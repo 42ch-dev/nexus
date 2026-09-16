@@ -1,5 +1,6 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -116,7 +117,7 @@ describe('fixture modes (real SDK)', () => {
       method: 'execute',
       session_id: launch.session_id,
       deadline_ms: 30_000,
-      payload: { kind: 'prompt', content: 'hello' },
+      payload: { Prompt: { op_id: randomUUID(), content: [{ Text: { text: 'hello' } }], permission_scope: null } },
     });
     let failed = false;
     for (let i = 0; i < 20; i += 1) {
@@ -156,7 +157,7 @@ describe('fixture modes (real SDK)', () => {
       method: 'execute',
       session_id: launch.session_id,
       deadline_ms: 30_000,
-      payload: { kind: 'prompt', content: 'block' },
+      payload: { Prompt: { op_id: randomUUID(), content: [{ Text: { text: 'block' } }], permission_scope: null } },
     });
     const cancel = await provider.call({
       request_id: 'cancel',
@@ -200,5 +201,179 @@ describe('fixture modes (real SDK)', () => {
     assert.equal(shutdown.ok, true);
     await new Promise((r) => setTimeout(r, 500));
     assert.equal(pidAlive(descendantPid), false, `descendant pid ${descendantPid} still alive`);
+  });
+});
+
+// A deterministic ACP protocol peer with real SDK validation. It advertises a
+// non-hardcoded model config ID and requests permission during each prompt.
+const controlPeer = String.raw`
+const { createInterface } = require('node:readline');
+const { appendFileSync } = require('node:fs');
+const send = (value) => process.stdout.write(JSON.stringify(value) + '\n');
+const config = { id: 'provider-model-selector', name: 'Model', category: 'model',
+  type: 'select', currentValue: 'alpha',
+  options: [{ value: 'alpha', name: 'Alpha' }, { value: 'beta', name: 'Beta' }] };
+let prompt;
+forAwait();
+async function forAwait() {
+  for await (const line of createInterface({ input: process.stdin })) {
+    const req = JSON.parse(line);
+    appendFileSync(process.env.PEER_LOG, JSON.stringify(req) + '\n');
+    if (req.id === 'permission-1' && !req.method) {
+      send({ jsonrpc: '2.0', method: 'session/update', params: {
+        sessionId: prompt.params.sessionId, update: { sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: process.env.PEER_MESSAGE ?? 'complete-message' } } } });
+      send({ jsonrpc: '2.0', id: prompt.id, result: { stopReason: 'end_turn' } });
+      continue;
+    }
+    const reply = (result) => send({ jsonrpc: '2.0', id: req.id, result });
+    if (req.method === 'initialize') reply({ protocolVersion: 1, agentCapabilities: {} });
+    else if (req.method === 'session/new') reply({ sessionId: 'peer-session',
+      configOptions: process.env.NO_MODEL ? [] : [config] });
+    else if (req.method === 'session/set_mode') {
+      if (process.env.REJECT_MODE) send({ jsonrpc: '2.0', id: req.id,
+        error: { code: -32601, message: 'unsupported mode' } });
+      else reply({});
+    } else if (req.method === 'session/set_config_option') {
+      config.currentValue = req.params.value;
+      reply({ configOptions: [config] });
+    } else if (req.method === 'session/prompt') {
+      prompt = req;
+      send({ jsonrpc: '2.0', id: 'permission-1', method: 'session/request_permission',
+        params: { sessionId: req.params.sessionId, toolCall: {
+          toolCallId: 'write-1', title: 'Write file', kind: 'edit', status: 'pending' },
+          options: [{ optionId: 'allow', name: 'Allow', kind: 'allow_once' },
+            { optionId: 'deny', name: 'Deny', kind: 'reject_once' }] } });
+    }
+  }
+}
+`;
+
+function controlRecipe(workspace, env = {}, providerId = 'configured-control', generation = 'generation-control') {
+  return {
+    provider_id: providerId, recipe_generation: generation,
+    executable: realpathSync(process.execPath), args: ['-e', controlPeer],
+    env: { PEER_LOG: join(workspace, `${providerId}.jsonl`), ...env }, cwd: workspace,
+  };
+}
+
+function request(method, sessionId, payload) {
+  return { request_id: randomUUID(), method, session_id: sessionId, deadline_ms: 30_000, payload };
+}
+
+async function finishedEvents(provider, operationId) {
+  const events = [];
+  for (let i = 0; i < 100; i += 1) {
+    const batch = await provider.next(operationId, 16, 256 * 1024);
+    assert.ok(!batch.gap, JSON.stringify(batch.gap));
+    events.push(...batch.events);
+    if (!batch.has_more) {
+      assert.ok(events.some((event) => event.OpFinished), JSON.stringify(events));
+      return events;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.fail('missing terminal from deterministic peer');
+}
+
+describe('HostOperation callback contract', () => {
+  test('controls, content and narrowing permissions stay on the selected session', async () => {
+    const provider = createAcpProvider();
+    const workspace = mkdtempSync(join(tmpdir(), 'acp-controls-'));
+    const recipe = controlRecipe(workspace);
+    const launch = await provider.call(request('launch', undefined, { provider_id: recipe.provider_id, recipe }));
+    assert.equal(launch.ok, true, JSON.stringify(launch));
+    try {
+      for (const payload of [{ SetModel: { model: 'beta' } }, { SetMode: { mode: 'plan' } }]) {
+        const reply = await provider.call(request('execute', launch.session_id, payload));
+        assert.equal(reply.ok, true, JSON.stringify(reply));
+        const events = await finishedEvents(provider, reply.operation_id);
+        assert.ok(events.every((event) => !event.OpFailed));
+      }
+      const content = [{ Text: { text: 'one' } }, { ResourceLink: { name: 'source', uri: 'file:///source.txt' } },
+        { Text: { text: 'two' } }];
+      const opId = randomUUID();
+      const payload = { Prompt: { op_id: opId, content,
+        permission_scope: { allow_read: true, allow_write: false, allow_destructive: false } } };
+      const reply = await provider.call(request('execute', launch.session_id, payload));
+      assert.equal(reply.ok, true, JSON.stringify(reply));
+      assert.equal(reply.operation_id, opId);
+      const events = await finishedEvents(provider, opId);
+      assert.deepEqual(events.filter((event) => event.MessageDelta).map((event) => event.MessageDelta.text), ['complete-message']);
+      const duplicate = await provider.call(request('execute', launch.session_id, payload));
+      assert.equal(duplicate.error?.code, 'invalid_input');
+      const invalidScope = await provider.call(request('execute', launch.session_id, {
+        Prompt: { op_id: randomUUID(), content, permission_scope: { allow_read: 'yes' } },
+      }));
+      assert.equal(invalidScope.error?.code, 'invalid_input');
+      const log = readFileSync(recipe.env.PEER_LOG, 'utf8').trim().split('\n').map(JSON.parse);
+      const model = log.find((entry) => entry.method === 'session/set_config_option');
+      assert.deepEqual(model.params, { sessionId: 'peer-session', configId: 'provider-model-selector', value: 'beta' });
+      assert.deepEqual(log.find((entry) => entry.method === 'session/set_mode').params, {
+        sessionId: 'peer-session', modeId: 'plan',
+      });
+      const prompts = log.filter((entry) => entry.method === 'session/prompt');
+      assert.equal(prompts.length, 1, 'invalid/duplicate operations have zero RPCs');
+      assert.deepEqual(prompts[0].params.prompt, [
+        { type: 'text', text: 'one' }, { type: 'resource_link', name: 'source', uri: 'file:///source.txt' },
+        { type: 'text', text: 'two' },
+      ]);
+      assert.deepEqual(log.find((entry) => entry.id === 'permission-1' && !entry.method).result,
+        { outcome: { outcome: 'cancelled' } }, 'a narrowing scope must never grant a write');
+    } finally {
+      assert.equal((await provider.call(request('shutdown', launch.session_id, {}))).ok, true);
+    }
+  });
+
+  test('unsupported controls never acknowledge success or invoke another adapter', async () => {
+    const provider = createAcpProvider();
+    const workspace = mkdtempSync(join(tmpdir(), 'acp-unsupported-'));
+    const recipe = controlRecipe(workspace, { NO_MODEL: '1', REJECT_MODE: '1' });
+    const launch = await provider.call(request('launch', undefined, { recipe }));
+    assert.equal(launch.ok, true);
+    try {
+      const model = await provider.call(request('execute', launch.session_id, { SetModel: { model: 'beta' } }));
+      assert.equal(model.ok, false);
+      assert.equal(model.error?.code, 'not_supported');
+      const mode = await provider.call(request('execute', launch.session_id, { SetMode: { mode: 'plan' } }));
+      assert.equal(mode.ok, false);
+      assert.equal(mode.error?.code, 'not_supported');
+      const log = readFileSync(recipe.env.PEER_LOG, 'utf8').trim().split('\n').map(JSON.parse);
+      assert.equal(log.filter((entry) => entry.method === 'session/set_config_option').length, 0);
+      assert.equal(log.filter((entry) => entry.method === 'session/set_mode').length, 1);
+      assert.equal(log.filter((entry) => entry.method === 'session/new').length, 1);
+    } finally {
+      await provider.call(request('shutdown', launch.session_id, {}));
+    }
+  });
+
+  test('different admitted provider generations cannot evict each other', async () => {
+    const provider = createAcpProvider();
+    const workspace = mkdtempSync(join(tmpdir(), 'acp-generations-'));
+    const sessions = [];
+    try {
+      for (const [id, generation] of [['provider-a', 'generation-a'], ['provider-b', 'generation-b']]) {
+        const recipe = controlRecipe(workspace, { PEER_MESSAGE: id }, id, generation);
+        const launch = await provider.call(request('launch', undefined, { recipe }));
+        assert.equal(launch.ok, true);
+        sessions.push(launch.session_id);
+      }
+      for (const sessionId of sessions) {
+        const reply = await provider.call(request('execute', sessionId, { SetMode: { mode: 'plan' } }));
+        assert.equal(reply.ok, true, 'the other provider must not close this owned session');
+        await finishedEvents(provider, reply.operation_id);
+      }
+      // Both connections deliberately use the same ACP session ID. Their
+      // notification callbacks must still target distinct Nexus operations.
+      const replies = await Promise.all(sessions.map((sessionId) => provider.call(request('execute', sessionId, {
+        Prompt: { op_id: randomUUID(), content: [{ Text: { text: 'hello' } }], permission_scope: null },
+      }))));
+      assert.ok(replies.every((reply) => reply.ok));
+      const events = await Promise.all(replies.map((reply) => finishedEvents(provider, reply.operation_id)));
+      assert.deepEqual(events.map((batch) => batch.filter((event) => event.MessageDelta).map((event) => event.MessageDelta.text)),
+        [['provider-a'], ['provider-b']]);
+    } finally {
+      for (const sessionId of sessions) await provider.call(request('shutdown', sessionId, {}));
+    }
   });
 });

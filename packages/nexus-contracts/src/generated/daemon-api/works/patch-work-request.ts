@@ -5,7 +5,7 @@
  */
 
 /**
- * Request body for PATCH /v1/daemon/works/{work_id}.
+ * Request body for PATCH /v1/daemon/works/{work_id}. `world_id` and `story_ref` are tri-state binding patches: omitted keeps the stored binding, `null` clears it to SQL NULL, a value sets it. Both fields are deliberately unrestricted at the JSON-Schema level: a typed nullable string (`anyOf`/`oneOf` [null, string]) collapses omission and null in the generated carrier, because typify resolves `anyOf` [null, T] to `Option<T>` (typify-impl `maybe_option`, enums.rs:27-52) and a non-required nullable property already carries the option (structs.rs:135-160). The Rust/TS boundary parser owns the three-state grammar and rejects every other value before any stored effect.
  */
 export interface PatchWorkRequest {
   title?: string;
@@ -13,8 +13,8 @@ export interface PatchWorkRequest {
   creative_brief?: string;
   intake_status?: string;
   status?: string;
-  world_id?: string;
-  story_ref?: string;
+  world_id?: unknown;
+  story_ref?: unknown;
   primary_preset_id?: string;
   current_stage?: string;
   stage_status?: string;

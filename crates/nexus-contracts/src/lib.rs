@@ -7,8 +7,14 @@
 
 pub mod common_types;
 pub mod enum_conversions;
+// typify emits `Ok(value.field)` conversions for `null`-only (unit-typed)
+// properties, which `clippy::unit_arg` rejects. The generated tree is
+// schema-owned and never hand-edited (see `.rustfmt.toml`'s matching ignore),
+// so the lint is allowed once at its root.
+#[allow(clippy::unit_arg)]
 pub mod generated;
 pub mod local;
+pub mod tristate;
 
 // Re-export all generated types at crate root (includes wire types only)
 pub use generated::*;

@@ -58,7 +58,11 @@ pub fn reap_completed() -> usize {
             }
             reg.entries.swap_remove(i);
             reaped += 1;
-        } else if entry.handle.as_ref().is_some_and(|h| h.is_finished()) {
+        } else if entry
+            .handle
+            .as_ref()
+            .is_some_and(std::thread::JoinHandle::is_finished)
+        {
             if let Some(handle) = entry.handle.take() {
                 let _ = handle.join();
             }

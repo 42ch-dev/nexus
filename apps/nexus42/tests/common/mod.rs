@@ -16,7 +16,7 @@ use nexus_daemon_runtime::api::auth_middleware::DaemonApiConfig;
 use nexus_daemon_runtime::test_utils;
 use nexus_daemon_runtime::test_utils::TestTempRoot;
 use nexus_daemon_runtime::workspace::WorkspaceState;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Output;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -52,12 +52,20 @@ pub struct LiveDaemon {
 /// `GraphFlowEngine`). MUST run before `create_router` so the router's
 /// `WorkspaceState` clone shares the engine slot.
 async fn wire_orchestration_engine(
-    state: &WorkspaceState,
+    state: &mut WorkspaceState,
     pool: &sqlx::SqlitePool,
 ) -> (
     Arc<dyn nexus_orchestration::OrchestrationEngine>,
     Arc<dyn graph_flow::SessionStorage>,
 ) {
+    // The lazy-attach publisher composes the production Host prompt executor
+    // and provider port, so it requires the facade boot always wires before
+    // serving. Fixture callers that supply their own facade (Character E2E,
+    // settlement tests) keep it; the default `LiveDaemon::start()` path gets
+    // an unstarted manager via the shared test_utils seam.
+    if state.agent_host().is_none() {
+        test_utils::wire_test_agent_host(state);
+    }
     state
         .publish_creator_runtime_bundle()
         .await
@@ -74,6 +82,25 @@ impl LiveDaemon {
     /// Boot the daemon and write the hermetic HOME config.
     pub async fn start() -> Self {
         Self::start_with_optional_host(None).await
+    }
+
+    /// Boot the daemon with a coherent creator/workspace identity from the
+    /// first line — the Profile home, `config.toml` selection and admitted
+    /// `state.db` all name the same creator. Tests that need a non-default
+    /// `ctr_…` creator MUST use this instead of rewriting `config.toml`
+    /// after `start()`: a post-hoc rewrite leaves the host's bound pool and
+    /// the config-resolved selection pointing at different databases.
+    pub async fn start_for_creator(creator_id: &str, workspace_slug: &str) -> Self {
+        Self::start_with_workspace_identity(creator_id, workspace_slug, None).await
+    }
+
+    /// Boot with a coherent `ctr_…` creator identity and a caller `HostFacade`.
+    pub async fn start_for_creator_with_agent_host(
+        creator_id: &str,
+        workspace_slug: &str,
+        host: Arc<dyn HostFacade>,
+    ) -> Self {
+        Self::start_with_workspace_identity(creator_id, workspace_slug, Some(host)).await
     }
 
     /// Boot the daemon with a deterministic `HostFacade` (Character run E2E).
@@ -127,7 +154,7 @@ impl LiveDaemon {
         });
         let pool = state.pool().expect("pool").clone();
         test_utils::seed_test_creator_and_world(&pool).await;
-        let (engine, session_storage) = wire_orchestration_engine(&state, &pool).await;
+        let (engine, session_storage) = wire_orchestration_engine(&mut state, &pool).await;
 
         let app = api::create_router(
             state.clone(),
@@ -190,7 +217,7 @@ impl LiveDaemon {
         state.set_daemon_tool_dispatch(dispatch.clone());
         let pool = state.pool().expect("pool").clone();
         test_utils::seed_test_creator_and_world(&pool).await;
-        let (engine, session_storage) = wire_orchestration_engine(&state, &pool).await;
+        let (engine, session_storage) = wire_orchestration_engine(&mut state, &pool).await;
 
         let app = api::create_router(
             state.clone(),
@@ -214,14 +241,16 @@ impl LiveDaemon {
     /// Daemon-level restart over the SAME DB/HOME (P3 A7 restart matrix).
     ///
     /// Quiesces the current generation (aborts in-flight drives via their
-    /// coordinator cancellation tokens, then the HTTP serve task), resets
-    /// the published runtime bundle, and re-runs the PRODUCTION attach/boot
-    /// path: `publish_creator_runtime_bundle` (fresh engine/coordinator/
-    /// supervisor over the same pool + terminal-schedule reconciliation)
-    /// followed by `run_boot_recovery` — the exact A7 recovery order real
-    /// daemon boot uses. A fresh listener/router is bound and `daemon_url`
-    /// in the hermetic `config.toml` is updated so CLI children resolve the
-    /// new daemon.
+    /// coordinator cancellation tokens, then the HTTP serve task), resets the
+    /// published runtime bundle, and re-runs the PRODUCTION attach/boot path:
+    /// `publish_creator_runtime_bundle` — which republishes a fresh
+    /// engine/coordinator/supervisor over the same pool, runs the
+    /// terminal-schedule reconciliation, AND performs A7 recovery, because
+    /// recovery is owned by the execution owner the publish establishes
+    /// (`start_execution`). Production boot (`boot.rs`) recovers the same way,
+    /// so neither does this harness. A fresh listener/router is bound and
+    /// `daemon_url` in the hermetic `config.toml` is updated so CLI children
+    /// resolve the new daemon.
     ///
     /// The bundled Host facade / agent-host config / tool dispatch are kept
     /// (the test owns them); every engine-side handle (runners, coordinator
@@ -236,25 +265,14 @@ impl LiveDaemon {
         // Let the old serve task die so its listener is fully released.
         tokio::task::yield_now().await;
 
-        // Production attach path over the same DB/HOME.
+        // Production attach path over the same DB/HOME. Retires the previous
+        // execution owner (A7), republishes the runtime bundle, and recovers
+        // the durable runs through the new owner — the exact production order.
         self.state.reset_runtime_bundle();
         self.state
             .publish_creator_runtime_bundle()
             .await
             .expect("daemon restart: republish Creator-DB runtime bundle");
-        let engine = self.state.engine().expect("engine after restart");
-        let sqlite = Arc::new(
-            nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(Arc::new(
-                self.pool.clone(),
-            )),
-        );
-        nexus_daemon_runtime::boot::run_boot_recovery(
-            &engine,
-            &sqlite,
-            self.state.run_coordinator().as_ref(),
-            self.state.shutdown_notify(),
-        )
-        .await;
 
         // Rebind a fresh listener + router (the old listener was consumed by
         // the aborted serve task) and point CLI children at the new port.
@@ -438,14 +456,12 @@ impl LiveDaemon {
         state.set_engine(engine_arc.clone() as Arc<dyn nexus_orchestration::OrchestrationEngine>);
         state.set_capability_registry(holder.clone());
 
-        let coordinator = Arc::new(
-            nexus_daemon_runtime::preset_run::WorkflowRunCoordinator::new(
-                engine_arc.clone(),
-                storage.clone(),
-                pool_arc.clone(),
-                state.session_cancels(),
-            ),
-        );
+        let coordinator = Arc::new(nexus_core::execution::WorkflowRunCoordinator::new(
+            engine_arc.clone(),
+            storage.clone(),
+            pool_arc.clone(),
+            state.session_cancels(),
+        ));
         state.set_run_coordinator(coordinator.clone());
 
         let mut supervisor_builder =
@@ -489,7 +505,16 @@ impl LiveDaemon {
     }
 
     async fn start_with_optional_host(host: Option<Arc<dyn HostFacade>>) -> Self {
-        let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+        Self::start_with_workspace_identity("test_creator", "default", host).await
+    }
+
+    async fn start_with_workspace_identity(
+        creator_id: &str,
+        workspace_slug: &str,
+        host: Option<Arc<dyn HostFacade>>,
+    ) -> Self {
+        let (tmp, nexus_home, db_path) =
+            test_utils::create_test_workspace_for(creator_id, workspace_slug).await;
 
         // Bind the HTTP listener BEFORE writing `daemon_url` into config.
         let listener = TcpListener::bind("127.0.0.1:0")
@@ -504,11 +529,11 @@ impl LiveDaemon {
         // `[active_workspace_slug_by_creator]` would make it a table key).
         let config_path = nexus_home.join("config.toml");
         let config = format!(
-            "active_creator_id = \"test_creator\"\n\
+            "active_creator_id = \"{creator_id}\"\n\
              daemon_url = \"{http_url}\"\n\
              \n\
              [active_workspace_slug_by_creator]\n\
-             \"test_creator\" = \"default\"\n"
+             \"{creator_id}\" = \"{workspace_slug}\"\n"
         );
         std::fs::write(&config_path, config).expect("write config.toml");
 
@@ -517,8 +542,14 @@ impl LiveDaemon {
             state.set_agent_host(host);
         }
         let pool = state.pool().expect("pool").clone();
-        test_utils::seed_test_creator_and_world(&pool).await;
-        let (engine, session_storage) = wire_orchestration_engine(&state, &pool).await;
+        if creator_id == "test_creator" {
+            test_utils::seed_test_creator_and_world(&pool).await;
+        } else {
+            nexus_local_db::ensure_creator_row(&pool, creator_id, "Fixture Creator")
+                .await
+                .expect("seed fixture creator row");
+        }
+        let (engine, session_storage) = wire_orchestration_engine(&mut state, &pool).await;
 
         let app = api::create_router(
             state.clone(),
@@ -539,13 +570,21 @@ impl LiveDaemon {
         }
     }
 
+    /// Declared `local_root` from workspace `meta.json` (`$HOME/creative`).
+    ///
+    /// Core resolves guarded filesystem paths against this root, not the daemon
+    /// state's `workspace_path` handle — fixtures must seed/read files here.
+    pub fn creative_root(&self) -> PathBuf {
+        self.home.path().join("creative")
+    }
+
     /// Boot the daemon with a real workspace directory on disk (needed by
     /// routes that read/write workspace files, e.g. the V1.72 outline
-    /// canvas). The workspace root is `$HOME/workspace`.
+    /// canvas). The creative root is `$HOME/creative` (matches `meta.json`).
     pub async fn start_with_workspace() -> Self {
         let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
-        let workspace_dir = tmp.path().join("workspace");
-        std::fs::create_dir_all(&workspace_dir).expect("create workspace dir");
+        let workspace_dir = tmp.path().join("creative");
+        std::fs::create_dir_all(&workspace_dir).expect("create creative workspace dir");
 
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
@@ -563,7 +602,7 @@ impl LiveDaemon {
         );
         std::fs::write(&config_path, config).expect("write config.toml");
 
-        let state = WorkspaceState::new_for_testing(
+        let mut state = WorkspaceState::new_for_testing(
             nexus_home,
             db_path,
             Some(workspace_dir.to_string_lossy().to_string()),
@@ -571,7 +610,7 @@ impl LiveDaemon {
         .await;
         let pool = state.pool().expect("pool").clone();
         test_utils::seed_test_creator_and_world(&pool).await;
-        let (engine, session_storage) = wire_orchestration_engine(&state, &pool).await;
+        let (engine, session_storage) = wire_orchestration_engine(&mut state, &pool).await;
 
         let app = api::create_router(
             state.clone(),

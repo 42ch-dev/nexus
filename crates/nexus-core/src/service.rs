@@ -1,9 +1,11 @@
 //! `CoreService` lifecycle and public API surface.
 
 use std::future::Future;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+#[cfg(feature = "provider-host")]
+use std::sync::Mutex;
 
 use nexus_contracts::{
     CoreChangesRequest, CoreChangesResponse, CoreCloseReport, WorldKbCandidatesResponse,
@@ -20,10 +22,37 @@ use nexus_local_db::writer_protocol::{
 };
 use sqlx::SqlitePool;
 
+use crate::actor_fence::ActorFenceTable;
 use crate::changes::read_changes;
-use crate::error::{CoreError, CoreResult};
+use crate::error::{local_db_err, CoreError, CoreResult};
 use crate::principal::Principal;
 use crate::world_kb::{candidates, graph, patch};
+
+/// Refuse an open whose config-resolved database is not the caller's bound one.
+///
+/// The host's creator-DB slot and this open each resolve the workspace path, so
+/// a selection that moved between them would silently point this service at a
+/// *second* database while the caller still treats it as the first. Comparing
+/// the two paths here — before any pool is initialized or joined — keeps a
+/// fail-closed error from becoming wrong-database reads and writes.
+///
+/// The error is [`CoreError::AuthRequired`], matching what
+/// [`CoreService::verify_selected_context`] reports for a selection that moved
+/// *after* open, so the status a caller sees does not depend on whether the
+/// drift was observed before or after the pool was taken. The paths are logged
+/// rather than carried on the wire.
+fn verify_expected_binding(expected: &Path, resolved: &Path) -> CoreResult<()> {
+    if expected == resolved {
+        return Ok(());
+    }
+    tracing::warn!(
+        expected = %expected.display(),
+        resolved = %resolved.display(),
+        "workspace database resolved from config is not the one bound by the caller; \
+         refusing to open a second database"
+    );
+    Err(CoreError::AuthRequired)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CoreAccess {
@@ -38,20 +67,50 @@ pub struct CoreOpenOptions {
     pub access: CoreAccess,
 }
 
-struct CoreInner {
-    pool: SqlitePool,
-    db_path: PathBuf,
+pub struct CoreInner {
+    pub(crate) pool: SqlitePool,
+    /// The workspace `state.db` this service serves. The execution owner
+    /// registry is keyed by it, so the single-owner fence spans every
+    /// `CoreService` opened over the same file in this process.
+    pub(crate) db_path: PathBuf,
     _guarded: Option<GuardedPool>,
-    nexus_home: PathBuf,
+    /// Active creator this service was opened against (open-scoped).
+    pub(crate) nexus_home: PathBuf,
     creator_id: String,
     workspace_slug: String,
+    /// Open-scoped generation: minted as `1` at [`CoreService::open`] and
+    /// never bumped for the service lifetime. It only proves a principal was
+    /// minted from THIS open — staleness of the on-disk selection is
+    /// enforced solely by `verify_selected_context`'s disk re-read.
+    /// Any future check MUST NOT test the generation alone.
     generation: AtomicU64,
-    access: CoreAccess,
+    pub(crate) access: CoreAccess,
     closing: AtomicBool,
+    /// Per-Character activity/transition fences (v1.190 P2-T1), Host-free
+    /// and separate from any process session registry.
+    pub(crate) character_fences: ActorFenceTable,
+    /// Established-owner slot for the Host authority (P4-T2): at most one
+    /// `open_host` manager per open service — a second start is a typed busy
+    /// rejection, never a second engine. Reset only by a confirmed close.
+    #[cfg(feature = "provider-host")]
+    pub(crate) host_authority_established: Mutex<bool>,
+    /// The execution owner slot for THIS service (v1.190 P3-T1). Empty until
+    /// `start_execution` succeeds.
+    ///
+    /// The authoritative single-owner fence is NOT this slot — it is the
+    /// process-wide registry in `execution::lifecycle`, keyed by the
+    /// workspace DB, because `CoreService::open` under `EngineOwner` joins
+    /// this process's retained engine admission and would otherwise let a
+    /// second core over the same file build a second engine.
+    #[cfg(feature = "execution")]
+    pub(crate) execution: std::sync::Mutex<Option<Arc<crate::execution::ExecutionHandle>>>,
 }
 
+/// Cloneable handle: `inner` is already shared, so a clone is the same open
+/// service (P4-T2: `open_host` hands a clone to the `HostHandle`).
+#[derive(Clone)]
 pub struct CoreService {
-    inner: Arc<CoreInner>,
+    pub(crate) inner: Arc<CoreInner>,
 }
 
 impl CoreService {
@@ -64,12 +123,38 @@ impl CoreService {
     /// guarded writer pool, and `EngineOwner` joins a live engine's pool or
     /// initializes one.
     ///
+    /// Use [`CoreService::open_with_expected_binding`] when the caller already
+    /// holds a bound workspace database.
+    ///
     /// # Errors
     /// Returns [`CoreError::AuthRequired`] when no active creator/workspace is
     /// configured, [`CoreError::Uninitialized`] when the state DB path cannot
     /// be resolved (or is missing under read-only access), and the mapped
     /// pool-initialization error otherwise.
     pub async fn open(options: CoreOpenOptions) -> CoreResult<Self> {
+        Self::open_impl(options, None).await
+    }
+
+    /// Open a [`CoreService`], requiring the resolved workspace database to be
+    /// the `expected` one the caller has already bound.
+    ///
+    /// The daemon's creator-DB slot resolves the workspace path independently of
+    /// this open, so the two can disagree when the active selection moves. Such
+    /// an open is refused with [`CoreError::AuthRequired`] **before** any pool is
+    /// initialized or joined, instead of silently opening a second database and
+    /// serving the selected identity out of it.
+    ///
+    /// # Errors
+    /// As [`CoreService::open`], plus [`CoreError::AuthRequired`] when the
+    /// resolved path is not `expected`.
+    pub async fn open_with_expected_binding(
+        options: CoreOpenOptions,
+        expected: &Path,
+    ) -> CoreResult<Self> {
+        Self::open_impl(options, Some(expected)).await
+    }
+
+    async fn open_impl(options: CoreOpenOptions, expected: Option<&Path>) -> CoreResult<Self> {
         let nexus_home = nexus_home_layout::nexus_root_from_home(&options.user_home);
         let cfg = CliConfigSnapshot::load(&nexus_home).map_err(|e| CoreError::Internal {
             category: format!("config_load: {e}"),
@@ -84,19 +169,22 @@ impl CoreService {
         }
         let db_path = try_resolve_state_db_path(&options.user_home, &nexus_home)
             .ok_or(CoreError::Uninitialized)?;
+        if let Some(expected) = expected {
+            verify_expected_binding(expected, &db_path)?;
+        }
         if !db_path.exists() && options.access == CoreAccess::ReadOnly {
             return Err(CoreError::Uninitialized);
         }
 
         let (pool, guarded) = match options.access {
             CoreAccess::ReadOnly => {
-                let pool = open_pool_read_only(&db_path).await.map_err(map_db)?;
+                let pool = open_pool_read_only(&db_path).await.map_err(local_db_err)?;
                 (pool, None)
             }
             CoreAccess::DirectWriter => {
                 let guarded = init_guarded_pool(&db_path, &creator_id)
                     .await
-                    .map_err(map_db)?;
+                    .map_err(local_db_err)?;
                 let pool = guarded.clone_pool();
                 (pool, Some(guarded))
             }
@@ -105,12 +193,12 @@ impl CoreService {
                 let guarded =
                     match nexus_local_db::writer_protocol::join_live_engine_pool(&db_path, options)
                         .await
-                        .map_err(map_db)?
+                        .map_err(local_db_err)?
                     {
                         Some(guarded) => guarded,
                         None => init_engine_pool(&db_path, &creator_id, options)
                             .await
-                            .map_err(map_db)?,
+                            .map_err(local_db_err)?,
                     };
                 let pool = guarded.clone_pool();
                 (pool, Some(guarded))
@@ -120,7 +208,7 @@ impl CoreService {
         Ok(Self {
             inner: Arc::new(CoreInner {
                 pool,
-                db_path,
+                db_path: db_path.clone(),
                 _guarded: guarded,
                 nexus_home,
                 creator_id,
@@ -128,18 +216,63 @@ impl CoreService {
                 generation: AtomicU64::new(1),
                 access: options.access,
                 closing: AtomicBool::new(false),
+                #[cfg(feature = "provider-host")]
+                host_authority_established: Mutex::new(false),
+                character_fences: ActorFenceTable::new(&db_path),
+                #[cfg(feature = "execution")]
+                execution: std::sync::Mutex::new(None),
             }),
         })
     }
 
-    fn ensure_open(&self) -> CoreResult<()> {
+    /// The nexus root this service was opened against (`<user_home>/.nexus42`).
+    /// Core family modules resolve bearer file paths (SOUL.md, long-term
+    /// memory) through it; the field stays private to this module.
+    #[must_use]
+    /// The Creator DB pool, for crate-external integration tests only.
+    ///
+    /// Architecture §Cohorts keeps the pool out of the product API: this
+    /// accessor is compiled solely for test builds (`test-hooks` / `cfg(test)`)
+    /// and exists so the `crates/nexus-core/tests/*` acceptance targets can
+    /// seed and inspect the same guarded store the service writes. It is not a
+    /// second business truth and must not acquire production callers.
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub fn pool(&self) -> &SqlitePool {
+        &self.inner.pool
+    }
+
+    #[must_use]
+    pub fn nexus_home(&self) -> &std::path::Path {
+        &self.inner.nexus_home
+    }
+
+    pub(crate) fn ensure_open(&self) -> CoreResult<()> {
         if self.inner.closing.load(Ordering::SeqCst) {
             return Err(CoreError::Closing);
         }
         Ok(())
     }
 
-    fn verify_selected_context(&self) -> CoreResult<()> {
+    /// Read-only probe: whether this service has begun closing.
+    ///
+    /// The same predicate [`Self::ensure_open`] enforces, exposed so a caller
+    /// can OBSERVE the close barrier instead of inferring it from a later
+    /// refusal. Used by the concurrent close/start contract to force a close
+    /// into the mid-build window deterministically.
+    #[must_use]
+    pub fn is_closing(&self) -> bool {
+        self.inner.closing.load(Ordering::SeqCst)
+    }
+
+    /// Re-read the on-disk active creator/workspace and require it to still
+    /// match the context this service was opened against.
+    ///
+    /// Invariant (QC v1.190 P0): this disk re-read is the ONLY staleness
+    /// enforcement — [`CoreInner::generation`] is open-scoped and never
+    /// bumps, so a principal minted from this open always passes the
+    /// generation check. Selection changes after open are caught here, not
+    /// by generation invalidation.
+    pub(crate) fn verify_selected_context(&self) -> CoreResult<()> {
         if read_active_creator_id(&self.inner.nexus_home).as_deref()
             != Some(self.inner.creator_id.as_str())
         {
@@ -152,7 +285,7 @@ impl CoreService {
         Ok(())
     }
 
-    fn verify_principal(&self, principal: &Principal) -> CoreResult<()> {
+    pub(crate) fn verify_principal(&self, principal: &Principal) -> CoreResult<()> {
         self.ensure_open()?;
         if !principal.verify_generation(self.inner.generation.load(Ordering::SeqCst)) {
             return Err(CoreError::AuthRequired);
@@ -280,14 +413,6 @@ impl CoreService {
         read_changes(&self.inner.pool, request).await
     }
 
-    /// Durable JS-provider operation journal access (LIFE-3). The pool is
-    /// exposed read/write for the native provider-callback bridge and the
-    /// `hostQuery` fallback; it is not a second business truth.
-    #[must_use]
-    pub fn pool(&self) -> &SqlitePool {
-        &self.inner.pool
-    }
-
     /// Close the pool and release writer guards exactly once; repeated calls
     /// report the already-closed state.
     ///
@@ -308,9 +433,30 @@ impl CoreService {
                 reason: None,
             });
         }
+        // I4: settle the execution owner BEFORE the SQL pool closes. Drive
+        // cancellation, the bounded join and every final durable settlement
+        // run against a LIVE pool — closing the pool first would make the
+        // documented cleanup path fail against a dead connection.
+        #[cfg(feature = "execution")]
+        let execution_handle = self
+            .inner
+            .execution
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        #[cfg(feature = "execution")]
+        if let Some(handle) = &execution_handle {
+            handle.shutdown().await;
+        }
         self.inner.pool.close().await;
         if self.inner.access == CoreAccess::DirectWriter {
             release_retained_writer_guards(&self.inner.db_path);
+        }
+        // `take` returned the handle, so ownership is settled; release the
+        // per-DB fence so a later open of the same DB can claim it.
+        #[cfg(feature = "execution")]
+        if let Some(handle) = execution_handle {
+            crate::execution::lifecycle::release_owner_slot(&self.inner.db_path, &handle);
         }
         Ok(CoreCloseReport {
             state: nexus_contracts::CoreCloseReportState::Closed,
@@ -318,29 +464,5 @@ impl CoreService {
             pending_operations: vec![],
             reason: None,
         })
-    }
-}
-
-fn is_sqlite_busy(err: &sqlx::Error) -> bool {
-    match err {
-        sqlx::Error::Database(db) => {
-            db.code().as_deref() == Some("5")
-                || db.message().contains("database is locked")
-                || db.message().contains("SQLITE_BUSY")
-        }
-        _ => false,
-    }
-}
-
-fn map_db(e: nexus_local_db::LocalDbError) -> CoreError {
-    match e {
-        nexus_local_db::LocalDbError::OwnerBusy { .. }
-        | nexus_local_db::LocalDbError::Sqlx(sqlx::Error::PoolTimedOut) => CoreError::OwnerBusy,
-        nexus_local_db::LocalDbError::WriterFenced { .. } => CoreError::WriterFenced,
-        nexus_local_db::LocalDbError::SchemaMismatch { .. } => CoreError::SchemaMismatch,
-        nexus_local_db::LocalDbError::Sqlx(err) if is_sqlite_busy(&err) => CoreError::Busy,
-        other => CoreError::Internal {
-            category: format!("database_error: {other}"),
-        },
     }
 }

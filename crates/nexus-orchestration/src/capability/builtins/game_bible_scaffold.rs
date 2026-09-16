@@ -312,11 +312,9 @@ impl Capability for GameBibleProjectScaffold {
     fn name(&self) -> &'static str {
         "game_bible.project_scaffold"
     }
-
     fn input_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"creator_id":{"type":"string"},"work_id":{"type":"string"},"work_ref":{"type":"string"},"title":{"type":"string"},"world_id":{"type":["string","null"]}},"required":["creator_id","work_id","work_ref","title"],"additionalProperties":false}"#
+        nexus_preset::capability_catalog::GAME_BIBLE_PROJECT_SCAFFOLD_INPUT_SCHEMA
     }
-
     fn output_schema(&self) -> &'static str {
         r#"{"type":"object","properties":{"scaffold_root":{"type":"string"},"files_created":{"type":"array","items":{"type":"string"}},"dirs_created":{"type":"array","items":{"type":"string"}}},"required":["scaffold_root","files_created","dirs_created"],"additionalProperties":false}"#
     }
@@ -357,10 +355,10 @@ impl Capability for GameBibleProjectScaffold {
 
         // Write README.md (atomic: temp+rename; tracks create vs overwrite)
         let readme_content = format!(
-            "# {title}\n\nGame design bible.\n\n- **Work ID**: {work_id}\n- **Profile**: game_bible\n\n## Core Pillars\n\n<!-- Genre, tone, target audience, and key design constraints -->\n",
-            title = inp.title,
-            work_id = inp.work_id,
-        );
+        "# {title}\n\nGame design bible.\n\n- **Work ID**: {work_id}\n- **Profile**: game_bible\n\n## Core Pillars\n\n<!-- Genre, tone, target audience, and key design constraints -->\n",
+        title = inp.title,
+        work_id = inp.work_id,
+    );
         tx.write_file(&work_dir.join("README.md"), &readme_content)?;
 
         // Write 12 Design/*.md template files

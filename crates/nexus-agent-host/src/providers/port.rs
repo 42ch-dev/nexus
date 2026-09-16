@@ -64,7 +64,7 @@ pub fn host_error_to_core_error(err: &HostError) -> CoreError {
         HostError::OperationTimeout { .. } | HostError::CleanupUnconfirmed { .. } => {
             (CoreErrorCode::Busy, 503)
         }
-        HostError::CapabilityUnsupported { .. } => (CoreErrorCode::InvalidInput, 400),
+        HostError::CapabilityUnsupported { .. } => (CoreErrorCode::NotSupported, 400),
         HostError::LaunchFailed { .. }
         | HostError::ProviderProtocolError { .. }
         | HostError::InternalHostError { .. } => (CoreErrorCode::Internal, 500),
@@ -635,15 +635,51 @@ impl ProviderPortAdapter {
         let session_id = Self::parse_session_id(session_raw)?;
         let op: HostOperation = serde_json::from_value(payload_value)
             .map_err(|e| Self::invalid_input(format!("execute payload: {e}")))?;
+        let control = !matches!(&op, HostOperation::Prompt { .. });
         let op_id = match &op {
-            HostOperation::Prompt { op_id, .. } => op_id.clone(),
-            _ => HostOperationId::new(),
+            HostOperation::Prompt { op_id, .. } => Some(op_id.clone()),
+            _ => None,
         };
         let stream = self
             .host
             .exec(session_id.clone(), op)
             .await
             .map_err(|err| Self::map_host_error(&err))?;
+        // The returned stream has not been polled, so HostManager still owns
+        // the active control operation. Publish that same identity for both
+        // cancellation and terminal delivery rather than inventing a wire ID.
+        let op_id = match op_id {
+            Some(op_id) => op_id,
+            None => self
+                .host
+                .list_sessions()
+                .await
+                .map_err(|err| Self::map_host_error(&err))?
+                .into_iter()
+                .find(|session| session.id == session_id)
+                .and_then(|session| session.active_op_id)
+                .ok_or_else(|| {
+                    Self::internal_error("control operation has no active host identity")
+                })?,
+        };
+        // ACP controls generate their own terminal ID after the synchronous
+        // RPC. Correlate it after HostManager applies its lifecycle transition.
+        let stream = if control {
+            let wire_id = op_id.clone();
+            Box::pin(stream.map(move |event| {
+                event.map(|mut event| {
+                    match &mut event {
+                        HostEvent::OpStarted(event) => event.op_id = wire_id.clone(),
+                        HostEvent::OpFinished(event) => event.op_id = wire_id.clone(),
+                        HostEvent::OpFailed(event) => event.op_id = wire_id.clone(),
+                        _ => {}
+                    }
+                    event
+                })
+            })) as HostEventStream
+        } else {
+            stream
+        };
         self.insert_operation(op_id.to_string(), stream);
         Ok(ProviderReply {
             request_id: request.request_id,
@@ -663,6 +699,26 @@ impl ProviderPortAdapter {
             .ok_or_else(|| Self::invalid_input("cancel requires operation_id"))?;
         let op_id = Self::parse_operation_id(op_raw)?;
         let op_id_str = op_id.to_string();
+        // Check negotiated capability before HostManager can transition the
+        // session to Cancelling. DSH's adapter-level no-op is not cancellation.
+        let sessions = self
+            .host
+            .list_sessions()
+            .await
+            .map_err(|err| Self::map_host_error(&err))?;
+        if let Some(session) = sessions
+            .iter()
+            .find(|session| session.active_op_id.as_ref() == Some(&op_id))
+        {
+            if !session.negotiated_capabilities.cancellation {
+                return Err(CoreError {
+                    code: CoreErrorCode::NotSupported,
+                    message: "provider does not support cancellation".into(),
+                    details: serde_json::Map::default(),
+                    http_status: Some(400),
+                });
+            }
+        }
         self.host
             .cancel(op_id)
             .await
@@ -1197,7 +1253,7 @@ mod tests {
                     capability: "prompt".into(),
                     message: "unsupported".into(),
                 },
-                CoreErrorCode::InvalidInput,
+                CoreErrorCode::NotSupported,
                 400,
             ),
         ];

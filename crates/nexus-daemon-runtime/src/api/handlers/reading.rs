@@ -1,13 +1,13 @@
-//! Reading depth Daemon API handlers (V1.89).
+//! Thin reading-depth HTTP adapters over the guarded core reading service.
 //!
-//! Endpoints under `/v1/daemon/reading/*` expose persisted scroll progress and
-//! character-offset annotations/highlights per (creator, work, chapter).
+//! Endpoints under `/v1/daemon/reading/*` translate the wire envelope to
+//! `nexus_core` reading operations and back; scope/isolation, color/offset
+//! validation, the tri-state note patch and storage semantics live in the
+//! core (P1-T3).
 
 #![allow(clippy::missing_errors_doc)]
 
-use super::wire_cast;
 use crate::api::errors::NexusApiError;
-use crate::config::{read_active_creator_id, read_active_workspace_slug};
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, Query, State};
 use axum::Json;
@@ -16,144 +16,57 @@ use nexus_contracts::daemon_api::reading::{
     ReadingAnnotationListResponse, ReadingAnnotationPatchRequest, ReadingProgressQuery,
     ReadingProgressRequest, ReadingProgressResponse,
 };
-use nexus_local_db::reading::{self, AnnotationRow};
-use nexus_local_db::works;
-use uuid::Uuid;
 
-// ─── Helpers ───────────────────────────────────────────────────────────────
-
-const ANNOTATION_ID_PREFIX: &str = "ann_";
-const VALID_COLORS: [&str; 4] = ["yellow", "blue", "green", "pink"];
-
-/// Convert a `NonZeroU64` chapter number to i64 for local-db calls.
-fn chapter_i64(ch: std::num::NonZeroU64) -> i64 {
-    i64::try_from(u64::from(ch)).unwrap_or(1)
-}
-
-/// Format a `DateTime` as an ISO 8601 string.
-fn format_timestamp(dt: &chrono::DateTime<chrono::Utc>) -> String {
-    dt.to_rfc3339()
-}
-
-/// Convert a `u64` offset/progress value to `i64`, returning a 400 if it
-/// does not fit (defense-in-depth; schema bounds keep values well within range).
-fn u64_to_i64(value: u64, field: &str) -> Result<i64, NexusApiError> {
-    i64::try_from(value).map_err(|_| NexusApiError::BadRequest {
-        code: "invalid_input".to_string(),
-        message: format!("{field} exceeds maximum supported value"),
-    })
-}
-
-/// Validate a highlight color against the V1.89 enum.
-fn validate_color(color: &str) -> Result<(), NexusApiError> {
-    if VALID_COLORS.contains(&color) {
-        Ok(())
-    } else {
-        Err(NexusApiError::BadRequest {
-            code: "invalid_input".to_string(),
-            message: format!(
-                "color must be one of {}, got '{color}'",
-                VALID_COLORS.join(", ")
-            ),
-        })
+/// Map a core reading fault onto the legacy HTTP classification.
+///
+/// `NotFound` resources round-trip verbatim; the `invalid_input` 422 code is
+/// carried as `InvalidInput.field`; the foreign-creator annotation access
+/// rides the `annotation_owner:` prefix carrier and re-emits the legacy
+/// `Forbidden { resource, reason }` pair; the core `local_db_err` lowercase
+/// `database_error: …` carrier is re-classified as the legacy
+/// `DATABASE_ERROR`; every other internal category keeps the shared
+/// `CORE_ERROR` shape.
+fn reading_error(error: nexus_core::CoreError) -> NexusApiError {
+    match error {
+        nexus_core::CoreError::InvalidInput { field, reason } => NexusApiError::BadRequest {
+            code: field,
+            message: reason,
+        },
+        nexus_core::CoreError::NotFound { resource } => NexusApiError::NotFound(resource),
+        nexus_core::CoreError::Forbidden { resource } => {
+            let foreign = resource
+                .strip_prefix("annotation_owner:")
+                .map(str::to_owned);
+            NexusApiError::Forbidden {
+                resource: foreign.clone().unwrap_or(resource),
+                reason: foreign.map_or_else(
+                    || "forbidden".to_string(),
+                    |_| "annotation belongs to a different creator".to_string(),
+                ),
+            }
+        }
+        nexus_core::CoreError::Internal { category } => match category.split_once(": ") {
+            Some(("database_error", message)) => NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_owned(),
+                message: message.to_owned(),
+            },
+            _ => nexus_core::CoreError::Internal { category }.into(),
+        },
+        other => other.into(),
     }
 }
-
-/// Ensure the active creator exists and an active workspace is selected.
-fn require_active_scope(state: &WorkspaceState) -> Result<String, NexusApiError> {
-    let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-    let _workspace_slug = read_active_workspace_slug(state.nexus_home(), &creator_id)
-        .ok_or(NexusApiError::Uninitialized)?;
-    Ok(creator_id)
-}
-
-/// Verify that `work_id` belongs to the active creator.
-async fn verify_work_ownership(
-    state: &WorkspaceState,
-    creator_id: &str,
-    work_id: &str,
-) -> Result<(), NexusApiError> {
-    works::get_work(state.pool_or_uninit()?, creator_id, work_id)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?
-        .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
-    Ok(())
-}
-
-/// Map a database annotation row to the contract DTO.
-fn to_annotation_dto(row: &AnnotationRow) -> ReadingAnnotation {
-    ReadingAnnotation {
-        annotation_id: row.annotation_id.clone(),
-        work_id: row.work_id.clone(),
-        chapter: std::num::NonZeroU64::new(u64::try_from(row.chapter).unwrap_or(1))
-            .unwrap_or(std::num::NonZeroU64::MIN),
-        start_offset: u64::try_from(row.start_offset).unwrap_or_default(),
-        end_offset: u64::try_from(row.end_offset).unwrap_or_default(),
-        selected_text: wire_cast(row.selected_text.clone()),
-        color: wire_cast(row.color.clone()),
-        note: row.note.clone(),
-        created_at: format_timestamp(&row.created_at),
-        updated_at: format_timestamp(&row.updated_at),
-    }
-}
-
-/// Fetch an annotation and enforce active-creator ownership.
-async fn load_annotation_for_creator(
-    state: &WorkspaceState,
-    creator_id: &str,
-    annotation_id: &str,
-) -> Result<AnnotationRow, NexusApiError> {
-    let row = reading::get_annotation(state.pool_or_uninit()?, annotation_id)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?
-        .ok_or_else(|| NexusApiError::NotFound(format!("annotation {annotation_id}")))?;
-
-    if row.creator_id != creator_id {
-        return Err(NexusApiError::Forbidden {
-            resource: format!("annotation {annotation_id}"),
-            reason: "annotation belongs to a different creator".to_string(),
-        });
-    }
-
-    Ok(row)
-}
-
-// ─── Handlers ───────────────────────────────────────────────────────────────
 
 /// `GET /v1/daemon/reading/progress` — get persisted scroll progress.
 pub async fn get_reading_progress(
     State(state): State<WorkspaceState>,
     Query(query): Query<ReadingProgressQuery>,
 ) -> Result<Json<ReadingProgressResponse>, NexusApiError> {
-    let creator_id = require_active_scope(&state)?;
-    verify_work_ownership(&state, &creator_id, &query.work_id).await?;
-
-    let chapter = query.chapter;
-    let (scroll_progress, updated_at) = reading::get_reading_progress(
-        state.pool_or_uninit()?,
-        &creator_id,
-        &query.work_id,
-        chapter_i64(chapter),
-    )
-    .await?;
-
-    let response = ReadingProgressResponse {
-        work_id: query.work_id,
-        chapter,
-        scroll_progress,
-        updated_at: updated_at.map_or_else(
-            || format_timestamp(&chrono::Utc::now()),
-            |ts| format_timestamp(&ts),
-        ),
-    };
-
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    let response = core
+        .get_reading_progress(&principal, query)
+        .await
+        .map_err(reading_error)?;
     Ok(Json(response))
 }
 
@@ -162,27 +75,12 @@ pub async fn put_reading_progress(
     State(state): State<WorkspaceState>,
     Json(body): Json<ReadingProgressRequest>,
 ) -> Result<Json<ReadingProgressResponse>, NexusApiError> {
-    let creator_id = require_active_scope(&state)?;
-    verify_work_ownership(&state, &creator_id, &body.work_id).await?;
-
-    let chapter = body.chapter;
-    let scroll_progress = body.scroll_progress;
-    let updated_at = reading::upsert_reading_progress(
-        state.pool_or_uninit()?,
-        &creator_id,
-        &body.work_id,
-        chapter_i64(chapter),
-        scroll_progress,
-    )
-    .await?;
-
-    let response = ReadingProgressResponse {
-        work_id: body.work_id,
-        chapter,
-        scroll_progress: body.scroll_progress,
-        updated_at: format_timestamp(&updated_at),
-    };
-
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    let response = core
+        .put_reading_progress(&principal, body.work_id.clone(), body)
+        .await
+        .map_err(reading_error)?;
     Ok(Json(response))
 }
 
@@ -191,17 +89,11 @@ pub async fn delete_reading_progress(
     State(state): State<WorkspaceState>,
     Query(query): Query<ReadingProgressQuery>,
 ) -> Result<axum::http::StatusCode, NexusApiError> {
-    let creator_id = require_active_scope(&state)?;
-    verify_work_ownership(&state, &creator_id, &query.work_id).await?;
-
-    reading::delete_reading_progress(
-        state.pool_or_uninit()?,
-        &creator_id,
-        &query.work_id,
-        chapter_i64(query.chapter),
-    )
-    .await?;
-
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    core.delete_reading_progress(&principal, query)
+        .await
+        .map_err(reading_error)?;
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
@@ -210,22 +102,12 @@ pub async fn list_annotations(
     State(state): State<WorkspaceState>,
     Query(query): Query<ReadingAnnotationListQuery>,
 ) -> Result<Json<ReadingAnnotationListResponse>, NexusApiError> {
-    let creator_id = require_active_scope(&state)?;
-    verify_work_ownership(&state, &creator_id, &query.work_id).await?;
-
-    let rows = reading::list_annotations(
-        state.pool_or_uninit()?,
-        &creator_id,
-        &query.work_id,
-        chapter_i64(query.chapter),
-    )
-    .await?;
-
-    let items = rows.iter().map(to_annotation_dto).collect::<Vec<_>>();
-    let response = ReadingAnnotationListResponse {
-        items: wire_cast(items),
-    };
-
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    let response = core
+        .list_annotations(&principal, query)
+        .await
+        .map_err(reading_error)?;
     Ok(Json(response))
 }
 
@@ -234,30 +116,13 @@ pub async fn create_annotation(
     State(state): State<WorkspaceState>,
     Json(body): Json<ReadingAnnotationCreateRequest>,
 ) -> Result<Json<ReadingAnnotation>, NexusApiError> {
-    let creator_id = require_active_scope(&state)?;
-    verify_work_ownership(&state, &creator_id, &body.work_id).await?;
-
-    validate_color(&body.color.to_string())?;
-
-    let start_offset = u64_to_i64(body.start_offset, "start_offset")?;
-    let end_offset = u64_to_i64(body.end_offset, "end_offset")?;
-    let annotation_id = format!("{ANNOTATION_ID_PREFIX}{}", Uuid::new_v4().simple());
-
-    let row = reading::create_annotation(
-        state.pool_or_uninit()?,
-        &creator_id,
-        &body.work_id,
-        chapter_i64(body.chapter),
-        &annotation_id,
-        start_offset,
-        end_offset,
-        &body.selected_text.to_string(),
-        &body.color.to_string(),
-        body.note.as_deref(),
-    )
-    .await?;
-
-    Ok(Json(to_annotation_dto(&row)))
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    let annotation = core
+        .create_annotation(&principal, body)
+        .await
+        .map_err(reading_error)?;
+    Ok(Json(annotation))
 }
 
 /// `PATCH /v1/daemon/reading/annotations/{annotation_id}` — edit an annotation.
@@ -266,37 +131,13 @@ pub async fn patch_annotation(
     Path(annotation_id): Path<String>,
     Json(body): Json<ReadingAnnotationPatchRequest>,
 ) -> Result<Json<ReadingAnnotation>, NexusApiError> {
-    let creator_id = require_active_scope(&state)?;
-    let _ = load_annotation_for_creator(&state, &creator_id, &annotation_id).await?;
-
-    if let Some(ref color) = body.color {
-        validate_color(&color.to_string())?;
-    }
-
-    // Translate empty-string note to None (clear note); missing field stays None
-    // on the request, which we interpret as "do not change" via `note: None` below.
-    let note_change = body.note.as_ref().map(|n| {
-        let trimmed = n.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed)
-        }
-    });
-
-    let row = reading::update_annotation(
-        state.pool_or_uninit()?,
-        &annotation_id,
-        body.color
-            .as_ref()
-            .map(std::string::ToString::to_string)
-            .as_deref(),
-        note_change,
-    )
-    .await?
-    .ok_or_else(|| NexusApiError::NotFound(format!("annotation {annotation_id}")))?;
-
-    Ok(Json(to_annotation_dto(&row)))
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    let annotation = core
+        .patch_annotation(&principal, annotation_id, body)
+        .await
+        .map_err(reading_error)?;
+    Ok(Json(annotation))
 }
 
 /// `DELETE /v1/daemon/reading/annotations/{annotation_id}` — delete an annotation.
@@ -304,10 +145,10 @@ pub async fn delete_annotation(
     State(state): State<WorkspaceState>,
     Path(annotation_id): Path<String>,
 ) -> Result<axum::http::StatusCode, NexusApiError> {
-    let creator_id = require_active_scope(&state)?;
-    let _ = load_annotation_for_creator(&state, &creator_id, &annotation_id).await?;
-
-    reading::delete_annotation(state.pool_or_uninit()?, &annotation_id).await?;
-
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    core.delete_annotation(&principal, annotation_id)
+        .await
+        .map_err(reading_error)?;
     Ok(axum::http::StatusCode::NO_CONTENT)
 }

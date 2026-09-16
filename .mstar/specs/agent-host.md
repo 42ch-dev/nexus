@@ -599,6 +599,87 @@ On denial, return `HostError::PolicyDenied` with descriptive message. Default po
 
 ---
 
+### 6.5 Actor admission and lifecycle leases (v1.190 P2)
+
+Stored Actor admission and per-Character fencing are owned by `nexus-core`
+(`CoreService`), not by the transport. Current facts:
+
+- **Admitted identity.** `AdmittedActor` (`Creator` / `Character`) is opaque:
+  no `Serialize`/`Deserialize`, so a serialized context can never be replayed
+  as authority. `classify_pair` accepts only the both-present or both-absent
+  `actor_ref`/`viewpoint` pair; a partial pair is a stable input rejection.
+  `CoreActorAdmission` (and `CoreService::admit_actor`) admit against stored
+  ownership only — active owned Character, active owned World, active binding
+  in the World — and load the bounded admitted `KnowledgeView`. The trusted
+  owner recorded on the context is the verified caller, never a payload claim.
+- **Non-blocking fences.** The per-Character fence (`ActorFenceTable`) is two
+  layers — an in-process `RwLock` and an OS shared/exclusive file lock. Both
+  layers are acquired with `try_*` only: an outstanding activity refuses a
+  transition and an outstanding transition refuses an activity with the same
+  observable `character_busy` refusal. Nothing waits on a provider or another
+  core; contention is observable, never parked.
+- **Leases.** `CoreService::acquire_actor_activity` owner-checks before
+  allocating a fence, takes the shared lease non-blockingly, and re-reads the
+  Character status/`lifecycle_epoch` under the fence, so the pair is exact for
+  the lease lifetime (inactive → `character_inactive`). The caller holds an
+  `ActorActivityLease` through every DB/file/provider/terminal-capture effect;
+  drop releases both layers. `acquire_character_transition` takes the
+  exclusive lease for archive/restore and re-reads the pre-transition epoch
+  under the fence; the committed epoch is written back onto the lease so
+  hosts retire old-epoch sessions only after a **material** transition.
+- **Stale sessions.** An indexed session whose stored `lifecycle_epoch` no
+  longer matches the epoch re-read under a fresh activity lease is
+  `actor_session_stale` and is denied before any provider effect.
+- **Fail-closed storage binding.** `CoreService::open_with_expected_binding`
+  refuses an open whose resolved workspace database is not the one the caller
+  already bound (`auth_required` before any pool is initialized or joined) —
+  a moved active selection can never be served out of a second database.
+  Every subsequent operation re-verifies the on-disk selection
+  (`verify_selected_context` is the only staleness enforcement; an open-scoped
+  generation alone never proves freshness).
+
+### 6.6 Core Host authority and provider multiplex (v1.190 P4)
+
+- **Provider selection (P4-T1).** `compose_provider_port` selects the owning
+  provider port once per session from the Rust-admitted catalog entry
+  (protocol/launch agreement is checked before any provider call) and retains
+  that owner: later calls never reselect by payload and never probe or fall
+  back to a second adapter after an effect. Claude/Codex/DSH run on the
+  maintained Rust native adapters in both TS-service and Rust consumers;
+  ACP sessions use the stable-v1 TS SDK callback (or the retained Rust ACP
+  adapter). DSH reports cancellation as not-supported and performs no cancel
+  RPC.
+- **Single Host owner (P4-T2).** `CoreService::open_host` composes the one
+  Host authority per open service: a started `HostManager`, the composed
+  provider port, and the process-lifetime Actor session registry
+  (`HostHandle`). An established-owner slot admits exactly one authority —
+  a second `open_host` is a typed `owner_busy` rejection, a failed start
+  releases the slot, a confirmed close frees it, and an unconfirmed close
+  keeps it held.
+- **Authority admission.** Every `HostHandle` method verifies the principal
+  first (`verify_principal`: open/closing state, principal identity, and the
+  on-disk active creator/workspace selection), so the authority is
+  single-owner per open: legacy sessions (never indexed) are owned by the
+  verified open identity by design. Indexed and retired Actor sessions carry
+  their own stored owner gate — list, get-session, and get-operation are
+  owner-scoped and foreign rows are invisible; a stale-epoch prompt is
+  denied before any provider effect; `set_model`/`set_mode` are rejected on
+  Actor-indexed sessions and routed into the real Host for legacy sessions.
+  Character prompts hold the P2 activity lease through the server-owned
+  drain and terminal settle.
+- **Private journal identity.** The durable JS-provider journal is owned by
+  `CoreService` (`journal_provider_write_internal`, `provider_operation_row_internal`,
+  `forget_provider_session_internal`, `settle_provider_orphans`); no pool
+  handle leaves the service. Journal rows are write-once attributed: the
+  identity columns (`session_id`, `provider_id`) are set at the first insert
+  and a later status update never re-attributes the operation. An
+  already-terminal status is never downgraded. On open, orphaned
+  non-terminal operations settle to `interrupted` before the host accepts new
+  work, so a restart never re-dispatches a journaled operation and the prior
+  active op stays queryable without re-executing provider work. A terminal
+  consumed from the provider during a journal failure is retained and
+  re-delivered exactly once after the journal retry succeeds.
+
 ## 7. Policy and Security
 
 ### 7.1 Admission policy

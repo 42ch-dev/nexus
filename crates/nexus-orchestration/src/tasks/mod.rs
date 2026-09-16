@@ -14,10 +14,10 @@
 
 use crate::capability::{CapabilityError, CapabilityRegistry};
 use crate::engine::{OrchestrationEngine, SessionId};
-use crate::preset::manifest::{ConvergeConfig, ConvergeStrategy};
-use crate::preset::manifest::{EnterAction, ExitWhen, MergeKind, NextTarget, StateDefinition};
 use async_trait::async_trait;
 use graph_flow::{Graph, NextAction, Task, TaskResult};
+use nexus_preset::manifest::{ConvergeConfig, ConvergeStrategy};
+use nexus_preset::manifest::{EnterAction, ExitWhen, MergeKind, NextTarget, StateDefinition};
 use serde_json::Value;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -845,7 +845,7 @@ pub struct StateCompositeTask {
 #[derive(Clone)]
 struct CachedExpressions {
     /// Parsed expressions + their target state IDs.
-    branches: Vec<(crate::preset::expr::Expr, String)>,
+    branches: Vec<(nexus_preset::expr::Expr, String)>,
     /// Default target when no branch matches.
     default: String,
     /// Any branch expression references `_context.registry_refresh.*`
@@ -1007,10 +1007,10 @@ impl StateCompositeTask {
         let mut needs_workspace = false;
 
         for rule in rules {
-            match crate::preset::expr::parse(&rule.when) {
+            match nexus_preset::expr::parse(&rule.when) {
                 Ok(ast) => {
                     // V1.56 P3: scan expression for context dependencies.
-                    let deps = crate::preset::expr::scan_context_deps(&ast);
+                    let deps = nexus_preset::expr::scan_context_deps(&ast);
                     needs_registry_refresh = needs_registry_refresh || deps.needs_registry_refresh;
                     needs_workspace = needs_workspace || deps.needs_workspace;
                     branches.push((ast, rule.target.clone()));
@@ -1051,7 +1051,7 @@ impl StateCompositeTask {
             ref min_interval,
         }) = self.exit_when
         {
-            if let Some(content) = crate::preset::read_embedded_template(preset_id, path) {
+            if let Some(content) = nexus_preset::read_embedded_template(preset_id, path) {
                 self.exit_when = Some(ExitWhen::LlmJudge {
                     template_file: Some(content),
                     judge_capability: judge_capability.clone(),
@@ -1183,7 +1183,7 @@ impl StateCompositeTask {
         })?;
 
         for (i, (ast, target)) in cache.branches.iter().enumerate() {
-            match crate::preset::expr::evaluate(ast, &ctx_json) {
+            match nexus_preset::expr::evaluate(ast, &ctx_json) {
                 Ok(true) => {
                     tracing::debug!(
                         state_id = %self.id,
@@ -3047,8 +3047,8 @@ fn parse_iso8601_duration(s: &str) -> Option<chrono::Duration> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::preset::manifest::{GoNogoNext, LabeledNext};
     use nexus_contracts::local::orchestration::preset::{ConditionalBranches, ConditionalRule};
+    use nexus_preset::manifest::{GoNogoNext, LabeledNext};
     use std::sync::Arc;
 
     #[tokio::test]
@@ -3519,7 +3519,7 @@ mod tests {
         };
         let registry = Arc::new(CapabilityRegistry::with_runtime_deps(&deps));
 
-        let state_def = crate::preset::manifest::StateDefinition {
+        let state_def = nexus_preset::manifest::StateDefinition {
             id: "gathering".into(),
             description: None,
             enter: vec![],
@@ -3528,7 +3528,7 @@ mod tests {
                 judge_capability: Some("judge.llm".to_string()),
                 min_interval: None,
             }),
-            next: Some(crate::preset::manifest::NextTarget::Linear(
+            next: Some(nexus_preset::manifest::NextTarget::Linear(
                 "brainstorming".into(),
             )),
             terminal: false,
@@ -3573,7 +3573,7 @@ mod tests {
         };
         let registry = Arc::new(CapabilityRegistry::with_runtime_deps(&deps));
 
-        let state_def = crate::preset::manifest::StateDefinition {
+        let state_def = nexus_preset::manifest::StateDefinition {
             id: "gathering".into(),
             description: None,
             enter: vec![],
@@ -3582,7 +3582,7 @@ mod tests {
                 judge_capability: Some("judge.llm".to_string()),
                 min_interval: None,
             }),
-            next: Some(crate::preset::manifest::NextTarget::Linear(
+            next: Some(nexus_preset::manifest::NextTarget::Linear(
                 "brainstorming".into(),
             )),
             terminal: false,
@@ -3613,7 +3613,7 @@ mod tests {
     async fn state_composite_llm_judge_no_worker_waits() {
         let registry = Arc::new(CapabilityRegistry::with_builtins());
 
-        let state_def = crate::preset::manifest::StateDefinition {
+        let state_def = nexus_preset::manifest::StateDefinition {
             id: "gathering".into(),
             description: None,
             enter: vec![],
@@ -3622,7 +3622,7 @@ mod tests {
                 judge_capability: None, // defaults to judge.llm
                 min_interval: None,
             }),
-            next: Some(crate::preset::manifest::NextTarget::Linear(
+            next: Some(nexus_preset::manifest::NextTarget::Linear(
                 "brainstorming".into(),
             )),
             terminal: false,
@@ -3650,7 +3650,7 @@ mod tests {
     async fn state_composite_llm_judge_empty_template_waits() {
         let registry = Arc::new(CapabilityRegistry::with_builtins());
 
-        let state_def = crate::preset::manifest::StateDefinition {
+        let state_def = nexus_preset::manifest::StateDefinition {
             id: "gathering".into(),
             description: None,
             enter: vec![],
@@ -3659,7 +3659,7 @@ mod tests {
                 judge_capability: None,
                 min_interval: None,
             }),
-            next: Some(crate::preset::manifest::NextTarget::Linear(
+            next: Some(nexus_preset::manifest::NextTarget::Linear(
                 "brainstorming".into(),
             )),
             terminal: false,
@@ -3687,7 +3687,7 @@ mod tests {
     /// the embedded `novel-writing` preset bundle for `prompts/gathering-exit.md`.
     #[test]
     fn with_resolved_template_loads_embedded_file() {
-        let state_def = crate::preset::manifest::StateDefinition {
+        let state_def = nexus_preset::manifest::StateDefinition {
             id: "gathering".into(),
             description: None,
             enter: vec![],
@@ -3738,7 +3738,7 @@ mod tests {
     /// preset IDs (backward compat for tests using inline templates).
     #[test]
     fn with_resolved_template_preserves_inline_for_unknown_preset() {
-        let state_def = crate::preset::manifest::StateDefinition {
+        let state_def = nexus_preset::manifest::StateDefinition {
             id: "test_state".into(),
             description: None,
             enter: vec![],
@@ -4190,11 +4190,11 @@ mod tests {
 
     #[tokio::test]
     async fn sec_v131_01_state_composite_injects_trusted_identity_into_capability() {
-        use crate::preset::manifest::EnterAction;
+        use nexus_preset::manifest::EnterAction;
 
         // Build a StateCompositeTask with one enter action: acp.prompt
         // (standalone mode — no worker IPC needed for this regression).
-        let state_def = crate::preset::manifest::StateDefinition {
+        let state_def = nexus_preset::manifest::StateDefinition {
             id: "gathering".into(),
             description: None,
             enter: vec![EnterAction::Capability {
@@ -4239,11 +4239,11 @@ mod tests {
 
     #[tokio::test]
     async fn sec_v131_01_engine_overwrites_spoofed_identity_in_preset_args() {
-        use crate::preset::manifest::EnterAction;
+        use nexus_preset::manifest::EnterAction;
 
         // Preset YAML tries to spoof _creator_id / _session_id in args.
         // The engine MUST overwrite these with trusted values from context.
-        let state_def = crate::preset::manifest::StateDefinition {
+        let state_def = nexus_preset::manifest::StateDefinition {
             id: "spoof_test".into(),
             description: None,
             enter: vec![EnterAction::Capability {
@@ -4286,9 +4286,9 @@ mod tests {
 
     #[tokio::test]
     async fn sec_v131_01_strips_spoofed_identity_when_context_missing() {
-        use crate::preset::manifest::EnterAction;
+        use nexus_preset::manifest::EnterAction;
 
-        let state_def = crate::preset::manifest::StateDefinition {
+        let state_def = nexus_preset::manifest::StateDefinition {
             id: "spoof_without_context".into(),
             description: None,
             enter: vec![EnterAction::Capability {
@@ -4398,9 +4398,9 @@ mod tests {
     /// reach the capability input.
     #[tokio::test]
     async fn state_composite_renders_capability_args_templates() {
-        use crate::preset::manifest::EnterAction;
+        use nexus_preset::manifest::EnterAction;
 
-        let state_def = crate::preset::manifest::StateDefinition {
+        let state_def = nexus_preset::manifest::StateDefinition {
             id: "persisting".into(),
             description: None,
             enter: vec![EnterAction::Capability {

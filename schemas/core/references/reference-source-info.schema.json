@@ -1,0 +1,44 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "$id": "https://nexus42.invalid/schemas/core/references/reference-source-info.schema.json",
+ "schema_version": 1,
+ "title": "ReferenceSourceInfo",
+ "description": "Registry metadata for one reference source (registry reads are global across creators in the local-first single-creator model).",
+ "type": "object",
+ "required": [
+  "reference_source_id",
+  "source_type",
+  "source_mutability",
+  "uri",
+  "title",
+  "scan_status",
+  "created_at"
+ ],
+ "additionalProperties": false,
+ "properties": {
+  "reference_source_id": {
+   "type": "string"
+  },
+  "source_type": {
+   "type": "string"
+  },
+  "source_mutability": {
+   "type": "string"
+  },
+  "uri": {
+   "type": "string"
+  },
+  "title": {
+   "type": "string"
+  },
+  "content_path": {
+   "type": "string"
+  },
+  "scan_status": {
+   "type": "string"
+  },
+  "created_at": {
+   "type": "string"
+  }
+ }
+}

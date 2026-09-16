@@ -8,7 +8,7 @@
 //! - No-match does NOT stall the session (deterministic fail)
 
 use graph_flow::SessionStorage;
-use nexus_orchestration::{preset, CapabilityRegistry, GraphFlowEngine, OrchestrationEngine};
+use nexus_orchestration::{CapabilityRegistry, GraphFlowEngine, OrchestrationEngine};
 use std::sync::Arc;
 
 fn test_capability_registry() -> CapabilityRegistry {
@@ -151,13 +151,13 @@ fn labeled_preset_loads_and_validates() {
     let yaml = labeled_preset_yaml(&[("good", "good_branch"), ("retry", "retry_branch")]);
     let caps = test_capability_registry();
     let loaded =
-        preset::load_preset_from_str(&yaml, &caps).expect("3-way labeled preset should load");
-    let result = preset::validation::validate_preset_semantic(&loaded.manifest, &caps);
+        nexus_preset::load_preset_from_str(&yaml, &caps).expect("3-way labeled preset should load");
+    let result = nexus_preset::validation::validate_preset_semantic(&loaded.manifest, &caps);
     assert!(
         result
             .diagnostics
             .iter()
-            .all(|d| d.severity != preset::validation::DiagnosticSeverity::Error),
+            .all(|d| d.severity != nexus_preset::validation::DiagnosticSeverity::Error),
         "labeled preset should pass semantic validation: {:?}",
         result.diagnostics
     );
@@ -168,14 +168,14 @@ fn labeled_preset_loads_and_validates() {
 fn hybrid_gonogo_labeled_preset_loads_and_validates() {
     let yaml = hybrid_preset_yaml();
     let caps = test_capability_registry();
-    let loaded = preset::load_preset_from_str(&yaml, &caps)
+    let loaded = nexus_preset::load_preset_from_str(&yaml, &caps)
         .expect("hybrid GoNogo+Labeled preset should load");
-    let result = preset::validation::validate_preset_semantic(&loaded.manifest, &caps);
+    let result = nexus_preset::validation::validate_preset_semantic(&loaded.manifest, &caps);
     assert!(
         result
             .diagnostics
             .iter()
-            .all(|d| d.severity != preset::validation::DiagnosticSeverity::Error),
+            .all(|d| d.severity != nexus_preset::validation::DiagnosticSeverity::Error),
         "hybrid preset should pass semantic validation: {:?}",
         result.diagnostics
     );
@@ -187,7 +187,7 @@ fn orphan_label_detected_at_validation_time() {
     let yaml = orphan_label_preset_yaml();
     let caps = test_capability_registry();
     // The loader itself should catch unknown state references in `next`.
-    let err = preset::load_preset_from_str(&yaml, &caps).unwrap_err();
+    let err = nexus_preset::load_preset_from_str(&yaml, &caps).unwrap_err();
     assert!(
         err.problems()
             .iter()
@@ -201,7 +201,7 @@ fn orphan_label_detected_at_validation_time() {
 #[test]
 fn all_embedded_presets_still_parse_regression() {
     let caps = test_capability_registry();
-    let preset_ids = preset::list_embedded_presets();
+    let preset_ids = nexus_preset::list_embedded_presets();
     assert!(
         !preset_ids.is_empty(),
         "expected at least one embedded preset"
@@ -209,13 +209,15 @@ fn all_embedded_presets_still_parse_regression() {
 
     let mut failures: Vec<String> = Vec::new();
     for preset_id in &preset_ids {
-        match preset::load_embedded_preset(preset_id, &caps) {
+        match nexus_preset::load_embedded_preset(preset_id, &caps) {
             Ok(loaded) => {
-                let result = preset::validation::validate_preset_semantic(&loaded.manifest, &caps);
+                let result =
+                    nexus_preset::validation::validate_preset_semantic(&loaded.manifest, &caps);
                 for d in &result.diagnostics {
-                    if d.severity == preset::validation::DiagnosticSeverity::Error {
+                    if d.severity == nexus_preset::validation::DiagnosticSeverity::Error {
                         // Known false positive: capability arg drift for creator.inject_prompt.
-                        if d.category == preset::validation::DiagnosticCategory::CapabilityArgDrift
+                        if d.category
+                            == nexus_preset::validation::DiagnosticCategory::CapabilityArgDrift
                             && d.message.contains("capability 'creator.inject_prompt'")
                         {
                             continue; // known false positive, not a regression
@@ -244,7 +246,8 @@ fn all_embedded_presets_still_parse_regression() {
 async fn labeled_no_match_does_not_stall_session() {
     let yaml = labeled_preset_yaml(&[("outline", "good_branch")]);
     let caps = Arc::new(test_capability_registry());
-    let loaded = preset::load_preset_from_str(&yaml, &caps).expect("labeled preset should load");
+    let loaded =
+        nexus_preset::load_preset_from_str(&yaml, &caps).expect("labeled preset should load");
 
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
     let engine = GraphFlowEngine::new_with_storage(

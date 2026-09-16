@@ -1,35 +1,31 @@
-//! HTTP handlers have consistent error patterns.
-#![allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
-//! Memory pending review handlers — session-end capture for review pipeline.
+//! Memory pending review handlers — session-end capture for review pipeline
+//! (thin translation over the core Creator memory family, v1.190 P2-T2).
 //!
-//! V1.78 P0 (Batch 1): every request/response/query/item DTO is now the
-//! generated `nexus_contracts` type — no hand-written DTOs (daemon-runtime
-//! invariant). `PendingReviewInfo` is also the response item type; the
-//! generated type cannot carry `sqlx::FromRow` (orphan rule — both
-//! `sqlx::FromRow` and `nexus_contracts::PendingReviewInfo` are foreign to
-//! this crate, and `nexus-contracts` intentionally does not depend on sqlx),
-//! so the SQL projections use `query!` + explicit field mapping instead of
-//! `query_as!`. See `fetch_pending_reviews_by_creator`. Wire behavior is
-//! unchanged.
+//! All DTOs are the generated `nexus_contracts` types; the pending-review
+//! queries, keyset pagination, fragment listing, bounded review drain and the
+//! SOUL narrative reflect live in [`nexus_core`]. The handlers keep only
+//! active-creator resolution, the retained 403/format envelopes and the
+//! in-process per-creator review lock (V1.80 REL-01 host composition).
+
+#![allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
 
 use crate::api::errors::NexusApiError;
-use crate::api::handlers::memory_pipeline::BearerPipelineCtx;
-use crate::api::handlers::memory_pipeline::{
-    process_bearer_review_batch, reflect_bearer_soul, MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS,
-    MIN_SOUL_NARRATIVE_FRAGMENTS, REVIEW_BATCH_LIMIT,
-};
+use crate::api::handlers::soul_narrative_synthesizer::AcpSoulNarrativeSynthesizer;
+use crate::api::handlers::world_kb_guards::resolve_core_principal;
 use crate::config::read_active_creator_id;
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, Query, State};
 use axum::Json;
-pub use nexus_contracts::{
-    CountPendingReviewsQuery, CountPendingReviewsResponse, CreatePendingReviewRequest,
-    CreatePendingReviewResponse, DeletePendingReviewQuery, DeletePendingReviewResponse,
-    ListMemoryFragmentsQuery, ListMemoryFragmentsResponse, ListPendingReviewsQuery,
-    ListPendingReviewsResponse, MemoryFragmentInfo, PaginationInfo, PendingReviewInfo,
-    ReviewRequest, ReviewResponse, SoulNarrativeRequest, SoulNarrativeResponse,
+// Re-exported so the DTO-identity integration target can assert that each
+// handler response is the SAME generated type the contracts expose (no
+// parallel handwritten shape); the handler body still imports them by name.
+pub use nexus_contracts::daemon_api::memory::{
+    CountPendingReviewsQuery, CountPendingReviewsResponse, CreatePendingReviewResponse,
+    DeletePendingReviewQuery, DeletePendingReviewResponse, ListMemoryFragmentsQuery,
+    ListMemoryFragmentsResponse, ListPendingReviewsQuery, ListPendingReviewsResponse,
+    MemoryFragmentInfo, PendingReviewInfo, ReviewRequest, ReviewResponse, SoulNarrativeRequest,
+    SoulNarrativeResponse,
 };
-use nexus_creator_memory::review::PendingReviewInput;
 use tracing::{debug, info};
 
 /// GET /v1/daemon/memory/pending-review?creator_id=...
@@ -63,47 +59,13 @@ pub async fn list_pending_reviews(
         });
     }
 
-    // R-V178P0-QC3-002: push pagination into SQL (keyset on
-    // `(created_at DESC, pending_id DESC)` with `LIMIT ? + 1`) so the daemon
-    // never materializes the full creator set before applying the cursor/limit.
-    // The prior fetch-all + in-Rust `split_off`/`truncate` is preserved at the
-    // wire level — see `fetch_pending_reviews_page` for the behavior argument.
+    let (core, principal) = resolve_core_principal(&state).await?;
     let limit = resolve_query_limit(params.limit);
-    let creator_id_filter = active_creator; // R-V133P4-07: use active creator
-    let fetch_limit = i64::try_from(limit + 1).unwrap_or(i64::MAX);
-    let mut items = fetch_pending_reviews_page(
-        state.pool_or_uninit()?,
-        &creator_id_filter,
-        params.cursor.as_deref(),
-        fetch_limit,
-    )
-    .await
-    .map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_ERROR".into(),
-        message: format!("failed to list pending reviews: {e}"),
-    })?;
-
-    // Determine the next cursor from the over-fetched (`limit + 1`) row. If we
-    // fetched strictly more than `limit`, there is at least one more row on the
-    // server; the next page's cursor is the last item of the truncated page.
-    // This matches the prior `items.len() > limit` branch exactly.
-    let next_cursor = if items.len() > limit {
-        items.truncate(limit);
-        items.last().map(|i| i.pending_id.clone())
-    } else {
-        None
-    };
-
-    debug!(count = items.len(), "Pending reviews retrieved");
-
-    Ok(Json(ListPendingReviewsResponse {
-        items: super::wire_cast(items),
-        pagination: super::wire_cast(PaginationInfo {
-            limit: i64::try_from(limit).unwrap_or(i64::MAX),
-            has_more: next_cursor.is_some(),
-            next_cursor,
-        }),
-    }))
+    let response = core
+        .list_pending_reviews(&principal, params.cursor, limit)
+        .await?;
+    debug!(count = response.items.len(), "Pending reviews retrieved");
+    Ok(Json(response))
 }
 
 /// Maximum items per page for the memory list endpoints.
@@ -114,151 +76,12 @@ const DEFAULT_QUERY_LIMIT: i64 = 50;
 
 /// Resolve an optional wire `limit` (i64) into a clamped `usize`, applying the
 /// memory default (`DEFAULT_QUERY_LIMIT` = 50) and the `1..=MAX_LIMIT` clamp
-/// shared by the list and fragments endpoints. Wire behavior matches the prior
-/// hand-written query structs (`#[serde(default = "default_limit")]` +
-/// `.clamp(1, MAX_LIMIT)`): absent → 50, otherwise clamped to `1..=250`.
+/// shared by the list and fragments endpoints.
 fn resolve_query_limit(raw: Option<i64>) -> usize {
     let clamped = raw
         .unwrap_or(DEFAULT_QUERY_LIMIT)
         .clamp(1, i64::try_from(MAX_LIMIT).unwrap_or(i64::MAX));
     usize::try_from(clamped).unwrap_or(MAX_LIMIT)
-}
-
-// (open item #7 bridging) The generated `PendingReviewInfo` cannot derive
-// `sqlx::FromRow` — both `sqlx::FromRow` and `nexus_contracts::PendingReviewInfo`
-// are foreign to this crate, so the orphan rule forbids `impl FromRow for
-// PendingReviewInfo` here (and `nexus-contracts` intentionally does not depend
-// on sqlx). The bounded helper `fetch_pending_reviews_page` below uses `query!`
-// + explicit field mapping instead of `query_as!`; the list and review handlers
-// share it.
-//
-// V1.80 REL-01: the unbounded `fetch_pending_reviews_by_creator` that used to
-// live here was removed — the review handler now reuses the bounded
-// `fetch_pending_reviews_page` (50 + 1 overfetch). The bounded helper carries
-// the same column-set, ordering, and field-mapping convention.
-
-/// Fetch one bounded page of a creator's pending reviews for the list endpoint.
-///
-/// **R-V178P0-QC3-002 (qc1 W-QC1-002 + qc3 W-QC3-002/W-QC3-003):** replaces the
-/// unbounded `fetch_all` + in-Rust `split_off`/`truncate` pagination in
-/// [`list_pending_reviews`]. The daemon now fetches at most `limit + 1` rows
-/// from the database instead of materializing the full creator set.
-///
-/// # Keyset + behavior preservation
-///
-/// The wire cursor is a `pending_id`. Pagination is implemented as a keyset on
-/// `(created_at DESC, pending_id DESC)`:
-///
-/// 1. If a cursor is supplied, its `created_at` is resolved with a point
-///    lookup. The page query then returns rows strictly after the cursor's key:
-///    `(created_at < cursor_ca) OR (created_at == cursor_ca AND pending_id <
-///    cursor_pid)`, ordered `created_at DESC, pending_id DESC`, `LIMIT ?`.
-/// 2. If no cursor is supplied (or the cursor row was deleted between pages),
-///    the first page is returned with `LIMIT ?`.
-///
-/// This reproduces the prior `position(cursor)` → `split_off(idx + 1)` →
-/// `truncate(limit)` semantics:
-///
-/// - **Distinct `created_at`** (the overwhelmingly common case): the observable
-///   row order is identical to the prior `ORDER BY created_at DESC`, so every
-///   page returns the same rows and the same `next_cursor`.
-/// - **Equal `created_at` ties:** the prior query ordered by `created_at DESC`
-///   only, leaving ties to the database's implementation-defined rowid order. Adding
-///   `pending_id DESC` as a tiebreaker makes ties deterministic, which is
-///   strictly more correct (the prior nondeterminism was a latent pagination
-///   hazard at the tie boundary). No row that previously appeared on page *N*
-///   can now appear on page *N-1* or *N+1* in a way that breaks cursor
-///   continuity, because the tiebreaker is total and stable.
-/// - **Deleted cursor:** the prior code returned the first page when
-///   `position()` could not find the cursor (pos `None` → items unchanged).
-///   This implementation returns the first page via the no-cursor query when the
-///   cursor's `created_at` lookup misses, matching that fallback.
-///
-/// `fetch_limit` is `page_limit + 1` from the caller; the extra row drives the
-/// `has_more` / `next_cursor` decision without a second round-trip (the caller
-/// truncates back to `page_limit`).
-async fn fetch_pending_reviews_page(
-    pool: &sqlx::SqlitePool,
-    creator_id: &str,
-    cursor: Option<&str>,
-    fetch_limit: i64,
-) -> Result<Vec<PendingReviewInfo>, sqlx::Error> {
-    // Resolve the cursor row's `created_at`. Returns `None` if the cursor was
-    // deleted (or never existed); the caller then falls through to the
-    // no-cursor first-page query, preserving the prior `position() == None`
-    // behavior.
-    let cursor_created_at: Option<String> = if let Some(cursor_pid) = cursor {
-        sqlx::query_scalar!(
-            "SELECT created_at FROM memory_pending_review
-             WHERE creator_id = ? AND pending_id = ?",
-            creator_id,
-            cursor_pid
-        )
-        .fetch_optional(pool)
-        .await?
-    } else {
-        None
-    };
-
-    let rows: Vec<PendingReviewInfo> = if let (Some(cursor_pid), Some(cursor_ca)) =
-        (cursor, cursor_created_at)
-    {
-        // Keyset page: rows strictly after `(cursor_ca, cursor_pid)` in
-        // `created_at DESC, pending_id DESC` order.
-        sqlx::query!(
-            r#"SELECT pending_id as "pending_id!", session_id, creator_id, world_id, task_kind, raw_digest, created_at
-             FROM memory_pending_review
-             WHERE creator_id = ?
-               AND (created_at < ? OR (created_at = ? AND pending_id < ?))
-             ORDER BY created_at DESC, pending_id DESC
-             LIMIT ?"#,
-            creator_id,
-            cursor_ca,
-            cursor_ca,
-            cursor_pid,
-            fetch_limit
-        )
-        .fetch_all(pool)
-        .await?
-        .into_iter()
-        .map(|row| PendingReviewInfo {
-            pending_id: row.pending_id,
-            session_id: row.session_id,
-            creator_id: row.creator_id,
-            world_id: row.world_id,
-            task_kind: row.task_kind,
-            raw_digest: row.raw_digest,
-            created_at: row.created_at,
-        })
-        .collect()
-    } else {
-        // First page (no cursor, or cursor deleted → restart from the top to
-        // preserve the prior position()==None behavior).
-        sqlx::query!(
-            r#"SELECT pending_id as "pending_id!", session_id, creator_id, world_id, task_kind, raw_digest, created_at
-             FROM memory_pending_review
-             WHERE creator_id = ?
-             ORDER BY created_at DESC, pending_id DESC
-             LIMIT ?"#,
-            creator_id,
-            fetch_limit
-        )
-        .fetch_all(pool)
-        .await?
-        .into_iter()
-        .map(|row| PendingReviewInfo {
-            pending_id: row.pending_id,
-            session_id: row.session_id,
-            creator_id: row.creator_id,
-            world_id: row.world_id,
-            task_kind: row.task_kind,
-            raw_digest: row.raw_digest,
-            created_at: row.created_at,
-        })
-        .collect()
-    };
-
-    Ok(rows)
 }
 
 /// GET /v1/daemon/memory/pending-review/count?creator_id=...
@@ -292,22 +115,9 @@ pub async fn count_pending_reviews(
         });
     }
 
-    let creator_id_filter = active_creator; // R-V133P4-07: use active creator
-    let row = sqlx::query_scalar!(
-        "SELECT COUNT(*) as \"count!\" FROM memory_pending_review WHERE creator_id = ?",
-        creator_id_filter
-    )
-    .fetch_one(state.pool_or_uninit()?)
-    .await
-    .map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_ERROR".into(),
-        message: format!("failed to count pending reviews: {e}"),
-    })?;
-
-    Ok(Json(CountPendingReviewsResponse {
-        // `row` is the i64 COUNT(*) result; the generated `count` field is i64.
-        count: row,
-    }))
+    let (core, principal) = resolve_core_principal(&state).await?;
+    let response = core.count_pending_reviews(&principal).await?;
+    Ok(Json(response))
 }
 
 /// DELETE /v1/daemon/memory/pending-review/{id}?creator_id=...
@@ -346,85 +156,16 @@ pub async fn delete_pending_review(
         });
     }
 
-    // Verify ownership before deletion
-    let pid = pending_id.clone();
-    let review = sqlx::query!(
-        r#"SELECT pending_id as "pending_id!", session_id, creator_id, world_id, task_kind, raw_digest, created_at
-         FROM memory_pending_review WHERE pending_id = ?"#, // sqlx R3: use ? instead of ?1
-        pid
-    )
-    .fetch_optional(state.pool_or_uninit()?)
-    .await
-    .map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_ERROR".into(),
-        message: format!("failed to lookup pending review: {e}"),
-    })?
-    .map(|row| PendingReviewInfo {
-        pending_id: row.pending_id,
-        session_id: row.session_id,
-        creator_id: row.creator_id,
-        world_id: row.world_id,
-        task_kind: row.task_kind,
-        raw_digest: row.raw_digest,
-        created_at: row.created_at,
-    });
-
-    match review {
-        None => {
-            return Err(NexusApiError::NotFound(format!(
-                "pending review '{pending_id}' not found"
-            )));
-        }
-        Some(ref r) if r.creator_id != params.creator_id => {
-            return Err(NexusApiError::Forbidden {
-                resource: "pending_review".into(),
-                reason: format!(
-                    "pending review '{}' does not belong to creator '{}'",
-                    pending_id, params.creator_id
-                ),
-            });
-        }
-        _ => {}
-    }
-
-    // Proceed with deletion
-    let pid = pending_id.clone();
-    let affected = sqlx::query!(
-        "DELETE FROM memory_pending_review WHERE pending_id = ?",
-        pid
-    )
-    .execute(state.pool_or_uninit()?)
-    .await
-    .map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_ERROR".into(),
-        message: format!("failed to delete pending review: {e}"),
-    })?;
-
-    debug_assert!(
-        affected.rows_affected() > 0,
-        "Expected 1 row deleted after ownership check"
-    );
-
-    Ok(Json(DeletePendingReviewResponse {
-        success: true,
-        pending_id,
-    }))
+    let (core, principal) = resolve_core_principal(&state).await?;
+    let response = core.delete_pending_review(&principal, pending_id).await?;
+    Ok(Json(response))
 }
-
-// ─── Review + Fragments handlers (V1.33 P4) ────────────────────────────────
 
 /// `POST /v1/daemon/memory/review`
 ///
 /// Triggers the review pipeline for a creator's pending review queue.
-/// Classifies each entry using rule-based heuristics:
-/// - **`PromoteToLongTerm`**: high-signal creative content → long-term memory file
-/// - **`FragmentOnly`**: informational content → keyword fragment record
-/// - **`Drop`**: below threshold → deleted
-///
 /// Auth: requires active creator from config.toml (R-V133P4-01).
 /// Request body `creator_id` must match the active creator, otherwise 403.
-const REVIEW_CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
-
 pub async fn review(
     State(state): State<WorkspaceState>,
     Json(req): Json<ReviewRequest>,
@@ -453,79 +194,16 @@ pub async fn review(
 
     info!(creator_id = %active_creator, "Reviewing pending memories");
 
-    // V1.80 REL-01: bounded fetch + per-creator serialization + per-call timeout.
-    //
-    // All of fetch, classify, side effects, and best-effort deletes happen
-    // inside the per-creator guard scope so two overlapping requests for the
-    // same creator cannot fetch/delete the same pending rows (the side effects
-    // mint fresh IDs and are not idempotent at the DB). The map mutex is only
-    // held briefly inside `memory_review_lock`; this `.await` waits on the
-    // creator-scoped lock. Overlapping calls serialize instead of erroring.
+    // V1.80 REL-01: bounded fetch + per-creator serialization + per-call
+    // timeout. The per-creator lock is host composition: two overlapping
+    // requests for the same creator serialize here so they cannot race the
+    // core's bounded fetch; the core's queue-advance transactions remain
+    // exactly-one-row so cross-process callers can never duplicate fragments.
     let outcome = {
         let creator_lock = state.memory_review_lock(&active_creator);
         let _guard = creator_lock.lock().await;
-
-        // Bounded fetch: REVIEW_BATCH_LIMIT + 1 overfetch drives `has_more`.
-        let fetch_limit = REVIEW_BATCH_LIMIT + 1;
-        let mut rows =
-            fetch_pending_reviews_page(state.pool_or_uninit()?, &active_creator, None, fetch_limit)
-                .await
-                .map_err(|e| NexusApiError::Internal {
-                    code: "DATABASE_ERROR".into(),
-                    message: format!("failed to fetch pending reviews for review: {e}"),
-                })?;
-
-        // The over-fetched (51st) row, if present, means more rows remain in the
-        // DB beyond this batch. Truncate the processing slice back to the limit.
-        let batch_limit = usize::try_from(REVIEW_BATCH_LIMIT).unwrap_or(usize::MAX);
-        let more_in_db = rows.len() > batch_limit;
-        if more_in_db {
-            rows.truncate(batch_limit);
-        }
-        let processing_slice = rows.len();
-
-        let deadline = tokio::time::Instant::now() + REVIEW_CALL_TIMEOUT;
-        let nexus_home = state.nexus_home().to_owned();
-        let pool = state.pool_or_uninit()?.clone();
-        let inputs: Vec<PendingReviewInput> = rows
-            .iter()
-            .map(|row| PendingReviewInput {
-                pending_id: row.pending_id.clone(),
-                session_id: row.session_id.clone(),
-                bearer_id: row.creator_id.clone(),
-                scope_id: row.world_id.clone(),
-                task_kind: row.task_kind.clone(),
-                raw_digest: row.raw_digest.clone(),
-                created_at: row.created_at.clone(),
-            })
-            .collect();
-        let ctx = BearerPipelineCtx::creator(&active_creator, None);
-        let mut batch =
-            process_bearer_review_batch(&inputs, &nexus_home, &ctx, &pool, deadline).await?;
-        drop(ctx);
-
-        // `has_more` is the drain-completion contract: `true` means the queue
-        // may not be fully drained and the client should re-request
-        // (`apps/web` `useReviewMemory` drains while `has_more === true`). It is
-        // `true` when ANY of:
-        //   - `more_in_db`: the overfetched (51st) row proves rows exist beyond
-        //     this batch;
-        //   - `deadline_stopped`: the per-call budget expired before the loop
-        //     inspected every fetched row (`processed < processing_slice`);
-        //   - `any_row_remained_pending`: a fetched row was inspected but NOT
-        //     completed — its action failed or it timed out mid-row, so it was
-        //     left pending. This is the key invariant added for W-QC3-001
-        //     (R-V180P0-QC3-001): if any row fetched in this batch still awaits
-        //     completion, `has_more` MUST be true, otherwise the client could
-        //     terminate with a false "Review complete" while a pending row
-        //     remains. `processed` alone was insufficient because it advances
-        //     for inspected-but-uncompleted rows too.
-        let deadline_stopped = batch.processed < processing_slice;
-        let has_more = more_in_db || deadline_stopped || batch.any_row_remained_pending;
-        batch.has_more = has_more;
-        batch.more_in_db = more_in_db;
-        batch.processing_slice = processing_slice;
-        batch
+        let (core, principal) = resolve_core_principal(&state).await?;
+        core.review_memory(&principal, req).await?
     }; // per-creator guard drops here (before the response is returned)
 
     info!(
@@ -538,21 +216,9 @@ pub async fn review(
         "Review completed"
     );
 
-    Ok(Json(ReviewResponse {
-        promoted: outcome.promoted,
-        fragmented: outcome.fragmented,
-        dropped: outcome.dropped,
-        has_more: Some(outcome.has_more),
-        processed: Some(i64::try_from(outcome.processed).unwrap_or(i64::MAX)),
-    }))
+    Ok(Json(outcome))
 }
 
-/// Maximum pending rows inspected per `POST /memory/review` call (V1.80 REL-01).
-///
-/// Aligns the review-drain batch with the memory list default
-/// (`DEFAULT_QUERY_LIMIT = 50`): a 50-row synchronous batch is the smallest
-/// policy that preserves the local-only / small-queue threat model while
-/// bounding the request duration. Not user-configurable in this slice.
 /// `GET /v1/daemon/memory/fragments?creator_id=...&keyword=...&limit=...`
 ///
 /// Lists memory fragments for a creator with optional keyword filter.
@@ -594,67 +260,22 @@ pub async fn fragments(
     );
 
     let limit = resolve_query_limit(params.limit);
-
-    let records = if params.keyword.is_some() {
-        // Use filtered query for keyword search
-        let limit_u32 = u32::try_from(limit).unwrap_or(u32::MAX);
-        nexus_local_db::memory_fragment::list_fragments_filtered(
-            state.pool_or_uninit()?,
-            &active_creator,
-            params.keyword.as_deref(),
-            params.world_id.as_deref(),
-            limit_u32,
-        )
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".into(),
-            message: format!("failed to list memory fragments: {e}"),
-        })?
-    } else {
-        // R-V178P0-QC3-002 (W-QC3-002): no-keyword path now uses the bounded
-        // DAO (`LIMIT ?` in SQL) instead of `list_fragments` (fetch-all) +
-        // in-Rust `truncate(limit)`. For total ≤ limit the returned set is
-        // identical; the cap is simply enforced server-side now.
-        let limit_i64 = i64::try_from(limit).unwrap_or(i64::MAX);
-        nexus_local_db::memory_fragment::list_fragments_limited(
-            state.pool_or_uninit()?,
-            &active_creator,
-            params.world_id.as_deref(),
-            limit_i64,
-        )
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".into(),
-            message: format!("failed to list memory fragments: {e}"),
-        })?
-    };
-
-    let fragments_list: Vec<MemoryFragmentInfo> = records
-        .into_iter()
-        .map(|r| MemoryFragmentInfo {
-            fragment_id: r.fragment_id,
-            summary: r.summary,
-            world_id: r.world_id,
-            keywords: decode_fragment_keywords(&r.keywords),
-            created_at: Some(r.created_at),
-        })
-        .collect();
-
-    debug!(count = fragments_list.len(), "Fragments retrieved");
-
-    Ok(Json(ListMemoryFragmentsResponse {
-        fragments: super::wire_cast(fragments_list),
-    }))
+    let (core, principal) = resolve_core_principal(&state).await?;
+    let response = core
+        .list_memory_fragments(&principal, params.keyword, params.world_id, limit)
+        .await?;
+    debug!(count = response.fragments.len(), "Fragments retrieved");
+    Ok(Json(response))
 }
 
-// ─── SOUL narrative reflect (v1.184 P3: dispatches through the bearer core) ─
+// ─── SOUL narrative reflect (v1.184 P3; core-owned since v1.190 P2-T2) ────
 
 /// `POST /v1/daemon/memory/soul/reflect`
 ///
 /// Reads or regenerates the cached whole-Creator SOUL narrative. The public
-/// Creator handler validates the active creator + world ownership, then
-/// delegates to the bearer-parameterized [`reflect_bearer_soul`] core; the
-/// wire response shape and state strings are preserved byte-for-byte.
+/// Creator handler validates the active creator, then delegates to the core
+/// reflect family; the wire response shape and state strings are preserved
+/// byte-for-byte.
 ///
 /// Auth: requires active creator from config.toml.
 pub async fn reflect_soul(
@@ -681,661 +302,26 @@ pub async fn reflect_soul(
         });
     }
 
-    let world_id = req.world_id.as_deref();
-
-    if let Some(w) = world_id {
-        if !nexus_local_db::narrative_write::is_world_owned(
-            state.pool_or_uninit()?,
-            &active_creator,
-            w,
-        )
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".into(),
-            message: e.to_string(),
-        })? {
-            return Err(NexusApiError::Forbidden {
-                resource: "soul_narrative".into(),
-                reason: format!("creator does not own world '{w}'"),
-            });
-        }
-    }
-
     info!(
         creator_id = %active_creator,
-        world_id = ?world_id,
+        world_id = ?req.world_id,
         force_regenerate = req.force_regenerate,
         "Reflecting on SOUL narrative"
     );
 
-    // Build the ACP synthesizer only when force=true; the core returns the
-    // canonical `ServiceUnavailable` when no capability registry is present.
-    let synthesizer = if req.force_regenerate {
-        let registry =
+    // The world-ownership gate (retained `soul_narrative` 403) lives in the
+    // core reflect command; the provider effect is a lazy factory evaluated
+    // by the core only after authorization (and only when synthesis is
+    // actually demanded), so a missing registry yields the core's retained
+    // 503 after authorization, never before it (no provider state is touched
+    // pre-auth).
+    let (core, principal) = resolve_core_principal(&state).await?;
+    let response = core
+        .reflect_creator_soul(&principal, req, || {
             state
                 .capability_registry()
-                .ok_or_else(|| NexusApiError::ServiceUnavailable {
-                    message: "capability registry not available".to_string(),
-                })?;
-        Some(
-            crate::api::handlers::soul_narrative_synthesizer::AcpSoulNarrativeSynthesizer::new(
-                registry,
-            ),
-        )
-    } else {
-        None
-    };
-
-    let pool = state.pool_or_uninit()?;
-    let ctx = BearerPipelineCtx::creator(&active_creator, world_id);
-    let outcome =
-        reflect_bearer_soul(pool, &ctx, req.force_regenerate, synthesizer.as_ref()).await?;
-    drop(ctx);
-
-    Ok(Json(map_reflect_outcome(active_creator, outcome)))
-}
-
-/// Map a bearer-agnostic reflect outcome to the wire `SoulNarrativeResponse`.
-fn map_reflect_outcome(
-    creator_id: String,
-    o: crate::api::handlers::memory_pipeline::ReflectOutcome,
-) -> SoulNarrativeResponse {
-    let state_str = match o.state {
-        crate::api::handlers::memory_pipeline::ReflectState::InsufficientData => {
-            "insufficient_data"
-        }
-        crate::api::handlers::memory_pipeline::ReflectState::Ungenerated => "ungenerated",
-        crate::api::handlers::memory_pipeline::ReflectState::Current => "current",
-        crate::api::handlers::memory_pipeline::ReflectState::Stale => "stale",
-    };
-    SoulNarrativeResponse {
-        creator_id,
-        state: state_str.parse().expect("valid state constant"),
-        narrative: o.narrative,
-        generated_at: o.generated_at,
-        stale: o.stale,
-        fragment_count_at_generation: o.fragment_count_at_generation,
-        max_fragment_created_at_at_generation: o.max_fragment_created_at_at_generation,
-        current_fragment_count: o.current_fragment_count,
-        current_distinct_keyword_count: o.current_distinct_keyword_count,
-        min_fragment_count: MIN_SOUL_NARRATIVE_FRAGMENTS,
-        min_distinct_keyword_count: MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS,
-    }
-}
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-/// Minimum fragment count before narrative synthesis is attempted.
-fn decode_fragment_keywords(raw: &str) -> Vec<String> {
-    serde_json::from_str::<Vec<String>>(raw).unwrap_or_default()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // ── V1.79: keyword JSON decode (SOUL visualization projection) ──────────
-
-    #[test]
-    fn decode_fragment_keywords_parses_valid_json_array() {
-        let kw = decode_fragment_keywords(r#"["historical fiction","moral ambiguity"]"#);
-        assert_eq!(kw, vec!["historical fiction", "moral ambiguity"]);
-    }
-
-    #[test]
-    fn decode_fragment_keywords_empty_array() {
-        assert!(decode_fragment_keywords("[]").is_empty());
-    }
-
-    #[test]
-    fn decode_fragment_keywords_malformed_json_degrades_to_empty() {
-        // Legacy/corrupt rows must never fail the fragments response.
-        assert!(decode_fragment_keywords("not valid json").is_empty());
-        assert!(decode_fragment_keywords("").is_empty());
-        // A JSON object (not an array) is also rejected gracefully.
-        assert!(decode_fragment_keywords(r#"{"key":"value"}"#).is_empty());
-    }
-
-    #[test]
-    fn decode_fragment_keywords_non_string_items_rejected() {
-        // Mixed-type arrays are not `Vec<String>` → graceful empty.
-        assert!(decode_fragment_keywords(r#"["ok", 42]"#).is_empty());
-    }
-
-    // ─── R-V181P0-QC3-W002: UTF-8 char-safe summary truncation ───────────
-
-    #[tokio::test]
-    async fn process_review_batch_past_deadline_processes_zero_rows() {
-        let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
-        let pool = nexus_local_db::open_pool(&db_path)
-            .await
-            .expect("test pool");
-
-        // Seed 3 rows so the processing slice is non-empty; the deadline alone
-        // must prevent them from being inspected.
-        for i in 0..3 {
-            // SAFETY: test-only seed using runtime query.
-            sqlx::query(
-                "INSERT OR IGNORE INTO memory_pending_review \
-                 (pending_id, session_id, creator_id, world_id, task_kind, raw_digest, created_at) \
-                 VALUES (?, ?, 'ctr_testuser', NULL, 'research', \
-                 'Research summary long enough to classify as fragment.', '2026-01-01T00:00:0X0Z')",
-            )
-            .bind(format!("pending_deadline_{i}"))
-            .bind(format!("sess_deadline_{i}"))
-            .execute(&pool)
-            .await
-            .expect("seed");
-        }
-
-        let rows = fetch_pending_reviews_page(&pool, "ctr_testuser", None, 51)
-            .await
-            .expect("fetch");
-        assert_eq!(rows.len(), 3, "precondition: 3 rows seeded");
-
-        let inputs: Vec<PendingReviewInput> = rows
-            .into_iter()
-            .map(|row| PendingReviewInput {
-                pending_id: row.pending_id,
-                session_id: row.session_id,
-                bearer_id: row.creator_id,
-                scope_id: row.world_id,
-                task_kind: row.task_kind,
-                raw_digest: row.raw_digest,
-                created_at: row.created_at,
-            })
-            .collect();
-
-        // Deadline already in the past.
-        let deadline = tokio::time::Instant::now();
-        let ctx =
-            crate::api::handlers::memory_pipeline::BearerPipelineCtx::creator("ctr_testuser", None);
-        let outcome = crate::api::handlers::memory_pipeline::process_bearer_review_batch(
-            &inputs,
-            &nexus_home,
-            &ctx,
-            &pool,
-            deadline,
-        )
-        .await
-        .expect("creator batch");
-        drop(ctx);
-
-        assert_eq!(outcome.processed, 0, "past deadline must inspect zero rows");
-        assert_eq!(outcome.promoted, 0);
-        assert_eq!(outcome.fragmented, 0);
-        assert_eq!(outcome.dropped, 0);
-
-        // The 3 seeded rows are untouched (no side effects ran).
-        let remaining: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM memory_pending_review")
-            .fetch_one(&pool)
-            .await
-            .expect("count");
-        assert_eq!(remaining.0, 3, "no rows deleted under a past deadline");
-
-        drop(tmp);
-    }
-
-    // ─── V1.81 G1: synthesis gated behind force=true ─────────────────────
-
-    /// `force_regenerate=false` + above-gate + no cache → `ungenerated`,
-    /// and the synthesizer is NOT called (proved by returning before the
-    /// capability-registry check, which would fail with `ServiceUnavailable`
-    /// in test mode).
-    #[tokio::test]
-    async fn reflect_soul_no_force_ungenerated_no_llm_call() {
-        let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
-        let pool = nexus_local_db::open_pool(&db_path)
-            .await
-            .expect("test pool");
-
-        // Override config.toml to use a creator_id that passes validation
-        // (must start with "ctr_" followed by alphanumeric only).
-        let creator_id = "ctr_testreflect";
-        let toml_str = format!(
-            "active_creator_id = \"{creator_id}\"\n[active_workspace_slug_by_creator]\n\"{creator_id}\" = \"default\""
-        );
-        std::fs::write(nexus_home.join("config.toml"), toml_str).expect("write config.toml");
-
-        // Seed 25 fragments with 25 distinct keywords → above data gate
-        // (10+ fragments AND 20+ distinct keywords).
-        for i in 0..25 {
-            let kw = format!("unique_kw_{i}");
-            let now = chrono::Utc::now().to_rfc3339();
-            // SAFETY: test-only data setup.
-            sqlx::query(
-                "INSERT INTO memory_fragments \
-                 (fragment_id, session_id, creator_id, keywords, summary, created_at, ttl, world_id) \
-                 VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)",
-            )
-            .bind(format!("frag_g1_{i:04}"))
-            .bind(format!("sess_g1_{i:04}"))
-            .bind(creator_id)
-            .bind(format!(r#"["{kw}"]"#))
-            .bind(format!("summary {i}"))
-            .bind(&now)
-            .execute(&pool)
-            .await
-            .expect("seed fragment");
-        }
-
-        let state =
-            crate::workspace::WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None)
-                .await;
-
-        // Test 1: force=false, above-gate, no cache → must return "ungenerated"
-        // WITHOUT trying to use capability_registry (which is None in test mode).
-        let req = SoulNarrativeRequest {
-            creator_id: creator_id.to_string(),
-            world_id: None,
-            force_regenerate: false,
-        };
-        let resp = reflect_soul(axum::extract::State(state.clone()), axum::Json(req))
-            .await
-            .expect("should succeed for force=false + ungenerated");
-
-        assert_eq!(resp.state.to_string(), "ungenerated");
-        assert!(resp.narrative.is_none());
-        assert!(resp.generated_at.is_none());
-        assert!(!resp.stale);
-        assert_eq!(resp.current_fragment_count, 25);
-        // Threshold-saturated count: 25 distinct reports as 20 (the gate only
-        // needs `>= 20?`).
-        assert_eq!(resp.current_distinct_keyword_count, 20);
-        assert_eq!(resp.min_fragment_count, MIN_SOUL_NARRATIVE_FRAGMENTS);
-        assert_eq!(
-            resp.min_distinct_keyword_count,
-            MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS
-        );
-
-        // Test 2: force=true → tries to synthesize → ServiceUnavailable
-        // (because capability_registry is None in test mode). This proves
-        // the code reaches the synthesis block only when force=true.
-        let req2 = SoulNarrativeRequest {
-            creator_id: creator_id.to_string(),
-            world_id: None,
-            force_regenerate: true,
-        };
-        let err = reflect_soul(axum::extract::State(state.clone()), axum::Json(req2))
-            .await
-            .expect_err("force=true should try synthesis and fail without registry");
-
-        match err {
-            NexusApiError::ServiceUnavailable { .. } => {
-                // Expected: no registry in test mode.
-            }
-            other => panic!(
-                "expected ServiceUnavailable for force=true without registry, got: {other:?}"
-            ),
-        }
-
-        drop(tmp);
-    }
-
-    /// `force_regenerate=false` + above-gate + cached + not stale → `current`.
-    /// The cached row comes from a prior synthesis; the read path returns it
-    /// without calling the LLM.
-    #[tokio::test]
-    async fn reflect_soul_no_force_current_no_llm_call() {
-        let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
-        let pool = nexus_local_db::open_pool(&db_path)
-            .await
-            .expect("test pool");
-
-        // Override config.toml to use a creator_id that passes validation.
-        let creator_id = "ctr_testcurrent";
-        let toml_str = format!(
-            "active_creator_id = \"{creator_id}\"\n[active_workspace_slug_by_creator]\n\"{creator_id}\" = \"default\""
-        );
-        std::fs::write(nexus_home.join("config.toml"), toml_str).expect("write config.toml");
-
-        // Seed 25 fragments with 25 distinct keywords → above gate.
-        for i in 0..25 {
-            let kw = format!("unique_kw_{i}");
-            let now = chrono::Utc::now().to_rfc3339();
-            sqlx::query(
-                "INSERT INTO memory_fragments \
-                 (fragment_id, session_id, creator_id, keywords, summary, created_at, ttl, world_id) \
-                 VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)",
-            )
-            .bind(format!("frag_g1cur_{i:04}"))
-            .bind(format!("sess_g1cur_{i:04}"))
-            .bind(creator_id)
-            .bind(format!(r#"["{kw}"]"#))
-            .bind(format!("summary {i}"))
-            .bind(&now)
-            .execute(&pool)
-            .await
-            .expect("seed fragment");
-        }
-
-        // Pre-seed a narrative cache row (simulating a prior synthesis).
-        // Use the actual max_created_at from the DB so the fingerprint matches.
-        let max_created_at: Option<String> =
-            sqlx::query_scalar("SELECT MAX(created_at) FROM memory_fragments WHERE creator_id = ?")
-                .bind(creator_id)
-                .fetch_one(&pool)
-                .await
-                .expect("max_created_at");
-        let now = chrono::Utc::now().to_rfc3339();
-        let fingerprint = nexus_local_db::build_stats_fingerprint(25, max_created_at.as_deref());
-        // SAFETY: test-only — seeds a narrative cache row.
-        sqlx::query(
-            "INSERT OR REPLACE INTO memory_soul_narratives \
-             (creator_id, world_id, narrative, generated_at, fragment_count_at_generation, \
-              max_fragment_created_at_at_generation, distinct_keyword_count_cache, \
-              stats_fingerprint, created_at, updated_at) \
-             VALUES (?, NULL, 'A test narrative.', ?, 25, ?, 25, ?, ?, ?)",
-        )
-        .bind(creator_id)
-        .bind(&now)
-        .bind(&max_created_at)
-        .bind(&fingerprint)
-        .bind(&now)
-        .bind(&now)
-        .execute(&pool)
-        .await
-        .expect("seed cache");
-
-        let state =
-            crate::workspace::WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None)
-                .await;
-
-        let req = SoulNarrativeRequest {
-            creator_id: creator_id.to_string(),
-            world_id: None,
-            force_regenerate: false,
-        };
-        let resp = reflect_soul(axum::extract::State(state), axum::Json(req))
-            .await
-            .expect("should succeed for force=false + cached current");
-
-        assert_eq!(resp.state.to_string(), "current");
-        assert_eq!(resp.narrative.as_deref(), Some("A test narrative."));
-        assert!(!resp.stale);
-        assert_eq!(resp.current_fragment_count, 25);
-
-        drop(tmp);
-    }
-
-    // ─── V1.82: per-World narrative ownership + gating ─────────────────────
-
-    /// Helper: seed a `narrative_worlds` row owned by `creator_id`.
-    async fn seed_owned_world(pool: &sqlx::SqlitePool, creator_id: &str, world_id: &str) {
-        // Ensure the creator row exists so the world FK can be inserted.
-        // SAFETY: test-only setup.
-        sqlx::query(
-            "INSERT OR IGNORE INTO creators (creator_id, display_name, cached_at, data) \
-             VALUES (?, 'Test Creator', ?, '{}')",
-        )
-        .bind(creator_id)
-        .bind(chrono::Utc::now().to_rfc3339())
-        .execute(pool)
-        .await
-        .expect("seed creator");
-
-        sqlx::query(
-            "INSERT OR IGNORE INTO narrative_worlds \
-             (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy) \
-             VALUES (?, 'default', ?, ?, ?, 'active', 'private', 'linear')",
-        )
-        .bind(world_id)
-        .bind(creator_id)
-        .bind(format!("{world_id} title"))
-        .bind(format!("{world_id}-slug"))
-        .execute(pool)
-        .await
-        .expect("seed world");
-    }
-
-    /// Non-owned and non-existent worlds are rejected with 403 before any stats
-    /// query or synthesis; owned worlds are accepted.
-    #[tokio::test]
-    async fn reflect_soul_per_world_ownership_rejected_before_stats() {
-        let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
-        let pool = nexus_local_db::open_pool(&db_path)
-            .await
-            .expect("test pool");
-
-        let creator_id = "ctr_ownerworld";
-        let owned_world = "wld_owned_by_me";
-        let other_world = "wld_owned_by_other";
-        let missing_world = "wld_does_not_exist";
-
-        let toml_str = format!(
-            "active_creator_id = \"{creator_id}\"\n[active_workspace_slug_by_creator]\n\"{creator_id}\" = \"default\""
-        );
-        std::fs::write(nexus_home.join("config.toml"), toml_str).expect("write config.toml");
-
-        seed_owned_world(&pool, creator_id, owned_world).await;
-        seed_owned_world(&pool, "ctr_someone_else", other_world).await;
-
-        let state =
-            crate::workspace::WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None)
-                .await;
-
-        // Owned world → accepted (below gate, so returns insufficient_data).
-        let req = SoulNarrativeRequest {
-            creator_id: creator_id.to_string(),
-            world_id: Some(owned_world.to_string()),
-            force_regenerate: false,
-        };
-        let resp = reflect_soul(axum::extract::State(state.clone()), axum::Json(req))
-            .await
-            .expect("owned world should be accepted");
-        assert_eq!(resp.state.to_string(), "insufficient_data");
-
-        // Non-owned world → 403 Forbidden.
-        let req = SoulNarrativeRequest {
-            creator_id: creator_id.to_string(),
-            world_id: Some(other_world.to_string()),
-            force_regenerate: false,
-        };
-        let err = reflect_soul(axum::extract::State(state.clone()), axum::Json(req))
-            .await
-            .expect_err("non-owned world should be rejected");
-        match err {
-            NexusApiError::Forbidden { resource, .. } => {
-                assert_eq!(resource, "soul_narrative");
-            }
-            other => panic!("expected Forbidden for non-owned world, got: {other:?}"),
-        }
-
-        // Non-existent world → 403 Forbidden (not a leak).
-        let req = SoulNarrativeRequest {
-            creator_id: creator_id.to_string(),
-            world_id: Some(missing_world.to_string()),
-            force_regenerate: false,
-        };
-        let err = reflect_soul(axum::extract::State(state.clone()), axum::Json(req))
-            .await
-            .expect_err("non-existent world should be rejected");
-        match err {
-            NexusApiError::Forbidden { resource, .. } => {
-                assert_eq!(resource, "soul_narrative");
-            }
-            other => panic!("expected Forbidden for non-existent world, got: {other:?}"),
-        }
-
-        drop(tmp);
-    }
-
-    /// Greploop lesson, applied per world: `force=false` + owned world +
-    /// above-gate + no cache returns `ungenerated` without reaching the
-    /// capability registry. `force=true` for the same world reaches synthesis
-    /// and fails with `ServiceUnavailable` in test mode (no registry).
-    #[tokio::test]
-    async fn reflect_soul_per_world_no_force_ungenerated_no_llm_call() {
-        let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
-        let pool = nexus_local_db::open_pool(&db_path)
-            .await
-            .expect("test pool");
-
-        let creator_id = "ctr_worldgating";
-        let world_id = "wld_gated";
-
-        let toml_str = format!(
-            "active_creator_id = \"{creator_id}\"\n[active_workspace_slug_by_creator]\n\"{creator_id}\" = \"default\""
-        );
-        std::fs::write(nexus_home.join("config.toml"), toml_str).expect("write config.toml");
-
-        seed_owned_world(&pool, creator_id, world_id).await;
-
-        // Seed 25 fragments in the owned world → above per-world gate.
-        for i in 0..25 {
-            let kw = format!("world_kw_{i}");
-            let now = chrono::Utc::now().to_rfc3339();
-            sqlx::query(
-                "INSERT INTO memory_fragments \
-                 (fragment_id, session_id, creator_id, keywords, summary, created_at, ttl, world_id) \
-                 VALUES (?, ?, ?, ?, ?, ?, NULL, ?)",
-            )
-            .bind(format!("frag_world_{i:04}"))
-            .bind(format!("sess_world_{i:04}"))
-            .bind(creator_id)
-            .bind(format!(r#"["{kw}"]"#))
-            .bind(format!("summary {i}"))
-            .bind(&now)
-            .bind(world_id)
-            .execute(&pool)
-            .await
-            .expect("seed world fragment");
-        }
-
-        let state =
-            crate::workspace::WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None)
-                .await;
-
-        // force=false + owned world + above-gate + no cache → ungenerated,
-        // and must NOT consult the capability registry (which is None).
-        let req = SoulNarrativeRequest {
-            creator_id: creator_id.to_string(),
-            world_id: Some(world_id.to_string()),
-            force_regenerate: false,
-        };
-        let resp = reflect_soul(axum::extract::State(state.clone()), axum::Json(req))
-            .await
-            .expect("should succeed for force=false + ungenerated world");
-
-        assert_eq!(resp.state.to_string(), "ungenerated");
-        assert!(resp.narrative.is_none());
-        assert_eq!(resp.current_fragment_count, 25);
-        // Threshold-saturated count: 25 distinct reports as 20.
-        assert_eq!(resp.current_distinct_keyword_count, 20);
-
-        // force=true → reaches synthesis block, fails with ServiceUnavailable.
-        let req2 = SoulNarrativeRequest {
-            creator_id: creator_id.to_string(),
-            world_id: Some(world_id.to_string()),
-            force_regenerate: true,
-        };
-        let err = reflect_soul(axum::extract::State(state.clone()), axum::Json(req2))
-            .await
-            .expect_err("force=true should try synthesis and fail without registry");
-        match err {
-            NexusApiError::ServiceUnavailable { .. } => {}
-            other => panic!(
-                "expected ServiceUnavailable for force=true world without registry, got: {other:?}"
-            ),
-        }
-
-        drop(tmp);
-    }
-
-    /// Per-World response counts reflect the world's fragment subset, and a
-    /// per-World narrative is persisted distinctly from the Creator-level one.
-    #[tokio::test]
-    async fn reflect_soul_per_world_stats_and_cache_are_distinct() {
-        let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
-        let pool = nexus_local_db::open_pool(&db_path)
-            .await
-            .expect("test pool");
-
-        let creator_id = "ctr_worldstats";
-        let world_id = "wld_stats";
-
-        let toml_str = format!(
-            "active_creator_id = \"{creator_id}\"\n[active_workspace_slug_by_creator]\n\"{creator_id}\" = \"default\""
-        );
-        std::fs::write(nexus_home.join("config.toml"), toml_str).expect("write config.toml");
-
-        seed_owned_world(&pool, creator_id, world_id).await;
-
-        // Creator whole: 10 fragments (below gate on its own).
-        for i in 0..10 {
-            let kw = format!("core_kw_{i}");
-            let now = chrono::Utc::now().to_rfc3339();
-            sqlx::query(
-                "INSERT INTO memory_fragments \
-                 (fragment_id, session_id, creator_id, keywords, summary, created_at, ttl, world_id) \
-                 VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)",
-            )
-            .bind(format!("frag_core_{i:04}"))
-            .bind(format!("sess_core_{i:04}"))
-            .bind(creator_id)
-            .bind(format!(r#"["{kw}"]"#))
-            .bind(format!("summary {i}"))
-            .bind(&now)
-            .execute(&pool)
-            .await
-            .expect("seed core fragment");
-        }
-
-        // World subset: 25 fragments → above gate.
-        for i in 0..25 {
-            let kw = format!("world_kw_{i}");
-            let now = chrono::Utc::now().to_rfc3339();
-            sqlx::query(
-                "INSERT INTO memory_fragments \
-                 (fragment_id, session_id, creator_id, keywords, summary, created_at, ttl, world_id) \
-                 VALUES (?, ?, ?, ?, ?, ?, NULL, ?)",
-            )
-            .bind(format!("frag_world_{i:04}"))
-            .bind(format!("sess_world_{i:04}"))
-            .bind(creator_id)
-            .bind(format!(r#"["{kw}"]"#))
-            .bind(format!("summary {i}"))
-            .bind(&now)
-            .bind(world_id)
-            .execute(&pool)
-            .await
-            .expect("seed world fragment");
-        }
-
-        let state =
-            crate::workspace::WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None)
-                .await;
-
-        // Poll the world: fragment count should be the subset (25), distinct
-        // keyword count threshold-saturated (20).
-        let req = SoulNarrativeRequest {
-            creator_id: creator_id.to_string(),
-            world_id: Some(world_id.to_string()),
-            force_regenerate: false,
-        };
-        let resp = reflect_soul(axum::extract::State(state.clone()), axum::Json(req))
-            .await
-            .expect("owned world poll should succeed");
-        assert_eq!(resp.state.to_string(), "ungenerated");
-        assert_eq!(resp.current_fragment_count, 25);
-        assert_eq!(resp.current_distinct_keyword_count, 20);
-
-        // Poll the Creator whole: fragment count should be the whole (35),
-        // distinct keyword count threshold-saturated (20). The cache row is
-        // distinct from the world row because the two scopes are keyed by
-        // `(creator_id, world_id)`.
-        let req = SoulNarrativeRequest {
-            creator_id: creator_id.to_string(),
-            world_id: None,
-            force_regenerate: false,
-        };
-        let resp = reflect_soul(axum::extract::State(state.clone()), axum::Json(req))
-            .await
-            .expect("creator-level poll should succeed");
-        assert_eq!(resp.state.to_string(), "ungenerated");
-        assert_eq!(resp.current_fragment_count, 35);
-        assert_eq!(resp.current_distinct_keyword_count, 20);
-
-        drop(tmp);
-    }
+                .map(AcpSoulNarrativeSynthesizer::new)
+        })
+        .await?;
+    Ok(Json(response))
 }

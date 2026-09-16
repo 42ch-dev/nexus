@@ -155,43 +155,25 @@ impl Capability for KbExtractWork {
     fn name(&self) -> &'static str {
         "kb.extract_work"
     }
-
     fn input_schema(&self) -> &'static str {
-        r#"{
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "type": "object",
-            "required": ["creator_id"],
-            "properties": {
-                "job_id": { "type": "string", "description": "Existing extract job ID" },
-                "work_entry_id": { "type": "string", "description": "Work-scope KB entry ID to extract" },
-                "world_id": { "type": "string", "description": "Target world ID for the resulting KnowledgeEntryRecord" },
-                "work_id": { "type": "string", "description": "Source work ID (parent of the chapter)" },
-                "work_content": { "type": "string", "description": "Pre-loaded work content" },
-                "creator_id": { "type": "string", "description": "Creator ID" },
-                "llm_response": { "type": "string", "description": "LLM response text from acp.prompt for finalizing" },
-                "source_kind": { "type": "string", "description": "Artifact kind (work_chapter, work_section, etc.)" },
-                "source_locator": { "type": "string", "description": "Artifact locator (relative path)" },
-                "profile_hint": { "type": "string", "description": "Extract profile (novel, screenplay, essay, generic)" }
-            }
-        }"#
+        nexus_preset::capability_catalog::KB_EXTRACT_WORK_INPUT_SCHEMA
     }
-
     fn output_schema(&self) -> &'static str {
         r#"{
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "type": "object",
-            "required": ["job_id", "status"],
-            "properties": {
-                "job_id": { "type": "string" },
-                "status": { "type": "string" },
-                "key_block_id": { "type": "string" },
-                "world_id": { "type": "string" },
-                "block_type": { "type": "string" },
-                "canonical_name": { "type": "string" },
-                "prompt": { "type": "string" },
-                "prompt_length": { "type": "integer" }
-            }
-        }"#
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "required": ["job_id", "status"],
+        "properties": {
+            "job_id": { "type": "string" },
+            "status": { "type": "string" },
+            "key_block_id": { "type": "string" },
+            "world_id": { "type": "string" },
+            "block_type": { "type": "string" },
+            "canonical_name": { "type": "string" },
+            "prompt": { "type": "string" },
+            "prompt_length": { "type": "integer" }
+        }
+    }"#
     }
 
     async fn run(&self, input: Value) -> Result<Value, CapabilityError> {

@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-work-selection.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CoreWorkSelection",
+  "description": "Owned record of the Work selected for the caller's creator/workspace scope after select_work; selection is persisted, not session-local.",
+  "type": "object",
+  "required": [
+    "work_id",
+    "active"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "work_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Id of the selected Work."
+    },
+    "active": {
+      "type": "boolean",
+      "description": "True when the Work is the active selection for the scope."
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-tool-execute-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CoreToolExecuteResponse",
+  "description": "Host tool execution result: success flag plus the extensible JSON result produced by the tool handler. The result is an unrestricted JSON value (object, array, scalar, or null), matching the existing serde_json::Value wire field.",
+  "type": "object",
+  "required": [
+    "success",
+    "result"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "success": {
+      "type": "boolean"
+    },
+    "result": {
+      "description": "Tool-produced JSON result; any JSON value."
+    }
+  }
+}

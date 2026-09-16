@@ -692,8 +692,8 @@ fn render_ts(secs: i64) -> String {
 /// source must still resolve and hash-match at its frozen version. No runner
 /// is attached and no state is mutated.
 fn frozen_source_reconstructable(bytes: Option<&[u8]>) -> bool {
-    use nexus_orchestration::preset::{load_embedded_preset, load_preset};
-    use nexus_orchestration::run_state::PresetSourceIdentity;
+    use nexus_preset::source_identity::PresetSourceIdentity;
+    use nexus_preset::{load_embedded_preset, load_preset};
 
     let Some(bytes) = bytes else {
         return false;

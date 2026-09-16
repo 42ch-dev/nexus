@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-register-creator-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CoreRegisterCreatorRequest",
+  "description": "Local creator registration request through the home/configuration entry. Display name is optional for persistent local identity; platform_creator_id links an existing platform identity.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "display_name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional display name for the persistent local creator."
+    },
+    "platform_creator_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional platform creator id to link to the local identity."
+    }
+  }
+}

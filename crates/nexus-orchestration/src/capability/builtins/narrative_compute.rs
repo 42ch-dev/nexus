@@ -169,11 +169,9 @@ impl Capability for NarrativeCompute {
     fn name(&self) -> &'static str {
         "narrative.compute"
     }
-
     fn input_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"world_id":{"type":"string"},"creator_id":{"type":"string"},"module_id":{"type":"string"},"invocation_params":{"type":"object"}},"required":["world_id","creator_id"],"additionalProperties":false}"#
+        nexus_preset::capability_catalog::NARRATIVE_COMPUTE_INPUT_SCHEMA
     }
-
     fn output_schema(&self) -> &'static str {
         r#"{"type":"object","properties":{"battle_report":{},"state_delta_applied":{"type":"integer","minimum":0},"timeline_events_created":{"type":"integer","minimum":0},"new_key_blocks_created":{"type":"integer","minimum":0}},"required":["battle_report","state_delta_applied","timeline_events_created","new_key_blocks_created"],"additionalProperties":false}"#
     }
@@ -295,9 +293,9 @@ impl Capability for NarrativeCompute {
 
         let cached = module_cache.get(&parsed.module_id).ok_or_else(|| {
             CapabilityError::InputInvalid(format!(
-                "module '{}' not loaded; ensure it is embedded or installed under ~/.nexus42/modules/",
-                parsed.module_id
-            ))
+            "module '{}' not loaded; ensure it is embedded or installed under ~/.nexus42/modules/",
+            parsed.module_id
+        ))
         })?;
         let module = cached.module.clone();
         let manifest = cached.manifest.clone();

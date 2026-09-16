@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-connect-invoke-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CoreConnectInvokeRequest",
+  "description": "Canonical Connect invoke request served by the core: operation name plus extensible JSON args. Non-served or unknown operations are refused with an unsupported error and zero side effects.",
+  "type": "object",
+  "required": [
+    "op",
+    "args"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "op": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Connect operation name."
+    },
+    "args": {
+      "type": "object",
+      "additionalProperties": true,
+      "default": {},
+      "description": "Operation arguments; extensible JSON."
+    }
+  }
+}

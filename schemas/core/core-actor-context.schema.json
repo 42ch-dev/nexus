@@ -1,0 +1,59 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-actor-context.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CoreActorContext",
+  "description": "Serializable owned projection of an admitted Actor: validated Creator ownership, active World/binding/branch/event anchors and the stored Character lifecycle epoch at admission. Grants no authority.",
+  "type": "object",
+  "required": [
+    "actor_ref",
+    "owner_creator_id",
+    "world_id",
+    "binding_id",
+    "branch_id",
+    "event_id",
+    "character_epoch"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "actor_ref": {
+      "$ref": "https://nexus42.invalid/schemas/domain/actor-ref.schema.json"
+    },
+    "owner_creator_id": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CreatorId",
+      "description": "Trusted owner admitted at request time; never taken from a later request body."
+    },
+    "world_id": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/WorldId"
+    },
+    "binding_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Active ActorWorldBinding id; null for Creator actors."
+    },
+    "branch_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Fork branch anchor (fbk_*); null when the session has no branch isolation."
+    },
+    "event_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Timeline event rewind anchor; null when absent."
+    },
+    "character_epoch": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "description": "Stored Character lifecycle_epoch at admission; null for Creator actors. Mismatch after admission is actor_session_stale."
+    }
+  }
+}

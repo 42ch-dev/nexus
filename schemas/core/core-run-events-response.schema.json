@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-run-events-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CoreRunEventsResponse",
+  "description": "Bounded run-events page with explicit terminal and resync inspection; consumers treat resync_required as a gap and explicitly resynchronize.",
+  "type": "object",
+  "required": [
+    "run_id",
+    "events",
+    "next_sequence",
+    "terminal",
+    "resync_required"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "sequence",
+          "kind"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "sequence": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "kind": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Run event kind discriminant."
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Event payload; extensible JSON, absent when the kind carries none."
+          }
+        }
+      }
+    },
+    "next_sequence": {
+      "type": "string",
+      "pattern": "^[0-9]+$",
+      "description": "Decimal string sequence watermark after this page."
+    },
+    "terminal": {
+      "type": "boolean",
+      "description": "True when the run has reached a terminal state and no further events can be produced."
+    },
+    "resync_required": {
+      "type": "boolean",
+      "description": "True when the requested tail has been retention-trimmed; the caller must resynchronize."
+    }
+  }
+}

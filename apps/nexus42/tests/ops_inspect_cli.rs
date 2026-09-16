@@ -14,7 +14,8 @@
 //! Run with: `cargo test -p nexus42 --test ops_inspect_cli`
 
 use assert_cmd::Command;
-use nexus_orchestration::run_state::{PresetSourceIdentity, RunDescriptorV1};
+use nexus_orchestration::run_state::RunDescriptorV1;
+use nexus_preset::source_identity::PresetSourceIdentity;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::future::Future;
@@ -212,8 +213,8 @@ fn inspect_v1_human_wait_with_unreconstructable_source_degrades_actions() {
         .await;
         // Valid-shape descriptor whose frozen version no longer matches.
         let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
-        let loaded = nexus_orchestration::preset::load_embedded_preset("memory-augmented", &caps)
-            .expect("embedded preset");
+        let loaded =
+            nexus_preset::load_embedded_preset("memory-augmented", &caps).expect("embedded preset");
         let descriptor = serde_json::json!({
             "creator_id": CREATOR,
             "work_id": null,
@@ -1165,8 +1166,8 @@ fn inspect_v1_human_wait_stays_distinct_and_preserves_wait_token() {
         // A v1 human wait carries a frozen descriptor; the shared projection
         // only offers `continue` when that source still verifies (P1-C).
         let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
-        let loaded = nexus_orchestration::preset::load_embedded_preset("memory-augmented", &caps)
-            .expect("embedded preset");
+        let loaded =
+            nexus_preset::load_embedded_preset("memory-augmented", &caps).expect("embedded preset");
         let descriptor = serde_json::json!({
             "creator_id": CREATOR,
             "work_id": null,
@@ -1481,8 +1482,8 @@ fn inspect_v1_list_mode_recovery_classes_and_read_only() {
         // A v1 human wait carries a frozen descriptor; the shared projection
         // only offers `continue` when that source still verifies (P1-C).
         let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
-        let loaded = nexus_orchestration::preset::load_embedded_preset("memory-augmented", &caps)
-            .expect("embedded preset");
+        let loaded =
+            nexus_preset::load_embedded_preset("memory-augmented", &caps).expect("embedded preset");
         let descriptor = serde_json::json!({
             "creator_id": CREATOR,
             "work_id": null,

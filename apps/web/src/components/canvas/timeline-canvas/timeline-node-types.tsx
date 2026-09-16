@@ -95,7 +95,7 @@ export const TimelineBriefEraNode = memo(function TimelineBriefEraNode({
         className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port"
       />
       <TimelineBriefEraChrome
-        title={d.canonical_name || t('timeline.briefEraNode.unnamed')}
+        title={d.canonical_name ?? t('timeline.briefEraNode.unnamed')}
         blockTypeLabel={BLOCK_TYPE_LABELS[d.block_type]}
         timeSpan={span}
         temporalUnknownLabel={t('timeline.briefEraNode.temporalUnknown')}
@@ -143,7 +143,7 @@ export const TimelineEventNode = memo(function TimelineEventNode({
         className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port"
       />
       <TimelineEventChrome
-        title={d.canonical_name || t('timeline.eventNode.unnamed')}
+        title={d.canonical_name ?? t('timeline.eventNode.unnamed')}
         blockTypeLabel={BLOCK_TYPE_LABELS[d.block_type]}
         occurredAtHint={d.occurredAtHint ?? null}
         temporalUnknownLabel={t('timeline.eventNode.temporalUnknown')}
@@ -188,7 +188,7 @@ export const TimelineKeyBlockNode = memo(function TimelineKeyBlockNode({
         className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port"
       />
       <TimelineKeyBlockChrome
-        title={d.canonical_name || t('timeline.keyBlockNode.unnamed')}
+        title={d.canonical_name ?? t('timeline.keyBlockNode.unnamed')}
         blockTypeLabel={BLOCK_TYPE_LABELS[d.block_type]}
         sourceAnchorLabel={t('timeline.keyBlockNode.sourceAnchorCount', {
           count: anchorCount,
@@ -246,7 +246,7 @@ export const TimelineComputeResultNode = memo(function TimelineComputeResultNode
         className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port"
       />
       <ComputeResultNodeChrome
-        title={d.canonical_name || payload.moduleName}
+        title={d.canonical_name ?? payload.moduleName}
         kindLabel={t('timeline.computeNode.kindLabel')}
         provenanceLabel={provenanceLabel}
         moduleName={payload.moduleName}

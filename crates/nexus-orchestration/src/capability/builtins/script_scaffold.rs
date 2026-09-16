@@ -292,11 +292,9 @@ impl Capability for ScriptProjectScaffold {
     fn name(&self) -> &'static str {
         "script.project_scaffold"
     }
-
     fn input_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"creator_id":{"type":"string"},"work_id":{"type":"string"},"work_ref":{"type":"string"},"title":{"type":"string"},"world_id":{"type":["string","null"]}},"required":["creator_id","work_id","work_ref","title"],"additionalProperties":false}"#
+        nexus_preset::capability_catalog::SCRIPT_PROJECT_SCAFFOLD_INPUT_SCHEMA
     }
-
     fn output_schema(&self) -> &'static str {
         r#"{"type":"object","properties":{"scaffold_root":{"type":"string"},"files_created":{"type":"array","items":{"type":"string"}},"dirs_created":{"type":"array","items":{"type":"string"}}},"required":["scaffold_root","files_created","dirs_created"],"additionalProperties":false}"#
     }

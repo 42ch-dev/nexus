@@ -354,7 +354,7 @@ pub async fn add_schedule(
     // Non-force path: evaluate preset gates if declared.
     if let Some(registry) = state.capability_registry() {
         let home = state.nexus_home();
-        let preset_result = nexus_orchestration::resolve_preset(&body.preset_id, home, &registry);
+        let preset_result = nexus_preset::resolve_preset(&body.preset_id, home, &registry);
 
         if let Ok(preset) = preset_result {
             let gates = &preset.manifest.preset.gates;
@@ -809,15 +809,14 @@ fn build_execution_descriptor(
             code: "CAPABILITY_REGISTRY_UNAVAILABLE".into(),
             message: "capability registry unavailable; cannot freeze preset source identity".into(),
         })?;
-    let loaded =
-        nexus_orchestration::preset::resolve_preset(&body.preset_id, state.nexus_home(), &registry)
-            .map_err(|e| NexusApiError::Internal {
-                code: "PRESET_LOAD_ERROR".into(),
-                message: format!(
-                    "failed to resolve preset '{}' for descriptor freeze: {e}",
-                    body.preset_id
-                ),
-            })?;
+    let loaded = nexus_preset::resolve_preset(&body.preset_id, state.nexus_home(), &registry)
+        .map_err(|e| NexusApiError::Internal {
+            code: "PRESET_LOAD_ERROR".into(),
+            message: format!(
+                "failed to resolve preset '{}' for descriptor freeze: {e}",
+                body.preset_id
+            ),
+        })?;
     let source = loaded
         .source_identity
         .ok_or_else(|| NexusApiError::Internal {
@@ -937,7 +936,10 @@ async fn admit_new_schedule(
     {
         Ok(_sid) => Ok("running".to_string()),
         Err(e) => {
-            if matches!(e, crate::preset_run::RunControlError::RunEventCapacity(_)) {
+            if matches!(
+                e,
+                nexus_core::execution::RunControlError::RunEventCapacity(_)
+            ) {
                 return Err(NexusApiError::from(e));
             }
             let msg = e.to_string();
@@ -1422,7 +1424,10 @@ pub async fn signal_schedule(
                 .await
                 .map_err(|e| {
                     // QC2 F-004: typed capacity refusal (retryable), not 500.
-                    if matches!(e, crate::preset_run::RunControlError::RunEventCapacity(_)) {
+                    if matches!(
+                        e,
+                        nexus_core::execution::RunControlError::RunEventCapacity(_)
+                    ) {
                         return NexusApiError::from(e);
                     }
                     let msg = e.to_string();
@@ -1567,7 +1572,7 @@ pub async fn signal_schedule(
                 } else {
                     (
                         "cancelled".to_string(),
-                        Some(crate::preset_run::CancelOutcome::Confirmed),
+                        Some(nexus_core::execution::CancelOutcome::Confirmed),
                     )
                 };
 
@@ -1580,7 +1585,7 @@ pub async fn signal_schedule(
                 // response reports the durable run status and public inspect
                 // projects `execution.recovery_class: "interrupted"` from the
                 // session record.
-                if cancel_outcome == Some(crate::preset_run::CancelOutcome::Unconfirmed) {
+                if cancel_outcome == Some(nexus_core::execution::CancelOutcome::Unconfirmed) {
                     tracing::warn!(
                         schedule_id = %schedule_id,
                         session_id = ?snapshot_session,
@@ -1689,7 +1694,7 @@ pub async fn signal_schedule(
                         let result = coordinator
                             .signal_run(
                                 &nexus_orchestration::engine::SessionId(sid),
-                                crate::preset_run::RunSignal::Resume,
+                                nexus_core::execution::RunSignal::Resume,
                             )
                             .await
                             .map_err(NexusApiError::from)?;
@@ -1755,7 +1760,7 @@ pub async fn signal_schedule(
             let result = coordinator
                 .signal_run(
                     &nexus_orchestration::engine::SessionId(session_id),
-                    crate::preset_run::RunSignal::Continue {
+                    nexus_core::execution::RunSignal::Continue {
                         wait_id: wait_id.to_string(),
                     },
                 )

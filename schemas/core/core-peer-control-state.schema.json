@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-peer-control-state.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CorePeerControlState",
+  "description": "Current peer control state: whether the reverse-invoke operator cohort is enabled and which peers are active.",
+  "type": "object",
+  "required": [
+    "enabled",
+    "active_peers"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "enabled": {
+      "type": "boolean"
+    },
+    "active_peers": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Authenticated peers with an active control session."
+    }
+  }
+}

@@ -8,8 +8,11 @@ use nexus_contracts::local::acp_runtime::daemon_status_v2::{
     DaemonStatusV2, DegradedInfo, HealthStatus, LifecycleState, SubsystemHealth,
     SubsystemHealthEntry,
 };
-use nexus_contracts::CertFingerprintResponse;
+use nexus_contracts::{
+    CertFingerprintResponse, CoreServiceStopRequest, RuntimeApi, RuntimeApiStatus,
+};
 use serde::Serialize;
+use std::sync::OnceLock;
 use tracing::info;
 
 #[derive(Serialize)]
@@ -217,4 +220,65 @@ async fn gather_acp_status(state: &WorkspaceState) -> AcpStatusInfo {
     }
 
     status
+}
+
+/// This daemon process's launch identity (architecture §7, frozen protocol).
+///
+/// The instance id is minted once per boot; the pid is diagnostic only and
+/// never a stop authorization. `POST /v1/daemon/runtime/stop` refuses any
+/// request whose `expected_instance_id`/`expected_engine_epoch` pair does not
+/// match this identity — a stale discovery record can never stop its
+/// replacement, and there is no PID-only stop.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServiceRuntimeIdentity {
+    pub instance_id: String,
+    pub engine_epoch: u64,
+}
+
+static RUNTIME_IDENTITY: OnceLock<ServiceRuntimeIdentity> = OnceLock::new();
+
+/// Install the boot identity.
+///
+/// Idempotent: the first caller wins and later boots in the same process
+/// cannot silently rotate identity underneath live clients. Returns `false`
+/// when an identity was already installed.
+pub fn init_runtime_identity(identity: ServiceRuntimeIdentity) -> bool {
+    RUNTIME_IDENTITY.set(identity).is_ok()
+}
+
+fn runtime_identity() -> Option<&'static ServiceRuntimeIdentity> {
+    RUNTIME_IDENTITY.get()
+}
+
+/// POST /v1/daemon/runtime/stop
+///
+/// Instance-bound stop: `CoreServiceStopRequest { expected_instance_id,
+/// expected_engine_epoch }`. A mismatch returns 409 `instance_conflict` and
+/// performs no stop; a match requests the graceful shutdown and reports
+/// `stopping` while the drain runs (poll runtime health for liveness).
+pub async fn stop(
+    State(state): State<WorkspaceState>,
+    Json(request): Json<CoreServiceStopRequest>,
+) -> Result<Json<RuntimeApi>, crate::api::errors::NexusApiError> {
+    info!("Handling runtime stop request");
+    let Some(identity) = runtime_identity() else {
+        // No installable identity means the handler cannot prove ownership;
+        // refusing is the only safe direction.
+        return Err(crate::api::errors::NexusApiError::ConflictCoded {
+            code: "instance_conflict".into(),
+            message: "runtime identity is unavailable; refusing to stop".into(),
+        });
+    };
+    let matches = request.expected_instance_id.as_str() == identity.instance_id
+        && request.expected_engine_epoch == Some(identity.engine_epoch);
+    if !matches {
+        return Err(crate::api::errors::NexusApiError::ConflictCoded {
+            code: "instance_conflict".into(),
+            message: "stop request does not match this service instance".into(),
+        });
+    }
+    state.request_shutdown();
+    Ok(Json(RuntimeApi {
+        status: RuntimeApiStatus::Stopping,
+    }))
 }

@@ -1,51 +1,41 @@
 //! Character identity and `ActorWorldBinding` Daemon API handlers (v1.184 P0).
 //!
-//! Active-Creator admission is stored-config only; request bodies never carry
-//! `owner_creator_id`. Responses are generated DTOs constructed from typed builders.
+//! Thin translation over the core Character/binding family (v1.190 P2-T1):
+//! stored ownership validation, the shared per-Character activity fence and
+//! the lifecycle transitions live in [`nexus_core`]; the handlers keep only
+//! auth resolution, wire parsing and status/envelope translation. Request
+//! bodies never carry `owner_creator_id`; responses are generated DTOs
+//! constructed from typed builders.
 
 #![allow(clippy::missing_errors_doc)]
 
 use crate::api::errors::NexusApiError;
-use crate::api::handlers::world_kb_guards::require_creator;
-use crate::api::pagination::{decode_offset_cursor, offset_page_meta};
+use crate::api::handlers::world_kb_guards::resolve_core_principal;
+use crate::api::pagination::decode_offset_cursor;
 use crate::workspace::WorkspaceState;
 use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
-use chrono::{DateTime, Utc};
 use nexus_contracts::daemon_api::characters::{
     add_character_binding_request::AddCharacterBindingRequest,
-    add_character_binding_response::{
-        AddCharacterBindingResponse, NexusActorWorldBinding as AddedBindingWire,
-    },
-    character_binding_detail::{
-        CharacterBindingDetail, NexusActorWorldBinding as DetailBindingWire,
-    },
+    add_character_binding_response::AddCharacterBindingResponse,
+    character_binding_detail::CharacterBindingDetail,
     character_detail::{CharacterDetail, NexusCharacter as DetailCharacterWire},
     character_lifecycle_request::CharacterLifecycleRequest,
     create_character_request::CreateCharacterRequest,
-    create_character_response::{
-        CreateCharacterResponse, NexusActorWorldBinding as CreatedBindingWire,
-        NexusCharacter as CreatedCharacterWire,
-    },
+    create_character_response::CreateCharacterResponse,
     list_character_bindings_query::ListCharacterBindingsQuery,
-    list_character_bindings_response::{
-        ListCharacterBindingsResponse, NexusActorWorldBinding as ListedBindingWire,
-        NexusPaginationInfo as BindingPaginationInfo,
-    },
+    list_character_bindings_response::ListCharacterBindingsResponse,
     list_characters_query::ListCharactersQuery,
-    list_characters_response::{
-        ListCharactersResponse, NexusCharacter as ListedCharacterWire, NexusPaginationInfo,
-    },
+    list_characters_response::ListCharactersResponse,
     update_character_binding_request::UpdateCharacterBindingRequest,
     update_character_request::UpdateCharacterRequest,
 };
-use nexus_contracts::{ActorWorldBinding, Character};
-use nexus_local_db::{
-    actor_world_binding::ActorWorldBindingRecord, character::CharacterRecord, CharacterPatch,
-    CharacterStatus, CreateBindingParams, CreateCharacterParams, FieldPatch,
+use nexus_contracts::generated::core::{
+    CoreCharacterTransitionRequest, CoreCharacterTransitionRequestTargetStatus,
 };
+use nexus_local_db::{CharacterPatch, FieldPatch};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -80,91 +70,8 @@ fn map_wire<T: DeserializeOwned>(value: impl Serialize) -> Result<T, NexusApiErr
     serde_json::from_value(json).map_err(wire_err)
 }
 
-fn parse_rfc3339(raw: &str) -> Result<DateTime<Utc>, NexusApiError> {
-    DateTime::parse_from_rfc3339(raw)
-        .map(|dt| dt.with_timezone(&Utc))
-        .map_err(wire_err)
-}
-
 fn finish_builder<T, E: std::fmt::Display>(value: Result<T, E>) -> Result<T, NexusApiError> {
     value.map_err(wire_err)
-}
-
-fn parse_optional<T>(raw: Option<&str>) -> Result<Option<T>, NexusApiError>
-where
-    T: std::str::FromStr,
-    T::Err: std::fmt::Display,
-{
-    raw.map(str::parse).transpose().map_err(wire_err)
-}
-
-fn character_from_record(record: &CharacterRecord) -> Result<Character, NexusApiError> {
-    let persona: serde_json::Map<String, serde_json::Value> =
-        serde_json::from_str(&record.persona_json).map_err(wire_err)?;
-    finish_builder(
-        Character::builder()
-            .schema_version(1u64)
-            .character_id(record.character_id.as_str())
-            .owner_creator_id(record.owner_creator_id.as_str())
-            .display_name(record.display_name.as_str())
-            .status(record.status.as_str())
-            .revision(record.revision)
-            .persona(persona)
-            .image_uri(parse_optional(record.image_uri.as_deref())?)
-            .created_at(parse_rfc3339(&record.created_at)?)
-            .updated_at(parse_rfc3339(&record.updated_at)?)
-            .try_into(),
-    )
-}
-
-fn binding_from_record(
-    record: &ActorWorldBindingRecord,
-) -> Result<ActorWorldBinding, NexusApiError> {
-    finish_builder(
-        ActorWorldBinding::builder()
-            .schema_version(1u64)
-            .binding_id(record.binding_id.as_str())
-            .character_id(record.character_id.as_str())
-            .world_id(record.world_id.as_str())
-            .status(record.status.as_str())
-            .revision(record.revision)
-            .world_sheet_entry_id(parse_optional(record.world_sheet_entry_id.as_deref())?)
-            .created_at(parse_rfc3339(&record.created_at)?)
-            .updated_at(parse_rfc3339(&record.updated_at)?)
-            .try_into(),
-    )
-}
-
-fn pagination_info(
-    limit: u32,
-    has_more: bool,
-    next_cursor: Option<String>,
-) -> Result<NexusPaginationInfo, NexusApiError> {
-    finish_builder(
-        NexusPaginationInfo::builder()
-            .limit(i64::from(limit))
-            .has_more(has_more)
-            .next_cursor(next_cursor)
-            .try_into(),
-    )
-}
-
-fn binding_pagination_info(
-    limit: u32,
-    has_more: bool,
-    next_cursor: Option<String>,
-) -> Result<BindingPaginationInfo, NexusApiError> {
-    finish_builder(
-        BindingPaginationInfo::builder()
-            .limit(i64::from(limit))
-            .has_more(has_more)
-            .next_cursor(next_cursor)
-            .try_into(),
-    )
-}
-
-fn persona_json_string(map: &serde_json::Map<String, serde_json::Value>) -> String {
-    serde_json::Value::Object(map.clone()).to_string()
 }
 
 fn parse_canonical_json<T: DeserializeOwned>(bytes: &Bytes) -> Result<T, NexusApiError> {
@@ -176,18 +83,6 @@ fn parse_canonical_json<T: DeserializeOwned>(bytes: &Bytes) -> Result<T, NexusAp
 
 fn optional_str(value: Option<&impl std::ops::Deref<Target = String>>) -> Option<&str> {
     value.map(|s| s.as_str())
-}
-
-fn character_detail_from_record(
-    record: &CharacterRecord,
-) -> Result<CharacterDetail, NexusApiError> {
-    finish_builder(
-        CharacterDetail::builder()
-            .character(map_wire::<DetailCharacterWire>(character_from_record(
-                record,
-            )?)?)
-            .try_into(),
-    )
 }
 
 fn parse_request_object(
@@ -262,16 +157,6 @@ const fn character_patch_is_empty(patch: &CharacterPatch<'_>) -> bool {
     patch.is_empty()
 }
 
-fn binding_detail_from_record(
-    record: &ActorWorldBindingRecord,
-) -> Result<CharacterBindingDetail, NexusApiError> {
-    finish_builder(
-        CharacterBindingDetail::builder()
-            .binding(map_wire::<DetailBindingWire>(binding_from_record(record)?)?)
-            .try_into(),
-    )
-}
-
 fn binding_patch_is_empty(raw: &serde_json::Map<String, serde_json::Value>) -> bool {
     !raw.contains_key("world_sheet_entry_id")
 }
@@ -298,49 +183,65 @@ fn build_binding_sheet_patch<'a>(
     }
 }
 
-/// Material lifecycle transition ordering (durable §11.3.2–§11.3.3):
-/// 1. `try_character_transition` exclusive fence (busy refusal before DB),
-/// 2. `transition_character` `BEGIN IMMEDIATE` commit (revision/epoch increment),
-/// 3. while the fence is still held, `retire_character_sessions` only when the
-///    returned epoch differs from the guard's pre-transition epoch,
-/// 4. release the exclusive fence, then one Host shutdown attempt per retired id
-///    outside registry locks (failures are logged and cannot undo the commit),
-/// 5. return the committed record.
+/// Material lifecycle transition ordering (durable §11.3.2–§11.3.3), fenced by
+/// the core per-Character lease **and** the daemon's in-process session fence:
+/// 1. daemon `try_character_transition` exclusive registry fence (busy refusal
+///    before DB — retained §11.3.1 interlock with the session/memory paths),
+/// 2. `acquire_character_transition` exclusive core fence (busy refusal
+///    before DB, ownership + pre-transition epoch re-read under the fence),
+/// 3. `commit_character_transition` revision-checked commit (epoch increment),
+/// 4. while both fences are still held, `retire_character_sessions` only
+///    when the committed epoch differs from the lease's pre-transition epoch,
+/// 5. drop both fences, then one Host shutdown attempt per retired id outside
+///    registry locks (failures are logged and cannot undo the commit),
+/// 6. return the committed record projected to the daemon detail envelope.
+///
+/// Both fences are held because the in-process session/memory effects
+/// (`character_memory`, `character_tom`, `agent_host`) still admit activity on
+/// the registry fence; retiring that fence is P4-T2's cutover (§11.3).
 async fn execute_character_lifecycle(
     state: &WorkspaceState,
-    owner: &str,
     character_id: &str,
     expected_revision: i64,
-    target: CharacterStatus,
-) -> Result<CharacterRecord, NexusApiError> {
+    target: CoreCharacterTransitionRequestTargetStatus,
+) -> Result<CharacterDetail, NexusApiError> {
+    let (core, principal) = resolve_core_principal(state).await?;
     let registry = state.actor_sessions();
-    let (record, retired_ids) = {
-        let guard = registry
-            .try_character_transition(state.pool_or_uninit()?, owner, character_id)
+    let (committed, retired_ids) = {
+        let registry_guard = registry
+            .try_character_transition(
+                state.pool_or_uninit()?,
+                principal.creator_id(),
+                character_id,
+            )
             .await?;
-        let pre_epoch = guard.epoch();
+        let mut lease = core
+            .acquire_character_transition(&principal, character_id.to_string())
+            .await?;
+        let pre_epoch = lease.epoch();
+        let request: CoreCharacterTransitionRequest = CoreCharacterTransitionRequest::builder()
+            .character_id(character_id.to_string())
+            .expected_revision(expected_revision)
+            .target_status(target)
+            .try_into()
+            .map_err(wire_err)?;
+        let committed = core
+            .commit_character_transition(&principal, &mut lease, request)
+            .await?;
 
-        let record = nexus_local_db::transition_character(
-            state.pool_or_uninit()?,
-            owner,
-            character_id,
-            expected_revision,
-            target,
-        )
-        .await?;
-
-        // §11.3.3: retire old session keys while the exclusive fence is
+        // §11.3.3: retire old session keys while the exclusive fences are
         // still held — no new session can be admitted at the new epoch in
         // this window, so the blanket retire cannot hit a fresh session.
-        // The guard is released before the (fallible, one-attempt) Host
+        // Both guards are released before the (fallible, one-attempt) Host
         // shutdown loop below.
-        let retired_ids = if record.lifecycle_epoch == pre_epoch {
+        let retired_ids = if lease.epoch() == pre_epoch {
             Vec::new()
         } else {
             registry.retire_character_sessions(character_id)
         };
-        drop(guard);
-        (record, retired_ids)
+        drop(lease);
+        drop(registry_guard);
+        (committed, retired_ids)
     };
 
     if !retired_ids.is_empty() {
@@ -358,7 +259,11 @@ async fn execute_character_lifecycle(
         }
     }
 
-    Ok(record)
+    finish_builder(
+        CharacterDetail::builder()
+            .character(map_wire::<DetailCharacterWire>(committed.character)?)
+            .try_into(),
+    )
 }
 
 /// `POST /v1/daemon/characters`
@@ -367,33 +272,9 @@ pub async fn create_character(
     body: Bytes,
 ) -> Result<(StatusCode, Json<CreateCharacterResponse>), NexusApiError> {
     let req: CreateCharacterRequest = parse_canonical_json(&body)?;
-    let owner = require_creator(&state)?;
-    let persona = persona_json_string(&req.persona);
-    let created = nexus_local_db::create_character_with_initial_binding(
-        state.pool_or_uninit()?,
-        CreateCharacterParams {
-            owner_creator_id: &owner,
-            display_name: req.display_name.as_str(),
-            image_uri: optional_str(req.image_uri.as_ref()),
-            persona_json: &persona,
-            world_id: req.world_id.as_str(),
-            world_sheet_entry_id: optional_str(req.world_sheet_entry_id.as_ref()),
-        },
-    )
-    .await?;
-    Ok((
-        StatusCode::CREATED,
-        Json(finish_builder(
-            CreateCharacterResponse::builder()
-                .character(map_wire::<CreatedCharacterWire>(character_from_record(
-                    &created.character,
-                )?)?)
-                .binding(map_wire::<CreatedBindingWire>(binding_from_record(
-                    &created.binding,
-                )?)?)
-                .try_into(),
-        )?),
-    ))
+    let (core, principal) = resolve_core_principal(&state).await?;
+    let response = core.create_character(&principal, req).await?;
+    Ok((StatusCode::CREATED, Json(response)))
 }
 
 /// `GET /v1/daemon/characters`
@@ -401,29 +282,11 @@ pub async fn list_characters(
     State(state): State<WorkspaceState>,
     Query(query): Query<ListCharactersQuery>,
 ) -> Result<Json<ListCharactersResponse>, NexusApiError> {
-    let owner = require_creator(&state)?;
+    let (core, principal) = resolve_core_principal(&state).await?;
     let offset = decode_offset_cursor(&query.cursor)?;
     let limit = resolve_limit(query.limit)?;
-    let fetch_limit = i64::from(limit) + 1;
-    let page = nexus_local_db::list_characters(
-        state.pool_or_uninit()?,
-        &owner,
-        fetch_limit,
-        i64::from(offset),
-    )
-    .await?;
-    let (next_cursor, has_more) = offset_page_meta(page.len(), limit, offset);
-    let items: Vec<Character> = page
-        .into_iter()
-        .take(limit as usize)
-        .map(|row| character_from_record(&row))
-        .collect::<Result<_, _>>()?;
-    Ok(Json(finish_builder(
-        ListCharactersResponse::builder()
-            .items(map_wire::<Vec<ListedCharacterWire>>(items)?)
-            .pagination(pagination_info(limit, has_more, next_cursor)?)
-            .try_into(),
-    )?))
+    let response = core.list_characters(&principal, limit, offset).await?;
+    Ok(Json(response))
 }
 
 /// `GET /v1/daemon/characters/{character_id}`
@@ -431,17 +294,9 @@ pub async fn get_character(
     State(state): State<WorkspaceState>,
     Path(character_id): Path<String>,
 ) -> Result<Json<CharacterDetail>, NexusApiError> {
-    let owner = require_creator(&state)?;
-    let row = nexus_local_db::get_character(state.pool_or_uninit()?, &owner, &character_id)
-        .await?
-        .ok_or_else(|| NexusApiError::NotFound(format!("character {character_id}")))?;
-    Ok(Json(finish_builder(
-        CharacterDetail::builder()
-            .character(map_wire::<DetailCharacterWire>(character_from_record(
-                &row,
-            )?)?)
-            .try_into(),
-    )?))
+    let (core, principal) = resolve_core_principal(&state).await?;
+    let detail = core.character(&principal, character_id).await?;
+    Ok(Json(detail))
 }
 
 /// `POST /v1/daemon/characters/{character_id}/bindings`
@@ -451,31 +306,16 @@ pub async fn add_binding(
     body: Bytes,
 ) -> Result<(StatusCode, Json<AddCharacterBindingResponse>), NexusApiError> {
     let req: AddCharacterBindingRequest = parse_canonical_json(&body)?;
-    let owner = require_creator(&state)?;
-    let _guard = state
-        .actor_sessions()
-        .admit_character_activity(state.pool_or_uninit()?, &owner, &character_id)
+    let (core, principal) = resolve_core_principal(&state).await?;
+    let response = core
+        .add_binding(
+            &principal,
+            character_id,
+            req.world_id.to_string(),
+            optional_str(req.world_sheet_entry_id.as_ref()).map(str::to_string),
+        )
         .await?;
-    let binding = nexus_local_db::add_actor_world_binding(
-        state.pool_or_uninit()?,
-        CreateBindingParams {
-            owner_creator_id: &owner,
-            character_id: &character_id,
-            world_id: req.world_id.as_str(),
-            world_sheet_entry_id: optional_str(req.world_sheet_entry_id.as_ref()),
-        },
-    )
-    .await?;
-    Ok((
-        StatusCode::CREATED,
-        Json(finish_builder(
-            AddCharacterBindingResponse::builder()
-                .binding(map_wire::<AddedBindingWire>(binding_from_record(
-                    &binding,
-                )?)?)
-                .try_into(),
-        )?),
-    ))
+    Ok((StatusCode::CREATED, Json(response)))
 }
 
 /// `GET /v1/daemon/characters/{character_id}/bindings`
@@ -484,30 +324,13 @@ pub async fn list_bindings(
     Path(character_id): Path<String>,
     Query(query): Query<ListCharacterBindingsQuery>,
 ) -> Result<Json<ListCharacterBindingsResponse>, NexusApiError> {
-    let owner = require_creator(&state)?;
+    let (core, principal) = resolve_core_principal(&state).await?;
     let offset = decode_offset_cursor(&query.cursor)?;
     let limit = resolve_limit(query.limit)?;
-    let fetch_limit = i64::from(limit) + 1;
-    let page = nexus_local_db::list_bindings_for_character(
-        state.pool_or_uninit()?,
-        &owner,
-        &character_id,
-        fetch_limit,
-        i64::from(offset),
-    )
-    .await?;
-    let (next_cursor, has_more) = offset_page_meta(page.len(), limit, offset);
-    let items: Vec<ActorWorldBinding> = page
-        .into_iter()
-        .take(limit as usize)
-        .map(|row| binding_from_record(&row))
-        .collect::<Result<_, _>>()?;
-    Ok(Json(finish_builder(
-        ListCharacterBindingsResponse::builder()
-            .items(map_wire::<Vec<ListedBindingWire>>(items)?)
-            .pagination(binding_pagination_info(limit, has_more, next_cursor)?)
-            .try_into(),
-    )?))
+    let response = core
+        .list_bindings(&principal, character_id, limit, offset)
+        .await?;
+    Ok(Json(response))
 }
 
 /// `GET /v1/daemon/characters/{character_id}/bindings/{binding_id}`
@@ -515,16 +338,9 @@ pub async fn get_binding(
     State(state): State<WorkspaceState>,
     Path((character_id, binding_id)): Path<(String, String)>,
 ) -> Result<Json<CharacterBindingDetail>, NexusApiError> {
-    let owner = require_creator(&state)?;
-    let row = nexus_local_db::get_actor_world_binding(
-        state.pool_or_uninit()?,
-        &owner,
-        &character_id,
-        &binding_id,
-    )
-    .await?
-    .ok_or_else(|| NexusApiError::NotFound(format!("binding {binding_id}")))?;
-    Ok(Json(binding_detail_from_record(&row)?))
+    let (core, principal) = resolve_core_principal(&state).await?;
+    let detail = core.binding(&principal, character_id, binding_id).await?;
+    Ok(Json(detail))
 }
 
 /// `PATCH /v1/daemon/characters/{character_id}/bindings/{binding_id}`
@@ -548,21 +364,17 @@ pub async fn patch_binding(
         });
     }
     let sheet_patch = build_binding_sheet_patch(&raw, &req)?;
-    let owner = require_creator(&state)?;
-    let _guard = state
-        .actor_sessions()
-        .admit_character_activity(state.pool_or_uninit()?, &owner, &character_id)
+    let (core, principal) = resolve_core_principal(&state).await?;
+    let detail = core
+        .patch_binding(
+            &principal,
+            character_id,
+            binding_id,
+            req.expected_revision,
+            sheet_patch,
+        )
         .await?;
-    let record = nexus_local_db::update_actor_world_binding(
-        state.pool_or_uninit()?,
-        &owner,
-        &character_id,
-        &binding_id,
-        req.expected_revision,
-        sheet_patch,
-    )
-    .await?;
-    Ok(Json(binding_detail_from_record(&record)?))
+    Ok(Json(detail))
 }
 
 /// `DELETE /v1/daemon/characters/{character_id}/bindings/{binding_id}`
@@ -570,12 +382,8 @@ pub async fn remove_binding(
     State(state): State<WorkspaceState>,
     Path((character_id, binding_id)): Path<(String, String)>,
 ) -> Result<StatusCode, NexusApiError> {
-    let owner = require_creator(&state)?;
-    let _guard = state
-        .actor_sessions()
-        .admit_character_activity(state.pool_or_uninit()?, &owner, &character_id)
-        .await?;
-    nexus_local_db::remove_binding(state.pool_or_uninit()?, &owner, &character_id, &binding_id)
+    let (core, principal) = resolve_core_principal(&state).await?;
+    core.remove_binding(&principal, character_id, binding_id)
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -604,20 +412,11 @@ pub async fn patch_character(
             message: "patch must include at least one mutable field".into(),
         });
     }
-    let owner = require_creator(&state)?;
-    let _guard = state
-        .actor_sessions()
-        .admit_character_activity(state.pool_or_uninit()?, &owner, &character_id)
+    let (core, principal) = resolve_core_principal(&state).await?;
+    let detail = core
+        .patch_character(&principal, character_id, req.expected_revision, patch)
         .await?;
-    let record = nexus_local_db::update_character(
-        state.pool_or_uninit()?,
-        &owner,
-        &character_id,
-        req.expected_revision,
-        patch,
-    )
-    .await?;
-    Ok(Json(character_detail_from_record(&record)?))
+    Ok(Json(detail))
 }
 
 /// `POST /v1/daemon/characters/{character_id}/archive`
@@ -627,16 +426,14 @@ pub async fn archive_character(
     body: Bytes,
 ) -> Result<Json<CharacterDetail>, NexusApiError> {
     let req: CharacterLifecycleRequest = parse_canonical_json(&body)?;
-    let owner = require_creator(&state)?;
-    let record = execute_character_lifecycle(
+    let detail = execute_character_lifecycle(
         &state,
-        &owner,
         &character_id,
         req.expected_revision,
-        CharacterStatus::Archived,
+        CoreCharacterTransitionRequestTargetStatus::Archived,
     )
     .await?;
-    Ok(Json(character_detail_from_record(&record)?))
+    Ok(Json(detail))
 }
 
 /// `POST /v1/daemon/characters/{character_id}/restore`
@@ -646,108 +443,12 @@ pub async fn restore_character(
     body: Bytes,
 ) -> Result<Json<CharacterDetail>, NexusApiError> {
     let req: CharacterLifecycleRequest = parse_canonical_json(&body)?;
-    let owner = require_creator(&state)?;
-    let record = execute_character_lifecycle(
+    let detail = execute_character_lifecycle(
         &state,
-        &owner,
         &character_id,
         req.expected_revision,
-        CharacterStatus::Active,
+        CoreCharacterTransitionRequestTargetStatus::Active,
     )
     .await?;
-    Ok(Json(character_detail_from_record(&record)?))
-}
-
-#[cfg(test)]
-mod conversion_tests {
-    use super::*;
-
-    fn sample_character() -> CharacterRecord {
-        CharacterRecord {
-            character_id: "chr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
-            owner_creator_id: "ctr_localabcdef123456".into(),
-            display_name: "Ava".into(),
-            status: "active".into(),
-            image_uri: Some("https://example.test/ava.png".into()),
-            persona_json: r#"{"tone":"calm"}"#.into(),
-            created_at: "2026-09-05T00:00:00Z".into(),
-            updated_at: "2026-09-05T00:00:01Z".into(),
-            revision: 0,
-            lifecycle_epoch: 0,
-        }
-    }
-
-    fn sample_binding() -> ActorWorldBindingRecord {
-        ActorWorldBindingRecord {
-            binding_id: "awb_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
-            character_id: "chr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
-            world_id: "wld_worldA".into(),
-            status: "active".into(),
-            world_sheet_entry_id: Some("sheet-1".into()),
-            revision: 0,
-            created_at: "2026-09-05T00:00:00Z".into(),
-            updated_at: "2026-09-05T00:00:01Z".into(),
-        }
-    }
-
-    #[test]
-    fn character_from_record_uses_generated_builder_fields() {
-        let mapped = character_from_record(&sample_character()).expect("valid record");
-        assert_eq!(
-            mapped.character_id.as_str(),
-            "chr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-        );
-        assert_eq!(mapped.owner_creator_id.as_str(), "ctr_localabcdef123456");
-        assert_eq!(mapped.display_name.as_str(), "Ava");
-        assert_eq!(
-            mapped.image_uri.as_ref().map(|u| u.as_str()),
-            Some("https://example.test/ava.png")
-        );
-        assert_eq!(
-            mapped.persona.get("tone").and_then(|v| v.as_str()),
-            Some("calm")
-        );
-        let envelope: CreateCharacterResponse = finish_builder(
-            CreateCharacterResponse::builder()
-                .character(map_wire::<CreatedCharacterWire>(mapped).expect("embed character"))
-                .binding(
-                    map_wire::<CreatedBindingWire>(
-                        binding_from_record(&sample_binding()).expect("binding"),
-                    )
-                    .expect("embed binding"),
-                )
-                .try_into(),
-        )
-        .expect("typed create envelope");
-        assert_eq!(
-            envelope.character.character_id.as_str(),
-            "chr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-        );
-    }
-
-    #[test]
-    fn invalid_status_is_character_wire_invalid() {
-        let mut record = sample_character();
-        record.status = "unknown".into();
-        let err = character_from_record(&record).expect_err("status must fail");
-        match err {
-            NexusApiError::Internal { code, .. } => assert_eq!(code, "CHARACTER_WIRE_INVALID"),
-            other => panic!("expected CHARACTER_WIRE_INVALID, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn list_envelope_is_generated_builder() {
-        let items = vec![character_from_record(&sample_character()).expect("character")];
-        let listed: ListCharactersResponse = finish_builder(
-            ListCharactersResponse::builder()
-                .items(map_wire::<Vec<ListedCharacterWire>>(items).expect("embed items"))
-                .pagination(pagination_info(10, true, Some("v1:10".into())).expect("page"))
-                .try_into(),
-        )
-        .expect("typed list envelope");
-        assert_eq!(listed.items.len(), 1);
-        assert!(listed.pagination.has_more);
-        assert_eq!(listed.pagination.next_cursor.as_deref(), Some("v1:10"));
-    }
+    Ok(Json(detail))
 }

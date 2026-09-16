@@ -50,11 +50,9 @@ impl Capability for OutboxFlush {
     fn name(&self) -> &'static str {
         "outbox.flush"
     }
-
     fn input_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"limit":{"type":"integer","minimum":0,"default":0}},"required":[],"additionalProperties":false}"#
+        nexus_preset::capability_catalog::OUTBOX_FLUSH_INPUT_SCHEMA
     }
-
     fn output_schema(&self) -> &'static str {
         r#"{"type":"object","properties":{"flushed":{"type":"integer","minimum":0}},"required":["flushed"],"additionalProperties":false}"#
     }
@@ -97,7 +95,7 @@ impl Capability for OutboxFlush {
                 // values are string literals from the database (outbox_entry_id), not user input.
                 let sql = format!(
                     "UPDATE outbox_entries SET delivery_state = 'acked', updated_at = ?
-                     WHERE outbox_entry_id IN ({})",
+                 WHERE outbox_entry_id IN ({})",
                     placeholders.join(",")
                 );
 
@@ -176,11 +174,9 @@ impl Capability for OutboxCompact {
     fn name(&self) -> &'static str {
         "outbox.compact"
     }
-
     fn input_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"retentionDays":{"type":"integer","minimum":1,"default":7}},"required":[],"additionalProperties":false}"#
+        nexus_preset::capability_catalog::OUTBOX_COMPACT_INPUT_SCHEMA
     }
-
     fn output_schema(&self) -> &'static str {
         r#"{"type":"object","properties":{"removed":{"type":"integer","minimum":0},"retained":{"type":"integer","minimum":0}},"required":["removed","retained"],"additionalProperties":false}"#
     }

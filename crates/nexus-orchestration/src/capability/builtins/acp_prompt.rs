@@ -82,35 +82,18 @@ impl Capability for AcpPrompt {
     fn name(&self) -> &'static str {
         "acp.prompt"
     }
-
     fn input_schema(&self) -> &'static str {
-        r#"{
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "type": "object",
-            "required": ["prompt"],
-            "properties": {
-                "prompt": { "type": "string", "description": "The prompt text to send to the ACP agent" },
-                "tool_policy": {
-                    "type": "string",
-                    "enum": ["auto_grant_all", "auto_grant_read_only", "deny_all", "request_policy"],
-                    "default": "auto_grant_read_only",
-                    "description": "Tool permission policy for this prompt"
-                }
-                // "_creator_id" and "_session_id" are injected by orchestration context,
-                // NOT accepted from user input (security: prevents cross-creator routing).
-            }
-        }"#
+        nexus_preset::capability_catalog::ACP_PROMPT_INPUT_SCHEMA
     }
-
     fn output_schema(&self) -> &'static str {
         r#"{
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "type": "object",
-            "required": ["full_text"],
-            "properties": {
-                "full_text": { "type": "string", "description": "The full response text from the ACP agent" }
-            }
-        }"#
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "required": ["full_text"],
+        "properties": {
+            "full_text": { "type": "string", "description": "The full response text from the ACP agent" }
+        }
+    }"#
     }
 
     async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
@@ -140,9 +123,9 @@ impl Capability for AcpPrompt {
             .and_then(|v| v.as_str())
             .ok_or_else(|| {
                 CapabilityError::Forbidden(
-                    "missing trusted _session_id: orchestration context must inject the run identity"
-                        .to_string(),
-                )
+                "missing trusted _session_id: orchestration context must inject the run identity"
+                    .to_string(),
+            )
             })?;
 
         let executor = self

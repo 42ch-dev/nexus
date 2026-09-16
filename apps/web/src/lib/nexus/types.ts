@@ -129,7 +129,6 @@ import type {
   ActiveCreatorResponse,
   WorkDetailResponse,
   WorkOutline,
-  World,
   WorldKbCandidatesResponse,
   WorldKbGraphResponse,
   WorldKbKeyBlockStateResponse,
@@ -453,9 +452,11 @@ export interface NexusClient extends CoreSliceClient {
    * `GET /v1/daemon/works/{work_id}/findings/{finding_id}` — full finding detail.
    * V1.77 findings-remediation promotion: the daemon route + generated TS type
    * already existed (V1.67 G2 pattern); only the TS client surface was missing.
-   * No schema/codegen change (`wire_contracts_changed: FALSE`).
+   * Renamed from `getFinding` (v1.190 P5-T1): the bare name now belongs to the
+   * canonical creator-scoped `GET /v1/daemon/findings/{finding_id}` declared
+   * on the generated `CoreSliceClient`.
    */
-  getFinding(workId: string, findingId: string): Promise<FindingDetailResponse>;
+  getWorkFinding(workId: string, findingId: string): Promise<FindingDetailResponse>;
   /**
    * `PATCH /v1/daemon/works/{work_id}/findings/{finding_id}` — remediation patch
    * (status transition / target_executor / inline edit). Server enforces the
@@ -686,14 +687,6 @@ export interface NexusClient extends CoreSliceClient {
   // that does not match the active creator in config.toml with 403. The UI is
   // consume-only. V1.186 removed the obsolete session-capture producer and its
   // POST route; retained GET/count/DELETE methods expose compatible stored rows.
-  /**
-   * `GET /v1/daemon/narrative/worlds` — workspace-scoped world list for the
-   * active creator. Returns every Work-backed world (including zero-fragment
-   * worlds) so the SOUL world selector can surface honest subset-empty states.
-   * V1.82: typed against the generated `World` domain contract; the response
-   * shape is promoted to a generated list response once P0 lands the schema.
-   */
-  listNarrativeWorlds(): Promise<World[]>;
   /**
    * `DELETE /v1/daemon/worlds/{world_id}` — hard-delete a World and cascade its
    * KB + timelines (FK `ON DELETE CASCADE`). Works that referenced the World

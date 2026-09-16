@@ -1,0 +1,22 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "$id": "https://nexus42.invalid/schemas/core/works/work-inspiration-list-query.schema.json",
+ "schema_version": 1,
+ "title": "WorkInspirationListQuery",
+ "description": "Query for `GET /v1/daemon/works/pool/inspiration`.",
+ "type": "object",
+ "additionalProperties": false,
+ "properties": {
+  "status": {
+   "type": "string"
+  },
+  "limit": {
+   "type": "integer",
+   "minimum": 0
+  },
+  "offset": {
+   "type": "integer",
+   "minimum": 0
+  }
+ }
+}

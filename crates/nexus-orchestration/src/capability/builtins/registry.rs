@@ -394,14 +394,9 @@ impl Capability for RegistryRefresh {
     fn name(&self) -> &'static str {
         "registry.refresh"
     }
-
     fn input_schema(&self) -> &'static str {
-        // V1.58 P0 fix-wave (QC2 M-1): the `force` property was removed —
-        // it was a documented no-op (no cache layer to bypass). The schema
-        // is now an empty object with additionalProperties:false.
-        r#"{"type":"object","properties":{},"required":[],"additionalProperties":false}"#
+        nexus_preset::capability_catalog::REGISTRY_REFRESH_INPUT_SCHEMA
     }
-
     fn output_schema(&self) -> &'static str {
         r#"{"type":"object","properties":{"cacheAgeMs":{"type":"integer","minimum":0},"capabilityCount":{"type":"integer","minimum":0},"source":{"type":"string","enum":["synthetic","cdn","synthetic_fallback"]},"snapshotVersion":{"type":"string"},"generatedAt":{"type":"string","format":"date-time"},"fetchTimeoutMs":{"type":"integer","minimum":0},"maxRetries":{"type":"integer","minimum":0},"retryCount":{"type":"integer","minimum":0},"fallbackReason":{"type":"string"}},"required":["cacheAgeMs","capabilityCount","source","snapshotVersion","generatedAt"],"additionalProperties":false}"#
     }

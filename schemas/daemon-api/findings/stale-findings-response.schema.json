@@ -1,15 +1,47 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://nexus42.invalid/schemas/daemon-api/findings/stale-findings-response.schema.json",
-  "schema_version": 1,
-  "title": "Nexus StaleFindingsResponse",
-  "description": "Response for GET /v1/daemon/findings/stale.",
-  "type": "object",
-  "required": ["open_count", "stale_threshold_seconds", "items"],
-  "properties": {
-    "open_count": { "type": "integer" },
-    "stale_threshold_seconds": { "type": "integer" },
-    "items": { "type": "array", "items": { "type": "object" } }
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "$id": "https://nexus42.invalid/schemas/daemon-api/findings/stale-findings-response.schema.json",
+ "schema_version": 2,
+ "title": "Nexus StaleFindingsResponse",
+ "description": "Response for `GET /v1/daemon/findings/stale` (V1.39 P4 T3): open findings for the active creator that aged past the stale threshold (default 96h; the threshold resolution stays at the adapter because the watcher schedule is daemon runtime state). v2 corrects the schema to the live wire envelope (`stale_count` / `threshold_seconds` / `now_epoch` / `findings`); the previous `open_count`/`items` shape was never emitted by the handler.",
+ "type": "object",
+ "required": ["stale_count", "threshold_seconds", "now_epoch", "findings"],
+ "properties": {
+  "stale_count": {
+   "type": "integer",
+   "minimum": 0,
+   "description": "Number of open findings older than `threshold_seconds`."
   },
-  "additionalProperties": false
+  "threshold_seconds": {
+   "type": "integer",
+   "description": "Threshold (seconds) used for the query."
+  },
+  "now_epoch": {
+   "type": "integer",
+   "description": "Server-side epoch second used as `now` for the cutoff calculation."
+  },
+  "findings": {
+   "type": "array",
+   "description": "Per-finding summaries, oldest first; the CLI banner surfaces the most-aged item.",
+   "items": {
+    "$ref": "#/definitions/StaleFindingEntry"
+   }
+  }
+ },
+ "additionalProperties": false,
+ "definitions": {
+  "StaleFindingEntry": {
+   "title": "StaleFindingEntry",
+   "type": "object",
+   "required": ["finding_id", "work_id", "severity", "created_at", "age_seconds"],
+   "additionalProperties": false,
+   "properties": {
+    "finding_id": { "type": "string" },
+    "work_id": { "type": "string" },
+    "severity": { "type": "string" },
+    "created_at": { "type": "integer", "description": "Epoch second the finding was created." },
+    "age_seconds": { "type": "integer", "minimum": 0 }
+   }
+  }
+ }
 }

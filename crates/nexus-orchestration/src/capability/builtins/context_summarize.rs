@@ -87,43 +87,25 @@ impl Capability for ContextSummarize {
     // orchestration context, NOT accepted from user input (security:
     // prevents cross-creator routing — SEC-V131-01).
     fn input_schema(&self) -> &'static str {
-        r#"{
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "type": "object",
-            "required": ["content"],
-            "properties": {
-                "content": {
-                    "type": "string",
-                    "description": "Current core_context text to summarize"
-                },
-                "trace": {
-                    "type": "string",
-                    "description": "Optional state execution trace for context"
-                },
-                "template": {
-                    "type": "string",
-                    "description": "Optional summarization template/instructions"
-                }
-            }
-        }"#
+        nexus_preset::capability_catalog::CONTEXT_SUMMARIZE_INPUT_SCHEMA
     }
 
     fn output_schema(&self) -> &'static str {
         r#"{
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "type": "object",
-            "required": ["summary", "prompt_hash"],
-            "properties": {
-                "summary": {
-                    "type": "string",
-                    "description": "LLM-generated summary of the core_context"
-                },
-                "prompt_hash": {
-                    "type": "string",
-                    "description": "blake3 hash of the prompt sent to the LLM"
-                }
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "required": ["summary", "prompt_hash"],
+        "properties": {
+            "summary": {
+                "type": "string",
+                "description": "LLM-generated summary of the core_context"
+            },
+            "prompt_hash": {
+                "type": "string",
+                "description": "blake3 hash of the prompt sent to the LLM"
             }
-        }"#
+        }
+    }"#
     }
 
     async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
@@ -150,9 +132,9 @@ impl Capability for ContextSummarize {
             .and_then(|v| v.as_str())
             .ok_or_else(|| {
                 CapabilityError::Forbidden(
-                    "missing trusted _session_id: orchestration context must inject the run identity"
-                        .to_string(),
-                )
+                "missing trusted _session_id: orchestration context must inject the run identity"
+                    .to_string(),
+            )
             })?;
 
         let trace = input.get("trace").and_then(|v| v.as_str()).unwrap_or("");

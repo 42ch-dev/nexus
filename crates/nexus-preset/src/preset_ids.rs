@@ -1,0 +1,176 @@
+//! Preset-id constants (single source of truth).
+//!
+//! Each preset id that is **referenced from more than one module** MUST live
+//! here as a `&'static str` const so the three call sites — auto-chain hook,
+//! `STAGE_PRESET_ALLOWLIST`, and supervisor guard — share one definition
+//! (R-V147P0-06 / V1.48 P0 T3).
+//!
+//! Literal preset ids used only in a single module (or only in tests) do not
+//! need to be hoisted here; the SSOT rule applies to values that are read by
+//! runtime logic in ≥2 modules.
+
+/// FL-E `review` stage preset id — `novel-chapter-review` (V1.47 P0).
+///
+/// Consumed by:
+/// - [`crate::auto_chain::persist_review_findings_for_schedule`] (findings hook)
+/// - [`crate::schedule::supervisor::ScheduleSupervisor::on_schedule_terminal`]
+///   (terminal guard)
+/// - [`crate::validation::STAGE_PRESET_ALLOWLIST`] (review stage
+///   allowlist entry)
+///
+/// See `.mstar/specs/novel-writing/quality-loop.md` §3 for the normative
+/// preset table.
+pub const NOVEL_CHAPTER_REVIEW_PRESET_ID: &str = "novel-chapter-review";
+
+/// FL-E `produce` stage preset id — `novel-writing` (V1.36+).
+///
+/// Consumed by:
+/// - [`crate::auto_chain::preset_version_for_id`] (version map)
+/// - [`crate::auto_chain::promote_foreshadowing_for_schedule`] (V1.49 P1
+///   narrative-index promotion hook)
+/// - [`crate::schedule::supervisor::ScheduleSupervisor::on_schedule_terminal`]
+///   (terminal guard for the promotion hook)
+///
+/// See `.mstar/specs/novel-writing/workflow-profile.md` for the
+/// normative preset table.
+pub const NOVEL_WRITING_PRESET_ID: &str = "novel-writing";
+
+/// Cron-triggered `brainstorm` role preset id — `novel-brainstorm` (V1.50 T-A P1).
+///
+/// The daemon-side cron evaluator (`schedule::cron_supervisor`) enqueues a
+/// pending Schedule with this preset id when the per-Work `brainstorm` role
+/// cron fires (spec `cron-staggering.md` §2.1 / §4.1). The existing
+/// `ScheduleSupervisor::tick()` then admits it; the existing executor runs it.
+/// Out-of-band fire (does NOT touch `driver_schedule_id`), mirroring
+/// `enqueue_review_master_schedule`.
+pub const NOVEL_BRAINSTORM_PRESET_ID: &str = "novel-brainstorm";
+
+/// Cron-triggered `write` role preset id — `novel-write` (V1.50 T-A P1).
+///
+/// Enqueued by the cron evaluator when the per-Work `write` role cron fires
+/// (spec `cron-staggering.md` §2.1 / §4.1). Out-of-band like brainstorm.
+///
+/// **Note (R-V150P1CRONBW-01):** the `novel-write` embedded preset is not yet
+/// authored as of T-A P1; the cron evaluator enqueues the correct preset id
+/// string per spec, and the schedule is persisted + admitted normally, but the
+/// executor will fail to load the preset until it is authored in a follow-up
+/// plan. This is a preset-authoring gap, not an evaluator gap.
+pub const NOVEL_WRITE_PRESET_ID: &str = "novel-write";
+
+/// Out-of-band review-master preset id — `novel-review-master`.
+///
+/// V1.39 introduced this preset for stale-findings escalation
+/// (`auto_review_master_on_timeout`); V1.50 T-A P2 will wire the per-Work
+/// `review` cron role to fire it on a schedule. V1.50 T-B P1 consumes it as
+/// the trigger for review-time KB candidate extraction
+/// ([`crate::quality_loop::extract_kb_candidates_for_review`]).
+///
+/// Consumed by:
+/// - [`crate::auto_chain::enqueue_review_master_schedule`] (schedule insert)
+/// - [`crate::quality_loop::extract_kb_candidates_for_review`] (T-B P1 hook)
+/// - [`crate::schedule::supervisor::ScheduleSupervisor::on_schedule_terminal`]
+///   (terminal guard for the T-B P1 extraction hook)
+///
+/// See `.mstar/specs/novel-writing/cron-staggering.md` §2.1 for the
+/// role→preset mapping.
+pub const NOVEL_REVIEW_MASTER_PRESET_ID: &str = "novel-review-master";
+
+/// The three works-cron role preset ids (brainstorm / write / review).
+///
+/// Single source of truth for cron-role membership (AR-21): consumed by
+/// [`crate::schedule::cron_supervisor::role_preset`] (via the individual
+/// constants) and by the daemon profile lane classifier (`profile_lanes` in
+/// `nexus-daemon-runtime`). Adding a new cron-role preset here automatically
+/// updates both consumers — never maintain a second membership list
+/// (W-001/F-004).
+pub const CRON_ROLE_PRESET_IDS: [&str; 3] = [
+    NOVEL_BRAINSTORM_PRESET_ID,
+    NOVEL_WRITE_PRESET_ID,
+    NOVEL_REVIEW_MASTER_PRESET_ID,
+];
+
+/// Returns the canonical works-cron role preset ids (brainstorm / write /
+/// review per `RolesSchedule`).
+#[must_use]
+pub const fn cron_role_preset_ids() -> &'static [&'static str] {
+    &CRON_ROLE_PRESET_IDS
+}
+
+/// Game-bible design-writing preset id — `design-writing` (V1.55 P2).
+///
+/// LLM-driven per-section drafting + design 五问 review loop for game-bible
+/// `Design/*.md` sections. Registered as a `work_continue` preset.
+///
+/// Consumed by:
+/// - [`crate::validation::STAGE_PRESET_ALLOWLIST`] (produce stage)
+/// - Schedule supervisor (terminal guard for completion hooks)
+///
+/// See `.mstar/specs/game-bible-profile.md` §5 for the stage chain.
+pub const DESIGN_WRITING_PRESET_ID: &str = "design-writing";
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        cron_role_preset_ids, DESIGN_WRITING_PRESET_ID, NOVEL_BRAINSTORM_PRESET_ID,
+        NOVEL_CHAPTER_REVIEW_PRESET_ID, NOVEL_REVIEW_MASTER_PRESET_ID, NOVEL_WRITE_PRESET_ID,
+        NOVEL_WRITING_PRESET_ID,
+    };
+
+    /// Guard against accidental rename: the wire value is part of the
+    /// persisted `creator_schedules.preset_id` column and the embedded
+    /// preset directory name. Bumping it requires a migration + preset
+    /// rename — never a silent edit.
+    #[test]
+    fn novel_chapter_review_preset_id_value_is_frozen() {
+        assert_eq!(NOVEL_CHAPTER_REVIEW_PRESET_ID, "novel-chapter-review");
+    }
+
+    #[test]
+    fn novel_writing_preset_id_value_is_frozen() {
+        assert_eq!(NOVEL_WRITING_PRESET_ID, "novel-writing");
+    }
+
+    #[test]
+    fn novel_brainstorm_preset_id_value_is_frozen() {
+        assert_eq!(NOVEL_BRAINSTORM_PRESET_ID, "novel-brainstorm");
+    }
+
+    #[test]
+    fn novel_write_preset_id_value_is_frozen() {
+        assert_eq!(NOVEL_WRITE_PRESET_ID, "novel-write");
+    }
+
+    #[test]
+    fn novel_review_master_preset_id_value_is_frozen() {
+        assert_eq!(NOVEL_REVIEW_MASTER_PRESET_ID, "novel-review-master");
+    }
+
+    #[test]
+    fn design_writing_preset_id_value_is_frozen() {
+        assert_eq!(DESIGN_WRITING_PRESET_ID, "design-writing");
+    }
+
+    /// W-001/F-004: the cron-role membership list is the single source of
+    /// truth consumed by both `cron_supervisor::role_preset` and the daemon
+    /// profile lane classifier. Freeze the membership so a rename/removal is
+    /// a deliberate change, not a silent desync.
+    #[test]
+    fn cron_role_preset_ids_membership_is_frozen() {
+        assert_eq!(
+            cron_role_preset_ids(),
+            &[
+                NOVEL_BRAINSTORM_PRESET_ID,
+                NOVEL_WRITE_PRESET_ID,
+                NOVEL_REVIEW_MASTER_PRESET_ID,
+            ]
+        );
+        // Every member is a real embedded preset id (the cron evaluator
+        // enqueues schedules with these ids).
+        for id in cron_role_preset_ids() {
+            assert!(
+                crate::list_embedded_presets().iter().any(|e| e == id),
+                "cron-role preset '{id}' must exist in the embedded preset tree"
+            );
+        }
+    }
+}

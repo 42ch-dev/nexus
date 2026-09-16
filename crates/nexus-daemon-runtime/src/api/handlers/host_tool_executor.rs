@@ -1,35 +1,37 @@
+//! Host tool executor — the daemon's HTTP/CLI/schedule entry point.
+//!
+//! v1.190 P3-T3: the dispatch BODY moved to
+//! [`nexus_core::execution::capabilities`], together with the 30 builtin rows,
+//! the admission pipeline, the audit writer and the peer registry. What
+//! remains here is the daemon's own composition: it turns its
+//! [`WorkspaceState`] into the narrow owned [`ToolContext`] the core consumes.
+//!
+//! # Why a bridge and not a copy
+//!
+//! The daemon could have kept its own registry and dispatch loop, but that is
+//! exactly the second spine the plan forbids: the builtin set, the peer set
+//! and the user-capability set would each be resolved twice and could silently
+//! diverge. The bridge is deliberately thin — every decision (which gates run,
+//! which row wins, what the audit says) is the core's.
+
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::too_many_lines)]
-//! Host Tool Executor — caller entry points for daemon-mediated agent tool access.
-//!
-//! V1.57 P1: Refactored from god-file.
-//! Caller entry points (CLI/HTTP, Schedule) all dispatch through the
-//! same `CapabilityRegistry::dispatch` path. Handlers live in
-//! [`host_tool_handlers`]; admission/permission/audit live there too.
-//!
-//! # Architecture (post-V1.57 P1, post-V1.186 P1 T3)
-//!
-//! ```text
-//! CLI host-call          ─┐
-//! HTTP ToolExecuteRequest ─┤  normalize → admission → CapabilityRegistry::dispatch
-//! Schedule dispatch       ─┘
-//! ```
 
 use crate::api::errors::NexusApiError;
 use crate::workspace::WorkspaceState;
+use nexus_core::execution::capabilities::{ToolContext, ToolRuntimeFacts};
 use serde::{Deserialize, Serialize};
 
-// Import admission + audit from the handlers module
-use super::host_tool_handlers::{admission_pipeline, audit_tool_execution};
+pub use nexus_core::execution::capabilities::{
+    HostToolCallerKind, ToolExecuteRequest, ToolExecuteResponse,
+};
 
 // ─── V1.34 Tool IDs (spec §12.2) ──────────────────────────────────────────
 
 /// Allowlist of all V1.34 + V1.53 P1 + V1.54 P0 + V1.56 P1 tool IDs.
 ///
-/// V1.57 P3: The runtime allowlist check now uses `CapabilityRegistry::lookup()`
-/// (see `admission_pipeline` in `host_tool_handlers.rs`). This constant is kept for:
-/// - Test consistency (`tool_allowlist_matches_registry_ids`)
-/// - Documentation (the canonical list of dispatched host tool IDs)
+/// The runtime allowlist check uses the registry itself; this constant is kept
+/// for test consistency and as the documented canonical list.
 #[allow(dead_code)] // Used in #[cfg(test)] modules only
 pub(crate) const TOOL_ALLOWLIST: &[&str] = &[
     // nexus.* tools (V1.34)
@@ -71,105 +73,46 @@ pub(crate) const TOOL_ALLOWLIST: &[&str] = &[
     "fs/write_text_file",
 ];
 
-/// Fields allowed in `nexus.work.patch` (spec §4.4).
-pub(crate) const PATCH_ALLOWED_FIELDS: &[&str] = &["title", "inspiration_log", "stage_metadata"];
+// ─── Response/error shapes ────────────────────────────────────────────────
 
-/// Fields explicitly rejected in `nexus.work.patch` (spec §4.4).
-pub(crate) const PATCH_REJECTED_FIELDS: &[&str] = &[
-    "current_stage",
-    "stage",
-    "stage_status",
-    "stage_started_at",
-    "stage_completed_at",
-    "creator_id",
-    "workspace_id",
-    "work_id",
-    "run_intents",
-];
-
-/// Sub-fields allowed inside `stage_metadata` (spec §4.4).
-pub(crate) const STAGE_METADATA_ALLOWED_KEYS: &[&str] = &[
-    "agent_notes",
-    "research_summary_ref",
-    "draft_outline_ref",
-    "review_summary_ref",
-    "last_agent_tool_request_id",
-];
-
-// ─── Request / Response types ─────────────────────────────────────────────
-
-/// Request for executing a host tool through the daemon.
-///
-/// Shared by HTTP, internal agent-host route, and schedule dispatch (spec §5).
-#[derive(Debug, Clone, Deserialize)]
-pub struct ToolExecuteRequest {
-    pub tool_name: String,
-    pub parameters: serde_json::Value,
-    #[serde(default)]
-    pub session_id: Option<String>,
-    #[serde(default)]
-    pub request_id: Option<String>,
-    #[serde(default)]
-    pub caller_kind: Option<HostToolCallerKind>,
-}
-
-/// Who is calling the tool registry (spec §12.3).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum HostToolCallerKind {
-    Schedule,
-}
-
-impl std::fmt::Display for HostToolCallerKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Schedule => write!(f, "schedule"),
-        }
-    }
-}
-
-/// Response from tool execution.
-#[derive(Debug, Serialize)]
-pub struct ToolExecuteResponse {
-    pub success: bool,
-    pub result: serde_json::Value,
-}
-
-/// Tool error code (spec §12.4).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum ToolErrorCode {
-    Forbidden,
-    PolicyBlocked,
-    NotSupported,
-    InvalidInput,
-}
-
-/// Structured tool error for audit and wire response.
+/// Error body for a tool execution refusal.
 #[derive(Debug, Serialize)]
 pub struct ToolExecuteError {
+    /// The refusal's error code.
     pub code: ToolErrorCode,
+    /// Optional reason detail.
     pub reason: Option<String>,
+    /// The refusal message.
     pub message: String,
+}
+
+/// The error codes the tool surface reports.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolErrorCode {
+    /// The tool id is not dispatchable.
+    NotSupported,
+    /// The request's arguments are invalid.
+    InvalidInput,
+    /// Admission refused the call.
+    PolicyBlocked,
+    /// An internal fault.
+    Internal,
 }
 
 // ─── HostToolExecutor — unified caller entry points ───────────────────────
 
 /// Internal service for executing host tools.
 ///
-/// Caller entry points:
-/// 1. CLI `host-call` / HTTP `ToolExecuteRequest` — normalize into the
-///    shared `ToolExecuteRequest` wire format
-/// 2. Schedule — `dispatch_for_schedule` for in-process preset/task dispatch
-///
-/// All dispatch through the same `CapabilityRegistry::dispatch` path.
+/// All caller entry points normalize into the shared request shape and then
+/// dispatch through the SAME core spine.
 pub struct HostToolExecutor;
 
 impl HostToolExecutor {
-    /// **Entry point 1 (CLI + HTTP)**: Execute a host tool request.
+    /// **Entry point 1 (CLI + HTTP)**: execute a host tool request.
     ///
-    /// Normalizes the `ToolExecuteRequest` wire format → admission pipeline
-    /// → `CapabilityRegistry::dispatch` → audit log.
+    /// # Errors
+    /// The core dispatch refusal, mapped to the daemon's envelope.
     pub async fn execute(
         req: &ToolExecuteRequest,
         state: &WorkspaceState,
@@ -177,49 +120,31 @@ impl HostToolExecutor {
         Self::registry_dispatch(req, state).await
     }
 
-    /// Core dispatch: admission pipeline → `CapabilityRegistry::dispatch` → audit.
+    /// Core dispatch: build the owned context, then run the core spine.
+    ///
+    /// The admission pipeline, the audit row and the handler invocation all
+    /// live in the core; this function only composes the daemon's state into
+    /// the narrow context the core consumes.
+    ///
+    /// # Errors
+    /// `NexusApiError::Uninitialized` when the workspace has no pool yet;
+    /// otherwise the core dispatch refusal.
     pub async fn registry_dispatch(
         req: &ToolExecuteRequest,
         state: &WorkspaceState,
     ) -> Result<serde_json::Value, NexusApiError> {
-        tracing::info!(
-            tool_name = %req.tool_name,
-            caller_kind = ?req.caller_kind,
-            "HostToolExecutor: executing tool via CapabilityRegistry"
-        );
-
-        // Gates 1–4
-        let admission_result = admission_pipeline(req, state).await;
-
-        let (creator_id, _workspace_slug) = match admission_result {
-            Ok(pair) => pair,
-            Err(e) => {
-                let error_code = e.error_code();
-                audit_tool_execution(req, "denied", Some(error_code), state).await?;
-                return Err(e);
-            }
-        };
-
-        let reg = crate::capability_registry::host_tool_registry();
-        let dispatch_result = reg.dispatch(req, state, &creator_id).await;
-
-        match &dispatch_result {
-            Ok(_) => {
-                audit_tool_execution(req, "success", None, state).await?;
-            }
-            Err(e) => {
-                let error_code = e.error_code();
-                audit_tool_execution(req, "denied", Some(error_code), state).await?;
-            }
-        }
-
-        dispatch_result
+        let context = tool_context(state).await?;
+        nexus_core::execution::capabilities::execute_tool(&context, req)
+            .await
+            .map_err(NexusApiError::from)
     }
 
-    /// **Entry point 3 (Schedule)**: Dispatch schedule-initiated tool call.
+    /// **Entry point 3 (Schedule)**: dispatch schedule-initiated tool call.
     ///
-    /// Uses `HostToolCallerKind::Schedule` for audit trail differentiation.
-    /// Returns the tool result JSON or `NexusApiError`.
+    /// Uses `HostToolCallerKind::Schedule` for audit-trail differentiation.
+    ///
+    /// # Errors
+    /// As [`Self::execute`].
     pub async fn dispatch_for_schedule(
         tool_name: &str,
         args: &serde_json::Value,
@@ -236,6 +161,33 @@ impl HostToolExecutor {
 
         Self::execute(&req, state).await
     }
+}
+
+/// Compose the daemon's workspace state into the core's narrow tool context.
+///
+/// # Errors
+/// `Uninitialized` when no pool is attached — the tool surface cannot dispatch
+/// without durable storage, and reporting that is honest.
+pub async fn tool_context(state: &WorkspaceState) -> Result<ToolContext, NexusApiError> {
+    let pool = state.pool_or_uninit()?.clone();
+    // The core opens lazily on first need; a tool that requires the family
+    // services (Work patch, findings, pool entries) gets the same instance the
+    // HTTP family routes use.
+    let core = state.core_or_uninit().await.ok();
+    Ok(ToolContext::new(
+        pool,
+        state.nexus_home().clone(),
+        state.workspace_path(),
+        ToolRuntimeFacts {
+            runtime_mode: *state.runtime_mode(),
+            is_initialized: state.is_initialized(),
+            lifecycle_state: state.lifecycle_state().to_string(),
+            started_at: state.started_at().to_rfc3339(),
+            uptime_seconds: state.uptime_seconds(),
+        },
+        core,
+        state.capability_registry_holder(),
+    ))
 }
 
 // ─── DaemonToolDispatch adapter (DF-47) ───────────────────────────────────
@@ -275,46 +227,7 @@ impl nexus_orchestration::capability::DaemonToolDispatch for DaemonToolDispatchA
     }
 }
 
-// ─── Re-exports from host_tool_handlers (for capability_registry.rs) ──────
-//
-// `capability_registry.rs::build_registry()` imports via
-// `use crate::api::handlers::host_tool_executor as hte`
-// and calls `hte::registry_*`. These re-exports preserve backward compat.
-
-pub(crate) use super::host_tool_handlers::registry_context_assemble;
-pub(crate) use super::host_tool_handlers::registry_context_whoami;
-pub(crate) use super::host_tool_handlers::registry_daemon_health;
-pub(crate) use super::host_tool_handlers::registry_finding_resolve;
-pub(crate) use super::host_tool_handlers::registry_kb_snapshot_read;
-pub(crate) use super::host_tool_handlers::registry_kb_snapshot_write;
-pub(crate) use super::host_tool_handlers::registry_manuscript_chapter_get;
-pub(crate) use super::host_tool_handlers::registry_manuscript_chapter_update;
-pub(crate) use super::host_tool_handlers::registry_pool_entry_manage;
-pub(crate) use super::host_tool_handlers::registry_read_file;
-pub(crate) use super::host_tool_handlers::registry_reference_refresh;
-pub(crate) use super::host_tool_handlers::registry_registry_refresh;
-pub(crate) use super::host_tool_handlers::registry_schedule_status;
-pub(crate) use super::host_tool_handlers::registry_timeline_recent_get;
-pub(crate) use super::host_tool_handlers::registry_work_get;
-pub(crate) use super::host_tool_handlers::registry_work_patch;
-pub(crate) use super::host_tool_handlers::registry_work_schedule_set;
-pub(crate) use super::host_tool_handlers::registry_workspace_info;
-pub(crate) use super::host_tool_handlers::registry_world_configure;
-pub(crate) use super::host_tool_handlers::registry_world_snapshot_get;
-pub(crate) use super::host_tool_handlers::registry_write_file;
-
-// V1.59 P0: DF-47 manuscript & misc capability parity batch (9 new tools).
-pub(crate) use super::host_tool_handlers::registry_manuscript_list;
-pub(crate) use super::host_tool_handlers::registry_manuscript_phase_get;
-pub(crate) use super::host_tool_handlers::registry_manuscript_phase_set;
-pub(crate) use super::host_tool_handlers::registry_manuscript_read_range;
-pub(crate) use super::host_tool_handlers::registry_manuscript_write;
-pub(crate) use super::host_tool_handlers::registry_research_query;
-pub(crate) use super::host_tool_handlers::registry_runtime_health;
-pub(crate) use super::host_tool_handlers::registry_trace_correlation;
-pub(crate) use super::host_tool_handlers::registry_workspace_paths;
-
-// ─── Include tests from extracted test file ───────────────────────────────
+// ─── Include tests from the retained test file ────────────────────────────
 
 #[cfg(test)]
 #[path = "host_tool_executor_tests.rs"]

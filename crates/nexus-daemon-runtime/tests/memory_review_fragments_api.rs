@@ -30,12 +30,13 @@ async fn test_ctx() -> TestCtx {
 
 /// Create a test context with a specific active creator configured.
 async fn test_ctx_with_active_creator(active_creator: &str) -> TestCtx {
-    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
-
-    // Write config.toml with active creator (required by R-V133P4-01 auth enforcement).
-    let config_content = format!("active_creator_id = \"{active_creator}\"\n");
-    std::fs::write(nexus_home.join("config.toml"), config_content)
-        .expect("failed to write config.toml");
+    // `active_creator` is selected through the constructor that materializes
+    // the Profile home AND the admitted `state.db` for that same identity:
+    // rewriting `config.toml` after the fact would leave the state's bound
+    // database and its resolved selection naming different creators, which
+    // the core refuses as a fail-closed binding mismatch (R-V133P4-01).
+    let (tmp, nexus_home, db_path) =
+        test_utils::create_test_workspace_for(active_creator, "default").await;
 
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
     let pool = state.pool().unwrap().clone();
@@ -471,7 +472,7 @@ async fn pending_review_delete_returns_401_without_creator() {
         State(state),
         Path("pending_noauth".to_string()),
         Query(
-            nexus_daemon_runtime::api::handlers::memory::DeletePendingReviewQuery {
+            nexus_contracts::daemon_api::memory::DeletePendingReviewQuery {
                 creator_id: "ctr_testuser".to_string(),
             },
         ),
@@ -649,13 +650,10 @@ async fn review_overlapping_calls_no_duplicate_processing() {
     use std::sync::Arc;
     const SEED: usize = 5;
 
-    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
-    // Active creator = ctr_testuser (required by the auth gate).
-    std::fs::write(
-        nexus_home.join("config.toml"),
-        "active_creator_id = \"ctr_testuser\"\n",
-    )
-    .expect("config.toml");
+    // Active creator = ctr_testuser (required by the auth gate), selected
+    // through the same constructor that materializes its workspace DB.
+    let (tmp, nexus_home, db_path) =
+        test_utils::create_test_workspace_for("ctr_testuser", "default").await;
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
     let pool = state.pool().unwrap().clone();
 

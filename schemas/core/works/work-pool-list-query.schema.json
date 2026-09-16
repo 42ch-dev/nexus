@@ -1,0 +1,22 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "$id": "https://nexus42.invalid/schemas/core/works/work-pool-list-query.schema.json",
+ "schema_version": 1,
+ "title": "WorkPoolListQuery",
+ "description": "Query for `GET /v1/daemon/works/pool`.",
+ "type": "object",
+ "additionalProperties": false,
+ "properties": {
+  "status": {
+   "type": "string"
+  },
+  "limit": {
+   "type": "integer",
+   "minimum": 0
+  },
+  "offset": {
+   "type": "integer",
+   "minimum": 0
+  }
+ }
+}

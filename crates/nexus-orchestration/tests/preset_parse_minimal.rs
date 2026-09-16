@@ -1,4 +1,4 @@
-use nexus_orchestration::preset::manifest::PresetManifest;
+use nexus_preset::manifest::PresetManifest;
 
 #[test]
 fn parse_minimal_creator_preset() {
@@ -205,8 +205,5 @@ states:
     terminal: true
 ";
     let p: PresetManifest = serde_yaml::from_str(yaml).unwrap();
-    assert_eq!(
-        p.preset.kind,
-        nexus_orchestration::preset::manifest::PresetKind::System
-    );
+    assert_eq!(p.preset.kind, nexus_preset::manifest::PresetKind::System);
 }

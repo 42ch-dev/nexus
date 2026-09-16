@@ -16,12 +16,7 @@ export interface CoreContextResponse {
    * Payload type (text or struct).
    */
   payload_kind: string;
-  /**
-   * Core context content (text or structured JSON).
-   */
-  content: {
-    [k: string]: unknown | undefined;
-  };
+  content: unknown;
   /**
    * How this version was derived (seed, user_edit, preset_hook, llm_summarize, preset_seed_expansion).
    */

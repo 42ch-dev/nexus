@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-workspace-commit-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CoreWorkspaceCommitResponse",
+  "description": "Durable workspace commit result: revision identifier for the commit and whether it was accepted (always true for successful commits).",
+  "type": "object",
+  "required": [
+    "revision",
+    "committed"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "revision": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Revision identifier for this commit."
+    },
+    "committed": {
+      "type": "boolean"
+    }
+  }
+}

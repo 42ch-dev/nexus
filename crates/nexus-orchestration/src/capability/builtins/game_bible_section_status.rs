@@ -280,11 +280,9 @@ impl Capability for GameBibleSectionStatusUpdate {
     fn name(&self) -> &'static str {
         "game_bible.section_status.update"
     }
-
     fn input_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"work_ref":{"type":"string"},"section_path":{"type":"string"},"new_status":{"type":"string","enum":["draft","reviewed","accepted"]},"reason":{"type":"string"},"works_root":{"type":"string"}},"required":["work_ref","section_path","new_status"],"additionalProperties":false}"#
+        nexus_preset::capability_catalog::GAME_BIBLE_SECTION_STATUS_UPDATE_INPUT_SCHEMA
     }
-
     fn output_schema(&self) -> &'static str {
         r#"{"type":"object","properties":{"updated":{"type":"boolean"},"new_section_status":{"type":"string"},"section_path":{"type":"string"}},"required":["updated","new_section_status","section_path"],"additionalProperties":false}"#
     }

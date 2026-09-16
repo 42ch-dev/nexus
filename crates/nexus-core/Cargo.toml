@@ -13,13 +13,105 @@ workspace = true
 [lib]
 path = "src/lib.rs"
 
+[features]
+default = []
+# v1.190 architecture §Cohorts — optional edges. The default/domain cohort
+# pulls none of these; each `dep:` edge stays inert until its feature is
+# requested. `compute` is never enabled by default/domain/Connect-host.
+provider-host = ["dep:nexus-agent-host", "dep:nexus-acp-host", "dep:nexus-provider-ports", "dep:futures-util"]
+execution = [
+    "dep:nexus-orchestration",
+    "dep:nexus-provider-ports",
+    "dep:graph-flow",
+    "dep:tokio-util",
+    "dep:async-trait",
+    # The durable workspace commit authority moved out of the daemon: the
+    # intent/digest/recovery protocol hashes content (sha2), hex-encodes the
+    # digest, decodes base64 manifest bodies and uses renameat/linkat for the
+    # atomic file apply. All four are execution-only edges.
+    "dep:sha2",
+    "dep:hex",
+    "dep:base64",
+    "dep:nix",
+]
+# The crash/rendezvous seams the workspace-commit recovery proofs drive. They
+# are compiled out of a production build and enabled by this package's own
+# dev-dependency self-reference, exactly as the daemon did before the move.
+test-hooks = []
+compute = ["execution", "dep:nexus-wasm-host", "nexus-spoke-adapter/compute"]
+# Reverse-invoke/peer-control edge attaches with its owning cohort task; the
+# bounded rmcp protocol adapter is the embedded-mcp edge (§Cohorts).
+# Reverse-invoke/peer-control edge (v1.190 P4-T3): the peer/MCP session,
+# visibility, bounded WS transport and watcher ownership moved here; the
+# spoke remote adapter types the WS transport implements. rmcp stays the
+# embedded-mcp edge.
+connect-client = [
+    "dep:spoke-connect",
+    "dep:tokio-tungstenite",
+    "dep:nexus-orchestration",
+    "dep:futures-util",
+    # mcp_bridge's rmcp server surface compiles with connect-client; only
+    # the embedded server (Model B) additionally needs embedded-mcp.
+    "dep:rmcp",
+    "dep:getrandom",
+]
+# Model B's sink/stream session channels (futures_channel::mpsc) ride the
+# same rmcp transport module; the shell compiles only under embedded-mcp.
+embedded-mcp = ["connect-client", "dep:rmcp", "dep:futures-channel"]
+
 [dependencies]
 nexus-contracts = { path = "../nexus-contracts" }
+nexus-preset = { path = "../nexus-preset" }
 nexus-home-layout = { path = "../nexus-home-layout" }
 nexus-local-db = { path = "../nexus-local-db" }
+# v1.190 P2-T0 (architecture §8): the core's local-outbox reuse is a normal
+# domain dependency on the existing nexus-cloud-sync `legacy-sync`
+# implementation (guarded, engine/Host-free). No new outbox implementation.
+nexus-cloud-sync = { path = "../nexus-cloud-sync", features = ["legacy-sync"] }
 nexus-knowledge = { path = "../nexus-knowledge" }
 nexus-spoke-adapter = { path = "../nexus-spoke-adapter", default-features = false }
-async-trait.workspace = true
+nexus-narrative = { path = "../nexus-narrative" }
+nexus-creator-memory = { path = "../nexus-creator-memory" }
+nexus-moment-context-assembly = { path = "../nexus-moment-context-assembly" }
+nexus-orchestration = { path = "../nexus-orchestration", optional = true }
+# v1.190 P4-T3 connect-client cohort edges: the WS transport speaks the
+# spoke remote-adapter Transport; tungstenite is the bounded WS wire.
+spoke-connect = { workspace = true, features = ["remote-adapter"], optional = true }
+tokio-tungstenite = { workspace = true, optional = true }
+# identity.rs seeds the per-peer device identity from the OS CSPRNG.
+getrandom = { version = "0.4", optional = true }
+# Model B session transport channels (embedded-mcp edge only).
+futures-channel = { version = "0.3", optional = true }
+nexus-provider-ports = { path = "../nexus-provider-ports", optional = true }
+# graph-flow is the engine's session backend: the execution layer names
+# `SessionStorage` directly (the engine trait surface does not re-export it).
+graph-flow = { version = "=0.8.0", default-features = false, optional = true }
+tokio-util = { workspace = true, optional = true }
+nexus-agent-host = { path = "../nexus-agent-host", optional = true }
+nexus-acp-host = { path = "../nexus-acp-host", optional = true }
+# v1.190 P4-T2: the Host authority composes the selected provider port and
+# drains Host event streams (both provider-host cohort edges).
+futures-util = { workspace = true, optional = true }
+nexus-wasm-host = { path = "../nexus-wasm-host", optional = true }
+# `server` is the smallest role covering mcp_bridge's ServerHandler
+# surface (RoleServer/RequestContext); the client role is not needed.
+rmcp = { version = "=3.2.0", default-features = false, features = ["server", "client"], optional = true }
+# async-trait is used ONLY by the execution cohort's port traits and the
+# module's test doubles. Nothing outside `execution` uses the macro (the
+# `#![allow(clippy::unused_async_trait_impl)]` in knowledge.rs is a lint name,
+# not a crate use), so the edge is optional and enabled by `execution`.
+async-trait = { workspace = true, optional = true }
+# The durable workspace commit authority (v1.190 P3-T2) moved out of the
+# daemon with its module set. These edges are `execution`-only:
+#   sha2   — content-addressed OCC hashes for the snapshot/intent digest
+#   hex    — lowercase-hex rendering of those digests
+#   base64 — manifest `contentBase64` body decode
+#   nix    — renameat/linkat + flock for the atomic file apply and the
+#            workspace-authority lease. Unix-only, so it is declared under
+#            `cfg(unix)` and its `dep:nix` edge only resolves there.
+hex = { version = "0.4", optional = true }
+base64 = { version = "0.22", optional = true }
+sha2 = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
@@ -27,7 +119,51 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 chrono.workspace = true
+toml.workspace = true
+uuid.workspace = true
+serde_yaml = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+# Descriptor-relative atomic mutation (openat/renameat/linkat/unlinkat) and the
+# advisory workspace-authority lease. Every use site is `cfg(unix)`-gated, so
+# the edge is scoped to Unix rather than linked on every target.
+nix = { version = "0.28", features = ["fs"], optional = true }
 
 [dev-dependencies]
+# Enable the gated execution test seams for this package's own tests without
+# exposing them in the production build.
+# `compute` is included so the capability/compute integration target can
+# reach the gated WASM path; the target itself is `#![cfg(feature = ...)]`,
+# so a user of this package is unaffected.
+# The integration targets cover every cohort this crate owns, so the test
+# seam must enable all of them: `provider-host` (HostHandle/actor sessions),
+# `connect-client` (peer-control/connect tables) and `execution`+`compute`
+# (execution lifecycle, capability/compute). Without the first two the
+# `host_actor_lifecycle` / `peer_control` targets cannot resolve their public
+# surface.
+nexus-core = { path = ".", features = [
+    "execution",
+    "compute",
+    "test-hooks",
+    "provider-host",
+    "connect-client",
+] }
+serial_test = "4"
 tempfile = "3"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+# Only `parking_lot` needs a dev-dep: the relocated execution regression module
+# builds one scripted engine fixture with interior mutability, and parking_lot
+# is not otherwise a `nexus-core` dependency. The integration target's other
+# imports (`nexus-provider-ports`, `nexus-local-db`, `async-trait`) come from
+# `[dependencies]` — that target is `#![cfg(feature = "execution")]`, and the
+# feature enables those optional edges.
+parking_lot = "0.12"
+# The capability/compute target builds a real WASM module and a real user
+# capability scan, so it needs the engine, the WAT compiler and the capability
+# scanner's dependencies.
+nexus-wasm-host = { path = "../nexus-wasm-host" }
+nexus-orchestration = { path = "../nexus-orchestration" }
+nexus-knowledge = { path = "../nexus-knowledge" }
+chrono.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true

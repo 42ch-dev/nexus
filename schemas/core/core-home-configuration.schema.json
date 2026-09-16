@@ -1,0 +1,41 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-home-configuration.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CoreHomeConfiguration",
+  "description": "Home/configuration projection for the narrow home entry: resolved home roots and the currently selected creator/workspace. Carries no workspace pool, execution or Host state.",
+  "type": "object",
+  "required": [
+    "user_home",
+    "nexus_home",
+    "active_creator_id",
+    "active_workspace_slug"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "user_home": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Raw user home this service was opened with."
+    },
+    "nexus_home": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Resolved .nexus42 home root (home-layout appends it exactly once)."
+    },
+    "active_creator_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Currently selected creator id; null before selection."
+    },
+    "active_workspace_slug": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Currently selected workspace slug; null before selection."
+    }
+  }
+}

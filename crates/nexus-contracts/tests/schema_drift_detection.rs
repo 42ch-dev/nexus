@@ -142,6 +142,177 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             ActorWorldBinding
         ),
+        // ── core/ (v1.190 P5-T0/P5-T1 — full-TS service wire contracts) ────
+        // core/findings/
+        entry!(
+            "schemas/core/findings/findings-prune-response.schema.json",
+            Strict,
+            FindingsPruneResponse
+        ),
+        // core/narrative/
+        entry!(
+            "schemas/core/narrative/narrative-world-response.schema.json",
+            Strict,
+            NarrativeWorldResponse
+        ),
+        entry!(
+            "schemas/core/narrative/narrative-world-state.schema.json",
+            Strict,
+            NarrativeWorldState
+        ),
+        entry!(
+            "schemas/core/narrative/narrative-worlds-list-response.schema.json",
+            Strict,
+            NarrativeWorldsListResponse
+        ),
+        // core/orchestration-presets/
+        entry!(
+            "schemas/core/orchestration-presets/orchestration-preset-list-response.schema.json",
+            Strict,
+            OrchestrationPresetListResponse
+        ),
+        entry!(
+            "schemas/core/orchestration-presets/preset-profile-conditional-rule.schema.json",
+            Strict,
+            PresetProfileConditionalRule
+        ),
+        entry!(
+            "schemas/core/orchestration-presets/preset-profile-enter-action.schema.json",
+            Strict,
+            PresetProfileEnterAction
+        ),
+        entry!(
+            "schemas/core/orchestration-presets/preset-profile-exit-when.schema.json",
+            Strict,
+            PresetProfileExitWhen
+        ),
+        entry!(
+            "schemas/core/orchestration-presets/preset-profile-labeled-next.schema.json",
+            Strict,
+            PresetProfileLabeledNext
+        ),
+        entry!(
+            "schemas/core/orchestration-presets/preset-profile-lanes.schema.json",
+            Strict,
+            PresetProfileLanes
+        ),
+        entry!(
+            "schemas/core/orchestration-presets/preset-profile-next.schema.json",
+            Strict,
+            PresetProfileNext
+        ),
+        entry!(
+            "schemas/core/orchestration-presets/preset-profile-response.schema.json",
+            Strict,
+            PresetProfileResponse
+        ),
+        entry!(
+            "schemas/core/orchestration-presets/preset-profile-role.schema.json",
+            Strict,
+            PresetProfileRole
+        ),
+        entry!(
+            "schemas/core/orchestration-presets/preset-profile-signal.schema.json",
+            Strict,
+            PresetProfileSignal
+        ),
+        entry!(
+            "schemas/core/orchestration-presets/preset-profile-state.schema.json",
+            Strict,
+            PresetProfileState
+        ),
+        // core/references/
+        entry!(
+            "schemas/core/references/reference-get-response.schema.json",
+            Strict,
+            ReferenceGetResponse
+        ),
+        entry!(
+            "schemas/core/references/reference-list-response.schema.json",
+            Strict,
+            ReferenceListResponse
+        ),
+        entry!(
+            "schemas/core/references/reference-source-info.schema.json",
+            Strict,
+            ReferenceSourceInfo
+        ),
+        // core/works/
+        entry!(
+            "schemas/core/works/work-inspiration-add-request.schema.json",
+            Strict,
+            WorkInspirationAddRequest
+        ),
+        entry!(
+            "schemas/core/works/work-inspiration-add-response.schema.json",
+            Strict,
+            WorkInspirationAddResponse
+        ),
+        entry!(
+            "schemas/core/works/work-inspiration-archive-request.schema.json",
+            Strict,
+            WorkInspirationArchiveRequest
+        ),
+        entry!(
+            "schemas/core/works/work-inspiration-item.schema.json",
+            Strict,
+            WorkInspirationItem
+        ),
+        entry!(
+            "schemas/core/works/work-inspiration-list-query.schema.json",
+            Strict,
+            WorkInspirationListQuery
+        ),
+        entry!(
+            "schemas/core/works/work-inspiration-list-response.schema.json",
+            Strict,
+            WorkInspirationListResponse
+        ),
+        entry!(
+            "schemas/core/works/work-inspiration-promote-request.schema.json",
+            Strict,
+            WorkInspirationPromoteRequest
+        ),
+        entry!(
+            "schemas/core/works/work-inspiration-promote-response.schema.json",
+            Strict,
+            WorkInspirationPromoteResponse
+        ),
+        entry!(
+            "schemas/core/works/work-pool-archive-request.schema.json",
+            Strict,
+            WorkPoolArchiveRequest
+        ),
+        entry!(
+            "schemas/core/works/work-pool-entry.schema.json",
+            Strict,
+            WorkPoolEntry
+        ),
+        entry!(
+            "schemas/core/works/work-pool-list-query.schema.json",
+            Strict,
+            WorkPoolListQuery
+        ),
+        entry!(
+            "schemas/core/works/work-pool-list-response.schema.json",
+            Strict,
+            WorkPoolListResponse
+        ),
+        entry!(
+            "schemas/core/works/work-pool-promote-request.schema.json",
+            Strict,
+            WorkPoolPromoteRequest
+        ),
+        entry!(
+            "schemas/core/works/work-pool-set-active-request.schema.json",
+            Strict,
+            WorkPoolSetActiveRequest
+        ),
+        entry!(
+            "schemas/core/works/work-reconcile-report.schema.json",
+            Strict,
+            WorkReconcileReport
+        ),
         // ── common/ ──────────────────────────────────────────────────────
         entry!("schemas/common/version-ref.schema.json", Strict, VersionRef),
         // SourceAnchor is generated by typify from source-anchor.schema.json
@@ -1570,7 +1741,7 @@ fn build_test_json(
         .and_then(|p| p.to_str())
         .unwrap_or("");
     for (name, prop_def) in properties {
-        let dummy = make_dummy_value(prop_def, schema_cache, current_dir);
+        let dummy = make_dummy_value(prop_def, schema_cache, current_dir, current_schema_path);
         map.insert(name.clone(), dummy);
     }
     Value::Object(map)
@@ -1632,14 +1803,16 @@ fn make_dummy_string(prop_def: &Value) -> Value {
 }
 
 /// Generate a dummy JSON value for a schema property definition.
+#[allow(clippy::too_many_lines)] // one recursive schema-shape dispatch table
 fn make_dummy_value(
     prop_def: &Value,
     schema_cache: &HashMap<String, Value>,
     current_dir: &str,
+    current_schema_path: &str,
 ) -> Value {
     // Handle $ref (must be first to resolve enum references)
     if let Some(ref_path) = prop_def.get("$ref").and_then(|r| r.as_str()) {
-        return make_dummy_from_ref(ref_path, schema_cache, current_dir);
+        return make_dummy_from_ref(ref_path, schema_cache, current_dir, current_schema_path);
     }
 
     // Handle const value (e.g., "const": 1)
@@ -1684,7 +1857,8 @@ fn make_dummy_value(
                 || Value::Array(vec![]),
                 |items| {
                     // Generate a single dummy item
-                    let item_val = make_dummy_value(items, schema_cache, current_dir);
+                    let item_val =
+                        make_dummy_value(items, schema_cache, current_dir, current_schema_path);
                     Value::Array(vec![item_val])
                 },
             )
@@ -1708,11 +1882,18 @@ fn make_dummy_value(
                             .and_then(|a| a.as_array())
                             .and_then(|a| a.first())
                         {
-                            return make_dummy_value(first_arm, schema_cache, current_dir);
+                            return make_dummy_value(
+                                first_arm,
+                                schema_cache,
+                                current_dir,
+                                current_schema_path,
+                            );
                         }
                         let val = prop_def.get("additionalProperties").map_or_else(
                             || Value::String("_".to_string()),
-                            |ap| make_dummy_value(ap, schema_cache, current_dir),
+                            |ap| {
+                                make_dummy_value(ap, schema_cache, current_dir, current_schema_path)
+                            },
                         );
                         let mut m = serde_json::Map::new();
                         // `propertyNames.pattern` constrains the map keys:
@@ -1741,7 +1922,12 @@ fn make_dummy_value(
                         for (sub_name, sub_def) in sub_props {
                             map.insert(
                                 sub_name.clone(),
-                                make_dummy_value(sub_def, schema_cache, current_dir),
+                                make_dummy_value(
+                                    sub_def,
+                                    schema_cache,
+                                    current_dir,
+                                    current_schema_path,
+                                ),
                             );
                         }
                         Value::Object(map)
@@ -1753,7 +1939,12 @@ fn make_dummy_value(
             for key in &["allOf", "oneOf", "anyOf"] {
                 if let Some(subs) = prop_def.get(*key).and_then(|a| a.as_array()) {
                     if let Some(first) = subs.first() {
-                        return make_dummy_value(first, schema_cache, current_dir);
+                        return make_dummy_value(
+                            first,
+                            schema_cache,
+                            current_dir,
+                            current_schema_path,
+                        );
                     }
                 }
             }
@@ -1768,6 +1959,7 @@ fn make_dummy_from_ref(
     ref_path: &str,
     schema_cache: &HashMap<String, Value>,
     current_dir: &str,
+    current_schema_path: &str,
 ) -> Value {
     // Split on # to separate file part from fragment
     let (file_part, fragment) = ref_path.find('#').map_or_else(
@@ -1784,7 +1976,15 @@ fn make_dummy_from_ref(
     );
 
     // Resolve the file path
-    let resolved_path = resolve_ref_file(file_part, current_dir);
+    // Same-file ref (`#/definitions/...`): the cache key IS the current
+    // schema's relative path, so use it directly instead of letting
+    // `resolve_ref_file` return "" (which made every cache lookup miss and
+    // hit the silent "dummy" fallback — e.g. StaleFindingsResponse.items).
+    let resolved_path = if file_part.is_empty() {
+        current_schema_path.to_string()
+    } else {
+        resolve_ref_file(file_part, current_dir)
+    };
 
     // Use the referenced file's directory for resolving nested relative refs
     let ref_dir = Path::new(&resolved_path)
@@ -1811,10 +2011,10 @@ fn make_dummy_from_ref(
                 }
             }
             // Now 'current' is the referenced definition
-            make_dummy_value(current, schema_cache, ref_dir)
+            make_dummy_value(current, schema_cache, ref_dir, &resolved_path)
         } else {
             // No fragment: the entire schema is the referenced value
-            make_dummy_value(s, schema_cache, ref_dir)
+            make_dummy_value(s, schema_cache, ref_dir, &resolved_path)
         }
     } else {
         // If we can't resolve, try using the raw property definition as a fallback

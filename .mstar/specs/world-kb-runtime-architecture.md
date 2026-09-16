@@ -16,6 +16,7 @@ World KB concerns were split across `nexus-knowledge` (formerly `nexus-kb`, merg
 
 | Layer | Crate | Responsibility |
 | --- | --- | --- |
+| **Domain authority** | `nexus-core` | Transport-neutral family authority: `worlds`, `world_kb`, `forks`, `world_pack`, `world_rules` (+findings), `timeline` services, one ownership guard, guarded storage (§2.1) |
 | **Domain (local)** | `nexus-knowledge` (V1.139: `nexus-kb` merged in) | KnowledgeEntry, SourceAnchors, taxonomy validation, `ingest_from_artifact()`, `KbStore` CRUD/query |
 | **Domain (narrative)** | `nexus-narrative` | World entity, timeline binding |
 | **Read SSOT** | `nexus-moment-context-assembly` | `WorldKbQueryBuilder` — shared filter/taxonomy logic; `assemble_moment` (wide session snapshot) and `build_chapter_kb_block` (narrow prompt slice) |
@@ -26,6 +27,18 @@ World KB concerns were split across `nexus-knowledge` (formerly `nexus-kb`, merg
 Platform integration reads World KB through `assemble_moment` / moment-context-assembly contracts, not through orchestration presets.
 
 V1.74 adds `kb_relationships` as the first-class relationship store under the World KB graph. Source/target entities FK to `kb_key_blocks`; source anchors remain optional JSON projection ids validated by the daemon. `GET graph` reads stored rows and emits derived reverse projections for `symmetric=true` without writing duplicate rows.
+
+### 2.1 `nexus-core` — single World/KB/narrative family authority (v1.190 P0 — Normative)
+
+The World/KB/narrative family is owned by `nexus-core` behind `CoreService`; each family lives in its own module under `crates/nexus-core/src/`: `worlds` (World lifecycle list/get/create/delete), `world_kb` (graph / patch-entity / candidates / promote / relationship), `forks` (local timeline forks over immutable parent history), `world_pack` (pack import/export), `world_rules` (structured rules plus the advisory world-findings read) and `timeline` (timeline overview + per-World keyset event pages). Family reads and writes reuse the existing shared repositories (`SqliteNarrativeGateway`, `narrative_write`, `KbStore` and the spoke operations) — one SQL implementation, the same one the CLI uses.
+
+**One ownership guard.** `world_kb::guards::check_world_owner` is the single ownership SQL: `SELECT owner_creator_id FROM narrative_worlds WHERE world_id = ?`. It reports a typed denial — `Missing` (no row), `Foreign` (the row names another creator), `Unowned` (`owner_creator_id` is NULL) — and every family (kb, pack, fork, rules, findings, timeline) calls this one guard; the daemon runs no ownership SQL of its own.
+
+**Denial → retained envelopes.** The guard surfaces the neutral `CoreError::WorldOwnerDenied { world_id, reason }`; the daemon adapter maps it to `Forbidden { resource: "world {id}", reason }` and HTTP 403. Each transport family keeps its retained envelope verbatim: World-KB-family routes render `world {id}` 404 plus the cross-author/unowned 403 reasons; timeline routes render `world {id} not found` 404 plus `you do not own this world` 403.
+
+**Daemon HTTP handlers are thin translations.** The narrative/worlds, world_kb, fork, world_rules, world_findings, world_kb_pack, timeline and timeline_events handlers only resolve the active creator + stored principal, call the matching `CoreService` method and map the neutral error onto the retained status/body envelopes. World-KB canonical mutations keep the ownership check, expected-version CAS (`kb_key_blocks.revision` / `kb_extract_jobs.version`) and the durable `core_changes` outbox inside one private transaction in core; no handler keeps business SQL or a second mutation path.
+
+**Pack bridge — retained authorized transition.** The retained local CLI pack composition (`nexus-daemon-runtime::pack_import`, whose only caller is `creator world kb pack import`) translates CLI arguments into the core request and the core report back into the legacy summary shape; conflict detection, remapping, provenance and persistence live in `CoreService::import_legacy_world_pack`, which admits the caller against stored state (registered creator, world ownership, non-query-only pool with a live registered writer) before importing. The bridge module and `import_legacy_world_pack` are transitional with a single deletion owner: P6-T1 removes them together with the CLI callsite migration; no new callers may attach.
 
 ---
 

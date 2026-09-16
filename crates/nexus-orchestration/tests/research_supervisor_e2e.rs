@@ -29,9 +29,9 @@ use nexus_contracts::local::schedule::ScheduleStatus;
 use nexus_local_db::works::{self, WorkRecord};
 use nexus_orchestration::auto_chain;
 use nexus_orchestration::capability::CapabilityRegistry;
-use nexus_orchestration::preset::load_embedded_preset;
 use nexus_orchestration::schedule::supervisor::ScheduleSupervisor;
 use nexus_orchestration::stage_gates::{build_schedule_for_stage, WorkFields};
+use nexus_preset::load_embedded_preset;
 use sqlx::SqlitePool;
 use std::sync::Arc;
 
@@ -160,7 +160,7 @@ impl ResearchScheduleFixture {
                 .unwrap_or_default();
         // N-7: resolve and stamp the REAL content-addressed source identity
         // (manifest + referenced template bytes) — never a zero placeholder.
-        let source = nexus_orchestration::preset::embedded_source_identity("research")
+        let source = nexus_preset::embedded_source_identity("research")
             .expect("research preset must carry an embedded source identity");
         let descriptor = nexus_orchestration::run_state::RunDescriptorV1 {
             creator_id: self.creator_id.to_string(),

@@ -65,7 +65,7 @@ async fn seed_work(d: &LiveDaemon) -> String {
 /// Write the work-level outline file at revision 0 with one volume holding
 /// chapter 1 (the default frontmatter shape the canvas handlers read).
 fn write_outline_file(d: &LiveDaemon) {
-    let ws_root = d.home.path().join("workspace");
+    let ws_root = d.creative_root();
     let rel = "Works/outline-test-novel/Outlines/outline.md";
     let outline_path = ws_root.join(rel);
     std::fs::create_dir_all(outline_path.parent().expect("outline parent"))
@@ -182,7 +182,7 @@ async fn outline_patch_move_chapter_bumps_revision() {
     assert!(text.contains("new_revision: 1"), "{text}");
 
     // The outline file on disk now has the chapter in volume 2.
-    let ws_root = d.home.path().join("workspace");
+    let ws_root = d.creative_root();
     let on_disk =
         std::fs::read_to_string(ws_root.join("Works/outline-test-novel/Outlines/outline.md"))
             .unwrap();
@@ -329,7 +329,7 @@ async fn chapter_patch_updates_metadata_and_bumps_revision() {
     assert!(text.contains("new_revision: 1"), "{text}");
 
     // The outline file on disk carries the title + revision bump.
-    let ws_root = d.home.path().join("workspace");
+    let ws_root = d.creative_root();
     let on_disk =
         std::fs::read_to_string(ws_root.join("Works/outline-test-novel/Outlines/outline.md"))
             .unwrap();
@@ -473,7 +473,7 @@ async fn chapter_patch_content_file_writes_outline_prose() {
 
     // Seed an existing per-chapter outline file so the content patch has a
     // target (the daemon derives `Works/<ref>/Outlines/chapters/ch01-outline.md`).
-    let ws_root = d.home.path().join("workspace");
+    let ws_root = d.creative_root();
     let chapter_outline =
         ws_root.join("Works/outline-test-novel/Outlines/chapters/ch01-outline.md");
     std::fs::create_dir_all(chapter_outline.parent().expect("chapter outline parent"))
@@ -548,7 +548,7 @@ async fn timeline_patch_add_event_bumps_revision() {
     assert!(stdout(&out).contains("new_revision: 1"), "{}", stdout(&out));
 
     // The outline file on disk now carries the event.
-    let ws_root = d.home.path().join("workspace");
+    let ws_root = d.creative_root();
     let on_disk =
         std::fs::read_to_string(ws_root.join("Works/outline-test-novel/Outlines/outline.md"))
             .unwrap();

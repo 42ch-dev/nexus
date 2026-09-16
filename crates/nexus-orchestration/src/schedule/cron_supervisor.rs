@@ -40,10 +40,10 @@ use serde::Deserialize;
 use sqlx::SqlitePool;
 use tracing::{debug, info, warn};
 
-use crate::preset_ids::{
+use crate::schedule::work_schedule::normalize_cron_fields;
+use nexus_preset::preset_ids::{
     NOVEL_BRAINSTORM_PRESET_ID, NOVEL_REVIEW_MASTER_PRESET_ID, NOVEL_WRITE_PRESET_ID,
 };
-use crate::schedule::work_schedule::normalize_cron_fields;
 
 /// Canonical role names (spec §2.1).
 const ROLE_BRAINSTORM: &str = "brainstorm";
@@ -130,7 +130,7 @@ const fn default_enabled() -> bool {
 /// Returns `None` for unknown role names (defensive — the evaluator only
 /// iterates the three canonical roles above).
 ///
-/// The preset ids come from the shared [`crate::preset_ids::CRON_ROLE_PRESET_IDS`]
+/// The preset ids come from the shared [`nexus_preset::preset_ids::CRON_ROLE_PRESET_IDS`]
 /// source (AR-21 / W-001): the daemon profile lane classifier consumes the
 /// same membership, so a new cron-role preset added here is reflected in
 /// every profile automatically.
@@ -407,7 +407,7 @@ async fn try_fire_role(
             // accepts an empty map.
             let bindings = if let Some(provider_id) = binding_provider {
                 if let Some(bindings) =
-                    crate::preset::default_bindings_for_preset(preset_id, provider_id)
+                    crate::preset_runtime::default_bindings_for_preset(preset_id, provider_id)
                 {
                     bindings
                 } else {
@@ -420,8 +420,8 @@ async fn try_fire_role(
                 }
             } else {
                 let caps = crate::capability::CapabilityRegistry::with_builtins();
-                if let Ok(loaded) = crate::preset::load_embedded_preset(preset_id, &caps) {
-                    let roles = crate::preset::required_prompt_roles(&loaded);
+                if let Ok(loaded) = nexus_preset::load_embedded_preset(preset_id, &caps) {
+                    let roles = nexus_preset::required_prompt_roles(&loaded);
                     if !roles.is_empty() {
                         warn!(
                             work_id = %row.work_id, role = role_name, preset_id,

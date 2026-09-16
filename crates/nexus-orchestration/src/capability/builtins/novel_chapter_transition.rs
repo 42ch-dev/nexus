@@ -104,8 +104,6 @@ impl Default for NovelChapterTransition {
     }
 }
 
-const INPUT_SCHEMA: &str = r#"{"type":"object","properties":{"work_id":{"type":"string"},"chapter":{"type":"integer","minimum":1},"from_status":{"type":"string"},"to_status":{"type":"string"},"actual_word_count":{"type":"integer","minimum":0},"force":{"type":"boolean","default":false},"reason":{"type":"string"},"workspace_root":{"type":"string"},"work_ref":{"type":"string"},"body_path":{"type":"string"}},"required":["work_id","chapter","from_status","to_status"],"additionalProperties":false}"#;
-
 const OUTPUT_SCHEMA: &str = r#"{"type":"object","properties":{"from_status":{"type":"string"},"to_status":{"type":"string"},"forced":{"type":"boolean"},"actual_word_count":{"type":["integer","null"],"minimum":0}},"required":["from_status","to_status","forced"],"additionalProperties":false}"#;
 
 #[async_trait]
@@ -113,11 +111,9 @@ impl Capability for NovelChapterTransition {
     fn name(&self) -> &'static str {
         "novel.chapter_transition"
     }
-
     fn input_schema(&self) -> &'static str {
-        INPUT_SCHEMA
+        nexus_preset::capability_catalog::NOVEL_CHAPTER_TRANSITION_INPUT_SCHEMA
     }
-
     fn output_schema(&self) -> &'static str {
         OUTPUT_SCHEMA
     }

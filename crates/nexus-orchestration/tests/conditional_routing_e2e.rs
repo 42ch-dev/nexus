@@ -20,7 +20,6 @@
 //!    branch or default.
 
 use graph_flow::{Context, NextAction};
-use nexus_orchestration::preset;
 use nexus_orchestration::CapabilityRegistry;
 
 /// Load a preset YAML, extract the start task, run it with the given context
@@ -30,12 +29,12 @@ async fn run_expression_route(
     context_values: &[(&str, serde_json::Value)],
 ) -> NextAction {
     let caps = CapabilityRegistry::with_builtins();
-    let loaded =
-        preset::load_preset_from_str(yaml, &caps).expect("preset YAML should load successfully");
+    let loaded = nexus_preset::load_preset_from_str(yaml, &caps)
+        .expect("preset YAML should load successfully");
 
     let start_id = loaded.manifest.preset.initial.as_str();
-    let task = loaded
-        .outer_graph
+    let graph = nexus_orchestration::preset_runtime::build_outer_graph(&loaded.manifest).unwrap();
+    let task = graph
         .get_task(start_id)
         .expect("start task should exist in the loaded outer graph");
 

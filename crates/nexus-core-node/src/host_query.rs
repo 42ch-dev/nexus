@@ -25,7 +25,10 @@ fn session_wire(session: &RegistryHostSession) -> NexusAgentHostSessionResponse 
         session_id: session.id.to_string(),
         provider_id: session.provider_id.to_string(),
         state: format!("{:?}", session.state),
-        active_op_id: session.active_op_id.as_ref().map(|id| id.to_string()),
+        active_op_id: session
+            .active_op_id
+            .as_ref()
+            .map(std::string::ToString::to_string),
         model: None,
         actor_ref: None,
         viewpoint: None,
@@ -217,7 +220,10 @@ pub async fn dispatch_host_query(
             let native = sorted_sessions(&host).await?;
             let js = js_sessions_snapshot(state);
             let items_all = merge_session_wires(&native, &js);
-            let limit = request.limit.map(|n| n.get()).unwrap_or(50).clamp(1, 250);
+            let limit = request
+                .limit
+                .map_or(50, std::num::NonZero::get)
+                .clamp(1, 250);
             let limit_us = usize::try_from(limit).unwrap_or(250);
             let items: Vec<NexusAgentHostSessionResponse> = items_all
                 .into_iter()
@@ -327,16 +333,17 @@ pub async fn dispatch_host_query(
                 });
             }
             // Durable journal fallback: after a restart the in-memory state is
-            // gone, but a previously active op is still queryable as interrupted.
-            if let Some(pool) = state.journal_pool() {
-                if let Ok(Some(op)) =
-                    nexus_local_db::js_provider_journal::get_operation(&pool, raw).await
+            // gone, but a previously active op is still queryable as
+            // interrupted, read through the CoreService-owned journal.
+            if let Some(core) = state.journal_core() {
+                if let Ok(Some((operation_id, session_id, _provider_id, status))) =
+                    core.provider_operation_row_internal(raw).await
                 {
                     return Ok(CoreHostQueryResponse {
                         operation: Some(NexusAgentHostOperationResponse {
-                            operation_id: op.operation_id,
-                            session_id: op.session_id,
-                            status: op.status,
+                            operation_id,
+                            session_id,
+                            status,
                             capture: None,
                         }),
                         health: None,

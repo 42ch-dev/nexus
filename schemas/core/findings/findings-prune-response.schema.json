@@ -1,0 +1,31 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "$id": "https://nexus42.invalid/schemas/core/findings/findings-prune-response.schema.json",
+ "schema_version": 1,
+ "title": "FindingsPruneResponse",
+ "description": "Response for `POST /v1/daemon/findings/prune` (V1.49 P3): `count` is rows deleted, or that would be deleted under `dry_run`. The PATCH tri-state stays in update-finding-request.schema.json (R-V1190-FINDINGS-TRISTATE-DUP: single wire definition).",
+ "type": "object",
+ "required": [
+  "count",
+  "older_than_days",
+  "dry_run",
+  "now_epoch"
+ ],
+ "additionalProperties": false,
+ "properties": {
+  "count": {
+   "type": "integer",
+   "minimum": 0
+  },
+  "older_than_days": {
+   "type": "integer",
+   "minimum": 0
+  },
+  "dry_run": {
+   "type": "boolean"
+  },
+  "now_epoch": {
+   "type": "integer"
+  }
+ }
+}

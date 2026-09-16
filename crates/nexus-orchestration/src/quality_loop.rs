@@ -1101,7 +1101,7 @@ async fn load_review_context(
         pool,
         schedule_id,
         workspace_dir,
-        crate::preset_ids::NOVEL_REVIEW_MASTER_PRESET_ID,
+        nexus_preset::preset_ids::NOVEL_REVIEW_MASTER_PRESET_ID,
         "kb-extract",
     )
     .await
@@ -1120,7 +1120,7 @@ async fn load_finalize_context(
         pool,
         schedule_id,
         workspace_dir,
-        crate::preset_ids::NOVEL_WRITING_PRESET_ID,
+        nexus_preset::preset_ids::NOVEL_WRITING_PRESET_ID,
         "kb-missing",
     )
     .await

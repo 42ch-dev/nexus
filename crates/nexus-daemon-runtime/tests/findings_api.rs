@@ -16,11 +16,14 @@
 use axum::extract::{Path, Query, State};
 use axum::Json;
 use nexus_contracts::BatchUpdateFindingsRequest;
+// `UpdateFindingRequest` is a generated wire DTO; the other request/query
+// shapes are handler-local and stay with the handlers.
+use nexus_contracts::UpdateFindingRequest;
 use nexus_daemon_runtime::api::handlers::findings::{
     batch_update_findings_handler, create_finding_handler, create_from_review_handler,
     delete_finding_handler, get_finding_handler, list_findings_handler, prune_findings_handler,
     update_finding_handler, CreateFindingRequest, FindingApiDto, ListFindingsQuery,
-    PruneFindingsQuery, UpdateFindingRequest,
+    PruneFindingsQuery,
 };
 use nexus_daemon_runtime::api::handlers::works::CreateWorkRequest;
 use nexus_daemon_runtime::test_utils;
@@ -391,8 +394,10 @@ async fn findings_creator_isolation_cross_creator_404() {
     let created = create_finding(&state, &work_id, "major", "Secret finding").await;
     let finding_id = created.finding_id.clone();
 
-    // Build a different creator's state (same DB but different active creator).
-    // The finding was created with creator A. Creator B should not see it.
+    // Build a different creator's state (separate workspace home and DB,
+    // different active creator). The finding was created with creator A.
+    // Creator B owns a real Work of its own, so the isolation asserted below
+    // is ownership-based, not an artifact of an empty DB.
     let tmp = tempfile::TempDir::new().unwrap();
     let user_home = tmp.path();
     let nexus_home = user_home.join(".nexus42");
@@ -426,6 +431,29 @@ async fn findings_creator_isolation_cross_creator_404() {
 
     let other_state =
         WorkspaceState::new_for_testing(nexus_home.clone(), db_path.clone(), None).await;
+    // Creator B owns real content in its own workspace DB: a creator row, a
+    // world bound to B, and a Work created through the same handler path
+    // creator A used (the create handler validates the world against the
+    // requesting creator, so the fixture must bind both to B).
+    // SAFETY: test-only fixture rows mirroring `seed_test_creator_and_world`.
+    sqlx::query(
+        "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
+         VALUES ('ctr_other_guy', 'Other Creator', 'active', datetime('now'), '{}')",
+    )
+    .execute(other_state.pool().unwrap())
+    .await
+    .expect("seed creator-B row");
+    sqlx::query(
+        "INSERT OR IGNORE INTO narrative_worlds \
+            (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
+             time_policy, metadata_json, created_at) \
+           VALUES ('wld_test_world', 'ws', 'ctr_other_guy', 'Other World', 'other-world', \
+             'active', 'private', 'manual', '{}', datetime('now'))",
+    )
+    .execute(other_state.pool().unwrap())
+    .await
+    .expect("seed creator-B world");
+    let _other_work_id = create_work(&other_state).await;
     std::mem::forget(tmp);
 
     // Try to GET — should 404 (creator isolation)
@@ -438,7 +466,9 @@ async fn findings_creator_isolation_cross_creator_404() {
     let err = result.unwrap_err();
     assert_eq!(err.status_code(), axum::http::StatusCode::NOT_FOUND);
 
-    // List should return empty (work not owned by other creator)
+    // List on creator A's work must 404 as well: the core findings authority
+    // resolves the owned Work first (work not owned/missing → NotFound), so
+    // creator A's finding rows are never leaked as an empty page.
     let result = list_findings_handler(
         State(other_state),
         Path(work_id),
@@ -450,9 +480,10 @@ async fn findings_creator_isolation_cross_creator_404() {
             cursor: None,
         }),
     )
-    .await
-    .unwrap();
-    assert!(result.0.items.is_empty());
+    .await;
+    assert!(result.is_err(), "cross-creator list should fail");
+    let err = result.unwrap_err();
+    assert_eq!(err.status_code(), axum::http::StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

@@ -1,0 +1,56 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "$id": "https://nexus42.invalid/schemas/core/narrative/narrative-world-state.schema.json",
+ "schema_version": 1,
+ "title": "NarrativeWorldState",
+ "description": "Read-model projection of one World (aggregated narrative state; never the stored row). Mirrors `nexus-narrative` serialized `WorldState` verbatim.",
+ "type": "object",
+ "required": [
+  "world_id",
+  "title",
+  "slug",
+  "status",
+  "is_fork",
+  "created_at"
+ ],
+ "additionalProperties": false,
+ "properties": {
+  "world_id": {
+   "type": "string"
+  },
+  "title": {
+   "type": "string"
+  },
+  "slug": {
+   "type": "string"
+  },
+  "status": {
+   "type": "string"
+  },
+  "is_fork": {
+   "type": "boolean"
+  },
+  "fork_branch_id": {
+   "type": "string"
+  },
+  "parent_world_id": {
+   "type": "string"
+  },
+  "forked_from_event_id": {
+   "type": "string"
+  },
+  "canon_revision": {
+   "type": "integer",
+   "minimum": 0
+  },
+  "current_timeline_head_id": {
+   "type": "string"
+  },
+  "current_time_pointer": {
+   "type": "string"
+  },
+  "created_at": {
+   "type": "string"
+  }
+ }
+}

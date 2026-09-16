@@ -15,8 +15,9 @@ use crate::errors::Result;
 use nexus_contracts::local::orchestration::preset::{PresetCliArg, PresetCliArgType};
 use nexus_contracts::local::orchestration::stage_index;
 use nexus_contracts::local::schedule::http::AddScheduleRequest;
-use nexus_orchestration::preset::validation::stage_for_preset;
-use nexus_orchestration::stage_gates::{self, WorkFields, WorkStageState};
+use nexus_local_db::work_stage::{check_stage_advance, WorkStageState};
+use nexus_orchestration::stage_gates::{self, WorkFields};
+use nexus_preset::validation::stage_for_preset;
 
 // ── V1.45 generic RunCommand struct ─────────────────────────────────────────
 
@@ -183,17 +184,15 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
     let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
 
     // QC3 W-1: try O(1) direct path lookup before falling back to full scan.
-    let loaded =
-        match nexus_orchestration::preset::lookup_preset_by_id(&preset_id, &nexus_home, &caps) {
-            Some(loaded) => loaded,
-            None => nexus_orchestration::preset::resolve_preset(&preset_id, &nexus_home, &caps)
-                .map_err(|e| {
-                    crate::errors::CliError::Config(format!(
-                        "Unknown preset '{preset_id}': {e}. \
+    let loaded = match nexus_preset::lookup_preset_by_id(&preset_id, &nexus_home, &caps) {
+        Some(loaded) => loaded,
+        None => nexus_preset::resolve_preset(&preset_id, &nexus_home, &caps).map_err(|e| {
+            crate::errors::CliError::Config(format!(
+                "Unknown preset '{preset_id}': {e}. \
                      Run `nexus42 creator presets list` to see available presets."
-                    ))
-                })?,
-        };
+            ))
+        })?,
+    };
 
     // Parse trailing args against preset.cli_args declarations.
     let mut input = parse_preset_cli_args(&loaded.manifest.preset.cli_args, &extra)?;
@@ -306,10 +305,9 @@ fn render_rich_preset_help(
     nexus_home: &std::path::Path,
     caps: &nexus_orchestration::capability::CapabilityRegistry,
 ) -> Option<String> {
-    let loaded = match nexus_orchestration::preset::lookup_preset_by_id(preset_id, nexus_home, caps)
-    {
+    let loaded = match nexus_preset::lookup_preset_by_id(preset_id, nexus_home, caps) {
         Some(loaded) => loaded,
-        None => match nexus_orchestration::preset::resolve_preset(preset_id, nexus_home, caps) {
+        None => match nexus_preset::resolve_preset(preset_id, nexus_home, caps) {
             Ok(loaded) => loaded,
             Err(_) => return None,
         },
@@ -788,7 +786,7 @@ async fn stage_advance(
         stage_status: current_status.to_string(),
         intake_status: intake_status.to_string(),
     };
-    stage_gates::check_stage_advance(&work_state, target_stage, force)
+    check_stage_advance(&work_state, target_stage, force)
         .map_err(|e| crate::errors::CliError::Other(format!("{}: {}", e.code, e.message)))?;
 
     // PATCH the work with new stage

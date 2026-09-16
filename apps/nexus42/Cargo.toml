@@ -76,6 +76,7 @@ nexus-home-layout = { path = "../../crates/nexus-home-layout" }
 # §2.1 basic allowlist: available to BOTH cohorts as a normal dependency —
 # the `basic-cli` feature must not be a dependency switch (it is `[]`).
 nexus-core = { path = "../../crates/nexus-core" }
+nexus-preset = { path = "../../crates/nexus-preset" }
 nexus-orchestration = { path = "../../crates/nexus-orchestration", optional = true }
 nexus-moment-context-assembly = { path = "../../crates/nexus-moment-context-assembly", optional = true, features = ["cloud-stage"] }
 nexus-creator-memory = { path = "../../crates/nexus-creator-memory", optional = true }

@@ -6,7 +6,8 @@
 //! reducing boilerplate across integration tests.
 
 use std::ops::Deref;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// Wrapper around [`tempfile::TempDir`] so tests get a `must_use` reminder to keep the root alive.
 #[must_use = "Temporary directory is deleted when dropped; keep TestTempRoot in scope for the whole test."]
@@ -22,6 +23,56 @@ impl Deref for TestTempRoot {
 
 const TEST_CREATOR_ID: &str = "test_creator";
 const TEST_WORKSPACE_SLUG: &str = "default";
+
+/// Wire AND start an Agent Host facade that admits the state's configured
+/// provider, mirroring the boot path.
+///
+/// Publishing the runtime bundle only needs a facade to EXIST, but run
+/// admission validates agent bindings against the port's live provider catalog
+/// (`DaemonProviderCatalogPort::provider_exists`). An unstarted
+/// [`nexus_agent_host::HostManager::new`] has an empty catalog, so a fixture
+/// that binds its own configured provider would be refused as
+/// `unknown provider …`. The admitted catalog is built from the fixture's own
+/// config (never a PATH scan), so the test never depends on host binaries.
+pub async fn wire_test_agent_host_started(state: &mut crate::workspace::WorkspaceState) {
+    use nexus_agent_host::capability::HostStartConfig;
+    use nexus_agent_host::{HostFacade, ProviderCatalog};
+
+    let config = (*state.agent_host_config()).clone();
+    let catalog =
+        ProviderCatalog::build_from_sources(&config, vec![], vec![]).expect("fixture catalog");
+    let workspace_root = state
+        .workspace_path()
+        .map_or_else(|| state.nexus_home().clone(), std::path::PathBuf::from);
+    let host = Arc::new(nexus_agent_host::core::manager::HostManager::new());
+    host.start(HostStartConfig {
+        config_path: workspace_root.join("absent-agent-host.toml"),
+        workspace_root,
+        max_sessions: config.max_sessions,
+        max_ops_per_session: config.max_ops_per_session,
+        timeouts: config.timeouts.clone(),
+        host_config: Some(config),
+        admitted_catalog: Some(catalog.entries),
+        probe_owner: None,
+    })
+    .await
+    .expect("start fixture agent host");
+    state.set_agent_host(host);
+}
+
+/// Wire a fresh, unstarted [`nexus_agent_host::HostManager`] as the Agent Host
+/// facade on a test-built workspace state.
+///
+/// The lazy-attach seam (`ensure_creator_pool` → `publish_lazy_attach_bundle`)
+/// composes the production Host prompt executor and provider port, so it
+/// requires the facade the daemon boot always wires before serving. Tests that
+/// drive that seam MUST supply one. Tests asserting the facade's *absence*
+/// (e.g. the agent-host "not configured" health path) keep
+/// [`crate::workspace::WorkspaceState::new_for_testing`] untouched — it wires
+/// no facade on purpose.
+pub fn wire_test_agent_host(state: &mut crate::workspace::WorkspaceState) {
+    state.set_agent_host(Arc::new(nexus_agent_host::core::manager::HostManager::new()));
+}
 
 /// Create a temporary workspace directory with an initialized `SQLite` database (ADR-014 layout).
 ///
@@ -41,22 +92,69 @@ const TEST_WORKSPACE_SLUG: &str = "default";
 /// // `tmp` must stay in scope for the duration of the test
 /// ```
 pub async fn create_test_workspace() -> (TestTempRoot, PathBuf, PathBuf) {
+    create_test_workspace_for(TEST_CREATOR_ID, TEST_WORKSPACE_SLUG).await
+}
+
+/// Create a temporary workspace selected for an explicit `creator_id` /
+/// `workspace_slug`.
+///
+/// The materialized Profile home, the `config.toml` active selection and the
+/// admitted `state.db` all name the **same** creator and workspace. Tests that
+/// need a non-default active creator (e.g. the `ctr_…` actor fixtures) MUST use
+/// this constructor rather than creating the default workspace and then
+/// rewriting `config.toml`: a post-hoc config rewrite leaves the host's bound
+/// pool and the config-resolved selection pointing at different databases, so
+/// the storage binding no longer matches the selected identity.
+pub async fn create_test_workspace_for(
+    creator_id: &str,
+    workspace_slug: &str,
+) -> (TestTempRoot, PathBuf, PathBuf) {
     let tmp = TestTempRoot(tempfile::TempDir::new().expect("failed to create temp dir"));
-    let user_home = tmp.path();
+    let nexus_home = tmp.path().join(".nexus42");
+    let db_path = materialize_workspace_for(tmp.path(), creator_id, workspace_slug).await;
+    (tmp, nexus_home, db_path)
+}
+
+/// The workspace root every test fixture declares in its operational
+/// `meta.json` as `local_root`.
+///
+/// The core resolves every guarded filesystem path against that recorded root
+/// (`nexus_core::works::work_workspace_path`), while the HTTP state carries its
+/// own `workspace_path`. Fixtures must therefore hand out the SAME directory
+/// both surfaces read — a fixture that advertises one root and records another
+/// makes relative paths (`Works/<ref>/Outlines/outline.md`) resolve outside the
+/// core's root and fail the path guard.
+fn test_workspace_local_root(user_home: &Path) -> PathBuf {
+    user_home.join("creative")
+}
+
+/// Materialize `.nexus42` for `creator_id`/`workspace_slug` inside an existing
+/// `user_home`, and select it as active in `config.toml`.
+///
+/// Split out of [`create_test_workspace_for`] so a single home can hold more
+/// than one creator's workspace — the shape a binding-mismatch test needs.
+/// Returns the created `state.db` path.
+pub async fn materialize_workspace_for(
+    user_home: &Path,
+    creator_id: &str,
+    workspace_slug: &str,
+) -> PathBuf {
     let nexus_home = user_home.join(".nexus42");
     std::fs::create_dir_all(&nexus_home).expect("failed to create nexus_home dir");
 
-    let op_dir = nexus_home_layout::operational_workspace_dir(
-        user_home,
-        TEST_CREATOR_ID,
-        TEST_WORKSPACE_SLUG,
-    );
+    let op_dir =
+        nexus_home_layout::operational_workspace_dir(user_home, creator_id, workspace_slug);
     std::fs::create_dir_all(&op_dir).expect("operational dir");
+    // The declared root must exist: the core's path guard canonicalizes it and
+    // refuses every path that resolves outside it, so a fixture that records an
+    // uncreated root refuses its own workspace-relative paths.
+    let local_root = test_workspace_local_root(user_home);
+    std::fs::create_dir_all(&local_root).expect("local root");
     let meta = serde_json::json!({
         "schema_version": 1,
-        "creator_id": TEST_CREATOR_ID,
-        "workspace_slug": TEST_WORKSPACE_SLUG,
-        "local_root": user_home.join("creative"),
+        "creator_id": creator_id,
+        "workspace_slug": workspace_slug,
+        "local_root": local_root,
         "created_at": "2020-01-01T00:00:00Z"
     });
     std::fs::write(
@@ -67,12 +165,11 @@ pub async fn create_test_workspace() -> (TestTempRoot, PathBuf, PathBuf) {
 
     // Write as TOML so daemon reads config.toml natively
     let toml_str = format!(
-        "active_creator_id = \"{TEST_CREATOR_ID}\"\n[active_workspace_slug_by_creator]\n\"{TEST_CREATOR_ID}\" = \"{TEST_WORKSPACE_SLUG}\""
+        "active_creator_id = \"{creator_id}\"\n[active_workspace_slug_by_creator]\n\"{creator_id}\" = \"{workspace_slug}\""
     );
     std::fs::write(nexus_home.join("config.toml"), toml_str).expect("config.toml");
 
-    let db_path =
-        nexus_home_layout::workspace_state_db_path(user_home, TEST_CREATOR_ID, TEST_WORKSPACE_SLUG);
+    let db_path = nexus_home_layout::workspace_state_db_path(user_home, creator_id, workspace_slug);
 
     // Admitted engine-owner fixture: same admission path the daemon uses in
     // production (`init_engine_pool` migrates and seeds versions), so the
@@ -84,7 +181,7 @@ pub async fn create_test_workspace() -> (TestTempRoot, PathBuf, PathBuf) {
     guarded.pool().close().await;
     nexus_local_db::writer_protocol::release_retained_writer_guards(&db_path);
 
-    (tmp, nexus_home, db_path)
+    db_path
 }
 
 /// Create a temporary workspace directory with an initialized `SQLite` database
@@ -92,11 +189,11 @@ pub async fn create_test_workspace() -> (TestTempRoot, PathBuf, PathBuf) {
 ///
 /// Returns a tuple of `(temp_dir, nexus_home, db_path, workspace_dir)` where:
 /// - `temp_dir`, `nexus_home`, `db_path` are as in [`create_test_workspace`].
-/// - `workspace_dir` is the path to a created workspace directory.
+/// - `workspace_dir` is the workspace's declared `local_root`, created.
 pub async fn create_initialized_test_workspace() -> (TestTempRoot, PathBuf, PathBuf, PathBuf) {
     let (tmp, nexus_home, db_path) = create_test_workspace().await;
 
-    let workspace_dir = tmp.path().join("workspace");
+    let workspace_dir = test_workspace_local_root(tmp.path());
     std::fs::create_dir_all(&workspace_dir).expect("failed to create workspace dir");
 
     // Seed workspace_meta so middleware recognizes the workspace as initialized

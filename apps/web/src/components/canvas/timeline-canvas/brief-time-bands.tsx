@@ -123,7 +123,7 @@ export function BriefTimeBands({ tree, onSelectEra }: BriefTimeBandsProps) {
   const renderBand = (node: EraTreeNode): ReactNode => {
     const { era, era_type, children, depth } = node;
     const eraId = era.key_block_id;
-    const title = era.canonical_name || t('timeline.briefEraNode.unnamed');
+    const title = era.canonical_name ?? t('timeline.briefEraNode.unnamed');
     const worldSummary = worldSummaryOf(era);
     // DoD: bands at depth > 0 are collapsible; depth-0 bands stay expanded.
     const isCollapsible = depth > 0 && children.length > 0;

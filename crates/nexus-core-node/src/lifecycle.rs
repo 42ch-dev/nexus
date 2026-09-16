@@ -620,18 +620,22 @@ pub async fn open_core(
 
     let core = Arc::new(core);
     state.clear_service_only_uninitialized();
-    // Install the durable journal pool and settle any operation orphaned by the
-    // predecessor process's exit as `interrupted` (LIFE-3). This must happen
-    // before the host accepts new work so a restarted process never re-dispatches
-    // a journaled op and the prior active op is queryable immediately. A failed
+    // Settle any operation orphaned by the predecessor process's exit as
+    // `interrupted` (LIFE-3) through the CoreService-owned journal before the
+    // host accepts new work, so a restarted process never re-dispatches a
+    // journaled op and the prior active op is queryable immediately. A failed
     // settlement cannot prove that recovery, so the open fails instead of
     // publishing a settled journal it does not have.
-    state.set_journal_pool(core.pool().clone());
-    if let Err(err) = state.settle_journal_on_open().await {
+    if let Err(err) = core.settle_provider_orphans().await {
         let reason = format!("journal settlement failed: {err}");
         abort_opening(state.clone(), Some(core), Some(host), js_port.clone()).await;
         return Err(reason);
     }
+    state
+        .core
+        .lock()
+        .expect("core mutex poisoned")
+        .replace(core);
     state
         .host
         .lock()
@@ -642,11 +646,6 @@ pub async fn open_core(
         .lock()
         .expect("port mutex poisoned")
         .replace(provider_port);
-    state
-        .core
-        .lock()
-        .expect("core mutex poisoned")
-        .replace(core);
     state.publish_open().await;
     Ok(())
 }
@@ -716,27 +715,28 @@ pub async fn close_core(state: Arc<EnvState>) -> CoreCloseReport {
             .await;
     }
 
-    let report = match tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), async {
-        let drain_budget = CLOSE_CANCEL_PHASE.min(CLOSE_BUDGET.saturating_sub(started.elapsed()));
-        if !drain_budget.is_zero() {
-            tokio::time::sleep(Duration::from_millis(25).min(drain_budget)).await;
-        }
-        let (_, report) = cleanup_owners(state.clone(), None, None, None, deadline).await;
-        report
-    })
-    .await
-    {
-        Ok(report) => report,
-        Err(_) => {
-            state.mark_interrupted();
-            let pending = state.pending_operations_snapshot().await;
-            let owners_present = state.owner_slots_present();
-            let mut pending = pending;
-            if owners_present {
-                pending.push("cleanup-owners-retained".to_string());
+    let report = if let Ok(report) =
+        tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), async {
+            let drain_budget =
+                CLOSE_CANCEL_PHASE.min(CLOSE_BUDGET.saturating_sub(started.elapsed()));
+            if !drain_budget.is_zero() {
+                tokio::time::sleep(Duration::from_millis(25).min(drain_budget)).await;
             }
-            interrupted_report(pending)
+            let (_, report) = cleanup_owners(state.clone(), None, None, None, deadline).await;
+            report
+        })
+        .await
+    {
+        report
+    } else {
+        state.mark_interrupted();
+        let pending = state.pending_operations_snapshot().await;
+        let owners_present = state.owner_slots_present();
+        let mut pending = pending;
+        if owners_present {
+            pending.push("cleanup-owners-retained".to_string());
         }
+        interrupted_report(pending)
     };
 
     *state.settled_close.lock().await = Some(report.clone());

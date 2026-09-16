@@ -154,7 +154,7 @@ fn render_template(template: &str, vars: &[(&str, &str)]) -> Result<String, Capa
 ///
 /// Uses the embedded-presets `include_dir!` tree compiled into the binary.
 fn load_template(name: &str) -> Option<String> {
-    crate::preset::read_embedded_template("novel-project-init", &format!("templates/{name}"))
+    nexus_preset::read_embedded_template("novel-project-init", &format!("templates/{name}"))
 }
 
 // ---------------------------------------------------------------------------
@@ -233,11 +233,9 @@ impl Capability for NovelProjectScaffold {
     fn name(&self) -> &'static str {
         "novel.project_scaffold"
     }
-
     fn input_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"creator_id":{"type":"string"},"work_id":{"type":"string"},"work_ref":{"type":"string"},"title":{"type":"string"},"world_id":{"type":["string","null"]},"create_world":{"type":"boolean"},"world_title":{"type":"string"},"world_slug":{"type":"string"},"total_planned_chapters":{"type":"integer","minimum":1},"total_volumes":{"type":"integer","minimum":1,"default":1}},"required":["creator_id","work_id","work_ref","title","total_planned_chapters"],"additionalProperties":false}"#
+        nexus_preset::capability_catalog::NOVEL_PROJECT_SCAFFOLD_INPUT_SCHEMA
     }
-
     fn output_schema(&self) -> &'static str {
         r#"{"type":"object","properties":{"scaffold_root":{"type":"string"},"chapters_seeded":{"type":"integer"},"files_created":{"type":"array","items":{"type":"string"}},"dirs_created":{"type":"array","items":{"type":"string"}}},"required":["scaffold_root","chapters_seeded","files_created","dirs_created"],"additionalProperties":false}"#
     }
@@ -306,9 +304,9 @@ impl Capability for NovelProjectScaffold {
         if !inp.create_world.unwrap_or(false) && inp.world_id.is_none() {
             return Err(CapabilityError::InputInvalid(
                 "V1.40 requires world_id at Work creation. \
-                 Either provide world_id from 'nexus42 creator world list' \
-                 or set create_world=true with world_title \
-                 (equivalent to 'nexus42 creator world create --title \"...\")"
+             Either provide world_id from 'nexus42 creator world list' \
+             or set create_world=true with world_title \
+             (equivalent to 'nexus42 creator world create --title \"...\")"
                     .to_string(),
             ));
         }
@@ -365,20 +363,20 @@ impl Capability for NovelProjectScaffold {
             // Also verifies owner_creator_id matches the scaffold's creator
             // to prevent cross-creator world binding (QC2 W-02).
             let exists: i64 = sqlx::query_scalar(
-                "SELECT EXISTS(SELECT 1 FROM narrative_worlds WHERE world_id = ? AND owner_creator_id = ?)",
-            )
-            .bind(world_id)
-            .bind(&inp.creator_id)
-            .fetch_one(pool)
-            .await
-            .map_err(|e| CapabilityError::Internal(format!("world_id existence check: {e}")))?;
+            "SELECT EXISTS(SELECT 1 FROM narrative_worlds WHERE world_id = ? AND owner_creator_id = ?)",
+        )
+        .bind(world_id)
+        .bind(&inp.creator_id)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| CapabilityError::Internal(format!("world_id existence check: {e}")))?;
             if exists == 0 {
                 return Err(CapabilityError::InputInvalid(format!(
-                    "world_id {world_id:?} not found in narrative_worlds or not owned by creator {:?}.\n  \
-                     ↳ Create a new World:  nexus42 creator world create --title \"...\"\n  \
-                     ↳ List your Worlds:    nexus42 creator world list",
-                    inp.creator_id
-                )));
+                "world_id {world_id:?} not found in narrative_worlds or not owned by creator {:?}.\n  \
+                 ↳ Create a new World:  nexus42 creator world create --title \"...\"\n  \
+                 ↳ List your Worlds:    nexus42 creator world list",
+                inp.creator_id
+            )));
             }
         }
 
@@ -403,9 +401,9 @@ impl Capability for NovelProjectScaffold {
                 "**Binding:** world_id will be assigned during scaffold\n".to_string()
             } else {
                 pre_existing_world_id
-                    .as_ref()
-                    .map(|id| format!("**Binding:** `world_id: {id}`\n\nWorld details live in the World KB; see World Browser for the full setting."))
-                    .expect("world_id must be resolved at this point — mandatory binding check at line ~284 guarantees Some")
+                .as_ref()
+                .map(|id| format!("**Binding:** `world_id: {id}`\n\nWorld details live in the World KB; see World Browser for the full setting."))
+                .expect("world_id must be resolved at this point — mandatory binding check at line ~284 guarantees Some")
             };
             // Description placeholder — collected during grill-me; left empty in V1.36.
             let description = format!("Long-term goal and initial creative direction for **{}** (work_ref: `{}`). Fill in as grill-me captures intent.", inp.title, inp.work_ref);
@@ -447,14 +445,14 @@ impl Capability for NovelProjectScaffold {
                 let extra = i32::from(vol <= (inp.total_planned_chapters % inp.total_volumes));
                 let ch_end = ch_start + chapters_per_volume + extra - 1;
                 volume_entries.push(format!(
-                    "  - volume: {vol}\n    title: \"Volume {vol}\"\n    chapter_range: [{ch_start}, {ch_end}]"
-                ));
+                "  - volume: {vol}\n    title: \"Volume {vol}\"\n    chapter_range: [{ch_start}, {ch_end}]"
+            ));
                 ch_start = ch_end + 1;
             }
             let volumes_yaml = volume_entries.join("\n");
             let content = format!(
                 "---\nwork_id: {work_id}\nvolumes:\n{volumes_yaml}---\n\n\
-                 *Generated by novel-project-init preset (V1.42 multi-volume)*\n",
+             *Generated by novel-project-init preset (V1.42 multi-volume)*\n",
                 work_id = inp.work_id,
             );
             write_file_idem(

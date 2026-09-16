@@ -51,6 +51,7 @@ pub mod soul_meta;
 pub mod soul_narrative;
 pub mod spoke_rules;
 pub mod work_chapters;
+pub mod work_stage;
 pub mod works;
 pub mod workspace_commit_intent;
 
@@ -135,7 +136,8 @@ pub use memory_fragment::{
 // Re-export soul_narrative types
 pub use soul_narrative::{
     build_stats_fingerprint, get_soul_narrative, soul_narrative_fragment_stats,
-    upsert_soul_narrative, SoulNarrativeFragmentStats, SoulNarrativeRecord,
+    soul_narrative_fragment_stats_readonly, upsert_soul_narrative, SoulNarrativeFragmentStats,
+    SoulNarrativeRecord,
 };
 
 // Re-export character memory types (v1.184 P3 Task 1)
@@ -155,8 +157,8 @@ pub use character_soul_meta::{
     CharacterSoulMeta,
 };
 pub use character_soul_narrative::{
-    character_soul_narrative_fragment_stats, get_character_soul_narrative,
-    upsert_character_soul_narrative, CharacterSoulNarrativeRecord,
+    character_soul_narrative_fragment_stats, character_soul_narrative_fragment_stats_readonly,
+    get_character_soul_narrative, upsert_character_soul_narrative, CharacterSoulNarrativeRecord,
 };
 
 /// Hard upper bound for Character memory list page sizes.

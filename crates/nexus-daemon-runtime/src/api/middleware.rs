@@ -664,7 +664,10 @@ mod tests {
         seed_creator_layout(user_home, CREATOR_ID);
         let _home = HomeOverride::set(user_home);
 
-        let state = WorkspaceState::initialize().await.expect("initialize");
+        let mut state = WorkspaceState::initialize().await.expect("initialize");
+        // set-active drives the Profile lazy attach, which composes over the
+        // Host facade the daemon wires at boot.
+        crate::test_utils::wire_test_agent_host(&mut state);
         let app = crate::api::create_router(state, DaemonApiConfig::keyless());
         let server = TestServer::new(app);
 
@@ -749,7 +752,10 @@ mod tests {
         seed_creator_layout(user_home, CREATOR_ID);
         let _home = HomeOverride::set(user_home);
 
-        let state = WorkspaceState::initialize().await.expect("initialize");
+        let mut state = WorkspaceState::initialize().await.expect("initialize");
+        // set-active drives the Profile lazy attach, which composes over the
+        // Host facade the daemon wires at boot.
+        crate::test_utils::wire_test_agent_host(&mut state);
         let app = crate::api::create_router(state, DaemonApiConfig::keyless());
         let server = TestServer::new(app);
 

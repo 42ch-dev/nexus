@@ -65,7 +65,7 @@ export function WorkDetailPage() {
                   canonical CardTitle voice="content" consumer. Sibling chrome
                   (status badges, buttons, shortId description) stays interface
                   voice (sans). */}
-              <CardTitle voice="content">{w.title || t('untitled')}</CardTitle>
+              <CardTitle voice="content">{w.title ?? t('untitled')}</CardTitle>
               <CardDescription>
                 <span className="text-copy-13-mono">{shortId(w.work_id)}</span>
               </CardDescription>
@@ -82,10 +82,10 @@ export function WorkDetailPage() {
         </CardHeader>
         <CardContent>
           <dl className="grid grid-cols-1 gap-x-8 gap-y-4 md:grid-cols-2">
-            <Detail label={t('workDetail.labels.longTermGoal')} value={w.long_term_goal || '—'} />
-            <Detail label={t('workDetail.labels.initialIdea')} value={w.initial_idea || '—'} />
+            <Detail label={t('workDetail.labels.longTermGoal')} value={w.long_term_goal ?? '—'} />
+            <Detail label={t('workDetail.labels.initialIdea')} value={w.initial_idea ?? '—'} />
             <Detail label={t('workDetail.labels.intakeStatus')}><StatusBadge status={w.intake_status} /></Detail>
-            <Detail label={t('workDetail.labels.currentStage')}>{w.current_stage || '—'} <span className="text-gray-700">· {humanizeStatus(w.stage_status)}</span></Detail>
+            <Detail label={t('workDetail.labels.currentStage')}>{w.current_stage ?? '—'} <span className="text-gray-700">· {humanizeStatus(w.stage_status)}</span></Detail>
             <Detail label={t('workDetail.labels.profile')}>{w.work_profile ? humanizeStatus(w.work_profile) : '—'}</Detail>
             <Detail label={t('workDetail.labels.primaryPreset')}><span className="text-copy-13-mono">{shortId(w.primary_preset_id)}</span></Detail>
             <Detail label={t('workDetail.labels.world')}><span className="text-copy-13-mono">{shortId(w.world_id)}</span></Detail>
@@ -207,7 +207,7 @@ function FindingsSection({ workId }: { workId: string }) {
             {rows.map((f) => (
               <li key={f.finding_id} className="rounded-card border border-gray-alpha-400 p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-copy-14 font-medium text-gray-1000">{f.title || t('workDetail.untitledFinding')}</p>
+                  <p className="text-copy-14 font-medium text-gray-1000">{f.title ?? t('workDetail.untitledFinding')}</p>
                   <div className="flex items-center gap-2">
                     <StatusBadge status={f.severity} variant={undefined} raw />
                     <StatusBadge status={f.status} />

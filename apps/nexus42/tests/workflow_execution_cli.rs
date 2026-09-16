@@ -235,8 +235,8 @@ async fn load_drive_row(daemon: &LiveDaemon, schedule_id: &str) -> ScheduleDrive
 /// REAL content-addressed source identity (never a zero hash) plus a valid
 /// `default` binding so admission's binding-completeness gate passes.
 fn seeded_descriptor_json() -> Vec<u8> {
-    let source = nexus_orchestration::preset::embedded_source_identity(PUBLIC_PRESET)
-        .expect("embedded source identity");
+    let source =
+        nexus_preset::embedded_source_identity(PUBLIC_PRESET).expect("embedded source identity");
     serde_json::to_vec(&serde_json::json!({
         "creator_id": "test_creator",
         "work_id": null,
@@ -333,7 +333,7 @@ async fn wait_for_run_status(
 /// (N-14 failed-driver fixture): the REAL content-addressed source
 /// identity plus an empty binding map (the preset has no prompt roles).
 fn seeded_combat_descriptor_json() -> Vec<u8> {
-    let source = nexus_orchestration::preset::embedded_source_identity("combat-engine")
+    let source = nexus_preset::embedded_source_identity("combat-engine")
         .expect("combat-engine embedded source identity");
     serde_json::to_vec(&serde_json::json!({
         "creator_id": "test_creator",
@@ -751,7 +751,7 @@ async fn admission_dependency_blocked_stays_pending() {
 /// creator stays pending while the first driven run is running.
 #[tokio::test]
 async fn admission_serial_blocked_stays_pending() {
-    let daemon = LiveDaemon::start().await;
+    let daemon = LiveDaemon::start_with_agent_host(MockHost::new()).await;
     let (status, body) = add_public(&daemon, "p2-t1-serial-first").await;
     assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
     let first_id = body["schedule_id"]
@@ -893,7 +893,7 @@ async fn admission_unknown_provider_refuses() {
 
 #[tokio::test]
 async fn admission_new_public_schedule_is_driven() {
-    let daemon = LiveDaemon::start().await;
+    let daemon = LiveDaemon::start_with_agent_host(MockHost::new()).await;
     let (status, body) = add_public(&daemon, "p2-t1-admission").await;
     assert_eq!(
         status,
@@ -989,7 +989,7 @@ async fn admission_system_maintenance_stays_inert() {
 
 #[tokio::test]
 async fn concurrent_start_yields_one_owned_session() {
-    let daemon = LiveDaemon::start().await;
+    let daemon = LiveDaemon::start_with_agent_host(MockHost::new()).await;
     let (status, body) = add_public(&daemon, "p2-t1-concurrent").await;
     assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
     let schedule_id = body["schedule_id"]
@@ -1087,7 +1087,7 @@ async fn explicit_legacy_running_without_session_starts() {
         .expect("resume running as paused");
     assert_eq!(paused, 0, "no driven_v1 running rows to pause");
     supervisor.tick().await.expect("tick succeeds");
-    nexus_daemon_runtime::cron_supervisor::run_one_tick(
+    nexus_core::execution::schedules::cron::run_one_tick(
         &daemon.pool,
         std::path::Path::new(""),
         &supervisor,
@@ -1421,7 +1421,7 @@ async fn admission_legacy_rows_inert_across_tick() {
     supervisor.tick().await.expect("tick succeeds");
 
     // Cron admission tick (the cron supervisor's step 2 path).
-    nexus_daemon_runtime::cron_supervisor::run_one_tick(
+    nexus_core::execution::schedules::cron::run_one_tick(
         &daemon.pool,
         std::path::Path::new(""),
         &supervisor,
@@ -1461,7 +1461,7 @@ async fn admission_legacy_rows_inert_across_tick() {
 /// unowned.
 #[tokio::test]
 async fn admission_resume_ignores_legacy_running_capacity() {
-    let daemon = LiveDaemon::start().await;
+    let daemon = LiveDaemon::start_with_agent_host(MockHost::new()).await;
     let now = chrono::Utc::now().timestamp();
 
     // Historical legacy `Running` row (no owned session, migration default).
@@ -1603,7 +1603,7 @@ async fn admission_internal_insertion_branches_durable() {
         None,
         None,
         &work,
-        nexus_orchestration::preset::default_bindings_for_preset("research", MOCK_PROVIDER)
+        nexus_orchestration::preset_runtime::default_bindings_for_preset("research", MOCK_PROVIDER)
             .expect("research preset resolves"),
         None,
     )
@@ -1644,7 +1644,7 @@ async fn admission_internal_insertion_branches_durable() {
             .expect("chain descriptor parses");
     assert!(
         chain_desc.source
-            != nexus_orchestration::run_state::PresetSourceIdentity::Embedded {
+            != nexus_preset::source_identity::PresetSourceIdentity::Embedded {
                 preset_id: "research".to_string(),
                 content_hash: [0; 32],
             },
@@ -1725,8 +1725,11 @@ async fn admission_internal_insertion_branches_durable() {
         "wrk_chain",
         "novel-brainstorm",
         "brainstorm",
-        nexus_orchestration::preset::default_bindings_for_preset("novel-brainstorm", MOCK_PROVIDER)
-            .expect("novel-brainstorm preset resolves"),
+        nexus_orchestration::preset_runtime::default_bindings_for_preset(
+            "novel-brainstorm",
+            MOCK_PROVIDER,
+        )
+        .expect("novel-brainstorm preset resolves"),
     )
     .await
     .expect("enqueue cron schedule");
@@ -1770,7 +1773,7 @@ async fn admission_internal_insertion_branches_durable() {
         &daemon.pool,
         "rvm_creator",
         "wrk_chain",
-        nexus_orchestration::preset::default_bindings_for_preset(
+        nexus_orchestration::preset_runtime::default_bindings_for_preset(
             "novel-review-master",
             MOCK_PROVIDER,
         )
@@ -2518,7 +2521,7 @@ async fn admission_failed_driver_transition_refuses_reentry() {
         .expect("ensure_driving must not error");
     assert_eq!(
         disposition,
-        nexus_daemon_runtime::preset_run::DriveDisposition::NotDriving,
+        nexus_core::execution::DriveDisposition::NotDriving,
         "a terminal failed run must refuse re-entry"
     );
 

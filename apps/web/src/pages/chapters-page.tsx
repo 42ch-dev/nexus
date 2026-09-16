@@ -118,7 +118,7 @@ export function ChaptersPage() {
                 <option value="" disabled>{t('chapters.selectWorkPlaceholder')}</option>
                 {workOptions.map((w) => (
                   <option key={w.work_id} value={w.work_id}>
-                    {w.title || w.work_id}
+                    {w.title ?? w.work_id}
                   </option>
                 ))}
               </select>

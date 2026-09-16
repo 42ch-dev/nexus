@@ -16,12 +16,7 @@ export interface EditCoreContextRequest {
    * Body text for append/replace operations.
    */
   body?: string;
-  /**
-   * JSON patch for struct_merge operation.
-   */
-  patch?: {
-    [k: string]: unknown | undefined;
-  };
+  patch?: unknown;
   /**
    * Key path for struct_remove operation.
    */

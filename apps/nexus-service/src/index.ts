@@ -1,8 +1,20 @@
 import type { Server } from 'node:http';
+import { rmSync } from 'node:fs';
 import { createAcpProvider } from '@42ch/nexus-provider-acp';
 import type { CoreCloseReport } from '@42ch/nexus-contracts';
 import { validateStartupBind } from './bind.js';
-import { CLOSE_BUDGET_MS, formatHttpAuthority, loadTlsMaterial, resolveServiceConfig, type ServiceOptions } from './config.js';
+import {
+  CLOSE_BUDGET_MS,
+  loadTlsMaterial,
+  resolveServiceConfig,
+  type ServiceOptions,
+} from './config.js';
+import {
+  createDiscoveryRecord,
+  publishDiscovery,
+  removeOwnedDiscovery,
+  withServiceStartLock,
+} from './discovery.js';
 import { closeServiceCore, openServiceCore } from './lifecycle.js';
 import { createServiceServer, listenServer, type RunningService } from './server.js';
 
@@ -20,6 +32,13 @@ export interface CloseOwnerOptions {
   budgetMs?: number;
   /** Listener teardown strategy (defaults to {@link stopListening}). */
   teardownListener?: (server: Server, deadlineMs: number) => Promise<void>;
+  /** Runs once the listener is down (e.g. removing a unix socket file). */
+  afterListenerStopped?: () => void;
+  /**
+   * §7 discovery ownership: awaited after a *confirmed* close only. An
+   * unconfirmed close retains the published record so diagnostics survive.
+   */
+  removeDiscovery?: () => Promise<unknown>;
 }
 
 /**
@@ -49,9 +68,21 @@ export function createCloseOwner(options: CloseOwnerOptions): () => Promise<Core
         // Ordering matters: stop accepts synchronously, then start the native
         // close in the same turn. Awaiting the listener first would spend the
         // budget twice.
-        const listener = server?.listening ? teardown(server, deadline) : Promise.resolve();
+        const listener = server?.listening
+          ? teardown(server, deadline).then(() => options.afterListenerStopped?.())
+          : Promise.resolve();
         const native = options.closeCore();
         const [report] = await Promise.all([native, listener]);
+        if (isConfirmedClosed(report) && options.removeDiscovery) {
+          try {
+            await options.removeDiscovery();
+          } catch (error) {
+            // The close itself is confirmed; a failed record removal leaves a
+            // stale-but-replaced-on-next-start record, which must not turn a
+            // confirmed close into a reported failure.
+            console.error('[nexus-service] discovery removal failed:', error);
+          }
+        }
         return report;
       })();
       inFlight = attempt
@@ -67,6 +98,12 @@ export function createCloseOwner(options: CloseOwnerOptions): () => Promise<Core
   };
 }
 
+/**
+ * Launch protocol composition (architecture §7): take the service-start lock,
+ * open the core (readiness confirmed inside — provider probe included, or the
+ * explicit uninitialized shell), bind the listener, and only then atomically
+ * publish the discovery record. A failed open or bind never publishes ready.
+ */
 export async function startService(options: ServiceOptions): Promise<RunningService> {
   const config = resolveServiceConfig(options);
   if (config.tlsCert && config.tlsKey) {
@@ -78,33 +115,50 @@ export async function startService(options: ServiceOptions): Promise<RunningServ
 
   validateStartupBind(config);
 
-  const providers = config.domainOnly ? undefined : createAcpProvider();
-  const serviceCore = await openServiceCore(config, providers);
+  return withServiceStartLock(config.home, async () => {
+    const providers = config.domainOnly ? undefined : createAcpProvider();
+    const serviceCore = await openServiceCore(config, providers);
 
-  let server: Server | undefined;
-  const close = createCloseOwner({
-    getServer: () => server,
-    closeCore: () => closeServiceCore(serviceCore.core),
-  });
+    let server: Server | undefined;
+    const close = createCloseOwner({
+      getServer: () => server,
+      closeCore: () => closeServiceCore(serviceCore.core),
+      afterListenerStopped: () => {
+        if (config.transport === 'unix' && config.socketPath) {
+          // The listener is down, so the socket file is a stale leaf now.
+          rmSync(config.socketPath, { force: true });
+        }
+      },
+      removeDiscovery: () => removeOwnedDiscovery(serviceCore.instanceId),
+    });
 
-  try {
-    const created = createServiceServer(config, serviceCore, close);
-    server = created.server;
-    await listenServer(server, config.host, config.port);
-    const bound = server.address();
-    if (bound && typeof bound === 'object') {
-      const protocol = config.tlsCert && config.tlsKey ? 'https' : 'http';
+    try {
+      const created = createServiceServer(config, serviceCore, close);
+      server = created.server;
+      const endpoint = await listenServer(server, config);
+      const record = createDiscoveryRecord({
+        instanceId: serviceCore.instanceId,
+        userHome: config.home,
+        endpoint,
+        tlsFingerprint: serviceCore.tlsFingerprint?.fingerprint ?? null,
+        readiness: serviceCore.workspaceInitialized ? 'ready' : 'uninitialized',
+        creatorId: serviceCore.creatorId,
+        workspaceSlug: serviceCore.workspaceSlug,
+        engineEpoch: serviceCore.engineEpoch,
+      });
+      await publishDiscovery(record);
       return {
-        url: `${protocol}://${formatHttpAuthority(config.host, bound.port)}`,
+        url: endpoint.transport === 'http' ? endpoint.url : null,
+        endpoint,
+        discovery: record,
         service: serviceCore,
-        close: created.running.close,
+        close,
       };
+    } catch (error) {
+      await close();
+      throw error;
     }
-    return created.running;
-  } catch (error) {
-    await close();
-    throw error;
-  }
+  });
 }
 
 /**

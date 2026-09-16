@@ -24,11 +24,9 @@ impl Capability for JudgeRule {
     fn name(&self) -> &'static str {
         "judge.rule"
     }
-
     fn input_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"rule":{"type":"string"},"contextData":{}},"required":["rule","contextData"],"additionalProperties":false}"#
+        nexus_preset::capability_catalog::JUDGE_RULE_INPUT_SCHEMA
     }
-
     fn output_schema(&self) -> &'static str {
         r#"{"type":"object","properties":{"result":{"type":"boolean"},"reason":{"type":"string"}},"required":["result","reason"],"additionalProperties":false}"#
     }

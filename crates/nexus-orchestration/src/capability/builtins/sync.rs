@@ -29,11 +29,9 @@ impl Capability for SyncPull {
     fn name(&self) -> &'static str {
         "sync.pull"
     }
-
     fn input_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"force":{"type":"boolean","default":false}},"required":[],"additionalProperties":false}"#
+        nexus_preset::capability_catalog::SYNC_PULL_INPUT_SCHEMA
     }
-
     fn output_schema(&self) -> &'static str {
         r#"{"type":"object","properties":{"deltasPulled":{"type":"integer","minimum":0},"conflicts":{"type":"boolean"}},"required":["deltasPulled","conflicts"],"additionalProperties":false}"#
     }
@@ -60,11 +58,9 @@ impl Capability for SyncPush {
     fn name(&self) -> &'static str {
         "sync.push"
     }
-
     fn input_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"force":{"type":"boolean","default":false}},"required":[],"additionalProperties":false}"#
+        nexus_preset::capability_catalog::SYNC_PUSH_INPUT_SCHEMA
     }
-
     fn output_schema(&self) -> &'static str {
         r#"{"type":"object","properties":{"entriesPushed":{"type":"integer","minimum":0}},"required":["entriesPushed"],"additionalProperties":false}"#
     }

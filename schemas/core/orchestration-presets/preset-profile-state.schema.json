@@ -1,0 +1,36 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "$id": "https://nexus42.invalid/schemas/core/orchestration-presets/preset-profile-state.schema.json",
+ "schema_version": 1,
+ "title": "PresetProfileState",
+ "description": "One state of the outer state machine; `exitWhen`/`next` are absent for terminal states.",
+ "type": "object",
+ "required": [
+  "id",
+  "terminal"
+ ],
+ "additionalProperties": false,
+ "properties": {
+  "id": {
+   "type": "string"
+  },
+  "description": {
+   "type": "string"
+  },
+  "enter": {
+   "type": "array",
+   "items": {
+    "$ref": "https://nexus42.invalid/schemas/core/orchestration-presets/preset-profile-enter-action.schema.json"
+   }
+  },
+  "exitWhen": {
+   "$ref": "https://nexus42.invalid/schemas/core/orchestration-presets/preset-profile-exit-when.schema.json"
+  },
+  "next": {
+   "$ref": "https://nexus42.invalid/schemas/core/orchestration-presets/preset-profile-next.schema.json"
+  },
+  "terminal": {
+   "type": "boolean"
+  }
+ }
+}

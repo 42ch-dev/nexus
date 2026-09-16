@@ -185,11 +185,9 @@ impl Capability for WorldStateQuery {
     fn name(&self) -> &'static str {
         "nexus.world.state.query"
     }
-
     fn input_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"world_id":{"type":"string"},"creator_id":{"type":"string"},"slice":{"type":"string","enum":["kb","timeline","all"]},"branch_id":{"type":"string"},"limit":{"type":"integer","minimum":0}},"required":["world_id","creator_id"],"additionalProperties":false}"#
+        nexus_preset::capability_catalog::NEXUS_WORLD_STATE_QUERY_INPUT_SCHEMA
     }
-
     fn output_schema(&self) -> &'static str {
         r#"{"type":"object","properties":{"world_id":{"type":"string"},"world":{"type":"object"},"kb_blocks":{"type":"array"},"timeline":{"type":"array"},"generated_at":{"type":"string","format":"date-time"}},"required":["world_id","generated_at"],"additionalProperties":false}"#
     }
@@ -295,11 +293,9 @@ impl Capability for WorldDeltaPropose {
     fn name(&self) -> &'static str {
         "nexus.world.delta.propose"
     }
-
     fn input_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"world_id":{"type":"string"},"creator_id":{"type":"string"},"changeset":{"type":"array","items":{"type":"object","properties":{"entity":{"type":"string"},"entity_id":{"type":"string"},"field":{"type":"string"},"new_value":{},"rationale":{"type":"string"}},"required":["entity","field","new_value","rationale"]}}},"required":["world_id","creator_id","changeset"],"additionalProperties":false}"#
+        nexus_preset::capability_catalog::NEXUS_WORLD_DELTA_PROPOSE_INPUT_SCHEMA
     }
-
     fn output_schema(&self) -> &'static str {
         r#"{"type":"object","properties":{"schema_version":{"type":"integer"},"policy_context":{"type":"object"},"proposed_changes":{"type":"array"},"atomic":{"type":"boolean"}},"required":["schema_version","policy_context","proposed_changes","atomic"],"additionalProperties":false}"#
     }
@@ -435,11 +431,9 @@ impl Capability for WorldDeltaApply {
     fn name(&self) -> &'static str {
         "nexus.world.delta.apply"
     }
-
     fn input_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"policy_context":{"type":"object","properties":{"world_id":{"type":"string"},"creator_id":{"type":"string"},"source_work_id":{"type":"string"}},"required":["world_id","creator_id"]},"proposed_changes":{"type":"array","items":{"type":"object","properties":{"entity":{"type":"string"},"entity_id":{"type":"string"},"field":{"type":"string"},"old_value":{},"new_value":{},"rationale":{"type":"string"}},"required":["entity","field","new_value","rationale"]}},"atomic":{"type":"boolean"}},"required":["policy_context","proposed_changes"],"additionalProperties":false}"#
+        nexus_preset::capability_catalog::NEXUS_WORLD_DELTA_APPLY_INPUT_SCHEMA
     }
-
     fn output_schema(&self) -> &'static str {
         r#"{"type":"object","properties":{"applied":{"type":"array"},"atomic_applied":{"type":"boolean"}},"required":["applied","atomic_applied"],"additionalProperties":false}"#
     }
@@ -523,8 +517,8 @@ impl Capability for WorldDeltaApply {
                 // only non-static aspect.
                 let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
                 let sql = format!(
-                    "SELECT key_block_id, body_json FROM kb_key_blocks WHERE key_block_id IN ({placeholders})"
-                );
+                "SELECT key_block_id, body_json FROM kb_key_blocks WHERE key_block_id IN ({placeholders})"
+            );
                 let mut q = sqlx::query_as::<_, (String, Option<String>)>(sqlx::AssertSqlSafe(sql));
                 for kid in chunk {
                     q = q.bind(*kid);
@@ -577,7 +571,7 @@ impl Capability for WorldDeltaApply {
                                 .map_err(|e| CapabilityError::Internal(e.to_string()))?;
                             sqlx::query(
                                 "UPDATE kb_key_blocks SET body_json = ?, updated_at = ? \
-                                 WHERE key_block_id = ?",
+                             WHERE key_block_id = ?",
                             )
                             .bind(&body_str)
                             .bind(chrono::Utc::now().to_rfc3339())
@@ -594,7 +588,7 @@ impl Capability for WorldDeltaApply {
                             })?;
                             sqlx::query(
                                 "UPDATE kb_key_blocks SET status = ?, updated_at = ? \
-                                 WHERE key_block_id = ?",
+                             WHERE key_block_id = ?",
                             )
                             .bind(new_status)
                             .bind(chrono::Utc::now().to_rfc3339())
@@ -605,8 +599,8 @@ impl Capability for WorldDeltaApply {
                         }
                         other => {
                             return Err(CapabilityError::InputInvalid(format!(
-                                "unsupported kb_key_block field '{other}' (V1.60: body_json, status)"
-                            )));
+                            "unsupported kb_key_block field '{other}' (V1.60: body_json, status)"
+                        )));
                         }
                     }
 
@@ -664,16 +658,18 @@ impl Capability for WorldDeltaApply {
                     }
 
                     let kb_store = nexus_local_db::kb_store::SqliteKbStore::new((**pool).clone());
-                    let insert_result = kb_store
-                        .insert_key_block_in_tx(&mut tx, kb)
-                        .await
-                        .map_err(|e| match e {
-                            nexus_knowledge::world_kb::store::KbStoreError::Validation(_)
-                            | nexus_knowledge::world_kb::store::KbStoreError::ValidationLegacy(_) => {
-                                CapabilityError::InputInvalid(format!("kb insert: {e}"))
-                            }
-                            other => CapabilityError::Internal(format!("kb insert: {other}")),
-                        })?;
+                    let insert_result =
+                        kb_store.insert_key_block_in_tx(&mut tx, kb).await.map_err(
+                            |e| {
+                                match e {
+                        nexus_knowledge::world_kb::store::KbStoreError::Validation(_)
+                        | nexus_knowledge::world_kb::store::KbStoreError::ValidationLegacy(_) => {
+                            CapabilityError::InputInvalid(format!("kb insert: {e}"))
+                        }
+                        other => CapabilityError::Internal(format!("kb insert: {other}")),
+                    }
+                            },
+                        )?;
 
                     results.push(json!({
                         "entity": ch.entity,

@@ -233,6 +233,88 @@ fn inject_character_display_name_trim(rust: &str) -> String {
     out
 }
 
+/// Schema extension marker (`x-nexus-tri-state: true`) for nullable PATCH
+/// properties whose three wire states — omitted (keep), `null` (clear),
+/// value (set) — must survive serde. A plain optional property deserializes
+/// explicit `null` to `None`, which erases the clear state, so the generated
+/// field additionally carries a presence-preserving deserializer.
+const TRI_STATE_MARKER: &str = "x-nexus-tri-state";
+
+/// Collect the marked property names of a source schema, in declaration order.
+fn tri_state_fields(src_schema_path: &Path) -> Vec<String> {
+    let Ok(content) = fs::read_to_string(src_schema_path) else {
+        return Vec::new();
+    };
+    let Ok(raw) = serde_json::from_str::<Value>(&content) else {
+        return Vec::new();
+    };
+    raw.get("properties")
+        .and_then(Value::as_object)
+        .map(|props| {
+            props
+                .iter()
+                .filter(|(_, schema)| {
+                    schema.get(TRI_STATE_MARKER).and_then(Value::as_bool) == Some(true)
+                })
+                .map(|(name, _)| name.clone())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Inject `#[serde(default, deserialize_with = …)]` into the marked fields of
+/// the emitted root struct. The generated field type is already
+/// `Option<serde_json::Value>` (the schema keeps the property unrestricted);
+/// only the attribute is added, so every unmarked optional field keeps the
+/// stock typify semantics. `default` covers absence (`None`); the helper maps
+/// a present `null` to `Some(Value::Null)` instead of collapsing it.
+fn inject_tri_state_deserializers(rust: &str, type_name: &str, fields: &[String]) -> String {
+    if fields.is_empty() {
+        return rust.to_string();
+    }
+    let struct_header = format!("pub struct {type_name} ");
+    let Some(start) = rust.find(&struct_header) else {
+        return rust.to_string();
+    };
+    let Some(open) = rust[start..].find('{') else {
+        return rust.to_string();
+    };
+    let open = start + open;
+    // Walk to the matching close brace of the root struct.
+    let mut depth = 0i32;
+    let mut close = open;
+    for (offset, ch) in rust[open..].char_indices() {
+        match ch {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    close = open + offset;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let (head, body, tail) = (rust[..open].to_string(), rust[open..close].to_string(), rust[close..].to_string());
+    let mut body = body;
+    for field in fields {
+        let needle = format!("pub {field} :");
+        let Some(at) = body.find(&needle) else {
+            continue;
+        };
+        let Some(attr_at) = body[..at].rfind("# [") else {
+            continue;
+        };
+        // `default` stays typify's own attribute (absence -> None); we only add
+        // the presence-preserving deserializer, so serde sees one `default`.
+        let attribute =
+            "# [serde (deserialize_with = \"crate :: tristate :: deserialize_presence\")] ";
+        body.insert_str(attr_at, attribute);
+    }
+    format!("{head}{body}{tail}")
+}
+
 fn rewrite_unicode_scalar_length_checks(rust: &str) -> String {
     inject_character_display_name_trim(
         &rust.replace("value . len ()", "value . chars () . count ()"),
@@ -417,6 +499,48 @@ fn apply_nested_session_viewpoint_order(rust: &str, src_schema_path: &Path) -> S
     reorder_root_struct_fields(rust, "NexusSessionViewpoint", &order)
 }
 
+/// Mirror typify's convert_case Pascal naming for a schema `title`
+/// (`"Nexus CharacterDetail"` → `NexusCharacterDetail`).
+fn title_to_type_name(title: &str) -> String {
+    title
+        .split_whitespace()
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect()
+}
+
+/// Rename identifier-prefixed occurrences of `from` to `to`. A match counts
+/// when the preceding char is not part of an identifier, so derived names
+/// (`NexusXBuilder`, `NexusXNested`) shift coherently with the root rename.
+fn rename_identifier_prefix(rust: &str, from: &str, to: &str) -> String {
+    if from == to || from.is_empty() {
+        return rust.to_string();
+    }
+    let mut out = String::with_capacity(rust.len());
+    let mut rest = rust;
+    while let Some(pos) = rest.find(from) {
+        let bounded = rest[..pos]
+            .chars()
+            .next_back()
+            .map(|c| !(c.is_alphanumeric() || c == '_'))
+            .unwrap_or(true);
+        out.push_str(&rest[..pos]);
+        if bounded {
+            out.push_str(to);
+        } else {
+            out.push_str(from);
+        }
+        rest = &rest[pos + from.len()..];
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Generate Rust source for a single schema via `typify` and write it to `out_path`.
 ///
 /// `rel` is the schema's path relative to the schemas dir (POSIX or platform); it
@@ -452,6 +576,22 @@ fn generate_schema_rust(
         .ok_or_else(|| format!("root schema must be an object: {}", schema_path.display()))?
         .insert("title".to_owned(), Value::String(type_name.clone()));
 
+    // Root-level `allOf` wrappers (alias schemas sharing a single underlying
+    // definition): the prep stage inlines the referenced schema verbatim, so
+    // typify names the merged root type from the REFERENCED member's `title`
+    // (e.g. `NexusCharacterDetail`), drifting from the basename-derived TS
+    // contract name set above. Capture that member-derived name; after
+    // generation the emitted identifiers are renamed to the contract name, and
+    // derived helper names (builders, nested newtypes) shift coherently.
+    let member_type_name: Option<String> = schema
+        .as_object()
+        .and_then(|obj| obj.get("allOf"))
+        .and_then(|value| value.as_array())
+        .and_then(|members| members.first())
+        .and_then(|member| member.get("title"))
+        .and_then(|title| title.as_str())
+        .map(title_to_type_name);
+
     let mut settings = TypeSpaceSettings::default();
     // Mirror the proven spoke setting; T4 may tune derives if clippy requires.
     settings.with_struct_builder(true);
@@ -472,6 +612,11 @@ fn generate_schema_rust(
             schema_path.display()
         ));
     }
+    if let Some(from) = member_type_name {
+        if from != type_name {
+            rust = rename_identifier_prefix(&rust, &from, &type_name);
+        }
+    }
     let rel_posix_path = rel_posix(rel);
     if PRESERVE_PROPERTY_ORDER.contains(&rel_posix_path.as_str()) {
         if let Ok(src_raw) = fs::read_to_string(src_schema_path) {
@@ -482,6 +627,11 @@ fn generate_schema_rust(
         }
     }
     rust = apply_nested_session_viewpoint_order(&rust, src_schema_path);
+
+    let marked = tri_state_fields(src_schema_path);
+    if !marked.is_empty() {
+        rust = inject_tri_state_deserializers(&rust, &type_name, &marked);
+    }
 
     if let Some(parent) = out_path.parent() {
         fs::create_dir_all(parent).map_err(|err| {

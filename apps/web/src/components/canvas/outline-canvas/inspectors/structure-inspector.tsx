@@ -110,7 +110,7 @@ function VolumeSection({
 }: VolumeSectionProps) {
   const { t } = useTranslation('canvas');
   const listHeight = Math.min(volume.chapter_ids.length * CHAPTER_ROW_HEIGHT, MAX_LIST_HEIGHT);
-  const volumeLabel = volume.label || t('chapter.volume', { volume: volume.volume_id });
+  const volumeLabel = volume.label ?? t('chapter.volume', { volume: volume.volume_id });
   return (
     <div className="rounded-card border border-gray-alpha-300 bg-background-100 p-3">
       <div className="flex items-center justify-between">

@@ -3,10 +3,10 @@
 //! Workspace handlers
 
 use crate::api::errors::NexusApiError;
-use crate::workspace::session::{SessionError, WorkspaceSessionManager};
 use crate::workspace::WorkspaceState;
 use axum::extract::State;
 use axum::Json;
+use nexus_core::execution::session::{SessionError, WorkspaceSessionManager};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
@@ -264,7 +264,7 @@ pub async fn commit_workspace(
     let session_mgr = state
         .session_manager()
         .ok_or(NexusApiError::Uninitialized)?;
-    let session_id = crate::workspace::session::SessionId(req.session_id.clone());
+    let session_id = nexus_core::execution::session::SessionId(req.session_id.clone());
 
     // V1.58 P0 T5 (R-V156P0-M005): validate + consume in one atomic step.
     // The previous two-call sequence (validate_changes_manifest then
@@ -321,7 +321,7 @@ pub async fn commit_workspace(
 
 /// Map a [`SessionError`] to the appropriate [`NexusApiError`] variant.
 fn map_session_error(
-    session_id: &crate::workspace::session::SessionId,
+    session_id: &nexus_core::execution::session::SessionId,
     err: SessionError,
 ) -> NexusApiError {
     match err {
@@ -580,10 +580,10 @@ mod tests {
 
         // Park the retained owner at its admission boundary so the abort lands
         // AFTER the commit was admitted — the worst case for abandonment.
-        let gate = std::sync::Arc::new(crate::workspace::test_hooks::OwnerGate::for_session(
+        let gate = std::sync::Arc::new(nexus_core::execution::test_hooks::OwnerGate::for_session(
             session_id.clone(),
         ));
-        crate::workspace::test_hooks::set_owner_gate(Some(std::sync::Arc::clone(&gate)));
+        nexus_core::execution::test_hooks::set_owner_gate(Some(std::sync::Arc::clone(&gate)));
 
         let state2 = state.clone();
         let session_for_count = session_id.clone();
@@ -604,7 +604,7 @@ mod tests {
             .await
             .is_err()
         {
-            crate::workspace::test_hooks::set_owner_gate(None);
+            nexus_core::execution::test_hooks::set_owner_gate(None);
             let outcome = request.await.expect("join");
             panic!("owner never reached admission; handler returned: {outcome:?}");
         }
@@ -614,7 +614,7 @@ mod tests {
         tokio::time::timeout(std::time::Duration::from_secs(30), gate.settled.notified())
             .await
             .expect("owner must settle after cancellation");
-        crate::workspace::test_hooks::set_owner_gate(None);
+        nexus_core::execution::test_hooks::set_owner_gate(None);
 
         // The commit reached the durable committed transition and the bytes are
         // on disk, despite the aborted request.

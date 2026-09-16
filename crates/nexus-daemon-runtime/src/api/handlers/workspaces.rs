@@ -6,52 +6,32 @@
 #![allow(clippy::missing_errors_doc)]
 
 use crate::api::errors::NexusApiError;
-use crate::config::{read_active_creator_id, read_active_workspace_slug};
 use crate::workspace::WorkspaceState;
 use axum::extract::{Query, State};
 use axum::Json;
-use nexus_contracts::PaginationInfo;
+use nexus_contracts::generated::daemon_api::workspace::{
+    list_workspaces_response::{NexusPaginationInfo, NexusWorkspaceSummary},
+    ActiveWorkspaceResponse, ListWorkspacesQuery, ListWorkspacesResponse,
+    SetActiveWorkspaceRequest, SetActiveWorkspaceResponse,
+};
+use nexus_core::CoreHomeService;
 use nexus_home_layout::{
     operational_workspace_dir, validate_creator_id_safe, workspace_state_db_path,
 };
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 use std::sync::Mutex;
 
 // ─── Request / Response types ──────────────────────────────────────────────
-
-#[derive(Debug, Deserialize)]
-pub struct ListWorkspacesQuery {
-    /// Optional filter: only show workspaces for this creator.
-    pub creator_id: Option<String>,
-    /// Maximum number of items to return (1–250, default 50).
-    #[serde(default = "default_limit")]
-    pub limit: usize,
-    /// Opaque cursor for pagination; pass `next_cursor` from the previous page.
-    pub cursor: Option<String>,
-}
-
-const fn default_limit() -> usize {
-    50
-}
+//
+// Wire DTOs are the schema-generated `nexus-contracts` workspace types
+// (v1.190 P2-T0: the handler keeps only transport translation). The daemon
+// retains its own query-parsing default (`limit` defaults to 50) and page
+// cap on top of the core-discovered workspace list.
 
 /// Maximum items per page.
 const MAX_LIMIT: usize = 250;
-
-#[derive(Debug, Serialize)]
-pub struct ListWorkspacesResponse {
-    pub items: Vec<WorkspaceSummary>,
-    pub pagination: PaginationInfo,
-}
-
-#[derive(Debug, Serialize, Clone)]
-pub struct WorkspaceSummary {
-    pub creator_id: String,
-    pub workspace_slug: String,
-    pub creative_root: String,
-    pub display_name: Option<String>,
-}
 
 #[derive(Debug, Deserialize)]
 pub struct CreateWorkspaceRequest {
@@ -72,33 +52,13 @@ pub struct CreateWorkspaceResponse {
     pub state_db_path: String,
 }
 
-#[derive(Debug, Serialize)]
-pub struct ActiveWorkspaceResponse {
-    pub creator_id: String,
-    pub workspace_slug: String,
-    pub creative_root: Option<String>,
-    pub operational_dir: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct SetActiveWorkspaceRequest {
-    pub creator_id: Option<String>,
-    pub workspace_slug: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct SetActiveWorkspaceResponse {
-    pub creator_id: String,
-    pub workspace_slug: String,
-}
-
 // ─── Workspace List Cache (QC3 W-004) ──────────────────────────────────────
 
 /// TTL for workspace list cache (60 seconds).
 const WORKSPACE_CACHE_TTL_SECS: u64 = 60;
 
 /// Cached workspace list with a timestamp.
-type WorkspaceCache = (std::time::Instant, Vec<WorkspaceSummary>);
+type WorkspaceCache = (std::time::Instant, Vec<NexusWorkspaceSummary>);
 
 /// Module-level workspace list cache.
 /// Stores unfiltered list + timestamp; invalidated on create/delete.
@@ -114,7 +74,7 @@ fn invalidate_workspace_cache() {
 
 /// Try to get cached workspaces. Returns `None` if cache is empty or expired.
 /// The cache stores the full unfiltered list; callers apply their own filters.
-fn get_cached_workspaces() -> Option<Vec<WorkspaceSummary>> {
+fn get_cached_workspaces() -> Option<Vec<NexusWorkspaceSummary>> {
     let cache = WORKSPACE_CACHE
         .lock()
         .expect("workspace cache lock should not be poisoned");
@@ -127,7 +87,7 @@ fn get_cached_workspaces() -> Option<Vec<WorkspaceSummary>> {
 }
 
 /// Store workspaces in cache (unfiltered, full list).
-fn cache_workspaces(items: Vec<WorkspaceSummary>) {
+fn cache_workspaces(items: Vec<NexusWorkspaceSummary>) {
     *WORKSPACE_CACHE
         .lock()
         .expect("workspace cache lock should not be poisoned") =
@@ -152,17 +112,6 @@ pub(crate) fn validate_slug(label: &str, value: &str) -> Result<(), NexusApiErro
     Ok(())
 }
 
-/// Read `display_name` from `.nexus42/workspace.json` in the creative root.
-/// Returns `None` if the file doesn't exist or can't be parsed.
-fn read_workspace_display_name(creative_root: &std::path::Path) -> Option<String> {
-    let config_path = creative_root.join(".nexus42").join("workspace.json");
-    let content = std::fs::read_to_string(&config_path).ok()?;
-    let json: serde_json::Value = serde_json::from_str(&content).ok()?;
-    json.get("name")
-        .and_then(|v| v.as_str())
-        .map(std::string::ToString::to_string)
-}
-
 /// Read `creative_root` from operational `meta.json`.
 fn read_meta_creative_root(op_dir: &std::path::Path) -> Option<String> {
     let meta_path = op_dir.join("meta.json");
@@ -171,146 +120,6 @@ fn read_meta_creative_root(op_dir: &std::path::Path) -> Option<String> {
     json.get("local_root")
         .and_then(|v| v.as_str())
         .map(std::string::ToString::to_string)
-}
-
-/// Scan all creator directories under `nexus_home` and collect workspace registrations.
-fn scan_workspaces(
-    nexus_home: &std::path::Path,
-    creator_filter: Option<&str>,
-) -> Vec<WorkspaceSummary> {
-    let creators_root = nexus_home.join("creators");
-    let mut items = Vec::new();
-
-    let Ok(creator_entries) = std::fs::read_dir(&creators_root) else {
-        return items;
-    };
-
-    for creator_entry in creator_entries.flatten() {
-        if !creator_entry.path().is_dir() {
-            continue;
-        }
-        let Ok(creator_id) = creator_entry.file_name().into_string() else {
-            continue;
-        };
-
-        // Apply optional filter
-        if let Some(filter) = creator_filter {
-            if creator_id != filter {
-                continue;
-            }
-        }
-
-        // Note: workspace slugs live under nexus_home/creators/<id>/workspaces/
-        // This matches the ADR-014 layout created by nexus_home_layout functions
-        // when called with the user home (nexus_home = user_home/.nexus42).
-        let ws_root = creators_root.join(&creator_id).join("workspaces");
-        let Ok(ws_entries) = std::fs::read_dir(&ws_root) else {
-            continue;
-        };
-
-        for ws_entry in ws_entries.flatten() {
-            if !ws_entry.path().is_dir() {
-                continue;
-            }
-            let Ok(slug) = ws_entry.file_name().into_string() else {
-                continue;
-            };
-
-            // Only include workspaces that have a meta.json
-            let op_dir = ws_entry.path();
-            if !op_dir.join("meta.json").exists() {
-                continue;
-            }
-
-            let creative_root = read_meta_creative_root(&op_dir);
-            let display_name = creative_root
-                .as_deref()
-                .and_then(|cr| read_workspace_display_name(std::path::Path::new(cr)));
-
-            items.push(WorkspaceSummary {
-                creator_id: creator_id.clone(),
-                workspace_slug: slug,
-                creative_root: creative_root.unwrap_or_default(),
-                display_name,
-            });
-        }
-    }
-
-    items.sort_by(|a, b| {
-        a.creator_id
-            .cmp(&b.creator_id)
-            .then(a.workspace_slug.cmp(&b.workspace_slug))
-    });
-
-    items
-}
-
-/// Write active `creator_id` and workspace slug to CLI config (config.toml).
-fn write_active_selection(
-    nexus_home: &std::path::Path,
-    creator_id: &str,
-    workspace_slug: &str,
-) -> Result<(), NexusApiError> {
-    let config_path = nexus_home.join("config.toml");
-
-    // Read existing config or start fresh
-    let mut config: toml::Value = if config_path.exists() {
-        let content =
-            std::fs::read_to_string(&config_path).map_err(|e| NexusApiError::Internal {
-                code: "CONFIG_READ_ERROR".into(),
-                message: e.to_string(),
-            })?;
-        if content.trim().is_empty() {
-            toml::Value::Table(toml::map::Map::new())
-        } else {
-            toml::from_str(&content).map_err(|e| NexusApiError::Internal {
-                code: "CONFIG_PARSE_ERROR".into(),
-                message: e.to_string(),
-            })?
-        }
-    } else {
-        toml::Value::Table(toml::map::Map::new())
-    };
-
-    let table = config
-        .as_table_mut()
-        .ok_or_else(|| NexusApiError::Internal {
-            code: "CONFIG_ERROR".into(),
-            message: "config root is not a table".to_string(),
-        })?;
-
-    // Set active_creator_id
-    table.insert(
-        "active_creator_id".to_string(),
-        toml::Value::String(creator_id.to_string()),
-    );
-
-    // Set active_workspace_slug_by_creator.<creator_id>
-    let slug_table = table
-        .entry("active_workspace_slug_by_creator")
-        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
-    slug_table
-        .as_table_mut()
-        .ok_or_else(|| NexusApiError::Internal {
-            code: "CONFIG_ERROR".into(),
-            message: "active_workspace_slug_by_creator is not a table".to_string(),
-        })?
-        .insert(
-            creator_id.to_string(),
-            toml::Value::String(workspace_slug.to_string()),
-        );
-
-    let toml_str = toml::to_string_pretty(&config).map_err(|e| NexusApiError::Internal {
-        code: "CONFIG_SERIALIZE_ERROR".into(),
-        message: e.to_string(),
-    })?;
-
-    std::fs::write(&config_path, toml_str).map_err(|e| NexusApiError::Internal {
-        code: "CONFIG_WRITE_ERROR".into(),
-        message: e.to_string(),
-    })?;
-
-    Ok(())
 }
 
 /// Default creative root: `~/Documents/nexus/<creator_id>/<workspace_slug>`
@@ -422,33 +231,35 @@ async fn materialize_workspace(
 
 /// `GET /v1/daemon/workspaces` — list workspaces (T21)
 ///
-/// Scans operational workspace directories on disk. Supports optional
-/// `creator_id` query parameter for filtering.
+/// Workspace discovery is owned by `CoreHomeService` (v1.190 P2-T0); this
+/// route applies the retained query semantics (creator filter, page cap,
+/// opaque cursor) on the core-discovered list and keeps the QC3 W-004 cache.
 pub async fn list_workspaces(
     State(state): State<WorkspaceState>,
     Query(query): Query<ListWorkspacesQuery>,
 ) -> Result<Json<ListWorkspacesResponse>, NexusApiError> {
-    let nexus_home = state.nexus_home();
-
     // Validate creator_id filter if provided
-    if let Some(ref cid) = query.creator_id {
+    if let Some(cid) = &query.creator_id {
         validate_creator_id_safe(cid).map_err(|reason| NexusApiError::InvalidInput {
             field: "creator_id".to_string(),
             reason,
         })?;
     }
 
-    let limit = query.limit.clamp(1, MAX_LIMIT);
+    let max_limit = i64::try_from(MAX_LIMIT).unwrap_or(i64::MAX);
+    let limit = usize::try_from(query.limit.unwrap_or(50).clamp(1, max_limit)).unwrap_or(50);
 
-    // Use cached workspace list if within TTL, otherwise rescan (QC3 W-004).
-    let all_items = get_cached_workspaces().unwrap_or_else(|| {
-        let items = scan_workspaces(nexus_home, None); // unfiltered scan
+    let home = CoreHomeService::open(user_home_of(&state)?).map_err(NexusApiError::from)?;
+    let all_items = if let Some(items) = get_cached_workspaces() {
+        items
+    } else {
+        let items = home.list_workspaces().await?.items;
         cache_workspaces(items.clone());
         items
-    });
+    };
 
     // Apply creator_id filter to the full list.
-    let mut items: Vec<WorkspaceSummary> = if let Some(ref filter) = query.creator_id {
+    let mut items: Vec<NexusWorkspaceSummary> = if let Some(filter) = &query.creator_id {
         all_items
             .into_iter()
             .filter(|i| i.creator_id == *filter)
@@ -477,7 +288,7 @@ pub async fn list_workspaces(
 
     Ok(Json(ListWorkspacesResponse {
         items,
-        pagination: PaginationInfo {
+        pagination: NexusPaginationInfo {
             limit: i64::try_from(limit).unwrap_or(i64::MAX),
             has_more: next_cursor.is_some(),
             next_cursor,
@@ -556,22 +367,23 @@ pub async fn create_workspace(
 
 /// `GET /v1/daemon/workspaces/active` — return active workspace selection (T23)
 ///
-/// Reads from CLI config. Returns 409 UNINITIALIZED if no active creator is set.
+/// The resolved home configuration is owned by `CoreHomeService` (v1.190
+/// P2-T0); this route keeps the retained 409 UNINITIALIZED envelope when no
+/// active creator is configured and projects the operational paths.
 pub async fn get_active_workspace(
     State(state): State<WorkspaceState>,
 ) -> Result<Json<ActiveWorkspaceResponse>, NexusApiError> {
-    let nexus_home = state.nexus_home();
+    let home = CoreHomeService::open(user_home_of(&state)?)?;
+    let config = home.configuration().await?;
 
-    let creator_id = read_active_creator_id(nexus_home).ok_or(NexusApiError::Uninitialized)?;
-
-    let workspace_slug = read_active_workspace_slug(nexus_home, &creator_id)
+    let creator_id = config
+        .active_creator_id
+        .ok_or(NexusApiError::Uninitialized)?;
+    let workspace_slug = config
+        .active_workspace_slug
         .unwrap_or_else(|| "default".to_string());
 
-    let user_home = dirs::home_dir().ok_or_else(|| NexusApiError::Internal {
-        code: "HOME_DIR_ERROR".into(),
-        message: "Cannot determine home directory".to_string(),
-    })?;
-
+    let user_home = user_home_of(&state)?;
     let op_dir = operational_workspace_dir(&user_home, &creator_id, &workspace_slug);
     let creative_root = read_meta_creative_root(&op_dir);
 
@@ -585,48 +397,31 @@ pub async fn get_active_workspace(
 
 /// `PUT /v1/daemon/workspaces/active` — set active workspace (T24)
 ///
-/// Persists selection to CLI config. Validates that the workspace exists on disk.
+/// Selection persistence and validation (existence plus foreign-workspace
+/// denial) are owned by `CoreHomeService::select_workspace`; this route is
+/// status/DTO translation only (v1.190 P2-T0).
 pub async fn set_active_workspace(
     State(state): State<WorkspaceState>,
     Json(req): Json<SetActiveWorkspaceRequest>,
 ) -> Result<Json<SetActiveWorkspaceResponse>, NexusApiError> {
-    let nexus_home = state.nexus_home();
+    let home = CoreHomeService::open(user_home_of(&state)?)?;
+    let response = home.select_workspace(req).await?;
 
-    // Resolve creator_id: use request value or current active
-    let creator_id = match req.creator_id {
-        Some(cid) => {
-            validate_creator_id_safe(&cid).map_err(|reason| NexusApiError::InvalidInput {
-                field: "creator_id".to_string(),
-                reason,
-            })?;
-            cid
-        }
-        None => read_active_creator_id(nexus_home).ok_or(NexusApiError::Uninitialized)?,
-    };
+    Ok(Json(response))
+}
 
-    validate_slug("workspace_slug", &req.workspace_slug)?;
-
-    let user_home = dirs::home_dir().ok_or_else(|| NexusApiError::Internal {
-        code: "HOME_DIR_ERROR".into(),
-        message: "Cannot determine home directory".to_string(),
-    })?;
-
-    // Verify workspace exists on disk
-    let op_dir = operational_workspace_dir(&user_home, &creator_id, &req.workspace_slug);
-    if !op_dir.is_dir() {
-        return Err(NexusApiError::NotFound(format!(
-            "Workspace {} does not exist for creator {}",
-            req.workspace_slug, creator_id
-        )));
-    }
-
-    // Persist to CLI config
-    write_active_selection(nexus_home, &creator_id, &req.workspace_slug)?;
-
-    Ok(Json(SetActiveWorkspaceResponse {
-        creator_id,
-        workspace_slug: req.workspace_slug,
-    }))
+/// The raw user home behind the daemon's `.nexus42` nexus home (boot.rs
+/// raw-user-home precedent). Fails honestly when the nexus home has no
+/// parent.
+fn user_home_of(state: &WorkspaceState) -> Result<PathBuf, NexusApiError> {
+    state
+        .nexus_home()
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| NexusApiError::Internal {
+            code: "HOME_DIR_ERROR".into(),
+            message: "Cannot determine home directory".to_string(),
+        })
 }
 
 // ─── Tests ─────────────────────────────────────────────────────────────────
@@ -665,7 +460,7 @@ mod tests {
 
         let query = ListWorkspacesQuery {
             creator_id: None,
-            limit: 50,
+            limit: Some(50),
             cursor: None,
         };
         let result = list_workspaces(AxumState(state), Query(query)).await;

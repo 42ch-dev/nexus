@@ -1,10 +1,23 @@
 import type {
   CoreChangesRequest,
   CoreHostQuery,
+  WorldKbKeyBlockStateResponse,
   WorldKbPatchEntityRequest,
+  WorldKbPatchRelationshipRequest,
+  WorldKbPatchRelationshipResponse,
+  WorldKbPromoteCandidateRequest,
+  WorldKbPromoteCandidateResponse,
 } from '@42ch/nexus-contracts';
 import type { ServiceCore } from './lifecycle.js';
 import { HttpError, mapNativeError } from './errors.js';
+
+/**
+ * Shared domain-HTTP plumbing for the P5-T1 World / Work / content /
+ * knowledge family modules: the single Principal seam (the handle is minted
+ * natively and only proves the stored identity), the retained World KB
+ * family operations, and the query-grammar helpers the route composer calls
+ * before dispatch. Family business lives in the family modules.
+ */
 
 export async function withPrincipal<T>(
   service: ServiceCore,
@@ -46,6 +59,39 @@ export async function getWorldKbCandidates(
 ) {
   return withPrincipal(service, async (principal) =>
     service.core.worldKbCandidates(principal, worldId, limit, cursor),
+  );
+}
+
+/** `POST /v1/daemon/worlds/{world_id}/kb/promote-candidate`. */
+export async function promoteWorldKbCandidate(
+  service: ServiceCore,
+  worldId: string,
+  request: WorldKbPromoteCandidateRequest,
+): Promise<WorldKbPromoteCandidateResponse> {
+  return withPrincipal(service, async (principal) =>
+    service.core.promoteWorldKbCandidate(principal, worldId, request),
+  );
+}
+
+/** `POST /v1/daemon/worlds/{world_id}/kb/patch-relationship`. */
+export async function patchWorldKbRelationship(
+  service: ServiceCore,
+  worldId: string,
+  request: WorldKbPatchRelationshipRequest,
+): Promise<WorldKbPatchRelationshipResponse> {
+  return withPrincipal(service, async (principal) =>
+    service.core.patchWorldKbRelationship(principal, worldId, request),
+  );
+}
+
+/** `GET /v1/daemon/worlds/{world_id}/kb/key-blocks/{key_block_id}/state`. */
+export async function getWorldKbKeyBlockState(
+  service: ServiceCore,
+  worldId: string,
+  keyBlockId: string,
+): Promise<WorldKbKeyBlockStateResponse> {
+  return withPrincipal(service, async (principal) =>
+    service.core.worldKbKeyBlockState(principal, worldId, keyBlockId),
   );
 }
 
@@ -103,4 +149,47 @@ export function parseBoundedLimit(
     throw new HttpError(400, 'invalid_input', `${field} must be an integer between ${min} and ${max}`);
   }
   return parsed;
+}
+
+/** Optional boolean query parameter: absent -> `undefined`, strict otherwise. */
+export function parseOptionalBoolean(
+  searchParams: URLSearchParams,
+  field: string,
+): boolean | undefined {
+  const raw = searchParams.get(field);
+  if (raw === null) return undefined;
+  if (raw === 'true' || raw === '1') return true;
+  if (raw === 'false' || raw === '0') return false;
+  throw new HttpError(400, 'invalid_input', `${field} must be a boolean`);
+}
+
+/** Optional integer query parameter: absent -> `undefined`, strict otherwise. */
+export function parseOptionalInteger(
+  searchParams: URLSearchParams,
+  field: string,
+  { min = 0, max = 4_294_967_295 }: { min?: number; max?: number } = {},
+): number | undefined {
+  const raw = searchParams.get(field);
+  if (raw === null) return undefined;
+  const parsed = parseStrictIntegerToken(raw, field);
+  if (parsed < min || parsed > max) {
+    throw new HttpError(
+      400,
+      'invalid_input',
+      `${field} must be an integer between ${min} and ${max}`,
+    );
+  }
+  return parsed;
+}
+
+/**
+ * A family handler body/query payload is an already-`JSON.parse`d value; the
+ * native layer re-parses it into the generated DTO, so this cast only carries
+ * the transport contract (the schema stays the shape authority).
+ */
+export function wirePayload<T>(body: unknown, label: string): T {
+  if (body === undefined || body === null || typeof body !== 'object' || Array.isArray(body)) {
+    throw new HttpError(400, 'invalid_input', `${label} must be a JSON object`);
+  }
+  return body as T;
 }

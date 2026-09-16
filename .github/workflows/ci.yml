@@ -573,5 +573,17 @@ jobs:
           workspaces: .
           cache-all-crates: false
           cache-on-failure: false
+      - name: Setup monorepo for provider-acp tests
+        if: matrix.group == 'cli-hosts'
+        uses: ./.github/actions/setup-monorepo
+        with:
+          rust-toolchain: ""
+      - name: Build nexus-provider-acp test peer
+        if: matrix.group == 'cli-hosts'
+        # The peer imports `@42ch/nexus-contracts` from its built `dist`, so the
+        # contracts package is built first (same order as the web job).
+        run: |
+          pnpm --filter @42ch/nexus-contracts run build
+          pnpm --filter @42ch/nexus-provider-acp build
       - name: Run tests
         run: cargo test ${{ matrix.packages }}

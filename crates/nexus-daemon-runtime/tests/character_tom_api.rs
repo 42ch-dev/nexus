@@ -25,15 +25,9 @@ struct Ctx {
 }
 
 async fn ctx() -> Ctx {
-    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
-    std::fs::write(
-        nexus_home.join("config.toml"),
-        format!(
-            "active_creator_id = \"{OWNER}\"\n\n[active_workspace_slug_by_creator]\n\"{OWNER}\" = \"default\"\n"
-        ),
-    )
-    .unwrap();
-    let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
+    // Select OWNER's own workspace up front; see `characters_api::ctx`.
+    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace_for(OWNER, "default").await;
+    let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
     let pool = state.pool().unwrap().clone();
     seed_world(&pool).await;
     let server = TestServer::new(api::create_router(state, DaemonApiConfig::keyless()));

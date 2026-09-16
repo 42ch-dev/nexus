@@ -72,11 +72,9 @@ impl Capability for TimelineEventAppend {
     fn name(&self) -> &'static str {
         "nexus.timeline.event.append"
     }
-
     fn input_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"world_id":{"type":"string"},"creator_id":{"type":"string"},"branch_id":{"type":"string"},"event_type":{"type":"string"},"title":{"type":"string"},"summary":{"type":"string"},"event_id":{"type":"string"}},"required":["world_id","creator_id","branch_id","event_type"],"additionalProperties":false}"#
+        nexus_preset::capability_catalog::NEXUS_TIMELINE_EVENT_APPEND_INPUT_SCHEMA
     }
-
     fn output_schema(&self) -> &'static str {
         r#"{"type":"object","properties":{"event_id":{"type":"string"},"sequence_no":{"type":"integer","minimum":0},"status":{"type":"string","enum":["provisional"]},"created_at":{"type":"string","format":"date-time"}},"required":["event_id","sequence_no","status","created_at"],"additionalProperties":false}"#
     }
@@ -117,16 +115,16 @@ impl Capability for TimelineEventAppend {
         if let Some(ref explicit_id) = parsed.event_id {
             // SAFETY: EXISTS check against known narrative_timeline_events schema.
             let exists: i64 = sqlx::query_scalar(
-                "SELECT EXISTS(SELECT 1 FROM narrative_timeline_events WHERE timeline_event_id = ?)",
-            )
-            .bind(explicit_id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|e| CapabilityError::Internal(format!("event_id collision check: {e}")))?;
+            "SELECT EXISTS(SELECT 1 FROM narrative_timeline_events WHERE timeline_event_id = ?)",
+        )
+        .bind(explicit_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| CapabilityError::Internal(format!("event_id collision check: {e}")))?;
             if exists != 0 {
                 return Err(CapabilityError::InputInvalid(format!(
-                    "event_id collision: '{explicit_id}' already exists; canon history is immutable"
-                )));
+                "event_id collision: '{explicit_id}' already exists; canon history is immutable"
+            )));
             }
         }
 
@@ -153,7 +151,7 @@ impl Capability for TimelineEventAppend {
                 // SAFETY: id rename against known narrative_timeline_events schema.
                 sqlx::query(
                     "UPDATE narrative_timeline_events SET timeline_event_id = ? \
-                     WHERE timeline_event_id = ?",
+                 WHERE timeline_event_id = ?",
                 )
                 .bind(explicit_id)
                 .bind(&result.event_id)

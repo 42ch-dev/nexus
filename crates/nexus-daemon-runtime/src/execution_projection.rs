@@ -56,8 +56,8 @@ fn frozen_source_reconstructable(
     descriptor: &nexus_orchestration::run_state::RunDescriptorV1,
     caps: &nexus_orchestration::capability::CapabilityRegistry,
 ) -> bool {
-    use nexus_orchestration::preset::{load_embedded_preset, load_preset};
-    use nexus_orchestration::run_state::PresetSourceIdentity;
+    use nexus_preset::source_identity::PresetSourceIdentity;
+    use nexus_preset::{load_embedded_preset, load_preset};
     let loaded = match &descriptor.source {
         PresetSourceIdentity::Embedded { preset_id, .. } => load_embedded_preset(preset_id, caps),
         PresetSourceIdentity::Directory { root, .. } => load_preset(root, caps),
@@ -300,8 +300,8 @@ mod tests {
     /// A descriptor whose embedded source resolves and matches.
     fn reconstructable_descriptor() -> nexus_orchestration::run_state::RunDescriptorV1 {
         let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
-        let loaded = nexus_orchestration::preset::load_embedded_preset("memory-augmented", &caps)
-            .expect("embedded preset");
+        let loaded =
+            nexus_preset::load_embedded_preset("memory-augmented", &caps).expect("embedded preset");
         nexus_orchestration::run_state::RunDescriptorV1 {
             creator_id: "c".to_string(),
             work_id: None,

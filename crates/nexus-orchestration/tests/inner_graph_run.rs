@@ -70,11 +70,10 @@ inner_graphs:
 #[tokio::test]
 async fn inner_graph_runs_to_completion_and_exports_output() {
     let caps = CapabilityRegistry::with_builtins();
-    let loaded = nexus_orchestration::preset::load_preset_from_str(INNER_GRAPH_PRESET_YAML, &caps)
-        .expect("load preset");
+    let loaded =
+        nexus_preset::load_preset_from_str(INNER_GRAPH_PRESET_YAML, &caps).expect("load preset");
 
     assert_eq!(loaded.id, "inner-graph-test");
-    assert!(loaded.inner_graphs.contains_key("my_graph"));
     assert_eq!(loaded.output_bindings.get("my_graph").unwrap(), "n3.text");
 
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
@@ -205,19 +204,4 @@ async fn spawn_child_and_get_context() {
         !output.is_empty(),
         "child should have produced output: {output}"
     );
-}
-
-/// Test that the loaded preset has the correct structure for novel-writing.
-#[test]
-fn inner_graph_preset_structure() {
-    let caps = CapabilityRegistry::with_builtins();
-    let loaded =
-        nexus_orchestration::preset::load_preset_from_str(INNER_GRAPH_PRESET_YAML, &caps).unwrap();
-
-    assert!(loaded.inner_graphs.contains_key("my_graph"));
-    let ig = &loaded.inner_graphs["my_graph"];
-    assert!(ig.get_task("n1").is_some());
-    assert!(ig.get_task("n2").is_some());
-    assert!(ig.get_task("n3").is_some());
-    assert_eq!(loaded.output_bindings.get("my_graph").unwrap(), "n3.text");
 }

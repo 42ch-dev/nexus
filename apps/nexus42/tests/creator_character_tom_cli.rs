@@ -88,7 +88,7 @@ fn as_strs(v: &[String]) -> Vec<&str> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn character_tom_record_show_json_and_human_parity() {
-    let d = LiveDaemon::start().await;
+    let d = LiveDaemon::start_for_creator(common::rn_act4::FIXTURE_CREATOR, "default").await;
     let g = seed(&d).await;
     let carrier = seed_tom_carrier(&d, &g.character_a).await;
 
@@ -172,7 +172,7 @@ async fn character_tom_record_show_json_and_human_parity() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn character_tom_fail_closed_no_mutation() {
-    let d = LiveDaemon::start().await;
+    let d = LiveDaemon::start_for_creator(common::rn_act4::FIXTURE_CREATOR, "default").await;
     let g = seed(&d).await;
     let carrier = seed_tom_carrier(&d, &g.character_a).await;
 

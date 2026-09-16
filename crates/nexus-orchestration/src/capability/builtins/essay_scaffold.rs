@@ -255,11 +255,9 @@ impl Capability for EssayProjectScaffold {
     fn name(&self) -> &'static str {
         "essay.project_scaffold"
     }
-
     fn input_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"creator_id":{"type":"string"},"work_id":{"type":"string"},"work_ref":{"type":"string"},"title":{"type":"string"},"world_id":{"type":["string","null"]}},"required":["creator_id","work_id","work_ref","title"],"additionalProperties":false}"#
+        nexus_preset::capability_catalog::ESSAY_PROJECT_SCAFFOLD_INPUT_SCHEMA
     }
-
     fn output_schema(&self) -> &'static str {
         r#"{"type":"object","properties":{"scaffold_root":{"type":"string"},"files_created":{"type":"array","items":{"type":"string"}},"dirs_created":{"type":"array","items":{"type":"string"}}},"required":["scaffold_root","files_created","dirs_created"],"additionalProperties":false}"#
     }
@@ -292,52 +290,52 @@ impl Capability for EssayProjectScaffold {
         let mut tx = {
             let work_dir = work_dir.clone();
             tokio::task::spawn_blocking(
-                move || -> Result<ScaffoldTransaction, CapabilityError> {
-                    let outlines_dir = work_dir.join("Outlines");
-                    let drafts_dir = work_dir.join("Drafts");
-                    let logs_dir = work_dir.join("Logs");
-                    let logs_write_dir = logs_dir.join("write");
-                    let logs_review_dir = logs_dir.join("review");
+            move || -> Result<ScaffoldTransaction, CapabilityError> {
+                let outlines_dir = work_dir.join("Outlines");
+                let drafts_dir = work_dir.join("Drafts");
+                let logs_dir = work_dir.join("Logs");
+                let logs_write_dir = logs_dir.join("write");
+                let logs_review_dir = logs_dir.join("review");
 
-                    let mut tx = ScaffoldTransaction::new();
+                let mut tx = ScaffoldTransaction::new();
 
-                    // Create directory structure (idempotent — only tracks newly created dirs)
-                    for dir in [
-                        &work_dir,
-                        &outlines_dir,
-                        &drafts_dir,
-                        &logs_dir,
-                        &logs_write_dir,
-                        &logs_review_dir,
-                    ] {
-                        tx.create_dir(dir)?;
-                    }
+                // Create directory structure (idempotent — only tracks newly created dirs)
+                for dir in [
+                    &work_dir,
+                    &outlines_dir,
+                    &drafts_dir,
+                    &logs_dir,
+                    &logs_write_dir,
+                    &logs_review_dir,
+                ] {
+                    tx.create_dir(dir)?;
+                }
 
-                    // Write README.md (atomic: temp+rename; tracks create vs overwrite)
-                    let readme_content = format!(
-                        "# {title}\n\nEssay project.\n\n- **Work ID**: {work_id_for_fs}\n- **Profile**: essay\n",
-                    );
-                    tx.write_file(&work_dir.join("README.md"), &readme_content)?;
+                // Write README.md (atomic: temp+rename; tracks create vs overwrite)
+                let readme_content = format!(
+                    "# {title}\n\nEssay project.\n\n- **Work ID**: {work_id_for_fs}\n- **Profile**: essay\n",
+                );
+                tx.write_file(&work_dir.join("README.md"), &readme_content)?;
 
-                    // Write Outlines/outline.md
-                    let outline_content = format!(
-                        "---\ntitle: {title}\nstatus: outline\n---\n\n# Thesis\n\n# Audience\n\n# Structure\n\n1. Opening hook\n2. Core argument\n3. Supporting evidence\n4. Counterpoint / nuance\n5. Ending takeaway\n",
-                    );
-                    tx.write_file(&outlines_dir.join("outline.md"), &outline_content)?;
+                // Write Outlines/outline.md
+                let outline_content = format!(
+                    "---\ntitle: {title}\nstatus: outline\n---\n\n# Thesis\n\n# Audience\n\n# Structure\n\n1. Opening hook\n2. Core argument\n3. Supporting evidence\n4. Counterpoint / nuance\n5. Ending takeaway\n",
+                );
+                tx.write_file(&outlines_dir.join("outline.md"), &outline_content)?;
 
-                    // Write Drafts/draft.md
-                    let draft_content = format!(
-                        "---\ntitle: {title}\nstatus: draft\nword_count: 0\n---\n\n# {title}\n\nWrite your essay here.\n",
-                    );
-                    tx.write_file(&drafts_dir.join("draft.md"), &draft_content)?;
+                // Write Drafts/draft.md
+                let draft_content = format!(
+                    "---\ntitle: {title}\nstatus: draft\nword_count: 0\n---\n\n# {title}\n\nWrite your essay here.\n",
+                );
+                tx.write_file(&drafts_dir.join("draft.md"), &draft_content)?;
 
-                    Ok(tx)
-                },
-            )
-            .await
-            .map_err(|e| {
-                CapabilityError::Internal(format!("scaffold blocking task panicked: {e}"))
-            })??
+                Ok(tx)
+            },
+        )
+        .await
+        .map_err(|e| {
+            CapabilityError::Internal(format!("scaffold blocking task panicked: {e}"))
+        })??
         };
 
         // PATCH works row: set work_profile and work_ref

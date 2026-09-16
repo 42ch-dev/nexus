@@ -297,11 +297,9 @@ impl Capability for CreatorReadMemory {
     fn name(&self) -> &'static str {
         "creator.read_memory"
     }
-
     fn input_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"keyword":{"type":"string"},"limit":{"type":"integer","minimum":1,"default":50}},"required":[],"additionalProperties":false}"#
+        nexus_preset::capability_catalog::CREATOR_READ_MEMORY_INPUT_SCHEMA
     }
-
     fn output_schema(&self) -> &'static str {
         r#"{"type":"object","properties":{"count":{"type":"integer","minimum":0}},"required":["count"],"additionalProperties":false}"#
     }
@@ -369,11 +367,9 @@ impl Capability for CreatorWriteMemory {
     fn name(&self) -> &'static str {
         "creator.write_memory"
     }
-
     fn input_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"content":{"type":"string"},"keywords":{"type":"array","items":{"type":"string"}},"required":["content","keywords"],"additionalProperties":false}"#
+        nexus_preset::capability_catalog::CREATOR_WRITE_MEMORY_INPUT_SCHEMA
     }
-
     fn output_schema(&self) -> &'static str {
         r#"{"type":"object","properties":{"fragmentId":{"type":"string"}},"required":["fragmentId"],"additionalProperties":false}"#
     }
@@ -450,16 +446,9 @@ impl Capability for CreatorInjectPrompt {
     fn name(&self) -> &'static str {
         "creator.inject_prompt"
     }
-
     fn input_schema(&self) -> &'static str {
-        // R-P2-01 v2: prompt is no longer required at the preset YAML level.
-        // The orchestration engine resolves prompt_file → prompt before calling
-        // run(), so the runtime always receives a populated prompt string.
-        // anyOf declares that at least one of prompt / prompt_file must be
-        // provided; the validator checks this semantically.
-        r#"{"type":"object","properties":{"prompt":{"type":"string"},"priority":{"type":"integer","default":0},"prompt_file":{"type":"string"},"vars":{"type":"object","additionalProperties":{"type":"string"}}},"required":[],"anyOf":[{"required":["prompt"]},{"required":["prompt_file"]}],"additionalProperties":false}"#
+        nexus_preset::capability_catalog::CREATOR_INJECT_PROMPT_INPUT_SCHEMA
     }
-
     fn output_schema(&self) -> &'static str {
         r#"{"type":"object","properties":{"queued":{"type":"boolean"}},"required":["queued"],"additionalProperties":false}"#
     }
@@ -644,11 +633,9 @@ impl Capability for CreatorWriteBrief {
     fn name(&self) -> &'static str {
         "creator.write_brief"
     }
-
     fn input_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"workId":{"type":"string"},"briefText":{"type":"string"}},"required":["workId","briefText"],"additionalProperties":false}"#
+        nexus_preset::capability_catalog::CREATOR_WRITE_BRIEF_INPUT_SCHEMA
     }
-
     fn output_schema(&self) -> &'static str {
         r#"{"type":"object","properties":{"written":{"type":"boolean"},"intakeStatus":{"type":"string"}},"required":["written","intakeStatus"],"additionalProperties":false}"#
     }

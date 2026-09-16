@@ -2,15 +2,42 @@
 //!
 //! Enforces the W-002 invariant: any file path resolved from a
 //! user-supplied or DB-stored relative path must remain inside the active
-//! workspace root. Used by chapter-content handlers and host-tool write paths
-//! so both surfaces share the same canonicalize + component-wise prefix-check
-//! implementation.
+//! workspace root. Used by chapter-content handlers and host-tool write paths.
+//!
+//! The check itself has a single authority: [`nexus_core::resolve_guarded_path`]
+//! (core `content.rs` module). This boundary module only delegates and maps the
+//! core taxonomy onto [`NexusApiError`], so a security fix cannot diverge
+//! between the core content services and the daemon fs/* consumers.
 
 use crate::api::errors::NexusApiError;
 use std::path::{Path, PathBuf};
 
-/// Async wrapper around [`resolve_guarded_path`] that runs the blocking
-/// `std::fs::canonicalize` syscalls on the tokio blocking pool.
+/// Map the core guard taxonomy onto the legacy daemon classification.
+///
+/// `InvalidInput { field, reason }` becomes `BadRequest { code, message }`
+/// (the legacy `chapter_path_*` wire shape) and the async wrapper's
+/// `PATH_GUARD_PANIC` carrier is split back into the legacy
+/// `Internal { code, message }` form. Everything else keeps the shared
+/// generic conversion.
+fn map_guard_error(error: nexus_core::CoreError) -> NexusApiError {
+    match error {
+        nexus_core::CoreError::InvalidInput { field, reason } => NexusApiError::BadRequest {
+            code: field,
+            message: reason,
+        },
+        nexus_core::CoreError::Internal { category } => match category.split_once(": ") {
+            Some(("PATH_GUARD_PANIC", message)) => NexusApiError::Internal {
+                code: "PATH_GUARD_PANIC".to_string(),
+                message: message.to_string(),
+            },
+            _ => nexus_core::CoreError::Internal { category }.into(),
+        },
+        other => other.into(),
+    }
+}
+
+/// Async wrapper around [`nexus_core::resolve_guarded_path`] that runs the
+/// blocking `std::fs::canonicalize` syscalls on the tokio blocking pool.
 ///
 /// V1.88 T3 (R-V187-QC3-P001): the wrapper is shared by fs/* tools and
 /// manuscript/chapter/outline handlers so all path-guard checks stay
@@ -18,114 +45,37 @@ use std::path::{Path, PathBuf};
 ///
 /// # Errors
 ///
-/// Propagates the same [`NexusApiError`] variants as [`resolve_guarded_path`]
-/// (e.g. `BadRequest` with `chapter_path_*` codes), plus an `Internal`
-/// `PATH_GUARD_PANIC` if the blocking task panics.
+/// Propagates the same [`NexusApiError`] variants as
+/// [`resolve_guarded_path`] (e.g. `BadRequest` with `chapter_path_*` codes),
+/// plus an `Internal` `PATH_GUARD_PANIC` if the blocking task panics.
 pub async fn resolve_guarded_path_async(
     workspace_root: PathBuf,
     rel_path: String,
     must_exist: bool,
 ) -> Result<PathBuf, NexusApiError> {
-    tokio::task::spawn_blocking(move || {
-        resolve_guarded_path(&workspace_root, &rel_path, must_exist)
-    })
-    .await
-    .map_err(|e| NexusApiError::Internal {
-        code: "PATH_GUARD_PANIC".into(),
-        message: format!("path guard task panicked: {e}"),
-    })?
+    nexus_core::resolve_guarded_path_async(workspace_root, rel_path, must_exist)
+        .await
+        .map_err(map_guard_error)
 }
 
 /// Resolve a relative path under the workspace root and enforce the
-/// W-002-style path guard: the resolved absolute path must remain inside
-/// the canonical workspace root.
+/// W-002-style path guard.
 ///
-/// `must_exist` controls whether the target itself must exist (read paths) or
-/// whether a missing-but-creatable target is allowed (write paths). For write
-/// paths, the helper walks up to the nearest existing parent so that missing
-/// intermediate directories are accepted as long as they would be created
-/// inside the root.
-///
-/// # TOCTOU note
-///
-/// There is a small race window between canonicalizing the workspace root and
-/// canonicalizing the requested path: a local attacker with filesystem access
-/// could replace either path during that window. Per the V1.86 trust-boundary
-/// spec, this is "racy-correct" rather than "racy-incorrect" for the
-/// single-user local daemon context: the practical risk is bounded by that
-/// threat model, while adversarial multi-user FS access is out of scope
-/// (`R-V166-QC2-TOCTOU`).
+/// See [`nexus_core::resolve_guarded_path`] for the canonical semantics:
+/// canonicalize + component-wise containment, with a creatable walk-up probe
+/// on write paths.
 ///
 /// # Errors
 ///
-/// Returns `NexusApiError::BadRequest` with `CHAPTER_PATH_*` codes when the
-/// path is empty, cannot be resolved, or escapes the workspace root. Callers
-/// may map these to domain-specific errors if desired.
+/// Returns `NexusApiError::BadRequest` with `chapter_path_*` codes when the
+/// path is empty, cannot be resolved, or escapes the workspace root — the
+/// legacy wire shape, mapped from the shared core error at this boundary.
 pub fn resolve_guarded_path(
     workspace_root: &Path,
     rel_path: &str,
     must_exist: bool,
 ) -> Result<PathBuf, NexusApiError> {
-    if rel_path.is_empty() {
-        return Err(NexusApiError::BadRequest {
-            code: "chapter_path_empty".to_string(),
-            message: "chapter path is empty".to_string(),
-        });
-    }
-
-    let canonical_root = workspace_root
-        .canonicalize()
-        .unwrap_or_else(|_| workspace_root.to_path_buf());
-
-    let joined = canonical_root.join(rel_path);
-
-    if must_exist {
-        let canonical_target = joined
-            .canonicalize()
-            .map_err(|e| NexusApiError::BadRequest {
-                code: "chapter_path_unresolvable".to_string(),
-                message: format!("cannot resolve chapter path '{rel_path}': {e}"),
-            })?;
-        // Component-wise comparison (Path::starts_with). A plain string prefix
-        // match would let `/home/user-data/evil.md` slip past a `/home/user`
-        // root because the string starts with "/home/user".
-        if !canonical_target.starts_with(&canonical_root) {
-            return Err(NexusApiError::BadRequest {
-                code: "chapter_path_forbidden".to_string(),
-                message: format!("chapter path '{rel_path}' escapes workspace root"),
-            });
-        }
-        Ok(canonical_target)
-    } else {
-        // For creatable targets, normalize the joined path and verify it stays
-        // within the workspace root. We walk up to the nearest existing parent
-        // so that missing intermediate directories are still allowed as long
-        // as they would be created inside the root.
-        let mut probe = joined.as_path();
-        loop {
-            if let Ok(canonical) = probe.canonicalize() {
-                // Component-wise comparison (Path::starts_with) — see read branch.
-                if !canonical.starts_with(&canonical_root) {
-                    return Err(NexusApiError::BadRequest {
-                        code: "chapter_path_forbidden".to_string(),
-                        message: format!("chapter path '{rel_path}' escapes workspace root"),
-                    });
-                }
-                return Ok(joined);
-            }
-            match probe.parent() {
-                Some(parent) => probe = parent,
-                None => {
-                    return Err(NexusApiError::BadRequest {
-                        code: "chapter_path_forbidden".to_string(),
-                        message: format!(
-                            "chapter path '{rel_path}' has no parent inside workspace root"
-                        ),
-                    });
-                }
-            }
-        }
-    }
+    nexus_core::resolve_guarded_path(workspace_root, rel_path, must_exist).map_err(map_guard_error)
 }
 
 #[cfg(test)]
@@ -193,5 +143,89 @@ mod tests {
                 .is_ok(),
             "inside-root creatable path should be accepted"
         );
+    }
+
+    /// W-002 equivalence regression: the daemon boundary (this module,
+    /// `NexusApiError`) and the core authority (`nexus_core`,
+    /// `CoreError`) agree on traversal, symlink-escape and creatable-parent
+    /// cases — same verdict and same legacy `chapter_path_*` code on both
+    /// sides of the delegation.
+    #[tokio::test]
+    async fn path_guard_boundaries_stay_equivalent() {
+        fn core_code(result: Result<PathBuf, nexus_core::CoreError>) -> String {
+            match result {
+                Ok(_) => "ok".to_string(),
+                Err(nexus_core::CoreError::InvalidInput { field, .. }) => field,
+                Err(other) => panic!("unexpected core error: {other:?}"),
+            }
+        }
+        fn daemon_code(result: Result<PathBuf, NexusApiError>) -> String {
+            match result {
+                Ok(_) => "ok".to_string(),
+                Err(NexusApiError::BadRequest { code, .. }) => code,
+                Err(other) => panic!("unexpected daemon error: {other:?}"),
+            }
+        }
+
+        let base = tempfile::tempdir().unwrap().keep();
+        let root = base.join("creative");
+        std::fs::create_dir_all(&root).unwrap();
+
+        // (1) traversal: `..` into a prefix-confusion sibling (read path).
+        let evil_dir = base.join("creative-evil");
+        std::fs::create_dir_all(&evil_dir).unwrap();
+        std::fs::write(evil_dir.join("evil.md"), "stolen").unwrap();
+
+        // (2) symlink escape: in-root link pointing outside the root.
+        let outside = base.join("outside-target.md");
+        std::fs::write(&outside, "secret").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside, root.join("link.md")).unwrap();
+
+        // (3) creatable-parent: missing intermediate dirs inside the root
+        // (write path) must stay accepted.
+        let cases: &[(&str, &str, bool)] = &[
+            ("traversal", "../creative-evil/evil.md", true),
+            ("symlink", "link.md", true),
+            ("creatable-parent", "Works/w/Outlines/v2/ch01.md", false),
+        ];
+        for (name, rel, must_exist) in cases {
+            let core = nexus_core::resolve_guarded_path(&root, rel, *must_exist);
+            let daemon = resolve_guarded_path(&root, rel, *must_exist);
+            assert_eq!(core_code(core), daemon_code(daemon), "case {name}");
+        }
+
+        // The rejected cases must actually be rejections, not accidental
+        // `ok`/`ok` agreement, and the creatable write must be permitted.
+        assert_eq!(
+            daemon_code(resolve_guarded_path(
+                &root,
+                "../creative-evil/evil.md",
+                true
+            )),
+            "chapter_path_forbidden"
+        );
+        #[cfg(unix)]
+        assert_eq!(
+            daemon_code(resolve_guarded_path(&root, "link.md", true)),
+            "chapter_path_forbidden"
+        );
+        assert_eq!(
+            daemon_code(resolve_guarded_path(
+                &root,
+                "Works/w/Outlines/v2/ch01.md",
+                false
+            )),
+            "ok"
+        );
+
+        // The async daemon wrapper delegates to the core async wrapper.
+        assert!(resolve_guarded_path_async(
+            root.clone(),
+            "../creative-evil/evil.md".to_string(),
+            true
+        )
+        .await
+        .is_err());
     }
 }

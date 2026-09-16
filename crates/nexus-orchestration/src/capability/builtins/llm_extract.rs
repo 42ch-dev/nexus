@@ -91,60 +91,50 @@ impl Capability for LlmExtract {
     // prevents cross-creator routing — SEC-V131-01, same rule as
     // judge.llm).
     fn input_schema(&self) -> &'static str {
-        r#"{
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "type": "object",
-            "required": ["prompt", "chapter_prose"],
-            "properties": {
-                "prompt": { "type": "string", "description": "Extraction instruction template (rendered by LlmExtractTask)" },
-                "chapter_prose": { "type": "string", "description": "Verbatim chapter body to extract entities from" },
-                "_creator_id": { "type": "string" },
-                "_session_id": { "type": "string" }
-            }
-        }"#
+        nexus_preset::capability_catalog::NEXUS_LLM_EXTRACT_INPUT_SCHEMA
     }
 
     fn output_schema(&self) -> &'static str {
         r#"{
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "type": "object",
-            "required": ["candidates"],
-            "properties": {
-                "candidates": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "required": ["canonical_name", "block_type", "confidence", "source_quote"],
-                        "properties": {
-                            "canonical_name": { "type": "string" },
-                            "block_type": { "type": "string" },
-                            "summary": { "type": ["string", "null"] },
-                            "confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
-                            "source_quote": { "type": "string" }
-                        }
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "required": ["candidates"],
+        "properties": {
+            "candidates": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["canonical_name", "block_type", "confidence", "source_quote"],
+                    "properties": {
+                        "canonical_name": { "type": "string" },
+                        "block_type": { "type": "string" },
+                        "summary": { "type": ["string", "null"] },
+                        "confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+                        "source_quote": { "type": "string" }
                     }
-                },
-                "relationships": {
-                    "type": "array",
-                    "description": "V1.76: optional relationship candidates proposed from chapter prose. Missing/empty array means no relationship candidates (backward compatible).",
-                    "items": {
-                        "type": "object",
-                        "required": ["source_canonical_name", "target_canonical_name", "relation_type", "symmetric", "confidence", "source_quote"],
-                        "properties": {
-                            "source_canonical_name": { "type": "string" },
-                            "source_block_type": { "type": ["string", "null"] },
-                            "target_canonical_name": { "type": "string" },
-                            "target_block_type": { "type": ["string", "null"] },
-                            "relation_type": { "type": "string", "description": "WorldKbRelationshipKind snake_case value; 'custom' requires custom_label" },
-                            "custom_label": { "type": ["string", "null"] },
-                            "symmetric": { "type": "boolean" },
-                            "confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
-                            "source_quote": { "type": "string" }
-                        }
+                }
+            },
+            "relationships": {
+                "type": "array",
+                "description": "V1.76: optional relationship candidates proposed from chapter prose. Missing/empty array means no relationship candidates (backward compatible).",
+                "items": {
+                    "type": "object",
+                    "required": ["source_canonical_name", "target_canonical_name", "relation_type", "symmetric", "confidence", "source_quote"],
+                    "properties": {
+                        "source_canonical_name": { "type": "string" },
+                        "source_block_type": { "type": ["string", "null"] },
+                        "target_canonical_name": { "type": "string" },
+                        "target_block_type": { "type": ["string", "null"] },
+                        "relation_type": { "type": "string", "description": "WorldKbRelationshipKind snake_case value; 'custom' requires custom_label" },
+                        "custom_label": { "type": ["string", "null"] },
+                        "symmetric": { "type": "boolean" },
+                        "confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+                        "source_quote": { "type": "string" }
                     }
                 }
             }
-        }"#
+        }
+    }"#
     }
 
     async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
@@ -170,9 +160,9 @@ impl Capability for LlmExtract {
             .and_then(|v| v.as_str())
             .ok_or_else(|| {
                 CapabilityError::Forbidden(
-                    "missing trusted _session_id: orchestration context must inject the run identity"
-                        .to_string(),
-                )
+                "missing trusted _session_id: orchestration context must inject the run identity"
+                    .to_string(),
+            )
             })?;
 
         let executor = self
@@ -194,20 +184,20 @@ impl Capability for LlmExtract {
         // extraction is read-only, no tools, no side-effect.
         let extract_prompt = format!(
             "{prompt_text}\n\n\
-             Return ONLY a JSON object of the form {{\"candidates\": [{{\"canonical_name\": \
-             string, \"block_type\": one of [character, ability, scene, organization, item, \
-             conflict, info_point, event], \"summary\": string|null, \"confidence\": number \
-             in [0.0,1.0], \"source_quote\": string}}], \"relationships\": [{{\
-             \"source_canonical_name\": string, \"source_block_type\": block_type|null, \
-             \"target_canonical_name\": string, \"target_block_type\": block_type|null, \
-             \"relation_type\": one of [allied_with, rival_of, mentor_of, parent_of, child_of, \
-             member_of, located_in, created_by, rules_over, custom], \"custom_label\": \
-             string|null (required when relation_type is custom), \"symmetric\": boolean, \
-             \"confidence\": number in [0.0,1.0], \"source_quote\": string}}]}}. \
-             Use the wire `block_type` and `relation_type` enums (snake_case). \
-             `source_quote` MUST be a verbatim excerpt from the chapter. The \
-             `relationships` array MAY be empty when no relationships are evident.\n\n\
-             CHAPTER PROSE:\n{chapter_prose}"
+         Return ONLY a JSON object of the form {{\"candidates\": [{{\"canonical_name\": \
+         string, \"block_type\": one of [character, ability, scene, organization, item, \
+         conflict, info_point, event], \"summary\": string|null, \"confidence\": number \
+         in [0.0,1.0], \"source_quote\": string}}], \"relationships\": [{{\
+         \"source_canonical_name\": string, \"source_block_type\": block_type|null, \
+         \"target_canonical_name\": string, \"target_block_type\": block_type|null, \
+         \"relation_type\": one of [allied_with, rival_of, mentor_of, parent_of, child_of, \
+         member_of, located_in, created_by, rules_over, custom], \"custom_label\": \
+         string|null (required when relation_type is custom), \"symmetric\": boolean, \
+         \"confidence\": number in [0.0,1.0], \"source_quote\": string}}]}}. \
+         Use the wire `block_type` and `relation_type` enums (snake_case). \
+         `source_quote` MUST be a verbatim excerpt from the chapter. The \
+         `relationships` array MAY be empty when no relationships are evident.\n\n\
+         CHAPTER PROSE:\n{chapter_prose}"
         );
 
         let result = executor

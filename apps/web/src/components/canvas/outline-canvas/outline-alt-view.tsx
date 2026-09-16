@@ -92,7 +92,7 @@ export function OutlineAltView({ outline, chapters, sceneBeatFixture }: OutlineA
   // chapter list is flattened by the Number sort.
   const volumeLabelByChapter = new Map<number, string>();
   for (const v of outline.volumes) {
-    const label = v.label || t('chapter.volume', { volume: v.volume_id });
+    const label = v.label ?? t('chapter.volume', { volume: v.volume_id });
     for (const id of v.chapter_ids) volumeLabelByChapter.set(id, label);
   }
 
@@ -223,7 +223,7 @@ export function OutlineAltView({ outline, chapters, sceneBeatFixture }: OutlineA
             {volumesInOrder.map((volume) => (
               <li key={`vol-${volume.volume_id}`} className="flex flex-col gap-1">
                 <span className="text-label-14 font-semibold text-gray-900">
-                  {volume.label || t('chapter.volume', { volume: volume.volume_id })}
+                  {volume.label ?? t('chapter.volume', { volume: volume.volume_id })}
                 </span>
                 <ol className="ml-2 flex flex-col gap-1 border-l border-gray-alpha-300 pl-2">
                   {volume.chapter_ids.map((chapterId, i) => {

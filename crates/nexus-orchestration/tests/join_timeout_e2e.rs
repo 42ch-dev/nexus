@@ -28,10 +28,8 @@
 //! contract.
 
 use graph_flow::{Context, NextAction, Task};
-use nexus_orchestration::preset::manifest::{
-    ConvergeConfig, ConvergeStrategy, NextTarget, StateDefinition,
-};
 use nexus_orchestration::tasks::{DeterministicClock, StateCompositeTask};
+use nexus_preset::manifest::{ConvergeConfig, ConvergeStrategy, NextTarget, StateDefinition};
 use std::collections::HashSet;
 use std::sync::Arc;
 

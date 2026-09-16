@@ -88,7 +88,10 @@ pub async fn create_session(
         .map_err(|e| {
             // QC2 F-004: the live-ring capacity refusal keeps its typed,
             // retryable envelope instead of collapsing into a generic 500.
-            if matches!(e, crate::preset_run::RunControlError::RunEventCapacity(_)) {
+            if matches!(
+                e,
+                nexus_core::execution::RunControlError::RunEventCapacity(_)
+            ) {
                 return NexusApiError::from(e);
             }
             let msg = e.to_string();
@@ -385,7 +388,7 @@ pub async fn signal_session(
         let result = coordinator
             .signal_run(
                 &sid,
-                crate::preset_run::RunSignal::Continue {
+                nexus_core::execution::RunSignal::Continue {
                     wait_id: wait_id.to_string(),
                 },
             )
@@ -419,7 +422,7 @@ pub async fn signal_session(
             Json(serde_json::json!({
                 "signal": "cancel",
                 "status": result.status,
-                "cancel_outcome": result.cancel_outcome.map(crate::preset_run::CancelOutcome::as_str),
+                "cancel_outcome": result.cancel_outcome.map(nexus_core::execution::CancelOutcome::as_str),
             })),
         ));
     }
@@ -603,21 +606,21 @@ pub async fn session_events(
     let sub = match registry.subscribe_live(&session_id, last_event_id, inspect_url) {
         Ok(rx) => rx,
         Err(
-            crate::run_events::SubscribeError::MalformedCursor
-            | crate::run_events::SubscribeError::FutureCursor,
+            nexus_core::execution::run_events::SubscribeError::MalformedCursor
+            | nexus_core::execution::run_events::SubscribeError::FutureCursor,
         ) => {
             return Err(NexusApiError::BadRequest {
                 code: "invalid_cursor".into(),
                 message: "malformed or future Last-Event-ID".into(),
             });
         }
-        Err(crate::run_events::SubscribeError::TooManySubscribers) => {
+        Err(nexus_core::execution::run_events::SubscribeError::TooManySubscribers) => {
             return Err(NexusApiError::ConflictCoded {
                 code: "sse_subscriber_limit".into(),
                 message: "too many concurrent SSE subscribers for this run".into(),
             });
         }
-        Err(crate::run_events::SubscribeError::HistoryUnavailable(body)) => {
+        Err(nexus_core::execution::run_events::SubscribeError::HistoryUnavailable(body)) => {
             return Err(NexusApiError::BadRequestCodedDetails {
                 code: "history_unavailable".into(),
                 message: "run event history is not available for replay".into(),
@@ -1169,12 +1172,14 @@ mod tests {
         // the production coordinator over the SAME engine/store.
         let engine = Arc::new(engine);
         state.set_engine(engine.clone());
-        state.set_run_coordinator(Arc::new(crate::preset_run::WorkflowRunCoordinator::new(
-            engine,
-            storage.clone(),
-            Arc::new(pool.clone()),
-            session_cancels,
-        )));
+        state.set_run_coordinator(Arc::new(
+            nexus_core::execution::WorkflowRunCoordinator::new(
+                engine,
+                storage.clone(),
+                Arc::new(pool.clone()),
+                session_cancels,
+            ),
+        ));
 
         // Start a real v1 session.
         let engine = state.engine().expect("engine set");
@@ -1271,7 +1276,7 @@ mod tests {
         let engine = Arc::new(engine);
         state.set_engine(engine.clone());
         state.set_run_coordinator(Arc::new(
-            crate::preset_run::WorkflowRunCoordinator::new(
+            nexus_core::execution::WorkflowRunCoordinator::new(
                 engine,
                 storage.clone(),
                 Arc::new(pool.clone()),

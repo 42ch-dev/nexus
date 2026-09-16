@@ -26,7 +26,11 @@ use crate::config::CliConfig;
 use crate::errors::Result;
 use crate::CliError;
 use clap::Subcommand;
-use nexus_contracts::local::orchestration::http::{
+// The canonical preset profile DTOs live in the generated `preset_profile_response`
+// module; the crate-root names resolve to per-DTO duplicates that are wire-identical
+// but distinct Rust types from the ones `PresetProfileResponse` actually holds.
+// Import the family from the owning response module.
+use nexus_contracts::generated::core::orchestration_presets::preset_profile_response::{
     PresetProfileExitWhen, PresetProfileLanes, PresetProfileNext, PresetProfileResponse,
 };
 
@@ -366,12 +370,12 @@ fn print_validate_verdict(resp: &serde_json::Value) {
 /// Moved from `system` (V1.153 P3) — the shared validator core, not
 /// re-implemented (AR-24).
 fn validate_preset_offline(path: &str) -> Result<serde_json::Value> {
-    use nexus_orchestration::preset::{
+    use nexus_orchestration::CapabilityRegistry;
+    use nexus_preset::{
         loader_validate_manifest_compat, validate_assets_in_bundle, validate_path_safety,
         validate_preset_semantic, yaml_value_depth, DiagnosticSeverity,
         ValidationResult as PresetValidationResult, DEFAULT_MAX_YAML_DEPTH, DEFAULT_MAX_YAML_SIZE,
     };
-    use nexus_orchestration::CapabilityRegistry;
 
     // Resolve the target file + optional bundle root (mirrors the daemon's
     // `infer_bundle_root`: only a file literally named `preset.yaml` has a
@@ -663,7 +667,9 @@ fn format_next(next: &PresetProfileNext) -> String {
 mod tests {
     use super::*;
     use clap::Parser;
-    use nexus_contracts::local::orchestration::http::{PresetProfileSignal, PresetProfileState};
+    use nexus_contracts::generated::core::orchestration_presets::preset_profile_response::{
+        PresetProfileSignal, PresetProfileState,
+    };
 
     /// Wrapper for parsing `PresetCommand` in tests.
     #[derive(Debug, clap::Parser)]

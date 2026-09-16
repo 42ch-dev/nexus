@@ -528,6 +528,140 @@ impl Outbox {
         Ok(())
     }
 
+    /// Re-queue a stuck (`conflicted` / `failed`) entry for delivery.
+    ///
+    /// The entry moves back to `ready` with its retry accounting cleared
+    /// (`retry_count` reset to 0), so a requeued max-retry entry receives a
+    /// fresh explicit retry budget instead of hitting the max-retry path on
+    /// its next [`Self::replay`]/push failure.
+    /// Resolution stays local: this never sends by itself. Non-stuck entries
+    /// do not match and surface as [`SyncError::OutboxEntryNotFound`]
+    /// (v1.190 P2-T0 core `resolve_outbox` retry action).
+    ///
+    /// # Errors
+    /// Returns [`SyncError::OutboxEntryNotFound`] when no stuck entry with
+    /// the given id exists, and the specific error type if the operation
+    /// fails.
+    pub async fn requeue_stuck(&self, outbox_entry_id: &str) -> SyncResult<()> {
+        let now = chrono::Utc::now();
+
+        let result = sqlx::query!(
+            "UPDATE outbox_entries
+             SET delivery_state = 'ready', retry_count = 0, last_error = NULL, next_retry_at = NULL, updated_at = ?
+             WHERE outbox_entry_id = ? AND delivery_state IN ('conflicted', 'failed')",
+            now,
+            outbox_entry_id
+        )
+        .execute(self.pool.inner())
+        .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(SyncError::OutboxEntryNotFound {
+                id: outbox_entry_id.to_string(),
+            });
+        }
+
+        tracing::info!(outbox_entry_id = %outbox_entry_id, "Requeued stuck entry for delivery");
+        Ok(())
+    }
+
+    /// Drop a stuck (`conflicted` / `failed`) entry from the local send
+    /// queue.
+    ///
+    /// The entry becomes permanently `failed` with no retry time, so
+    /// [`Self::replay`] never re-sends it; the durable row (with its last
+    /// error and `reason`) is retained for audit. Non-stuck entries do not
+    /// match and surface as [`SyncError::OutboxEntryNotFound`] (v1.190 P2-T0
+    /// core `resolve_outbox` discard action).
+    ///
+    /// # Errors
+    /// Returns [`SyncError::OutboxEntryNotFound`] when no stuck entry with
+    /// the given id exists, and the specific error type if the operation
+    /// fails.
+    pub async fn discard_stuck(&self, outbox_entry_id: &str, reason: &str) -> SyncResult<()> {
+        let now = chrono::Utc::now();
+
+        let result = sqlx::query!(
+            "UPDATE outbox_entries
+             SET delivery_state = 'failed', last_error = ?, next_retry_at = NULL, updated_at = ?
+             WHERE outbox_entry_id = ? AND delivery_state IN ('conflicted', 'failed')",
+            reason,
+            now,
+            outbox_entry_id
+        )
+        .execute(self.pool.inner())
+        .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(SyncError::OutboxEntryNotFound {
+                id: outbox_entry_id.to_string(),
+            });
+        }
+
+        tracing::info!(outbox_entry_id = %outbox_entry_id, "Discarded stuck entry from send queue");
+        Ok(())
+    }
+
+    /// Bounded page of durable send-queue entries, newest first.
+    ///
+    /// Status surface for the core `outbox_status` command (v1.190 P2-T0):
+    /// every durable entry in the page — including stuck entries whose retry
+    /// time has not elapsed — with delivery state, retry accounting and last
+    /// error. Read-only: never mutates the queue.
+    ///
+    /// # Errors
+    /// Returns [`SyncError::InvalidInput`] when `limit` is not positive (a
+    /// page must be bounded), and the specific error type if the operation
+    /// fails.
+    pub async fn list_page(&self, limit: i64) -> SyncResult<Vec<OutboxEntry>> {
+        // A page must be bounded: SQLite treats a negative LIMIT as
+        // unbounded, so non-positive limits are rejected up front.
+        if limit <= 0 {
+            return Err(SyncError::InvalidInput(format!(
+                "outbox page limit must be positive: {limit}"
+            )));
+        }
+        // sqlx R2: Uses module-level OutboxRow struct.
+        let rows = sqlx::query_as!(
+            OutboxRow,
+            "SELECT outbox_entry_id as \"outbox_entry_id!\", bundle_id as \"bundle_id!\",
+                    idempotency_key as \"idempotency_key!\", delivery_state as \"delivery_state!\",
+                    retry_count as \"retry_count!\", last_error, next_retry_at,
+                    created_at as \"created_at!\", updated_at
+             FROM outbox_entries
+             ORDER BY created_at DESC
+             LIMIT ?",
+            limit
+        )
+        .fetch_all(self.pool.inner())
+        .await?;
+
+        let mut entries = Vec::with_capacity(rows.len());
+        for row in rows {
+            let delivery_state = DeliveryState::from_str(&row.delivery_state).map_err(|_| {
+                SyncError::OutboxDatabase(format!("invalid delivery_state: {}", row.delivery_state))
+            })?;
+            entries.push(OutboxEntry {
+                schema_version: LATEST_SCHEMA_VERSION,
+                outbox_entry_id: row.outbox_entry_id,
+                bundle_id: row.bundle_id,
+                idempotency_key: row.idempotency_key,
+                delivery_state,
+                retry_count: Some(u64::try_from(row.retry_count).map_err(|_| {
+                    SyncError::InvalidInput(format!(
+                        "outbox retry_count is negative: {}",
+                        row.retry_count
+                    ))
+                })?),
+                last_error: row.last_error,
+                next_retry_at: row.next_retry_at,
+                created_at: row.created_at,
+                updated_at: row.updated_at,
+            });
+        }
+        Ok(entries)
+    }
+
     /// Replay all pending entries (staged, ready, failed-with-retry-due).
     ///
     /// Returns entries that are eligible for sync processing.
@@ -909,6 +1043,60 @@ mod tests {
             result,
             Err(SyncError::OutboxMaxRetriesExceeded { .. })
         ));
+    }
+
+    #[tokio::test]
+    async fn requeue_stuck_grants_a_fresh_retry_budget() {
+        let outbox = Outbox::new_in_memory().await.expect("create outbox");
+        let cmd = make_test_command();
+        let entry_id = outbox.append(&cmd).await.expect("append");
+        outbox.mark_sent(&entry_id).await.expect("mark_sent");
+
+        // Burn the whole budget: the next failure takes the max-retry path.
+        for _ in 0..MAX_RETRIES {
+            outbox.mark_failed(&entry_id, "persistent error").await.ok();
+        }
+        assert!(matches!(
+            outbox.mark_failed(&entry_id, "persistent error").await,
+            Err(SyncError::OutboxMaxRetriesExceeded { .. })
+        ));
+
+        // Requeue clears the retry accounting ...
+        outbox.requeue_stuck(&entry_id).await.expect("requeue");
+        let entry = outbox.get(&entry_id).await.expect("get");
+        assert_eq!(entry.delivery_state, DeliveryState::Ready);
+        assert_eq!(entry.retry_count, Some(0));
+
+        // ... so the next failure gets a fresh explicit budget instead of
+        // instantly exceeding max retries again.
+        outbox
+            .mark_failed(&entry_id, "persistent error")
+            .await
+            .expect("fresh retry budget after requeue");
+        let entry = outbox.get(&entry_id).await.expect("get");
+        assert_eq!(entry.retry_count, Some(1));
+    }
+
+    #[tokio::test]
+    async fn list_page_rejects_non_positive_limits() {
+        let outbox = Outbox::new_in_memory().await.expect("create outbox");
+        let cmd = make_test_command();
+        outbox.append(&cmd).await.expect("append");
+
+        // SQLite treats a negative LIMIT as unbounded; the primitive must
+        // guarantee a bounded page by rejecting non-positive limits.
+        for limit in [0, -1, -100] {
+            assert!(
+                matches!(
+                    outbox.list_page(limit).await,
+                    Err(SyncError::InvalidInput(_))
+                ),
+                "limit {limit} must be rejected"
+            );
+        }
+
+        let page = outbox.list_page(1).await.expect("bounded page");
+        assert_eq!(page.len(), 1);
     }
 
     #[tokio::test]

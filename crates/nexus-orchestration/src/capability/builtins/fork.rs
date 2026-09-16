@@ -83,13 +83,9 @@ impl Capability for ForkCreate {
     fn name(&self) -> &'static str {
         "nexus.fork.create"
     }
-
     fn input_schema(&self) -> &'static str {
-        // label bounds mirror the HTTP schema (create-fork-request.schema.json,
-        // 1–200 chars when present) — orchestration/preset surface parity.
-        r#"{"type":"object","properties":{"world_id":{"type":"string"},"creator_id":{"type":"string"},"parent_branch_id":{"type":"string"},"forked_from_event_id":{"type":"string"},"label":{"type":"string","minLength":1,"maxLength":200}},"required":["world_id","creator_id","parent_branch_id","forked_from_event_id"],"additionalProperties":false}"#
+        nexus_preset::capability_catalog::NEXUS_FORK_CREATE_INPUT_SCHEMA
     }
-
     fn output_schema(&self) -> &'static str {
         r#"{"type":"object","properties":{"branch_id":{"type":"string"},"parent_branch_id":{"type":"string"},"forked_from_event_id":{"type":"string"},"created_at":{"type":"string","format":"date-time"}},"required":["branch_id","parent_branch_id","forked_from_event_id","created_at"],"additionalProperties":false}"#
     }
@@ -116,7 +112,7 @@ impl Capability for ForkCreate {
         // SAFETY: SELECT against known narrative_timeline_events schema.
         let event_ok: Option<String> = sqlx::query_scalar(
             "SELECT timeline_event_id FROM narrative_timeline_events \
-             WHERE timeline_event_id = ? AND world_id = ? AND branch_id = ?",
+         WHERE timeline_event_id = ? AND world_id = ? AND branch_id = ?",
         )
         .bind(&parsed.forked_from_event_id)
         .bind(&parsed.world_id)

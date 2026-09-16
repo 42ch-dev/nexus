@@ -32,44 +32,27 @@ impl Capability for SoulExperienceAggregate {
     fn name(&self) -> &'static str {
         "soul.experience.aggregate"
     }
-
     fn input_schema(&self) -> &'static str {
-        r#"{
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "type": "object",
-            "required": ["creator_id", "home_dir"],
-            "properties": {
-                "creator_id": {
-                    "type": "string",
-                    "description": "Creator ID to aggregate experience for"
-                },
-                "home_dir": {
-                    "type": "string",
-                    "description": "Absolute path to the user home directory"
-                }
-            },
-            "additionalProperties": false
-        }"#
+        nexus_preset::capability_catalog::SOUL_EXPERIENCE_AGGREGATE_INPUT_SCHEMA
     }
-
     fn output_schema(&self) -> &'static str {
         r#"{
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "type": "object",
-            "required": ["memories_processed", "experience_markdown"],
-            "properties": {
-                "memories_processed": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "description": "Number of experience-kind memories found"
-                },
-                "experience_markdown": {
-                    "type": "string",
-                    "description": "Aggregated markdown body for the Experience section"
-                }
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "required": ["memories_processed", "experience_markdown"],
+        "properties": {
+            "memories_processed": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Number of experience-kind memories found"
             },
-            "additionalProperties": false
-        }"#
+            "experience_markdown": {
+                "type": "string",
+                "description": "Aggregated markdown body for the Experience section"
+            }
+        },
+        "additionalProperties": false
+    }"#
     }
 
     async fn run(&self, input: Value) -> Result<Value, CapabilityError> {

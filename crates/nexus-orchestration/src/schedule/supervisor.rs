@@ -637,7 +637,7 @@ impl ScheduleSupervisor {
         // on-demand `creator run novel-chapter-review <work_id>` runs.
         // R-V147P0-06 (V1.48 P0 T3): preset id hoisted to `preset_ids`
         // SSOT — single source shared with the allowlist and findings hook.
-        if preset_id == crate::preset_ids::NOVEL_CHAPTER_REVIEW_PRESET_ID {
+        if preset_id == nexus_preset::preset_ids::NOVEL_CHAPTER_REVIEW_PRESET_ID {
             if let Err(e) =
                 auto_chain::persist_review_findings_for_schedule(&self.pool, schedule_id, ws_path)
                     .await
@@ -653,7 +653,7 @@ impl ScheduleSupervisor {
         // declarations from chapter outlines into
         // `Works/<work_ref>/Outlines/foreshadowing.md` after a
         // `novel-writing` produce run completes.
-        if preset_id == crate::preset_ids::NOVEL_WRITING_PRESET_ID {
+        if preset_id == nexus_preset::preset_ids::NOVEL_WRITING_PRESET_ID {
             if let Err(e) =
                 auto_chain::promote_foreshadowing_for_schedule(&self.pool, schedule_id, ws_path)
                     .await
@@ -687,7 +687,7 @@ impl ScheduleSupervisor {
         // `novel-review-master` schedule completes, scan the current
         // chapter prose for capitalized noun phrases and insert
         // `kb_extract_jobs` rows with `promotion_status='pending'`.
-        if preset_id == crate::preset_ids::NOVEL_REVIEW_MASTER_PRESET_ID {
+        if preset_id == nexus_preset::preset_ids::NOVEL_REVIEW_MASTER_PRESET_ID {
             if let Err(e) = quality_loop::extract_kb_candidates_for_review(
                 &self.pool,
                 schedule_id,
@@ -1017,7 +1017,7 @@ impl ScheduleSupervisor {
     ) -> Option<std::collections::HashMap<String, crate::run_state::AgentBinding>> {
         let preset_id = crate::stage_gates::preset_for_stage(stage)?;
         if let Some(provider_id) = self.binding_provider.as_ref().as_ref() {
-            crate::preset::default_bindings_for_preset(preset_id, provider_id).map_or_else(
+            crate::preset_runtime::default_bindings_for_preset(preset_id, provider_id).map_or_else(
                 || {
                     tracing::warn!(
                         work_id = %work_id,
@@ -1034,8 +1034,8 @@ impl ScheduleSupervisor {
             // No configured provider: only presets WITHOUT prompt roles
             // may be enqueued (empty map passes the completeness gate).
             let caps = crate::capability::CapabilityRegistry::with_builtins();
-            if let Ok(loaded) = crate::preset::load_embedded_preset(preset_id, &caps) {
-                let roles = crate::preset::required_prompt_roles(&loaded);
+            if let Ok(loaded) = nexus_preset::load_embedded_preset(preset_id, &caps) {
+                let roles = nexus_preset::required_prompt_roles(&loaded);
                 if !roles.is_empty() {
                     tracing::warn!(
                         work_id = %work_id,
@@ -1267,7 +1267,7 @@ impl ScheduleSupervisor {
         };
         let bindings = if let Some(provider_id) = self.binding_provider.as_ref().as_ref() {
             if let Some(bindings) =
-                crate::preset::default_bindings_for_preset(preset_id, provider_id)
+                crate::preset_runtime::default_bindings_for_preset(preset_id, provider_id)
             {
                 bindings
             } else {
@@ -1284,8 +1284,8 @@ impl ScheduleSupervisor {
             // No configured provider: only presets WITHOUT prompt roles
             // may be enqueued (empty map passes the completeness gate).
             let caps = crate::capability::CapabilityRegistry::with_builtins();
-            if let Ok(loaded) = crate::preset::load_embedded_preset(preset_id, &caps) {
-                let roles = crate::preset::required_prompt_roles(&loaded);
+            if let Ok(loaded) = nexus_preset::load_embedded_preset(preset_id, &caps) {
+                let roles = nexus_preset::required_prompt_roles(&loaded);
                 if !roles.is_empty() {
                     tracing::warn!(
                         work_id = %work_id,
@@ -3242,7 +3242,7 @@ mod tests_t9 {
             workspace_root: std::path::PathBuf::new(),
             preset_id: "test-preset".to_string(),
             preset_version: 1,
-            source: crate::run_state::PresetSourceIdentity::Embedded {
+            source: nexus_preset::source_identity::PresetSourceIdentity::Embedded {
                 preset_id: "test-preset".to_string(),
                 content_hash: [0u8; 32],
             },

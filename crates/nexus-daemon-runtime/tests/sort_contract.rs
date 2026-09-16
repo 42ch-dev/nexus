@@ -23,9 +23,9 @@ fn bindings_for_preset(
     nexus_home: &Path,
 ) -> HashMap<String, SessionAgentBindingDto> {
     let registry = std::sync::Arc::new(nexus_orchestration::CapabilityRegistry::with_builtins());
-    let loaded = nexus_orchestration::preset::resolve_preset(preset_id, nexus_home, &registry)
+    let loaded = nexus_preset::resolve_preset(preset_id, nexus_home, &registry)
         .unwrap_or_else(|e| panic!("resolve preset {preset_id}: {e}"));
-    nexus_orchestration::preset::required_prompt_roles(&loaded)
+    nexus_preset::required_prompt_roles(&loaded)
         .into_iter()
         .map(|role| {
             (
@@ -55,7 +55,7 @@ async fn sessions_ctx() -> TestCtx {
     state.set_agent_host_config(AgentHostConfig {
         providers: vec![ProviderConfig {
             id: TEST_BINDING_PROVIDER.to_string(),
-            protocol: "native_cli".to_string(),
+            protocol: "acp".to_string(),
             command: Some("mock".to_string()),
             args: vec![],
             env: HashMap::new(),
@@ -63,6 +63,10 @@ async fn sessions_ctx() -> TestCtx {
         }],
         ..AgentHostConfig::default()
     });
+    // The bundle publish composes the Host prompt executor and provider
+    // port over the Agent Host facade the daemon boot always wires before
+    // serving, so the fixture must supply one too.
+    nexus_daemon_runtime::test_utils::wire_test_agent_host_started(&mut state).await;
     state
         .publish_creator_runtime_bundle()
         .await

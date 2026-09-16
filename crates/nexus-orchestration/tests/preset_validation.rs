@@ -1,4 +1,4 @@
-use nexus_orchestration::preset::load_preset_from_str;
+use nexus_preset::load_preset_from_str;
 
 fn test_capability_registry() -> nexus_orchestration::capability::CapabilityRegistry {
     nexus_orchestration::capability::CapabilityRegistry::with_builtins()
@@ -101,44 +101,6 @@ inner_graphs:
         "expected 'cycle' problem in inner_graphs: {:?}",
         err.problems()
     );
-}
-
-#[test]
-fn accept_conditional_next_on_any_state_kind() {
-    // V1.56 P2: conditional next is now accepted on any state kind,
-    // not just llm_judge. The loader no longer rejects this form.
-    let yaml = r#"
-preset:
-  id: cond-test
-  version: 1
-  kind: creator
-  description: test
-  requires_capabilities: []
-  initial: a
-  terminal: c
-states:
-  - id: a
-    enter: []
-    exit_when: { kind: rule }
-    next:
-      kind: conditional
-      rules:
-        - when: "true"
-          to: c
-      default: b
-  - id: b
-    enter: []
-    exit_when: { kind: manual }
-    next: c
-  - id: c
-    terminal: true
-"#;
-    let loaded = load_preset_from_str(yaml, &test_capability_registry()).unwrap();
-    assert_eq!(loaded.id, "cond-test");
-    // Verify the graph has all 3 states
-    assert!(loaded.outer_graph.get_task("a").is_some());
-    assert!(loaded.outer_graph.get_task("b").is_some());
-    assert!(loaded.outer_graph.get_task("c").is_some());
 }
 
 #[test]
@@ -326,82 +288,6 @@ inner_graphs:
         "expected 'unknown node' problem: {:?}",
         err.problems()
     );
-}
-
-#[test]
-fn valid_preset_loads_with_all_sections() {
-    let yaml = r#"
-preset:
-  id: full-valid
-  version: 1
-  kind: creator
-  description: "A valid preset with all sections"
-  requires_capabilities:
-    - workspace.open
-  initial: a
-  terminal: c
-states:
-  - id: a
-    enter:
-      - kind: capability
-        name: workspace.open
-    exit_when: { kind: manual }
-    next: b
-  - id: b
-    enter: []
-    exit_when: { kind: rule }
-    next: c
-  - id: c
-    terminal: true
-inner_graphs:
-  my_graph:
-    nodes:
-      - id: n1
-        kind: acp_prompt
-      - id: n2
-        kind: acp_prompt
-        depends_on: [n1]
-    output_binding: n2.text
-signals:
-  - name: user_paused
-    on_receive:
-      action: pause
-"#;
-    let loaded = load_preset_from_str(yaml, &test_capability_registry()).unwrap();
-    assert_eq!(loaded.id, "full-valid");
-    assert_eq!(loaded.version, 1);
-    assert_eq!(loaded.outer_graph.id, "full-valid");
-    assert!(loaded.inner_graphs.contains_key("my_graph"));
-    assert_eq!(loaded.signals.len(), 1);
-}
-
-#[test]
-fn loaded_preset_has_correct_structure() {
-    let yaml = r"
-preset:
-  id: struct-test
-  version: 2
-  kind: creator
-  description: test
-  requires_capabilities: []
-  initial: a
-  terminal: b
-states:
-  - id: a
-    enter: []
-    exit_when: { kind: manual }
-    next: b
-  - id: b
-    terminal: true
-";
-    let loaded = load_preset_from_str(yaml, &test_capability_registry()).unwrap();
-    assert_eq!(loaded.id, "struct-test");
-    assert_eq!(loaded.version, 2);
-    assert!(loaded.outer_graph.get_task("a").is_some());
-    assert!(loaded.outer_graph.get_task("b").is_some());
-    assert!(loaded.inner_graphs.is_empty());
-    assert!(loaded.signals.is_empty());
-    assert!(!loaded.source_hash.is_empty());
 }
 
 #[test]

@@ -168,7 +168,7 @@ export function SchedulePage() {
                 {worksList.map((w) => (
                   <TableRow key={w.work_id}>
                     <TableCell>
-                      <span className="font-medium text-gray-1000">{w.title || t('works:untitled')}</span>
+                      <span className="font-medium text-gray-1000">{w.title ?? t('works:untitled')}</span>
                       <div className="text-copy-13-mono text-gray-700">{shortId(w.work_id)}</div>
                     </TableCell>
                     <TableCell><StatusBadge status={w.status} /></TableCell>
@@ -178,7 +178,7 @@ export function SchedulePage() {
                         type="button"
                         variant="tertiary"
                         size="tiny"
-                        onClick={() => setEditCron({ workId: w.work_id, workTitle: w.title || w.work_id })}
+                        onClick={() => setEditCron({ workId: w.work_id, workTitle: w.title ?? w.work_id })}
                         aria-label={t('workCron.triggerAria', { id: shortId(w.work_id) })}
                       >
                         {t('workCron.trigger')}

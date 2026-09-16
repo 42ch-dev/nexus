@@ -90,26 +90,19 @@ impl Capability for JudgeLlm {
     // orchestration context, NOT accepted from user input (security:
     // prevents cross-creator routing — SEC-V131-01).
     fn input_schema(&self) -> &'static str {
-        r#"{
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "type": "object",
-            "required": ["prompt"],
-            "properties": {
-                "prompt": { "type": "string", "description": "The evaluation prompt for the judge" }
-            }
-        }"#
+        nexus_preset::capability_catalog::JUDGE_LLM_INPUT_SCHEMA
     }
 
     fn output_schema(&self) -> &'static str {
         r#"{
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "type": "object",
-            "required": ["result", "reason"],
-            "properties": {
-                "result": { "type": "boolean", "description": "true = go, false = nogo" },
-                "reason": { "type": "string", "description": "Human-readable explanation" }
-            }
-        }"#
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "required": ["result", "reason"],
+        "properties": {
+            "result": { "type": "boolean", "description": "true = go, false = nogo" },
+            "reason": { "type": "string", "description": "Human-readable explanation" }
+        }
+    }"#
     }
 
     async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
@@ -131,9 +124,9 @@ impl Capability for JudgeLlm {
             .and_then(|v| v.as_str())
             .ok_or_else(|| {
                 CapabilityError::Forbidden(
-                    "missing trusted _session_id: orchestration context must inject the run identity"
-                        .to_string(),
-                )
+                "missing trusted _session_id: orchestration context must inject the run identity"
+                    .to_string(),
+            )
             })?;
 
         let executor = self
@@ -152,8 +145,8 @@ impl Capability for JudgeLlm {
         // Build judge prompt with GO/NOGO framing.
         let judge_prompt = format!(
             "You are a judge. Evaluate the following and respond with GO or NOGO.\n\
-             Respond with ONLY 'GO' or 'NOGO' followed by a brief reason.\n\n\
-             {prompt_text}"
+         Respond with ONLY 'GO' or 'NOGO' followed by a brief reason.\n\n\
+         {prompt_text}"
         );
 
         let result = executor

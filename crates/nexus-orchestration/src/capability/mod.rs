@@ -930,6 +930,12 @@ impl CapabilityRegistry {
     }
 }
 
+impl nexus_preset::capability_catalog::CapabilityCatalog for CapabilityRegistry {
+    fn input_schema(&self, name: &str) -> Option<&str> {
+        self.get(name).map(Capability::input_schema)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // CapabilityRegistryHolder — hot-reload swap seam (V1.176 P1, AR-92)
 // ---------------------------------------------------------------------------

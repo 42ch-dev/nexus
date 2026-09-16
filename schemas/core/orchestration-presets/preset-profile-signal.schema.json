@@ -1,0 +1,24 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "$id": "https://nexus42.invalid/schemas/core/orchestration-presets/preset-profile-signal.schema.json",
+ "schema_version": 1,
+ "title": "PresetProfileSignal",
+ "description": "A declared signal binding (declared, not delivered).",
+ "type": "object",
+ "required": [
+  "name",
+  "action"
+ ],
+ "additionalProperties": false,
+ "properties": {
+  "name": {
+   "type": "string"
+  },
+  "action": {
+   "type": "string"
+  },
+  "target": {
+   "type": "string"
+  }
+ }
+}

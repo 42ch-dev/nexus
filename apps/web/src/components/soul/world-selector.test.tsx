@@ -10,18 +10,15 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { WorldSelector, countFragmentsByWorld } from '@/components/soul/world-selector';
 import { renderInApp } from '@/test/test-providers';
-import type { World } from '@42ch/nexus-contracts';
+import type { NarrativeWorldState } from '@42ch/nexus-contracts';
 
-function world(over: Partial<World> = {}): World {
+function world(over: Partial<NarrativeWorldState> = {}): NarrativeWorldState {
   return {
-    schema_version: 1,
     world_id: 'w-1',
-    owner_creator_id: 'c1',
     title: 'World One',
     slug: 'world-one',
     status: 'active',
-    visibility: 'private',
-    time_policy: 'manual',
+    is_fork: false,
     created_at: '2026-07-01T00:00:00Z',
     ...over,
   };

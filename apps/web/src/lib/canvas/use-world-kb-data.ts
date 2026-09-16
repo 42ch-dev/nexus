@@ -167,7 +167,7 @@ export function useWorldKbChangesWatch(worldId: string | undefined, enabled: boo
   useEffect(() => {
     if (!changeData || !worldId) return;
     const touched =
-      changeData.resync_required ||
+      changeData.resync_required ??
       changeData.rows.some((row) => row.world_id === worldId);
     if (!touched) return;
     void qc.invalidateQueries({ queryKey: queryKeys.worldKb.graph(worldId) });

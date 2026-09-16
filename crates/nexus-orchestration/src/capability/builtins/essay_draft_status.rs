@@ -80,11 +80,9 @@ impl Capability for EssayDraftStatusFinalize {
     fn name(&self) -> &'static str {
         "essay.draft_status.finalize"
     }
-
     fn input_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"work_ref":{"type":"string"},"works_root":{"type":"string"},"word_count":{"anyOf":[{"type":"string","enum":["auto"]},{"type":"integer"}]}},"required":["work_ref"],"additionalProperties":false}"#
+        nexus_preset::capability_catalog::ESSAY_DRAFT_STATUS_FINALIZE_INPUT_SCHEMA
     }
-
     fn output_schema(&self) -> &'static str {
         r#"{"type":"object","properties":{"updated":{"type":"boolean"},"draft_path":{"type":"string"},"word_count":{"type":"integer"}},"required":["updated","draft_path","word_count"],"additionalProperties":false}"#
     }

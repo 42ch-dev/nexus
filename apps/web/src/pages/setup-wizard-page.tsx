@@ -99,7 +99,7 @@ export function SetupWizardPage() {
       if (desktop) {
         const name = state.selectedAgent?.name ?? 'custom';
         const launchCommand =
-          (state.selectedAgent?.launch_command ?? state.customLaunchCommand.trim()) || undefined;
+          (state.selectedAgent?.launch_command ?? state.customLaunchCommand.trim()) ?? undefined;
         await desktop.setAgentProfile(name, launchCommand);
       }
       markCompleted();

@@ -22,11 +22,12 @@
 use graph_flow::{Session, SessionStorage};
 use nexus_orchestration::engine::{SessionId, SessionStatus};
 use nexus_orchestration::run_state::{
-    AgentBinding, ChildCheckpoint, PresetSourceIdentity, RunCheckpoint, RunDescriptorV1,
-    RunStateV1, TerminalSettlementTarget, WorkflowStateStore,
+    AgentBinding, ChildCheckpoint, RunCheckpoint, RunDescriptorV1, RunStateV1,
+    TerminalSettlementTarget, WorkflowStateStore,
 };
 use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
 use nexus_orchestration::OrchestrationEngine;
+use nexus_preset::source_identity::PresetSourceIdentity;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -1543,7 +1544,7 @@ async fn engine_start_with_loaded_preset_builds_source_identity() {
     // Load a real embedded preset (novel-writing) — exercises the actual
     // loader + source identity construction.
     let registry = nexus_orchestration::CapabilityRegistry::with_builtins();
-    let loaded = nexus_orchestration::preset::load_embedded_preset("novel-writing", &registry)
+    let loaded = nexus_preset::load_embedded_preset("novel-writing", &registry)
         .expect("novel-writing preset loads");
     assert!(
         loaded.source_identity.is_some(),
@@ -5196,14 +5197,13 @@ async fn engine_join_park_persists_paused_tokenless_with_live_join_keys() {
         nexus_orchestration::CapabilityRegistryHolder::with_registry(caps.clone()),
     );
 
-    let mut loaded =
-        nexus_orchestration::preset::load_preset_from_str(converge_preset_yaml(), &caps)
-            .expect("converge preset loads");
+    let mut loaded = nexus_preset::load_preset_from_str(converge_preset_yaml(), &caps)
+        .expect("converge preset loads");
     // Raw-YAML loads carry no source identity (the loader cannot know the
     // origin); a v1 run requires one, so freeze the embedded identity over
     // the manifest exactly as `load_embedded_preset` does (A2/A7).
     loaded.source_identity = Some(
-        nexus_orchestration::preset::loader::preset_source_identity(
+        nexus_preset::loader::preset_source_identity(
             &loaded.manifest,
             None,
             Some("e2e-engine-converge"),
@@ -5502,10 +5502,8 @@ fn judge_registry_holder(
 /// auto-step on the next boot).
 #[tokio::test]
 async fn engine_labeled_routed_manual_wait_keeps_token_despite_join_keys() {
-    use nexus_orchestration::preset::manifest::{
-        ExitWhen, LabeledNext, NextTarget, StateDefinition,
-    };
     use nexus_orchestration::tasks::StateCompositeTask;
+    use nexus_preset::manifest::{ExitWhen, LabeledNext, NextTarget, StateDefinition};
 
     let (pool, db) = fresh_pool().await;
     let storage = Arc::new(SqliteSessionStorage::new(pool.clone()));
@@ -5756,10 +5754,10 @@ states:
     terminal: true
 "#;
     let caps = std::sync::Arc::new(nexus_orchestration::CapabilityRegistry::with_builtins());
-    let mut loaded = nexus_orchestration::preset::load_preset_from_str(yaml, &caps)
-        .expect("conditional preset loads");
+    let mut loaded =
+        nexus_preset::load_preset_from_str(yaml, &caps).expect("conditional preset loads");
     loaded.source_identity = Some(
-        nexus_orchestration::preset::loader::preset_source_identity(
+        nexus_preset::loader::preset_source_identity(
             &loaded.manifest,
             None,
             Some("e2e-cond-manual"),

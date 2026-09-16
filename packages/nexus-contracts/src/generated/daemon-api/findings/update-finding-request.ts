@@ -5,7 +5,7 @@
  */
 
 /**
- * Request body for PATCH /v1/daemon/works/{work_id}/findings/{finding_id}.
+ * Request body for PATCH /v1/daemon/works/{work_id}/findings/{finding_id}. Every field is optional; `rule_suggestion` is tri-state (R-V1190-FINDINGS-TRISTATE-DUP): omitted does not touch the stored column, `null` clears it to SQL NULL, a string sets it.
  */
 export interface UpdateFindingRequest {
   severity?: string;
@@ -14,5 +14,5 @@ export interface UpdateFindingRequest {
   description?: string;
   target_executor?: string;
   kind?: string;
-  rule_suggestion?: string;
+  rule_suggestion?: unknown;
 }

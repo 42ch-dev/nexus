@@ -4,9 +4,8 @@
 //! Covers happy path, --force semantics, wrong order rejection, and active schedule uniqueness.
 
 use nexus_contracts::local::orchestration::FL_E_STAGES;
-use nexus_orchestration::stage_gates::{
-    build_preset_input, check_stage_advance, preset_for_stage, WorkFields, WorkStageState,
-};
+use nexus_local_db::work_stage::{check_stage_advance, WorkStageState};
+use nexus_orchestration::stage_gates::{build_preset_input, preset_for_stage, WorkFields};
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

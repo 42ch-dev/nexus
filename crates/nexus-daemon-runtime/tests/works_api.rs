@@ -99,29 +99,34 @@ async fn create_work_with_title(server: &TestServer, title: &str) -> String {
 }
 
 /// Build a fresh `WorkspaceState` for handler-level testing.
-/// Switch the active creator on the SAME real workspace state.
-///
-/// A cross-creator test must not build a second workspace authority for the
-/// same root: the workspace-authority lease is exclusive per root (P3), so a
-/// second `new_for_testing` over the same DB fails with EAGAIN. Rewriting the
-/// active selection in this state's `config.toml` exercises the real
-/// creator-scoped isolation instead (same pattern as the characters API
-/// switch helper).
-fn switch_active_creator(state: &WorkspaceState, creator_id: &str) {
-    std::fs::write(
-        state.nexus_home().join("config.toml"),
-        format!(
-            "active_creator_id = \"{creator_id}\"\n\n[active_workspace_slug_by_creator]\n\"{creator_id}\" = \"default\"\n"
-        ),
-    )
-    .expect("write active-creator selection");
-}
-
 async fn handler_state() -> (WorkspaceState, TestTempRoot) {
     let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
     test_utils::seed_test_creator_and_world(state.pool().unwrap()).await;
     (state, tmp)
+}
+
+/// Seed a `works` row owned by `creator_id` in the CURRENT workspace DB.
+///
+/// Cross-creator coverage is expressed as a foreign OWNER inside one coherent
+/// workspace, not as an in-place active-selection move: the core refuses a
+/// state whose bound database and resolved selection name different
+/// identities (fail-closed binding), because serving the newly selected
+/// creator out of the old database is exactly the mismatch that guard exists
+/// to prevent.
+async fn seed_work_owned_by(pool: &sqlx::SqlitePool, work_id: &str, creator_id: &str) {
+    let now = chrono::Utc::now().to_rfc3339();
+    // SAFETY: test helper using runtime query — compile-time macro not applicable.
+    sqlx::query(
+        "INSERT OR IGNORE INTO works (work_id, creator_id, workspace_slug, status, title, long_term_goal, initial_idea, creative_brief, intake_status, world_id, story_ref, inspiration_log, primary_preset_id, schedule_ids, created_at, updated_at, current_stage, stage_status) VALUES (?, ?, 'default', 'active', 'Foreign Work', 'Goal', 'Idea', NULL, 'pending', NULL, NULL, '[]', 'novel-writing', '[]', ?, ?, 'intake', 'pending')",
+    )
+    .bind(work_id)
+    .bind(creator_id)
+    .bind(&now)
+    .bind(&now)
+    .execute(pool)
+    .await
+    .expect("seed foreign work insert");
 }
 
 // ─── HTTP-level: POST /v1/daemon/works ──────────────────────────────────────
@@ -931,11 +936,12 @@ async fn creator_isolation_get_work_returns_404_for_other_creator() {
     .unwrap();
     let work_id = resp.work_id.clone();
 
-    // Switch the active creator on the SAME real state, then try to GET the
-    // other creator's work. The creator-scoped lookup must not find it.
-    switch_active_creator(&state_a, "ctr_other_creator");
+    // A second creator's Work inside the SAME workspace DB: the
+    // creator-scoped lookup must not find it.
+    let foreign = format!("wrk_{}", uuid::Uuid::new_v4());
+    seed_work_owned_by(state_a.pool().unwrap(), &foreign, "ctr_other_creator").await;
     let result =
-        nexus_daemon_runtime::api::handlers::works::get_work(State(state_a), Path(work_id.clone()))
+        nexus_daemon_runtime::api::handlers::works::get_work(State(state_a.clone()), Path(foreign))
             .await;
 
     let err = result.expect_err("a foreign creator must not read another creator's work");
@@ -944,35 +950,24 @@ async fn creator_isolation_get_work_returns_404_for_other_creator() {
         axum::http::StatusCode::NOT_FOUND,
         "cross-creator read must be a 404, got: {err:?}"
     );
+
+    // Positive control: the active creator still reads its OWN work, so the
+    // 404 above proves scoping rather than a blanket refusal.
+    assert!(
+        nexus_daemon_runtime::api::handlers::works::get_work(State(state_a), Path(work_id))
+            .await
+            .is_ok(),
+        "the owning creator must still read its own work"
+    );
 }
 
 #[tokio::test]
 async fn creator_isolation_patch_work_returns_404_for_other_creator() {
-    // Create with default test creator
+    // A second creator's Work inside the SAME workspace DB, patched through
+    // the active creator's state.
     let (state_a, _tmp_a) = handler_state().await;
-    let req = CreateWorkRequest {
-        title: "Isolated Patch".into(),
-        long_term_goal: "Goal".into(),
-        initial_idea: "Idea".into(),
-        world_id: Some("wld_test_world".to_string()),
-        story_ref: None,
-        primary_preset_id: None,
-        client_request_id: None,
-        lineage_from_work_id: None,
-        set_pool_active: None,
-        work_profile: None,
-    };
-    let (_, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
-        State(state_a.clone()),
-        axum::Json(req),
-    )
-    .await
-    .unwrap();
-    let work_id = resp.work_id.clone();
-
-    // Switch the active creator on the SAME real state (never a second
-    // authority for the same root), then try to PATCH across creators.
-    switch_active_creator(&state_a, "ctr_other_creator");
+    let foreign = format!("wrk_{}", uuid::Uuid::new_v4());
+    seed_work_owned_by(state_a.pool().unwrap(), &foreign, "ctr_other_creator").await;
     let patch = PatchWorkRequest {
         title: Some("Hacked".into()),
         long_term_goal: None,
@@ -991,14 +986,15 @@ async fn creator_isolation_patch_work_returns_404_for_other_creator() {
     };
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state_a),
-        Path(work_id),
+        Path(foreign),
         axum::Json(patch),
     )
     .await;
     assert!(result.is_err());
     assert_eq!(
         result.unwrap_err().status_code(),
-        axum::http::StatusCode::NOT_FOUND
+        axum::http::StatusCode::NOT_FOUND,
+        "cross-creator PATCH must be a creator-scoped 404"
     );
 }
 
@@ -1391,11 +1387,15 @@ async fn seed_work_for_status_test(
 }
 
 /// Create a test context with active creator config for handler-level tests.
+///
+/// `ctr_testuser` / `ws_default` is selected through the constructor that
+/// materializes the Profile home AND the admitted `state.db` for that same
+/// identity. Rewriting `config.toml` after the fact would leave the state's
+/// bound database and its resolved selection naming different creators,
+/// which the core refuses as a fail-closed binding mismatch.
 async fn test_ctx_with_creator_config() -> (TestTempRoot, WorkspaceState) {
-    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
-    // Write config.toml so read_active_creator_id finds "ctr_testuser"
-    let config_content = "active_creator_id = \"ctr_testuser\"\n[active_workspace_slug_by_creator]\n\"ctr_testuser\" = \"ws_default\"\n";
-    std::fs::write(nexus_home.join("config.toml"), config_content).expect("write config.toml");
+    let (tmp, nexus_home, db_path) =
+        test_utils::create_test_workspace_for("ctr_testuser", "ws_default").await;
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
     (tmp, state)
 }

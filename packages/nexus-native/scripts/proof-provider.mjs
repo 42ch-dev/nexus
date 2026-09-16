@@ -292,7 +292,7 @@ function failScenario(key, message, detail = {}) {
 }
 
 
-function runIsolatedScenario(scenarioKey, adapter, providers = undefined) {
+function runIsolatedScenario(scenarioKey, adapter, providers) {
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL('./proof-isolated-worker.mjs', import.meta.url), {
       workerData: { root, adapter, scenario: scenarioKey, providers: adapter === 'ts-acp' ? undefined : providers },
@@ -594,7 +594,7 @@ function tsExecutePayload() {
   return { kind: 'prompt', content: 'hello' };
 }
 
-async function runAcpLifecycleSession(core, { adapter, sdk, admittedMeta = {}, home, accessJson, providers = undefined }) {
+async function runAcpLifecycleSession(core, { adapter, sdk, admittedMeta = {}, home, accessJson, providers }) {
   const probePayload = adapter === 'rust-acp' ? rustProbePayload(home) : tsProbePayload();
   const launchPayload = adapter === 'rust-acp' ? rustLaunchPayload(home) : tsLaunchPayload();
   const executePayload = adapter === 'rust-acp' ? rustExecutePayload() : tsExecutePayload();

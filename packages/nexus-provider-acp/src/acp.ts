@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { ContentBlock, SessionConfigOption } from '@agentclientprotocol/sdk';
 import type { ProviderCallbacks } from './contracts.js';
 import type {
   ProviderCall,
@@ -11,7 +12,6 @@ import { OperationDelivery } from './delivery.js';
 import { CleanupUnconfirmedError, ProviderNextError } from './errors.js';
 import {
   cleanupOwnedConnection,
-  createAcpSession,
   MAX_PROMPT_INPUT_BYTES,
   spawnOwnedConnection,
   type OwnedConnection,
@@ -28,6 +28,7 @@ type SessionState = {
   cwd: string;
   owned: OwnedConnection;
   activeOperationId: string | null;
+  configOptions: SessionConfigOption[];
 };
 
 type ActiveOperation = {
@@ -68,6 +69,79 @@ function sanitizeError(message: string): ProviderError {
     details: {},
     http_status: 500,
   };
+}
+
+class OperationError extends Error {
+  constructor(readonly code: 'invalid_input' | 'not_supported' | 'interrupted', message: string) {
+    super(message);
+  }
+}
+
+function object(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new OperationError('invalid_input', 'expected_object');
+  }
+  return value as Record<string, unknown>;
+}
+
+function string(value: unknown): string {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new OperationError('invalid_input', 'expected_nonempty_string');
+  }
+  return value;
+}
+
+/** Decode the existing Rust HostOperation representation, not a second DTO. */
+function parseOperation(payload: Record<string, unknown>, controlId: string) {
+  if (Object.keys(payload).length !== 1) {
+    throw new OperationError('invalid_input', 'expected_one_host_operation');
+  }
+  if ('SetModel' in payload) {
+    return { kind: 'model' as const, opId: controlId, value: string(object(payload.SetModel).model) };
+  }
+  if ('SetMode' in payload) {
+    return { kind: 'mode' as const, opId: controlId, value: string(object(payload.SetMode).mode) };
+  }
+  if (!('Prompt' in payload)) {
+    throw new OperationError('not_supported', 'unsupported_operation');
+  }
+  const prompt = object(payload.Prompt);
+  const opId = string(prompt.op_id);
+  if (prompt.permission_scope != null) {
+    const scope = object(prompt.permission_scope);
+    for (const key of ['allow_read', 'allow_write', 'allow_destructive']) {
+      if (typeof scope[key] !== 'boolean') {
+        throw new OperationError('invalid_input', 'invalid_permission_scope');
+      }
+    }
+    // The callback's existing host permission policy denies every request.
+    // Intersection with any valid narrowing scope remains deny-all; never
+    // turn a scope's true bits into an approval or discard a false bit.
+  }
+  if (!Array.isArray(prompt.content) || prompt.content.length === 0) {
+    throw new OperationError('invalid_input', 'empty_prompt');
+  }
+  const content: ContentBlock[] = prompt.content.map((value: unknown): ContentBlock => {
+    const block = object(value);
+    if (Object.keys(block).length !== 1) {
+      throw new OperationError('invalid_input', 'invalid_content_block');
+    }
+    if ('Text' in block) {
+      const text = object(block.Text).text;
+      if (typeof text !== 'string') throw new OperationError('invalid_input', 'invalid_text');
+      return { type: 'text', text };
+    }
+    if ('ResourceLink' in block) {
+      const link = object(block.ResourceLink);
+      const uri = string(link.uri);
+      return { type: 'resource_link', uri, name: link.name == null ? uri : string(link.name) };
+    }
+    throw new OperationError('not_supported', 'unsupported_content_block');
+  });
+  if (new TextEncoder().encode(JSON.stringify(content)).length > MAX_PROMPT_INPUT_BYTES) {
+    throw new OperationError('invalid_input', 'prompt_too_large');
+  }
+  return { kind: 'prompt' as const, opId, content };
 }
 
 function mapSessionUpdate(
@@ -139,14 +213,21 @@ export class AcpProviderEngine {
   private recipeOwners = new Map<string, OwnedConnection>();
   private cleanupFences = new Map<string, OwnedConnection>();
   private livePayloadOrder: string[] = [];
+  private launchingProviders = new Set<string>();
+  private launchingSessions = new Set<string>();
+  private recoveringUnpublishedOwners = false;
 
   async call(request: ProviderCall): Promise<ProviderReply> {
+    const deadline = handlerDeadlineMs(request.deadline_ms);
     try {
+      if (request.method === 'probe' || request.method === 'launch' || request.method === 'execute') {
+        await this.recoverUnpublishedOwners(deadline);
+      }
       switch (request.method) {
         case 'probe':
-          return await this.handleProbe(request);
+          return await this.handleProbe(request, deadline);
         case 'launch':
-          return await this.handleLaunch(request);
+          return await this.handleLaunch(request, deadline);
         case 'execute':
           return await this.handleExecute(request);
         case 'cancel':
@@ -162,6 +243,12 @@ export class AcpProviderEngine {
           });
       }
     } catch (error) {
+      if (error instanceof OperationError) {
+        return errReply(request.request_id, {
+          code: error.code, message: error.message, details: {},
+          http_status: error.code === 'interrupted' ? 503 : 400,
+        });
+      }
       if (error instanceof CleanupUnconfirmedError) {
         return interruptedReply(request.request_id, error.message);
       }
@@ -245,16 +332,58 @@ export class AcpProviderEngine {
     if (this.cleanupFences.size > 0) throw new Error('cleanup_fence_active');
   }
 
+  private async recoverUnpublishedOwners(deadline: number): Promise<void> {
+    // Do not queue or race a second reap against the currently owned attempt.
+    if (this.recoveringUnpublishedOwners) {
+      throw new CleanupUnconfirmedError('cleanup_recovery_in_flight');
+    }
+    if (this.cleanupFences.size === 0) return;
+    this.recoveringUnpublishedOwners = true;
+    try {
+      for (const [key, owned] of this.cleanupFences) {
+        const identity = this.ownerIdentityKey(owned);
+        let published = false;
+        for (const session of this.sessions.values()) {
+          if (this.ownerIdentityKey(session.owned) === identity) {
+            published = true;
+            break;
+          }
+        }
+        // Published sessions retain their original cancel/shutdown route.
+        if (published) continue;
+        const remaining = remainingBudgetMs(deadline);
+        if (remaining <= 0) throw new CleanupUnconfirmedError('cleanup_fence_active');
+        await this.requireConfirmedCleanup(owned, key, 'unpublished_child_not_reaped', remaining);
+        // Only confirmed reaping releases recipe ownership.
+        for (const [ownerKey, candidate] of this.recipeOwners) {
+          if (this.ownerIdentityKey(candidate) === identity) this.recipeOwners.delete(ownerKey);
+        }
+      }
+      this.assertNoCleanupFence();
+      if (remainingBudgetMs(deadline) <= 0) {
+        throw new OperationError('interrupted', 'cleanup_recovery_deadline_exhausted');
+      }
+    } finally {
+      // No detached timeout race: keep admission locked until reap returns.
+      this.recoveringUnpublishedOwners = false;
+    }
+  }
+
   private ownerIdentityKey(owned: OwnedConnection): string {
     const id = owned.boundIdentity;
     return `${id.pid}:${id.process_birth ?? ''}:${id.group_id ?? ''}`;
   }
 
-  private retainCleanupFence(key: string, owned: OwnedConnection): void {
+  private hasCleanupFenceForOwner(owned: OwnedConnection): boolean {
     const identity = this.ownerIdentityKey(owned);
     for (const existing of this.cleanupFences.values()) {
-      if (this.ownerIdentityKey(existing) === identity) return;
+      if (this.ownerIdentityKey(existing) === identity) return true;
     }
+    return false;
+  }
+
+  private retainCleanupFence(key: string, owned: OwnedConnection): void {
+    if (this.hasCleanupFenceForOwner(owned)) return;
     this.cleanupFences.set(key, owned);
   }
 
@@ -328,19 +457,20 @@ export class AcpProviderEngine {
     this.pruneLivePayloads();
   }
 
-  private routeSessionUpdate(acpSessionId: string, update: unknown): void {
-    for (const session of this.sessions.values()) {
-      if (session.owned.acpSessionId !== acpSessionId) continue;
-      const opId = session.activeOperationId;
-      if (!opId) continue;
-      const op = this.operations.get(opId);
-      if (!op?.delivery) continue;
-      const mapped = mapSessionUpdate(session.sessionId, opId, update);
-      if (mapped) op.delivery.enqueue(mapped);
-    }
+  private routeSessionUpdate(sessionId: string, acpSessionId: string, update: unknown): void {
+    // ACP IDs are connection-local; different providers may return identical
+    // IDs. The connection closure, not a global ACP-ID scan, owns the update.
+    const session = this.sessions.get(sessionId);
+    if (!session || session.owned.acpSessionId !== acpSessionId) return;
+    const opId = session.activeOperationId;
+    if (!opId) return;
+    const op = this.operations.get(opId);
+    if (!op?.delivery) return;
+    const mapped = mapSessionUpdate(sessionId, opId, update);
+    if (mapped) op.delivery.enqueue(mapped);
   }
 
-  private async handleProbe(request: ProviderCall): Promise<ProviderReply> {
+  private async handleProbe(request: ProviderCall, deadline: number): Promise<ProviderReply> {
     this.assertNoCleanupFence();
     const started = Date.now();
     const recipe = parseAdmittedRecipe(request.payload);
@@ -371,7 +501,10 @@ export class AcpProviderEngine {
       throw error;
     }
     try {
-      await this.requireConfirmedCleanup(owned, `probe:${recipe.recipe_generation}`, 'probe_child_not_reaped');
+      await this.requireConfirmedCleanup(
+        owned, `probe:${recipe.recipe_generation}`, 'probe_child_not_reaped',
+        remainingBudgetMs(deadline),
+      );
     } catch (error) {
       if (error instanceof CleanupUnconfirmedError) {
         return this.fenceCleanupError(
@@ -392,24 +525,37 @@ export class AcpProviderEngine {
     });
   }
 
-  private async handleLaunch(request: ProviderCall): Promise<ProviderReply> {
+  private async handleLaunch(request: ProviderCall, deadline: number): Promise<ProviderReply> {
     this.assertNoCleanupFence();
     const recipe = parseAdmittedRecipe(request.payload);
-    await this.evictStaleGeneration(recipe.recipe_generation);
+    if (this.launchingProviders.has(recipe.provider_id)) throw new Error('session_busy');
     const sessionId = request.session_id ?? randomUUID();
+    if (this.sessions.has(sessionId) || this.launchingSessions.has(sessionId)) {
+      throw new OperationError('invalid_input', 'session_id_already_owned');
+    }
+    this.launchingProviders.add(recipe.provider_id);
+    this.launchingSessions.add(sessionId);
     const ownerKey = `${recipe.recipe_generation}:${sessionId}`;
     let owned: OwnedConnection | null = null;
     try {
+      await this.evictStaleGeneration(recipe.provider_id, recipe.recipe_generation);
       owned = await this.connectForRecipe(recipe, sessionId);
-      await createAcpSession(owned, recipe.cwd);
-      this.sessions.set(sessionId, {
+      const created = await owned.connection.newSession({ cwd: recipe.cwd, mcpServers: [] });
+      owned.acpSessionId = created.sessionId;
+      const session: SessionState = {
         sessionId,
         providerId: recipe.provider_id,
         recipeGeneration: recipe.recipe_generation,
         cwd: recipe.cwd,
         owned,
         activeOperationId: null,
-      });
+        configOptions: created.configOptions ?? [],
+      };
+      // LaunchSpec's retained model/mode settings use the same discovered
+      // control paths as subsequent operations, on this exact ACP session.
+      if (request.payload.model != null) await this.setModel(session, string(request.payload.model));
+      if (request.payload.mode != null) await this.setMode(session, string(request.payload.mode));
+      this.sessions.set(sessionId, session);
       return okReply(request.request_id, { session_id: sessionId });
     } catch (error) {
       return await this.finalizeLaunchFailure(
@@ -417,7 +563,11 @@ export class AcpProviderEngine {
         owned,
         ownerKey,
         request.request_id,
+        deadline,
       );
+    } finally {
+      this.launchingProviders.delete(recipe.provider_id);
+      this.launchingSessions.delete(sessionId);
     }
   }
 
@@ -427,13 +577,17 @@ export class AcpProviderEngine {
     owned: OwnedConnection | null,
     ownerKey: string,
     requestId: string,
+    deadline?: number,
   ): Promise<ProviderReply> {
     const cleanupTarget =
       owned ??
       (error instanceof CleanupUnconfirmedError ? error.owner : null);
     if (cleanupTarget) {
       try {
-        await this.requireConfirmedCleanup(cleanupTarget, ownerKey, 'launch_child_not_reaped');
+        await this.requireConfirmedCleanup(
+          cleanupTarget, ownerKey, 'launch_child_not_reaped',
+          deadline === undefined ? undefined : remainingBudgetMs(deadline),
+        );
         this.recipeOwners.delete(ownerKey);
         this.clearFencesForOwner(cleanupTarget);
       } catch (cleanupError) {
@@ -457,18 +611,12 @@ export class AcpProviderEngine {
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error('session_not_found');
     if (session.activeOperationId) throw new Error('session_busy');
-    const payload = request.payload as { kind?: string; content?: string };
-    if (payload.kind !== 'prompt') throw new Error('unsupported_operation');
-    const content = payload.content ?? '';
-    if (new TextEncoder().encode(content).length > MAX_PROMPT_INPUT_BYTES) {
-      return errReply(request.request_id, {
-        code: 'invalid_input',
-        message: 'prompt_too_large',
-        details: {},
-        http_status: 400,
-      });
+    const operation = parseOperation(request.payload, request.operation_id ?? randomUUID());
+    const opId = operation.opId;
+    if (this.operations.has(opId)) throw new OperationError('invalid_input', 'operation_id_already_owned');
+    if (operation.kind === 'model' && !session.configOptions.some((option) => option.category === 'model')) {
+      throw new OperationError('not_supported', 'no_model_config_option');
     }
-    const opId = randomUUID();
     const delivery = new OperationDelivery(opId);
     const active: ActiveOperation = {
       sessionId,
@@ -483,18 +631,69 @@ export class AcpProviderEngine {
     this.trackLivePayload(opId);
     session.activeOperationId = opId;
     delivery.enqueue({ OpStarted: { session_id: sessionId, op_id: opId } });
-    const task = this.runPrompt(session, active, content);
+    const task = operation.kind === 'prompt'
+      ? this.runPrompt(session, active, operation.content)
+      : this.runControl(session, active, operation);
     active.promptTask = task;
-    void task.finally(() => {
+    const release = () => {
       if (session.activeOperationId === opId) session.activeOperationId = null;
-    });
+    };
+    void task.then(release, release);
+    if (operation.kind !== 'prompt') {
+      // A control RPC rejection is not a successful operation. Keep its
+      // owned task visible to shutdown while awaiting the real acknowledgement.
+      await task;
+    }
     return okReply(request.request_id, { operation_id: opId, session_id: sessionId });
+  }
+
+  private async setMode(session: SessionState, mode: string): Promise<void> {
+    try {
+      await session.owned.connection.setSessionMode({
+        sessionId: string(session.owned.acpSessionId), modeId: mode,
+      });
+    } catch {
+      throw new OperationError('not_supported', 'set_mode_failed');
+    }
+  }
+
+  private async setModel(session: SessionState, model: string): Promise<void> {
+    const option = session.configOptions.find((config) => config.category === 'model');
+    if (!option) throw new OperationError('not_supported', 'no_model_config_option');
+    try {
+      const response = await session.owned.connection.setSessionConfigOption({
+        sessionId: string(session.owned.acpSessionId), configId: option.id, value: model,
+      });
+      session.configOptions = response.configOptions;
+    } catch {
+      throw new OperationError('not_supported', 'set_model_failed');
+    }
+  }
+
+  private async runControl(
+    session: SessionState,
+    op: ActiveOperation,
+    operation: { kind: 'model' | 'mode'; value: string },
+  ): Promise<void> {
+    try {
+      if (operation.kind === 'model') await this.setModel(session, operation.value);
+      else await this.setMode(session, operation.value);
+      if (op.cancelled) throw new OperationError('interrupted', 'control_cancelled');
+      op.delivery?.trySetTerminal({ kind: 'finished', reason: 'end_turn' });
+    } catch (error) {
+      if (!op.cancelled) {
+        op.delivery?.trySetTerminal({
+          kind: 'failed', category: 'capability_unsupported', message: `set_${operation.kind}_failed`,
+        });
+      }
+      throw error;
+    }
   }
 
   private async runPrompt(
     session: SessionState,
     op: ActiveOperation,
-    content: string,
+    content: ContentBlock[],
   ): Promise<void> {
     const acpSessionId = session.owned.acpSessionId;
     if (!acpSessionId) {
@@ -508,7 +707,7 @@ export class AcpProviderEngine {
     try {
       const response = await session.owned.connection.prompt({
         sessionId: acpSessionId,
-        prompt: [{ type: 'text', text: content }],
+        prompt: content,
       });
       if (op.cancelled) return;
       const reason = String(response.stopReason ?? 'end_turn') as
@@ -559,7 +758,10 @@ export class AcpProviderEngine {
     // fresh default, or the handler would outlive the deadline it was given.
     const deadline = handlerDeadlineMs(request.deadline_ms);
     op.cancelled = true;
-    if (!op.delivery?.trySetTerminal({ kind: 'finished', reason: 'cancelled' })) {
+    // A retained terminal does not prove the previous reap succeeded. Retrying
+    // cancel must settle this owner's fence before acknowledging cleanup.
+    if (!op.delivery?.trySetTerminal({ kind: 'finished', reason: 'cancelled' }) &&
+        !this.hasCleanupFenceForOwner(session.owned)) {
       return okReply(request.request_id, { operation_id: operationId, session_id: op.sessionId });
     }
     // Narrowing does not survive the closure boundary, so capture it here.
@@ -654,7 +856,7 @@ export class AcpProviderEngine {
     sessionId: string,
   ): Promise<OwnedConnection> {
     const owned = await spawnOwnedConnection(recipe, (params) => {
-      this.routeSessionUpdate(String(params.sessionId), params.update);
+      this.routeSessionUpdate(sessionId, String(params.sessionId), params.update);
     });
     this.recipeOwners.set(`${recipe.recipe_generation}:${sessionId}`, owned);
     return owned;
@@ -717,6 +919,7 @@ export class AcpProviderEngine {
       cwd: '',
       owned,
       activeOperationId: null,
+      configOptions: [],
     });
     this.recipeOwners.set(`${generation}:${sessionId}`, owned);
   }
@@ -766,15 +969,10 @@ export class AcpProviderEngine {
     this.retainCleanupFence(key, owner);
   }
 
-  private async evictStaleGeneration(currentGeneration: string): Promise<void> {
+  private async evictStaleGeneration(providerId: string, currentGeneration: string): Promise<void> {
     if (this.cleanupFences.size > 0) throw new Error('generation_blocked_by_cleanup_fence');
-    for (const [key, owned] of [...this.recipeOwners.entries()]) {
-      if (key.startsWith(`${currentGeneration}:`)) continue;
-      await this.requireConfirmedCleanup(owned, key, `evict_cleanup_unconfirmed:${key}`);
-      this.recipeOwners.delete(key);
-    }
     for (const [sessionId, session] of [...this.sessions.entries()]) {
-      if (session.recipeGeneration === currentGeneration) continue;
+      if (session.providerId !== providerId || session.recipeGeneration === currentGeneration) continue;
       this.terminalizeSessionOperations(sessionId);
       const ownerKey = `${session.recipeGeneration}:${sessionId}`;
       await this.requireConfirmedCleanup(session.owned, ownerKey, `evict_session_cleanup_unconfirmed:${ownerKey}`);

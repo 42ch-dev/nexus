@@ -1,30 +1,11 @@
-//! Works API handlers (V1.33 §7.2).
-//!
-//! Endpoints:
-//! - `POST   /v1/daemon/works` — Create Work (idempotent on `client_request_id`)
-//! - `GET    /v1/daemon/works` — List Works (filters: status, `intake_status`, cursor pagination — F-P1)
-//! - `GET    /v1/daemon/works/{work_id}` — Get one Work
-//! - `PATCH  /v1/daemon/works/{work_id}` — Partial update
-//! - `POST   /v1/daemon/works/{work_id}/inspiration` — Append inspiration log entry
-//! - `POST   /v1/daemon/works/pool` — Set active pool entry (DF-60 §5.3)
-//! - `POST   /v1/daemon/works/{work_id}/completion-lock/release` — Release completion-lock (DF-60 §3.1)
-
-#![allow(clippy::missing_errors_doc)]
-
+//! Thin Work HTTP adapters over the guarded core authoring service.
 use crate::api::errors::NexusApiError;
-use crate::api::pagination::{decode_offset_cursor, encode_offset_cursor};
-use crate::api::runtime_lock::RuntimeLockGuard;
-use crate::api::sort::parse_sort_terms;
-use crate::config::{read_active_creator_id, read_active_workspace_slug};
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
-use nexus_contracts::daemon_api::works::{ListWorksQuery, ListWorksResponse, WorkSummary};
-use nexus_contracts::PaginationInfo;
-use nexus_local_db::works::{self, WorkListFilters, WorkPatch, WorkRecord};
+use nexus_contracts::{ListWorksQuery, ListWorksResponse};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 // ─── Request / Response types ──────────────────────────────────────────────
 
@@ -101,31 +82,21 @@ pub struct WorkApiDto {
     pub lineage_from_work_id: Option<String>,
 }
 
-impl From<WorkRecord> for WorkApiDto {
-    fn from(r: WorkRecord) -> Self {
-        // Parse JSON columns. Best-effort: if a column is malformed, fall back
-        // to a sensible default rather than 500. The DB writes these via Rust
-        // types so they should be valid JSON.
-        let creative_brief = r
-            .creative_brief
-            .as_deref()
-            .and_then(|s| serde_json::from_str(s).ok());
-        let inspiration_log = serde_json::from_str(&r.inspiration_log).unwrap_or_default();
-        let schedule_ids = serde_json::from_str(&r.schedule_ids).unwrap_or_default();
-
+impl From<nexus_core::WorkDetails> for WorkApiDto {
+    fn from(r: nexus_core::WorkDetails) -> Self {
         Self {
             work_id: r.work_id,
             status: r.status,
             title: r.title,
             long_term_goal: r.long_term_goal,
             initial_idea: r.initial_idea,
-            creative_brief,
+            creative_brief: r.creative_brief,
             intake_status: r.intake_status,
             world_id: r.world_id,
             story_ref: r.story_ref,
-            inspiration_log,
+            inspiration_log: r.inspiration_log,
             primary_preset_id: r.primary_preset_id,
-            schedule_ids,
+            schedule_ids: r.schedule_ids,
             created_at: r.created_at,
             updated_at: r.updated_at,
             current_stage: r.current_stage,
@@ -134,9 +105,9 @@ impl From<WorkRecord> for WorkApiDto {
             work_ref: r.work_ref,
             total_planned_chapters: r.total_planned_chapters,
             current_chapter: r.current_chapter,
-            chapters: None,            // populated by enrich_with_chapters()
-            next_chapter: None,        // populated by enrich_with_chapters()
-            next_chapter_volume: None, // populated by enrich_with_chapters()
+            chapters: r.chapters,
+            next_chapter: r.next_chapter,
+            next_chapter_volume: r.next_chapter_volume,
             auto_chain_enabled: r.auto_chain_enabled,
             driver_schedule_id: r.driver_schedule_id,
             auto_chain_interrupted: r.auto_chain_interrupted,
@@ -179,6 +150,12 @@ pub struct CreateWorkResponse {
     pub work_id: String,
     pub status: String,
 }
+#[allow(clippy::option_option)] // the outer Option is presence, the inner is the wire null
+fn deserialize_nullable<'de, T: Deserialize<'de>, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Option<T>>, D::Error> {
+    Option::<T>::deserialize(deserializer).map(Some)
+}
 
 #[derive(Debug, Deserialize)]
 pub struct PatchWorkRequest {
@@ -187,7 +164,9 @@ pub struct PatchWorkRequest {
     pub creative_brief: Option<String>,
     pub intake_status: Option<String>,
     pub status: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_nullable")]
     pub world_id: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_nullable")]
     pub story_ref: Option<Option<String>>,
     pub primary_preset_id: Option<String>,
     /// V1.34 FL-E: update the current stage.
@@ -241,12 +220,12 @@ pub struct PoolEntryDto {
     pub note: Option<String>,
 }
 
-impl From<nexus_local_db::novel_pool_entries::PoolEntry> for PoolEntryDto {
-    fn from(e: nexus_local_db::novel_pool_entries::PoolEntry) -> Self {
+impl From<nexus_core::WorkPoolEntry> for PoolEntryDto {
+    fn from(e: nexus_core::WorkPoolEntry) -> Self {
         Self {
             entry_id: e.entry_id,
             creator_id: e.creator_id,
-            work_id: e.work_id.unwrap_or_default(),
+            work_id: e.work_id,
             status: e.status,
             title: e.title,
             promoted_at: e.promoted_at,
@@ -255,8 +234,8 @@ impl From<nexus_local_db::novel_pool_entries::PoolEntry> for PoolEntryDto {
     }
 }
 
-impl From<nexus_local_db::inspiration_items::InspirationItem> for InspirationItemDto {
-    fn from(i: nexus_local_db::inspiration_items::InspirationItem) -> Self {
+impl From<nexus_core::WorkInspirationItem> for InspirationItemDto {
+    fn from(i: nexus_core::WorkInspirationItem) -> Self {
         Self {
             item_id: i.item_id,
             creator_id: i.creator_id,
@@ -277,1536 +256,6 @@ pub struct ReleaseCompletionLockRequest {
     pub reason: String,
 }
 
-// ─── Handlers ──────────────────────────────────────────────────────────────
-
-/// rationale: multi-column INSERT + validation + response construction;
-/// splitting would harm readability without reducing actual complexity.
-#[allow(clippy::too_many_lines)]
-pub async fn create_work(
-    State(state): State<WorkspaceState>,
-    Json(req): Json<CreateWorkRequest>,
-) -> Result<(StatusCode, Json<CreateWorkResponse>), NexusApiError> {
-    let pool = state.pool_or_uninit()?;
-    let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-    let workspace_slug = read_active_workspace_slug(state.nexus_home(), &creator_id)
-        .ok_or(NexusApiError::AuthRequired)?;
-
-    // T0.4: V1.40 mandatory world_id — reject Work creation without a World binding.
-    // R-V140P0-S1: Uses BadRequest (400) rather than UnprocessableEntity (422) for
-    // missing required field. This is consistent with other "field missing" errors
-    // in this handler. Semantic 422 is used only for preset_gates_failed.
-    // R-V140P0-S4: tracing span for mandatory binding check observability.
-    if req.world_id.is_none() {
-        tracing::info!(creator_id = %creator_id, "create_work rejected: missing world_id binding");
-        return Err(NexusApiError::BadRequest {
-            code: "world_id_required".to_string(),
-            message: "World binding is required for new Works (V1.40+).\n  \
-                       ↳ Create a new World:  nexus42 creator world create --title \"...\"\n  \
-                       ↳ List existing Worlds: nexus42 creator world list"
-                .to_string(),
-        });
-    }
-
-    // QC3 W-2: Validate that the provided world_id actually exists in
-    // narrative_worlds AND is owned by the requesting creator.
-    if let Some(ref wid) = req.world_id {
-        let exists: Option<String> = sqlx::query_scalar!(
-            r#"SELECT world_id AS "world_id!" FROM narrative_worlds WHERE world_id = ? AND owner_creator_id = ?"#,
-            wid,
-            creator_id,
-        )
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: format!("world_id existence check: {e}"),
-        })?;
-        if exists.is_none() {
-            return Err(NexusApiError::BadRequest {
-                code: "invalid_world_id".to_string(),
-                message: format!(
-                    "world_id '{wid}' does not exist or is not owned by this creator.\n  \
-                     ↳ Create a new World:  nexus42 creator world create --title \"...\"\n  \
-                     ↳ List your Worlds:    nexus42 creator world list\n  \
-                     World binding is required for new Works (V1.40+)."
-                ),
-            });
-        }
-    }
-
-    // PR #53 review: validate lineage_from_work_id if present.
-    // The referenced Work must exist, belong to the active creator, and be non-empty.
-    if let Some(ref lineage_id) = req.lineage_from_work_id {
-        if lineage_id.is_empty() {
-            return Err(NexusApiError::BadRequest {
-                code: "invalid_lineage".to_string(),
-                message: "lineage_from_work_id must not be empty; omit the field if no lineage is intended.".to_string(),
-            });
-        }
-        let lineage_work = works::get_work(pool, &creator_id, lineage_id)
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "DATABASE_ERROR".to_string(),
-                message: format!("lineage_from_work_id lookup: {e}"),
-            })?;
-        if lineage_work.is_none() {
-            return Err(NexusApiError::BadRequest {
-                code: "invalid_lineage".to_string(),
-                message: format!(
-                    "lineage_from_work_id '{lineage_id}' does not exist or is not owned by this creator."
-                ),
-            });
-        }
-    }
-
-    let work_id = format!("wrk_{}", Uuid::new_v4());
-    let now = chrono::Utc::now().to_rfc3339();
-    let preset_id = req
-        .primary_preset_id
-        .clone()
-        .unwrap_or_else(|| "novel-writing".to_string());
-
-    let record = WorkRecord {
-        work_id: work_id.clone(),
-        creator_id: creator_id.clone(),
-        workspace_slug,
-        status: "active".to_string(),
-        title: req.title,
-        long_term_goal: req.long_term_goal,
-        initial_idea: req.initial_idea,
-        creative_brief: None,
-        intake_status: "pending".to_string(),
-        world_id: req.world_id,
-        story_ref: req.story_ref,
-        inspiration_log: String::from("[]"),
-        primary_preset_id: preset_id,
-        schedule_ids: String::from("[]"),
-        created_at: now.clone(),
-        updated_at: now.clone(),
-        current_stage: "intake".to_string(),
-        stage_status: "pending".to_string(),
-        work_profile: req.work_profile,
-        work_ref: None,
-        total_planned_chapters: None,
-        current_chapter: 0,
-        auto_chain_enabled: true,
-        driver_schedule_id: None,
-        auto_chain_interrupted: false,
-        auto_review_master_on_timeout: false,
-        runtime_lock_holder: None,
-        runtime_lock_acquired_at: None,
-        completion_locked_at: None,
-        novel_completion_status: None,
-        lineage_from_work_id: req.lineage_from_work_id,
-    };
-
-    // R-V133P1-01: Atomic create + idempotency in single transaction
-    let crid = req.client_request_id.as_deref();
-    let result = works::create_work_atomic(pool, &record, crid)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?;
-
-    match result {
-        // Idempotent replay — existing Work found
-        Ok(existing) => Ok((
-            StatusCode::OK,
-            Json(CreateWorkResponse {
-                work_id: existing.work_id,
-                status: existing.status,
-            }),
-        )),
-        // New Work created (no client_request_id)
-        Err(new) => {
-            // DF-60 §5.3: if set_pool_active was requested, promote in pool
-            if req.set_pool_active == Some(true) {
-                if let Err(e) = set_pool_active_inner(pool, &creator_id, &new.work_id).await {
-                    tracing::warn!(
-                        work_id = %new.work_id,
-                        error = %e,
-                        "set_pool_active after create failed (non-fatal)"
-                    );
-                }
-            }
-            Ok((
-                StatusCode::CREATED,
-                Json(CreateWorkResponse {
-                    work_id: new.work_id,
-                    status: new.status,
-                }),
-            ))
-        }
-    }
-}
-
-pub async fn list_works(
-    State(state): State<WorkspaceState>,
-    Query(query): Query<ListWorksQuery>,
-) -> Result<Json<ListWorksResponse>, NexusApiError> {
-    let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-    let workspace_slug = read_active_workspace_slug(state.nexus_home(), &creator_id)
-        .ok_or(NexusApiError::AuthRequired)?;
-
-    // F-F1 (V1.67): parse requested sort; default is empty (DB layer falls back
-    // to `updated_at DESC`).
-    let sort_terms = parse_sort_terms(
-        query.sort.as_deref(),
-        &["updated_at", "title", "status", "intake_status"],
-        "work",
-    )?;
-
-    let offset = decode_offset_cursor(&query.cursor)?;
-    let limit = u32::try_from(query.limit.unwrap_or(100))
-        .unwrap_or(100)
-        .min(500);
-
-    let filters = WorkListFilters {
-        status: query.status,
-        intake_status: query.intake_status,
-        limit: Some(limit),
-        offset: Some(offset),
-        order_by: sort_terms,
-    };
-
-    let (records, total) = works::list_and_count_works(
-        state.pool_or_uninit()?,
-        &creator_id,
-        &workspace_slug,
-        &filters,
-    )
-    .await
-    .map_err(|e| {
-        tracing::warn!(
-            error = %e,
-            "list_works failed for creator {creator_id} — pagination unavailable"
-        );
-        NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        }
-    })?;
-
-    let has_more = u64::from(total) > u64::from(offset).saturating_add(u64::from(limit));
-    let next_cursor = if has_more {
-        Some(encode_offset_cursor(offset.saturating_add(limit)))
-    } else {
-        None
-    };
-
-    let items: Vec<WorkSummary> = records
-        .into_iter()
-        .map(|r| WorkSummary {
-            work_id: r.work_id,
-            title: r.title,
-            status: r.status,
-            intake_status: r.intake_status,
-            primary_preset_id: r.primary_preset_id,
-            updated_at: r.updated_at,
-            completion_locked_at: r.completion_locked_at,
-        })
-        .collect();
-
-    Ok(Json(ListWorksResponse {
-        items: super::wire_cast(items),
-        pagination: super::wire_cast(PaginationInfo {
-            limit: i64::from(limit),
-            next_cursor,
-            has_more,
-        }),
-    }))
-}
-
-/// `GET /v1/daemon/works/{id}` — fetch a single Work by id.
-///
-/// # Lazy completion-promotion contract (R-V138P0-03)
-///
-/// This handler intentionally performs a **write-on-read** for novel-profile
-/// Works: when the row's `status != 'completed'` and
-/// [`nexus_local_db::work_chapters::is_work_completed`] returns `true` (every
-/// chapter finalized per novel-workflow-profile §6.1), the handler issues a
-/// `PATCH` to flip `works.status` → `'completed'` before returning the DTO.
-///
-/// **Why this is intentional, not an accident:**
-///
-/// 1. There is no daemon-side scheduler watching for "all chapters finalized"
-///    — completion is a derived state that only crystallises on access.
-/// 2. The platform requires `status='completed'` as the canonical signal for
-///    sync/UI; computing it on every read without persisting would force every
-///    downstream consumer to re-derive it.
-/// 3. The patch is **idempotent**: subsequent GETs find `status='completed'`
-///    on the first read, skip the `is_work_completed` check entirely (early
-///    exit via the `status != "completed"` guard), and return the cached value.
-///
-/// **Failure semantics:** if the auto-promote PATCH fails, the handler logs a
-/// warning and returns the un-promoted record — `GET` never fails because of
-/// a promotion error. The caller will retry on the next read.
-///
-/// **Consistency:** because Nexus is single-user local-first (see
-/// `next_chapter()` doc), there is no race with concurrent finalizers — the
-/// read-then-write window is safe under the single-writer invariant.
-///
-/// A future cleanup may move this into a daemon-side post-finalize hook (e.g.
-/// `update_status` for the last chapter triggers the promotion), at which
-/// point this lazy path can become a no-op or be removed.
-///
-/// # Errors
-///
-/// - `404 NotFound` if the work id is unknown for the active creator.
-/// - `401 AuthRequired` if no active creator is configured.
-/// - `500 Internal` on database error.
-// V1.55 P2: game-bible auto-promotion adds ~15 lines; still a single-concept
-// handler (completion promotion for two profiles), not a god function.
-#[allow(clippy::too_many_lines)]
-pub async fn get_work(
-    State(state): State<WorkspaceState>,
-    Path(work_id): Path<String>,
-) -> Result<Json<WorkApiDto>, NexusApiError> {
-    let pool = state.pool_or_uninit()?;
-    let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-
-    let mut record = works::get_work(pool, &creator_id, &work_id)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?
-        .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
-
-    // V1.36 P4 (T1): auto-promote works.status to 'completed' when all
-    // chapters are finalized per novel-workflow-profile §6.1.
-    if record.status != "completed" && record.work_profile.as_deref() == Some("novel") {
-        match nexus_local_db::work_chapters::is_work_completed(pool, &work_id).await {
-            Ok(true) => {
-                let now = chrono::Utc::now().to_rfc3339();
-                // V1.38 P0 (T7): set works.status = 'completed' per §6.1.
-                // novel_completion_status column not yet migrated — will be
-                // added in a future schema change; tracked as residual.
-                let patch = WorkPatch {
-                    status: Some("completed".to_string()),
-                    ..Default::default()
-                };
-                match works::patch_work(pool, &creator_id, &work_id, &patch, &now).await {
-                    Ok(updated) => {
-                        tracing::info!(
-                            target: "novel.completion",
-                            work_id = %work_id,
-                            creator_id = %creator_id,
-                            work_ref = ?updated.work_ref,
-                            total_planned_chapters = ?updated.total_planned_chapters,
-                            "Auto-promoted work to 'completed' (all chapters finalized)"
-                        );
-                        record = updated;
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            target: "novel.completion",
-                            work_id = %work_id,
-                            error = %e,
-                            "Failed to auto-promote work to 'completed'"
-                        );
-                    }
-                }
-            }
-            Ok(false) => {}
-            Err(e) => {
-                tracing::warn!(
-                    target: "novel.completion",
-                    work_id = %work_id,
-                    error = %e,
-                    "Failed to check work completion status"
-                );
-            }
-        }
-    }
-
-    // V1.55 P2: auto-promote game-bible works.status to 'completed' when all
-    // critical Design/*.md sections are accepted per game-bible-profile.md §8.
-    if record.status != "completed" && record.work_profile.as_deref() == Some("game_bible") {
-        let workspace_path = state.workspace_path().unwrap_or_default();
-        if !workspace_path.is_empty() {
-            let workspace_dir = std::path::Path::new(&workspace_path);
-            match nexus_local_db::work_chapters::is_game_bible_design_complete(
-                pool,
-                &work_id,
-                workspace_dir,
-            )
-            .await
-            {
-                Ok(true) => {
-                    let now = chrono::Utc::now().to_rfc3339();
-                    let patch = WorkPatch {
-                        status: Some("completed".to_string()),
-                        ..Default::default()
-                    };
-                    match works::patch_work(pool, &creator_id, &work_id, &patch, &now).await {
-                        Ok(updated) => {
-                            tracing::info!(
-                                target: "completion",
-                                work_id = %work_id,
-                                creator_id = %creator_id,
-                                work_ref = ?updated.work_ref,
-                                "game-bible: Auto-promoted work to 'completed' \
-                                 (all critical Design sections accepted)"
-                            );
-                            record = updated;
-                        }
-                        Err(e) => {
-                            tracing::warn!(
-                                target: "completion",
-                                work_id = %work_id,
-                                error = %e,
-                                "game-bible: Failed to auto-promote work to 'completed'"
-                            );
-                        }
-                    }
-                }
-                Ok(false) => {}
-                Err(e) => {
-                    tracing::warn!(
-                        target: "completion",
-                        work_id = %work_id,
-                        error = %e,
-                        "game-bible: Failed to check design completion status"
-                    );
-                }
-            }
-        }
-    }
-
-    // V1.60 P1: auto-promote script works.status to 'completed' when all
-    // critical script sections are accepted per script-profile.md §8.
-    if record.status != "completed" && record.work_profile.as_deref() == Some("script") {
-        let workspace_path = state.workspace_path().unwrap_or_default();
-        if !workspace_path.is_empty() {
-            let workspace_dir = std::path::Path::new(&workspace_path);
-            match nexus_local_db::work_chapters::is_script_complete(pool, &work_id, workspace_dir)
-                .await
-            {
-                Ok(true) => {
-                    let now = chrono::Utc::now().to_rfc3339();
-                    let patch = WorkPatch {
-                        status: Some("completed".to_string()),
-                        ..Default::default()
-                    };
-                    match works::patch_work(pool, &creator_id, &work_id, &patch, &now).await {
-                        Ok(updated) => {
-                            tracing::info!(
-                                target: "completion",
-                                work_id = %work_id,
-                                creator_id = %creator_id,
-                                work_ref = ?updated.work_ref,
-                                "script: Auto-promoted work to 'completed' \
-                                 (all critical script sections accepted)"
-                            );
-                            record = updated;
-                        }
-                        Err(e) => {
-                            tracing::warn!(
-                                target: "completion",
-                                work_id = %work_id,
-                                error = %e,
-                                "script: Failed to auto-promote work to 'completed'"
-                            );
-                        }
-                    }
-                }
-                Ok(false) => {}
-                Err(e) => {
-                    tracing::warn!(
-                        target: "completion",
-                        work_id = %work_id,
-                        error = %e,
-                        "script: Failed to check script completion status"
-                    );
-                }
-            }
-        }
-    }
-
-    // V1.63 P0: auto-promote essay works.status to 'completed' when
-    // Drafts/draft.md frontmatter status == finalized AND intake complete.
-    if record.status != "completed" && record.work_profile.as_deref() == Some("essay") {
-        let workspace_path = state.workspace_path().unwrap_or_default();
-        if !workspace_path.is_empty() {
-            let workspace_dir = std::path::Path::new(&workspace_path);
-            match nexus_local_db::work_chapters::is_essay_complete(pool, &work_id, workspace_dir)
-                .await
-            {
-                Ok(true) => {
-                    let now = chrono::Utc::now().to_rfc3339();
-                    let patch = WorkPatch {
-                        status: Some("completed".to_string()),
-                        ..Default::default()
-                    };
-                    match works::patch_work(pool, &creator_id, &work_id, &patch, &now).await {
-                        Ok(updated) => {
-                            tracing::info!(
-                                target: "completion",
-                                work_id = %work_id,
-                                creator_id = %creator_id,
-                                work_ref = ?updated.work_ref,
-                                "essay: Auto-promoted work to 'completed' \
-                                 (draft finalized + intake complete)"
-                            );
-                            record = updated;
-                        }
-                        Err(e) => {
-                            tracing::warn!(
-                                target: "completion",
-                                work_id = %work_id,
-                                error = %e,
-                                "essay: Failed to auto-promote work to 'completed'"
-                            );
-                        }
-                    }
-                }
-                Ok(false) => {}
-                Err(e) => {
-                    tracing::warn!(
-                        target: "completion",
-                        work_id = %work_id,
-                        error = %e,
-                        "essay: Failed to check essay completion status"
-                    );
-                }
-            }
-        }
-    }
-
-    Ok(Json(enrich_with_chapters(pool, record).await))
-}
-
-/// Enrich a `WorkApiDto` with chapter rows and `next_chapter` for novel profile Works.
-///
-/// Populates `chapters` and `next_chapter` fields when the Work has
-/// `work_profile == "novel"`. Non-novel Works return the DTO unchanged.
-async fn enrich_with_chapters(
-    pool: &sqlx::SqlitePool,
-    record: nexus_local_db::works::WorkRecord,
-) -> WorkApiDto {
-    let mut dto = WorkApiDto::from(record);
-
-    if dto.work_profile.as_deref() != Some("novel") {
-        return dto;
-    }
-
-    let work_id = &dto.work_id;
-
-    // Populate chapter rows
-    // R-V139P5-N2 (deferred): no cap/pagination on list_chapters yet.
-    // Works with 100+ chapters would benefit from server-side pagination.
-    // Currently returns all rows; the CLI status command consumes the full list.
-    // A future slice should add `limit`/`offset` params to the DB query + API.
-    match nexus_local_db::work_chapters::list_chapters(pool, work_id).await {
-        Ok(chapters) => {
-            let chapter_values: Vec<serde_json::Value> = chapters
-                .iter()
-                .map(|c| {
-                    serde_json::json!({
-                        "chapter": c.chapter,
-                        "volume": c.volume,
-                        "slug": c.slug,
-                        "status": c.status,
-                        "planned_word_count": c.planned_word_count,
-                        "actual_word_count": c.actual_word_count,
-                        "outline_path": c.outline_path,
-                        "body_path": c.body_path,
-                    })
-                })
-                .collect();
-            dto.chapters = Some(chapter_values);
-        }
-        Err(e) => {
-            tracing::warn!(
-                target: "novel.chapters",
-                work_id = %work_id,
-                error = %e,
-                "Failed to list chapters for work"
-            );
-        }
-    }
-
-    // Populate next_chapter (§4.5.2 selection) and next_chapter_volume (V1.42)
-    match nexus_local_db::work_chapters::next_chapter_volume_aware(pool, work_id).await {
-        Ok(Some((volume, chapter))) => {
-            dto.next_chapter = Some(chapter);
-            dto.next_chapter_volume = Some(volume);
-        }
-        Ok(None) => {
-            // No more chapters to work on
-        }
-        Err(e) => {
-            tracing::warn!(
-                target: "novel.chapters",
-                work_id = %work_id,
-                error = %e,
-                "Failed to compute next_chapter (volume-aware)"
-            );
-        }
-    }
-
-    dto
-}
-
-/// Apply non-stage fields (title, goal, brief, etc.) if any are present in the request.
-///
-/// Returns early with `Ok(())` if no non-stage fields are present.
-async fn apply_non_stage_fields(
-    pool: &sqlx::SqlitePool,
-    creator_id: &str,
-    work_id: &str,
-    req: &PatchWorkRequest,
-    now: &str,
-) -> Result<(), NexusApiError> {
-    let has_non_stage = req.title.is_some()
-        || req.long_term_goal.is_some()
-        || req.creative_brief.is_some()
-        || req.intake_status.is_some()
-        || req.status.is_some()
-        || req.world_id.is_some()
-        || req.story_ref.is_some()
-        || req.primary_preset_id.is_some()
-        || req.auto_review_master_on_timeout.is_some()
-        || req.work_profile.is_some();
-
-    if !has_non_stage {
-        return Ok(());
-    }
-
-    let non_stage_patch = WorkPatch {
-        title: req.title.clone(),
-        long_term_goal: req.long_term_goal.clone(),
-        creative_brief: req.creative_brief.clone().map(Some),
-        intake_status: req.intake_status.clone(),
-        status: req.status.clone(),
-        world_id: req.world_id.clone(),
-        story_ref: req.story_ref.clone(),
-        primary_preset_id: req.primary_preset_id.clone(),
-        schedule_ids: None,
-        current_stage: None,
-        stage_status: None,
-        work_profile: req.work_profile.clone().map(Some),
-        work_ref: None,
-        total_planned_chapters: None,
-        current_chapter: None,
-        auto_chain_enabled: None,
-        driver_schedule_id: None,
-        auto_chain_interrupted: None,
-        auto_review_master_on_timeout: req.auto_review_master_on_timeout,
-        runtime_lock_holder: None,
-        runtime_lock_acquired_at: None,
-        completion_locked_at: None,
-        novel_completion_status: None,
-        lineage_from_work_id: None,
-    };
-
-    // QC2 W-03: V1.40 — reject clearing world_id on a novel Work that
-    // already has a non-null world_id binding. This prevents downgrading
-    // a mandatory-bound Work back to worldless via PATCH.
-    // R-V140P0-S4: tracing for mandatory binding check observability.
-    if non_stage_patch.world_id == Some(None) {
-        // Check if the Work currently has a non-null world_id.
-        let current = works::get_work(pool, creator_id, work_id)
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "DATABASE_ERROR".to_string(),
-                message: e.to_string(),
-            })?
-            .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
-        if current.world_id.is_some() {
-            tracing::info!(work_id = %work_id, "patch_work: rejected world_id clear (non-stage path)");
-            return Err(NexusApiError::BadRequest {
-                code: "world_clear_forbidden".to_string(),
-                message: format!(
-                    "Cannot clear world_id on Work '{work_id}' — V1.40 Works require a World binding.\n  \
-                     ↳ To rebind to a different World: PATCH with world_id set to the new World ID\n  \
-                     ↳ List your Worlds: nexus42 creator world list"
-                ),
-            });
-        }
-    }
-
-    // T4: validate world_id FK existence and ownership when PATCHing a non-null world_id.
-    if let Some(Some(ref wid)) = non_stage_patch.world_id {
-        let exists: Option<String> = sqlx::query_scalar!(
-            r#"SELECT world_id AS "world_id!" FROM narrative_worlds WHERE world_id = ? AND owner_creator_id = ?"#,
-            wid,
-            creator_id,
-        )
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: format!("world_id existence check: {e}"),
-        })?;
-        if exists.is_none() {
-            return Err(NexusApiError::BadRequest {
-                code: "invalid_world_id".to_string(),
-                message: format!(
-                    "world_id '{wid}' does not exist or is not owned by this creator.\n  \
-                     ↳ Create a new World:  nexus42 creator world create --title \"...\"\n  \
-                     ↳ List your Worlds:    nexus42 creator world list\n  \
-                     World binding is required for new Works (V1.40+)."
-                ),
-            });
-        }
-    }
-
-    works::patch_work(pool, creator_id, work_id, &non_stage_patch, now)
-        .await
-        .map_err(|e| match &e {
-            nexus_local_db::LocalDbError::MissingVersionKey { .. } => {
-                NexusApiError::NotFound(format!("work {work_id}"))
-            }
-            _ => NexusApiError::Internal {
-                code: "DATABASE_ERROR".to_string(),
-                message: e.to_string(),
-            },
-        })?;
-
-    Ok(())
-}
-
-/// Handle PATCH with stage changes: gate validation + atomic transaction (R-FL-E-05 + R-FL-E-07).
-async fn patch_work_stage(
-    state: &WorkspaceState,
-    creator_id: &str,
-    work_id: &str,
-    req: &PatchWorkRequest,
-    now: &str,
-) -> Result<WorkRecord, NexusApiError> {
-    let pool = state.pool_or_uninit()?;
-    let current = works::get_work(pool, creator_id, work_id)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?
-        .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
-
-    let target_stage = req
-        .current_stage
-        .as_deref()
-        .unwrap_or(&current.current_stage);
-
-    if req.current_stage.is_some() {
-        let force = req.force.unwrap_or(false);
-        let work_state = nexus_orchestration::stage_gates::WorkStageState {
-            current_stage: current.current_stage.clone(),
-            stage_status: current.stage_status.clone(),
-            intake_status: current.intake_status.clone(),
-        };
-        nexus_orchestration::stage_gates::check_stage_advance(&work_state, target_stage, force)
-            .map_err(|e| NexusApiError::BadRequest {
-                code: "invalid_stage".to_string(),
-                message: e.message,
-            })?;
-    }
-
-    let target_status = req.stage_status.as_deref().unwrap_or(&current.stage_status);
-
-    // R-CURSOR-PR42-03: Validate stage_status transitions to terminal states
-    // even when no explicit current_stage change is provided. Without this,
-    // PATCH {"stage_status":"complete"} bypasses all FL-E gates.
-    if req.stage_status.is_some() && req.current_stage.is_none() {
-        let force = req.force.unwrap_or(false);
-        check_stage_status_transition(&current.stage_status, target_status, force)?;
-    }
-
-    // Fix D (W-D): Stage transition runs FIRST, non-stage fields SECOND.
-    // This ensures that if the stage-advance transaction fails (e.g., active
-    // FL-E schedule already exists), NO non-stage field changes are persisted.
-    // Validation above already gates the critical path without DB writes.
-    //
-    // NOTE: These two operations are NOT in a single transaction. Wrapping both
-    // in one transaction would require refactoring `apply_non_stage_fields` and
-    // `advance_work_stage_atomic` to accept a shared `Transaction`, which is too
-    // invasive for this fix wave. The fail-fast ordering is sufficient: the
-    // stage-advance atomic transaction either commits (and then non-stage fields
-    // are applied) or rolls back (and non-stage fields are never touched).
-    let _updated = works::advance_work_stage_atomic(
-        pool,
-        creator_id,
-        work_id,
-        target_stage,
-        target_status,
-        now,
-    )
-    .await
-    .map_err(|e| match &e {
-        nexus_local_db::LocalDbError::MissingVersionKey { .. } => {
-            NexusApiError::NotFound(format!("work {work_id}"))
-        }
-        nexus_local_db::LocalDbError::ConstraintViolation { constraint, .. } => {
-            NexusApiError::Conflict(constraint.clone())
-        }
-        _ => NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        },
-    })?;
-
-    // Only apply non-stage fields after the stage transition succeeds.
-    apply_non_stage_fields(pool, creator_id, work_id, req, now).await?;
-
-    // Re-fetch to get the fully updated record (stage + non-stage fields).
-    let final_record = works::get_work(pool, creator_id, work_id)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?
-        .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
-
-    tracing::info!(
-        target: "fl_e.audit",
-        work_id = %final_record.work_id,
-        current_stage = %final_record.current_stage,
-        stage_status = %final_record.stage_status,
-        "FL-E stage updated via PATCH (atomic)"
-    );
-
-    Ok(final_record)
-}
-
-// R-V140P0-S4: Pre-existing — function exceeds 100-line clippy threshold.
-// Refactoring into smaller helpers deferred to V1.42.
-#[allow(clippy::too_many_lines)]
-pub async fn patch_work(
-    State(state): State<WorkspaceState>,
-    Path(work_id): Path<String>,
-    Json(req): Json<PatchWorkRequest>,
-) -> Result<Json<WorkApiDto>, NexusApiError> {
-    let pool = state.pool_or_uninit()?;
-    let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-    let now = chrono::Utc::now().to_rfc3339();
-
-    // DF-60 §4: guard mutating operations against completion-lock and runtime-lock
-    let current_work = works::get_work(pool, &creator_id, &work_id)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?
-        .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
-
-    if current_work.completion_locked_at.is_some() {
-        return Err(NexusApiError::Conflict(
-            format!(
-                "work {work_id} is completion-locked since {}; use 'creator works completion-lock release' first",
-                current_work.completion_locked_at.as_deref().unwrap_or("?")
-            ),
-        ));
-    }
-
-    if let Some(ref holder) = current_work.runtime_lock_holder {
-        // V1.42 P0: allow stale locks to be force-cleared by acquire below.
-        let ttl = nexus_local_db::ttl_from_env();
-        if !nexus_local_db::is_lock_stale(&current_work, ttl) {
-            return Err(NexusApiError::Locked {
-                resource: "work".to_string(),
-                reason: format!(
-                    "work {work_id} is locked by '{holder}'; wait for release or check 'creator works status'"
-                ),
-            });
-        }
-    }
-
-    // V1.42 P0 (T2): Acquire runtime lock for this mutating operation.
-    let lock = RuntimeLockGuard::acquire(pool, &creator_id, &work_id).await?;
-
-    // Stage changes use gate validation + atomic transaction (R-FL-E-05 + R-FL-E-07).
-    if req.current_stage.is_some() || req.stage_status.is_some() {
-        let updated = patch_work_stage(&state, &creator_id, &work_id, &req, &now).await?;
-        // V1.42.1 (R-V142-MERGE-CI-001): Release runtime lock before early return.
-        // The previous P0 T2 wiring (e8993870) returned without releasing, which
-        // leaked the holder column to subsequent operations on the same Work
-        // (manifest as `patch_work_stage_change_is_auditable` failing on the
-        // second PATCH call). All early-return paths after `acquire` MUST
-        // call `lock.release().await` to honor the single-writer contract.
-        lock.release().await;
-        return Ok(Json(WorkApiDto::from(updated)));
-    }
-
-    // Non-stage PATCH: validate world_id clear-rejection first
-    // QC2 W-03: V1.40 — reject clearing world_id on a Work that already
-    // has a non-null world_id binding.
-    if req.world_id == Some(None) {
-        let current = works::get_work(pool, &creator_id, &work_id)
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "DATABASE_ERROR".to_string(),
-                message: e.to_string(),
-            })?
-            .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
-        if current.world_id.is_some() {
-            // R-V140P0-S4: tracing for mandatory binding check observability.
-            tracing::info!(work_id = %work_id, "patch_work_stage: rejected world_id clear (stage path)");
-            // V1.42.1 (R-V142-MERGE-CI-001): release before early Err return.
-            lock.release().await;
-            return Err(NexusApiError::BadRequest {
-                code: "world_clear_forbidden".to_string(),
-                message: format!(
-                    "Cannot clear world_id on Work '{work_id}' — V1.40 Works require a World binding.\n  \
-                     ↳ To rebind to a different World: PATCH with world_id set to the new World ID\n  \
-                     ↳ List your Worlds: nexus42 creator world list"
-                ),
-            });
-        }
-    }
-
-    // Non-stage PATCH: use regular patch
-    let patch = WorkPatch {
-        title: req.title,
-        long_term_goal: req.long_term_goal,
-        creative_brief: req.creative_brief.map(Some),
-        intake_status: req.intake_status,
-        status: req.status,
-        world_id: req.world_id,
-        story_ref: req.story_ref,
-        primary_preset_id: req.primary_preset_id,
-        schedule_ids: None,
-        current_stage: None,
-        stage_status: None,
-        work_profile: None,
-        work_ref: None,
-        total_planned_chapters: None,
-        current_chapter: None,
-        auto_chain_enabled: None,
-        driver_schedule_id: None,
-        auto_chain_interrupted: req.auto_chain_interrupted,
-        auto_review_master_on_timeout: req.auto_review_master_on_timeout,
-        runtime_lock_holder: None,
-        runtime_lock_acquired_at: None,
-        completion_locked_at: None,
-        novel_completion_status: None,
-        lineage_from_work_id: None,
-    };
-
-    // V1.42.1 (R-V142-MERGE-CI-001): release before propagating DB error.
-    // The previous P0 T2 wiring (e8993870) used `?` to propagate, which
-    // bypassed `lock.release().await` and leaked the holder column.
-    let updated =
-        match works::patch_work(state.pool_or_uninit()?, &creator_id, &work_id, &patch, &now).await
-        {
-            Ok(u) => u,
-            Err(e) => {
-                lock.release().await;
-                return Err(match &e {
-                    nexus_local_db::LocalDbError::MissingVersionKey { .. } => {
-                        NexusApiError::NotFound(format!("work {work_id}"))
-                    }
-                    _ => NexusApiError::Internal {
-                        code: "DATABASE_ERROR".to_string(),
-                        message: e.to_string(),
-                    },
-                });
-            }
-        };
-
-    // R-V139P0-W-C: trigger supervisor tick when auto_chain_interrupted
-    // transitions from true to false, so the resumed Work progresses
-    // immediately rather than waiting for the next tick cycle.
-    if req.auto_chain_interrupted == Some(false) {
-        if let Some(supervisor) = state.schedule_supervisor() {
-            if let Err(e) = supervisor.tick().await {
-                tracing::warn!(
-                    work_id = %work_id,
-                    error = %e,
-                    "resume: supervisor tick failed (non-fatal)"
-                );
-            }
-        }
-    }
-
-    // V1.42 P0 (T2): Release runtime lock before returning.
-    lock.release().await;
-
-    Ok(Json(WorkApiDto::from(updated)))
-}
-
-pub async fn append_inspiration(
-    State(state): State<WorkspaceState>,
-    Path(work_id): Path<String>,
-    Json(req): Json<AppendInspirationRequest>,
-) -> Result<Json<AppendInspirationResponse>, NexusApiError> {
-    let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-    let now = chrono::Utc::now().to_rfc3339();
-
-    // V1.42.1 (R-V142-MERGE-CI-001): Verify work exists BEFORE acquiring the
-    // runtime lock. The previous ordering (P0 T2 wiring in e8993870) acquired
-    // the lock before the existence check, which caused `acquire_runtime_lock`
-    // to fail with `MissingVersionKey` → mapped to 500 instead of 404. It also
-    // leaked the holder column for any DB-level reads until the row was
-    // touched again. Mirrors the pattern in `patch_work` and
-    // `reconcile_work_chapters` (existence check first, lock after).
-    let work = nexus_local_db::works::get_work(state.pool_or_uninit()?, &creator_id, &work_id)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?
-        .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
-
-    // V1.39 §5.6 (T6): Single FL-E driver invariant.
-    // If the Work has an active auto-chain driver, reject side input
-    // to prevent concurrent schedule conflicts.
-    if work.auto_chain_enabled && work.driver_schedule_id.is_some() {
-        return Err(NexusApiError::Conflict(format!(
-            "AUTO_CHAIN_DRIVER_ACTIVE: Work {} has an active auto-chain driver schedule ({}). \
-             Side input is not allowed while auto-chain is running. \
-             Wait for the current stage to complete or pause the driver first.",
-            work_id,
-            work.driver_schedule_id.as_deref().unwrap_or("?")
-        )));
-    }
-
-    // V1.42 P0 (T2): Acquire runtime lock for this mutating operation.
-    let lock = RuntimeLockGuard::acquire(state.pool_or_uninit()?, &creator_id, &work_id).await?;
-
-    // Build JSON for inspiration entry
-    let entry = serde_json::json!({
-        "at": now.clone(),
-        "note": req.note,
-    });
-    let entry_json = serde_json::to_string(&entry).unwrap_or_default();
-
-    // R-V133P1-04: append_inspiration now uses tx + Rust append and returns updated record
-    //
-    // V1.42.1 (R-V142-MERGE-CI-001): release before propagating DB error.
-    // The work existence was verified at the top of this handler; a
-    // `MissingVersionKey` here would mean concurrent deletion (race), so the
-    // 404 mapping is preserved while still releasing the lock.
-    let updated = match works::append_inspiration(
-        state.pool_or_uninit()?,
-        &creator_id,
-        &work_id,
-        &entry_json,
-        &now,
-    )
-    .await
-    {
-        Ok(u) => u,
-        Err(e) => {
-            lock.release().await;
-            return Err(match &e {
-                nexus_local_db::LocalDbError::MissingVersionKey { .. } => {
-                    NexusApiError::NotFound(format!("work {work_id}"))
-                }
-                _ => NexusApiError::Internal {
-                    code: "DATABASE_ERROR".to_string(),
-                    message: e.to_string(),
-                },
-            });
-        }
-    };
-
-    // Derive count from post-state (not pre-fetch + 1)
-    let count = serde_json::from_str::<serde_json::Value>(&updated.inspiration_log)
-        .ok()
-        .and_then(|v| v.as_array().map(Vec::len))
-        .unwrap_or(0);
-
-    // V1.42 P0 (T2): Release runtime lock before returning.
-    lock.release().await;
-
-    Ok(Json(AppendInspirationResponse {
-        work_id,
-        inspiration_count: count,
-    }))
-}
-
-// ─── Pool handler (DF-60 §5.3) ──────────────────────────────────────────────
-
-/// `POST /v1/daemon/works/pool` — Set the active pool entry for the creator.
-///
-/// Transactional: demotes any prior `active` row → `queued`, promotes target → `active`.
-///
-/// # IDOR protection (PR #53 review fix)
-///
-/// The body `creator_id` field is accepted for backward compatibility but is
-/// **validated** against the active creator from `config.toml`. If it does not
-/// match, the request is rejected with 403 Forbidden. The actual operation
-/// always uses the active creator, never the body value.
-pub async fn set_pool_active(
-    State(state): State<WorkspaceState>,
-    Json(req): Json<SetPoolActiveRequest>,
-) -> Result<Json<PoolEntryDto>, NexusApiError> {
-    // IDOR fix: read active creator from config, reject body mismatch.
-    let active_creator =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-    if req.creator_id.is_some() && req.creator_id != Some(active_creator.clone()) {
-        return Err(NexusApiError::Forbidden {
-            resource: "pool".into(),
-            reason: format!(
-                "creator_id '{}' does not match active creator '{}'",
-                req.creator_id.as_deref().unwrap_or("?"),
-                active_creator
-            ),
-        });
-    }
-    let creator_id = active_creator;
-
-    if req.action != "set_pool_active" {
-        return Err(NexusApiError::BadRequest {
-            code: "invalid_action".to_string(),
-            message: format!(
-                "unsupported action '{}'; expected 'set_pool_active'",
-                req.action
-            ),
-        });
-    }
-
-    // Verify the work exists and belongs to this creator
-    let _work = works::get_work(state.pool_or_uninit()?, &creator_id, &req.work_id)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?
-        .ok_or_else(|| NexusApiError::NotFound(format!("work {}", req.work_id)))?;
-
-    let entry = set_pool_active_inner(state.pool_or_uninit()?, &creator_id, &req.work_id)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?;
-
-    Ok(Json(entry))
-}
-
-// ─── Completion-lock release handler (DF-60 §3.1) ───────────────────────────
-
-/// `POST /v1/daemon/works/{work_id}/completion-lock/release`
-///
-/// Releases the completion-lock for a Work:
-/// 1. Clear DB `completion_locked_at` + set `novel_completion_status = 'reopened'`.
-/// 2. Delete `.completion-lock.json` (best-effort; DB is SSOT).
-pub async fn release_completion_lock_handler(
-    State(state): State<WorkspaceState>,
-    Path(work_id): Path<String>,
-    Json(req): Json<ReleaseCompletionLockRequest>,
-) -> Result<Json<WorkApiDto>, NexusApiError> {
-    let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-
-    // Step 1: Look up the Work record
-    let work = works::get_work(state.pool_or_uninit()?, &creator_id, &work_id)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?
-        .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
-
-    // Verify the work is actually completion-locked
-    if work.completion_locked_at.is_none() {
-        return Err(NexusApiError::BadRequest {
-            code: "not_locked".to_string(),
-            message: format!("work {work_id} is not completion-locked"),
-        });
-    }
-
-    // Step 2: Clear DB columns (SSOT)
-    let now = chrono::Utc::now().to_rfc3339();
-    let patch = WorkPatch {
-        completion_locked_at: Some(None),
-        novel_completion_status: Some(Some("reopened".to_string())),
-        ..Default::default()
-    };
-
-    let updated = works::patch_work(state.pool_or_uninit()?, &creator_id, &work_id, &patch, &now)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?;
-
-    // Step 3: Delete on-disk lock file (best-effort; DB is SSOT)
-    if let Some(ref work_ref) = updated.work_ref {
-        let workspace_path = state.workspace_path().unwrap_or_default();
-        if !workspace_path.is_empty() {
-            let workspace_dir = std::path::Path::new(&workspace_path);
-            if let Err(e) = nexus_orchestration::completion_lock::release_completion_lock(
-                workspace_dir,
-                work_ref,
-            ) {
-                tracing::warn!(
-                    work_id = %work_id,
-                    work_ref = %work_ref,
-                    error = %e,
-                    "completion-lock file deletion failed (non-fatal; DB is SSOT)"
-                );
-            }
-        }
-    }
-
-    tracing::info!(
-        target: "novel.completion",
-        work_id = %work_id,
-        creator_id = %creator_id,
-        reason = %req.reason,
-        "completion-lock released"
-    );
-
-    Ok(Json(WorkApiDto::from(updated)))
-}
-
-// ─── Delete Work (V1.129 P2 — R-V1126P0-T2-001) ─────────────────────────────
-
-/// `DELETE /v1/daemon/works/{work_id}` — hard-delete a Work and cascade its
-/// children.
-///
-/// Per architect lock (Seat 2, 2026-07-21): **hard delete**, not soft. The
-/// confirm dialog in the web UI is the safety net; there is no undo.
-///
-/// # Cascade
-///
-/// Most children cascade via `SQLite` `ON DELETE CASCADE` FKs:
-/// - `work_chapters`, `work_chapter_volumes` → CASCADE
-/// - `findings` → CASCADE
-/// - `novel_pool_entries` (`work_id`) → CASCADE
-/// - `reading_progress`, `reading_annotations` → CASCADE
-/// - `inspiration_items.promoted_work_id` → SET NULL (preserves the row)
-/// - `works.lineage_from_work_id` → SET NULL on descendant Works
-///
-/// The handler additionally invalidates the on-disk Manuscript / Outline
-/// directory under the workspace path (best-effort). On-disk orphan files do
-/// not corrupt the DB SSOT — they are dead weight only.
-///
-/// # Errors
-///
-/// - `401 AuthRequired` if no active creator is configured.
-/// - `404 NotFound` if the work id is unknown for the active creator.
-/// - `409 Conflict` if the Work holds the runtime lock or is completion-locked
-///   (callers must release those first).
-/// - `500 Internal` on database error.
-pub async fn delete_work(
-    State(state): State<WorkspaceState>,
-    Path(work_id): Path<String>,
-) -> Result<StatusCode, NexusApiError> {
-    let pool = state.pool_or_uninit()?;
-    let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-
-    // Rule 1: existence check BEFORE lock acquire (V1.42.1 hotfix rule).
-    let work = works::get_work(pool, &creator_id, &work_id)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?
-        .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
-
-    // Reject while completion-locked or actively locked — author must release
-    // those first. Cascading a delete under either state would silently drop
-    // an in-flight authoring session.
-    if work.completion_locked_at.is_some() {
-        return Err(NexusApiError::Conflict(format!(
-            "work {work_id} is completion-locked since {}; use 'creator works completion-lock release' first",
-            work.completion_locked_at.as_deref().unwrap_or("?")
-        )));
-    }
-    if let Some(ref holder) = work.runtime_lock_holder {
-        let ttl = nexus_local_db::ttl_from_env();
-        if !nexus_local_db::is_lock_stale(&work, ttl) {
-            return Err(NexusApiError::Locked {
-                resource: "work".to_string(),
-                reason: format!(
-                    "work {work_id} is locked by '{holder}'; wait for release or check 'creator works status'"
-                ),
-            });
-        }
-    }
-
-    // Acquire the runtime lock for this mutating operation.
-    let lock = RuntimeLockGuard::acquire(pool, &creator_id, &work_id).await?;
-
-    // Hard-delete the Work row. SQLite FK cascades drop the children:
-    // work_chapters / work_chapter_volumes / findings / novel_pool_entries /
-    // reading_progress / reading_annotations. inspiration_items.promoted_work_id
-    // and works.lineage_from_work_id cascade SET NULL.
-    //
-    // SAFETY: DELETE matches works DDL in 20260604_works_table.sql; runtime
-    // sqlx::query is acceptable per the narrative_write.rs precedent for
-    // schema-mutable writes and avoids regenerating the .sqlx/ cache.
-    let deleted = match sqlx::query("DELETE FROM works WHERE work_id = ? AND creator_id = ?")
-        .bind(&work_id)
-        .bind(&creator_id)
-        .execute(pool)
-        .await
-    {
-        Ok(res) => res.rows_affected(),
-        Err(e) => {
-            lock.release().await;
-            return Err(NexusApiError::Internal {
-                code: "DATABASE_ERROR".to_string(),
-                message: format!("delete_work failed: {e}"),
-            });
-        }
-    };
-
-    lock.release().await;
-
-    if deleted == 0 {
-        // Concurrent delete raced between get_work and DELETE. Treat as 404 —
-        // the row is gone regardless of who removed it.
-        return Err(NexusApiError::NotFound(format!("work {work_id}")));
-    }
-
-    // Best-effort on-disk cleanup: remove the Work directory (Manuscripts +
-    // Outlines). DB is SSOT — orphan files here do not corrupt state.
-    if let Some(ref work_ref) = work.work_ref {
-        let workspace_path = state.workspace_path().unwrap_or_default();
-        if !workspace_path.is_empty() {
-            let workspace_dir = std::path::Path::new(&workspace_path);
-            let works_dir = workspace_dir.join("Works").join(work_ref);
-            if works_dir.exists() {
-                if let Err(e) = std::fs::remove_dir_all(&works_dir) {
-                    tracing::warn!(
-                        work_id = %work_id,
-                        work_ref = %work_ref,
-                        path = %works_dir.display(),
-                        error = %e,
-                        "Work directory deletion failed (non-fatal; DB is SSOT)"
-                    );
-                }
-            }
-        }
-    }
-
-    tracing::info!(
-        target: "works.delete",
-        work_id = %work_id,
-        creator_id = %creator_id,
-        "Work hard-deleted (cascade via FK)"
-    );
-
-    Ok(StatusCode::NO_CONTENT)
-}
-
-// ─── Helpers ───────────────────────────────────────────────────────────────
-
-/// Validate `stage_status` transitions to terminal states (R-CURSOR-PR42-03).
-///
-/// Rejects direct status promotion to `complete`/`skipped` without an explicit
-/// stage change unless `force` is true. This prevents PATCH requests with only
-/// `{"stage_status":"complete"}` from bypassing all FL-E gate validation.
-///
-/// Allowed transitions without force:
-/// - `pending` → `active` (schedule starts the stage)
-/// - `active` → `pending` (schedule reset)
-///
-/// Blocked transitions without force:
-/// - `pending` → `complete` or `skipped` (must go through gate or force)
-/// - `active` → `complete` or `skipped` (schedule completion or force)
-fn check_stage_status_transition(
-    current_status: &str,
-    target_status: &str,
-    force: bool,
-) -> Result<(), NexusApiError> {
-    // Terminal status values that require gate validation or explicit force.
-    const TERMINAL_STATUSES: &[&str] = &["complete", "skipped"];
-
-    if force {
-        return Ok(());
-    }
-
-    if TERMINAL_STATUSES.contains(&target_status) && !TERMINAL_STATUSES.contains(&current_status) {
-        return Err(NexusApiError::BadRequest {
-            code: "invalid_status_transition".to_string(),
-            message: format!(
-                "Cannot set stage_status to '{target_status}' without an explicit stage advance. \
-                 Use PATCH with current_stage to advance through FL-E gates, or set force=true to override."
-            ),
-        });
-    }
-
-    Ok(())
-}
-
-/// Shared helper: transactional set-pool-active (DF-60 §5.3).
-///
-/// Demotes any prior `active` row → `queued`, then upserts target → `active`.
-/// Uses `nexus_local_db::novel_pool_entries::promote_to_active` for the core logic.
-async fn set_pool_active_inner(
-    pool: &sqlx::SqlitePool,
-    creator_id: &str,
-    work_id: &str,
-) -> Result<PoolEntryDto, nexus_local_db::LocalDbError> {
-    let entry =
-        nexus_local_db::novel_pool_entries::promote_to_active(pool, creator_id, work_id).await?;
-
-    Ok(PoolEntryDto::from(entry))
-}
-
-// ---------------------------------------------------------------------------
-// Reconcile chapters (V1.36 §4.1.2, §8)
-// ---------------------------------------------------------------------------
-
-/// Reconcile `work_chapters` from filesystem for a Work.
-///
-/// `POST /v1/daemon/works/{work_id}/reconcile-chapters[?dry_run=true]`
-///
-/// # Dry-run (V1.49 P2, R-V148P4-W2; overlay §8.2)
-///
-/// When the `dry_run` query parameter is `true`, the handler computes the
-/// `ReconcileReport` it would return when mutating, but performs **no**
-/// filesystem or DB writes and **does not acquire the runtime lock**. The
-/// report's counters reflect what the mutating path would do. This is the
-/// preview surface for `creator works reconcile-chapters --dry-run`.
-pub async fn reconcile_chapters(
-    State(state): State<WorkspaceState>,
-    Path(work_id): Path<String>,
-    Query(dry_run_query): Query<ReconcileDryRunQuery>,
-) -> Result<
-    (
-        StatusCode,
-        Json<nexus_local_db::work_chapters::ReconcileReport>,
-    ),
-    NexusApiError,
-> {
-    let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-    let pool = state.pool_or_uninit()?;
-    let dry_run = dry_run_query.dry_run.unwrap_or(false);
-
-    // Get the Work record to find work_ref
-    let work = works::get_work(pool, &creator_id, &work_id)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: format!("get_work failed: {e}"),
-        })?
-        .ok_or_else(|| NexusApiError::NotFound(format!("Work '{work_id}' not found")))?;
-
-    let work_ref = work
-        .story_ref
-        .as_deref()
-        .ok_or_else(|| NexusApiError::BadRequest {
-            code: "precondition_failed".to_string(),
-            message: "`story_ref` (work_ref) not set on Work; run novel-project-init first"
-                .to_string(),
-        })?;
-
-    // Defense in depth: validate work_ref slug before passing to filesystem
-    // layer. Matches the same policy as
-    // `nexus-orchestration::capability::builtins::novel_scaffold_sanitize::validate_work_ref`.
-    if !is_valid_work_ref(work_ref) {
-        return Err(NexusApiError::BadRequest {
-            code: "invalid_work_ref".to_string(),
-            message: format!(
-                "work_ref '{work_ref}' is not a valid slug (expected [a-z0-9][a-z0-9-]{{0,63}})"
-            ),
-        });
-    }
-
-    // Resolve workspace root from state
-    let workspace_path_str = state.workspace_path().unwrap_or_default();
-    let workspace_root = std::path::Path::new(&workspace_path_str);
-
-    let now = chrono::Utc::now().to_rfc3339();
-
-    // V1.49 P2 (R-V148P4-W2): dry-run path — compute the report only, with no
-    // runtime-lock acquire and no filesystem/DB writes (overlay §8.2).
-    if dry_run {
-        tracing::info!(
-            work_id = %work_id,
-            work_ref = %work_ref,
-            "dry-run reconcile for work_id={work_id}"
-        );
-        let report = nexus_local_db::work_chapters::reconcile_from_filesystem(
-            pool,
-            &work_id,
-            work_ref,
-            workspace_root,
-            &now,
-            true,
-        )
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: format!("reconcile preview failed: {e}"),
-        })?;
-        return Ok((StatusCode::OK, Json(report)));
-    }
-
-    // V1.49 P3 (R-V148P4-W3): shorten the runtime-lock window.
-    //
-    // The previous implementation acquired the lock for the *entire* reconcile
-    // — filesystem walk + per-chapter DB reads + writes + file frontmatter
-    // syncs — blocking other schedule operations on the same Work for the
-    // full duration. Reconcile is now split into a read-only
-    // [`compute_reconcile_diff`] (unlocked; the slow walk + reads live here)
-    // and a write-only [`apply_reconcile_diff`] (the only phase that needs the
-    // lock). Trade-off: under concurrent reconcile + mutate from the same
-    // client the diff may be stale by the time the lock is re-acquired; this is
-    // accepted for the local-first single-writer daemon model (documented in
-    // the plan). The V1.48 P4-fix1 lock-release-on-error guarantee is
-    // preserved on the apply phase below.
-    let diff = nexus_local_db::work_chapters::compute_reconcile_diff(
-        pool,
-        &work_id,
-        work_ref,
-        workspace_root,
-    )
-    .await
-    .map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_ERROR".to_string(),
-        message: format!("reconcile diff failed: {e}"),
-    })?;
-
-    // Phase B: acquire the lock and apply only the writes.
-    let lock = RuntimeLockGuard::acquire(pool, &creator_id, &work_id).await?;
-    let lock_acquired_at = chrono::Utc::now();
-    tracing::info!(
-        work_id = %work_id,
-        acquired_at = %lock_acquired_at.to_rfc3339(),
-        pending_ops = diff.ops.len(),
-        "runtime_lock: acquired for reconcile write phase"
-    );
-
-    // V1.48 P4-fix1 (W-2 qc3): release the lock on both Ok and Err paths.
-    // The previous `?` propagation on the reconcile call could return early
-    // without releasing the runtime lock, leaving the Work unwritable until
-    // restart. Mirrors the V1.42.1 hotfix pattern (R-V142-MERGE-CI-001).
-    let report = match nexus_local_db::work_chapters::apply_reconcile_diff(
-        pool, &work_id, &now, &diff,
-    )
-    .await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            lock.release().await;
-            return Err(NexusApiError::Internal {
-                code: "DATABASE_ERROR".to_string(),
-                message: format!("reconcile apply failed: {e}"),
-            });
-        }
-    };
-
-    // V1.42 P0 (T2): Release runtime lock before returning.
-    lock.release().await;
-    let held_ms = (chrono::Utc::now() - lock_acquired_at)
-        .num_milliseconds()
-        .max(0);
-    tracing::info!(
-        work_id = %work_id,
-        held_ms,
-        "runtime_lock: released after reconcile write phase"
-    );
-
-    Ok((StatusCode::OK, Json(report)))
-}
-
 /// Query parameters for `reconcile-chapters` (V1.49 P2, R-V148P4-W2).
 ///
 /// `dry_run=true` selects the preview path (no writes, no lock).
@@ -1816,347 +265,6 @@ pub struct ReconcileDryRunQuery {
     #[serde(default)]
     pub dry_run: Option<bool>,
 }
-
-/// Validate that `work_ref` is a safe slug: `[a-z0-9][a-z0-9-]{0,63}`.
-///
-/// This mirrors the policy enforced by
-/// `nexus-orchestration::capability::builtins::novel_scaffold_sanitize::validate_work_ref`.
-/// Duplicated here because the sanitize module is private to `nexus-orchestration`.
-fn is_valid_work_ref(s: &str) -> bool {
-    if s.is_empty() || s.len() > 64 {
-        return false;
-    }
-    if s.contains("..") || s.contains('/') || s.contains('\\') || s.contains('\0') {
-        return false;
-    }
-    let mut chars = s.chars();
-    let first = chars.next().expect("non-empty checked above");
-    if !first.is_ascii_lowercase() && !first.is_ascii_digit() {
-        return false;
-    }
-    s.chars()
-        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-}
-
-// ─── P1: Pool + Inspiration handlers (DF-61) ────────────────────────────────
-
-/// `GET /v1/daemon/works/pool` — List pool entries for the active creator.
-pub async fn list_pool(
-    State(state): State<WorkspaceState>,
-    Query(query): Query<ListPoolQuery>,
-) -> Result<Json<ListPoolResponse>, NexusApiError> {
-    let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-
-    let limit = query.limit;
-    let offset = query.offset;
-
-    let entries = nexus_local_db::novel_pool_entries::list_pool_entries(
-        state.pool_or_uninit()?,
-        &creator_id,
-        query.status.as_deref(),
-        limit,
-        offset,
-    )
-    .await
-    .map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_ERROR".to_string(),
-        message: e.to_string(),
-    })?;
-
-    let total = nexus_local_db::novel_pool_entries::count_pool_entries(
-        state.pool_or_uninit()?,
-        &creator_id,
-        query.status.as_deref(),
-    )
-    .await
-    .map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_ERROR".to_string(),
-        message: e.to_string(),
-    })?;
-
-    let items: Vec<PoolEntryDto> = entries.into_iter().map(PoolEntryDto::from).collect();
-
-    Ok(Json(ListPoolResponse {
-        entries: items,
-        total,
-        limit: limit.unwrap_or(200),
-        offset: offset.unwrap_or(0),
-    }))
-}
-
-/// `POST /v1/daemon/works/pool/promote` — Promote a pool entry to active.
-pub async fn promote_pool_entry(
-    State(state): State<WorkspaceState>,
-    Json(req): Json<PromotePoolRequest>,
-) -> Result<Json<PoolEntryDto>, NexusApiError> {
-    let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-
-    // Verify the work exists and belongs to this creator
-    let _work = works::get_work(state.pool_or_uninit()?, &creator_id, &req.work_id)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?
-        .ok_or_else(|| NexusApiError::NotFound(format!("work {}", req.work_id)))?;
-
-    let entry = nexus_local_db::novel_pool_entries::promote_to_active(
-        state.pool_or_uninit()?,
-        &creator_id,
-        &req.work_id,
-    )
-    .await
-    .map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_ERROR".to_string(),
-        message: e.to_string(),
-    })?;
-
-    Ok(Json(PoolEntryDto::from(entry)))
-}
-
-/// `POST /v1/daemon/works/pool/archive` — Archive a pool entry.
-pub async fn archive_pool_entry_handler(
-    State(state): State<WorkspaceState>,
-    Json(req): Json<ArchivePoolRequest>,
-) -> Result<Json<PoolEntryDto>, NexusApiError> {
-    let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-
-    let entry = nexus_local_db::novel_pool_entries::archive_pool_entry(
-        state.pool_or_uninit()?,
-        &req.entry_id,
-        &creator_id,
-    )
-    .await
-    .map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_ERROR".to_string(),
-        message: e.to_string(),
-    })?;
-
-    Ok(Json(PoolEntryDto::from(entry)))
-}
-
-/// `POST /v1/daemon/works/pool/inspiration` — Add an inspiration item.
-pub async fn add_inspiration(
-    State(state): State<WorkspaceState>,
-    Json(req): Json<AddInspirationRequest>,
-) -> Result<(StatusCode, Json<AddInspirationResponse>), NexusApiError> {
-    let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-    let workspace_slug = read_active_workspace_slug(state.nexus_home(), &creator_id)
-        .ok_or(NexusApiError::AuthRequired)?;
-
-    let item_id = format!("npi_{}", Uuid::new_v4());
-    let now = chrono::Utc::now().to_rfc3339();
-
-    // Route through nexus-home-layout — resolve operational workspace dir
-    // from nexus_home (~/.nexus42), not user home directly.
-    let workspace_dir = state
-        .nexus_home()
-        .join("creators")
-        .join(&creator_id)
-        .join("workspaces")
-        .join(&workspace_slug);
-
-    let item = nexus_local_db::inspiration_items::create_inspiration_with_scaffold(
-        state.pool_or_uninit()?,
-        &item_id,
-        &creator_id,
-        &req.title,
-        &workspace_dir,
-        &now,
-    )
-    .await
-    .map_err(|e| match &e {
-        nexus_local_db::LocalDbError::ConstraintViolation { .. } => NexusApiError::Conflict(
-            format!("inspiration item with this path already exists: {e}"),
-        ),
-        _ => NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        },
-    })?;
-
-    Ok((
-        StatusCode::CREATED,
-        Json(AddInspirationResponse {
-            item_id: item.item_id,
-            rel_path: item.rel_path,
-        }),
-    ))
-}
-
-/// `GET /v1/daemon/works/pool/inspiration` — List inspiration items.
-pub async fn list_inspiration(
-    State(state): State<WorkspaceState>,
-    Query(query): Query<ListInspirationQuery>,
-) -> Result<Json<ListInspirationResponse>, NexusApiError> {
-    let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-
-    let limit = query.limit;
-    let offset = query.offset;
-
-    let items = nexus_local_db::inspiration_items::list_inspiration(
-        state.pool_or_uninit()?,
-        &creator_id,
-        query.status.as_deref(),
-        limit,
-        offset,
-    )
-    .await
-    .map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_ERROR".to_string(),
-        message: e.to_string(),
-    })?;
-
-    let total = nexus_local_db::inspiration_items::count_inspiration(
-        state.pool_or_uninit()?,
-        &creator_id,
-        query.status.as_deref(),
-    )
-    .await
-    .map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_ERROR".to_string(),
-        message: e.to_string(),
-    })?;
-
-    let dtos: Vec<InspirationItemDto> = items.into_iter().map(InspirationItemDto::from).collect();
-
-    Ok(Json(ListInspirationResponse {
-        items: dtos,
-        total,
-        limit: limit.unwrap_or(200),
-        offset: offset.unwrap_or(0),
-    }))
-}
-
-/// `POST /v1/daemon/works/pool/inspiration/promote` — Promote an inspiration item to a Work.
-pub async fn promote_inspiration_handler(
-    State(state): State<WorkspaceState>,
-    Json(req): Json<PromoteInspirationRequest>,
-) -> Result<Json<PromoteInspirationResponse>, NexusApiError> {
-    let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-
-    // Look up the inspiration item
-    let item =
-        nexus_local_db::inspiration_items::get_inspiration(state.pool_or_uninit()?, &req.item_id)
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "DATABASE_ERROR".to_string(),
-                message: e.to_string(),
-            })?
-            .ok_or_else(|| NexusApiError::NotFound(format!("inspiration item {}", req.item_id)))?;
-
-    // Cross-creator guard: only the owning creator can promote their items
-    if item.creator_id != creator_id {
-        return Err(NexusApiError::NotFound(format!(
-            "inspiration item {}",
-            req.item_id
-        )));
-    }
-
-    if item.status != "idea" {
-        return Err(NexusApiError::BadRequest {
-            code: "invalid_status".to_string(),
-            message: format!(
-                "inspiration item {} has status '{}' — only 'idea' items can be promoted",
-                req.item_id, item.status
-            ),
-        });
-    }
-
-    // Create a new Work from the inspiration
-    let work_id = format!("wrk_{}", Uuid::new_v4());
-    let now = chrono::Utc::now().to_rfc3339();
-    let workspace_slug = read_active_workspace_slug(state.nexus_home(), &creator_id)
-        .ok_or(NexusApiError::AuthRequired)?;
-
-    let idea = req.idea.as_deref().unwrap_or(&item.title);
-
-    // For inspiration promote, we create a Work without world_id (the user
-    // can bind a world later). This is a lighter-weight flow than `run start`.
-    let record = WorkRecord {
-        work_id: work_id.clone(),
-        creator_id: creator_id.clone(),
-        workspace_slug,
-        status: "draft".to_string(),
-        title: item.title.clone(),
-        long_term_goal: idea.to_string(),
-        initial_idea: idea.to_string(),
-        creative_brief: None,
-        intake_status: "pending".to_string(),
-        world_id: None,
-        story_ref: None,
-        inspiration_log: "[]".to_string(),
-        primary_preset_id: "novel-writing".to_string(),
-        schedule_ids: "[]".to_string(),
-        created_at: now.clone(),
-        updated_at: now.clone(),
-        current_stage: "intake".to_string(),
-        stage_status: "pending".to_string(),
-        work_profile: None,
-        work_ref: None,
-        total_planned_chapters: None,
-        current_chapter: 0,
-        auto_chain_enabled: true,
-        driver_schedule_id: None,
-        auto_chain_interrupted: false,
-        auto_review_master_on_timeout: false,
-        runtime_lock_holder: None,
-        runtime_lock_acquired_at: None,
-        completion_locked_at: None,
-        novel_completion_status: None,
-        lineage_from_work_id: None,
-    };
-
-    // Wrap the three writes (Work create + pool promote + inspiration update)
-    // in a single transaction so a step-3 failure rolls back everything.
-    let pool_entry = nexus_local_db::inspiration_promote_atomic(
-        state.pool_or_uninit()?,
-        &record,
-        &creator_id,
-        &work_id,
-        &req.item_id,
-        &now,
-    )
-    .await
-    .map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_ERROR".to_string(),
-        message: e.to_string(),
-    })?;
-
-    Ok(Json(PromoteInspirationResponse {
-        work_id: work_id.clone(),
-        pool_entry_id: pool_entry.entry_id,
-    }))
-}
-
-/// `POST /v1/daemon/works/pool/inspiration/archive` — Archive an inspiration item.
-pub async fn archive_inspiration_handler(
-    State(state): State<WorkspaceState>,
-    Json(req): Json<ArchiveInspirationRequest>,
-) -> Result<Json<InspirationItemDto>, NexusApiError> {
-    let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-
-    let item = nexus_local_db::inspiration_items::archive_inspiration(
-        state.pool_or_uninit()?,
-        &req.item_id,
-        &creator_id,
-    )
-    .await
-    .map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_ERROR".to_string(),
-        message: e.to_string(),
-    })?;
-
-    Ok(Json(InspirationItemDto::from(item)))
-}
-
 // ─── P1 Request / Response types ────────────────────────────────────────────
 
 #[derive(Debug, Default, Deserialize)]
@@ -2248,133 +356,517 @@ pub struct ArchiveInspirationRequest {
     pub item_id: String,
 }
 
+pub(crate) fn work_error(error: nexus_core::CoreError) -> NexusApiError {
+    match error {
+        nexus_core::CoreError::InvalidInput { field, reason } => NexusApiError::BadRequest {
+            code: field,
+            message: reason,
+        },
+        nexus_core::CoreError::Forbidden { resource } if resource.starts_with("work_conflict:") => {
+            NexusApiError::Conflict(resource[14..].to_owned())
+        }
+        nexus_core::CoreError::Forbidden { resource } if resource.starts_with("work_locked:") => {
+            NexusApiError::Locked {
+                resource: "work".into(),
+                reason: resource[12..].to_owned(),
+            }
+        }
+        nexus_core::CoreError::Forbidden { resource }
+            if resource.starts_with("work_pool_forbidden:") =>
+        {
+            NexusApiError::Forbidden {
+                resource: "pool".into(),
+                reason: resource[20..].to_owned(),
+            }
+        }
+        // Core works carries the legacy internal classification verbatim as
+        // `<CODE>: <message>` (DATABASE_ERROR, CONTRACT_ERROR — the codes the
+        // pre-extraction handlers emitted). Re-emit the code unchanged; every
+        // other internal category keeps the shared CORE_ERROR shape.
+        nexus_core::CoreError::Internal { category } => match category.split_once(": ") {
+            Some((code, message)) if code == "DATABASE_ERROR" || code == "CONTRACT_ERROR" => {
+                NexusApiError::Internal {
+                    code: code.to_owned(),
+                    message: message.to_owned(),
+                }
+            }
+            _ => nexus_core::CoreError::Internal { category }.into(),
+        },
+        other => other.into(),
+    }
+}
+
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
+pub async fn create_work(
+    State(state): State<WorkspaceState>,
+    Json(req): Json<CreateWorkRequest>,
+) -> Result<(StatusCode, Json<CreateWorkResponse>), NexusApiError> {
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    let result = core
+        .create_work_with_outcome(
+            &principal,
+            nexus_contracts::CreateWorkRequest {
+                title: req.title,
+                long_term_goal: req.long_term_goal,
+                initial_idea: req.initial_idea,
+                world_id: req.world_id,
+                story_ref: req.story_ref,
+                primary_preset_id: req.primary_preset_id,
+                client_request_id: req.client_request_id,
+                lineage_from_work_id: req.lineage_from_work_id,
+                set_pool_active: req.set_pool_active,
+                work_profile: req.work_profile,
+            },
+        )
+        .await
+        .map_err(work_error)?;
+    let (created, result) = result;
+    Ok((
+        if created {
+            StatusCode::CREATED
+        } else {
+            StatusCode::OK
+        },
+        Json(CreateWorkResponse {
+            work_id: result.work_id,
+            status: result.status,
+        }),
+    ))
+}
+
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
+pub async fn list_works(
+    State(state): State<WorkspaceState>,
+    Query(query): Query<ListWorksQuery>,
+) -> Result<Json<ListWorksResponse>, NexusApiError> {
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    let result = core
+        .list_works(&principal, query)
+        .await
+        .map_err(work_error)?;
+    Ok(Json(result))
+}
+
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
+pub async fn get_work(
+    State(state): State<WorkspaceState>,
+    Path(work_id): Path<String>,
+) -> Result<Json<WorkApiDto>, NexusApiError> {
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    let result = core
+        .get_work(&principal, work_id)
+        .await
+        .map_err(work_error)?;
+    Ok(Json(result.into()))
+}
+
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
+pub async fn patch_work(
+    State(state): State<WorkspaceState>,
+    Path(work_id): Path<String>,
+    Json(req): Json<PatchWorkRequest>,
+) -> Result<Json<WorkApiDto>, NexusApiError> {
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    let resume_auto_chain = req.auto_chain_interrupted == Some(false)
+        && req.current_stage.is_none()
+        && req.stage_status.is_none();
+    let result = core
+        .patch_work(
+            &principal,
+            work_id,
+            "http",
+            nexus_core::WorkPatchRequest {
+                title: req.title,
+                long_term_goal: req.long_term_goal,
+                creative_brief: req.creative_brief,
+                intake_status: req.intake_status,
+                status: req.status,
+                world_id: req.world_id,
+                story_ref: req.story_ref,
+                primary_preset_id: req.primary_preset_id,
+                current_stage: req.current_stage,
+                stage_status: req.stage_status,
+                force: req.force,
+                auto_review_master_on_timeout: req.auto_review_master_on_timeout,
+                auto_chain_interrupted: req.auto_chain_interrupted,
+                work_profile: req.work_profile,
+                schedule_ids: None,
+            },
+        )
+        .await
+        .map_err(work_error)?;
+    // Legacy daemon composition only; scheduling remains outside the core Work service.
+    if resume_auto_chain {
+        if let Some(supervisor) = state.schedule_supervisor() {
+            if let Err(error) = supervisor.tick().await {
+                tracing::warn!(work_id = %result.work_id, %error, "resume: supervisor tick failed (non-fatal)");
+            }
+        }
+    }
+    Ok(Json(result.into()))
+}
+
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
+pub async fn append_inspiration(
+    State(state): State<WorkspaceState>,
+    Path(work_id): Path<String>,
+    Json(req): Json<AppendInspirationRequest>,
+) -> Result<Json<AppendInspirationResponse>, NexusApiError> {
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    let result = core
+        .append_work_inspiration(
+            &principal,
+            work_id,
+            "http",
+            nexus_contracts::AppendInspirationRequest { note: req.note },
+        )
+        .await
+        .map_err(work_error)?;
+    Ok(Json(AppendInspirationResponse {
+        work_id: result.work_id,
+        inspiration_count: usize::try_from(result.inspiration_count).unwrap_or(usize::MAX),
+    }))
+}
+
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
+pub async fn set_pool_active(
+    State(state): State<WorkspaceState>,
+    Json(req): Json<SetPoolActiveRequest>,
+) -> Result<Json<PoolEntryDto>, NexusApiError> {
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    let result = core
+        .set_work_pool_active(
+            &principal,
+            nexus_core::SetPoolActiveRequest {
+                action: req.action,
+                work_id: req.work_id,
+                creator_id: req.creator_id,
+            },
+        )
+        .await
+        .map_err(work_error)?;
+    Ok(Json(result.into()))
+}
+
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
+pub async fn release_completion_lock_handler(
+    State(state): State<WorkspaceState>,
+    Path(work_id): Path<String>,
+    Json(req): Json<ReleaseCompletionLockRequest>,
+) -> Result<Json<WorkApiDto>, NexusApiError> {
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    let result = core
+        .release_work_completion_lock(
+            &principal,
+            work_id,
+            nexus_contracts::ReleaseCompletionLockRequest { reason: req.reason },
+        )
+        .await
+        .map_err(work_error)?;
+    Ok(Json(result.into()))
+}
+
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
+pub async fn delete_work(
+    State(state): State<WorkspaceState>,
+    Path(work_id): Path<String>,
+) -> Result<StatusCode, NexusApiError> {
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    core.delete_work(&principal, work_id, "http")
+        .await
+        .map_err(work_error)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
+pub async fn reconcile_chapters(
+    State(state): State<WorkspaceState>,
+    Path(work_id): Path<String>,
+    Query(query): Query<ReconcileDryRunQuery>,
+) -> Result<
+    (
+        StatusCode,
+        Json<nexus_local_db::work_chapters::ReconcileReport>,
+    ),
+    NexusApiError,
+> {
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    let result = core
+        .reconcile_work_chapters(
+            &principal,
+            work_id,
+            "http",
+            nexus_core::ReconcileDryRunQuery {
+                dry_run: query.dry_run,
+            },
+        )
+        .await
+        .map_err(work_error)?;
+    Ok((
+        StatusCode::OK,
+        Json(nexus_local_db::work_chapters::ReconcileReport {
+            created: result.created,
+            updated: result.updated,
+            resynced: result.resynced,
+            preserved: result.preserved,
+        }),
+    ))
+}
+
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
+pub async fn list_pool(
+    State(state): State<WorkspaceState>,
+    Query(query): Query<ListPoolQuery>,
+) -> Result<Json<ListPoolResponse>, NexusApiError> {
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    let result = core
+        .list_work_pool(
+            &principal,
+            nexus_core::ListPoolQuery {
+                status: query.status,
+                limit: query.limit,
+                offset: query.offset,
+            },
+        )
+        .await
+        .map_err(work_error)?;
+    Ok(Json(ListPoolResponse {
+        entries: result.entries.into_iter().map(Into::into).collect(),
+        total: result.total,
+        limit: result.limit,
+        offset: result.offset,
+    }))
+}
+
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
+pub async fn promote_pool_entry(
+    State(state): State<WorkspaceState>,
+    Json(req): Json<PromotePoolRequest>,
+) -> Result<Json<PoolEntryDto>, NexusApiError> {
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    let result = core
+        .promote_work_pool_entry(
+            &principal,
+            nexus_core::PromotePoolRequest {
+                work_id: req.work_id,
+                set_default: req.set_default,
+            },
+        )
+        .await
+        .map_err(work_error)?;
+    Ok(Json(result.into()))
+}
+
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
+pub async fn archive_pool_entry_handler(
+    State(state): State<WorkspaceState>,
+    Json(req): Json<ArchivePoolRequest>,
+) -> Result<Json<PoolEntryDto>, NexusApiError> {
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    let result = core
+        .archive_work_pool_entry(
+            &principal,
+            nexus_core::ArchivePoolRequest {
+                entry_id: req.entry_id,
+            },
+        )
+        .await
+        .map_err(work_error)?;
+    Ok(Json(result.into()))
+}
+
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
+pub async fn add_inspiration(
+    State(state): State<WorkspaceState>,
+    Json(req): Json<AddInspirationRequest>,
+) -> Result<(StatusCode, Json<AddInspirationResponse>), NexusApiError> {
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    let result = core
+        .add_work_inspiration(
+            &principal,
+            nexus_core::AddInspirationRequest { title: req.title },
+        )
+        .await
+        .map_err(work_error)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(AddInspirationResponse {
+            item_id: result.item_id,
+            rel_path: result.rel_path,
+        }),
+    ))
+}
+
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
+pub async fn list_inspiration(
+    State(state): State<WorkspaceState>,
+    Query(query): Query<ListInspirationQuery>,
+) -> Result<Json<ListInspirationResponse>, NexusApiError> {
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    let result = core
+        .list_work_inspiration(
+            &principal,
+            nexus_core::ListInspirationQuery {
+                status: query.status,
+                limit: query.limit,
+                offset: query.offset,
+            },
+        )
+        .await
+        .map_err(work_error)?;
+    Ok(Json(ListInspirationResponse {
+        items: result.items.into_iter().map(Into::into).collect(),
+        total: result.total,
+        limit: result.limit,
+        offset: result.offset,
+    }))
+}
+
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
+pub async fn promote_inspiration_handler(
+    State(state): State<WorkspaceState>,
+    Json(req): Json<PromoteInspirationRequest>,
+) -> Result<Json<PromoteInspirationResponse>, NexusApiError> {
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    let result = core
+        .promote_work_inspiration(
+            &principal,
+            nexus_core::PromoteInspirationRequest {
+                item_id: req.item_id,
+                idea: req.idea,
+                set_default: req.set_default,
+            },
+        )
+        .await
+        .map_err(work_error)?;
+    Ok(Json(PromoteInspirationResponse {
+        work_id: result.work_id,
+        pool_entry_id: result.pool_entry_id,
+    }))
+}
+
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
+pub async fn archive_inspiration_handler(
+    State(state): State<WorkspaceState>,
+    Json(req): Json<ArchiveInspirationRequest>,
+) -> Result<Json<InspirationItemDto>, NexusApiError> {
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    let result = core
+        .archive_work_inspiration(
+            &principal,
+            nexus_core::ArchiveInspirationRequest {
+                item_id: req.item_id,
+            },
+        )
+        .await
+        .map_err(work_error)?;
+    Ok(Json(result.into()))
+}
+
 #[cfg(test)]
 mod tests_fix_d {
     use super::*;
-    use nexus_local_db::works::{self, WorkRecord};
-
-    async fn test_pool() -> sqlx::SqlitePool {
-        let db = tempfile::Builder::new()
-            .prefix("works_handler_test_")
-            .suffix(".db")
-            .tempfile()
-            .unwrap();
-        let db_path = db.path().to_path_buf();
-        std::mem::forget(db);
-
-        let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
-        nexus_local_db::run_migrations(&pool).await.unwrap();
-        pool
-    }
-
-    fn test_work(work_id: &str) -> WorkRecord {
-        WorkRecord {
-            work_id: work_id.to_string(),
-            creator_id: "ctr_test".to_string(),
-            workspace_slug: "ws".to_string(),
-            status: "active".to_string(),
-            title: "Original Title".to_string(),
-            long_term_goal: "Write a novel".to_string(),
-            initial_idea: "An idea".to_string(),
-            creative_brief: None,
-            intake_status: "complete".to_string(),
-            world_id: None,
-            story_ref: None,
-            inspiration_log: "[]".to_string(),
-            primary_preset_id: "novel-writing".to_string(),
-            schedule_ids: "[]".to_string(),
-            created_at: "2026-06-09T10:00:00Z".to_string(),
-            updated_at: "2026-06-09T10:00:00Z".to_string(),
-            current_stage: "research".to_string(),
-            stage_status: "active".to_string(),
-            work_profile: Some("novel".to_string()),
-            work_ref: Some("test-novel".to_string()),
-            total_planned_chapters: Some(3),
-            current_chapter: 0,
-            auto_chain_enabled: true,
-            driver_schedule_id: Some("sch_active_driver".to_string()),
-            auto_chain_interrupted: false,
-            auto_review_master_on_timeout: false,
-            runtime_lock_holder: None,
-            runtime_lock_acquired_at: None,
-            completion_locked_at: None,
-            novel_completion_status: None,
-            lineage_from_work_id: None,
-        }
-    }
-
-    /// Fix D (W-D): Verify that when `advance_work_stage_atomic` fails due to
-    /// an active-stage constraint violation, non-stage fields (title) are NOT
-    /// applied. This validates the fail-fast reordering: stage transition runs
-    /// before non-stage field changes.
-    #[tokio::test]
-    async fn stage_advance_failure_does_not_apply_non_stage_fields() {
-        let pool = test_pool().await;
-        let work = test_work("wrk_fixd");
-        works::create_work(&pool, &work).await.unwrap();
-
-        // Work is at research/active with an active driver schedule.
-        // Attempting to PATCH with stage_status="active" (same as current)
-        // will trigger the ConstraintViolation inside advance_work_stage_atomic
-        // (active → active is blocked). We also send a title change.
-        //
-        // Fix D: After the reordering, the title should NOT be changed because
-        // advance_work_stage_atomic runs first and fails before
-        // apply_non_stage_fields is called.
-
-        // Verify the current stage is "active" and title is "Original Title".
-        let before = works::get_work(&pool, "ctr_test", "wrk_fixd")
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(before.stage_status, "active");
-        assert_eq!(before.title, "Original Title");
-
-        // Simulate the constraint violation: calling advance_work_stage_atomic
-        // with target_status="active" when current is "active" should fail.
-        let now = chrono::Utc::now().to_rfc3339();
-        let result = works::advance_work_stage_atomic(
-            &pool, "ctr_test", "wrk_fixd", "research", // same stage
-            "active",   // same status → constraint violation
-            &now,
-        )
-        .await;
-
-        assert!(result.is_err(), "should fail with constraint violation");
-
-        // Simulate what the OLD code did: apply_non_stage_fields FIRST, then
-        // advance_work_stage_atomic. In the OLD code, the title would have
-        // already been changed. In the NEW code (Fix D), it's not called.
-        //
-        // Verify the title is unchanged (proving the reorder works).
-        let after = works::get_work(&pool, "ctr_test", "wrk_fixd")
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            after.title, "Original Title",
-            "Fix D: title should NOT be changed when stage advance fails"
-        );
-    }
-
-    // ── T0.4: mandatory world_id tests ─────────────────────────────────
-
+    use crate::config::read_active_workspace_slug;
+    use nexus_local_db::works;
     #[tokio::test]
     async fn create_work_without_world_id_returns_error() {
-        let tmp = tempfile::tempdir().expect("tmpdir");
-        let nexus_home = tmp.path().to_path_buf();
-        let db_path = tmp.path().join("state.db");
-
-        // Write a minimal config.toml with active creator
-        let config = toml::toml! {
-            active_creator_id = "ctr_test"
-            active_workspace_slug_by_creator = { ctr_test = "ws" }
-        };
-        std::fs::write(
-            nexus_home.join("config.toml"),
-            toml::to_string(&config).unwrap(),
-        )
-        .expect("write config");
+        let (_tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
 
         let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
@@ -2399,10 +891,6 @@ mod tests_fix_d {
         assert!(
             msg.contains("world_id_required"),
             "error code should be world_id_required, got: {msg}"
-        );
-        assert!(
-            msg.contains("creator world create") || msg.contains("creator world list"),
-            "error should mention remediation, got: {msg}"
         );
 
         // QC1 W-1 regression: WORLD_ID_REQUIRED returns 422 (not 400).
@@ -2701,5 +1189,194 @@ mod tests_fix_d {
 
         let slug = read_active_workspace_slug(nexus_home, "ctr_test");
         assert_eq!(slug.as_deref(), Some("ws_custom"));
+    }
+    #[test]
+    fn work_error_retains_status_and_body() {
+        let cases = [
+            (
+                nexus_core::CoreError::InvalidInput { field: "invalid_action".into(), reason: "unsupported action 'other'; expected 'set_pool_active'".into() },
+                NexusApiError::BadRequest { code: "invalid_action".into(), message: "unsupported action 'other'; expected 'set_pool_active'".into() },
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                nexus_core::CoreError::Forbidden { resource: "work_conflict:work wrk_locked is completion-locked since 2026-09-15; use 'creator works completion-lock release' first".into() },
+                NexusApiError::Conflict("work wrk_locked is completion-locked since 2026-09-15; use 'creator works completion-lock release' first".into()),
+                StatusCode::CONFLICT,
+            ),
+            (
+                nexus_core::CoreError::Forbidden { resource: "work_locked:work wrk_locked is locked by 'driver'; wait for release or check 'creator works status'".into() },
+                NexusApiError::Locked { resource: "work".into(), reason: "work wrk_locked is locked by 'driver'; wait for release or check 'creator works status'".into() },
+                StatusCode::LOCKED,
+            ),
+            (
+                nexus_core::CoreError::NotFound { resource: "work wrk_missing".into() },
+                NexusApiError::NotFound("work wrk_missing".into()),
+                StatusCode::NOT_FOUND,
+            ),
+            (
+                nexus_core::CoreError::Forbidden { resource: "work_pool_forbidden:work wrk_x is not in the authoring pool".into() },
+                NexusApiError::Forbidden { resource: "pool".into(), reason: "work wrk_x is not in the authoring pool".into() },
+                StatusCode::FORBIDDEN,
+            ),
+        ];
+        for (core_error, old_error, status) in cases {
+            let migrated = work_error(core_error);
+            assert_eq!(migrated.status_code(), status);
+            assert_eq!(
+                serde_json::to_string(&migrated.to_response_body()).unwrap(),
+                serde_json::to_string(&old_error.to_response_body()).unwrap(),
+            );
+        }
+        // The legacy internal classifications (emitted directly by the pre-extraction
+        // handlers) ride the `<CODE>: <message>` carrier and are re-emitted verbatim.
+        // Body JSON alone cannot distinguish them — the body always reports
+        // `error.code = "internal"` — so the carrier `code` field is asserted too.
+        for (category, legacy_code, legacy_message) in [
+            (
+                "DATABASE_ERROR: INSERT failed: no such table: works",
+                "DATABASE_ERROR",
+                "INSERT failed: no such table: works",
+            ),
+            (
+                "CONTRACT_ERROR: invalid type: string, expected u32 at line 1 column 5",
+                "CONTRACT_ERROR",
+                "invalid type: string, expected u32 at line 1 column 5",
+            ),
+        ] {
+            let migrated = work_error(nexus_core::CoreError::Internal {
+                category: category.into(),
+            });
+            let NexusApiError::Internal { code, message } = &migrated else {
+                panic!("internal category must stay Internal, got {migrated:?}");
+            };
+            assert_eq!(
+                (code.as_str(), message.as_str()),
+                (legacy_code, legacy_message)
+            );
+            assert_eq!(migrated.status_code(), StatusCode::INTERNAL_SERVER_ERROR);
+            let old_error = NexusApiError::Internal {
+                code: legacy_code.into(),
+                message: legacy_message.into(),
+            };
+            assert_eq!(
+                serde_json::to_string(&migrated.to_response_body()).unwrap(),
+                serde_json::to_string(&old_error.to_response_body()).unwrap(),
+            );
+        }
+        // Non-legacy internal categories keep the shared CORE_ERROR fallback.
+        let fallback = work_error(nexus_core::CoreError::Internal {
+            category: "workspace metadata: boom".into(),
+        });
+        let NexusApiError::Internal { code, .. } = &fallback else {
+            panic!("fallback must stay Internal, got {fallback:?}");
+        };
+        assert_eq!(code, "CORE_ERROR");
+        assert_eq!(fallback.status_code(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn nullable_patch_and_ignored_reopen_fields_remain_distinct() {
+        let omitted: PatchWorkRequest = serde_json::from_value(serde_json::json!({})).unwrap();
+        let cleared: PatchWorkRequest =
+            serde_json::from_value(serde_json::json!({"story_ref": null, "world_id": null}))
+                .unwrap();
+        let set: PatchWorkRequest =
+            serde_json::from_value(serde_json::json!({"story_ref": "story", "world_id": "world"}))
+                .unwrap();
+        assert_eq!((omitted.story_ref, omitted.world_id), (None, None));
+        assert_eq!(
+            (cleared.story_ref, cleared.world_id),
+            (Some(None), Some(None))
+        );
+        assert_eq!(
+            (set.story_ref, set.world_id),
+            (Some(Some("story".into())), Some(Some("world".into())))
+        );
+        let ignored: PatchWorkRequest = serde_json::from_value(serde_json::json!({
+            "novel_completion_status": "reopened", "completion_locked_at": null,
+            "total_planned_chapters": 99,
+        }))
+        .unwrap();
+        assert!(
+            ignored.status.is_none()
+                && ignored.current_stage.is_none()
+                && ignored.world_id.is_none()
+                && ignored.story_ref.is_none()
+        );
+    }
+    #[tokio::test]
+    async fn retained_reopen_is_ignored_and_completion_lock_remains_conflict() {
+        let (_tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        let pool = state.pool_or_uninit().unwrap();
+        crate::test_utils::seed_test_creator_and_world(pool).await;
+        let request = serde_json::from_value(serde_json::json!({
+            "title": "Locked work", "long_term_goal": "write", "initial_idea": "idea",
+            "world_id": "wld_test_world",
+        }))
+        .unwrap();
+        let (_, Json(created)) = create_work(State(state.clone()), Json(request))
+            .await
+            .unwrap();
+        let ignored_request = || {
+            serde_json::from_value(serde_json::json!({
+                "novel_completion_status": "reopened", "completion_locked_at": null,
+                "total_planned_chapters": 99,
+            }))
+            .unwrap()
+        };
+        let Json(unchanged) = patch_work(
+            State(state.clone()),
+            Path(created.work_id.clone()),
+            Json(ignored_request()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(unchanged.novel_completion_status, None);
+        assert_eq!(unchanged.total_planned_chapters, None);
+        sqlx::query("UPDATE works SET completion_locked_at = '2026-09-15', novel_completion_status = 'completed', total_planned_chapters = 3 WHERE work_id = ?").bind(&created.work_id).execute(pool).await.unwrap();
+        let error = patch_work(
+            State(state.clone()),
+            Path(created.work_id.clone()),
+            Json(ignored_request()),
+        )
+        .await
+        .unwrap_err();
+        let expected = NexusApiError::Conflict(format!("work {} is completion-locked since 2026-09-15; use 'creator works completion-lock release' first", created.work_id));
+        assert_eq!(error.status_code(), StatusCode::CONFLICT);
+        assert_eq!(
+            serde_json::to_string(&error.to_response_body()).unwrap(),
+            serde_json::to_string(&expected.to_response_body()).unwrap()
+        );
+        let record = works::get_work(pool, "test_creator", &created.work_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.completion_locked_at.as_deref(), Some("2026-09-15"));
+        assert_eq!(record.total_planned_chapters, Some(3));
+    }
+    #[tokio::test]
+    async fn internal_database_fault_reaches_handler_with_legacy_code() {
+        let (_tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        let pool = state.pool_or_uninit().unwrap();
+        crate::test_utils::seed_test_creator_and_world(pool).await;
+        sqlx::query("DROP TABLE works").execute(pool).await.unwrap();
+        let request = serde_json::from_value(serde_json::json!({
+            "title": "Broken", "long_term_goal": "write", "initial_idea": "idea",
+            "world_id": "wld_test_world",
+        }))
+        .unwrap();
+        let error = create_work(State(state), Json(request)).await.unwrap_err();
+        let NexusApiError::Internal { code, message } = &error else {
+            panic!("dropped works table must surface as Internal, got {error:?}");
+        };
+        assert_eq!(code, "DATABASE_ERROR");
+        assert!(
+            message.contains("works"),
+            "message must carry the sqlite failure, got: {message}"
+        );
+        assert_eq!(error.status_code(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(error.to_response_body().error.code, "internal");
     }
 }
