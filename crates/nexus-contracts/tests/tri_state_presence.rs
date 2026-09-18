@@ -103,3 +103,25 @@ fn required_nullable_field_rejects_omission_and_accepts_null() {
             .expect("a present integer is a valid required value");
     assert_eq!(epoch.expected_engine_epoch, Some(7));
 }
+
+/// The serialization half of the same contract: a required nullable property
+/// must stay *present* on the wire while it is null. The generated field
+/// carries no `skip_serializing_if`, so the null state emits the key rather
+/// than dropping it — a `skip_serializing_if` regression here would silently
+/// make the field disappear for consumers that treat absence as "not
+/// supplied".
+#[test]
+fn required_nullable_field_serializes_its_null_state() {
+    let request: CoreServiceStopRequest = CoreServiceStopRequest::builder()
+        .expected_instance_id("inst-1")
+        .expected_engine_epoch(None)
+        .try_into()
+        .expect("the builder accepts an absent engine epoch");
+    assert_eq!(request.expected_engine_epoch, None);
+
+    let wire = serde_json::to_string(&request).expect("serializes");
+    assert!(
+        wire.contains(r#""expected_engine_epoch":null"#),
+        "a required nullable property must keep its key: {wire}"
+    );
+}
