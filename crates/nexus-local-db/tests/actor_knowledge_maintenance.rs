@@ -4,9 +4,11 @@
 
 use nexus_contracts::BlockType;
 use nexus_knowledge::world_kb::knowledge_entry::{
-    KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeGovernance, DISCLOSURE_OWNER_PRIVATE,
+    KnowledgeEntryBody, KnowledgeEntryRecord, DISCLOSURE_OWNER_PRIVATE,
 };
-use nexus_local_db::kb_store::{cas_update_key_block_modules_in_tx, SqliteKbStore};
+use nexus_local_db::kb_store::{
+    cas_update_key_block_modules_in_tx, AuthoredAudience, SqliteKbStore,
+};
 use nexus_local_db::{
     author_actor_knowledge_entry, character_holder_entry_id, create_character_with_initial_binding,
     creator_holder_entry_id, delete_actor_knowledge_entry, get_actor_knowledge_entry,
@@ -63,6 +65,26 @@ async fn seed_character(pool: &SqlitePool) -> (String, String) {
     .await
     .unwrap();
     (created.character.character_id, created.binding.binding_id)
+}
+
+/// Another Character owned by `OWNER`, created with its initial binding in
+/// `world_id` (the same World unless the test seeds a second one).
+async fn seed_character_in(pool: &SqlitePool, world_id: &str, display_name: &str) -> String {
+    create_character_with_initial_binding(
+        pool,
+        CreateCharacterParams {
+            owner_creator_id: OWNER,
+            display_name,
+            image_uri: None,
+            persona_json: "{}",
+            world_id,
+            world_sheet_entry_id: None,
+        },
+    )
+    .await
+    .unwrap()
+    .character
+    .character_id
 }
 
 async fn insert_character_ke(
@@ -920,13 +942,6 @@ async fn world_knowledge_revision(pool: &SqlitePool) -> i64 {
         .unwrap()
 }
 
-fn private_holder(holder: &str) -> KnowledgeGovernance {
-    KnowledgeGovernance {
-        holder_entry_id: Some(holder.to_string()),
-        disclosure: Some(DISCLOSURE_OWNER_PRIVATE.to_string()),
-    }
-}
-
 const KEEP_CONTENT: ActorKnowledgePatch<'static> = ActorKnowledgePatch {
     canonical_name: None,
     summary: FieldPatch::Keep,
@@ -965,7 +980,7 @@ async fn v1191_audience_cas_authoring_writes_pair_and_bumps_both_revisions() {
         &entry,
         0,
         KEEP_CONTENT,
-        Some(&private_holder(&creator_holder)),
+        AuthoredAudience::Creator { creator_id: OWNER },
     )
     .await
     .unwrap();
@@ -993,13 +1008,22 @@ async fn v1191_audience_cas_shared_clears_pair_and_identical_reauthoring_is_a_no
     seed(&pool).await;
     let (chr, _) = seed_character(&pool).await;
     let entry = insert_character_ke(&pool, &chr, "fact", None).await;
-    let char_holder = character_holder_entry_id(&chr);
 
-    let private = private_holder(&char_holder);
-    author_actor_knowledge_entry(&pool, OWNER, &chr, &entry, 0, KEEP_CONTENT, Some(&private))
-        .await
-        .unwrap();
-    assert_eq!(stored_pair(&pool, &entry).await.1.as_deref(), Some(DISCLOSURE_OWNER_PRIVATE));
+    author_actor_knowledge_entry(
+        &pool,
+        OWNER,
+        &chr,
+        &entry,
+        0,
+        KEEP_CONTENT,
+        AuthoredAudience::Character { character_id: &chr },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        stored_pair(&pool, &entry).await.1.as_deref(),
+        Some(DISCLOSURE_OWNER_PRIVATE)
+    );
     assert_eq!(character_knowledge_revision(&pool, &chr).await, 1);
 
     // Explicit `shared` clears both columns and is material.
@@ -1010,7 +1034,7 @@ async fn v1191_audience_cas_shared_clears_pair_and_identical_reauthoring_is_a_no
         &entry,
         1,
         KEEP_CONTENT,
-        Some(&KnowledgeGovernance::shared()),
+        AuthoredAudience::Shared,
     )
     .await
     .unwrap();
@@ -1027,7 +1051,7 @@ async fn v1191_audience_cas_shared_clears_pair_and_identical_reauthoring_is_a_no
         &entry,
         2,
         KEEP_CONTENT,
-        Some(&KnowledgeGovernance::shared()),
+        AuthoredAudience::Shared,
     )
     .await
     .unwrap();
@@ -1042,14 +1066,20 @@ async fn v1191_audience_cas_no_op_preserves_both_revisions() {
     seed(&pool).await;
     let (chr, _) = seed_character(&pool).await;
     let entry = insert_character_ke(&pool, &chr, "fact", Some(r#"{"summary":"hi"}"#)).await;
-    let char_holder = character_holder_entry_id(&chr);
-    let private = private_holder(&char_holder);
 
-    author_actor_knowledge_entry(&pool, OWNER, &chr, &entry, 0, KEEP_CONTENT, Some(&private))
-        .await
-        .unwrap();
+    author_actor_knowledge_entry(
+        &pool,
+        OWNER,
+        &chr,
+        &entry,
+        0,
+        KEEP_CONTENT,
+        AuthoredAudience::Character { character_id: &chr },
+    )
+    .await
+    .unwrap();
     let before = row_snapshot(&pool, &entry).await;
-    let ke_revision = character_knowledge_revision(&pool, &chr).await;
+    let knowledge_revision = character_knowledge_revision(&pool, &chr).await;
 
     // Identical content (same summary) + identical audience.
     let no_op = author_actor_knowledge_entry(
@@ -1062,7 +1092,7 @@ async fn v1191_audience_cas_no_op_preserves_both_revisions() {
             canonical_name: None,
             summary: FieldPatch::Set("hi"),
         },
-        Some(&private),
+        AuthoredAudience::Character { character_id: &chr },
     )
     .await
     .unwrap();
@@ -1070,9 +1100,66 @@ async fn v1191_audience_cas_no_op_preserves_both_revisions() {
     assert_eq!(row_snapshot(&pool, &entry).await, before);
     assert_eq!(
         character_knowledge_revision(&pool, &chr).await,
-        ke_revision,
+        knowledge_revision,
         "no-op keeps the knowledge revision"
     );
+}
+
+/// Regression (L2 C1): an explicit content field that re-states the stored
+/// value may not mask a governance change — the no-op decision covers content
+/// **and** governance, in both directions.
+#[tokio::test]
+async fn v1191_audience_cas_content_restating_the_stored_value_still_applies_governance() {
+    let (pool, _dir) = fresh_pool().await;
+    seed(&pool).await;
+    let (chr, _) = seed_character(&pool).await;
+    let entry = insert_character_ke(&pool, &chr, "fact", Some(r#"{"summary":"hi"}"#)).await;
+
+    // shared → private while re-stating the stored summary.
+    let authored = author_actor_knowledge_entry(
+        &pool,
+        OWNER,
+        &chr,
+        &entry,
+        0,
+        ActorKnowledgePatch {
+            canonical_name: None,
+            summary: FieldPatch::Set("hi"),
+        },
+        AuthoredAudience::Character { character_id: &chr },
+    )
+    .await
+    .unwrap();
+    assert_eq!(authored.revision, Some(1), "the governance write is material");
+    assert_eq!(
+        stored_pair(&pool, &entry).await,
+        (
+            Some(character_holder_entry_id(&chr)),
+            Some(DISCLOSURE_OWNER_PRIVATE.to_string()),
+            1
+        ),
+        "an unchanged content field must not discard the authored audience"
+    );
+    assert_eq!(character_knowledge_revision(&pool, &chr).await, 1);
+
+    // private → shared while re-stating the stored summary (the C1 example).
+    let cleared = author_actor_knowledge_entry(
+        &pool,
+        OWNER,
+        &chr,
+        &entry,
+        1,
+        ActorKnowledgePatch {
+            canonical_name: None,
+            summary: FieldPatch::Set("hi"),
+        },
+        AuthoredAudience::Shared,
+    )
+    .await
+    .unwrap();
+    assert_eq!(cleared.revision, Some(2));
+    assert_eq!(stored_pair(&pool, &entry).await, (None, None, 2));
+    assert_eq!(character_knowledge_revision(&pool, &chr).await, 2);
 }
 
 #[tokio::test]
@@ -1081,7 +1168,6 @@ async fn v1191_audience_cas_stale_revision_refuses_with_zero_mutation() {
     seed(&pool).await;
     let (chr, _) = seed_character(&pool).await;
     let entry = insert_character_ke(&pool, &chr, "fact", None).await;
-    let creator_holder = creator_holder_entry_id(OWNER);
     let before = row_snapshot(&pool, &entry).await;
 
     let err = author_actor_knowledge_entry(
@@ -1091,7 +1177,7 @@ async fn v1191_audience_cas_stale_revision_refuses_with_zero_mutation() {
         &entry,
         7,
         KEEP_CONTENT,
-        Some(&private_holder(&creator_holder)),
+        AuthoredAudience::Creator { creator_id: OWNER },
     )
     .await
     .unwrap_err();
@@ -1107,9 +1193,13 @@ async fn v1191_audience_cas_unregistered_holder_refuses_with_zero_mutation() {
     let (chr, _) = seed_character(&pool).await;
     let entry = insert_character_ke(&pool, &chr, "fact", None).await;
     let before = row_snapshot(&pool, &entry).await;
-    // A well-formed id that no registry row binds: the in-transaction
-    // resolution fails closed (`holder_state_invalid`) and never provisions.
-    let foreign = nexus_local_db::character_holder_entry_id(&nexus_local_db::mint_character_id());
+    // Remove the subject's registry row: the in-transaction resolution must
+    // fail closed instead of admitting a silently derived holder id.
+    sqlx::query("DELETE FROM knowledge_holders WHERE character_id = ?")
+        .bind(&chr)
+        .execute(&pool)
+        .await
+        .unwrap();
 
     let err = author_actor_knowledge_entry(
         &pool,
@@ -1118,16 +1208,155 @@ async fn v1191_audience_cas_unregistered_holder_refuses_with_zero_mutation() {
         &entry,
         0,
         KEEP_CONTENT,
-        Some(&private_holder(&foreign)),
+        AuthoredAudience::Character { character_id: &chr },
     )
     .await
     .unwrap_err();
     assert!(
         matches!(err, LocalDbError::HolderStateInvalid { .. }),
-        "unregistered holder must fail closed, got {err:?}"
+        "missing registry state must fail closed, got {err:?}"
     );
     assert_eq!(row_snapshot(&pool, &entry).await, before, "refusal wrote nothing");
     assert_eq!(character_knowledge_revision(&pool, &chr).await, 0);
+}
+
+/// Regression (L2 C3/I1): the permitted-identity rules are re-resolved from
+/// stored state inside the authoring transaction.
+#[tokio::test]
+async fn v1191_audience_cas_character_audience_refuses_a_non_owning_character() {
+    let (pool, _dir) = fresh_pool().await;
+    seed(&pool).await;
+    let (chr, _) = seed_character(&pool).await;
+    let other = seed_character_in(&pool, WORLD, "Other").await;
+    let entry = insert_character_ke(&pool, &chr, "fact", None).await;
+    let before = row_snapshot(&pool, &entry).await;
+
+    // A Character row may only target its own owning Character.
+    let err = author_actor_knowledge_entry(
+        &pool,
+        OWNER,
+        &chr,
+        &entry,
+        0,
+        KEEP_CONTENT,
+        AuthoredAudience::Character { character_id: &other },
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(err, LocalDbError::ActorNotFound { .. }),
+        "another owned Character is not a permitted audience here, got {err:?}"
+    );
+    assert_eq!(row_snapshot(&pool, &entry).await, before);
+    assert_eq!(character_knowledge_revision(&pool, &chr).await, 0);
+
+    // A foreign Creator's holder is likewise refused (no leak).
+    let err = author_actor_knowledge_entry(
+        &pool,
+        OWNER,
+        &chr,
+        &entry,
+        0,
+        KEEP_CONTENT,
+        AuthoredAudience::Creator { creator_id: OTHER },
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, LocalDbError::ActorNotFound { .. }));
+    assert_eq!(row_snapshot(&pool, &entry).await, before);
+}
+
+/// Regression (L2 C3): a World container's `character-private` audience is
+/// resolved in-transaction against ownership, activity and an **active
+/// binding** to that World.
+fn world_container() -> nexus_local_db::kb_store::AudienceContainer<'static> {
+    nexus_local_db::kb_store::AudienceContainer {
+        owner_creator_id: OWNER,
+        owning_character_id: None,
+        world_id: Some(WORLD),
+    }
+}
+
+#[tokio::test]
+async fn v1191_audience_cas_world_container_audience_requires_an_active_binding() {
+    let (pool, _dir) = fresh_pool().await;
+    seed(&pool).await;
+    let (chr, binding) = seed_character(&pool).await;
+    // A second owned World, so this Character holds no binding to `WORLD`.
+    sqlx::query(
+        "INSERT INTO narrative_worlds \
+         (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
+          time_policy, metadata_json, created_at) \
+         VALUES ('wld_worldB', 'ws', ?, 'B', 'b', 'active', 'private', 'manual', '{}', \
+                 datetime('now'))",
+    )
+    .bind(OWNER)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let unbound = seed_character_in(&pool, "wld_worldB", "Unbound").await;
+    // The bound Character resolves to its own registry holder.
+    let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
+    let resolved = nexus_local_db::kb_store::resolve_authored_audience_tx(
+        &mut tx,
+        AuthoredAudience::Character {
+            character_id: &chr,
+        },
+        world_container(),
+    )
+    .await
+    .unwrap()
+    .expect("private pair");
+    tx.rollback().await.unwrap();
+    assert_eq!(
+        resolved.holder_entry_id.as_deref(),
+        Some(character_holder_entry_id(&chr).as_str())
+    );
+    assert_eq!(resolved.disclosure.as_deref(), Some(DISCLOSURE_OWNER_PRIVATE));
+
+    // An owned Character without a binding to that World is refused.
+    let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
+    let err = nexus_local_db::kb_store::resolve_authored_audience_tx(
+        &mut tx,
+        AuthoredAudience::Character {
+            character_id: &unbound,
+        },
+        world_container(),
+    )
+    .await
+    .unwrap_err();
+    tx.rollback().await.unwrap();
+    assert!(
+        matches!(err, LocalDbError::ValidationError(_)),
+        "an unbound Character is not a permitted World-row audience, got {err:?}"
+    );
+
+    // Archiving the bound Character removes it from the permitted set even
+    // though its binding row is untouched — the refusal is decided in-tx.
+    transition_character(&pool, OWNER, &chr, 0, CharacterStatus::Archived)
+        .await
+        .unwrap();
+    let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
+    let err = nexus_local_db::kb_store::resolve_authored_audience_tx(
+        &mut tx,
+        AuthoredAudience::Character {
+            character_id: &chr,
+        },
+        world_container(),
+    )
+    .await
+    .unwrap_err();
+    tx.rollback().await.unwrap();
+    assert_conflict(err, ActorContractConflict::CharacterInactive);
+
+    // The binding itself still exists (the archive did not unlink it).
+    let stored: String =
+        sqlx::query_scalar("SELECT status FROM actor_world_bindings WHERE binding_id = ?")
+            .bind(&binding)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(stored, "active");
 }
 
 #[tokio::test]
@@ -1137,10 +1366,17 @@ async fn v1191_audience_cas_ordinary_content_patch_preserves_governance() {
     let (chr, _) = seed_character(&pool).await;
     let entry = insert_character_ke(&pool, &chr, "fact", Some(r#"{"summary":"hi"}"#)).await;
     let char_holder = character_holder_entry_id(&chr);
-    let private = private_holder(&char_holder);
-    author_actor_knowledge_entry(&pool, OWNER, &chr, &entry, 0, KEEP_CONTENT, Some(&private))
-        .await
-        .unwrap();
+    author_actor_knowledge_entry(
+        &pool,
+        OWNER,
+        &chr,
+        &entry,
+        0,
+        KEEP_CONTENT,
+        AuthoredAudience::Character { character_id: &chr },
+    )
+    .await
+    .unwrap();
 
     // The ordinary content lane cannot transfer or clear governance, and a
     // material content edit still bumps the owning Character's revision.
@@ -1179,7 +1415,7 @@ async fn v1191_audience_cas_binding_owned_governance_bumps_the_owning_character(
         &entry,
         0,
         KEEP_CONTENT,
-        Some(&private_holder(&char_holder)),
+        AuthoredAudience::Character { character_id: &chr },
     )
     .await
     .unwrap();

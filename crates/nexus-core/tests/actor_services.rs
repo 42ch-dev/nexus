@@ -2449,3 +2449,146 @@ async fn v1191_audience_cas_binding_patch_bumps_only_the_owning_character() {
     );
     pool.close().await;
 }
+
+/// Regression (L2 C1): at the core layer an explicitly re-stated content field
+/// may not mask a governance change (both directions).
+#[tokio::test]
+async fn v1191_audience_cas_restated_content_still_moves_governance() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let pool = plain_pool(&env).await;
+    let creator_holder = nexus_local_db::creator_holder_entry_id(CREATOR);
+    let created = core
+        .add_actor_knowledge_entry(
+            &principal,
+            create_request(
+                "character",
+                None,
+                Some(&env.character_id),
+                None,
+                "RestatedSubject",
+                None,
+            ),
+            false,
+        )
+        .await
+        .expect("shared create admits");
+
+    // shared → author-only while re-stating the (absent) summary is still a
+    // material governance write.
+    let authored = core
+        .patch_actor_knowledge_entry(
+            &principal,
+            env.character_id.clone(),
+            created.entry_id.clone(),
+            0,
+            None,
+            nexus_local_db::FieldPatch::Set("same"),
+            Some(KnowledgeAudience::AuthorOnly),
+        )
+        .await
+        .expect("governed patch admits");
+    assert_eq!(authored.revision, Some(1));
+    assert_eq!(
+        stored_governance(&pool, &created.entry_id).await,
+        (
+            Some(creator_holder),
+            Some(DISCLOSURE_OWNER_PRIVATE.to_string()),
+            1
+        ),
+        "the authored audience must land even when the content half matches"
+    );
+    assert_eq!(stored_character_revision(&pool, &env.character_id).await, 1);
+
+    // …and the same explicit summary with `shared` clears the pair.
+    let cleared = core
+        .patch_actor_knowledge_entry(
+            &principal,
+            env.character_id.clone(),
+            created.entry_id.clone(),
+            1,
+            None,
+            nexus_local_db::FieldPatch::Set("same"),
+            Some(KnowledgeAudience::Shared),
+        )
+        .await
+        .expect("shared patch admits");
+    assert_eq!(cleared.revision, Some(2));
+    assert_eq!(
+        stored_governance(&pool, &created.entry_id).await,
+        (None, None, 2)
+    );
+    assert_eq!(stored_character_revision(&pool, &env.character_id).await, 2);
+
+    // A true no-op (same content, same audience) still moves neither.
+    let no_op = core
+        .patch_actor_knowledge_entry(
+            &principal,
+            env.character_id.clone(),
+            created.entry_id.clone(),
+            2,
+            None,
+            nexus_local_db::FieldPatch::Set("same"),
+            Some(KnowledgeAudience::Shared),
+        )
+        .await
+        .expect("no-op patch admits");
+    assert_eq!(no_op.revision, Some(2));
+    assert_eq!(stored_character_revision(&pool, &env.character_id).await, 2);
+    pool.close().await;
+}
+
+/// Regression (L2 I2): an audience-bearing create takes the **exclusive**
+/// Character governance fence, not the shared activity fence — a live shared
+/// activity lease therefore refuses it, while the same audience-less create
+/// still admits under that fence.
+#[tokio::test]
+async fn v1191_audience_cas_governed_create_takes_the_exclusive_fence() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let pool = plain_pool(&env).await;
+    let actor = AdmittedActor::Character {
+        character_id: env.character_id.clone(),
+    };
+    let activity = core
+        .acquire_actor_activity(&principal, &actor)
+        .await
+        .expect("shared activity lease");
+    let before = knowledge_row_count(&pool).await;
+
+    let err = core
+        .add_actor_knowledge_entry(
+            &principal,
+            create_request(
+                "character",
+                None,
+                Some(&env.character_id),
+                None,
+                "FencedGoverned",
+                Some(character_private(&env.character_id)),
+            ),
+            false,
+        )
+        .await
+        .unwrap_err();
+    assert_conflict(err, "character_busy");
+    assert_eq!(knowledge_row_count(&pool).await, before, "refusal wrote no row");
+
+    // The retained shared lane still admits under the same activity lease.
+    core.add_actor_knowledge_entry(
+        &principal,
+        create_request(
+            "character",
+            None,
+            Some(&env.character_id),
+            None,
+            "FencedShared",
+            None,
+        ),
+        false,
+    )
+    .await
+    .expect("a shared create keeps the shared fence");
+    drop(activity);
+    pool.close().await;
+}

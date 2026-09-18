@@ -1,6 +1,7 @@
 //! v1.185 P2 — stored-owner summary CAS and referent-guarded delete.
 
 use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryRecord, KnowledgeGovernance};
+use crate::kb_store::AuthoredAudience;
 use nexus_knowledge::world_kb::validation::validate_canonical_name;
 use sqlx::{AssertSqlSafe, SqlitePool};
 
@@ -186,24 +187,35 @@ fn apply_summary_patch_to_body_json(
     Ok(Some(serde_json::Value::Object(obj).to_string()))
 }
 
+/// Whether the patch is a **complete** no-op (durable §3): every supplied
+/// content field materialises to the stored value **and** the resolved
+/// governance pair equals the stored pair.
+///
+/// The two halves are independent: an explicitly re-sent summary that equals
+/// the stored one may not mask an authored audience change (short-circuiting
+/// on the content half alone would silently drop the governance mutation), and
+/// an unchanged audience may not mask a content edit.
 fn actor_knowledge_patch_is_no_op(
     row: &KeyBlockRow,
     patch: ActorKnowledgePatch<'_>,
     governance: Option<&KnowledgeGovernance>,
 ) -> Result<bool, LocalDbError> {
-    if let Some(name) = patch.canonical_name {
-        if name != row.canonical_name {
-            return Ok(false);
-        }
-    }
-    if patch.summary != FieldPatch::Keep {
+    let name_unchanged = patch
+        .canonical_name
+        .is_none_or(|name| name == row.canonical_name);
+    let summary_unchanged = if patch.summary == FieldPatch::Keep {
+        true
+    } else {
         let after = apply_summary_patch_to_body_json(row.body_json.as_deref(), patch.summary)?;
-        return Ok(canonical_body_json(row.body_json.as_deref())?
-            == canonical_body_json(after.as_deref())?);
+        canonical_body_json(row.body_json.as_deref())?
+            == canonical_body_json(after.as_deref())?
+    };
+    if !name_unchanged || !summary_unchanged {
+        return Ok(false);
     }
-    // v1.191 P1 T7 (durable §3): an authored governance pair that already
-    // equals the stored pair is a no-op too — an explicit `shared` on a shared
-    // row (or the same private audience re-sent) may not bump either revision.
+    // An authored governance pair that already equals the stored pair is a
+    // no-op too — an explicit `shared` on a shared row (or the same private
+    // audience re-sent) may not bump either revision.
     if let Some(governance) = governance {
         if row.holder_entry_id != governance.holder_entry_id
             || row.disclosure != governance.disclosure
@@ -637,7 +649,7 @@ pub async fn update_actor_knowledge_entry(
         entry_id,
         expected_revision,
         patch,
-        None,
+        AuthoredAudience::Keep,
     )
     .await
 }
@@ -646,24 +658,26 @@ pub async fn update_actor_knowledge_entry(
 /// content CAS as [`update_actor_knowledge_entry`] plus the explicit native
 /// governance mutation, in **one** transaction.
 ///
-/// `governance` is the pair `nexus_core` admission resolved from the closed
-/// author `audience` — `None` when the patch omitted `audience` (the stored
-/// pair is preserved), `Some(shared)` to clear both columns, or
-/// `Some(private)` for the admitted holder. Which subject a private audience
-/// may name is decided by admission, never here.
+/// `audience` is the admitted author intent `nexus_core` mapped from the
+/// closed wire `audience`: [`AuthoredAudience::Keep`] when the patch omitted
+/// the member (the stored pair is preserved), [`AuthoredAudience::Shared`] to
+/// clear both columns, or a private intent whose **permitted identity is
+/// resolved and re-checked inside this transaction** (durable §3 — the caller
+/// never supplies a holder id).
 ///
 /// In-transaction order (durable §3): stored lifecycle/owner + row-scope
-/// recheck → CAS on `expected_revision` → registry resolution of an authored
-/// private holder → one material write that carries content **and** governance
-/// → bump the KE revision and the owning Character's `knowledge_revision` once.
-/// A no-op (identical content and identical governance) writes nothing and
-/// bumps neither.
+/// recheck → CAS on `expected_revision` → resolve the authored audience from
+/// stored state → no-op decision over content **and** governance → one
+/// material write that carries content **and** governance → bump the KE
+/// revision and the owning Character's `knowledge_revision` once. A no-op
+/// (identical content and identical governance) writes nothing and bumps
+/// neither.
 ///
 /// # Errors
 ///
-/// Returns `LocalDbError` on ownership, CAS, validation, `holder_state_invalid`
-/// for an unregistered holder, or database failure. Every refusal is
-/// zero-mutation.
+/// Returns `LocalDbError` on ownership, CAS, validation, the audience refusals
+/// of [`crate::kb_store::resolve_authored_audience_tx`], or database failure.
+/// Every refusal is zero-mutation.
 pub async fn author_actor_knowledge_entry(
     pool: &SqlitePool,
     owner_creator_id: &str,
@@ -671,7 +685,7 @@ pub async fn author_actor_knowledge_entry(
     entry_id: &str,
     expected_revision: i64,
     patch: ActorKnowledgePatch<'_>,
-    governance: Option<&KnowledgeGovernance>,
+    audience: AuthoredAudience<'_>,
 ) -> Result<KnowledgeEntryRecord, LocalDbError> {
     apply_actor_knowledge_patch(
         pool,
@@ -680,7 +694,7 @@ pub async fn author_actor_knowledge_entry(
         entry_id,
         expected_revision,
         patch,
-        governance,
+        audience,
     )
     .await
 }
@@ -692,7 +706,7 @@ async fn apply_actor_knowledge_patch(
     entry_id: &str,
     expected_revision: i64,
     patch: ActorKnowledgePatch<'_>,
-    governance: Option<&KnowledgeGovernance>,
+    audience: AuthoredAudience<'_>,
 ) -> Result<KnowledgeEntryRecord, LocalDbError> {
     let mut tx = crate::begin_immediate(pool).await?;
     let result = async {
@@ -704,14 +718,26 @@ async fn apply_actor_knowledge_patch(
             expected_revision,
         )
         .await?;
+        // The audience is resolved against stored state **in this
+        // transaction** (durable §3): ownership/activity, the World-row active
+        // binding and the fail-closed registry read all see the same snapshot
+        // as the write below.
+        let resolved = crate::kb_store::resolve_authored_audience_tx(
+            &mut tx,
+            audience,
+            crate::kb_store::AudienceContainer {
+                owner_creator_id,
+                owning_character_id: Some(character_id),
+                world_id: row.world_id.as_deref(),
+            },
+        )
+        .await?;
+        let governance = resolved.as_ref();
         if actor_knowledge_patch_is_no_op(&row, patch, governance)? {
             return row.to_record().map_err(map_kb_store_to_local_db);
         }
         if let Some(governance) = governance {
             crate::kb_store::validate_authored_governance(governance)?;
-            if let Some(holder) = governance.holder_entry_id.as_deref() {
-                crate::kb_store::require_registered_holder_tx(&mut tx, holder).await?;
-            }
         }
 
         let canonical_name = if let Some(name) = patch.canonical_name {

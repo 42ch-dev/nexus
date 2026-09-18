@@ -367,6 +367,11 @@ pub async fn add_actor_world_binding(
 /// Whether an owned Character holds an active binding to an owned World
 /// (durable §3 `character-private` audience permission on a World row).
 ///
+/// The probe is transaction-taking on purpose: authoring admission must
+/// re-read the stored binding state inside its own transaction, so a
+/// bind/unbind racing the write cannot land a private row whose audience was
+/// no longer bound when it committed.
+///
 /// `Ok(false)` covers a missing/inactive binding, a foreign World and a
 /// binding whose World is not owned by `owner_creator_id`; the caller owns the
 /// refusal shape. The Character's own ownership/activity is a separate,
@@ -375,29 +380,33 @@ pub async fn add_actor_world_binding(
 /// # Errors
 ///
 /// Returns `LocalDbError` on database failure.
-pub async fn has_active_binding_to_world(
-    pool: &SqlitePool,
+pub(crate) async fn has_active_binding_to_world_tx(
+    tx: &mut Transaction<'_, Sqlite>,
     owner_creator_id: &str,
     character_id: &str,
     world_id: &str,
 ) -> Result<bool, LocalDbError> {
-    let exists: i64 = sqlx::query_scalar(
-        "SELECT EXISTS(
-            SELECT 1 FROM actor_world_bindings b
-            INNER JOIN narrative_worlds w ON w.world_id = b.world_id
-            WHERE b.character_id = ?
-              AND b.world_id = ?
-              AND b.status = 'active'
-              AND w.owner_creator_id = ?
-         )",
-    )
-    .bind(character_id)
-    .bind(world_id)
-    .bind(owner_creator_id)
-    .fetch_one(pool)
-    .await?;
+    let exists: i64 = sqlx::query_scalar(ACTIVE_BINDING_TO_WORLD_EXISTS_SQL)
+        .bind(character_id)
+        .bind(world_id)
+        .bind(owner_creator_id)
+        .fetch_one(&mut **tx)
+        .await?;
     Ok(exists != 0)
 }
+
+/// The active-owned-binding `EXISTS` behind [`has_active_binding_to_world_tx`]:
+/// the binding is
+/// active, targets `world_id`, and that World belongs to `owner_creator_id`.
+const ACTIVE_BINDING_TO_WORLD_EXISTS_SQL: &str =
+    "SELECT EXISTS(
+        SELECT 1 FROM actor_world_bindings b
+        INNER JOIN narrative_worlds w ON w.world_id = b.world_id
+        WHERE b.character_id = ?
+          AND b.world_id = ?
+          AND b.status = 'active'
+          AND w.owner_creator_id = ?
+     )";
 
 /// Ownership-scoped binding list for a Character.
 ///

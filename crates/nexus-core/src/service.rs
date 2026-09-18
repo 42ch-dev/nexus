@@ -371,20 +371,36 @@ impl CoreService {
         }
         // v1.191 P1 T7 (durable §4.3): a World governance edit takes the World
         // **exclusive** knowledge lease before the authoring transaction opens
-        // `BEGIN IMMEDIATE`, so no in-flight ActorView/stream can observe the
-        // disclosure change. The lease is released when this call returns.
-        let _governance_lease = if request.patch.audience.is_some() {
-            Some(
+        // `BEGIN IMMEDIATE`, and a `character-private` audience additionally
+        // takes the named Character's exclusive lease in the durable
+        // multi-scope order (World ids first, then Character ids). The
+        // audience permission is then re-resolved inside that transaction, so
+        // an archive/unbind racing this call cannot land a row whose holder
+        // was no longer admitted. Both leases are released when this returns.
+        let mut _governance_leases: Vec<crate::actor_fence::KnowledgeGovernanceLease> = Vec::new();
+        if let Some(audience) = request.patch.audience.as_ref() {
+            _governance_leases.push(
                 self.acquire_knowledge_governance(
                     principal,
                     crate::actor_fence::ActorFenceKind::World,
                     world_id.clone(),
                 )
                 .await?,
-            )
-        } else {
-            None
-        };
+            );
+            if let nexus_contracts::world_kb_patch_entity_request::NexusWorldKbEntityPatchAudience::CharacterPrivate(
+                character_id,
+            ) = audience
+            {
+                _governance_leases.push(
+                    self.acquire_knowledge_governance(
+                        principal,
+                        crate::actor_fence::ActorFenceKind::Character,
+                        character_id.to_string(),
+                    )
+                    .await?,
+                );
+            }
+        }
         patch::patch_entity(&self.inner.pool, principal.creator_id(), &world_id, request).await
     }
 

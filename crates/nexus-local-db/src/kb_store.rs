@@ -717,6 +717,61 @@ impl SqliteKbStore {
         binding_id: Option<&str>,
         kb: KnowledgeEntryRecord,
     ) -> Result<KbInsertResult, LocalDbError> {
+        // The ordinary create lane authors no governance of its own: the
+        // record's stored pair is written verbatim.
+        self.apply_actor_owned_create(
+            owner_creator_id,
+            character_id,
+            binding_id,
+            kb,
+            AuthoredAudience::Keep,
+        )
+        .await
+    }
+
+    /// Admitted Character/binding authoring create (durable §3).
+    ///
+    /// The audience-carrying sibling of [`Self::insert_actor_owned_key_block`]:
+    /// the stored owner/provenance recheck, the audience resolution
+    /// ([`resolve_authored_audience_tx`] — ownership, activity, the World-row
+    /// active binding and the fail-closed registry read) and the INSERT all run
+    /// in **one** `BEGIN IMMEDIATE` transaction, so a committed private row can
+    /// never name an identity that stopped being permitted before the commit.
+    ///
+    /// A create does not move the owning Character's `knowledge_revision` (see
+    /// [`AuthoringRevision::Keep`]).
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::insert_actor_owned_key_block`], plus the audience
+    /// refusals of [`resolve_authored_audience_tx`]. Every refusal is
+    /// zero-mutation.
+    pub async fn author_actor_owned_key_block(
+        &self,
+        owner_creator_id: &str,
+        character_id: &str,
+        binding_id: Option<&str>,
+        kb: KnowledgeEntryRecord,
+        audience: AuthoredAudience<'_>,
+    ) -> Result<KbInsertResult, LocalDbError> {
+        self.apply_actor_owned_create(
+            owner_creator_id,
+            character_id,
+            binding_id,
+            kb,
+            audience,
+        )
+        .await
+    }
+
+    async fn apply_actor_owned_create(
+        &self,
+        owner_creator_id: &str,
+        character_id: &str,
+        binding_id: Option<&str>,
+        kb: KnowledgeEntryRecord,
+        audience: AuthoredAudience<'_>,
+    ) -> Result<KbInsertResult, LocalDbError> {
         let mut tx = crate::begin_immediate(&self.pool).await?;
         let result = async {
             // Stored live revalidation in the same write transaction as the
@@ -737,6 +792,21 @@ impl SqliteKbStore {
                 .await?;
             }
             validate_actor_owned_create_summary(&kb)?;
+            let resolved = resolve_authored_audience_tx(
+                &mut tx,
+                audience,
+                AudienceContainer {
+                    owner_creator_id,
+                    owning_character_id: Some(character_id),
+                    world_id: kb.owner.world_id(),
+                },
+            )
+            .await?;
+            let mut kb = kb;
+            if let Some(governance) = resolved {
+                kb.holder_entry_id = governance.holder_entry_id;
+                kb.disclosure = governance.disclosure;
+            }
             self.insert_key_block_in_tx(&mut tx, kb)
                 .await
                 .map_err(|err| match err {
@@ -841,28 +911,149 @@ pub(crate) async fn bump_character_knowledge_revision_tx(
     Ok(())
 }
 
-/// Resolve a resolved-holder id against the registry **inside** `tx` (durable
-/// §3: "a local private write must resolve an existing authorized registry row
-/// within the same transaction").
+/// The admitted author audience as `nexus-core` hands it to an authoring
+/// transaction (durable §3).
 ///
-/// Fail-closed: an unregistered or corrupt row is `holder_state_invalid`, never
-/// a silently accepted id and never provisioning.
+/// `nexus-core` owns only the wire→intent mapping and the pre-transaction
+/// lease acquisition; *which* stored identity a private intent resolves to,
+/// and whether it is still permitted, is decided here **inside** the
+/// transaction. A caller-supplied holder id is never an input.
+#[derive(Debug, Clone, Copy)]
+pub enum AuthoredAudience<'a> {
+    /// A patch that omitted the member: the stored pair is preserved.
+    Keep,
+    /// Explicit `shared`, or an omitted create audience: both columns clear.
+    Shared,
+    /// `author-only`: the admitted controlling Creator.
+    Creator {
+        /// The admitted Creator's id (must be the container's owner).
+        creator_id: &'a str,
+    },
+    /// `character-private`: the named Character.
+    Character {
+        /// The named Character id (`chr_*`).
+        character_id: &'a str,
+    },
+}
+
+/// The container context an authored audience is resolved against (durable
+/// §3): the owning Creator, the owning Character for a Character/binding
+/// container, and the owning World for a World container.
+#[derive(Debug, Clone, Copy)]
+pub struct AudienceContainer<'a> {
+    /// The admitted owning Creator (the request principal's stored identity).
+    pub owner_creator_id: &'a str,
+    /// Owning Character for a Character- or binding-owned container.
+    pub owning_character_id: Option<&'a str>,
+    /// Owning World for a World-owned container.
+    pub world_id: Option<&'a str>,
+}
+
+/// Resolve one authored audience into the native governance pair **inside the
+/// caller's transaction** (durable §3).
+///
+/// Rules, all evaluated against stored state read in this transaction:
+///
+/// - `Keep` → `Ok(None)`: no governance column is written.
+/// - `Shared` → `Ok(Some(shared))`: both columns clear.
+/// - `Creator` → the admitted Creator must be the container's owner, and its
+///   registry holder resolves fail-closed (`holder_state_invalid`, never
+///   provisioning).
+/// - `Character` → on a Character/binding container the named Character must
+///   **be** the owning Character; on a World container it must be an owned
+///   **active** Character with an **active binding to that owned World**. The
+///   Character must be owned and active, and its registry holder resolves
+///   fail-closed.
 ///
 /// # Errors
 ///
-/// Returns [`LocalDbError::HolderStateInvalid`] when the id is not registered
-/// here or its row is corrupt, and `LocalDbError` on database failure.
-pub(crate) async fn require_registered_holder_tx(
+/// Returns [`LocalDbError::ActorNotFound`] for a foreign/missing/non-owning
+/// subject, [`LocalDbError::ActorContractConflict`] `character_inactive` for
+/// an archived Character, [`LocalDbError::ValidationError`] for a
+/// character-private intent without a permitted binding or container, and
+/// [`LocalDbError::HolderStateInvalid`] for missing/corrupt registry state.
+/// Every refusal leaves the transaction uncommitted (zero mutation).
+pub async fn resolve_authored_audience_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-    holder_entry_id: &str,
-) -> Result<(), LocalDbError> {
-    match crate::holders::resolve_holder(&mut **tx, holder_entry_id).await? {
-        Some(_) => Ok(()),
-        None => Err(LocalDbError::HolderStateInvalid {
-            reason: format!(
-                "holder {holder_entry_id} has no registry row; a native private write never provisions one"
+    audience: AuthoredAudience<'_>,
+    container: AudienceContainer<'_>,
+) -> Result<Option<KnowledgeGovernance>, LocalDbError> {
+    let private = |holder: String| {
+        Ok(Some(KnowledgeGovernance {
+            holder_entry_id: Some(holder),
+            disclosure: Some(
+                nexus_knowledge::world_kb::knowledge_entry::DISCLOSURE_OWNER_PRIVATE.to_string(),
             ),
-        }),
+        }))
+    };
+    match audience {
+        AuthoredAudience::Keep => Ok(None),
+        AuthoredAudience::Shared => Ok(Some(KnowledgeGovernance::shared())),
+        AuthoredAudience::Creator { creator_id } => {
+            if creator_id != container.owner_creator_id {
+                return Err(LocalDbError::ActorNotFound {
+                    resource: "creator",
+                    id: creator_id.to_string(),
+                });
+            }
+            let holder = crate::holders::require_subject_holder(
+                &mut **tx,
+                &crate::holders::HolderSubject::Creator(creator_id.to_string()),
+            )
+            .await?;
+            private(holder)
+        }
+        AuthoredAudience::Character { character_id } => {
+            // The identity gate comes first: the named Character must be a
+            // stored, owned, **active** Character (the order durable §3 states
+            // the rule in), so an archived or foreign subject is refused as
+            // such rather than as a binding mismatch.
+            crate::character::require_active_owned_character_tx(
+                tx,
+                container.owner_creator_id,
+                character_id,
+            )
+            .await?;
+            match container.owning_character_id {
+                Some(owning) => {
+                    // A Character/binding container authorizes only its own
+                    // owning Character.
+                    if owning != character_id {
+                        return Err(LocalDbError::ActorNotFound {
+                            resource: "character",
+                            id: character_id.to_string(),
+                        });
+                    }
+                }
+                None => {
+                    let world_id = container.world_id.ok_or_else(|| {
+                        LocalDbError::ValidationError(
+                            "a character-private audience requires a World or Character container"
+                                .to_string(),
+                        )
+                    })?;
+                    let bound = crate::actor_world_binding::has_active_binding_to_world_tx(
+                        tx,
+                        container.owner_creator_id,
+                        character_id,
+                        world_id,
+                    )
+                    .await?;
+                    if !bound {
+                        return Err(LocalDbError::ValidationError(format!(
+                            "character-private audience requires the named Character to hold an \
+                             active binding to world {world_id}"
+                        )));
+                    }
+                }
+            }
+            let holder = crate::holders::require_subject_holder(
+                &mut **tx,
+                &crate::holders::HolderSubject::Character(character_id.to_string()),
+            )
+            .await?;
+            private(holder)
+        }
     }
 }
 
@@ -944,10 +1135,10 @@ pub async fn author_world_knowledge_governance_tx(
         });
     }
     if let Some(governance) = governance {
+        // The pair was resolved from stored state in this same transaction by
+        // [`resolve_authored_audience_tx`]; validate the domain shape as the
+        // fail-closed last gate before the columns are written.
         validate_authored_governance(governance)?;
-        if let Some(holder) = governance.holder_entry_id.as_deref() {
-            require_registered_holder_tx(tx, holder).await?;
-        }
         sqlx::query(
             "UPDATE kb_key_blocks SET holder_entry_id = ?, disclosure = ? \
              WHERE key_block_id = ? AND owner_kind = 'world' AND world_id = ?",
@@ -963,6 +1154,88 @@ pub async fn author_world_knowledge_governance_tx(
     match revision {
         AuthoringRevision::Bump => bump_world_knowledge_revision_tx(tx, world_id).await,
         AuthoringRevision::Keep => Ok(()),
+    }
+}
+
+/// Admitted World-row authoring create (durable §3).
+///
+/// The create sibling of [`SqliteKbStore::insert_knowledge_entry`]: the stored
+/// World owner is re-checked and the authored audience is resolved from stored
+/// state **inside** the same `BEGIN IMMEDIATE` transaction as the row, so the
+/// committed pair can never name an identity that was no longer permitted when
+/// the row landed.
+///
+/// A create does not move the World's `knowledge_revision` (see
+/// [`AuthoringRevision::Keep`]); it writes the resolved pair, or preserves the
+/// pair the record already carries for [`AuthoredAudience::Keep`].
+///
+/// # Errors
+///
+/// Returns [`LocalDbError::ActorNotFound`] for a foreign/missing World,
+/// [`LocalDbError::ActorNotFound`] / `character_inactive` /
+/// [`LocalDbError::ValidationError`] / [`LocalDbError::HolderStateInvalid`] for
+/// a refused audience, and `LocalDbError` for an invalid entry
+/// (canonical name/body) or database failure. Every refusal is zero-mutation.
+pub async fn author_world_knowledge_entry(
+    pool: &SqlitePool,
+    owner_creator_id: &str,
+    kb: KnowledgeEntryRecord,
+    audience: AuthoredAudience<'_>,
+) -> Result<KbInsertResult, LocalDbError> {
+    let world_id = kb
+        .owner
+        .world_id()
+        .ok_or_else(|| {
+            LocalDbError::ValidationError(
+                "an admitted World authoring create requires a World container".to_string(),
+            )
+        })?
+        .to_string();
+    let mut tx = crate::begin_immediate(pool).await?;
+    let result = async {
+        // In-transaction stored owner recheck (durable §3).
+        let stored: Option<String> =
+            sqlx::query_scalar("SELECT owner_creator_id FROM narrative_worlds WHERE world_id = ?")
+                .bind(&world_id)
+                .fetch_optional(&mut *tx)
+                .await?;
+        if stored.as_deref() != Some(owner_creator_id) {
+            return Err(LocalDbError::ActorNotFound {
+                resource: "world",
+                id: world_id.clone(),
+            });
+        }
+        let governance = resolve_authored_audience_tx(
+            &mut tx,
+            audience,
+            AudienceContainer {
+                owner_creator_id,
+                owning_character_id: None,
+                world_id: Some(&world_id),
+            },
+        )
+        .await?;
+        let mut kb = kb;
+        if let Some(governance) = governance {
+            kb.holder_entry_id = governance.holder_entry_id;
+            kb.disclosure = governance.disclosure;
+        }
+        let store = SqliteKbStore::new(pool.clone());
+        store
+            .insert_key_block_in_tx(&mut tx, kb)
+            .await
+            .map_err(map_kb_store_to_local_db)
+    }
+    .await;
+    match result {
+        Ok(inserted) => {
+            tx.commit().await?;
+            Ok(inserted)
+        }
+        Err(err) => {
+            let _ = tx.rollback().await;
+            Err(err)
+        }
     }
 }
 

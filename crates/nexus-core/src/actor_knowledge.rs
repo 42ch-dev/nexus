@@ -19,8 +19,7 @@ use nexus_contracts::generated::daemon_api::actor_knowledge::add_knowledge_entry
 use nexus_contracts::generated::daemon_api::actor_knowledge::update_knowledge_entry_request::UpdateKnowledgeEntryRequestAudience;
 use nexus_knowledge::world_kb::errors::KbError;
 use nexus_knowledge::world_kb::knowledge_entry::{
-    resolve_authored_governance, stored_created_at_order_millis, KnowledgeAudience,
-    KnowledgeAuthoringOp, KnowledgeEntryRecord, KnowledgeOwnerRef,
+    stored_created_at_order_millis, KnowledgeAudience, KnowledgeEntryRecord, KnowledgeOwnerRef,
 };
 use nexus_knowledge::world_kb::store::{
     KbStore, KbStoreError, KnowledgeReadPolicy, KnowledgeReadScope,
@@ -1055,72 +1054,62 @@ impl CoreService {
             }
         };
         // v1.191 P1 (durable §3): the closed `audience` replaces the retired
-        // World-only `creator_only` carrier. Admission — never the author —
-        // resolves the intended holder (T3 registry, fail-closed, no
-        // provisioning) and the conversion goes through the T2 resolver.
-        // T7 owns the permitted-identity rules: a private audience must name a
-        // permitted **active** identity (and, on a World row, one actively
-        // bound to that World), while a Character/binding row may only target
-        // its own owning Character.
+        // World-only `creator_only` carrier. The author supplies intent only;
+        // the permitted identity and its holder are resolved from **stored
+        // state inside the authoring transaction** (durable §3's order), so a
+        // committed private row can never name an identity that stopped being
+        // permitted before the commit.
         let audience = authored_audience(request.audience.as_ref())?;
-        let resolved_holder = match &audience {
-            None | Some(KnowledgeAudience::Shared) => None,
-            Some(KnowledgeAudience::AuthorOnly) => Some(
-                require_actor_holder(
-                    &self.inner.pool,
-                    creator_id,
-                    &AdmittedActor::Creator {
-                        creator_id: creator_id.to_string(),
-                    },
-                )
-                .await?,
-            ),
-            Some(KnowledgeAudience::CharacterPrivate { character_id }) => {
-                require_active_owned_character(&self.inner.pool, creator_id, character_id).await?;
-                if let KnowledgeOwnerRef::World(world_id) = &owner {
-                    // Durable §3: on a World row the named Character must have
-                    // an active binding to that owned World.
-                    if !nexus_local_db::has_active_binding_to_world(
-                        &self.inner.pool,
-                        creator_id,
-                        character_id,
-                        world_id,
-                    )
-                    .await
-                    .map_err(actor_db_err)?
-                    {
-                        return Err(CoreError::ActorInput(format!(
-                            "character-private audience requires the named Character to hold an \
-                             active binding to world {world_id}"
-                        )));
+        let intent = create_audience_intent(audience.as_ref(), creator_id);
+        // Leases before the transaction (durable §4.3): a governance create
+        // takes the exclusive container fence — World first, then the named
+        // Character — while an ordinary shared create keeps the retained
+        // shared activity fence.
+        let mut governance_leases: Vec<crate::actor_fence::KnowledgeGovernanceLease> = Vec::new();
+        if let Some(KnowledgeAudience::AuthorOnly | KnowledgeAudience::CharacterPrivate { .. }) =
+            &audience
+        {
+            match &owner {
+                KnowledgeOwnerRef::World(world_id) => {
+                    governance_leases.push(
+                        self.acquire_knowledge_governance(
+                            principal,
+                            crate::actor_fence::ActorFenceKind::World,
+                            world_id.clone(),
+                        )
+                        .await?,
+                    );
+                    if let Some(KnowledgeAudience::CharacterPrivate { character_id }) = &audience {
+                        governance_leases.push(
+                            self.acquire_knowledge_governance(
+                                principal,
+                                crate::actor_fence::ActorFenceKind::Character,
+                                character_id.clone(),
+                            )
+                            .await?,
+                        );
                     }
-                } else if owner_character_id.as_deref() != Some(character_id.as_str()) {
-                    // Durable §3: Character/binding rows can target only their
-                    // owning Character — a foreign identity stays hidden.
-                    return Err(not_found("character", character_id));
                 }
-                Some(
-                    require_actor_holder(
-                        &self.inner.pool,
-                        creator_id,
-                        &AdmittedActor::Character {
-                            character_id: character_id.clone(),
-                        },
-                    )
-                    .await?,
-                )
+                KnowledgeOwnerRef::Character(_) | KnowledgeOwnerRef::ActorWorldBinding(_) => {
+                    governance_leases.push(
+                        self.acquire_knowledge_governance(
+                            principal,
+                            crate::actor_fence::ActorFenceKind::Character,
+                            owner_character_id.clone().ok_or_else(|| {
+                                CoreError::Internal {
+                                    category: format!(
+                                        "{KNOWLEDGE_INSERT_FAILED_PREFIX}: a Character/binding \
+                                         create must carry its admitted Character"
+                                    ),
+                                }
+                            })?,
+                        )
+                        .await?,
+                    );
+                }
             }
-        };
-        let governance = resolve_authored_governance(
-            KnowledgeAuthoringOp::Create,
-            audience.as_ref(),
-            resolved_holder.as_deref(),
-        )
-        .map_err(kb_authoring_err)?;
-        if let Some(governance) = governance {
-            record.holder_entry_id = governance.holder_entry_id;
-            record.disclosure = governance.disclosure;
         }
+        let governance_authored = !governance_leases.is_empty();
         if matches!(
             &owner,
             KnowledgeOwnerRef::Character(_) | KnowledgeOwnerRef::ActorWorldBinding(_)
@@ -1136,24 +1125,31 @@ impl CoreService {
         }
         let store = SqliteKbStore::new(self.inner.pool.clone());
         let inserted = match &owner {
-            KnowledgeOwnerRef::World(_) => {
-                store
-                    .insert_knowledge_entry(record.clone())
-                    .await
-                    .map_err(kb_insert_err)?
-                    .entry_id
-            }
+            KnowledgeOwnerRef::World(_) => nexus_local_db::kb_store::author_world_knowledge_entry(
+                &self.inner.pool,
+                creator_id,
+                record.clone(),
+                intent,
+            )
+            .await
+            .map_err(actor_insert_db_err)?
+            .entry_id,
             KnowledgeOwnerRef::Character(id) => {
-                let _activity = self
-                    .acquire_actor_activity(
-                        principal,
-                        &AdmittedActor::Character {
-                            character_id: id.clone(),
-                        },
+                let _activity = if governance_authored {
+                    None
+                } else {
+                    Some(
+                        self.acquire_actor_activity(
+                            principal,
+                            &AdmittedActor::Character {
+                                character_id: id.clone(),
+                            },
+                        )
+                        .await?,
                     )
-                    .await?;
+                };
                 store
-                    .insert_actor_owned_key_block(creator_id, id.as_str(), None, record.clone())
+                    .author_actor_owned_key_block(creator_id, id.as_str(), None, record.clone(), intent)
                     .await
                     .map_err(actor_insert_db_err)?
                     .entry_id
@@ -1168,20 +1164,26 @@ impl CoreService {
                             ),
                         }
                     })?;
-                let _activity = self
-                    .acquire_actor_activity(
-                        principal,
-                        &AdmittedActor::Character {
-                            character_id: admitted_character.to_string(),
-                        },
+                let _activity = if governance_authored {
+                    None
+                } else {
+                    Some(
+                        self.acquire_actor_activity(
+                            principal,
+                            &AdmittedActor::Character {
+                                character_id: admitted_character.to_string(),
+                            },
+                        )
+                        .await?,
                     )
-                    .await?;
+                };
                 store
-                    .insert_actor_owned_key_block(
+                    .author_actor_owned_key_block(
                         creator_id,
                         admitted_character,
                         Some(id.as_str()),
                         record.clone(),
+                        intent,
                     )
                     .await
                     .map_err(actor_insert_db_err)?
@@ -1250,13 +1252,12 @@ impl CoreService {
     ) -> CoreResult<KnowledgeEntryRecord> {
         self.verify_principal(principal)?;
         let creator_id = principal.creator_id();
-        let admitted_actor = AdmittedActor::Character {
-            character_id: character_id.clone(),
-        };
+        let intent = audience_intent(audience.as_ref(), creator_id);
         // Durable §4.3: a disclosure change is a Character-governance edit and
         // takes the exclusive Character lease; an activity lease would be the
         // weaker (shared) fence and would self-block the exclusive one.
-        let _governance_lease = if audience.is_some() {
+        let governance_authored = audience.is_some();
+        let _governance_lease = if governance_authored {
             Some(
                 self.acquire_knowledge_governance(
                     principal,
@@ -1268,52 +1269,19 @@ impl CoreService {
         } else {
             None
         };
-        let _activity = if audience.is_some() {
+        let _activity = if governance_authored {
             None
         } else {
             Some(
-                self.acquire_actor_activity(principal, &admitted_actor)
-                    .await?,
-            )
-        };
-
-        let resolved_holder = match &audience {
-            None | Some(KnowledgeAudience::Shared) => None,
-            Some(KnowledgeAudience::AuthorOnly) => Some(
-                require_actor_holder(
-                    &self.inner.pool,
-                    creator_id,
-                    &AdmittedActor::Creator {
-                        creator_id: creator_id.to_string(),
+                self.acquire_actor_activity(
+                    principal,
+                    &AdmittedActor::Character {
+                        character_id: character_id.clone(),
                     },
                 )
                 .await?,
-            ),
-            Some(KnowledgeAudience::CharacterPrivate { character_id: named }) => {
-                // Durable §3: a Character/binding row can target only its
-                // owning Character — a foreign identity stays hidden.
-                if named != &character_id {
-                    return Err(not_found("character", named));
-                }
-                require_active_owned_character(&self.inner.pool, creator_id, named).await?;
-                Some(
-                    require_actor_holder(
-                        &self.inner.pool,
-                        creator_id,
-                        &AdmittedActor::Character {
-                            character_id: named.clone(),
-                        },
-                    )
-                    .await?,
-                )
-            }
+            )
         };
-        let governance = resolve_authored_governance(
-            KnowledgeAuthoringOp::Patch,
-            audience.as_ref(),
-            resolved_holder.as_deref(),
-        )
-        .map_err(kb_authoring_err)?;
 
         nexus_local_db::author_actor_knowledge_entry(
             &self.inner.pool,
@@ -1325,7 +1293,7 @@ impl CoreService {
                 canonical_name: canonical_name_patch,
                 summary: summary_patch,
             },
-            governance.as_ref(),
+            intent,
         )
         .await
         .map_err(actor_db_err)
@@ -1458,6 +1426,35 @@ fn authored_audience(
                 .map(Some)
                 .map_err(kb_authoring_err)
         }
+    }
+}
+
+/// Map an admitted domain audience onto the local-db authoring intent
+/// (durable §3). An omitted audience on a **patch** authors no governance.
+fn audience_intent<'a>(
+    audience: Option<&'a KnowledgeAudience>,
+    creator_id: &'a str,
+) -> nexus_local_db::kb_store::AuthoredAudience<'a> {
+    use nexus_local_db::kb_store::AuthoredAudience;
+    match audience {
+        None => AuthoredAudience::Keep,
+        Some(KnowledgeAudience::Shared) => AuthoredAudience::Shared,
+        Some(KnowledgeAudience::AuthorOnly) => AuthoredAudience::Creator { creator_id },
+        Some(KnowledgeAudience::CharacterPrivate { character_id }) => AuthoredAudience::Character {
+            character_id,
+        },
+    }
+}
+
+/// Create-path sibling of [`audience_intent`]: an **omitted** create audience
+/// is in-scope shared (durable §3).
+fn create_audience_intent<'a>(
+    audience: Option<&'a KnowledgeAudience>,
+    creator_id: &'a str,
+) -> nexus_local_db::kb_store::AuthoredAudience<'a> {
+    match audience {
+        None => nexus_local_db::kb_store::AuthoredAudience::Shared,
+        Some(audience) => audience_intent(Some(audience), creator_id),
     }
 }
 

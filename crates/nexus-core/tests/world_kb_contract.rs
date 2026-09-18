@@ -845,6 +845,14 @@ async fn sheet_pair(pool: &SqlitePool, entry_id: &str) -> (Option<String>, Optio
     .unwrap()
 }
 
+async fn sheet_revision(pool: &SqlitePool, entry_id: &str) -> i64 {
+    sqlx::query_scalar("SELECT COALESCE(revision, 0) FROM kb_key_blocks WHERE key_block_id = ?")
+        .bind(entry_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
 async fn sheet_status(pool: &SqlitePool, entry_id: &str) -> String {
     sqlx::query_scalar("SELECT status FROM kb_key_blocks WHERE key_block_id = ?")
         .bind(entry_id)
@@ -1085,6 +1093,39 @@ async fn v1191_world_sheet_governance_rejects_both_directions() {
     pool.close().await;
 }
 
+/// Regression (L2 C2): a patch that merely re-states stored values is a no-op
+/// for **both** revisions. The no-op decision is made on the materialised
+/// post-patch content (not on request-field presence) plus the resolved
+/// governance pair, and it short-circuits before any CAS.
+#[tokio::test]
+async fn v1191_world_sheet_governance_restated_content_is_a_no_op() {
+    let fx = setup_sheet_fixture().await;
+    let pool = sheet_pool(&fx).await;
+
+    // The stored row is `Sheet` (body `{}`, revision 0, shared). Re-stating the
+    // title and an explicitly `shared` audience changes nothing.
+    let restated: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
+        "entity_id": SHEET_ID,
+        "expected_version": 0,
+        "patch": {"title": "Sheet", "audience": {"kind": "shared"}},
+    }))
+    .unwrap();
+    let response = fx
+        .core
+        .patch_world_kb_entity(&fx.principal, SHEET_WORLD.to_string(), restated)
+        .await
+        .expect("a value-identical patch is a no-op, not a write");
+    assert_eq!(response.version, 0, "the KE revision does not move");
+    assert_eq!(sheet_revision(&pool, SHEET_ID).await, 0);
+    assert_eq!(
+        world_revision(&pool, SHEET_WORLD).await,
+        0,
+        "a no-op must not move the World knowledge revision"
+    );
+    assert_eq!(sheet_pair(&pool, SHEET_ID).await, (None, None));
+    pool.close().await;
+}
+
 #[tokio::test]
 async fn v1191_world_sheet_governance_canvas_create_authors_the_audience() {
     let fx = setup_sheet_fixture().await;
@@ -1135,7 +1176,10 @@ async fn v1191_world_sheet_governance_canvas_create_authors_the_audience() {
         .patch_world_kb_entity(&fx.principal, SHEET_WORLD.to_string(), unbound)
         .await
         .unwrap_err();
-    assert!(matches!(err, CoreError::InvalidInput { .. }), "got {err:?}");
+    // The permission refusal comes from the in-transaction resolution, so it
+    // keeps the actor-input family (a malformed id would be
+    // `InvalidInput { field: "patch.audience" }` from the wire mapping).
+    assert!(matches!(err, CoreError::ActorInput(_)), "got {err:?}");
     let exists: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM kb_key_blocks WHERE key_block_id = 'kb_4d222222222222222222222222222222'",
     )
