@@ -45,6 +45,7 @@ pub mod novel_pool_entries;
 pub mod peer_hosts;
 pub mod pending_review;
 pub mod prompt_injection;
+pub mod read_scope;
 pub mod reading;
 pub mod reference_source;
 pub mod runtime_lock;

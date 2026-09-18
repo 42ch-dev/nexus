@@ -206,11 +206,19 @@ impl ActorKnowledgeViewService {
                 // owned archived Character/binding scopes and does not drop
                 // the World's owned retained history when archived (§11.2).
                 require_owned_world(&self.pool, caller_creator_id, world_id).await?;
-                containers.push(KnowledgeOwnerRef::world(world_id));
-                containers.extend(
-                    self.owned_world_containers(caller_creator_id, world_id)
-                        .await?,
-                );
+                // Container derivation is shared with every other admitted-read
+                // caller (`nexus-local-db` `read_scope`), so the core and the
+                // orchestration reads cannot drift into two container sets.
+                let (owned_containers, _) = nexus_local_db::read_scope::owned_world_containers(
+                    &self.pool,
+                    caller_creator_id,
+                    world_id,
+                )
+                .await
+                .map_err(|err| CoreError::Internal {
+                    category: format!("{KNOWLEDGE_VIEW_COMPONENT_FAILED_PREFIX}: {err}"),
+                })?;
+                containers = owned_containers;
                 require_actor_holder(&self.pool, caller_creator_id, actor).await?
             }
             AdmittedActor::Character { character_id } => {
@@ -239,49 +247,6 @@ impl ActorKnowledgeViewService {
                 message: err.to_string(),
             }
         })
-    }
-
-    /// Owned Character/binding containers of one World (retained reads include
-    /// archived Characters), deduplicated per Character and ordered
-    /// World → Character → binding.
-    async fn owned_world_containers(
-        &self,
-        creator_id: &str,
-        world_id: &str,
-    ) -> CoreResult<Vec<KnowledgeOwnerRef>> {
-        let bindings = sqlx::query(
-            "SELECT b.character_id, b.binding_id \
-             FROM actor_world_bindings b \
-             INNER JOIN characters c ON c.character_id = b.character_id \
-             WHERE b.world_id = ? AND c.owner_creator_id = ?",
-        )
-        .bind(world_id)
-        .bind(creator_id)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|err| CoreError::Internal {
-            category: format!("{KNOWLEDGE_VIEW_COMPONENT_FAILED_PREFIX}: {err}"),
-        })?;
-
-        let mut owners = Vec::new();
-        let mut seen_characters = std::collections::BTreeSet::new();
-        for row in bindings {
-            let character_id: String =
-                row.try_get("character_id")
-                    .map_err(|err| CoreError::Internal {
-                        category: format!("{KNOWLEDGE_VIEW_COMPONENT_FAILED_PREFIX}: {err}"),
-                    })?;
-            let binding_id: String =
-                row.try_get("binding_id")
-                    .map_err(|err| CoreError::Internal {
-                        category: format!("{KNOWLEDGE_VIEW_COMPONENT_FAILED_PREFIX}: {err}"),
-                    })?;
-            if seen_characters.insert(character_id.clone()) {
-                owners.push(KnowledgeOwnerRef::character(&character_id));
-            }
-            owners.push(KnowledgeOwnerRef::actor_world_binding(&binding_id));
-        }
-        Ok(owners)
     }
 
     /// Compose one policy-filtered keyset page for an admitted selection.
@@ -609,40 +574,20 @@ async fn read_knowledge_revisions(
 /// Owned containers of one World for the Creator management review (§4.1):
 /// the World itself plus every owned Character bound to it and those bindings.
 /// Archived Characters stay in the retained management selection.
+///
+/// Container derivation is shared with the ActorView resolution
+/// (`nexus-local-db` `read_scope`), so both policies authorize exactly the
+/// containers the stored ownership rows describe.
 async fn management_containers(
     pool: &SqlitePool,
     creator_id: &str,
     world_id: &str,
 ) -> CoreResult<(Vec<KnowledgeOwnerRef>, Vec<String>)> {
-    let rows = sqlx::query(
-        "SELECT b.character_id, b.binding_id \
-         FROM actor_world_bindings b \
-         INNER JOIN characters c ON c.character_id = b.character_id \
-         WHERE b.world_id = ? AND c.owner_creator_id = ?",
-    )
-    .bind(world_id)
-    .bind(creator_id)
-    .fetch_all(pool)
-    .await
-    .map_err(|err| CoreError::Internal {
-        category: format!("{KNOWLEDGE_VIEW_COMPONENT_FAILED_PREFIX}: {err}"),
-    })?;
-    let mut containers = vec![KnowledgeOwnerRef::world(world_id)];
-    let mut character_ids: Vec<String> = Vec::new();
-    for row in rows {
-        let character_id: String = row.try_get("character_id").map_err(|err| CoreError::Internal {
+    nexus_local_db::read_scope::owned_world_containers(pool, creator_id, world_id)
+        .await
+        .map_err(|err| CoreError::Internal {
             category: format!("{KNOWLEDGE_VIEW_COMPONENT_FAILED_PREFIX}: {err}"),
-        })?;
-        let binding_id: String = row.try_get("binding_id").map_err(|err| CoreError::Internal {
-            category: format!("{KNOWLEDGE_VIEW_COMPONENT_FAILED_PREFIX}: {err}"),
-        })?;
-        if !character_ids.contains(&character_id) {
-            character_ids.push(character_id.clone());
-            containers.push(KnowledgeOwnerRef::character(&character_id));
-        }
-        containers.push(KnowledgeOwnerRef::actor_world_binding(&binding_id));
-    }
-    Ok((containers, character_ids))
+        })
 }
 
 /// Server-chosen `CreatorManagement` read selection for one owned World

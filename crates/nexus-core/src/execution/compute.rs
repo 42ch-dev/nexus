@@ -35,6 +35,8 @@
 
 #![cfg(feature = "compute")]
 
+use crate::actor_knowledge::ActorKnowledgeViewService;
+use crate::actors::AdmittedActor;
 use crate::error::{CoreError, CoreResult};
 use crate::principal::Principal;
 use crate::service::CoreService;
@@ -169,9 +171,28 @@ pub async fn compute_run(
 
     let invocation_params = request.invocation_params.clone();
     let invocation_params_str = serde_json::to_string(&invocation_params).ok();
-    let builder =
-        ComputeInputBuilder::new(pool.clone(), &request.world_id, manifest, invocation_params)
-            .with_narrative_position(branch_id.clone(), timeline_head_event_id.clone());
+    // The module input is a model-facing payload, so it reads through the
+    // admitted Creator ActorView — never a management review (durable §4.1/§4.2).
+    // A Creator whose holder registry row is missing refuses here instead of
+    // falling back to a World-wide read.
+    let selection = ActorKnowledgeViewService::new(pool.clone())
+        .actor_view_scope(
+            creator_id,
+            &AdmittedActor::Creator {
+                creator_id: creator_id.to_string(),
+            },
+            &request.world_id,
+            None,
+        )
+        .await?;
+    let builder = ComputeInputBuilder::new(
+        pool.clone(),
+        &request.world_id,
+        manifest,
+        invocation_params,
+        selection,
+    )
+    .with_narrative_position(branch_id.clone(), timeline_head_event_id.clone());
     let compute_input = builder.build().await.map_err(map_build_error)?;
 
     let run_id = compute_runs::insert_run(

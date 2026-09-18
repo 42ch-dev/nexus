@@ -831,6 +831,82 @@ async fn v1191_holder_visibility_keyset_pages_skip_hidden_before_limit() {
     );
 }
 
+/// R5 (v1.191 P1): the by-id/id-set read applies the same container +
+/// §4.2 eligibility as every other admitted read — an id in an unauthorized
+/// container, or one whose governance the selection does not admit, is as
+/// absent as an id that was never stored.
+#[tokio::test]
+async fn v1191_r5_by_id_read_is_container_and_governance_scoped() {
+    let (pool, _dir) = migrated_pool().await;
+    let fixture = seed_visibility_fixture(&pool).await;
+    let store = SqliteKbStore::new(pool.clone());
+    let selection = character_1_view(&fixture);
+    let id_of = |name: &str| {
+        fixture
+            .ids
+            .get(name)
+            .unwrap_or_else(|| panic!("{name} must be seeded"))
+            .clone()
+    };
+
+    // Eligible: the shared World row, the Character's own private World row, and
+    // the selection's binding-local row.
+    let admitted = store
+        .list_entries_by_ids_admitted(
+            &[
+                id_of("WorldShared"),
+                id_of("WorldChar1Private"),
+                id_of("Bind1Private"),
+            ],
+            &selection,
+        )
+        .await
+        .unwrap();
+    let mut names: Vec<&str> = admitted
+        .iter()
+        .map(|row| row.canonical_name.as_str())
+        .collect();
+    names.sort_unstable();
+    assert_eq!(
+        names,
+        vec!["Bind1Private", "WorldChar1Private", "WorldShared"],
+        "an admitted id resolves to its eligible row"
+    );
+
+    // Hidden for this selection: another holder's private World row, a foreign
+    // creator's private World row, another Character's private World row, and a
+    // shared row of an unauthorized World.
+    let hidden = store
+        .list_entries_by_ids_admitted(
+            &[
+                id_of("WorldForeignHolderPrivate"),
+                id_of("WorldCreatorPrivate"),
+                id_of("WorldChar2Private"),
+                id_of("WorldBShared"),
+            ],
+            &selection,
+        )
+        .await
+        .unwrap();
+    assert!(
+        hidden.is_empty(),
+        "a hidden id is indistinguishable from a missing one: {hidden:?}"
+    );
+
+    // The unscoped by-id read still returns those rows, so the empty result is
+    // the selection's eligibility and not an absent or malformed row.
+    for name in ["WorldCreatorPrivate", "WorldBShared"] {
+        store.get_knowledge_entry(&id_of(name)).await.unwrap();
+    }
+
+    // A requested id that was never stored is simply absent (never an error).
+    assert!(store
+        .list_entries_by_ids_admitted(&["kb_never_stored".to_string()], &selection)
+        .await
+        .unwrap()
+        .is_empty());
+}
+
 /// Search: the count, the returned rows and their snippets are computed over
 /// the eligible set only, while a hidden row that matches the term stays
 /// invisible — and is still there for an unscoped read.

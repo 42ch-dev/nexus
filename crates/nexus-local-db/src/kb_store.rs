@@ -254,6 +254,43 @@ pub(crate) fn selection_visibility_conjunct(
     }
 }
 
+/// Container eligibility for one admitted read selection as a SQL `AND (...)`
+/// conjunct, plus the JSON id-set binds it needs.
+///
+/// A row belongs to exactly one container, named by its `owner_kind` and the
+/// matching owner column, so this predicate is the union of the selection's
+/// authorized containers: a World container authorizes that World's rows, a
+/// Character container that Character's rows, and a binding container that
+/// binding's rows. A row whose container the selection never authorized matches
+/// no branch — an id outside the selection yields no row at all, never a
+/// filtered view of an unauthorized one.
+///
+/// The `json_each` id-set binds follow the existing convention in this file
+/// ([`SqliteKbStore::list_by_world_scoped`]).
+pub(crate) fn selection_container_conjunct(
+    selection: &KnowledgeReadScope,
+) -> (String, Vec<String>) {
+    let mut world_ids: Vec<String> = Vec::new();
+    let mut character_ids: Vec<String> = Vec::new();
+    let mut binding_ids: Vec<String> = Vec::new();
+    for container in selection.containers() {
+        match container {
+            KnowledgeOwnerRef::World(id) => world_ids.push(id.clone()),
+            KnowledgeOwnerRef::Character(id) => character_ids.push(id.clone()),
+            KnowledgeOwnerRef::ActorWorldBinding(id) => binding_ids.push(id.clone()),
+        }
+    }
+    let bind = |ids: &[String]| serde_json::to_string(ids).unwrap_or_else(|_| "[]".to_string());
+    (
+        " AND ((owner_kind = 'world' AND world_id IN (SELECT value FROM json_each(?))) \
+         OR (owner_kind = 'character' AND character_id IN (SELECT value FROM json_each(?))) \
+         OR (owner_kind = 'actor_world_binding' \
+             AND actor_world_binding_id IN (SELECT value FROM json_each(?))))"
+            .to_string(),
+        vec![bind(&world_ids), bind(&character_ids), bind(&binding_ids)],
+    )
+}
+
 /// Test helpers for seeding KB data into the database.
 ///
 /// These functions are intended for tests and development fixtures only.
@@ -2401,6 +2438,79 @@ impl SqliteKbStore {
             .list_by_world_with_status_filter(&query.world_id, false, Some(selection))
             .await?;
         Ok(apply_kb_query_filters(eligible, query))
+    }
+
+    /// Admitted by-id / id-set read (v1.191 P1 R5).
+    ///
+    /// The by-id companion of [`Self::query_with_scope`] and
+    /// [`Self::list_by_owner_complete`]: the same eligibility predicate decides
+    /// which requested ids are readable, so a caller that names an id receives a
+    /// row only when the row is in an authorized container **and** its
+    /// governance admits the selection. Nothing is filtered after the read — an
+    /// id that fails either rule is simply absent from the result, so a hidden
+    /// row is indistinguishable from a missing one (durable §4.2) and naming an
+    /// id is never an existence oracle.
+    ///
+    /// A one-element `entry_ids` slice is the by-id form; the id-set form exists
+    /// because the callers that reference entries by id hold several at once and
+    /// each id carries the same eligibility rule.
+    ///
+    /// Status semantics mirror the unscoped by-id read
+    /// ([`KbStore::get_knowledge_entry`]): rows are looked up by primary key with
+    /// no status clause, because this is the scoped replacement for the by-id
+    /// callers, not a listing (which excludes non-active rows). Requested ids
+    /// matching no eligible row are dropped; the returned rows keep the stored
+    /// `(created_at, key_block_id)` order.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`KbStoreError::Storage`] on database failure.
+    pub async fn list_entries_by_ids_admitted(
+        &self,
+        entry_ids: &[String],
+        selection: &KnowledgeReadScope,
+    ) -> Result<Vec<KnowledgeEntryRecord>, KbStoreError> {
+        let (containers, container_binds) = selection_container_conjunct(selection);
+        let (visibility, holders) = selection_visibility_conjunct(selection);
+        // SAFETY: static column list; every dynamic fragment is a static
+        // predicate with bind params only (no user-controlled SQL).
+        let sql = format!(
+            r"SELECT
+                key_block_id,
+                owner_kind,
+                world_id,
+                character_id,
+                actor_world_binding_id,
+                holder_entry_id,
+                disclosure,
+                block_type,
+                canonical_name,
+                status,
+                revision,
+                body_json,
+                source_anchor_json,
+                created_from_command_id,
+                created_at,
+                updated_at,
+                source_work_id,
+                source_chapter,
+                source_provenance_kind, extensions_nexus_json, modules_json
+            FROM kb_key_blocks
+            WHERE key_block_id IN (SELECT value FROM json_each(?)){containers}{visibility}
+            ORDER BY created_at ASC, key_block_id ASC"
+        );
+        let mut query = sqlx::query_as::<_, KeyBlockRow>(sqlx::AssertSqlSafe(sql)).bind(
+            serde_json::to_string(entry_ids).unwrap_or_else(|_| "[]".to_string()),
+        );
+        for value in container_binds {
+            query = query.bind(value);
+        }
+        for holder in holders {
+            query = query.bind(holder);
+        }
+        let rows = query.fetch_all(&*self.pool).await.map_err(|e| db_err(&e))?;
+
+        rows.iter().map(KeyBlockRow::to_record).collect()
     }
 
     /// List active [`KnowledgeEntryRecord`]s owned by a canonical
