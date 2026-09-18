@@ -10,6 +10,7 @@
 //! BEFORE any write (per-row OCC catches stale writes from both canvas and
 //! daemon-side writers).
 
+use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
 use axum::Json;
 use nexus_contracts::BlockType;
@@ -24,6 +25,12 @@ use nexus_daemon_runtime::workspace::WorkspaceState;
 use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_extract_job::insert_pending;
 use nexus_local_db::kb_store::SqliteKbStore;
+
+/// Raw request body for the `patch_entity` handler, which takes `Bytes` so the
+/// reserved-key pre-scan runs before deserialization (durable §§5, 7).
+fn patch_body(request: impl serde::Serialize) -> Bytes {
+    Bytes::from(serde_json::to_vec(&request).expect("serialize patch request body"))
+}
 
 /// Seed a `kb_key_blocks` row directly (bypassing store validation) with a
 /// controlled `status` and `revision`, returning its id.
@@ -177,7 +184,7 @@ async fn patch_entity_title_bumps_version() {
     let Json(resp) = patch_entity(
         State(state.clone()),
         Path("wld_test_world".to_string()),
-        Json(req),
+        patch_body(req),
     )
     .await
     .expect("patch should succeed");
@@ -223,7 +230,7 @@ async fn patch_entity_preserves_null_array_object_body_attributes() {
     let Json(resp) = patch_entity(
         State(state.clone()),
         Path("wld_test_world".to_string()),
-        Json(req),
+        patch_body(req),
     )
     .await
     .expect("patch should succeed");
@@ -267,7 +274,7 @@ async fn patch_entity_stale_version_returns_409() {
     let err = patch_entity(
         State(state.clone()),
         Path("wld_test_world".to_string()),
-        Json(req),
+        patch_body(req),
     )
     .await
     .expect_err("stale version must 409");
@@ -301,7 +308,7 @@ async fn patch_entity_deleted_entity_rejected_422() {
     let err = patch_entity(
         State(state.clone()),
         Path("wld_test_world".to_string()),
-        Json(req),
+        patch_body(req),
     )
     .await
     .expect_err("deleted entity patch must 422");
@@ -354,7 +361,7 @@ async fn patch_entity_cross_author_forbidden() {
     let err = patch_entity(
         State(state.clone()),
         Path("wld_other".to_string()),
-        Json(req),
+        patch_body(req),
     )
     .await
     .expect_err("cross-author must 403");
@@ -422,7 +429,7 @@ async fn patch_entity_cross_author_does_not_leak_existence() {
     let err = patch_entity(
         State(state.clone()),
         Path("wld_other".to_string()),
-        Json(req),
+        patch_body(req),
     )
     .await
     .expect_err("cross-author must be forbidden before any entity read");
@@ -461,7 +468,7 @@ async fn patch_entity_update_bumps_version_from_existing() {
     let Json(resp) = patch_entity(
         State(state.clone()),
         Path("wld_test_world".to_string()),
-        Json(req),
+        patch_body(req),
     )
     .await
     .expect("update should succeed");
@@ -504,7 +511,7 @@ async fn patch_entity_create_on_existing_returns_409() {
     let err = patch_entity(
         State(state.clone()),
         Path("wld_test_world".to_string()),
-        Json(req),
+        patch_body(req),
     )
     .await
     .expect_err("create-on-existing must 409");
@@ -546,7 +553,7 @@ async fn patch_entity_create_on_absent_happy_path() {
     let Json(resp) = patch_entity(
         State(state.clone()),
         Path("wld_test_world".to_string()),
-        Json(req),
+        patch_body(req),
     )
     .await
     .expect("create-on-absent should succeed");
@@ -584,7 +591,7 @@ async fn patch_entity_update_on_absent_returns_409() {
     let err = patch_entity(
         State(state.clone()),
         Path("wld_test_world".to_string()),
-        Json(req),
+        patch_body(req),
     )
     .await
     .expect_err("update-on-absent must 409");
@@ -614,7 +621,7 @@ async fn patch_entity_create_missing_title_rejected_422() {
     let err = patch_entity(
         State(state.clone()),
         Path("wld_test_world".to_string()),
-        Json(req),
+        patch_body(req),
     )
     .await
     .expect_err("create without title must 422");
@@ -639,7 +646,7 @@ async fn patch_entity_create_missing_block_type_rejected_422() {
     let err = patch_entity(
         State(state.clone()),
         Path("wld_test_world".to_string()),
-        Json(req),
+        patch_body(req),
     )
     .await
     .expect_err("create without block_type must 422");
@@ -671,7 +678,7 @@ async fn patch_entity_create_whitespace_title_rejected_422() {
     let err = patch_entity(
         State(state.clone()),
         Path("wld_test_world".to_string()),
-        Json(req),
+        patch_body(req),
     )
     .await
     .expect_err("create with whitespace-only title must 422");
@@ -709,7 +716,7 @@ async fn patch_entity_create_malformed_entity_id_rejected_422() {
         let err = patch_entity(
             State(state.clone()),
             Path("wld_test_world".to_string()),
-            Json(req),
+            patch_body(req),
         )
         .await
         .expect_err("malformed entity_id must 422");
@@ -764,7 +771,7 @@ async fn patch_entity_create_cross_author_forbidden() {
     let err = patch_entity(
         State(state.clone()),
         Path("wld_other".to_string()),
-        Json(req),
+        patch_body(req),
     )
     .await
     .expect_err("create in a foreign world must 403");
@@ -802,7 +809,7 @@ async fn patch_entity_create_on_deleted_entity_rejected_422() {
     let err = patch_entity(
         State(state.clone()),
         Path("wld_test_world".to_string()),
-        Json(req),
+        patch_body(req),
     )
     .await
     .expect_err("deleted entity patch must 422 (terminal, not create)");
@@ -851,7 +858,7 @@ async fn patch_entity_create_with_era_block_type() {
     let Json(resp) = patch_entity(
         State(state.clone()),
         Path("wld_test_world".to_string()),
-        Json(req),
+        patch_body(req),
     )
     .await
     .expect("era create should succeed");
@@ -945,7 +952,7 @@ async fn patch_entity_merged_status_rejected_by_orchestrator() {
     let err = patch_entity(
         State(state.clone()),
         Path("wld_test_world".to_string()),
-        Json(req),
+        patch_body(req),
     )
     .await
     .expect_err("merged entity must be rejected as terminal by the orchestrator");
@@ -1014,7 +1021,7 @@ async fn patch_entity_modules_upsert_replaces_first_level_value() {
     let Json(resp) = patch_entity(
         State(state.clone()),
         Path("wld_test_world".to_string()),
-        Json(req),
+        patch_body(req),
     )
     .await
     .expect("patch should succeed");
@@ -1065,7 +1072,7 @@ async fn patch_entity_omit_modules_preserves_existing() {
     let Json(resp) = patch_entity(
         State(state.clone()),
         Path("wld_test_world".to_string()),
-        Json(req),
+        patch_body(req),
     )
     .await
     .expect("patch should succeed");
@@ -1110,7 +1117,7 @@ async fn patch_entity_empty_modules_does_not_wipe() {
     let Json(resp) = patch_entity(
         State(state.clone()),
         Path("wld_test_world".to_string()),
-        Json(req),
+        patch_body(req),
     )
     .await
     .expect("patch should succeed");
@@ -1157,7 +1164,7 @@ async fn patch_entity_unknown_module_keys_round_trip_verbatim() {
     let Json(resp) = patch_entity(
         State(state.clone()),
         Path("wld_test_world".to_string()),
-        Json(req),
+        patch_body(req),
     )
     .await
     .expect("patch should succeed");
@@ -1246,7 +1253,7 @@ async fn patch_entity_modules_only_patch_on_confirmed_ke() {
     let Json(resp) = patch_entity(
         State(state.clone()),
         Path("wld_test_world".to_string()),
-        Json(req),
+        patch_body(req),
     )
     .await
     .expect("modules-only patch must succeed on a confirmed KE");
@@ -1291,7 +1298,7 @@ async fn patch_entity_mental_and_belief_round_trip_on_graph_read() {
     let Json(resp) = patch_entity(
         State(state.clone()),
         Path("wld_test_world".to_string()),
-        Json(req),
+        patch_body(req),
     )
     .await
     .expect("patch should succeed");
@@ -1372,7 +1379,7 @@ async fn patch_entity_observation_on_event_entity_round_trip_on_graph_read() {
     let Json(resp) = patch_entity(
         State(state.clone()),
         Path("wld_test_world".to_string()),
-        Json(req),
+        patch_body(req),
     )
     .await
     .expect("patch should succeed");
@@ -2519,12 +2526,20 @@ async fn promote_reject_cas_miss_conflict_carries_bumped_version() {
 /// the candidate CAS again — a two-round-trip conflict loop with misleading
 /// modal text.
 ///
-/// Deterministic setup (same spirit as `promote_reject_cas_miss_*`): hold a
-/// RESERVED write lock with `BEGIN IMMEDIATE`, let `promote_merge` read the
-/// target at revision V and block on its in-tx CAS, then bump the target
-/// revision and commit. The promote CAS then affects 0 rows — the bug path —
-/// without relying on `tokio::join!` scheduler interleaving (which can fully
-/// serialize on CI and let both merges succeed).
+/// Setup (same spirit as `promote_reject_cas_miss_*`): hold a RESERVED write
+/// lock with `BEGIN IMMEDIATE`, let `promote_merge` read the target at revision
+/// V and block on its in-tx CAS, then bump the target revision and commit. The
+/// promote CAS then affects 0 rows — the bug path — without relying on
+/// `tokio::join!` scheduler interleaving (which can fully serialize on CI and
+/// let both merges succeed).
+///
+/// The wait is on the *blocked* write, not on wall-clock time: the merge's reads
+/// hold a pool connection for a single statement each, while the CAS it cannot
+/// execute holds one until the lock is released. The merge runs ~9 tiny
+/// statements before that CAS, so a core-pool connection held continuously for a
+/// window no such statement sequence can span is the blocked write — and
+/// therefore proves the target was read at revision V, whatever the runtime
+/// scheduling.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn promote_merge_target_cas_miss_marks_target_conflict() {
     let (_tmp, state) = fresh_state().await;
@@ -2568,6 +2583,16 @@ async fn promote_merge_target_cas_miss_marks_target_conflict() {
         .await
         .expect("BEGIN IMMEDIATE");
 
+    // The merge runs on the core's own pool (`CoreService::pool`), not the
+    // test's `state.pool()`, so open the core here (the handler reuses this
+    // instance) and watch that pool's connection accounting.
+    let core_pool = state
+        .core_or_uninit()
+        .await
+        .expect("core service")
+        .pool()
+        .clone();
+
     let state_for_promote = state.clone();
     let promote = tokio::spawn(async move {
         promote_candidate(
@@ -2578,18 +2603,47 @@ async fn promote_merge_target_cas_miss_marks_target_conflict() {
         .await
     });
 
-    // Promote must reach the blocked CAS write (cannot finish while we hold
-    // the lock). Wait until it is clearly in-flight, then bump the target.
+    // Promote must reach the blocked CAS write: while the lock is held the merge
+    // cannot complete, so the wait only has to establish that its target read is
+    // already done. A read holds a core-pool connection for one statement and the
+    // CAS UPDATE it cannot execute holds one until the lock is released, so a
+    // connection held *continuously* across a window no short-statement sequence
+    // can span is that blocked write — the merge runs ~9 tiny statements before
+    // the CAS — and therefore proves the target was read at revision V. Timing
+    // the wait instead raced the scheduler: under a loaded parallel run the read
+    // landed after the bump and the intended CAS miss became a successful merge.
+    //
+    // SAFETY: test-only wait over the pool's own connection accounting.
+    const SAMPLE: std::time::Duration = std::time::Duration::from_millis(5);
+    const HELD_FOR: std::time::Duration = std::time::Duration::from_millis(1000);
+    const CAP: std::time::Duration = std::time::Duration::from_millis(3000);
     let started = std::time::Instant::now();
+    let mut held_since: Option<std::time::Instant> = None;
+    let mut samples: Vec<(u32, usize)> = Vec::new();
     loop {
         assert!(
             !promote.is_finished(),
             "promote finished while RESERVED lock held — cannot force target CAS miss"
         );
-        if started.elapsed() >= std::time::Duration::from_millis(100) {
-            break;
+        let idle = u32::try_from(core_pool.num_idle()).unwrap_or(u32::MAX);
+        samples.push((core_pool.size(), core_pool.num_idle()));
+        if samples.len() > 6 {
+            samples.remove(0);
         }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        if core_pool.size().saturating_sub(idle) >= 1 {
+            if held_since.get_or_insert_with(std::time::Instant::now).elapsed() >= HELD_FOR {
+                break;
+            }
+        } else {
+            held_since = None;
+        }
+        assert!(
+            started.elapsed() < CAP,
+            "the merge never held a core-pool connection while the RESERVED lock was held — \
+             this regression's read/CAS window cannot be forced in this environment \
+             (last (size, num_idle) samples: {samples:?})"
+        );
+        tokio::time::sleep(SAMPLE).await;
     }
 
     // Simulate the concurrent writer that wins the target CAS.
@@ -2783,10 +2837,9 @@ async fn get_key_block_state_unknown_world_returns_404() {
 
 // --- v1.191 P1 T9: holder governance on the shipped world-kb patch surface ---
 
-/// Durable §3/§7: the World-KB entity patch authors the native audience under
-/// the same `expected_version` CAS as the content, projects the governance
-/// pair, and refuses the retired `creator_only` key by presence — including
-/// `false` and a raw-extension `patch.extensions` occurrence.
+/// Durable §§3, 5, 7: the World-KB entity patch authors the native audience
+/// under the same `expected_version` CAS as the content and projects the
+/// governance pair.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn v1191_holder_public_world_patch_authors_and_projects_the_audience() {
     let (_tmp, state) = fresh_state().await;
@@ -2795,14 +2848,11 @@ async fn v1191_holder_public_world_patch_authors_and_projects_the_audience() {
     let created = patch_entity(
         State(state.clone()),
         Path("wld_test_world".to_string()),
-        Json(
-            serde_json::from_value(serde_json::json!({
-                "entity_id": "kb_a1b2",
-                "expected_version": 0,
-                "patch": { "title": "Audience Row", "block_type": "character" }
-            }))
-            .unwrap(),
-        ),
+        patch_body(serde_json::json!({
+            "entity_id": "kb_a1b2",
+            "expected_version": 0,
+            "patch": { "title": "Audience Row", "block_type": "character" }
+        })),
     )
     .await
     .unwrap()
@@ -2815,14 +2865,11 @@ async fn v1191_holder_public_world_patch_authors_and_projects_the_audience() {
     let private = patch_entity(
         State(state.clone()),
         Path("wld_test_world".to_string()),
-        Json(
-            serde_json::from_value(serde_json::json!({
-                "entity_id": "kb_a1b2",
-                "expected_version": 1,
-                "patch": { "audience": { "kind": "author-only" } }
-            }))
-            .unwrap(),
-        ),
+        patch_body(serde_json::json!({
+            "entity_id": "kb_a1b2",
+            "expected_version": 1,
+            "patch": { "audience": { "kind": "author-only" } }
+        })),
     )
     .await
     .unwrap()
@@ -2852,14 +2899,11 @@ async fn v1191_holder_public_world_patch_authors_and_projects_the_audience() {
     let shared = patch_entity(
         State(state.clone()),
         Path("wld_test_world".to_string()),
-        Json(
-            serde_json::from_value(serde_json::json!({
-                "entity_id": "kb_a1b2",
-                "expected_version": before_shared,
-                "patch": { "audience": { "kind": "shared" } }
-            }))
-            .unwrap(),
-        ),
+        patch_body(serde_json::json!({
+            "entity_id": "kb_a1b2",
+            "expected_version": before_shared,
+            "patch": { "audience": { "kind": "shared" } }
+        })),
     )
     .await
     .unwrap()
@@ -2871,6 +2915,104 @@ async fn v1191_holder_public_world_patch_authors_and_projects_the_audience() {
     let row = graph_entity(&state, "kb_a1b2").await;
     assert!(row.holder_entry_id.is_none());
     assert!(row.disclosure.is_none());
+}
+
+/// Durable §§3, 5, 7: the retired World-only `creator_only` key is refused by
+/// **presence** on the raw entity-patch body — `false` included — at every raw
+/// authoring scope before deserialization can discard it as an unknown member,
+/// with the stable `legacy_creator_only_unsupported` reason. A raw extension
+/// document is scanned through the `extensions.nexus` namespace the cutover
+/// deleted the key from, and a client-authored `holder_entry_id` is refused as
+/// `reserved_governance_key`. Nothing is written.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn v1191_holder_public_world_patch_refuses_the_retired_key_by_presence() {
+    use serde_json::json;
+
+    let (_tmp, state) = fresh_state().await;
+    let patch = |extra: serde_json::Value| {
+        let mut patch = json!({ "title": "Retired Row", "block_type": "character" });
+        for (key, value) in extra.as_object().expect("patch extras must be an object") {
+            patch[key] = value.clone();
+        }
+        patch
+    };
+
+    let cases: [(serde_json::Value, &str); 6] = [
+        (
+            json!({ "creator_only": true }),
+            "legacy_creator_only_unsupported",
+        ),
+        // `false` is refused exactly like `true`, never silently ignored.
+        (
+            json!({ "creator_only": false }),
+            "legacy_creator_only_unsupported",
+        ),
+        (
+            json!({ "extensions": { "creator_only": true } }),
+            "legacy_creator_only_unsupported",
+        ),
+        (
+            json!({ "extensions": { "nexus": { "creator_only": true } } }),
+            "legacy_creator_only_unsupported",
+        ),
+        (
+            serde_json::json!({ "holder_entry_id": "hld_deadbeef" }),
+            "reserved_governance_key",
+        ),
+        (
+            serde_json::json!({ "disclosure": "owner-private" }),
+            "reserved_governance_key",
+        ),
+    ];
+
+    // The same six raw scopes are refused on the request root and inside the
+    // `patch` object.
+    for at_root in [true, false] {
+        for (extra, reason) in &cases {
+            let mut raw = json!({
+                "entity_id": "kb_a1b2",
+                "expected_version": 0,
+                "patch": patch(json!({})),
+            });
+            if at_root {
+                for (key, value) in extra.as_object().unwrap() {
+                    raw[key] = value.clone();
+                }
+            } else {
+                raw["patch"] = patch(extra.clone());
+            }
+
+            let err = patch_entity(
+                State(state.clone()),
+                Path("wld_test_world".to_string()),
+                patch_body(raw),
+            )
+            .await
+            .expect_err("a reserved or retired key must be refused before any write");
+
+            // The canonical invalid-input family is 422 `invalid_input`.
+            assert_eq!(
+                err.status_code(),
+                axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+                "{extra} at_root={at_root}"
+            );
+            let body = err.to_response_body();
+            assert_eq!(body.error.code, "invalid_input");
+            assert!(
+                body.error.message.contains(reason),
+                "{extra}: {}",
+                body.error.message
+            );
+        }
+    }
+
+    let written: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE key_block_id = ?")
+            .bind("kb_a1b2")
+            .fetch_one(state.pool().unwrap())
+            .await
+            .unwrap();
+    assert_eq!(written, 0, "a refused key must author nothing");
 }
 
 /// The stored per-row version of one World-KB entity, read through the
