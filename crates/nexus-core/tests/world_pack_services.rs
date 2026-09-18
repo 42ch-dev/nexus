@@ -535,9 +535,13 @@ async fn v1191_holder_pack_unmapped_and_colliding_holders_stay_quarantined() {
         colliding.original_disclosure.as_deref(),
         Some(DISCLOSURE_OWNER_PRIVATE)
     );
+    // The reviewed original is the **pack document's** atom JSON verbatim, not
+    // a re-serialization of the typed entry.
+    let document_atom = pack["entries"][1].to_string();
     assert_eq!(
-        colliding.original_entry.as_ref().unwrap()["entry_id"],
-        "kb_gov_collide"
+        colliding.original_entry.as_deref(),
+        Some(document_atom.as_str()),
+        "review returns the document's atom JSON byte-for-byte"
     );
     // A foreign World's batch is not reviewable by this Creator.
     let denied = core

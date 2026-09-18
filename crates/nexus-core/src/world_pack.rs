@@ -582,13 +582,6 @@ async fn review_pack_import_quarantine(
 fn quarantined_atom_report(
     stored: nexus_local_db::kb_store::QuarantinedAtom,
 ) -> CoreResult<QuarantinedAtomReport> {
-    let original_entry = serde_json::from_str::<serde_json::Value>(&stored.original_entry_json)
-        .map_err(|e| CoreError::Internal {
-            category: format!(
-                "quarantined atom {} original JSON is unreadable: {e}",
-                stored.quarantine_id
-            ),
-        })?;
     Ok(QuarantinedAtomReport {
         quarantine_id: stored.quarantine_id,
         import_batch_id: stored.import_batch_id,
@@ -596,7 +589,7 @@ fn quarantined_atom_report(
         reason: quarantine_reason_from_stored(&stored.reason),
         original_owner: stored.original_owner,
         original_disclosure: stored.original_disclosure,
-        original_entry: Some(original_entry),
+        original_entry: Some(stored.original_entry_json),
     })
 }
 
@@ -864,9 +857,12 @@ pub struct QuarantinedAtomReport {
     pub original_owner: Option<String>,
     /// The atom's original wire `disclosure`, exactly as the pack carried it.
     pub original_disclosure: Option<String>,
-    /// The immutable original wire KE JSON — populated by the bounded review arm
-    /// only; the import response reports ids/reasons/original governance.
-    pub original_entry: Option<serde_json::Value>,
+    /// The immutable original wire KE JSON **as the pack document carried it**
+    /// — the untransformed document atom value, serialized once and never from
+    /// the typed entry (so defaults, rebuilt extensions and field order cannot
+    /// drift). Populated by the bounded review arm only; the import response
+    /// reports ids/reasons/original governance.
+    pub original_entry: Option<String>,
 }
 
 /// The bounded, read-only, owner-only quarantine review of one import batch
@@ -1029,7 +1025,15 @@ async fn import_pack(
         None
     };
 
-    for mut entry in pack.entries {
+    // The untransformed pack atoms, index-aligned with `pack.entries`.
+    let source_entries: Vec<serde_json::Value> = pack
+        .source
+        .get("entries")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+
+    for (entry_index, mut entry) in pack.entries.into_iter().enumerate() {
         let pack_entry_id = entry.entry_id.clone();
         let Some(entry_type) = parse_entry_type(&entry.entry_type) else {
             let reason = format!("unknown entry_type '{}'", entry.entry_type);
@@ -1122,7 +1126,9 @@ async fn import_pack(
                     identity,
                     world_id,
                     &pack_entry_id,
-                    &entry,
+                    source_entries
+                        .get(entry_index)
+                        .unwrap_or(&serde_json::Value::Null),
                     &original_owner,
                     &original_disclosure,
                     reason,
@@ -1962,7 +1968,8 @@ fn prepare_create_entry(entry: &mut KnowledgeEntry, world_id: &str) {
 
 /// Hold one foreign-governed atom outside the KB stores (durable §6).
 ///
-/// The row keeps the immutable original wire KE JSON, this run's batch id, the
+/// The row keeps the immutable original wire KE JSON (`raw_entry`, the pack
+/// document's own atom value), this run's batch id, the
 /// stored controlling Creator and the import target container. A dry run
 /// reports the atom (and its deterministic id) without writing: a preview never
 /// quarantines. The atom is also recorded as a `Rejected` detail so the
@@ -1975,16 +1982,17 @@ async fn quarantine_pack_atom(
     identity: &ImportIdentityContext<'_>,
     world_id: &str,
     pack_entry_id: &str,
-    entry: &KnowledgeEntry,
+    raw_entry: &serde_json::Value,
     original_owner: &Option<String>,
     original_disclosure: &Option<String>,
     reason: QuarantineReason,
     dry_run: bool,
 ) -> Result<(), PackImportError> {
-    // The immutable original atom JSON is the entry exactly as the pack carried
-    // it: this runs before any mutation of `entry`'s container or revision.
-    let original_entry_json =
-        serde_json::to_string(entry).map_err(|e| PackImportError::Storage(e.to_string()))?;
+    // The immutable original atom JSON is the **document's own** atom value: it
+    // is read from the untransformed pack (`ParsedPack::source`) and serialized
+    // once, so nothing about the typed entry (defaults, rebuilt extensions,
+    // field order) can reach the quarantine row.
+    let original_entry_json = raw_entry.to_string();
     let new_atom = NewQuarantinedAtom {
         import_batch_id: identity.batch_id,
         controlling_creator_id: identity.creator_id,
@@ -2289,14 +2297,20 @@ fn review_to_response(review: ImportQuarantineReview) -> CoreResult<PackImportRe
         .atoms
         .into_iter()
         .map(|atom| {
-            let Some(serde_json::Value::Object(original_entry)) = atom.original_entry else {
-                return Err(CoreError::Internal {
+            // The wire carries the **value of the stored original bytes**: the
+            // verbatim stored JSON is parsed once here, so what leaves the
+            // boundary is the pack document's atom, never a typed
+            // re-serialization of the entry.
+            let original_entry =
+                serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(
+                    atom.original_entry.as_deref().unwrap_or_default(),
+                )
+                .map_err(|e| CoreError::Internal {
                     category: format!(
-                        "quarantined atom {} carried no original entry object",
+                        "quarantined atom {} original JSON is unreadable: {e}",
                         atom.quarantine_id
                     ),
-                });
-            };
+                })?;
             Ok(PackImportResponseReviewAtomsItem {
                 quarantine_id: atom.quarantine_id,
                 batch_id: Some(atom.import_batch_id),

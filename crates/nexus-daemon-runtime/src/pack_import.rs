@@ -5,7 +5,7 @@
 
 use nexus_contracts::daemon_api::kb::{PackImportRequest, PackImportRequestConflict};
 use nexus_core::{HolderMapping, ImportQuarantineReview};
-use nexus_spoke_adapter::pack::{build_pack, ParsedPack};
+use nexus_spoke_adapter::pack::ParsedPack;
 use sqlx::SqlitePool;
 use thiserror::Error;
 
@@ -63,18 +63,13 @@ pub async fn import_pack(
     holder_map: Vec<HolderMapping>,
     dry_run: bool,
 ) -> Result<ImportSummary, PackImportError> {
-    let value = build_pack(
-        &pack.entries,
-        &pack.relations,
-        pack.source_anchors.as_deref(),
-        &pack.pack_metadata.title,
-        &pack.pack_metadata.version,
-        &pack.pack_metadata.creator,
-        pack.pack_metadata.description.as_deref(),
-        Some(&pack.extra_modules),
-    );
-    let serde_json::Value::Object(pack) = value else {
-        unreachable!("build_pack always produces a JSON object")
+    // The parsed pack document travels through **verbatim**
+    // (`ParsedPack::source`) instead of being rebuilt from the typed atoms: a
+    // rebuild re-serializes every atom, which is exactly the drift the import
+    // boundary must not introduce (a quarantined atom keeps the document's own
+    // JSON).
+    let serde_json::Value::Object(pack) = pack.source.clone() else {
+        unreachable!("parse_pack only accepts a JSON object")
     };
     // The CLI carries its adoptions as parsed `HolderMapping`s (the bridge's
     // out-of-band argument), so the retained wire literal stays on the import
