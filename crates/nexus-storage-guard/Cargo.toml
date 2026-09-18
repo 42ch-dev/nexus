@@ -12,4 +12,4 @@ unsafe_code = "allow"
 
 [dependencies]
 sqlx = { workspace = true }
-libsqlite3-sys = { version = "=0.30.1", features = ["bundled"] }
+libsqlite3-sys = { version = "=0.37.0", features = ["bundled"] }
