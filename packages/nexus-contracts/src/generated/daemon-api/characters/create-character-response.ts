@@ -28,6 +28,10 @@ export interface NexusCharacter {
    */
   owner_creator_id: string;
   /**
+   * Read-only service-managed holder KnowledgeEntry id for this Character (`hld_` namespace). Never accepted from create/bind request bodies; there is no holder CRUD route behind this field.
+   */
+  holder_entry_id?: string;
+  /**
    * Character display name. Trimmed non-empty; at most 120 Unicode scalars.
    */
   display_name: string;

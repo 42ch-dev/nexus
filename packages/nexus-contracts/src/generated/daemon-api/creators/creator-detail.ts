@@ -5,10 +5,14 @@
  */
 
 /**
- * Response for GET /v1/daemon/creators/{creator_id}.
+ * Response for GET /v1/daemon/creators/{creator_id}. holder_entry_id is the read-only service-managed holder projection of this already-authorized identity; there is no holder CRUD route.
  */
 export interface CreatorDetail {
   creator_id: string;
+  /**
+   * Read-only service-managed holder KnowledgeEntry id for this Creator (`hld_` namespace). Never accepted from a request body.
+   */
+  holder_entry_id?: string;
   handle?: string;
   display_name?: string;
   has_api_key: boolean;
