@@ -122,7 +122,7 @@ which = "8"
 regex = "1"
 subtle = { version = "2", default-features = false }
 # V1.50 T-A P0 T2: cron expression parsing (novel-writing staggering spec §3.1)
-cron = "0.12"
+cron = "0.17"
 # V1.50 T-A P0 T2: IANA timezone validation (spec §3.1 `--tz`)
 chrono-tz = "0.10"
 # V1.138 T4: required by typify-generated Rust wire types. JSON Schema
