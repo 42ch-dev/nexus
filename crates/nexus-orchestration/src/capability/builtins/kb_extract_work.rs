@@ -355,36 +355,46 @@ impl Capability for KbExtractWork {
             nexus_knowledge::world_kb::source_anchor::SourceAnchor::from_excerpt(source_locator)
         };
 
-        let finalize_input = nexus_knowledge::world_kb::ExtractFinalizeInput {
+        let prepare_input = nexus_knowledge::world_kb::ExtractPrepareInput {
             world_id: world_id.clone(),
             block_type,
             canonical_name: extract.canonical_name.clone(),
             body,
             source_anchor,
             validation_mode,
+            // v1.191 P1 T12: the trusted job policy is attached here, before
+            // persistence. Until T13 wires the real policy this stays shared —
+            // the same columns the combined finalizer wrote before the split.
+            governance: nexus_knowledge::world_kb::KnowledgeGovernance::shared(),
         };
 
         // ── Phase 4b: Insert KnowledgeEntryRecord BEFORE marking job done ──────────
-        // Insert first; only mark done on success. On insert failure,
-        // mark the job as failed so the preset state machine can surface
-        // or retry. This prevents "done job with no KnowledgeEntryRecord" data loss.
+        // Prepare (validate + allocate the id once) then persist the exact
+        // record; only mark done on success. On failure, mark the job as failed
+        // so the preset state machine can surface or retry. This prevents
+        // "done job with no KnowledgeEntryRecord" data loss.
         let store = nexus_local_db::kb_store::SqliteKbStore::new(pool.as_ref().clone());
-        let insert_result =
-            match nexus_knowledge::world_kb::finalize_extract(&store, finalize_input).await {
-                Ok(r) => r,
-                Err(e) => {
-                    // Mark job as failed so the content loss window is closed.
-                    let _ = nexus_local_db::mark_extract_job_failed(
-                        pool,
-                        &job_id,
-                        &format!("KnowledgeEntryRecord insert failed: {e}"),
-                    )
-                    .await;
-                    return Err(CapabilityError::Internal(format!(
-                        "KnowledgeEntryRecord insert failed: {e}"
-                    )));
-                }
-            };
+        let insert_result = match nexus_knowledge::world_kb::prepare_extract(prepare_input) {
+            Ok(prepared) => {
+                nexus_knowledge::world_kb::persist_prepared_extract(&store, prepared).await
+            }
+            Err(e) => Err(e),
+        };
+        let insert_result = match insert_result {
+            Ok(r) => r,
+            Err(e) => {
+                // Mark job as failed so the content loss window is closed.
+                let _ = nexus_local_db::mark_extract_job_failed(
+                    pool,
+                    &job_id,
+                    &format!("KnowledgeEntryRecord insert failed: {e}"),
+                )
+                .await;
+                return Err(CapabilityError::Internal(format!(
+                    "KnowledgeEntryRecord insert failed: {e}"
+                )));
+            }
+        };
 
         // Mark done only after the KnowledgeEntryRecord was successfully inserted.
         nexus_local_db::mark_extract_job_done(pool, &job_id)

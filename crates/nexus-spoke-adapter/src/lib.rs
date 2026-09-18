@@ -57,6 +57,10 @@ pub mod adapter;
 pub mod constraint;
 pub mod conversion;
 pub mod extensions;
+// v1.191 P1 T12 — the adapter-owned production extraction wrapper (durable §8):
+// `ResolvedExtractionPort` + `extract_candidates` around upstream
+// `orchestrate_extract`. No orchestration/core import; no persistence.
+pub mod extraction;
 pub mod ops;
 
 /// The HostCapabilityManifest single builder SSOT (DF-72 N-C0, §4.1).
@@ -195,6 +199,19 @@ pub use spoke_operations::{
 // production wrapper that actually calls `orchestrate_extract`.
 pub use spoke_operations::{
     orchestrate_extract, ExtractRunInput, ExtractionPort, ExtractionResult,
+};
+
+// v1.191 P1 T12 (durable §8) — the production wrapper that actually drives
+// `orchestrate_extract` for nexus: an injected admitted source bundle
+// (`ResolvedExtractionInput` → `ResolvedExtractionPort`) plus the native
+// callback (`NativeExtractionOutput`), returning the upstream-validated
+// response with the prepared candidates and the relationship sidecar
+// (`ExtractCandidatesOutcome`). Persistence stays with the caller, so the
+// `ExtractionPort` here is still standalone — not a `BaselinePorts` /
+// `FullPorts` member.
+pub use extraction::{
+    extract_candidates, ExtractCandidatesOutcome, NativeExtractionOutput, ResolvedExtractionInput,
+    ResolvedExtractionPort,
 };
 
 // V1.166 AR-1 — the world-scoped `orchestrate_check` seam (nexus semantics

@@ -31,7 +31,9 @@ pub mod store;
 pub mod validation;
 
 pub use errors::{KbError, ValidationError, ValidationKind};
-pub use extract_finalize::{finalize_extract, ExtractFinalizeInput};
+pub use extract_finalize::{
+    persist_prepared_extract, prepare_extract, ExtractPrepareInput, PreparedExtractCandidate,
+};
 pub use extract_sync::{compute_kb_diff, diff_and_apply, KbSyncDiff, KbSyncUpdate};
 pub use knowledge_entry::{
     is_character_subject_id, reject_reserved_authoring_keys, resolve_authored_governance,
