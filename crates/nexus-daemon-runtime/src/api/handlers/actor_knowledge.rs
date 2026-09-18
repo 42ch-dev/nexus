@@ -157,7 +157,9 @@ fn parse_delete_expected_revision(uri: &Uri) -> Result<i64, NexusApiError> {
 }
 
 fn knowledge_patch_is_empty(raw: &serde_json::Map<String, serde_json::Value>) -> bool {
-    !raw.contains_key("canonical_name") && !raw.contains_key("summary")
+    !raw.contains_key("canonical_name")
+        && !raw.contains_key("summary")
+        && !raw.contains_key("audience")
 }
 
 fn build_knowledge_summary_patch<'a>(
@@ -367,6 +369,9 @@ pub async fn patch_knowledge_entry(
         });
     }
     let (canonical_name_patch, summary_patch) = build_actor_knowledge_patch(&raw, &req)?;
+    // v1.191 P1 T7 (durable §3): the closed `audience` member rides the same
+    // expected_revision CAS; core admission resolves the identity it names.
+    let audience = nexus_core::authored_patch_audience(req.audience.as_ref())?;
     let (core, principal) = resolve_core_principal(&state).await?;
     let record = core
         .patch_actor_knowledge_entry(
@@ -376,6 +381,7 @@ pub async fn patch_knowledge_entry(
             req.expected_revision,
             canonical_name_patch,
             summary_patch,
+            audience,
         )
         .await?;
     Ok(Json(detail_from_record(&record)?))

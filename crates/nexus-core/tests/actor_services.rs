@@ -14,8 +14,9 @@ use nexus_core::{
     classify_pair, ActorFenceKind, ActorKnowledgeViewQuery, ActorViewpoint, AdmittedActor,
     CoreAccess, CoreActorAdmission, CoreError, CoreOpenOptions, CoreService,
 };
+use nexus_contracts::generated::daemon_api::actor_knowledge::add_knowledge_entry_request::AddKnowledgeEntryRequest;
 use nexus_knowledge::world_kb::knowledge_entry::{
-    KnowledgeEntryRecord, KnowledgeOwnerRef, DISCLOSURE_OWNER_PRIVATE,
+    KnowledgeAudience, KnowledgeEntryRecord, KnowledgeOwnerRef, DISCLOSURE_OWNER_PRIVATE,
 };
 use nexus_knowledge::world_kb::store::{KbStore, KnowledgeReadPolicy, KnowledgeReadScope};
 use nexus_local_db::kb_store::SqliteKbStore;
@@ -1881,4 +1882,570 @@ async fn v1191_holder_visibility_management_and_actor_view_stay_separate() {
         vec!["FirstCharacterPrivate", "FirstCharacterShared"],
         "the Character-owned listing hides the foreign-holder private row"
     );
+}
+
+// ── v1.191 P1 T7: admitted audience authoring (durable §3/§4.3) ──────────
+
+/// Owner-scoped native governance pair of one stored KE.
+async fn stored_governance(
+    pool: &SqlitePool,
+    entry_id: &str,
+) -> (Option<String>, Option<String>, i64) {
+    sqlx::query_as(
+        "SELECT holder_entry_id, disclosure, COALESCE(revision, 0) \
+         FROM kb_key_blocks WHERE key_block_id = ?",
+    )
+    .bind(entry_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+async fn stored_character_revision(pool: &SqlitePool, character_id: &str) -> i64 {
+    sqlx::query_scalar("SELECT knowledge_revision FROM characters WHERE character_id = ?")
+        .bind(character_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+async fn stored_world_revision(pool: &SqlitePool, world_id: &str) -> i64 {
+    sqlx::query_scalar("SELECT knowledge_revision FROM narrative_worlds WHERE world_id = ?")
+        .bind(world_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+async fn knowledge_row_count(pool: &SqlitePool) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks")
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// One wire-valid actor-knowledge create request (owner + audience).
+fn create_request(
+    owner_kind: &str,
+    world_id: Option<&str>,
+    character_id: Option<&str>,
+    binding_id: Option<&str>,
+    name: &str,
+    audience: Option<serde_json::Value>,
+) -> AddKnowledgeEntryRequest {
+    let mut value = serde_json::json!({
+        "owner_kind": owner_kind,
+        "block_type": "item",
+        "canonical_name": name,
+    });
+    for (key, field) in [
+        ("world_id", world_id),
+        ("character_id", character_id),
+        ("binding_id", binding_id),
+    ] {
+        if let Some(field) = field {
+            value[key] = serde_json::json!(field);
+        }
+    }
+    if let Some(audience) = audience {
+        value["audience"] = audience;
+    }
+    serde_json::from_value(value).expect("create request is wire-valid")
+}
+
+fn author_only() -> serde_json::Value {
+    serde_json::json!({ "kind": "author-only" })
+}
+
+fn shared_audience() -> serde_json::Value {
+    serde_json::json!({ "kind": "shared" })
+}
+
+fn character_private(character_id: &str) -> serde_json::Value {
+    serde_json::json!({ "kind": "character-private", "character_id": character_id })
+}
+
+/// A second owned Character, created in `WORLD_B` so it holds no binding to
+/// `WORLD` (the World-row permission probe's negative case).
+async fn seed_unbound_character(env: &Env) -> String {
+    let pool = plain_pool(env).await;
+    let (character_id, _) = seed_character(&pool, CREATOR, WORLD_B, "Unbound").await;
+    pool.close().await;
+    character_id
+}
+
+#[tokio::test]
+async fn v1191_audience_cas_create_resolves_permitted_identities() {
+    let env = seed_env().await;
+    let unbound = seed_unbound_character(&env).await;
+    let (core, principal) = open_core(&env).await;
+    let pool = plain_pool(&env).await;
+    let creator_holder = nexus_local_db::creator_holder_entry_id(CREATOR);
+    let character_holder = nexus_local_db::character_holder_entry_id(&env.character_id);
+    let foreign_holder = nexus_local_db::character_holder_entry_id(&env.foreign_character_id);
+
+    // World row + author-only → the admitted controlling Creator's holder.
+    let author_only_row = core
+        .add_actor_knowledge_entry(
+            &principal,
+            create_request("world", Some(WORLD), None, None, "AuthoredOnly", Some(author_only())),
+            false,
+        )
+        .await
+        .expect("author-only create admits");
+    assert_eq!(
+        stored_governance(&pool, &author_only_row.entry_id).await,
+        (
+            Some(creator_holder.clone()),
+            Some(DISCLOSURE_OWNER_PRIVATE.to_string()),
+            0
+        )
+    );
+
+    // World row + character-private naming a Character actively bound to that
+    // World → that Character's holder.
+    let world_private = core
+        .add_actor_knowledge_entry(
+            &principal,
+            create_request(
+                "world",
+                Some(WORLD),
+                None,
+                None,
+                "WorldCharacterPrivate",
+                Some(character_private(&env.character_id)),
+            ),
+            false,
+        )
+        .await
+        .expect("a bound Character is a permitted World-row audience");
+    assert_eq!(
+        stored_governance(&pool, &world_private.entry_id).await,
+        (
+            Some(character_holder.clone()),
+            Some(DISCLOSURE_OWNER_PRIVATE.to_string()),
+            0
+        )
+    );
+
+    // Omitted audience (and explicit shared) both store no governance.
+    let omitted = core
+        .add_actor_knowledge_entry(
+            &principal,
+            create_request("world", Some(WORLD), None, None, "OmittedShared", None),
+            false,
+        )
+        .await
+        .expect("omitted create audience admits");
+    assert_eq!(stored_governance(&pool, &omitted.entry_id).await, (None, None, 0));
+    let explicit = core
+        .add_actor_knowledge_entry(
+            &principal,
+            create_request(
+                "world",
+                Some(WORLD),
+                None,
+                None,
+                "ExplicitShared",
+                Some(shared_audience()),
+            ),
+            false,
+        )
+        .await
+        .expect("explicit shared admits");
+    assert_eq!(stored_governance(&pool, &explicit.entry_id).await, (None, None, 0));
+
+    // Character-owned row + character-private naming its own owning Character.
+    let character_row = core
+        .add_actor_knowledge_entry(
+            &principal,
+            create_request(
+                "character",
+                None,
+                Some(&env.character_id),
+                None,
+                "OwnCharacterPrivate",
+                Some(character_private(&env.character_id)),
+            ),
+            false,
+        )
+        .await
+        .expect("the owning Character is a permitted audience");
+    assert_eq!(
+        stored_governance(&pool, &character_row.entry_id).await,
+        (
+            Some(character_holder.clone()),
+            Some(DISCLOSURE_OWNER_PRIVATE.to_string()),
+            0
+        )
+    );
+
+    // Binding-owned row + character-private naming its owning Character.
+    let binding_row = core
+        .add_actor_knowledge_entry(
+            &principal,
+            create_request(
+                "actor_world_binding",
+                Some(WORLD),
+                Some(&env.character_id),
+                Some(&env.binding_id),
+                "OwnBindingPrivate",
+                Some(character_private(&env.character_id)),
+            ),
+            false,
+        )
+        .await
+        .expect("the owning Character is a permitted binding-row audience");
+    assert_eq!(
+        stored_governance(&pool, &binding_row.entry_id).await,
+        (
+            Some(character_holder.clone()),
+            Some(DISCLOSURE_OWNER_PRIVATE.to_string()),
+            0
+        )
+    );
+
+    assert!(!unbound.is_empty(), "the unbound Character exists for the matrix");
+    assert_eq!(
+        stored_governance(&pool, &omitted.entry_id).await.0,
+        None,
+        "no create above leaked the foreign holder {foreign_holder}"
+    );
+    assert_eq!(knowledge_row_count(&pool).await, 6);
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn v1191_audience_cas_create_refuses_unpermitted_identities() {
+    let env = seed_env().await;
+    let unbound = seed_unbound_character(&env).await;
+    let (core, principal) = open_core(&env).await;
+    let pool = plain_pool(&env).await;
+    let before = knowledge_row_count(&pool).await;
+
+    // Owned + active, but no binding to the target World.
+    let err = core
+        .add_actor_knowledge_entry(
+            &principal,
+            create_request(
+                "world",
+                Some(WORLD),
+                None,
+                None,
+                "UnboundAudience",
+                Some(character_private(&unbound)),
+            ),
+            false,
+        )
+        .await
+        .unwrap_err();
+    assert_invalid_input(&err);
+    assert_eq!(knowledge_row_count(&pool).await, before, "refusal wrote no row");
+
+    // Foreign Character (another Creator's) stays hidden.
+    let err = core
+        .add_actor_knowledge_entry(
+            &principal,
+            create_request(
+                "world",
+                Some(WORLD),
+                None,
+                None,
+                "ForeignAudience",
+                Some(character_private(&env.foreign_character_id)),
+            ),
+            false,
+        )
+        .await
+        .unwrap_err();
+    assert_not_found(&err);
+    assert_eq!(knowledge_row_count(&pool).await, before);
+
+    // A Character row may only target its own owning Character.
+    let err = core
+        .add_actor_knowledge_entry(
+            &principal,
+            create_request(
+                "character",
+                None,
+                Some(&env.character_id),
+                None,
+                "ForeignOwnAudience",
+                Some(character_private(&unbound)),
+            ),
+            false,
+        )
+        .await
+        .unwrap_err();
+    assert_not_found(&err);
+
+    // A binding row likewise targets only its owning Character.
+    let err = core
+        .add_actor_knowledge_entry(
+            &principal,
+            create_request(
+                "actor_world_binding",
+                Some(WORLD),
+                Some(&env.character_id),
+                Some(&env.binding_id),
+                "ForeignBindingAudience",
+                Some(character_private(&unbound)),
+            ),
+            false,
+        )
+        .await
+        .unwrap_err();
+    assert_not_found(&err);
+    assert_eq!(knowledge_row_count(&pool).await, before);
+
+    // Owned but archiving the Character removes it from the permitted set.
+    let characters = plain_pool(&env).await;
+    let (_, revision, _) = character_row(&env, &unbound).await;
+    nexus_local_db::transition_character(
+        &characters,
+        CREATOR,
+        &unbound,
+        revision,
+        nexus_local_db::CharacterStatus::Archived,
+    )
+    .await
+    .unwrap();
+    let err = core
+        .add_actor_knowledge_entry(
+            &principal,
+            create_request(
+                "world",
+                Some(WORLD),
+                None,
+                None,
+                "ArchivedAudience",
+                Some(character_private(&unbound)),
+            ),
+            false,
+        )
+        .await
+        .unwrap_err();
+    assert_conflict(err, "character_inactive");
+    assert_eq!(knowledge_row_count(&pool).await, before, "no refusal wrote a row");
+    characters.close().await;
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn v1191_audience_cas_patch_moves_governance_under_the_ke_revision() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let pool = plain_pool(&env).await;
+    let creator_holder = nexus_local_db::creator_holder_entry_id(CREATOR);
+
+    let created = core
+        .add_actor_knowledge_entry(
+            &principal,
+            create_request(
+                "character",
+                None,
+                Some(&env.character_id),
+                None,
+                "PatchSubject",
+                None,
+            ),
+            false,
+        )
+        .await
+        .expect("shared create admits");
+    let entry_id = created.entry_id.clone();
+    assert_eq!(stored_governance(&pool, &entry_id).await, (None, None, 0));
+
+    // Governed patch: the pair and the owning Character's knowledge revision
+    // move under the same expected_revision CAS.
+    let patched = core
+        .patch_actor_knowledge_entry(
+            &principal,
+            env.character_id.clone(),
+            entry_id.clone(),
+            0,
+            None,
+            nexus_local_db::FieldPatch::Keep,
+            Some(KnowledgeAudience::AuthorOnly),
+        )
+        .await
+        .expect("author-only patch admits");
+    assert_eq!(patched.revision, Some(1));
+    assert_eq!(
+        stored_governance(&pool, &entry_id).await,
+        (
+            Some(creator_holder.clone()),
+            Some(DISCLOSURE_OWNER_PRIVATE.to_string()),
+            1
+        )
+    );
+    assert_eq!(stored_character_revision(&pool, &env.character_id).await, 1);
+    let admitted = core
+        .admit_actor_knowledge_view(
+            &principal,
+            &AdmittedActor::Character {
+                character_id: env.character_id.clone(),
+            },
+            character_viewpoint(WORLD, &env.binding_id),
+        )
+        .await
+        .expect("admitted after the governance patch");
+    assert_eq!(
+        admitted.identity().character_revision(),
+        Some(1),
+        "the next admission observes the bumped Character revision"
+    );
+    drop(admitted);
+
+    // A content-only patch omits the member: the stored pair is preserved.
+    let content_only = core
+        .patch_actor_knowledge_entry(
+            &principal,
+            env.character_id.clone(),
+            entry_id.clone(),
+            1,
+            None,
+            nexus_local_db::FieldPatch::Set("edited summary"),
+            None,
+        )
+        .await
+        .expect("content-only patch admits");
+    assert_eq!(content_only.revision, Some(2));
+    assert_eq!(
+        stored_governance(&pool, &entry_id).await,
+        (
+            Some(creator_holder.clone()),
+            Some(DISCLOSURE_OWNER_PRIVATE.to_string()),
+            2
+        ),
+        "an omitted patch audience preserves the stored governance"
+    );
+    assert_eq!(stored_character_revision(&pool, &env.character_id).await, 2);
+
+    // Explicit shared clears both columns.
+    core.patch_actor_knowledge_entry(
+        &principal,
+        env.character_id.clone(),
+        entry_id.clone(),
+        2,
+        None,
+        nexus_local_db::FieldPatch::Keep,
+        Some(KnowledgeAudience::Shared),
+    )
+    .await
+    .expect("shared patch admits");
+    assert_eq!(stored_governance(&pool, &entry_id).await, (None, None, 3));
+    assert_eq!(stored_character_revision(&pool, &env.character_id).await, 3);
+
+    // No-op: identical content and identical audience move neither revision.
+    let no_op = core
+        .patch_actor_knowledge_entry(
+            &principal,
+            env.character_id.clone(),
+            entry_id.clone(),
+            3,
+            None,
+            nexus_local_db::FieldPatch::Set("edited summary"),
+            Some(KnowledgeAudience::Shared),
+        )
+        .await
+        .expect("no-op patch admits");
+    assert_eq!(no_op.revision, Some(3));
+    assert_eq!(stored_character_revision(&pool, &env.character_id).await, 3);
+
+    // Stale CAS writes nothing.
+    let err = core
+        .patch_actor_knowledge_entry(
+            &principal,
+            env.character_id.clone(),
+            entry_id.clone(),
+            0,
+            None,
+            nexus_local_db::FieldPatch::Keep,
+            Some(KnowledgeAudience::AuthorOnly),
+        )
+        .await
+        .unwrap_err();
+    assert_conflict(err, "knowledge_revision_conflict");
+    assert_eq!(stored_governance(&pool, &entry_id).await, (None, None, 3));
+    assert_eq!(stored_character_revision(&pool, &env.character_id).await, 3);
+
+    // A foreign Character is never a permitted patch audience, and the
+    // refusal leaves the row byte-identical.
+    let err = core
+        .patch_actor_knowledge_entry(
+            &principal,
+            env.character_id.clone(),
+            entry_id.clone(),
+            3,
+            None,
+            nexus_local_db::FieldPatch::Keep,
+            Some(KnowledgeAudience::CharacterPrivate {
+                character_id: env.foreign_character_id.clone(),
+            }),
+        )
+        .await
+        .unwrap_err();
+    assert_not_found(&err);
+    assert_eq!(stored_governance(&pool, &entry_id).await, (None, None, 3));
+    assert_eq!(stored_character_revision(&pool, &env.character_id).await, 3);
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn v1191_audience_cas_binding_patch_bumps_only_the_owning_character() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let pool = plain_pool(&env).await;
+    let character_holder = nexus_local_db::character_holder_entry_id(&env.character_id);
+
+    let created = core
+        .add_actor_knowledge_entry(
+            &principal,
+            create_request(
+                "actor_world_binding",
+                Some(WORLD),
+                Some(&env.character_id),
+                Some(&env.binding_id),
+                "BindingPatchSubject",
+                None,
+            ),
+            false,
+        )
+        .await
+        .expect("binding-owned create admits");
+
+    core.patch_actor_knowledge_entry(
+        &principal,
+        env.character_id.clone(),
+        created.entry_id.clone(),
+        0,
+        None,
+        nexus_local_db::FieldPatch::Set("binding summary"),
+        Some(KnowledgeAudience::CharacterPrivate {
+            character_id: env.character_id.clone(),
+        }),
+    )
+    .await
+    .expect("binding-owned governed patch admits");
+
+    assert_eq!(
+        stored_governance(&pool, &created.entry_id).await,
+        (
+            Some(character_holder),
+            Some(DISCLOSURE_OWNER_PRIVATE.to_string()),
+            1
+        )
+    );
+    assert_eq!(
+        stored_character_revision(&pool, &env.character_id).await,
+        1,
+        "a binding-owned governance write bumps its owning Character"
+    );
+    assert_eq!(
+        stored_world_revision(&pool, WORLD).await,
+        0,
+        "the binding has no revision of its own and moves no World revision"
+    );
+    pool.close().await;
 }

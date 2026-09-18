@@ -45,9 +45,10 @@ pub use actor_fence::{
     KnowledgeGovernanceLease,
 };
 pub use actor_knowledge::{
-    ActorKnowledgeIdentity, ActorKnowledgePage, ActorKnowledgeViewQuery, ActorKnowledgeViewService,
-    AdmittedKnowledgeContext, KnowledgeRevisions, KNOWLEDGE_INSERT_FAILED_PREFIX,
-    KNOWLEDGE_VIEW_COMPONENT_FAILED_PREFIX, KNOWLEDGE_WIRE_INVALID_PREFIX,
+    authored_patch_audience, ActorKnowledgeIdentity, ActorKnowledgePage,
+    ActorKnowledgeViewQuery, ActorKnowledgeViewService, AdmittedKnowledgeContext,
+    KnowledgeRevisions, KNOWLEDGE_INSERT_FAILED_PREFIX, KNOWLEDGE_VIEW_COMPONENT_FAILED_PREFIX,
+    KNOWLEDGE_WIRE_INVALID_PREFIX,
 };
 #[cfg(feature = "provider-host")]
 pub use actor_sessions::{

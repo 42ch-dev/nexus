@@ -730,7 +730,10 @@ impl NativeCore {
         request_json: Buffer,
     ) -> Result<Buffer> {
         let (req, raw) = decode_with_raw::<UpdateKnowledgeEntryRequest>(request_json, "request")?;
-        if !raw.contains_key("canonical_name") && !raw.contains_key("summary") {
+        if !raw.contains_key("canonical_name")
+            && !raw.contains_key("summary")
+            && !raw.contains_key("audience")
+        {
             return Err(Error::from_reason(
                 "invalid patch: patch must include at least one mutable field",
             ));
@@ -751,6 +754,11 @@ impl NativeCore {
             None
         };
         let summary_patch = knowledge_summary_patch(&raw, &req)?;
+        // v1.191 P1 T7 (durable §3): the closed `audience` member rides the
+        // same expected_revision CAS; the core owns admission of the identity
+        // it names.
+        let audience = nexus_core::authored_patch_audience(req.audience.as_ref())
+            .map_err(|e| Error::from_reason(e.to_string()))?;
         self.json_call(principal_handle, async move |core, principal| {
             let record = core
                 .patch_actor_knowledge_entry(
@@ -760,6 +768,7 @@ impl NativeCore {
                     req.expected_revision,
                     canonical_name_patch,
                     summary_patch,
+                    audience,
                 )
                 .await?;
             knowledge_detail_from_record(&record)

@@ -353,9 +353,10 @@ impl CoreService {
     /// # Errors
     /// Returns [`CoreError::AuthRequired`] when the principal fails
     /// verification, [`CoreError::Forbidden`] under read-only access,
-    /// [`CoreError::WorldKbValidation`] for invalid patches, and
-    /// [`CoreError::WorldKbConflict`] carrying the committed revision when
-    /// the expected version is stale.
+    /// [`CoreError::WorldKbValidation`] for invalid patches,
+    /// [`CoreError::ActorConflict`] `invalid_world_sheet` when a linked
+    /// WorldSheet would lose its eligibility, and [`CoreError::WorldKbConflict`]
+    /// carrying the committed revision when the expected version is stale.
     pub async fn patch_world_kb_entity(
         &self,
         principal: &Principal,
@@ -368,6 +369,22 @@ impl CoreService {
                 resource: "world_kb_patch: read-only core access".to_string(),
             });
         }
+        // v1.191 P1 T7 (durable §4.3): a World governance edit takes the World
+        // **exclusive** knowledge lease before the authoring transaction opens
+        // `BEGIN IMMEDIATE`, so no in-flight ActorView/stream can observe the
+        // disclosure change. The lease is released when this call returns.
+        let _governance_lease = if request.patch.audience.is_some() {
+            Some(
+                self.acquire_knowledge_governance(
+                    principal,
+                    crate::actor_fence::ActorFenceKind::World,
+                    world_id.clone(),
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
         patch::patch_entity(&self.inner.pool, principal.creator_id(), &world_id, request).await
     }
 

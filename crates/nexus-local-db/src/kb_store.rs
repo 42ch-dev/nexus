@@ -20,7 +20,8 @@
 use nexus_contracts::BlockType;
 use nexus_knowledge::world_kb::errors::ValidationError;
 use nexus_knowledge::world_kb::knowledge_entry::{
-    KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeOwnerRef, DISCLOSURE_OWNER_PRIVATE,
+    KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeGovernance, KnowledgeOwnerRef,
+    DISCLOSURE_OWNER_PRIVATE,
 };
 use nexus_knowledge::world_kb::query::{KbInsertResult, KbQuery, KbQueryResult};
 use nexus_knowledge::world_kb::source_anchor::SourceAnchor;
@@ -784,7 +785,184 @@ pub(crate) fn map_kb_store_to_local_db(err: KbStoreError) -> LocalDbError {
         },
         KbStoreError::Validation(e) => LocalDbError::ValidationError(e.to_string()),
         KbStoreError::ValidationLegacy(e) => LocalDbError::ValidationError(e),
+        // v1.191 P1 T7 (durable §3): a write that would strip a linked
+        // WorldSheet of its eligibility keeps the stable contract conflict the
+        // link-time rule already uses, so both directions refuse identically.
+        KbStoreError::LinkedWorldSheet(_) => LocalDbError::ActorContractConflict {
+            code: crate::error::ActorContractConflict::InvalidWorldSheet,
+        },
         other => LocalDbError::Sqlx(sqlx::Error::Protocol(format!("kb store error: {other}"))),
+    }
+}
+
+// ── Native knowledge revisions + admitted World authoring (v1.191 P1 T7) ──
+
+/// Bump the owning World's `knowledge_revision` once inside `tx` (durable
+/// §4.3).
+///
+/// The revision pair is what retires a reused Actor session/context across
+/// processes, so it is written in the same transaction as the authoring write
+/// that made the container's knowledge materially different.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` on database failure. A missing World affects no row
+/// (the authoring write's own owner/foreign-key checks own that condition).
+pub(crate) async fn bump_world_knowledge_revision_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    world_id: &str,
+) -> Result<(), LocalDbError> {
+    sqlx::query(
+        "UPDATE narrative_worlds SET knowledge_revision = knowledge_revision + 1 \
+         WHERE world_id = ?",
+    )
+    .bind(world_id)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+/// Bump the admitted Character's `knowledge_revision` once inside `tx`
+/// (durable §4.3). A binding-owned authoring write bumps the **owning
+/// Character**, never a World: the binding has no revision of its own.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` on database failure.
+pub(crate) async fn bump_character_knowledge_revision_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    character_id: &str,
+) -> Result<(), LocalDbError> {
+    sqlx::query("UPDATE characters SET knowledge_revision = knowledge_revision + 1 \
+                 WHERE character_id = ?")
+        .bind(character_id)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
+/// Resolve a resolved-holder id against the registry **inside** `tx` (durable
+/// §3: "a local private write must resolve an existing authorized registry row
+/// within the same transaction").
+///
+/// Fail-closed: an unregistered or corrupt row is `holder_state_invalid`, never
+/// a silently accepted id and never provisioning.
+///
+/// # Errors
+///
+/// Returns [`LocalDbError::HolderStateInvalid`] when the id is not registered
+/// here or its row is corrupt, and `LocalDbError` on database failure.
+pub(crate) async fn require_registered_holder_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    holder_entry_id: &str,
+) -> Result<(), LocalDbError> {
+    match crate::holders::resolve_holder(&mut **tx, holder_entry_id).await? {
+        Some(_) => Ok(()),
+        None => Err(LocalDbError::HolderStateInvalid {
+            reason: format!(
+                "holder {holder_entry_id} has no registry row; a native private write never provisions one"
+            ),
+        }),
+    }
+}
+
+/// Validate one authored governance pair against the domain rule before it is
+/// written (durable §3).
+pub(crate) fn validate_authored_governance(
+    governance: &KnowledgeGovernance,
+) -> Result<(), LocalDbError> {
+    nexus_knowledge::world_kb::knowledge_entry::validate_native_governance(
+        governance.holder_entry_id.as_deref(),
+        governance.disclosure.as_deref(),
+    )
+    .map_err(|e| LocalDbError::ValidationError(e.to_string()))
+}
+
+/// Whether one admitted World authoring write also moves the owning World's
+/// `knowledge_revision` (durable §4.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthoringRevision {
+    /// A material authoring edit of an **existing** entry: bump the owning
+    /// container's knowledge revision exactly once, in the same transaction.
+    Bump,
+    /// A create: the row is new, so no stored entry's governance moved. The
+    /// revision pair is the invalidation signal for entries an admitted
+    /// snapshot may already hold, and the create lane leaves it put (T5's
+    /// accepted admission fixture pins `world: 0` across creates).
+    Keep,
+}
+
+/// Admitted World-row governance authoring side-car (v1.191 P1 T7, durable §3).
+///
+/// The canvas World KB entity patch writes its material content through the
+/// spoke CAS lane; this is the native governance + invalidation half of the
+/// **same** caller-owned `BEGIN IMMEDIATE` transaction, so one transaction
+/// carries one KE revision bump plus the correct knowledge revision.
+///
+/// In-transaction work, in durable §3's order:
+///
+/// 1. re-read the stored row (owner/lifecycle recheck: it must still be a
+///    World-owned row of `world_id`);
+/// 2. when a governance pair is authored, resolve the holder against the
+///    registry and write `holder_entry_id` + `disclosure` (the pair is
+///    validated with the domain rule first);
+/// 3. re-assert the reverse `WorldSheet` rule — a linked sheet may not lose
+///    its eligibility (private/deleted/re-classified/moved), which refuses
+///    `invalid_world_sheet` instead of silently unlinking the binding;
+/// 4. under [`AuthoringRevision::Bump`], bump the owning World's
+///    `knowledge_revision` exactly once.
+///
+/// `governance = None` (an omitted patch audience) preserves the stored pair
+/// and only re-asserts the guards.
+///
+/// # Errors
+///
+/// Returns [`LocalDbError::ActorNotFound`] for a missing/foreign/non-World row,
+/// the validation error family for a malformed pair,
+/// [`LocalDbError::HolderStateInvalid`] for an unregistered holder,
+/// `invalid_world_sheet` when step 3 refuses, and `LocalDbError` on database
+/// failure. Every refusal leaves the transaction uncommitted (zero mutation).
+pub async fn author_world_knowledge_governance_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    world_id: &str,
+    entry_id: &str,
+    governance: Option<&KnowledgeGovernance>,
+    revision: AuthoringRevision,
+) -> Result<(), LocalDbError> {
+    let stored: Option<(Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT holder_entry_id, disclosure FROM kb_key_blocks \
+         WHERE key_block_id = ? AND owner_kind = 'world' AND world_id = ?",
+    )
+    .bind(entry_id)
+    .bind(world_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    if stored.is_none() {
+        return Err(LocalDbError::ActorNotFound {
+            resource: "knowledge_entry",
+            id: entry_id.to_string(),
+        });
+    }
+    if let Some(governance) = governance {
+        validate_authored_governance(governance)?;
+        if let Some(holder) = governance.holder_entry_id.as_deref() {
+            require_registered_holder_tx(tx, holder).await?;
+        }
+        sqlx::query(
+            "UPDATE kb_key_blocks SET holder_entry_id = ?, disclosure = ? \
+             WHERE key_block_id = ? AND owner_kind = 'world' AND world_id = ?",
+        )
+        .bind(governance.holder_entry_id.as_deref())
+        .bind(governance.disclosure.as_deref())
+        .bind(entry_id)
+        .bind(world_id)
+        .execute(&mut **tx)
+        .await?;
+    }
+    crate::actor_world_binding::assert_linked_world_sheets_remain_eligible_tx(tx, entry_id).await?;
+    match revision {
+        AuthoringRevision::Bump => bump_world_knowledge_revision_tx(tx, world_id).await,
+        AuthoringRevision::Keep => Ok(()),
     }
 }
 
@@ -1382,8 +1560,17 @@ impl KbStore for SqliteKbStore {
         validate_body(kb.block_type, kb.body.as_ref(), self.validation_mode)
             .map_err(validation_err)?;
 
+        // v1.191 P1 T7 (durable §3): one `BEGIN IMMEDIATE` transaction so the
+        // reverse `WorldSheet` rule can be re-asserted against the stored row
+        // after the write and the whole edit rolls back when a linked sheet
+        // would become ineligible. Dropping the transaction on any early
+        // return rolls it back (zero mutation).
+        let mut tx = crate::begin_immediate(&self.pool)
+            .await
+            .map_err(|e| KbStoreError::Storage(e.to_string()))?;
+
         // Verify exists
-        let existing = self.get_knowledge_entry(&kb.entry_id).await?;
+        let existing = get_knowledge_entry_in_tx(&mut tx, &kb.entry_id).await?;
 
         // v1.184 P1 / v1.191 P1 T3: owner and the native governance pair are
         // immutable through patch APIs — moving ownership or governance is
@@ -1425,7 +1612,7 @@ impl KbStore for SqliteKbStore {
                 .bind(&block_type_str)
                 .bind(&kb.canonical_name)
                 .bind(&kb.entry_id)
-                .fetch_one(&*self.pool)
+                .fetch_one(&mut *tx)
                 .await
                 .map_err(|e| db_err(&e))?;
 
@@ -1495,15 +1682,39 @@ impl KbStore for SqliteKbStore {
         .bind(&extensions_nexus_json)
         .bind(&modules_json)
         .bind(&kb.entry_id)
-        .execute(&*self.pool)
+        .execute(&mut *tx)
         .await
         .map_err(|e| db_err(&e))?;
 
+        // v1.191 P1 T7 (durable §3): a status/type edit may not strip an entry
+        // that a binding links as its `WorldSheet` of its eligibility —
+        // `invalid_world_sheet` instead of silently unlinking.
+        crate::actor_world_binding::assert_linked_world_sheets_remain_eligible_tx(
+            &mut tx,
+            &kb.entry_id,
+        )
+        .await
+        .map_err(|err| match err {
+            LocalDbError::ActorContractConflict {
+                code: crate::error::ActorContractConflict::InvalidWorldSheet,
+            } => KbStoreError::LinkedWorldSheet(kb.entry_id.clone()),
+            other => KbStoreError::Storage(other.to_string()),
+        })?;
+
+        tx.commit().await.map_err(|e| db_err(&e))?;
         Ok(())
     }
 
     async fn delete_knowledge_entry(&self, key_block_id: &str) -> Result<(), KbStoreError> {
         let now = chrono::Utc::now().to_rfc3339();
+
+        // v1.191 P1 T7 (durable §3): the soft delete is a status change, so a
+        // row linked as a binding's `WorldSheet` refuses with
+        // `invalid_world_sheet` (mapped from `LinkedWorldSheet`) rather than
+        // leaving the binding pointing at a non-live sheet.
+        let mut tx = crate::begin_immediate(&self.pool)
+            .await
+            .map_err(|e| KbStoreError::Storage(e.to_string()))?;
 
         let result = sqlx::query!(
             r#"UPDATE kb_key_blocks SET status = 'deleted', updated_at = ?
@@ -1511,7 +1722,7 @@ impl KbStore for SqliteKbStore {
             now,
             key_block_id,
         )
-        .execute(&*self.pool)
+        .execute(&mut *tx)
         .await
         .map_err(|e| db_err(&e))?;
 
@@ -1519,6 +1730,19 @@ impl KbStore for SqliteKbStore {
             return Err(KbStoreError::NotFound(key_block_id.to_string()));
         }
 
+        crate::actor_world_binding::assert_linked_world_sheets_remain_eligible_tx(
+            &mut tx,
+            key_block_id,
+        )
+        .await
+        .map_err(|err| match err {
+            LocalDbError::ActorContractConflict {
+                code: crate::error::ActorContractConflict::InvalidWorldSheet,
+            } => KbStoreError::LinkedWorldSheet(key_block_id.to_string()),
+            other => KbStoreError::Storage(other.to_string()),
+        })?;
+
+        tx.commit().await.map_err(|e| db_err(&e))?;
         Ok(())
     }
 }

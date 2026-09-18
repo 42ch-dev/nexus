@@ -3,8 +3,8 @@
 
 use nexus_contracts::{
     world_kb_patch_entity_request::{
-        NexusWorldKbEntityPatch, NexusWorldKbEntityPatchModulesKey,
-        NexusWorldKbEntityPatchModulesValue,
+        NexusWorldKbEntityPatch, NexusWorldKbEntityPatchAudience,
+        NexusWorldKbEntityPatchModulesKey, NexusWorldKbEntityPatchModulesValue,
     },
     BlockType, PaginationInfo, WorldKbCandidateProjection, WorldKbCandidatesResponse,
     WorldKbEntityProjection, WorldKbGraphResponse, WorldKbKeyBlockStateResponse,
@@ -12,7 +12,10 @@ use nexus_contracts::{
     WorldKbPatchRelationshipResponse, WorldKbPromoteCandidateRequest,
     WorldKbPromoteCandidateResponse, WorldKbRelationshipProjection, WorldKbSourceAnchorProjection,
 };
-use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
+use nexus_knowledge::world_kb::knowledge_entry::{
+    resolve_authored_governance, KnowledgeAudience, KnowledgeAuthoringOp, KnowledgeEntryBody,
+    KnowledgeGovernance, KnowledgeEntryRecord,
+};
 use nexus_knowledge::world_kb::store::KbStoreError;
 use nexus_knowledge::world_kb::validation::{
     validate_body, validate_canonical_name, ValidationMode,
@@ -501,12 +504,13 @@ pub mod patch {
     use super::{
         db_err, get_knowledge_entry_in_tx, guards, is_world_conflict_reject,
         knowledge_record_to_spoke, local_db_err, project_entity, put_knowledge_entry_in_tx,
-        set_nexus_body, spoke_to_knowledge_record, store_err, validate_body,
-        validate_canonical_name, validation_summary, wire_cast, BlockType, CoreError, CoreResult,
-        HashMap, KbStoreError, KnowledgeEntryBody, KnowledgeEntryRecord, NexusWorldKbEntityPatch,
-        NexusWorldKbEntityPatchModulesKey, NexusWorldKbEntityPatchModulesValue,
-        SpokeKnowledgeEntry, SpokeReject, SpokeRejectCode, SpokeResult, Sqlite, SqlitePool,
-        ValidationMode, WorldKbPatchEntityRequest, WorldKbPatchEntityResponse,
+        resolve_authored_governance, set_nexus_body, spoke_to_knowledge_record, store_err,
+        validate_body, validate_canonical_name, validation_summary, wire_cast, BlockType,
+        CoreError, CoreResult, HashMap, KbStoreError, KnowledgeAudience, KnowledgeAuthoringOp,
+        KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeGovernance, NexusWorldKbEntityPatch,
+        NexusWorldKbEntityPatchModulesKey, NexusWorldKbEntityPatchModulesValue, SpokeKnowledgeEntry,
+        NexusWorldKbEntityPatchAudience, SpokeReject, SpokeRejectCode, SpokeResult, Sqlite,
+        SqlitePool, ValidationMode, WorldKbPatchEntityRequest, WorldKbPatchEntityResponse,
     };
 
     pub async fn patch_entity(
@@ -559,9 +563,30 @@ pub mod patch {
         if patch_is_empty(&req.patch) {
             return Err(CoreError::InvalidInput {
                 field: "patch".to_string(),
-                reason: "at least one of title/body/aliases/block_type/modules must be provided"
+                reason: "at least one of title/body/aliases/block_type/modules/audience must be \
+                         provided"
                     .to_string(),
             });
+        }
+        // v1.191 P1 T7 (durable §3): the admitted audience mutation moves the
+        // native governance pair in the same revision as the content edit.
+        let governance = resolve_world_patch_governance(
+            pool,
+            creator_id,
+            world_id,
+            req.patch.audience.as_ref(),
+        )
+        .await?;
+        if !patch_has_content(&req.patch) && governance_is_stored(&kb, governance.as_ref()) {
+            // No-op: identical content and identical governance. Both
+            // revisions stay untouched (durable §3).
+            let response = WorldKbPatchEntityResponse {
+                entity: wire_cast(project_entity(&kb)),
+                version: current_version,
+                validation_summary: wire_cast(validation_summary(&[], &[])),
+            };
+            tx.commit().await.map_err(|e| db_err(&e))?;
+            return Ok(response);
         }
 
         let new_name = req.patch.title.as_ref().map(|t| t.to_string());
@@ -588,6 +613,18 @@ pub mod patch {
                 return Err(e);
             }
         };
+        // The governance half of the same authoring transaction: write the
+        // resolved pair (or preserve it), re-assert the reverse WorldSheet
+        // rule, and bump the owning World's knowledge revision exactly once.
+        nexus_local_db::kb_store::author_world_knowledge_governance_tx(
+            &mut tx,
+            world_id,
+            &req.entity_id,
+            governance.as_ref(),
+            nexus_local_db::kb_store::AuthoringRevision::Bump,
+        )
+        .await
+        .map_err(authoring_db_err)?;
         let new_version = persisted.revision.unwrap_or(0);
         let response = WorldKbPatchEntityResponse {
             entity: wire_cast(project_entity(&persisted)),
@@ -596,6 +633,130 @@ pub mod patch {
         };
         tx.commit().await.map_err(|e| db_err(&e))?;
         Ok(response)
+    }
+
+    /// Resolve the authored World-row audience into the native governance pair
+    /// (durable §3).
+    ///
+    /// Admission — never the author — resolves the holder: `author-only` is
+    /// the admitted controlling Creator's holder, and `character-private`
+    /// requires an owned **active** Character that holds an active binding to
+    /// this owned World. A malformed or unpermitted identity refuses with no
+    /// mutation.
+    ///
+    /// # Errors
+    ///
+    /// [`CoreError::InvalidInput`] for a malformed/unpermitted audience,
+    /// [`CoreError::NotFound`] for a foreign/missing Character, and the
+    /// retained activation conflicts otherwise.
+    async fn resolve_world_patch_governance(
+        pool: &SqlitePool,
+        creator_id: &str,
+        world_id: &str,
+        wire: Option<&NexusWorldKbEntityPatchAudience>,
+    ) -> CoreResult<Option<KnowledgeGovernance>> {
+        let audience = match wire {
+            None => None,
+            Some(NexusWorldKbEntityPatchAudience::Shared) => Some(KnowledgeAudience::Shared),
+            Some(NexusWorldKbEntityPatchAudience::AuthorOnly) => Some(KnowledgeAudience::AuthorOnly),
+            Some(NexusWorldKbEntityPatchAudience::CharacterPrivate(character_id)) => Some(
+                KnowledgeAudience::character_private(character_id.to_string()).map_err(|e| {
+                    CoreError::InvalidInput {
+                        field: "patch.audience".to_string(),
+                        reason: e.to_string(),
+                    }
+                })?,
+            ),
+        };
+        let resolved_holder = match &audience {
+            None | Some(KnowledgeAudience::Shared) => None,
+            Some(KnowledgeAudience::AuthorOnly) => Some(
+                crate::actors::require_actor_holder(
+                    pool,
+                    creator_id,
+                    &crate::actors::AdmittedActor::Creator {
+                        creator_id: creator_id.to_string(),
+                    },
+                )
+                .await?,
+            ),
+            Some(KnowledgeAudience::CharacterPrivate { character_id }) => {
+                crate::actors::require_active_owned_character(pool, creator_id, character_id)
+                    .await?;
+                if !nexus_local_db::has_active_binding_to_world(
+                    pool,
+                    creator_id,
+                    character_id,
+                    world_id,
+                )
+                .await
+                .map_err(crate::error::actor_db_err)?
+                {
+                    return Err(CoreError::InvalidInput {
+                        field: "patch.audience".to_string(),
+                        reason: format!(
+                            "character-private audience requires the named Character to hold an \
+                             active binding to world {world_id}"
+                        ),
+                    });
+                }
+                Some(
+                    crate::actors::require_actor_holder(
+                        pool,
+                        creator_id,
+                        &crate::actors::AdmittedActor::Character {
+                            character_id: character_id.clone(),
+                        },
+                    )
+                    .await?,
+                )
+            }
+        };
+        resolve_authored_governance(
+            KnowledgeAuthoringOp::Patch,
+            audience.as_ref(),
+            resolved_holder.as_deref(),
+        )
+        .map_err(|e| CoreError::InvalidInput {
+            field: "patch.audience".to_string(),
+            reason: e.to_string(),
+        })
+    }
+
+    /// Whether the patch asks for any material content field.
+    fn patch_has_content(patch: &NexusWorldKbEntityPatch) -> bool {
+        patch.title.is_some()
+            || !patch.body.is_empty()
+            || !patch.aliases.is_empty()
+            || patch.block_type.is_some()
+            || !patch.modules.is_empty()
+    }
+
+    /// Whether the resolved governance equals the stored pair — an authored
+    /// audience that changes nothing.
+    fn governance_is_stored(kb: &KnowledgeEntryRecord, governance: Option<&KnowledgeGovernance>) -> bool {
+        match governance {
+            None => true,
+            Some(governance) => {
+                kb.holder_entry_id == governance.holder_entry_id
+                    && kb.disclosure == governance.disclosure
+            }
+        }
+    }
+
+    /// Map the admitted World authoring side-car refusal: the stable
+    /// `invalid_world_sheet` contract conflict keeps its wire code, everything
+    /// else keeps the retained world-kb storage mapping.
+    fn authoring_db_err(err: nexus_local_db::LocalDbError) -> CoreError {
+        if matches!(
+            &err,
+            nexus_local_db::LocalDbError::ActorContractConflict {
+                code: nexus_local_db::ActorContractConflict::InvalidWorldSheet,
+            }
+        ) {
+            return crate::error::actor_db_err(err);
+        }
+        local_db_err(err)
     }
 
     async fn patch_entity_create_in_tx(
@@ -656,6 +817,16 @@ pub mod patch {
         fresh.body = body_for_validation;
         apply_patch_modules(&mut fresh, None, &req.patch);
 
+        // v1.191 P1 T7 (durable §3): resolve the authored audience before the
+        // row is written, so an unpermitted identity refuses with no mutation.
+        let governance = resolve_world_patch_governance(
+            pool,
+            creator_id,
+            world_id,
+            req.patch.audience.as_ref(),
+        )
+        .await?;
+
         let spoke_entry = build_spoke_entry(&fresh);
         let put_result = put_knowledge_entry_in_tx(pool, &mut tx, spoke_entry, None).await;
         let persisted = match map_put_response(put_result, &req.entity_id, &mut tx).await {
@@ -664,6 +835,20 @@ pub mod patch {
                 return Err(e);
             }
         };
+        // A create authors governance under the same transaction as the row.
+        // The revision pair stays put: it is the invalidation signal for the
+        // entries an admitted snapshot may already hold, and T5's accepted
+        // admission fixture pins `world: 0` across creates (durable §4.3
+        // speaks of changes to a stored entry's governance).
+        nexus_local_db::kb_store::author_world_knowledge_governance_tx(
+            &mut tx,
+            world_id,
+            &req.entity_id,
+            governance.as_ref(),
+            nexus_local_db::kb_store::AuthoringRevision::Keep,
+        )
+        .await
+        .map_err(authoring_db_err)?;
         let new_version = persisted.revision.unwrap_or(0);
         let response = WorldKbPatchEntityResponse {
             entity: wire_cast(project_entity(&persisted)),
@@ -791,11 +976,7 @@ pub mod patch {
     }
 
     fn patch_is_empty(patch: &NexusWorldKbEntityPatch) -> bool {
-        patch.title.is_none()
-            && patch.body.is_empty()
-            && patch.aliases.is_empty()
-            && patch.block_type.is_none()
-            && patch.modules.is_empty()
+        !patch_has_content(patch) && patch.audience.is_none()
     }
 
     fn build_post_patch(

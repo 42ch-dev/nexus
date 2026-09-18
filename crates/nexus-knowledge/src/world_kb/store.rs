@@ -58,6 +58,16 @@ pub enum KbStoreError {
     #[error("governance is immutable through the ordinary store path for entry {0}")]
     ImmutableGovernance(String),
 
+    /// A write would leave an entry that a binding links as its `WorldSheet`
+    /// ineligible (durable §3): a linked sheet must stay a live, World-owned,
+    /// `character` entry of the same World with no disclosure. The guarded
+    /// write is refused so the binding is never silently unlinked.
+    ///
+    /// Only a backend that stores binding links can raise this; the in-memory
+    /// backend carries no links, so it never observes the condition.
+    #[error("entry {0} is linked as a WorldSheet and would become ineligible")]
+    LinkedWorldSheet(String),
+
     /// Storage backend error.
     #[error("storage error: {0}")]
     Storage(String),

@@ -16,6 +16,7 @@ use crate::error::{actor_db_err, actor_insert_db_err, db_err, CoreError, CoreRes
 use crate::principal::Principal;
 use crate::service::CoreService;
 use nexus_contracts::generated::daemon_api::actor_knowledge::add_knowledge_entry_request::AddKnowledgeEntryRequestAudience;
+use nexus_contracts::generated::daemon_api::actor_knowledge::update_knowledge_entry_request::UpdateKnowledgeEntryRequestAudience;
 use nexus_knowledge::world_kb::errors::KbError;
 use nexus_knowledge::world_kb::knowledge_entry::{
     resolve_authored_governance, stored_created_at_order_millis, KnowledgeAudience,
@@ -986,7 +987,9 @@ impl CoreService {
 
         self.verify_principal(principal)?;
         let creator_id = principal.creator_id();
-        let owner = match request.owner_kind {
+        // The owner container plus its owning Character (durable §3: a
+        // Character/binding container authorizes only that Character).
+        let (owner, owner_character_id) = match request.owner_kind {
             AddKnowledgeEntryRequestOwnerKind::World => {
                 if summary_present {
                     return Err(CoreError::ActorInput(
@@ -999,7 +1002,7 @@ impl CoreService {
                     )
                 })?;
                 require_active_owned_world(&self.inner.pool, creator_id, world_id).await?;
-                KnowledgeOwnerRef::world(world_id.to_string())
+                (KnowledgeOwnerRef::world(world_id.to_string()), None)
             }
             AddKnowledgeEntryRequestOwnerKind::Character => {
                 let character_id = str_field(request.character_id.as_ref()).ok_or_else(|| {
@@ -1008,7 +1011,10 @@ impl CoreService {
                     )
                 })?;
                 require_active_owned_character(&self.inner.pool, creator_id, character_id).await?;
-                KnowledgeOwnerRef::character(character_id.to_string())
+                (
+                    KnowledgeOwnerRef::character(character_id.to_string()),
+                    Some(character_id.to_string()),
+                )
             }
             AddKnowledgeEntryRequestOwnerKind::ActorWorldBinding => {
                 let character_id = str_field(request.character_id.as_ref()).ok_or_else(|| {
@@ -1030,7 +1036,10 @@ impl CoreService {
                 require_active_owned_world(&self.inner.pool, creator_id, world_id).await?;
                 require_active_binding(&self.inner.pool, character_id, binding_id, world_id)
                     .await?;
-                KnowledgeOwnerRef::actor_world_binding(binding_id.to_string())
+                (
+                    KnowledgeOwnerRef::actor_world_binding(binding_id.to_string()),
+                    Some(character_id.to_string()),
+                )
             }
         };
         let block_type: nexus_contracts::BlockType = map_wire_one(request.block_type)?;
@@ -1049,10 +1058,13 @@ impl CoreService {
         // World-only `creator_only` carrier. Admission — never the author —
         // resolves the intended holder (T3 registry, fail-closed, no
         // provisioning) and the conversion goes through the T2 resolver.
-        // T7 owns the remaining permitted-identity semantics (active/bound
-        // Character, patch CAS).
+        // T7 owns the permitted-identity rules: a private audience must name a
+        // permitted **active** identity (and, on a World row, one actively
+        // bound to that World), while a Character/binding row may only target
+        // its own owning Character.
         let audience = authored_audience(request.audience.as_ref())?;
         let resolved_holder = match &audience {
+            None | Some(KnowledgeAudience::Shared) => None,
             Some(KnowledgeAudience::AuthorOnly) => Some(
                 require_actor_holder(
                     &self.inner.pool,
@@ -1063,17 +1075,41 @@ impl CoreService {
                 )
                 .await?,
             ),
-            Some(KnowledgeAudience::CharacterPrivate { character_id }) => Some(
-                require_actor_holder(
-                    &self.inner.pool,
-                    creator_id,
-                    &AdmittedActor::Character {
-                        character_id: character_id.clone(),
-                    },
+            Some(KnowledgeAudience::CharacterPrivate { character_id }) => {
+                require_active_owned_character(&self.inner.pool, creator_id, character_id).await?;
+                if let KnowledgeOwnerRef::World(world_id) = &owner {
+                    // Durable §3: on a World row the named Character must have
+                    // an active binding to that owned World.
+                    if !nexus_local_db::has_active_binding_to_world(
+                        &self.inner.pool,
+                        creator_id,
+                        character_id,
+                        world_id,
+                    )
+                    .await
+                    .map_err(actor_db_err)?
+                    {
+                        return Err(CoreError::ActorInput(format!(
+                            "character-private audience requires the named Character to hold an \
+                             active binding to world {world_id}"
+                        )));
+                    }
+                } else if owner_character_id.as_deref() != Some(character_id.as_str()) {
+                    // Durable §3: Character/binding rows can target only their
+                    // owning Character — a foreign identity stays hidden.
+                    return Err(not_found("character", character_id));
+                }
+                Some(
+                    require_actor_holder(
+                        &self.inner.pool,
+                        creator_id,
+                        &AdmittedActor::Character {
+                            character_id: character_id.clone(),
+                        },
+                    )
+                    .await?,
                 )
-                .await?,
-            ),
-            None | Some(KnowledgeAudience::Shared) => None,
+            }
         };
         let governance = resolve_authored_governance(
             KnowledgeAuthoringOp::Create,
@@ -1183,12 +1219,25 @@ impl CoreService {
     }
 
     /// Patch one owned Character knowledge entry behind the shared activity
-    /// lease (CAS-checked).
+    /// lease (CAS-checked), optionally moving the native governance pair.
+    ///
+    /// `audience` is the admitted author audience (durable §3): `None` omits
+    /// the member and preserves the stored `holder_entry_id`/`disclosure`
+    /// pair, `Some(Shared)` explicitly clears both, and a private audience
+    /// resolves the admitted holder — `author-only` the controlling Creator's
+    /// holder, `character-private` only the owning Character of this
+    /// Character/binding row.
+    ///
+    /// Leases (durable §4.3): a governance edit takes the **Character
+    /// exclusive** knowledge lease (which already excludes every in-flight
+    /// ActorView/stream on that Character); an ordinary content edit keeps the
+    /// retained shared activity lease.
     ///
     /// # Errors
     /// Returns [`CoreError::AuthRequired`] when the principal fails
     /// verification and the mapped storage conflicts otherwise
-    /// (`knowledge_revision_conflict`, `knowledge_entry_not_mutable`).
+    /// (`knowledge_revision_conflict`, `knowledge_entry_not_mutable`,
+    /// `holder_state_invalid`, `character_busy`).
     pub async fn patch_actor_knowledge_entry(
         &self,
         principal: &Principal,
@@ -1197,19 +1246,78 @@ impl CoreService {
         expected_revision: i64,
         canonical_name_patch: Option<&str>,
         summary_patch: nexus_local_db::FieldPatch<&str>,
+        audience: Option<KnowledgeAudience>,
     ) -> CoreResult<KnowledgeEntryRecord> {
         self.verify_principal(principal)?;
-        let _activity = self
-            .acquire_actor_activity(
-                principal,
-                &AdmittedActor::Character {
-                    character_id: character_id.clone(),
-                },
+        let creator_id = principal.creator_id();
+        let admitted_actor = AdmittedActor::Character {
+            character_id: character_id.clone(),
+        };
+        // Durable §4.3: a disclosure change is a Character-governance edit and
+        // takes the exclusive Character lease; an activity lease would be the
+        // weaker (shared) fence and would self-block the exclusive one.
+        let _governance_lease = if audience.is_some() {
+            Some(
+                self.acquire_knowledge_governance(
+                    principal,
+                    crate::actor_fence::ActorFenceKind::Character,
+                    character_id.clone(),
+                )
+                .await?,
             )
-            .await?;
-        nexus_local_db::update_actor_knowledge_entry(
+        } else {
+            None
+        };
+        let _activity = if audience.is_some() {
+            None
+        } else {
+            Some(
+                self.acquire_actor_activity(principal, &admitted_actor)
+                    .await?,
+            )
+        };
+
+        let resolved_holder = match &audience {
+            None | Some(KnowledgeAudience::Shared) => None,
+            Some(KnowledgeAudience::AuthorOnly) => Some(
+                require_actor_holder(
+                    &self.inner.pool,
+                    creator_id,
+                    &AdmittedActor::Creator {
+                        creator_id: creator_id.to_string(),
+                    },
+                )
+                .await?,
+            ),
+            Some(KnowledgeAudience::CharacterPrivate { character_id: named }) => {
+                // Durable §3: a Character/binding row can target only its
+                // owning Character — a foreign identity stays hidden.
+                if named != &character_id {
+                    return Err(not_found("character", named));
+                }
+                require_active_owned_character(&self.inner.pool, creator_id, named).await?;
+                Some(
+                    require_actor_holder(
+                        &self.inner.pool,
+                        creator_id,
+                        &AdmittedActor::Character {
+                            character_id: named.clone(),
+                        },
+                    )
+                    .await?,
+                )
+            }
+        };
+        let governance = resolve_authored_governance(
+            KnowledgeAuthoringOp::Patch,
+            audience.as_ref(),
+            resolved_holder.as_deref(),
+        )
+        .map_err(kb_authoring_err)?;
+
+        nexus_local_db::author_actor_knowledge_entry(
             &self.inner.pool,
-            principal.creator_id(),
+            creator_id,
             &character_id,
             &entry_id,
             expected_revision,
@@ -1217,6 +1325,7 @@ impl CoreService {
                 canonical_name: canonical_name_patch,
                 summary: summary_patch,
             },
+            governance.as_ref(),
         )
         .await
         .map_err(actor_db_err)
@@ -1345,6 +1454,35 @@ fn authored_audience(
             Ok(Some(KnowledgeAudience::AuthorOnly))
         }
         Some(AddKnowledgeEntryRequestAudience::CharacterPrivate(character_id)) => {
+            KnowledgeAudience::character_private(character_id.to_string())
+                .map(Some)
+                .map_err(kb_authoring_err)
+        }
+    }
+}
+
+/// Map the closed wire **patch** audience onto the domain audience (durable
+/// §3).
+///
+/// The patch sibling of [`authored_audience`]: `None` omits the member (the
+/// stored governance pair is preserved), `Some(Shared)` clears both columns,
+/// and a private audience is resolved by admission against the permitted
+/// stored identity — a caller never supplies a holder id or a management flag.
+///
+/// # Errors
+///
+/// Returns [`CoreError::ActorInput`] for a malformed `character-private`
+/// Character id (the domain constructor owns that rule).
+pub fn authored_patch_audience(
+    wire: Option<&UpdateKnowledgeEntryRequestAudience>,
+) -> CoreResult<Option<KnowledgeAudience>> {
+    match wire {
+        None => Ok(None),
+        Some(UpdateKnowledgeEntryRequestAudience::Shared) => Ok(Some(KnowledgeAudience::Shared)),
+        Some(UpdateKnowledgeEntryRequestAudience::AuthorOnly) => {
+            Ok(Some(KnowledgeAudience::AuthorOnly))
+        }
+        Some(UpdateKnowledgeEntryRequestAudience::CharacterPrivate(character_id)) => {
             KnowledgeAudience::character_private(character_id.to_string())
                 .map(Some)
                 .map_err(kb_authoring_err)
