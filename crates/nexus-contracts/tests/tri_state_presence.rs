@@ -4,8 +4,13 @@
 //! `PatchWorkRequest.{world_id,story_ref}` must deserialize with presence
 //! preserved — absent (keep) / `null` (clear) / value (set) — and serialize
 //! back without losing the clear state.
+//!
+//! The same file pins the *other* half of the omission contract: a property
+//! that the schema declares both `required` and nullable keeps its required
+//! status (omission is rejected, `null` is a value), which the typify 0.8
+//! cutover tightened rather than relaxed.
 
-use nexus_contracts::{PatchWorkRequest, UpdateFindingRequest};
+use nexus_contracts::{CoreServiceStopRequest, PatchWorkRequest, UpdateFindingRequest};
 
 #[test]
 fn update_finding_rule_suggestion_keeps_all_three_states() {
@@ -70,4 +75,31 @@ fn patch_work_binding_fields_keep_all_three_states() {
         set.story_ref,
         Some(serde_json::Value::String("ref-1".into()))
     );
+}
+
+/// A schema-`required` property that is also nullable stays required: the
+/// generated carrier is `Option<T>` carrying typify 0.8's
+/// `#[serde(deserialize_with = "Option::deserialize")]`, so an omitted key is
+/// a deserialization error while an explicit `null` decodes to `None`.
+/// `core-service-stop-request.schema.json` requires both `expected_instance_id`
+/// and the nullable `expected_engine_epoch`.
+#[test]
+fn required_nullable_field_rejects_omission_and_accepts_null() {
+    let omitted =
+        serde_json::from_str::<CoreServiceStopRequest>(r#"{"expected_instance_id":"inst-1"}"#)
+            .expect_err("omitting a required nullable property must not decode");
+    assert!(
+        omitted.to_string().contains("expected_engine_epoch"),
+        "the omission error must name the field: {omitted}"
+    );
+
+    let null: CoreServiceStopRequest =
+        serde_json::from_str(r#"{"expected_instance_id":"inst-1","expected_engine_epoch":null}"#)
+            .expect("explicit null is the required value's null state");
+    assert_eq!(null.expected_engine_epoch, None);
+
+    let epoch: CoreServiceStopRequest =
+        serde_json::from_str(r#"{"expected_instance_id":"inst-1","expected_engine_epoch":7}"#)
+            .expect("a present integer is a valid required value");
+    assert_eq!(epoch.expected_engine_epoch, Some(7));
 }
