@@ -723,6 +723,170 @@ mod tests {
         assert_eq!(message, "tool_not_authorized: tools.t5.echo");
     }
 
+    /// Backend whose `call_tool` blocks until the fixture releases it, so a
+    /// real `tools/call` can be in flight when the client cancels it.
+    #[derive(Clone)]
+    struct GatedBackend {
+        entered: Arc<tokio::sync::Notify>,
+        release: Arc<tokio::sync::Notify>,
+        calls: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl GatedBackend {
+        fn new() -> Self {
+            Self {
+                entered: Arc::new(tokio::sync::Notify::new()),
+                release: Arc::new(tokio::sync::Notify::new()),
+                calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            }
+        }
+
+        fn call_count(&self) -> usize {
+            self.calls.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    impl McpBackend for GatedBackend {
+        fn list_tools(&self) -> impl Future<Output = Result<Vec<CatalogRow>, McpError>> + Send {
+            std::future::ready(Ok(Vec::new()))
+        }
+
+        fn call_tool(
+            &self,
+            _tool_name: &str,
+            _parameters: serde_json::Value,
+        ) -> impl Future<Output = Result<ToolCallOutcome, McpError>> + Send {
+            let entered = Arc::clone(&self.entered);
+            let release = Arc::clone(&self.release);
+            let calls = Arc::clone(&self.calls);
+            async move {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                entered.notify_one();
+                release.notified().await;
+                Ok(ToolCallOutcome::Success(
+                    serde_json::json!({ "completed_after_cancel": true }),
+                ))
+            }
+        }
+    }
+
+    /// v1.191 P0 T4 (Step 5): cancellation coverage on the real wire.
+    ///
+    /// rmcp 3.3 cancellation is cooperative: `notifications/cancelled`
+    /// cancels the in-flight request's context token and unregisters the
+    /// request, and the response the handler still goes on to produce is
+    /// dropped (`dropping response for cancelled request`). This bridge's
+    /// tool family never observes the token, so the pinned contract is: the
+    /// backend still runs exactly once, the cancelled id gets NO response on
+    /// the wire, and the session keeps serving the next call.
+    #[tokio::test]
+    async fn cancelled_tools_call_is_answered_with_silence_and_session_survives() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+
+        let backend = GatedBackend::new();
+        let handler = McpBridgeHandler {
+            backend: backend.clone(),
+            policy: VisibilityPolicy::absent(),
+        };
+        let (client_io, server_io) = tokio::io::duplex(4096);
+        tokio::spawn(async move {
+            let service = serve_server(handler, server_io).await.expect("server init");
+            let _ = service.waiting().await;
+        });
+        let (read_half, mut write_half) = tokio::io::split(client_io);
+        let mut lines = tokio::io::BufReader::new(read_half).lines();
+
+        // initialize + initialized at the legacy-negotiated version.
+        write_half
+            .write_all(
+                br#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"cancel-probe","version":"0"}}}"#,
+            )
+            .await
+            .expect("write initialize");
+        write_half.write_all(b"\n").await.expect("newline");
+        let init_line = lines
+            .next_line()
+            .await
+            .expect("initialize response")
+            .expect("line present");
+        assert!(
+            init_line.contains("\"id\":1"),
+            "initialize is answered before the probe starts: {init_line}"
+        );
+        write_half
+            .write_all(br#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#)
+            .await
+            .expect("write initialized");
+        write_half.write_all(b"\n").await.expect("newline");
+
+        // An in-flight call, then the cancellation for that request id.
+        write_half
+            .write_all(
+                br#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"tools.t5.echo","arguments":{"x":1}}}"#,
+            )
+            .await
+            .expect("write tools/call");
+        write_half.write_all(b"\n").await.expect("newline");
+        backend.entered.notified().await;
+        write_half
+            .write_all(
+                br#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":2,"reason":"probe"}}"#,
+            )
+            .await
+            .expect("write notifications/cancelled");
+        write_half.write_all(b"\n").await.expect("newline");
+        backend.release.notify_one();
+
+        // The cancelled request is answered with silence: its response is
+        // dropped, so nothing reaches the wire even though the handler (which
+        // ignores the cancellation token) finished.
+        let dropped =
+            tokio::time::timeout(std::time::Duration::from_secs(1), lines.next_line()).await;
+        assert!(
+            dropped.is_err(),
+            "a cancelled request must get no response: {dropped:?}"
+        );
+        assert_eq!(
+            backend.call_count(),
+            1,
+            "the backend still executed exactly once for the cancelled call"
+        );
+
+        // The session survives the cancellation: the next call is dispatched
+        // and answered, with nothing interleaved ahead of it.
+        write_half
+            .write_all(
+                br#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"tools.t5.echo","arguments":{"x":2}}}"#,
+            )
+            .await
+            .expect("write second tools/call");
+        write_half.write_all(b"\n").await.expect("newline");
+        backend.entered.notified().await;
+        backend.release.notify_one();
+        let next_line = lines
+            .next_line()
+            .await
+            .expect("second response")
+            .expect("line present");
+        let next: serde_json::Value =
+            serde_json::from_str(&next_line).expect("second response parses");
+        assert_eq!(
+            next["id"],
+            serde_json::json!(3),
+            "the session keeps serving after a cancelled call: {next_line}"
+        );
+        assert_eq!(
+            next["result"]["structuredContent"],
+            serde_json::json!({ "completed_after_cancel": true }),
+            "the surviving call carries the backend result: {next_line}"
+        );
+        assert_eq!(
+            backend.call_count(),
+            2,
+            "exactly one backend execution per request"
+        );
+    }
+
     /// T1 review gap 6: legacy negotiated-version wire proof. A raw
     /// JSON-RPC client negotiates the OLDEST supported protocol version
     /// (2024-11-05) over the real NDJSON transport; the negotiated

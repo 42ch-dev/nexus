@@ -43,8 +43,8 @@ use rmcp::model::{
     ClientNotification, ClientRequest, ClientResult, JsonRpcMessage, ServerNotification,
     ServerRequest, ServerResult,
 };
+use rmcp::serve_server;
 use rmcp::transport::sink_stream::SinkStreamTransport;
-use rmcp::{serve_server, ErrorData as McpError};
 
 use crate::connect::mcp_bridge::{McpBackend, McpBridgeHandler};
 use crate::connect::visibility::VisibilityPolicy;

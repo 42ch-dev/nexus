@@ -681,6 +681,16 @@ mod tests {
             403,
             "same-origin request should pass Origin gate"
         );
+        // V1.191 P0 T4 (#322): the CORS layer's header output is part of the
+        // tower-http bump gate — the matched allowlist entry is echoed back.
+        assert_eq!(
+            response
+                .headers()
+                .get("access-control-allow-origin")
+                .and_then(|value| value.to_str().ok()),
+            Some("http://127.0.0.1:8420"),
+            "the allowed origin is echoed on the response"
+        );
     }
 
     #[tokio::test]
@@ -748,6 +758,26 @@ mod tests {
             response.status_code(),
             403,
             "OPTIONS preflight must not be rejected by Origin middleware"
+        );
+        assert!(
+            response.status_code().is_success(),
+            "the CORS layer answers the preflight: {}",
+            response.status_code()
+        );
+        let headers = response.headers();
+        assert_eq!(
+            headers
+                .get("access-control-allow-origin")
+                .and_then(|value| value.to_str().ok()),
+            Some("http://127.0.0.1:8420"),
+            "preflight echoes the allowed origin"
+        );
+        assert_eq!(
+            headers
+                .get("access-control-allow-methods")
+                .and_then(|value| value.to_str().ok()),
+            Some("*"),
+            "preflight advertises the configured `Any` methods"
         );
     }
 
