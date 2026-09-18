@@ -20,11 +20,11 @@
 use nexus_contracts::BlockType;
 use nexus_knowledge::world_kb::errors::ValidationError;
 use nexus_knowledge::world_kb::knowledge_entry::{
-    KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeOwnerRef,
+    KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeOwnerRef, DISCLOSURE_OWNER_PRIVATE,
 };
 use nexus_knowledge::world_kb::query::{KbInsertResult, KbQuery, KbQueryResult};
 use nexus_knowledge::world_kb::source_anchor::SourceAnchor;
-use nexus_knowledge::world_kb::store::KbStoreError;
+use nexus_knowledge::world_kb::store::{KbStoreError, KnowledgeReadPolicy, KnowledgeReadScope};
 use nexus_knowledge::world_kb::validation::{
     validate_body, validate_canonical_name, ValidationMode,
 };
@@ -194,6 +194,63 @@ fn insert_opt_i64(
         Some(v) => nexus.insert(key.into(), serde_json::Value::Number(v.into())),
         None => nexus.remove(key),
     };
+}
+
+/// The durable §4.2 visibility rule as a SQL `AND (...)` conjunct, plus the
+/// values it binds.
+///
+/// `admitted_holders` is the holder set the read selection admits for
+/// `owner-private` rows: exactly the resolved holder for an `ActorView`, the
+/// known-governance holder set for `CreatorManagement`. A row is eligible when
+/// it is in an authorized container (the caller's own `WHERE`) **and**
+/// `disclosure IS NULL` or `disclosure = 'owner-private'` under one of those
+/// holders. Any other disclosure value — the unknown Domain-Profile vocabulary
+/// the core excludes (durable §6), and a private row without a holder — fails
+/// both branches. An empty holder set therefore admits no private row.
+///
+/// The conjunct belongs to the eligibility `WHERE`, never a post-filter: it is
+/// applied before the keyset cursor, `LIMIT`, count, ranking and snippet
+/// observation so a hidden row consumes no page slot, no count and no snippet.
+pub(crate) fn owner_private_visibility_conjunct(
+    admitted_holders: &[String],
+) -> (String, Vec<String>) {
+    if admitted_holders.is_empty() {
+        return (" AND disclosure IS NULL".to_string(), Vec::new());
+    }
+    let placeholders = vec!["?"; admitted_holders.len()].join(", ");
+    (
+        format!(
+            " AND (disclosure IS NULL OR \
+             (disclosure = '{DISCLOSURE_OWNER_PRIVATE}' AND holder_entry_id IN ({placeholders})))"
+        ),
+        admitted_holders.to_vec(),
+    )
+}
+
+/// [`owner_private_visibility_conjunct`] for one admitted read selection.
+///
+/// An `ActorView` admits only the exact resolved holder; `CreatorManagement`
+/// admits the known-governance holder set. Both are chosen by admission, so a
+/// request body can never widen this set.
+pub(crate) fn selection_visibility_conjunct(
+    selection: &KnowledgeReadScope,
+) -> (String, Vec<String>) {
+    match selection.policy() {
+        KnowledgeReadPolicy::ActorView => {
+            // `KnowledgeReadScope::actor_view` refuses an empty holder, so the
+            // `None` arm is unreachable by construction; it fails closed
+            // (shared rows only) rather than admitting every private row.
+            let holders: Vec<String> = selection
+                .holder_entry_id()
+                .map(str::to_string)
+                .into_iter()
+                .collect();
+            owner_private_visibility_conjunct(&holders)
+        }
+        KnowledgeReadPolicy::CreatorManagement => {
+            owner_private_visibility_conjunct(selection.authorized_holders())
+        }
+    }
 }
 
 /// Test helpers for seeding KB data into the database.
@@ -1061,6 +1118,76 @@ pub async fn list_by_world_in_tx(
     rows.iter().map(KeyBlockRow::to_record).collect()
 }
 
+// ── Query filtering (v1.184) ────────────────────────────────────────────────
+
+/// The retained in-memory `KbQuery` filter/score/offset body.
+///
+/// Shared by the trait [`KbStore::query`] (unscoped World listing, retained for
+/// the callers T8/T11 migrate) and [`SqliteKbStore::query_with_scope`] (the
+/// admitted selection). Scores nothing today: a text search is a
+/// case-insensitive `contains` over the canonical name, summary and tags, and
+/// `total_count` is the size of the matching set the caller handed in — so the
+/// caller's row selection is what bounds both the count and the snippets.
+fn apply_kb_query_filters(all_active: Vec<KnowledgeEntryRecord>, query: &KbQuery) -> KbQueryResult {
+    let text_lower = query.text_search.as_deref().map(str::to_lowercase);
+
+    let filtered: Vec<KnowledgeEntryRecord> = all_active
+        .into_iter()
+        .filter(|kb| {
+            if let Some(bt) = query.block_type {
+                if kb.block_type != bt {
+                    return false;
+                }
+            }
+            if let Some(name) = &query.canonical_name {
+                if kb.canonical_name != *name {
+                    return false;
+                }
+            }
+            if let Some(lower) = &text_lower {
+                let hit_name = kb.canonical_name.to_lowercase().contains(lower.as_str());
+                let hit_summary = kb
+                    .body
+                    .as_ref()
+                    .and_then(|b| b.summary.as_ref())
+                    .is_some_and(|s| s.to_lowercase().contains(lower.as_str()));
+                let hit_tags = kb
+                    .body
+                    .as_ref()
+                    .and_then(|b| b.tags.as_ref())
+                    .is_some_and(|tags| {
+                        tags.iter()
+                            .any(|t| t.to_lowercase().contains(lower.as_str()))
+                    });
+                if !hit_name && !hit_summary && !hit_tags {
+                    return false;
+                }
+            }
+            // V1.61 P1: filter by computable flag
+            if let Some(want) = query.computable {
+                let is_computable = kb.body.as_ref().and_then(|b| b.computable).unwrap_or(false);
+                if is_computable != want {
+                    return false;
+                }
+            }
+            true
+        })
+        .collect();
+
+    let total_count = filtered.len();
+    let offset = query.offset.unwrap_or(0);
+    let limit = query.limit.unwrap_or(usize::MAX);
+    let items: Vec<KnowledgeEntryRecord> = filtered.into_iter().skip(offset).take(limit).collect();
+    let fetched = items.len();
+    let has_more = offset + fetched < total_count;
+
+    KbQueryResult {
+        items,
+        total_count,
+        has_more,
+    }
+}
+
 // SAFETY: sqlx SQLite futures borrow the connection pool internally;
 // safe for single-threaded SQLite usage within our tokio runtime.
 #[allow(clippy::future_not_send)]
@@ -1170,63 +1297,7 @@ impl KbStore for SqliteKbStore {
         // This is deferred to a future iteration — V1.61 worlds are small
         // enough that in-memory filtering is sufficient. No migration needed.
         let all_active = self.list_by_world(&query.world_id).await?;
-
-        let text_lower = query.text_search.as_deref().map(str::to_lowercase);
-
-        let filtered: Vec<KnowledgeEntryRecord> = all_active
-            .into_iter()
-            .filter(|kb| {
-                if let Some(bt) = query.block_type {
-                    if kb.block_type != bt {
-                        return false;
-                    }
-                }
-                if let Some(ref name) = query.canonical_name {
-                    if kb.canonical_name != *name {
-                        return false;
-                    }
-                }
-                if let Some(ref lower) = text_lower {
-                    let hit_name = kb.canonical_name.to_lowercase().contains(lower);
-                    let hit_summary = kb
-                        .body
-                        .as_ref()
-                        .and_then(|b| b.summary.as_ref())
-                        .is_some_and(|s| s.to_lowercase().contains(lower));
-                    let hit_tags = kb
-                        .body
-                        .as_ref()
-                        .and_then(|b| b.tags.as_ref())
-                        .is_some_and(|tags| tags.iter().any(|t| t.to_lowercase().contains(lower)));
-                    if !hit_name && !hit_summary && !hit_tags {
-                        return false;
-                    }
-                }
-                // V1.61 P1: filter by computable flag
-                if let Some(want) = query.computable {
-                    let is_computable =
-                        kb.body.as_ref().and_then(|b| b.computable).unwrap_or(false);
-                    if is_computable != want {
-                        return false;
-                    }
-                }
-                true
-            })
-            .collect();
-
-        let total_count = filtered.len();
-        let offset = query.offset.unwrap_or(0);
-        let limit = query.limit.unwrap_or(usize::MAX);
-        let items: Vec<KnowledgeEntryRecord> =
-            filtered.into_iter().skip(offset).take(limit).collect();
-        let fetched = items.len();
-        let has_more = offset + fetched < total_count;
-
-        Ok(KbQueryResult {
-            items,
-            total_count,
-            has_more,
-        })
+        Ok(apply_kb_query_filters(all_active, query))
     }
 
     async fn attach_source_anchor(
@@ -1458,16 +1529,24 @@ impl SqliteKbStore {
         &self,
         world_id: &str,
     ) -> Result<Vec<KnowledgeEntryRecord>, KbStoreError> {
-        self.list_by_world_with_status_filter(world_id, true).await
+        self.list_by_world_with_status_filter(world_id, true, None)
+            .await
     }
 
     /// Shared body for [`Self::list_by_world_including_deprecated`] —
     /// parameterized status clause so the two call sites don't duplicate
     /// the full SELECT shape.
+    ///
+    /// `selection` is the admitted read selection of a scoped caller; `None` is
+    /// the retained unscoped listing (its callers are migrated to an admitted
+    /// selection by their owning tasks). A scoped caller gets the durable §4.2
+    /// visibility conjunct **inside** the `WHERE`, so the [`LIST_BY_WORLD_LIMIT`]
+    /// window counts only eligible rows.
     async fn list_by_world_with_status_filter(
         &self,
         world_id: &str,
         include_deprecated: bool,
+        selection: Option<&KnowledgeReadScope>,
     ) -> Result<Vec<KnowledgeEntryRecord>, KbStoreError> {
         // SAFETY: LIMIT is a compile-time constant; status filter is a static
         // fragment chosen from two literals (no user input). Dynamic SQL
@@ -1477,6 +1556,10 @@ impl SqliteKbStore {
         } else {
             "status NOT IN ('deleted', 'merged', 'deprecated')"
         };
+        let (visibility, holders) = selection.map_or_else(
+            || (String::new(), Vec::new()),
+            selection_visibility_conjunct,
+        );
         let sql = format!(
             r"SELECT
                 key_block_id,
@@ -1501,17 +1584,54 @@ impl SqliteKbStore {
             FROM kb_key_blocks
             WHERE owner_kind = 'world'
               AND world_id = ?
-              AND {status_clause}
+              AND {status_clause}{visibility}
             ORDER BY created_at ASC
             LIMIT {LIST_BY_WORLD_LIMIT}"
         );
-        let rows = sqlx::query_as::<_, KeyBlockRow>(sqlx::AssertSqlSafe(sql))
-            .bind(world_id)
-            .fetch_all(&*self.pool)
-            .await
-            .map_err(|e| db_err(&e))?;
+        let mut query = sqlx::query_as::<_, KeyBlockRow>(sqlx::AssertSqlSafe(sql)).bind(world_id);
+        for holder in holders {
+            query = query.bind(holder);
+        }
+        let rows = query.fetch_all(&*self.pool).await.map_err(|e| db_err(&e))?;
 
         rows.iter().map(KeyBlockRow::to_record).collect()
+    }
+
+    /// Admitted-selection search over one World (durable §4.2).
+    ///
+    /// The selection's eligibility predicate is applied in SQL before the
+    /// listing window, so the returned `total_count` and the summaries a text
+    /// search matches can only ever count and carry visible rows: a hidden row
+    /// is not scored, not counted and contributes no snippet. The World
+    /// container must be one of the selection's authorized containers — a
+    /// foreign World yields the empty result, never a filtered view of
+    /// unauthorized rows.
+    ///
+    /// The trait's unscoped [`KbStore::query`] is the retained entry point for
+    /// the callers their owning tasks migrate to this selection.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`KbStoreError::Storage`] on database failure.
+    pub async fn query_with_scope(
+        &self,
+        query: &KbQuery,
+        selection: &KnowledgeReadScope,
+    ) -> Result<KbQueryResult, KbStoreError> {
+        if !selection
+            .containers()
+            .contains(&KnowledgeOwnerRef::world(query.world_id.as_str()))
+        {
+            return Ok(KbQueryResult {
+                items: Vec::new(),
+                total_count: 0,
+                has_more: false,
+            });
+        }
+        let eligible = self
+            .list_by_world_with_status_filter(&query.world_id, false, Some(selection))
+            .await?;
+        Ok(apply_kb_query_filters(eligible, query))
     }
 
     /// List active [`KnowledgeEntryRecord`]s owned by a canonical
@@ -1580,18 +1700,30 @@ impl SqliteKbStore {
     /// Rows are ordered by `(created_at, key_block_id)` so keyset pagination
     /// over the union is deterministic even when timestamps collide.
     ///
+    /// v1.191 P1 T6: this is the **complete admitted snapshot** handed to the
+    /// context consumers (MCA/lore/inspect, durable §4.2). It is scoped by an
+    /// admitted read selection: the owner must be one of the selection's
+    /// authorized containers, and the durable §4.2 visibility conjunct is
+    /// applied in SQL, so a hidden row is never part of the snapshot. An owner
+    /// outside the selection yields no rows at all.
+    ///
     /// # Errors
     ///
     /// Returns [`KbStoreError::Storage`] on database failure.
     pub async fn list_by_owner_complete(
         &self,
         owner: &KnowledgeOwnerRef,
+        selection: &KnowledgeReadScope,
     ) -> Result<Vec<KnowledgeEntryRecord>, KbStoreError> {
+        if !selection.containers().contains(owner) {
+            return Ok(Vec::new());
+        }
         let owner_column = match owner {
             KnowledgeOwnerRef::World(_) => "world_id",
             KnowledgeOwnerRef::Character(_) => "character_id",
             KnowledgeOwnerRef::ActorWorldBinding(_) => "actor_world_binding_id",
         };
+        let (visibility, holders) = selection_visibility_conjunct(selection);
         let sql = format!(
             r"SELECT
                 key_block_id,
@@ -1615,14 +1747,14 @@ impl SqliteKbStore {
                 source_provenance_kind, extensions_nexus_json, modules_json
             FROM kb_key_blocks
             WHERE {owner_column} = ?
-              AND status NOT IN ('deleted', 'merged', 'deprecated')
+              AND status NOT IN ('deleted', 'merged', 'deprecated'){visibility}
             ORDER BY created_at ASC, key_block_id ASC"
         );
-        let rows = sqlx::query_as::<_, KeyBlockRow>(sqlx::AssertSqlSafe(sql))
-            .bind(owner.id())
-            .fetch_all(&*self.pool)
-            .await
-            .map_err(|e| db_err(&e))?;
+        let mut query = sqlx::query_as::<_, KeyBlockRow>(sqlx::AssertSqlSafe(sql)).bind(owner.id());
+        for holder in holders {
+            query = query.bind(holder);
+        }
+        let rows = query.fetch_all(&*self.pool).await.map_err(|e| db_err(&e))?;
 
         rows.iter().map(KeyBlockRow::to_record).collect()
     }
@@ -1634,6 +1766,14 @@ impl SqliteKbStore {
     /// time (`strftime('%s')` plus `%f` millis) matching
     /// `stored_created_at_order_millis`. Stored `created_at` bytes are not rewritten.
     ///
+    /// v1.191 P1 T6 (durable §4.2): the admitted read selection supplies the
+    /// eligibility predicate. The owner must be one of the selection's
+    /// authorized containers, and the §4.2 visibility conjunct sits in the
+    /// eligibility `WHERE` **before** the keyset cursor and `LIMIT`, so a
+    /// hidden row never occupies a page slot, never flips `has_more`/the next
+    /// cursor, and can never be paged into. An owner outside the selection
+    /// yields no rows — hidden and absent are indistinguishable.
+    ///
     /// # Errors
     ///
     /// Returns [`KbStoreError::Storage`] on database failure.
@@ -1642,8 +1782,11 @@ impl SqliteKbStore {
         owner: &KnowledgeOwnerRef,
         after: Option<&(String, String)>,
         limit: u32,
-        exclude_disclosed: bool,
+        selection: &KnowledgeReadScope,
     ) -> Result<Vec<KnowledgeEntryRecord>, KbStoreError> {
+        if !selection.containers().contains(owner) {
+            return Ok(Vec::new());
+        }
         let owner_column = match owner {
             KnowledgeOwnerRef::World(_) => "world_id",
             KnowledgeOwnerRef::Character(_) => "character_id",
@@ -1651,16 +1794,7 @@ impl SqliteKbStore {
         };
         let created_key = "(CAST(strftime('%s', created_at) AS INTEGER) * 1000 + CAST(substr(strftime('%f', created_at), 4) AS INTEGER))";
         let cursor_millis = "(CAST(strftime('%s', ?) AS INTEGER) * 1000 + CAST(substr(strftime('%f', ?), 4) AS INTEGER))";
-        // v1.191 P1 T3: the retired `creator_only = 0` predicate is expressed on
-        // the native governance pair — exclude every disclosure-restricted row.
-        // The full admitted read selection (resolved holder + authorized
-        // containers, durable §4.2) replaces this interim fold in the
-        // visibility task.
-        let visibility = if exclude_disclosed {
-            " AND disclosure IS NULL"
-        } else {
-            ""
-        };
+        let (visibility, holders) = selection_visibility_conjunct(selection);
         let cursor_sql = if after.is_some() {
             format!(
                 " AND ({created_key} > {cursor_millis} \
@@ -1698,6 +1832,9 @@ impl SqliteKbStore {
             LIMIT {limit}"
         );
         let mut query = sqlx::query_as::<_, KeyBlockRow>(sqlx::AssertSqlSafe(sql)).bind(owner.id());
+        for holder in holders {
+            query = query.bind(holder);
+        }
         if let Some((created_at, entry_id)) = after {
             query = query
                 .bind(created_at)
@@ -2154,6 +2291,13 @@ mod tests {
     use crate::{open_pool, run_migrations};
     use serde_json::{json, Value};
 
+    /// An admitted selection over one World container with no admitted holder:
+    /// only shared rows are eligible. The vision matrix itself lives in
+    /// `tests/kb_owner_store.rs`; these cases pin the keyset/cap shape.
+    fn shared_only_world_selection(world_id: &str) -> KnowledgeReadScope {
+        KnowledgeReadScope::creator_management(vec![KnowledgeOwnerRef::world(world_id)], Vec::new())
+    }
+
     async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test.db");
@@ -2505,7 +2649,10 @@ mod tests {
         assert_eq!(capped.len(), usize::try_from(LIST_BY_WORLD_LIMIT).unwrap());
 
         let complete = store
-            .list_by_owner_complete(&KnowledgeOwnerRef::world("wld_1"))
+            .list_by_owner_complete(
+                &KnowledgeOwnerRef::world("wld_1"),
+                &shared_only_world_selection("wld_1"),
+            )
             .await
             .unwrap();
         assert_eq!(complete.len(), n);
@@ -2559,7 +2706,7 @@ mod tests {
 
         let owner = KnowledgeOwnerRef::world("wld_1");
         let first = store
-            .list_by_owner_keyset(&owner, None, 3, false)
+            .list_by_owner_keyset(&owner, None, 3, &shared_only_world_selection("wld_1"))
             .await
             .unwrap();
         assert_eq!(first.len(), 3, "SQL LIMIT must bound the component");
@@ -2584,7 +2731,12 @@ mod tests {
 
         let after = (first[1].created_at.clone(), first[1].entry_id.clone());
         let page = store
-            .list_by_owner_keyset(&owner, Some(&after), 2, false)
+            .list_by_owner_keyset(
+                &owner,
+                Some(&after),
+                2,
+                &shared_only_world_selection("wld_1"),
+            )
             .await
             .unwrap();
         assert!(page.len() <= 2);
@@ -2614,7 +2766,7 @@ mod tests {
         }
         let owner = KnowledgeOwnerRef::world("wld_1");
         let first = store
-            .list_by_owner_keyset(&owner, None, 1, false)
+            .list_by_owner_keyset(&owner, None, 1, &shared_only_world_selection("wld_1"))
             .await
             .unwrap();
         assert_eq!(
@@ -2626,7 +2778,12 @@ mod tests {
         );
         let after = (first[0].created_at.clone(), first[0].entry_id.clone());
         let page = store
-            .list_by_owner_keyset(&owner, Some(&after), 2, false)
+            .list_by_owner_keyset(
+                &owner,
+                Some(&after),
+                2,
+                &shared_only_world_selection("wld_1"),
+            )
             .await
             .unwrap();
         let ids: Vec<&str> = page.iter().map(|r| r.entry_id.as_str()).collect();

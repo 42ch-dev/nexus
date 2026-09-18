@@ -174,6 +174,143 @@ impl ActorKnowledgeViewService {
         })
     }
 
+    /// Resolve the `ActorView` selection for one stored Actor + viewpoint
+    /// (durable §4.1/§4.2).
+    ///
+    /// The selection is chosen by this function, never by the request: the
+    /// authorized containers come from the stored ownership rows, and the
+    /// admitted holder comes from the stored identity's holder registry entry.
+    /// Retained read texture (durable §11.2): the owned subject is authorized
+    /// without a liveness gate, so an archived World/Character keeps its
+    /// containers readable — the resolution still fails closed on a
+    /// foreign/missing subject or a missing registry row.
+    ///
+    /// # Errors
+    ///
+    /// Ownership/actor-shape failures, the fail-closed `holder_state_invalid`,
+    /// and invalid cursors.
+    pub async fn actor_view_scope(
+        &self,
+        caller_creator_id: &str,
+        actor: &AdmittedActor,
+        world_id: &str,
+        binding_id: Option<&str>,
+    ) -> CoreResult<KnowledgeReadScope> {
+        let mut containers = Vec::new();
+        let holder_entry_id = match actor {
+            AdmittedActor::Creator { creator_id } => {
+                if creator_id != caller_creator_id {
+                    return Err(not_found("actor_ref", creator_id));
+                }
+                // Creator World-selected view is a retained read: it includes
+                // owned archived Character/binding scopes and does not drop
+                // the World's owned retained history when archived (§11.2).
+                require_owned_world(&self.pool, caller_creator_id, world_id).await?;
+                containers.push(KnowledgeOwnerRef::world(world_id));
+                containers.extend(
+                    self.owned_world_containers(caller_creator_id, world_id)
+                        .await?,
+                );
+                require_actor_holder(&self.pool, caller_creator_id, actor).await?
+            }
+            AdmittedActor::Character { character_id } => {
+                let Some(binding_id) = binding_id else {
+                    return Err(CoreError::ActorInput(
+                        "binding_id is required for Character KnowledgeView".to_string(),
+                    ));
+                };
+                // Retained read (durable §11.2): authorize by owner + stored
+                // binding tuple, not liveness. A foreign/missing Character,
+                // a cross-Character binding, or a missing/foreign World still
+                // fails closed.
+                require_owned_character(&self.pool, caller_creator_id, character_id).await?;
+                require_owned_world(&self.pool, caller_creator_id, world_id).await?;
+                require_stored_binding_tuple(&self.pool, character_id, binding_id, world_id)
+                    .await?;
+                containers.push(KnowledgeOwnerRef::world(world_id));
+                containers.push(KnowledgeOwnerRef::character(character_id.as_str()));
+                containers.push(KnowledgeOwnerRef::actor_world_binding(binding_id));
+                require_actor_holder(&self.pool, caller_creator_id, actor).await?
+            }
+        };
+        KnowledgeReadScope::actor_view(holder_entry_id, containers).map_err(|err| {
+            CoreError::ActorConflict {
+                code: "holder_state_invalid".to_string(),
+                message: err.to_string(),
+            }
+        })
+    }
+
+    /// Owned Character/binding containers of one World (retained reads include
+    /// archived Characters), deduplicated per Character and ordered
+    /// World → Character → binding.
+    async fn owned_world_containers(
+        &self,
+        creator_id: &str,
+        world_id: &str,
+    ) -> CoreResult<Vec<KnowledgeOwnerRef>> {
+        let bindings = sqlx::query(
+            "SELECT b.character_id, b.binding_id \
+             FROM actor_world_bindings b \
+             INNER JOIN characters c ON c.character_id = b.character_id \
+             WHERE b.world_id = ? AND c.owner_creator_id = ?",
+        )
+        .bind(world_id)
+        .bind(creator_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| CoreError::Internal {
+            category: format!("{KNOWLEDGE_VIEW_COMPONENT_FAILED_PREFIX}: {err}"),
+        })?;
+
+        let mut owners = Vec::new();
+        let mut seen_characters = std::collections::BTreeSet::new();
+        for row in bindings {
+            let character_id: String =
+                row.try_get("character_id")
+                    .map_err(|err| CoreError::Internal {
+                        category: format!("{KNOWLEDGE_VIEW_COMPONENT_FAILED_PREFIX}: {err}"),
+                    })?;
+            let binding_id: String =
+                row.try_get("binding_id")
+                    .map_err(|err| CoreError::Internal {
+                        category: format!("{KNOWLEDGE_VIEW_COMPONENT_FAILED_PREFIX}: {err}"),
+                    })?;
+            if seen_characters.insert(character_id.clone()) {
+                owners.push(KnowledgeOwnerRef::character(&character_id));
+            }
+            owners.push(KnowledgeOwnerRef::actor_world_binding(&binding_id));
+        }
+        Ok(owners)
+    }
+
+    /// Compose one policy-filtered keyset page for an admitted selection.
+    ///
+    /// Every selection container is fetched through the same §4.2 eligibility
+    /// predicate, so the union holds eligible rows only and the merged page —
+    /// including its `has_more` flag and next cursor — is computed over that
+    /// union. A container the selection never authorized contributes nothing.
+    ///
+    /// # Errors
+    ///
+    /// Invalid cursors and any failed component query.
+    pub async fn view_in_scope(
+        &self,
+        selection: &KnowledgeReadScope,
+        cursor: Option<String>,
+        limit: u32,
+    ) -> CoreResult<ActorKnowledgePage> {
+        let cursor = Self::decode_cursor(&cursor)?;
+        let mut items = Vec::new();
+        for owner in selection.containers() {
+            items.extend(
+                self.component(owner, cursor.as_ref(), limit, selection)
+                    .await?,
+            );
+        }
+        Self::paginate(items, None, limit)
+    }
+
     /// Admit `actor_ref` from stored rows and compose the locked view.
     ///
     /// # Errors
@@ -185,52 +322,16 @@ impl ActorKnowledgeViewService {
         actor: &AdmittedActor,
         query: ActorKnowledgeViewQuery,
     ) -> CoreResult<ActorKnowledgePage> {
-        let cursor = Self::decode_cursor(&query.cursor)?;
-        match actor {
-            AdmittedActor::Creator { creator_id } => {
-                if creator_id != caller_creator_id {
-                    return Err(not_found("actor_ref", creator_id));
-                }
-                // Creator World-selected view is a retained read: it includes
-                // owned archived Character/binding scopes and does not drop
-                // the World's owned retained history when archived (§11.2).
-                require_owned_world(&self.pool, caller_creator_id, &query.world_id).await?;
-                let parts = self
-                    .creator_union(
-                        caller_creator_id,
-                        &query.world_id,
-                        cursor.as_ref(),
-                        query.limit,
-                    )
-                    .await?;
-                Self::paginate(parts, None, query.limit)
-            }
-            AdmittedActor::Character { character_id } => {
-                let Some(binding_id) = query.binding_id.as_deref() else {
-                    return Err(CoreError::ActorInput(
-                        "binding_id is required for Character KnowledgeView".to_string(),
-                    ));
-                };
-                // Retained read (durable §11.2): authorize by owner + stored
-                // binding tuple, not liveness. A foreign/missing Character,
-                // a cross-Character binding, or a missing/foreign World still
-                // fails closed.
-                require_owned_character(&self.pool, caller_creator_id, character_id).await?;
-                require_owned_world(&self.pool, caller_creator_id, &query.world_id).await?;
-                require_stored_binding_tuple(&self.pool, character_id, binding_id, &query.world_id)
-                    .await?;
-                let parts = self
-                    .character_union(
-                        &query.world_id,
-                        character_id,
-                        binding_id,
-                        cursor.as_ref(),
-                        query.limit,
-                    )
-                    .await?;
-                Self::paginate(parts, None, query.limit)
-            }
-        }
+        let selection = self
+            .actor_view_scope(
+                caller_creator_id,
+                actor,
+                &query.world_id,
+                query.binding_id.as_deref(),
+            )
+            .await?;
+        self.view_in_scope(&selection, query.cursor, query.limit)
+            .await
     }
 
     /// Character-owned listing without a World filter.
@@ -246,126 +347,36 @@ impl ActorKnowledgeViewService {
         cursor: Option<String>,
     ) -> CoreResult<ActorKnowledgePage> {
         require_owned_character(&self.pool, caller_creator_id, character_id).await?;
-        let cursor = Self::decode_cursor(&cursor)?;
-        let items = self
-            .component(
-                KnowledgeOwnerRef::character(character_id),
-                cursor.as_ref(),
-                limit,
-                false,
-            )
-            .await?;
-        Self::paginate(items, None, limit)
-    }
-
-    async fn creator_union(
-        &self,
-        creator_id: &str,
-        world_id: &str,
-        cursor: Option<&(String, String)>,
-        limit: u32,
-    ) -> CoreResult<Vec<KnowledgeEntryRecord>> {
-        let mut items = self
-            .component(KnowledgeOwnerRef::world(world_id), cursor, limit, false)
-            .await?;
-        // Retained read (durable §11.2): include owned archived Character and
-        // binding scopes — never silently drop them with `status = 'active'`.
-        let bindings = sqlx::query(
-            "SELECT b.character_id, b.binding_id \
-             FROM actor_world_bindings b \
-             INNER JOIN characters c ON c.character_id = b.character_id \
-             WHERE b.world_id = ? AND c.owner_creator_id = ?",
+        let holder_entry_id = require_actor_holder(
+            &self.pool,
+            caller_creator_id,
+            &AdmittedActor::Character {
+                character_id: character_id.to_string(),
+            },
         )
-        .bind(world_id)
-        .bind(creator_id)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|err| CoreError::Internal {
-            category: format!("{KNOWLEDGE_VIEW_COMPONENT_FAILED_PREFIX}: {err}"),
+        .await?;
+        // The listing is an ActorView over the exact admitted Character: its
+        // own container, and only its own `owner-private` rows.
+        let selection = KnowledgeReadScope::actor_view(
+            holder_entry_id,
+            vec![KnowledgeOwnerRef::character(character_id)],
+        )
+        .map_err(|err| CoreError::ActorConflict {
+            code: "holder_state_invalid".to_string(),
+            message: err.to_string(),
         })?;
-
-        let mut seen_characters = std::collections::BTreeSet::new();
-        for row in bindings {
-            let character_id: String =
-                row.try_get("character_id")
-                    .map_err(|err| CoreError::Internal {
-                        category: format!("{KNOWLEDGE_VIEW_COMPONENT_FAILED_PREFIX}: {err}"),
-                    })?;
-            let binding_id: String =
-                row.try_get("binding_id")
-                    .map_err(|err| CoreError::Internal {
-                        category: format!("{KNOWLEDGE_VIEW_COMPONENT_FAILED_PREFIX}: {err}"),
-                    })?;
-            if seen_characters.insert(character_id.clone()) {
-                items.extend(
-                    self.component(
-                        KnowledgeOwnerRef::character(&character_id),
-                        cursor,
-                        limit,
-                        false,
-                    )
-                    .await?,
-                );
-            }
-            items.extend(
-                self.component(
-                    KnowledgeOwnerRef::actor_world_binding(&binding_id),
-                    cursor,
-                    limit,
-                    false,
-                )
-                .await?,
-            );
-        }
-        Ok(items)
-    }
-
-    async fn character_union(
-        &self,
-        world_id: &str,
-        character_id: &str,
-        binding_id: &str,
-        cursor: Option<&(String, String)>,
-        limit: u32,
-    ) -> CoreResult<Vec<KnowledgeEntryRecord>> {
-        let mut items = self
-            .component(KnowledgeOwnerRef::world(world_id), cursor, limit, true)
-            .await?;
-        items.extend(
-            self.component(
-                KnowledgeOwnerRef::character(character_id),
-                cursor,
-                limit,
-                false,
-            )
-            .await?,
-        );
-        items.extend(
-            self.component(
-                KnowledgeOwnerRef::actor_world_binding(binding_id),
-                cursor,
-                limit,
-                false,
-            )
-            .await?,
-        );
-        Ok(items)
+        self.view_in_scope(&selection, cursor, limit).await
     }
 
     async fn component(
         &self,
-        owner: KnowledgeOwnerRef,
+        owner: &KnowledgeOwnerRef,
         cursor: Option<&(String, String)>,
         limit: u32,
-        exclude_creator_only: bool,
+        selection: &KnowledgeReadScope,
     ) -> CoreResult<Vec<KnowledgeEntryRecord>> {
         self.store
-            .list_by_owner_keyset(
-                &owner,
-                cursor,
-                limit.saturating_add(1),
-                exclude_creator_only,
-            )
+            .list_by_owner_keyset(owner, cursor, limit.saturating_add(1), selection)
             .await
             .map_err(|e| component_err(&e))
     }
@@ -890,6 +901,31 @@ impl CoreService {
         .await
     }
 
+    /// Compose one policy-filtered keyset page for an already admitted
+    /// knowledge context (durable §4.2).
+    ///
+    /// This is the read that consumes the **`CreatorManagement`** selection:
+    /// the authorized Creator reviews owned `owner-private` facts through their
+    /// own admitted context, while every `ActorView` (including a Creator's
+    /// `ActorView` and every Connect path) keeps the holder-filtered selection.
+    /// The page is selected before pagination, so a hidden row consumes no
+    /// slot, no `has_more` and no cursor position.
+    ///
+    /// # Errors
+    /// Returns [`CoreError::AuthRequired`] when the principal fails
+    /// verification, and the component-query errors otherwise.
+    pub async fn admitted_knowledge_page(
+        &self,
+        principal: &Principal,
+        context: &AdmittedKnowledgeContext,
+        limit: u32,
+        cursor: Option<String>,
+    ) -> CoreResult<ActorKnowledgePage> {
+        self.verify_principal(principal)?;
+        let views = ActorKnowledgeViewService::new(self.inner.pool.clone());
+        views.view_in_scope(&context.scope(), cursor, limit).await
+    }
+
     /// Compose the admitted `KnowledgeView` for an explicit query
     /// (`POST /v1/daemon/actor-knowledge/view`): stored-owner admission and
     /// the locked union.
@@ -1231,24 +1267,19 @@ async fn complete_view(
 ) -> CoreResult<ActorKnowledgePage> {
     const HARD_CAP: usize = 200;
     let limit = ActorKnowledgeViewService::resolve_limit(Some(100))?;
+    // One admitted selection for the whole composition: every merged page is
+    // selected by the same policy-filtered eligibility, so the cap counts
+    // eligible rows only (durable §4.2).
+    let selection = views
+        .actor_view_scope(caller_creator_id, actor, world_id, binding_id.as_deref())
+        .await?;
     let mut items = Vec::new();
     let mut cursor = None;
     loop {
         if items.len() >= HARD_CAP {
             return Err(view_incomplete());
         }
-        let page = views
-            .view(
-                caller_creator_id,
-                actor,
-                ActorKnowledgeViewQuery {
-                    world_id: world_id.to_string(),
-                    binding_id: binding_id.clone(),
-                    limit,
-                    cursor,
-                },
-            )
-            .await?;
+        let page = views.view_in_scope(&selection, cursor, limit).await?;
         if page.has_more && page.next_cursor.is_none() {
             return Err(view_incomplete());
         }

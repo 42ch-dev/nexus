@@ -2,7 +2,7 @@
 
 use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
 use nexus_knowledge::world_kb::validation::validate_canonical_name;
-use sqlx::SqlitePool;
+use sqlx::{AssertSqlSafe, SqlitePool};
 
 use crate::character::{check_expected_revision, require_active_owned_character_tx, FieldPatch};
 use crate::error::ActorContractConflict;
@@ -326,6 +326,13 @@ async fn character_owned_for_read(
 
 /// Stored-owner scoped knowledge detail read (retained archive reads allowed).
 ///
+/// v1.191 P1 T6 (durable §4.2): the same visibility rule the keyset page and
+/// the search apply is part of this row's eligibility `WHERE`, with the
+/// resolved holder of the admitted Character as the only holder whose
+/// `owner-private` rows it admits. An entry hidden from that holder — private
+/// to somebody else, or carrying unknown disclosure vocabulary — is therefore
+/// never fetched, which makes it indistinguishable from a missing entry.
+///
 /// # Errors
 ///
 /// Returns `LocalDbError` on database failure.
@@ -338,22 +345,29 @@ pub async fn get_actor_knowledge_entry(
     if !character_owned_for_read(pool, owner_creator_id, character_id).await? {
         return Ok(None);
     }
+    // The detail read is an ActorView over the exact admitted Character, so the
+    // admitted private rows are exactly this Character's own.
+    let holder_entry_id = crate::holders::character_holder_entry_id(character_id);
+    let (visibility, holders) =
+        crate::kb_store::owner_private_visibility_conjunct(std::slice::from_ref(&holder_entry_id));
     // SAFETY: runtime query (not `query_as!`) because the v1.191 P1 T3
     // governance columns are unknown to the committed `.sqlx` offline cache —
     // the same convention `kb_store.rs` uses for `kb_key_blocks` column
     // changes. Static SQL; the row shape is the shared `KeyBlockRow`.
-    let row = sqlx::query_as::<_, KeyBlockRow>(
+    let sql = format!(
         r"SELECT key_block_id, owner_kind, world_id, character_id,
                 actor_world_binding_id, holder_entry_id, disclosure, block_type,
                 canonical_name, status, revision, body_json, source_anchor_json,
                 created_from_command_id, created_at, updated_at, source_work_id,
                 source_chapter, source_provenance_kind, extensions_nexus_json,
                 modules_json
-         FROM kb_key_blocks WHERE key_block_id = ?",
-    )
-    .bind(entry_id)
-    .fetch_optional(pool)
-    .await?;
+         FROM kb_key_blocks WHERE key_block_id = ?{visibility}"
+    );
+    let mut query = sqlx::query_as::<_, KeyBlockRow>(AssertSqlSafe(sql)).bind(entry_id);
+    for holder in holders {
+        query = query.bind(holder);
+    }
+    let row = query.fetch_optional(pool).await?;
     let Some(row) = row else {
         return Ok(None);
     };

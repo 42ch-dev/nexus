@@ -11,8 +11,8 @@ use nexus_contracts::generated::core::{
 };
 use nexus_contracts::BlockType;
 use nexus_core::{
-    classify_pair, ActorFenceKind, ActorViewpoint, AdmittedActor, CoreAccess, CoreActorAdmission,
-    CoreError, CoreOpenOptions, CoreService,
+    classify_pair, ActorFenceKind, ActorKnowledgeViewQuery, ActorViewpoint, AdmittedActor,
+    CoreAccess, CoreActorAdmission, CoreError, CoreOpenOptions, CoreService,
 };
 use nexus_knowledge::world_kb::knowledge_entry::{
     KnowledgeEntryRecord, KnowledgeOwnerRef, DISCLOSURE_OWNER_PRIVATE,
@@ -1004,6 +1004,34 @@ async fn seed_governance_fixture(env: &Env) -> GovernanceFixture {
             Some(&first_holder),
             Some(DISCLOSURE_OWNER_PRIVATE),
         ),
+        // v1.191 P1 T6 additions: the first Character's own container carries a
+        // shared row, its own private row, and a storable private row held by
+        // somebody else (the shape a hidden read-by-id must not reveal); its
+        // binding carries a binding-local private row.
+        governed_entry(
+            KnowledgeOwnerRef::character(&env.character_id),
+            "FirstCharacterShared",
+            None,
+            None,
+        ),
+        governed_entry(
+            KnowledgeOwnerRef::character(&env.character_id),
+            "FirstCharacterPrivate",
+            Some(&first_holder),
+            Some(DISCLOSURE_OWNER_PRIVATE),
+        ),
+        governed_entry(
+            KnowledgeOwnerRef::character(&env.character_id),
+            "FirstCharacterForeignPrivate",
+            Some(&second_holder),
+            Some(DISCLOSURE_OWNER_PRIVATE),
+        ),
+        governed_entry(
+            KnowledgeOwnerRef::actor_world_binding(&env.binding_id),
+            "FirstBindingPrivate",
+            Some(&first_holder),
+            Some(DISCLOSURE_OWNER_PRIVATE),
+        ),
     ] {
         store.insert_knowledge_entry(row).await.unwrap();
     }
@@ -1541,4 +1569,291 @@ async fn v1191_knowledge_admission_fence_blocks_and_releases_partial_plan() {
     )
     .await
     .expect("the admission works again once the governance edit drains");
+}
+
+// ── v1.191 P1 T6 — pre-limit native read visibility ─────────────────────────
+//
+// Durable contract: `.mstar/specs/holder-governance.md` §4.2 (the visibility
+// rule is an eligibility predicate applied before the keyset cursor, LIMIT,
+// count and snippet observation; a hidden read-by-id is indistinguishable from
+// a missing one) and §4.1 (CreatorManagement reviews owned known-private rows;
+// an ActorView — including a Creator's — never inherits that review).
+//
+// T5 proved the selection each policy resolves; these cases prove the core
+// read paths (view / list / detail, and the admitted-context page) consume it
+// at the SQL layer, page by page.
+
+/// `canonical_name` → `key_block_id` for the fixture rows.
+async fn entry_id_by_name(pool: &SqlitePool, name: &str) -> String {
+    sqlx::query_scalar("SELECT key_block_id FROM kb_key_blocks WHERE canonical_name = ?")
+        .bind(name)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+fn sorted_names(rows: &[KnowledgeEntryRecord]) -> Vec<String> {
+    let mut names: Vec<String> = rows.iter().map(|row| row.canonical_name.clone()).collect();
+    names.sort();
+    names
+}
+
+/// Walk one `ActorView` one row per page: every eligible row appears exactly
+/// once, no hidden row is ever paged into, and the walk ends only when the page
+/// says so. Filtering *after* the keyset `LIMIT` returns a short or empty page
+/// here (`has_more` false while rows remain), which the walk cannot complete.
+#[allow(clippy::significant_drop_tightening)] // the second Character's context is held across its page call
+#[tokio::test]
+async fn v1191_holder_visibility_actor_view_pages_skip_hidden_rows() {
+    let env = seed_env().await;
+    let fixture = seed_governance_fixture(&env).await;
+    let (core, principal) = open_core(&env).await;
+    let actor = AdmittedActor::Character {
+        character_id: env.character_id.clone(),
+    };
+
+    let mut cursor: Option<String> = None;
+    let mut names: Vec<String> = Vec::new();
+    let mut pages = 0;
+    loop {
+        let page = core
+            .actor_knowledge_view(
+                &principal,
+                &actor,
+                ActorKnowledgeViewQuery {
+                    world_id: WORLD.to_string(),
+                    binding_id: Some(env.binding_id.clone()),
+                    limit: 1,
+                    cursor,
+                },
+            )
+            .await
+            .expect("one-row page");
+        assert!(
+            page.items.len() <= 1,
+            "a one-row page carries at most one row"
+        );
+        names.extend(page.items.iter().map(|row| row.canonical_name.clone()));
+        pages += 1;
+        if !page.has_more {
+            assert!(page.next_cursor.is_none(), "a final page exposes no cursor");
+            break;
+        }
+        cursor = page.next_cursor;
+        assert!(cursor.is_some(), "has_more implies a next cursor");
+        assert!(pages < 32, "the walk must terminate: {names:?}");
+    }
+
+    let expected = vec![
+        "FirstBindingPrivate",
+        "FirstCharacterPrivate",
+        "FirstCharacterShared",
+        "WorldFirstPrivate",
+        "WorldShared",
+    ];
+    assert_eq!(pages, expected.len(), "one page per eligible row");
+    let mut sorted = names.clone();
+    sorted.sort();
+    assert_eq!(
+        sorted, expected,
+        "the paginated ActorView holds exactly the eligible rows"
+    );
+    for hidden in [
+        "WorldAuthorPrivate",
+        "WorldSecondPrivate",
+        "SecondCharacterPrivate",
+        "FirstCharacterForeignPrivate",
+        "ForeignPrivate",
+    ] {
+        assert!(
+            !names.contains(&hidden.to_string()),
+            "{hidden} must not be paged into a Character ActorView"
+        );
+    }
+    // Two independently admitted Characters and the reason the matrix holds:
+    // the same stored rows, a different resolved holder.
+    let second = core
+        .admit_actor_knowledge_view(
+            &principal,
+            &AdmittedActor::Character {
+                character_id: fixture.second_character_id.clone(),
+            },
+            character_viewpoint(WORLD, &fixture.second_binding_id),
+        )
+        .await
+        .expect("second Character admits");
+    let second_page = core
+        .admitted_knowledge_page(&principal, &second, 100, None)
+        .await
+        .expect("second Character page");
+    let second_names = sorted_names(&second_page.items);
+    assert!(second_names.contains(&"SecondCharacterPrivate".to_string()));
+    assert!(second_names.contains(&"WorldSecondPrivate".to_string()));
+    assert!(second_names.contains(&"WorldShared".to_string()));
+    assert!(
+        !second_names.contains(&"FirstCharacterPrivate".to_string())
+            && !second_names.contains(&"FirstCharacterShared".to_string()),
+        "another Character's container never joins this view: {second_names:?}"
+    );
+}
+
+/// The detail read is the same rule for one row: a private row held by
+/// somebody else is refused exactly like an absent id, with no hidden
+/// identifier in the error.
+#[tokio::test]
+async fn v1191_holder_visibility_detail_hidden_equals_absent() {
+    let env = seed_env().await;
+    let fixture = seed_governance_fixture(&env).await;
+    let (core, principal) = open_core(&env).await;
+    let pool = plain_pool(&env).await;
+    let character_id = env.character_id.clone();
+
+    let own = core
+        .actor_knowledge_entry(
+            &principal,
+            character_id.clone(),
+            entry_id_by_name(&pool, "FirstCharacterPrivate").await,
+        )
+        .await
+        .expect("the admitted Character reads its own private row");
+    assert_eq!(own.canonical_name, "FirstCharacterPrivate");
+
+    let shared = core
+        .actor_knowledge_entry(
+            &principal,
+            character_id.clone(),
+            entry_id_by_name(&pool, "FirstCharacterShared").await,
+        )
+        .await
+        .expect("a shared row stays readable");
+    assert_eq!(shared.canonical_name, "FirstCharacterShared");
+
+    let hidden = core
+        .actor_knowledge_entry(
+            &principal,
+            character_id.clone(),
+            entry_id_by_name(&pool, "FirstCharacterForeignPrivate").await,
+        )
+        .await
+        .expect_err("a private row held by another holder is hidden");
+    let absent = core
+        .actor_knowledge_entry(&principal, character_id, "kb_never_written".to_string())
+        .await
+        .expect_err("an absent id is absent");
+    assert_not_found(&hidden);
+    assert_not_found(&absent);
+    for err in [&hidden, &absent] {
+        let text = format!("{err:?}");
+        assert!(
+            !text.contains("FirstCharacterForeignPrivate"),
+            "the refusal must not name the hidden row: {text}"
+        );
+        assert!(
+            !text.contains(&fixture.second_holder),
+            "the refusal must not name a holder: {text}"
+        );
+    }
+    pool.close().await;
+}
+
+/// Both policies read through the same page composition: management reaches
+/// the owned known-private rows, an `ActorView` does not, and a Creator's
+/// `ActorView` keeps the same holder filter as a Character's.
+#[allow(clippy::significant_drop_tightening)] // each context is held across its page call
+#[tokio::test]
+async fn v1191_holder_visibility_management_and_actor_view_stay_separate() {
+    let env = seed_env().await;
+    seed_governance_fixture(&env).await;
+    let (core, principal) = open_core(&env).await;
+
+    let management = core
+        .admit_creator_management_knowledge(&principal, WORLD.to_string())
+        .await
+        .expect("Creator management review admits");
+    let management_page = core
+        .admitted_knowledge_page(&principal, &management, 100, None)
+        .await
+        .expect("management page");
+    assert_eq!(
+        sorted_names(&management_page.items),
+        vec![
+            "FirstBindingPrivate",
+            "FirstCharacterForeignPrivate",
+            "FirstCharacterPrivate",
+            "FirstCharacterShared",
+            "SecondCharacterPrivate",
+            "WorldAuthorPrivate",
+            "WorldFirstPrivate",
+            "WorldSecondPrivate",
+            "WorldShared",
+        ],
+        "management review reaches every owned known-private row"
+    );
+
+    let first = core
+        .admit_actor_knowledge_view(
+            &principal,
+            &AdmittedActor::Character {
+                character_id: env.character_id.clone(),
+            },
+            character_viewpoint(WORLD, &env.binding_id),
+        )
+        .await
+        .expect("first Character admits");
+    let actor_page = core
+        .admitted_knowledge_page(&principal, &first, 100, None)
+        .await
+        .expect("ActorView page");
+    let actor_names = sorted_names(&actor_page.items);
+    assert_eq!(
+        actor_names,
+        vec![
+            "FirstBindingPrivate",
+            "FirstCharacterPrivate",
+            "FirstCharacterShared",
+            "WorldFirstPrivate",
+            "WorldShared",
+        ],
+        "the same read path under ActorView holds the holder-filtered rows"
+    );
+    assert!(
+        !actor_names.contains(&"WorldAuthorPrivate".to_string())
+            && !actor_names.contains(&"FirstCharacterForeignPrivate".to_string()),
+        "a management snapshot is never returned as an ActorView"
+    );
+
+    // A Creator's ActorView carries the Creator holder only: the private World
+    // facts they authored, never the Characters' private rows.
+    let creator_page = core
+        .actor_knowledge_view(
+            &principal,
+            &AdmittedActor::Creator {
+                creator_id: CREATOR.to_string(),
+            },
+            ActorKnowledgeViewQuery {
+                world_id: WORLD.to_string(),
+                binding_id: None,
+                limit: 100,
+                cursor: None,
+            },
+        )
+        .await
+        .expect("Creator ActorView");
+    assert_eq!(
+        sorted_names(&creator_page.items),
+        vec!["FirstCharacterShared", "WorldAuthorPrivate", "WorldShared"],
+        "a Creator ActorView never inherits omniscient management review"
+    );
+
+    // The Character detail listing (no World filter) applies the same
+    // selection: its own container, its own holder.
+    let listed = core
+        .list_character_knowledge(&principal, env.character_id.clone(), 100, None)
+        .await
+        .expect("Character-owned listing");
+    assert_eq!(
+        sorted_names(&listed.items),
+        vec!["FirstCharacterPrivate", "FirstCharacterShared"],
+        "the Character-owned listing hides the foreign-holder private row"
+    );
 }
