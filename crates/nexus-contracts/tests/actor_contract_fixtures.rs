@@ -1,12 +1,17 @@
 //! Closed Actor/Character/ActorWorldBinding wire fixtures (v1.184 P0 Task 1).
 
 use nexus_contracts::{
-    ActorRef, ActorWorldBinding, ActorWorldBindingStatus, AddKnowledgeEntryRequest, Character,
-    CharacterBindingDetail, CharacterDetail, CharacterLifecycleRequest, CharacterOperationResult,
+    ActorRef, ActorWorldBinding, ActorWorldBindingStatus, AddKnowledgeEntryRequest,
+    AddKnowledgeEntryRequestAudience, Character, CharacterBindingDetail, CharacterDetail,
+    CharacterHolderEntryId, CharacterLifecycleRequest, CharacterOperationResult,
     CharacterPendingReviewInfo, CharacterRunCaptureOutcome, CharacterStatus,
-    CreateCharacterRequest, CreateCharacterResponse, DeleteKnowledgeEntryQuery,
-    KnowledgeEntryDetail, KnowledgeViewItem, ListCharactersResponse, UpdateCharacterBindingRequest,
-    UpdateCharacterRequest, UpdateKnowledgeEntryRequest,
+    CreateCharacterRequest, CreateCharacterResponse, CreatorDetail, CreatorDetailHolderEntryId,
+    DeleteKnowledgeEntryQuery, KnowledgeEntryDetail, KnowledgeViewItem, KnowledgeViewItemDisclosure,
+    KnowledgeViewItemHolderEntryId, ListCharactersResponse, UpdateCharacterBindingRequest,
+    UpdateCharacterRequest, UpdateKnowledgeEntryRequest, UpdateKnowledgeEntryRequestAudience,
+    WorldKbEntityPatch, WorldKbEntityPatchAudience, WorldKbEntityProjection,
+    WorldKbEntityProjectionDisclosure, WorldKbEntityProjectionHolderEntryId,
+    WorldKbPatchEntityRequest,
 };
 use std::str::FromStr;
 
@@ -117,6 +122,7 @@ fn root_status_populates_generated_records() {
         character_id: character.character_id.clone(),
         created_at: character.created_at,
         display_name: character.display_name.clone(),
+        holder_entry_id: None,
         image_uri: None,
         owner_creator_id: character.owner_creator_id.clone(),
         persona: character.persona.clone(),
@@ -378,12 +384,28 @@ fn knowledge_view_item_json() -> serde_json::Value {
     serde_json::json!({
         "entry_id": format!("kb_{HEX32}"),
         "owner": { "kind": "character", "id": chr() },
-        "creator_only": false,
         "block_type": "info_point",
         "canonical_name": "note-alpha",
         "status": "confirmed",
         "revision": 0,
         "created_at": "2026-09-05T00:00:00Z"
+    })
+}
+
+/// `knowledge_view_item_json()` with one member substituted (governance cases).
+fn knowledge_view_item_json_with(key: &str, value: serde_json::Value) -> serde_json::Value {
+    let mut item = knowledge_view_item_json();
+    item[key] = value;
+    item
+}
+
+/// Minimal `CreatorDetail` body — the inline creator family, no `$ref` leaf.
+fn creator_record() -> serde_json::Value {
+    serde_json::json!({
+        "creator_id": ctr(),
+        "has_api_key": false,
+        "has_cached_token": false,
+        "is_active": true
     })
 }
 
@@ -574,4 +596,467 @@ fn character_operation_result_and_capture_outcome_roundtrip() {
         }
     });
     serde_json::from_value::<CharacterOperationResult>(result).expect("operation result");
+}
+
+// ── v1.191 P1 T2 native holder governance (P0 custodian checkpoint) ────────
+//
+// The frozen T2 schema inputs retire the legacy `creator_only` boolean in
+// favour of a native holder pair (`holder_entry_id` `^hld_[0-9a-f]{64}$` plus
+// an `owner-private`-only `disclosure`) authored through a closed `audience`.
+// These cases pin the *generated* DTOs against that frozen wire shape. They
+// assert wire decoding only — no governance decision is taken here, and the
+// service-resolved holder/verbatim-key gates live in `nexus-knowledge`
+// (T2's own `v1191_governance` cases).
+
+const HEX64: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+fn hld() -> String {
+    format!("hld_{HEX64}")
+}
+
+/// The create body with a substituted `audience` member.
+fn add_request_with_audience(audience: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "owner_kind": "character",
+        "character_id": chr(),
+        "block_type": "info_point",
+        "canonical_name": "note-alpha",
+        "audience": audience
+    })
+}
+
+fn add_request_without_audience() -> serde_json::Value {
+    serde_json::json!({
+        "owner_kind": "character",
+        "character_id": chr(),
+        "block_type": "info_point",
+        "canonical_name": "note-alpha"
+    })
+}
+
+#[test]
+fn add_knowledge_entry_audience_accepts_the_three_closed_kinds() {
+    // Omission is the shared default, not a third state.
+    let omitted = serde_json::from_value::<AddKnowledgeEntryRequest>(add_request_without_audience())
+        .expect("omitted audience");
+    assert!(omitted.audience.is_none());
+
+    let shared = serde_json::from_value::<AddKnowledgeEntryRequest>(add_request_with_audience(
+        serde_json::json!({ "kind": "shared" }),
+    ))
+    .expect("shared audience");
+    assert!(matches!(
+        shared.audience,
+        Some(AddKnowledgeEntryRequestAudience::Shared)
+    ));
+    assert_eq!(
+        serde_json::to_value(&shared).expect("serializes")["audience"],
+        serde_json::json!({ "kind": "shared" })
+    );
+
+    let author_only = serde_json::from_value::<AddKnowledgeEntryRequest>(
+        add_request_with_audience(serde_json::json!({ "kind": "author-only" })),
+    )
+    .expect("author-only audience");
+    assert!(matches!(
+        author_only.audience,
+        Some(AddKnowledgeEntryRequestAudience::AuthorOnly)
+    ));
+
+    let private = serde_json::from_value::<AddKnowledgeEntryRequest>(add_request_with_audience(
+        serde_json::json!({ "kind": "character-private", "character_id": chr() }),
+    ))
+    .expect("character-private audience");
+    let wire = serde_json::to_value(&private).expect("serializes");
+    assert_eq!(
+        wire["audience"],
+        serde_json::json!({ "kind": "character-private", "character_id": chr() })
+    );
+    let Some(AddKnowledgeEntryRequestAudience::CharacterPrivate(character_id)) = private.audience
+    else {
+        panic!("character-private must decode to its id-carrying arm");
+    };
+    assert_eq!(character_id.as_str(), chr());
+}
+
+#[test]
+fn add_knowledge_entry_audience_rejects_every_non_native_shape() {
+    // `character-private` is the only arm with a body: the `chr_` id is required
+    // and pattern-checked, exactly as the frozen `oneOf` declares.
+    assert!(
+        serde_json::from_value::<AddKnowledgeEntryRequest>(add_request_with_audience(
+            serde_json::json!({ "kind": "character-private" })
+        ))
+        .is_err()
+    );
+    assert!(
+        serde_json::from_value::<AddKnowledgeEntryRequest>(add_request_with_audience(
+            serde_json::json!({ "kind": "character-private", "character_id": "chr_nothex" })
+        ))
+        .is_err()
+    );
+    // Unknown kind, a non-object audience, and a wrong-cased kind.
+    for audience in [
+        serde_json::json!({ "kind": "viewer" }),
+        serde_json::json!({ "kind": "AuthorOnly" }),
+        serde_json::json!([]),
+        serde_json::json!("shared"),
+    ] {
+        assert!(
+            serde_json::from_value::<AddKnowledgeEntryRequest>(add_request_with_audience(
+                audience.clone()
+            ))
+            .is_err(),
+            "accepted non-native audience {audience}"
+        );
+    }
+}
+
+/// **Known generator gap — reported to the PM at this checkpoint.** Every
+/// frozen audience `oneOf` arm declares `additionalProperties: false`, but the
+/// generated adjacently-tagged DTO (`tag = "kind"`, `content =
+/// "character_id"`) scans only for the tag/content keys and silently drops any
+/// other member of the arm object. The authoring guards that carry governance
+/// meaning are unaffected — root-level `additionalProperties: false` (no
+/// `creator_only`, no client-authored `holder_entry_id`/`disclosure`) and the
+/// strict `kind` tag are both still enforced, see
+/// `knowledge_authoring_requests_reject_legacy_and_service_resolved_keys` and
+/// `add_knowledge_entry_audience_rejects_every_non_native_shape`.
+///
+/// This case documents the tolerance so it cannot be mistaken for closure; it
+/// fails loudly (making the finding actionable) if a schema or codegen change
+/// makes the arms strict.
+#[test]
+fn audience_arm_extra_member_is_tolerated_by_the_generated_dto() {
+    let tolerated = serde_json::from_value::<AddKnowledgeEntryRequest>(add_request_with_audience(
+        serde_json::json!({ "kind": "shared", "extra": true }),
+    ))
+    .expect("the generated DTO drops an unknown member inside the arm");
+    assert!(matches!(
+        tolerated.audience,
+        Some(AddKnowledgeEntryRequestAudience::Shared)
+    ));
+
+    // Only the tag is scanned strictly: an unknown `kind` is still refused,
+    // with or without the extra member.
+    assert!(
+        serde_json::from_value::<AddKnowledgeEntryRequest>(add_request_with_audience(
+            serde_json::json!({ "kind": "viewer", "extra": true })
+        ))
+        .is_err()
+    );
+}
+
+#[test]
+fn knowledge_authoring_requests_reject_legacy_and_service_resolved_keys() {
+    // Presence of the legacy `creator_only` key is rejected *including* `false`
+    // (durable §3): the retired flag must never be read as "not restrictive".
+    for value in [serde_json::json!(false), serde_json::json!(true)] {
+        let mut create = add_request_with_audience(serde_json::json!({ "kind": "shared" }));
+        create["creator_only"] = value.clone();
+        assert!(
+            serde_json::from_value::<AddKnowledgeEntryRequest>(create).is_err(),
+            "create accepted creator_only={value}"
+        );
+
+        let mut patch = serde_json::json!({ "expected_revision": 0, "canonical_name": "note-beta" });
+        patch["creator_only"] = value.clone();
+        assert!(
+            serde_json::from_value::<UpdateKnowledgeEntryRequest>(patch).is_err(),
+            "patch accepted creator_only={value}"
+        );
+    }
+
+    // `holder_entry_id` / `disclosure` are service-resolved projections: no
+    // authoring body may supply them.
+    for (key, value) in [
+        ("holder_entry_id", serde_json::json!(hld())),
+        ("disclosure", serde_json::json!("owner-private")),
+    ] {
+        let mut create = add_request_with_audience(serde_json::json!({ "kind": "author-only" }));
+        create[key] = value.clone();
+        assert!(
+            serde_json::from_value::<AddKnowledgeEntryRequest>(create).is_err(),
+            "create accepted client-authored {key}"
+        );
+
+        let mut patch = serde_json::json!({ "expected_revision": 0 });
+        patch[key] = value;
+        assert!(
+            serde_json::from_value::<UpdateKnowledgeEntryRequest>(patch).is_err(),
+            "patch accepted client-authored {key}"
+        );
+    }
+}
+
+#[test]
+fn update_knowledge_entry_audience_is_cas_bound_and_omittable() {
+    // Omission preserves stored governance; explicit `shared` is the authored
+    // clear. Both ride the same `expected_revision` as content.
+    let preserved =
+        serde_json::from_value::<UpdateKnowledgeEntryRequest>(serde_json::json!({
+            "expected_revision": 0,
+            "canonical_name": "note-beta"
+        }))
+        .expect("omitted audience");
+    assert!(preserved.audience.is_none());
+
+    let cleared = serde_json::from_value::<UpdateKnowledgeEntryRequest>(serde_json::json!({
+        "expected_revision": 0,
+        "audience": { "kind": "shared" }
+    }))
+    .expect("explicit clear");
+    assert!(matches!(
+        cleared.audience,
+        Some(UpdateKnowledgeEntryRequestAudience::Shared)
+    ));
+
+    let private = serde_json::from_value::<UpdateKnowledgeEntryRequest>(serde_json::json!({
+        "expected_revision": 0,
+        "audience": { "kind": "character-private", "character_id": chr() }
+    }))
+    .expect("private audience");
+    assert!(matches!(
+        private.audience,
+        Some(UpdateKnowledgeEntryRequestAudience::CharacterPrivate(_))
+    ));
+
+    // A governance edit without the CAS revision is refused outright.
+    assert!(
+        serde_json::from_value::<UpdateKnowledgeEntryRequest>(serde_json::json!({
+            "audience": { "kind": "shared" }
+        }))
+        .is_err()
+    );
+    assert!(
+        serde_json::from_value::<UpdateKnowledgeEntryRequest>(serde_json::json!({
+            "expected_revision": 0,
+            "audience": { "kind": "character-private" }
+        }))
+        .is_err()
+    );
+}
+
+#[test]
+fn knowledge_view_item_holder_governance_projection_fixtures() {
+    // In-scope shared row: both governance members are absent — never the
+    // string "shared", never a `false` flag.
+    let shared = serde_json::from_value::<KnowledgeViewItem>(knowledge_view_item_json())
+        .expect("shared projection");
+    assert!(shared.holder_entry_id.is_none());
+    assert!(shared.disclosure.is_none());
+    let wire = serde_json::to_value(&shared).expect("serializes");
+    assert!(wire.get("holder_entry_id").is_none());
+    assert!(wire.get("disclosure").is_none());
+    assert!(wire.get("creator_only").is_none());
+
+    // Disclosure-restricted row: the resolved pair travels together.
+    let mut private = knowledge_view_item_json();
+    private["holder_entry_id"] = serde_json::json!(hld());
+    private["disclosure"] = serde_json::json!("owner-private");
+    let private = serde_json::from_value::<KnowledgeViewItem>(private).expect("private projection");
+    assert_eq!(
+        private.holder_entry_id.as_deref().map(String::as_str),
+        Some(hld().as_str())
+    );
+    assert_eq!(
+        private.disclosure,
+        Some(KnowledgeViewItemDisclosure::OwnerPrivate)
+    );
+    let wire = serde_json::to_value(&private).expect("serializes");
+    assert_eq!(wire["holder_entry_id"], serde_json::json!(hld()));
+    assert_eq!(wire["disclosure"], serde_json::json!("owner-private"));
+
+    // The pair is optional-but-typed: the raw wire rejects a bare string here,
+    // the typed gate below owns the pattern.
+    assert!(
+        serde_json::from_value::<KnowledgeViewItem>(knowledge_view_item_json_with(
+            "creator_only",
+            serde_json::json!(false)
+        ))
+        .is_err()
+    );
+}
+
+#[test]
+fn holder_entry_id_projection_enforces_the_hld_pattern() {
+    KnowledgeViewItemHolderEntryId::from_str(&hld()).expect("valid holder id");
+    for malformed in [
+        String::new(),
+        "hld_".to_string(),
+        format!("hld_{}", &HEX64[..63]),
+        format!("hld_{HEX64}0"),
+        format!("hld_{}", HEX64.to_uppercase()),
+        format!("HLD_{HEX64}"),
+        "hld_nothex".to_string(),
+        format!("kb_{HEX64}"),
+    ] {
+        assert!(
+            KnowledgeViewItemHolderEntryId::from_str(&malformed).is_err(),
+            "accepted malformed holder id {malformed:?}"
+        );
+        let item = knowledge_view_item_json_with("holder_entry_id", serde_json::json!(malformed));
+        assert!(
+            serde_json::from_value::<KnowledgeViewItem>(item).is_err(),
+            "wire accepted malformed holder id"
+        );
+    }
+}
+
+#[test]
+fn disclosure_projection_is_the_owner_private_vocabulary_only() {
+    KnowledgeViewItemDisclosure::from_str("owner-private").expect("the one known disclosure");
+    for rejected in [
+        "shared",
+        "owner-public",
+        "OWNER-PRIVATE",
+        "owner_private",
+        "",
+        "character-private",
+    ] {
+        assert!(
+            KnowledgeViewItemDisclosure::from_str(rejected).is_err(),
+            "accepted unknown disclosure {rejected:?}"
+        );
+        // "shared" is the absence of disclosure, never a disclosure value.
+        let item = knowledge_view_item_json_with("disclosure", serde_json::json!(rejected));
+        assert!(
+            serde_json::from_value::<KnowledgeViewItem>(item).is_err(),
+            "wire accepted unknown disclosure {rejected:?}"
+        );
+    }
+}
+
+#[test]
+fn identity_detail_holder_projection_is_read_only() {
+    // Character: the projection is optional, pattern-checked, and never
+    // accepted on a create/bind body.
+    let bare = serde_json::from_value::<Character>(character_record("Ada")).expect("no holder yet");
+    assert!(bare.holder_entry_id.is_none());
+    CharacterHolderEntryId::from_str(&hld()).expect("valid holder id");
+    assert!(CharacterHolderEntryId::from_str("hld_short").is_err());
+
+    let mut covered = character_record("Ada");
+    covered["holder_entry_id"] = serde_json::json!(hld());
+    let covered = serde_json::from_value::<Character>(covered).expect("holder projection");
+    assert_eq!(
+        covered.holder_entry_id.as_deref().map(String::as_str),
+        Some(hld().as_str())
+    );
+
+    let mut malformed = character_record("Ada");
+    malformed["holder_entry_id"] = serde_json::json!("hld_short");
+    assert!(serde_json::from_value::<Character>(malformed).is_err());
+
+    let mut create = serde_json::json!({
+        "display_name": "Ada",
+        "world_id": format!("wld_{HEX32}")
+    });
+    create["holder_entry_id"] = serde_json::json!(hld());
+    assert!(serde_json::from_value::<CreateCharacterRequest>(create).is_err());
+
+    // CreatorDetail: the same read-only projection, inline in its own family.
+    let bare = serde_json::from_value::<CreatorDetail>(creator_record()).expect("no holder yet");
+    assert!(bare.holder_entry_id.is_none());
+
+    let mut covered = creator_record();
+    covered["holder_entry_id"] = serde_json::json!(hld());
+    let covered = serde_json::from_value::<CreatorDetail>(covered).expect("holder projection");
+    assert_eq!(
+        covered.holder_entry_id.as_deref().map(String::as_str),
+        Some(hld().as_str())
+    );
+    CreatorDetailHolderEntryId::from_str(&hld()).expect("valid holder id");
+    assert!(CreatorDetailHolderEntryId::from_str("hld_short").is_err());
+
+    let mut malformed = creator_record();
+    malformed["holder_entry_id"] = serde_json::json!("hld_short");
+    assert!(serde_json::from_value::<CreatorDetail>(malformed).is_err());
+}
+
+#[test]
+fn world_kb_patch_and_projection_share_the_same_governance_contract() {
+    // The third authoring surface declares the identical closed audience.
+    let mut shared = serde_json::json!({});
+    shared["audience"] = serde_json::json!({ "kind": "shared" });
+    let parsed = serde_json::from_value::<WorldKbEntityPatch>(shared).expect("shared patch");
+    assert!(matches!(
+        parsed.audience,
+        Some(WorldKbEntityPatchAudience::Shared)
+    ));
+
+    let private = serde_json::json!({
+        "audience": { "kind": "character-private", "character_id": chr() }
+    });
+    let parsed = serde_json::from_value::<WorldKbEntityPatch>(private).expect("private patch");
+    assert!(matches!(
+        parsed.audience,
+        Some(WorldKbEntityPatchAudience::CharacterPrivate(_))
+    ));
+
+    for rejected in [
+        serde_json::json!({ "audience": { "kind": "character-private" } }),
+        serde_json::json!({ "audience": { "kind": "viewer" } }),
+        serde_json::json!({ "creator_only": false }),
+        serde_json::json!({ "holder_entry_id": hld() }),
+        serde_json::json!({ "disclosure": "owner-private" }),
+    ] {
+        assert!(
+            serde_json::from_value::<WorldKbEntityPatch>(rejected.clone()).is_err(),
+            "patch accepted {rejected}"
+        );
+    }
+
+    // The CAS envelope carries the governance patch under `expected_version`.
+    let envelope = serde_json::json!({
+        "entity_id": format!("kb_{HEX32}"),
+        "expected_version": 0,
+        "patch": { "audience": { "kind": "author-only" } }
+    });
+    let parsed = serde_json::from_value::<WorldKbPatchEntityRequest>(envelope)
+        .expect("governance patch under CAS");
+    assert_eq!(parsed.expected_version, 0);
+    assert!(serde_json::from_value::<WorldKbPatchEntityRequest>(serde_json::json!({
+        "entity_id": format!("kb_{HEX32}"),
+        "patch": { "audience": { "kind": "shared" } }
+    }))
+    .is_err());
+
+    // The canvas projection carries the same pair as the ActorView projection.
+    WorldKbEntityProjectionHolderEntryId::from_str(&hld()).expect("valid holder id");
+    assert!(WorldKbEntityProjectionHolderEntryId::from_str("hld_short").is_err());
+    WorldKbEntityProjectionDisclosure::from_str("owner-private").expect("the one disclosure");
+    assert!(WorldKbEntityProjectionDisclosure::from_str("shared").is_err());
+
+    let projection = serde_json::json!({
+        "key_block_id": format!("kb_{HEX32}"),
+        "world_id": format!("wld_{HEX32}"),
+        "block_type": "character",
+        "canonical_name": "Entity",
+        "status": "confirmed",
+        "version": 0,
+        "holder_entry_id": hld(),
+        "disclosure": "owner-private"
+    });
+    let parsed =
+        serde_json::from_value::<WorldKbEntityProjection>(projection).expect("restricted row");
+    assert_eq!(
+        parsed.holder_entry_id.as_deref().map(String::as_str),
+        Some(hld().as_str())
+    );
+    assert_eq!(
+        parsed.disclosure,
+        Some(WorldKbEntityProjectionDisclosure::OwnerPrivate)
+    );
+
+    let mut malformed = serde_json::json!({
+        "key_block_id": format!("kb_{HEX32}"),
+        "world_id": format!("wld_{HEX32}"),
+        "block_type": "character",
+        "canonical_name": "Entity",
+        "status": "confirmed",
+        "version": 0
+    });
+    malformed["holder_entry_id"] = serde_json::json!("hld_short");
+    assert!(serde_json::from_value::<WorldKbEntityProjection>(malformed).is_err());
 }

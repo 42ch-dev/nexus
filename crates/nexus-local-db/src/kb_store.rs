@@ -786,6 +786,15 @@ impl KeyBlockRow {
             schema_version: 1,
             entry_id: self.key_block_id.clone(),
             owner,
+            // v1.191 P1 custodian checkpoint: `KnowledgeEntryRecord` gained the
+            // native `holder_entry_id` / `disclosure` governance columns. This
+            // SQLite row has no such columns yet — T3 adds them together with
+            // the holder registry and migration — so the value is genuinely
+            // absent here, not a defaulted-away authored pair. T3 replaces these
+            // two zeros with the real column projection; no governance logic is
+            // decided at this seam (see knowledge_entry.rs §1.2).
+            holder_entry_id: None,
+            disclosure: None,
             creator_only: self.creator_only != 0,
             block_type,
             canonical_name: self.canonical_name.clone(),

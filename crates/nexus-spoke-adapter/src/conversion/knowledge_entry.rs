@@ -273,6 +273,13 @@ pub fn spoke_to_knowledge_record(
         schema_version,
         entry_id: s.entry_id,
         owner,
+        // v1.191 P1 custodian checkpoint: make the reverse seam compile against
+        // the extended `KnowledgeEntryRecord`. Spoke 0.13.x `KnowledgeEntry.owner`
+        // / `.disclosure` are deliberately NOT read here (T1's note above); the
+        // exact native↔wire governance mapping is T8's. `None` states the
+        // absence of a mapping, it does not author one.
+        holder_entry_id: None,
+        disclosure: None,
         creator_only,
         block_type: entry_type_to_block_type(&entry_type)?,
         canonical_name,

@@ -10,7 +10,10 @@
 //! status (omission is rejected, `null` is a value), which the typify 0.8
 //! cutover tightened rather than relaxed.
 
-use nexus_contracts::{CoreServiceStopRequest, PatchWorkRequest, UpdateFindingRequest};
+use nexus_contracts::{
+    CoreServiceStopRequest, KnowledgeViewItem, PatchWorkRequest, UpdateFindingRequest,
+    UpdateKnowledgeEntryRequest, UpdateKnowledgeEntryRequestAudience,
+};
 
 #[test]
 fn update_finding_rule_suggestion_keeps_all_three_states() {
@@ -124,4 +127,78 @@ fn required_nullable_field_serializes_its_null_state() {
         wire.contains(r#""expected_engine_epoch":null"#),
         "a required nullable property must keep its key: {wire}"
     );
+}
+
+/// The v1.191 native holder-governance fields carry **two** states, not three.
+///
+/// The frozen `audience` member is absent (preserve the stored pair) or an
+/// authored value; its only clear is the explicit `{"kind":"shared"}` arm, and
+/// the schemas declare no `null` arm. The read-only `holder_entry_id` /
+/// `disclosure` projection pair is service-resolved and likewise has no null
+/// state — "shared" is the *absence* of both, never a value.
+///
+/// This pins the safety-relevant half: a `null` on either family must never
+/// read as a third intent (a clear, or a resolved holder). Governance can only
+/// be cleared by naming the `shared` arm.
+#[test]
+fn governance_fields_have_no_null_state() {
+    const HEX32: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let view_item = |holder: &str| {
+        format!(
+            r#"{{"entry_id":"kb_1","owner":{{"kind":"world","id":"wld_{HEX32}"}},
+               "holder_entry_id":{holder},"block_type":"info_point",
+               "canonical_name":"note-alpha","status":"confirmed","revision":0,
+               "created_at":"2026-09-05T00:00:00Z"}}"#
+        )
+    };
+    let hld = format!("hld_{}", "0123456789abcdef".repeat(4));
+
+    // Absent and `null` both leave `audience` unset — neither is a clear.
+    let absent: UpdateKnowledgeEntryRequest =
+        serde_json::from_str(r#"{"expected_revision":0}"#).expect("absent audience");
+    assert!(absent.audience.is_none());
+    let null: UpdateKnowledgeEntryRequest =
+        serde_json::from_str(r#"{"expected_revision":0,"audience":null}"#).expect("null audience");
+    assert!(null.audience.is_none());
+
+    // The explicit shared arm is the authored clear, and it round-trips.
+    let cleared: UpdateKnowledgeEntryRequest =
+        serde_json::from_str(r#"{"expected_revision":0,"audience":{"kind":"shared"}}"#)
+            .expect("explicit clear");
+    assert!(matches!(
+        cleared.audience,
+        Some(UpdateKnowledgeEntryRequestAudience::Shared)
+    ));
+    let round_trip: serde_json::Value =
+        serde_json::from_str(&serde_json::to_string(&cleared).expect("serializes"))
+            .expect("round-trips");
+    assert_eq!(
+        round_trip,
+        serde_json::json!({ "expected_revision": 0, "audience": { "kind": "shared" } })
+    );
+
+    // The projection pair is absence-bearing: a shared row emits neither key.
+    let shared: KnowledgeViewItem = serde_json::from_str(
+        r#"{"entry_id":"kb_1","owner":{"kind":"world","id":"wld_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+            "block_type":"info_point","canonical_name":"note-alpha","status":"confirmed",
+            "revision":0,"created_at":"2026-09-05T00:00:00Z"}"#,
+    )
+    .expect("shared projection");
+    assert!(shared.holder_entry_id.is_none());
+    assert!(shared.disclosure.is_none());
+    let wire = serde_json::to_string(&shared).expect("serializes");
+    assert!(
+        !wire.contains("holder_entry_id") && !wire.contains("disclosure"),
+        "a shared projection must omit both governance members: {wire}"
+    );
+
+    // A null holder is not a resolved holder; it stays the shared absence.
+    let nulled: KnowledgeViewItem = serde_json::from_str(&view_item("null")).expect("null holder");
+    assert!(nulled.holder_entry_id.is_none());
+
+    // A resolved pair round-trips as authored.
+    let restricted: KnowledgeViewItem =
+        serde_json::from_str(&view_item(&format!(r#""{hld}""#))).expect("resolved holder");
+    let wire = serde_json::to_string(&restricted).expect("serializes");
+    assert!(wire.contains(&format!(r#""holder_entry_id":"{hld}""#)), "{wire}");
 }
