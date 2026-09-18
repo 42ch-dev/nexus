@@ -732,4 +732,75 @@ mod tests {
             .collect();
         assert_eq!(sqlite_names, spoke_names);
     }
+
+    /// v1.191 P1 T11 (consumer side): the novel-writing run's chapter KB block
+    /// reads its rows through [`SpokeBackedKbStore::list_by_world`] — the
+    /// complete admitted listing the MCA `WorldKB` snapshot is composed from.
+    /// The exact admitted holder's private row is in; another holder's private
+    /// row is out, so a prompt built from this snapshot carries no foreign
+    /// private text.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn v1191_holder_context_list_by_world_serves_the_admitted_snapshot() {
+        use nexus_knowledge::world_kb::knowledge_entry::DISCLOSURE_OWNER_PRIVATE;
+
+        let (pool, _dir) = fresh_pool().await;
+        let (world_id, seeded) = seed_world_with_entries(&pool).await;
+
+        // Two stored creators with one registered holder each.
+        nexus_local_db::ensure_creator_row(&pool, "ctr_other", "Other")
+            .await
+            .unwrap();
+        let mut tx = pool.begin().await.unwrap();
+        let own_holder = nexus_local_db::holders::ensure_creator_holder_in_tx(&mut tx, "ctr_test")
+            .await
+            .unwrap();
+        let other_holder = nexus_local_db::holders::ensure_creator_holder_in_tx(&mut tx, "ctr_other")
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        let sqlite = SqliteKbStore::new(pool.clone());
+        for (entry_id, name, holder) in [
+            ("kb_mca_own_private", "OwnPrivateRow", &own_holder),
+            ("kb_mca_other_private", "OtherHolderPrivateRow", &other_holder),
+        ] {
+            let mut row = KnowledgeEntryRecord::new(&world_id, BlockType::Item, name);
+            row.entry_id = entry_id.to_string();
+            row.holder_entry_id = Some(holder.clone());
+            row.disclosure = Some(DISCLOSURE_OWNER_PRIVATE.to_string());
+            sqlite.insert_knowledge_entry(row).await.unwrap();
+        }
+
+        let scoped = SpokeBackedKbStore::new(
+            pool,
+            KnowledgeReadScope::actor_view(
+                own_holder,
+                vec![KnowledgeOwnerRef::world(world_id.as_str())],
+            )
+            .expect("actor view scope"),
+        );
+        let names: Vec<String> = scoped
+            .list_by_world(&world_id)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|row| row.canonical_name)
+            .collect();
+
+        for entry in &seeded {
+            assert!(
+                names.contains(&entry.canonical_name),
+                "the Character-global shared row {} stays visible: {names:?}",
+                entry.canonical_name
+            );
+        }
+        assert!(
+            names.contains(&"OwnPrivateRow".to_string()),
+            "the exact admitted holder's private row is in the snapshot: {names:?}"
+        );
+        assert!(
+            !names.contains(&"OtherHolderPrivateRow".to_string()),
+            "another holder's private row must not enter the model snapshot: {names:?}"
+        );
+    }
 }

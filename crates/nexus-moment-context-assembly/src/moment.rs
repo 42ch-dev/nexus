@@ -27,10 +27,10 @@ use crate::directive::{
 use crate::generation::GenerationStage;
 use crate::slots::{self, SlotMapEntry};
 use crate::stage0::{Stage0Assembly, STAGE0_PERSONALITY_END, STAGE0_PERSONALITY_START};
-use crate::world_context::{CharacterViewInput, WorldKbQueryBuilder};
+use crate::world_context::CharacterViewInput;
 use nexus_contracts::BlockType;
 use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
-use nexus_knowledge::world_kb::KbStore;
+use nexus_knowledge::world_kb::{KbQuery, KbStore};
 use nexus_knowledge::KnowledgeStore;
 use nexus_narrative::NarrativeGateway;
 use nexus_spoke_adapter::adapter::activation::{
@@ -170,12 +170,25 @@ pub enum MomentActorKind {
 /// Internal Actor context carried into [`assemble_moment`].
 ///
 /// MCA does not authorize; the daemon admission service must populate this.
+///
+/// # ActorView-only snapshot (HARD, v1.191 P1 T11 — durable §4.2)
+///
+/// Every Actor context carries its admitted snapshot, and there is no
+/// constructor for an Actor without one: "missing/incomplete snapshot" is not
+/// representable, so an Actor-bearing assembly can never fall back to a
+/// World-wide `KbStore` query. An empty snapshot means "this actor sees
+/// nothing" (fail-closed, empty World-KB section) — never "read the World
+/// instead". A Character's snapshot is the rows of its World + Character +
+/// binding containers its holder is admitted to; a Creator's is the same
+/// selection over the owned containers.
 #[derive(Debug, Clone)]
 pub struct MomentActorContext {
     /// Admitted actor kind.
     pub kind: MomentActorKind,
-    /// Character view rows. Required for [`MomentActorKind::Character`]; ignored otherwise.
-    pub character_view: Option<CharacterViewInput>,
+    /// The admitted ActorView snapshot: the complete filtered rows this actor
+    /// may see (Character-global shared rows included, other holders' private
+    /// rows excluded).
+    pub character_view: CharacterViewInput,
     /// P3 SOUL/Memory projection for [`MomentActorKind::Character`]. `None`
     /// means no projection (the P2 empty-heading bytes). Ignored for Creator.
     pub character_mind: Option<CharacterMindInput>,
@@ -193,37 +206,23 @@ impl MomentActorContext {
     pub const fn character_with_mind(view: CharacterViewInput, mind: CharacterMindInput) -> Self {
         Self {
             kind: MomentActorKind::Character,
-            character_view: Some(view),
+            character_view: view,
             character_mind: Some(mind),
         }
     }
 
-    /// Creator actor without an admitted view (non-Actor/legacy World query).
-    #[must_use]
-    pub const fn creator() -> Self {
-        Self {
-            kind: MomentActorKind::Creator,
-            character_view: None,
-            character_mind: None,
-        }
-    }
-
-    /// Creator actor consuming the admitted P1 omniscient union.
+    /// Creator actor consuming its admitted ActorView snapshot.
     #[must_use]
     pub const fn creator_with_view(view: CharacterViewInput) -> Self {
         Self {
             kind: MomentActorKind::Creator,
-            character_view: Some(view),
+            character_view: view,
             character_mind: None,
         }
     }
 
     const fn is_character(&self) -> bool {
         matches!(self.kind, MomentActorKind::Character)
-    }
-
-    const fn uses_admitted_view(&self) -> bool {
-        self.character_view.is_some() || self.is_character()
     }
 }
 
@@ -1135,25 +1134,27 @@ async fn fetch_narrative_context<G: NarrativeGateway>(
 /// V1.146 P4 T2: extracted so the activation pass can operate on entries
 /// before formatting. Callers use `format_entries` (in `slots.rs`) to produce
 /// context text.
+///
+/// # ActorView-only snapshot (HARD, v1.191 P1 T11 — durable §4.2)
+///
+/// An Actor-bearing assembly returns exactly its admitted snapshot: the rows
+/// the caller's `KnowledgeReadScope` already filtered. It never issues a
+/// World-wide `KbStore` query, so a missing or incomplete snapshot cannot
+/// widen into one; an empty snapshot yields no World-KB section.
+///
+/// The non-Actor lane (raw World assembly / CLI preview, `actor == None`) is
+/// the caller's own admitted store read: `kb_store` must be a scoped store
+/// (e.g. `SpokeBackedKbStore`), and MCA holds no authority to widen it.
 #[allow(clippy::future_not_send)]
 async fn fetch_world_kb_entries<K: KbStore>(
     kb_store: &K,
     world_id: &str,
     request: &MomentRequest,
 ) -> Result<Vec<KnowledgeEntryRecord>, nexus_knowledge::world_kb::KbStoreError> {
-    if request
-        .actor
-        .as_ref()
-        .is_some_and(MomentActorContext::uses_admitted_view)
-    {
-        let view = request
-            .actor
-            .as_ref()
-            .and_then(|actor| actor.character_view.as_ref());
-        return Ok(WorldKbQueryBuilder::character_view_or_unrestricted(view).unwrap_or_default());
+    if let Some(actor) = request.actor.as_ref() {
+        return Ok(actor.character_view.admitted_entries().to_vec());
     }
-    let builder = WorldKbQueryBuilder::new(world_id);
-    let mut query = builder.query_all();
+    let mut query = KbQuery::new(world_id);
     if let Some(limit) = request.kb_limit {
         query = query.with_limit(limit);
     }
@@ -3176,5 +3177,117 @@ mod tests {
         assert!(full.contains("# Ava\nSOUL\n"));
         assert!(full.contains("- SHAREDMEMORYMARKER\n- LOCALMEMORYMARKER\n"));
         assert!(full.contains("## Character ToM — L1\n\n## Character ToM — L2\n"));
+    }
+
+    // ── v1.191 P1 T11: ActorView-only model input (durable §4.2) ─────────
+
+    /// The container matrix over one store: a Character-global shared World
+    /// row, this Character's own Character-owned row and binding-local row are
+    /// each visible because the admitted snapshot carries them; another
+    /// holder's World-owned `owner-private` row is admitted by nobody here and
+    /// is never read out of the store.
+    #[tokio::test]
+    async fn v1191_holder_context_matrix_shared_character_binding_and_private() {
+        use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
+
+        let stores = TestStores::new();
+        seed_world_and_timeline(&stores).await;
+
+        let shared_world = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "SharedHarbor");
+        let own_character = KnowledgeEntryRecord::for_character(
+            "chr_ada",
+            BlockType::Character,
+            "CharacterOwnFact",
+        );
+        let binding_local =
+            KnowledgeEntryRecord::for_binding("bnd_ada", BlockType::Scene, "BindingLocalDock");
+        let unadmitted_character = KnowledgeEntryRecord::for_character(
+            "chr_bea",
+            BlockType::Character,
+            "OtherCharacterRow",
+        );
+        let mut other_holder_private =
+            KnowledgeEntryRecord::new("wld_1", BlockType::Character, "OtherHolderPrivateRow");
+        other_holder_private.holder_entry_id = Some("hld_other".to_string());
+        other_holder_private.disclosure =
+            Some(nexus_knowledge::world_kb::DISCLOSURE_OWNER_PRIVATE.to_string());
+
+        for row in [
+            shared_world.clone(),
+            own_character.clone(),
+            binding_local.clone(),
+            unadmitted_character,
+            other_holder_private,
+        ] {
+            stores.kb.insert_knowledge_entry(row).await.unwrap();
+        }
+
+        // The admitted Character ActorView snapshot: World shared + this
+        // Character's own container + its binding's container rows.
+        let request = MomentRequest::new(minimal_stage0())
+            .with_world("wld_1")
+            .with_actor(MomentActorContext::character(
+                CharacterViewInput::from_entries(vec![
+                    shared_world,
+                    own_character,
+                    binding_local,
+                ]),
+            ));
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let kb_text = ctx.world_kb.expect("admitted snapshot must render");
+
+        assert!(
+            kb_text.contains("SharedHarbor"),
+            "Character-global shared row stays visible: {kb_text}"
+        );
+        assert!(kb_text.contains("CharacterOwnFact"), "own container row: {kb_text}");
+        assert!(kb_text.contains("BindingLocalDock"), "binding-local row: {kb_text}");
+        assert!(
+            !kb_text.contains("OtherCharacterRow"),
+            "another Character's container is never read from the store: {kb_text}"
+        );
+        assert!(
+            !kb_text.contains("OtherHolderPrivateRow"),
+            "another holder's private row is never read from the store: {kb_text}"
+        );
+    }
+
+    /// Fail-closed: an Actor with an empty admitted snapshot emits no
+    /// World-KB section even though the store it was handed holds rows —
+    /// "missing/incomplete snapshot" never widens into a World query.
+    #[tokio::test]
+    async fn v1191_holder_context_empty_snapshot_fails_closed() {
+        use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
+
+        let stores = TestStores::new();
+        seed_world_and_timeline(&stores).await;
+        for name in ["StoreRowOne", "StoreRowTwo"] {
+            stores
+                .kb
+                .insert_knowledge_entry(KnowledgeEntryRecord::new(
+                    "wld_1",
+                    BlockType::Character,
+                    name,
+                ))
+                .await
+                .unwrap();
+        }
+
+        for actor in [
+            MomentActorContext::character(CharacterViewInput::from_entries(Vec::new())),
+            MomentActorContext::creator_with_view(CharacterViewInput::from_entries(Vec::new())),
+        ] {
+            let request = MomentRequest::new(minimal_stage0())
+                .with_world("wld_1")
+                .with_actor(actor);
+            let ctx =
+                assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+            assert!(
+                ctx.world_kb.is_none(),
+                "an empty snapshot must not fall back to the store's rows"
+            );
+            let full = ctx.to_full_context();
+            assert!(!full.contains("StoreRowOne") && !full.contains("StoreRowTwo"));
+        }
     }
 }

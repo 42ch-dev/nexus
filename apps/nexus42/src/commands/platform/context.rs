@@ -622,11 +622,15 @@ fn lore_activation_value_is_off(value: &str) -> bool {
 #[allow(clippy::fn_params_excessive_bools)]
 #[allow(clippy::too_many_arguments)] // CLI param plumbing — acceptable until refactored into builder
 #[allow(clippy::too_many_lines)] // CLI param plumbing + flag tail — same builder-refactor path
-/// The admitted Creator's `ActorView` read selection for one CLI preview
+/// The admitted Creator's `ActorView` read selection for one CLI surface
 /// (durable §4.1): the exact Creator holder from the registry plus the selected
 /// World container. A missing holder registry row or unknown active Creator
 /// fails closed instead of widening the read.
-async fn creator_view_scope(
+///
+/// Shared by the CLI Moment preview (`run_assemble_moment`) and the
+/// novel-writing run's chapter KB block (`creator/run.rs`), so both model
+/// inputs resolve the same selection (v1.191 P1 T11).
+pub(crate) async fn creator_view_scope(
     pool: &sqlx::SqlitePool,
     config: &CliConfig,
     world_id: Option<&str>,
