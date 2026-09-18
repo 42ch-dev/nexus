@@ -88,6 +88,11 @@ pub fn project_entity(kb: &KnowledgeEntryRecord) -> WorldKbEntityProjection {
         aliases: aliases.unwrap_or_default(),
         source_anchor_count: Some(source_anchor_count),
         updated_at: kb.updated_at.clone(),
+        // v1.191 P1 T2: the native governance pair is projected verbatim
+        // (both absent for an in-scope shared row); it is never derived from
+        // the narrative owner. T9 owns the read-policy polish.
+        holder_entry_id: wire_cast(kb.holder_entry_id.clone()),
+        disclosure: wire_cast(kb.disclosure.clone()),
     }
 }
 

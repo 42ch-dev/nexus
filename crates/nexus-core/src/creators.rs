@@ -25,7 +25,7 @@ use nexus_contracts::generated::daemon_api::creators::{
     set_active_creator_request::SetActiveCreatorRequest,
     set_active_creator_response::SetActiveCreatorResponse,
 };
-use nexus_contracts::CreatorDetail;
+use nexus_contracts::{CreatorDetail, CreatorDetailHolderEntryId};
 use nexus_home_layout::active_context::{read_active_creator_id, try_resolve_state_db_path};
 use nexus_home_layout::validate_creator_id_safe;
 
@@ -215,11 +215,21 @@ impl CoreHomeService {
         let materialized = nexus_local_db::ensure_creator_row(&pool, &creator_id, &display_name)
             .await
             .map_err(crate::error::local_db_err);
+        // §2.2: the detail's holder projection reads the registry row that
+        // just committed with the subject back through the read-only
+        // primitive (a read never provisions), while the pool is still open.
+        let holder = match materialized {
+            Ok(()) => nexus_local_db::require_creator_holder(&pool, &creator_id)
+                .await
+                .map_err(crate::error::local_db_err),
+            Err(err) => Err(err),
+        };
         pool.close().await;
-        materialized?;
+        let holder_entry_id = holder_projection(holder?);
 
         Ok(CreatorDetail {
             creator_id,
+            holder_entry_id,
             handle: None,
             display_name: Some(display_name),
             has_api_key: false,
@@ -525,12 +535,28 @@ fn creator_detail_from_parts(
 ) -> CreatorDetail {
     CreatorDetail {
         creator_id: creator_id.to_string(),
+        // Home-level detail reads hold no workspace pool, so the
+        // service-managed holder is not projected here (the trusted
+        // management read path resolves it).
+        holder_entry_id: None,
         handle: entry.and_then(|e| e.handle.clone()),
         display_name: entry.and_then(|e| e.display_name.clone()),
         has_api_key: has_creator_api_key(auth_store, creator_id),
         has_cached_token: has_cached_token(auth_store, creator_id),
         is_active: active_id == Some(creator_id),
     }
+}
+
+/// Wire holder projection for an already-authorized identity (durable §7).
+///
+/// The registry id is `hld_` plus the lowercase BLAKE3 digest of the subject
+/// (§2.1), so it always satisfies the wire pattern. `None` is the honest
+/// projection for a caller that holds no registry state to read.
+fn holder_projection(holder_entry_id: String) -> Option<CreatorDetailHolderEntryId> {
+    Some(
+        CreatorDetailHolderEntryId::try_from(holder_entry_id)
+            .expect("registry-derived holder id is wire-valid"),
+    )
 }
 
 /// Reject path segments that look like Google-AIP custom verbs (`id:verb`):

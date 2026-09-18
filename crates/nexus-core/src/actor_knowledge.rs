@@ -9,14 +9,17 @@
 //! error and no partial page.
 
 use crate::actors::{
-    map_wire_one, require_active_binding, require_active_owned_character,
+    map_wire_one, require_actor_holder, require_active_binding, require_active_owned_character,
     require_active_owned_world, AdmittedActor,
 };
 use crate::error::{actor_db_err, actor_insert_db_err, db_err, CoreError, CoreResult};
 use crate::principal::Principal;
 use crate::service::CoreService;
+use nexus_contracts::generated::daemon_api::actor_knowledge::add_knowledge_entry_request::AddKnowledgeEntryRequestAudience;
+use nexus_knowledge::world_kb::errors::KbError;
 use nexus_knowledge::world_kb::knowledge_entry::{
-    stored_created_at_order_millis, KnowledgeEntryRecord, KnowledgeOwnerRef,
+    resolve_authored_governance, stored_created_at_order_millis, KnowledgeAudience,
+    KnowledgeAuthoringOp, KnowledgeEntryRecord, KnowledgeOwnerRef,
 };
 use nexus_knowledge::world_kb::store::{KbStore, KbStoreError};
 use nexus_local_db::kb_store::SqliteKbStore;
@@ -604,7 +607,6 @@ impl CoreService {
 
         self.verify_principal(principal)?;
         let creator_id = principal.creator_id();
-        let creator_only = request.creator_only.unwrap_or(false);
         let owner = match request.owner_kind {
             AddKnowledgeEntryRequestOwnerKind::World => {
                 if summary_present {
@@ -621,11 +623,6 @@ impl CoreService {
                 KnowledgeOwnerRef::world(world_id.to_string())
             }
             AddKnowledgeEntryRequestOwnerKind::Character => {
-                if creator_only {
-                    return Err(CoreError::ActorInput(
-                        "creator_only is World-owned only".to_string(),
-                    ));
-                }
                 let character_id = str_field(request.character_id.as_ref()).ok_or_else(|| {
                     CoreError::ActorInput(
                         "character_id is required for character-owned knowledge".to_string(),
@@ -635,11 +632,6 @@ impl CoreService {
                 KnowledgeOwnerRef::character(character_id.to_string())
             }
             AddKnowledgeEntryRequestOwnerKind::ActorWorldBinding => {
-                if creator_only {
-                    return Err(CoreError::ActorInput(
-                        "creator_only is World-owned only".to_string(),
-                    ));
-                }
                 let character_id = str_field(request.character_id.as_ref()).ok_or_else(|| {
                     CoreError::ActorInput(
                         "character_id is required for binding-owned knowledge".to_string(),
@@ -674,7 +666,46 @@ impl CoreService {
                 KnowledgeEntryRecord::for_binding(id, block_type, request.canonical_name.as_str())
             }
         };
-        record.creator_only = creator_only;
+        // v1.191 P1 (durable §3): the closed `audience` replaces the retired
+        // World-only `creator_only` carrier. Admission — never the author —
+        // resolves the intended holder (T3 registry, fail-closed, no
+        // provisioning) and the conversion goes through the T2 resolver.
+        // T7 owns the remaining permitted-identity semantics (active/bound
+        // Character, patch CAS).
+        let audience = authored_audience(request.audience.as_ref())?;
+        let resolved_holder = match &audience {
+            Some(KnowledgeAudience::AuthorOnly) => Some(
+                require_actor_holder(
+                    &self.inner.pool,
+                    creator_id,
+                    &AdmittedActor::Creator {
+                        creator_id: creator_id.to_string(),
+                    },
+                )
+                .await?,
+            ),
+            Some(KnowledgeAudience::CharacterPrivate { character_id }) => Some(
+                require_actor_holder(
+                    &self.inner.pool,
+                    creator_id,
+                    &AdmittedActor::Character {
+                        character_id: character_id.clone(),
+                    },
+                )
+                .await?,
+            ),
+            None | Some(KnowledgeAudience::Shared) => None,
+        };
+        let governance = resolve_authored_governance(
+            KnowledgeAuthoringOp::Create,
+            audience.as_ref(),
+            resolved_holder.as_deref(),
+        )
+        .map_err(kb_authoring_err)?;
+        if let Some(governance) = governance {
+            record.holder_entry_id = governance.holder_entry_id;
+            record.disclosure = governance.disclosure;
+        }
         if matches!(
             &owner,
             KnowledgeOwnerRef::Character(_) | KnowledgeOwnerRef::ActorWorldBinding(_)
@@ -922,6 +953,40 @@ fn kb_insert_err(err: KbStoreError) -> CoreError {
 
 fn str_field<T: std::ops::Deref<Target = String>>(value: Option<&T>) -> Option<&str> {
     value.map(|s| s.as_str())
+}
+
+/// Map the closed wire author audience onto the domain audience (durable §3).
+///
+/// `audience` is the only governance input on the create command: the author
+/// never supplies `holder_entry_id` or a management flag, and omission means
+/// in-scope shared. Which holder a private audience names is resolved by
+/// admission against the stored identity, not here.
+fn authored_audience(
+    wire: Option<&AddKnowledgeEntryRequestAudience>,
+) -> CoreResult<Option<KnowledgeAudience>> {
+    match wire {
+        None => Ok(None),
+        Some(AddKnowledgeEntryRequestAudience::Shared) => Ok(Some(KnowledgeAudience::Shared)),
+        Some(AddKnowledgeEntryRequestAudience::AuthorOnly) => {
+            Ok(Some(KnowledgeAudience::AuthorOnly))
+        }
+        Some(AddKnowledgeEntryRequestAudience::CharacterPrivate(character_id)) => {
+            KnowledgeAudience::character_private(character_id.to_string())
+                .map(Some)
+                .map_err(kb_authoring_err)
+        }
+    }
+}
+
+/// Map a domain authoring refusal onto the actor input family, matching the
+/// retained create/update `invalid_input` texture for validation refusals.
+fn kb_authoring_err(err: KbError) -> CoreError {
+    match err {
+        KbError::ValidationError(message) => CoreError::ActorInput(message),
+        other => CoreError::Internal {
+            category: format!("{KNOWLEDGE_INSERT_FAILED_PREFIX}: {other}"),
+        },
+    }
 }
 
 #[cfg(test)]
