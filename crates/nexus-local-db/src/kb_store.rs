@@ -420,6 +420,11 @@ impl SqliteKbStore {
     /// # Errors
     ///
     /// Returns [`KbStoreError::Storage`] on database failure.
+    // v1.191 P1 T6 — UNSCOPED retained read (no `KnowledgeReadScope`, no
+    // disclosure conjunct): transitional state equals the pre-T6 behaviour,
+    // so it adds no exposure. Its production caller is the adapter
+    // `ScopeQueryPort` (T8) and must be migrated to an admitted selection;
+    // T15 verifies no public unscoped reader remains. Do not add new callers.
     pub async fn list_by_world_scoped(
         &self,
         world_id: &str,
@@ -1270,6 +1275,12 @@ impl KbStore for SqliteKbStore {
         rows.iter().map(KeyBlockRow::to_record).collect()
     }
 
+    // v1.191 P1 T6 — UNSCOPED retained read (trait shape owned by
+    // `nexus-knowledge`): transitional state equals the pre-T6 behaviour, so
+    // it adds no exposure. Its production callers (adapter MCA read, MCA/
+    // moment assembly, orchestration compute input) migrate to
+    // `query_with_scope` under T8/T11; T15 verifies no public unscoped
+    // reader remains. Do not add new callers.
     async fn query(&self, query: &KbQuery) -> Result<KbQueryResult, KbStoreError> {
         // Strategy: fetch all active blocks for the world, then apply
         // optional filters in-memory. This avoids complex dynamic SQL
@@ -1525,6 +1536,10 @@ impl SqliteKbStore {
     /// # Errors
     ///
     /// Returns [`KbStoreError::Storage`] on database failure.
+    // v1.191 P1 T6 — UNSCOPED retained read (no `KnowledgeReadScope`): its
+    // callers are the pack export paths owned by T10; transitional state
+    // equals the pre-T6 behaviour, so it adds no exposure, and T15 verifies
+    // no public unscoped reader remains. Do not add new callers.
     pub async fn list_by_world_including_deprecated(
         &self,
         world_id: &str,

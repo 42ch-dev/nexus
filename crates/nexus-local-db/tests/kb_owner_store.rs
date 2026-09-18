@@ -38,6 +38,9 @@ const CHARACTER_1: &str = "chr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const CHARACTER_2: &str = "chr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const BINDING_1: &str = "awb_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const BINDING_2: &str = "awb_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+/// A Character with no knowledge rows: the only shape whose holder registry row
+/// can be removed without violating the governance FK.
+const ORPHAN_CHARACTER: &str = "chr_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
 
 // ── Pool / seed helpers (same shapes as kb_owner_scope_migration.rs) ──────
 
@@ -942,70 +945,110 @@ async fn v1191_holder_visibility_search_counts_and_snippets_skip_hidden() {
     );
 }
 
-/// The detail read is the same rule in a single-row `WHERE`: a row hidden from
-/// the admitted Character is indistinguishable from a missing one.
+/// The detail read selects container **and** disclosure in one `WHERE`: a row
+/// hidden from the admitted Character, a row outside its container, and a
+/// simply absent id are all unobservable — and the holder comes from the
+/// registry, so a broken registry fails closed instead of deriving one.
 #[tokio::test]
 async fn v1191_holder_visibility_detail_hidden_is_absent() {
     let (pool, _dir) = migrated_pool().await;
     let fixture = seed_visibility_fixture(&pool).await;
 
-    let own = nexus_local_db::get_actor_knowledge_entry(
-        &pool,
-        CREATOR,
-        CHARACTER_1,
-        &fixture.ids["Char1Private"],
-    )
-    .await
-    .unwrap();
+    let read = |entry_id: &str| {
+        let pool = pool.clone();
+        let entry_id = entry_id.to_string();
+        async move {
+            nexus_local_db::get_actor_knowledge_entry(&pool, CREATOR, CHARACTER_1, &entry_id).await
+        }
+    };
+
+    let own = read(&fixture.ids["Char1Private"]).await.unwrap();
     assert_eq!(
         own.map(|row| row.canonical_name),
         Some("Char1Private".to_string()),
         "the admitted Character reads its own private row"
     );
+    assert_eq!(
+        read(&fixture.ids["Char1Shared"])
+            .await
+            .unwrap()
+            .map(|row| row.canonical_name),
+        Some("Char1Shared".to_string()),
+        "a shared Character row stays readable"
+    );
+    assert_eq!(
+        read(&fixture.ids["Bind1Private"])
+            .await
+            .unwrap()
+            .map(|row| row.canonical_name),
+        Some("Bind1Private".to_string()),
+        "a binding-owned row in this Character's own binding stays readable"
+    );
 
-    let hidden = nexus_local_db::get_actor_knowledge_entry(
+    // Every refused id is observably identical to a never-written one: private
+    // to another holder, in another container (World / other Character / other
+    // binding / other World), or absent.
+    let absent = read("kb_never_written").await.unwrap();
+    assert_eq!(absent, None, "an absent row is absent");
+    for refused in [
+        // Same container, `owner-private` under a holder that is not this
+        // Character's.
+        "Char1ForeignHolderPrivate",
+        // World container (a World-owned row is never in a Character container).
+        "WorldChar1Private",
+        // Another Character's container and another binding's provenance.
+        "Char2Private",
+        "Bind2Private",
+        // Another World entirely.
+        "WorldBShared",
+    ] {
+        let got = read(&fixture.ids[refused]).await.unwrap();
+        assert_eq!(
+            got, absent,
+            "{refused} must be indistinguishable from an absent id"
+        );
+    }
+
+    // The requested container is authorized first: a Character the caller does
+    // not own is the retained not-found shape, never a row.
+    let foreign = nexus_local_db::get_actor_knowledge_entry(
+        &pool,
+        OTHER_CREATOR,
+        CHARACTER_1,
+        &fixture.ids["Char1Private"],
+    )
+    .await;
+    assert!(
+        matches!(
+            foreign,
+            Err(nexus_local_db::LocalDbError::ActorNotFound { .. })
+        ),
+        "a foreign requested Character is not-found, got {foreign:?}"
+    );
+
+    // The holder is read from the registry, never derived: a missing registry
+    // row fails closed with `holder_state_invalid` (no provisioning, no
+    // silently derived predicate). A Character with no knowledge rows is used
+    // so the registry DELETE is not blocked by the governance FK.
+    seed_character(&pool, ORPHAN_CHARACTER).await;
+    sqlx::query("DELETE FROM knowledge_holders WHERE character_id = ?")
+        .bind(ORPHAN_CHARACTER)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let broken = nexus_local_db::get_actor_knowledge_entry(
         &pool,
         CREATOR,
-        CHARACTER_1,
-        &fixture.ids["Char1ForeignHolderPrivate"],
+        ORPHAN_CHARACTER,
+        "kb_never_written",
     )
-    .await
-    .unwrap();
-    let absent =
-        nexus_local_db::get_actor_knowledge_entry(&pool, CREATOR, CHARACTER_1, "kb_never_written")
-            .await
-            .unwrap();
-    assert_eq!(hidden, None, "a foreign-holder private row is hidden");
-    assert_eq!(absent, None, "an absent row is absent");
-    assert_eq!(
-        hidden, absent,
-        "a hidden entry id must be indistinguishable from a missing one"
-    );
-
-    // A World-owned row is outside the Character's detail container, and a
-    // shared Character row stays readable.
-    assert_eq!(
-        nexus_local_db::get_actor_knowledge_entry(
-            &pool,
-            CREATOR,
-            CHARACTER_1,
-            &fixture.ids["WorldChar1Private"]
-        )
-        .await
-        .unwrap(),
-        None
-    );
-    assert_eq!(
-        nexus_local_db::get_actor_knowledge_entry(
-            &pool,
-            CREATOR,
-            CHARACTER_1,
-            &fixture.ids["Char1Shared"]
-        )
-        .await
-        .unwrap()
-        .map(|row| row.canonical_name),
-        Some("Char1Shared".to_string())
+    .await;
+    assert!(
+        matches!(
+            broken,
+            Err(nexus_local_db::LocalDbError::HolderStateInvalid { .. })
+        ),
+        "a missing registry holder must fail closed, got {broken:?}"
     );
 }
 

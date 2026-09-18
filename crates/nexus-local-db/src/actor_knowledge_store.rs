@@ -310,50 +310,49 @@ async fn row_in_character_retained_read_scope(
     }
 }
 
-async fn character_owned_for_read(
-    pool: &SqlitePool,
-    owner_creator_id: &str,
-    character_id: &str,
-) -> Result<bool, LocalDbError> {
-    let owned = sqlx::query_scalar!(
-        r#"SELECT owner_creator_id as "owner_creator_id!" FROM characters WHERE character_id = ?"#,
-        character_id
-    )
-    .fetch_optional(pool)
-    .await?;
-    Ok(matches!(owned.as_deref(), Some(stored) if stored == owner_creator_id))
-}
-
 /// Stored-owner scoped knowledge detail read (retained archive reads allowed).
 ///
-/// v1.191 P1 T6 (durable §4.2): the same visibility rule the keyset page and
-/// the search apply is part of this row's eligibility `WHERE`, with the
-/// resolved holder of the admitted Character as the only holder whose
-/// `owner-private` rows it admits. An entry hidden from that holder — private
-/// to somebody else, or carrying unknown disclosure vocabulary — is therefore
-/// never fetched, which makes it indistinguishable from a missing entry.
+/// v1.191 P1 T6 (durable §4.2): the authorized-container selection **and** the
+/// visibility rule are one eligibility `WHERE`, so the database returns a row
+/// only when it is inside the admitted Character's container **and** disclosure
+/// admits it for the resolved holder. Nothing is fetched and then filtered:
+///
+/// - container: a Character-owned row of this Character, or a binding-owned row
+///   whose binding belongs to this Character inside a World this Creator owns
+///   (the same retained provenance rule the write paths enforce, expressed in
+///   SQL);
+/// - holder: the registry holder of the requested Character, resolved through
+///   [`crate::character::require_character_holder`] — a missing or corrupt
+///   registry row fails closed with `holder_state_invalid` instead of admitting
+///   a predicate over a silently derived id;
+/// - disclosure: `owner-private` is admitted only for that exact holder, so a
+///   foreign-holder private row (or unknown vocabulary, which storage refuses)
+///   yields no row.
+///
+/// An entry outside the container, hidden from the holder, or simply absent is
+/// therefore indistinguishable from an absent id at the database boundary.
 ///
 /// # Errors
 ///
-/// Returns `LocalDbError` on database failure.
+/// [`LocalDbError::HolderStateInvalid`] when the requested Character's registry
+/// holder is missing/corrupt, [`LocalDbError::ActorNotFound`] when the requested
+/// Character is missing or belongs to another Creator, and `LocalDbError` on
+/// database failure.
 pub async fn get_actor_knowledge_entry(
     pool: &SqlitePool,
     owner_creator_id: &str,
     character_id: &str,
     entry_id: &str,
 ) -> Result<Option<KnowledgeEntryRecord>, LocalDbError> {
-    if !character_owned_for_read(pool, owner_creator_id, character_id).await? {
-        return Ok(None);
-    }
-    // The detail read is an ActorView over the exact admitted Character, so the
-    // admitted private rows are exactly this Character's own.
-    let holder_entry_id = crate::holders::character_holder_entry_id(character_id);
+    let holder_entry_id =
+        crate::character::require_character_holder(pool, owner_creator_id, character_id).await?;
     let (visibility, holders) =
         crate::kb_store::owner_private_visibility_conjunct(std::slice::from_ref(&holder_entry_id));
     // SAFETY: runtime query (not `query_as!`) because the v1.191 P1 T3
     // governance columns are unknown to the committed `.sqlx` offline cache —
     // the same convention `kb_store.rs` uses for `kb_key_blocks` column
-    // changes. Static SQL; the row shape is the shared `KeyBlockRow`.
+    // changes. Static SQL with bound parameters only (no interpolated input);
+    // the row shape is the shared `KeyBlockRow`.
     let sql = format!(
         r"SELECT key_block_id, owner_kind, world_id, character_id,
                 actor_world_binding_id, holder_entry_id, disclosure, block_type,
@@ -361,9 +360,26 @@ pub async fn get_actor_knowledge_entry(
                 created_from_command_id, created_at, updated_at, source_work_id,
                 source_chapter, source_provenance_kind, extensions_nexus_json,
                 modules_json
-         FROM kb_key_blocks WHERE key_block_id = ?{visibility}"
+         FROM kb_key_blocks
+         WHERE key_block_id = ?
+           AND (
+             (owner_kind = 'character' AND character_id = ?)
+             OR (
+               owner_kind = 'actor_world_binding'
+               AND actor_world_binding_id IN (
+                 SELECT b.binding_id
+                 FROM actor_world_bindings b
+                 INNER JOIN narrative_worlds w ON w.world_id = b.world_id
+                 WHERE b.character_id = ? AND w.owner_creator_id = ?
+               )
+             )
+           ){visibility}"
     );
-    let mut query = sqlx::query_as::<_, KeyBlockRow>(AssertSqlSafe(sql)).bind(entry_id);
+    let mut query = sqlx::query_as::<_, KeyBlockRow>(AssertSqlSafe(sql))
+        .bind(entry_id)
+        .bind(character_id)
+        .bind(character_id)
+        .bind(owner_creator_id);
     for holder in holders {
         query = query.bind(holder);
     }
@@ -371,6 +387,8 @@ pub async fn get_actor_knowledge_entry(
     let Some(row) = row else {
         return Ok(None);
     };
+    // Defense in depth: re-check the same rule in Rust so a future SQL change
+    // cannot silently widen this read.
     if !row_in_character_retained_read_scope(pool, owner_creator_id, &row, character_id).await? {
         return Ok(None);
     }

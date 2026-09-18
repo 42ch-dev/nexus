@@ -1697,9 +1697,20 @@ async fn v1191_holder_visibility_actor_view_pages_skip_hidden_rows() {
     );
 }
 
-/// The detail read is the same rule for one row: a private row held by
-/// somebody else is refused exactly like an absent id, with no hidden
-/// identifier in the error.
+/// The observable shape of one detail refusal, with the caller-supplied id
+/// normalized away: two refusals equal under this measure are indistinguishable
+/// to the caller, which is what "a hidden id behaves like an absent one" means.
+fn refusal_shape(err: &CoreError, requested: &str) -> String {
+    match err {
+        CoreError::NotFound { resource } => resource.replace(requested, "<requested-id>"),
+        other => format!("{other:?}"),
+    }
+}
+
+/// The detail read is one eligibility `WHERE` (container + registry holder +
+/// disclosure): a row hidden by holder, a row in another container, and an
+/// absent id are observably indistinguishable, and no refusal names the hidden
+/// row or a holder.
 #[tokio::test]
 async fn v1191_holder_visibility_detail_hidden_equals_absent() {
     let env = seed_env().await;
@@ -1728,24 +1739,38 @@ async fn v1191_holder_visibility_detail_hidden_equals_absent() {
         .expect("a shared row stays readable");
     assert_eq!(shared.canonical_name, "FirstCharacterShared");
 
-    let hidden = core
-        .actor_knowledge_entry(
-            &principal,
-            character_id.clone(),
-            entry_id_by_name(&pool, "FirstCharacterForeignPrivate").await,
-        )
-        .await
-        .expect_err("a private row held by another holder is hidden");
+    // The observable refusal shape with the caller-supplied id normalized away:
+    // two refusals must be identical by this measure, so a hidden id cannot be
+    // distinguished from an absent one by the caller.
+    let absent_id = "kb_never_written";
     let absent = core
-        .actor_knowledge_entry(&principal, character_id, "kb_never_written".to_string())
+        .actor_knowledge_entry(&principal, character_id.clone(), absent_id.to_string())
         .await
         .expect_err("an absent id is absent");
-    assert_not_found(&hidden);
+    let absent_shape = refusal_shape(&absent, absent_id);
     assert_not_found(&absent);
-    for err in [&hidden, &absent] {
-        let text = format!("{err:?}");
+
+    // Hidden by holder, then outside the container (World container, the other
+    // Character's container, the other binding's provenance).
+    for name in [
+        "FirstCharacterForeignPrivate",
+        "WorldFirstPrivate",
+        "SecondCharacterPrivate",
+    ] {
+        let entry_id = entry_id_by_name(&pool, name).await;
+        let denied = core
+            .actor_knowledge_entry(&principal, character_id.clone(), entry_id.clone())
+            .await
+            .expect_err("a row outside the admitted selection is unobservable");
+        assert_not_found(&denied);
+        assert_eq!(
+            refusal_shape(&denied, &entry_id),
+            absent_shape,
+            "{name} must be indistinguishable from an absent id"
+        );
+        let text = format!("{denied:?}");
         assert!(
-            !text.contains("FirstCharacterForeignPrivate"),
+            !text.contains(name),
             "the refusal must not name the hidden row: {text}"
         );
         assert!(
