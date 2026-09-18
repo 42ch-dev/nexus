@@ -123,7 +123,7 @@ getrandom = { version = "0.4", optional = true }
 # under the nested `embedded-mcp` feature. Pinned exactly `=3.2.0`
 # (2026-09-10 dependency sweep #280; ACP 2.1.0 core no longer carries rmcp,
 # so feature-on is exactly-one 3.2.0 and feature-off is absent).
-rmcp = { version = "=3.2.0", default-features = false, features = ["server"], optional = true }
+rmcp = { version = "=3.3.0", default-features = false, features = ["server"], optional = true }
 # V1.174 P0 T3 (AR-68): pure tool manifest/ABI helpers for the PeerToolTable
 # admission chain (`validate_manifest_tools`, `parse_tool_capability_id`,
 # `validate_tool_arguments`) AND for the user-capability catalog grammar
@@ -159,7 +159,7 @@ spoke-operations = { workspace = true }
 # (`tests/embedded_mcp_e2e.rs`) — dev-only, tests-only. The feature-on
 # shipped graph keeps exactly one rmcp 3.2.0 with `server` only; graph pins
 # use `--edges normal`, dev-deps excluded (AR-74 caveat).
-rmcp = { version = "=3.2.0", default-features = false, features = ["client"] }
+rmcp = { version = "=3.3.0", default-features = false, features = ["client"] }
 
 [[bench]]
 name = "dispatch_latency"
