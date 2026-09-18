@@ -3,6 +3,8 @@
 use std::ffi::CString;
 use std::os::raw::{c_char, c_int, c_void};
 use std::panic::catch_unwind;
+#[cfg(debug_assertions)]
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use libsqlite3_sys::{
@@ -14,6 +16,26 @@ use sqlx::sqlite::SqliteConnection;
 
 use crate::{WriterConnectionContext, WriterMode};
 
+/// Live FFI userdata boxes in this process — one per registration that supplied
+/// a destructor and has not been destroyed yet.
+///
+/// This is the ownership invariant itself: every `sqlite3_create_function_v2`
+/// attempt adds exactly one box and `destroy_userdata` removes exactly one, so
+/// the count returns to its previous value once a connection is torn down. It
+/// is compiled only into debug builds and exists so the ownership proof can be
+/// *asserted* from a fixture instead of inferred from observable values.
+#[cfg(debug_assertions)]
+static LIVE_REGISTRATIONS: AtomicUsize = AtomicUsize::new(0);
+
+impl WriterConnectionContext {
+    /// Live FFI userdata boxes in this process (debug builds only).
+    #[cfg(debug_assertions)]
+    #[must_use]
+    pub fn live_registration_count() -> usize {
+        LIVE_REGISTRATIONS.load(Ordering::SeqCst)
+    }
+}
+
 /// Per-registration userdata: one `Arc` clone per successful `sqlite3_create_function_v2`.
 struct UserData(Arc<WriterConnectionContext>);
 
@@ -24,6 +46,8 @@ struct UserData(Arc<WriterConnectionContext>);
 /// error path must therefore never call this manually.
 unsafe extern "C" fn destroy_userdata(ptr: *mut c_void) {
     if !ptr.is_null() {
+        #[cfg(debug_assertions)]
+        LIVE_REGISTRATIONS.fetch_sub(1, Ordering::SeqCst);
         // SAFETY: pointer came from `Box::into_raw` in `register_scalar`.
         drop(unsafe { Box::from_raw(ptr.cast::<UserData>()) });
     }
@@ -141,6 +165,8 @@ fn register_scalar(
     let c_name =
         CString::new(name).map_err(|e| sqlx::Error::Configuration(e.to_string().into()))?;
     let userdata = Box::into_raw(Box::new(UserData(context)));
+    #[cfg(debug_assertions)]
+    LIVE_REGISTRATIONS.fetch_add(1, Ordering::SeqCst);
     let status = unsafe {
         sqlite3_create_function_v2(
             db,
@@ -179,6 +205,11 @@ fn register_scalar(
 /// that attempt's box only; earlier successful registrations retain live `Arc`
 /// clones and their userdata pointers stay valid until connection teardown.
 /// The error path never calls `destroy_userdata` manually.
+///
+/// Debug builds expose the same count through
+/// [`WriterConnectionContext::live_registration_count`], so a fixture asserts
+/// the arithmetic (one box per attempt, one destructor per box) instead of
+/// inferring it from returned values.
 pub async fn install_writer_functions(
     conn: &mut SqliteConnection,
     context: WriterConnectionContext,

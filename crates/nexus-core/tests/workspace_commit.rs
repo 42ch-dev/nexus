@@ -415,3 +415,65 @@ fn session_id_display_round_trips() {
     let id = SessionId("sess-123".to_string());
     assert_eq!(id.to_string(), "sess-123");
 }
+
+/// v1.191 P0 T4 (#318): the manifest-body base64 boundary on the bumped
+/// `base64 0.23.1`. Malformed bodies stay refusals of the commit authority and
+/// a well-formed body still round-trips through the same call — the assertions
+/// pin accept/reject behaviour, never the decoder's error rendering.
+#[tokio::test]
+#[serial]
+async fn malformed_manifest_base64_bodies_are_refused() {
+    let (pool, db_dir) = fresh_pool().await;
+    let mgr = recoverable_mgr(pool, &db_dir);
+    let ws = tempfile::tempdir().unwrap();
+    let root = ws.path().to_string_lossy().to_string();
+    let session = mgr.open_session(&root, "", true).await.expect("open");
+
+    // Malformed bodies: truncated quad, wrong/embedded padding, non-canonical
+    // trailing bits, interior whitespace, and URL-safe symbols that the
+    // standard alphabet does not accept. None may create a file.
+    for malformed in [
+        "A",    // truncated quad
+        "AB=",  // wrong padding count
+        "AA=A", // padding inside the quad
+        "AB==", // non-canonical trailing bits in the last symbol
+        "AB C", // interior whitespace is not a symbol
+        "AB*",  // non-alphabet character
+        "AA--", // URL-safe symbol in the standard alphabet
+        "AB_",  // URL-safe symbol in the standard alphabet
+    ] {
+        let path = format!("malformed_{}.txt", malformed.replace(['/', ' '], "_"));
+        let change = ChangeEntry {
+            path: path.clone(),
+            op: ChangeOp::Create,
+            expected_hash: None,
+            content_base64: Some(malformed.to_string()),
+        };
+        let err = mgr
+            .commit_session_durable(&session, std::slice::from_ref(&change), &root)
+            .await
+            .unwrap_err();
+        match err {
+            SessionError::ManifestInvalid(message) => assert!(
+                message.contains("base64"),
+                "{malformed:?} must be refused at the base64 boundary: {message}"
+            ),
+            other => panic!("{malformed:?} must be a manifest refusal, got {other:?}"),
+        }
+        assert!(
+            !ws.path().join(&path).exists(),
+            "{malformed:?} must not create its target file"
+        );
+    }
+
+    // Control on the same session: the identical call path accepts a
+    // well-formed body, so the refusals above are the decode boundary.
+    let content = b"v1.191 base64 boundary";
+    mgr.commit_session_durable(&session, &[create_change("accepted.txt", content)], &root)
+        .await
+        .expect("a well-formed body still commits");
+    assert_eq!(
+        std::fs::read(ws.path().join("accepted.txt")).expect("committed file"),
+        content
+    );
+}

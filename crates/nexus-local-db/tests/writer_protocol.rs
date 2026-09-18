@@ -796,7 +796,9 @@ async fn v1191_sqlite_writer() {
     let writer_id = assert_writer_registration(&db).await;
     assert_unregistered_writer_refused(&db).await;
     assert_reopen_carries_its_own_context(&db, &writer_id).await;
-    assert_registration_destructor(&db).await;
+    assert_re_registration_replaces_live_userdata(&db).await;
+    #[cfg(debug_assertions)]
+    assert_registration_ownership_isolated(dir.path(), &db);
 
     release_retained_writer_guards(&db);
 }
@@ -929,11 +931,12 @@ async fn assert_reopen_carries_its_own_context(db: &Path, first_writer: &str) {
     reopened.close().await;
 }
 
-/// (4) Destructor: re-registering on a live connection replaces all five
-/// registrations (SQLite runs each replaced box's `destroy_userdata`), and
-/// every teardown after an install leaves the allocator intact with the next
-/// connection reporting its own context.
-async fn assert_registration_destructor(db: &Path) {
+/// (4a) Replacement on a live connection: SQLite replaces all five
+/// registrations, so the connection reports the replacement context and the
+/// registry still holds exactly five names — never ten. The exit is observed
+/// through values and the registry; the exact box arithmetic is asserted by
+/// the isolated child below.
+async fn assert_re_registration_replaces_live_userdata(db: &Path) {
     let url = format!("sqlite://{}?mode=rwc", db.display());
     let mut conn = SqliteConnection::connect(&url)
         .await
@@ -949,11 +952,7 @@ async fn assert_registration_destructor(db: &Path) {
         ("v1191_first".to_owned(), "direct".to_owned(), 1, None),
         "the first context is live on the raw handle"
     );
-    // A cached prepared statement still referencing a function makes SQLite
-    // refuse the replacement, so release the cache before re-registering.
-    conn.clear_cached_statements()
-        .await
-        .expect("clear cached statements");
+
     install_writer_functions(
         &mut conn,
         probe_context("v1191_second", GuardWriterMode::Engine, 2, Some(7)),
@@ -963,7 +962,7 @@ async fn assert_registration_destructor(db: &Path) {
     assert_eq!(
         probe_scalars(&mut conn).await,
         ("v1191_second".to_owned(), "engine".to_owned(), 2, Some(7)),
-        "the replacement context is live; the five replaced boxes were destroyed"
+        "the replacement context is live on the connection"
     );
     let installed: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM pragma_function_list WHERE name LIKE 'nexus_%' AND builtin = 0",
@@ -973,46 +972,81 @@ async fn assert_registration_destructor(db: &Path) {
     .expect("registry count after re-registration");
     assert_eq!(installed, 5, "re-registration replaces, never accumulates");
     conn.close().await.expect("close the probe connection");
-
-    // Teardown after each install runs that install's five destructors. Many
-    // install→use→close cycles must leave the allocator intact and every
-    // following connection reporting its own context.
-    for cycle in 0..16_i32 {
-        assert_install_use_close_cycle(&url, cycle).await;
-    }
 }
 
-/// One destructor cycle: install a fresh context, read it back, close the
-/// connection (running that install's five `destroy_userdata` calls).
-async fn assert_install_use_close_cycle(url: &str, cycle: i32) {
-    let engine = cycle % 2 == 1;
-    let expected_id = format!("v1191_cycle_{cycle}");
-    let mode = if engine {
-        GuardWriterMode::Engine
-    } else {
-        GuardWriterMode::Direct
-    };
-    let epoch = i64::from(cycle) + 1;
-    let mut conn = SqliteConnection::connect(url)
+/// (4b) Exact ownership accounting, run in an isolated child process: every
+/// `sqlite3_create_function_v2` attempt must add exactly one userdata box, and
+/// every box must be destroyed exactly once — by connection teardown or by the
+/// replacement of a live registration. The counter is process-global, so a
+/// sibling test installing writer functions would perturb it; the child runs
+/// only this check (`--exact`, one thread).
+///
+/// This is the leak gate: a regression that stops invoking `destroy_userdata`
+/// leaves the count above the expected value and fails here.
+///
+/// Coverage limit: the *failed*-registration branch of `destroy_userdata` is
+/// not reachable from this fixture — SQLite returns `SQLITE_BUSY` only while a
+/// statement evaluating the function is actively stepping, which a
+/// single-connection, single-threaded test cannot arrange deterministically.
+#[cfg(debug_assertions)]
+fn assert_registration_ownership_isolated(dir: &Path, db: &Path) {
+    let err_path = dir.join("v1191_ownership_err");
+    let mut child = spawn_child("v1191_ownership", db, &[], &err_path);
+    reap(&mut child, &err_path);
+}
+
+/// Child entry point for [`assert_registration_ownership_isolated`].
+#[cfg(debug_assertions)]
+async fn assert_registration_ownership(db: &Path) {
+    let live = WriterConnectionContext::live_registration_count;
+    let url = format!("sqlite://{}?mode=rwc", db.display());
+    assert_eq!(live(), 0, "a fresh process holds no writer registrations");
+
+    let mut conn = SqliteConnection::connect(&url)
         .await
-        .expect("cycle connection");
+        .expect("ownership connection");
     install_writer_functions(
         &mut conn,
-        probe_context(&expected_id, mode, epoch, engine.then_some(epoch)),
+        probe_context("v1191_a", GuardWriterMode::Direct, 1, None),
     )
     .await
-    .expect("cycle install");
+    .expect("install");
+    assert_eq!(live(), 5, "one box per registration");
+
+    install_writer_functions(
+        &mut conn,
+        probe_context("v1191_b", GuardWriterMode::Engine, 2, Some(1)),
+    )
+    .await
+    .expect("replace");
+    assert_eq!(live(), 5, "a replacement destroys the five replaced boxes");
     assert_eq!(
         probe_scalars(&mut conn).await,
-        (
-            expected_id,
-            if engine { "engine" } else { "direct" }.to_owned(),
-            epoch,
-            engine.then_some(epoch),
-        ),
-        "cycle {cycle} reports its own context"
+        ("v1191_b".to_owned(), "engine".to_owned(), 2, Some(1))
     );
-    conn.close().await.expect("cycle close");
+
+    conn.close().await.expect("close the ownership connection");
+    assert_eq!(live(), 0, "connection teardown destroys every registration");
+
+    for cycle in 0..8_i32 {
+        let mut conn = SqliteConnection::connect(&url)
+            .await
+            .expect("cycle connection");
+        install_writer_functions(
+            &mut conn,
+            probe_context(
+                &format!("v1191_cycle_{cycle}"),
+                GuardWriterMode::Direct,
+                i64::from(cycle) + 1,
+                None,
+            ),
+        )
+        .await
+        .expect("cycle install");
+        assert_eq!(live(), 5, "cycle {cycle}: one box per registration");
+        conn.close().await.expect("cycle close");
+        assert_eq!(live(), 0, "cycle {cycle}: teardown leaves none live");
+    }
 }
 
 /// The connection-local context the FFI probe installs by hand.
@@ -1076,6 +1110,8 @@ async fn child_main() {
                 };
             fs::write(out, outcome).expect("write owner outcome");
         }
+        #[cfg(debug_assertions)]
+        "v1191_ownership" => assert_registration_ownership(&db).await,
         other => panic!("unknown child mode {other}"),
     }
 }
