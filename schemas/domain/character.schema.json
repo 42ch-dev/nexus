@@ -28,6 +28,11 @@
       "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CreatorId",
       "description": "Owning Creator ID (`CreatorId`). Never accepted from create/bind request bodies."
     },
+    "holder_entry_id": {
+      "type": "string",
+      "pattern": "^hld_[0-9a-f]{64}$",
+      "description": "Read-only service-managed holder KnowledgeEntry id for this Character (`hld_` namespace). Never accepted from create/bind request bodies; there is no holder CRUD route behind this field."
+    },
     "display_name": {
       "type": "string",
       "minLength": 1,

@@ -34,12 +34,15 @@ pub use errors::{KbError, ValidationError, ValidationKind};
 pub use extract_finalize::{finalize_extract, ExtractFinalizeInput};
 pub use extract_sync::{compute_kb_diff, diff_and_apply, KbSyncDiff, KbSyncUpdate};
 pub use knowledge_entry::{
-    is_character_subject_id, validate_character_tom_belief_row, BeliefPropositionRaw,
-    KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeOwnerRef, MentalFieldsRaw,
+    is_character_subject_id, reject_reserved_authoring_keys, resolve_authored_governance,
+    validate_character_tom_belief_row, validate_native_governance, BeliefPropositionRaw,
+    KnowledgeAudience, KnowledgeAuthoringOp, KnowledgeEntryBody, KnowledgeEntryRecord,
+    KnowledgeGovernance, KnowledgeOwnerRef, MentalFieldsRaw, ReservedAuthoringKey,
+    DISCLOSURE_OWNER_PRIVATE, LEGACY_CREATOR_ONLY_KEY, LEGACY_CREATOR_ONLY_UNSUPPORTED,
     LEGACY_MENTAL_BELIEF_MODULES_FIXTURE,
 };
 pub use query::{KbInsertResult, KbQuery, KbQueryResult};
-pub use store::{InMemoryKbStore, KbStore, KbStoreError};
+pub use store::{InMemoryKbStore, KbStore, KbStoreError, KnowledgeReadPolicy, KnowledgeReadScope};
 pub use validation::{
     block_type_state_key, validate_body, validate_canonical_name, ValidationMode, NOVEL_CATEGORIES,
 };

@@ -3,12 +3,11 @@
   "$id": "https://nexus42.invalid/schemas/daemon-api/actor-knowledge/knowledge-view-item.schema.json",
   "schema_version": 1,
   "title": "Nexus ActorKnowledgeViewItem",
-  "description": "One KnowledgeEntry in an Actor KnowledgeView or Character knowledge list, with deterministic stored-owner metadata.",
+  "description": "One KnowledgeEntry in an Actor KnowledgeView or Character knowledge list, with deterministic stored-owner metadata and the native holder-governance projection. `owner` stays the narrative KnowledgeOwnerRef container; holder_entry_id and disclosure are the governance columns and are both absent for an in-scope shared entry. The legacy creator_only boolean is not part of this projection.",
   "type": "object",
   "required": [
     "entry_id",
     "owner",
-    "creator_only",
     "block_type",
     "canonical_name",
     "status",
@@ -25,7 +24,16 @@
     "owner": {
       "$ref": "https://nexus42.invalid/schemas/domain/knowledge-owner-ref.schema.json"
     },
-    "creator_only": { "type": "boolean" },
+    "holder_entry_id": {
+      "type": "string",
+      "pattern": "^hld_[0-9a-f]{64}$",
+      "description": "Resolved holder KnowledgeEntry id of the disclosure-restricted row (`hld_` namespace). Absent for an in-scope shared entry or an adopted row whose holder is unspecified. Service-resolved only: never accepted from a request body."
+    },
+    "disclosure": {
+      "type": "string",
+      "enum": ["owner-private"],
+      "description": "Stored disclosure vocabulary; the core knows only owner-private. Absent for an in-scope shared entry — shared is the absence of disclosure, never the string \"shared\"."
+    },
     "block_type": {
       "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/BlockType"
     },

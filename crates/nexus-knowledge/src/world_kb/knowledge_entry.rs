@@ -8,6 +8,18 @@
 //! KB has a lifecycle from provisional → confirmed (with possible
 //! deprecation/merge/deletion). See data-model-v1.md §5.5,
 //! consistency-rules-v1.md §3.2.
+//!
+//! # Native holder governance (v1.191 P1 T2 — planned target)
+//!
+//! The record additionally carries the two native governance columns
+//! [`KnowledgeEntryRecord::holder_entry_id`] and
+//! [`KnowledgeEntryRecord::disclosure`] (`.mstar/specs/holder-governance.md`
+//! §§1, 3). They are *not* a second owner: [`KnowledgeOwnerRef`] stays the
+//! closed narrative container, and the holder pair is the disclosure policy
+//! applied on top of it. [`KnowledgeAudience`] is the closed author-facing
+//! input; [`resolve_authored_governance`] owns its omission semantics. The
+//! legacy `creator_only` boolean stays carried here only until the complete
+//! cutover removes it (durable §5); it is never an authoring input.
 
 use crate::world_kb::errors::KbError;
 use crate::world_kb::source_anchor::SourceAnchor;
@@ -183,8 +195,27 @@ pub struct KnowledgeEntryRecord {
     pub entry_id: String,
     /// Canonical owner (immutable after insert — stores reject any change).
     pub owner: KnowledgeOwnerRef,
-    /// World-owner-only creator visibility flag (`creator_only` column).
+    /// Resolved holder `KnowledgeEntry` id for a disclosure-restricted entry
+    /// (durable §1/§3). `None` = in-scope shared, or a holder unspecified by
+    /// an adopted foreign row. Service-resolved only: the authoring path
+    /// derives it from the admitted [`KnowledgeAudience`], a client never
+    /// supplies it, and ordinary store updates cannot transfer it.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub holder_entry_id: Option<String>,
+    /// Stored disclosure vocabulary (`owner-private`) or `None` for shared
+    /// (durable §1/§3). "Shared" is the *absence* of disclosure, never the
+    /// string `"shared"`. Carried as an open string natively because adopted
+    /// foreign rows are rejected by [`validate_native_governance`] rather than
+    /// rewritten.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub disclosure: Option<String>,
+    /// Legacy World-only creator visibility flag (`creator_only` column).
     /// May only be `true` for a [`KnowledgeOwnerRef::World`] owner (DB CHECK).
+    ///
+    /// Planned target (durable §5): the offline cutover migrates every `true`
+    /// row to the stored controlling Creator's holder + `owner-private` and
+    /// removes this field; client authoring of the key is already rejected —
+    /// including `false` — by [`reject_reserved_authoring_keys`].
     #[serde(default)]
     pub creator_only: bool,
     pub block_type: BlockType,
@@ -215,6 +246,10 @@ pub struct KnowledgeEntryRecord {
     /// `source_provenance_kind`). Preserved verbatim across the `SQLite`
     /// read-modify-write cycle and the spoke conversion seam (spec §2.2
     /// round-trip rule 2). `None` when no unknown keys are present.
+    ///
+    /// The native governance columns (`holder_entry_id` / `disclosure`) are
+    /// not extension keys: durable §1 requires the adapter to map them to the
+    /// SPOKE `KnowledgeEntry.owner` / `.disclosure` fields instead.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extensions_nexus_extras: Option<serde_json::Value>,
     /// Per-entry functional-dialect modules (`modules.*`).
@@ -307,6 +342,8 @@ impl KnowledgeEntryRecord {
             schema_version: 1,
             entry_id,
             owner,
+            holder_entry_id: None,
+            disclosure: None,
             creator_only: false,
             block_type,
             canonical_name: canonical_name.to_string(),
@@ -456,6 +493,302 @@ pub fn validate_creator_only_owner(
 ) -> Result<(), KbError> {
     if creator_only && owner.world_id().is_none() {
         return Err(KbError::CreatorOnlyRequiresWorld(owner.kind()));
+    }
+    Ok(())
+}
+
+// ── Native holder governance (v1.191 P1 T2, durable §§1/3) ────────────────
+//
+// The closed author-facing audience, its omission semantics, the native
+// validation of the two governance columns, and the raw-input gate that keeps
+// legacy/reserved keys from being silently dropped by deserialization.
+// Admission (`nexus-core`) resolves *which* holder a private audience names;
+// this module owns only the closed input contract and the column shape.
+
+/// The one disclosure value the core knows (`owner-private`).
+///
+/// "Shared" is the absence of disclosure, never the string `"shared"`
+/// (durable §3). Any other stored value is open Domain-Profile vocabulary the
+/// core excludes, and native rows reject it (see
+/// [`validate_native_governance`]).
+pub const DISCLOSURE_OWNER_PRIVATE: &str = "owner-private";
+
+/// Legacy World-only visibility key (`creator_only`), reserved on every
+/// audience-aware authoring input (durable §5).
+///
+/// Its presence is rejected even when `false`; `false` is not a silently
+/// ignored optional extension.
+pub const LEGACY_CREATOR_ONLY_KEY: &str = "creator_only";
+
+/// Stable machine-readable reason for a rejected legacy `creator_only` key
+/// (durable §5), for the daemon invalid-input family.
+pub const LEGACY_CREATOR_ONLY_UNSUPPORTED: &str = "legacy_creator_only_unsupported";
+
+/// Closed author-facing audience of the knowledge authoring surfaces
+/// (durable §3).
+///
+/// Wire shape: `{"kind":"shared"}`, `{"kind":"author-only"}`, or
+/// `{"kind":"character-private","character_id":"chr_…"}`. The author never
+/// supplies `holder_entry_id` or a management flag on these commands: a
+/// private audience is resolved by admission against the permitted stored
+/// identity (`author-only` ⇒ the admitted controlling Creator's holder;
+/// `character-private` ⇒ an owned, admitted Character).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum KnowledgeAudience {
+    /// In-scope shared: visible to every reader already authorized for the
+    /// container. The default for an omitted create audience.
+    Shared,
+    /// The admitted controlling Creator's own holder.
+    AuthorOnly,
+    /// A permitted Character's holder.
+    CharacterPrivate {
+        /// Owning Character id (`chr_*`); resolved against stored ownership.
+        character_id: String,
+    },
+}
+
+impl KnowledgeAudience {
+    /// Construct a `character-private` audience with a nonempty Character id.
+    ///
+    /// # Errors
+    /// Returns [`KbError::ValidationError`] for an empty or non-Character id.
+    pub fn character_private(character_id: impl Into<String>) -> Result<Self, KbError> {
+        let character_id = character_id.into();
+        if !is_character_subject_id(&character_id) {
+            return Err(KbError::ValidationError(
+                "character-private audience requires a Character id (chr_* prefix)".into(),
+            ));
+        }
+        Ok(Self::CharacterPrivate { character_id })
+    }
+
+    /// The wire/DB discriminant (`shared` / `author-only` / `character-private`).
+    #[must_use]
+    pub const fn kind(&self) -> &'static str {
+        match self {
+            Self::Shared => "shared",
+            Self::AuthorOnly => "author-only",
+            Self::CharacterPrivate { .. } => "character-private",
+        }
+    }
+
+    /// The Character this audience targets, when it names one.
+    #[must_use]
+    pub fn character_id(&self) -> Option<&str> {
+        match self {
+            Self::CharacterPrivate { character_id } => Some(character_id),
+            Self::Shared | Self::AuthorOnly => None,
+        }
+    }
+
+    /// Whether this audience requires a resolved holder during admission.
+    #[must_use]
+    pub const fn requires_holder(&self) -> bool {
+        !matches!(self, Self::Shared)
+    }
+}
+
+/// The native governance column pair of a [`KnowledgeEntryRecord`]
+/// (`holder_entry_id` + `disclosure`, durable §3).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct KnowledgeGovernance {
+    /// Resolved holder `KnowledgeEntry` id; `None` = shared.
+    pub holder_entry_id: Option<String>,
+    /// Stored disclosure (`owner-private`); `None` = shared.
+    pub disclosure: Option<String>,
+}
+
+impl KnowledgeGovernance {
+    /// In-scope shared: both columns absent.
+    #[must_use]
+    pub const fn shared() -> Self {
+        Self {
+            holder_entry_id: None,
+            disclosure: None,
+        }
+    }
+
+    /// Whether both governance columns are absent (shared).
+    #[must_use]
+    pub const fn is_shared(&self) -> bool {
+        self.holder_entry_id.is_none() && self.disclosure.is_none()
+    }
+}
+
+/// Which authoring operation an omitted `audience` belongs to (durable §3).
+///
+/// The omission rule is the only place create and patch differ: on create an
+/// omitted audience means shared, on patch it preserves the stored pair.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KnowledgeAuthoringOp {
+    /// Creating a new entry.
+    Create,
+    /// Editing an existing entry under `expected_revision` CAS.
+    Patch,
+}
+
+/// Resolve one authored audience into the native governance columns
+/// (durable §3).
+///
+/// - `authored == None` (no `audience` key on the request): on
+///   [`KnowledgeAuthoringOp::Patch`] the stored pair is *preserved*
+///   (`Ok(None)` — the caller writes no governance column and bumps no
+///   governance revision); on [`KnowledgeAuthoringOp::Create`] it means
+///   shared.
+/// - `Some(Shared)`: explicitly clears both columns, on create and patch.
+/// - `Some(AuthorOnly | CharacterPrivate)`: requires the nonempty holder that
+///   admission resolved for the permitted identity, and yields
+///   `disclosure = owner-private`.
+///
+/// A holder supplied for `Shared` is ignored, because shared is defined as
+/// the absence of both columns.
+///
+/// # Errors
+/// Returns [`KbError::ValidationError`] when a private audience has no
+/// resolved holder (or an empty one). This call never resolves identity
+/// itself: the caller's admission does, and a client-supplied value is never
+/// authority.
+pub fn resolve_authored_governance(
+    op: KnowledgeAuthoringOp,
+    authored: Option<&KnowledgeAudience>,
+    resolved_holder_entry_id: Option<&str>,
+) -> Result<Option<KnowledgeGovernance>, KbError> {
+    match authored {
+        None => match op {
+            KnowledgeAuthoringOp::Create => Ok(Some(KnowledgeGovernance::shared())),
+            KnowledgeAuthoringOp::Patch => Ok(None),
+        },
+        Some(KnowledgeAudience::Shared) => Ok(Some(KnowledgeGovernance::shared())),
+        Some(audience) => {
+            let holder = resolved_holder_entry_id
+                .filter(|id| !id.is_empty())
+                .ok_or_else(|| {
+                    KbError::ValidationError(format!(
+                        "audience {} requires a resolved holder entry id",
+                        audience.kind()
+                    ))
+                })?;
+            Ok(Some(KnowledgeGovernance {
+                holder_entry_id: Some(holder.to_string()),
+                disclosure: Some(DISCLOSURE_OWNER_PRIVATE.to_string()),
+            }))
+        }
+    }
+}
+
+/// Validate one native governance column pair (durable §3).
+///
+/// - Both columns absent is shared.
+/// - A holder may stand alone: an adopted foreign row may carry a holder with
+///   no disclosure (durable §6 adopts such a row only through an explicit
+///   permitted-identity mapping).
+/// - A disclosure requires a nonempty holder; `owner-private` is the only
+///   value native rows may carry (unknown vocabulary is quarantined, never
+///   stored natively).
+/// - Empty strings are invalid.
+///
+/// # Errors
+/// Returns [`KbError::ValidationError`] for an empty column, a disclosure
+/// without a holder, or a disclosure outside the core's closed value.
+pub fn validate_native_governance(
+    holder_entry_id: Option<&str>,
+    disclosure: Option<&str>,
+) -> Result<(), KbError> {
+    if holder_entry_id == Some("") {
+        return Err(KbError::ValidationError(
+            "holder_entry_id must be a nonempty resolved holder id".into(),
+        ));
+    }
+    match disclosure {
+        None => Ok(()),
+        Some("") => Err(KbError::ValidationError(
+            "disclosure must be a nonempty stored value".into(),
+        )),
+        Some(DISCLOSURE_OWNER_PRIVATE) if holder_entry_id.is_some() => Ok(()),
+        Some(DISCLOSURE_OWNER_PRIVATE) => Err(KbError::ValidationError(
+            "owner-private disclosure requires a nonempty holder_entry_id".into(),
+        )),
+        Some(other) => Err(KbError::ValidationError(format!(
+            "unknown disclosure vocabulary {other:?}; only {DISCLOSURE_OWNER_PRIVATE:?} is native"
+        ))),
+    }
+}
+
+/// A reserved key present on a raw authoring input (durable §§3, 5, 7).
+///
+/// Held as a typed value so the public surface can return the stable reason
+/// string without parsing a message, and so `false` is rejected exactly like
+/// `true` instead of being ignored as an optional extension.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReservedAuthoringKey {
+    /// Legacy World-only `creator_only` boolean (durable §5).
+    LegacyCreatorOnly,
+    /// Service-resolved `holder_entry_id` authored by a client (durable §3).
+    HolderEntryId,
+    /// Service-resolved `disclosure` authored by a client (durable §3).
+    Disclosure,
+}
+
+impl std::fmt::Display for ReservedAuthoringKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}: {} is not accepted on this input",
+            self.reason(),
+            self.key()
+        )
+    }
+}
+
+impl std::error::Error for ReservedAuthoringKey {}
+
+impl ReservedAuthoringKey {
+    /// The offending JSON key.
+    #[must_use]
+    pub const fn key(&self) -> &'static str {
+        match self {
+            Self::LegacyCreatorOnly => LEGACY_CREATOR_ONLY_KEY,
+            Self::HolderEntryId => "holder_entry_id",
+            Self::Disclosure => "disclosure",
+        }
+    }
+
+    /// The stable machine-readable reason for the invalid-input error family.
+    #[must_use]
+    pub const fn reason(&self) -> &'static str {
+        match self {
+            Self::LegacyCreatorOnly => LEGACY_CREATOR_ONLY_UNSUPPORTED,
+            Self::HolderEntryId | Self::Disclosure => "reserved_governance_key",
+        }
+    }
+}
+
+/// Reject reserved and legacy keys on a raw audience-aware authoring input
+/// before deserialization can discard them (durable §§5, 7).
+///
+/// Applies to the actor-knowledge create/patch bodies and the World KB entity
+/// patch: those surfaces accept `audience`, never `creator_only`,
+/// `holder_entry_id`, or `disclosure`. Schema `additionalProperties` alone is
+/// not sufficient wherever handlers inspect raw objects before typed
+/// deserialization, so this gate runs on the raw value.
+///
+/// # Errors
+/// Returns the first offending [`ReservedAuthoringKey`] in
+/// `creator_only` → `holder_entry_id` → `disclosure` order, so the legacy
+/// reason wins when a request carries several reserved keys.
+pub fn reject_reserved_authoring_keys(raw: &serde_json::Value) -> Result<(), ReservedAuthoringKey> {
+    let Some(object) = raw.as_object() else {
+        return Ok(());
+    };
+    for key in [
+        ReservedAuthoringKey::LegacyCreatorOnly,
+        ReservedAuthoringKey::HolderEntryId,
+        ReservedAuthoringKey::Disclosure,
+    ] {
+        if object.contains_key(key.key()) {
+            return Err(key);
+        }
     }
     Ok(())
 }

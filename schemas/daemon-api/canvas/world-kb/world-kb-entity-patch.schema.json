@@ -3,7 +3,7 @@
   "$id": "https://nexus42.invalid/schemas/daemon-api/canvas/world-kb/world-kb-entity-patch.schema.json",
   "schema_version": 1,
   "title": "Nexus WorldKbEntityPatch",
-  "description": "Field set for world_kb.patch_entity (V1.73). `title` maps to kb_key_blocks.canonical_name; `body` to body_json; `block_type` re-classifies the entity (entity-scope-model §5.1.1); `modules` merges per-entry functional-dialect modules into kb_key_blocks.modules_json (V1.165 P2, AR-4/PD-12: first-level key upsert; omit or {} preserves existing keys; unknown keys round-trip verbatim). At least one property must be provided.",
+  "description": "Field set for world_kb.patch_entity (V1.73). `title` maps to kb_key_blocks.canonical_name; `body` to body_json; `block_type` re-classifies the entity (entity-scope-model §5.1.1); `modules` merges per-entry functional-dialect modules into kb_key_blocks.modules_json (V1.165 P2, AR-4/PD-12: first-level key upsert; omit or {} preserves existing keys; unknown keys round-trip verbatim). `audience` patches the native holder governance under the same revision as content. At least one property must be provided.",
   "type": "object",
   "properties": {
     "title": { "type": "string", "minLength": 1, "maxLength": 200, "description": "New canonical_name (display title)." },
@@ -25,6 +25,53 @@
       "propertyNames": {
         "pattern": "^[a-z][a-z0-9_-]*$"
       }
+    },
+    "audience": {
+      "description": "Closed author audience for holder governance (the same contract as the actor-knowledge create/patch families). Omission on this patch preserves the stored governance columns; explicit \"shared\" clears both. The author never supplies a holder id or a management flag. The legacy `creator_only` key is not a member of this schema and its presence is rejected (including `false`), never ignored.",
+      "oneOf": [
+        {
+          "title": "SharedKnowledgeAudience",
+          "type": "object",
+          "required": ["kind"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": ["shared"],
+              "description": "In-scope shared knowledge: clears holder and disclosure."
+            }
+          }
+        },
+        {
+          "title": "AuthorOnlyKnowledgeAudience",
+          "type": "object",
+          "required": ["kind"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": ["author-only"],
+              "description": "Resolves to the admitted controlling Creator's own holder with disclosure owner-private."
+            }
+          }
+        },
+        {
+          "title": "CharacterPrivateKnowledgeAudience",
+          "type": "object",
+          "required": ["kind", "character_id"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": ["character-private"],
+              "description": "Resolves to a Character this Creator owns; for a World-owned row that Character must be bound to that World."
+            },
+            "character_id": {
+              "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CharacterId"
+            }
+          }
+        }
+      ]
     }
   },
   "additionalProperties": false

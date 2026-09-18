@@ -12,7 +12,7 @@
 //! enforce `body.attributes.novel_category` requirements per
 //! entity-scope-model.md §5.1.1.
 
-use crate::world_kb::errors::ValidationError;
+use crate::world_kb::errors::{KbError, ValidationError};
 use crate::world_kb::knowledge_entry::{KnowledgeEntryRecord, KnowledgeOwnerRef};
 use crate::world_kb::query::{KbInsertResult, KbQuery, KbQueryResult};
 use crate::world_kb::source_anchor::SourceAnchor;
@@ -50,6 +50,13 @@ pub enum KbStoreError {
     /// v1.184 P1 — moving knowledge is explicit create/copy work).
     #[error("owner is immutable for entry {0}")]
     ImmutableOwner(String),
+
+    /// Native governance change attempted through the ordinary store path
+    /// (durable §3): `holder_entry_id` / `disclosure` move only through the
+    /// admitted audience-authoring transaction, so `KbStore::update` is not a
+    /// transfer mechanism.
+    #[error("governance is immutable through the ordinary store path for entry {0}")]
+    ImmutableGovernance(String),
 
     /// Storage backend error.
     #[error("storage error: {0}")]
@@ -138,6 +145,95 @@ pub trait KbStore {
     async fn delete_knowledge_entry(&self, entry_id: &str) -> Result<(), KbStoreError>;
 }
 
+// ── Read selection (v1.191 P1 T2, durable §4.1) ─────────────────────
+
+/// Server-chosen read policy for one knowledge read (durable §4.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KnowledgeReadPolicy {
+    /// Authorized Creator management review: the owned World / Character /
+    /// binding containers, including known private rows for any authorized
+    /// owned Character. A distinct management query — never encoded as an
+    /// absent viewpoint.
+    CreatorManagement,
+    /// Exact admitted Creator or Character holder plus the authorized
+    /// containers. Character selection is World + that Character + this
+    /// binding.
+    ActorView,
+}
+
+/// Authorized read selection for one knowledge read (durable §4.1).
+///
+/// Lower layer only, and deliberately not a wire type: no `serde`, no
+/// `Default`, private fields, and no accessor that implies a client-supplied
+/// value is authority. `nexus-core` admission constructs it from an admitted
+/// principal; this crate never depends on `nexus-core`, so the type cannot
+/// receive a core `Principal`, and the public daemon/CLI handlers never accept
+/// it. Adapters and stores validate the scope's stored subject/container
+/// tuple when they resolve rows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KnowledgeReadScope {
+    policy: KnowledgeReadPolicy,
+    holder_entry_id: Option<String>,
+    containers: Vec<KnowledgeOwnerRef>,
+}
+
+impl KnowledgeReadScope {
+    /// Creator management review over explicitly owned containers.
+    ///
+    /// Carries no resolved holder: management selection is container-scoped
+    /// plus the known-governance rule, not holder-filtered.
+    #[must_use]
+    pub const fn creator_management(containers: Vec<KnowledgeOwnerRef>) -> Self {
+        Self {
+            policy: KnowledgeReadPolicy::CreatorManagement,
+            holder_entry_id: None,
+            containers,
+        }
+    }
+
+    /// Actor view: the exact admitted holder plus authorized containers.
+    ///
+    /// # Errors
+    /// Returns [`KbError::ValidationError`] when the holder is empty — a
+    /// holder-scoped read without a resolved holder would silently widen or
+    /// empty the selection.
+    pub fn actor_view(
+        holder_entry_id: impl Into<String>,
+        containers: Vec<KnowledgeOwnerRef>,
+    ) -> Result<Self, KbError> {
+        let holder_entry_id = holder_entry_id.into();
+        if holder_entry_id.is_empty() {
+            return Err(KbError::ValidationError(
+                "ActorView read scope requires a nonempty resolved holder".into(),
+            ));
+        }
+        Ok(Self {
+            policy: KnowledgeReadPolicy::ActorView,
+            holder_entry_id: Some(holder_entry_id),
+            containers,
+        })
+    }
+
+    /// The server-chosen policy of this selection.
+    #[must_use]
+    pub const fn policy(&self) -> KnowledgeReadPolicy {
+        self.policy
+    }
+
+    /// The resolved holder entry id, present exactly for
+    /// [`KnowledgeReadPolicy::ActorView`].
+    #[must_use]
+    pub fn holder_entry_id(&self) -> Option<&str> {
+        self.holder_entry_id.as_deref()
+    }
+
+    /// The authorized container selectors.
+    #[must_use]
+    pub fn containers(&self) -> &[KnowledgeOwnerRef] {
+        &self.containers
+    }
+}
+
 // ── In-Memory Implementation ────────────────────────────────────────
 
 /// In-memory KB store for testing and development.
@@ -205,6 +301,21 @@ impl InMemoryKbStore {
         Ok(())
     }
 
+    /// Validate the native governance pair of a record before it is stored
+    /// (durable §3).
+    ///
+    /// Parity companion to `validate_creator_only_owner`: the in-memory
+    /// backend owns the invariant that the `SQLite` columns + registry
+    /// reference enforce, so an invalid pair is rejected before it can be
+    /// observed or projected onto the wire.
+    fn validate_governance(kb: &KnowledgeEntryRecord) -> Result<(), KbStoreError> {
+        crate::world_kb::knowledge_entry::validate_native_governance(
+            kb.holder_entry_id.as_deref(),
+            kb.disclosure.as_deref(),
+        )
+        .map_err(|e| KbStoreError::ValidationLegacy(e.to_string()))
+    }
+
     /// Acquire a read lock on the blocks map.
     fn read_blocks(
         &self,
@@ -269,6 +380,10 @@ impl KbStore for InMemoryKbStore {
         // projection.
         crate::world_kb::knowledge_entry::validate_creator_only_owner(&kb.owner, kb.creator_only)
             .map_err(|e| KbStoreError::ValidationLegacy(e.to_string()))?;
+
+        // v1.191 P1 T2: the native governance pair is validated on every write
+        // path, exactly like the owner/flag invariant above.
+        Self::validate_governance(&kb)?;
 
         let entry_id = kb.entry_id.clone();
         let owner = kb.owner.clone();
@@ -445,6 +560,8 @@ impl KbStore for InMemoryKbStore {
             },
         )?;
 
+        Self::validate_governance(&kb)?;
+
         {
             let mut blocks = self.write_blocks()?;
 
@@ -456,6 +573,17 @@ impl KbStore for InMemoryKbStore {
             // APIs — moving knowledge is explicit create/copy work.
             if existing.owner != kb.owner || existing.creator_only != kb.creator_only {
                 return Err(KbStoreError::ImmutableOwner(kb.entry_id.clone()));
+            }
+
+            // v1.191 P1 T2 (durable §3): the ordinary store path carries
+            // content, not governance — the admitted audience-authoring
+            // transaction is the only writer of holder_entry_id/disclosure, so
+            // an ordinary update (compute, promote, sync) cannot transfer or
+            // clear an existing private audience.
+            if existing.holder_entry_id != kb.holder_entry_id
+                || existing.disclosure != kb.disclosure
+            {
+                return Err(KbStoreError::ImmutableGovernance(kb.entry_id.clone()));
             }
 
             // Re-check owner-scoped uniqueness if name or type changed
@@ -1243,5 +1371,295 @@ mod tests {
         kb.creator_only = true;
         let result = store.insert_knowledge_entry(kb).await.unwrap();
         assert_eq!(result.owner, KnowledgeOwnerRef::world("wld_1"));
+    }
+
+    // ── v1.191 P1 T2: native holder governance (durable §§1, 3) ─────────
+    //
+    // Domain-parity home for the governance contract: audience
+    // omission/explicit semantics, the closed native pair, reserved-key
+    // rejection, read-selection construction, and the ordinary store path's
+    // refusal to move governance.
+
+    use crate::world_kb::knowledge_entry::{
+        reject_reserved_authoring_keys, resolve_authored_governance, validate_native_governance,
+        KnowledgeAudience, KnowledgeAuthoringOp, KnowledgeGovernance, ReservedAuthoringKey,
+        DISCLOSURE_OWNER_PRIVATE, LEGACY_CREATOR_ONLY_KEY, LEGACY_CREATOR_ONLY_UNSUPPORTED,
+    };
+
+    /// A resolved holder entry id in the reserved `hld_` namespace.
+    const HLD: &str = "hld_0000000000000000000000000000000000000000000000000000000000000000";
+
+    fn chr() -> String {
+        format!("chr_{}", "a".repeat(32))
+    }
+
+    #[tokio::test]
+    async fn v1191_governance_omitted_create_audience_is_shared() {
+        let store = InMemoryKbStore::new();
+
+        let omitted = resolve_authored_governance(KnowledgeAuthoringOp::Create, None, None)
+            .expect("omitted create audience resolves")
+            .expect("create always authors a pair");
+        assert!(omitted.is_shared(), "omitted create audience is shared");
+        assert_eq!(omitted, KnowledgeGovernance::shared());
+
+        let explicit = resolve_authored_governance(
+            KnowledgeAuthoringOp::Create,
+            Some(&KnowledgeAudience::Shared),
+            None,
+        )
+        .expect("explicit shared resolves")
+        .expect("create authors a pair");
+        assert_eq!(explicit, omitted, "explicit shared on create == omitted");
+
+        let mut kb = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Shared note");
+        kb.holder_entry_id.clone_from(&omitted.holder_entry_id);
+        kb.disclosure.clone_from(&omitted.disclosure);
+        let entry_id = store.insert_knowledge_entry(kb).await.unwrap().entry_id;
+
+        let stored = store.get_knowledge_entry(&entry_id).await.unwrap();
+        assert_eq!(
+            (
+                stored.holder_entry_id.as_deref(),
+                stored.disclosure.as_deref()
+            ),
+            (None, None),
+            "a shared row projects both governance columns absent"
+        );
+    }
+
+    #[tokio::test]
+    async fn v1191_governance_omitted_patch_preserves_stored_pair() {
+        let store = InMemoryKbStore::new();
+
+        let pair = resolve_authored_governance(
+            KnowledgeAuthoringOp::Create,
+            Some(&KnowledgeAudience::AuthorOnly),
+            Some(HLD),
+        )
+        .expect("private create audience resolves")
+        .expect("create authors a pair");
+        assert_eq!(pair.holder_entry_id.as_deref(), Some(HLD));
+        assert_eq!(pair.disclosure.as_deref(), Some(DISCLOSURE_OWNER_PRIVATE));
+
+        let mut kb = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Private note");
+        kb.holder_entry_id.clone_from(&pair.holder_entry_id);
+        kb.disclosure.clone_from(&pair.disclosure);
+        let entry_id = store.insert_knowledge_entry(kb).await.unwrap().entry_id;
+
+        let authored = resolve_authored_governance(KnowledgeAuthoringOp::Patch, None, Some(HLD))
+            .expect("omitted patch audience resolves");
+        assert_eq!(
+            authored, None,
+            "an omitted patch audience authors no governance column"
+        );
+
+        // A content-only edit therefore keeps the stored private audience.
+        let mut edited = store.get_knowledge_entry(&entry_id).await.unwrap();
+        edited.canonical_name = "Private note v2".to_string();
+        store.update_knowledge_entry(edited).await.unwrap();
+
+        let stored = store.get_knowledge_entry(&entry_id).await.unwrap();
+        assert_eq!(stored.holder_entry_id.as_deref(), Some(HLD));
+        assert_eq!(stored.disclosure.as_deref(), Some(DISCLOSURE_OWNER_PRIVATE));
+    }
+
+    #[test]
+    fn v1191_governance_explicit_shared_clears_both_columns() {
+        let cleared = resolve_authored_governance(
+            KnowledgeAuthoringOp::Patch,
+            Some(&KnowledgeAudience::Shared),
+            Some(HLD),
+        )
+        .expect("explicit shared resolves")
+        .expect("explicit shared authors the pair");
+        assert_eq!(
+            cleared,
+            KnowledgeGovernance::shared(),
+            "explicit shared clears holder AND disclosure"
+        );
+        assert!(cleared.holder_entry_id.is_none());
+        assert!(cleared.disclosure.is_none());
+    }
+
+    #[test]
+    fn v1191_governance_private_audience_requires_resolved_holder() {
+        let character = chr();
+        let audiences = [
+            KnowledgeAudience::AuthorOnly,
+            KnowledgeAudience::character_private(character.clone()).expect("chr_ id accepted"),
+        ];
+        for audience in &audiences {
+            for unresolved in [None, Some("")] {
+                let err = resolve_authored_governance(
+                    KnowledgeAuthoringOp::Patch,
+                    Some(audience),
+                    unresolved,
+                )
+                .expect_err("private audience without a resolved holder must fail");
+                assert!(
+                    err.to_string()
+                        .contains("requires a resolved holder entry id"),
+                    "unexpected error: {err}"
+                );
+            }
+            let pair =
+                resolve_authored_governance(KnowledgeAuthoringOp::Patch, Some(audience), Some(HLD))
+                    .expect("resolved holder accepted")
+                    .expect("private audience authors a pair");
+            assert_eq!(pair.holder_entry_id.as_deref(), Some(HLD));
+            assert_eq!(pair.disclosure.as_deref(), Some(DISCLOSURE_OWNER_PRIVATE));
+        }
+
+        assert_eq!(KnowledgeAudience::Shared.kind(), "shared");
+        assert_eq!(KnowledgeAudience::AuthorOnly.kind(), "author-only");
+        assert_eq!(audiences[1].kind(), "character-private");
+        assert_eq!(audiences[1].character_id(), Some(character.as_str()));
+        assert!(!KnowledgeAudience::Shared.requires_holder());
+        assert!(audiences[1].requires_holder());
+        assert!(
+            KnowledgeAudience::character_private("wld_not_a_character").is_err(),
+            "a non-Character target is not a permitted private audience"
+        );
+    }
+
+    #[test]
+    fn v1191_governance_legacy_creator_only_key_is_rejected() {
+        let rejected = reject_reserved_authoring_keys(&serde_json::json!({
+            "owner_kind": "character",
+            "canonical_name": "note-alpha",
+            "creator_only": false,
+            "audience": { "kind": "shared" },
+        }))
+        .expect_err("legacy key presence must be rejected even when false");
+        assert_eq!(rejected, ReservedAuthoringKey::LegacyCreatorOnly);
+        assert_eq!(rejected.key(), LEGACY_CREATOR_ONLY_KEY);
+        assert_eq!(rejected.reason(), LEGACY_CREATOR_ONLY_UNSUPPORTED);
+        assert!(
+            rejected
+                .to_string()
+                .starts_with("legacy_creator_only_unsupported:"),
+            "unexpected message: {rejected}"
+        );
+
+        assert_eq!(
+            reject_reserved_authoring_keys(&serde_json::json!({ "holder_entry_id": HLD }))
+                .expect_err("service-resolved holder is not authored"),
+            ReservedAuthoringKey::HolderEntryId
+        );
+        assert_eq!(
+            reject_reserved_authoring_keys(&serde_json::json!({
+                "disclosure": DISCLOSURE_OWNER_PRIVATE
+            }))
+            .expect_err("service-resolved disclosure is not authored"),
+            ReservedAuthoringKey::Disclosure
+        );
+
+        reject_reserved_authoring_keys(&serde_json::json!({
+            "canonical_name": "note-alpha",
+            "audience": { "kind": "character-private", "character_id": chr() },
+        }))
+        .expect("an audience-aware input without reserved keys is accepted");
+    }
+
+    #[test]
+    fn v1191_governance_read_scope_construction() {
+        let containers = vec![
+            KnowledgeOwnerRef::world("wld_1"),
+            KnowledgeOwnerRef::character(chr()),
+        ];
+
+        let management = KnowledgeReadScope::creator_management(containers.clone());
+        assert_eq!(management.policy(), KnowledgeReadPolicy::CreatorManagement);
+        assert_eq!(management.holder_entry_id(), None);
+        assert_eq!(management.containers(), containers.as_slice());
+
+        let view = KnowledgeReadScope::actor_view(HLD, vec![KnowledgeOwnerRef::world("wld_1")])
+            .expect("holder-scoped view");
+        assert_eq!(view.policy(), KnowledgeReadPolicy::ActorView);
+        assert_eq!(view.holder_entry_id(), Some(HLD));
+        assert_eq!(view.containers(), &[KnowledgeOwnerRef::world("wld_1")]);
+
+        assert!(
+            KnowledgeReadScope::actor_view("", containers).is_err(),
+            "a holder-scoped read without a resolved holder must not construct"
+        );
+    }
+
+    #[test]
+    fn v1191_governance_native_pair_validation() {
+        assert_eq!(DISCLOSURE_OWNER_PRIVATE, "owner-private");
+
+        validate_native_governance(None, None).expect("shared pair");
+        validate_native_governance(Some(HLD), None)
+            .expect("adopted foreign holder without disclosure");
+        validate_native_governance(Some(HLD), Some(DISCLOSURE_OWNER_PRIVATE))
+            .expect("private pair");
+
+        assert!(validate_native_governance(None, Some(DISCLOSURE_OWNER_PRIVATE)).is_err());
+        assert!(validate_native_governance(Some(""), None).is_err());
+        assert!(validate_native_governance(Some(HLD), Some("")).is_err());
+        assert!(
+            validate_native_governance(Some(HLD), Some("shared")).is_err(),
+            "shared is the absence of disclosure, never the string"
+        );
+        assert!(validate_native_governance(Some(HLD), Some("owner-public")).is_err());
+    }
+
+    #[tokio::test]
+    async fn v1191_governance_store_refuses_governance_transfer() {
+        let store = InMemoryKbStore::new();
+        let mut kb = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Private note");
+        kb.holder_entry_id = Some(HLD.to_string());
+        kb.disclosure = Some(DISCLOSURE_OWNER_PRIVATE.to_string());
+        let entry_id = store.insert_knowledge_entry(kb).await.unwrap().entry_id;
+
+        let mut cleared = store.get_knowledge_entry(&entry_id).await.unwrap();
+        cleared.holder_entry_id = None;
+        cleared.disclosure = None;
+        let err = store.update_knowledge_entry(cleared).await.unwrap_err();
+        assert!(
+            matches!(&err, KbStoreError::ImmutableGovernance(id) if id == &entry_id),
+            "ordinary update must not clear governance: {err:?}"
+        );
+
+        let mut moved = store.get_knowledge_entry(&entry_id).await.unwrap();
+        moved.holder_entry_id = Some("hld_moved_elsewhere".to_string());
+        let err = store.update_knowledge_entry(moved).await.unwrap_err();
+        assert!(
+            matches!(&err, KbStoreError::ImmutableGovernance(_)),
+            "ordinary update must not move governance: {err:?}"
+        );
+
+        let stored = store.get_knowledge_entry(&entry_id).await.unwrap();
+        assert_eq!(stored.holder_entry_id.as_deref(), Some(HLD));
+        assert_eq!(stored.disclosure.as_deref(), Some(DISCLOSURE_OWNER_PRIVATE));
+    }
+
+    #[tokio::test]
+    async fn v1191_governance_store_rejects_invalid_pair_on_insert() {
+        let store = InMemoryKbStore::new();
+
+        let mut orphan = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Orphan");
+        orphan.disclosure = Some(DISCLOSURE_OWNER_PRIVATE.to_string());
+        let err = store.insert_knowledge_entry(orphan).await.unwrap_err();
+        assert!(
+            matches!(&err, KbStoreError::ValidationLegacy(m) if m.contains("owner-private disclosure requires a nonempty holder_entry_id")),
+            "disclosure without a holder must be rejected: {err:?}"
+        );
+
+        let mut unknown = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Unknown");
+        unknown.holder_entry_id = Some(HLD.to_string());
+        unknown.disclosure = Some("owner-public".to_string());
+        let err = store.insert_knowledge_entry(unknown).await.unwrap_err();
+        assert!(
+            matches!(&err, KbStoreError::ValidationLegacy(m) if m.contains("unknown disclosure vocabulary")),
+            "non-core disclosure must be rejected natively: {err:?}"
+        );
+        assert_eq!(
+            store.list_by_world("wld_1").await.unwrap().len(),
+            0,
+            "a rejected pair writes nothing"
+        );
     }
 }
