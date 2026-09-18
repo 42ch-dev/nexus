@@ -468,7 +468,7 @@ fn admit_viewpoint(viewpoint: NexusSessionViewpoint) -> ActorViewpoint {
 /// Validate stored ownership for an admission (durable §11.3 admission
 /// ordering: Creator self-ownership, binding shape, active owned World,
 /// active owned Character, active stored binding).
-async fn require_admitted_ownership(
+pub(crate) async fn require_admitted_ownership(
     pool: &SqlitePool,
     caller_creator_id: &str,
     actor: &AdmittedActor,

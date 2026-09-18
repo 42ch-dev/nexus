@@ -148,7 +148,10 @@ pub trait KbStore {
 // ── Read selection (v1.191 P1 T2, durable §4.1) ─────────────────────
 
 /// Server-chosen read policy for one knowledge read (durable §4.1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// `Hash` exists so the policy kind can participate in `nexus-core`'s exact
+/// Actor session key; it is still not a wire type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum KnowledgeReadPolicy {
     /// Authorized Creator management review: the owned World / Character /
     /// binding containers, including known private rows for any authorized
@@ -174,6 +177,7 @@ pub enum KnowledgeReadPolicy {
 pub struct KnowledgeReadScope {
     policy: KnowledgeReadPolicy,
     holder_entry_id: Option<String>,
+    authorized_holders: Vec<String>,
     containers: Vec<KnowledgeOwnerRef>,
 }
 
@@ -181,12 +185,19 @@ impl KnowledgeReadScope {
     /// Creator management review over explicitly owned containers.
     ///
     /// Carries no resolved holder: management selection is container-scoped
-    /// plus the known-governance rule, not holder-filtered.
+    /// plus the known-governance rule, not holder-filtered. The authorized
+    /// holder set is the other half of that rule — the owner Creator's holder
+    /// plus the holder of every owned Character whose container is authorized,
+    /// so an owned private row is reviewable.
     #[must_use]
-    pub const fn creator_management(containers: Vec<KnowledgeOwnerRef>) -> Self {
+    pub const fn creator_management(
+        containers: Vec<KnowledgeOwnerRef>,
+        authorized_holders: Vec<String>,
+    ) -> Self {
         Self {
             policy: KnowledgeReadPolicy::CreatorManagement,
             holder_entry_id: None,
+            authorized_holders,
             containers,
         }
     }
@@ -210,6 +221,7 @@ impl KnowledgeReadScope {
         Ok(Self {
             policy: KnowledgeReadPolicy::ActorView,
             holder_entry_id: Some(holder_entry_id),
+            authorized_holders: Vec::new(),
             containers,
         })
     }
@@ -225,6 +237,15 @@ impl KnowledgeReadScope {
     #[must_use]
     pub fn holder_entry_id(&self) -> Option<&str> {
         self.holder_entry_id.as_deref()
+    }
+
+    /// The known-governance holder set, populated exactly for
+    /// [`KnowledgeReadPolicy::CreatorManagement`]. An `ActorView` never
+    /// inherits it: the exact resolved holder is the only private row it
+    /// admits.
+    #[must_use]
+    pub fn authorized_holders(&self) -> &[String] {
+        &self.authorized_holders
     }
 
     /// The authorized container selectors.
@@ -1623,9 +1644,13 @@ mod tests {
             KnowledgeOwnerRef::character(chr()),
         ];
 
-        let management = KnowledgeReadScope::creator_management(containers.clone());
+        let management = KnowledgeReadScope::creator_management(
+            containers.clone(),
+            vec![HLD.to_string()],
+        );
         assert_eq!(management.policy(), KnowledgeReadPolicy::CreatorManagement);
         assert_eq!(management.holder_entry_id(), None);
+        assert_eq!(management.authorized_holders(), &[HLD.to_string()]);
         assert_eq!(management.containers(), containers.as_slice());
 
         let view = KnowledgeReadScope::actor_view(HLD, vec![KnowledgeOwnerRef::world("wld_1")])
@@ -1633,6 +1658,10 @@ mod tests {
         assert_eq!(view.policy(), KnowledgeReadPolicy::ActorView);
         assert_eq!(view.holder_entry_id(), Some(HLD));
         assert_eq!(view.containers(), &[KnowledgeOwnerRef::world("wld_1")]);
+        assert!(
+            view.authorized_holders().is_empty(),
+            "an ActorView never inherits the management known-governance set"
+        );
 
         assert!(
             KnowledgeReadScope::actor_view("", containers).is_err(),

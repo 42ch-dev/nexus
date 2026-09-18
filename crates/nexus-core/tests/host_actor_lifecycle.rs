@@ -187,9 +187,10 @@ async fn admit_character(
 fn registry_key(
     _registry: &ActorSessionRegistry,
     ctx: &nexus_core::AdmittedActorContext,
+    knowledge: nexus_core::ActorKnowledgeIdentity,
     home: &Path,
 ) -> ActorSessionKey {
-    ActorSessionRegistry::key_for("mock-acp", home, None, None, ctx).unwrap()
+    ActorSessionRegistry::key_for("mock-acp", home, None, None, ctx, knowledge).unwrap()
 }
 
 /// Old Actor epoch denies BEFORE the provider effect: after a material
@@ -206,7 +207,8 @@ async fn stale_actor_and_journal_failure_never_redispatch() {
     // Index one old-epoch Actor session without a live host create (the
     // documented integration seam of the registry).
     let ctx = admit_character(&core, &principal, &env).await;
-    let key = registry_key(handle.actor_sessions(), &ctx, &env.user_home);
+    let knowledge = admitted_knowledge(&core, &principal, &env).await.identity();
+    let key = registry_key(handle.actor_sessions(), &ctx, knowledge, &env.user_home);
     let session_id = Uuid::new_v4();
     handle.actor_sessions().insert_indexed_entry(
         key,
@@ -285,7 +287,8 @@ async fn stale_actor_and_journal_failure_never_redispatch() {
     // survives the close.
     let h2 = restarted.open_host(CountingPort::new()).await.unwrap();
     let ctx2 = admit_character(&restarted, &principal2, &env).await;
-    let key2 = registry_key(h2.actor_sessions(), &ctx2, &env.user_home);
+    let knowledge2 = admitted_knowledge(&restarted, &principal2, &env).await.identity();
+    let key2 = registry_key(h2.actor_sessions(), &ctx2, knowledge2, &env.user_home);
     let sid2 = Uuid::new_v4();
     h2.actor_sessions()
         .insert_indexed_entry(key2, ctx2, nexus_agent_host::HostSessionId(sid2));
@@ -458,4 +461,242 @@ async fn journal_status_update_preserves_stored_identity() {
     assert_eq!(row.1, "sess-i", "stored session_id is write-once");
     assert_eq!(row.2, "mock-acp", "stored provider_id is write-once");
     assert_eq!(row.3, "cancelled", "the status update still lands");
+}
+
+// ── v1.191 P1 T5 — knowledge fences and session-key revision binding ──────
+//
+// Durable contract: `.mstar/specs/holder-governance.md` §4.3. The Actor session
+// key carries the read-policy kind and the stored World/Character
+// `knowledge_revision` pair; a session whose admitted fingerprint no longer
+// matches stored state is retired through the existing tombstone machinery
+// instead of being reused, and a no-op leaves the key usable.
+
+/// The exact fingerprint the host records for one admission, read from the
+/// stored revisions under the knowledge leases.
+async fn admitted_knowledge(
+    core: &CoreService,
+    principal: &nexus_core::Principal,
+    env: &Env,
+) -> nexus_core::AdmittedKnowledgeContext {
+    core.admit_actor_knowledge_view(
+        principal,
+        &AdmittedActor::Character {
+            character_id: env.character_id.clone(),
+        },
+        ActorViewpoint {
+            world_id: WORLD.to_string(),
+            binding_id: Some(env.binding_id.clone()),
+            branch_id: None,
+            event_id: None,
+        },
+    )
+    .await
+    .expect("knowledge context admits")
+}
+
+/// A running effect holds the World/Character shared knowledge leases: the
+/// disclosure edits (exclusive governance leases) refuse busy and only land
+/// after the effect drains.
+#[tokio::test]
+async fn v1191_knowledge_fence_active_effect_blocks_governance_and_drains() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let actor = AdmittedActor::Character {
+        character_id: env.character_id.clone(),
+    };
+
+    // The admitted knowledge context is what a running stream holds: the
+    // Character activity lease plus the World-then-Character shared knowledge
+    // leases.
+    let effect = admitted_knowledge(&core, &principal, &env).await;
+    let refused = core
+        .acquire_knowledge_governance(
+            &principal,
+            nexus_core::ActorFenceKind::World,
+            WORLD.to_string(),
+        )
+        .await
+        .expect_err("World disclosure edit blocks while the stream runs");
+    match &refused {
+        CoreError::ActorConflict { code, .. } => assert_eq!(code, "world_busy"),
+        other => panic!("expected world_busy, got {other:?}"),
+    }
+    let refused = core
+        .acquire_knowledge_governance(
+            &principal,
+            nexus_core::ActorFenceKind::Character,
+            env.character_id.clone(),
+        )
+        .await
+        .expect_err("Character disclosure edit blocks while the stream runs");
+    match &refused {
+        CoreError::ActorConflict { code, .. } => assert_eq!(code, "character_busy"),
+        other => panic!("expected character_busy, got {other:?}"),
+    }
+    drop(effect);
+
+    // Drained: the same edit lands on both subjects and is then releasable.
+    let world_lease = core
+        .acquire_knowledge_governance(
+            &principal,
+            nexus_core::ActorFenceKind::World,
+            WORLD.to_string(),
+        )
+        .await
+        .expect("the edit acquires once the effect drains");
+    let character_lease = core
+        .acquire_knowledge_governance(
+            &principal,
+            nexus_core::ActorFenceKind::Character,
+            env.character_id.clone(),
+        )
+        .await
+        .expect("the Character edit acquires once the effect drains");
+    drop(world_lease);
+    drop(character_lease);
+    assert_eq!(
+        core.admit_actor_knowledge_view(
+            &principal,
+            &actor,
+            ActorViewpoint {
+                world_id: WORLD.to_string(),
+                binding_id: Some(env.binding_id.clone()),
+                branch_id: None,
+                event_id: None,
+            },
+        )
+        .await
+        .expect("a fresh admission works after the edits drain")
+        .identity()
+        .policy(),
+        nexus_knowledge::world_kb::store::KnowledgeReadPolicy::ActorView
+    );
+}
+
+/// Two independently opened cores compute the same fingerprint from stored
+/// state; a stored knowledge-revision bump (the governance edit) makes them
+/// diverge, and a stale session retires on its next use with the retained
+/// `actor_session_stale` refusal before any provider effect.
+#[allow(clippy::too_many_lines)] // one reuse round-trip asserted across cores
+#[tokio::test]
+async fn v1191_knowledge_fence_stale_revision_retires_the_session() {
+    let env = seed_env().await;
+    let (core_a, principal_a) = open_core(&env).await;
+    let port = CountingPort::new();
+    let handle = core_a.open_host(port.clone()).await.unwrap();
+
+    // The session is indexed with the fingerprint admitted from stored state.
+    let ctx = admit_character(&core_a, &principal_a, &env).await;
+    let admitted = admitted_knowledge(&core_a, &principal_a, &env).await;
+    let identity = admitted.identity();
+    assert_eq!(identity.world_revision(), 0);
+    assert_eq!(identity.character_revision(), Some(0));
+    drop(admitted);
+    let key = registry_key(handle.actor_sessions(), &ctx, identity, &env.user_home);
+    assert_eq!(key.knowledge, identity, "the key carries the fingerprint");
+    let session_id = Uuid::new_v4();
+    handle.actor_sessions().insert_indexed_entry(
+        key,
+        ctx.clone(),
+        nexus_agent_host::HostSessionId(session_id),
+    );
+
+    // A no-op reuse keeps the key usable, and a second, independently opened
+    // core derives the same fingerprint from the same stored state.
+    let (core_b, principal_b) = open_core(&env).await;
+    let same = admitted_knowledge(&core_b, &principal_b, &env).await;
+    assert_eq!(same.identity(), identity, "no-op admissions agree");
+    drop(same);
+    let reuse = handle
+        .actor_sessions()
+        .revalidate_knowledge(&nexus_agent_host::HostSessionId(session_id), &identity)
+        .expect("an indexed session is revalidated");
+    assert!(
+        matches!(reuse, nexus_core::KnowledgeReuse::Reusable),
+        "no-op admissions leave the reuse key usable, got {reuse:?}"
+    );
+    assert!(
+        handle
+            .actor_sessions()
+            .context_for(&nexus_agent_host::HostSessionId(session_id))
+            .is_some(),
+        "a reusable session stays indexed"
+    );
+
+    // Governance edit: the stored Character knowledge revision moves.
+    {
+        let pool = plain_pool(&env).await;
+        sqlx::query(
+            "UPDATE characters SET knowledge_revision = knowledge_revision + 1 \
+             WHERE character_id = ?1",
+        )
+        .bind(&env.character_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    let bumped = admitted_knowledge(&core_b, &principal_b, &env).await;
+    assert_ne!(
+        bumped.identity(),
+        identity,
+        "an independently opened core observes the stored revision change"
+    );
+    drop(bumped);
+
+    // Next use of the stale session retires it and refuses before any provider
+    // effect.
+    let request = serde_json::from_value::<
+        nexus_contracts::generated::daemon_api::agent_host::ExecuteOperationRequest,
+    >(serde_json::json!({ "kind": "prompt", "content": "hello" }))
+    .unwrap();
+    let err = handle
+        .execute(&principal_a, session_id.to_string(), request)
+        .await
+        .expect_err("a stale knowledge context must be refused on reuse");
+    match &err {
+        CoreError::ActorConflict { code, .. } => assert_eq!(code, "actor_session_stale"),
+        other => panic!("expected actor_session_stale, got {other:?}"),
+    }
+    assert_eq!(
+        port.call_count(),
+        0,
+        "the stale denial happens before any provider effect"
+    );
+    let retired = nexus_agent_host::HostSessionId(session_id);
+    assert!(
+        handle.actor_sessions().context_for(&retired).is_none(),
+        "the stale session left the live index"
+    );
+    assert!(
+        handle.actor_sessions().is_actor_session(&retired),
+        "the retired id stays recognizably Actor-mode"
+    );
+    assert_eq!(
+        handle
+            .actor_sessions()
+            .stored_session_owner(&retired)
+            .map(|(owner, _, retired)| (owner, retired)),
+        Some((CREATOR.to_string(), true)),
+        "the tombstone retains its owner for later authorization"
+    );
+
+    // The retired id stays an Actor session: a second use is the same stale
+    // refusal, never a legacy raw-prompt fallback.
+    let request = serde_json::from_value::<
+        nexus_contracts::generated::daemon_api::agent_host::ExecuteOperationRequest,
+    >(serde_json::json!({ "kind": "prompt", "content": "hello again" }))
+    .unwrap();
+    let err = handle
+        .execute(&principal_a, session_id.to_string(), request)
+        .await
+        .expect_err("a retired id is never re-admitted as a legacy session");
+    match &err {
+        CoreError::ActorConflict { code, .. } => assert_eq!(code, "actor_session_stale"),
+        other => panic!("expected actor_session_stale, got {other:?}"),
+    }
+    assert_eq!(
+        port.call_count(),
+        0,
+        "no provider effect for a retired Actor session"
+    );
 }

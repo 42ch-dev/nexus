@@ -45,7 +45,8 @@ use nexus_spoke_adapter::SpokeBackedKbStore;
 use uuid::Uuid;
 
 use crate::actor_sessions::{
-    echo_actor_pair, ActorSessionKey, ActorSessionRegistry, CharacterOperationSnapshot,
+    actor_session_stale, echo_actor_pair, ActorSessionKey, ActorSessionRegistry,
+    CharacterOperationSnapshot, KnowledgeReuse,
 };
 use crate::actors::{
     classify_pair, ActorPairMode, ActorViewpoint, AdmittedActor, CoreActorAdmission,
@@ -161,13 +162,6 @@ fn invalid(field: &str, reason: impl Into<String>) -> CoreError {
     }
 }
 
-fn actor_session_stale(session_id: &str) -> CoreError {
-    CoreError::ActorConflict {
-        code: "actor_session_stale".into(),
-        message: format!("actor session {session_id} is stale"),
-    }
-}
-
 impl HostHandle {
     /// The composed provider port backing this authority (effect-boundary
     /// access for the owning transport; never a second admission path).
@@ -222,36 +216,30 @@ impl HostHandle {
                 }
             };
             let admission = CoreActorAdmission::new(self.core.inner.pool.clone());
-            // Admit one per-Character activity lease and hold it through Host
-            // creation AND registry insertion, so an archive cannot race an
-            // in-flight create into a reusable old-epoch session. Dropped
-            // after the registry insert.
-            let lease = match &actor {
-                AdmittedActor::Character { .. } => Some(
-                    self.registry
-                        .admit_character_activity(&self.core, principal, &actor)
-                        .await?,
-                ),
-                AdmittedActor::Creator { .. } => None,
+            let viewpoint = ActorViewpoint {
+                world_id: viewpoint.world_id.to_string(),
+                binding_id: viewpoint.binding_id.as_ref().map(|id| (**id).clone()),
+                branch_id: viewpoint.branch_id.as_ref().map(|id| (**id).clone()),
+                event_id: viewpoint.event_id.as_ref().map(|id| (**id).clone()),
             };
-            let ctx = admission
-                .admit(
-                    &creator_id,
-                    actor,
-                    ActorViewpoint {
-                        world_id: viewpoint.world_id.to_string(),
-                        binding_id: viewpoint.binding_id.as_ref().map(|id| (**id).clone()),
-                        branch_id: viewpoint.branch_id.as_ref().map(|id| (**id).clone()),
-                        event_id: viewpoint.event_id.as_ref().map(|id| (**id).clone()),
-                    },
-                )
+            // Admit the operation-scoped knowledge context: it owns the
+            // per-Character activity lease and the shared World/Character
+            // knowledge leases (durable §4.3), and is held through Host
+            // creation AND registry insertion, so neither an archive nor a
+            // governance edit can race an in-flight create into a reusable
+            // session.
+            let knowledge = self
+                .core
+                .admit_actor_knowledge_view(principal, &actor, viewpoint.clone())
                 .await?;
+            let ctx = admission.admit(&creator_id, actor, viewpoint).await?;
             let key = ActorSessionKey::for_context(
                 &request.provider_id,
                 &canonical_root,
                 request.model.clone(),
                 request.mode.clone(),
                 &ctx,
+                knowledge.identity(),
             )?;
             let host_req =
                 Self::host_create_request(&request, &canonical_root, &ctx.owner_creator_id);
@@ -269,7 +257,7 @@ impl HostHandle {
                     }
                 })
                 .await?;
-            drop(lease);
+            drop(knowledge);
             let (actor_ref, viewpoint) = echo_actor_pair(&ctx)?;
             return Ok(session_wire(
                 session.id.to_string(),
@@ -347,7 +335,8 @@ impl HostHandle {
             ExecuteOperationRequest::Prompt { content, remember } => {
                 let remember = remember.unwrap_or(false);
                 let raw_prompt = content.clone();
-                let is_character = match self.registry.context_for(&sid) {
+                let indexed = self.registry.context_for(&sid);
+                let is_character = match &indexed {
                     Some(ctx) => matches!(ctx.actor, AdmittedActor::Character { .. }),
                     None => self.registry.is_actor_session(&sid),
                 };
@@ -357,45 +346,73 @@ impl HostHandle {
                         "remember requires an admitted stored Character session with an active binding",
                     ));
                 }
-                let (assembled, lease) = if is_character {
-                    let ctx = self
-                        .registry
-                        .context_for(&sid)
-                        .ok_or_else(|| actor_session_stale(&sid.to_string()))?;
-                    if ctx.owner_creator_id != principal.creator_id() {
-                        return Err(CoreError::NotFound {
-                            resource: format!("session {sid}"),
-                        });
+                let (assembled, fenced) = match indexed {
+                    None => {
+                        // A retired (tombstoned) Actor id is never legacy: it
+                        // must stay a stale refusal instead of falling back to
+                        // raw prompt bytes.
+                        if self.registry.is_actor_session(&sid) {
+                            return Err(actor_session_stale(&sid.to_string()));
+                        }
+                        // Never-indexed legacy path: unchanged raw prompt
+                        // bytes, no knowledge fence (nothing is
+                        // selection-scoped here).
+                        (content, None)
                     }
-                    let admission = CoreActorAdmission::new(self.core.inner.pool.clone());
-                    // Activity admission BEFORE MCA/Host so an archive cannot
-                    // race the prompt into a stale session. The lease is held
-                    // through terminal capture in the server-owned drain.
-                    let lease = self
-                        .registry
-                        .admit_character_activity(&self.core, principal, &ctx.actor)
-                        .await?;
-                    if ctx.character_epoch != Some(lease.epoch()) {
-                        return Err(actor_session_stale(&sid.to_string()));
+                    Some(ctx) => {
+                        if ctx.owner_creator_id != principal.creator_id() {
+                            return Err(CoreError::NotFound {
+                                resource: format!("session {sid}"),
+                            });
+                        }
+                        let viewpoint = ActorViewpoint {
+                            world_id: ctx.world_id.clone(),
+                            binding_id: ctx.binding_id.clone(),
+                            branch_id: ctx.branch_id.clone(),
+                            event_id: ctx.event_id.clone(),
+                        };
+                        // Activity admission BEFORE MCA/Host so an archive
+                        // cannot race the prompt into a stale session, and the
+                        // knowledge fences are read/held under it (durable
+                        // §4.3). The context is held through terminal capture
+                        // in the server-owned drain.
+                        let knowledge = self
+                            .core
+                            .admit_actor_knowledge_view(principal, &ctx.actor, viewpoint.clone())
+                            .await?;
+                        if ctx.character_epoch != knowledge.activity_epoch() {
+                            return Err(actor_session_stale(&sid.to_string()));
+                        }
+                        // Stored knowledge revisions were re-read under the
+                        // leases: a material governance change (or a policy
+                        // switch) retires this session and admits a fresh
+                        // context on the next create, never a stale reuse.
+                        match self
+                            .registry
+                            .revalidate_knowledge(&sid, &knowledge.identity())?
+                        {
+                            KnowledgeReuse::Reusable => {}
+                            KnowledgeReuse::Retired(retired) => {
+                                let _ = self.host.shutdown_session(retired).await;
+                                return Err(actor_session_stale(&sid.to_string()));
+                            }
+                        }
+                        let text = if is_character {
+                            let admission = CoreActorAdmission::new(self.core.inner.pool.clone());
+                            let re_admitted = admission
+                                .admit(principal.creator_id(), ctx.actor.clone(), viewpoint)
+                                .await?;
+                            self.assemble_admitted_prompt(
+                                principal.creator_id(),
+                                &re_admitted,
+                                content,
+                            )
+                            .await?
+                        } else {
+                            content
+                        };
+                        (text, Some(knowledge))
                     }
-                    let re_admitted = admission
-                        .admit(
-                            principal.creator_id(),
-                            ctx.actor.clone(),
-                            ActorViewpoint {
-                                world_id: ctx.world_id.clone(),
-                                binding_id: ctx.binding_id.clone(),
-                                branch_id: ctx.branch_id.clone(),
-                                event_id: ctx.event_id.clone(),
-                            },
-                        )
-                        .await?;
-                    let text = self
-                        .assemble_admitted_prompt(principal.creator_id(), &re_admitted, content)
-                        .await?;
-                    (text, Some(lease))
-                } else {
-                    (content, None)
                 };
                 let snapshot = if is_character {
                     let ctx = self
@@ -439,10 +456,10 @@ impl HostHandle {
                 if let Some(snapshot) = snapshot {
                     let registry = self.registry.clone();
                     tokio::spawn(async move {
-                        drain_character_operation(registry, stream, snapshot, lease).await;
+                        drain_character_operation(registry, stream, snapshot, fenced).await;
                     });
                 } else {
-                    tokio::spawn(drain_plain(stream, lease));
+                    tokio::spawn(drain_plain(stream, fenced));
                 }
                 Ok(OperationResponse {
                     operation_id: op_id.to_string(),
@@ -903,9 +920,10 @@ fn session_response_wire(session: &RegistryHostSession) -> NexusAgentHostSession
     }
 }
 
-/// Server-owned drain for a Character operation: the P2 activity lease is
-/// held through the whole stream (terminal capture) and dropped only after
-/// the registry settles the terminal.
+/// Server-owned drain for a Character operation: the admitted knowledge
+/// context is held through the whole stream (terminal capture) — its Character
+/// activity lease and its World/Character shared knowledge leases (durable
+/// §4.3) — and dropped only after the registry settles the terminal.
 async fn drain_character_operation(
     registry: ActorSessionRegistry,
     mut stream: impl futures_util::Stream<
@@ -915,7 +933,7 @@ async fn drain_character_operation(
             >,
         > + Unpin,
     snapshot: CharacterOperationSnapshot,
-    _lease: Option<crate::actor_fence::ActorActivityLease>,
+    _fenced: Option<crate::actor_knowledge::AdmittedKnowledgeContext>,
 ) {
     use futures_util::StreamExt;
     let cancel_requested = {
@@ -936,7 +954,8 @@ async fn drain_character_operation(
 }
 
 /// Server-owned drain for non-capture operations; events are broadcast by the
-/// `HostManager`, draining drives the state machine.
+/// `HostManager`, draining drives the state machine. An indexed Actor session's
+/// admitted knowledge context stays held for the whole stream.
 async fn drain_plain(
     mut stream: impl futures_util::Stream<
             Item = Result<
@@ -944,7 +963,7 @@ async fn drain_plain(
                 nexus_agent_host::HostError,
             >,
         > + Unpin,
-    _lease: Option<crate::actor_fence::ActorActivityLease>,
+    _fenced: Option<crate::actor_knowledge::AdmittedKnowledgeContext>,
 ) {
     use futures_util::StreamExt;
     while let Some(_result) = stream.next().await {}
@@ -957,7 +976,10 @@ impl ActorSessionKey {
         model: Option<String>,
         mode: Option<String>,
         ctx: &crate::actors::AdmittedActorContext,
+        knowledge: crate::actor_knowledge::ActorKnowledgeIdentity,
     ) -> CoreResult<Self> {
-        crate::actor_sessions::ActorSessionRegistry::key_for(provider_id, cwd, model, mode, ctx)
+        crate::actor_sessions::ActorSessionRegistry::key_for(
+            provider_id, cwd, model, mode, ctx, knowledge,
+        )
     }
 }

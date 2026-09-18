@@ -11,11 +11,13 @@ use nexus_contracts::generated::core::{
 };
 use nexus_contracts::BlockType;
 use nexus_core::{
-    classify_pair, ActorViewpoint, AdmittedActor, CoreAccess, CoreActorAdmission, CoreError,
-    CoreOpenOptions, CoreService,
+    classify_pair, ActorFenceKind, ActorViewpoint, AdmittedActor, CoreAccess, CoreActorAdmission,
+    CoreError, CoreOpenOptions, CoreService,
 };
-use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
-use nexus_knowledge::world_kb::store::KbStore;
+use nexus_knowledge::world_kb::knowledge_entry::{
+    KnowledgeEntryRecord, KnowledgeOwnerRef, DISCLOSURE_OWNER_PRIVATE,
+};
+use nexus_knowledge::world_kb::store::{KbStore, KnowledgeReadPolicy, KnowledgeReadScope};
 use nexus_local_db::kb_store::SqliteKbStore;
 use nexus_local_db::writer_protocol::{init_engine_pool, GuardedPoolOptions};
 use nexus_local_db::{ensure_creator_row, CreateCharacterParams};
@@ -867,4 +869,676 @@ async fn v1191_holder_lifecycle_missing_registry_read_fails_closed() {
     .expect_err("foreign Character is not found");
     assert_not_found(&err);
     pool.close().await;
+}
+
+// ── v1.191 P1 T5 — trusted knowledge admission and typed knowledge fences ──
+//
+// Durable contract: `.mstar/specs/holder-governance.md` §4.1 (the two
+// server-chosen policies, minted only after principal / stored-owner / admitted
+// Actor checks) and §4.3 (World-then-Character shared effect leases, exclusive
+// governance lease, knowledge revisions read under the leases).
+//
+// Applying the resolved selection as pre-limit SQL predicates is P1 T6; these
+// cases prove the selection the store will consume, the fence mechanics, and
+// the fingerprint that binds a context to its session.
+
+/// Durable §4.2 reference rule expressed over one resolved selection. T6
+/// applies the same rule as SQL predicates before cursor / LIMIT / count /
+/// ranking / snippets.
+fn selection_admits(scope: &KnowledgeReadScope, row: &KnowledgeEntryRecord) -> bool {
+    if !scope.containers().contains(&row.owner) {
+        return false;
+    }
+    match row.disclosure.as_deref() {
+        None => true,
+        Some(DISCLOSURE_OWNER_PRIVATE) => {
+            let holder = row.holder_entry_id.as_deref();
+            match scope.policy() {
+                KnowledgeReadPolicy::ActorView => holder == scope.holder_entry_id(),
+                KnowledgeReadPolicy::CreatorManagement => holder.is_some_and(|holder| {
+                    scope.authorized_holders().iter().any(|known| known == holder)
+                }),
+            }
+        }
+        // Unknown vocabulary cannot exist as a native row (the storage CHECK in
+        // `seed_governance_fixture` proves it) and stays quarantined (§6).
+        Some(_) => false,
+    }
+}
+
+fn governed_entry(
+    owner: KnowledgeOwnerRef,
+    name: &str,
+    holder: Option<&str>,
+    disclosure: Option<&str>,
+) -> KnowledgeEntryRecord {
+    let mut row = match &owner {
+        KnowledgeOwnerRef::World(world_id) => {
+            KnowledgeEntryRecord::new(world_id, BlockType::Item, name)
+        }
+        KnowledgeOwnerRef::Character(character_id) => {
+            KnowledgeEntryRecord::for_character(character_id, BlockType::Item, name)
+        }
+        KnowledgeOwnerRef::ActorWorldBinding(binding_id) => {
+            KnowledgeEntryRecord::for_binding(binding_id, BlockType::Item, name)
+        }
+    };
+    row.holder_entry_id = holder.map(str::to_string);
+    row.disclosure = disclosure.map(str::to_string);
+    row
+}
+
+async fn load_governed_row(
+    pool: &SqlitePool,
+    store: &SqliteKbStore,
+    name: &str,
+) -> KnowledgeEntryRecord {
+    let id: String =
+        sqlx::query_scalar("SELECT key_block_id FROM kb_key_blocks WHERE canonical_name = ?")
+            .bind(name)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    store.get_knowledge_entry(&id).await.unwrap()
+}
+
+async fn set_knowledge_revision(pool: &SqlitePool, subject: &str, id: &str, value: i64) {
+    let sql = match subject {
+        "world" => "UPDATE narrative_worlds SET knowledge_revision = ? WHERE world_id = ?",
+        "character" => "UPDATE characters SET knowledge_revision = ? WHERE character_id = ?",
+        other => panic!("unknown subject {other}"),
+    };
+    sqlx::query(sql).bind(value).bind(id).execute(pool).await.unwrap();
+}
+
+struct GovernanceFixture {
+    second_character_id: String,
+    second_binding_id: String,
+    creator_holder: String,
+    first_holder: String,
+    second_holder: String,
+}
+
+/// Seed a second owned Character with its binding in `WORLD` plus one row per
+/// governance class, through one engine pool released before the cores open.
+async fn seed_governance_fixture(env: &Env) -> GovernanceFixture {
+    let guarded = init_engine_pool(&env.db_path, CREATOR, GuardedPoolOptions::default())
+        .await
+        .unwrap();
+    let pool = guarded.clone_pool();
+    let (second_character_id, second_binding_id) =
+        seed_character(&pool, CREATOR, WORLD, "Bea").await;
+    let store = SqliteKbStore::new(pool.clone());
+    let creator_holder = nexus_local_db::creator_holder_entry_id(CREATOR);
+    let first_holder = nexus_local_db::character_holder_entry_id(&env.character_id);
+    let second_holder = nexus_local_db::character_holder_entry_id(&second_character_id);
+    for row in [
+        governed_entry(KnowledgeOwnerRef::world(WORLD), "WorldShared", None, None),
+        governed_entry(
+            KnowledgeOwnerRef::world(WORLD),
+            "WorldAuthorPrivate",
+            Some(&creator_holder),
+            Some(DISCLOSURE_OWNER_PRIVATE),
+        ),
+        governed_entry(
+            KnowledgeOwnerRef::world(WORLD),
+            "WorldFirstPrivate",
+            Some(&first_holder),
+            Some(DISCLOSURE_OWNER_PRIVATE),
+        ),
+        governed_entry(
+            KnowledgeOwnerRef::world(WORLD),
+            "WorldSecondPrivate",
+            Some(&second_holder),
+            Some(DISCLOSURE_OWNER_PRIVATE),
+        ),
+        governed_entry(
+            KnowledgeOwnerRef::character(&second_character_id),
+            "SecondCharacterPrivate",
+            Some(&second_holder),
+            Some(DISCLOSURE_OWNER_PRIVATE),
+        ),
+        governed_entry(
+            KnowledgeOwnerRef::world(FOREIGN_WORLD),
+            "ForeignPrivate",
+            Some(&first_holder),
+            Some(DISCLOSURE_OWNER_PRIVATE),
+        ),
+    ] {
+        store.insert_knowledge_entry(row).await.unwrap();
+    }
+    // Unknown disclosure vocabulary cannot exist as a native row at all: the
+    // cutover keeps it out of `kb_key_blocks` (durable §6 quarantine).
+    let unknown = sqlx::query(
+        "INSERT INTO kb_key_blocks \
+         (key_block_id, owner_kind, world_id, block_type, canonical_name, status, body_json, \
+          created_at, holder_entry_id, disclosure) \
+         VALUES ('kb_unknown_disclosure', 'world', ?, 'item', 'WorldUnknown', 'confirmed', '{}', \
+                 datetime('now'), ?, 'owner-profile')",
+    )
+    .bind(WORLD)
+    .bind(&first_holder)
+    .execute(&pool)
+    .await;
+    assert!(
+        unknown.is_err(),
+        "unknown disclosure vocabulary must not be storable as a native row"
+    );
+    pool.close().await;
+    GovernanceFixture {
+        second_character_id,
+        second_binding_id,
+        creator_holder,
+        first_holder,
+        second_holder,
+    }
+}
+
+fn character_viewpoint(world_id: &str, binding_id: &str) -> ActorViewpoint {
+    ActorViewpoint {
+        world_id: world_id.to_string(),
+        binding_id: Some(binding_id.to_string()),
+        branch_id: None,
+        event_id: None,
+    }
+}
+
+fn container_ids(scope: &KnowledgeReadScope) -> Vec<(String, String)> {
+    let mut ids: Vec<(String, String)> = scope
+        .containers()
+        .iter()
+        .map(|owner| (owner.kind().to_string(), owner.id().to_string()))
+        .collect();
+    ids.sort();
+    ids
+}
+
+#[allow(clippy::too_many_lines)] // one fixture asserted across both policies
+#[tokio::test]
+async fn v1191_knowledge_admission_management_visible_actor_hidden() {
+    let env = seed_env().await;
+    let fixture = seed_governance_fixture(&env).await;
+    let (core, principal) = open_core(&env).await;
+
+    // CreatorManagement: the owned World plus every owned Character/binding
+    // container and the known-governance holder set — never an absent viewpoint.
+    let management = core
+        .admit_creator_management_knowledge(&principal, WORLD.to_string())
+        .await
+        .expect("Creator management review admits");
+    let management_scope = management.scope();
+    assert_eq!(
+        management_scope.policy(),
+        KnowledgeReadPolicy::CreatorManagement
+    );
+    assert_eq!(
+        management_scope.holder_entry_id(),
+        None,
+        "management selection is container-scoped, not holder-narrowed"
+    );
+    let mut expected_containers = vec![
+        ("actor_world_binding".to_string(), env.binding_id.clone()),
+        (
+            "actor_world_binding".to_string(),
+            fixture.second_binding_id.clone(),
+        ),
+        ("character".to_string(), env.character_id.clone()),
+        ("character".to_string(), fixture.second_character_id.clone()),
+        ("world".to_string(), WORLD.to_string()),
+    ];
+    expected_containers.sort();
+    assert_eq!(container_ids(&management_scope), expected_containers);
+    let mut expected_holders = vec![
+        fixture.creator_holder.clone(),
+        fixture.first_holder.clone(),
+        fixture.second_holder.clone(),
+    ];
+    expected_holders.sort();
+    let mut stored_holders = management_scope.authorized_holders().to_vec();
+    stored_holders.sort();
+    assert_eq!(
+        stored_holders, expected_holders,
+        "management known-governance holders are the owner Creator plus every owned Character"
+    );
+
+    // ActorView: the exact admitted holder plus its authorized containers only.
+    let first_actor = AdmittedActor::Character {
+        character_id: env.character_id.clone(),
+    };
+    let first = core
+        .admit_actor_knowledge_view(
+            &principal,
+            &first_actor,
+            character_viewpoint(WORLD, &env.binding_id),
+        )
+        .await
+        .expect("Character ActorView admits");
+    let first_scope = first.scope();
+    assert_eq!(first_scope.policy(), KnowledgeReadPolicy::ActorView);
+    assert_eq!(
+        first_scope.holder_entry_id(),
+        Some(fixture.first_holder.as_str())
+    );
+    let mut expected_first_containers = vec![
+        ("actor_world_binding".to_string(), env.binding_id.clone()),
+        ("character".to_string(), env.character_id.clone()),
+        ("world".to_string(), WORLD.to_string()),
+    ];
+    expected_first_containers.sort();
+    assert_eq!(container_ids(&first_scope), expected_first_containers);
+    assert!(
+        first_scope.authorized_holders().is_empty(),
+        "an ActorView never inherits the management known-governance set"
+    );
+
+    // Row-level outcomes under the §4.2 rule: the same stored rows are
+    // management-visible and Actor-hidden (and vice versa).
+    let pool = plain_pool(&env).await;
+    let store = SqliteKbStore::new(pool.clone());
+    for (name, expected) in [
+        ("WorldShared", (true, true)),
+        ("WorldAuthorPrivate", (true, false)),
+        ("WorldFirstPrivate", (true, true)),
+        ("WorldSecondPrivate", (true, false)),
+        ("SecondCharacterPrivate", (true, false)),
+        ("ForeignPrivate", (false, false)),
+    ] {
+        let row = load_governed_row(&pool, &store, name).await;
+        assert_eq!(
+            (
+                selection_admits(&management_scope, &row),
+                selection_admits(&first_scope, &row)
+            ),
+            expected,
+            "{name}: management-visible vs Actor-hidden"
+        );
+    }
+
+    // A second ActorView sees exactly its own private rows, never the first
+    // Character's: the exact holder is the only private row it admits.
+    let second = core
+        .admit_actor_knowledge_view(
+            &principal,
+            &AdmittedActor::Character {
+                character_id: fixture.second_character_id.clone(),
+            },
+            character_viewpoint(WORLD, &fixture.second_binding_id),
+        )
+        .await
+        .expect("second Character ActorView admits");
+    let second_scope = second.scope();
+    assert_eq!(
+        second_scope.holder_entry_id(),
+        Some(fixture.second_holder.as_str())
+    );
+    assert!(
+        selection_admits(
+            &second_scope,
+            &load_governed_row(&pool, &store, "SecondCharacterPrivate").await
+        ),
+        "the owning Character sees its own private row"
+    );
+    assert!(
+        !selection_admits(
+            &second_scope,
+            &load_governed_row(&pool, &store, "WorldFirstPrivate").await
+        ),
+        "a Character view never inherits another holder's private row"
+    );
+
+    // Both fingerprints were read under the leases and differ by policy.
+    assert_eq!(
+        management.revisions(),
+        nexus_core::KnowledgeRevisions {
+            world: 0,
+            character: None
+        }
+    );
+    assert_eq!(
+        first.revisions(),
+        nexus_core::KnowledgeRevisions {
+            world: 0,
+            character: Some(0)
+        }
+    );
+    assert_ne!(management.identity(), first.identity());
+    assert_eq!(management.policy(), KnowledgeReadPolicy::CreatorManagement);
+    assert_eq!(first.policy(), KnowledgeReadPolicy::ActorView);
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn v1191_knowledge_admission_spoofed_viewpoint_and_actor_are_refused() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let first_actor = AdmittedActor::Character {
+        character_id: env.character_id.clone(),
+    };
+
+    // The holder is the stored derivation, never anything the caller supplies.
+    let admitted = core
+        .admit_actor_knowledge_view(
+            &principal,
+            &first_actor,
+            character_viewpoint(WORLD, &env.binding_id),
+        )
+        .await
+        .expect("owned Character admits");
+    assert_eq!(
+        admitted.scope().holder_entry_id(),
+        Some(nexus_local_db::character_holder_entry_id(&env.character_id).as_str())
+    );
+
+    // A foreign holder string supplied through the actor never widens the
+    // selection: the foreign Actor is simply not found.
+    let err = core
+        .admit_actor_knowledge_view(
+            &principal,
+            &AdmittedActor::Character {
+                character_id: env.foreign_character_id.clone(),
+            },
+            character_viewpoint(FOREIGN_WORLD, &env.foreign_binding_id),
+        )
+        .await
+        .expect_err("foreign Actor");
+    assert_not_found(&err);
+
+    // A viewpoint naming another Character's binding is refused.
+    let err = core
+        .admit_actor_knowledge_view(
+            &principal,
+            &first_actor,
+            character_viewpoint(WORLD, &env.foreign_binding_id),
+        )
+        .await
+        .expect_err("cross-Character binding");
+    assert_not_found(&err);
+
+    // A foreign World viewpoint is refused.
+    let err = core
+        .admit_actor_knowledge_view(
+            &principal,
+            &first_actor,
+            character_viewpoint(FOREIGN_WORLD, &env.binding_id),
+        )
+        .await
+        .expect_err("foreign World");
+    assert_not_found(&err);
+
+    // A Creator actor carrying a binding is a pair-shape violation.
+    let err = core
+        .admit_actor_knowledge_view(
+            &principal,
+            &AdmittedActor::Creator {
+                creator_id: CREATOR.to_string(),
+            },
+            character_viewpoint(WORLD, &env.binding_id),
+        )
+        .await
+        .expect_err("Creator with binding");
+    assert_invalid_input(&err);
+
+    // A missing registry row fails closed instead of provisioning a holder.
+    drop_holder_row(&env, "character_id", &env.character_id).await;
+    let err = core
+        .admit_actor_knowledge_view(
+            &principal,
+            &first_actor,
+            character_viewpoint(WORLD, &env.binding_id),
+        )
+        .await
+        .expect_err("missing holder registry row");
+    assert_conflict(err, "holder_state_invalid");
+}
+
+#[tokio::test]
+async fn v1191_knowledge_admission_identity_binds_policy_and_stored_revisions() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let pool = plain_pool(&env).await;
+    let actor = AdmittedActor::Character {
+        character_id: env.character_id.clone(),
+    };
+    let viewpoint = character_viewpoint(WORLD, &env.binding_id);
+
+    let baseline = core
+        .admit_actor_knowledge_view(&principal, &actor, viewpoint.clone())
+        .await
+        .expect("admitted baseline");
+    assert_eq!(baseline.identity().policy(), KnowledgeReadPolicy::ActorView);
+    assert_eq!(baseline.identity().world_revision(), 0);
+    assert_eq!(baseline.identity().character_revision(), Some(0));
+    let baseline_identity = baseline.identity();
+    drop(baseline);
+
+    // A cosmetic rename moves the projected label and the content revision,
+    // never the knowledge revisions: the reuse fingerprint stays usable.
+    let (_, revision, _) = character_row(&env, &env.character_id).await;
+    core.patch_character(
+        &principal,
+        env.character_id.clone(),
+        revision,
+        nexus_local_db::CharacterPatch {
+            display_name: Some("Ada Cosmetically Renamed"),
+            image_uri: nexus_local_db::FieldPatch::Keep,
+            persona_json: nexus_local_db::FieldPatch::Keep,
+        },
+    )
+    .await
+    .expect("cosmetic rename");
+    let after_rename = core
+        .admit_actor_knowledge_view(&principal, &actor, viewpoint.clone())
+        .await
+        .expect("admitted after rename");
+    assert_eq!(
+        after_rename.identity(),
+        baseline_identity,
+        "a cosmetic rename leaves the reuse fingerprint untouched"
+    );
+
+    // A stored Character governance bump is observed by the next admission
+    // (this is what retires a reused session).
+    set_knowledge_revision(&pool, "character", &env.character_id, 1).await;
+    let after_character = core
+        .admit_actor_knowledge_view(&principal, &actor, viewpoint.clone())
+        .await
+        .expect("admitted after the Character governance bump");
+    assert_eq!(after_character.identity().character_revision(), Some(1));
+    assert_ne!(after_character.identity(), after_rename.identity());
+
+    // The World revision participates too.
+    set_knowledge_revision(&pool, "world", WORLD, 2).await;
+    let after_world = core
+        .admit_actor_knowledge_view(&principal, &actor, viewpoint.clone())
+        .await
+        .expect("admitted after the World governance bump");
+    assert_eq!(after_world.identity().world_revision(), 2);
+    assert_ne!(after_world.identity(), after_character.identity());
+
+    // Same stored revisions, different policy kind: the policy is part of the
+    // fingerprint, so management and ActorView can never share a session key.
+    let management = core
+        .admit_creator_management_knowledge(&principal, WORLD.to_string())
+        .await
+        .expect("management admits");
+    assert_eq!(
+        management.identity().policy(),
+        KnowledgeReadPolicy::CreatorManagement
+    );
+    assert_eq!(management.identity().character_revision(), None);
+    assert_eq!(management.identity().world_revision(), 2);
+    assert_ne!(management.identity(), after_world.identity());
+    pool.close().await;
+}
+
+#[allow(clippy::too_many_lines)] // one fence matrix asserted in order
+#[tokio::test]
+async fn v1191_knowledge_admission_fence_blocks_and_releases_partial_plan() {
+    let env = seed_env().await;
+    let fixture = seed_governance_fixture(&env).await;
+    let (core, principal) = open_core(&env).await;
+    let first_actor = AdmittedActor::Character {
+        character_id: env.character_id.clone(),
+    };
+
+    // Canonical order inside a plan is World ids then Character ids. Holding
+    // both the World and the lexically-last Character exclusively must refuse
+    // on the World, proving the World is attempted first.
+    let mut characters = vec![
+        env.character_id.clone(),
+        fixture.second_character_id.clone(),
+    ];
+    characters.sort();
+    let first_character = characters[0].clone();
+    let last_character = characters[1].clone();
+    let world_lease = core
+        .acquire_knowledge_governance(&principal, ActorFenceKind::World, WORLD.to_string())
+        .await
+        .expect("World governance lease");
+    assert_eq!(world_lease.kind(), ActorFenceKind::World);
+    assert_eq!(world_lease.subject_id(), WORLD);
+    let last_lease = core
+        .acquire_knowledge_governance(
+            &principal,
+            ActorFenceKind::Character,
+            last_character.clone(),
+        )
+        .await
+        .expect("Character governance lease");
+    assert_eq!(last_lease.kind(), ActorFenceKind::Character);
+    assert_eq!(last_lease.subject_id(), last_character);
+    let refused = core
+        .admit_creator_management_knowledge(&principal, WORLD.to_string())
+        .await
+        .expect_err("World-first ordering refuses on the World");
+    assert_conflict(refused, "world_busy");
+    drop(world_lease);
+
+    // Partial acquisition release: with only the last Character contended the
+    // plan takes World + first Character, fails on the last, and must release
+    // everything it already took.
+    let refused = core
+        .admit_creator_management_knowledge(&principal, WORLD.to_string())
+        .await
+        .expect_err("the contended Character refuses the plan");
+    assert_conflict(refused, "character_busy");
+    drop(last_lease);
+    let world_after = core
+        .acquire_knowledge_governance(&principal, ActorFenceKind::World, WORLD.to_string())
+        .await
+        .expect("the failed plan released the World shared lease");
+    let first_after = core
+        .acquire_knowledge_governance(
+            &principal,
+            ActorFenceKind::Character,
+            first_character.clone(),
+        )
+        .await
+        .expect("the failed plan released the intermediate Character shared lease");
+    drop(world_after);
+    drop(first_after);
+
+    // An in-flight activity effect (what a running stream holds) blocks the
+    // disclosure edit on its Character.
+    let activity = core
+        .acquire_actor_activity(&principal, &first_actor)
+        .await
+        .expect("activity admission");
+    let refused = core
+        .acquire_knowledge_governance(
+            &principal,
+            ActorFenceKind::Character,
+            env.character_id.clone(),
+        )
+        .await
+        .expect_err("an in-flight activity blocks the Character governance edit");
+    assert_conflict(refused, "character_busy");
+    drop(activity);
+
+    // An admitted ActorView context holds World then Character shared leases
+    // through its effect, blocking both governance edits and the retained
+    // lifecycle transition; draining it releases every lease.
+    let context = core
+        .admit_actor_knowledge_view(
+            &principal,
+            &first_actor,
+            character_viewpoint(WORLD, &env.binding_id),
+        )
+        .await
+        .expect("ActorView context admits");
+    let refused = core
+        .acquire_knowledge_governance(&principal, ActorFenceKind::World, WORLD.to_string())
+        .await
+        .expect_err("World governance blocks while the ActorView effect runs");
+    assert_conflict(refused, "world_busy");
+    let refused = core
+        .acquire_knowledge_governance(
+            &principal,
+            ActorFenceKind::Character,
+            env.character_id.clone(),
+        )
+        .await
+        .expect_err("Character governance blocks while the ActorView effect runs");
+    assert_conflict(refused, "character_busy");
+    let refused = core
+        .acquire_character_transition(&principal, env.character_id.clone())
+        .await
+        .expect_err("the lifecycle transition contends with the held activity lease");
+    assert_conflict(refused, "character_busy");
+    drop(context);
+    let drained = core
+        .acquire_knowledge_governance(&principal, ActorFenceKind::World, WORLD.to_string())
+        .await
+        .expect("draining the effect releases the World lease");
+    drop(drained);
+    let drained = core
+        .acquire_knowledge_governance(
+            &principal,
+            ActorFenceKind::Character,
+            env.character_id.clone(),
+        )
+        .await
+        .expect("draining the effect releases the Character lease");
+    drop(drained);
+
+    // Reverse direction: a held governance edit refuses the next admission.
+    let world_lease = core
+        .acquire_knowledge_governance(&principal, ActorFenceKind::World, WORLD.to_string())
+        .await
+        .expect("World governance lease");
+    let refused = core
+        .admit_actor_knowledge_view(
+            &principal,
+            &first_actor,
+            character_viewpoint(WORLD, &env.binding_id),
+        )
+        .await
+        .expect_err("an ActorView admission blocks while the World is governed");
+    assert_conflict(refused, "world_busy");
+    drop(world_lease);
+    let character_lease = core
+        .acquire_knowledge_governance(
+            &principal,
+            ActorFenceKind::Character,
+            env.character_id.clone(),
+        )
+        .await
+        .expect("Character governance lease");
+    let refused = core
+        .admit_actor_knowledge_view(
+            &principal,
+            &first_actor,
+            character_viewpoint(WORLD, &env.binding_id),
+        )
+        .await
+        .expect_err("an ActorView admission blocks while the Character is governed");
+    assert_conflict(refused, "character_busy");
+    drop(character_lease);
+    core.admit_actor_knowledge_view(
+        &principal,
+        &first_actor,
+        character_viewpoint(WORLD, &env.binding_id),
+    )
+    .await
+    .expect("the admission works again once the governance edit drains");
 }
