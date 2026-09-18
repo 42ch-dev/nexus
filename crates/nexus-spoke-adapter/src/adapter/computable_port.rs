@@ -558,6 +558,23 @@ impl ComputablePort for NexusAdapter<'_> {
         let dynamic_computable = request.computable;
         let settle = request.settle.unwrap_or(false);
 
+        // ── 0. Scoped operand check (L2 F3) ──────────────────────────────
+        // The target entry is the request's operand: it must be one the bound
+        // selection admits BEFORE any session state is read, so a session row
+        // (and its stored entry id) is never observed — let alone echoed — for
+        // an entry the caller cannot read.
+        match self.get_knowledge_entry(&entry_id).await {
+            SpokeResult::Ok(_) => {}
+            SpokeResult::Reject(r) if r.code == SpokeRejectCode::KnowledgeEntryNotFound => {
+                return reject(
+                    SpokeRejectCode::InvalidInput,
+                    format!("target KnowledgeEntry not found for compute: {entry_id}"),
+                    json!({ "entry_id": entry_id }),
+                );
+            }
+            SpokeResult::Reject(r) => return SpokeResult::Reject(r),
+        }
+
         // ── 1. Load session row ──────────────────────────────────────────
         let session = get_compute_session(&pool, &session_id).await;
         let session = match session {
@@ -578,17 +595,16 @@ impl ComputablePort for NexusAdapter<'_> {
             }
         };
 
-        // Verify entry_id consistency.
+        // Verify entry_id consistency. L2 F3: the mismatched corpus entry id is
+        // NOT echoed — the caller already supplied its own `entry_id`, and the
+        // stored one is not proven readable by this caller.
         if session.entry_id != entry_id {
             return reject(
                 SpokeRejectCode::InvalidInput,
-                format!(
-                    "entry_id mismatch: session stores '{}' but compute request targets '{}'",
-                    session.entry_id, entry_id
-                ),
+                "entry_id mismatch: the compute request does not match the staged session"
+                    .to_string(),
                 json!({
                     "session_id": session_id,
-                    "session_entry_id": session.entry_id,
                     "request_entry_id": entry_id,
                 }),
             );
@@ -1332,6 +1348,17 @@ mod tests {
         let adapter = scoped(pool.clone());
         let entry = spoke_character_entry("kb_mismatch", "Mismatch", 100, 20, 10, 100);
         unwrap_ok(adapter.put_knowledge_entry(entry, None).await, "create");
+        // L2 F3: the operand gate runs before the session read, so the mismatch
+        // branch needs a target the caller CAN read.
+        unwrap_ok(
+            adapter
+                .put_knowledge_entry(
+                    spoke_character_entry("kb_different", "Different", 100, 20, 10, 100),
+                    None,
+                )
+                .await,
+            "create other",
+        );
 
         // Stage a session against kb_mismatch.
         let project_req = ProjectRequest {
@@ -1355,6 +1382,12 @@ mod tests {
             SpokeResult::Reject(r) => {
                 assert_eq!(r.code, SpokeRejectCode::InvalidInput);
                 assert!(r.message.contains("mismatch"));
+                assert!(
+                    r.details
+                        .as_ref()
+                        .is_none_or(|d| !d.contains_key("session_entry_id")),
+                    "the staged session's entry id must not be echoed (L2 F3): {r:?}"
+                );
             }
             SpokeResult::Ok(_) => panic!("expected InvalidInput for mismatch"),
         }
@@ -1659,6 +1692,70 @@ mod tests {
                 assert!(r.message.contains("unknown embedded WASM module"));
             }
             SpokeResult::Ok(_) => panic!("expected InvalidInput for unknown module"),
+        }
+    }
+
+    /// L2 F3: the compute operand is checked inside the bound selection BEFORE
+    /// the session row is read, and the refusal never echoes the session's
+    /// stored entry id.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn compute_operand_outside_selection_refused_before_the_session_read() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let owner = scoped(pool.clone());
+        unwrap_ok(
+            owner
+                .put_knowledge_entry(spoke_character_entry("kb_scope_h", "ScopeHero", 100, 20, 10, 100), None)
+                .await,
+            "create",
+        );
+        unwrap_ok(
+            owner
+                .project(ProjectRequest {
+                    session_id: "ses_scope".to_string(),
+                    entry_id: "kb_scope_h".to_string(),
+                    state: Map::new(),
+                    extensions: HashMap::default(),
+                })
+                .await,
+            "project",
+        );
+
+        // Same database, no authority over the entry's world.
+        let outsider = NexusAdapter::new(
+            pool,
+            nexus_knowledge::world_kb::KnowledgeReadScope::creator_management(
+                vec![nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef::world(
+                    "wld_none",
+                )],
+                Vec::new(),
+            ),
+        );
+        match outsider
+            .compute(ComputeRequest {
+                session_id: "ses_scope".to_string(),
+                entry_id: "kb_scope_h".to_string(),
+                computable: Map::new(),
+                settle: None,
+                extensions: HashMap::default(),
+            })
+            .await
+        {
+            SpokeResult::Reject(r) => {
+                assert_eq!(r.code, SpokeRejectCode::InvalidInput, "got {r:?}");
+                assert!(
+                    r.message.contains("not found for compute"),
+                    "the operand gate must refuse as not-found: {r:?}"
+                );
+                assert!(
+                    r.details
+                        .as_ref()
+                        .is_none_or(|d| !d.contains_key("session_entry_id")),
+                    "the stored session entry id must not be echoed: {r:?}"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("an unauthorized operand must be refused"),
         }
     }
 

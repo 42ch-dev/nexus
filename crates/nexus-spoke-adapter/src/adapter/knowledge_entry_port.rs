@@ -227,15 +227,17 @@ async fn put_create(
     // Pre-check existence. (The underlying `kb_key_blocks_active_unique`
     // constraint is the true race guard; if a concurrent writer beats us the
     // Duplicate error from insert is also mapped to AlreadyExists below.)
-    match store.get_knowledge_entry(&entry_id).await {
-        Ok(_) => {
+    // L2 F1: the pre-check runs through the bound selection, so a row the
+    // caller cannot see is not an existence oracle — it reads as absent here.
+    match adapter.load_admitted_entry(&entry_id).await {
+        Ok(Some(_)) => {
             return reject(
                 SpokeRejectCode::KnowledgeEntryAlreadyExists,
                 format!("Entry already exists: {entry_id}"),
                 json!({ "entry_id": entry_id }),
             );
         }
-        Err(KbStoreError::NotFound(_)) => {} // proceed to insert
+        Ok(None) => {} // absent (or hidden) — the unique constraint is the race guard
         Err(e) => {
             return reject(
                 SpokeRejectCode::InternalError,
@@ -382,7 +384,7 @@ async fn put_update(
     if adapter.is_bound() {
         return put_update_bound(adapter, entry, expected).await;
     }
-    put_update_unbound(pool, entry, expected).await
+    put_update_unbound(adapter, pool, entry, expected).await
 }
 
 async fn put_update_bound(
@@ -404,13 +406,14 @@ async fn put_update_bound(
     let mut tx = adapter
         .take_bound_tx()
         .expect("bound adapter must have tx in cell");
-    let new_rev = match run_cas_update_in_tx(&mut tx, &entry_id, &world_entry, expected).await {
-        SpokeResult::Ok(rev) => rev,
-        SpokeResult::Reject(r) => {
-            adapter.restore_bound_tx(tx);
-            return SpokeResult::Reject(r);
-        }
-    };
+    let new_rev =
+        match run_cas_update_in_tx(&mut tx, adapter, &entry_id, &world_entry, expected).await {
+            SpokeResult::Ok(rev) => rev,
+            SpokeResult::Reject(r) => {
+                adapter.restore_bound_tx(tx);
+                return SpokeResult::Reject(r);
+            }
+        };
     adapter.restore_bound_tx(tx);
     let mut result = entry;
     result.revision = Some(new_rev);
@@ -418,6 +421,7 @@ async fn put_update_bound(
 }
 
 async fn put_update_unbound(
+    adapter: &NexusAdapter<'_>,
     pool: &sqlx::SqlitePool,
     entry: KnowledgeEntry,
     expected: u64,
@@ -443,10 +447,11 @@ async fn put_update_unbound(
             );
         }
     };
-    let new_rev = match run_cas_update_in_tx(&mut tx, &entry_id, &world_entry, expected).await {
-        SpokeResult::Ok(rev) => rev,
-        SpokeResult::Reject(r) => return SpokeResult::Reject(r),
-    };
+    let new_rev =
+        match run_cas_update_in_tx(&mut tx, adapter, &entry_id, &world_entry, expected).await {
+            SpokeResult::Ok(rev) => rev,
+            SpokeResult::Reject(r) => return SpokeResult::Reject(r),
+        };
     if let Err(e) = tx.commit().await {
         return reject(
             SpokeRejectCode::InternalError,
@@ -501,7 +506,7 @@ pub(crate) async fn commit_compute_settlement(
                     );
                 }
             };
-            match run_cas_update_in_tx(&mut tx, &entry_id, &world_entry, expected).await {
+            match run_cas_update_in_tx(&mut tx, adapter, &entry_id, &world_entry, expected).await {
                 SpokeResult::Ok(_) => {}
                 SpokeResult::Reject(r) => {
                     // Drop tx without commit → rollback prior CAS writes.
@@ -542,6 +547,7 @@ pub(crate) async fn commit_compute_settlement(
 
 async fn run_cas_update_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    adapter: &NexusAdapter<'_>,
     entry_id: &str,
     world_entry: &KnowledgeEntryRecord,
     expected: u64,
@@ -591,14 +597,29 @@ async fn run_cas_update_in_tx(
     // carrier) — exactly the spec §3.2 behavior. We must NOT intercept that
     // here as an immutable-governance error, or we would mask the world
     // conflict.
-    let stored_governance = match sqlx::query_as::<_, (Option<String>, Option<String>, Option<String>)>(
-        "SELECT world_id, holder_entry_id, disclosure FROM kb_key_blocks WHERE key_block_id = ?",
-    )
-    .bind(entry_id)
-    .fetch_optional(&mut **tx)
-    .await
-    {
-        Ok(v) => v,
+    // L2 F1 (HARD): admission comes from the *read path*, not from the
+    // constructor marker. The stored row is loaded through the bound selection
+    // — the same scoped read the port exposes — so an unscoped-CAS hole cannot
+    // exist for any caller that reaches this function. A row the selection does
+    // not admit is indistinguishable from an absent one, and its stored
+    // governance (or its world) is never observed.
+    let stored = match adapter.load_admitted_entry(entry_id).await {
+        Ok(Some(stored)) => stored,
+        Ok(None) => {
+            // Same shape the CAS produces for an absent row: the caller is
+            // ahead of the store, or the row is not theirs to see.
+            return reject(
+                SpokeRejectCode::RevisionConflict,
+                format!(
+                    "KnowledgeEntry not found for update: {entry_id} (expected base {expected})"
+                ),
+                json!({
+                    "entry_id": entry_id,
+                    "expectedBaseRevision": expected,
+                    "storeRevision": null,
+                }),
+            );
+        }
         Err(e) => {
             return reject(
                 SpokeRejectCode::InternalError,
@@ -607,22 +628,19 @@ async fn run_cas_update_in_tx(
             );
         }
     };
-    if let Some((stored_world, stored_holder, stored_disclosure)) = stored_governance {
-        // Only a same-world governance change is an immutable-governance
-        // violation. A different stored world (or a non-World row) falls
-        // through to the CAS, which classifies world-conflict / not-found
-        // exactly as before.
-        if stored_world.as_deref() == world_entry.world_id()
-            && (stored_holder.as_deref() != world_entry.holder_entry_id.as_deref()
-                || stored_disclosure.as_deref() != world_entry.disclosure.as_deref())
-        {
-            return reject(
-                SpokeRejectCode::InvalidInput,
-                "knowledge entry governance is immutable through the ordinary update path \
-                 (stored holder/disclosure differ from the candidate)",
-                json!({ "entry_id": entry_id }),
-            );
-        }
+    // Only a same-world governance change is an immutable-governance violation.
+    // A different stored world falls through to the CAS, which classifies
+    // world-conflict / not-found exactly as before.
+    if stored.world_id() == world_entry.world_id()
+        && (stored.holder_entry_id.as_deref() != world_entry.holder_entry_id.as_deref()
+            || stored.disclosure.as_deref() != world_entry.disclosure.as_deref())
+    {
+        return reject(
+            SpokeRejectCode::InvalidInput,
+            "knowledge entry governance is immutable through the ordinary update path \
+             (stored holder/disclosure differ from the candidate)",
+            json!({ "entry_id": entry_id }),
+        );
     }
     // A missing row falls through to the CAS, which classifies NotFound /
     // CAS-miss exactly as before.
@@ -727,19 +745,8 @@ pub async fn put_knowledge_entry_in_tx(
     let adapter = NexusAdapter::new(pool.clone(), read_scope.clone());
     match expected_base_revision {
         None => put_create_in_tx(&adapter, pool, tx, entry).await,
-        Some(expected) => put_update_in_tx(tx, entry, expected).await,
+        Some(expected) => put_update_in_tx(&adapter, tx, entry, expected).await,
     }
-}
-
-async fn entry_exists_in_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-    entry_id: &str,
-) -> Result<bool, sqlx::Error> {
-    let row: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM kb_key_blocks WHERE key_block_id = ?")
-        .bind(entry_id)
-        .fetch_optional(&mut **tx)
-        .await?;
-    Ok(row.is_some())
 }
 
 #[allow(clippy::too_many_lines)]
@@ -752,15 +759,16 @@ async fn put_create_in_tx(
     let store = SqliteKbStore::new(pool.clone());
     let entry_id = entry.entry_id.clone();
 
-    match entry_exists_in_tx(tx, &entry_id).await {
-        Ok(true) => {
+    // L2 F1: same scoped pre-check as the port create path.
+    match adapter.load_admitted_entry(&entry_id).await {
+        Ok(Some(_)) => {
             return reject(
                 SpokeRejectCode::KnowledgeEntryAlreadyExists,
                 format!("Entry already exists: {entry_id}"),
                 json!({ "entry_id": entry_id }),
             );
         }
-        Ok(false) => {}
+        Ok(None) => {}
         Err(e) => {
             return reject(
                 SpokeRejectCode::InternalError,
@@ -848,6 +856,7 @@ async fn put_create_in_tx(
 }
 
 async fn put_update_in_tx(
+    adapter: &NexusAdapter<'_>,
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     entry: KnowledgeEntry,
     expected: u64,
@@ -863,10 +872,11 @@ async fn put_update_in_tx(
             );
         }
     };
-    let new_rev = match run_cas_update_in_tx(tx, &entry_id, &world_entry, expected).await {
-        SpokeResult::Ok(rev) => rev,
-        SpokeResult::Reject(r) => return SpokeResult::Reject(r),
-    };
+    let new_rev =
+        match run_cas_update_in_tx(tx, adapter, &entry_id, &world_entry, expected).await {
+            SpokeResult::Ok(rev) => rev,
+            SpokeResult::Reject(r) => return SpokeResult::Reject(r),
+        };
     let mut result = entry;
     result.revision = Some(new_rev);
     SpokeResult::Ok(result)
@@ -1544,6 +1554,56 @@ mod tests {
             }
             SpokeResult::Ok(_) => panic!("expected InvalidInput reject"),
         }
+    }
+
+    /// L2 F1 (HARD): admission lives in the read/write path, so a scoped
+    /// adapter whose selection excludes the row's container cannot update or
+    /// read it — the refusal is the absent shape and the row keeps its revision.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_update_outside_bound_containers_is_refused_without_mutation() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let writer = scoped(pool.clone());
+        let created = unwrap_ok(
+            writer
+                .put_knowledge_entry(spoke_entry("kb_out_of_scope", "Out", None), None)
+                .await,
+            "create",
+        );
+        assert_eq!(created.revision, Some(1));
+
+        // A different selection: same database, no authority over `wld_1`.
+        let outsider = NexusAdapter::new(
+            pool.clone(),
+            KnowledgeReadScope::creator_management(
+                vec![KnowledgeOwnerRef::world("wld_other")],
+                Vec::new(),
+            ),
+        );
+        match outsider
+            .put_knowledge_entry(spoke_entry("kb_out_of_scope", "Out", None), Some(1))
+            .await
+        {
+            SpokeResult::Reject(r) => assert_eq!(
+                r.code,
+                SpokeRejectCode::RevisionConflict,
+                "an out-of-selection update must read as absent, got {r:?}"
+            ),
+            SpokeResult::Ok(_) => panic!("an out-of-selection update must be refused"),
+        }
+        match outsider.get_knowledge_entry("kb_out_of_scope").await {
+            SpokeResult::Reject(r) => assert_eq!(r.code, SpokeRejectCode::KnowledgeEntryNotFound),
+            SpokeResult::Ok(_) => panic!("an out-of-selection row must not be readable"),
+        }
+
+        let revision: Option<i64> =
+            sqlx::query_scalar("SELECT revision FROM kb_key_blocks WHERE key_block_id = ?")
+                .bind("kb_out_of_scope")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(revision, Some(1), "a refused update must not mutate the row");
     }
 
     /// v1.191 P1 T8: a create whose container is outside the bound selection

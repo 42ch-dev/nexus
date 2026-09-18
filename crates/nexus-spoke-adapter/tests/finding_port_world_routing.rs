@@ -502,3 +502,59 @@ async fn v1191_holder_ports_world_findings_stay_inside_the_bound_selection() {
         "a refused target finding must persist nothing"
     );
 }
+
+/// `v1191_holder_ports` (L2 F4): a multi-world selection admits entries from
+/// several containers, so the world route must additionally require the target
+/// entry to live in the *routed* world — a cross-world target is refused with
+/// the same unknown-target shape.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn v1191_holder_ports_cross_world_target_is_refused() {
+    use nexus_contracts::BlockType;
+    use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryRecord, KnowledgeOwnerRef};
+    use nexus_knowledge::world_kb::KbStore;
+    use nexus_local_db::kb_store::SqliteKbStore;
+
+    let (pool, _dir) = fresh_pool().await;
+    seed_world(&pool, "wld_test").await;
+    seed_world(&pool, "wld_foreign").await;
+
+    // An entry that IS visible to the caller (both worlds authorized) but
+    // lives in another world than the finding's route.
+    let mut foreign = KnowledgeEntryRecord::new("wld_foreign", BlockType::Character, "ForeignNote");
+    foreign.entry_id = "kb_foreign_note".to_string();
+    SqliteKbStore::new(pool.clone())
+        .insert_knowledge_entry(foreign)
+        .await
+        .unwrap();
+
+    let both = nexus_spoke_adapter::NexusAdapter::new(
+        pool.clone(),
+        nexus_knowledge::world_kb::KnowledgeReadScope::creator_management(
+            vec![
+                KnowledgeOwnerRef::world("wld_test"),
+                KnowledgeOwnerRef::world("wld_foreign"),
+            ],
+            Vec::new(),
+        ),
+    );
+
+    let mut cross = world_finding("fnd_cross_world");
+    cross.target_entry_id = Some("kb_foreign_note".to_string());
+    match both.put_findings(vec![cross]).await {
+        SpokeResult::Reject(r) => {
+            assert_eq!(r.code, SpokeRejectCode::InvalidInput, "got {r:?}");
+            assert!(
+                r.message.contains("unknown knowledge entry"),
+                "a cross-world target must use the unknown-target shape: {r:?}"
+            );
+        }
+        SpokeResult::Ok(_) => panic!("a cross-world target must be refused"),
+    }
+    assert!(
+        get_world_finding(&pool, "fnd_cross_world")
+            .await
+            .unwrap()
+            .is_none(),
+        "a refused cross-world finding must persist nothing"
+    );
+}

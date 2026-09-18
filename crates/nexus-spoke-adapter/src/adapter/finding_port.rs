@@ -146,8 +146,16 @@ impl FindingPort for NexusAdapter<'_> {
                     }
                     if let Some(target) = finding.target_entry_id.as_deref() {
                         match self.load_admitted_entry(target).await {
-                            Ok(Some(_)) => {}
-                            Ok(None) => {
+                            // L2 F4: the target must live in the SAME world the
+                            // finding is routed to. A multi-world selection
+                            // admits rows from several containers, so admission
+                            // alone is not enough — a cross-world target would
+                            // otherwise be readable through the finding.
+                            Ok(Some(record)) if record.world_id() == Some(world_id) => {}
+                            // Admitted but living in another container, and a
+                            // target the caller cannot read at all, take the
+                            // same unknown-target refusal.
+                            Ok(Some(_) | None) => {
                                 return reject(
                                     SpokeRejectCode::InvalidInput,
                                     format!(

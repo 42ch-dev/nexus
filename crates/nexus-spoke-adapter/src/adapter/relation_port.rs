@@ -331,25 +331,31 @@ impl NexusAdapter<'_> {
         // table will ever hold that many rows).
         let probe_limit = limit.saturating_add(1);
         let take = usize::try_from(limit).unwrap_or(usize::MAX);
+        let mut current = cursor.cloned();
+        loop {
         let rows =
-            list_confirmed_relationships_paginated(&pool, &world_id, probe_limit, cursor).await?;
+            list_confirmed_relationships_paginated(&pool, &world_id, probe_limit, current.as_ref())
+                .await?;
         let has_more = rows.len() > take;
-        let next_cursor = has_more.then(|| {
-            let last = &rows[take - 1];
-            RelationshipCursor {
-                updated_at: last.updated_at.clone(),
-                relationship_id: last.relationship_id.clone(),
-            }
-        });
         let mut edges = Vec::with_capacity(take);
-        for row in rows.into_iter().take(take) {
-            match self.relation_endpoints_admitted(&row.relationship_id, &row).await {
-                Ok(true) => edges.push(HopEdge {
-                    relation_id: row.relationship_id,
-                    from_id: row.source_entity_id,
-                    to_id: row.target_entity_id,
-                    relation_type: row.relation_type,
-                }),
+        // L2 F2: the next cursor is built from the last KEPT row, never from a
+        // dropped (hidden) row — the cursor is handed back to the caller, so a
+        // hidden relation id must not ride in it.
+        let mut last_kept: Option<RelationshipCursor> = None;
+        for row in rows.iter().take(take) {
+            match self.relation_endpoints_admitted(&row.relationship_id, row).await {
+                Ok(true) => {
+                    last_kept = Some(RelationshipCursor {
+                        updated_at: row.updated_at.clone(),
+                        relationship_id: row.relationship_id.clone(),
+                    });
+                    edges.push(HopEdge {
+                        relation_id: row.relationship_id.clone(),
+                        from_id: row.source_entity_id.clone(),
+                        to_id: row.target_entity_id.clone(),
+                        relation_type: row.relation_type.clone(),
+                    });
+                }
                 // An edge with a hidden endpoint is not an edge in this
                 // selection: drop it silently (the caller sees a smaller
                 // graph, never a hidden id).
@@ -359,7 +365,21 @@ impl NexusAdapter<'_> {
                 }
             }
         }
-        Ok(HopEdgePage { edges, next_cursor })
+        if edges.is_empty() && has_more {
+            // The whole page is hidden from this caller. Advance on the raw
+            // page position — never exposed, because the walk continues inside
+            // this call — so a later visible page is still reachable without
+            // the caller learning a hidden relation id.
+            let last = &rows[take - 1];
+            current = Some(RelationshipCursor {
+                updated_at: last.updated_at.clone(),
+                relationship_id: last.relationship_id.clone(),
+            });
+            continue;
+        }
+        let next_cursor = if has_more { last_kept } else { None };
+        return Ok(HopEdgePage { edges, next_cursor });
+        }
     }
 }
 
@@ -380,14 +400,22 @@ async fn put_relation_create(&self, relation: Relation) -> SpokeResult<Relation>
     // Pre-check existence. The PK is the true race guard; if a concurrent
     // writer beats us the INSERT fails and surfaces as InternalError —
     // acceptable for the local single-writer daemon path.
+    // L2 F2: the existence pre-check is scoped — a stored relation whose
+    // endpoints the caller cannot see is absent for this caller, so the gate is
+    // not an existence oracle. (If the id truly exists, the INSERT's
+    // primary-key collision still refuses the write without disclosing it.)
     match get_relationship(&self.pool, &relation_id).await {
-        Ok(_) => {
-            return reject(
-                SpokeRejectCode::RelationAlreadyExists,
-                format!("Relation already exists: {relation_id}"),
-                json!({ "relation_id": relation_id }),
-            );
-        }
+        Ok(row) => match self.relation_endpoints_admitted(&relation_id, &row).await {
+            Ok(true) => {
+                return reject(
+                    SpokeRejectCode::RelationAlreadyExists,
+                    format!("Relation already exists: {relation_id}"),
+                    json!({ "relation_id": relation_id }),
+                );
+            }
+            Ok(false) => {} // hidden endpoints ⇒ absent for this caller
+            Err(reject) => return SpokeResult::Reject(reject),
+        },
         Err(LocalDbError::Sqlx(sqlx::Error::RowNotFound)) => {} // proceed to insert
         Err(e) => {
             return reject(
@@ -2367,6 +2395,20 @@ mod tests {
             ),
             SpokeResult::Ok(_) => panic!("a relation with a hidden endpoint must not be served"),
         }
+        // L2 F2: the create pre-check is scoped, so the stored-but-hidden
+        // relation is not an existence oracle.
+        match adapter
+            .put_relation(spoke_relation("rel_vis", "kb_src", "kb_dst"), None)
+            .await
+        {
+            SpokeResult::Reject(r) => assert_ne!(
+                r.code,
+                SpokeRejectCode::RelationAlreadyExists,
+                "a hidden relation must not be disclosed by the pre-check: {r:?}"
+            ),
+            SpokeResult::Ok(_) => panic!("the id is still occupied by the stored row"),
+        }
+
         // The update path answers the same absent shape as a missing relation
         // (a hidden endpoint must never leak through the reject's shape).
         match adapter
