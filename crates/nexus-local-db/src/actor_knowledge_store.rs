@@ -236,16 +236,20 @@ async fn load_key_block_row_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     entry_id: &str,
 ) -> Result<Option<KeyBlockRow>, LocalDbError> {
-    let row = sqlx::query_as!(
-        KeyBlockRow,
-        r#"SELECT key_block_id as "key_block_id!", owner_kind as "owner_kind!", world_id, character_id,
-                actor_world_binding_id, creator_only as "creator_only!", block_type as "block_type!",
-                canonical_name as "canonical_name!", status as "status!", revision, body_json,
-                source_anchor_json, created_from_command_id, created_at as "created_at!", updated_at,
-                source_work_id, source_chapter, source_provenance_kind, extensions_nexus_json, modules_json
-         FROM kb_key_blocks WHERE key_block_id = ?"#,
-        entry_id
+    // SAFETY: runtime query (not `query_as!`) because the v1.191 P1 T3
+    // governance columns are unknown to the committed `.sqlx` offline cache —
+    // the same convention `kb_store.rs` uses for `kb_key_blocks` column
+    // changes. Static SQL; the row shape is the shared `KeyBlockRow`.
+    let row = sqlx::query_as::<_, KeyBlockRow>(
+        r"SELECT key_block_id, owner_kind, world_id, character_id,
+                actor_world_binding_id, holder_entry_id, disclosure, block_type,
+                canonical_name, status, revision, body_json, source_anchor_json,
+                created_from_command_id, created_at, updated_at, source_work_id,
+                source_chapter, source_provenance_kind, extensions_nexus_json,
+                modules_json
+         FROM kb_key_blocks WHERE key_block_id = ?",
     )
+    .bind(entry_id)
     .fetch_optional(&mut **tx)
     .await?;
     Ok(row)
@@ -334,16 +338,20 @@ pub async fn get_actor_knowledge_entry(
     if !character_owned_for_read(pool, owner_creator_id, character_id).await? {
         return Ok(None);
     }
-    let row = sqlx::query_as!(
-        KeyBlockRow,
-        r#"SELECT key_block_id as "key_block_id!", owner_kind as "owner_kind!", world_id, character_id,
-                actor_world_binding_id, creator_only as "creator_only!", block_type as "block_type!",
-                canonical_name as "canonical_name!", status as "status!", revision, body_json,
-                source_anchor_json, created_from_command_id, created_at as "created_at!", updated_at,
-                source_work_id, source_chapter, source_provenance_kind, extensions_nexus_json, modules_json
-         FROM kb_key_blocks WHERE key_block_id = ?"#,
-        entry_id
+    // SAFETY: runtime query (not `query_as!`) because the v1.191 P1 T3
+    // governance columns are unknown to the committed `.sqlx` offline cache —
+    // the same convention `kb_store.rs` uses for `kb_key_blocks` column
+    // changes. Static SQL; the row shape is the shared `KeyBlockRow`.
+    let row = sqlx::query_as::<_, KeyBlockRow>(
+        r"SELECT key_block_id, owner_kind, world_id, character_id,
+                actor_world_binding_id, holder_entry_id, disclosure, block_type,
+                canonical_name, status, revision, body_json, source_anchor_json,
+                created_from_command_id, created_at, updated_at, source_work_id,
+                source_chapter, source_provenance_kind, extensions_nexus_json,
+                modules_json
+         FROM kb_key_blocks WHERE key_block_id = ?",
     )
+    .bind(entry_id)
     .fetch_optional(pool)
     .await?;
     let Some(row) = row else {

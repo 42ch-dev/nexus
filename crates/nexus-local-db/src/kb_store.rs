@@ -59,6 +59,13 @@ type ExtensionMap = HashMap<String, serde_json::Map<String, serde_json::Value>>;
 /// P1 adds the canonical owner keys (`character_id`, `actor_world_binding_id`)
 /// and the `creator_only` flag so non-World owners never fabricate a
 /// `world_id`.
+///
+/// v1.191 P1 T3 retires `creator_only` (durable §5): it stays in this list so a
+/// stale key is classified as *known* — i.e. filtered out of
+/// `extensions_nexus_extras` and actively removed on the next write — instead
+/// of round-tripping as an unknown passthrough. The native governance pair
+/// (`holder_entry_id` / `disclosure`) is the authority; governance never
+/// travels through `extensions.nexus`.
 const KNOWN_NEXUS_KEYS: [&str; 8] = [
     "world_id",
     "character_id",
@@ -87,10 +94,10 @@ fn is_known_nexus_key(key: &str) -> bool {
 /// non-World owner never carries a `world_id` key (no fabricated World id).
 /// Each optional provenance field is inserted when `Some`, removed when
 /// `None`. Unknown keys already present under the `"nexus"` namespace of
-/// `existing_extensions` are preserved verbatim (spec §2.2 round-trip rule 2).
+/// `existing_extensions` are preserved verbatim (spec §2.2 round-trip rule 2);
+/// the retired legacy `creator_only` key is always removed (durable §5).
 fn build_extensions_nexus(
     owner: &KnowledgeOwnerRef,
-    creator_only: bool,
     created_from_command_id: Option<&str>,
     source_work_id: Option<&str>,
     source_chapter: Option<i64>,
@@ -124,13 +131,9 @@ fn build_extensions_nexus(
         );
     }
 
-    // `creator_only` is World-owned only (DB CHECK); round-trip as Nexus
-    // metadata when set, otherwise the key is absent.
-    if creator_only {
-        nexus.insert("creator_only".into(), serde_json::Value::Bool(true));
-    } else {
-        nexus.remove("creator_only");
-    }
+    // The retired legacy World-only visibility flag is never written and is
+    // dropped from any carried namespace (durable §5: not unknown passthrough).
+    nexus.remove("creator_only");
 
     insert_opt_string(
         &mut nexus,
@@ -297,7 +300,7 @@ impl SqliteKbStore {
         let row = sqlx::query_as::<_, KeyBlockRow>(
             r"SELECT
                 key_block_id, owner_kind, world_id, character_id,
-                actor_world_binding_id, creator_only,
+                actor_world_binding_id, holder_entry_id, disclosure,
                 block_type, canonical_name, status,
                 revision, body_json, source_anchor_json, created_from_command_id,
                 created_at, updated_at, source_work_id, source_chapter,
@@ -352,7 +355,8 @@ impl SqliteKbStore {
                 world_id,
                 character_id,
                 actor_world_binding_id,
-                creator_only,
+                holder_entry_id,
+                disclosure,
                 block_type,
                 canonical_name,
                 status,
@@ -444,7 +448,6 @@ impl SqliteKbStore {
         // opaque primitive.
         let extensions_nexus_json = serde_json::to_string(&build_extensions_nexus(
             &kb.owner,
-            kb.creator_only,
             kb.created_from_command_id.as_deref(),
             kb.source_work_id.as_deref(),
             kb.source_chapter,
@@ -490,14 +493,16 @@ impl SqliteKbStore {
         validate_body(kb.block_type, kb.body.as_ref(), self.validation_mode)
             .map_err(validation_err)?;
 
-        // v1.184 P1 fix: `creator_only` is World-only — the SQLite schema
-        // CHECK is defense in depth, but the explicit check surfaces a
-        // validation error and keeps the invariant identical across domain /
-        // memory / conversion boundaries. Mapped to `ValidationLegacy` (not
-        // the `validation_err` fallback, which would mislabel it `MissingBody`).
-        nexus_knowledge::world_kb::knowledge_entry::validate_creator_only_owner(
-            &kb.owner,
-            kb.creator_only,
+        // v1.191 P1 T3: the native governance pair is validated with the domain
+        // rule (durable §3): a disclosure requires its nonempty holder, empty
+        // strings are invalid, and only `owner-private` is native. The SQLite
+        // CHECK/FK are defense in depth; the explicit check keeps the invariant
+        // identical across the domain / memory / storage boundaries. Mapped to
+        // `ValidationLegacy` (not the `validation_err` fallback, which would
+        // mislabel it `MissingBody`).
+        nexus_knowledge::world_kb::knowledge_entry::validate_native_governance(
+            kb.holder_entry_id.as_deref(),
+            kb.disclosure.as_deref(),
         )
         .map_err(|e| KbStoreError::ValidationLegacy(e.to_string()))?;
 
@@ -534,24 +539,27 @@ impl SqliteKbStore {
         let world_id_opt = owner.world_id();
         let character_id = owner.character_id();
         let actor_world_binding_id = owner.actor_world_binding_id();
-        let creator_only_i64 = i64::from(kb.creator_only);
+        let holder_entry_id = kb.holder_entry_id.clone();
+        let disclosure = kb.disclosure.clone();
         let cname = kb.canonical_name.clone();
         let btype = kb.block_type;
         sqlx::query(
             r"INSERT INTO kb_key_blocks
                 (key_block_id, owner_kind, world_id, character_id,
-                 actor_world_binding_id, creator_only, block_type, canonical_name, status,
-                 revision, body_json, source_anchor_json, created_from_command_id, created_at,
-                 updated_at, source_work_id, source_chapter, source_provenance_kind,
-                 extensions_nexus_json, modules_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 actor_world_binding_id, holder_entry_id, disclosure, block_type,
+                 canonical_name, status, revision, body_json, source_anchor_json,
+                 created_from_command_id, created_at, updated_at, source_work_id,
+                 source_chapter, source_provenance_kind, extensions_nexus_json,
+                 modules_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&key_block_id)
         .bind(owner_kind)
         .bind(world_id_opt)
         .bind(character_id)
         .bind(actor_world_binding_id)
-        .bind(creator_only_i64)
+        .bind(&holder_entry_id)
+        .bind(&disclosure)
         .bind(&block_type_str)
         .bind(&cname)
         .bind(&kb.status)
@@ -696,7 +704,11 @@ pub(crate) struct KeyBlockRow {
     pub(crate) world_id: Option<String>,
     pub(crate) character_id: Option<String>,
     pub(crate) actor_world_binding_id: Option<String>,
-    pub(crate) creator_only: i64,
+    // v1.191 P1 T3 native governance (durable §3): the resolved holder of an
+    // `owner-private` row and the disclosure marker. Both NULL = shared; the
+    // legacy `creator_only` column is gone.
+    pub(crate) holder_entry_id: Option<String>,
+    pub(crate) disclosure: Option<String>,
     pub(crate) block_type: String,
     pub(crate) canonical_name: String,
     pub(crate) status: String,
@@ -786,16 +798,19 @@ impl KeyBlockRow {
             schema_version: 1,
             entry_id: self.key_block_id.clone(),
             owner,
-            // v1.191 P1 custodian checkpoint: `KnowledgeEntryRecord` gained the
-            // native `holder_entry_id` / `disclosure` governance columns. This
-            // SQLite row has no such columns yet — T3 adds them together with
-            // the holder registry and migration — so the value is genuinely
-            // absent here, not a defaulted-away authored pair. T3 replaces these
-            // two zeros with the real column projection; no governance logic is
-            // decided at this seam (see knowledge_entry.rs §1.2).
-            holder_entry_id: None,
-            disclosure: None,
-            creator_only: self.creator_only != 0,
+            // v1.191 P1 T3 — the native governance projection. These two lines
+            // are this task's load-bearing change: while they carried the T2
+            // placeholder (`None` / `None`), every migrated `owner-private` row
+            // would read back as shared.
+            holder_entry_id: self.holder_entry_id.clone(),
+            disclosure: self.disclosure.clone(),
+            // The legacy World-only carrier has no storage column after the
+            // cutover (durable §5). It is projected from the governance pair so
+            // a disclosure-restricted row never reads back as shared; a
+            // Character-private World row over-approximates here, which errs
+            // toward hiding. The field itself is deleted by the complete-cutover
+            // task, at which point this line goes with it.
+            creator_only: self.disclosure.is_some(),
             block_type,
             canonical_name: self.canonical_name.clone(),
             status: self.status.clone(),
@@ -853,7 +868,6 @@ impl KeyBlockRow {
         };
         build_extensions_nexus(
             &owner,
-            self.creator_only != 0,
             self.created_from_command_id.as_deref(),
             self.source_work_id.as_deref(),
             self.source_chapter,
@@ -967,7 +981,7 @@ pub async fn get_knowledge_entry_in_tx(
     let row = sqlx::query_as::<_, KeyBlockRow>(
         r"SELECT
                 key_block_id, owner_kind, world_id, character_id,
-                actor_world_binding_id, creator_only,
+                actor_world_binding_id, holder_entry_id, disclosure,
                 block_type, canonical_name, status,
                 revision, body_json, source_anchor_json, created_from_command_id,
                 created_at, updated_at, source_work_id, source_chapter,
@@ -997,7 +1011,7 @@ pub async fn list_by_world_in_tx(
     let rows = sqlx::query_as::<_, KeyBlockRow>(sqlx::AssertSqlSafe(format!(
         r"SELECT
                 key_block_id, owner_kind, world_id, character_id,
-                actor_world_binding_id, creator_only,
+                actor_world_binding_id, holder_entry_id, disclosure,
                 block_type, canonical_name, status,
                 revision, body_json, source_anchor_json, created_from_command_id,
                 created_at, updated_at, source_work_id, source_chapter,
@@ -1039,7 +1053,7 @@ impl KbStore for SqliteKbStore {
         let row = sqlx::query_as::<_, KeyBlockRow>(
             r"SELECT
                 key_block_id, owner_kind, world_id, character_id,
-                actor_world_binding_id, creator_only,
+                actor_world_binding_id, holder_entry_id, disclosure,
                 block_type, canonical_name, status,
                 revision, body_json, source_anchor_json, created_from_command_id,
                 created_at, updated_at, source_work_id, source_chapter,
@@ -1069,7 +1083,8 @@ impl KbStore for SqliteKbStore {
                 world_id,
                 character_id,
                 actor_world_binding_id,
-                creator_only,
+                holder_entry_id,
+                disclosure,
                 block_type,
                 canonical_name,
                 status,
@@ -1257,11 +1272,16 @@ impl KbStore for SqliteKbStore {
         // Verify exists
         let existing = self.get_knowledge_entry(&kb.entry_id).await?;
 
-        // v1.184 P1: owner and `creator_only` are immutable through patch
-        // APIs — moving knowledge is explicit create/copy work. Rejected here
-        // (and in the in-memory store) rather than silently re-owned.
-        if existing.owner != kb.owner || existing.creator_only != kb.creator_only {
+        // v1.184 P1 / v1.191 P1 T3: owner and the native governance pair are
+        // immutable through patch APIs — moving ownership or governance is
+        // explicit create/copy work (durable §3: the ordinary store path is not
+        // a transfer mechanism). Rejected here (and in the in-memory store)
+        // rather than silently re-owned or re-scoped.
+        if existing.owner != kb.owner {
             return Err(KbStoreError::ImmutableOwner(kb.entry_id.clone()));
+        }
+        if existing.holder_entry_id != kb.holder_entry_id || existing.disclosure != kb.disclosure {
+            return Err(KbStoreError::ImmutableGovernance(kb.entry_id.clone()));
         }
 
         // If name or type changed, check owner-scoped uniqueness.
@@ -1323,7 +1343,6 @@ impl KbStore for SqliteKbStore {
         // (spec §2.3 write path; mirrors the INSERT path).
         let extensions_nexus_json = serde_json::to_string(&build_extensions_nexus(
             &kb.owner,
-            kb.creator_only,
             kb.created_from_command_id.as_deref(),
             kb.source_work_id.as_deref(),
             kb.source_chapter,
@@ -1434,7 +1453,8 @@ impl SqliteKbStore {
                 world_id,
                 character_id,
                 actor_world_binding_id,
-                creator_only,
+                holder_entry_id,
+                disclosure,
                 block_type,
                 canonical_name,
                 status,
@@ -1470,9 +1490,10 @@ impl SqliteKbStore {
     /// whitelist — not user input), so the SQL fragment is static. World
     /// owners return the same set as [`KbStore::list_by_world`]; Character and
     /// binding owners return their own isolated rows. Bound by the same
-    /// [`LIST_BY_WORLD_LIMIT`] safety cap as `list_by_world`. `creator_only`
-    /// is carried on the returned records (the view service filters it) — the
-    /// store is owner-scoped, not visibility-scoped.
+    /// [`LIST_BY_WORLD_LIMIT`] safety cap as `list_by_world`. Governance
+    /// (`holder_entry_id` / `disclosure`) is carried on the returned records
+    /// (the view service filters it) — the store is owner-scoped, not
+    /// visibility-scoped.
     ///
     /// # Errors
     ///
@@ -1493,7 +1514,8 @@ impl SqliteKbStore {
                 world_id,
                 character_id,
                 actor_world_binding_id,
-                creator_only,
+                holder_entry_id,
+                disclosure,
                 block_type,
                 canonical_name,
                 status,
@@ -1546,7 +1568,8 @@ impl SqliteKbStore {
                 world_id,
                 character_id,
                 actor_world_binding_id,
-                creator_only,
+                holder_entry_id,
+                disclosure,
                 block_type,
                 canonical_name,
                 status,
@@ -1588,7 +1611,7 @@ impl SqliteKbStore {
         owner: &KnowledgeOwnerRef,
         after: Option<&(String, String)>,
         limit: u32,
-        exclude_creator_only: bool,
+        exclude_disclosed: bool,
     ) -> Result<Vec<KnowledgeEntryRecord>, KbStoreError> {
         let owner_column = match owner {
             KnowledgeOwnerRef::World(_) => "world_id",
@@ -1597,8 +1620,13 @@ impl SqliteKbStore {
         };
         let created_key = "(CAST(strftime('%s', created_at) AS INTEGER) * 1000 + CAST(substr(strftime('%f', created_at), 4) AS INTEGER))";
         let cursor_millis = "(CAST(strftime('%s', ?) AS INTEGER) * 1000 + CAST(substr(strftime('%f', ?), 4) AS INTEGER))";
-        let visibility = if exclude_creator_only {
-            " AND creator_only = 0"
+        // v1.191 P1 T3: the retired `creator_only = 0` predicate is expressed on
+        // the native governance pair — exclude every disclosure-restricted row.
+        // The full admitted read selection (resolved holder + authorized
+        // containers, durable §4.2) replaces this interim fold in the
+        // visibility task.
+        let visibility = if exclude_disclosed {
+            " AND disclosure IS NULL"
         } else {
             ""
         };
@@ -1618,7 +1646,8 @@ impl SqliteKbStore {
                 world_id,
                 character_id,
                 actor_world_binding_id,
-                creator_only,
+                holder_entry_id,
+                disclosure,
                 block_type,
                 canonical_name,
                 status,
@@ -3108,7 +3137,6 @@ mod tests {
         // Build the opaque JSON the way the spoke adapter does (T2 path).
         let extensions_nexus_json = serde_json::to_string(&build_extensions_nexus(
             &kb.owner,
-            kb.creator_only,
             kb.created_from_command_id.as_deref(),
             kb.source_work_id.as_deref(),
             kb.source_chapter,

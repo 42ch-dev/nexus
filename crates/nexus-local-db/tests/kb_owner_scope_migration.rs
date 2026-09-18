@@ -5,7 +5,13 @@
 //!   (`kb_source_anchors`, `kb_relationships`, `mind_states`,
 //!   `actor_world_bindings.world_sheet_entry_id`), and pre-existing index
 //!   survives the rebuild;
-//! - exactly-one-owner and World-only `creator_only` CHECK constraints;
+//! - exactly-one-owner CHECK constraints and the owner-scoped partial unique
+//!   indexes on the rebuilt `kb_key_blocks`;
+//! - the v1.191 P1 T3 holder cutover: registry/quarantine schema, the native
+//!   governance columns (the legacy `creator_only` column is gone), the
+//!   `creator_only = true` → stored-Creator `owner-private` backfill, the
+//!   knowledge revisions, and every preflight abort (all in
+//!   `v1191_holder_migration_*` cases below);
 //! - owner FK actions (CASCADE world, RESTRICT character/binding, SET NULL
 //!   `WorldSheet` link);
 //! - owner-scoped active uniqueness partial unique indexes;
@@ -239,22 +245,25 @@ async fn insert_owned_kb(
     world_id: Option<&str>,
     character_id: Option<&str>,
     binding_id: Option<&str>,
-    creator_only: i64,
+    holder_entry_id: Option<&str>,
     canonical_name: &str,
     status: &str,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         "INSERT INTO kb_key_blocks \
          (key_block_id, owner_kind, world_id, character_id, actor_world_binding_id, \
-          creator_only, block_type, canonical_name, status, created_at) \
-         VALUES (?, ?, ?, ?, ?, ?, 'character', ?, ?, '2026-09-05T00:00:00Z')",
+          holder_entry_id, disclosure, block_type, canonical_name, status, created_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'character', ?, ?, '2026-09-05T00:00:00Z')",
     )
     .bind(key_block_id)
     .bind(owner_kind)
     .bind(world_id)
     .bind(character_id)
     .bind(binding_id)
-    .bind(creator_only)
+    .bind(holder_entry_id)
+    // A resolved holder implies `owner-private` (durable §3); unusual pairs are
+    // exercised with direct SQL in the v1.191 governance cases below.
+    .bind(holder_entry_id.map(|_| "owner-private"))
     .bind(canonical_name)
     .bind(status)
     .execute(pool)
@@ -625,18 +634,19 @@ async fn pre_v1184_upgrade_preserves_bytes_children_and_schema_objects() {
     assert_eq!(dump(&pool, MIND_STATE_DUMP_SQL).await, pre_mind_states);
     assert_eq!(dump(&pool, BINDING_DUMP_SQL).await, pre_bindings);
 
-    // ── Owner defaults: World-owned, no creator-only, null other owners ──
+    // ── Owner defaults: World-owned, shared governance, null other owners ─
     let owner_dump = dump(
         &pool,
-        "SELECT json_array(owner_kind, character_id, actor_world_binding_id, creator_only) \
+        "SELECT json_array(owner_kind, character_id, actor_world_binding_id, \
+                           holder_entry_id, disclosure) \
          FROM kb_key_blocks ORDER BY key_block_id",
     )
     .await;
     assert_eq!(owner_dump.len(), pre_rows.len());
     for row in &owner_dump {
         assert_eq!(
-            row, "[\"world\",null,null,0]",
-            "legacy rows become World-owned"
+            row, "[\"world\",null,null,null,null]",
+            "legacy shared rows become World-owned with no governance"
         );
     }
 
@@ -672,7 +682,9 @@ async fn pre_v1184_upgrade_preserves_bytes_children_and_schema_objects() {
         "owner_kind",
         "character_id",
         "actor_world_binding_id",
-        "creator_only",
+        "holder_entry_id",
+        "disclosure",
+        "REFERENCES knowledge_holders",
         "REFERENCES characters",
         "REFERENCES actor_world_bindings",
         "REFERENCES narrative_worlds",
@@ -680,6 +692,10 @@ async fn pre_v1184_upgrade_preserves_bytes_children_and_schema_objects() {
     ] {
         assert!(ddl.contains(fragment), "rebuilt DDL missing: {fragment}");
     }
+    assert!(
+        !ddl.contains("creator_only"),
+        "the legacy creator_only column must not survive the cutover"
+    );
 
     // ── foreign_key_check is empty after rebuild ────────────────────────
     let violations = sqlx::query("PRAGMA foreign_key_check")
@@ -700,14 +716,16 @@ async fn pre_v1184_upgrade_preserves_bytes_children_and_schema_objects() {
     let fetched = store.get_knowledge_entry(&kb.entry_id).await.unwrap();
     assert_eq!(fetched.world_id(), Some(WORLD_A));
     assert_eq!(fetched.canonical_name, "Post Upgrade Hero");
-    // New store inserts land as World-owned rows.
-    let new_owner: (String, i64) =
-        sqlx::query_as("SELECT owner_kind, creator_only FROM kb_key_blocks WHERE key_block_id = ?")
-            .bind(&kb.entry_id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-    assert_eq!(new_owner, ("world".to_string(), 0));
+    // New store inserts land as World-owned shared rows.
+    let new_owner: (String, Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT owner_kind, holder_entry_id, disclosure \
+         FROM kb_key_blocks WHERE key_block_id = ?",
+    )
+    .bind(&kb.entry_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(new_owner, ("world".to_string(), None, None));
     // World listing still sees the world rows (9 active in world A + new one).
     let listed = store.list_by_world(WORLD_A).await.unwrap();
     assert!(
@@ -869,7 +887,7 @@ async fn exactly_one_owner_check_rejects_invalid_combinations() {
         Some(WORLD_A),
         None,
         None,
-        0,
+        None,
         "Ok World",
         "confirmed",
     )
@@ -882,7 +900,7 @@ async fn exactly_one_owner_check_rejects_invalid_combinations() {
         None,
         Some(CHARACTER),
         None,
-        0,
+        None,
         "Ok Char",
         "confirmed",
     )
@@ -895,7 +913,7 @@ async fn exactly_one_owner_check_rejects_invalid_combinations() {
         None,
         None,
         Some(BINDING),
-        0,
+        None,
         "Ok Bind",
         "confirmed",
     )
@@ -911,7 +929,7 @@ async fn exactly_one_owner_check_rejects_invalid_combinations() {
             None,
             None,
             None,
-            0,
+            None,
             "Bad 01",
             "confirmed",
         )
@@ -927,7 +945,7 @@ async fn exactly_one_owner_check_rejects_invalid_combinations() {
             Some(WORLD_A),
             Some(CHARACTER),
             None,
-            0,
+            None,
             "Bad 02",
             "confirmed",
         )
@@ -942,7 +960,7 @@ async fn exactly_one_owner_check_rejects_invalid_combinations() {
             Some(WORLD_A),
             None,
             Some(BINDING),
-            0,
+            None,
             "Bad 03",
             "confirmed",
         )
@@ -958,7 +976,7 @@ async fn exactly_one_owner_check_rejects_invalid_combinations() {
             Some(WORLD_A),
             Some(CHARACTER),
             None,
-            0,
+            None,
             "Bad 04",
             "confirmed",
         )
@@ -973,7 +991,7 @@ async fn exactly_one_owner_check_rejects_invalid_combinations() {
             None,
             None,
             None,
-            0,
+            None,
             "Bad 05",
             "confirmed",
         )
@@ -988,7 +1006,7 @@ async fn exactly_one_owner_check_rejects_invalid_combinations() {
             None,
             Some(CHARACTER),
             Some(BINDING),
-            0,
+            None,
             "Bad 06",
             "confirmed",
         )
@@ -1004,7 +1022,7 @@ async fn exactly_one_owner_check_rejects_invalid_combinations() {
             None,
             None,
             None,
-            0,
+            None,
             "Bad 07",
             "confirmed",
         )
@@ -1019,7 +1037,7 @@ async fn exactly_one_owner_check_rejects_invalid_combinations() {
             Some(WORLD_A),
             None,
             Some(BINDING),
-            0,
+            None,
             "Bad 08",
             "confirmed",
         )
@@ -1035,7 +1053,7 @@ async fn exactly_one_owner_check_rejects_invalid_combinations() {
             None,
             None,
             None,
-            0,
+            None,
             "Bad 09",
             "confirmed",
         )
@@ -1044,74 +1062,187 @@ async fn exactly_one_owner_check_rejects_invalid_combinations() {
     );
 }
 
+/// v1.191 P1 T3: the native governance columns carry the disclosure policy.
+///
+/// Shared is the absence of both columns; `owner-private` requires a registered
+/// holder; the pair is FK-bound to the registry with `ON DELETE RESTRICT`; the
+/// retired `creator_only` World-only rule is not reimposed on the native shape.
+#[allow(clippy::too_many_lines)] // one governance matrix on one schema
 #[tokio::test]
-async fn creator_only_is_world_owned_only() {
+async fn v1191_holder_migration_governance_columns() {
     let (pool, _dir) = migrated_pool().await;
     seed_creator(&pool).await;
     seed_world(&pool, WORLD_A).await;
     seed_character(&pool, CHARACTER, "Aria").await;
     seed_binding(&pool, BINDING, CHARACTER, WORLD_A, None).await;
 
-    // World-owned creator-only lore is allowed.
+    let creator_holder = {
+        let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
+        let id = nexus_local_db::ensure_creator_holder_in_tx(&mut tx, CREATOR)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        id
+    };
+    let character_holder = {
+        let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
+        let id = nexus_local_db::ensure_character_holder_in_tx(&mut tx, CHARACTER)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        id
+    };
+    assert_eq!(
+        creator_holder,
+        nexus_local_db::creator_holder_entry_id(CREATOR)
+    );
+    assert_eq!(
+        character_holder,
+        nexus_local_db::character_holder_entry_id(CHARACTER)
+    );
+
+    // Shared (both columns NULL) on a World owner.
     insert_owned_kb(
         &pool,
-        "kb_co_world",
+        "kb_gov_shared",
         "world",
         Some(WORLD_A),
         None,
         None,
-        1,
-        "Creator Lore",
+        None,
+        "Shared Lore",
         "confirmed",
     )
     .await
     .unwrap();
-    // Character/binding owners can never be creator-only.
-    expect_check_violation(
-        insert_owned_kb(
-            &pool,
-            "kb_co_char",
-            "character",
-            None,
-            Some(CHARACTER),
-            None,
-            1,
-            "CO Char",
-            "confirmed",
-        )
-        .await,
-        "creator_only on character owner",
+    // Owner-private under the World Creator's holder.
+    insert_owned_kb(
+        &pool,
+        "kb_gov_private",
+        "world",
+        Some(WORLD_A),
+        None,
+        None,
+        Some(&creator_holder),
+        "Private Lore",
+        "confirmed",
+    )
+    .await
+    .unwrap();
+    // A Character-owned private row is legal natively: governance is not
+    // re-constrained to the (retired) legacy World-only rule.
+    insert_owned_kb(
+        &pool,
+        "kb_gov_char",
+        "character",
+        None,
+        Some(CHARACTER),
+        None,
+        Some(&character_holder),
+        "Character Private",
+        "confirmed",
+    )
+    .await
+    .unwrap();
+
+    let stored: Vec<(String, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT key_block_id, holder_entry_id, disclosure FROM kb_key_blocks \
+         WHERE key_block_id LIKE 'kb_gov_%' ORDER BY key_block_id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        stored,
+        vec![
+            (
+                "kb_gov_char".to_string(),
+                Some(character_holder.clone()),
+                Some("owner-private".to_string())
+            ),
+            (
+                "kb_gov_private".to_string(),
+                Some(creator_holder.clone()),
+                Some("owner-private".to_string())
+            ),
+            ("kb_gov_shared".to_string(), None, None),
+        ]
     );
+
+    // A disclosure without a holder is not a state the schema can hold.
     expect_check_violation(
-        insert_owned_kb(
-            &pool,
-            "kb_co_bind",
-            "actor_world_binding",
-            None,
-            None,
-            Some(BINDING),
-            1,
-            "CO Bind",
-            "confirmed",
+        sqlx::query(
+            "INSERT INTO kb_key_blocks \
+             (key_block_id, world_id, block_type, canonical_name, status, disclosure) \
+             VALUES ('kb_gov_orphan', ?, 'character', 'Orphan', 'confirmed', 'owner-private')",
         )
-        .await,
-        "creator_only on binding owner",
+        .bind(WORLD_A)
+        .execute(&pool)
+        .await
+        .map(|_| ()),
+        "owner-private without a holder",
     );
-    // creator_only is a boolean domain.
+    // Empty strings are invalid.
     expect_check_violation(
-        insert_owned_kb(
-            &pool,
-            "kb_co_two",
-            "world",
-            Some(WORLD_A),
-            None,
-            None,
-            2,
-            "CO Two",
-            "confirmed",
+        sqlx::query(
+            "INSERT INTO kb_key_blocks \
+             (key_block_id, world_id, block_type, canonical_name, status, holder_entry_id) \
+             VALUES ('kb_gov_empty', ?, 'character', 'Empty', 'confirmed', '')",
         )
-        .await,
-        "creator_only outside {0,1}",
+        .bind(WORLD_A)
+        .execute(&pool)
+        .await
+        .map(|_| ()),
+        "empty holder_entry_id",
+    );
+    // Unknown vocabulary stays out of the native table (it is quarantined at
+    // the import boundary, never stored here).
+    expect_check_violation(
+        sqlx::query(
+            "INSERT INTO kb_key_blocks \
+             (key_block_id, world_id, block_type, canonical_name, status, holder_entry_id, disclosure) \
+             VALUES ('kb_gov_unknown', ?, 'character', 'Unknown', 'confirmed', ?, 'owner-public')",
+        )
+        .bind(WORLD_A)
+        .bind(&creator_holder)
+        .execute(&pool)
+        .await
+        .map(|_| ()),
+        "unknown disclosure vocabulary",
+    );
+    // The holder must exist in the registry (FK, native rows only).
+    expect_fk_violation(
+        sqlx::query(
+            "INSERT INTO kb_key_blocks \
+             (key_block_id, world_id, block_type, canonical_name, status, holder_entry_id, disclosure) \
+             VALUES ('kb_gov_fk', ?, 'character', 'Dangling', 'confirmed', 'hld_unregistered', 'owner-private')",
+        )
+        .bind(WORLD_A)
+        .execute(&pool)
+        .await
+        .map(|_| ()),
+        "holder referencing an unregistered registry row",
+    );
+    // A governed row pins its holder: the registry row cannot be deleted out
+    // from under it (ON DELETE RESTRICT).
+    expect_fk_violation(
+        sqlx::query("DELETE FROM knowledge_holders WHERE holder_entry_id = ?")
+            .bind(&creator_holder)
+            .execute(&pool)
+            .await
+            .map(|_| ()),
+        "delete a holder referenced by a private row",
+    );
+    // And the subject pin is one-to-one and one-directional.
+    expect_unique_violation(
+        sqlx::query(
+            "INSERT INTO knowledge_holders (holder_entry_id, creator_id) VALUES ('hld_second', ?)",
+        )
+        .bind(CREATOR)
+        .execute(&pool)
+        .await
+        .map(|_| ()),
+        "second holder for the same Creator subject",
     );
 }
 
@@ -1134,7 +1265,7 @@ async fn owner_foreign_keys_enforced_with_actions() {
             None,
             Some("chr_deadbeefdeadbeefdeadbeefdeadbeef"),
             None,
-            0,
+            None,
             "Dangling Char",
             "confirmed",
         )
@@ -1149,7 +1280,7 @@ async fn owner_foreign_keys_enforced_with_actions() {
             None,
             None,
             Some("awb_deadbeefdeadbeefdeadbeefdeadbeef"),
-            0,
+            None,
             "Dangling Bind",
             "confirmed",
         )
@@ -1165,7 +1296,7 @@ async fn owner_foreign_keys_enforced_with_actions() {
         None,
         Some(CHARACTER),
         None,
-        0,
+        None,
         "Owned Char",
         "confirmed",
     )
@@ -1186,7 +1317,7 @@ async fn owner_foreign_keys_enforced_with_actions() {
         None,
         None,
         Some(BINDING),
-        0,
+        None,
         "Owned Bind",
         "confirmed",
     )
@@ -1221,7 +1352,7 @@ async fn owner_scoped_active_uniqueness_enforced() {
         None,
         Some(CHARACTER),
         None,
-        0,
+        None,
         "Shared Name",
         "confirmed",
     )
@@ -1235,7 +1366,7 @@ async fn owner_scoped_active_uniqueness_enforced() {
             None,
             Some(CHARACTER),
             None,
-            0,
+            None,
             "Shared Name",
             "confirmed",
         )
@@ -1250,7 +1381,7 @@ async fn owner_scoped_active_uniqueness_enforced() {
         None,
         Some(CHARACTER_B),
         None,
-        0,
+        None,
         "Shared Name",
         "confirmed",
     )
@@ -1264,7 +1395,7 @@ async fn owner_scoped_active_uniqueness_enforced() {
         Some(WORLD_A),
         None,
         None,
-        0,
+        None,
         "Shared Name",
         "confirmed",
     )
@@ -1277,7 +1408,7 @@ async fn owner_scoped_active_uniqueness_enforced() {
         None,
         None,
         Some(BINDING),
-        0,
+        None,
         "Shared Name",
         "confirmed",
     )
@@ -1291,7 +1422,7 @@ async fn owner_scoped_active_uniqueness_enforced() {
             None,
             None,
             Some(BINDING),
-            0,
+            None,
             "Shared Name",
             "confirmed",
         )
@@ -1306,7 +1437,7 @@ async fn owner_scoped_active_uniqueness_enforced() {
             Some(WORLD_A),
             None,
             None,
-            0,
+            None,
             "Shared Name",
             "confirmed",
         )
@@ -1322,7 +1453,7 @@ async fn owner_scoped_active_uniqueness_enforced() {
         None,
         Some(CHARACTER),
         None,
-        0,
+        None,
         "Terminal Name",
         "deleted",
     )
@@ -1335,7 +1466,7 @@ async fn owner_scoped_active_uniqueness_enforced() {
         None,
         Some(CHARACTER),
         None,
-        0,
+        None,
         "Terminal Name",
         "confirmed",
     )
@@ -1361,12 +1492,834 @@ async fn legacy_insert_without_owner_columns_defaults_to_world_owner() {
     .await
     .unwrap();
 
-    let row: (String, Option<String>, Option<String>, i64) = sqlx::query_as(
-        "SELECT owner_kind, character_id, actor_world_binding_id, creator_only \
-         FROM kb_key_blocks WHERE key_block_id = 'kb_legacy_5c'",
+    let row: (
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) = sqlx::query_as(
+        "SELECT owner_kind, character_id, actor_world_binding_id, \
+                    holder_entry_id, disclosure \
+             FROM kb_key_blocks WHERE key_block_id = 'kb_legacy_5c'",
     )
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(row, ("world".to_string(), None, None, 0));
+    assert_eq!(row, ("world".to_string(), None, None, None, None));
+}
+
+// ── v1.191 P1 T3: holder registry and the offline governance cutover ────────
+
+const CREATOR_B: &str = "ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const WORLD_B: &str = "wld_ownerB";
+const CHARACTER_ARCHIVED: &str = "chr_cccccccccccccccccccccccccccccccc";
+
+/// Canonical dump of the pre-cutover `kb_key_blocks` columns that must survive
+/// the rebuild verbatim. Extensions are asserted separately: the retired legacy
+/// `creator_only` key is removed while unknown keys stay.
+const PRE_CUTOVER_COLUMNS_DUMP_SQL: &str = "SELECT json_array(\
+       key_block_id, owner_kind, world_id, character_id, actor_world_binding_id, \
+       block_type, canonical_name, status, revision, body_json, source_anchor_json, \
+       created_from_command_id, created_at, updated_at, source_work_id, source_chapter, \
+       source_provenance_kind, modules_json) \
+     FROM kb_key_blocks ORDER BY key_block_id";
+
+/// Version of the core writer-protocol migration (`20260912000001`). Every
+/// migration before it is seeded raw; it and everything after run through the
+/// production runner.
+const CORE_WRITER_PROTOCOL_VERSION: i64 = 20_260_912_000_001;
+
+/// Migrator containing every migration shipped before the writer guards — the
+/// state a legacy workspace can still be seeded from directly (no guarded
+/// tables, no protocol scalar functions on the fixture connection).
+fn pre_writer_protocol_migrator() -> Migrator {
+    let full = sqlx::migrate!("./migrations");
+    let pre: Vec<Migration> = full
+        .migrations
+        .iter()
+        .filter(|m| m.version < CORE_WRITER_PROTOCOL_VERSION)
+        .cloned()
+        .collect();
+    Migrator::with_migrations(pre)
+}
+
+/// A pre-cutover workspace: the writer protocol and the v1.191 holder migration
+/// are both still pending.
+///
+/// The fixture pool is raw (no writer admission, no protocol scalar functions)
+/// and keeps foreign keys **off** after the pre-migration batch, so the invalid
+/// subject references the preflight must refuse can be installed at all — the
+/// same state a hand-repaired or legacy workspace can present. The pending
+/// migrations are then applied by the production runner (`run_migrations`).
+async fn pre_holder_db() -> (SqlitePool, tempfile::TempDir, std::path::PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("test.db");
+    let url = format!("sqlite://{}?mode=rwc", db_path.display());
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect(&url)
+        .await
+        .unwrap();
+    run_migrator(&pool, pre_writer_protocol_migrator()).await;
+    // SAFETY: PRAGMA statement — the fixture models pre-cutover state.
+    sqlx::query("PRAGMA foreign_keys = OFF")
+        .execute(&pool)
+        .await
+        .unwrap();
+    (pool, dir, db_path)
+}
+
+/// Insert a pre-cutover `kb_key_blocks` row (the v1.184 shape, `creator_only`
+/// included).
+async fn seed_pre_cutover_kb(
+    pool: &SqlitePool,
+    key_block_id: &str,
+    canonical_name: &str,
+    world_id: Option<&str>,
+    character_id: Option<&str>,
+    creator_only: i64,
+    extensions_nexus_json: Option<&str>,
+) {
+    let owner_kind = if world_id.is_some() {
+        "world"
+    } else {
+        "character"
+    };
+    sqlx::query(
+        "INSERT INTO kb_key_blocks \
+         (key_block_id, owner_kind, world_id, character_id, creator_only, block_type, \
+          canonical_name, status, extensions_nexus_json, created_at) \
+         VALUES (?, ?, ?, ?, ?, 'character', ?, 'confirmed', ?, '2026-09-01T00:00:00Z')",
+    )
+    .bind(key_block_id)
+    .bind(owner_kind)
+    .bind(world_id)
+    .bind(character_id)
+    .bind(creator_only)
+    .bind(canonical_name)
+    .bind(extensions_nexus_json)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// Seed a minimal Creator row with an explicit id (the shared `seed_creator`
+/// helper is fixed to `CREATOR`).
+async fn seed_creator_row(pool: &SqlitePool, creator_id: &str) {
+    sqlx::query(
+        "INSERT INTO creators (creator_id, display_name, status, cached_at, data) \
+         VALUES (?, ?, 'active', '2026-09-01T00:00:00Z', '{}')",
+    )
+    .bind(creator_id)
+    .bind(creator_id)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// Seed a World whose stored controlling Creator is `owner_creator_id`.
+async fn seed_world_owned_by(pool: &SqlitePool, world_id: &str, owner_creator_id: &str) {
+    sqlx::query(
+        "INSERT INTO narrative_worlds \
+         (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
+          time_policy, metadata_json, created_at) \
+         VALUES (?, 'ws', ?, ?, ?, 'active', 'private', 'manual', '{}', '2026-09-01T00:00:00Z')",
+    )
+    .bind(world_id)
+    .bind(owner_creator_id)
+    .bind(world_id)
+    .bind(world_id)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// Seed a Character row with an explicit status (archived identities are
+/// backfilled too).
+async fn seed_character_with_status(pool: &SqlitePool, character_id: &str, status: &str) {
+    sqlx::query(
+        "INSERT INTO characters \
+         (character_id, owner_creator_id, display_name, status, persona_json, \
+          created_at, updated_at) \
+         VALUES (?, ?, ?, ?, '{}', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z')",
+    )
+    .bind(character_id)
+    .bind(CREATOR)
+    .bind(character_id)
+    .bind(status)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+async fn column_names(pool: &SqlitePool, table: &str) -> Vec<String> {
+    sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(format!(
+        "SELECT name FROM pragma_table_info('{table}') ORDER BY cid"
+    )))
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+async fn table_exists(pool: &SqlitePool, table: &str) -> bool {
+    count_where(
+        pool,
+        &format!("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = '{table}'"),
+    )
+    .await
+        == 1
+}
+
+/// The aborted cutover must leave the workspace exactly as it was: no registry,
+/// no quarantine, no governance columns, no revisions and no bookkeeping row.
+async fn assert_holder_migration_aborted(pool: &SqlitePool, case: &str) {
+    assert!(
+        !table_exists(pool, "knowledge_holders").await,
+        "{case}: the registry must not survive the abort"
+    );
+    assert!(
+        !table_exists(pool, "knowledge_import_quarantine").await,
+        "{case}: the quarantine table must not survive the abort"
+    );
+    let kb_columns = column_names(pool, "kb_key_blocks").await;
+    assert!(
+        kb_columns.iter().any(|c| c == "creator_only"),
+        "{case}: the legacy column must still be present"
+    );
+    assert!(
+        !kb_columns.iter().any(|c| c == "holder_entry_id"),
+        "{case}: governance columns must not be added"
+    );
+    assert!(
+        !column_names(pool, "narrative_worlds")
+            .await
+            .iter()
+            .any(|c| c == "knowledge_revision"),
+        "{case}: knowledge_revision must not be added"
+    );
+    assert!(
+        !column_names(pool, "characters")
+            .await
+            .iter()
+            .any(|c| c == "knowledge_revision"),
+        "{case}: knowledge_revision must not be added"
+    );
+    let applied = count_where(
+        pool,
+        &format!(
+            "SELECT COUNT(*) FROM _sqlx_migrations WHERE version = {}",
+            nexus_local_db::HOLDER_MIGRATION_VERSION
+        ),
+    )
+    .await;
+    assert_eq!(applied, 0, "{case}: the migration must not be recorded");
+    assert!(
+        count_where(pool, "SELECT COUNT(*) FROM kb_key_blocks").await > 0,
+        "{case}: fixture rows must remain"
+    );
+}
+
+/// Backfill equivalence: every `creator_only = true` row becomes `owner-private`
+/// under the holder of its **stored World controlling Creator** (never the
+/// active shell Creator), shared rows stay NULL/NULL, and the legacy key leaves
+/// the extension document while unknown keys stay.
+#[allow(clippy::too_many_lines)]
+#[tokio::test]
+async fn v1191_holder_migration_backfills_stored_creator_private() {
+    let (pool, _dir, db_path) = pre_holder_db().await;
+    seed_creator(&pool).await;
+    seed_creator_row(&pool, CREATOR_B).await;
+    seed_world(&pool, WORLD_A).await;
+    seed_world_owned_by(&pool, WORLD_B, CREATOR_B).await;
+    seed_character(&pool, CHARACTER, "Aria").await;
+    seed_character_with_status(&pool, CHARACTER_ARCHIVED, "archived").await;
+
+    seed_pre_cutover_kb(
+        &pool,
+        "kb_priv_a",
+        "Private A",
+        Some(WORLD_A),
+        None,
+        1,
+        None,
+    )
+    .await;
+    seed_pre_cutover_kb(
+        &pool,
+        "kb_priv_b",
+        "Private B",
+        Some(WORLD_B),
+        None,
+        1,
+        None,
+    )
+    .await;
+    seed_pre_cutover_kb(
+        &pool,
+        "kb_shared_a",
+        "Shared A",
+        Some(WORLD_A),
+        None,
+        0,
+        Some("{\"world_id\":\"wld_ownerA\",\"creator_only\":false,\"custom_unknown\":{\"x\":1}}"),
+    )
+    .await;
+    seed_pre_cutover_kb(
+        &pool,
+        "kb_shared_chr",
+        "Shared Char",
+        None,
+        Some(CHARACTER),
+        0,
+        None,
+    )
+    .await;
+
+    let pre_columns = dump(&pool, PRE_CUTOVER_COLUMNS_DUMP_SQL).await;
+    assert_eq!(pre_columns.len(), 4, "fixture rows");
+    let pre_private = count_where(
+        &pool,
+        "SELECT COUNT(*) FROM kb_key_blocks WHERE creator_only = 1",
+    )
+    .await;
+    assert_eq!(pre_private, 2);
+
+    // ── The cutover runs through the production migration transaction ────
+    nexus_local_db::run_migrations(&pool)
+        .await
+        .expect("holder migration applies");
+
+    // Registry: one holder per stored subject, archived Character included.
+    let mut registry: Vec<(String, Option<String>, Option<String>)> =
+        sqlx::query_as("SELECT holder_entry_id, creator_id, character_id FROM knowledge_holders")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    let mut expected = vec![
+        (
+            nexus_local_db::creator_holder_entry_id(CREATOR),
+            Some(CREATOR.to_string()),
+            None,
+        ),
+        (
+            nexus_local_db::creator_holder_entry_id(CREATOR_B),
+            Some(CREATOR_B.to_string()),
+            None,
+        ),
+        (
+            nexus_local_db::character_holder_entry_id(CHARACTER),
+            None,
+            Some(CHARACTER.to_string()),
+        ),
+        (
+            nexus_local_db::character_holder_entry_id(CHARACTER_ARCHIVED),
+            None,
+            Some(CHARACTER_ARCHIVED.to_string()),
+        ),
+    ];
+    registry.sort();
+    expected.sort();
+    assert_eq!(registry, expected, "registry backfill");
+
+    // Governance: true → stored-Creator owner-private; shared unchanged.
+    let governance: Vec<(String, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT key_block_id, holder_entry_id, disclosure FROM kb_key_blocks \
+         ORDER BY key_block_id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        governance,
+        vec![
+            (
+                "kb_priv_a".to_string(),
+                Some(nexus_local_db::creator_holder_entry_id(CREATOR)),
+                Some("owner-private".to_string())
+            ),
+            (
+                "kb_priv_b".to_string(),
+                Some(nexus_local_db::creator_holder_entry_id(CREATOR_B)),
+                Some("owner-private".to_string())
+            ),
+            ("kb_shared_a".to_string(), None, None),
+            ("kb_shared_chr".to_string(), None, None),
+        ],
+        "stored World controlling Creator, not the shell Creator"
+    );
+
+    // Visibility equivalence: exactly the legacy private/shared split.
+    assert_eq!(
+        count_where(
+            &pool,
+            "SELECT COUNT(*) FROM kb_key_blocks WHERE disclosure = 'owner-private'"
+        )
+        .await,
+        pre_private
+    );
+    assert_eq!(
+        count_where(
+            &pool,
+            "SELECT COUNT(*) FROM kb_key_blocks WHERE disclosure IS NULL"
+        )
+        .await,
+        4 - pre_private
+    );
+
+    // Every surviving pre-cutover column byte-identical.
+    assert_eq!(
+        dump(&pool, PRE_CUTOVER_COLUMNS_DUMP_SQL).await,
+        pre_columns,
+        "row ids/bodies/statuses/created_at must survive the rebuild"
+    );
+
+    // The retired legacy key is gone; unknown keys stay verbatim.
+    let extensions: Option<String> = sqlx::query_scalar(
+        "SELECT extensions_nexus_json FROM kb_key_blocks WHERE key_block_id = 'kb_shared_a'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let extensions: serde_json::Value = serde_json::from_str(&extensions.unwrap()).unwrap();
+    assert!(
+        extensions.get("creator_only").is_none(),
+        "the legacy extension key is not unknown passthrough: {extensions}"
+    );
+    assert_eq!(extensions["world_id"], "wld_ownerA");
+    assert_eq!(extensions["custom_unknown"]["x"], 1);
+
+    // ── Post-cutover schema shape ───────────────────────────────────────
+    let kb_columns = column_names(&pool, "kb_key_blocks").await;
+    assert!(kb_columns.iter().any(|c| c == "holder_entry_id"));
+    assert!(kb_columns.iter().any(|c| c == "disclosure"));
+    assert!(
+        !kb_columns.iter().any(|c| c == "creator_only"),
+        "no runtime creator_only column"
+    );
+    for table in ["narrative_worlds", "characters"] {
+        assert!(
+            column_names(&pool, table)
+                .await
+                .iter()
+                .any(|c| c == "knowledge_revision"),
+            "{table} must carry knowledge_revision"
+        );
+        assert_eq!(
+            count_where(
+                &pool,
+                &format!("SELECT COUNT(*) FROM {table} WHERE knowledge_revision = 0")
+            )
+            .await,
+            count_where(&pool, &format!("SELECT COUNT(*) FROM {table}")).await,
+            "{table}.knowledge_revision starts at 0"
+        );
+    }
+    assert!(
+        table_exists(&pool, "knowledge_import_quarantine").await,
+        "quarantine store exists"
+    );
+    assert_eq!(
+        column_names(&pool, "knowledge_import_quarantine").await,
+        vec![
+            "quarantine_id",
+            "import_batch_id",
+            "controlling_creator_id",
+            "owner_kind",
+            "world_id",
+            "character_id",
+            "actor_world_binding_id",
+            "quarantine_reason",
+            "original_entry_json",
+            "source_provenance_json",
+            "created_at",
+        ],
+        "quarantine store shape"
+    );
+    assert_eq!(
+        count_where(&pool, "SELECT COUNT(*) FROM knowledge_import_quarantine").await,
+        0,
+        "the backfill quarantines nothing on its own"
+    );
+
+    // ── The completed version is admitted, and the run is idempotent ────
+    pool.close().await;
+    let pool = nexus_local_db::init_pool(&db_path).await.unwrap();
+    let versions = nexus_local_db::read_versions(&pool).await.unwrap();
+    assert_eq!(
+        versions.db_schema_version,
+        nexus_local_db::DB_SCHEMA_VERSION,
+        "the version line advanced with the cutover"
+    );
+    nexus_local_db::validate(&pool, nexus_local_db::RuntimeRole::Cli)
+        .await
+        .expect("a migrated workspace validates as current");
+    assert_eq!(
+        count_where(&pool, "SELECT COUNT(*) FROM knowledge_holders").await,
+        4,
+        "re-running the migration must not add holders"
+    );
+}
+
+/// The registry/quarantine/revision/governance schema, its guards and its
+/// indexes, inspected on a migrated workspace.
+#[tokio::test]
+async fn v1191_holder_migration_schema_shape() {
+    let (pool, _dir) = migrated_pool().await;
+
+    assert_eq!(
+        column_names(&pool, "knowledge_holders").await,
+        vec![
+            "holder_entry_id",
+            "creator_id",
+            "character_id",
+            "created_at"
+        ],
+        "registry shape"
+    );
+    let indexes: Vec<String> = sqlx::query_scalar(
+        "SELECT name FROM sqlite_master WHERE type = 'index' \
+         AND tbl_name IN ('knowledge_holders', 'knowledge_import_quarantine') \
+         ORDER BY name",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert!(
+        indexes.contains(&"idx_knowledge_holders_creator_unique".to_string())
+            && indexes.contains(&"idx_knowledge_holders_character_unique".to_string()),
+        "per-subject unique partial indexes: {indexes:?}"
+    );
+    assert!(indexes.contains(&"idx_knowledge_import_quarantine_batch".to_string()));
+    // Governance is indexed alongside the owner/page keys without replacing
+    // them.
+    let kb_indexes = index_names(&pool).await;
+    for name in OWNER_INDEXES {
+        assert!(kb_indexes.contains(&name.to_string()), "missing {name}");
+    }
+    assert!(
+        kb_indexes.contains(&"idx_kb_key_blocks_holder_governance".to_string()),
+        "governance index: {kb_indexes:?}"
+    );
+
+    // Both new persistent tables carry the writer-admission guards.
+    let triggers: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type = 'trigger' ORDER BY name")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    for table in ["knowledge_holders", "knowledge_import_quarantine"] {
+        for op in ["insert", "update", "delete"] {
+            let expected = format!("guard_{table}_{op}");
+            assert!(
+                triggers.contains(&expected),
+                "missing writer guard {expected}"
+            );
+        }
+    }
+    // The governance FK is a real RESTRICT reference.
+    let fks: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT \"table\", \"from\", on_delete FROM pragma_foreign_key_list('kb_key_blocks')",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert!(
+        fks.iter()
+            .any(|(table, from, on_delete)| table == "knowledge_holders"
+                && from == "holder_entry_id"
+                && on_delete == "RESTRICT"),
+        "governance FK must be RESTRICT: {fks:?}"
+    );
+}
+
+/// The row→record projection reads the real governance columns: a migrated
+/// restricted row never reads back as shared (the T2 placeholder risk), the
+/// ordinary update path cannot transfer governance, and neither read nor write
+/// re-creates the retired legacy key.
+#[allow(clippy::too_many_lines)]
+#[tokio::test]
+async fn v1191_holder_migration_projection_never_reads_back_shared() {
+    let (pool, _dir) = migrated_pool().await;
+    seed_creator(&pool).await;
+    seed_world(&pool, WORLD_A).await;
+    let holder = {
+        let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
+        let id = nexus_local_db::ensure_creator_holder_in_tx(&mut tx, CREATOR)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        id
+    };
+
+    let store = SqliteKbStore::new(pool.clone());
+    let mut private = KnowledgeEntryRecord::new(WORLD_A, BlockType::Character, "Private Hero");
+    private.holder_entry_id = Some(holder.clone());
+    private.disclosure = Some("owner-private".to_string());
+    store.insert_knowledge_entry(private.clone()).await.unwrap();
+
+    let shared = KnowledgeEntryRecord::new(WORLD_A, BlockType::Character, "Shared Hero");
+    store.insert_knowledge_entry(shared.clone()).await.unwrap();
+
+    let fetched_private = store.get_knowledge_entry(&private.entry_id).await.unwrap();
+    assert_eq!(
+        fetched_private.holder_entry_id.as_deref(),
+        Some(holder.as_str())
+    );
+    assert_eq!(fetched_private.disclosure.as_deref(), Some("owner-private"));
+    assert!(
+        fetched_private.creator_only,
+        "the legacy carrier must not report a restricted row as shared"
+    );
+    let fetched_shared = store.get_knowledge_entry(&shared.entry_id).await.unwrap();
+    assert_eq!(fetched_shared.holder_entry_id, None);
+    assert_eq!(fetched_shared.disclosure, None);
+    assert!(!fetched_shared.creator_only);
+
+    // The listing path projects the same pair.
+    let listed = store.list_by_world(WORLD_A).await.unwrap();
+    let listed_private = listed
+        .iter()
+        .find(|e| e.entry_id == private.entry_id)
+        .expect("private entry listed");
+    assert_eq!(
+        listed_private.holder_entry_id.as_deref(),
+        Some(holder.as_str())
+    );
+    assert_eq!(listed_private.disclosure.as_deref(), Some("owner-private"));
+
+    // Ordinary update is not a governance transfer mechanism.
+    let mut moved = fetched_private.clone();
+    moved.disclosure = None;
+    moved.holder_entry_id = None;
+    assert!(
+        matches!(
+            store.update_knowledge_entry(moved).await,
+            Err(KbStoreError::ImmutableGovernance(_))
+        ),
+        "clearing governance through the ordinary store must be refused"
+    );
+    // A content edit that preserves the pair succeeds and keeps it.
+    let mut edited = fetched_private.clone();
+    edited.canonical_name = "Private Hero Renamed".to_string();
+    store.update_knowledge_entry(edited).await.unwrap();
+    let after = store.get_knowledge_entry(&private.entry_id).await.unwrap();
+    assert_eq!(after.holder_entry_id.as_deref(), Some(holder.as_str()));
+    assert_eq!(after.disclosure.as_deref(), Some("owner-private"));
+
+    // The retired legacy key is never re-created in the extension document.
+    let extensions: Option<String> = sqlx::query_scalar(
+        "SELECT extensions_nexus_json FROM kb_key_blocks WHERE key_block_id = ?",
+    )
+    .bind(&private.entry_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(
+        !extensions.unwrap_or_default().contains("creator_only"),
+        "governance never travels through extensions.nexus"
+    );
+}
+
+/// The same global Creator resolves to the same holder id in every workspace
+/// materialization, and the registry refuses a colliding id or a second holder.
+#[tokio::test]
+async fn v1191_holder_migration_cross_workspace_ids_are_stable() {
+    let mut registry_rows = Vec::new();
+    for _ in 0..2 {
+        let (pool, _dir, _db_path) = pre_holder_db().await;
+        seed_creator(&pool).await;
+        seed_world(&pool, WORLD_A).await;
+        seed_pre_cutover_kb(&pool, "kb_priv", "Private", Some(WORLD_A), None, 1, None).await;
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("holder migration applies");
+        registry_rows.push(
+            sqlx::query_as::<_, (String, Option<String>)>(
+                "SELECT holder_entry_id, creator_id FROM knowledge_holders",
+            )
+            .fetch_all(&pool)
+            .await
+            .unwrap(),
+        );
+    }
+    assert_eq!(registry_rows[0], registry_rows[1]);
+    assert_eq!(
+        registry_rows[0],
+        vec![(
+            nexus_local_db::creator_holder_entry_id(CREATOR),
+            Some(CREATOR.to_string())
+        )],
+        "the same Creator materialization resolves the same holder id"
+    );
+
+    // A colliding id (PK) or a second subject binding is refused outright.
+    let (pool, _dir) = migrated_pool().await;
+    seed_creator(&pool).await;
+    seed_creator_row(&pool, CREATOR_B).await;
+    let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
+    let holder = nexus_local_db::ensure_creator_holder_in_tx(&mut tx, CREATOR)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    expect_unique_violation(
+        sqlx::query("INSERT INTO knowledge_holders (holder_entry_id, creator_id) VALUES (?, ?)")
+            .bind(&holder)
+            .bind(CREATOR_B)
+            .execute(&pool)
+            .await
+            .map(|_| ()),
+        "an id already bound to another subject",
+    );
+    // The mismatch is a hard error through the registry API too.
+    let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
+    sqlx::query("UPDATE knowledge_holders SET creator_id = ? WHERE holder_entry_id = ?")
+        .bind(CREATOR_B)
+        .bind(&holder)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    let err = nexus_local_db::ensure_creator_holder_in_tx(&mut tx, CREATOR_B)
+        .await
+        .unwrap_err();
+    let _ = tx.rollback().await;
+    assert!(
+        matches!(&err, nexus_local_db::LocalDbError::ConstraintViolation { table, constraint }
+            if table == "knowledge_holders" && constraint.contains("refusing reassignment")),
+        "expected a hard mismatch error, got {err:?}"
+    );
+}
+
+/// Every ambiguous or corrupt preflight aborts the whole migration transaction:
+/// unresolved controlling Creator, a contradictory legacy extension document, a
+/// `WorldSheet` row this cutover would privatize, a pre-existing governance
+/// column, and a malformed extension document. Each case asserts the error
+/// names its guard **and** that the workspace is untouched.
+#[allow(clippy::too_many_lines)] // one abort matrix, one contract
+#[tokio::test]
+async fn v1191_holder_migration_aborts_without_mutation() {
+    // 1. The stored World controlling Creator cannot be resolved.
+    let (pool, _dir, _db_path) = pre_holder_db().await;
+    seed_creator(&pool).await;
+    seed_world_owned_by(&pool, WORLD_A, "ctr_orphaned").await;
+    seed_pre_cutover_kb(&pool, "kb_priv", "Private", Some(WORLD_A), None, 1, None).await;
+    let err = nexus_local_db::run_migrations(&pool).await.unwrap_err();
+    assert!(
+        err.to_string().contains(
+            "NOT NULL constraint failed: _preflight_unresolvable_world_creator.violations"
+        ),
+        "unexpected error: {err}"
+    );
+    assert_holder_migration_aborted(&pool, "unresolvable controlling Creator").await;
+
+    // 2. The legacy extension document contradicts the column.
+    let (pool, _dir, _db_path) = pre_holder_db().await;
+    seed_creator(&pool).await;
+    seed_world(&pool, WORLD_A).await;
+    seed_pre_cutover_kb(
+        &pool,
+        "kb_conflict",
+        "Conflict",
+        Some(WORLD_A),
+        None,
+        0,
+        Some("{\"creator_only\":true}"),
+    )
+    .await;
+    let err = nexus_local_db::run_migrations(&pool).await.unwrap_err();
+    assert!(
+        err.to_string().contains(
+            "NOT NULL constraint failed: _preflight_legacy_extension_conflict.violations"
+        ),
+        "unexpected error: {err}"
+    );
+    assert_holder_migration_aborted(&pool, "contradictory legacy extension").await;
+
+    // 3. A WorldSheet-linked row would become private.
+    let (pool, _dir, _db_path) = pre_holder_db().await;
+    seed_creator(&pool).await;
+    seed_world(&pool, WORLD_A).await;
+    seed_character(&pool, CHARACTER, "Aria").await;
+    seed_pre_cutover_kb(
+        &pool,
+        "kb_sheet_priv",
+        "Sheet",
+        Some(WORLD_A),
+        None,
+        1,
+        None,
+    )
+    .await;
+    sqlx::query(
+        "INSERT INTO actor_world_bindings \
+         (binding_id, character_id, world_id, status, world_sheet_entry_id, created_at, updated_at) \
+         VALUES (?, ?, ?, 'active', 'kb_sheet_priv', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z')",
+    )
+    .bind(BINDING)
+    .bind(CHARACTER)
+    .bind(WORLD_A)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let err = nexus_local_db::run_migrations(&pool).await.unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("NOT NULL constraint failed: _preflight_world_sheet_privatized.violations"),
+        "unexpected error: {err}"
+    );
+    assert_holder_migration_aborted(&pool, "privatized WorldSheet").await;
+
+    // 4. A pre-existing native governance column (hostile/partial schema).
+    let (pool, _dir, _db_path) = pre_holder_db().await;
+    seed_creator(&pool).await;
+    seed_world(&pool, WORLD_A).await;
+    seed_pre_cutover_kb(&pool, "kb_priv", "Private", Some(WORLD_A), None, 1, None).await;
+    sqlx::query("ALTER TABLE kb_key_blocks ADD COLUMN holder_entry_id TEXT")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let err = nexus_local_db::run_migrations(&pool).await.unwrap_err();
+    assert!(
+        err.to_string().contains(
+            "NOT NULL constraint failed: _preflight_preexisting_governance_columns.violations"
+        ),
+        "unexpected error: {err}"
+    );
+    assert!(
+        !table_exists(&pool, "knowledge_holders").await,
+        "the registry must not survive the abort"
+    );
+    assert_eq!(
+        count_where(
+            &pool,
+            &format!(
+                "SELECT COUNT(*) FROM _sqlx_migrations WHERE version = {}",
+                nexus_local_db::HOLDER_MIGRATION_VERSION
+            )
+        )
+        .await,
+        0
+    );
+
+    // 5. A malformed extension document.
+    let (pool, _dir, _db_path) = pre_holder_db().await;
+    seed_creator(&pool).await;
+    seed_world(&pool, WORLD_A).await;
+    seed_pre_cutover_kb(
+        &pool,
+        "kb_malformed",
+        "Malformed",
+        Some(WORLD_A),
+        None,
+        0,
+        Some("not-json"),
+    )
+    .await;
+    let err = nexus_local_db::run_migrations(&pool).await.unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("NOT NULL constraint failed: _preflight_malformed_extensions.violations"),
+        "unexpected error: {err}"
+    );
+    assert_holder_migration_aborted(&pool, "malformed extension document").await;
 }

@@ -28,6 +28,7 @@ pub mod creators;
 pub mod file_lock;
 pub mod findings;
 pub mod force_gates_audit;
+pub mod holders;
 pub mod identity;
 pub mod inspiration_items;
 pub mod js_provider_journal;
@@ -114,6 +115,13 @@ pub use identity::{
 
 // Re-export creators types (V1.167 P2 T2)
 pub use creators::ensure_creator_row;
+
+// Re-export holder registry primitives (v1.191 P1 T3)
+pub use holders::{
+    character_holder_entry_id, creator_holder_entry_id, ensure_character_holder_in_tx,
+    ensure_creator_holder_in_tx, resolve_holder, HolderSubject, KnowledgeHolder,
+    HOLDER_ENTRY_ID_PREFIX, HOLDER_MIGRATION_VERSION,
+};
 
 // Re-export soul_meta types
 pub use soul_meta::{
@@ -627,6 +635,17 @@ async fn apply_fk_suspension_tx(
     let start = std::time::Instant::now();
 
     let outcome: Result<(), LocalDbError> = async {
+        // v1.191 P1 T3: the holder migration's registry backfill needs the
+        // BLAKE3 holder id of every stored Creator/Character, and SQLite has
+        // no BLAKE3 function (holder-governance §2.1 is a Rust dependency
+        // here). Stage those `<subject_kind, subject_id, holder_entry_id>`
+        // rows on this connection inside the migration transaction; the
+        // script preflights that the staging is present and complete, so a
+        // path that applies this migration without the hook fails loudly.
+        if migration.version == crate::holders::HOLDER_MIGRATION_VERSION {
+            crate::holders::stage_holder_digests_in_tx(&mut tx).await?;
+        }
+
         tx.execute(migration.sql.clone())
             .await
             .map_err(|err| sqlx::migrate::MigrateError::ExecuteMigration(err, migration.version))?;
