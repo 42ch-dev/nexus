@@ -533,15 +533,22 @@ pub const LEGACY_CREATOR_ONLY_UNSUPPORTED: &str = "legacy_creator_only_unsupport
 /// private audience is resolved by admission against the permitted stored
 /// identity (`author-only` ⇒ the admitted controlling Creator's holder;
 /// `character-private` ⇒ an owned, admitted Character).
+///
+/// The variant tags are hyphenated exactly like the frozen schemas: an
+/// enum-level `rename_all` would emit `author_only` / `character_private` and
+/// drift from the generated DTOs, so each variant renames explicitly.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(tag = "kind")]
 pub enum KnowledgeAudience {
     /// In-scope shared: visible to every reader already authorized for the
     /// container. The default for an omitted create audience.
+    #[serde(rename = "shared")]
     Shared,
     /// The admitted controlling Creator's own holder.
+    #[serde(rename = "author-only")]
     AuthorOnly,
     /// A permitted Character's holder.
+    #[serde(rename = "character-private")]
     CharacterPrivate {
         /// Owning Character id (`chr_*`); resolved against stored ownership.
         character_id: String,

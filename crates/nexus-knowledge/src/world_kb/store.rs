@@ -1524,6 +1524,60 @@ mod tests {
     }
 
     #[test]
+    fn v1191_governance_audience_serde_matches_wire_tags() {
+        let character = chr();
+        let cases = [
+            (
+                KnowledgeAudience::Shared,
+                serde_json::json!({ "kind": "shared" }),
+            ),
+            (
+                KnowledgeAudience::AuthorOnly,
+                serde_json::json!({ "kind": "author-only" }),
+            ),
+            (
+                KnowledgeAudience::character_private(character.clone()).unwrap(),
+                serde_json::json!({ "kind": "character-private", "character_id": character }),
+            ),
+        ];
+
+        for (audience, wire) in &cases {
+            let serialized = serde_json::to_value(audience).expect("audience serializes");
+            assert_eq!(
+                &serialized,
+                wire,
+                "audience {} must serialize to its frozen wire tag",
+                audience.kind()
+            );
+            assert_eq!(
+                serialized["kind"],
+                audience.kind(),
+                "the wire tag and kind() must not drift"
+            );
+            let parsed: KnowledgeAudience =
+                serde_json::from_value(wire.clone()).expect("frozen tag deserializes");
+            assert_eq!(&parsed, audience);
+        }
+
+        // The enum-level snake_case spelling must not come back: the frozen
+        // schemas and the generated DTOs use hyphenated tags only.
+        assert!(
+            serde_json::from_value::<KnowledgeAudience>(
+                serde_json::json!({ "kind": "author_only" })
+            )
+            .is_err(),
+            "author_only is not the wire tag"
+        );
+        assert!(
+            serde_json::from_value::<KnowledgeAudience>(
+                serde_json::json!({ "kind": "character_private", "character_id": chr() })
+            )
+            .is_err(),
+            "character_private is not the wire tag"
+        );
+    }
+
+    #[test]
     fn v1191_governance_legacy_creator_only_key_is_rejected() {
         let rejected = reject_reserved_authoring_keys(&serde_json::json!({
             "owner_kind": "character",
