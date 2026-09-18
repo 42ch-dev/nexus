@@ -24,7 +24,10 @@ use nexus_local_db::writer_protocol::{
 use nexus_local_db::{
     ensure_creator_row, init_engine_pool, init_pool, open_pool_read_only, LocalDbError,
 };
-use sqlx::SqlitePool;
+use nexus_storage_guard::{
+    install_writer_functions, WriterConnectionContext, WriterMode as GuardWriterMode,
+};
+use sqlx::{Connection as _, SqliteConnection, SqlitePool};
 use tempfile::TempDir;
 
 const CHILD_ENV: &str = "NEXUS_WRITER_PROTOCOL_CHILD";
@@ -765,6 +768,314 @@ async fn guarded_migrations_fast_path() {
     release_retained_writer_guards(&db);
 }
 
+/// v1.191 P0 T4 (issue #317) — focused requalification of the storage FFI
+/// against the single resolved `libsqlite3-sys 0.37.0` (`links=sqlite3`)
+/// shared with `sqlx-sqlite`. Deliberately not the 100-round engine-owner
+/// race: four contracts, one case.
+///
+/// 1. **Registration** — the five protocol scalars resolve on the handle the
+///    FFI entry point locks, and report the context the admission registered
+///    durably.
+/// 2. **Refusal** — a handle that never received the functions (the
+///    pre-opened / raw writer loophole) is fenced by SQLite itself.
+/// 3. **Reopen** — committed state survives and the reopened handle installs
+///    its own connection-local context.
+/// 4. **Destructor** — re-registering on a live connection replaces all five
+///    registrations (SQLite runs each replaced box's `destroy_userdata`), and
+///    every teardown after an install leaves the allocator intact with the
+///    next connection reporting its own context.
+#[tokio::test]
+async fn v1191_sqlite_writer() {
+    let dir = TempDir::new().expect("tempdir");
+    let db = dir.path().join("v1191_writer.db");
+
+    let bootstrap = init_pool(&db).await.expect("init_pool");
+    bootstrap.close().await;
+    release_retained_writer_guards(&db);
+
+    let writer_id = assert_writer_registration(&db).await;
+    assert_unregistered_writer_refused(&db).await;
+    assert_reopen_carries_its_own_context(&db, &writer_id).await;
+    assert_re_registration_replaces_live_userdata(&db).await;
+    #[cfg(debug_assertions)]
+    assert_registration_ownership_isolated(dir.path(), &db);
+
+    release_retained_writer_guards(&db);
+}
+
+/// (1) Registration: the five scalars resolve on the handle the FFI entry
+/// point locks and report the context the admission registered durably.
+/// Returns the live writer id for the reopen comparison.
+async fn assert_writer_registration(db: &Path) -> String {
+    let direct = open_admitted_pool(db, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
+        .await
+        .expect("direct admitted pool");
+    let (writer_id, protocol, mode, migration_epoch, engine_epoch): (
+        String,
+        i64,
+        String,
+        i64,
+        Option<i64>,
+    ) = sqlx::query_as(
+        "SELECT nexus_writer_id(), nexus_writer_protocol(), nexus_writer_mode(), \
+         nexus_migration_epoch(), nexus_engine_epoch()",
+    )
+    .fetch_one(&direct)
+    .await
+    .expect("the five protocol scalars resolve on a registered connection");
+    assert_eq!(protocol, 1, "connection-local protocol version");
+    assert!(
+        migration_epoch >= 1,
+        "activated migration epoch: {migration_epoch}"
+    );
+    assert_eq!(mode, "direct");
+    assert_eq!(
+        engine_epoch, None,
+        "a direct writer carries no engine epoch"
+    );
+    let registered: (String, String, i64, Option<i64>) = sqlx::query_as(
+        "SELECT mode, creator_id, migration_epoch, engine_epoch \
+         FROM core_writer_registration WHERE writer_id = ?",
+    )
+    .bind(&writer_id)
+    .fetch_one(&direct)
+    .await
+    .expect("the live FFI userdata belongs to the durably registered writer");
+    assert_eq!(
+        registered,
+        (
+            mode.clone(),
+            BOOTSTRAP_CREATOR_ID.to_owned(),
+            migration_epoch,
+            None
+        ),
+        "the connection-local context matches the registration row"
+    );
+    // The function registry of THIS connection — the SQLx handle the FFI
+    // entry point locked — carries exactly the five application functions.
+    let mut functions: Vec<String> = sqlx::query_scalar(
+        "SELECT name FROM pragma_function_list WHERE name LIKE 'nexus_%' AND builtin = 0",
+    )
+    .fetch_all(&direct)
+    .await
+    .expect("pragma_function_list");
+    functions.sort();
+    assert_eq!(
+        functions,
+        [
+            "nexus_engine_epoch",
+            "nexus_migration_epoch",
+            "nexus_writer_id",
+            "nexus_writer_mode",
+            "nexus_writer_protocol",
+        ],
+        "exactly the five registered scalars on the connection being served"
+    );
+    sqlx::query("INSERT INTO workspace_meta (key, value) VALUES ('v1191_registered', 'ok')")
+        .execute(&direct)
+        .await
+        .expect("a registered writer mutates a guarded table");
+    direct.close().await;
+    writer_id
+}
+
+/// (2) Refusal: a handle that never received the functions (the pre-opened /
+/// raw writer loophole) is fenced by SQLite itself.
+async fn assert_unregistered_writer_refused(db: &Path) {
+    let raw = SqlitePool::connect(&format!("sqlite://{}?mode=rwc", db.display()))
+        .await
+        .expect("raw connect");
+    assert_fenced(
+        &raw,
+        "INSERT INTO workspace_meta (key, value) VALUES ('v1191_raw', 'x')",
+    )
+    .await;
+    let missing = sqlx::query_scalar::<_, Option<i64>>("SELECT nexus_writer_protocol()")
+        .fetch_one(&raw)
+        .await
+        .expect_err("an unregistered handle has no protocol scalars");
+    assert!(
+        missing
+            .to_string()
+            .contains("no such function: nexus_writer_protocol"),
+        "the fence names the missing scalar: {missing}"
+    );
+    raw.close().await;
+}
+
+/// (3) Reopen: committed state survives and the reopened handle installs its
+/// own connection-local context.
+async fn assert_reopen_carries_its_own_context(db: &Path, first_writer: &str) {
+    release_retained_writer_guards(db);
+    let reopened = open_admitted_pool(db, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
+        .await
+        .expect("reopened admitted pool");
+    let committed: (String,) =
+        sqlx::query_as("SELECT value FROM workspace_meta WHERE key = 'v1191_registered'")
+            .fetch_one(&reopened)
+            .await
+            .expect("committed row survives the reopen");
+    assert_eq!(committed.0, "ok");
+    let reopened_id: (String,) = sqlx::query_as("SELECT nexus_writer_id()")
+        .fetch_one(&reopened)
+        .await
+        .expect("the reopened handle carries its own context");
+    assert_ne!(
+        reopened_id.0, first_writer,
+        "a reopened handle reports its own writer, never the closed one's userdata"
+    );
+    sqlx::query("INSERT INTO workspace_meta (key, value) VALUES ('v1191_reopened', 'ok')")
+        .execute(&reopened)
+        .await
+        .expect("the reopened handle writes");
+    reopened.close().await;
+}
+
+/// (4a) Replacement on a live connection: SQLite replaces all five
+/// registrations, so the connection reports the replacement context and the
+/// registry still holds exactly five names — never ten. The exit is observed
+/// through values and the registry; the exact box arithmetic is asserted by
+/// the isolated child below.
+async fn assert_re_registration_replaces_live_userdata(db: &Path) {
+    let url = format!("sqlite://{}?mode=rwc", db.display());
+    let mut conn = SqliteConnection::connect(&url)
+        .await
+        .expect("probe connection");
+    install_writer_functions(
+        &mut conn,
+        probe_context("v1191_first", GuardWriterMode::Direct, 1, None),
+    )
+    .await
+    .expect("first install");
+    assert_eq!(
+        probe_scalars(&mut conn).await,
+        ("v1191_first".to_owned(), "direct".to_owned(), 1, None),
+        "the first context is live on the raw handle"
+    );
+
+    install_writer_functions(
+        &mut conn,
+        probe_context("v1191_second", GuardWriterMode::Engine, 2, Some(7)),
+    )
+    .await
+    .expect("re-registration on the same live connection");
+    assert_eq!(
+        probe_scalars(&mut conn).await,
+        ("v1191_second".to_owned(), "engine".to_owned(), 2, Some(7)),
+        "the replacement context is live on the connection"
+    );
+    let installed: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM pragma_function_list WHERE name LIKE 'nexus_%' AND builtin = 0",
+    )
+    .fetch_one(&mut conn)
+    .await
+    .expect("registry count after re-registration");
+    assert_eq!(installed, 5, "re-registration replaces, never accumulates");
+    conn.close().await.expect("close the probe connection");
+}
+
+/// (4b) Exact ownership accounting, run in an isolated child process: every
+/// `sqlite3_create_function_v2` attempt must add exactly one userdata box, and
+/// every box must be destroyed exactly once — by connection teardown or by the
+/// replacement of a live registration. The counter is process-global, so a
+/// sibling test installing writer functions would perturb it; the child runs
+/// only this check (`--exact`, one thread).
+///
+/// This is the leak gate: a regression that stops invoking `destroy_userdata`
+/// leaves the count above the expected value and fails here.
+///
+/// Coverage limit: the *failed*-registration branch of `destroy_userdata` is
+/// not reachable from this fixture — SQLite returns `SQLITE_BUSY` only while a
+/// statement evaluating the function is actively stepping, which a
+/// single-connection, single-threaded test cannot arrange deterministically.
+#[cfg(debug_assertions)]
+fn assert_registration_ownership_isolated(dir: &Path, db: &Path) {
+    let err_path = dir.join("v1191_ownership_err");
+    let mut child = spawn_child("v1191_ownership", db, &[], &err_path);
+    reap(&mut child, &err_path);
+}
+
+/// Child entry point for [`assert_registration_ownership_isolated`].
+#[cfg(debug_assertions)]
+async fn assert_registration_ownership(db: &Path) {
+    let live = WriterConnectionContext::live_registration_count;
+    let url = format!("sqlite://{}?mode=rwc", db.display());
+    assert_eq!(live(), 0, "a fresh process holds no writer registrations");
+
+    let mut conn = SqliteConnection::connect(&url)
+        .await
+        .expect("ownership connection");
+    install_writer_functions(
+        &mut conn,
+        probe_context("v1191_a", GuardWriterMode::Direct, 1, None),
+    )
+    .await
+    .expect("install");
+    assert_eq!(live(), 5, "one box per registration");
+
+    install_writer_functions(
+        &mut conn,
+        probe_context("v1191_b", GuardWriterMode::Engine, 2, Some(1)),
+    )
+    .await
+    .expect("replace");
+    assert_eq!(live(), 5, "a replacement destroys the five replaced boxes");
+    assert_eq!(
+        probe_scalars(&mut conn).await,
+        ("v1191_b".to_owned(), "engine".to_owned(), 2, Some(1))
+    );
+
+    conn.close().await.expect("close the ownership connection");
+    assert_eq!(live(), 0, "connection teardown destroys every registration");
+
+    for cycle in 0..8_i32 {
+        let mut conn = SqliteConnection::connect(&url)
+            .await
+            .expect("cycle connection");
+        install_writer_functions(
+            &mut conn,
+            probe_context(
+                &format!("v1191_cycle_{cycle}"),
+                GuardWriterMode::Direct,
+                i64::from(cycle) + 1,
+                None,
+            ),
+        )
+        .await
+        .expect("cycle install");
+        assert_eq!(live(), 5, "cycle {cycle}: one box per registration");
+        conn.close().await.expect("cycle close");
+        assert_eq!(live(), 0, "cycle {cycle}: teardown leaves none live");
+    }
+}
+
+/// The connection-local context the FFI probe installs by hand.
+fn probe_context(
+    writer_id: &str,
+    mode: GuardWriterMode,
+    migration_epoch: i64,
+    engine_epoch: Option<i64>,
+) -> WriterConnectionContext {
+    WriterConnectionContext {
+        writer_id: writer_id.to_owned(),
+        protocol_version: 1,
+        mode,
+        migration_epoch,
+        engine_epoch,
+    }
+}
+
+/// Read the identity/mode/epoch scalars back from one probe connection.
+async fn probe_scalars(conn: &mut SqliteConnection) -> (String, String, i64, Option<i64>) {
+    sqlx::query_as(
+        "SELECT nexus_writer_id(), nexus_writer_mode(), nexus_migration_epoch(), \
+         nexus_engine_epoch()",
+    )
+    .fetch_one(&mut *conn)
+    .await
+    .expect("probe scalars")
+}
+
 async fn child_main() {
     let mode = std::env::var(CHILD_ENV).expect("child mode");
     let db = PathBuf::from(std::env::var("DB_PATH").expect("db"));
@@ -799,6 +1110,8 @@ async fn child_main() {
                 };
             fs::write(out, outcome).expect("write owner outcome");
         }
+        #[cfg(debug_assertions)]
+        "v1191_ownership" => assert_registration_ownership(&db).await,
         other => panic!("unknown child mode {other}"),
     }
 }

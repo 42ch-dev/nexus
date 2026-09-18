@@ -270,4 +270,35 @@ mod tests {
         // Should contain truncation marker
         assert!(msg.contains("..."));
     }
+
+    #[test]
+    fn source_chain_is_preserved() {
+        // `ConnectionFailed` carries an optional `#[source]` field: when set it
+        // must stay reachable through `std::error::Error::source()`.
+        let err = AcpError::connection_io(std::io::Error::new(
+            std::io::ErrorKind::BrokenPipe,
+            "pipe broken",
+        ));
+        let source = std::error::Error::source(&err).expect("ConnectionFailed exposes its source");
+        assert_eq!(source.to_string(), "pipe broken");
+        assert!(source.downcast_ref::<std::io::Error>().is_some());
+
+        // Without an underlying error there is nothing to report as source.
+        let err = AcpError::connection_failed("pipe broken");
+        assert!(std::error::Error::source(&err).is_none());
+
+        // `#[from]` variants forward the wrapped error as the source.
+        let err: AcpError = std::io::Error::new(std::io::ErrorKind::NotFound, "missing").into();
+        assert_eq!(
+            std::error::Error::source(&err).map(ToString::to_string),
+            Some("missing".to_string())
+        );
+        let err: AcpError = serde_json::from_str::<serde_json::Value>("not json")
+            .unwrap_err()
+            .into();
+        assert!(std::error::Error::source(&err).is_some());
+
+        // Variants wrapping no error report no source.
+        assert!(std::error::Error::source(&AcpError::protocol("boom")).is_none());
+    }
 }

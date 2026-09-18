@@ -268,6 +268,14 @@ fn tri_state_fields(src_schema_path: &Path) -> Vec<String> {
 /// only the attribute is added, so every unmarked optional field keeps the
 /// stock typify semantics. `default` covers absence (`None`); the helper maps
 /// a present `null` to `Some(Value::Null)` instead of collapsing it.
+///
+/// The `default` half is supplied here, not by typify: 0.7 emitted
+/// `#[serde(default, skip_serializing_if = …)]` for an optional `Option`
+/// field, and 0.8 dropped the `default` (relying on serde's implicit
+/// missing-field-to-`None` for `Option`). That implicit path is bypassed once
+/// a field carries `deserialize_with` — serde then makes a missing field a
+/// hard error — so the marked tri-state fields keep their author-facing
+/// omission state only because the attribute is emitted here.
 fn inject_tri_state_deserializers(rust: &str, type_name: &str, fields: &[String]) -> String {
     if fields.is_empty() {
         return rust.to_string();
@@ -306,10 +314,13 @@ fn inject_tri_state_deserializers(rust: &str, type_name: &str, fields: &[String]
         let Some(attr_at) = body[..at].rfind("# [") else {
             continue;
         };
-        // `default` stays typify's own attribute (absence -> None); we only add
-        // the presence-preserving deserializer, so serde sees one `default`.
-        let attribute =
-            "# [serde (deserialize_with = \"crate :: tristate :: deserialize_presence\")] ";
+        // typify 0.8 no longer emits `default` for an optional `Option` field;
+        // a field that carries `deserialize_with` makes serde reject omission,
+        // so the presence-preserving attribute must carry `default` itself.
+        let attribute = concat!(
+            "# [serde (default , deserialize_with = ",
+            "\"crate :: tristate :: deserialize_presence\")] ",
+        );
         body.insert_str(attr_at, attribute);
     }
     format!("{head}{body}{tail}")

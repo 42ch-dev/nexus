@@ -79,7 +79,7 @@ tokio-stream = { workspace = true }
 regex = { workspace = true }
 serde_yaml = { workspace = true }
 sha2 = { workspace = true }
-base64 = "0.22"
+base64 = "0.23"
 libc = "0.2"
 # V1.153 P2 (DF-73): the embedded `apps/web` SPA is compile-time-gated behind
 # the `web-embed` feature (default ON; OFF for the slim `nexus-runtime`
@@ -120,10 +120,10 @@ getrandom = { version = "0.4", optional = true }
 # V1.179 P0 T1 (DF-88): embedded MCP server (Model B) — in-process rmcp
 # over sink/stream. Optional + wired to `connect-client` (the shared
 # bridge core compiles there); the embedded server module compiles only
-# under the nested `embedded-mcp` feature. Pinned exactly `=3.2.0`
+# under the nested `embedded-mcp` feature. Pinned exactly `=3.3.0`
 # (2026-09-10 dependency sweep #280; ACP 2.1.0 core no longer carries rmcp,
-# so feature-on is exactly-one 3.2.0 and feature-off is absent).
-rmcp = { version = "=3.2.0", default-features = false, features = ["server"], optional = true }
+# so feature-on is exactly-one 3.3.0 and feature-off is absent).
+rmcp = { version = "=3.3.0", default-features = false, features = ["server"], optional = true }
 # V1.174 P0 T3 (AR-68): pure tool manifest/ABI helpers for the PeerToolTable
 # admission chain (`validate_manifest_tools`, `parse_tool_capability_id`,
 # `validate_tool_arguments`) AND for the user-capability catalog grammar
@@ -157,9 +157,9 @@ parking_lot = "0.12"
 spoke-operations = { workspace = true }
 # V1.179 P0 T1 (DF-88): in-process rmcp CLIENT for the embedded-server e2e
 # (`tests/embedded_mcp_e2e.rs`) — dev-only, tests-only. The feature-on
-# shipped graph keeps exactly one rmcp 3.2.0 with `server` only; graph pins
+# shipped graph keeps exactly one rmcp 3.3.0 with `server` only; graph pins
 # use `--edges normal`, dev-deps excluded (AR-74 caveat).
-rmcp = { version = "=3.2.0", default-features = false, features = ["client"] }
+rmcp = { version = "=3.3.0", default-features = false, features = ["client"] }
 
 [[bench]]
 name = "dispatch_latency"

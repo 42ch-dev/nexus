@@ -663,4 +663,32 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert!(matches!(events[0], HostEvent::OpFinished(_)));
     }
+
+    /// Closed-transport regression (deepseek-harness-sdk 0.2.1 wakes a run
+    /// parked on the notification channel when the runtime's stdio closes):
+    /// the SDK surfaces `Error::TransportClosed`, and Nexus turns it into the
+    /// turn's single terminal failure `OpFailed(stream_closed)` — never a
+    /// second terminal, and never the SDK's process diagnostics (exit code,
+    /// stderr tail) on the author-visible event.
+    #[test]
+    fn closed_transport_run_error_is_one_stream_closed_terminal() {
+        let (session_id, op_id) = ids();
+        let error = Error::TransportClosed(
+            "DeepSeek Harness runtime closed\nexit code: 1\nstderr tail:\nfatal: secret"
+                .to_string(),
+        );
+
+        let failed = classify_run_error(&error, &session_id, &op_id);
+
+        assert_eq!(failed.error_category, "stream_closed");
+        assert_eq!(
+            failed.error_message,
+            "dsh runtime closed the transport before the turn completed"
+        );
+        assert!(
+            !failed.error_message.contains("stderr tail")
+                && !failed.error_message.contains("secret"),
+            "the SDK's process diagnostics must not reach the event: {failed:?}"
+        );
+    }
 }

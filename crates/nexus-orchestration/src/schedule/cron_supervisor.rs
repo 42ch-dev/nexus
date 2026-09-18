@@ -725,6 +725,9 @@ async fn has_active_role_schedule(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::schedule::work_schedule::{
+        DEFAULT_BRAINSTORM_CRON, DEFAULT_REVIEW_CRON, DEFAULT_WRITE_CRON,
+    };
 
     fn utc(year: i32, month: u32, day: u32, hour: u32, min: u32) -> DateTime<Utc> {
         Utc.with_ymd_and_hms(year, month, day, hour, min, 0)
@@ -806,13 +809,13 @@ mod tests {
     fn cron_fires_comma_lists_match_one_slot() {
         // `0 3,9,15,21 * * *` (brainstorm default) fires at 09:00.
         assert!(cron_fires_at_minute(
-            "0 3,9,15,21 * * *",
+            DEFAULT_BRAINSTORM_CRON,
             Tz::UTC,
             utc(2026, 6, 19, 9, 0)
         ));
         // Not at 10:00.
         assert!(!cron_fires_at_minute(
-            "0 3,9,15,21 * * *",
+            DEFAULT_BRAINSTORM_CRON,
             Tz::UTC,
             utc(2026, 6, 19, 10, 0)
         ));
@@ -822,17 +825,17 @@ mod tests {
     fn cron_fires_half_hour_pattern() {
         // `0,30 * * * *` (review default) fires at :00 and :30.
         assert!(cron_fires_at_minute(
-            "0,30 * * * *",
+            DEFAULT_REVIEW_CRON,
             Tz::UTC,
             utc(2026, 6, 19, 14, 0)
         ));
         assert!(cron_fires_at_minute(
-            "0,30 * * * *",
+            DEFAULT_REVIEW_CRON,
             Tz::UTC,
             utc(2026, 6, 19, 14, 30)
         ));
         assert!(!cron_fires_at_minute(
-            "0,30 * * * *",
+            DEFAULT_REVIEW_CRON,
             Tz::UTC,
             utc(2026, 6, 19, 14, 15)
         ));
@@ -852,6 +855,162 @@ mod tests {
             "0 3 * * *",
             Tz::Asia__Shanghai,
             utc(2026, 6, 18, 19, 1)
+        ));
+    }
+
+    /// V1.191 P0 T3 (cron 0.12.1 → 0.17.0): every saved default keeps firing at
+    /// the same wall-clock minute in a named author TZ. Asia/Shanghai is UTC+8
+    /// with no DST, so each expectation is a fixed UTC offset from the minute
+    /// the author authored.
+    #[test]
+    fn cron_fires_saved_defaults_in_named_author_tz() {
+        // brainstorm `0 3,9,15,21 * * *`: 03:00 CST == 19:00 UTC (previous day).
+        assert!(cron_fires_at_minute(
+            DEFAULT_BRAINSTORM_CRON,
+            Tz::Asia__Shanghai,
+            utc(2026, 6, 18, 19, 0)
+        ));
+        assert!(!cron_fires_at_minute(
+            DEFAULT_BRAINSTORM_CRON,
+            Tz::Asia__Shanghai,
+            utc(2026, 6, 18, 20, 0)
+        ));
+        // write `0 4,10,16,22 * * *`: 04:00 CST == 20:00 UTC (previous day),
+        // 22:00 CST == 14:00 UTC (same day).
+        assert!(cron_fires_at_minute(
+            DEFAULT_WRITE_CRON,
+            Tz::Asia__Shanghai,
+            utc(2026, 6, 18, 20, 0)
+        ));
+        assert!(cron_fires_at_minute(
+            DEFAULT_WRITE_CRON,
+            Tz::Asia__Shanghai,
+            utc(2026, 6, 19, 14, 0)
+        ));
+        assert!(!cron_fires_at_minute(
+            DEFAULT_WRITE_CRON,
+            Tz::Asia__Shanghai,
+            utc(2026, 6, 19, 15, 0)
+        ));
+        // review `0,30 * * * *`: :00 and :30 every local hour → 03:30 CST is 19:30 UTC.
+        assert!(cron_fires_at_minute(
+            DEFAULT_REVIEW_CRON,
+            Tz::Asia__Shanghai,
+            utc(2026, 6, 18, 19, 30)
+        ));
+        assert!(!cron_fires_at_minute(
+            DEFAULT_REVIEW_CRON,
+            Tz::Asia__Shanghai,
+            utc(2026, 6, 18, 19, 15)
+        ));
+    }
+
+    /// V1.191 P0 T3: named-TZ DST, spring-forward. Europe/Berlin jumps
+    /// 02:00 CET → 03:00 CEST at 2026-03-29 01:00 UTC, so local 02:00–02:59
+    /// never exists that day. The hourly review default keeps its local
+    /// :00/:30 grid across the jump (one hour shorter in UTC terms), and the
+    /// brainstorm default's 03:00 local fire moves with the offset instead of
+    /// being lost.
+    #[test]
+    fn cron_fires_named_tz_dst_spring_forward() {
+        // 2026-03-29 00:00 UTC == 01:00 CET (UTC+1); 00:30 UTC == 01:30 CET.
+        assert!(cron_fires_at_minute(
+            DEFAULT_REVIEW_CRON,
+            Tz::Europe__Berlin,
+            utc(2026, 3, 29, 0, 0)
+        ));
+        assert!(cron_fires_at_minute(
+            DEFAULT_REVIEW_CRON,
+            Tz::Europe__Berlin,
+            utc(2026, 3, 29, 0, 30)
+        ));
+        // 01:00 UTC == 03:00 CEST (UTC+2) — the local 02:00 hour was skipped.
+        assert!(cron_fires_at_minute(
+            DEFAULT_REVIEW_CRON,
+            Tz::Europe__Berlin,
+            utc(2026, 3, 29, 1, 0)
+        ));
+        assert!(cron_fires_at_minute(
+            DEFAULT_REVIEW_CRON,
+            Tz::Europe__Berlin,
+            utc(2026, 3, 29, 1, 30)
+        ));
+        assert!(!cron_fires_at_minute(
+            DEFAULT_REVIEW_CRON,
+            Tz::Europe__Berlin,
+            utc(2026, 3, 29, 1, 15)
+        ));
+        // brainstorm `0 3,9,15,21 * * *`: 03:00 local is 02:00 UTC the day
+        // before the jump and 01:00 UTC on the transition day.
+        assert!(cron_fires_at_minute(
+            DEFAULT_BRAINSTORM_CRON,
+            Tz::Europe__Berlin,
+            utc(2026, 3, 28, 2, 0)
+        ));
+        assert!(cron_fires_at_minute(
+            DEFAULT_BRAINSTORM_CRON,
+            Tz::Europe__Berlin,
+            utc(2026, 3, 29, 1, 0)
+        ));
+        assert!(!cron_fires_at_minute(
+            DEFAULT_BRAINSTORM_CRON,
+            Tz::Europe__Berlin,
+            utc(2026, 3, 29, 1, 30)
+        ));
+    }
+
+    /// V1.191 P0 T3: named-TZ DST, fall-back. `America/New_York` repeats the
+    /// local hour 01:00–01:59 on 2026-11-01 (02:00 EDT → 01:00 EST at
+    /// 06:00 UTC). Those wall-clock minutes are ambiguous, so the shared
+    /// minute-truncation produces no fire on either pass and the schedule
+    /// resumes at 02:00 EST. This is the pre-bump (cron 0.12.1) author-visible
+    /// behaviour; the 0.17 DST-iteration fix must not add a fire here.
+    #[test]
+    fn cron_fires_named_tz_dst_fall_back_ambiguous_hour() {
+        // 00:00 / 00:30 EDT (UTC−4): the last unambiguous minutes before the jump.
+        assert!(cron_fires_at_minute(
+            DEFAULT_REVIEW_CRON,
+            Tz::America__New_York,
+            utc(2026, 11, 1, 4, 0)
+        ));
+        assert!(cron_fires_at_minute(
+            DEFAULT_REVIEW_CRON,
+            Tz::America__New_York,
+            utc(2026, 11, 1, 4, 30)
+        ));
+        // Local 01:00 occurs at 05:00 UTC (EDT) and 06:00 UTC (EST); neither fires.
+        assert!(!cron_fires_at_minute(
+            DEFAULT_REVIEW_CRON,
+            Tz::America__New_York,
+            utc(2026, 11, 1, 5, 0)
+        ));
+        assert!(!cron_fires_at_minute(
+            DEFAULT_REVIEW_CRON,
+            Tz::America__New_York,
+            utc(2026, 11, 1, 6, 0)
+        ));
+        // Resumes at 02:00 EST (UTC−5).
+        assert!(cron_fires_at_minute(
+            DEFAULT_REVIEW_CRON,
+            Tz::America__New_York,
+            utc(2026, 11, 1, 7, 0)
+        ));
+        assert!(cron_fires_at_minute(
+            DEFAULT_REVIEW_CRON,
+            Tz::America__New_York,
+            utc(2026, 11, 1, 7, 30)
+        ));
+        // write `0 4,10,16,22 * * *`: the author's 04:00 local moves from
+        // 08:00 UTC (EDT) to 09:00 UTC (EST) — 04:00 still fires exactly once.
+        assert!(!cron_fires_at_minute(
+            DEFAULT_WRITE_CRON,
+            Tz::America__New_York,
+            utc(2026, 11, 1, 8, 0)
+        ));
+        assert!(cron_fires_at_minute(
+            DEFAULT_WRITE_CRON,
+            Tz::America__New_York,
+            utc(2026, 11, 1, 9, 0)
         ));
     }
 

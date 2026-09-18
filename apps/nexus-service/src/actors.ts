@@ -381,7 +381,7 @@ export const ACTOR_ROUTES: readonly DomainRoute[] = [
     pattern: /^\/v1\/daemon\/characters\/([^/]+)\/bindings$/,
     tier: 'tier2',
     family: 'actors',
-    handle: async (service, params, _search) => ({
+    handle: async (service, params, search) => ({
       body: await listCharacterBindings(service, params[0], search),
     }),
   },
@@ -446,7 +446,7 @@ export const ACTOR_ROUTES: readonly DomainRoute[] = [
     pattern: /^\/v1\/daemon\/characters\/([^/]+)\/knowledge$/,
     tier: 'tier2',
     family: 'actors',
-    handle: async (service, params, _search) => ({
+    handle: async (service, params, search) => ({
       body: await listCharacterKnowledge(service, params[0], search),
     }),
   },
@@ -479,7 +479,7 @@ export const ACTOR_ROUTES: readonly DomainRoute[] = [
     tier: 'tier2',
     family: 'actors',
     status: 204,
-    handle: async (service, params, _search) => {
+    handle: async (service, params, search) => {
       await deleteKnowledgeEntry(service, params[0], params[1], search);
       return { body: null };
     },

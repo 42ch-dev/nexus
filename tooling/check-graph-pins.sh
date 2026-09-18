@@ -18,10 +18,10 @@
 #     spoke-connect   exactly one 0.11.x
 #     libp2p          exactly one 0.56.x    (spoke-connect base dep)
 #     spoke-operations exactly one 0.11.1
-#     rmcp            exactly one 3.2.0
+#     rmcp            exactly one 3.3.0
 #     agent-client-protocol exactly one 2.1.0
 #   -F embedded-mcp (both crates):
-#     rmcp            exactly one 3.2.0
+#     rmcp            exactly one 3.3.0
 #     agent-client-protocol exactly one 2.1.0
 #     spoke-connect   exactly one 0.11.x
 #     spoke-operations exactly one 0.11.1
@@ -29,7 +29,7 @@
 #   -F connect-client,connect-host (nexus42 only; nexus-daemon-runtime has no
 #     connect-host feature):
 #     libp2p          exactly one 0.56.x
-#     rmcp            exactly one 3.2.0
+#     rmcp            exactly one 3.3.0
 #     agent-client-protocol exactly one 2.1.0
 #     spoke-connect   exactly one 0.11.x
 #     spoke-operations exactly one 0.11.1
@@ -38,7 +38,7 @@
 # by default. `--edges normal` drops them — the pins below therefore verify
 # the SHIPPED graph only. Tests-only harness deps (e.g. the rmcp CLIENT
 # dev-dep in nexus42) are intentionally excluded here; the shipped graph
-# keeps exactly one rmcp 3.2.0 (server + transport-io).
+# keeps exactly one rmcp 3.3.0 (server + transport-io).
 #
 # Run from the repository root. Requires a Rust toolchain + `cargo`.
 
@@ -148,13 +148,13 @@ for crate in nexus-daemon-runtime nexus42; do
   assert_exactly_one "$crate" "--features connect-client" spoke-connect "0.11.*"
   assert_exactly_one "$crate" "--features connect-client" libp2p "0.56.*"
   assert_exactly_one "$crate" "--features connect-client" spoke-operations "0.11.1"
-  assert_exactly_one "$crate" "--features connect-client" rmcp "3.2.0"
+  assert_exactly_one "$crate" "--features connect-client" rmcp "3.3.0"
   assert_exactly_one "$crate" "--features connect-client" agent-client-protocol "2.1.0"
 done
 
 # --- embedded-mcp --------------------------------------------------------------
 for crate in nexus-daemon-runtime nexus42; do
-  assert_exactly_one "$crate" "--features embedded-mcp" rmcp "3.2.0"
+  assert_exactly_one "$crate" "--features embedded-mcp" rmcp "3.3.0"
   assert_exactly_one "$crate" "--features embedded-mcp" agent-client-protocol "2.1.0"
   # embedded-mcp embeds the full in-process connect stack: the same
   # spoke/libp2p pins as the connect-client rows apply (verified present via
@@ -166,7 +166,7 @@ done
 
 # --- connect-client + connect-host (nexus42 only) ------------------------------
 assert_exactly_one nexus42 "--features connect-client,connect-host" libp2p "0.56.*"
-assert_exactly_one nexus42 "--features connect-client,connect-host" rmcp "3.2.0"
+assert_exactly_one nexus42 "--features connect-client,connect-host" rmcp "3.3.0"
 assert_exactly_one nexus42 "--features connect-client,connect-host" agent-client-protocol "2.1.0"
 assert_exactly_one nexus42 "--features connect-client,connect-host" spoke-connect "0.11.*"
 assert_exactly_one nexus42 "--features connect-client,connect-host" spoke-operations "0.11.1"
