@@ -2352,7 +2352,7 @@ mod tests {
 
         // Re-point the relation at a hidden endpoint directly (a stored row
         // the caller's selection cannot see).
-        sqlx::query("UPDATE kb_key_relationships SET target_entity_id = ? WHERE relationship_id = ?")
+        sqlx::query("UPDATE kb_relationships SET target_entity_id = ? WHERE relationship_id = ?")
             .bind("kb_hidden_rel")
             .bind("rel_vis")
             .execute(&pool)

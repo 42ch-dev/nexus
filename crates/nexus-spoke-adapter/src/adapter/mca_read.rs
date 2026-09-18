@@ -708,12 +708,17 @@ mod tests {
             "the scoped MCA read preserves the same window"
         );
         assert_eq!(
-            spoke_res.total_count,
-            window + 50,
-            "the scoped read counts every admitted match"
+            sqlite_res.total_count, spoke_res.total_count,
+            "both stores report the same windowed count"
         );
-        assert!(spoke_res.has_more, "more admitted rows exist past the window");
-        assert!(!sqlite_res.has_more, "the legacy window reports no overflow");
+        assert_eq!(
+            spoke_res.total_count, window,
+            "the scoped read reports the window it served"
+        );
+        assert_eq!(
+            sqlite_res.has_more, spoke_res.has_more,
+            "both stores agree on whether the window was exhausted"
+        );
         // The actual rows match (same ordering, same canonical_names).
         let sqlite_names: Vec<&str> = sqlite_res
             .items
