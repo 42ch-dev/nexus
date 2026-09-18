@@ -232,7 +232,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         let (world_id, _) = seed_fork_world(&pool).await;
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = NexusAdapter::new_host(pool);
 
         // Query fbk_main branch — should return 2 events (evt_fk_0, evt_fk_1)
         let scope = fork_scope(&world_id, "fbk_main", &[]);
@@ -266,7 +266,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         let (world_id, _) = seed_fork_world(&pool).await;
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = NexusAdapter::new_host(pool);
 
         // fbk_empty does not exist as a branch in the timeline events table,
         // but the world does exist. Per Decision 3: an empty event list
@@ -285,7 +285,7 @@ mod tests {
     async fn list_fork_timeline_events_unknown_world_rejects() {
         let (pool, _dir) = fresh_pool().await;
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = NexusAdapter::new_host(pool);
         let scope = fork_scope("wld_nonexistent", "fbk_any", &[]);
         match adapter.list_fork_timeline_events(&scope).await {
             SpokeResult::Ok(_) => panic!("unknown world must reject, not return Ok"),
@@ -311,7 +311,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         let (world_id, _) = seed_fork_world(&pool).await;
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = NexusAdapter::new_host(pool);
 
         // Scope without fork_id
         let scope: Scope = serde_json::from_value(json!({
@@ -343,7 +343,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         let (world_id, event_ids) = seed_fork_world(&pool).await;
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = NexusAdapter::new_host(pool);
         let scope = fork_scope(&world_id, "fbk_main", &[&event_ids[0]]);
         let events = match adapter.list_fork_timeline_events(&scope).await {
             SpokeResult::Ok(v) => v,
@@ -364,7 +364,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         let (world_id, _) = seed_fork_world(&pool).await;
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = NexusAdapter::new_host(pool);
         let scope = fork_scope(&world_id, "fbk_main", &[]);
         let events = match adapter.list_fork_timeline_events(&scope).await {
             SpokeResult::Ok(v) => v,
@@ -417,7 +417,7 @@ mod tests {
             .await
             .unwrap();
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = NexusAdapter::new_host(pool);
         let scope = fork_scope(&world_id, "fbk_main", &[]);
         match adapter.list_fork_timeline_events(&scope).await {
             SpokeResult::Reject(r) => {
@@ -442,7 +442,7 @@ mod tests {
             .await
             .unwrap();
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = NexusAdapter::new_host(pool);
         let scope = fork_scope(&world_id, "fbk_main", &[]);
         match adapter.list_fork_timeline_events(&scope).await {
             SpokeResult::Reject(r) => {
@@ -467,7 +467,7 @@ mod tests {
 
         let (pool, _dir) = fresh_pool().await;
         let _ = seed_fork_world(&pool).await;
-        let adapter = NexusAdapter::new(pool);
+        let adapter = NexusAdapter::new_host(pool);
 
         accepts_fork_timeline_port(&adapter);
         accepts_fork_ports(&adapter);

@@ -69,6 +69,7 @@ use crate::{
     SpokeResult,
 };
 use async_trait::async_trait;
+use nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef;
 use nexus_local_db::findings::{validate_finding_enums, Finding as NexusFinding};
 use nexus_local_db::world_findings::insert_world_finding_in_tx;
 use nexus_local_db::LocalDbError;
@@ -77,6 +78,12 @@ use serde_json::{json, Map, Value};
 #[async_trait]
 impl FindingPort for NexusAdapter<'_> {
     async fn put_findings(&self, findings: Vec<SpokeFinding>) -> SpokeResult<Vec<SpokeFinding>> {
+        // Request-bound scope (durable §4.1, v1.191 P1 T8): the finding
+        // family carries KE references (the world route's `target_entry_id`),
+        // so a host-only adapter rejects instead of writing them.
+        if let Err(reject) = self.require_read_scope("put_findings") {
+            return SpokeResult::Reject(reject);
+        }
         let pool = self.pool.clone();
         let mut persisted: Vec<SpokeFinding> = Vec::with_capacity(findings.len());
 
@@ -121,6 +128,48 @@ impl FindingPort for NexusAdapter<'_> {
                     }
                 }
                 (None, Some(world_id)) => {
+                    // Durable §4.2/§9 (v1.191 P1 T8): the world route writes a
+                    // row that cites this world and (optionally) one entry in
+                    // it — both must be inside the bound selection. A hidden
+                    // target id is refused with the same unknown-target shape,
+                    // so the caller cannot use findings to probe for rows it
+                    // cannot read.
+                    if !self.admits_container(&KnowledgeOwnerRef::world(world_id)) {
+                        return reject(
+                            SpokeRejectCode::InvalidInput,
+                            format!(
+                                "Finding {finding_id} cites world {world_id}, which is outside \
+                                 the bound read selection"
+                            ),
+                            json!({ "finding_id": finding_id, "world_id": world_id }),
+                        );
+                    }
+                    if let Some(target) = finding.target_entry_id.as_deref() {
+                        match self.load_admitted_entry(target).await {
+                            Ok(Some(_)) => {}
+                            Ok(None) => {
+                                return reject(
+                                    SpokeRejectCode::InvalidInput,
+                                    format!(
+                                        "Finding {finding_id} targets an unknown knowledge entry \
+                                         in world {world_id}"
+                                    ),
+                                    json!({
+                                        "finding_id": finding_id,
+                                        "world_id": world_id,
+                                        "target_entry_id": target,
+                                    }),
+                                );
+                            }
+                            Err(e) => {
+                                return reject(
+                                    SpokeRejectCode::InternalError,
+                                    format!("storage error on finding target read: {e}"),
+                                    json!({ "finding_id": finding_id }),
+                                );
+                            }
+                        }
+                    }
                     if let Err(e) = insert_world_finding_tx(&mut tx, &finding, world_id).await {
                         return reject(
                             SpokeRejectCode::InternalError,
@@ -496,8 +545,19 @@ fn reject<T>(code: SpokeRejectCode, message: impl Into<String>, details: Value) 
 mod tests {
     use super::*;
     use crate::FindingPort;
+    use nexus_knowledge::world_kb::KnowledgeReadScope;
     use nexus_local_db::{open_pool, run_migrations};
     use serde_json::json;
+
+    /// A KE-capable adapter for the legacy work route: the finding family
+    /// requires a bound selection (v1.191 P1 T8), and the work route cites no
+    /// container, so an empty container set is the honest scope here.
+    fn scoped(pool: sqlx::SqlitePool) -> NexusAdapter<'static> {
+        NexusAdapter::new(
+            pool,
+            KnowledgeReadScope::creator_management(Vec::new(), Vec::new()),
+        )
+    }
 
     async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
@@ -617,7 +677,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_work(&pool).await;
 
-        let adapter = NexusAdapter::new(pool.clone());
+        let adapter = scoped(pool.clone());
         let spoke = spoke_finding(
             "fnd_happy",
             "warning",
@@ -653,7 +713,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_work(&pool).await;
 
-        let adapter = NexusAdapter::new(pool.clone());
+        let adapter = scoped(pool.clone());
         let spoke = spoke_finding("fnd_voc", "error", "dismissed", None, None);
 
         match adapter.put_findings(vec![spoke]).await {
@@ -675,7 +735,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_work(&pool).await;
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = scoped(pool);
         // Strip the work_id; keep creator_id so the rejection is
         // specifically about the missing work_id.
         let spoke: SpokeFinding = serde_json::from_value(json!({
@@ -708,7 +768,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_work(&pool).await;
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = scoped(pool);
         // `critical` is not in the spoke documented vocabulary.
         let spoke: SpokeFinding = serde_json::from_value(json!({
             "schema_version": 1,
@@ -740,7 +800,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_work(&pool).await;
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = scoped(pool);
         let result = adapter.put_findings(Vec::new()).await;
         match result {
             SpokeResult::Ok(v) => assert!(v.is_empty()),
@@ -774,7 +834,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_work(&pool).await;
 
-        let adapter = NexusAdapter::new(pool.clone());
+        let adapter = scoped(pool.clone());
 
         // First item: valid, would persist on its own.
         let first = spoke_finding("fnd_rb_first", "info", "open", None, None);
@@ -813,7 +873,7 @@ mod tests {
             .await
             .unwrap();
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = scoped(pool);
         let finding = spoke_finding("fnd_fail", "info", "open", None, None);
         match adapter.put_findings(vec![finding]).await {
             SpokeResult::Reject(r) => {

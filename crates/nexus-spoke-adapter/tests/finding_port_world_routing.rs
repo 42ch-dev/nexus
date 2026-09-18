@@ -18,6 +18,20 @@ use nexus_local_db::{open_pool, run_migrations};
 use nexus_spoke_adapter::{Finding, FindingPort, NexusAdapter, SpokeRejectCode, SpokeResult};
 use serde_json::{json, Value};
 
+    /// A KE-capable adapter whose selection authorizes the worlds these
+    /// fixtures own (v1.191 P1 T8 — the check/relate paths read knowledge).
+    fn scoped(pool: sqlx::SqlitePool) -> NexusAdapter<'static> {
+        NexusAdapter::new(
+            pool,
+            nexus_knowledge::world_kb::KnowledgeReadScope::creator_management(
+                vec![
+                nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef::world("wld_test"),
+                ],
+                Vec::new(),
+            ),
+        )
+    }
+
 async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test.db");
@@ -152,7 +166,7 @@ async fn work_scoped_finding_routes_to_legacy_findings_table() {
     let (pool, _dir) = fresh_pool().await;
     seed_work(&pool).await;
 
-    let adapter = NexusAdapter::new(pool.clone());
+    let adapter = scoped(pool.clone());
     let result = adapter.put_findings(vec![work_finding("fnd_wrk")]).await;
     let returned = match result {
         SpokeResult::Ok(v) => v,
@@ -177,7 +191,7 @@ async fn work_path_vocabulary_mapping_unchanged() {
     let (pool, _dir) = fresh_pool().await;
     seed_work(&pool).await;
 
-    let adapter = NexusAdapter::new(pool.clone());
+    let adapter = scoped(pool.clone());
     // `warning` severity + `dismissed` status to assert the mapping still applies.
     let finding: Finding = serde_json::from_value(json!({
         "schema_version": 1,
@@ -213,7 +227,7 @@ async fn world_scoped_finding_routes_to_world_findings_table() {
     let (pool, _dir) = fresh_pool().await;
     seed_world(&pool, "wld_test").await;
 
-    let adapter = NexusAdapter::new(pool.clone());
+    let adapter = scoped(pool.clone());
     // Full AC-V165-3 shape: kind, spoke severity verbatim, target_entry_id,
     // description + text_position/source_anchor for verbatim JSON asserts.
     let finding: Finding = serde_json::from_value(json!({
@@ -301,7 +315,7 @@ async fn both_routing_keys_reject_invalid_input() {
     seed_work(&pool).await;
     seed_world(&pool, "wld_test").await;
 
-    let adapter = NexusAdapter::new(pool.clone());
+    let adapter = scoped(pool.clone());
     let finding = spoke_finding(
         "fnd_both",
         &json!({ "work_id": "wrk_test", "world_id": "wld_test", "creator_id": "ctr_test" }),
@@ -331,7 +345,7 @@ async fn neither_routing_key_rejects_invalid_input() {
     seed_work(&pool).await;
     seed_world(&pool, "wld_test").await;
 
-    let adapter = NexusAdapter::new(pool.clone());
+    let adapter = scoped(pool.clone());
     let finding = spoke_finding("fnd_neither", &json!({ "creator_id": "ctr_test" }));
 
     match adapter.put_findings(vec![finding]).await {
@@ -359,7 +373,7 @@ async fn mixed_batch_commits_both_tables_atomically() {
     seed_work(&pool).await;
     seed_world(&pool, "wld_test").await;
 
-    let adapter = NexusAdapter::new(pool.clone());
+    let adapter = scoped(pool.clone());
     let result = adapter
         .put_findings(vec![
             world_finding("fnd_mix_wld"),
@@ -388,7 +402,7 @@ async fn mixed_batch_mid_failure_rolls_back_both_tables() {
     seed_work(&pool).await;
     seed_world(&pool, "wld_test").await;
 
-    let adapter = NexusAdapter::new(pool.clone());
+    let adapter = scoped(pool.clone());
     // Batch: [world row, work row, world row with the FIRST world finding's
     // id]. The third item collides on the `world_findings` PK mid-batch →
     // UNIQUE violation. The W-1 transaction must roll back the work row
@@ -418,4 +432,73 @@ async fn mixed_batch_mid_failure_rolls_back_both_tables() {
         "first world row must roll back"
     );
     assert_legacy_finding_absent(&pool, "fnd_rb_wrk").await;
+}
+
+// ── v1.191 P1 T8: findings are written inside the bound selection ────────
+
+/// `v1191_holder_ports`: a world-scoped finding must cite a world the caller's
+/// selection authorizes, and its target entry must be one the caller can read.
+/// A target the caller cannot see takes the same unknown-target branch as an
+/// absent id, so findings cannot probe for hidden rows.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn v1191_holder_ports_world_findings_stay_inside_the_bound_selection() {
+    let (pool, _dir) = fresh_pool().await;
+    seed_world(&pool, "wld_test").await;
+    seed_world(&pool, "wld_foreign").await;
+
+    let adapter = scoped(pool.clone());
+
+    // (a) A world outside the bound selection is refused outright.
+    let mut foreign = world_finding("fnd_foreign_world");
+    if let Some(ext) = foreign
+        .extensions
+        .get_mut(
+            &spoke_schemas::finding::FindingExtensionsKey::try_from("nexus")
+                .expect("nexus namespace key"),
+        )
+    {
+        ext.insert(
+            "world_id".to_string(),
+            Value::String("wld_foreign".to_string()),
+        );
+    }
+    match adapter.put_findings(vec![foreign]).await {
+        SpokeResult::Reject(r) => {
+            assert_eq!(r.code, SpokeRejectCode::InvalidInput, "got {r:?}");
+            assert!(
+                r.message.contains("outside the bound read selection"),
+                "the refusal must name the selection boundary: {r:?}"
+            );
+        }
+        SpokeResult::Ok(_) => panic!("a foreign world finding must reject"),
+    }
+    assert!(
+        get_world_finding(&pool, "fnd_foreign_world")
+            .await
+            .unwrap()
+            .is_none(),
+        "a refused world finding must persist nothing"
+    );
+
+    // (b) A target entry the caller cannot read (here: absent) is refused with
+    // the unknown-target shape, and nothing is written for that finding.
+    let mut unknown_target = world_finding("fnd_unknown_target");
+    unknown_target.target_entry_id = Some("kb_not_visible".to_string());
+    match adapter.put_findings(vec![unknown_target]).await {
+        SpokeResult::Reject(r) => {
+            assert_eq!(r.code, SpokeRejectCode::InvalidInput, "got {r:?}");
+            assert!(
+                r.message.contains("unknown knowledge entry"),
+                "the refusal must use the unknown-target shape: {r:?}"
+            );
+        }
+        SpokeResult::Ok(_) => panic!("an unreadable target must reject"),
+    }
+    assert!(
+        get_world_finding(&pool, "fnd_unknown_target")
+            .await
+            .unwrap()
+            .is_none(),
+        "a refused target finding must persist nothing"
+    );
 }

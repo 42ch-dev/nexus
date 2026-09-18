@@ -26,7 +26,21 @@
 //! 5 fields (see field-level doc comments on the helpers).
 //!
 //! Unknown `extensions.nexus` keys ride as [`KnowledgeEntryRecord::extensions_nexus_extras`]
-//! and are preserved verbatim across the seam (spec §2.2).
+//! and are preserved verbatim across the seam (spec §2.2); the retired legacy
+//! `extensions.nexus.creator_only` key is refused, never carried.
+//!
+//! # Holder governance mapping (v1.191 P1 T8, durable §1)
+//!
+//! Two independent axes cross this seam, and they must not be conflated:
+//!
+//! | Axis | Native | Wire |
+//! |------|--------|------|
+//! | Narrative container | `owner: KnowledgeOwnerRef` | `extensions.nexus.{world_id, character_id, actor_world_binding_id}` |
+//! | Holder disclosure | `holder_entry_id` / `disclosure` | `KnowledgeEntry.owner` / `KnowledgeEntry.disclosure` |
+//!
+//! The mapping per field is exact in both directions and performs no
+//! normalization: an absent wire field is an absent native column (shared), and
+//! whatever an adopted foreign row carries is carried back out unchanged.
 
 use std::collections::HashMap;
 use std::num::NonZeroU64;
@@ -41,13 +55,16 @@ use serde_json::{Map, Value};
 use spoke_schemas::knowledge_entry::{
     KnowledgeEntry as SpokeKnowledgeEntry, KnowledgeEntryBody as SpokeKnowledgeEntryBody,
     KnowledgeEntryBodyAttributesItem, KnowledgeEntryBodyAttributesItemTraitType,
-    KnowledgeEntryBodyAttributesItemValue, KnowledgeEntryCanonicalName, KnowledgeEntryModulesKey,
-    KnowledgeEntryModulesValue, SourceAnchor as SpokeSourceAnchor,
+    KnowledgeEntryBodyAttributesItemValue, KnowledgeEntryCanonicalName,
+    KnowledgeEntryDisclosure as SpokeKnowledgeDisclosure, KnowledgeEntryModulesKey,
+    KnowledgeEntryModulesValue, KnowledgeEntryOwner as SpokeKnowledgeOwner,
+    SourceAnchor as SpokeSourceAnchor,
 };
 
 use crate::extensions::{
-    get_created_from_command_id, get_creator_only, get_nexus_extras, get_owner, get_provenance,
-    set_created_from_command_id, set_nexus_extras, set_owner, set_provenance, take_nexus_body,
+    get_created_from_command_id, get_nexus_extras, get_owner, get_provenance,
+    refuse_legacy_creator_only, set_created_from_command_id, set_nexus_extras, set_owner,
+    set_provenance, take_nexus_body,
 };
 // Test-only: simulates the persist-path carrier stash in `build_spoke_upsert_
 // request` (production code sets the carrier in nexus-daemon-runtime, not here).
@@ -127,22 +144,32 @@ pub fn knowledge_record_to_spoke(entry: &KnowledgeEntryRecord) -> SpokeKnowledge
         created_at: chrono::DateTime::parse_from_rfc3339(&entry.created_at)
             .ok()
             .map(|dt| dt.with_timezone(&chrono::Utc)),
-        // v1.191 P1 T1 (spoke 0.13.0): `disclosure` is the optional open
-        // disclosure vocabulary (core vocabulary: `owner-private`). Nexus has
-        // no native holder governance record until the T2 domain cut, so the
-        // field is genuinely absent — the exact native↔wire mapping lands with
-        // T2/T8. Never fabricate a disclosure here: that would invent authored
-        // governance the domain does not hold.
-        disclosure: None,
+        // Native `disclosure` → wire `KnowledgeEntry.disclosure` (durable §1).
+        // The mapping is exact and one-way per field: "shared" is the absence
+        // of both columns, and an adopted foreign row keeps whatever stored
+        // value it has. The newtype requires a non-empty string; the domain
+        // validates that on every write (`validate_native_governance`), so an
+        // empty value here is stored-shape drift, not runtime input.
+        disclosure: entry
+            .disclosure
+            .as_deref()
+            .map(|value| {
+                SpokeKnowledgeDisclosure::try_from(value)
+                    .expect("disclosure is non-empty (validated)")
+            }),
         entry_id: entry.entry_id.clone(),
         entry_type: block_type_to_entry_type(entry.block_type),
         extensions: HashMap::new(),
         modules: nexus_modules_to_spoke(entry.modules.as_ref()),
-        // v1.191 P1 T1 (spoke 0.13.0): `owner` is the holder KnowledgeEntry
-        // `entry_id`, an axis distinct from the narrative `KnowledgeOwnerRef`
-        // carried in `extensions.nexus`. Absent until the T2 domain cut, same
-        // rationale as `disclosure` above.
-        owner: None,
+        // Native `holder_entry_id` → wire `KnowledgeEntry.owner` (durable §1).
+        // This is the holder axis only — the narrative container owner
+        // (`KnowledgeOwnerRef`) keeps riding `extensions.nexus`, because wire
+        // `owner` is a holder KnowledgeEntry `entry_id`, never a World /
+        // Character / binding entity id.
+        owner: entry.holder_entry_id.as_deref().map(|holder| {
+            SpokeKnowledgeOwner::try_from(holder)
+                .expect("holder_entry_id is non-empty (validated)")
+        }),
         revision: entry.revision,
         schema_version: NonZeroU64::new(u64::from(entry.schema_version))
             .expect("schema_version >= 1"),
@@ -155,10 +182,10 @@ pub fn knowledge_record_to_spoke(entry: &KnowledgeEntryRecord) -> SpokeKnowledge
         }),
     };
 
-    // Canonical owner + creator_only → extensions.nexus (v1.184 P1). World
-    // owners emit `world_id`; Character/binding owners emit their typed key
-    // and never a fabricated `world_id`. Preserves unknown keys per spec §2.2.
-    set_owner(&mut spoke, &entry.owner, entry.creator_only);
+    // Canonical container owner → extensions.nexus (v1.184 P1). World owners
+    // emit `world_id`; Character/binding owners emit their typed key and never
+    // a fabricated `world_id`. Preserves unknown keys per spec §2.2.
+    set_owner(&mut spoke, &entry.owner);
     set_created_from_command_id(&mut spoke, entry.created_from_command_id.clone());
     set_provenance(
         &mut spoke,
@@ -199,23 +226,27 @@ pub fn spoke_to_knowledge_record(
     // authoritative, lossless nexus body that the persist writes (V1.143
     // Greptile P1 — body fidelity).
     let lossless_body_value = take_nexus_body(&mut s);
-    // Canonical owner from the typed extension keys (v1.184 P1). Fail closed
-    // when absent, ambiguous, or malformed (non-string/null owner key) — a
-    // spoke entry with anything other than exactly one valid owner claim is
-    // rejected, never resolved by precedence.
+    // Retired legacy key gate (durable §5, v1.191 P1 T8): a wire entry that
+    // still carries `extensions.nexus.creator_only` — `false` included — is
+    // refused with the stable reason before anything reads it. It is neither
+    // interpreted as governance nor carried as an unknown extra.
+    refuse_legacy_creator_only(&s)?;
+    // Canonical container owner from the typed extension keys (v1.184 P1).
+    // Fail closed when absent, ambiguous, or malformed (non-string/null owner
+    // key) — a spoke entry with anything other than exactly one valid owner
+    // claim is rejected, never resolved by precedence. This stays the
+    // *narrative container* axis; the wire-level holder governance below is a
+    // separate axis (durable §1).
     let owner = get_owner(&s)?;
-    // v1.191 P1 T1 (spoke 0.13.0): the wire-level holder governance
-    // (`KnowledgeEntry.owner` / `.disclosure`) is intentionally NOT read here.
-    // The nexus domain record gains its holder slots in T2
-    // (`holder_entry_id` / `disclosure`) and the exact native↔wire mapping in
-    // T8; this pin checkpoint only makes the seam compile against the new wire
-    // and adds no compatibility shim. `owner` below is the narrative container
-    // owner (`KnowledgeOwnerRef`, unchanged) — never the holder `entry_id`.
-    let creator_only = get_creator_only(&s);
-    // creator_only is World-only (v1.184 P1 fix): a Character/binding-owned
-    // wire entry that sets the flag is rejected here, matching both store
-    // implementations and the SQLite CHECK.
-    nexus_knowledge::world_kb::knowledge_entry::validate_creator_only_owner(&owner, creator_only)?;
+    // Wire ↔ native holder governance (durable §1, v1.191 P1 T8): the exact
+    // one-to-one mapping of `KnowledgeEntry.owner` / `.disclosure` onto the
+    // native `holder_entry_id` / `disclosure` columns. No normalization: an
+    // absent wire field is an absent native column (shared), an `owner-private`
+    // disclosure without a holder is refused by the storage rule, and unknown
+    // disclosure vocabulary is carried verbatim here and refused/quarantined
+    // by its owning boundary (never rewritten to shared).
+    let holder_entry_id = s.owner.as_ref().map(|holder| holder.as_str().to_string());
+    let disclosure = s.disclosure.as_ref().map(|value| value.as_str().to_string());
     // Extract borrowed accessor data into owned values FIRST, so subsequent
     // field moves out of `s` are not blocked by outstanding borrows.
     let created_from_command_id = get_created_from_command_id(&s).map(String::from);
@@ -273,14 +304,17 @@ pub fn spoke_to_knowledge_record(
         schema_version,
         entry_id: s.entry_id,
         owner,
-        // v1.191 P1 custodian checkpoint: make the reverse seam compile against
-        // the extended `KnowledgeEntryRecord`. Spoke 0.13.x `KnowledgeEntry.owner`
-        // / `.disclosure` are deliberately NOT read here (T1's note above); the
-        // exact native↔wire governance mapping is T8's. `None` states the
-        // absence of a mapping, it does not author one.
-        holder_entry_id: None,
-        disclosure: None,
-        creator_only,
+        // Exact wire → native holder governance mapping (v1.191 P1 T8): the
+        // value is read straight from `KnowledgeEntry.owner` / `.disclosure`
+        // and never synthesized, so a wire entry with no governance stays
+        // shared.
+        holder_entry_id,
+        disclosure,
+        // The legacy World-only visibility bool is retired: it is never read
+        // from the wire (its presence is refused above), so every converted
+        // record carries the retired field `false` until the complete-cutover
+        // task removes it. Governance travels only in the column pair.
+        creator_only: false,
         block_type: entry_type_to_block_type(&entry_type)?,
         canonical_name,
         status: s.status,
@@ -302,8 +336,13 @@ pub fn spoke_to_knowledge_record(
 
 // ── Private attribute / anchor shape helpers ─────────────────────────────
 
-/// Convert a nexus `BlockType` to spoke's open-string `entry_type`.
-fn block_type_to_entry_type(bt: BlockType) -> String {
+/// Convert a nexus `BlockType` to spoke's open-string `entry_type`
+/// (`snake_case`).
+///
+/// `pub(crate)` because the adapter's scoped filters compare the same wire
+/// vocabulary the conversion seam emits (`Scope.entry_types`); the serde
+/// representation stays the single source of truth.
+pub(crate) fn block_type_to_entry_type(bt: BlockType) -> String {
     serde_json::to_value(bt)
         .ok()
         .and_then(|v| v.as_str().map(std::string::ToString::to_string))

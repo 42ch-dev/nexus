@@ -218,7 +218,6 @@ fn build_extensions_nexus_writes_typed_fields_and_preserves_unknown_keys() {
 
     let value = build_extensions_nexus(
         &KnowledgeOwnerRef::world("wld_abc"),
-        false,
         Some("cmd_xyz"),
         Some("wrk_def"),
         Some(3),
@@ -258,7 +257,6 @@ fn build_extensions_nexus_omits_optional_fields_when_none_and_removes_stale() {
 
     let value = build_extensions_nexus(
         &KnowledgeOwnerRef::world("wld_abc"),
-        false,
         None,
         None,
         None,
@@ -295,7 +293,6 @@ fn build_extensions_nexus_handles_missing_namespace() {
 
     let value = build_extensions_nexus(
         &KnowledgeOwnerRef::world("wld_abc"),
-        false,
         Some("cmd_xyz"),
         None,
         None,

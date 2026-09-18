@@ -45,6 +45,21 @@ use nexus_spoke_adapter::{NexusAdapter, Rule, RuleQueryPort, SpokeResult};
 ///
 /// Returns the pool AND the `TempDir` guard so the temp DB stays alive for
 /// the test body (mirrors `spoke_orchestrator_integration.rs::fresh_pool`).
+    /// A KE-capable adapter whose selection authorizes the worlds these
+    /// fixtures own (v1.191 P1 T8 — the check/relate paths read knowledge).
+    fn scoped(pool: sqlx::SqlitePool) -> NexusAdapter<'static> {
+        NexusAdapter::new(
+            pool,
+            nexus_knowledge::world_kb::KnowledgeReadScope::creator_management(
+                vec![
+                nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef::world("wld_a"),
+                nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef::world("wld_b"),
+                ],
+                Vec::new(),
+            ),
+        )
+    }
+
 async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test.db");
@@ -133,7 +148,7 @@ async fn list_rules_returns_exactly_requested_rules_across_worlds() {
     // World B: a third rule that must NOT leak into the result unasked.
     seed_rule(&pool, "rule_b1", "wld_b").await;
 
-    let adapter = NexusAdapter::new(pool);
+    let adapter = scoped(pool);
     let rules = unwrap_ok(
         adapter
             .list_rules(&[
@@ -171,7 +186,7 @@ async fn list_rules_empty_refs_returns_empty_vec() {
     let (pool, _dir) = fresh_pool().await;
     seed_rule(&pool, "rule_a1", "wld_a").await;
 
-    let adapter = NexusAdapter::new(pool);
+    let adapter = scoped(pool);
     let rules = unwrap_ok(adapter.list_rules(&[]).await, "list_rules empty");
     assert!(
         rules.is_empty(),
@@ -214,7 +229,7 @@ async fn list_rules_does_not_fabricate_from_work_side_rule_sources() {
     )
     .unwrap();
 
-    let adapter = NexusAdapter::new(pool);
+    let adapter = scoped(pool);
 
     // Phantom id requested alongside a real id: only the `spoke_rules` row
     // comes back.
@@ -249,7 +264,7 @@ async fn list_rules_duplicate_refs_are_deduplicated() {
     seed_rule(&pool, "rule_a1", "wld_a").await;
     seed_rule(&pool, "rule_a2", "wld_a").await;
 
-    let adapter = NexusAdapter::new(pool);
+    let adapter = scoped(pool);
     // SQLite `IN (subquery)` membership semantics dedup: the
     // `get_spoke_rules_by_ids` doc contract ("duplicate ids in the input are
     // deduplicated; one row per distinct `rule_id`") holds end-to-end through

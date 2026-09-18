@@ -256,6 +256,21 @@ mod tests {
     use nexus_local_db::spoke_rules::{insert_spoke_rule_for_test, SpokeRuleRow};
     use nexus_local_db::{open_pool, run_migrations};
 
+    /// A KE-capable adapter whose selection authorizes the worlds these
+    /// fixtures own (v1.191 P1 T8 — the check/relate paths read knowledge).
+    fn scoped(pool: sqlx::SqlitePool) -> NexusAdapter<'static> {
+        NexusAdapter::new(
+            pool,
+            nexus_knowledge::world_kb::KnowledgeReadScope::creator_management(
+                vec![
+                nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef::world("wld_1"),
+                nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef::world("wld_2"),
+                ],
+                Vec::new(),
+            ),
+        )
+    }
+
     async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test.db");
@@ -308,7 +323,7 @@ mod tests {
         seed_rule(&pool, "rule_a", "wld_1", None, "{}").await;
         seed_rule(&pool, "rule_b", "wld_1", None, "{}").await;
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = scoped(pool);
         let rules = unwrap_ok(
             adapter
                 .list_rules(&[
@@ -365,7 +380,7 @@ mod tests {
         )
         .await;
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = scoped(pool);
         let rules = unwrap_ok(
             adapter.list_rules(&["rule_rich".to_string()]).await,
             "list_rules",
@@ -391,7 +406,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_rule(&pool, "rule_a", "wld_1", None, "{}").await;
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = scoped(pool);
         let rules = unwrap_ok(adapter.list_rules(&[]).await, "list_rules empty");
         assert!(
             rules.is_empty(),
@@ -404,7 +419,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_rule(&pool, "rule_a", "wld_1", None, "{}").await;
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = scoped(pool);
         let rules = unwrap_ok(
             adapter
                 .list_rules(&["rule_nope".to_string(), "rule_nada".to_string()])
@@ -426,7 +441,7 @@ mod tests {
             .await
             .unwrap();
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = scoped(pool);
         match adapter.list_rules(&["rule_a".to_string()]).await {
             SpokeResult::Reject(r) => {
                 assert_eq!(
@@ -485,7 +500,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn world_scoped_embedded_rules_reject_invalid_input_verbatim() {
         let (pool, _dir) = fresh_pool().await;
-        let adapter = NexusAdapter::new(pool);
+        let adapter = scoped(pool);
         let embedded: spoke_schemas::check_request::Rule = serde_json::from_value(json!({
             "schema_version": 1,
             "rule_id": "rul_embedded",
@@ -529,7 +544,7 @@ mod tests {
         seed_rule_full(&pool, "rul_c", "wld_1", "Charlie", "deprecated").await;
         seed_rule_full(&pool, "rul_zulu", "wld_2", "Zulu", "active").await;
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = scoped(pool);
         let request = check_request("wld_1", &[]);
         match orchestrate_check_world_scoped(&adapter, "wld_1", request, |input| {
             assert_eq!(
@@ -558,7 +573,7 @@ mod tests {
         seed_rule_full(&pool, "rul_draft", "wld_1", "Draft", "draft").await;
         seed_rule_full(&pool, "rul_dep", "wld_1", "Dep", "deprecated").await;
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = scoped(pool);
         let request = check_request("wld_1", &[]);
         match orchestrate_check_world_scoped(&adapter, "wld_1", request, |input| {
             assert!(
@@ -590,7 +605,7 @@ mod tests {
         seed_rule_full(&pool, "rul_f1", "wld_2", "Foreign One", "active").await;
         seed_rule_full(&pool, "rul_f2", "wld_2", "Foreign Two", "active").await;
 
-        let adapter = NexusAdapter::new(pool.clone());
+        let adapter = scoped(pool.clone());
         let request = check_request("wld_1", &["rul_f1", "rul_own", "rul_f2"]);
         let result = orchestrate_check_world_scoped(&adapter, "wld_1", request, |_input| {
             panic!("foreign refs must reject before the checker runs");
@@ -648,7 +663,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_rule_full(&pool, "rul_same", "wld_1", "Same", "active").await;
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = scoped(pool);
         let request = check_request("wld_1", &["rul_unknown", "rul_same"]);
         match orchestrate_check_world_scoped(&adapter, "wld_1", request, |input| {
             assert_eq!(
@@ -678,7 +693,7 @@ mod tests {
             .await
             .unwrap();
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = scoped(pool);
         let request = check_request("wld_1", &[]);
         match orchestrate_check_world_scoped(&adapter, "wld_1", request, |_input| {
             panic!("storage failure must reject before the checker runs");
@@ -707,7 +722,7 @@ mod tests {
             .await
             .unwrap();
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = scoped(pool);
         let request = check_request("wld_1", &["rul_x"]);
         match orchestrate_check_world_scoped(&adapter, "wld_1", request, |_input| {
             panic!("storage failure must reject before the checker runs");

@@ -571,7 +571,7 @@ mod tests {
         let db_path = dir.path().join("test.db");
         let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
         nexus_local_db::run_migrations(&pool).await.unwrap();
-        let adapter = NexusAdapter::new(pool);
+        let adapter = NexusAdapter::new_host(pool);
         for capability in &manifest.capabilities {
             assert_capability_maps_to_production_port(&adapter, capability);
         }

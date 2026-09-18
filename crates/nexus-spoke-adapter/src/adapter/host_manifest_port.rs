@@ -296,7 +296,7 @@ mod tests {
         let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
         nexus_local_db::run_migrations(&pool).await.unwrap();
 
-        let adapter = NexusAdapter::new(pool).with_host_id("test-host-uuid-0000");
+        let adapter = NexusAdapter::new_host(pool).with_host_id("test-host-uuid-0000");
         let manifest = match adapter.get_host_capability_manifest().await {
             SpokeResult::Ok(m) => m,
             SpokeResult::Reject(r) => panic!("self manifest is Ok: {r:?}"),
@@ -371,7 +371,7 @@ mod tests {
         let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
         nexus_local_db::run_migrations(&pool).await.unwrap();
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = NexusAdapter::new_host(pool);
         let peers = match adapter.list_peer_host_capability_manifests().await {
             SpokeResult::Ok(p) => p,
             SpokeResult::Reject(r) => panic!("peer list is Ok: {r:?}"),
@@ -392,7 +392,7 @@ mod tests {
         let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
         nexus_local_db::run_migrations(&pool).await.unwrap();
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = NexusAdapter::new_host(pool);
         let manifest = match crate::manifest::build_local_host_manifest("peer-host-uuid-0001") {
             SpokeResult::Ok(m) => m,
             SpokeResult::Reject(r) => panic!("manifest build is Ok: {r:?}"),
@@ -455,7 +455,7 @@ mod tests {
         }))
         .expect("tools-carrying manifest parses");
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = NexusAdapter::new_host(pool);
         match adapter.record_peer_manifest(&manifest, None).await {
             SpokeResult::Ok(()) => {}
             SpokeResult::Reject(r) => panic!("recording is Ok: {r:?}"),
@@ -498,7 +498,7 @@ mod tests {
         let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
         nexus_local_db::run_migrations(&pool).await.unwrap();
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = NexusAdapter::new_host(pool);
         let first = match crate::manifest::build_local_host_manifest("peer-host-uuid-0001") {
             SpokeResult::Ok(m) => m,
             SpokeResult::Reject(r) => panic!("manifest build is Ok: {r:?}"),
@@ -534,7 +534,7 @@ mod tests {
         let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
         nexus_local_db::run_migrations(&pool).await.unwrap();
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = NexusAdapter::new_host(pool);
         // `HostCapabilityManifestHostId` only enforces minLength 1 at parse —
         // an oversized id is constructible, so the adapter's own gate is the
         // fail-closed boundary (mirrors the storage cap).
@@ -568,7 +568,7 @@ mod tests {
         let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
         nexus_local_db::run_migrations(&pool).await.unwrap();
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = NexusAdapter::new_host(pool);
         let observed = match adapter.list_observed_peer_hosts().await {
             SpokeResult::Ok(o) => o,
             SpokeResult::Reject(r) => panic!("observed peer list is Ok: {r:?}"),
@@ -586,7 +586,7 @@ mod tests {
         let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
         nexus_local_db::run_migrations(&pool).await.unwrap();
 
-        let adapter = NexusAdapter::new(pool.clone());
+        let adapter = NexusAdapter::new_host(pool.clone());
         let manifest = match crate::manifest::build_local_host_manifest("peer-host-uuid-0001") {
             SpokeResult::Ok(m) => m,
             SpokeResult::Reject(r) => panic!("manifest build is Ok: {r:?}"),
@@ -655,7 +655,7 @@ mod tests {
         .await
         .expect("corrupt row inserts");
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = NexusAdapter::new_host(pool);
         match adapter.list_peer_host_capability_manifests().await {
             SpokeResult::Reject(r) => {
                 assert_eq!(r.code, SpokeRejectCode::InternalError);
