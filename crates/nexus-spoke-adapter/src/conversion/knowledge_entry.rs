@@ -127,10 +127,22 @@ pub fn knowledge_record_to_spoke(entry: &KnowledgeEntryRecord) -> SpokeKnowledge
         created_at: chrono::DateTime::parse_from_rfc3339(&entry.created_at)
             .ok()
             .map(|dt| dt.with_timezone(&chrono::Utc)),
+        // v1.191 P1 T1 (spoke 0.13.0): `disclosure` is the optional open
+        // disclosure vocabulary (core vocabulary: `owner-private`). Nexus has
+        // no native holder governance record until the T2 domain cut, so the
+        // field is genuinely absent — the exact native↔wire mapping lands with
+        // T2/T8. Never fabricate a disclosure here: that would invent authored
+        // governance the domain does not hold.
+        disclosure: None,
         entry_id: entry.entry_id.clone(),
         entry_type: block_type_to_entry_type(entry.block_type),
         extensions: HashMap::new(),
         modules: nexus_modules_to_spoke(entry.modules.as_ref()),
+        // v1.191 P1 T1 (spoke 0.13.0): `owner` is the holder KnowledgeEntry
+        // `entry_id`, an axis distinct from the narrative `KnowledgeOwnerRef`
+        // carried in `extensions.nexus`. Absent until the T2 domain cut, same
+        // rationale as `disclosure` above.
+        owner: None,
         revision: entry.revision,
         schema_version: NonZeroU64::new(u64::from(entry.schema_version))
             .expect("schema_version >= 1"),
@@ -192,6 +204,13 @@ pub fn spoke_to_knowledge_record(
     // spoke entry with anything other than exactly one valid owner claim is
     // rejected, never resolved by precedence.
     let owner = get_owner(&s)?;
+    // v1.191 P1 T1 (spoke 0.13.0): the wire-level holder governance
+    // (`KnowledgeEntry.owner` / `.disclosure`) is intentionally NOT read here.
+    // The nexus domain record gains its holder slots in T2
+    // (`holder_entry_id` / `disclosure`) and the exact native↔wire mapping in
+    // T8; this pin checkpoint only makes the seam compile against the new wire
+    // and adds no compatibility shim. `owner` below is the narrative container
+    // owner (`KnowledgeOwnerRef`, unchanged) — never the holder `entry_id`.
     let creator_only = get_creator_only(&s);
     // creator_only is World-only (v1.184 P1 fix): a Character/binding-owned
     // wire entry that sets the flag is rejected here, matching both store

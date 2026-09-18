@@ -138,9 +138,10 @@ pub use spoke_operations::{
 // envelopes + capability types the orchestrators accept/return.
 pub use spoke_schemas::{
     AssemblePacket, AssembleRequest, AssembleResponse, CheckRequest, CheckResponse, ComputeRequest,
-    ComputeResponse, Finding, HostCapabilityManifest, KnowledgeEntry, ProjectRequest,
-    ProjectResponse, PromoteRequest, PromoteResponse, RelateRequest, RelateResponse, Relation,
-    Rule, Scope, SourceAnchor, TimelineEvent, UpsertRequest, UpsertResponse,
+    ComputeResponse, ExtractRequest, ExtractResponse, Finding, HostCapabilityManifest,
+    KnowledgeEntry, ProjectRequest, ProjectResponse, PromoteRequest, PromoteResponse,
+    RelateRequest, RelateResponse, Relation, Rule, Scope, SourceAnchor, TimelineEvent,
+    UpsertRequest, UpsertResponse,
 };
 
 // ── Spoke extension-key newtypes (re-export) ─────────────────────────
@@ -183,6 +184,17 @@ pub use spoke_operations::{
 // boundary (call-boundary invariant above).
 pub use spoke_operations::{
     parse_tool_capability_id, validate_manifest_tools, validate_tool_arguments, ToolDescriptor,
+};
+
+// v1.191 P1 T1 (spoke 0.13.0) — the `ke-extraction` surface: the injected
+// product source loader, its operand/result types and the `orchestrate_extract`
+// entrypoint. `ExtractionPort` is deliberately NOT a member of
+// `BaselinePorts` / `FullPorts` upstream (it is a standalone injected boundary,
+// like `ToolInvokePort`), so re-exporting it here adds no baseline/full port
+// obligation and the adapter's own port impls stay unchanged. T12 owns the
+// production wrapper that actually calls `orchestrate_extract`.
+pub use spoke_operations::{
+    orchestrate_extract, ExtractRunInput, ExtractionPort, ExtractionResult,
 };
 
 // V1.166 AR-1 — the world-scoped `orchestrate_check` seam (nexus semantics

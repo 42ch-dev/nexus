@@ -29,10 +29,14 @@ fn make_entry() -> KnowledgeEntry {
         canonical_name: KnowledgeEntryCanonicalName::try_from("Mira Vale".to_owned())
             .expect("non-empty canonical name"),
         created_at: None,
+        // v1.191 P1 T1 (spoke 0.13.0): optional holder governance is genuinely
+        // absent for these fixtures; the native↔wire mapping lands with T2/T8.
+        disclosure: None,
         entry_id: "kb_test".into(),
         entry_type: "character".into(),
         extensions: HashMap::new(),
         modules: HashMap::new(),
+        owner: None,
         revision: None,
         schema_version: NonZeroU64::new(1).expect("1 is non-zero"),
         source_anchor: None,
