@@ -27,13 +27,12 @@ struct Fixture {
 }
 
 async fn seed_world(pool: &SqlitePool, world_id: &str, owner: &str) {
-    sqlx::query(
-        "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) VALUES (?, 'Test', 'active', datetime('now'), '{}')",
-    )
-    .bind(owner)
-    .execute(pool)
-    .await
-    .unwrap();
+    // v1.191 P1: a stored Creator always carries its holder registry row
+    // (§2.2), and the management read selection resolves it — the fixture must
+    // therefore seed a complete subject, not a bare `creators` row.
+    nexus_local_db::ensure_creator_row(pool, owner, "Test")
+        .await
+        .unwrap();
     sqlx::query(
         "INSERT INTO narrative_worlds (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json) VALUES (?, 'wrk', ?, 't', 's', 'active', 'private', 'manual', '{}')",
     )

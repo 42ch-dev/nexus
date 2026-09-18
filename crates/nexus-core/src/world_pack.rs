@@ -34,8 +34,16 @@ impl CoreService {
                 resource: "world_pack_import: read-only core access".to_string(),
             });
         }
+        // Durable §5.1: pack import is Creator management authoring on the
+        // owned World, so the orchestrator persists under the management
+        // selection (server-chosen from stored ownership + the holder
+        // registry, never from the pack).
+        let (read_scope, _) =
+            crate::actor_knowledge::management_read_scope(&self.inner.pool, principal.creator_id(), &world_id)
+                .await?;
         run_world_pack_import(
             &self.inner.pool,
+            &read_scope,
             principal.creator_id(),
             &world_id,
             request,
@@ -54,8 +62,12 @@ impl CoreService {
         request: PackImportRequest,
     ) -> CoreResult<PackImportResponse> {
         self.verify_principal(principal)?;
+        let (read_scope, _) =
+            crate::actor_knowledge::management_read_scope(&self.inner.pool, principal.creator_id(), &world_id)
+                .await?;
         run_world_pack_import(
             &self.inner.pool,
+            &read_scope,
             principal.creator_id(),
             &world_id,
             request,
@@ -144,12 +156,15 @@ impl CoreService {
             return Err(CoreError::WriterFenced);
         }
         drop(connection);
-        run_world_pack_import(pool, creator_id, world_id, request, dry_run).await
+        let (read_scope, _) =
+            crate::actor_knowledge::management_read_scope(pool, creator_id, world_id).await?;
+        run_world_pack_import(pool, &read_scope, creator_id, world_id, request, dry_run).await
     }
 }
 
 async fn run_world_pack_import(
     pool: &SqlitePool,
+    read_scope: &KnowledgeReadScope,
     creator_id: &str,
     world_id: &str,
     request: PackImportRequest,
@@ -164,6 +179,7 @@ async fn run_world_pack_import(
     })?;
     let summary = import_pack(
         pool,
+        read_scope,
         world_id,
         parsed,
         conflict_policy_from_request(request.conflict),
@@ -182,6 +198,7 @@ use nexus_knowledge::world_kb::validation::CANONICAL_NAME_MAX_LEN;
 use nexus_knowledge::world_kb::KbStore;
 use nexus_knowledge::world_kb::KnowledgeEntryRecord;
 use nexus_local_db::kb_relationships::{generate_relationship_id, get_relationship};
+use nexus_knowledge::world_kb::store::KnowledgeReadScope;
 use nexus_local_db::kb_store::SqliteKbStore;
 use nexus_spoke_adapter::pack::ParsedPack;
 use nexus_spoke_adapter::{
@@ -281,6 +298,7 @@ enum PackImportError {
 )]
 async fn import_pack(
     pool: &SqlitePool,
+    read_scope: &KnowledgeReadScope,
     world_id: &str,
     pack: ParsedPack,
     conflict: ConflictPolicy,
@@ -366,6 +384,7 @@ async fn import_pack(
                         ConflictPolicy::Rename => {
                             import_renamed_entry(
                                 pool,
+                                read_scope,
                                 world_id,
                                 &mut entry,
                                 entry_type,
@@ -380,6 +399,7 @@ async fn import_pack(
                         ConflictPolicy::Overwrite => {
                             import_overwritten_entry(
                                 pool,
+                                read_scope,
                                 world_id,
                                 &mut entry,
                                 &existing_by_id,
@@ -407,6 +427,7 @@ async fn import_pack(
                     ConflictPolicy::Rename => {
                         import_renamed_on_entry_id_collision(
                             pool,
+                            read_scope,
                             world_id,
                             &mut entry,
                             entry_type,
@@ -426,6 +447,7 @@ async fn import_pack(
                         target_entry_ids.insert(existing_by_id.entry_id.clone());
                         import_overwritten_entry(
                             pool,
+                            read_scope,
                             world_id,
                             &mut entry,
                             &existing_by_id,
@@ -464,6 +486,7 @@ async fn import_pack(
                     ConflictPolicy::Rename => {
                         import_renamed_entry(
                             pool,
+                            read_scope,
                             world_id,
                             &mut entry,
                             entry_type,
@@ -478,6 +501,7 @@ async fn import_pack(
                     ConflictPolicy::Overwrite => {
                         import_overwritten_entry(
                             pool,
+                            read_scope,
                             world_id,
                             &mut entry,
                             &existing_name_match,
@@ -529,6 +553,7 @@ async fn import_pack(
                 ConflictPolicy::Rename => {
                     import_renamed_entry(
                         pool,
+                        read_scope,
                         world_id,
                         &mut entry,
                         entry_type,
@@ -543,6 +568,7 @@ async fn import_pack(
                 ConflictPolicy::Overwrite => {
                     import_overwritten_entry(
                         pool,
+                        read_scope,
                         world_id,
                         &mut entry,
                         &existing_name,
@@ -572,7 +598,7 @@ async fn import_pack(
         }
 
         prepare_create_entry(&mut entry, world_id);
-        match persist_entry_upsert(pool, &entry).await {
+        match persist_entry_upsert(pool, read_scope, &entry).await {
             PersistOutcome {
                 outcome: ImportOutcome::Created,
                 ..
@@ -667,7 +693,7 @@ async fn import_pack(
                             continue;
                         }
                         update_relation_world_id(&mut relation, world_id);
-                        match persist_relation_relate(pool, &relation).await {
+                        match persist_relation_relate(pool, read_scope, &relation).await {
                             PersistOutcome {
                                 outcome: ImportOutcome::Overwritten,
                                 ..
@@ -726,7 +752,7 @@ async fn import_pack(
         relation.revision = None;
 
         let renamed = relation.relation_id != pack_relation_id;
-        match persist_relation_relate(pool, &relation).await {
+        match persist_relation_relate(pool, read_scope, &relation).await {
             PersistOutcome {
                 outcome: ImportOutcome::Created,
                 ..
@@ -771,6 +797,7 @@ async fn import_pack(
 #[allow(clippy::too_many_arguments)]
 async fn import_renamed_on_entry_id_collision(
     pool: &SqlitePool,
+    read_scope: &KnowledgeReadScope,
     world_id: &str,
     entry: &mut KnowledgeEntry,
     entry_type: BlockType,
@@ -834,7 +861,7 @@ async fn import_renamed_on_entry_id_collision(
     prepare_create_entry(entry, world_id);
     remap.insert(pack_entry_id.to_string(), fresh_id.clone());
 
-    match persist_entry_upsert(pool, entry).await {
+    match persist_entry_upsert(pool, read_scope, entry).await {
         PersistOutcome {
             outcome: ImportOutcome::Created,
             ..
@@ -888,6 +915,7 @@ fn handle_entry_id_collision_in_target(
 #[allow(clippy::too_many_arguments)]
 async fn import_renamed_entry(
     pool: &SqlitePool,
+    read_scope: &KnowledgeReadScope,
     world_id: &str,
     entry: &mut KnowledgeEntry,
     entry_type: BlockType,
@@ -948,7 +976,7 @@ async fn import_renamed_entry(
     prepare_create_entry(entry, world_id);
     remap.insert(pack_entry_id.to_string(), fresh_id.clone());
 
-    match persist_entry_upsert(pool, entry).await {
+    match persist_entry_upsert(pool, read_scope, entry).await {
         PersistOutcome {
             outcome: ImportOutcome::Created,
             ..
@@ -982,6 +1010,7 @@ async fn import_renamed_entry(
 #[allow(clippy::too_many_arguments)]
 async fn import_overwritten_entry(
     pool: &SqlitePool,
+    read_scope: &KnowledgeReadScope,
     world_id: &str,
     entry: &mut KnowledgeEntry,
     existing: &KnowledgeEntryRecord,
@@ -1012,7 +1041,7 @@ async fn import_overwritten_entry(
     extensions::set_world_id(entry, world_id.to_string());
     extensions::set_provenance(entry, None, None, Some(IMPORT_PROVENANCE.to_string()));
 
-    match persist_entry_upsert(pool, entry).await {
+    match persist_entry_upsert(pool, read_scope, entry).await {
         PersistOutcome {
             outcome: ImportOutcome::Created,
             ..
@@ -1139,9 +1168,9 @@ fn prepare_create_entry(entry: &mut KnowledgeEntry, world_id: &str) {
     extensions::set_provenance(entry, None, None, Some(IMPORT_PROVENANCE.to_string()));
 }
 
-async fn persist_entry_upsert(pool: &SqlitePool, entry: &KnowledgeEntry) -> PersistOutcome {
+async fn persist_entry_upsert(pool: &SqlitePool, read_scope: &KnowledgeReadScope, entry: &KnowledgeEntry) -> PersistOutcome {
     let upsert_req = build_import_upsert_request(entry);
-    let adapter = NexusAdapter::new(pool.clone());
+    let adapter = NexusAdapter::new(pool.clone(), read_scope.clone());
     match orchestrate_upsert(&adapter, upsert_req).await {
         nexus_spoke_adapter::SpokeResult::Ok(_) => PersistOutcome {
             outcome: ImportOutcome::Created,
@@ -1162,9 +1191,9 @@ async fn persist_entry_upsert(pool: &SqlitePool, entry: &KnowledgeEntry) -> Pers
     }
 }
 
-async fn persist_relation_relate(pool: &SqlitePool, relation: &Relation) -> PersistOutcome {
+async fn persist_relation_relate(pool: &SqlitePool, read_scope: &KnowledgeReadScope, relation: &Relation) -> PersistOutcome {
     let relate_req = build_import_relate_request(relation);
-    let adapter = NexusAdapter::new(pool.clone());
+    let adapter = NexusAdapter::new(pool.clone(), read_scope.clone());
     match orchestrate_relate(&adapter, relate_req).await {
         nexus_spoke_adapter::SpokeResult::Ok(_) => PersistOutcome {
             outcome: if relation.revision.is_some() {

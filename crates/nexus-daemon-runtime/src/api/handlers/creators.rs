@@ -61,6 +61,12 @@ pub struct CreatorDetail {
     pub has_api_key: bool,
     pub has_cached_token: bool,
     pub is_active: bool,
+    /// v1.191 P1 T9 (durable §7): the read-only service-managed holder
+    /// `KnowledgeEntry` id resolved from the holder registry. There is no
+    /// holder CRUD route behind this member; it is absent only when the
+    /// registry read has not run (the create/status paths always resolve it).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub holder_entry_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -126,6 +132,7 @@ fn creator_detail_from_core(detail: nexus_contracts::CreatorDetail) -> CreatorDe
         has_api_key: detail.has_api_key,
         has_cached_token: detail.has_cached_token,
         is_active: detail.is_active,
+        holder_entry_id: detail.holder_entry_id.map(|id| id.to_string()),
     }
 }
 

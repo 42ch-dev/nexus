@@ -58,6 +58,16 @@ pub enum KbEntityCommand {
         /// `{}` is a no-op).
         #[arg(long)]
         modules: Option<String>,
+        /// Author audience: `shared`, `author-only`, or `character-private`.
+        /// Omitted preserves the stored holder/disclosure pair; `shared`
+        /// clears both. Governance moves under the same `--expected-version`
+        /// CAS as the content.
+        #[arg(long, value_name = "AUDIENCE")]
+        audience: Option<String>,
+        /// Character a `character-private` audience resolves to (must be a
+        /// Character this Creator owns and that is bound to this World).
+        #[arg(long, value_name = "CHARACTER_ID", requires = "audience")]
+        audience_character: Option<String>,
         /// Emit machine-readable JSON (the `WorldKbPatchEntityResponse` DTO
         /// verbatim) instead of human text.
         #[arg(long, default_value_t = false)]

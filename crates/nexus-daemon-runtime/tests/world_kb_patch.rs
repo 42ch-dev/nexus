@@ -2780,3 +2780,122 @@ async fn get_key_block_state_unknown_world_returns_404() {
     .expect_err("unknown world must 404");
     assert_eq!(err.status_code(), axum::http::StatusCode::NOT_FOUND);
 }
+
+// --- v1.191 P1 T9: holder governance on the shipped world-kb patch surface ---
+
+/// Durable §3/§7: the World-KB entity patch authors the native audience under
+/// the same `expected_version` CAS as the content, projects the governance
+/// pair, and refuses the retired `creator_only` key by presence — including
+/// `false` and a raw-extension `patch.extensions` occurrence.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn v1191_holder_public_world_patch_authors_and_projects_the_audience() {
+    let (_tmp, state) = fresh_state().await;
+    let creator_holder = nexus_local_db::creator_holder_entry_id("test_creator");
+
+    let created = patch_entity(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(
+            serde_json::from_value(serde_json::json!({
+                "entity_id": "kb_a1b2",
+                "expected_version": 0,
+                "patch": { "title": "Audience Row", "block_type": "character" }
+            }))
+            .unwrap(),
+        ),
+    )
+    .await
+    .unwrap()
+    .0;
+    assert_eq!(created.version, 1);
+    assert!(created.entity.holder_entry_id.is_none());
+    assert!(created.entity.disclosure.is_none());
+
+    // author-only: the admitted controlling Creator's own holder.
+    let private = patch_entity(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(
+            serde_json::from_value(serde_json::json!({
+                "entity_id": "kb_a1b2",
+                "expected_version": 1,
+                "patch": { "audience": { "kind": "author-only" } }
+            }))
+            .unwrap(),
+        ),
+    )
+    .await
+    .unwrap()
+    .0;
+    assert_eq!(private.version, 2);
+    assert_eq!(
+        private
+            .entity
+            .holder_entry_id
+            .as_ref()
+            .map(|id| serde_json::to_value(id).unwrap()),
+        Some(serde_json::Value::String(creator_holder))
+    );
+    assert_eq!(
+        private
+            .entity
+            .disclosure
+            .as_ref()
+            .map(|d| serde_json::to_value(d).unwrap()),
+        Some(serde_json::Value::String("owner-private".to_string()))
+    );
+
+    // Explicit shared clears both columns under the next CAS. The stored
+    // revision is re-read rather than assumed: the governance half of the
+    // authoring transaction owns its own bump.
+    let before_shared = stored_version(&state, "kb_a1b2").await;
+    let shared = patch_entity(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(
+            serde_json::from_value(serde_json::json!({
+                "entity_id": "kb_a1b2",
+                "expected_version": before_shared,
+                "patch": { "audience": { "kind": "shared" } }
+            }))
+            .unwrap(),
+        ),
+    )
+    .await
+    .unwrap()
+    .0;
+    assert!(shared.entity.holder_entry_id.is_none());
+    assert!(shared.entity.disclosure.is_none());
+
+    // The stored row reflects the last authored governance (no silent write).
+    let row = graph_entity(&state, "kb_a1b2").await;
+    assert!(row.holder_entry_id.is_none());
+    assert!(row.disclosure.is_none());
+}
+
+/// The stored per-row version of one World-KB entity, read through the
+/// shipped graph projection.
+async fn stored_version(state: &WorkspaceState, entity_id: &str) -> u64 {
+    graph_entity(state, entity_id).await.version
+}
+
+async fn graph_entity(
+    state: &WorkspaceState,
+    entity_id: &str,
+) -> nexus_contracts::world_kb_graph_response::NexusWorldKbEntityProjection {
+    let graph = get_graph(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Query(GraphQuery {
+            include_suggested: None,
+        }),
+    )
+    .await
+    .unwrap()
+    .0;
+    graph
+        .entities
+        .into_iter()
+        .find(|entity| serde_json::to_value(&entity.key_block_id).unwrap() == entity_id)
+        .expect("patched entity is in the graph")
+}

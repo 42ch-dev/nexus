@@ -193,7 +193,7 @@ async fn character_view_without_binding_id_is_422_not_creator_page() {
             "world_id": WORLD_A,
             "block_type": "item",
             "canonical_name": "WorldSecret",
-            "creator_only": true
+            "audience": { "kind": "author-only" }
         }),
     )
     .await;
@@ -213,7 +213,7 @@ async fn character_view_without_binding_id_is_422_not_creator_page() {
 }
 
 #[tokio::test]
-async fn creator_only_hidden_from_character_visible_to_creator() {
+async fn author_only_hidden_from_character_visible_to_creator() {
     let ctx = ctx().await;
     let created = create_character(&ctx.server, "Ava", WORLD_A).await;
     let chr = created["character"]["character_id"].as_str().unwrap();
@@ -226,7 +226,7 @@ async fn creator_only_hidden_from_character_visible_to_creator() {
             "world_id": WORLD_A,
             "block_type": "item",
             "canonical_name": "PublicWorld",
-            "creator_only": false
+            "audience": { "kind": "shared" }
         }),
     )
     .await;
@@ -237,7 +237,7 @@ async fn creator_only_hidden_from_character_visible_to_creator() {
             "world_id": WORLD_A,
             "block_type": "item",
             "canonical_name": "SecretWorld",
-            "creator_only": true
+            "audience": { "kind": "author-only" }
         }),
     )
     .await;
@@ -877,8 +877,7 @@ async fn inactive_world_and_character_fail_closed_on_view_and_add() {
             "owner_kind": "world",
             "world_id": WORLD_A,
             "block_type": "item",
-            "canonical_name": "Keystone",
-            "creator_only": false
+            "canonical_name": "Keystone"
         }),
     )
     .await;
@@ -1411,4 +1410,330 @@ async fn character_create_oversize_multibyte_summary_is_invalid_input() {
     assert_eq!(resp.status_code(), 422, "{}", resp.text());
     let body: Value = resp.json();
     assert_eq!(body["error"]["code"], "invalid_input");
+}
+
+// --- v1.191 P1 T9: holder governance on the shipped actor-knowledge surface ---
+
+#[allow(clippy::future_not_send)]
+async fn view_page(server: &TestServer, actor: Value, world_id: &str, binding_id: Option<&str>) -> Value {
+    let mut body = json!({ "actor_ref": actor, "world_id": world_id });
+    if let Some(binding) = binding_id {
+        body["binding_id"] = Value::String(binding.to_string());
+    }
+    let resp = server
+        .post("/v1/daemon/actor-knowledge/view")
+        .json(&body)
+        .await;
+    assert_eq!(resp.status_code(), 200, "view: {}", resp.text());
+    resp.json()
+}
+
+fn item_named<'a>(page: &'a Value, canonical_name: &str) -> &'a Value {
+    page["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["canonical_name"] == canonical_name)
+        .unwrap_or_else(|| panic!("{canonical_name} missing from view page"))
+}
+
+/// Durable §5: the retired World-only `creator_only` key is refused by
+/// **presence** on both authoring bodies — `false` included — with the stable
+/// `legacy_creator_only_unsupported` reason, and nothing is written.
+#[tokio::test]
+async fn v1191_holder_public_legacy_creator_only_key_is_refused_by_presence() {
+    let ctx = ctx().await;
+    let created = create_character(&ctx.server, "LegacyKey", WORLD_A).await;
+    let chr = created["character"]["character_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    for raw in [json!(true), json!(false)] {
+        let resp = ctx
+            .server
+            .post("/v1/daemon/actor-knowledge/entries")
+            .json(&json!({
+                "owner_kind": "world",
+                "world_id": WORLD_A,
+                "block_type": "item",
+                "canonical_name": "RefusedRow",
+                "creator_only": raw
+            }))
+            .await;
+        // The daemon's canonical invalid-input family is 422 `invalid_input`.
+        assert_eq!(resp.status_code(), 422, "{}", resp.text());
+        let body: Value = resp.json();
+        assert_eq!(body["error"]["code"], "invalid_input");
+        assert!(
+            body["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("legacy_creator_only_unsupported"),
+            "{}",
+            body["error"]["message"]
+        );
+    }
+
+    let refused: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM kb_key_blocks WHERE canonical_name = 'RefusedRow'",
+    )
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(refused.0, 0, "a refused legacy key must author nothing");
+
+    let entry_id = add_entry(
+        &ctx.server,
+        json!({
+            "owner_kind": "character",
+            "character_id": chr,
+            "block_type": "item",
+            "canonical_name": "PatchTarget"
+        }),
+    )
+    .await["item"]["entry_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let patch = ctx
+        .server
+        .patch(&format!("/v1/daemon/characters/{chr}/knowledge/{entry_id}"))
+        .json(&json!({
+            "expected_revision": 0,
+            "summary": "x",
+            "creator_only": false
+        }))
+        .await;
+    assert_eq!(patch.status_code(), 422, "{}", patch.text());
+    let body: Value = patch.json();
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("legacy_creator_only_unsupported"),
+        "{}",
+        body["error"]["message"]
+    );
+    let revision: (i64,) =
+        sqlx::query_as("SELECT revision FROM kb_key_blocks WHERE key_block_id = ?")
+            .bind(&entry_id)
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
+    assert_eq!(revision.0, 0, "a refused legacy key must not move the CAS");
+}
+
+/// Durable §7: the item projection carries the native governance pair
+/// (`holder_entry_id` + `disclosure`) and never `creator_only`; a shared row
+/// carries neither member. The Creator actor_ref is the management review, the
+/// Character actor_ref the strict preview — they must differ on exactly the
+/// author-only row.
+#[tokio::test]
+async fn v1191_holder_public_item_projects_native_governance_not_the_legacy_bool() {
+    let ctx = ctx().await;
+    let created = create_character(&ctx.server, "Proj", WORLD_A).await;
+    let chr = created["character"]["character_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let binding = created["binding"]["binding_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let shared = add_entry(
+        &ctx.server,
+        json!({
+            "owner_kind": "world",
+            "world_id": WORLD_A,
+            "block_type": "item",
+            "canonical_name": "SharedRow"
+        }),
+    )
+    .await;
+    let author_only = add_entry(
+        &ctx.server,
+        json!({
+            "owner_kind": "world",
+            "world_id": WORLD_A,
+            "block_type": "item",
+            "canonical_name": "AuthorRow",
+            "audience": { "kind": "author-only" }
+        }),
+    )
+    .await;
+
+    let creator_holder = nexus_local_db::creator_holder_entry_id(OWNER);
+    for item in [&shared["item"], &author_only["item"]] {
+        assert!(
+            item.get("creator_only").is_none(),
+            "the legacy boolean is not part of the projection: {item}"
+        );
+    }
+    assert!(shared["item"].get("holder_entry_id").is_none());
+    assert!(shared["item"].get("disclosure").is_none());
+    assert_eq!(author_only["item"]["holder_entry_id"], creator_holder);
+    assert_eq!(author_only["item"]["disclosure"], "owner-private");
+
+    let character_page = view_page(
+        &ctx.server,
+        json!({ "actor_kind": "character", "character_id": chr }),
+        WORLD_A,
+        Some(&binding),
+    )
+    .await;
+    let visible = names(&character_page);
+    assert!(visible.contains(&"SharedRow".into()));
+    assert!(
+        !visible.contains(&"AuthorRow".into()),
+        "an author-only World row never enters a Character view"
+    );
+    assert!(item_named(&character_page, "SharedRow")
+        .get("holder_entry_id")
+        .is_none());
+
+    let creator_page = view_page(
+        &ctx.server,
+        json!({ "actor_kind": "creator", "creator_id": OWNER }),
+        WORLD_A,
+        None,
+    )
+    .await;
+    let reviewed = item_named(&creator_page, "AuthorRow");
+    assert_eq!(
+        reviewed["holder_entry_id"], creator_holder,
+        "the Creator management review resolves the holder"
+    );
+    assert_eq!(reviewed["disclosure"], "owner-private");
+    assert!(item_named(&creator_page, "SharedRow")
+        .get("disclosure")
+        .is_none());
+
+    // The Character list and detail families share the same projection.
+    let listed = ctx
+        .server
+        .get(&format!("/v1/daemon/characters/{chr}/knowledge"))
+        .await;
+    assert_eq!(listed.status_code(), 200, "{}", listed.text());
+    let listed: Value = listed.json();
+    for item in listed["items"].as_array().unwrap() {
+        assert!(item.get("creator_only").is_none());
+    }
+    let char_row = add_entry(
+        &ctx.server,
+        json!({
+            "owner_kind": "character",
+            "character_id": chr,
+            "block_type": "item",
+            "canonical_name": "CharRow"
+        }),
+    )
+    .await;
+    let char_row_id = char_row["item"]["entry_id"].as_str().unwrap().to_string();
+    assert!(char_row["item"].get("holder_entry_id").is_none());
+    assert!(char_row["item"].get("creator_only").is_none());
+    let detail = ctx
+        .server
+        .get(&format!("/v1/daemon/characters/{chr}/knowledge/{char_row_id}"))
+        .await;
+    assert_eq!(detail.status_code(), 200, "{}", detail.text());
+    let detail: Value = detail.json();
+    assert!(detail["item"].get("holder_entry_id").is_none());
+    assert!(detail["item"].get("disclosure").is_none());
+    assert!(detail["item"].get("creator_only").is_none());
+}
+
+/// Durable §6: the shipped PATCH route walks one Character-owned row shared →
+/// author-only → Character-private → shared under the `expected_revision` CAS,
+/// and the Character preview follows exactly the authored audience.
+#[tokio::test]
+async fn v1191_holder_public_audience_round_trip_moves_the_character_preview() {
+    let ctx = ctx().await;
+    let created = create_character(&ctx.server, "RoundTrip", WORLD_A).await;
+    let chr = created["character"]["character_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let binding = created["binding"]["binding_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let character_holder = nexus_local_db::character_holder_entry_id(&chr);
+    let creator_holder = nexus_local_db::creator_holder_entry_id(OWNER);
+
+    let added = add_entry(
+        &ctx.server,
+        json!({
+            "owner_kind": "character",
+            "character_id": chr,
+            "block_type": "item",
+            "canonical_name": "AudienceRow"
+        }),
+    )
+    .await;
+    let entry_id = added["item"]["entry_id"].as_str().unwrap().to_string();
+    assert!(added["item"].get("disclosure").is_none());
+
+    let actor = json!({ "actor_kind": "character", "character_id": chr });
+    assert!(names(&view_page(&ctx.server, actor.clone(), WORLD_A, Some(&binding)).await)
+        .contains(&"AudienceRow".into()));
+
+    let patch_path = format!("/v1/daemon/characters/{chr}/knowledge/{entry_id}");
+
+    // author-only: the Creator-holder private row leaves the Character preview.
+    let to_author_only = ctx
+        .server
+        .patch(&patch_path)
+        .json(&json!({
+            "expected_revision": 0,
+            "audience": { "kind": "author-only" }
+        }))
+        .await;
+    assert_eq!(to_author_only.status_code(), 200, "{}", to_author_only.text());
+    let body: Value = to_author_only.json();
+    assert_eq!(body["item"]["holder_entry_id"], creator_holder);
+    assert_eq!(body["item"]["disclosure"], "owner-private");
+    assert!(!names(&view_page(&ctx.server, actor.clone(), WORLD_A, Some(&binding)).await)
+        .contains(&"AudienceRow".into()));
+
+    // Character-private: the row comes back for exactly this Character.
+    let to_character_private = ctx
+        .server
+        .patch(&patch_path)
+        .json(&json!({
+            "expected_revision": 1,
+            "audience": { "kind": "character-private", "character_id": chr }
+        }))
+        .await;
+    assert_eq!(
+        to_character_private.status_code(),
+        200,
+        "{}",
+        to_character_private.text()
+    );
+    let body: Value = to_character_private.json();
+    assert_eq!(body["item"]["holder_entry_id"], character_holder);
+    assert_eq!(body["item"]["disclosure"], "owner-private");
+    let character_page = view_page(&ctx.server, actor.clone(), WORLD_A, Some(&binding)).await;
+    assert_eq!(
+        item_named(&character_page, "AudienceRow")["holder_entry_id"],
+        character_holder
+    );
+
+    // Explicit shared clears both governance columns again.
+    let to_shared = ctx
+        .server
+        .patch(&patch_path)
+        .json(&json!({
+            "expected_revision": 2,
+            "audience": { "kind": "shared" }
+        }))
+        .await;
+    assert_eq!(to_shared.status_code(), 200, "{}", to_shared.text());
+    let body: Value = to_shared.json();
+    assert!(body["item"].get("holder_entry_id").is_none());
+    assert!(body["item"].get("disclosure").is_none());
+    let character_page = view_page(&ctx.server, actor, WORLD_A, Some(&binding)).await;
+    assert!(names(&character_page).contains(&"AudienceRow".into()));
 }

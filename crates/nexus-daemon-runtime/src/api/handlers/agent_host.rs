@@ -681,7 +681,21 @@ async fn assemble_admitted_prompt(
         request = request.with_user(creator_id);
     }
     let narrative = SqliteNarrativeGateway::new(pool.clone());
-    let kb = SpokeBackedKbStore::new(pool.clone());
+    // v1.191 P1 T9 (durable §4.2/§5.1): the Agent Host prompt is a
+    // **Character-view** consumer — it assembles over the same complete
+    // ActorView selection its admitted context was built from (the exact
+    // admitted holder plus the authorized containers), never a management
+    // review and never an unscoped store.
+    let (core, principal) = super::world_kb_guards::resolve_core_principal(state).await?;
+    let view_scope = core
+        .actor_view_read_scope(
+            &principal,
+            &ctx.actor,
+            ctx.world_id.as_str(),
+            ctx.binding_id.as_deref(),
+        )
+        .await?;
+    let kb = SpokeBackedKbStore::new(pool.clone(), view_scope);
     let knowledge = SqliteKnowledgeStore::new(pool);
     let assembled = assemble_moment(&request, &narrative, &kb, &knowledge).await;
     Ok(assembled.to_full_context())

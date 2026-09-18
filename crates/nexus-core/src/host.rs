@@ -402,12 +402,8 @@ impl HostHandle {
                             let re_admitted = admission
                                 .admit(principal.creator_id(), ctx.actor.clone(), viewpoint)
                                 .await?;
-                            self.assemble_admitted_prompt(
-                                principal.creator_id(),
-                                &re_admitted,
-                                content,
-                            )
-                            .await?
+                            self.assemble_admitted_prompt(principal, &re_admitted, content)
+                                .await?
                         } else {
                             content
                         };
@@ -815,10 +811,11 @@ impl HostHandle {
     /// SOUL/Memory mind projection in the reserved mind slots.
     async fn assemble_admitted_prompt(
         &self,
-        creator_id: &str,
+        principal: &Principal,
         ctx: &crate::actors::AdmittedActorContext,
         user_prompt: String,
     ) -> CoreResult<String> {
+        let creator_id = principal.creator_id();
         let pool = self.core.inner.pool.clone();
         let view = CharacterViewInput::from_entries(ctx.view.items.clone());
         let actor = match &ctx.actor {
@@ -853,7 +850,19 @@ impl HostHandle {
             request = request.with_user(creator_id);
         }
         let narrative = SqliteNarrativeGateway::new(pool.clone());
-        let kb = SpokeBackedKbStore::new(pool.clone());
+        // Durable §4.2: the host prompt consumes the same complete ActorView
+        // snapshot its admitted context was built from — the exact admitted
+        // holder plus the authorized containers, never a management selection.
+        let view_scope = self
+            .core
+            .actor_view_read_scope(
+                &principal,
+                &ctx.actor,
+                &ctx.world_id,
+                ctx.binding_id.as_deref(),
+            )
+            .await?;
+        let kb = SpokeBackedKbStore::new(pool.clone(), view_scope);
         let knowledge = SqliteKnowledgeStore::new(pool);
         let assembled = assemble_moment(&request, &narrative, &kb, &knowledge).await;
         Ok(assembled.to_full_context())

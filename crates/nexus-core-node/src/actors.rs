@@ -220,19 +220,61 @@ fn knowledge_item_from_record(record: &KnowledgeEntryRecord) -> CoreWire<Knowled
         serde_json::to_value(record.block_type).map_err(|error| CoreError::Internal {
             category: format!("{CHARACTER_WIRE_INVALID_PREFIX}: {error}"),
         })?;
-    let value = serde_json::json!({
-        "entry_id": record.entry_id,
-        "owner": owner,
-        "creator_only": record.creator_only,
-        "block_type": block_type,
-        "canonical_name": record.canonical_name,
-        "status": record.status,
-        "revision": record.revision.unwrap_or(0),
-        "created_at": created_at,
-    });
-    serde_json::from_value(value).map_err(|error| CoreError::Internal {
+    // v1.191 P1 T9 (durable §7): the bridge projection mirrors the daemon item
+    // family — native `holder_entry_id` / `disclosure`, no `creator_only`, and
+    // `owner` staying the narrative `KnowledgeOwnerRef` container. Both
+    // governance members are absent for an in-scope shared entry.
+    let mut value = serde_json::Map::new();
+    value.insert("entry_id".into(), serde_json::json!(record.entry_id));
+    value.insert("owner".into(), owner);
+    value.insert("block_type".into(), block_type);
+    value.insert(
+        "canonical_name".into(),
+        serde_json::json!(record.canonical_name),
+    );
+    value.insert("status".into(), serde_json::json!(record.status));
+    value.insert(
+        "revision".into(),
+        serde_json::json!(record.revision.unwrap_or(0)),
+    );
+    value.insert("created_at".into(), serde_json::json!(created_at));
+    if let Some(holder) = record.holder_entry_id.as_deref() {
+        value.insert("holder_entry_id".into(), serde_json::json!(holder));
+    }
+    if let Some(disclosure) = record.disclosure.as_deref() {
+        value.insert("disclosure".into(), serde_json::json!(disclosure));
+    }
+    serde_json::from_value(serde_json::Value::Object(value)).map_err(|error| CoreError::Internal {
         category: format!("{CHARACTER_WIRE_INVALID_PREFIX}: {error}"),
     })
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod v1191_holder_public_tests {
+    use super::{knowledge_item_from_record, KnowledgeEntryRecord};
+    use nexus_contracts::BlockType;
+
+    // v1.191 P1 T9 (durable §7): the NAPI bridge item projection must match the
+    // daemon item family exactly — native governance pair, no legacy boolean.
+
+    #[test]
+    fn v1191_holder_public_bridge_item_projects_the_native_governance_pair() {
+        let mut record = KnowledgeEntryRecord::new("wld_1", BlockType::Item, "Row");
+        record.created_at = "2026-01-01T00:00:00Z".to_string();
+        let shared = serde_json::to_value(knowledge_item_from_record(&record).unwrap()).unwrap();
+        assert!(shared.get("creator_only").is_none(), "{shared}");
+        assert!(shared.get("holder_entry_id").is_none(), "{shared}");
+        assert!(shared.get("disclosure").is_none(), "{shared}");
+
+        let holder = format!("hld_{}", "a".repeat(64));
+        record.holder_entry_id = Some(holder.clone());
+        record.disclosure = Some("owner-private".to_string());
+        let private = serde_json::to_value(knowledge_item_from_record(&record).unwrap()).unwrap();
+        assert_eq!(private["holder_entry_id"], holder);
+        assert_eq!(private["disclosure"], "owner-private");
+        assert!(private.get("creator_only").is_none(), "{private}");
+    }
 }
 
 /// The retained summary wire member projects from the stored body block.

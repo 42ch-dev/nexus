@@ -622,6 +622,35 @@ fn lore_activation_value_is_off(value: &str) -> bool {
 #[allow(clippy::fn_params_excessive_bools)]
 #[allow(clippy::too_many_arguments)] // CLI param plumbing — acceptable until refactored into builder
 #[allow(clippy::too_many_lines)] // CLI param plumbing + flag tail — same builder-refactor path
+/// The admitted Creator's `ActorView` read selection for one CLI preview
+/// (durable §4.1): the exact Creator holder from the registry plus the selected
+/// World container. A missing holder registry row or unknown active Creator
+/// fails closed instead of widening the read.
+async fn creator_view_scope(
+    pool: &sqlx::SqlitePool,
+    config: &CliConfig,
+    world_id: Option<&str>,
+) -> Result<nexus_knowledge::world_kb::KnowledgeReadScope> {
+    let creator_id = config
+        .active_creator_id
+        .as_deref()
+        .ok_or_else(|| crate::errors::CliError::CreatorNotSelected)?;
+    let holder = nexus_local_db::require_creator_holder(pool, creator_id)
+        .await
+        .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
+    nexus_knowledge::world_kb::KnowledgeReadScope::actor_view(
+        holder,
+        vec![nexus_knowledge::world_kb::KnowledgeOwnerRef::world(
+            world_id.unwrap_or("wld_default"),
+        )],
+    )
+    .map_err(|e| crate::errors::CliError::Other(e.to_string()))
+}
+
+#[allow(clippy::future_not_send)]
+#[allow(clippy::fn_params_excessive_bools)]
+#[allow(clippy::too_many_arguments)] // CLI param plumbing — acceptable until refactored into builder
+#[allow(clippy::too_many_lines)] // CLI param plumbing + flag tail — same builder-refactor path
 pub async fn run_assemble_moment(
     config: &CliConfig,
     world_id: Option<&str>,
@@ -661,7 +690,14 @@ pub async fn run_assemble_moment(
     // scoped read (storage → spoke `KnowledgeEntry` → `KnowledgeEntryRecord` via the
     // `spoke_to_knowledge_record` conversion seam), matching `SqliteKbStore::query`
     // behavior exactly (silent 500-row window; no reject-on-overflow).
-    let kb = nexus_spoke_adapter::SpokeBackedKbStore::new(pool.clone());
+    // v1.191 P1 T9 (durable §4.1/§5.1): a Moment assembly is a **preview**, so
+    // the KB store reads under the admitted Creator's ActorView — its own
+    // holder plus the selected World container. Never a management selection,
+    // and never an unscoped store.
+    let kb = nexus_spoke_adapter::SpokeBackedKbStore::new(
+        pool.clone(),
+        creator_view_scope(&pool, config, world_id).await?,
+    );
     // V1.149 P1: preload the world's confirmed relation edges for relation-hop
     // expansion when activation is on (off-switch ⇒ no hop load; spec §6).
     // The edge source is the inherent `NexusAdapter::list_hop_edges_for_world`
@@ -677,11 +713,14 @@ pub async fn run_assemble_moment(
     let hop_edges = if activation_off {
         None
     } else {
-        nexus_spoke_adapter::adapter::NexusAdapter::new(pool.clone())
-            .list_hop_edges_for_world(wid)
-            .await
-            .ok()
-            .filter(|edges| !edges.is_empty())
+        nexus_spoke_adapter::adapter::NexusAdapter::new(
+            pool.clone(),
+            creator_view_scope(&pool, config, world_id).await?,
+        )
+        .list_hop_edges_for_world(wid)
+        .await
+        .ok()
+        .filter(|edges| !edges.is_empty())
     };
     let uid = user_id.unwrap_or("user_default");
     let knowledge = SqliteKnowledgeStore::new(pool.clone());
@@ -1886,7 +1925,16 @@ mod tests {
 
         let sqlite_store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
         let ctx_sqlite = run(&pool, &sqlite_store).await;
-        let spoke_store = nexus_spoke_adapter::SpokeBackedKbStore::new(pool.clone());
+        // v1.191 P1 T9: the scoped store takes the request-bound selection; the
+        // fixture seeds shared rows in one World, so the container-scoped
+        // management selection admits them without a holder registry row.
+        let spoke_store = nexus_spoke_adapter::SpokeBackedKbStore::new(
+            pool.clone(),
+            nexus_knowledge::world_kb::KnowledgeReadScope::creator_management(
+                vec![nexus_knowledge::world_kb::KnowledgeOwnerRef::world("wld_t4")],
+                Vec::new(),
+            ),
+        );
         let ctx_spoke = run(&pool, &spoke_store).await;
 
         // The KB-dependent slice must be byte-identical.

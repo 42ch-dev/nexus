@@ -645,7 +645,103 @@ async fn management_containers(
     Ok((containers, character_ids))
 }
 
+/// Server-chosen `CreatorManagement` read selection for one owned World
+/// (durable §4.1) plus the owned Character ids it authorizes.
+///
+/// The owned World/Character/binding containers come from stored ownership
+/// rows and the known-governance holder set from the identity registry, so an
+/// owned private row stays reviewable. Nothing here reads a request: the
+/// selection is derived from the admitted Creator id alone, exactly like
+/// [`CoreService::admit_creator_management_knowledge`], and the authoring /
+/// maintenance paths that already hold their own fence reuse it without
+/// re-taking the shared effect leases.
+pub(crate) async fn management_read_scope(
+    pool: &SqlitePool,
+    creator_id: &str,
+    world_id: &str,
+) -> CoreResult<(KnowledgeReadScope, Vec<String>)> {
+    require_owned_world(pool, creator_id, world_id).await?;
+    let (containers, character_ids) = management_containers(pool, creator_id, world_id).await?;
+    let mut authorized_holders = vec![
+        nexus_local_db::require_creator_holder(pool, creator_id)
+            .await
+            .map_err(actor_db_err)?,
+    ];
+    for character_id in &character_ids {
+        authorized_holders.push(
+            nexus_local_db::require_character_holder(pool, creator_id, character_id)
+                .await
+                .map_err(actor_db_err)?,
+        );
+    }
+    Ok((
+        KnowledgeReadScope::creator_management(containers, authorized_holders),
+        character_ids,
+    ))
+}
+
 impl CoreService {
+    /// The `CreatorManagement` read selection for one owned World (durable
+    /// §4.1), for the shipped authoring/maintenance surfaces that already hold
+    /// their own fence.
+    ///
+    /// # Errors
+    /// [`CoreError::AuthRequired`] for a failed principal, [`CoreError::NotFound`]
+    /// for a foreign/missing World, and the fail-closed `holder_state_invalid`.
+    pub async fn creator_management_read_scope(
+        &self,
+        principal: &Principal,
+        world_id: &str,
+    ) -> CoreResult<KnowledgeReadScope> {
+        self.verify_principal(principal)?;
+        let (scope, _) =
+            management_read_scope(&self.inner.pool, principal.creator_id(), world_id).await?;
+        Ok(scope)
+    }
+
+    /// The `ActorView` read selection for one stored Actor plus viewpoint
+    /// (durable §4.1): the exact admitted holder and the authorized
+    /// containers. Never a management selection, whatever the caller sends.
+    ///
+    /// # Errors
+    /// As [`ActorKnowledgeViewService::actor_view_scope`]: auth/ownership
+    /// failures, the fail-closed `holder_state_invalid`, and the missing
+    /// `binding_id` for a Character actor.
+    pub async fn actor_view_read_scope(
+        &self,
+        principal: &Principal,
+        actor: &AdmittedActor,
+        world_id: &str,
+        binding_id: Option<&str>,
+    ) -> CoreResult<KnowledgeReadScope> {
+        self.verify_principal(principal)?;
+        ActorKnowledgeViewService::new(self.inner.pool.clone())
+            .actor_view_scope(principal.creator_id(), actor, world_id, binding_id)
+            .await
+    }
+
+    /// The `ActorView` read selection for the admitted Creator over one owned
+    /// World — the Creator-context preview (model/run/inspect) that never
+    /// reviews owned private facts on another identity's behalf.
+    ///
+    /// # Errors
+    /// As [`Self::actor_view_read_scope`].
+    pub async fn creator_view_read_scope(
+        &self,
+        principal: &Principal,
+        world_id: &str,
+    ) -> CoreResult<KnowledgeReadScope> {
+        self.actor_view_read_scope(
+            principal,
+            &AdmittedActor::Creator {
+                creator_id: principal.creator_id().to_string(),
+            },
+            world_id,
+            None,
+        )
+        .await
+    }
+
     /// Admit an operation-scoped **ActorView** knowledge context (durable
     /// §4.1): the exact admitted Creator/Character holder plus the authorized
     /// containers, minted only after the principal, stored-owner and admitted
@@ -732,21 +828,8 @@ impl CoreService {
     ) -> CoreResult<AdmittedKnowledgeContext> {
         self.verify_principal(principal)?;
         let creator_id = principal.creator_id();
-        require_owned_world(&self.inner.pool, creator_id, &world_id).await?;
-        let (containers, character_ids) =
-            management_containers(&self.inner.pool, creator_id, &world_id).await?;
-        let mut authorized_holders = vec![
-            nexus_local_db::require_creator_holder(&self.inner.pool, creator_id)
-                .await
-                .map_err(actor_db_err)?,
-        ];
-        for character_id in &character_ids {
-            authorized_holders.push(
-                nexus_local_db::require_character_holder(&self.inner.pool, creator_id, character_id)
-                    .await
-                    .map_err(actor_db_err)?,
-            );
-        }
+        let (scope, character_ids) =
+            management_read_scope(&self.inner.pool, creator_id, &world_id).await?;
         let _leases = self
             .inner
             .character_fences
@@ -758,7 +841,7 @@ impl CoreService {
                 world_revision: revisions.world,
                 character_revision: None,
             },
-            scope: KnowledgeReadScope::creator_management(containers, authorized_holders),
+            scope,
             activity: None,
             _leases,
         })
@@ -941,7 +1024,29 @@ impl CoreService {
     ) -> CoreResult<ActorKnowledgePage> {
         self.verify_principal(principal)?;
         let views = ActorKnowledgeViewService::new(self.inner.pool.clone());
-        views.view(principal.creator_id(), actor, query).await
+        match actor {
+            // Durable §5.1: the Creator World-selected KnowledgeView is the
+            // **management review** — owned containers plus the
+            // known-governance holder set, so the authorized Creator can
+            // review owned private facts. Server-selected from the
+            // authenticated entry point's actor kind, never a request flag.
+            AdmittedActor::Creator { .. } => {
+                let (selection, _) = management_read_scope(
+                    &self.inner.pool,
+                    principal.creator_id(),
+                    &query.world_id,
+                )
+                .await?;
+                views
+                    .view_in_scope(&selection, query.cursor, query.limit)
+                    .await
+            }
+            // A Character actor_ref stays the strict holder-filtered preview:
+            // management review is never inherited by a Character view.
+            AdmittedActor::Character { .. } => {
+                views.view(principal.creator_id(), actor, query).await
+            }
+        }
     }
 
     /// List one owned Character's knowledge entries without a World filter.

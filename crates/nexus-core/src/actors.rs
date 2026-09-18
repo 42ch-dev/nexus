@@ -26,7 +26,10 @@ use nexus_contracts::generated::daemon_api::characters::{
     character_binding_detail::{
         CharacterBindingDetail, NexusActorWorldBinding as DetailBindingWire,
     },
-    character_detail::{CharacterDetail, NexusCharacter as DetailCharacterWire},
+    character_detail::{
+        CharacterDetail, NexusCharacter as DetailCharacterWire,
+        NexusCharacterHolderEntryId as DetailCharacterHolderId,
+    },
     create_character_request::CreateCharacterRequest,
     create_character_response::{
         CreateCharacterResponse, NexusActorWorldBinding as CreatedBindingWire,
@@ -161,8 +164,22 @@ where
 }
 
 pub fn nexus_character_from_record(record: &CharacterRecord) -> CoreResult<DetailCharacterWire> {
+    nexus_character_with_holder(record, None)
+}
+
+/// Identity projection with the read-only `holder_entry_id` member (durable
+/// §7): the holder is service-resolved from the registry and never accepted
+/// from a request, so it is a projection input rather than a stored column on
+/// [`CharacterRecord`].
+pub fn nexus_character_with_holder(
+    record: &CharacterRecord,
+    holder_entry_id: Option<String>,
+) -> CoreResult<DetailCharacterWire> {
     let persona: serde_json::Map<String, serde_json::Value> =
         serde_json::from_str(&record.persona_json).map_err(wire_err)?;
+    let holder_entry_id: Option<DetailCharacterHolderId> = holder_entry_id
+        .map(|id| DetailCharacterHolderId::try_from(id).map_err(wire_err))
+        .transpose()?;
     build_wire(
         DetailCharacterWire::builder()
             .schema_version(1u64)
@@ -172,6 +189,7 @@ pub fn nexus_character_from_record(record: &CharacterRecord) -> CoreResult<Detai
             .status(record.status.as_str())
             .revision(record.revision)
             .persona(persona)
+            .holder_entry_id(holder_entry_id)
             .image_uri(parse_optional(record.image_uri.as_deref())?)
             .created_at(parse_rfc3339(&record.created_at)?)
             .updated_at(parse_rfc3339(&record.updated_at)?)
@@ -405,7 +423,10 @@ impl CoreService {
         .map_err(actor_db_err)?;
         lease.set_epoch(record.lifecycle_epoch);
         let character: nexus_contracts::generated::core::core_character_transition_response::NexusCharacter =
-            map_wire_one(nexus_character_from_record(&record)?)?;
+            map_wire_one(
+                self.character_identity_wire(principal.creator_id(), &record)
+                    .await?,
+            )?;
         CoreCharacterTransitionResponse::builder()
             .character(character)
             .try_into()
@@ -660,7 +681,9 @@ impl CoreService {
         )
         .await
         .map_err(actor_db_err)?;
-        let character: DetailCharacterWire = nexus_character_from_record(&created.character)?;
+        let character: DetailCharacterWire = self
+            .character_identity_wire(principal.creator_id(), &created.character)
+            .await?;
         let binding: DetailBindingWire = binding_wire_from_record(&created.binding)?;
         let character: CreatedCharacterWire = map_wire_one(character)?;
         let binding: CreatedBindingWire = map_wire_one(binding)?;
@@ -720,7 +743,7 @@ impl CoreService {
         let row =
             require_character_row(&self.inner.pool, principal.creator_id(), &character_id).await?;
         CharacterDetail::builder()
-            .character(nexus_character_from_record(&row)?)
+            .character(self.character_identity_wire(principal.creator_id(), &row).await?)
             .try_into()
             .map_err(wire_err)
     }
@@ -770,9 +793,30 @@ impl CoreService {
         .await
         .map_err(actor_db_err)?;
         CharacterDetail::builder()
-            .character(nexus_character_from_record(&record)?)
+            .character(self.character_identity_wire(principal.creator_id(), &record).await?)
             .try_into()
             .map_err(wire_err)
+    }
+
+    /// The **identity detail** projection of one stored Character (durable §7):
+    /// the same wire shape as [`nexus_character_from_record`] plus the
+    /// read-only `holder_entry_id`, resolved from the holder registry. The
+    /// registry is only ever **read** here — a missing row fails closed as
+    /// `holder_state_invalid` rather than provisioning one (§2.2), and there is
+    /// no holder CRUD route behind this member.
+    async fn character_identity_wire(
+        &self,
+        creator_id: &str,
+        record: &CharacterRecord,
+    ) -> CoreResult<DetailCharacterWire> {
+        let holder = nexus_local_db::require_character_holder(
+            &self.inner.pool,
+            creator_id,
+            &record.character_id,
+        )
+        .await
+        .map_err(actor_db_err)?;
+        nexus_character_with_holder(record, Some(holder))
     }
 
     /// Add one active `ActorWorldBinding` behind the shared activity lease.

@@ -758,7 +758,14 @@ impl CoreService {
         // `MomentInspectRequest` carries no such knob, so the cap stays
         // unset — MCA's `hop_budget_tokens` then runs the hop pass
         // depth+cycle-only, identical to a default CLI invocation.
-        let hop_edges = NexusAdapter::new(pool.clone())
+        // Durable §4.2/§5.1: the inspect packet is a **preview** input, so it
+        // reads the owned World under the admitted Creator's ActorView — the
+        // exact Creator holder plus the owned containers — never the Creator
+        // management review, and never an unscoped adapter.
+        let view_scope = self
+            .creator_view_read_scope(principal, req.world_id.as_str())
+            .await?;
+        let hop_edges = NexusAdapter::new(pool.clone(), view_scope.clone())
             .list_hop_edges_for_world(req.world_id.as_str())
             .await
             .ok()
@@ -775,7 +782,7 @@ impl CoreService {
         // plain `assemble_moment` (AC-I1b). Per-domain failures degrade to
         // omitted sections, they never reject.
         let narrative = SqliteNarrativeGateway::new(pool.clone());
-        let kb = SpokeBackedKbStore::new(pool.clone());
+        let kb = SpokeBackedKbStore::new(pool.clone(), view_scope.clone());
         let knowledge = SqliteKnowledgeStore::new(pool.clone());
         let directives = ReadOnlyDirectiveStore::new(pool.clone());
         let ctx =

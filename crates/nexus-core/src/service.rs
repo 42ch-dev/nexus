@@ -401,7 +401,32 @@ impl CoreService {
                 );
             }
         }
-        patch::patch_entity(&self.inner.pool, principal.creator_id(), &world_id, request).await
+        // Retained route texture (daemon world-KB family): a foreign World is
+        // refused by the typed ownership guard as 403 before any other
+        // admission runs, so adding the read selection below cannot turn that
+        // answer into an existence-revealing 404.
+        crate::world_kb::guards::require_world_owner(
+            &self.inner.pool,
+            &world_id,
+            principal.creator_id(),
+        )
+        .await?;
+        // Durable §5.1: World-KB authoring is Creator **management** authoring
+        // on owned containers, so it reads and writes under the management
+        // selection (owned World/Character/binding containers plus the
+        // known-governance holder set) — server-chosen from stored state, never
+        // from the request.
+        let read_scope = self
+            .creator_management_read_scope(principal, &world_id)
+            .await?;
+        patch::patch_entity(
+            &self.inner.pool,
+            principal.creator_id(),
+            &world_id,
+            &read_scope,
+            request,
+        )
+        .await
     }
 
     /// List pending World KB candidates with keyset pagination.

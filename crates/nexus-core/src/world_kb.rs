@@ -15,7 +15,7 @@ use nexus_contracts::{
 use nexus_knowledge::world_kb::knowledge_entry::{
     KnowledgeAudience, KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeGovernance,
 };
-use nexus_knowledge::world_kb::store::KbStoreError;
+use nexus_knowledge::world_kb::store::{KbStoreError, KnowledgeReadScope};
 use nexus_knowledge::world_kb::validation::{
     validate_body, validate_canonical_name, ValidationMode,
 };
@@ -510,6 +510,7 @@ pub mod patch {
         validate_body, validate_canonical_name, validation_summary, wire_cast, AuthoredAudience,
         AudienceContainer, BlockType, CoreError, CoreResult, HashMap, KbStoreError,
         KnowledgeAudience, KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeGovernance,
+        KnowledgeReadScope,
         NexusWorldKbEntityPatch,
         NexusWorldKbEntityPatchAudience, NexusWorldKbEntityPatchModulesKey,
         NexusWorldKbEntityPatchModulesValue, SpokeKnowledgeEntry, SpokeReject, SpokeRejectCode,
@@ -521,6 +522,7 @@ pub mod patch {
         pool: &SqlitePool,
         creator_id: &str,
         world_id: &str,
+        read_scope: &KnowledgeReadScope,
         req: WorldKbPatchEntityRequest,
     ) -> CoreResult<WorldKbPatchEntityResponse> {
         let mut tx = nexus_local_db::begin_immediate(pool)
@@ -532,7 +534,8 @@ pub mod patch {
 
         if kb_opt.is_none() {
             if req.expected_version == 0 {
-                return patch_entity_create_in_tx(pool, tx, world_id, creator_id, &req).await;
+                return patch_entity_create_in_tx(pool, tx, world_id, creator_id, read_scope, &req)
+                    .await;
             }
             return Err(CoreError::world_kb_conflict(
                 0,
@@ -621,7 +624,8 @@ pub mod patch {
         }
         let spoke_entry = build_spoke_entry(&post_patch);
         let put_result =
-            put_knowledge_entry_in_tx(pool, &mut tx, spoke_entry, Some(current_version)).await;
+            put_knowledge_entry_in_tx(pool, read_scope, &mut tx, spoke_entry, Some(current_version))
+                .await;
         let persisted = match map_put_response(put_result, &req.entity_id, &mut tx).await {
             Ok(entry) => entry,
             Err(e) => {
@@ -640,6 +644,14 @@ pub mod patch {
         )
         .await
         .map_err(actor_db_err)?;
+        // The response projects the pair this transaction just authored —
+        // `None` (omitted audience) preserves the stored pair, which the read
+        // row already carries, so only an explicit audience updates it.
+        let mut persisted = persisted;
+        if let Some(governance) = governance.as_ref() {
+            persisted.holder_entry_id = governance.holder_entry_id.clone();
+            persisted.disclosure = governance.disclosure.clone();
+        }
         let new_version = persisted.revision.unwrap_or(0);
         let response = WorldKbPatchEntityResponse {
             entity: wire_cast(project_entity(&persisted)),
@@ -747,6 +759,7 @@ pub mod patch {
         mut tx: sqlx::Transaction<'_, Sqlite>,
         world_id: &str,
         creator_id: &str,
+        read_scope: &KnowledgeReadScope,
         req: &WorldKbPatchEntityRequest,
     ) -> CoreResult<WorldKbPatchEntityResponse> {
         guards::require_world_owner(&mut *tx, world_id, creator_id).await?;
@@ -817,7 +830,7 @@ pub mod patch {
         .map_err(actor_db_err)?;
 
         let spoke_entry = build_spoke_entry(&fresh);
-        let put_result = put_knowledge_entry_in_tx(pool, &mut tx, spoke_entry, None).await;
+        let put_result = put_knowledge_entry_in_tx(pool, read_scope, &mut tx, spoke_entry, None).await;
         let persisted = match map_put_response(put_result, &req.entity_id, &mut tx).await {
             Ok(entry) => entry,
             Err(e) => {
@@ -838,6 +851,14 @@ pub mod patch {
         )
         .await
         .map_err(actor_db_err)?;
+        // The response projects the pair this transaction just authored —
+        // `None` (omitted audience) preserves the stored pair, which the read
+        // row already carries, so only an explicit audience updates it.
+        let mut persisted = persisted;
+        if let Some(governance) = governance.as_ref() {
+            persisted.holder_entry_id = governance.holder_entry_id.clone();
+            persisted.disclosure = governance.disclosure.clone();
+        }
         let new_version = persisted.revision.unwrap_or(0);
         let response = WorldKbPatchEntityResponse {
             entity: wire_cast(project_entity(&persisted)),
@@ -1099,8 +1120,21 @@ impl CoreService {
                 resource: "world_kb_promote: read-only core access".to_string(),
             });
         }
-        promote::promote_candidate(&self.inner.pool, principal.creator_id(), &world_id, request)
-            .await
+        // Retained route texture: the typed ownership guard answers 403 for a
+        // foreign World before the read selection can answer 404.
+        guards::require_world_owner(&self.inner.pool, &world_id, principal.creator_id())
+            .await?;
+        let read_scope = self
+            .creator_management_read_scope(principal, &world_id)
+            .await?;
+        promote::promote_candidate(
+            &self.inner.pool,
+            principal.creator_id(),
+            &world_id,
+            &read_scope,
+            request,
+        )
+        .await
     }
 
     /// Add/update/remove a typed relationship between two World KB entities.
@@ -1124,10 +1158,18 @@ impl CoreService {
                 resource: "world_kb_relationship: read-only core access".to_string(),
             });
         }
+        // Retained route texture: the typed ownership guard answers 403 for a
+        // foreign World before the read selection can answer 404.
+        guards::require_world_owner(&self.inner.pool, &world_id, principal.creator_id())
+            .await?;
+        let read_scope = self
+            .creator_management_read_scope(principal, &world_id)
+            .await?;
         relationship::patch_relationship(
             &self.inner.pool,
             principal.creator_id(),
             &world_id,
+            &read_scope,
             request,
         )
         .await
@@ -1181,7 +1223,7 @@ pub mod promote {
     use super::{
         db_err, guards, local_db_err, parse_block_type, project_entity, store_err,
         validation_summary, wire_cast, CoreError, CoreResult, KnowledgeEntryBody,
-        KnowledgeEntryRecord, SpokeKnowledgeEntry, ValidationMode,
+        KnowledgeEntryRecord, KnowledgeReadScope, SpokeKnowledgeEntry, ValidationMode,
     };
     use crate::error::CoreError as RootCoreError;
 
@@ -1189,6 +1231,7 @@ pub mod promote {
         pool: &sqlx::SqlitePool,
         creator_id: &str,
         world_id: &str,
+        read_scope: &KnowledgeReadScope,
         req: WorldKbPromoteCandidateRequest,
     ) -> CoreResult<WorldKbPromoteCandidateResponse> {
         guards::require_world_owner(pool, world_id, creator_id).await?;
@@ -1240,7 +1283,7 @@ pub mod promote {
         }
 
         match req.action.as_str() {
-            "adopt" => promote_adopt(pool, world_id, &candidate, &req).await,
+            "adopt" => promote_adopt(pool, world_id, read_scope, &candidate, &req).await,
             "reject" => promote_reject(pool, &candidate, &req).await,
             "merge" => promote_merge(pool, world_id, &candidate, &req).await,
             other => Err(CoreError::InvalidInput {
@@ -1343,6 +1386,7 @@ pub mod promote {
     async fn promote_adopt(
         pool: &sqlx::SqlitePool,
         world_id: &str,
+        read_scope: &KnowledgeReadScope,
         candidate: &nexus_local_db::kb_extract_job::KbExtractPromotion,
         req: &WorldKbPromoteCandidateRequest,
     ) -> CoreResult<WorldKbPromoteCandidateResponse> {
@@ -1374,7 +1418,8 @@ pub mod promote {
 
         let tx = pool.begin().await.map_err(|e| db_err(&e))?;
         let tx_cell = Arc::new(Mutex::new(Some(tx)));
-        let adapter = NexusAdapter::new(pool.clone()).with_tx_cell(Arc::clone(&tx_cell));
+        let adapter = NexusAdapter::new(pool.clone(), read_scope.clone())
+            .with_tx_cell(Arc::clone(&tx_cell));
 
         let spoke_req = build_spoke_promote_request(&kb);
         let result = adapter
@@ -2134,22 +2179,25 @@ pub mod relationship {
 
     use super::{
         db_err, guards, local_db_err, validation_summary, wire_cast, CoreError, CoreResult,
+        KnowledgeReadScope,
     };
 
     pub async fn patch_relationship(
         pool: &sqlx::SqlitePool,
         creator_id: &str,
         world_id: &str,
+        read_scope: &KnowledgeReadScope,
         req: WorldKbPatchRelationshipRequest,
     ) -> CoreResult<WorldKbPatchRelationshipResponse> {
         guards::require_world_owner(pool, world_id, creator_id).await?;
 
         match req.action.as_str() {
-            "add" => patch_relationship_add(pool, world_id, req.relationship).await,
+            "add" => patch_relationship_add(pool, world_id, read_scope, req.relationship).await,
             "update" => {
                 patch_relationship_update(
                     pool,
                     world_id,
+                    read_scope,
                     req.relationship_id.as_deref(),
                     req.expected_version,
                     req.relationship,
@@ -2175,6 +2223,7 @@ pub mod relationship {
     async fn patch_relationship_add(
         pool: &sqlx::SqlitePool,
         world_id: &str,
+        read_scope: &KnowledgeReadScope,
         input: Option<NexusWorldKbRelationshipInput>,
     ) -> CoreResult<WorldKbPatchRelationshipResponse> {
         let input = input.ok_or_else(|| CoreError::InvalidInput {
@@ -2203,7 +2252,7 @@ pub mod relationship {
             Some(SOURCE_MANUAL),
         );
         let spoke_req = build_spoke_relate_request(&relation);
-        let adapter = NexusAdapter::new(pool.clone());
+        let adapter = NexusAdapter::new(pool.clone(), read_scope.clone());
         let result = adapter
             .with_bound_tx(|| orchestrate_relate(&adapter, spoke_req))
             .await;
@@ -2221,6 +2270,7 @@ pub mod relationship {
     async fn patch_relationship_update(
         pool: &sqlx::SqlitePool,
         world_id: &str,
+        read_scope: &KnowledgeReadScope,
         relationship_id: Option<&str>,
         expected_version: Option<u64>,
         input: Option<NexusWorldKbRelationshipInput>,
@@ -2326,7 +2376,7 @@ pub mod relationship {
         }
 
         let spoke_req = build_spoke_relate_request(&relation);
-        let adapter = NexusAdapter::new(pool.clone());
+        let adapter = NexusAdapter::new(pool.clone(), read_scope.clone());
         let result = adapter
             .with_bound_tx(|| orchestrate_relate(&adapter, spoke_req))
             .await;

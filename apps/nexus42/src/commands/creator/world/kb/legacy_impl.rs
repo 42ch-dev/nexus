@@ -252,8 +252,12 @@ pub async fn run(cmd: WorldKbCommand, config: &CliConfig) -> Result<()> {
                 aliases,
                 block_type,
                 modules,
+                audience,
+                audience_character,
                 json,
             } => {
+                let audience =
+                    service::audience_wire(audience.as_deref(), audience_character.as_deref())?;
                 service::run_entity_patch(
                     config,
                     world_id,
@@ -264,6 +268,7 @@ pub async fn run(cmd: WorldKbCommand, config: &CliConfig) -> Result<()> {
                     aliases,
                     block_type,
                     modules,
+                    audience,
                     json,
                 )
                 .await
