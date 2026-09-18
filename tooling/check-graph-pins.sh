@@ -9,7 +9,7 @@
 #   default (-p nexus-daemon-runtime / -p nexus42):
 #     spoke-connect   ABSENT
 #     libp2p          ABSENT
-#     spoke-operations exactly one 0.13.0   (via nexus-spoke-adapter, prior art)
+#     spoke-operations exactly one 0.13.1   (via nexus-spoke-adapter, prior art)
 #     rmcp            ABSENT   (ACP 2.1 core no longer pulls rmcp; the optional
 #                               server/transport-io edge stays feature-gated)
 #     agent-client-protocol exactly one 2.1.0  (via nexus-acp-host normal edge)
@@ -17,14 +17,14 @@
 #   -F connect-client (both crates):
 #     spoke-connect   exactly one 0.13.x
 #     libp2p          exactly one 0.56.x    (spoke-connect base dep)
-#     spoke-operations exactly one 0.13.0
+#     spoke-operations exactly one 0.13.1
 #     rmcp            exactly one 3.3.0
 #     agent-client-protocol exactly one 2.1.0
 #   -F embedded-mcp (both crates):
 #     rmcp            exactly one 3.3.0
 #     agent-client-protocol exactly one 2.1.0
 #     spoke-connect   exactly one 0.13.x
-#     spoke-operations exactly one 0.13.0
+#     spoke-operations exactly one 0.13.1
 #     libp2p          exactly one 0.56.x
 #   -F connect-client,connect-host (nexus42 only; nexus-daemon-runtime has no
 #     connect-host feature):
@@ -32,7 +32,7 @@
 #     rmcp            exactly one 3.3.0
 #     agent-client-protocol exactly one 2.1.0
 #     spoke-connect   exactly one 0.13.x
-#     spoke-operations exactly one 0.13.0
+#     spoke-operations exactly one 0.13.1
 #
 # DEV-DEP CAVEAT (AR-74): `cargo tree -p <crate>` includes dev-dependencies
 # by default. `--edges normal` drops them — the pins below therefore verify
@@ -131,7 +131,7 @@ assert_exactly_one() {
 for crate in nexus-daemon-runtime nexus42; do
   assert_empty "$crate" "" spoke-connect
   assert_empty "$crate" "" libp2p
-  assert_exactly_one "$crate" "" spoke-operations "0.13.0"
+  assert_exactly_one "$crate" "" spoke-operations "0.13.1"
   assert_empty "$crate" "" rmcp
   # ACP 2.1.0 rides the unconditional nexus-acp-host normal edge in BOTH
   # shipped graphs (daemon -> nexus-acp-host / nexus-agent-host). Exactly one
@@ -147,7 +147,7 @@ done
 for crate in nexus-daemon-runtime nexus42; do
   assert_exactly_one "$crate" "--features connect-client" spoke-connect "0.13.*"
   assert_exactly_one "$crate" "--features connect-client" libp2p "0.56.*"
-  assert_exactly_one "$crate" "--features connect-client" spoke-operations "0.13.0"
+  assert_exactly_one "$crate" "--features connect-client" spoke-operations "0.13.1"
   assert_exactly_one "$crate" "--features connect-client" rmcp "3.3.0"
   assert_exactly_one "$crate" "--features connect-client" agent-client-protocol "2.1.0"
 done
@@ -160,7 +160,7 @@ for crate in nexus-daemon-runtime nexus42; do
   # spoke/libp2p pins as the connect-client rows apply (verified present via
   # `cargo tree -i` on both crates).
   assert_exactly_one "$crate" "--features embedded-mcp" spoke-connect "0.13.*"
-  assert_exactly_one "$crate" "--features embedded-mcp" spoke-operations "0.13.0"
+  assert_exactly_one "$crate" "--features embedded-mcp" spoke-operations "0.13.1"
   assert_exactly_one "$crate" "--features embedded-mcp" libp2p "0.56.*"
 done
 
@@ -169,7 +169,7 @@ assert_exactly_one nexus42 "--features connect-client,connect-host" libp2p "0.56
 assert_exactly_one nexus42 "--features connect-client,connect-host" rmcp "3.3.0"
 assert_exactly_one nexus42 "--features connect-client,connect-host" agent-client-protocol "2.1.0"
 assert_exactly_one nexus42 "--features connect-client,connect-host" spoke-connect "0.13.*"
-assert_exactly_one nexus42 "--features connect-client,connect-host" spoke-operations "0.13.0"
+assert_exactly_one nexus42 "--features connect-client,connect-host" spoke-operations "0.13.1"
 
 # --- graph-flow feature evidence (no postgres / no rig) ------------------------
 # `-f "{p} feats=[{f}]"` prints the resolved feature set on the inverted

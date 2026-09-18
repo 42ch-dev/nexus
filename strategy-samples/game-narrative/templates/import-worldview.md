@@ -94,7 +94,7 @@ Respond with ONLY a JSON object (no markdown code fences):
 }
 ```
 
-## SDK-side import pattern (N-C1, @42ch/spoke-connect@0.13.0)
+## SDK-side import pattern (N-C1, @42ch/spoke-connect@0.13.1)
 
 The partner's backend persists these drafts — the preset itself does not write:
 

@@ -53,7 +53,7 @@
     "typescript": "7.0.2"
   },
   "dependencies": {
-    "@42ch/spoke-operations": "0.13.0",
-    "@42ch/spoke-schemas": "0.13.0"
+    "@42ch/spoke-operations": "0.13.1",
+    "@42ch/spoke-schemas": "0.13.1"
   }
 }

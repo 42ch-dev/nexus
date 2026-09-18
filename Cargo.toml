@@ -180,7 +180,11 @@ regress = "0.12"
 # and the invoke handler's SERVED_OPS gate refuses `tools.*` pre-routing
 # (`op_unsupported`, double defense). libp2p stays =0.56.0 (upstream same);
 # the default daemon graph stays libp2p-free.
-# V1.191 P1 T1: 0.11.1 → 0.13.0 — lockstep across all three crates.
+# V1.191 P1: 0.11.1 → 0.13.1 — lockstep across all three crates. T1 pinned
+# 0.13.0; the P1 custodian checkpoint re-pinned to the 0.13.1 patch release
+# before any generated artifact landed, so 0.13.0 was never a released state.
+# The 0.13.x delta is the same additive-optional holder surface (no shape
+# change in `KnowledgeEntry.owner` / `.disclosure` / `Scope.viewpoint`).
 # schemas: additive-optional `KnowledgeEntry.owner` (holder KnowledgeEntry
 # `entry_id`; absent = ownership unspecified), `KnowledgeEntry.disclosure`
 # (core knows only `owner-private`) and `Scope.viewpoint` (reader-context
@@ -201,8 +205,8 @@ regress = "0.12"
 # `connect-client`).
 # libp2p stays =0.56.0 (upstream same); the default daemon graph stays
 # libp2p-free, and `TimelineEvent` gains no governance field.
-spoke-schemas = "=0.13.0"
-spoke-operations = "=0.13.0"
+spoke-schemas = "=0.13.1"
+spoke-operations = "=0.13.1"
 # V1.148 P3 N-C0 (DF-72): spoke-connect — Connect Host facade (signed
 # hello, allowlist, capability-token gate). V1.153 P0: 0.8.2 → 0.9.1
 # (dial-bound hello + envelope-auth v2 are internal to spoke-connect;
@@ -217,7 +221,7 @@ spoke-operations = "=0.13.0"
 # spoke-connect removed the `mdns` feature in 0.9.2 (not present in 0.10.0);
 # hickory/libp2p-mdns stay lockfile-only via libp2p 0.56 optional deps,
 # never compiled.
-spoke-connect = "=0.13.0"
+spoke-connect = "=0.13.1"
 # V1.148 P3 N-C0: libp2p 0.56 — identity/PeerId/Multiaddr types for the
 # `nexus42 connect` CLI (ed25519 keypair + protobuf key serialization only).
 libp2p = { version = "=0.56.0", features = ["ed25519"] }
