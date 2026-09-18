@@ -110,7 +110,7 @@ async-trait = { workspace = true, optional = true }
 #            workspace-authority lease. Unix-only, so it is declared under
 #            `cfg(unix)` and its `dep:nix` edge only resolves there.
 hex = { version = "0.4", optional = true }
-base64 = { version = "0.22", optional = true }
+base64 = { version = "0.23", optional = true }
 sha2 = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true

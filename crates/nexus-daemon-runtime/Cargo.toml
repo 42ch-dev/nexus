@@ -79,7 +79,7 @@ tokio-stream = { workspace = true }
 regex = { workspace = true }
 serde_yaml = { workspace = true }
 sha2 = { workspace = true }
-base64 = "0.22"
+base64 = "0.23"
 libc = "0.2"
 # V1.153 P2 (DF-73): the embedded `apps/web` SPA is compile-time-gated behind
 # the `web-embed` feature (default ON; OFF for the slim `nexus-runtime`
