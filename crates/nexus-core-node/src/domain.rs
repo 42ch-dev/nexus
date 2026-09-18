@@ -234,12 +234,11 @@ impl NativeCore {
         request_json: Buffer,
     ) -> Result<Buffer> {
         let request: PackExportRequest = decode(request_json, "request")?;
-        // The explicit author intent to include owned known-private material
-        // (`include_owned_private`) is a frozen schema input for the custodian
-        // checkpoint; the generated request type does not carry it yet, so this
-        // bridge serves the shared-only admitted export.
+        // The explicit author intent for owned known-private material travels
+        // with the request (v1.191 P1 T10, holder-governance.md §6).
+        let include_owned_private = request.include_owned_private;
         self.json_call(principal_handle, async move |core, principal| {
-            core.export_world_pack(&principal, world_id, request, false)
+            core.export_world_pack(&principal, world_id, request, include_owned_private)
                 .await
         })
         .await
@@ -247,6 +246,11 @@ impl NativeCore {
 
     /// `POST /v1/daemon/worlds/{world_id}/kb/pack/import` (conflict policy,
     /// dry-run preview, id remapping and provenance stay core-owned).
+    ///
+    /// The frozen arms (v1.191 P1 T10) are dispatched by the core authority:
+    /// `review_import` alone reads one import batch's quarantined atoms back,
+    /// and the import arm adopts foreign-governed atoms only through its
+    /// `holder_map`.
     #[napi]
     pub async fn import_world_pack(
         &self,
@@ -255,12 +259,8 @@ impl NativeCore {
         request_json: Buffer,
     ) -> Result<Buffer> {
         let request: PackImportRequest = decode(request_json, "request")?;
-        // The explicit identity-safety arms (`holder_map` adoption mappings and
-        // the read-only `review_import` batch selector) are frozen schema inputs
-        // for the custodian checkpoint; the generated request type does not carry
-        // them yet, so this bridge serves the default import arm.
         self.json_call(principal_handle, async move |core, principal| {
-            core.import_world_pack(&principal, world_id, request, Vec::new())
+            core.dispatch_world_pack_import(&principal, world_id, request)
                 .await
         })
         .await

@@ -76,6 +76,9 @@ pub async fn import_pack(
     let serde_json::Value::Object(pack) = value else {
         unreachable!("build_pack always produces a JSON object")
     };
+    // The CLI carries its adoptions as parsed `HolderMapping`s (the bridge's
+    // out-of-band argument), so the retained wire literal stays on the import
+    // arm: no `review_import` selector, no duplicate wire mappings.
     let request = PackImportRequest {
         pack,
         conflict: match conflict {
@@ -84,6 +87,8 @@ pub async fn import_pack(
             ConflictPolicy::Overwrite => PackImportRequestConflict::Overwrite,
         },
         include_anchors,
+        holder_map: Vec::new(),
+        review_import: None,
     };
     nexus_core::CoreService::import_legacy_world_pack(
         pool,

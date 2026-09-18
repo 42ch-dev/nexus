@@ -30,7 +30,10 @@ use crate::{CoreAccess, CoreError, CoreResult, CoreService, Principal};
 use nexus_contracts::daemon_api::kb::{
     PackExportRequest, PackExportResponse, PackImportRequest, PackImportRequestConflict,
     PackImportResponse, PackImportResponseDetailsItem, PackImportResponseDetailsItemKind,
-    PackImportResponseDetailsItemOutcome, PackImportResponseEntries, PackImportResponseRelations,
+    PackImportResponseDetailsItemOutcome, PackImportResponseEntries,
+    PackImportResponseQuarantinedItem, PackImportResponseQuarantinedItemReason,
+    PackImportResponseRelations, PackImportResponseReview, PackImportResponseReviewAtomsItem,
+    PackImportResponseReviewAtomsItemReason,
 };
 use nexus_local_db::kb_relationships::list_relationships_for_world;
 use nexus_spoke_adapter::conversion::{kb_relationship_row_to_spoke, knowledge_record_to_spoke};
@@ -62,6 +65,11 @@ impl CoreService {
                 resource: "world_pack_import: read-only core access".to_string(),
             });
         }
+        // Retained pack-family envelope (`world_kb::guards`): the typed
+        // ownership guard runs before the selection is derived, so a foreign
+        // World keeps the cross-author 403 and only a missing World is the
+        // `world {id}` 404 — exactly as the export arm renders it.
+        guards::require_world_owner(&self.inner.pool, &world_id, principal.creator_id()).await?;
         // Durable §5.1: pack import is Creator management authoring on the
         // owned World, so the orchestrator persists under the management
         // selection (server-chosen from stored ownership + the holder
@@ -82,6 +90,53 @@ impl CoreService {
         Ok(import_summary_to_response(summary))
     }
 
+    /// Dispatch one decoded wire pack-import request onto its frozen arm
+    /// (v1.191 P1 T10).
+    ///
+    /// The frozen request carries two mutually exclusive arms: `review_import`
+    /// alone selects the bounded, read-only, owner-only review of one batch,
+    /// otherwise the request is the import arm under the explicit `holder_map`
+    /// adoptions it carries. Mixing the review selector with import input is
+    /// refused as invalid input, so no boundary silently drops caller input.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::InvalidInput`] for a mixed-arms request or an
+    /// unparsable holder-map selector, and forwards the failure of the selected
+    /// arm (principal, ownership, admission, validation or storage).
+    pub async fn dispatch_world_pack_import(
+        &self,
+        principal: &Principal,
+        world_id: String,
+        request: PackImportRequest,
+    ) -> CoreResult<PackImportResponse> {
+        if let Some(import_batch_id) = request.review_import.as_deref() {
+            if !request.pack.is_empty() || !request.holder_map.is_empty() || request.include_anchors {
+                return Err(CoreError::InvalidInput {
+                    field: "review_import".to_string(),
+                    reason: "the review arm is exclusive: drop pack, holder_map and include_anchors"
+                        .to_string(),
+                });
+            }
+            let review = self
+                .review_world_pack_import(principal, world_id, import_batch_id.to_string())
+                .await?;
+            return review_to_response(review);
+        }
+        let holder_map = request
+            .holder_map
+            .iter()
+            .map(|item| {
+                Ok(HolderMapping {
+                    foreign_holder_id: item.foreign_id.to_string(),
+                    selector: HolderMappingSelector::parse(&item.selector)?,
+                })
+            })
+            .collect::<CoreResult<Vec<_>>>()?;
+        self.import_world_pack(principal, world_id, request, holder_map)
+            .await
+    }
+
     /// Evaluate import outcomes without writing atoms, for the retained CLI dry-run.
     ///
     /// # Errors
@@ -95,6 +150,9 @@ impl CoreService {
         holder_map: Vec<HolderMapping>,
     ) -> CoreResult<PackImportResponse> {
         self.verify_principal(principal)?;
+        // Same retained envelope as the import arm: ownership refusal first,
+        // then the selection. A dry run never renders a different refusal.
+        guards::require_world_owner(&self.inner.pool, &world_id, principal.creator_id()).await?;
         let (read_scope, _) =
             crate::actor_knowledge::management_read_scope(&self.inner.pool, principal.creator_id(), &world_id)
                 .await?;
@@ -2171,12 +2229,12 @@ fn atom_counts_to_relations(counts: AtomCounts) -> PackImportResponseRelations {
 
 /// Project one run's complete report onto the frozen wire response.
 ///
-/// The response's structured quarantine arm (`quarantined`: ids, reasons,
-/// original governance) and the review arm are frozen schema inputs for the T10
-/// custodian checkpoint; until the generated response carries them, the wire
-/// arm reports each quarantined atom through the retained `details` list (as a
-/// `Rejected` entry naming its reason) and the counts, and the local composition
-/// reads the full structured report from [`ImportSummary`].
+/// The wire carries both the structured quarantine arm (`quarantined`: ids,
+/// reasons, original governance — never the atom's JSON, which stays in the
+/// local review arm) and the review arm (`review`, populated by
+/// [`review_to_response`]); each quarantined atom is *also* reported through
+/// the retained `details` list as a `Rejected` entry, so the retained counts
+/// stay complete for existing consumers.
 fn import_summary_to_response(summary: ImportSummary) -> PackImportResponse {
     PackImportResponse {
         entries: atom_counts_to_entries(summary.entries),
@@ -2200,6 +2258,90 @@ fn import_summary_to_response(summary: ImportSummary) -> PackImportResponse {
                 reason: detail.reason,
             })
             .collect(),
+        quarantined: summary
+            .quarantined
+            .into_iter()
+            .map(|atom| PackImportResponseQuarantinedItem {
+                quarantine_id: atom.quarantine_id,
+                batch_id: atom.import_batch_id,
+                entry_id: atom.entry_id,
+                reason: quarantine_reason_to_wire(atom.reason),
+                original_owner: atom.original_owner,
+                original_disclosure: atom.original_disclosure,
+            })
+            .collect(),
+        review: None,
+    }
+}
+
+/// Project one bounded quarantine review onto the frozen wire response.
+///
+/// The review arm returns zero counts and an empty `details` — the retained
+/// response contract for existing consumers — and puts the batch's atoms, with
+/// their immutable original wire KE JSON, in `review`.
+///
+/// # Errors
+///
+/// Returns [`CoreError::Internal`] when an atom carries no original entry
+/// object, which the storage read guarantees cannot happen.
+fn review_to_response(review: ImportQuarantineReview) -> CoreResult<PackImportResponse> {
+    let atoms = review
+        .atoms
+        .into_iter()
+        .map(|atom| {
+            let Some(serde_json::Value::Object(original_entry)) = atom.original_entry else {
+                return Err(CoreError::Internal {
+                    category: format!(
+                        "quarantined atom {} carried no original entry object",
+                        atom.quarantine_id
+                    ),
+                });
+            };
+            Ok(PackImportResponseReviewAtomsItem {
+                quarantine_id: atom.quarantine_id,
+                batch_id: Some(atom.import_batch_id),
+                entry_id: atom.entry_id,
+                reason: review_reason_to_wire(atom.reason),
+                original_owner: atom.original_owner,
+                original_disclosure: atom.original_disclosure,
+                original_entry,
+            })
+        })
+        .collect::<CoreResult<Vec<_>>>()?;
+    Ok(PackImportResponse {
+        entries: atom_counts_to_entries(AtomCounts::default()),
+        relations: atom_counts_to_relations(AtomCounts::default()),
+        details: Vec::new(),
+        quarantined: Vec::new(),
+        review: Some(PackImportResponseReview {
+            batch_id: review.batch_id,
+            truncated: review.truncated,
+            atoms,
+        }),
+    })
+}
+
+/// The frozen wire spelling of one quarantine reason.
+const fn quarantine_reason_to_wire(reason: QuarantineReason) -> PackImportResponseQuarantinedItemReason {
+    match reason {
+        QuarantineReason::UnresolvedHolder => {
+            PackImportResponseQuarantinedItemReason::UnresolvedHolder
+        }
+        QuarantineReason::UnknownDisclosure => {
+            PackImportResponseQuarantinedItemReason::UnknownDisclosure
+        }
+    }
+}
+
+/// The frozen wire spelling of one review-atom reason.
+const fn review_reason_to_wire(reason: QuarantineReason) -> PackImportResponseReviewAtomsItemReason {
+    match reason {
+        QuarantineReason::UnresolvedHolder => {
+            PackImportResponseReviewAtomsItemReason::UnresolvedHolder
+        }
+        QuarantineReason::UnknownDisclosure => {
+            PackImportResponseReviewAtomsItemReason::UnknownDisclosure
+        }
     }
 }
 
