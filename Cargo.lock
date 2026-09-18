@@ -3835,7 +3835,7 @@ dependencies = [
  "serial_test",
  "sysinfo",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
  "tokio",
  "tokio-util",
  "toml",
@@ -3866,7 +3866,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
  "tokio",
  "tokio-stream",
  "toml",
@@ -3883,7 +3883,7 @@ dependencies = [
  "nexus-contracts",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -3902,7 +3902,7 @@ dependencies = [
  "sha2 0.11.0",
  "sqlx",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
  "tokio",
  "tracing",
  "uuid",
@@ -3918,7 +3918,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -3960,7 +3960,7 @@ dependencies = [
  "spoke-connect",
  "sqlx",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
  "tokio",
  "tokio-tungstenite",
  "tokio-util",
@@ -4005,7 +4005,7 @@ dependencies = [
  "nexus-home-layout",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
  "tokio",
  "uuid",
 ]
@@ -4024,7 +4024,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "strum",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
  "tokio",
  "tracing",
  "uuid",
@@ -4089,7 +4089,7 @@ dependencies = [
  "statig",
  "subtle",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
  "tokio",
  "tokio-rustls",
  "tokio-stream",
@@ -4111,7 +4111,7 @@ name = "nexus-embedding"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
  "tokio",
 ]
 
@@ -4123,7 +4123,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
  "toml",
  "uuid",
 ]
@@ -4138,7 +4138,7 @@ dependencies = [
  "serde",
  "serde_json",
  "spoke-schemas",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
  "tokio",
  "tracing",
  "uuid",
@@ -4162,7 +4162,7 @@ dependencies = [
  "serde_json",
  "sqlx",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -4207,7 +4207,7 @@ dependencies = [
  "serde_json",
  "spoke-schemas",
  "strum",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
  "tokio",
  "uuid",
 ]
@@ -4247,7 +4247,7 @@ dependencies = [
  "sha2 0.11.0",
  "sqlx",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
  "tokio",
  "tokio-util",
  "tracing",
@@ -4266,7 +4266,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
  "tracing",
  "tracing-subscriber",
 ]
@@ -4308,7 +4308,7 @@ dependencies = [
  "spoke-schemas",
  "sqlx",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
  "tokio",
 ]
 
@@ -4331,7 +4331,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
  "tracing",
  "wasmtime",
  "wat",
@@ -4392,7 +4392,7 @@ dependencies = [
  "spoke-schemas",
  "sqlx",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
  "tokio",
  "tokio-tungstenite",
  "toml",
