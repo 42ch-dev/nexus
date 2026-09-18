@@ -472,6 +472,11 @@ async fn review_quarantine(
             atom.original_owner.as_deref().unwrap_or("<none>"),
             atom.original_disclosure.as_deref().unwrap_or("<none>"),
         );
+        // The original atom JSON is printed exactly as the pack document
+        // carried it (never a re-serialization of the typed entry).
+        if let Some(original) = atom.original_entry.as_deref() {
+            println!("    original: {original}");
+        }
     }
     Ok(())
 }
