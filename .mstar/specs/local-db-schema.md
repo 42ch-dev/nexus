@@ -6,6 +6,7 @@
 **V1.42 Draft amendment:** `work_chapters` PK migration — composite primary key `(work_id, volume, chapter)` with `volume INTEGER NOT NULL DEFAULT 1`; backfill existing rows `volume = 1`; drop legacy `(work_id, chapter)` PK. Normative detail: [novel-writing/workflow-profile.md §4.5.4](novel-writing/workflow-profile.md).   
 **V1.139 architect §5.2 amendment:** §4.1.2 `kb_key_blocks` — `extensions_nexus_json TEXT` column (additive migration) for spoke `extensions.nexus` round-trip preservation. Existing columns (`world_id`, `created_from_command_id`, `source_work_id`, `source_chapter`, `source_provenance_kind`) retained for query efficiency. Full contract: [`spoke-adapter-architecture.md`](spoke-adapter-architecture.md) §2.3.  
 **Last updated**: 2026-07-26 — V1.139 architect §5.2: extensions.nexus storage shape amendment.  
+**Planned v1.191 amendment (not shipped):** [holder-governance.md §§2–6](holder-governance.md#2-registry-identity-stability-and-lifecycle) owns the workspace holder registry, native KE governance columns, World/Character knowledge revisions, isolated import quarantine, guarded offline migration and rollback. Current `creator_only` remains until that complete cutover. Actor narrative ownership remains the existing three-container model; no fake World lore rows or parallel holder database are introduced.
 
 ## 0. 文档定位
 

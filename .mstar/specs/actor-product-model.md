@@ -13,6 +13,8 @@ This file is the **durable trackable spec-path authority (SSOT) for the Actor mo
 
 **Honesty invariant.** Product vocabulary in this file is accepted direction. **v1.184 shipped** stages 1–6 of §10 (identity, binding, view, execution, memory, ToM). Cite generated schemas and Daemon API for wire facts; do not treat this overlay as a dump of local handlers. **v1.185** behavior in §11 (identity edit, reversible freeze, WorldSheet maintenance, KE content maintenance, run-connected `--remember`) is **shipped** (PR #241). The pre-v1.185 absence of edit/archive/content/`--remember` verbs was a maintenance gap, not proof that no Actor storage exists.
 
+**Planned v1.191 holder amendment (not shipped):** [holder-governance.md](holder-governance.md) is the technical authority for stable Creator/Character holder KEs, native disclosure, complete `creator_only` replacement, author controls and trusted management/view policies. Existing shipped descriptions below remain current until the atomic schema/consumer cutover; do not interpret their bool-only implementation as the future holder contract.
+
 ## 1. Product thesis
 
 **Actor** is the cross-cutting **narrative identity** primitive — *who can think and act* in a story.
@@ -112,6 +114,12 @@ KnowledgeView(Character, Binding) =
 
 - Never the whole World directly, never another binding's local KE, never creator-only facts.
 - A missing/invalid binding or an incomplete view **fails closed** (§3 execution gate).
+
+### 5.4 Planned holder policy
+
+After the holder cutover, canonical `KnowledgeOwnerRef` still selects the three narrative containers above. Holder governance is a separate conjunct: shared rows have no disclosure; `owner-private` rows are visible only to the exact admitted holder on Character/Connect views; unknown disclosure is excluded. Creator management review remains authorized over all owned known-private entries, including Character-private material. It is explicitly chosen by core admission and is never a missing-viewpoint bypass.
+
+One stable service-managed holder KE belongs to each Creator and Character identity, independent of WorldSheet and binding. Existing knowledge commands gain shared/author-only/Character-private audience controls with revision CAS. `creator_only` World rows migrate to the stored controlling Creator holder, preserving prior Character invisibility, and the bool is removed only after every consumer is cut over. Registry, wire/native names, migration, trusted readers, session invalidation and public schema paths are defined once in [holder-governance.md](holder-governance.md); no second authorization taxonomy is defined here.
 
 ## 6. Execution — one Agent Host, session isolation
 
@@ -241,6 +249,8 @@ Only `world_sheet_entry_id` is mutable. Binding id, Character id, World id, stat
 
 Within `BEGIN IMMEDIATE`, require the owned active Character, exact active binding and owned active World, compare binding revision, then validate any new link against `kb_key_blocks`: `owner_kind='world'`, matching `world_id`, `block_type='character'`, live status not in `deleted|merged|deprecated`. `creator_only` sheets reject with `invalid_world_sheet` so their identity link cannot leak private lore through Character reads. Wrong type/World/owner, missing and non-live all use the same `invalid_world_sheet` conflict. Apply this validation to existing create/add as well as update. Clearing never edits or deletes the old sheet.
 
+**Planned holder cutover:** replace the `creator_only` condition with “disclosure absent”; private or unknown-disclosure sheets remain `invalid_world_sheet`. Apply the guard in both directions: linking a sheet and editing governance of an already-linked KE. The shipped condition above is not retained as a second predicate after migration.
+
 Binding DELETE retains its existing bodyless API and fixed precedence: owned active Character → exact active binding/owned active World → last-active-binding count → any binding-owned KE row (including non-live rows) → binding-local pending/fragments/SOUL-narrative rows → delete exactly the binding. All checks and deletion share `BEGIN IMMEDIATE`. A WorldSheet link is not binding-owned data: removing a non-last otherwise-empty binding removes only the link, not the World KE.
 
 Two competing removals cannot both remove the final active binding. Capture versus removal is ordered by SQLite: capture-first creates local memory and removal conflicts; removal-first makes capture fail before any candidate/receipt insert. Linking/editing a WorldSheet never authorizes KE ownership transfer. Retained bindings still enforce `world_has_actor_bindings` on World deletion.
@@ -261,6 +271,8 @@ Two competing removals cannot both remove the final active binding. Capture vers
 `canonical_name` uses existing `validate_canonical_name` and owner-scoped uniqueness. `summary` is plain UTF-8, at most 65536 bytes; empty string is an explicit empty summary, null removes the summary member, absence keeps it. Do not trim or silently truncate. Preserve all other raw `body_json` members (including unknown members), modules, status, block type, anchors, timestamps other than updated_at, ownership and extensions; malformed stored body refuses `409 knowledge_entry_not_mutable` rather than overwriting it. Canonical-name-only editing need not parse/rewrite the body. New empty-body create remains supported.
 
 Updates/deletes require a live row (not `deleted|merged|deprecated`) and active owning Character; detail can inspect a retained non-live row. Freeze gate then CAS precede payload semantic validation. A successful material update bumps the shared KE revision once, so concurrent ToM carrier CAS and summary edit cannot erase each other. This surface accepts no `body`, `modules`, owner fields, `creator_only`, `block_type`, `status`, source-anchor or provenance patch.
+
+**Planned holder cutover:** the existing content endpoint additionally accepts the closed `audience` patch with the same `expected_revision`, preserving governance on omission and bumping revision once for a material combined update. Narrative owner/block/status/provenance remain non-transferable. Raw holder ids and legacy `creator_only` are not author controls. The exact replacement contract is [holder-governance.md §3](holder-governance.md#3-native-governance-and-atomic-authoring).
 
 **Delete is physical, explicit, unreferenced-only, never cascading.** In one write transaction, authorize stored owner, check live state and revision, then run existence checks before deleting the KE:
 
