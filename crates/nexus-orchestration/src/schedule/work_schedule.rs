@@ -268,6 +268,29 @@ mod tests {
         assert!(err.message.contains(ERR_INVALID_CRON));
     }
 
+    /// V1.191 P0 T3 (cron 0.12.1 → 0.17.0): invalid steps keep returning the
+    /// stable `E_CRON_INVALID_EXPR` rejection. Upstream 0.13 tightened this
+    /// grammar (triage #316 "tightens invalid-step parsing"): 0.12.1 tolerated
+    /// a step wider than the field's range — `*/60 * * * *` collapsed to
+    /// minute 0 — while 0.17 rejects it, and a step equal to the field's last
+    /// value stays accepted.
+    #[test]
+    fn validate_cron_rejects_invalid_step() {
+        for expr in [
+            "*/0 * * * *",
+            "0/0 * * * *",
+            "1-5/0 * * * *",
+            "*/60 * * * *",
+        ] {
+            match validate_cron_expr(expr) {
+                Ok(()) => panic!("{expr} must be rejected with {ERR_INVALID_CRON}"),
+                Err(err) => assert_eq!(err.code, ERR_INVALID_CRON, "{expr} code"),
+            }
+        }
+        // Minutes run 0-59, so a step of 59 is the last in-range step.
+        validate_cron_expr("*/59 * * * *").unwrap();
+    }
+
     #[test]
     fn validate_tz_accepts_iana_zones_and_rejects_garbage() {
         validate_tz("Asia/Shanghai").unwrap();
