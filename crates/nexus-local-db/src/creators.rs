@@ -7,31 +7,69 @@
 //! outside the workspace db (e.g. `creator register --local`) must also
 //! materialize the row here or world creation fails its FK precheck.
 //!
-//! V1.167 P2 T2: mirrors the daemon-private `upsert_creator_display_name`
-//! (crates/nexus-daemon-runtime/src/api/handlers/creators.rs) so the CLI
-//! local-register path no longer depends on the undocumented HTTP
-//! `PATCH /v1/daemon/creators/{id}` workaround. The daemon copy stays
-//! private (no cross-crate refactor this plan).
+//! V1.167 P2 T2 introduced this helper for the CLI local-register path.
+//! V1.191 P1 T4 makes it the **one** transaction-taking Creator
+//! materialization: the core/daemon creators flows delegate here instead of
+//! carrying their own upsert SQL, and the holder registry row is committed with
+//! the subject (durable §2.1). Removing a materialized Creator is
+//! unreferenced-only ([`delete_creator`]).
 
-use sqlx::SqlitePool;
+use sqlx::{Sqlite, SqlitePool, Transaction};
 
 use crate::error::LocalDbError;
+use crate::holders::{ensure_creator_holder_in_tx, require_subject_holder, HolderSubject};
 
-/// Upsert a minimal active `creators` row for `creator_id`.
+/// Materialize a workspace Creator and its holder registry row in one transaction.
 ///
-/// UPDATE-else-INSERT mirroring the daemon helper's SQL verbatim:
-/// `display_name`, `cached_at` (RFC3339 via `chrono::Utc::now().to_rfc3339()`),
-/// `status='active'`, `data='{}'`. Idempotent: re-running updates
-/// `display_name`/`cached_at` in place instead of duplicating the row.
+/// §2.1: "before a workspace identity becomes usable its local subject and
+/// registry row must commit together". This is the one Creator materialization
+/// implementation: the daemon creators flow, the CLI local bootstrap, core
+/// workspace selection and this crate's own callers all go through it, so every
+/// workspace materialization of the same global Creator commits the same
+/// derived `hld_…` id.
+///
+/// Idempotent: re-running updates `display_name`/`cached_at` in place instead of
+/// duplicating the row, and re-ensuring an existing holder is a no-op.
 ///
 /// # Errors
 ///
-/// Returns `LocalDbError` if the UPDATE or INSERT fails.
+/// Returns [`LocalDbError`] if the transaction, either upsert, or the holder
+/// registration fails (a registry integrity conflict included).
 pub async fn ensure_creator_row(
     pool: &SqlitePool,
     creator_id: &str,
     display_name: &str,
 ) -> Result<(), LocalDbError> {
+    let mut tx = crate::begin_immediate(pool).await?;
+    match ensure_creator_row_in_tx(&mut tx, creator_id, display_name).await {
+        Ok(_holder_entry_id) => {
+            tx.commit().await?;
+            Ok(())
+        }
+        Err(err) => {
+            let _ = tx.rollback().await;
+            Err(err)
+        }
+    }
+}
+
+/// Transaction form of [`ensure_creator_row`]: upsert the subject, then its holder.
+///
+/// UPDATE-else-INSERT the minimal active `creators` row (`display_name`,
+/// `cached_at` RFC3339, `status='active'`, `data='{}'`), then ensure its stable
+/// holder in the same transaction.
+///
+/// Returns the Creator's holder id.
+///
+/// # Errors
+///
+/// Returns [`LocalDbError`] on SQL failure or a holder registry integrity
+/// conflict (collision/mismatch is never reassignment, §2.1).
+pub async fn ensure_creator_row_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    creator_id: &str,
+    display_name: &str,
+) -> Result<String, LocalDbError> {
     let now = chrono::Utc::now().to_rfc3339();
     let updated = sqlx::query!(
         "UPDATE creators SET display_name = ?, cached_at = ? WHERE creator_id = ?",
@@ -39,7 +77,7 @@ pub async fn ensure_creator_row(
         now,
         creator_id
     )
-    .execute(pool)
+    .execute(&mut **tx)
     .await?;
     if updated.rows_affected() == 0 {
         sqlx::query!(
@@ -48,10 +86,150 @@ pub async fn ensure_creator_row(
             display_name,
             now
         )
-        .execute(pool)
+        .execute(&mut **tx)
         .await?;
     }
+    ensure_creator_holder_in_tx(tx, creator_id).await
+}
+
+/// Resolve the stable holder of a stored Creator for a normal read (§2.2).
+///
+/// Fails closed when the registry row is missing or corrupt — a read never
+/// provisions one.
+///
+/// # Errors
+///
+/// Returns [`LocalDbError::HolderStateInvalid`] when the Creator has no holder
+/// registry row here or the row is corrupt, and [`LocalDbError::Sqlx`] on
+/// database failure.
+pub async fn require_creator_holder(
+    pool: &SqlitePool,
+    creator_id: &str,
+) -> Result<String, LocalDbError> {
+    let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM creators WHERE creator_id = ?")
+        .bind(creator_id)
+        .fetch_one(pool)
+        .await?;
+    if exists == 0 {
+        return Err(LocalDbError::ActorNotFound {
+            resource: "creator",
+            id: creator_id.to_string(),
+        });
+    }
+    require_subject_holder(pool, &HolderSubject::Creator(creator_id.to_string())).await
+}
+
+/// Unreferenced-only deletion of a stored Creator and its holder (§2.2).
+///
+/// The holder row and the workspace `creators` row are removed in one
+/// transaction, and only when the subject is unreferenced: governance
+/// references (rows governed by the Creator's holder), owned Worlds,
+/// Characters and descendants, and any retained creator-owned row refuse the
+/// deletion with a zero-mutation `actor_in_use` conflict. The Worlds FK cascade
+/// is explicitly pre-counted because deleting a referenced Creator would
+/// otherwise drop Worlds and their governed rows silently.
+///
+/// # Errors
+///
+/// Returns [`LocalDbError::ActorNotFound`] for a missing Creator,
+/// [`LocalDbError::HolderStateInvalid`] when its registry row is missing or
+/// corrupt, [`LocalDbError::ActorContractConflict`] (`actor_in_use`) when any
+/// reference remains, and [`LocalDbError::Sqlx`] on database failure.
+pub async fn delete_creator(pool: &SqlitePool, creator_id: &str) -> Result<(), LocalDbError> {
+    let mut tx = crate::begin_immediate(pool).await?;
+    let result = delete_creator_in_tx(&mut tx, creator_id).await;
+    match result {
+        Ok(()) => {
+            tx.commit().await?;
+            Ok(())
+        }
+        Err(err) => {
+            let _ = tx.rollback().await;
+            Err(err)
+        }
+    }
+}
+
+async fn delete_creator_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    creator_id: &str,
+) -> Result<(), LocalDbError> {
+    let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM creators WHERE creator_id = ?")
+        .bind(creator_id)
+        .fetch_one(&mut **tx)
+        .await?;
+    if exists == 0 {
+        return Err(LocalDbError::ActorNotFound {
+            resource: "creator",
+            id: creator_id.to_string(),
+        });
+    }
+    let holder_entry_id =
+        require_subject_holder(&mut **tx, &HolderSubject::Creator(creator_id.to_string())).await?;
+    let in_use = creator_reference_count(tx, creator_id, &holder_entry_id).await?;
+    if in_use > 0 {
+        return Err(LocalDbError::actor_in_use());
+    }
+    // Holder first (it references the subject), then the subject — one
+    // transaction, so a refusal anywhere leaves both rows untouched.
+    sqlx::query("DELETE FROM knowledge_holders WHERE holder_entry_id = ? AND creator_id = ?")
+        .bind(&holder_entry_id)
+        .bind(creator_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(LocalDbError::actor_reference_refusal)?;
+    sqlx::query("DELETE FROM creators WHERE creator_id = ?")
+        .bind(creator_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(LocalDbError::actor_reference_refusal)?;
     Ok(())
+}
+
+/// Count every row that still references a Creator subject: governance
+/// references (rows governed by its holder), owned Worlds/Characters and their
+/// descendants, and retained creator-owned rows.
+///
+/// The table list is the complete creator-scoped inventory of this schema
+/// version. Only `narrative_worlds` and `knowledge_holders` are
+/// foreign-key-related (`CASCADE` and `RESTRICT` respectively), so an
+/// incomplete explicit list would silently orphan rows; it is deliberately
+/// exhaustive rather than derived.
+async fn creator_reference_count(
+    conn: &mut sqlx::SqliteConnection,
+    creator_id: &str,
+    holder_entry_id: &str,
+) -> Result<i64, LocalDbError> {
+    let count: i64 = sqlx::query_scalar(
+        "WITH subject(creator_id, holder_entry_id) AS (VALUES (?, ?)) \
+         SELECT \
+             (SELECT COUNT(*) FROM narrative_worlds r JOIN subject s ON r.owner_creator_id = s.creator_id) \
+           + (SELECT COUNT(*) FROM characters r JOIN subject s ON r.owner_creator_id = s.creator_id) \
+           + (SELECT COUNT(*) FROM kb_key_blocks r JOIN subject s ON r.holder_entry_id = s.holder_entry_id) \
+           + (SELECT COUNT(*) FROM knowledge_import_quarantine r JOIN subject s ON r.controlling_creator_id = s.creator_id) \
+           + (SELECT COUNT(*) FROM works r JOIN subject s ON r.creator_id = s.creator_id) \
+           + (SELECT COUNT(*) FROM works_idempotency r JOIN subject s ON r.creator_id = s.creator_id) \
+           + (SELECT COUNT(*) FROM soul_meta r JOIN subject s ON r.creator_id = s.creator_id) \
+           + (SELECT COUNT(*) FROM memory_pending_review r JOIN subject s ON r.creator_id = s.creator_id) \
+           + (SELECT COUNT(*) FROM memory_fragments r JOIN subject s ON r.creator_id = s.creator_id) \
+           + (SELECT COUNT(*) FROM memory_soul_narratives r JOIN subject s ON r.creator_id = s.creator_id) \
+           + (SELECT COUNT(*) FROM orchestration_sessions r JOIN subject s ON r.creator_id = s.creator_id) \
+           + (SELECT COUNT(*) FROM creator_schedules r JOIN subject s ON r.creator_id = s.creator_id) \
+           + (SELECT COUNT(*) FROM creator_prompt_injections r JOIN subject s ON r.creator_id = s.creator_id) \
+           + (SELECT COUNT(*) FROM force_gates_audit r JOIN subject s ON r.creator_id = s.creator_id) \
+           + (SELECT COUNT(*) FROM findings r JOIN subject s ON r.creator_id = s.creator_id) \
+           + (SELECT COUNT(*) FROM novel_pool_entries r JOIN subject s ON r.creator_id = s.creator_id) \
+           + (SELECT COUNT(*) FROM inspiration_items r JOIN subject s ON r.creator_id = s.creator_id) \
+           + (SELECT COUNT(*) FROM reading_progress r JOIN subject s ON r.creator_id = s.creator_id) \
+           + (SELECT COUNT(*) FROM reading_annotations r JOIN subject s ON r.creator_id = s.creator_id) \
+           + (SELECT COUNT(*) FROM moment_directives r JOIN subject s ON r.creator_id = s.creator_id) \
+           + (SELECT COUNT(*) FROM kb_extract_jobs r JOIN subject s ON r.creator_id = s.creator_id)",
+    )
+    .bind(creator_id)
+    .bind(holder_entry_id)
+    .fetch_one(conn)
+    .await?;
+    Ok(count)
 }
 
 #[cfg(test)]

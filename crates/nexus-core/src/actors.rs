@@ -482,7 +482,47 @@ async fn require_admitted_ownership(
             require_active_binding(pool, character_id, binding, &viewpoint.world_id).await?;
         }
     }
+    // §2.1: the identity is usable only while its holder registry row exists;
+    // admission is a normal read, so missing/corrupt registry state fails
+    // closed here instead of provisioning a holder.
+    require_actor_holder(pool, caller_creator_id, actor).await?;
     Ok(())
+}
+
+/// Resolve the stable holder of an admitted Actor's stored identity for a
+/// normal read (durable §2.2).
+///
+/// Fails closed when the registry row is missing or corrupt
+/// (`holder_state_invalid`): a normal read never provisions a holder, so an
+/// identity whose subject committed without its registry row is not usable.
+/// Foreign/missing rows stay the retained not-found shape, so this read does
+/// not widen existence.
+///
+/// # Errors
+///
+/// Returns [`CoreError::NotFound`] for a foreign or missing subject,
+/// [`CoreError::ActorConflict`] `holder_state_invalid` for missing/corrupt
+/// registry state, and the mapped storage error otherwise.
+pub async fn require_actor_holder(
+    pool: &SqlitePool,
+    caller_creator_id: &str,
+    actor: &AdmittedActor,
+) -> CoreResult<String> {
+    match actor {
+        AdmittedActor::Creator { creator_id } => {
+            if creator_id != caller_creator_id {
+                return Err(not_found("actor_ref", creator_id));
+            }
+            nexus_local_db::require_creator_holder(pool, creator_id)
+                .await
+                .map_err(actor_db_err)
+        }
+        AdmittedActor::Character { character_id } => {
+            nexus_local_db::require_character_holder(pool, caller_creator_id, character_id)
+                .await
+                .map_err(actor_db_err)
+        }
+    }
 }
 
 /// Active owned World (PR #240 finding 1): foreign/missing → 404, owned but
@@ -1005,6 +1045,9 @@ impl CoreActorAdmission {
                     .await?;
             }
         }
+        // §2.1/§2.2: the same fail-closed holder resolution as the core
+        // admission path — a normal read never provisions a missing holder.
+        require_actor_holder(&self.pool, caller_creator_id, &actor).await?;
         let view = self
             .views
             .admitted_view(

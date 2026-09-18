@@ -643,3 +643,227 @@ async fn admitted_view_rejects_when_hard_cap_exceeded() {
     assert_conflict(err, "view_incomplete");
     pool.close().await;
 }
+
+// ── v1.191 P1 T4 — holder lifecycle provisioning ────────────────────────
+//
+// Durable contract: `.mstar/specs/holder-governance.md` §2.1 (one stable holder
+// per stored Creator/Character, committed with the subject) and §2.2 (rename/
+// archive/restore keep the holder, retained archived reads resolve it, and a
+// normal read never provisions a missing/corrupt registry row).
+
+/// The holder registry row count of one subject, read from the workspace DB.
+async fn holder_count(env: &Env, column: &str, subject_id: &str) -> i64 {
+    let pool = plain_pool(env).await;
+    let count: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT COUNT(*) FROM knowledge_holders WHERE {column} = ?"
+    )))
+    .bind(subject_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+    count
+}
+
+/// Remove one subject's holder registry row behind the API: the only reachable
+/// way to break the subject+holder invariant (corrupt registry state).
+async fn drop_holder_row(env: &Env, column: &str, subject_id: &str) {
+    let pool = plain_pool(env).await;
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "DELETE FROM knowledge_holders WHERE {column} = ?"
+    )))
+    .bind(subject_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn v1191_holder_lifecycle_actor_holders_are_stable_across_the_lifecycle() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let pool = plain_pool(&env).await;
+
+    // Both Actor kinds resolve the derived holder on a normal read.
+    let creator_holder = nexus_core::require_actor_holder(
+        &pool,
+        CREATOR,
+        &AdmittedActor::Creator {
+            creator_id: CREATOR.to_string(),
+        },
+    )
+    .await
+    .expect("Creator holder");
+    assert_eq!(
+        creator_holder,
+        nexus_local_db::creator_holder_entry_id(CREATOR)
+    );
+    let character_actor = AdmittedActor::Character {
+        character_id: env.character_id.clone(),
+    };
+    let character_holder = nexus_core::require_actor_holder(&pool, CREATOR, &character_actor)
+        .await
+        .expect("Character holder");
+    assert_eq!(
+        character_holder,
+        nexus_local_db::character_holder_entry_id(&env.character_id)
+    );
+    assert_eq!(holder_count(&env, "creator_id", CREATOR).await, 1);
+    assert_eq!(
+        holder_count(&env, "character_id", &env.character_id).await,
+        1
+    );
+
+    // Rename: the projected label moves, the holder does not.
+    let renamed = core
+        .patch_character(
+            &principal,
+            env.character_id.clone(),
+            0,
+            nexus_local_db::CharacterPatch {
+                display_name: Some("Ada Renamed"),
+                image_uri: nexus_local_db::FieldPatch::Keep,
+                persona_json: nexus_local_db::FieldPatch::Keep,
+            },
+        )
+        .await
+        .expect("rename");
+    assert_eq!(
+        String::from(renamed.character.display_name.clone()),
+        "Ada Renamed",
+        "the rename lands on the projected label"
+    );
+    let (_, revision, _) = character_row(&env, &env.character_id).await;
+
+    // Archive keeps the holder and the retained management read answers.
+    core.transition_character(
+        &principal,
+        transition_request(
+            &env.character_id,
+            revision,
+            CoreCharacterTransitionRequestTargetStatus::Archived,
+        ),
+    )
+    .await
+    .expect("archive");
+    assert_eq!(
+        nexus_core::require_actor_holder(&pool, CREATOR, &character_actor)
+            .await
+            .expect("archived retained holder read"),
+        character_holder
+    );
+    assert_eq!(
+        character_row(&env, &env.character_id).await.0,
+        "archived".to_string()
+    );
+
+    // Restore reuses the same holder.
+    let (_, archived_revision, _) = character_row(&env, &env.character_id).await;
+    core.transition_character(
+        &principal,
+        transition_request(
+            &env.character_id,
+            archived_revision,
+            CoreCharacterTransitionRequestTargetStatus::Active,
+        ),
+    )
+    .await
+    .expect("restore");
+    assert_eq!(
+        nexus_core::require_actor_holder(&pool, CREATOR, &character_actor)
+            .await
+            .expect("holder after restore"),
+        character_holder
+    );
+    assert_eq!(
+        holder_count(&env, "character_id", &env.character_id).await,
+        1,
+        "one Character materialization keeps exactly one holder"
+    );
+    // The actor admission path resolves the same holder and still composes.
+    let admission = CoreActorAdmission::new(pool.clone());
+    admission
+        .admit(
+            CREATOR,
+            character_actor,
+            ActorViewpoint {
+                world_id: WORLD.to_string(),
+                binding_id: Some(env.binding_id.clone()),
+                branch_id: None,
+                event_id: None,
+            },
+        )
+        .await
+        .expect("admission after the lifecycle round-trip");
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn v1191_holder_lifecycle_missing_registry_read_fails_closed() {
+    let env = seed_env().await;
+    let pool = plain_pool(&env).await;
+    let character_actor = AdmittedActor::Character {
+        character_id: env.character_id.clone(),
+    };
+
+    drop_holder_row(&env, "character_id", &env.character_id).await;
+    assert_eq!(
+        holder_count(&env, "character_id", &env.character_id).await,
+        0
+    );
+
+    // The normal read refuses with the stable code instead of provisioning.
+    let err = nexus_core::require_actor_holder(&pool, CREATOR, &character_actor)
+        .await
+        .expect_err("missing registry must fail the read");
+    assert_conflict(err, "holder_state_invalid");
+    assert_eq!(
+        holder_count(&env, "character_id", &env.character_id).await,
+        0,
+        "a read never mints the missing row"
+    );
+
+    // Both admission entry points fail closed on the same state.
+    let err = CoreActorAdmission::new(pool.clone())
+        .admit(
+            CREATOR,
+            character_actor,
+            ActorViewpoint {
+                world_id: WORLD.to_string(),
+                binding_id: Some(env.binding_id.clone()),
+                branch_id: None,
+                event_id: None,
+            },
+        )
+        .await
+        .expect_err("composed admission must fail closed");
+    assert_conflict(err, "holder_state_invalid");
+
+    // A missing Creator holder is refused as well.
+    drop_holder_row(&env, "creator_id", CREATOR).await;
+    let err = nexus_core::require_actor_holder(
+        &pool,
+        CREATOR,
+        &AdmittedActor::Creator {
+            creator_id: CREATOR.to_string(),
+        },
+    )
+    .await
+    .expect_err("Creator read must fail closed");
+    assert_conflict(err, "holder_state_invalid");
+
+    // A foreign Actor never widens existence through the holder read.
+    drop_holder_row(&env, "character_id", &env.foreign_character_id).await;
+    let err = nexus_core::require_actor_holder(
+        &pool,
+        CREATOR,
+        &AdmittedActor::Character {
+            character_id: env.foreign_character_id.clone(),
+        },
+    )
+    .await
+    .expect_err("foreign Character is not found");
+    assert_not_found(&err);
+    pool.close().await;
+}

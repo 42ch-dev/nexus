@@ -99,9 +99,10 @@ pub use actor_world_binding::{
     ActorWorldBindingRecord, CreateBindingParams,
 };
 pub use character::{
-    create_character_with_initial_binding, get_character, list_characters, mint_character_id,
-    require_active_owned_character_tx, transition_character, update_character, CharacterPatch,
-    CharacterRecord, CharacterStatus, CreateCharacterParams, CreateCharacterResult, FieldPatch,
+    create_character_with_initial_binding, delete_character, get_character, list_characters,
+    mint_character_id, require_active_owned_character_tx, require_character_holder,
+    transition_character, update_character, CharacterPatch, CharacterRecord, CharacterStatus,
+    CreateCharacterParams, CreateCharacterResult, FieldPatch,
 };
 
 // Re-export sqlx pool type for consumers
@@ -113,14 +114,17 @@ pub use identity::{
     list_local_identities, unlink_from_platform, LocalIdentityRow,
 };
 
-// Re-export creators types (V1.167 P2 T2)
-pub use creators::ensure_creator_row;
+// Re-export creators types (V1.167 P2 T2; T4 convergence)
+pub use creators::{
+    delete_creator, ensure_creator_row, ensure_creator_row_in_tx, require_creator_holder,
+};
 
-// Re-export holder registry primitives (v1.191 P1 T3)
+// Re-export holder registry primitives (v1.191 P1 T3; lifecycle reads T4)
 pub use holders::{
     character_holder_entry_id, creator_holder_entry_id, ensure_character_holder_in_tx,
-    ensure_creator_holder_in_tx, resolve_holder, HolderSubject, KnowledgeHolder,
-    HOLDER_ENTRY_ID_PREFIX, HOLDER_MIGRATION_VERSION,
+    ensure_creator_holder_in_tx, require_subject_holder, resolve_holder, resolve_subject_holder,
+    HolderSubject, KnowledgeHolder, HOLDER_ENTRY_ID_PREFIX, HOLDER_MIGRATION_VERSION,
+    HOLDER_STATE_INVALID_CODE,
 };
 
 // Re-export soul_meta types

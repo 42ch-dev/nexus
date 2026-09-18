@@ -209,21 +209,14 @@ impl CoreHomeService {
         let pool = nexus_local_db::init_pool(&db_path)
             .await
             .map_err(crate::error::local_db_err)?;
-        let now = chrono::Utc::now().to_rfc3339();
-        let insert = sqlx::query(
-            "INSERT INTO creators (creator_id, display_name, status, cached_at, data) \
-             VALUES (?, ?, 'active', ?, '{}')",
-        )
-        .bind(&creator_id)
-        .bind(&display_name)
-        .bind(&now)
-        .execute(&pool)
-        .await;
-        if let Err(e) = insert {
-            pool.close().await;
-            return Err(db_err(&e));
-        }
+        // v1.191 P1 T4: the one transaction-taking local-db materialization —
+        // the workspace `creators` row and its stable holder registry row
+        // commit together (§2.1), so no second Creator create SQL exists here.
+        let materialized = nexus_local_db::ensure_creator_row(&pool, &creator_id, &display_name)
+            .await
+            .map_err(crate::error::local_db_err);
         pool.close().await;
+        materialized?;
 
         Ok(CreatorDetail {
             creator_id,
@@ -703,34 +696,22 @@ pub fn save_identity_cache(cache_path: &Path, cache: &serde_json::Value) -> Core
 }
 
 /// Update the SQL `creators` row for `creator_id`, inserting a minimal active
-/// row if one does not exist.
+/// row if one does not exist (v1.191 P1 T4: the daemon/core creators flow
+/// delegates to the one transaction-taking local-db materialization, so the
+/// workspace subject and its stable holder registry row commit together, §2.1).
+///
+/// # Errors
+///
+/// Returns the retained `DATABASE_ERROR` carrier when the materialization, its
+/// transaction, or the holder registration fails.
 async fn upsert_creator_display_name(
     pool: &sqlx::SqlitePool,
     creator_id: &str,
     display_name: &str,
 ) -> CoreResult<()> {
-    let now = chrono::Utc::now().to_rfc3339();
-    let rows =
-        sqlx::query("UPDATE creators SET display_name = ?, cached_at = ? WHERE creator_id = ?")
-            .bind(display_name)
-            .bind(&now)
-            .bind(creator_id)
-            .execute(pool)
-            .await
-            .map_err(|e| db_err(&e))?;
-    if rows.rows_affected() == 0 {
-        sqlx::query(
-            "INSERT INTO creators (creator_id, display_name, status, cached_at, data) \
-             VALUES (?, ?, 'active', ?, '{}')",
-        )
-        .bind(creator_id)
-        .bind(display_name)
-        .bind(&now)
-        .execute(pool)
+    nexus_local_db::ensure_creator_row(pool, creator_id, display_name)
         .await
-        .map_err(|e| db_err(&e))?;
-    }
-    Ok(())
+        .map_err(crate::error::local_db_err)
 }
 
 /// Active-workspace `creators` rows ordered by recency (retained list order

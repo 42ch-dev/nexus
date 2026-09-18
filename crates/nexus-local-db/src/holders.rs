@@ -40,6 +40,10 @@ use crate::LocalDbError;
 /// Reserved namespace for holder entry ids; never an ordinary narrative KE id.
 pub const HOLDER_ENTRY_ID_PREFIX: &str = "hld_";
 
+/// Stable public conflict code for missing or corrupt holder registry state on a
+/// normal read (§2.2). Hosts map [`LocalDbError::HolderStateInvalid`] to it.
+pub const HOLDER_STATE_INVALID_CODE: &str = "holder_state_invalid";
+
 /// Domain separation for the Creator subject (`nexus-holder-v1\0creator\0`).
 const HOLDER_ID_DOMAIN_CREATOR: &[u8] = b"nexus-holder-v1\0creator\0";
 
@@ -174,7 +178,7 @@ impl From<HolderRow> for KnowledgeHolder {
 ///
 /// # Errors
 ///
-/// Returns [`LocalDbError::ConstraintViolation`] (`holder_state_invalid`) for a
+/// Returns [`LocalDbError::HolderStateInvalid`] (`holder_state_invalid`) for a
 /// corrupt registry row and [`LocalDbError::Sqlx`] on database failure.
 pub async fn resolve_holder<'e, E>(
     executor: E,
@@ -193,6 +197,14 @@ where
     let Some(row) = row else {
         return Ok(None);
     };
+    Ok(Some(validate_holder_row(row)?))
+}
+
+/// Validate one selected registry row: it must carry an exclusive subject and
+/// its id must re-derive from that subject (§2.1). Shared by the id-addressed
+/// and subject-addressed reads so both refuse corrupt registry state the same
+/// way.
+fn validate_holder_row(row: HolderRow) -> Result<KnowledgeHolder, LocalDbError> {
     let holder = KnowledgeHolder::from(row);
     let Some(subject) = holder.subject() else {
         return Err(holder_state_invalid(&format!(
@@ -208,15 +220,93 @@ where
             subject.describe()
         )));
     }
-    Ok(Some(holder))
+    Ok(holder)
 }
 
-/// Corrupt-registry error (`holder_state_invalid`, durable §2.2) for a row that
-/// cannot be admitted as holder authority.
+/// Read-only resolution of a stored subject's registered holder (§2.2).
+///
+/// This is the read side of the registry: it never provisions, never re-mints
+/// and never repairs. `Ok(None)` means the subject has no registry row here
+/// (a missing state the caller decides how to surface); a row this subject is
+/// bound to that does not derive from it is corrupt registry state and is
+/// refused as [`LocalDbError::HolderStateInvalid`] instead of being handed
+/// back as holder authority.
+///
+/// # Errors
+///
+/// Returns [`LocalDbError::HolderStateInvalid`] (`holder_state_invalid`) for
+/// corrupt registry state and [`LocalDbError::Sqlx`] on database failure.
+pub async fn resolve_subject_holder<'e, E>(
+    executor: E,
+    subject: &HolderSubject,
+) -> Result<Option<String>, LocalDbError>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    let (kind, subject_id) = subject.selector();
+    if subject_id.is_empty() {
+        return Err(holder_state_invalid(&format!("{kind} id must be nonempty")));
+    }
+    let subject_column = match kind {
+        "creator" => "creator_id",
+        _ => "character_id",
+    };
+    let row = sqlx::query_as::<_, HolderRow>(sqlx::AssertSqlSafe(format!(
+        "SELECT holder_entry_id, creator_id, character_id, created_at \
+         FROM knowledge_holders WHERE {subject_column} = ?"
+    )))
+    .bind(subject_id)
+    .fetch_optional(executor)
+    .await?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let holder = validate_holder_row(row)?;
+    // The registry's exclusive-subject CHECK makes a subject mismatch
+    // unreachable through writes; asserting it anyway keeps this read from
+    // returning a holder the requested subject does not bind to.
+    if holder.subject().as_ref() != Some(subject) {
+        return Err(holder_state_invalid(&format!(
+            "registry row {} is not bound to {}",
+            holder.holder_entry_id,
+            subject.describe()
+        )));
+    }
+    Ok(Some(holder.holder_entry_id))
+}
+
+/// Resolve a stored subject's holder for a normal read, failing closed when the
+/// registry row is missing or corrupt (§2.2: `holder_state_invalid`, never
+/// provisioning).
+///
+/// # Errors
+///
+/// Returns [`LocalDbError::HolderStateInvalid`] (`holder_state_invalid`) when
+/// the subject has no registry row here or the row is corrupt, and
+/// [`LocalDbError::Sqlx`] on database failure.
+pub async fn require_subject_holder<'e, E>(
+    executor: E,
+    subject: &HolderSubject,
+) -> Result<String, LocalDbError>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    resolve_subject_holder(executor, subject)
+        .await?
+        .ok_or_else(|| {
+            holder_state_invalid(&format!(
+                "{} has no holder registry row; a normal read never provisions one",
+                subject.describe()
+            ))
+        })
+}
+
+/// Corrupt-registry error (`holder_state_invalid`, durable §2.2) for state that
+/// cannot be admitted as holder authority. Carries the registry detail for
+/// diagnostics; hosts surface the stable `holder_state_invalid` code.
 fn holder_state_invalid(reason: &str) -> LocalDbError {
-    LocalDbError::ConstraintViolation {
-        table: "knowledge_holders".to_string(),
-        constraint: format!("holder_state_invalid: {reason}"),
+    LocalDbError::HolderStateInvalid {
+        reason: reason.to_string(),
     }
 }
 
@@ -421,6 +511,21 @@ mod tests {
         (pool, dir)
     }
 
+    /// Insert the workspace `creators` row **without** its holder, so a case can
+    /// hand-write registry state: the materialization helper now always commits
+    /// both rows together (§2.1).
+    async fn seed_creator_row(pool: &SqlitePool, creator_id: &str) {
+        sqlx::query(
+            "INSERT INTO creators (creator_id, display_name, status, cached_at, data) \
+             VALUES (?, ?, 'active', datetime('now'), '{}')",
+        )
+        .bind(creator_id)
+        .bind(creator_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
     /// §2.1 byte recipe, NUL separators included.
     #[test]
     fn holder_id_input_is_the_frozen_domain_separated_bytes() {
@@ -500,9 +605,7 @@ mod tests {
     #[tokio::test]
     async fn subject_bound_to_another_id_is_a_hard_error() {
         let (pool, _dir) = fresh_pool().await;
-        crate::ensure_creator_row(&pool, "ctr_holder_b", "Holder B")
-            .await
-            .unwrap();
+        seed_creator_row(&pool, "ctr_holder_b").await;
         // A foreign/hand-written registry row binds the subject to another id.
         sqlx::query(
             "INSERT INTO knowledge_holders (holder_entry_id, creator_id, created_at) \
@@ -532,12 +635,8 @@ mod tests {
     #[tokio::test]
     async fn id_bound_to_another_subject_is_a_hard_error() {
         let (pool, _dir) = fresh_pool().await;
-        crate::ensure_creator_row(&pool, "ctr_holder_c", "Holder C")
-            .await
-            .unwrap();
-        crate::ensure_creator_row(&pool, "ctr_holder_d", "Holder D")
-            .await
-            .unwrap();
+        seed_creator_row(&pool, "ctr_holder_c").await;
+        seed_creator_row(&pool, "ctr_holder_d").await;
         // The id that `ctr_holder_c` must derive is already bound to another subject.
         sqlx::query(
             "INSERT INTO knowledge_holders (holder_entry_id, creator_id, created_at) \
@@ -566,9 +665,7 @@ mod tests {
     #[tokio::test]
     async fn corrupt_registry_row_is_not_resolved_as_a_holder() {
         let (pool, _dir) = fresh_pool().await;
-        crate::ensure_creator_row(&pool, "ctr_corrupt", "Corrupt")
-            .await
-            .unwrap();
+        seed_creator_row(&pool, "ctr_corrupt").await;
         sqlx::query(
             "INSERT INTO knowledge_holders (holder_entry_id, creator_id, created_at) \
              VALUES ('hld_corrupt', 'ctr_corrupt', datetime('now'))",
@@ -579,11 +676,13 @@ mod tests {
 
         let err = resolve_holder(&pool, "hld_corrupt").await.unwrap_err();
         assert!(
-            matches!(&err, LocalDbError::ConstraintViolation { table, constraint }
-                if table == "knowledge_holders"
-                    && constraint.contains("holder_state_invalid")
-                    && constraint.contains("does not re-derive")),
+            matches!(&err, LocalDbError::HolderStateInvalid { reason }
+                if reason.contains("does not re-derive")),
             "expected holder_state_invalid for a non-deriving row, got {err:?}"
+        );
+        assert!(
+            err.to_string().starts_with("holder_state_invalid:"),
+            "the storage detail must keep the public code prefix, got {err}"
         );
 
         // A correctly registered holder resolves; an unregistered id is absent.

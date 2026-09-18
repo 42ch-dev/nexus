@@ -240,6 +240,17 @@ pub fn actor_db_err(e: LocalDbError) -> CoreError {
             code: code.as_str().to_string(),
             message: code.message().to_string(),
         },
+        LocalDbError::HolderStateInvalid { reason } => {
+            // The registry detail stays in the log; the wire keeps the stable
+            // `holder_state_invalid` code and its fixed product message (§2.2).
+            tracing::debug!(target: "actors.holder_state", %reason, "holder registry state refused on a normal read");
+            CoreError::ActorConflict {
+                code: nexus_local_db::HOLDER_STATE_INVALID_CODE.to_string(),
+                message:
+                    "Actor holder registry state is invalid; the Actor identity cannot be resolved"
+                        .to_string(),
+            }
+        }
         LocalDbError::ValidationError(msg) => CoreError::ActorInput(msg),
         other => local_db_err(other),
     }
