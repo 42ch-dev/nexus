@@ -2067,14 +2067,9 @@ async fn v1191_holder_migration_projection_never_reads_back_shared() {
         Some(holder.as_str())
     );
     assert_eq!(fetched_private.disclosure.as_deref(), Some("owner-private"));
-    assert!(
-        fetched_private.creator_only,
-        "the legacy carrier must not report a restricted row as shared"
-    );
     let fetched_shared = store.get_knowledge_entry(&shared.entry_id).await.unwrap();
     assert_eq!(fetched_shared.holder_entry_id, None);
     assert_eq!(fetched_shared.disclosure, None);
-    assert!(!fetched_shared.creator_only);
 
     // The listing path projects the same pair.
     let listed = store.list_by_world(WORLD_A).await.unwrap();
@@ -2322,4 +2317,139 @@ async fn v1191_holder_migration_aborts_without_mutation() {
         "unexpected error: {err}"
     );
     assert_holder_migration_aborted(&pool, "malformed extension document").await;
+}
+
+/// Raw extension input is the boundary durable §5.4 names: the retired legacy
+/// visibility key is refused there with the stable
+/// `legacy_creator_only_unsupported` reason (`false` included, never silently
+/// ignored), on the opaque insert, the opaque update and the CAS lane — while
+/// a document without it, and the adapter's empty-string serialization
+/// fallback, keep working.
+#[allow(clippy::too_many_lines)] // one boundary matrix, one contract
+#[tokio::test]
+async fn v1191_holder_migration_rejects_legacy_extension_input() {
+    let (pool, _dir) = migrated_pool().await;
+    seed_creator(&pool).await;
+    seed_world(&pool, WORLD_A).await;
+    let store = SqliteKbStore::new(pool.clone());
+
+    // 1. The opaque INSERT primitive.
+    for (index, extensions) in [
+        r#"{"world_id":"wld_ownerA","creator_only":true}"#,
+        r#"{"creator_only":false}"#,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let kb = KnowledgeEntryRecord::new(
+            WORLD_A,
+            BlockType::Character,
+            &format!("Legacy Input {index}"),
+        );
+        let mut tx = pool.begin().await.unwrap();
+        let err = store
+            .insert_key_block_with_extensions_in_tx(&mut tx, kb, extensions.to_string())
+            .await
+            .expect_err("raw legacy extension input must be refused");
+        let _ = tx.rollback().await;
+        assert!(
+            matches!(&err, KbStoreError::ValidationLegacy(msg)
+                if msg.contains("legacy_creator_only_unsupported")),
+            "extensions {extensions} must be refused with the stable reason, got {err:?}"
+        );
+    }
+
+    // 2. Documents without the retired key — and the adapter's empty-string
+    //    serialization fallback — are accepted.
+    let mut accepted = Vec::new();
+    for (index, extensions) in [r#"{"world_id":"wld_ownerA","custom_unknown":1}"#, ""]
+        .into_iter()
+        .enumerate()
+    {
+        let kb = KnowledgeEntryRecord::new(
+            WORLD_A,
+            BlockType::Character,
+            &format!("Accepted Input {index}"),
+        );
+        accepted.push(kb.entry_id.clone());
+        let mut tx = pool.begin().await.unwrap();
+        store
+            .insert_key_block_with_extensions_in_tx(&mut tx, kb, extensions.to_string())
+            .await
+            .expect("a document without the retired key is accepted");
+        tx.commit().await.unwrap();
+    }
+    assert_eq!(
+        count_where(
+            &pool,
+            "SELECT COUNT(*) FROM kb_key_blocks WHERE extensions_nexus_json LIKE '%creator_only%'"
+        )
+        .await,
+        0,
+        "the retired key never reaches storage"
+    );
+
+    // 3. The CAS lane carries a raw extension document too.
+    let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
+    let err = nexus_local_db::kb_store::cas_update_key_block_fields(
+        &mut tx,
+        &accepted[0],
+        0,
+        WORLD_A,
+        &nexus_local_db::kb_store::CasKeyBlockFieldUpdate {
+            extensions_nexus_json: Some(r#"{"creator_only":true}"#),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect_err("the CAS lane must refuse raw legacy extension input");
+    let _ = tx.rollback().await;
+    assert!(
+        matches!(&err, nexus_local_db::LocalDbError::ValidationError(msg)
+            if msg.contains("legacy_creator_only_unsupported")),
+        "expected the invalid-input family with the stable reason, got {err:?}"
+    );
+
+    // 4. The auxiliary update primitive reports storage-level errors, so the
+    //    refusal rides the crate's `Protocol` vehicle and still names the
+    //    reason.
+    let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
+    let err = nexus_local_db::kb_store::update_key_block_auxiliary_fields_in_tx(
+        &mut tx,
+        &accepted[0],
+        "confirmed",
+        None,
+        r#"{"creator_only":true}"#,
+        None,
+        None,
+    )
+    .await
+    .expect_err("the auxiliary update must refuse raw legacy extension input");
+    let _ = tx.rollback().await;
+    assert!(
+        err.to_string().contains("legacy_creator_only_unsupported"),
+        "expected the stable reason in the storage-level refusal, got {err}"
+    );
+
+    // 5. Extras on the record cannot smuggle it either: the retired key is a
+    //    known (non-passthrough) key, so it never reaches the document.
+    let mut smuggler = KnowledgeEntryRecord::new(WORLD_A, BlockType::Character, "Smuggler");
+    smuggler.extensions_nexus_extras = Some(serde_json::json!({"creator_only": true, "custom": 2}));
+    store
+        .insert_knowledge_entry(smuggler.clone())
+        .await
+        .unwrap();
+    let extensions: Option<String> = sqlx::query_scalar(
+        "SELECT extensions_nexus_json FROM kb_key_blocks WHERE key_block_id = ?",
+    )
+    .bind(&smuggler.entry_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let extensions: serde_json::Value = serde_json::from_str(&extensions.unwrap()).unwrap();
+    assert!(
+        extensions.get("creator_only").is_none(),
+        "the retired key is filtered, not passed through: {extensions}"
+    );
+    assert_eq!(extensions["custom"], 2, "unknown extras still survive");
 }

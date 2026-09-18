@@ -84,6 +84,31 @@ fn is_known_nexus_key(key: &str) -> bool {
     KNOWN_NEXUS_KEYS.contains(&key)
 }
 
+/// Reject a caller-supplied opaque `extensions.nexus` document that carries the
+/// retired legacy visibility key (durable §5: only historical migrations and
+/// the new offline cutover may interpret the bool, and its presence in raw
+/// extension input is refused with the stable `legacy_creator_only_unsupported`
+/// reason — `false` included, never silently ignored).
+///
+/// A document that is not a JSON object carries no key to reject; the adapter's
+/// serialization fallback passes an empty string here.
+fn reject_legacy_creator_only_extension(json: &str) -> Result<(), KbStoreError> {
+    use nexus_knowledge::world_kb::knowledge_entry as governance;
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
+        return Ok(());
+    };
+    let Some(object) = value.as_object() else {
+        return Ok(());
+    };
+    if object.contains_key(governance::LEGACY_CREATOR_ONLY_KEY) {
+        return Err(KbStoreError::ValidationLegacy(format!(
+            "{}: extensions.nexus.creator_only is not accepted on raw extension input",
+            governance::LEGACY_CREATOR_ONLY_UNSUPPORTED
+        )));
+    }
+    Ok(())
+}
+
 /// Build the `extensions.nexus` namespace object from typed nexus fields.
 ///
 /// Behavior-equivalent local copy of
@@ -489,6 +514,12 @@ impl SqliteKbStore {
         // Validate canonical_name format/safety (same as trait impl).
         validate_canonical_name(&kb.canonical_name).map_err(validation_err)?;
 
+        // v1.191 P1 T3 (durable §5.4): a caller-supplied extension document may
+        // not re-introduce the retired legacy visibility key. The wrapper path
+        // builds the document itself (and never emits the key); this opaque
+        // primitive is the raw-input boundary and refuses it explicitly.
+        reject_legacy_creator_only_extension(&extensions_nexus_json)?;
+
         // Validate body semantics before persisting (same as trait impl).
         validate_body(kb.block_type, kb.body.as_ref(), self.validation_mode)
             .map_err(validation_err)?;
@@ -804,13 +835,13 @@ impl KeyBlockRow {
             // would read back as shared.
             holder_entry_id: self.holder_entry_id.clone(),
             disclosure: self.disclosure.clone(),
-            // The legacy World-only carrier has no storage column after the
-            // cutover (durable §5). It is projected from the governance pair so
-            // a disclosure-restricted row never reads back as shared; a
-            // Character-private World row over-approximates here, which errs
-            // toward hiding. The field itself is deleted by the complete-cutover
-            // task, at which point this line goes with it.
-            creator_only: self.disclosure.is_some(),
+            // The retired World-only carrier has no storage column after the
+            // cutover, and no runtime code may interpret the bool (durable §5).
+            // This storage layer therefore neither reconstructs it from the
+            // governance pair nor lets it drive any predicate: the pair above
+            // is the authority, and this constant only serves the vestigial
+            // field that the complete-cutover task deletes.
+            creator_only: false,
             block_type,
             canonical_name: self.canonical_name.clone(),
             status: self.status.clone(),
@@ -1757,6 +1788,13 @@ pub async fn cas_update_key_block_fields(
     world_id: &str,
     fields: &CasKeyBlockFieldUpdate<'_>,
 ) -> Result<u64, LocalDbError> {
+    // v1.191 P1 T3 (durable §5.4): the CAS lane carries the raw extension
+    // document, so it refuses the retired legacy visibility key like the INSERT
+    // primitive does.
+    if let Some(json) = fields.extensions_nexus_json {
+        reject_legacy_creator_only_extension(json)
+            .map_err(|err| LocalDbError::ValidationError(err.to_string()))?;
+    }
     // Build a dynamic SET clause from the supplied fields. revision is always
     // bumped; updated_at always set. SAFETY: dynamic SET built from a fixed
     // field whitelist (not user-controlled SQL); all values are bind params.
@@ -1965,6 +2003,15 @@ pub async fn update_key_block_auxiliary_fields_in_tx(
     modules_json: Option<&str>,
     source_provenance_kind: Option<&str>,
 ) -> Result<(), sqlx::Error> {
+    // v1.191 P1 T3 (durable §5.4): raw extension input may not re-introduce the
+    // retired legacy visibility key. This primitive reports storage-level
+    // errors (`sqlx::Error`), so the refusal rides the crate's established
+    // `Protocol` vehicle for an invalid boundary value and names the stable
+    // `legacy_creator_only_unsupported` reason in the message; a caller that
+    // ever adopts this primitive for a public surface maps it to the
+    // invalid-input family.
+    reject_legacy_creator_only_extension(extensions_nexus_json)
+        .map_err(|err| sqlx::Error::Protocol(err.to_string()))?;
     // SAFETY: static SQL with vetted column names from migration
     // 202606190003_kb_key_blocks_provenance.sql.
     sqlx::query(

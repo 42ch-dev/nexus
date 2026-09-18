@@ -164,11 +164,18 @@ impl From<HolderRow> for KnowledgeHolder {
 ///
 /// `Ok(None)` means the id is not registered here: the caller decides whether
 /// that is a missing state (`holder_state_invalid`) or simply "no such holder".
-/// Missing/corrupt registry state is never repaired and never minted.
+/// Missing registry state is never repaired and never minted.
+///
+/// A row whose id does **not** re-derive from its registered subject is corrupt
+/// registry state, not a holder (§2.1: "collision/mismatch is a hard integrity
+/// error, never reassignment"), so it is an error rather than a returned row —
+/// a digest that does not bind to its subject must never be admitted as
+/// authority.
 ///
 /// # Errors
 ///
-/// Returns [`LocalDbError::Sqlx`] on database failure.
+/// Returns [`LocalDbError::ConstraintViolation`] (`holder_state_invalid`) for a
+/// corrupt registry row and [`LocalDbError::Sqlx`] on database failure.
 pub async fn resolve_holder<'e, E>(
     executor: E,
     holder_entry_id: &str,
@@ -183,7 +190,34 @@ where
     .bind(holder_entry_id)
     .fetch_optional(executor)
     .await?;
-    Ok(row.map(KnowledgeHolder::from))
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let holder = KnowledgeHolder::from(row);
+    let Some(subject) = holder.subject() else {
+        return Err(holder_state_invalid(&format!(
+            "registry row {} has no exclusive Creator/Character subject",
+            holder.holder_entry_id
+        )));
+    };
+    let derived = subject.expected_holder_entry_id();
+    if derived != holder.holder_entry_id {
+        return Err(holder_state_invalid(&format!(
+            "registry row {} does not re-derive from its subject {} (expected {derived})",
+            holder.holder_entry_id,
+            subject.describe()
+        )));
+    }
+    Ok(Some(holder))
+}
+
+/// Corrupt-registry error (`holder_state_invalid`, durable §2.2) for a row that
+/// cannot be admitted as holder authority.
+fn holder_state_invalid(reason: &str) -> LocalDbError {
+    LocalDbError::ConstraintViolation {
+        table: "knowledge_holders".to_string(),
+        constraint: format!("holder_state_invalid: {reason}"),
+    }
 }
 
 /// Ensure the stable holder of `creator_id` exists in `tx` (§2.1).
@@ -524,6 +558,49 @@ mod tests {
                 if constraint.contains("already bound to creator:ctr_holder_d")),
             "expected a collision error naming the bound subject, got {err:?}"
         );
+    }
+
+    /// A registry row whose id does not re-derive from its subject is corrupt
+    /// state (§2.1): resolution must refuse it (`holder_state_invalid`) rather
+    /// than hand back an id that its own subject does not bind to.
+    #[tokio::test]
+    async fn corrupt_registry_row_is_not_resolved_as_a_holder() {
+        let (pool, _dir) = fresh_pool().await;
+        crate::ensure_creator_row(&pool, "ctr_corrupt", "Corrupt")
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO knowledge_holders (holder_entry_id, creator_id, created_at) \
+             VALUES ('hld_corrupt', 'ctr_corrupt', datetime('now'))",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let err = resolve_holder(&pool, "hld_corrupt").await.unwrap_err();
+        assert!(
+            matches!(&err, LocalDbError::ConstraintViolation { table, constraint }
+                if table == "knowledge_holders"
+                    && constraint.contains("holder_state_invalid")
+                    && constraint.contains("does not re-derive")),
+            "expected holder_state_invalid for a non-deriving row, got {err:?}"
+        );
+
+        // A correctly registered holder resolves; an unregistered id is absent.
+        crate::ensure_creator_row(&pool, "ctr_derived", "Derived")
+            .await
+            .unwrap();
+        let mut tx = crate::begin_immediate(&pool).await.unwrap();
+        let derived = ensure_creator_holder_in_tx(&mut tx, "ctr_derived")
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        let resolved = resolve_holder(&pool, &derived).await.unwrap().unwrap();
+        assert_eq!(
+            resolved.subject(),
+            Some(HolderSubject::Creator("ctr_derived".to_string()))
+        );
+        assert!(resolve_holder(&pool, "hld_absent").await.unwrap().is_none());
     }
 
     #[tokio::test]

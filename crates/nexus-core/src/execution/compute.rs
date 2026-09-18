@@ -937,13 +937,17 @@ async fn create_key_blocks_in_tx(
         let now = chrono::Utc::now().to_rfc3339();
 
         // The lane is World-owned only (world_id param), so owner_kind='world'
-        // and the non-World owner columns are NULL.
+        // and the non-World owner columns are NULL. The native governance
+        // columns are left at their shared defaults (NULL/NULL): v1.191 P1 T3
+        // removed the legacy `creator_only` column from `kb_key_blocks`, and
+        // compute output never assigns a holder or disclosure (authoring
+        // admission owns that).
         sqlx::query(
             "INSERT INTO kb_key_blocks \
              (key_block_id, owner_kind, world_id, character_id, \
-              actor_world_binding_id, creator_only, block_type, canonical_name, status, \
+              actor_world_binding_id, block_type, canonical_name, status, \
               body_json, source_anchor_json, created_at, updated_at) \
-             VALUES (?, 'world', ?, NULL, NULL, 0, ?, ?, ?, ?, ?, ?, ?)",
+             VALUES (?, 'world', ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&kb.entry_id)
         .bind(world_id)
