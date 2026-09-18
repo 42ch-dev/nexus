@@ -15,7 +15,7 @@ export interface PackExportResponse {
     [k: string]: unknown | undefined;
   };
   /**
-   * Ordered KnowledgeEntry list (canonical_name ASC).
+   * Ordered KnowledgeEntry list (canonical_name ASC). Each entry carries its wire governance (`owner` = the holder KnowledgeEntry entry_id, `disclosure`) exactly as stored; a quarantined import atom is not a KB row and is never emitted.
    *
    * Items: Spoke KnowledgeEntry (serialized JSON object). Typed access is via the spoke package (@42ch/spoke-schemas / spoke-schemas). Canonical schema: https://spoke42.invalid/schemas/data/knowledge-entry.schema.json. V1.139 fallback: opaque object here.
    */
