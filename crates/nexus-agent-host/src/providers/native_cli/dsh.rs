@@ -3592,20 +3592,27 @@ mod tests {
         );
     }
 
-    /// The spawned runtime pid once the fixture has received
-    /// `session/prompt` (`log_request` runs before the reply), or `None`
-    /// while the turn has not reached the wire yet.
+    /// The spawned runtime pid once the fixture records `_turn_open`, i.e.
+    /// after it flushed the `session/prompt` response and the inbox receipt
+    /// (HOLD_TURN arm). `None` while the turn has not reached that point.
+    ///
+    /// This is the write-completion barrier for the closed-transport fixture:
+    /// both frames are already in the pipe when the marker appears, and a
+    /// pipe keeps them readable after the writer dies, so the SDK's read loop
+    /// must dispatch the prompt response (and the receipt) before it observes
+    /// EOF. Killing after the marker therefore cannot fail a still-pending
+    /// `session/prompt` request — whose `Error::TransportClosed` would reach
+    /// Nexus through the exact same mapping and be indistinguishable
+    /// downstream — and the only remaining failure origin is the park on the
+    /// notification subscription that the 0.2.1 EOF tail wakes.
     #[cfg(unix)]
-    fn prompt_runtime_pid(req_log: &Path) -> Option<i32> {
+    fn pid_when_turn_open(req_log: &Path) -> Option<i32> {
         let raw = std::fs::read_to_string(req_log).ok()?;
         let entries: Vec<serde_json::Value> = raw
             .lines()
             .filter_map(|line| serde_json::from_str(line).ok())
             .collect();
-        if entries
-            .iter()
-            .any(|entry| entry["method"] == "session/prompt")
-        {
+        if entries.iter().any(|entry| entry["method"] == "_turn_open") {
             spawn_pids(&entries).pop()
         } else {
             None
@@ -3613,12 +3620,14 @@ mod tests {
     }
 
     /// Closed-transport regression (deepseek-harness-sdk 0.2.1 "wakes closed
-    /// transport"): a runtime that dies with the turn still open on the wire
-    /// closes the SDK notification channel, so the parked run resolves with
-    /// `Error::TransportClosed` instead of waiting out the provider turn
-    /// timeout. Nexus emits `OpStarted` then exactly one
-    /// `OpFailed(stream_closed)` — no fabricated root text, and no second
-    /// terminal.
+    /// transport"): the `hold_turn` runtime is killed only after it has
+    /// flushed the prompt response and the inbox receipt (`_turn_open`), so
+    /// the run is provably parked on the SDK notification subscription rather
+    /// than awaiting `session/prompt`. The death then closes the notification
+    /// channel, the parked receive resolves with `Error::TransportClosed`, and
+    /// Nexus emits `OpStarted` then exactly one `OpFailed(stream_closed)` — no
+    /// fabricated root text, no second terminal, and none of the SDK's process
+    /// diagnostics on the author-visible event.
     #[cfg(unix)]
     #[tokio::test]
     async fn dsh_runtime_death_mid_turn_is_one_stream_closed_terminal() {
@@ -3652,12 +3661,12 @@ mod tests {
 
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         let pid = loop {
-            if let Some(pid) = prompt_runtime_pid(&req_log) {
+            if let Some(pid) = pid_when_turn_open(&req_log) {
                 break pid;
             }
             assert!(
                 std::time::Instant::now() < deadline,
-                "the fixture must receive session/prompt before the deadline"
+                "the fixture must hold the turn open before the deadline"
             );
             tokio::time::sleep(std::time::Duration::from_millis(25)).await;
         };

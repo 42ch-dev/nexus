@@ -21,11 +21,19 @@ Behavior knobs (env vars):
   plus one startup `_spawn` record ({"argv": ..., "dsh_home": ...,
   "pid": ...}) so tests can assert the provider's launch identity (exact
   argv, DSH_HOME) and CONFIRMED child exit (pid liveness after close)
-  without touching the wire protocol.
+  without touching the wire protocol. The held-turn arm also appends one
+  `_turn_open` marker AFTER the prompt response and inbox receipt are
+  flushed — a write-completion barrier for the closed-transport fixture
+  (see HOLD_TURN below).
 - HOLD_TURN=1     after the `session/prompt` response, emit the inbox
   receipt but never the root idle — the SDK run hangs and the provider's
   turn timeout fires (the zombie-turn arm: the runtime keeps the turn
-  open under the old session id).
+  open under the old session id). Before holding, the arm records
+  `_turn_open`: the response and receipt are already flushed, so the
+  client's next observation on this stream is EOF. Tests that kill the
+  runtime mid-turn wait for that marker first, which keeps the death out
+  of the window where `session/prompt` is still pending (that failure is
+  also `Error::TransportClosed`, and is indistinguishable downstream).
 - SHUTDOWN_DELAY_MS=<ms>  delay the `shutdown` reply, so the provider's
   close-wait timeout fires while the retained cleanup owner still runs
   (unconfirmed-close lifecycle arm).
@@ -84,6 +92,14 @@ def log_spawn():
     }
     with open(path, "a") as f:
         f.write(json.dumps(entry) + "\n")
+
+def log_marker(method):
+    """Append one control record (no request payload) to REQ_LOG."""
+    path = os.environ.get("REQ_LOG")
+    if not path:
+        return
+    with open(path, "a") as f:
+        f.write(json.dumps({"method": method}) + "\n")
 
 def reply(req, result):
     send({"jsonrpc": "2.0", "id": req["id"], "result": result})
@@ -153,6 +169,9 @@ def handle_request(req):
         })
         scenario = os.environ.get("SCENARIO", "happy")
         if scenario == "hold_turn" or os.environ.get("HOLD_TURN") == "1":
+            # The response and the inbox receipt above are flushed, so the
+            # held turn is fully open on the wire.
+            log_marker("_turn_open")
             return
         if scenario == "lag":
             time.sleep(int(os.environ.get("LAG_MS", "150")) / 1000.0)
