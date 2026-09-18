@@ -216,7 +216,7 @@ tokio-tungstenite = "0.30"
 # `default-features = false` drops `sync-client`; claude's `auth` feature is
 # not in default and must stay off (PD-2). Consumed by `nexus-agent-host`.
 claude-codes = { version = "=2.1.263", default-features = false, features = ["async-client"] }
-codex-codes = { version = "=0.146.4", default-features = false, features = ["async-client"] }
+codex-codes = { version = "=0.154.2", default-features = false, features = ["async-client"] }
 # V1.168 P2 introduced this Rust SDK for the DeepSeek Harness runtime
 # (PD-4); V1.188 P0 T1 bumps the exact pin to 0.2.0 (profile/dsh_bin
 # launch surface, five-field RunResult, expanded Error taxonomy). The
