@@ -126,6 +126,12 @@ async fn migrated_pool() -> (SqlitePool, tempfile::TempDir) {
 
 // ── Seed helpers ────────────────────────────────────────────────────────
 
+/// Seed the shared `CREATOR` through the production materialization.
+///
+/// Only usable on a pool at the current schema: since v1.191 P1 T4 the
+/// materializer commits the subject and its holder registry row together
+/// (§2.1), so it cannot run before the cutover. Fixtures that model a
+/// pre-cutover workspace seed [`seed_pre_cutover_creator`] instead.
 async fn seed_creator(pool: &SqlitePool) {
     nexus_local_db::ensure_creator_row(pool, CREATOR, "Owner")
         .await
@@ -398,7 +404,7 @@ async fn pre_v1184_upgrade_preserves_bytes_children_and_schema_objects() {
     assert!(!column_names.iter().any(|c| c == "owner_kind"));
 
     // ── Seed the pre-v1.184 fixture ─────────────────────────────────────
-    seed_creator(&pool).await;
+    seed_pre_cutover_creator(&pool, CREATOR).await;
     seed_world(&pool, WORLD_A).await;
     seed_world(&pool, WORLD_CASCADE).await;
     seed_character(&pool, CHARACTER, "Aria").await;
@@ -1604,9 +1610,12 @@ async fn seed_pre_cutover_kb(
     .unwrap();
 }
 
-/// Seed a minimal Creator row with an explicit id (the shared `seed_creator`
-/// helper is fixed to `CREATOR`).
-async fn seed_creator_row(pool: &SqlitePool, creator_id: &str) {
+/// Seed a pre-cutover Creator subject row (the `creators` row alone).
+///
+/// The holder registry does not exist yet in these fixtures — the cutover under
+/// test is what backfills it — so pre-cutover seeding must not go through
+/// [`seed_creator`]'s holder-writing materializer.
+async fn seed_pre_cutover_creator(pool: &SqlitePool, creator_id: &str) {
     sqlx::query(
         "INSERT INTO creators (creator_id, display_name, status, cached_at, data) \
          VALUES (?, ?, 'active', '2026-09-01T00:00:00Z', '{}')",
@@ -1728,8 +1737,8 @@ async fn assert_holder_migration_aborted(pool: &SqlitePool, case: &str) {
 #[tokio::test]
 async fn v1191_holder_migration_backfills_stored_creator_private() {
     let (pool, _dir, db_path) = pre_holder_db().await;
-    seed_creator(&pool).await;
-    seed_creator_row(&pool, CREATOR_B).await;
+    seed_pre_cutover_creator(&pool, CREATOR).await;
+    seed_pre_cutover_creator(&pool, CREATOR_B).await;
     seed_world(&pool, WORLD_A).await;
     seed_world_owned_by(&pool, WORLD_B, CREATOR_B).await;
     seed_character(&pool, CHARACTER, "Aria").await;
@@ -2123,7 +2132,7 @@ async fn v1191_holder_migration_cross_workspace_ids_are_stable() {
     let mut registry_rows = Vec::new();
     for _ in 0..2 {
         let (pool, _dir, _db_path) = pre_holder_db().await;
-        seed_creator(&pool).await;
+        seed_pre_cutover_creator(&pool, CREATOR).await;
         seed_world(&pool, WORLD_A).await;
         seed_pre_cutover_kb(&pool, "kb_priv", "Private", Some(WORLD_A), None, 1, None).await;
         nexus_local_db::run_migrations(&pool)
@@ -2150,8 +2159,8 @@ async fn v1191_holder_migration_cross_workspace_ids_are_stable() {
 
     // A colliding id (PK) or a second subject binding is refused outright.
     let (pool, _dir) = migrated_pool().await;
-    seed_creator(&pool).await;
-    seed_creator_row(&pool, CREATOR_B).await;
+    seed_pre_cutover_creator(&pool, CREATOR).await;
+    seed_pre_cutover_creator(&pool, CREATOR_B).await;
     let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
     let holder = nexus_local_db::ensure_creator_holder_in_tx(&mut tx, CREATOR)
         .await
@@ -2195,7 +2204,7 @@ async fn v1191_holder_migration_cross_workspace_ids_are_stable() {
 async fn v1191_holder_migration_aborts_without_mutation() {
     // 1. The stored World controlling Creator cannot be resolved.
     let (pool, _dir, _db_path) = pre_holder_db().await;
-    seed_creator(&pool).await;
+    seed_pre_cutover_creator(&pool, CREATOR).await;
     seed_world_owned_by(&pool, WORLD_A, "ctr_orphaned").await;
     seed_pre_cutover_kb(&pool, "kb_priv", "Private", Some(WORLD_A), None, 1, None).await;
     let err = nexus_local_db::run_migrations(&pool).await.unwrap_err();
@@ -2209,7 +2218,7 @@ async fn v1191_holder_migration_aborts_without_mutation() {
 
     // 2. The legacy extension document contradicts the column.
     let (pool, _dir, _db_path) = pre_holder_db().await;
-    seed_creator(&pool).await;
+    seed_pre_cutover_creator(&pool, CREATOR).await;
     seed_world(&pool, WORLD_A).await;
     seed_pre_cutover_kb(
         &pool,
@@ -2232,7 +2241,7 @@ async fn v1191_holder_migration_aborts_without_mutation() {
 
     // 3. A WorldSheet-linked row would become private.
     let (pool, _dir, _db_path) = pre_holder_db().await;
-    seed_creator(&pool).await;
+    seed_pre_cutover_creator(&pool, CREATOR).await;
     seed_world(&pool, WORLD_A).await;
     seed_character(&pool, CHARACTER, "Aria").await;
     seed_pre_cutover_kb(
@@ -2266,7 +2275,7 @@ async fn v1191_holder_migration_aborts_without_mutation() {
 
     // 4. A pre-existing native governance column (hostile/partial schema).
     let (pool, _dir, _db_path) = pre_holder_db().await;
-    seed_creator(&pool).await;
+    seed_pre_cutover_creator(&pool, CREATOR).await;
     seed_world(&pool, WORLD_A).await;
     seed_pre_cutover_kb(&pool, "kb_priv", "Private", Some(WORLD_A), None, 1, None).await;
     sqlx::query("ALTER TABLE kb_key_blocks ADD COLUMN holder_entry_id TEXT")
@@ -2298,7 +2307,7 @@ async fn v1191_holder_migration_aborts_without_mutation() {
 
     // 5. A malformed extension document.
     let (pool, _dir, _db_path) = pre_holder_db().await;
-    seed_creator(&pool).await;
+    seed_pre_cutover_creator(&pool, CREATOR).await;
     seed_world(&pool, WORLD_A).await;
     seed_pre_cutover_kb(
         &pool,

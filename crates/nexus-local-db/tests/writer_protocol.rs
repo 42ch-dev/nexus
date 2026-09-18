@@ -786,9 +786,18 @@ async fn assert_holder_tables_require_admission(db: &Path) {
     let direct = open_admitted_pool(db, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
         .await
         .expect("direct admitted pool");
-    ensure_creator_row(&direct, "ctr_holder_writer", "Holder Writer")
-        .await
-        .expect("creator materialization");
+    // The subject row alone: the holder is registered by the explicit insert
+    // below, which is what proves the guard admits a direct writer on the
+    // registry table. `ensure_creator_row` commits the holder together with the
+    // subject (§2.1) and would collide with that insert.
+    // SAFETY: fixture insert against the known `creators` DDL.
+    sqlx::query(
+        "INSERT INTO creators (creator_id, display_name, status, cached_at, data) \
+         VALUES ('ctr_holder_writer', 'Holder Writer', 'active', '2026-09-18T00:00:00Z', '{}')",
+    )
+    .execute(&direct)
+    .await
+    .expect("creator subject row");
     // The quarantine container is a real stored World (FK), not a placeholder.
     sqlx::query(
         "INSERT INTO narrative_worlds \
