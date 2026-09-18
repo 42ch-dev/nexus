@@ -229,6 +229,14 @@ async fn put_create(
     // Duplicate error from insert is also mapped to AlreadyExists below.)
     // L2 F1: the pre-check runs through the bound selection, so a row the
     // caller cannot see is not an existence oracle — it reads as absent here.
+    //
+    // Precedence (L2 ruling, v1.191 P1 T8): for an id that already exists AND
+    // is visible to this caller, the conflict answer wins — `ALREADY_EXISTS` is
+    // returned before any content-level refusal, so the legacy-key refusal
+    // below (`legacy_creator_only_unsupported`, applied on the conversion path)
+    // only ever answers requests for rows that would actually be created. The
+    // stored row is neither read out (no key swallowed, nothing echoed) nor
+    // written by this branch.
     match adapter.load_admitted_entry(&entry_id).await {
         Ok(Some(_)) => {
             return reject(
@@ -1338,6 +1346,23 @@ mod tests {
     // unchanged (confirmed by the red-green run). No additional OCC test
     // needed beyond the existing coverage.
 
+    /// Byte-level fingerprint of one stored `kb_key_blocks` row (governance +
+    /// revision + the persisted extensions document) for unchanged-storage
+    /// assertions.
+    async fn stored_row_fingerprint(
+        pool: &sqlx::SqlitePool,
+        entry_id: &str,
+    ) -> (String, Option<String>, Option<String>, Option<i64>, String) {
+        sqlx::query_as(
+            "SELECT owner_kind, holder_entry_id, disclosure, revision, extensions_nexus_json \
+             FROM kb_key_blocks WHERE key_block_id = ?",
+        )
+        .bind(entry_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
     /// Read the stored container kind + native governance columns plus the
     /// persisted `extensions_nexus_json` for an entry — used to assert a
     /// rejected write leaves storage unchanged.
@@ -1604,6 +1629,68 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(revision, Some(1), "a refused update must not mutate the row");
+    }
+
+    /// L2 ruling: an existing **visible** id answers `ALREADY_EXISTS` before the
+    /// legacy-key refusal — the refusal is for rows that would really be
+    /// created. The stored row (revision, extensions document, governance) must
+    /// stay byte-identical: no key is swallowed, nothing is written.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_create_on_existing_visible_id_wins_over_the_legacy_refusal() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let adapter = scoped(pool.clone());
+        let created = unwrap_ok(
+            adapter
+                .put_knowledge_entry(spoke_entry("kb_prio", "Prio", None), None)
+                .await,
+            "create",
+        );
+        assert_eq!(created.revision, Some(1));
+
+        // Simulate a stored pre-cutover row: the cutover migration strips the
+        // retired key, so a surviving row that still carries it is reproduced
+        // directly in the extensions document.
+        sqlx::query("UPDATE kb_key_blocks SET extensions_nexus_json = ? WHERE key_block_id = ?")
+            .bind(r#"{"nexus":{"world_id":"wld_1","creator_only":false}}"#)
+            .bind("kb_prio")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let before = stored_row_fingerprint(&pool, "kb_prio").await;
+
+        // Same visible id, and the request itself carries the legacy key.
+        let mut attempt = spoke_entry("kb_prio", "Prio", None);
+        let key = spoke_schemas::knowledge_entry::KnowledgeEntryExtensionsKey::try_from("nexus")
+            .expect("nexus key is a valid extension key");
+        attempt
+            .extensions
+            .entry(key)
+            .or_default()
+            .insert("creator_only".to_string(), serde_json::Value::Bool(false));
+
+        match adapter.put_knowledge_entry(attempt, None).await {
+            SpokeResult::Reject(r) => {
+                assert_eq!(
+                    r.code,
+                    SpokeRejectCode::KnowledgeEntryAlreadyExists,
+                    "the visible-id conflict must win over the legacy refusal, got {r:?}"
+                );
+                assert_eq!(
+                    r.message.matches("legacy_creator_only_unsupported").count(),
+                    0,
+                    "the conflict, not the legacy reason, is the answer here: {r:?}"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("expected AlreadyExists for an existing visible id"),
+        }
+
+        assert_eq!(
+            stored_row_fingerprint(&pool, "kb_prio").await,
+            before,
+            "the stored row must be byte-identical (revision, governance, extensions)"
+        );
     }
 
     /// v1.191 P1 T8: a create whose container is outside the bound selection
