@@ -88,6 +88,11 @@ pub use service::{CoreAccess, CoreOpenOptions, CoreService};
 pub use soul::CoreCharacterMind;
 pub use storage_status::{CoreStorageStatus, CoreStorageVersions};
 pub use timeline::{CoreTimelineEventsQuery, CoreTimelineOverviewQuery};
+pub use world_pack::{
+    AtomCounts, HolderMapping, HolderMappingSelector, ImportAtomKind, ImportDetail,
+    ImportOutcome, ImportQuarantineReview, ImportSummary, QuarantineReason, QuarantinedAtomReport,
+    REVIEW_IMPORT_MAX_ATOMS,
+};
 pub use works::{
     AddInspirationRequest, AddInspirationResponse, ArchiveInspirationRequest, ArchivePoolRequest,
     ListInspirationQuery, ListInspirationResponse, ListPoolQuery, ListPoolResponse,

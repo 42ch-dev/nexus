@@ -49,7 +49,9 @@ use nexus_knowledge::world_kb::knowledge_entry::{
 };
 use serde_json::{Map, Value};
 use spoke_operations::ExtensionMap;
-use spoke_schemas::knowledge_entry::KnowledgeEntryExtensionsKey;
+use spoke_schemas::knowledge_entry::{
+    KnowledgeEntryExtensionsKey, KnowledgeEntryOwner as SpokeKnowledgeOwner,
+};
 use spoke_schemas::KnowledgeEntry;
 
 /// The `extensions.nexus` namespace key (lowercase, matches the
@@ -123,6 +125,29 @@ pub fn refuse_legacy_creator_only(entry: &KnowledgeEntry) -> Result<(), KbError>
              is not accepted on a wire knowledge entry"
         )));
     }
+    Ok(())
+}
+
+/// Adopt one parsed wire entry's holder reference into a permitted local
+/// identity (durable §6, v1.191 P1 T10).
+///
+/// The import boundary calls this **only** for an atom an explicit
+/// `--holder-map` mapping authorizes. It rewrites exactly `KnowledgeEntry.owner`
+/// to the resolved local holder id and leaves `.disclosure` untouched, so an
+/// adopted atom keeps the governance the pack carried while naming a local
+/// identity. Nothing else on the entry is modified.
+///
+/// # Errors
+///
+/// Returns [`KbError::ValidationError`] when `local_holder_id` cannot be a wire
+/// `owner` value (spoke requires a non-empty string).
+pub fn adopt_wire_holder(entry: &mut KnowledgeEntry, local_holder_id: &str) -> Result<(), KbError> {
+    let holder = SpokeKnowledgeOwner::try_from(local_holder_id).map_err(|e| {
+        KbError::ValidationError(format!(
+            "holder {local_holder_id:?} is not a valid wire owner value: {e}"
+        ))
+    })?;
+    entry.owner = Some(holder);
     Ok(())
 }
 

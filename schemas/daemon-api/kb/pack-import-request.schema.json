@@ -3,26 +3,56 @@
   "$id": "https://nexus42.invalid/schemas/daemon-api/kb/pack-import-request.schema.json",
   "schema_version": 1,
   "title": "Nexus PackImportRequest",
-  "description": "POST /v1/daemon/worlds/:world_id/kb/pack/import — import a Narrative Knowledge Pack into a World (V1.152 P0 DF-77). The pack is an opaque handbook pack object; conflict policy is required semantic state.",
+  "description": "POST /v1/daemon/worlds/:world_id/kb/pack/import — import a Narrative Knowledge Pack into a World (V1.152 P0 DF-77), or review one import batch's quarantined atoms (v1.191 P1 T10). Two mutually exclusive arms: the IMPORT arm requires `pack` + `conflict` and may carry `holder_map`/`include_anchors`; the REVIEW arm carries `review_import` alone (a read-only, bounded, owner-only review of one batch). Sending `review_import` together with `pack`, `holder_map` or `include_anchors` is refused as invalid input.",
   "type": "object",
-  "required": ["pack", "conflict"],
   "additionalProperties": false,
   "properties": {
     "pack": {
       "type": "object",
       "additionalProperties": true,
-      "description": "Opaque Narrative Knowledge Pack (spoke handbook shape: modules.pack + entries + relations + optional source_anchors). Parsed server-side via nexus_spoke_adapter::pack::parse_pack."
+      "description": "Opaque Narrative Knowledge Pack (spoke handbook shape: modules.pack + entries + relations + optional source_anchors). Parsed server-side via nexus_spoke_adapter::pack::parse_pack. Required on the import arm; absent on the review arm."
     },
     "conflict": {
       "type": "string",
       "enum": ["skip", "rename", "overwrite"],
-      "description": "Collision policy: skip (keep existing, default), rename (disambiguate and create), overwrite (replace one entry body, behind confirmation).",
+      "description": "Collision policy: skip (keep existing, default), rename (disambiguate and create), overwrite (replace one entry body, behind confirmation). Required semantic state on the import arm; absent on the review arm.",
       "default": "skip"
     },
     "include_anchors": {
       "type": "boolean",
       "description": "Whether to import source_anchors from the pack. Accepted on the wire; no-op until anchor persistence ships.",
       "default": false
+    },
+    "holder_map": {
+      "type": "array",
+      "description": "Explicit foreign→local holder adoptions for this import (v1.191 P1 T10, holder-governance.md §6). Each mapping validates through authoring admission; an inadmissible mapping refuses the whole import with no atom written. Without a mapping for a foreign-governed atom, that atom is quarantined — a foreign id is never adopted by string equality, and unknown disclosure stays quarantined even when its owner is mapped.",
+      "items": {
+        "$ref": "#/definitions/holder_mapping"
+      }
+    },
+    "review_import": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Import batch id to review. Selects the read-only review arm: it returns the batch's bounded quarantined atoms (immutable original KE JSON, original owner/disclosure, reason) authorized to the stored controlling Creator that ran the batch, and never a model-facing knowledge view. Mutually exclusive with pack/ST input and holder mappings."
+    }
+  },
+  "definitions": {
+    "holder_mapping": {
+      "type": "object",
+      "required": ["foreign_id", "selector"],
+      "additionalProperties": false,
+      "properties": {
+        "foreign_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The foreign holder id exactly as the pack carries it. Matched by exact key only; equality with a local hld_ digest adopts nothing."
+        },
+        "selector": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The permitted local identity the atom is adopted into: \"author-only\" (the admitted controlling Creator) or \"character-private:<character_id>\" (that owned, active Character, which must hold an active binding to the owned World)."
+        }
+      }
     }
   }
 }

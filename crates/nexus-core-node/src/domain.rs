@@ -234,8 +234,13 @@ impl NativeCore {
         request_json: Buffer,
     ) -> Result<Buffer> {
         let request: PackExportRequest = decode(request_json, "request")?;
+        // The explicit author intent to include owned known-private material
+        // (`include_owned_private`) is a frozen schema input for the custodian
+        // checkpoint; the generated request type does not carry it yet, so this
+        // bridge serves the shared-only admitted export.
         self.json_call(principal_handle, async move |core, principal| {
-            core.export_world_pack(&principal, world_id, request).await
+            core.export_world_pack(&principal, world_id, request, false)
+                .await
         })
         .await
     }
@@ -250,8 +255,13 @@ impl NativeCore {
         request_json: Buffer,
     ) -> Result<Buffer> {
         let request: PackImportRequest = decode(request_json, "request")?;
+        // The explicit identity-safety arms (`holder_map` adoption mappings and
+        // the read-only `review_import` batch selector) are frozen schema inputs
+        // for the custodian checkpoint; the generated request type does not carry
+        // them yet, so this bridge serves the default import arm.
         self.json_call(principal_handle, async move |core, principal| {
-            core.import_world_pack(&principal, world_id, request).await
+            core.import_world_pack(&principal, world_id, request, Vec::new())
+                .await
         })
         .await
     }

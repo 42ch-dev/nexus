@@ -18,6 +18,12 @@ use nexus_contracts::daemon_api::kb::{
 /// request, the core authority denies it (ownership, admission or validation),
 /// or the bounded store read/write fails.
 /// Export an owned World's lore; the response remains the handbook pack.
+///
+/// The export reads through the exporting Creator's admitted selection. The
+/// explicit author intent to include owned known-private material
+/// (`include_owned_private`) is a frozen schema input for the custodian
+/// checkpoint; the generated request type does not carry it yet, so this arm
+/// serves the shared-only admitted export.
 pub async fn pack_export(
     State(state): State<WorkspaceState>,
     Path(world_id): Path<String>,
@@ -25,7 +31,7 @@ pub async fn pack_export(
 ) -> Result<Json<PackExportResponse>, NexusApiError> {
     require_creator(&state)?;
     let (core, principal) = resolve_core_principal(&state).await?;
-    core.export_world_pack(&principal, world_id, req)
+    core.export_world_pack(&principal, world_id, req, false)
         .await
         .map(Json)
         .map_err(NexusApiError::from)
@@ -45,7 +51,7 @@ pub async fn pack_import(
 ) -> Result<Json<PackImportResponse>, NexusApiError> {
     require_creator(&state)?;
     let (core, principal) = resolve_core_principal(&state).await?;
-    core.import_world_pack(&principal, world_id, req)
+    core.import_world_pack(&principal, world_id, req, Vec::new())
         .await
         .map(Json)
         .map_err(NexusApiError::from)

@@ -2045,6 +2045,263 @@ impl SqliteKbStore {
             .await
     }
 
+    /// List the **admitted** rows of one World under an explicit read selection
+    /// (v1.191 P1 T10, durable §4.2/§6).
+    ///
+    /// The pack-export path reads through this instead of the unscoped
+    /// listings: the selection's eligibility conjunct is applied inside the
+    /// `WHERE`, so the returned rows are exactly what the caller's authority
+    /// may read and a hidden row consumes no slot in the
+    /// [`LIST_BY_WORLD_LIMIT`] window. A selection with an empty
+    /// known-governance holder set admits only `disclosure IS NULL` rows — the
+    /// shared-only view an export without explicit author intent uses.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`KbStoreError::Storage`] on database failure.
+    pub async fn list_by_world_admitted(
+        &self,
+        world_id: &str,
+        include_deprecated: bool,
+        selection: &KnowledgeReadScope,
+    ) -> Result<Vec<KnowledgeEntryRecord>, KbStoreError> {
+        self.list_by_world_with_status_filter(world_id, include_deprecated, Some(selection))
+            .await
+    }
+}
+
+// ── Import quarantine store (v1.191 P1 T10, durable §6) ────────────────────
+//
+// `knowledge_import_quarantine` is T3's table; this is its single storage API.
+// A quarantined atom is a foreign-governed pack entry the import boundary
+// refused to store natively: its wire holder id is not a local identity and no
+// explicit `--holder-map` adopted it, or its disclosure is not native
+// vocabulary. The row is outside every ordinary KB read, export, search and
+// compute path (it is not a `kb_key_blocks` row), so only the bounded owner
+// review arm reads it back.
+
+/// The quarantined atom's wire holder id resolved to no permitted local
+/// identity (`knowledge_import_quarantine.quarantine_reason`).
+pub const QUARANTINE_REASON_UNRESOLVED_HOLDER: &str = "unresolved_holder";
+
+/// The quarantined atom's disclosure is outside the native vocabulary
+/// (`knowledge_import_quarantine.quarantine_reason`).
+pub const QUARANTINE_REASON_UNKNOWN_DISCLOSURE: &str = "unknown_disclosure";
+
+/// Domain separation for a quarantined atom's deterministic id.
+const QUARANTINE_ID_DOMAIN: &[u8] = b"nexus-quarantine-v1\0";
+
+/// Reserved namespace for quarantine ids; never an ordinary narrative KE id.
+pub const QUARANTINE_ID_PREFIX: &str = "qrn_";
+
+/// The identity of one quarantined atom. Exactly these fields decide *which*
+/// foreign atom is held, so the derived id is stable across repeated imports
+/// (idempotent quarantine) and across a later adoption (the mapped re-import
+/// removes the row this same identity produced).
+#[derive(Debug, Clone, Copy)]
+pub struct NewQuarantinedAtom<'a> {
+    /// The import run's batch id (grouping label; never part of the identity).
+    pub import_batch_id: &'a str,
+    /// Stored controlling Creator that performed the import.
+    pub controlling_creator_id: &'a str,
+    /// The import target World the atom was intended for.
+    pub world_id: &'a str,
+    /// One of the two [`QUARANTINE_REASON_*`] vocabulary strings.
+    pub reason: &'a str,
+    /// The wire `owner` the atom carried, absent when there was none.
+    pub foreign_holder_id: Option<&'a str>,
+    /// The pack atom's `entry_id` (the atom identity inside the pack).
+    pub entry_id: &'a str,
+    /// The immutable original wire KE JSON, verbatim as parsed.
+    pub original_entry_json: &'a str,
+    /// Pack-level provenance (title/version/creator) as a JSON object.
+    pub source_provenance_json: &'a str,
+}
+
+/// `qrn_` + lowercase BLAKE3 digest of the domain-separated atom identity.
+///
+/// Pure function of `(controlling Creator, World, reason, foreign holder,
+/// pack entry id)`: the batch id is deliberately excluded so a repeated import
+/// of the same atom resolves to the same row.
+#[must_use]
+pub fn quarantine_atom_id(
+    controlling_creator_id: &str,
+    world_id: &str,
+    reason: &str,
+    foreign_holder_id: Option<&str>,
+    entry_id: &str,
+) -> String {
+    let mut input = Vec::new();
+    input.extend_from_slice(QUARANTINE_ID_DOMAIN);
+    for part in [
+        controlling_creator_id,
+        world_id,
+        reason,
+        foreign_holder_id.unwrap_or_default(),
+        entry_id,
+    ] {
+        input.extend_from_slice(part.as_bytes());
+        input.push(0);
+    }
+    let digest = blake3::hash(&input);
+    format!("{QUARANTINE_ID_PREFIX}{}", digest.to_hex())
+}
+
+/// One quarantined atom as this store reads it back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuarantinedAtom {
+    pub quarantine_id: String,
+    pub import_batch_id: String,
+    pub controlling_creator_id: String,
+    pub world_id: String,
+    pub reason: String,
+    /// Projected from the immutable original JSON (`$.entry_id`).
+    pub entry_id: String,
+    /// Projected from the immutable original JSON (`$.owner`).
+    pub original_owner: Option<String>,
+    /// Projected from the immutable original JSON (`$.disclosure`).
+    pub original_disclosure: Option<String>,
+    pub original_entry_json: String,
+    pub source_provenance_json: String,
+    pub created_at: String,
+}
+
+/// Row shape of the quarantine SELECT (JSON projections come back nullable).
+#[derive(Debug, sqlx::FromRow)]
+struct QuarantinedAtomRow {
+    quarantine_id: String,
+    import_batch_id: String,
+    controlling_creator_id: String,
+    world_id: String,
+    quarantine_reason: String,
+    entry_id: Option<String>,
+    original_owner: Option<String>,
+    original_disclosure: Option<String>,
+    original_entry_json: String,
+    source_provenance_json: String,
+    created_at: String,
+}
+
+impl From<QuarantinedAtomRow> for QuarantinedAtom {
+    fn from(row: QuarantinedAtomRow) -> Self {
+        Self {
+            quarantine_id: row.quarantine_id,
+            import_batch_id: row.import_batch_id,
+            controlling_creator_id: row.controlling_creator_id,
+            world_id: row.world_id,
+            reason: row.quarantine_reason,
+            entry_id: row.entry_id.unwrap_or_default(),
+            original_owner: row.original_owner,
+            original_disclosure: row.original_disclosure,
+            original_entry_json: row.original_entry_json,
+            source_provenance_json: row.source_provenance_json,
+            created_at: row.created_at,
+        }
+    }
+}
+
+/// Write one quarantined atom, keyed by its deterministic id.
+///
+/// Idempotent per atom: re-importing the same foreign atom inserts nothing and
+/// keeps the first row's batch id and immutable original JSON, so a repeated
+/// import neither duplicates state nor rewrites the record.
+///
+/// # Errors
+///
+/// Returns [`LocalDbError`] on database failure or a violated container/creator
+/// foreign key.
+pub async fn quarantine_import_atom(
+    pool: &SqlitePool,
+    atom: &NewQuarantinedAtom<'_>,
+) -> Result<String, LocalDbError> {
+    let quarantine_id = quarantine_atom_id(
+        atom.controlling_creator_id,
+        atom.world_id,
+        atom.reason,
+        atom.foreign_holder_id,
+        atom.entry_id,
+    );
+    sqlx::query(
+        "INSERT OR IGNORE INTO knowledge_import_quarantine \
+            (quarantine_id, import_batch_id, controlling_creator_id, owner_kind, world_id, \
+             quarantine_reason, original_entry_json, source_provenance_json) \
+         VALUES (?, ?, ?, 'world', ?, ?, ?, ?)",
+    )
+    .bind(&quarantine_id)
+    .bind(atom.import_batch_id)
+    .bind(atom.controlling_creator_id)
+    .bind(atom.world_id)
+    .bind(atom.reason)
+    .bind(atom.original_entry_json)
+    .bind(atom.source_provenance_json)
+    .execute(pool)
+    .await?;
+    Ok(quarantine_id)
+}
+
+/// Remove one quarantine row inside a caller-owned transaction, returning
+/// whether a row was removed.
+///
+/// The adoption path deletes the mapped atom's row in the **same** transaction
+/// as the native write, so a committed adoption always means its quarantine row
+/// is gone and a failed one always means the original row (and its original
+/// JSON) survives.
+///
+/// # Errors
+///
+/// Returns [`LocalDbError`] on database failure.
+pub async fn remove_quarantine_atom_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    quarantine_id: &str,
+) -> Result<bool, LocalDbError> {
+    let result = sqlx::query("DELETE FROM knowledge_import_quarantine WHERE quarantine_id = ?")
+        .bind(quarantine_id)
+        .execute(&mut **tx)
+        .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Read back the quarantine rows of one import batch for one controlling
+/// Creator and World, ordered by their stable ids and capped at `limit` rows.
+///
+/// The read is keyed by the **stored** controlling Creator, so a batch is only
+/// ever visible to the identity that imported it. `entry_id`,
+/// `original_owner` and `original_disclosure` are projected out of the
+/// immutable original JSON (never a copy that could drift from it).
+///
+/// # Errors
+///
+/// Returns [`LocalDbError`] on database failure.
+pub async fn list_quarantine_atoms(
+    pool: &SqlitePool,
+    controlling_creator_id: &str,
+    world_id: &str,
+    import_batch_id: &str,
+    limit: i64,
+) -> Result<Vec<QuarantinedAtom>, LocalDbError> {
+    let rows = sqlx::query_as::<_, QuarantinedAtomRow>(
+        "SELECT quarantine_id, import_batch_id, controlling_creator_id, world_id, \
+                quarantine_reason, \
+                json_extract(original_entry_json, '$.entry_id') AS entry_id, \
+                json_extract(original_entry_json, '$.owner') AS original_owner, \
+                json_extract(original_entry_json, '$.disclosure') AS original_disclosure, \
+                original_entry_json, source_provenance_json, created_at \
+         FROM knowledge_import_quarantine \
+         WHERE controlling_creator_id = ? AND owner_kind = 'world' AND world_id = ? \
+           AND import_batch_id = ? \
+         ORDER BY quarantine_id ASC \
+         LIMIT ?",
+    )
+    .bind(controlling_creator_id)
+    .bind(world_id)
+    .bind(import_batch_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(QuarantinedAtom::from).collect())
+}
+
+impl SqliteKbStore {
     /// Shared body for [`Self::list_by_world_including_deprecated`] —
     /// parameterized status clause so the two call sites don't duplicate
     /// the full SELECT shape.
