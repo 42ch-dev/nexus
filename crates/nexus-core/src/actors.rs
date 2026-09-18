@@ -382,6 +382,18 @@ impl CoreService {
                 CharacterStatus::Active
             }
         };
+        // §2.2: resolve the identity's holder through the same exported read the
+        // admission paths use, before the lifecycle write. The storage layer
+        // re-resolves it inside the transaction, so the archive/restore commit
+        // still fails closed on a registry that changed under the fence.
+        require_actor_holder(
+            &self.inner.pool,
+            principal.creator_id(),
+            &AdmittedActor::Character {
+                character_id: lease.character_id().to_string(),
+            },
+        )
+        .await?;
         let record = nexus_local_db::transition_character(
             &self.inner.pool,
             principal.creator_id(),
@@ -737,6 +749,17 @@ impl CoreService {
                 },
             )
             .await?;
+        // §2.2: the lifecycle write resolves the identity's holder through the
+        // same exported read the admission paths use (the storage layer
+        // re-resolves it inside its own transaction).
+        require_actor_holder(
+            &self.inner.pool,
+            principal.creator_id(),
+            &AdmittedActor::Character {
+                character_id: character_id.clone(),
+            },
+        )
+        .await?;
         let record = nexus_local_db::update_character(
             &self.inner.pool,
             principal.creator_id(),

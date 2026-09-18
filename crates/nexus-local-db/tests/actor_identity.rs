@@ -2053,3 +2053,106 @@ async fn v1191_holder_lifecycle_referenced_creator_delete_refuses_and_unreferenc
         "removing another Creator leaves this registry row untouched"
     );
 }
+
+#[tokio::test]
+async fn v1191_holder_lifecycle_creator_guard_covers_every_creator_scoped_table() {
+    let (pool, _dir) = fresh_pool().await;
+
+    // Every persistent table carrying a Creator-identifying column, straight
+    // from the migrated schema (never a hand-kept copy).
+    let tables: Vec<String> = sqlx::query_scalar(
+        "SELECT m.name FROM sqlite_master m \
+         WHERE m.type = 'table' AND m.name NOT LIKE 'sqlite_%' \
+           AND EXISTS (SELECT 1 FROM pragma_table_info(m.name) c \
+                       WHERE c.name IN ('creator_id', 'owner_creator_id', 'controlling_creator_id')) \
+         ORDER BY m.name",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+
+    let classified: Vec<&str> = nexus_local_db::creators::CREATOR_RETAINED_TABLES
+        .iter()
+        .copied()
+        .chain(
+            nexus_local_db::creators::CREATOR_SCOPE_HANDLED_ELSEWHERE
+                .iter()
+                .map(|(table, _reason)| *table),
+        )
+        .collect();
+    let unclassified: Vec<&str> = tables
+        .iter()
+        .map(String::as_str)
+        .filter(|table| !classified.contains(table))
+        .collect();
+
+    assert!(
+        unclassified.is_empty(),
+        "Creator-scoped tables neither counted as retained rows nor classified as \
+         handled elsewhere — the delete_creator guard would let them be orphaned: {unclassified:?}"
+    );
+    // And the declared inventory names only tables that really exist.
+    let all_tables: Vec<String> = sqlx::query_scalar(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let stale: Vec<&str> = classified
+        .iter()
+        .copied()
+        .filter(|table| !all_tables.iter().any(|t| t == table))
+        .collect();
+    assert!(
+        stale.is_empty(),
+        "declared tables missing from the schema: {stale:?}"
+    );
+}
+
+#[tokio::test]
+async fn v1191_holder_lifecycle_reference_source_refuses_creator_delete() {
+    let (pool, _dir) = fresh_pool().await;
+    seed_creator_and_worlds(&pool).await;
+    // OWNER owns the seeded Worlds; use a Creator that owns nothing else so the
+    // reference registry row is the only possible refusal cause.
+    ensure_creator_row(&pool, OTHER, "Other").await.unwrap();
+    let holder = require_creator_holder(&pool, OTHER).await.unwrap();
+
+    // A creator-scoped reference registry row is retained owned data: it must
+    // refuse the deletion even though the Creator owns no World or Character.
+    sqlx::query(
+        "INSERT INTO reference_sources \
+         (reference_source_id, creator_id, source_type, uri, title, created_at) \
+         VALUES ('ref_guard', ?, 'note', 'note://guard', 'Guard', datetime('now'))",
+    )
+    .bind(OTHER)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    assert!(matches!(
+        delete_creator(&pool, OTHER).await.unwrap_err(),
+        LocalDbError::ActorContractConflict {
+            code: ActorContractConflict::ActorInUse
+        }
+    ));
+    // Zero mutation: holder, subject and the retained row all survive.
+    assert_eq!(holder_rows(&pool, "creator_id", OTHER).await, 1);
+    assert_eq!(require_creator_holder(&pool, OTHER).await.unwrap(), holder);
+    let sources: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM reference_sources WHERE creator_id = ?")
+            .bind(OTHER)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(sources, 1, "the retained reference source row is untouched");
+
+    // The same Creator is deletable once the retained row is gone.
+    sqlx::query("DELETE FROM reference_sources WHERE creator_id = ?")
+        .bind(OTHER)
+        .execute(&pool)
+        .await
+        .unwrap();
+    delete_creator(&pool, OTHER).await.unwrap();
+    assert_eq!(holder_rows(&pool, "creator_id", OTHER).await, 0);
+}

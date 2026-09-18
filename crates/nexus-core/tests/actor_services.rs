@@ -679,6 +679,7 @@ async fn drop_holder_row(env: &Env, column: &str, subject_id: &str) {
     pool.close().await;
 }
 
+#[allow(clippy::too_many_lines)] // one lifecycle round-trip asserted end to end
 #[tokio::test]
 async fn v1191_holder_lifecycle_actor_holders_are_stable_across_the_lifecycle() {
     let env = seed_env().await;

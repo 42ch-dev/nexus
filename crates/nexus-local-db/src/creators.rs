@@ -14,6 +14,8 @@
 //! the subject (durable §2.1). Removing a materialized Creator is
 //! unreferenced-only ([`delete_creator`]).
 
+use std::fmt::Write as _;
+
 use sqlx::{Sqlite, SqlitePool, Transaction};
 
 use crate::error::LocalDbError;
@@ -186,49 +188,109 @@ async fn delete_creator_in_tx(
     Ok(())
 }
 
-/// Count every row that still references a Creator subject: governance
-/// references (rows governed by its holder), owned Worlds/Characters and their
-/// descendants, and retained creator-owned rows.
+/// Creator-scoped tables whose rows are retained creator-owned data.
 ///
-/// The table list is the complete creator-scoped inventory of this schema
-/// version. Only `narrative_worlds` and `knowledge_holders` are
-/// foreign-key-related (`CASCADE` and `RESTRICT` respectively), so an
-/// incomplete explicit list would silently orphan rows; it is deliberately
-/// exhaustive rather than derived.
+/// Any row in one of them refuses Creator deletion (durable §2.2: "any
+/// governance reference, binding, retained owned row or existing Actor
+/// reference guard refuses deletion"); each is counted through its
+/// `creator_id` column.
+///
+/// This list is not prose: the delete guard builds its pre-count from it, and
+/// `v1191_holder_lifecycle_creator_guard_covers_every_creator_scoped_table`
+/// compares the two lists below against the live schema, so a table added to
+/// the workspace schema cannot silently escape the guard.
+pub const CREATOR_RETAINED_TABLES: &[&str] = &[
+    "creator_prompt_injections",
+    "creator_schedules",
+    "findings",
+    "force_gates_audit",
+    "inspiration_items",
+    "kb_extract_jobs",
+    "memory_fragments",
+    "memory_pending_review",
+    "memory_soul_narratives",
+    "moment_directives",
+    "novel_pool_entries",
+    "orchestration_sessions",
+    "reading_annotations",
+    "reading_progress",
+    "reference_sources",
+    "soul_meta",
+    "works",
+    "works_idempotency",
+];
+
+/// Creator-scoped tables the pre-count does **not** read through `creator_id`.
+///
+/// Each entry carries the reason it is already handled. Together with
+/// [`CREATOR_RETAINED_TABLES`] this classifies every Creator-identifying column
+/// in the live schema (§2.2); an unclassified one fails the coverage case.
+pub const CREATOR_SCOPE_HANDLED_ELSEWHERE: &[(&str, &str)] = &[
+    ("creators", "the subject row being deleted"),
+    (
+        "narrative_worlds",
+        "owned Worlds are pre-counted on owner_creator_id (the FK is ON DELETE CASCADE)",
+    ),
+    (
+        "characters",
+        "owned Characters are pre-counted on owner_creator_id",
+    ),
+    (
+        "knowledge_holders",
+        "the subject's own registry row, removed by the same transaction",
+    ),
+    (
+        "kb_key_blocks",
+        "governed rows are counted as governance references on holder_entry_id",
+    ),
+    (
+        "knowledge_import_quarantine",
+        "quarantine atoms are pre-counted on controlling_creator_id",
+    ),
+    (
+        "core_writer_registration",
+        "per-connection writer bookkeeping, not retained owned data",
+    ),
+    (
+        "local_identities",
+        "global identity store with its own lifecycle (separate database)",
+    ),
+];
+
+/// Count every row that still references a Creator subject: governance
+/// references (rows governed by its holder), owned Worlds/Characters and the
+/// quarantine atoms naming it, and the retained creator-owned rows declared in
+/// [`CREATOR_RETAINED_TABLES`].
+///
+/// Only `narrative_worlds` is foreign-key-`CASCADE`d (and `knowledge_holders`
+/// `RESTRICT`ed); the rest carry no Creator FK, so an incomplete inventory
+/// would silently orphan rows rather than fail. The inventory is therefore
+/// declared as data and guarded by a schema coverage case.
 async fn creator_reference_count(
     conn: &mut sqlx::SqliteConnection,
     creator_id: &str,
     holder_entry_id: &str,
 ) -> Result<i64, LocalDbError> {
-    let count: i64 = sqlx::query_scalar(
+    let mut sql = String::from(
         "WITH subject(creator_id, holder_entry_id) AS (VALUES (?, ?)) \
          SELECT \
              (SELECT COUNT(*) FROM narrative_worlds r JOIN subject s ON r.owner_creator_id = s.creator_id) \
            + (SELECT COUNT(*) FROM characters r JOIN subject s ON r.owner_creator_id = s.creator_id) \
            + (SELECT COUNT(*) FROM kb_key_blocks r JOIN subject s ON r.holder_entry_id = s.holder_entry_id) \
-           + (SELECT COUNT(*) FROM knowledge_import_quarantine r JOIN subject s ON r.controlling_creator_id = s.creator_id) \
-           + (SELECT COUNT(*) FROM works r JOIN subject s ON r.creator_id = s.creator_id) \
-           + (SELECT COUNT(*) FROM works_idempotency r JOIN subject s ON r.creator_id = s.creator_id) \
-           + (SELECT COUNT(*) FROM soul_meta r JOIN subject s ON r.creator_id = s.creator_id) \
-           + (SELECT COUNT(*) FROM memory_pending_review r JOIN subject s ON r.creator_id = s.creator_id) \
-           + (SELECT COUNT(*) FROM memory_fragments r JOIN subject s ON r.creator_id = s.creator_id) \
-           + (SELECT COUNT(*) FROM memory_soul_narratives r JOIN subject s ON r.creator_id = s.creator_id) \
-           + (SELECT COUNT(*) FROM orchestration_sessions r JOIN subject s ON r.creator_id = s.creator_id) \
-           + (SELECT COUNT(*) FROM creator_schedules r JOIN subject s ON r.creator_id = s.creator_id) \
-           + (SELECT COUNT(*) FROM creator_prompt_injections r JOIN subject s ON r.creator_id = s.creator_id) \
-           + (SELECT COUNT(*) FROM force_gates_audit r JOIN subject s ON r.creator_id = s.creator_id) \
-           + (SELECT COUNT(*) FROM findings r JOIN subject s ON r.creator_id = s.creator_id) \
-           + (SELECT COUNT(*) FROM novel_pool_entries r JOIN subject s ON r.creator_id = s.creator_id) \
-           + (SELECT COUNT(*) FROM inspiration_items r JOIN subject s ON r.creator_id = s.creator_id) \
-           + (SELECT COUNT(*) FROM reading_progress r JOIN subject s ON r.creator_id = s.creator_id) \
-           + (SELECT COUNT(*) FROM reading_annotations r JOIN subject s ON r.creator_id = s.creator_id) \
-           + (SELECT COUNT(*) FROM moment_directives r JOIN subject s ON r.creator_id = s.creator_id) \
-           + (SELECT COUNT(*) FROM kb_extract_jobs r JOIN subject s ON r.creator_id = s.creator_id)",
-    )
-    .bind(creator_id)
-    .bind(holder_entry_id)
-    .fetch_one(conn)
-    .await?;
+           + (SELECT COUNT(*) FROM knowledge_import_quarantine r JOIN subject s ON r.controlling_creator_id = s.creator_id)",
+    );
+    for table in CREATOR_RETAINED_TABLES {
+        write!(
+            sql,
+            " + (SELECT COUNT(*) FROM {table} r JOIN subject s ON r.creator_id = s.creator_id)"
+        )
+        .expect("writing into a String cannot fail");
+    }
+    let count: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
+        .bind(creator_id)
+        .bind(holder_entry_id)
+        .fetch_one(conn)
+        .await?;
     Ok(count)
 }
 
