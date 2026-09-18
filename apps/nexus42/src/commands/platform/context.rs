@@ -623,13 +623,21 @@ fn lore_activation_value_is_off(value: &str) -> bool {
 #[allow(clippy::too_many_arguments)] // CLI param plumbing — acceptable until refactored into builder
 #[allow(clippy::too_many_lines)] // CLI param plumbing + flag tail — same builder-refactor path
 /// The admitted Creator's `ActorView` read selection for one CLI surface
-/// (durable §4.1): the exact Creator holder from the registry plus the selected
-/// World container. A missing holder registry row or unknown active Creator
-/// fails closed instead of widening the read.
+/// (durable §4.1).
 ///
-/// Shared by the CLI Moment preview (`run_assemble_moment`) and the
-/// novel-writing run's chapter KB block (`creator/run.rs`), so both model
-/// inputs resolve the same selection (v1.191 P1 T11).
+/// v1.191 P1 T11 (review I-001): the container derivation is **core's**, not a
+/// CLI-local one. `ActorKnowledgeViewService::actor_view_scope` — the same
+/// function `CoreService::creator_view_read_scope` uses — resolves the owned
+/// World plus the owned Character/binding containers with the exact admitted
+/// Creator holder and the same ownership gate. A CLI-local `[World]`-only
+/// selection was strictly narrower than core's, which silently dropped the
+/// Character-global rows (an owned Character/binding container's shared rows,
+/// and the Creator's own `author-only` private rows stored there) that the
+/// daemon preview and inspector already serve.
+///
+/// A missing active creator, a missing `world_id`, or a World the active
+/// creator does not own fails closed (`CreatorNotSelected` / the admission
+/// error) instead of widening the read or fabricating a container.
 pub(crate) async fn creator_view_scope(
     pool: &sqlx::SqlitePool,
     config: &CliConfig,
@@ -639,16 +647,22 @@ pub(crate) async fn creator_view_scope(
         .active_creator_id
         .as_deref()
         .ok_or_else(|| crate::errors::CliError::CreatorNotSelected)?;
-    let holder = nexus_local_db::require_creator_holder(pool, creator_id)
+    let world_id = world_id.ok_or_else(|| {
+        crate::errors::CliError::Other(
+            "an admitted knowledge view requires a World: pass `--world-id wld_...`".to_string(),
+        )
+    })?;
+    nexus_core::ActorKnowledgeViewService::new(pool.clone())
+        .actor_view_scope(
+            creator_id,
+            &nexus_core::AdmittedActor::Creator {
+                creator_id: creator_id.to_string(),
+            },
+            world_id,
+            None,
+        )
         .await
-        .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
-    nexus_knowledge::world_kb::KnowledgeReadScope::actor_view(
-        holder,
-        vec![nexus_knowledge::world_kb::KnowledgeOwnerRef::world(
-            world_id.unwrap_or("wld_default"),
-        )],
-    )
-    .map_err(|e| crate::errors::CliError::Other(e.to_string()))
+        .map_err(|e| crate::errors::CliError::Other(e.to_string()))
 }
 
 #[allow(clippy::future_not_send)]
@@ -696,12 +710,11 @@ pub async fn run_assemble_moment(
     // behavior exactly (silent 500-row window; no reject-on-overflow).
     // v1.191 P1 T9 (durable §4.1/§5.1): a Moment assembly is a **preview**, so
     // the KB store reads under the admitted Creator's ActorView — its own
-    // holder plus the selected World container. Never a management selection,
-    // and never an unscoped store.
-    let kb = nexus_spoke_adapter::SpokeBackedKbStore::new(
-        pool.clone(),
-        creator_view_scope(&pool, config, world_id).await?,
-    );
+    // holder plus the authorized containers. Never a management selection,
+    // and never an unscoped store. v1.191 P1 T11 (I-001): one derivation per
+    // invocation, shared by the KB store and the hop-edge read.
+    let view_scope = creator_view_scope(&pool, config, world_id).await?;
+    let kb = nexus_spoke_adapter::SpokeBackedKbStore::new(pool.clone(), view_scope.clone());
     // V1.149 P1: preload the world's confirmed relation edges for relation-hop
     // expansion when activation is on (off-switch ⇒ no hop load; spec §6).
     // The edge source is the inherent `NexusAdapter::list_hop_edges_for_world`
@@ -717,14 +730,11 @@ pub async fn run_assemble_moment(
     let hop_edges = if activation_off {
         None
     } else {
-        nexus_spoke_adapter::adapter::NexusAdapter::new(
-            pool.clone(),
-            creator_view_scope(&pool, config, world_id).await?,
-        )
-        .list_hop_edges_for_world(wid)
-        .await
-        .ok()
-        .filter(|edges| !edges.is_empty())
+        nexus_spoke_adapter::adapter::NexusAdapter::new(pool.clone(), view_scope)
+            .list_hop_edges_for_world(wid)
+            .await
+            .ok()
+            .filter(|edges| !edges.is_empty())
     };
     let uid = user_id.unwrap_or("user_default");
     let knowledge = SqliteKnowledgeStore::new(pool.clone());
