@@ -274,7 +274,6 @@ export interface ComposeDesktopHostOptions {
   /** Opened store override (test seam); defaults to the encrypted userData store. */
   connectionStore?: ConnectionStore;
   adapters?: {
-    registerSchemes?: () => Promise<void>;
     registerProtocol?: (distRoot: string, policy: DesktopCspPolicy) => Promise<void>;
     registerIpc?: (
       window: BrowserWindow,
@@ -362,7 +361,6 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
   const product = input.product;
   const dev = input.devUrl !== null;
   const adapters = input.adapters ?? {};
-  const registerSchemes = adapters.registerSchemes ?? registerDesktopSchemes;
   const registerProtocol = adapters.registerProtocol ?? registerDesktopProtocol;
   const registerIpc = adapters.registerIpc ?? registerDesktopIpc;
   const attachNetworkHooks = adapters.attachNetworkHooks ?? attachDesktopNetworkHooks;
@@ -667,6 +665,17 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
     }
   }
 
+  // ── protocol BEFORE any window is created/loaded ──────────────────────
+  // The `nexus` scheme privilege is registered exactly once, pre-ready, by
+  // the bootstrap (`registerDesktopSchemes` before `app.whenReady()`); this
+  // composition never registers schemes again. The protocol handler must be
+  // installed before the first `loadURL('nexus://app/index.html')`.
+  await registerProtocol(input.paths.distRoot, {
+    serviceOrigin: localEndpoint,
+    fingerprintProbeOrigin: localEndpoint,
+    dev,
+  });
+
   let recreateInFlight: Promise<void> | null = null;
   function recreateWindow(): void {
     if (recreateInFlight) return;
@@ -685,9 +694,12 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
   lastSelect = selectWindow(firstWindow);
 
   function focusExistingWindow(): void {
+    // Second-instance contract: focus the sole window, never spawn anything.
+    // With no live window this is an explicit no-op — window (re)creation is
+    // owned only by the guarded paths (`activate`, renderer-crash recreate),
+    // so a second launch can never race a replacement into existence.
     const win = currentWindow;
     if (!win || win.isDestroyed()) {
-      recreateWindow();
       return;
     }
     if (win.isMinimized()) win.restore();
@@ -748,14 +760,9 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
     contents.on('will-navigate', (event, url) => {
       if (!allowDesktopNavigation(url, navigationOptions)) event.preventDefault();
     });
-  });
-
-  // ── protocol (packaged resources only, exact-origin CSP) ──────────────
-  await registerSchemes();
-  await registerProtocol(input.paths.distRoot, {
-    serviceOrigin: localEndpoint,
-    fingerprintProbeOrigin: localEndpoint,
-    dev,
+    contents.on('will-redirect', (event, url) => {
+      if (!allowDesktopNavigation(url, navigationOptions)) event.preventDefault();
+    });
   });
 
   return {

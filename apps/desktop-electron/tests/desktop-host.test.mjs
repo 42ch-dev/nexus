@@ -263,6 +263,17 @@ async function makeHost(overrides = {}) {
   const disposedGenerations = [];
   const protocolCalls = [];
   const networkHooks = [];
+  // Registration-order evidence: the protocol handler must be installed
+  // before any window is created (scheme privilege is bootstrap-only,
+  // pre-ready — composeDesktopHost has no registerSchemes seam at all).
+  electron.lifecycleEvents = [];
+  const { BrowserWindow: FakeBrowserWindow } = electron;
+  electron.BrowserWindow = class extends FakeBrowserWindow {
+    constructor(options) {
+      electron.lifecycleEvents.push('window');
+      super(options);
+    }
+  };
   const host = await composeDesktopHost({
     electron,
     product,
@@ -272,10 +283,8 @@ async function makeHost(overrides = {}) {
     devUrl: null,
     nodeExecutable: process.execPath,
     adapters: {
-      registerSchemes: async () => {
-        electron.schemesRegistered = true;
-      },
       registerProtocol: async (distRoot, policy) => {
+        electron.lifecycleEvents.push('protocol');
         protocolCalls.push({ distRoot, policy });
       },
       registerIpc: async (window, handlers, options) => {
@@ -415,8 +424,11 @@ test('production window policy and protocol registration', async () => {
   // Full typed handler map — exactly the frozen operation union.
   assert.deepEqual(Object.keys(host.handlers).sort(), [...DESKTOP_OPERATIONS].sort());
 
-  // Protocol registered with the local service origin; schemes before ready.
-  assert.equal(electron.schemesRegistered, true);
+  // Protocol registered with the local service origin, BEFORE the first
+  // window was created. Scheme privilege is registered exactly once,
+  // pre-ready, by the bootstrap — composeDesktopHost exposes no
+  // registerSchemes seam, so no second registration can happen after ready.
+  assert.deepEqual(electron.lifecycleEvents, ['protocol', 'window']);
   assert.deepEqual(protocolCalls, [
     {
       distRoot: paths.distRoot,
@@ -513,14 +525,51 @@ test('second-instance focuses the sole window and never spawns a duplicate servi
   assert.equal(ipcCalls.length, 1);
   assert.equal(forkCalls.length, 0);
 
-  // No live window: focus falls back to recreating one renderer.
+  // No live window: the second-instance path is an explicit no-op — it
+  // never recreates a window and never spawns a duplicate service.
+  // (Window recreation is owned only by the guarded `activate` and
+  // renderer-crash paths.)
   electron.windows[0].destroyed = true;
   host.focusExistingWindow();
-  await host.settled();
-  await until(() => electron.windows.length === 2, 'replacement window');
-  assert.equal(ipcCalls.length, 2);
+  secondInstance();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(electron.windows.length, 1);
+  assert.equal(ipcCalls.length, 1);
   assert.equal(forkCalls.length, 0);
   host.dispose();
+});
+
+// ---------------------------------------------------------------------------
+// Global content lockdown (app-level web-contents-created)
+// ---------------------------------------------------------------------------
+
+test('global web-contents-created lockdown denies window.open, non-app navigation and non-app redirects', async () => {
+  const { electron } = await makeHost();
+  const lockdown = electron.appEvents.get('web-contents-created')[0];
+  const listeners = new Map();
+  let windowOpenResult = null;
+  const contents = {
+    setWindowOpenHandler: (fn) => {
+      windowOpenResult = fn({ url: 'https://evil.example/popup' });
+    },
+    on: (event, fn) => listeners.set(event, fn),
+  };
+  lockdown({}, contents);
+
+  // window.open is denied everywhere.
+  assert.deepEqual(windowOpenResult, { action: 'deny' });
+
+  // Non-app navigation and redirect are both prevented (production: no dev
+  // origins); the app origin is allowed through for both events.
+  for (const eventName of ['will-navigate', 'will-redirect']) {
+    const denied = { preventDefault: () => (denied.prevented = true) };
+    listeners.get(eventName)(denied, 'https://evil.example/phish');
+    assert.equal(denied.prevented, true, `${eventName} must deny non-app URL`);
+
+    const allowed = { preventDefault: () => (allowed.prevented = true) };
+    listeners.get(eventName)(allowed, 'nexus://app/index.html');
+    assert.notEqual(allowed.prevented, true, `${eventName} must allow app URL`);
+  }
 });
 
 // ---------------------------------------------------------------------------
