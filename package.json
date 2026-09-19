@@ -32,7 +32,7 @@
     "publish:contracts": "pnpm -F @42ch/nexus-contracts publish:public",
     "build:design-studio": "pnpm -F design-studio build",
     "build:web": "pnpm -F web build",
-    "build:desktop": "pnpm -F desktop build",
+    "build:desktop": "pnpm --dir apps/desktop-electron run package",
     "test:design-studio": "pnpm -F design-studio test",
     "test:web": "pnpm -F web test",
     "build:cli": "cargo build -p nexus42",
@@ -42,9 +42,9 @@
     "sidecar:ensure": "SIDECAR_ENSURE_ONLY=1 bash scripts/fetch-sidecar.sh",
     "dev:design-studio": "pnpm -F design-studio dev",
     "dev:web": "pnpm -F web dev",
-    "dev:desktop": "pnpm run sidecar:dev && pnpm --filter web build && pnpm --filter desktop run icons:generate && pnpm --filter desktop exec tauri dev --config src-tauri/tauri.dev.dist.conf.json",
+    "dev:desktop": "pnpm --dir apps/desktop-electron run dev",
+    "dev:desktop:web": "pnpm --dir apps/desktop-electron run dev:web",
     "dev:backend:refresh": "node scripts/refresh-dev-backend.mjs",
-    "dev:desktop:web": "pnpm run sidecar:ensure && pnpm --filter web dev",
     "dev": "bash scripts/dev-cli-web.sh"
   },
   "devDependencies": {
