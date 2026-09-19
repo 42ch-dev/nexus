@@ -645,6 +645,32 @@ export function parseDesktopRuntimeMetadata(raw: unknown): DesktopRuntimeMetadat
 }
 
 // ---------------------------------------------------------------------------
+// External URL policy — the ONE main-owned predicate (parity row 25), shared
+// by the protocol/navigation layer (P0-T1) and the `open_external_url`
+// action (P0-T3). Checked on the RAW input string before any parsing:
+// WHATWG URL normalization strips/remaps some C0 controls, so a post-parse
+// check alone would accept control-bearing input. http/https with a
+// nonempty host only; no userinfo, no surrounding whitespace, no controls.
+// ---------------------------------------------------------------------------
+
+export function isAllowedDesktopExternalUrl(url: unknown): boolean {
+  if (typeof url !== 'string' || url.length === 0) return false;
+  if (jsonBytes(url) > MAX_URL_BYTES) return false;
+  if (hasControlChars(url)) return false;
+  if (url !== url.trim()) return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return false;
+  if (!parsed.hostname) return false;
+  if (parsed.username !== '' || parsed.password !== '') return false;
+  return true;
+}
+
+// ---------------------------------------------------------------------------
 // App origin (nexus://app) — shared by desktop-ipc sender checks and
 // protocol navigation policy. Dev HMR origins are opt-in, never default.
 // ---------------------------------------------------------------------------

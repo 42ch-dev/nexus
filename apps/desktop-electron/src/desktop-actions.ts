@@ -28,7 +28,7 @@ import { isAbsolute, join, sep } from 'node:path';
 import {
   desktopError,
   errorMessage,
-  MAX_URL_BYTES,
+  isAllowedDesktopExternalUrl,
 } from './desktop-contract.js';
 import type { DesktopHandlers } from './desktop-ipc.js';
 
@@ -136,27 +136,11 @@ async function guardWorkspacePath(
 // External URL policy (parity row 25)
 // ---------------------------------------------------------------------------
 
-/**
- * The single external-URL predicate, main-owned and shared by the
- * protocol/navigation layer and the `open_external_url` action: every http
- * and https destination is preserved (no proof-only host allowlist), with a
- * nonempty host and no userinfo, credentials or control characters. Never
- * auto-opens an untrusted navigation as an external URL.
- */
-export function isAllowedExternalUrl(raw: unknown): boolean {
-  if (typeof raw !== 'string' || raw.includes('\0')) return false;
-  if (Buffer.byteLength(raw, 'utf8') > MAX_URL_BYTES) return false;
-  let parsed: URL;
-  try {
-    parsed = new URL(raw);
-  } catch {
-    return false;
-  }
-  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return false;
-  if (parsed.username !== '' || parsed.password !== '') return false;
-  if (parsed.host === '') return false;
-  return true;
-}
+// The single main-owned predicate `isAllowedDesktopExternalUrl` lives in the
+// shared host contract (desktop-contract.ts) and rejects C0 controls / DEL
+// on the raw string BEFORE WHATWG parsing (which would otherwise strip or
+// remap some controls and let them pass). Both this action and the
+// protocol/navigation layer consume that one implementation.
 
 // ---------------------------------------------------------------------------
 // Factory
@@ -206,7 +190,7 @@ export function createDesktopActions(options: DesktopActionsOptions): DesktopAct
     /** Parity row 25: external URLs pass the single main-owned predicate. */
     async open_external_url(payload) {
       const url = typeof payload === 'object' && payload !== null && 'url' in payload ? payload.url : undefined;
-      if (typeof url !== 'string' || !isAllowedExternalUrl(url)) {
+      if (typeof url !== 'string' || !isAllowedDesktopExternalUrl(url)) {
         throw desktopError('url_not_allowed', 'external URL is not an allowed http/https destination');
       }
       await shell.openExternal(url);

@@ -421,25 +421,15 @@ export function allowDesktopNavigation(
 }
 
 // ---------------------------------------------------------------------------
-// External URL policy — one main predicate: parsed http/https, nonempty host,
-// no userinfo, no control characters. No host allowlist.
+// External URL policy — the single predicate lives in the shared host
+// contract (`isAllowedDesktopExternalUrl` in desktop-contract.ts); it is
+// re-exported here so existing protocol consumers keep one import site. The
+// implementation is NOT duplicated: raw-string C0/DEL + whitespace + size
+// checks run before WHATWG parsing, then http/https, nonempty host, no
+// userinfo.
 // ---------------------------------------------------------------------------
 
-export function isAllowedDesktopExternalUrl(url: string): boolean {
-  if (typeof url !== 'string' || url.length === 0) return false;
-  if (hasControlChars(url)) return false;
-  if (url !== url.trim()) return false;
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return false;
-  }
-  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return false;
-  if (!parsed.hostname) return false;
-  if (parsed.username !== '' || parsed.password !== '') return false;
-  return true;
-}
+export { isAllowedDesktopExternalUrl } from './desktop-contract.js';
 
 // ---------------------------------------------------------------------------
 // Desktop scheme registration

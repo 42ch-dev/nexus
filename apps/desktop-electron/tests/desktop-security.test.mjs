@@ -537,6 +537,8 @@ test('external URL predicate: http/https with host only, no userinfo/controls', 
   assert.equal(isAllowedDesktopExternalUrl('data:text/html,x'), false);
   assert.equal(isAllowedDesktopExternalUrl('file:///etc/passwd'), false);
   assert.equal(isAllowedDesktopExternalUrl('https://example.com/\x1f'), false);
+  assert.equal(isAllowedDesktopExternalUrl('https://example.com/a\nb'), false); // raw C0 survives WHATWG parse
+  assert.equal(isAllowedDesktopExternalUrl('https://example.com/\tfoo'), false);
   assert.equal(isAllowedDesktopExternalUrl(' https://example.com/'), false);
   assert.equal(isAllowedDesktopExternalUrl('https://'), false);
 });

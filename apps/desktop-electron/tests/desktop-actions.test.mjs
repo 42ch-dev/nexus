@@ -28,7 +28,8 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { createDesktopActions, isAllowedExternalUrl } from '../dist/desktop-actions.js';
+import { isAllowedDesktopExternalUrl } from '../dist/desktop-contract.js';
+import { createDesktopActions } from '../dist/desktop-actions.js';
 
 /**
  * Recording fakes for the injected Electron OS adapters. `effects` records
@@ -263,21 +264,32 @@ test('shell.openPath failure string surfaces as a typed error, not success', asy
 // ---------------------------------------------------------------------------
 
 test('URL predicate preserves all http/https destinations', () => {
-  assert.equal(isAllowedExternalUrl('https://example.com/a?b=1#c'), true);
-  assert.equal(isAllowedExternalUrl('http://sub.example.co.uk:8080/path'), true);
-  assert.equal(isAllowedExternalUrl('https://127.0.0.1:5173'), true);
-  assert.equal(isAllowedExternalUrl('https://user%20name@example.com'), false); // userinfo
-  assert.equal(isAllowedExternalUrl('https://user:pass@example.com'), false); // credentials
-  assert.equal(isAllowedExternalUrl('ftp://example.com'), false);
-  assert.equal(isAllowedExternalUrl('file:///etc/passwd'), false);
-  assert.equal(isAllowedExternalUrl('nexus://app/index.html'), false);
-  assert.equal(isAllowedExternalUrl('javascript:alert(1)'), false);
-  assert.equal(isAllowedExternalUrl('https://exam\x01ple.com'), false); // control char
-  assert.equal(isAllowedExternalUrl('https://example.com/\0x'), false);
-  assert.equal(isAllowedExternalUrl('not a url'), false);
-  assert.equal(isAllowedExternalUrl('https://' + 'a'.repeat(8200)), false); // byte bound
-  assert.equal(isAllowedExternalUrl(undefined), false);
-  assert.equal(isAllowedExternalUrl(null), false);
+  assert.equal(isAllowedDesktopExternalUrl('https://example.com/a?b=1#c'), true);
+  assert.equal(isAllowedDesktopExternalUrl('http://sub.example.co.uk:8080/path'), true);
+  assert.equal(isAllowedDesktopExternalUrl('https://127.0.0.1:5173'), true);
+  assert.equal(isAllowedDesktopExternalUrl('https://user%20name@example.com'), false); // userinfo
+  assert.equal(isAllowedDesktopExternalUrl('https://user:pass@example.com'), false); // credentials
+  assert.equal(isAllowedDesktopExternalUrl('ftp://example.com'), false);
+  assert.equal(isAllowedDesktopExternalUrl('file:///etc/passwd'), false);
+  assert.equal(isAllowedDesktopExternalUrl('nexus://app/index.html'), false);
+  assert.equal(isAllowedDesktopExternalUrl('javascript:alert(1)'), false);
+  assert.equal(isAllowedDesktopExternalUrl('https://exam\x01ple.com'), false); // control char
+  assert.equal(isAllowedDesktopExternalUrl('https://example.com/\0x'), false);
+  // Raw C0 controls that WHATWG parsing would strip/remap into a "clean"
+  // URL must still be rejected on the raw input string.
+  assert.equal(isAllowedDesktopExternalUrl('https://example.com/a\nb'), false); // newline in path
+  assert.equal(isAllowedDesktopExternalUrl('https://example.com/\tfoo'), false); // tab in path
+  assert.equal(isAllowedDesktopExternalUrl('https://example.com/\u0001foo'), false); // SOH in path
+  assert.equal(isAllowedDesktopExternalUrl('https://example.com/a\x0db'), false); // CR in path
+  assert.equal(isAllowedDesktopExternalUrl('https://exam\x1fple.com/path'), false); // US in host
+  assert.equal(isAllowedDesktopExternalUrl('https://example.com/\x7fadmin'), false); // DEL in path
+  assert.equal(isAllowedDesktopExternalUrl('ht\ttps://example.com/'), false); // control in scheme
+  assert.equal(isAllowedDesktopExternalUrl('\nhttps://example.com/'), false); // leading newline
+  assert.equal(isAllowedDesktopExternalUrl('https://example.com/ '), false); // trailing space
+  assert.equal(isAllowedDesktopExternalUrl('not a url'), false);
+  assert.equal(isAllowedDesktopExternalUrl('https://' + 'a'.repeat(8200)), false); // byte bound
+  assert.equal(isAllowedDesktopExternalUrl(undefined), false);
+  assert.equal(isAllowedDesktopExternalUrl(null), false);
 });
 
 test('open_external_url opens exactly the validated URL and denies the rest before any effect', async (t) => {
@@ -292,6 +304,11 @@ test('open_external_url opens exactly the validated URL and denies the rest befo
   );
   await expectCode(
     handlers.open_external_url({ url: 'https://u:p@example.com' }, { operation: 'open_external_url' }),
+    'url_not_allowed',
+  );
+  // A raw control char that WHATWG parsing would silently strip still denies.
+  await expectCode(
+    handlers.open_external_url({ url: 'https://example.com/a\nb' }, { operation: 'open_external_url' }),
     'url_not_allowed',
   );
   assert.deepEqual(os.effects, [['openExternal', 'https://github.com/42ch-dev/nexus']]);
