@@ -240,8 +240,8 @@ tokio-tungstenite = "0.30"
 # crate versions (AR-1, AR-3); bump deliberately with the next iteration.
 # `default-features = false` drops `sync-client`; claude's `auth` feature is
 # not in default and must stay off (PD-2). Consumed by `nexus-agent-host`.
-claude-codes = { version = "=2.1.270", default-features = false, features = ["async-client"] }
-codex-codes = { version = "=0.154.2", default-features = false, features = ["async-client"] }
+claude-codes = { version = "=2.1.273", default-features = false, features = ["async-client"] }
+codex-codes = { version = "=0.154.3", default-features = false, features = ["async-client"] }
 # V1.168 P2 introduced this Rust SDK for the DeepSeek Harness runtime
 # (PD-4); V1.188 P0 T1 bumps the exact pin to 0.2.0 (profile/dsh_bin
 # launch surface, five-field RunResult, expanded Error taxonomy). The
@@ -251,14 +251,14 @@ codex-codes = { version = "=0.154.2", default-features = false, features = ["asy
 # dep. Consumed by `nexus-agent-host`. Version must never be mirrored in
 # `docs/` (PD-6).
 deepseek-harness-sdk = "=0.2.1"
-napi = { version = "=3.12.4", default-features = false, features = [
+napi = { version = "=3.12.5", default-features = false, features = [
     "napi8",
     "tokio_rt",
     "serde-json",
     "dyn-symbols",
 ] }
-napi-derive = "=3.6.5"
-napi-build = "=2.4.2"
+napi-derive = "=3.6.7"
+napi-build = "=2.4.3"
 futures-core = "0.3"
 
 # --- Dev profile: keep local `target/` smaller ---
