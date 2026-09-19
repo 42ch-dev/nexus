@@ -184,3 +184,31 @@ export function assertRequiredFiles(files, label = 'prerequisite') {
     if (!stat.isFile() || stat.size === 0) fail(`${label} is empty or not a file: ${file}`, 'package.preflight.missing');
   }
 }
+export function assertPreflightFiles(entries) {
+  for (const { path, label, code, action } of entries) {
+    if (!existsSync(path)) fail(`${label} missing: ${path}; ${action}`, code);
+    const stat = statSync(path);
+    if (!stat.isFile() || stat.size === 0) fail(`${label} is empty or not a file: ${path}; ${action}`, code);
+  }
+}
+
+export function assertDependencyClosure({ lockfile, virtualStore, workspaceRoots, requiredPaths = [] }) {
+  const action = 'run pnpm install --frozen-lockfile';
+  const requiredDirectories = [
+    [virtualStore, 'pnpm virtual store'],
+    ...workspaceRoots.map((root) => [root, 'workspace node_modules']),
+    ...requiredPaths,
+  ];
+  for (const [path, label] of requiredDirectories) {
+    if (!existsSync(path) || !statSync(path).isDirectory()) {
+      fail(`${label} missing: ${path}; ${action}`, 'package.preflight.missing_dependency_closure');
+    }
+  }
+  const virtualStoreLockfile = join(virtualStore, 'lock.yaml');
+  if (!existsSync(virtualStoreLockfile) || !statSync(virtualStoreLockfile).isFile()) {
+    fail(`pnpm virtual-store lockfile missing: ${virtualStoreLockfile}; ${action}`, 'package.preflight.missing_dependency_closure');
+  }
+  if (!readFileSync(lockfile).equals(readFileSync(virtualStoreLockfile))) {
+    fail(`installed dependency closure does not match ${lockfile}; ${action}`, 'package.preflight.missing_dependency_closure');
+  }
+}

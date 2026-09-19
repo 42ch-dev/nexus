@@ -1,14 +1,16 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import {
   PACKAGE_CONTRACT,
   PackageContractError,
+  assertDependencyClosure,
   assertNativeCompatibility,
   assertNoSigningEnvironment,
   assertNoSymlinkEscape,
+  assertPreflightFiles,
   assertReceipt,
   parsePackageArgs,
 } from '../scripts/package-contract.mjs';
@@ -39,6 +41,47 @@ test('package options are closed and default to the native architecture', () => 
   throwsCode(() => parsePackageArgs(['--release'], 'arm64'), 'package.args.unknown');
   throwsCode(() => parsePackageArgs(['--arch', 'arm64', '--arch', 'arm64'], 'arm64'), 'package.args.duplicate');
   throwsCode(() => parsePackageArgs(['--unknown'], 'arm64'), 'package.args.unknown');
+});
+
+test('missing web dist is rejected before staging with no partial output', () => {
+  const root = mkdtempSync(join(tmpdir(), 'nexus-package-preflight-'));
+  const output = join(root, 'artifacts');
+  let error;
+  try {
+    assertPreflightFiles([{
+      path: join(root, 'web', 'index.html'),
+      label: 'web dist',
+      code: 'package.preflight.missing_web_dist',
+      action: 'run pnpm run build:web',
+    }]);
+  } catch (caught) {
+    error = caught;
+  }
+  assert.equal(error?.code, 'package.preflight.missing_web_dist');
+  assert.match(error?.message ?? '', /run pnpm run build:web/);
+  assert.equal(existsSync(output), false);
+});
+
+test('missing dependency closure is rejected with frozen-install guidance and no partial output', () => {
+  const root = mkdtempSync(join(tmpdir(), 'nexus-package-dependencies-'));
+  const output = join(root, 'artifacts');
+  const lockfile = join(root, 'pnpm-lock.yaml');
+  const virtualStore = join(root, 'node_modules', '.pnpm');
+  writeFileSync(lockfile, 'lockfileVersion: 9.0\n');
+  mkdirSync(join(root, 'node_modules'), { recursive: true });
+  let error;
+  try {
+    assertDependencyClosure({
+      lockfile,
+      virtualStore,
+      workspaceRoots: [join(root, 'apps', 'desktop-electron', 'node_modules')],
+    });
+  } catch (caught) {
+    error = caught;
+  }
+  assert.equal(error?.code, 'package.preflight.missing_dependency_closure');
+  assert.match(error?.message ?? '', /pnpm install --frozen-lockfile/);
+  assert.equal(existsSync(output), false);
 });
 
 test('credential-triggered environments are rejected before packaging effects', () => {

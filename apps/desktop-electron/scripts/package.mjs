@@ -10,12 +10,13 @@ import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, re
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { packager } from '@electron/packager';
 import {
   PACKAGE_CONTRACT,
+  assertDependencyClosure,
   assertNativeCompatibility,
   assertNoSigningEnvironment,
   assertNoSymlinkEscape,
+  assertPreflightFiles,
   assertReceipt,
   assertRequiredFiles,
   digestTree,
@@ -114,6 +115,62 @@ function preflight(arch) {
   if (product.version !== version || appPackage.version !== version) {
     throw new Error(`package.preflight.version: root/product/Electron versions must match (${version})`);
   }
+  assertPreflightFiles([
+    {
+      path: join(webDist, 'index.html'),
+      label: 'web dist',
+      code: 'package.preflight.missing_web_dist',
+      action: 'run pnpm run build:web',
+    },
+    {
+      path: join(appRoot, 'dist', 'main.js'),
+      label: 'compiled desktop host',
+      code: 'package.preflight.missing_compiled_host',
+      action: 'run pnpm --dir apps/desktop-electron run build',
+    },
+    {
+      path: join(appRoot, 'dist', 'preload.js'),
+      label: 'compiled desktop preload',
+      code: 'package.preflight.missing_compiled_host',
+      action: 'run pnpm --dir apps/desktop-electron run build',
+    },
+    {
+      path: join(serviceRoot, 'dist', 'index.js'),
+      label: 'compiled service entry',
+      code: 'package.preflight.missing_compiled_service',
+      action: 'run pnpm --dir apps/nexus-service run build',
+    },
+    {
+      path: join(serviceRoot, 'dist', 'main.js'),
+      label: 'compiled service main',
+      code: 'package.preflight.missing_compiled_service',
+      action: 'run pnpm --dir apps/nexus-service run build',
+    },
+    {
+      path: join(repoRoot, 'packages', 'nexus-contracts', 'dist', 'index.js'),
+      label: 'compiled contracts package',
+      code: 'package.preflight.missing_compiled_package',
+      action: 'run pnpm --dir packages/nexus-contracts run build',
+    },
+    {
+      path: join(repoRoot, 'packages', 'nexus-provider-acp', 'dist', 'index.js'),
+      label: 'compiled provider package',
+      code: 'package.preflight.missing_compiled_package',
+      action: 'run pnpm --dir packages/nexus-provider-acp run build',
+    },
+    {
+      path: join(nativeLoaderRoot, 'dist', 'index.js'),
+      label: 'compiled native loader',
+      code: 'package.preflight.missing_compiled_package',
+      action: 'run pnpm --dir packages/nexus-native run build',
+    },
+  ]);
+  assertDependencyClosure({
+    lockfile,
+    virtualStore: join(repoRoot, 'node_modules', '.pnpm'),
+    workspaceRoots: [join(repoRoot, 'node_modules'), join(appRoot, 'node_modules'), join(serviceRoot, 'node_modules')],
+    requiredPaths: [[join(appRoot, 'node_modules', '@electron', 'packager'), 'Electron packager']],
+  });
   const native = nativeManifest(arch);
   const compatibility = assertNativeCompatibility(native.manifest, { arch });
   return { pnpmVersion, native, compatibility };
@@ -133,22 +190,6 @@ function verifyLoadedNative(preflightInfo, arch) {
   return { ...preflightInfo, compatibility: loadedCompatibility };
 }
 
-function ensureBuildOutputs() {
-  const outputs = [
-    [join(repoRoot, 'packages', 'nexus-contracts', 'dist', 'index.js'), ['--dir', 'packages/nexus-contracts', 'run', 'build']],
-    [join(repoRoot, 'packages', 'nexus-provider-acp', 'dist', 'index.js'), ['--dir', 'packages/nexus-provider-acp', 'run', 'build']],
-    [join(nativeLoaderRoot, 'dist', 'index.js'), ['--dir', 'packages/nexus-native', 'run', 'build']],
-    [join(serviceRoot, 'dist', 'index.js'), ['--dir', 'apps/nexus-service', 'run', 'build']],
-    [join(serviceRoot, 'dist', 'main.js'), ['--dir', 'apps/nexus-service', 'run', 'build']],
-    [join(webDist, 'index.html'), ['--dir', 'apps/web', 'run', 'build']],
-    [join(appRoot, 'dist', 'main.js'), ['--dir', 'apps/desktop-electron', 'run', 'build']],
-    [join(appRoot, 'dist', 'preload.js'), ['--dir', 'apps/desktop-electron', 'run', 'build']],
-  ];
-  for (const [path, args] of outputs) {
-    if (!existsSync(path)) command('pnpm', args, { stdio: 'inherit' });
-  }
-  assertRequiredFiles(outputs.map(([path]) => path), 'compiled package input');
-}
 
 function materializeSymlinks(root) {
   const queue = [root];
@@ -380,8 +421,8 @@ async function main() {
   }
   assertNoSigningEnvironment();
   const preflightInfo = preflight(args.arch);
-  ensureBuildOutputs();
   const verifiedPreflight = verifyLoadedNative(preflightInfo, args.arch);
+  const { packager } = await import('@electron/packager');
   const destinationRoot = outputRoot(args.out);
   mkdirSync(destinationRoot, { recursive: true });
   const finalDir = join(destinationRoot, version, `darwin-${args.arch}`);
