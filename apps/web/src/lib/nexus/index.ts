@@ -2,18 +2,19 @@
  * Nexus Daemon API client adapter — the single transport boundary for the SPA.
  *
  * Import the {@link NexusClient} interface and the factory picks an
- * implementation based on the host (browser-tab vs Tauri webview). Screens must
- * depend only on the interface, never on a concrete client. Desktop-only
- * capabilities come from `DesktopCapabilities` (null in the browser build).
+ * implementation based on the host (browser-tab vs Electron desktop shell).
+ * Screens must depend only on the interface, never on a concrete client.
+ * Desktop-only capabilities come from `DesktopCapabilities` (null in the
+ * browser build).
  *
  * @see {@link ./types.ts} for the interface contract and pending-contracts notes.
- * @see {@link ./desktop-capabilities.ts} for the V1.66 desktop-only surface.
+ * @see {@link ./desktop-capabilities.ts} for the desktop-only surface.
  */
 export { BrowserClient, type BrowserClientOptions } from './browser-client';
 export { NexusClientError, type NexusErrorBody, type TransportErrorKind } from './errors';
-export { TauriClient, resolveDesktopPort, type TauriClientOptions } from './tauri-client';
+export { DesktopClient, resolveDesktopPort, type DesktopClientOptions } from './desktop-client';
 export {
-  TauriDesktopCapabilities,
+  ElectronDesktopCapabilities,
   DESKTOP_CAPABILITIES_UNAVAILABLE,
   type DesktopCapabilities,
   type DesktopCapabilityError,

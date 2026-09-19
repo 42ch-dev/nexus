@@ -1,56 +1,197 @@
+/**
+ * Product preload bridge (v1.192 P0-T1) — the ONLY renderer surface:
+ * `window.nexusDesktop` version 1.
+ *
+ * - No raw ipcRenderer exposure, no Node/process/env handles, no arbitrary
+ *   channel invocation — invoke is typed to the frozen operation union.
+ * - `runtime` is immutable nonsecret metadata fetched synchronously from main
+ *   (trusted additional argument) BEFORE the bridge is exposed; main must
+ *   answer `nexus:desktop:runtime` before creating the window (P0-T7).
+ * - `onStatusChanged` never forwards Electron event objects to the renderer
+ *   and re-bounds status frames before delivery.
+ *
+ * Why this file does not import `desktop-contract` (not even type-only):
+ * the sandboxed preload compiles CommonJS, and the package build runs
+ * `tsc -p tsconfig.json && tsc -p tsconfig.preload.json` with both projects
+ * emitting into `dist/`. Any reference to the contract source pulls it into
+ * the preload program and re-emits it as CommonJS, overwriting the ESM
+ * artifact the main process loads at runtime (invalid under `type: module`).
+ * The bridge's canonical TYPE (`DesktopBridge`, `Window.nexusDesktop`) lives
+ * in `desktop-contract.ts` and governs the SPA side; the mirrors below are
+ * the mechanical preload-side implementation values, kept in lockstep by the
+ * channel-parity test in tests/desktop-security.test.mjs.
+ */
 /// <reference lib="dom" />
 import { contextBridge, ipcRenderer } from 'electron';
 
-/** Frozen preload surface for the private proof shell — no raw ipcRenderer/process/require. */
-const api = {
-  getLifecycle(): Promise<unknown> {
-    return ipcRenderer.invoke('nexus-proof:lifecycle');
-  },
+// --- mirrors of desktop-contract.ts (canonical definitions live there) ---
+// Every mirror value is pinned against DESKTOP_BRIDGE_MANIFEST by
+// tests/desktop-security.test.mjs — a drift on either side fails the parity
+// lock. Keep in lockstep with desktop-contract.ts.
+const DESKTOP_BRIDGE_VERSION = 1 as const;
+const DESKTOP_ENVELOPE_VERSION = 1 as const;
+const DESKTOP_INVOKE_CHANNEL = 'nexus:desktop:invoke' as const;
+const DESKTOP_STATUS_CHANNEL = 'nexus:desktop:status-changed' as const;
+const DESKTOP_RUNTIME_CHANNEL = 'nexus:desktop:runtime' as const;
+const MAX_STATUS_BYTES = 4 * 1024;
+const MAX_DIAGNOSTIC_BYTES = 2 * 1024;
+const MAX_URL_BYTES = 8192;
 
-  /** Proof-only harness command; restricted steps validated in main. */
-  runProofStep(step: string, payload?: Record<string, unknown>): Promise<unknown> {
-    return ipcRenderer.invoke('nexus-proof:proof-step', { step, payload });
-  },
+const DESKTOP_OPERATIONS = [
+  'open_with',
+  'reveal_in_finder',
+  'open_external_url',
+  'pick_directory',
+  'get_workspace_root',
+  'set_workspace_path',
+  'switch_active_creator',
+  'ensure_setup_bootstrap',
+  'get_entrance',
+  'set_entrance',
+  'get_setup_completed',
+  'set_setup_completed',
+  'get_agent_profile',
+  'set_agent_profile',
+  'get_connection_config',
+  'set_connection_config',
+  'delete_connection_config',
+  'get_daemon_status',
+  'start_daemon',
+  'stop_daemon',
+  'restart_daemon',
+  'reset_local_database',
+  'toggle_maximize_window',
+] as const;
+type DesktopOperation = (typeof DESKTOP_OPERATIONS)[number];
 
-  onLifecycleChanged(listener: (status: unknown) => void): () => void {
-    const channel = 'nexus-proof:lifecycle-changed';
-    const handler = (_event: Electron.IpcRendererEvent, status: unknown) => listener(status);
-    ipcRenderer.on(channel, handler);
-    return () => ipcRenderer.removeListener(channel, handler);
-  },
+type DaemonStatus = {
+  state: 'starting' | 'running' | 'degraded' | 'stopped' | 'error';
+  version?: string;
+  port: number;
+  detail?: string;
+};
 
-  /**
-   * Proof-only: ask the main process to quit.
-   *
-   * The renderer cannot call `app.quit()`, but the canonical proof needs to
-   * exercise the full close-then-quit handshake (the owner close alone does not
-   * end the process). Restricted to the proof window by `assertProofSender`.
-   */
-  requestQuit(): Promise<unknown> {
-    return ipcRenderer.invoke('nexus-proof:quit');
-  },
+type DesktopBridge = {
+  version: 1;
+  runtime: { localEndpoint: string };
+  invoke(operation: DesktopOperation, payload?: unknown): Promise<unknown>;
+  onStatusChanged(listener: (status: DaemonStatus) => void): () => void;
+};
+// --- end mirrors ---
 
-  /** Writes JSON into the DOM inspection harness for automated proof drivers. */
-  publishHarnessResult(label: string, value: unknown): void {
-    const root = document.getElementById('nexus-electron-proof-root');
-    if (!root) return;
-    root.dataset[label] = JSON.stringify(value);
-    root.textContent = JSON.stringify({ label, value, at: new Date().toISOString() });
+const encoder = new TextEncoder();
+
+/** NUL, C0 controls and DEL are rejected (mirrors desktop-contract.ts). */
+function hasControlChars(value: string): boolean {
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    if (code < 0x20 || code === 0x7f) return true;
+  }
+  return false;
+}
+
+function typedError(code: string, message: string): Error {
+  const err = new Error(message) as Error & { code: string };
+  err.code = code;
+  return err;
+}
+
+/** Trusted runtime metadata, supplied by main before the window is created. */
+function readTrustedRuntime(): { localEndpoint: string } {
+  let raw: unknown;
+  try {
+    raw = ipcRenderer.sendSync(DESKTOP_RUNTIME_CHANNEL);
+  } catch (err) {
+    throw typedError('runtime_unavailable', `desktop runtime metadata unavailable: ${String(err)}`);
+  }
+  if (!raw || typeof raw !== 'object') {
+    throw typedError('runtime_unavailable', 'desktop runtime metadata unavailable');
+  }
+  const { localEndpoint } = raw as { localEndpoint?: unknown };
+  if (typeof localEndpoint !== 'string' || localEndpoint.length === 0) {
+    throw typedError('runtime_unavailable', 'desktop runtime metadata malformed');
+  }
+  if (encoder.encode(localEndpoint).length > MAX_URL_BYTES || hasControlChars(localEndpoint)) {
+    throw typedError('runtime_unavailable', 'desktop runtime metadata malformed');
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(localEndpoint);
+  } catch {
+    throw typedError('runtime_unavailable', 'desktop runtime metadata malformed');
+  }
+  if ((parsed.protocol !== 'http:' && parsed.protocol !== 'https:') || !parsed.host) {
+    throw typedError('runtime_unavailable', 'desktop runtime metadata malformed');
+  }
+  return { localEndpoint };
+}
+
+function isDesktopResponse(
+  value: unknown,
+): value is {
+  version: number;
+  request_id: string;
+  ok: boolean;
+  result?: unknown;
+  error?: { code: string; message: string };
+} {
+  if (!value || typeof value !== 'object') return false;
+  if (!('version' in value) || !('request_id' in value) || !('ok' in value)) return false;
+  return (
+    value.version === DESKTOP_ENVELOPE_VERSION &&
+    typeof value.request_id === 'string' &&
+    typeof value.ok === 'boolean'
+  );
+}
+
+/** Preload-side bound re-check; main already validated before sending. */
+function isBoundedStatusFrame(raw: unknown): raw is DaemonStatus {
+  if (!raw || typeof raw !== 'object') return false;
+  const body = raw as { state?: unknown; version?: unknown; port?: unknown; detail?: unknown };
+  if (typeof body.state !== 'string' || typeof body.port !== 'number') return false;
+  if (body.detail !== undefined && typeof body.detail !== 'string') return false;
+  if (typeof body.detail === 'string' && encoder.encode(body.detail).length > MAX_DIAGNOSTIC_BYTES) {
+    return false;
+  }
+  return encoder.encode(JSON.stringify(raw)).length <= MAX_STATUS_BYTES;
+}
+
+function invoke(operation: DesktopOperation, payload?: unknown): Promise<unknown> {
+  if (!DESKTOP_OPERATIONS.includes(operation)) {
+    return Promise.reject(typedError('invalid_input', `unsupported operation: ${String(operation)}`));
+  }
+  const request_id = crypto.randomUUID();
+  const envelope =
+    payload === undefined
+      ? { version: DESKTOP_ENVELOPE_VERSION, request_id, operation }
+      : { version: DESKTOP_ENVELOPE_VERSION, request_id, operation, payload };
+  return ipcRenderer.invoke(DESKTOP_INVOKE_CHANNEL, envelope).then((raw: unknown) => {
+    if (!isDesktopResponse(raw)) {
+      throw typedError('internal', 'malformed desktop response envelope');
+    }
+    if (raw.request_id !== request_id) {
+      throw typedError('internal', 'desktop response id mismatch');
+    }
+    if (raw.ok) return raw.result;
+    throw typedError(raw.error?.code ?? 'internal', raw.error?.message ?? 'desktop request failed');
+  });
+}
+
+const bridge: DesktopBridge = {
+  version: DESKTOP_BRIDGE_VERSION,
+  runtime: readTrustedRuntime(),
+  invoke,
+  onStatusChanged(listener) {
+    const handler = (_event: unknown, raw: unknown): void => {
+      // Invalid/oversized frames are dropped, never delivered to the SPA, and
+      // Electron event objects never cross this boundary.
+      if (isBoundedStatusFrame(raw)) listener(raw);
+    };
+    ipcRenderer.on(DESKTOP_STATUS_CHANNEL, handler);
+    return () => {
+      ipcRenderer.removeListener(DESKTOP_STATUS_CHANNEL, handler);
+    };
   },
 };
 
-contextBridge.exposeInMainWorld('nexusProof', api);
-
-function ensureHarnessRoot(): void {
-  if (document.getElementById('nexus-electron-proof-root')) return;
-  const root = document.createElement('div');
-  root.id = 'nexus-electron-proof-root';
-  root.hidden = true;
-  root.setAttribute('aria-hidden', 'true');
-  document.documentElement.appendChild(root);
-}
-
-window.addEventListener('DOMContentLoaded', () => {
-  ensureHarnessRoot();
-  ipcRenderer.invoke('nexus-proof:renderer-ready').catch(() => undefined);
-});
+contextBridge.exposeInMainWorld('nexusDesktop', bridge);

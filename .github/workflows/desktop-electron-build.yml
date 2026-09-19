@@ -1,0 +1,183 @@
+name: Electron Desktop Unsigned Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, iteration/v1.192]
+    paths:
+      - 'apps/desktop-electron/**'
+      - 'apps/nexus-service/**'
+      - 'apps/web/**'
+      - 'packages/nexus-contracts/**'
+      - 'packages/nexus-native/**'
+      - 'packages/nexus-native-darwin-*/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - '.github/actions/**'
+      - '.github/workflows/desktop-electron-build.yml'
+  pull_request:
+    branches: [main, iteration/v1.192]
+    paths:
+      - 'apps/desktop-electron/**'
+      - 'apps/nexus-service/**'
+      - 'apps/web/**'
+      - 'packages/nexus-contracts/**'
+      - 'packages/nexus-native/**'
+      - 'packages/nexus-native-darwin-*/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - '.github/actions/**'
+      - '.github/workflows/desktop-electron-build.yml'
+
+concurrency:
+  group: desktop-electron-unsigned-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  NODE_VERSION: '22.22.0'
+  PNPM_VERSION: '11.25.0'
+
+jobs:
+  package:
+    name: unsigned darwin-${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            os: macos-15
+            rust-target: aarch64-apple-darwin
+          - arch: x64
+            os: macos-15-intel
+            rust-target: x86_64-apple-darwin
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          lfs: true
+
+      - name: Set up Node, pnpm, and stable Rust
+        uses: ./.github/actions/setup-monorepo
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+          rust-toolchain: stable
+          # install-deps defaults to true: pnpm install --frozen-lockfile.
+          # nexus-wasm-host's build.rs compiles embedded modules from source.
+          rust-targets: ${{ matrix.rust-target }},wasm32-unknown-unknown
+
+      - name: Assert native runner architecture
+        env:
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const expected = process.env.TARGET_ARCH;
+          if (process.platform !== 'darwin' || process.arch !== expected) {
+            console.error(`native runner mismatch: expected darwin/${expected}, got ${process.platform}/${process.arch}`);
+            process.exit(1);
+          }
+          console.log(`native runner: ${process.platform}/${process.arch}`);
+          NODE
+
+      - name: Install signing-dispatch sentinels
+        env:
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          sentinel_dir="${RUNNER_TEMP}/unsigned-package-sentinels-${TARGET_ARCH}"
+          sentinel_log="${RUNNER_TEMP}/unsigned-package-sentinel-calls-${TARGET_ARCH}.log"
+          mkdir -p "${sentinel_dir}"
+          : > "${sentinel_log}"
+          for tool in codesign notarytool stapler; do
+            cat > "${sentinel_dir}/${tool}" <<EOF
+          #!/bin/sh
+          printf '%s %s\\n' '${tool}' "\$*" >> '${sentinel_log}'
+          exit 97
+          EOF
+            chmod +x "${sentinel_dir}/${tool}"
+          done
+          cat > "${sentinel_dir}/xcrun" <<EOF
+          #!/bin/sh
+          case " \$* " in
+            *" codesign "*|*" notarytool "*|*" stapler "*)
+              printf '%s %s\\n' 'xcrun' "\$*" >> '${sentinel_log}'
+              exit 97
+              ;;
+            *)
+              exec /usr/bin/xcrun "\$@"
+              ;;
+          esac
+          EOF
+          chmod +x "${sentinel_dir}/xcrun"
+          echo "${sentinel_dir}" >> "${GITHUB_PATH}"
+          echo "UNSIGNED_SENTINEL_LOG=${sentinel_log}" >> "${GITHUB_ENV}"
+
+      - name: Build packaging prerequisites
+        run: |
+          set -euo pipefail
+          pnpm run build:web
+          pnpm --filter @42ch/nexus-contracts run build
+          pnpm --filter @42ch/nexus-provider-acp run build
+          pnpm --filter @42ch/nexus-native run build
+          pnpm --dir apps/nexus-service run build
+          pnpm --dir apps/desktop-electron run build
+
+      - name: Build unsigned native payload
+        env:
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          # CI intentionally uses Cargo's runner-local default target/ directory:
+          # a scoped CARGO_TARGET_DIR deadlocks nexus-wasm-host's nested Cargo
+          # module builds when the outer build holds that directory's lock.
+          node packages/nexus-native/scripts/build.mjs --release
+          test -s "packages/nexus-native-darwin-${TARGET_ARCH}/native/nexus_core_node.node"
+          test -s "packages/nexus-native-darwin-${TARGET_ARCH}/native/compatibility.json"
+
+      - name: Package with signing-dispatch sentinels
+        env:
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          pnpm build:desktop -- --arch "${TARGET_ARCH}"
+          if [ -s "${UNSIGNED_SENTINEL_LOG}" ]; then
+            echo 'forbidden signing dispatch observed:'
+            cat "${UNSIGNED_SENTINEL_LOG}"
+            exit 1
+          fi
+          echo 'signing-dispatch sentinel calls: 0'
+
+
+      - name: Verify published package
+        env:
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          dir="artifacts/desktop/${version}/darwin-${TARGET_ARCH}"
+          node apps/desktop-electron/scripts/verify-package.mjs --dir "${dir}"
+          test -d "${dir}/Nexus.app"
+          test -s "${dir}/Nexus-${version}-darwin-${TARGET_ARCH}-unsigned.dmg"
+          test -s "${dir}/Nexus-${version}-darwin-${TARGET_ARCH}-unsigned.app.zip"
+          test -s "${dir}/receipt.json"
+          test -s "${dir}/SHA256SUMS"
+
+      - name: Upload unsigned distribution artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: nexus-desktop-unsigned-darwin-${{ matrix.arch }}
+          retention-days: 90
+          if-no-files-found: error
+          path: |
+            artifacts/desktop/*/darwin-${{ matrix.arch }}/Nexus.app
+            artifacts/desktop/*/darwin-${{ matrix.arch }}/*.dmg
+            artifacts/desktop/*/darwin-${{ matrix.arch }}/*.app.zip
+            artifacts/desktop/*/darwin-${{ matrix.arch }}/receipt.json
+            artifacts/desktop/*/darwin-${{ matrix.arch }}/SHA256SUMS

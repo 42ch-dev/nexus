@@ -23,7 +23,7 @@ This project follows the [Contributor Covenant Code of Conduct v2.1](../.github/
 
   Stable `cargo fmt` ignores workspace `.rustfmt.toml` `ignore` rules and can incorrectly reformat generated code under `crates/nexus-contracts/src/generated/`.
 
-- **Optional — desktop shell:** macOS + [Tauri v2 prerequisites](https://v2.tauri.app/start/prerequisites/) when working on `apps/desktop`
+- **Optional — desktop shell:** macOS when working on `apps/desktop-electron` (Electron host; unsigned arm64/x64 packaging)
 - **Optional — WASM host crate:** `rustup target add wasm32-unknown-unknown` when touching `nexus-wasm-host`
 
 ## Getting started
@@ -63,16 +63,14 @@ Root [`package.json`](../package.json) exposes shortcuts for common tasks. Run f
 | Task | Command |
 |------|---------|
 | CLI + web dev (one command) | `pnpm run dev` → builds `nexus42`, ensures the daemon on 127.0.0.1:8420, then Vite dev server in the foreground (`scripts/dev-cli-web.sh`) |
-| Desktop dev | `pnpm run dev:desktop` (starts web via Tauri `beforeDevCommand`) |
-| Desktop dev | `pnpm run dev:desktop` (starts web via Tauri `beforeDevCommand`) |
-| TS workspaces build | `pnpm run build` (all workspaces **except** desktop — avoids accidental Tauri bundle) |
+| Desktop dev | `pnpm run dev:desktop` (Electron host over the built web dist) · `pnpm run dev:desktop:web` (Vite HMR + host) |
+| TS workspaces build | `pnpm run build` (all TS workspaces; desktop packaging is a separate command) |
 | Web / Studio build | `pnpm run build:web`, `pnpm run build:design-studio` |
-| Desktop bundle | `pnpm run build:desktop` (web build + sidecar + Tauri; see below) |
+| Desktop bundle | `pnpm run build:desktop -- --arch <arch>` (unsigned Electron packaging; see below) |
 | CLI build | `pnpm run build:cli` or `pnpm run build:cli:release` |
 | TS tests | `pnpm run test`, or `pnpm run test:web` / `pnpm run test:design-studio` |
 | TS typecheck | `pnpm run typecheck` |
 | Schema validate + codegen | `pnpm run validate-schemas`, `pnpm run codegen` |
-| Desktop sidecar binary | `pnpm run sidecar` |
 
 Build individual npm packages when needed:
 
@@ -95,19 +93,17 @@ Before opening a PR, run the **full** gates in [Local checks (mirror CI)](#local
 
 See [`AGENTS.md`](../AGENTS.md) for `target/` disk hygiene and when to run `cargo clean`.
 
-### Desktop sidecar
+### Desktop packaging (Electron)
 
-`apps/desktop` bundles a `nexus42` sidecar at compile time. The binary under `apps/desktop/src-tauri/binaries/` is gitignored — on a fresh clone, before `pnpm run dev:desktop` or `pnpm run build:desktop`:
-
-```bash
-pnpm run sidecar
-```
-
-On Intel Macs:
+The desktop host lives in [`apps/desktop-electron`](../apps/desktop-electron). It produces **unsigned** macOS `.app` / `.dmg` for arm64 and x64 — no signing, notarization, or auto-update lane.
 
 ```bash
-SIDECAR_TARGETS="x86_64-apple-darwin" pnpm run sidecar
+pnpm run dev:desktop                     # Electron host over the built web dist
+pnpm run dev:desktop:web                 # Vite HMR + Electron host
+pnpm run build:desktop -- --arch arm64   # native arch is the default
 ```
+
+`nexus42 desktop bundle --arch <arch>` delegates to the same driver. Dev requires a prepared native payload; the package driver fails closed when compiled prerequisites (web dist, service build, native payload) are missing. See [`apps/desktop-electron/AGENTS.md`](../apps/desktop-electron/AGENTS.md).
 
 ## Schema-first development
 

@@ -51,7 +51,7 @@ See linked AGENTS.md files for per-directory decision rules and invariants:
 | `tooling/design-tokens/` | Shared `@nexus/design-tokens` Tailwind preset + tokens.css | [`tooling/design-tokens/AGENTS.md`](tooling/design-tokens/AGENTS.md) |
 | `apps/nexus42/` | CLI executable (polyglot product-surfaces dir) | [`apps/nexus42/AGENTS.md`](apps/nexus42/AGENTS.md) |
 | `apps/web/` | Web SPA — Control Room + canvas (daemon-served React) | [`apps/web/AGENTS.md`](apps/web/AGENTS.md) |
-| `apps/desktop/` | Tauri v2 desktop shell wrapping `apps/web` | [`apps/desktop/AGENTS.md`](apps/desktop/AGENTS.md) |
+| `apps/desktop-electron/` | Electron desktop host (unsigned macOS arm64 + x64) wrapping `apps/web` | [`apps/desktop-electron/AGENTS.md`](apps/desktop-electron/AGENTS.md) |
 | `apps/design-studio/` | Design-system gallery (daemon-independent Vite SPA) | [`apps/design-studio/AGENTS.md`](apps/design-studio/AGENTS.md) |
 | `crates/nexus-acp-host/` | ACP client adapter | [`crates/nexus-acp-host/AGENTS.md`](crates/nexus-acp-host/AGENTS.md) |
 | `crates/nexus-agent-host/` | Agent host adapter | [`crates/nexus-agent-host/AGENTS.md`](crates/nexus-agent-host/AGENTS.md) |
@@ -72,7 +72,7 @@ See linked AGENTS.md files for per-directory decision rules and invariants:
 | `.mstar/` | Harness infrastructure | [`.mstar/AGENTS.md`](.mstar/AGENTS.md) |
 | `.agents/` | Code-agent skills only (ACP workspace skill root) | [`.agents/AGENTS.md`](.agents/AGENTS.md) |
 
-**`apps/` is the polyglot product-surfaces directory.** Any product surface — regardless of language (Rust CLI, Tauri desktop shell, web SPA, etc.) — lives under `apps/`. Reusable Rust libraries live under `crates/`. See [`apps/AGENTS.md`](apps/AGENTS.md) for the durable placement rule.
+**`apps/` is the polyglot product-surfaces directory.** Any product surface — regardless of language (Rust CLI, Electron desktop host, web SPA, etc.) — lives under `apps/`. Reusable Rust libraries live under `crates/`. See [`apps/AGENTS.md`](apps/AGENTS.md) for the durable placement rule.
 
 **Directory split:** `{HARNESS_DIR}` = `.mstar/`. `.agents/` holds optional `.agents/skills/` for IDE/ACP — not harness SSOT.
 

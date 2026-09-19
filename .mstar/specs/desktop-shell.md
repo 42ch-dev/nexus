@@ -1,471 +1,204 @@
-# Desktop Shell (Tauri) — Specification v1
+# Desktop Shell — Product and Host Contract
 
-**Status**: Shipped (V1.66) — Tauri Desktop Shell delivered (QC tri-review Approve after fix-wave-1 + QA Pass). **V1.118 P0 shipped** (§13.11 Daemon no-Profile boot — Profile is a business gate, not a sidecar boot prerequisite).
-**Document class**: Feature line
-**Created**: 2026-06-25 (Phase 2b, `@architect`)
-**Scope**: Nexus desktop shell contract — `apps/desktop` Tauri v2 wrapper, SPA adapter selection (`TauriClient`), desktop-only `NexusClient` extensions, native file actions + path guard, bundled `nexus42` sidecar lifecycle, port discovery, capability detection, macOS-first unsigned dev build. V1.67+ deferrals (signing, multi-OS, auto-update, in-process lib link, body editor) recorded in §2.
-**Last reconciled**: 2026-09-04 — current Daemon API route namespace and `NexusClient` source-authority rule through V1.183.
+**Classification:** Master. **Status:** Electron is the shipped desktop host: the v1.192 cutover (RFT-09) is accepted, unsigned packaging is delivered (RFT-10), and the replaced Tauri composition is retired (RFT-11), leaving exactly one desktop host. This is **not a claim that dual-architecture GUI qualification, Gatekeeper trust or installed-deployment behavior has been verified** — those rows remain **[UNVERIFIED]** (§12). This in-place revision replaces Tauri-specific normative hosting, preserves the shipped setup/product behavior, and leaves historical evidence unchanged.
 
-**Coordinates with**:
+Architecture authority: [rust-core-service-boundary.md](rust-core-service-boundary.md) §§5,7–12,16. This Master owns desktop capability, window/setup, IPC and packaging contracts; service/domain HTTP schemas remain schema-owned. No second desktop UI or competing desktop spec is introduced.
 
-- [web-ui.md](web-ui.md) §14 (Desktop Shell stage — product UX + user stories + capability table delta)
-- [web-ui-design-requirements.md](web-ui-design-requirements.md) §6 (desktop shell surface design requirements)
-- [daemon-runtime.md](daemon-runtime.md) §12 (Tauri sidecar mode — daemon-side launch/readiness/lifecycle)
-- [daemon-api-surface-conventions.md](daemon-api-surface-conventions.md) §9 (local daemon port discovery; `local-api-surface-conventions.md` is a V1.90 redirect stub)
-- [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md) / `host_tool_handlers.rs` (W-002 path-guard reference for `openWith`/`revealInFinder` scope)
-- [repo-root `DESIGN.md`](../../DESIGN.md) + [`DESIGN.dark.md`](../../DESIGN.dark.md) — Desktop Shell Supplement (window/menu/dialog/context-menu/status tokens) *(V1.98: sole SSOT; former `apps/web/DESIGN*.md` retired)*
-- [schemas-external-consumer-boundary.md](schemas-external-consumer-boundary.md) — `wire_contracts_changed: false` (V1.66); desktop-native methods are Tauri IPC, not Daemon API wire. **V1.94:** `wire_contracts_changed: true` (additive `POST /v1/daemon/agent-host/scan` schemas; `@42ch/nexus-contracts` 0.20.0 → 0.21.0).
-- [daemon-runtime.md](daemon-runtime.md) — health-probe plumbing reused for per-launch daemon-ready gate; `setup_completed` field additive to `~/.nexus42/config.toml`
-- [web-ui.md](web-ui.md) — sidebar IA (two-tab + nested nav + footer), daemon status bar simplification, Strategies unification, button contrast invariant
+## 1. Product and cohort
 
----
+Nexus desktop reuses `apps/web`, `apps/design-studio` and `packages/nexus-ui`; no visual redesign, duplicate UI or new design system. Supported desktop cohort is macOS13+ on arm64 and x86_64. Windows/Linux GUI, auto-update, native product-menu expansion and global shortcut systems are not added.
 
-## 1. Purpose
+Bundle id `io.nexus42.desktop`; product/app name `Nexus`. Product version comes from root `package.json.version`, not an iteration label or independent staging literal. `apps/desktop-electron/resources/product.json` owns id/name. Existing brand icon composition is retained in Electron resources without the Tauri CLI.
 
-Defines the V1.66 desktop shell boundary: a Tauri v2 wrapper (`apps/desktop`) around the unchanged-transport `apps/web` SPA, the `TauriClient` impl of `NexusClient`, desktop-only capability extensions, native file actions with workspace-root path guard, and the bundled `nexus42` sidecar lifecycle. The shell is a **packaging/delivery layer** — it reuses the V1.64/V1.65 HTTP transport and wire contracts unchanged; it adds only what the browser sandbox cannot do.
+## 2. Host ownership and replacement boundary
 
-## 2. Non-goals (durable V1.67+ roadmap)
+- Electron main owns trusted raw home, config persistence, credentials, active workspace resolution, OS actions, service supervision and windows.
+- Preload exposes only `window.nexusDesktop` version1. Renderer remains sandboxed, context-isolated, Node-disabled, web-security-enabled and never loads `.node`, native handles, Principal claims or persisted secrets. A path shown in UI is not path authority.
+- An Electron utility process hosts `@42ch/nexus-service`; the service calls the Rust/native authority. No separate proof `openCore` owner exists beside the service. Service code never imports Electron.
+- A utility process is app-lifetime-bound. Only independent TS-service composition may outlive the GUI; attach and keep/quit are defined in §7.
+- The Tauri product tree/toolchain/CI retirement landed in v1.192, after accepted host parity and unsigned packaging. The still-consumed integrated legacy daemon + embedded SPA and callable dormant CLI rows are **not** retired merely because desktop changed. Public operator names survive.
 
-Recorded so deferrals are tracked, not lost:
+## 3. Public entries and resources
 
-- Body full-text editor + per-chapter edit lock (V1.67 lead authoring slice).
-- System tray / menu-bar app / global hotkeys / native notifications; custom title bar / animated transitions (Production polish). **Menu-bar daemon status + stop/start control** tracked as DF-71 (interim quit dialog shipped on the agent-detection hotfix; tray remains opportunistic polish).
-> **Durable roadmap:** DR-58 (signing/distribution v2), DR-59 (UI productivity wave), DR-60 (tray/menu-bar/hotkeys/notifications), DR-61 (mobile).
+`pnpm dev:desktop` launches the Electron host over built web dist; `pnpm dev:desktop:web` launches Vite HMR plus Electron. Neither stable-interface UI path invokes Cargo or fetches a Rust sidecar. Explicit native changes require the separate native rebuild/preparation command.
 
-## 3. Application structure
+`pnpm build:desktop -- --arch arm64|x64` delegates to the package-scoped unsigned driver. `nexus42 desktop bundle` delegates to that same entry; the command name is preserved. No second Rust implementation of packaging.
 
-- `apps/desktop` is a **pnpm workspace sibling** of `apps/web` (`pnpm-workspace.yaml` already admits `apps/*`); shares the lockfile + `@42ch/nexus-contracts` via workspace dep.
-- `apps/desktop/src-tauri/` is a **standalone Tauri-managed Rust crate**, NOT a root Cargo workspace member (Tauri convention; avoids coupling the daemon workspace to Tauri's build).
-- `tauri.conf.json`: `productName`, macOS bundle id, window config, `build.frontendDist` (= bundled `apps/web/dist`), `bundle.externalBin` (the sidecar), capability permissions (`shell:allow-execute` with `sidecar: true`; opener scope).
+Packaged `Contents/Resources` contains host/preload JS, web-dist, required native payloads outside ASAR where loaded, and an ordinary unpacked `service/` directory with compiled TS entry plus its production dependency closure. Standalone Node must not depend on reading Electron ASAR or workspace symlinks. Packaged resource lookup has no repository fallback.
 
-## 4. Web asset loading
+## 4. IPC and sender boundary
 
-**`build.frontendDist` serves the bundled `apps/web/dist` directly** (Tauri v2 key, under `build`). The daemon's rust-embed static-asset route (V1.64) remains normative for the browser-tab flow and standalone `nexus42 daemon ui`; it is **not** the desktop shell's asset-serving path. No static fallback to the daemon inside desktop mode.
+Global `{version:1,runtime:{localEndpoint},invoke,onStatusChanged}` is typed through one desktop contract; immutable nonsecret endpoint metadata comes from main before preload so a nondefault port is available synchronously. Web imports types only, never Electron runtime. Invoke channel `nexus:desktop:invoke`; main event `nexus:desktop:status-changed`. Preload exposes no raw ipcRenderer, Node/process/env, arbitrary channel invocation, proof commands or Electron event objects.
 
-## 5. NexusClient desktop contract
+Request `{request_id,operation,payload}`; response `{request_id,ok:true,result}` or `{request_id,ok:false,error:{code,message}}`. ASCII request IDs `[A-Za-z0-9._-]{1,128}`; operation and payload schemas closed. Unknown fields, wrong types and oversized values reject before effect. Invoke checks the selected live webContents, exact top mainFrame identity, exact approved origin and current window generation. Missing senderFrame never falls back to trusting the whole webContents URL. Stale window, subframe and foreign-origin messages deny.
 
-**`TauriClient`** (replaces the V1.65 stub at `apps/web/src/lib/nexus/tauri-client.ts`) implements the current **`NexusClient` interface** as **thin desktop augmentation over `BrowserClient`**: every inherited data method reuses the identical HTTP transport to `http://localhost:<resolvedPort>/v1/daemon/*` (or an explicitly configured remote base URL). The interface is the method-count authority; this specification does not freeze a literal count. **Not** a full Tauri-plugin IPC rewrite.
+Bounds: request/response1MiB UTF-8, status4KiB, diagnostic tail2KiB; path4096 bytes, URL8192, creator id256, agent name256, agent command8192, connection config64KiB. No path/id/URL NUL or control characters. At most32 active and16 queued, aggregate queued≤1MiB; excess=`busy`. Default command30s deadline, restart25s; user dialogs require cancellation rather than fake timeout-success. Reload/destruction removes pending renderer replies/listeners, not service ownership.
 
-Desktop-only capability extensions (browser sandbox cannot perform these) are added as a separate `DesktopNexusClient extends NexusClient` (or equivalent capability object), exposed **only in desktop mode**:
+Allowlist:
 
-| Method | Transport | Notes |
-| --- | --- | --- |
-| `openWith(path)` | Tauri custom command → `plugin-opener.openPath()` | Runtime path-guarded (§9). |
-| `revealInFinder(path)` | Tauri custom command → `plugin-opener.revealItemInDir()` | Runtime path-guarded (§9). |
-| `getDaemonStatus()` | Tauri `plugin-shell` / sidecar IPC | Returns health + port; drives status indicator. |
-| `startDaemon()` / `stopDaemon()` | Tauri `plugin-shell` Sidecar | Lifecycle control; autostart on app launch is default. |
+- `open_with({path})`, `reveal_in_finder({path})`, `open_external_url({url})`, `pick_directory({defaultPath})`.
+- `get_workspace_root(null)`, `set_workspace_path({path})`, `switch_active_creator({creatorId})`, `ensure_setup_bootstrap(null)`.
+- `get_entrance(null)`, `set_entrance({value})`, `get_setup_completed(null)`, `set_setup_completed({value})`, `get_agent_profile(null)`, `set_agent_profile({name,launchCommand?})`.
+- `get_connection_config(null)`, `set_connection_config({config,credential})`, `delete_connection_config(null)`.
+- `get_daemon_status(null)`, `start_daemon(null)`, `stop_daemon(null)`, `restart_daemon(null)`, `reset_local_database(null)`, `toggle_maximize_window(null)`.
 
-`copyPath(path)` is unchanged from V1.65 (clipboard write; browser + desktop).
+Method success returns the existing capability result: void/null, picker/path strings, bootstrap `{creator_id,already_bootstrapped}`, entrance enum, setup boolean, optional agent profile, status or public connection config as appropriate. Domain requests/streaming remain HTTP, not a generic IPC SQL/native-operation bridge.
 
-## 6. Capability detection
+## 5. HTTP client and credential storage
 
-**Primary signal**: injected build/runtime flag (`NEXUS_DESKTOP`). **Sanity check**: Tauri API presence — if relying on `window.__TAURI__`, set `app.withGlobalTauri: true` explicitly; otherwise prefer `@tauri-apps/api/core`'s `isTauri`. **Checked once at the `NexusClient` factory** (not scattered across screens). Browser build selects `BrowserClient`; desktop build selects `TauriClient` (+ desktop capability object).
+`DesktopClient` replaces the Tauri-named thin subclass; inherited BrowserClient methods stay the one HTTP implementation. Runtime detection requires a valid versioned preload; no build-env-only desktop selection or retained `__TAURI_INTERNALS__` branch. Web/browser mode and same-origin `/v1/daemon/*` remain supported independently of desktop.
 
-## 7. Sidecar lifecycle
+Main stores connection configuration with Electron safeStorage encryption, atomic replacement and owner-only file permissions at product userData. No new plaintext-write fallback. A one-time import can read the old `nexus42`/`connection_config` macOS keychain entry or old app-data JSON on main only; validate and encrypt before selecting the new store, retain original user data. Once selected, encrypted storage is sole authority; a durable cleared marker prevents re-import after deletion. Unavailable encryption or corrupt state errors rather than silently wiping or retaining a fake success.
 
-Owned by the Tauri app while the desktop session is alive. **Daemon-side detail in [daemon-runtime.md](daemon-runtime.md) §4.6.** Summary:
+Public config `{endpointUrl,label?,active?,pinnedFingerprint?,hasApiKey}` contains no stored API key. Credential update is explicit `{action:'keep'}` or `{action:'replace',value}`; empty replacement clears. Endpoint change cannot inherit the previous endpoint's secret. The user may type and submit a key, but after saving the UI reloads public metadata and discards it. Masked placeholders are never sent as credentials. Browser storage retains its existing real-key contract.
 
-- **Launch**: `nexus42 daemon start --foreground --port <resolved>` via `Command.sidecar(...)` from `@tauri-apps/plugin-shell` on app start (unless a healthy daemon already responds on the resolved port — then attach).
-- **Readiness**: `GET /v1/daemon/runtime/health` returns healthy (NOT stdout parsing). Bounded retry/backoff; render `Daemon starting…` until healthy.
-- **Crash after healthy**: restart with bounded exponential backoff; on repeated crash, stop retrying + show `Daemon stopped` + diagnostics.
-- **App quit**: request graceful termination of the owned sidecar; escalate after bounded timeout. Do NOT kill an unrelated user-started daemon without confirming ownership (track the process handle from the Sidecar API; PID-file/port stop is a CLI-compat mechanism only).
-- **Manual restart**: from the daemon-status indicator, stop owned sidecar → spawn fresh → wait for health.
+Main attaches `X-API-Key` only to the selected top-frame renderer's fetch/XHR for the exact active saved origin and `/v1/daemon/` path prefix. Strip renderer-provided auth first; no secret on inactive/foreign endpoints, images, external links, other frames, fingerprint probes or redirects. Authenticated redirects deny. Keep current fingerprint/TOFU mismatch gate; no TLS error bypass. This is request policy on the existing client, not a second HTTP server/proxy.
 
-## 8. Port discovery
+## 6. Scheme, CSP, navigation and external URLs
 
-**Default `8420` + `NEXUS_DAEMON_PORT` override + health probe.** Resolution: explicit configured port → `NEXUS_DAEMON_PORT` (if valid) → `8420`. App passes `--port <resolved>` so CLI args + env cannot diverge. Readiness = health probe (§7). No dynamic port handshake in V1.66. Conventions are codified in [daemon-api-surface-conventions.md](daemon-api-surface-conventions.md) §9; the historical filename redirects there.
+Production static origin `nexus://app`; scheme registered secure/standard/fetch/streaming before ready. Files are decoded once, realpathed beneath canonical web-dist, checked by path components and regular-file status. Traversal/symlink escape rejects. HTML SPA navigation may fall back to index; missing assets/APIs never do. No repository fallback in packaged mode.
 
-## 9. Native file actions + path guard
+CSP: `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' <selected-service-origin> <explicit-fingerprint-probe-origin>; object-src 'none'; base-uri 'none'; frame-src 'none'; frame-ancestors 'none'; form-action 'none'`. Main inserts validated exact origins, never untrusted strings/wildcards. HMR is restricted to the explicitly launched loopback Vite origin and exact websocket origin in development only; packaged code ignores dev-origin override. No unsafe-eval, remote scripts, webviews or service workers.
 
-`Open With…` (system MD-editor picker) + `Reveal in Finder` on chapter body/outline paths. **Path guard (security-critical):**
+Deny new windows and navigation/redirect out of active app origin. External opening happens only via the explicit main operation. One main URL policy accepts valid http/https with host and without userinfo/control characters; rejects all other schemes. No proof-only github allowlist and no auto-open of a denied navigation.
 
-- **Runtime canonicalize + prefix-check against the active workspace root is AUTHORITATIVE** — mirrors the W-002 guard intent from `host_tool_handlers.rs`.
-- **Tauri capability/opener scope is defense-in-depth ONLY** — Tauri permissions are *static* capability scopes and **cannot** encode a *dynamic* active workspace root.
-- **Prefer custom Tauri commands** (`open_with`, `reveal_in_finder`) that validate the path (canonicalize + prefix-check) **before** calling opener functionality — over relying solely on the static opener scope.
-- On rejection: plain-language disabled state (`Path not opened. The file is outside the active workspace.`), not a silent no-op.
-- **Coordinate with P-sec `R-V165-QC-SUGG-DEFENSE`** — `host_tool_handlers.rs` body-write path gets parity hardening in V1.66; the openWith guard shares the canonicalize+prefix-check pattern.
+Standalone service origin admission replaces obsolete Tauri-only origins with exactly `nexus://app`, preserving loopback/Vite and supported browser origins. No wildcard/null-origin relaxation or stripping Origin to bypass policy. Remote service must explicitly support the selected app origin; incompatible configuration surfaces an error.
 
-Browser build: "Copy Path" only (no greyed-out teasing of unavailable actions).
+## 7. Service lifecycle, identity and quit
 
-## 10. Design requirements
+### 7.1 Readiness and ownership
 
-Window chrome / app menu / native dialogs / desktop context menu / daemon-status indicator tokens in repo-root [`DESIGN.md`](../../DESIGN.md) **Desktop Shell Supplement (V1.66 Standard+)**. Product intent + constraints in [web-ui-design-requirements.md](web-ui-design-requirements.md) §6. System tray: none in V1.66.
+App launch always starts or attaches irrespective of `setup_completed`. Desktop local port precedence: explicit launch value → valid `NEXUS_DAEMON_PORT` →8420. Standalone service's own default8421 is unchanged. Invalid explicit port errors. Selected remote HTTP connection does not grant local controls authority over remote processes.
 
-## 11. Build + CI
+Start reads the private `CoreServiceDiscovery` record and matches it against guarded `GET /v1/daemon/runtime/discovery`, including instance/home/endpoint/epoch, then health. This guarded read is a **required implementation prerequisite**: current unauthenticated runtime/status does not provide those identity fields. Reuse the existing closed DTO, auth rules and service instance; do not invent a new schema. PID is diagnostic, never stop/attach authority. Legacy listener without matching identity is a conflict, not an auto-kill target.
 
-- **macOS-only** in V1.66 (`aarch64-apple-darwin` + `x86_64-apple-darwin`).
-- **Unsigned** `.app` + `.dmg` (T1 DoD). No signing, no notarization, no auto-update, no GitHub Releases.
-- CI `desktop-build` job: `macos-14` aarch64 runner, both Rust targets installed, `--target universal-apple-darwin` if stable (else separate arch artifacts; no hand-rolled `lipo` first), 90-day retention, path filter (`apps/web/**`, `apps/desktop/**`, `apps/nexus42/**`, `packages/nexus-contracts/**`, `crates/**`, lockfiles, workflows).
+Utility calls existing `startService(ServiceOptions)`, awaits published ready/uninitialized discovery plus HTTP health≤15s (probe2s; 100ms first second then250ms). Clean home/no profile is healthy uninitialized state, not startup failure. Messages between main and utility carry generation/request id and only start/close/reset-local-state operations; stale generation replies are ignored.
 
-## 12. Verification matrix
+### 7.2 Stop, restart, recovery, events
 
-| Check | Scope |
-| --- | --- |
-| `pnpm --filter desktop tauri build` | Unsigned `.app`/`.dmg` produces on clean macOS checkout |
-| `cargo check` in `apps/desktop/src-tauri` | Tauri Rust crate compiles (standalone, not workspace) |
-| `TauriClient` transport parity | Every current `NexusClient` data method mirrors `BrowserClient` `/v1/daemon/*` paths (test mocks `__TAURI__`) |
-| Capability detection | Factory selects correct client in browser vs desktop mode |
-| Path guard | Rejection of paths outside workspace root (test coverage) |
-| Sidecar lifecycle | Autostart on launch; health probe; restart-on-crash; stop-on-quit |
-| Q5 actions | Open With / Reveal in Finder / Copy Path work in desktop mode; browser = Copy Path only |
-| Daemon-status indicator | States surface (starting/healthy/degraded/stopped/error) with text + recovery |
+Owned stop awaits cooperative `CoreCloseReport` within the5s budget. Unconfirmed close/lost owner/timeout is Interrupted/error with retained diagnostic state, not SIGKILL-and-success. Ordinary stop on attached independent service is a no-op. Explicit Restart/Stop-and-Quit may send the authenticated expected-instance/epoch stop, verify shutdown, wait≤3s for port release, then start. A `stopping` acknowledgment alone is not completion; stale identity conflicts without touching replacement.
 
----
+Restart is single-flight. Intentional stop/handoff suppresses auto-restart. Owned unexpected exits retry500/1000/2000/4000/8000ms (five attempts), degraded during backoff, **stopped** at exhaustion, manual recovery thereafter. Stop cancels backoff. Renderer crash only recreates renderer, not native owner. Status `{state,version?,port,detail?}` uses current starting/running/degraded/stopped/error states; retain concrete diagnostics, bounded event size and unsubscribe behavior. Register event listener before snapshot fetch.
 
----
+### 7.3 Three-option quit
 
-## 13. Setup Wizard (V1.94)
+Stop Daemon & Quit / Keep Daemon & Quit / Cancel remain available. Cancel leaves state alone. Stop waits real owned close or verified attached stop; failure keeps app open. Keep on independent attach detaches only GUI. Keep on owned utility preflights locally installed Node≥22.22 plus packaged service entry, confirms utility close, starts independent detached Node with same home/port, waits identity+health≤15s, then exits. No two native owners; no utility falsely described as detached. Missing Node, unconfirmed close or failed handoff gives an actionable error and keeps the app open. In-flight work is Interrupted, not promised continuation. For uninterrupted after-exit work attach to independently started service from the outset. No auto-install of Node.
 
-**Status**: Draft (V1.94) — normative contract frozen by P-1; implement authority P0 + P1.
+Closing a window is not automatically quitting/stopping work. Actual quit, including native quit role, shares the serialized decision path.
 
-### 13.1 Purpose
+## 8. Config, bootstrap, profile and local-state recovery
 
-Desktop first-launch is a **two-phase entry** (V1.105):
+Main reads existing home config: per-active-creator `workspace_path_by_creator` → legacy `workspace_path` → documents `nexus/default`. Workspace/creator changes preserve the per-creator mapping, legacy mirror and default slug; serialize mutations, preserve unrelated TOML values, atomically replace. Corrupt config errors without overwriting it. Bootstrap is idempotent, creates `ctr_local` +12hex only when no active creator exists, never replaces an existing creator, and is not a boot prerequisite.
 
-1. **Launch ritual** — fullscreen `DaemonLaunchGate` until the bundled sidecar is Ready (every launch; not a wizard step).
-2. **Setup wizard** — after Ready, four author-facing steps: **Entrance → Agent → Workspace → Done** (V1.170 P1 AR-17; see §13.10.3).
+`entrance` is developer/content-creator with established missing/stale behavior; absent `setup_completed` is false. `getAgentProfile` returns first valid native_cli profile or null; upsert retains other provider kinds/unknown values. Merely persisting a launch command never executes it. Directory picker is directory-only, honors defaultPath and returns null on cancel.
 
-The `setup_completed` marker still gates main UI vs `/setup` **after** Ready — absent or `false` → wizard; `true` → main UI.
+**Reset is retained product behavior, not a migration shortcut.** Explicit native confirmation is mandatory. Main serializes reset with lifecycle, confirms service close, then a narrow utility-native reset acquires the existing storage migration fences exclusively for all target stores before deletion. Target only non-symlink `.nexus42/creators/<id>/workspaces/<slug>/{state.db,state.db-wal,state.db-shm}`; preserve stable lock files and all other data. Live writer, unknown owner, symlink or unconfirmed close errors before destructive action. The native binding reuses Rust storage fencing; no JS SQL or unrelated filesystem wipe. Reset then restores service/readiness through main; renderer reload is not falsely treated as re-running main startup. Cancellation/failure must not look like completed recovery. Any safety-driven substep difference requires an explicit accepted deviation and durable tracked residual; the whole capability cannot be replaced by blanket refusal.
 
-**Entrance persistence (V1.170 P1, AR-16):** the wizard's Entrance step writes the User-layer entrance (`developer` | `content-creator`) through the Tauri IPC pair `get_entrance` / `set_entrance` into the `entrance` key of `~/.nexus42/config.toml` — the same file and durability class as `setup_completed` — before `markCompleted()`. Returning installs skip the Entrance step when an entrance is already stored; unset/failed reads resolve `content-creator` without writing. The daemon never sees the entrance (client-owned config only; `wire_contracts_changed: false`).
+The no-wipe policy forbids reset as migration/implementation escape hatch, not an explicitly confirmed shipped local-state recovery function. User documents, harness, knowledge, specs and creative workspace directories are never reset targets.
 
-> **Current product authority:** §13.10. Sections §13.2–§13.9 record historical V1.94–V1.100 behavior for traceability.
+## 9. Authoritative path guard and file actions
 
-### 13.2 Four-step flow (historical — superseded by §13.10)
+Open/reveal resolve the active root on **each** main-side call, realpath both root and candidate, accept root itself or root+separator prefix, and use the canonical result in the OS action. Relative paths resolve beneath root. Symlink escape, sibling-prefix collision, invalid/unreadable paths or missing root deny before OS effects with existing structured errors. Static capability scope is only defense-in-depth.
 
-| Step | Title | Action | UX states |
-|------|-------|--------|-----------|
-| 1 | Welcome + Workspace | Resolve default workspace (`~/Documents/nexus/default/` via `dirs::document_dir()`); create directory if absent. Existing `~/.nexus42/config.toml` values are preserved — no forced migration unless stale pattern. | Path display + native directory picker ("Browse…") + "Use default" affordance. |
-| 2 | Daemon Ready | Start the bundled `nexus42` sidecar; poll `GET /v1/daemon/runtime/health` until healthy. Reuses the existing `HEALTH_START_TIMEOUT` (15s) + `SidecarManager` lifecycle from §7. | "Starting daemon…" transient → "Daemon ready" (success) OR error state distinguishing timeout vs port conflict vs crash. Never a silent hang. |
+Changing the active creator/workspace invalidates prior root authority. A renderer cannot freeze a root or supply its own root claim. Directory selection intentionally may choose a new root outside the old root; it is not an unguarded open/reveal exception. Copy path remains browser clipboard behavior.
 
-> **V1.96 update**: the wizard-side daemon-wait logic is now subscription-based (not polling) with a mount-time state probe, explicit `'starting'` branch, and a 25s hard timeout. See §13.7.5 for the current behavior. The polling/15s description above is historical (V1.94 original).
-| 3 | ACP Agent Detection | Call `POST /v1/daemon/agent-host/scan`; display registry entries annotated with PATH-install status. Default recommendation = first `installed: true` entry with "Recommended" badge. | Scanning transient → agent list with selectable cards (name, version, installed badge, "Recommended" badge) → "No agents found" state with custom `launch_command` input + "Continue with custom" CTA. |
-| 4 | Done | Persist the selected agent + `setup_completed = true` in `~/.nexus42/config.toml`; transition to main UI. | Confirmation screen; "Finish" CTA launches main UI. |
+## 10. Window, menu and shared UI
 
-### 13.3 `setup_completed` marker
+Window1280×800, minimum960×640, overlay titlebar, traffic lights at12,14; maximize toggle remains main-owned. Keep Dock brand and single-instance focus behavior. Existing SPA menus/shortcuts remain product authority; standard native edit/quit roles support ordinary macOS interaction, not a duplicate native product menu. No auto-updater.
 
-- **Location**: `~/.nexus42/config.toml` field `setup_completed: bool`.
-- **Semantics**: absent or `false` = first-launch (wizard at `/setup` after `DaemonLaunchGate` Ready); `true` = skip wizard, enter main UI after Ready (§13.10.2).
-- **Additive**: the field is optional; existing config files without it are treated as absent (= first-launch). TOML deserialiser must use `#[serde(default)]` or equivalent — the field must tolerate unknown config shapes.
-- **Persistence**: the Tauri shell writes `setup_completed = true` on wizard completion via the existing `set_setup_completed` command (P0). The CLI config path (`apps/nexus42/src/config.rs`) accepts the field additively.
-- **Reset**: Settings → **Setup** exposes **Re-run Setup**, which clears the `setup_completed` marker (R1). Missing marker = fail-safe to wizard. **V1.103 implement authority:** `settings-setup-section.md`.
+Studio uses the same presentational setup/layout/settings components and shared UI tokens. Do not change markup/design merely to fit the Electron host. Existing DESIGN/Studio contracts remain in force.
 
-### 13.4 Per-launch daemon-ready gate (historical pre-V1.105 — see §13.10.2)
+## 11. Unsigned packaging and distribution
 
-> **V1.105 supersedes this section.** Current product: outer **`DaemonLaunchGate`** — fullscreen splash on **every** desktop launch (first-launch and return visits), always preceded by unconditional sidecar auto-start (D2). The wizard Daemon step is retired. **Normative:** §13.10.2.
+Required artifacts for **each** macOS architecture: `Nexus.app` and `Nexus-<version>-darwin-<arch>-unsigned.dmg`; zip of app for CI transport, checksum manifest and provenance receipt. Default root `artifacts/desktop/<version>/darwin-<arch>/`. Build/layout entry and application identity are single-sourced. Native matrix labels follow existing repository precedent: arm64 `macos-15`, x64 `macos-15-intel`; assert actual native architecture, no emulation substitute.
 
-The text below describes pre-V1.105 behavior retained for traceability.
+**No Apple credentials are required.** Ordinary unsigned packaging must succeed with none. Signing/notarization/stapling/release requests fail explicitly before staging. Remove existing proof identity/env/entitlement signing wiring, no dormant future lane. Packager20.3 must use `asarIntegrityDigest:false`, no `osxSign`/`osxNotarize`, no binary/fuse modifications: its default integrity patch can invoke ad-hoc codesign. No path in this lane may invoke codesign/notarytool/stapler. Inherited vendor/ad-hoc signatures in downloaded Electron binaries are recorded honestly; the pipeline does not strip or apply them and does not claim Developer ID/notarized trust.
 
-Every app launch — not only first launch — gates entry to the main UI on a healthy daemon probe:
+The explicit native build prerequisite likewise removes the old native helper's unconditional signing mutation, leaving no optional/dormant signing branch. It must load the produced unsigned `.node` and read real compatibility, never reuse stale compatibility JSON after a load failure. This native rebuild is separate from ordinary TS/UI loops; normal packaging consumes the verified prebuilt payload. Unsigned load failure blocks acceptance rather than triggering signing.
 
-- `setup_completed === true` → show a brief "Starting daemon…" splash (full-screen, minimal, not the main UI shell).
-- Poll `GET /v1/daemon/runtime/health` (reuses `wait_for_first_health` in `sidecar.rs`).
-- On first successful probe → transition to main UI.
-- On failure after `HEALTH_START_TIMEOUT` (15s) → error surface that distinguishes timeout, port conflict (port 8420 already in use), and daemon crash. The surface must:
-  - (i) Show clear copy distinguishing the failure mode.
-  - (ii) Offer an actionable next step (Restart CTA or "Kill conflicting process" hint).
-  - (iii) Never silently hang or show an enabled-while-broken Start button.
-- The wizard step 2 and the per-launch gate are two consumers of the same health-probe state machine; failure paths are plumbed by P0 (gate state + signals); visual copy is P1.
+Fail before publication on missing/invalid web/host/service/native/tool/icon prerequisites. Stage temporarily; publish final arch directory only after both app+DMG and receipt succeed. Preserve previous completed artifacts on failure. Pin/record inputs, revision, lock/web/service/native hashes, runtime/tool versions, native contract/target and artifact checksums. Repeatable provenance/layout does not claim bit-identical timestamped DMGs. CI uploads both architectures' complete sets, not an automatic public signed release.
 
-### 13.5 Default workspace
+Do not relabel macOS15 package inspection as macOS13 launch proof, unsigned as trusted Gatekeeper distribution, or native package CI as historical x64 GUI qualification.
 
-- **Path**: `~/Documents/nexus/default/` (cross-platform via `dirs::document_dir()`).
-- **Fallback**: if `dirs::document_dir()` returns `None`, fall back to `dirs::home_dir().join("Documents").join("nexus").join("default")` and log a warning.
-- **Resolution contract**: both `apps/nexus42/src/config.rs` (CLI/daemon-side) and `apps/desktop/src-tauri/src/lib.rs` (Tauri shell) MUST agree — the workspace-default resolver is shared by both.
-- **Existing installs**: `workspace_path` already set in `~/.nexus42/config.toml` is preserved verbatim unless it matches known stale patterns (`nexus42/default` or `nexus/local/default`), in which case it's overwritten with the new default. The default applies **only when `workspace_path` is unset** or matches a stale pattern.
+## 12. Acceptance and explicit host differences
 
-### 13.6 V1.95 Amendments
+### 12.1 Evidence scope, not a shipping declaration
 
-#### 13.6.1 Setup wizard layout redesign (V1.95 shipped behavior)
+All 29 stable capability IDs require an explicit disposition; “same web bundle” is not native parity. The implementation reconciliation at `b61a59f59e427e53039609161a7f753c18e13b36` demonstrates the layers below, **not an installed Electron GUI or dual-architecture qualification**. Later corrections require evidence for the affected behavior; an earlier passing suite must not silently certify a changed contract.
 
-The setup wizard moves from a centered card with horizontal steps at the top to a left‑sidebar vertical step indicator with content on the right (V1.95 delivery):
+| Stable IDs | Evidenced implementation layer | Qualification still absent |
+|---|---|---|
+| 1, 2, 5, 20, 25 — open/reveal, path guard, directory picker, external URLs | Temporary-tree path tests and injected shell/dialog actions; canonical paths, deny-before-effect, directory-only selection/cancel, shared raw-input URL policy | Actual default-app/Finder/browser opening and native directory dialog; OS permission-denial depth |
+| 3 — copy path | Retained `navigator.clipboard.writeText` source in the web path menu and reading surface; no shell IPC | No clipboard exercise is recorded in the reconciled test set; source retention alone is not a pass |
+| 4, 13–17 — workspace/config/setup/profile | Real temporary-home TOML tests: precedence, enum/defaults, serialized atomic mutations, unknown-key preservation, corrupt-write refusal, idempotent bootstrap and no execution of saved commands | Installed first-run/setup/settings journeys; host config convenience is not native domain registration |
+| 6–12 — service lifecycle/readiness/status | Controller tests with a stub utility and virtual clock; real HTTP route requests with a boundary service-core stub; headless event/window composition | Real Electron utility → TS service → native ownership, publication/cleanup and renderer delivery; virtual deadlines are not production latency measurements |
+| 18 — connection config | Redacted store/form, encryption-unavailable refusal and header-map isolation at injected safeStorage/session seams | Durable-clear mismatch described in §12.3; real macOS encryption/keychain import, renderer header isolation and TOFU runtime |
+| 19 — reset | macOS arm64 Rust tests with real writer fences/files, rebuilt native binding tests, controller sequencing and component recovery tests | Cross-layer cancellation mismatch described in §12.3; real Electron → utility → native reset/recovery and macOS x64 binding exercise |
+| 21 — quit | Three-choice gate, failed-close/absent-Node refusal, headless before-quit composition; detached fixture child survives parent with separate process group | Real packaged TS-service/native handoff, launchd Node discovery and native quit sheet; fixture survival is not product-service survival |
+| 22, 26, 28 — chrome/security/single instance | Headless window options, maximize/quit handlers, versioned IPC/sender/generation/path/CSP checks, protocol-before-window and focus-only second-instance composition | Actual chrome geometry, custom-scheme/preload enforcement, OS lock/LaunchServices and extracted-bundle policy equivalence |
+| 23, 24 — icons/identity | Tauri-free ICNS generation and source-preview inspection; product manifest/root-version validation; headless host consumption; recorded arm64 app/ZIP/DMG construction | Retained/extracted package receipt, Info.plist/icon verification and source-revision/dirty-input reconciliation; no x64 receipt, installed Dock or macOS13 launch proof |
+| 27 — web client selection | Typed version1 bridge, synchronous nondefault local endpoint, thin BrowserClient inheritance, browser-storage isolation and migrated Tauri names | Bridge-only selection mismatch described in §12.3; actual packaged SPA/preload execution |
+| 29 — auto-update | Explicit non-addition; no updater route or dependency in the scoped host checks | No updater is required or claimed by this cutover |
 
-- Steps: Welcome (workspace selection), Daemon (status/error/reset), Agent (detection/selection), Done.
-- The wizard fills the entire window (no `min-h-screen items-center justify-center`).
-- Step indicators are a vertical list in a fixed left panel (`w-52`), with the current step highlighted.
-- Content area keeps the card chrome (border, shadow, background).
+The package construction observation is **arm64 only** and its generated receipt/artifacts were removed afterward. Recorded output checksums do not establish the unavailable receipt's source revision, dirty delta, input hashes or extracted bundle contents. Package implementation revision `ed1d191ad8f55a4fe907cd1241f3a0d187143234` is not a replacement for that provenance. In particular, the package observation does not certify the final web-adapter revision above. Both architectures and the retained artifact-verification evidence remain required by §11.
 
-**Note**: V1.96 reworks this to a centered, integrated single-card IA (see §13.7). The V1.95 description is retained for historical traceability only.
+### 12.2 Explicit host differences and reset safety
 
-#### 13.6.2 Setup wizard workspace selection with native directory picker
+- **D-7:** never auto-kill a legacy/PID-only listener. Attachment requires trusted home/endpoint plus authenticated instance/epoch discovery and health; an unrelated listener is a conflict.
+- **D-9:** restart is single-flight and replacement is identity-safe. Ordinary attached stop is a no-op; explicit restart/Stop-and-Quit must use the matching instance/epoch stop. A stopping acknowledgment or HTTP error is not proof of shutdown, and a successor is not a PID-kill target.
+- **D-18:** no persisted-secret readback to the renderer and no plaintext-write fallback. Redacted metadata and main-only credential authority replace the old readback behavior. This difference does **not** waive durable clear or permit a deleted credential to reappear on the next launch.
+- **D-21:** a utility cannot outlive the app. Keep on an owned utility requires confirmed close and a ready independent TS-service handoff, with an installed compatible Node precondition and explicitly Interrupted in-flight work. Missing Node/entry or failed close/handoff keeps the app open. A packaged Node lookup path is not proof that Node is bundled or discoverable from launchd.
+- Workspace-root resolution preserves map → legacy → default precedence but is a pure read: it does not create the directory or migrate the legacy key into the map on read. Missing/empty values fall through; corrupt authoritative config fails closed. Mutations remain serialized and atomic; the renderer never gains root authority.
+- Stronger CSP/sandbox/isolation replaces the old null-CSP posture. Standard native edit/quit roles do not add a product menu or global shortcut system. Auto-update remains out of scope.
 
-Step 1 (Welcome) now includes a native directory picker (Tauri `@tauri-apps/plugin-dialog` `open({ directory: true })`) to let the user select a custom workspace path:
+**Row19 is retained, not an accepted omission.** Confirmed reset closes the service before the narrow native operation. Existing migration locks are acquired exclusively for all admitted targets before deletion; a live cooperating writer refuses before any file is removed. Only the three local-state filenames in §8 are targets; stable locks and unrelated/user-document trees survive. A missing stable lock may be created and must remain. The returned count counts removed primary databases, not WAL/SHM-only cleanup.
 
-- Default workspace path: `~/Documents/nexus/default` (brand `nexus/`, not `nexus42/`; system home remains `~/.nexus42/`).
-- Stale path overwrite: if the existing `workspace_path` matches `~/Documents/nexus42/default` or `~/Documents/nexus/local/default`, it is overwritten with the new default; custom user‑set paths are preserved.
-- Browser build hides the directory picker button (no native dialogs).
+On Unix the tested deletion uses admitted directory descriptors and file identity checks: a post-fence symlink/file replacement refuses, and a renamed directory cannot redirect deletion to another directory. This is not a transactional rollback guarantee after arbitrary I/O failure. The implementation report also discloses a narrower remaining bound: migration-fence acquisition is path-based, so a same-permission actor able to rename the parent between descriptor admission and fence acquisition could separate the lock path from the admitted directory. Do not claim that race was exercised or eliminated. macOS x64 uses the Unix implementation but was not exercised; the separate non-Unix path-recheck fallback is unqualified and outside the macOS desktop cohort. No safety-driven removal of the reset capability is accepted.
 
-#### 13.6.3 FingerprintGate setup route bypass
+### 12.3 Contract corrections and incomplete demonstrations
 
-The `FingerprintGate` adds `/setup` to its bypass routes (alongside `/connect`), so the wizard can render before any remote config exists without timing risks.
+For acceptance, the §4 envelope shapes are **versioned end-to-end**: request `{version:1,request_id,operation,payload}`, success `{version:1,request_id,ok:true,result}` and failure `{version:1,request_id,ok:false,error:{code,message}}`. Missing/wrong versions reject before effects. Main supplies synchronous nonsecret runtime metadata; the preload's mechanically mirrored constants are checked against the canonical contract because the main/preload emit formats differ. Neither that parity check nor headless host composition proves actual preload execution.
 
-#### 13.6.4 ClientProvider immediate TauriClient for desktop
+At the reconciled revision, three observed mismatches remain **fix-required, not accepted deviations**:
 
-On desktop builds, `ClientProvider` returns `TauriClient` + `TauriDesktopCapabilities` immediately in the `!loaded` branch (no temporary `BrowserClient`), avoiding the "Request failed: The string did not match the expected pattern" error from same‑origin `/v1/daemon/runtime/health` calls in the Tauri webview.
+1. **Row18 — durable clear:** the store test currently demonstrates deletion followed by legacy re-import on the next `ConnectionStore.open()`. A same-call “clear never reimports” claim is insufficient. §5's durable cleared marker remains required; redaction/no-plaintext tests cannot close this gap.
+2. **Row19 — cancellation:** native Cancel returns false, but the action resolves null for both cancel and successful reset. Web recovery consumers interpret any resolution as confirmed. Cancel must be distinguishable from success across the full bridge/consumer contract, preserving recovery state without claiming a completed reset; byte-preserving cancellation alone does not prove this.
+3. **Row27 — bridge-only selection:** the current detector/test still allows `NEXUS_DESKTOP=true` without the version1 bridge. §5 prohibits build-env-only selection. The override must not qualify as a valid desktop runtime.
 
-#### 13.6.5 Daemon error surfacing + migration‑mismatch recovery
+These gaps have a fix-now disposition; only affected regression evidence and review can change their partial status. No GUI test is substituted for missing unit/contract evidence, and no unobserved GUI behavior is relabeled as passing.
 
-- Wizard step 2 (Daemon) surfaces the real error detail from `SidecarManager` (not a generic message).
-- When the daemon fails to start (e.g., migration checksum mismatch), the wizard offers an **opt‑in "Reset local database" button** that clears the daemon state in `~/.nexus42/` (no user creative files touched) and retries daemon start.
-- The button copy clearly states: "This will clear the daemon's local state database (config, registry cache). Your creative files in the workspace are not affected."
+Historical Electron decision JSON missing/unobserved rows remain **[UNVERIFIED]**. New scoped evidence does not rewrite prior qualification, and native package CI is not historical x64 GUI/resource proof. Real-environment qualification, when separately requested, must name the actual architecture/OS and exercised surface; macOS13 metadata, headless composition and unsigned package construction are not GUI, Gatekeeper-trust or installed-deployment success.
 
-### 13.7 V1.96 Amendments — Setup Wizard Surface rework & daemon diagnostic chain
+## 13. Setup Wizard — preserved product behavior
 
-> **Supersession (V1.105):** §13.10.3 four-step IA (Entrance-first since V1.170 P1); portrait top Steps (§13.10.5 / `portrait-wizard-shell.md`); daemon diagnostics on `DaemonLaunchGate` splash — not wizard step 2. Toast/CTA/Browse patterns below remain valid where §13.10 references them.
+### 13.1 Marker and state
 
-**Product behavior target (author-visible).** These describe what the user sees and does after the V1.96 changes. Technical token names, React implementation, and Rust sidecar mechanics are out of scope for this spec (see DESIGN.md and the implement plan).
+After service readiness, `setup_completed=false`/absent routes to setup; true routes to main UI. Marker is set only after successful completion persistence. Failed config writes leave the wizard recoverable. Workspace path and agent profile are durable across re-run setup.
 
-#### 13.7.1 Centered, integrated card layout
+### 13.2 Current flow
 
-- The entire wizard is centered in the viewport (both horizontally and vertically) rather than left-aligned or window-filling without centering.
-- The step indicator list and the current step's content area live inside **one shared card chrome** (single container element with border, shadow, and background). The step list and content are not two disconnected panels.
-- In the step indicator, the circle (number or completion marker) and the step label text align on the same horizontal baseline within each row (no vertical offset between circle and label).
+Entrance → Agent → Workspace → Done. Entrance chooses Content creator/Developer, default content-creator; agent uses shared AgentPicker/custom command; workspace defaults to documents `nexus/default` with Browse/Change Folder; Workspace Continue calls idempotent bootstrap; Done persists agent/profile and entrance **before** setup_completed=true.
 
-#### 13.7.2 Inline workspace location row (Step 1)
+### 13.3–13.9 Superseded bootstrap assumptions
 
-- The workspace location is presented as a single inline affordance:
-  - Folder icon + "Workspace location" label + current resolved path + "Browse…" button appear grouped on one row (or two tightly coupled rows inside the same visual block).
-- The Browse button is visually adjacent to the path text (strong association between location display and the action that changes it).
-- Browser builds continue to hide the native picker button.
+Earlier Welcome/Daemon-numbered-step and bootstrap-before-daemon designs are no longer normative. Keep their product outcomes through the current flow, not their Tauri startup mechanism. No implicit data deletion when settings re-runs setup.
 
-#### 13.7.3 Global unified toast + shared error helper (all steps)
+### 13.10 First-launch reshape — Entrance-first and app-level daemon gate
 
-- Actionable errors originating from Tauri invokes (`pickDirectory`, `setWorkspacePath`, daemon status, finish, etc.) are **never** shown as inline `<p role="alert">` text inside a step.
-- All such errors route through the page-level `useToast()` (variant "error").
-- A shared `errorMessage(err: unknown)` helper (used by every wizard step) correctly turns Tauri error objects (`{ message: "..." }`), native `Error` instances, and plain strings into a human string. The literal text `[object Object]` never appears for these failures.
-- The daemon step's prior inline error logic is updated for consistency with the global toast pattern.
+1. Electron main always starts/attaches service on app launch, independent of marker. Wizard does not own the clean-state start.
+2. Outer `DaemonLaunchGate` wraps all routes; inner `SetupGate` routes by marker only. `/setup` is under the outer gate. First and returning launches wait for readiness or bounded error/retry/recovery. Gate subscribes/probes; no duplicate happy-path start.
+3. Re-run Setup clears marker only after confirmation, then gate→Entrance with stored entrance pre-highlighted. No deletion of workspace/profile files. Missing/stale entrance resolves current content-creator default without read-time writes.
+4. Portrait wizard width480px, height720px, viewport cap85vh; TopStepIndicator horizontal. Reuse presentational DaemonReadySplash, shared workspace-path field, layout/settings chrome and shared toast. Studio consumes the same presentational modules; App retains daemon hooks. No host-driven redesign.
+5. Recovery retry/reset explicitly reaches main controller; reload alone does not rerun main's startup hook. Keep failed-reset error visible and never mark setup complete as a side effect of recovery.
 
-#### 13.7.4 Primary bottom CTA pattern (all steps)
+### 13.11 No-profile boot
 
-- Navigation controls sit at the bottom of each step's content area.
-- The primary action ("Continue", "Finish", or equivalent) is a wide, prominent button that spans most or all of the available width inside the card (or a constrained max-width per the surface rules).
-- The secondary "Back" action is a smaller tertiary/secondary button placed adjacent to the primary (typically left of it or in a compact pair).
-- The pattern is applied consistently to Steps 1–4.
+A clean raw home without active_creator_id must reach healthy service readiness. Profile/creator creation is post-gate business flow in setup/footer Profiles. Bootstrap remains optional idempotent Workspace Continue convenience. Readiness may truthfully be `uninitialized`; it is not failure and not permission to execute uninitialized domain operations.
 
-#### 13.7.5 Daemon diagnostic UX (Step 2)
+## 14. ACP Agent Detection — unchanged service contract
 
-- The wizard **never** hangs indefinitely in the "Starting daemon…" transient after the SPA has subscribed.
-- The subscription callback explicitly branches on `state === 'starting'` (treated as progress; the default transient UI remains appropriate).
-- A hard bounded timeout applies (≤30 s from step entry or from the moment subscription is established). If no terminal state (`running` / `error` / `stopped`) has arrived by then, the UI surfaces a "Taking longer than expected" state that exposes visible Retry and Reset actions.
-- When the daemon reaches `error`, the surfaced `detail` contains the **verbatim stderr** captured from the sidecar (clearly prefixed or appended so the real output — e.g. migration failure, missing config, port conflict — is visible to the author). Generic SidecarManager strings are only a fallback when no stderr was captured.
-- V1.95 fixes (ClientProvider immediate TauriClient, opt-in Reset local database, workspace-path stale-pattern handling) remain in effect and are not regressed.
+`POST /v1/daemon/agent-host/scan` remains schema-owned by `schemas/daemon-api/agent-host/{scan-request,scan-response}.schema.json`, shared by Setup AgentPicker and Settings Agent section. Request optional filter installed/all (default all), registry_refresh boolean (default false). Response agents retain name, registry_agent_id, launch_command, installed, version, description and icon_url with existing nullability. Do not redefine these DTOs in Electron.
 
-##### 13.7.5.1 Technical invariant — mount-time state probe (React lifecycle contract)
+Scan is read-only service-side registry-known binary discovery, not frontend/native-shell command execution. At most bounded concurrency (recommended4); PATH lookup then fixed `--version` with≤2s timeout; nonzero/timeout means version unknown, not uninstalled if PATH succeeded. No shell expansion or user-provided launch string execution. Registry cache/explicit refresh semantics remain unchanged.
 
-The `SetupStepDaemon` `useEffect` MUST call `desktop.getDaemonStatus()` on mount **before** subscribing via `desktop.onDaemonStatusChanged`. On a clean first launch the daemon exits within milliseconds; the SidecarManager transitions to Error and fires `notify()` before the SPA subscribes. Without an initial probe, the SPA never learns about the Error and the timeout is the only escape. The mount-time probe catches the "event already fired" scenario without waiting 25s.
-
-The `useEffect` cleanup MUST:
-- Set a `cancelled` flag to prevent state updates after unmount.
-- Call `unsub?.()` to tear down the daemon status listener.
-- Call `clearTimeout(timer)` to cancel any in-flight hard timeout.
-
-These are React lifecycle invariants, not product-behavior requirements; they are recorded here so the implement plan and code review are aligned.
-
-#### 13.7.6 Preservation of prior fixes
-
-V1.95 amendments (ClientProvider, migration-reset button, workspace default + stale overwrite, FingerprintGate bypass) continue to ship. V1.96 adds the surface and diagnostic improvements on top of them.
-
-### 13.8 V1.97 Amendments — First-launch reliability hardening
-
-> **Daemon step references below are historical** (V1.105 §13.10.2). Workspace/Browse rules apply to Workspace step 2 in the current IA.
-
-**Product behavior target (author-visible).** A clean desktop install must not strand the author in an unbounded starting state. The wizard may succeed or surface a daemon failure, but the outcome must be observable, bounded, and actionable.
-
-- Step 1 remains contained at desktop window sizes: the step list does not crowd the content area, card bounds hold, and long workspace paths truncate instead of expanding the layout.
-- The Browse action calls the native directory picker with the desktop command's expected `defaultPath` argument. A casing mismatch such as `default_path` is a product-blocking failure because it prevents workspace selection.
-- On clean first launch, the sidecar lifecycle cannot rely on a stale or synthetic `Starting` state. If no owned child process exists and no spawn attempt is in progress, desktop launch must either attempt a real daemon start or surface a bounded error state with recovery copy.
-- Existing-install launches preserve V1.95/V1.96 setup behavior: `setup_completed`, workspace path preservation/stale overwrite rules, reset-local-database recovery, and daemon diagnostics.
-- V1.97 does not expand desktop distribution scope: signing, notarization, auto-update, GitHub Releases, multi-OS release hardening, tray/menu-bar, and native notifications remain out of scope.
-
-#### 13.8.1 Technical invariant — sidecar startup state machine
-
-The desktop sidecar manager state machine uses process ownership as the boundary between attach and spawn:
-
-- A newly constructed `SidecarManager` starts in `Stopped` with no owned child. It MUST NOT initialize to `Starting` as a synthetic "maybe starting" placeholder.
-- `Starting` means a spawn attempt is in progress or the desktop app already owns and monitors a child during health probing. `start_with_budget` may return early for `Starting` only when the manager still owns and monitors a child (`child.is_some()`).
-- `Starting` with no owned child is invalid. It must not suppress a new spawn attempt, retry path, or bounded error transition.
-- Attaching to an already healthy daemon on the resolved port is allowed, but attach does not imply child ownership. App quit/stop may terminate only a child spawned and tracked by this desktop session.
-- `Stopped` and `Error` remain retryable states. Retry/Reset actions must be able to re-enter the attach/spawn flow and then either reach health or surface a bounded diagnostic failure.
-
-#### 13.8.2 Contract boundary
-
-V1.97 does not change daemon routes, JSON schemas, generated TypeScript/Rust contracts, or `@42ch/nexus-contracts`. The wizard and desktop shell continue to use existing desktop status/detail capabilities and daemon health probes.
-
-### 13.9 V1.100 Amendments — Clean-state first-launch bootstrap (P0)
-
-> **Partial supersession (V1.105):** §13.9.1 bootstrap **timing** moves to Workspace **Continue** (§13.10.3). §13.9.2 Rule 13 gating is **rewritten** by §13.10.1 (D2 — always auto-start). Bootstrap IPC contract itself remains valid.
-
-**Product behavior target (historical).** A clean desktop install must complete the full wizard path without a pre-daemon `No active creator` failure. A new bootstrap substep between workspace selection and daemon start creates the minimum creator/workspace state the daemon requires to boot.
-
-> **Superseded by §13.11 (V1.118):** Daemon boot no longer requires `active_creator_id`; bootstrap IPC is wizard convenience only, not a sidecar boot gate.
-
-**Contract location:** The authoritative implementation-ready contract is `desktop-first-launch-bootstrap.md`. This section records the product behavior; the iteration contract is SSOT for implementation details (bootstrap mechanism, daemon-start timing matrix, minimum state, idempotency contract, reuse targets).
-
-#### 13.9.1 Wizard flow change
-
-A new bootstrap substep is inserted between step 1 (Welcome + Workspace) and step 2 (Daemon):
-
-| Step | Title | What changed |
-|------|-------|-------------|
-| 1 | Welcome + Workspace | **Unchanged.** Workspace selection and `setWorkspacePath()` persist as before. |
-| **1→2** | **Bootstrap (new)** | **New.** Wizard calls `ensureSetupBootstrap()` via desktop IPC. On clean state, generates a persistent creator ID and writes minimum config (`active_creator_id`, `active_workspace_slug_by_creator`) to `~/.nexus42/config.toml`. On re-run or partial state, detects existing creator and skips generation (idempotent). Failure blocks advance to step 2. |
-| 2 | Daemon Ready | **Unchanged in behavior.** The daemon now boots successfully because creator state exists. Start, probe, error surfacing, and reset work as before. |
-| 3 | ACP Agent Detection | **Unchanged.** |
-| 4 | Done | **Unchanged.** |
-
-#### 13.9.2 `.setup()` daemon auto-start gating (historical — superseded by §13.10.1)
-
-The Tauri `.setup()` hook in `apps/desktop/src-tauri/src/lib.rs` now reads `setup_completed` before spawning the sidecar:
-
-- `setup_completed = true` (existing install): **preserved** — auto-start as before (no regression).
-- `setup_completed = false` or absent (clean state): **skip** — wizard owns daemon start via the step 2 `startDaemon` IPC.
-
-#### 13.9.3 Contract boundary
-
-V1.100 does not change daemon routes, JSON schemas, generated TypeScript/Rust contracts, or `@42ch/nexus-contracts` (`wire_contracts_changed: false`). The bootstrap is Tauri IPC only — it writes to `~/.nexus42/config.toml` through the existing Tauri Rust layer; the daemon reads the same config file it already reads at boot. No daemon boot-without-creator mode is introduced **(superseded for boot behavior by §13.11 V1.118)**.
-
-### 13.10 V1.105 Amendments — First-launch wizard reshape (Entrance-first + app-level Daemon gate)
-
-**Product behavior target.** V1.105 makes daemon readiness a **launch ritual** (fullscreen gate) and reduces the setup wizard to author choices; V1.170 P1 (AR-17) adds the Entrance step first (Entrance → Agent → Workspace → Done).
-
-#### 13.10.1 Rule 13 rewrite — always auto-start sidecar (D2)
-
-The Tauri `.setup()` hook **always** spawns/attaches the sidecar on app launch — **regardless of `setup_completed`**. This **supersedes** §13.9.2 (V1.100 "wizard owns daemon start on clean state").
-
-| `setup_completed` | Sidecar at `.setup()` | Author-visible entry after Ready |
-|-------------------|----------------------|----------------------------------|
-| false / absent | Auto-start (always) | `/setup` wizard |
-| true | Auto-start (always) | Main UI |
-
-The wizard **no longer** owns daemon start via a Daemon step or `startDaemon` IPC as the primary clean-state path.
-
-#### 13.10.2 Fullscreen Daemon gate (every launch)
-
-- First-launch **and** return visits wait on a fullscreen splash until daemon Ready (or bounded timeout/retry/recovery).
-- **Gate layering (architect §5.2):** outer `DaemonLaunchGate` (`apps/web/src/components/setup/daemon-launch-gate.tsx`) wraps all routes in `App.tsx`; inner `SetupGate` routes by `setup_completed` only. `/setup` is under the outer gate, not inside `SetupGate`.
-- Sidecar start is **exclusively** Tauri `.setup()` (`apps/desktop/src-tauri/src/lib.rs`) — gate subscribes/health-probes; happy path does **not** call wizard `startDaemon`.
-- `setup_completed` marker still gates main UI vs `/setup` **after** Ready — unchanged semantics from §13.3.
-- Wizard step 2 (Daemon Ready) from §13.2 is **retired** as a numbered step; diagnostic UX (timeout, retry, `resetLocalDatabase`) lives on `daemon-ready-splash.tsx` / outer gate.
-
-#### 13.10.3 Four-step wizard flow (supersedes §13.2 four-step table for current product)
-
-| Step | Title | Action |
-|------|-------|--------|
-| 1 | Entrance | Two option cards (Content creator / Developer); writes `WizardState.entrance` (init `content-creator`); persisted via `set_entrance` IPC in `finish()` **before** `setup_completed=true` (V1.170 P1 AR-16/AR-17) |
-| 2 | Agent | `POST /v1/daemon/agent-host/scan`; AgentPicker + custom command |
-| 3 | Workspace | Default `~/Documents/nexus/default` + Browse; `ensureSetupBootstrap` on Continue |
-| 4 | Done | `setAgentProfile` + `setup_completed=true` → main UI |
-
-**Removed:** Welcome + Workspace as step 1; Daemon as step 2.
-
-**Entrance persistence (V1.170 P1, AR-16):** `get_entrance` / `set_entrance` read/write the `entrance` key in `~/.nexus42/config.toml` (same durability class as `setup_completed`), registered in the Tauri `invoke_handler`; `DesktopCapabilities` exposes `getEntrance()` / `setEntrance(value)` and screens depend on the interface, never `window.__TAURI__`. Returning installs with a stored entrance skip the Entrance step; unset/stale values resolve `content-creator` without writing. The daemon reads only the config keys it already reads at boot — no daemon change, no User entity (`wire_contracts_changed: false`).
-
-Bootstrap timing moves to Workspace Continue (not between Welcome and Daemon as in V1.100 §13.9.1).
-
-#### 13.10.4 Settings Re-run Setup (V1.103 R1)
-
-- Re-run still clears `setup_completed` marker only (`settings-setup-section.md`).
-- After confirm: fullscreen gate → `/setup` on Entrance step (new IA; V1.170 P1 — the stored entrance is re-offered as the pre-highlighted default).
-- Workspace path and agent profile files are **not** deleted.
-
-#### 13.10.5 Contract boundary
-
-Prefer `wire_contracts_changed: false`. Portrait shell: `wizard-max-width` **480px**, `wizard-max-height` **720px**, viewport cap **85vh** (P2 — see `portrait-wizard-shell.md`). React structure: `TopStepIndicator` horizontal; retire left `step-panel-width` (208px) in wizard.
-
-#### 13.10.6 V1.106 Amendments — Studio fixtures + shared chrome SSOT
-
-
-- **DaemonReadySplash fixtures:** Studio `/surfaces/launch` imports presentational `@web-setup/daemon-ready-splash` — same module as App outer gate.
-- **MainBanner fixtures:** composition-only props-driven chrome in Studio — App `main-banner.tsx` stays daemon-hook-owned; no extract in V1.106.
-- **TopStepIndicator:** single `apps/web/src/components/setup/top-step-indicator.tsx`; Studio `@web-setup/top-step-indicator` (closes dual-source residual).
-- **Contract boundary:** `wire_contracts_changed: false`.
-
-#### 13.10.7 V1.107 Amendments — Studio paint + presentational SSOT
-
-
-- **Studio Tailwind content:** Design Studio must scan `apps/web/src/components/setup/**`, `layout/presentational/**`, and `packages/nexus-ui/src/**` so wizard and matrix utilities paint (FB-000).
-- **Shell chrome SSOT:** Extract props-driven modules under `apps/web/src/components/layout/presentational/`; App wrappers (`sidebar.tsx`, `footer-profiles.tsx`, `daemon-health-indicator.tsx`) delegate markup; Studio imports via `@web-layout/*` (FB-013..014).
-- **Settings chrome SSOT:** Presentational extracts under `apps/web/src/components/settings/presentational/`; Studio imports via `@web-settings/*` (FB-015).
-- **Workspace path field:** Shared `workspace-path-field.tsx` — label **Workspace folder**, CTA **Change Folder…** on wizard and Settings (FB-008); wizard uses `layout="wizard-stack"`.
-- **Toast:** App `apps/web/src/lib/use-toast.tsx` becomes thin re-export from `@42ch/nexus-ui` (FB-012) — package promotion alone (V1.106) does not close App duplication (`R-V1106P0-001`).
-- **Contract boundary:** `wire_contracts_changed: false`.
-
-### 13.11 V1.118 Amendments — Daemon no-Profile boot
-
-> **Status:** P0 shipped (V1.118, 2026-07-15). Iteration SSOT: `daemon-no-profile-boot.md`. Runtime detail: [daemon-runtime.md](./daemon-runtime.md) §17. Fold into this Master at V1.118 P5 hygiene.
-
-**Product behavior target.** The daemon **must** reach healthy Running on an empty `~/.nexus42` home **without** `active_creator_id`. Profile creation/selection remains in setup and footer Profiles — not a sidecar boot prerequisite.
-
-**Verification (P0 T3):** `apps/desktop/src-tauri/src/sidecar.rs` — `clean_home_nexus42_daemon_reaches_healthy_without_profile`, `clean_home_creators_tier1_before_profile`, `clean_home_sidecar_manager_attaches_to_running_daemon`; `apps/desktop/src-tauri/src/lib.rs` — `v118_clean_home_without_nexus42_dir_resolves_default_workspace`, `v118_always_start_sidecar_without_prior_bootstrap`. **CI gap:** these tests are not yet wired in GitHub Actions (plan residual I-1).
-
-**Supersedes (product assumption, not necessarily IPC removal):** §13.9–§13.10 treating creator bootstrap as required for daemon boot. `ensureSetupBootstrap` may remain idempotent on wizard Workspace Continue but is **no longer** the clean-state boot gate.
-
-| Concern | V1.100 / V1.105 (historical) | V1.118 (target) |
-| --- | --- | --- |
-| Clean home daemon boot | Fails without bootstrap writing `active_creator_id` | Healthy without active creator |
-| V1.105 always auto-start | Surfaces fatal earlier at fullscreen gate | Gate reaches Ready; setup follows |
-| Wizard bootstrap IPC | Required minimum state for daemon | Optional convenience; daemon independent |
-| Desktop `DaemonLaunchGate` | Blocked on no-creator fatal | Ready on health T0; setup/wizard follows |
-
-**Desktop contract:** Tauri always-start (V1.105) unchanged. Gate success = T0 health only; Profile selection is post-gate business flow.
-
-**Contract boundary:** `wire_contracts_changed: false`.
-
----
-
-## 14. ACP Agent Detection (V1.94)
-
-**Status**: Draft (V1.94) — normative contract frozen by P-1; implement authority P0.
-
-### 14.1 Endpoint
-
-**`POST /v1/daemon/agent-host/scan`** — additive, no breaking change to existing agent-host routes.
-
-**Handler**: `crates/nexus-daemon-runtime/src/api/handlers/agent_host.rs` — new `scan` function, wired into the existing agent-host router (same route group as `health`, `sessions`).
-
-**Consumers**: Setup wizard agent step (V1.101 Must / P0 — app-shared `AgentPicker` at `apps/web/src/components/setup/agent-picker.tsx`); **V1.102** thin Settings host (`/settings`) remounts the same picker for post-setup agent change; **V1.103** deepens into S3 Settings shell with `/settings/agent` + `getAgentProfile` preselect (G1). **Current IA authority:** `settings-shell-ia.md` + `settings-agent-section.md`. Execution-mode matrix remains deferred post-V1.103 (DF-70).
-
-### 14.2 Contract shapes
-
-Frozen in `schemas/daemon-api/agent-host/scan-request.schema.json` and `schemas/daemon-api/agent-host/scan-response.schema.json`:
-
-- **Request** (`AgentScanRequest`): optional `filter` (string enum: `"installed"` | `"all"`; default `"all"`); optional `registry_refresh` (bool; default `false` — uses cached registry data unless explicitly refreshed).
-- **Response** (`AgentScanResponse`): `agents: AgentScanEntry[]`. Each entry:
-  - `name` (string, required) — agent display name from registry.
-  - `registry_agent_id` (string | null) — matching ACP registry agent ID; null for custom entries.
-  - `launch_command` (string | null) — known launch command (from registry binary `cmd` or user-supplied); null when neither is available.
-  - `installed` (bool, required) — `true` when the binary referenced by `launch_command` is found on PATH.
-  - `version` (string | null) — best-effort `--version` probe result; null when probing fails or times out.
-  - `description` (string | null) — agent description from registry.
-  - `icon_url` (string | null) — agent icon URL from registry.
-
-### 14.3 PATH-probe safety boundary
-
-The scan is a read-only local operation executed by the daemon (not the frontend). It MUST observe the following safety constraints:
-
-1. **Registry-known binary names only**: the probe extracts binary names from the ACP registry cache (`crates/nexus-acp-host/src/registry.rs` → `AgentEntry.distribution.binary.<platform>.cmd`). No user-supplied commands are executed during scan.
-2. **Bounded concurrency**: probe at most N agents concurrently (recommended N=4); the probe is a `which`-equivalent PATH lookup followed by a `--version` subprocess call with a 2-second timeout per binary.
-3. **Short `--version` timeout**: each `--version` subprocess is spawned with a ≤2s timeout. A timeout or non-zero exit is treated as "version unknown" — the agent is still reported as `installed: true` if the PATH lookup succeeded.
-4. **No shell expansion**: binary names are executed directly (not through a shell); arguments are fixed (`--version` only); no `$PATH`, `~`, or other expansion.
-5. **No user-supplied commands during scan**: the `launch_command` field in the response is populated from registry data or supplied separately outside the scan; the scan's subprocess boundary never runs a user-provided string.
-
-**QC2 review note**: the PATH-probe execution boundary is reviewed by qc2 (security lens) at P-last. The constraints above are the architectural safety contract; implementers must not loosen them.
-
-### 14.4 Integration with registry cache
-
-The scan handler composes two existing subsystems:
-
-1. **`RegistryClient::get_registry()`** (`crates/nexus-acp-host/src/registry.rs`) — provides the cached agent list (stale-while-revalidate). The `registry_refresh: true` flag on the request forces `RegistryClient::refresh()` before scanning.
-2. **`scan_local_installations()`** (new helper in `crates/nexus-acp-host/src/registry.rs`) — PATH probe of registry-known binary names. Returns `Vec<LocalInstallation { binary, version: Option<String> }>`.
-
-The handler joins the registry list with the scan results to produce the annotated `AgentScanEntry[]`.
-
-### 14.5 Non-goals
-
-- Agent installation / download / update (registry-only detection; the user manages their own ACP agent binaries).
-- Full `AgentProfile` CRUD API (wizard + Settings Agent section write the default profile via desktop `setAgentProfile`; broader CRUD remains a separate future iteration).
-- Execution-mode matrix / BYOK / AgentPicker package promotion (out of V1.103 scope; see V1.103 compass Non-Goals). Multi-section Settings shell for Agent/Connection/Setup is **in scope V1.103** — not a non-goal here.
-
----
-
-*Desktop shell feature-line spec. V1.66 Draft (Phase 2b `@architect`); flips Shipped (V1.66) at P-last. **V1.94 amendment** (§13–14) adds Setup Wizard + ACP Agent Detection contracts; frozen by P-1. The compass is authoritative for scope/batching/residual tracking; this spec is the durable contract.*
+No automatic agent installation/download/update, broader profile CRUD, execution-mode matrix or new provider capability is introduced by desktop replacement. Settings IA authority remains [settings-shell-ia.md](../iterations/v1.103/specs/settings-shell-ia.md), [settings-agent-section.md](../iterations/v1.103/specs/settings-agent-section.md) and [settings-setup-section.md](../iterations/v1.103/specs/settings-setup-section.md).

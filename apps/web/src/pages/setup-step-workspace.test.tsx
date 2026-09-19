@@ -32,7 +32,7 @@ function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapab
     onDaemonStatusChanged: () => Promise.resolve(() => {}),
     startDaemon: () => Promise.resolve(),
     stopDaemon: () => Promise.resolve(),
-    resetLocalDatabase: () => Promise.resolve(),
+    resetLocalDatabase: () => Promise.resolve({ status: 'confirmed' as const }),
     getSetupCompleted: () => Promise.resolve(false),
     setSetupCompleted: () => Promise.resolve(),
     getEntrance: () => Promise.resolve('content-creator'),
@@ -340,14 +340,22 @@ describe('SetupStepWorkspace', () => {
     expect(onNext).not.toHaveBeenCalled();
   });
 
-  it('reset local database after bootstrap failure reloads without startDaemon', async () => {
+  it('confirmed reset clears the migration error without startDaemon or a success reload', async () => {
     const user = userEvent.setup();
     const onNext = vi.fn();
     // Migration-class error -> classified `migration_db` -> Reset renders (AD-P0).
-    const ensureSetupBootstrap = vi.fn(() =>
-      Promise.reject(new Error('Failed to open creator database: Failed to run database migrations: schema mismatch')),
-    );
-    const resetLocalDatabase = vi.fn(() => Promise.resolve());
+    const ensureSetupBootstrap = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new Error(
+          'Failed to open creator database: Failed to run database migrations: schema mismatch',
+        ),
+      )
+      .mockResolvedValueOnce({
+        creator_id: 'ctr_local1234567890ab',
+        already_bootstrapped: false,
+      });
+    const resetLocalDatabase = vi.fn(() => Promise.resolve({ status: 'confirmed' as const }));
     const startDaemon = vi.fn(() => Promise.resolve());
     const reloadSpy = vi.fn();
     Object.defineProperty(window, 'location', {
@@ -367,15 +375,69 @@ describe('SetupStepWorkspace', () => {
     );
     // AC-P0-3: migration-class failure -> inline alert + Reset allowed.
     expect(screen.getByTestId('wizard-continue-error')).toHaveAttribute('data-continue-error-class', 'migration_db');
-    expect(
-      within(screen.getByTestId('wizard-continue-error')).getByText('Failed to open creator database: Failed to run database migrations: schema mismatch'),
-    ).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Reset' }));
     await waitFor(() => expect(resetLocalDatabase).toHaveBeenCalled());
+    // Recovery honesty (v1.192 P0-T8): no startDaemon, no success reload —
+    // the wizard stays put and clears the error so Continue can be retried.
     expect(startDaemon).not.toHaveBeenCalled();
-    expect(reloadSpy).toHaveBeenCalled();
+    expect(reloadSpy).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('wizard-continue-error')).not.toBeInTheDocument();
     expect(onNext).not.toHaveBeenCalled();
+
+    // Retry after the confirmed reset succeeds and advances.
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await waitFor(() => expect(onNext).toHaveBeenCalled());
+  });
+
+  it('cancelled reset keeps the migration error so the author can retry', async () => {
+    const user = userEvent.setup();
+    const onNext = vi.fn();
+    const ensureSetupBootstrap = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new Error(
+          'Failed to open creator database: Failed to run database migrations: schema mismatch',
+        ),
+      )
+      .mockResolvedValueOnce({
+        creator_id: 'ctr_local1234567890ab',
+        already_bootstrapped: false,
+      });
+    const resetLocalDatabase = vi.fn(() => Promise.resolve({ status: 'cancelled' as const }));
+    const startDaemon = vi.fn(() => Promise.resolve());
+    const reloadSpy = vi.fn();
+    Object.defineProperty(window, 'location', {
+      value: { ...window.location, reload: reloadSpy },
+      writable: true,
+    });
+
+    renderHarness(makeState({ workspaceRoot: '/custom/nexus' }), {
+      desktop: makeDesktop({ ensureSetupBootstrap, resetLocalDatabase, startDaemon }),
+      onNext,
+    });
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Reset' })).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId('wizard-continue-error')).toHaveAttribute('data-continue-error-class', 'migration_db');
+
+    await user.click(screen.getByRole('button', { name: 'Reset' }));
+    await waitFor(() => expect(resetLocalDatabase).toHaveBeenCalled());
+
+    // Declined native dialog: the migration error survives (nothing was
+    // reset), no reload, no daemon start — Continue can be retried directly.
+    expect(screen.getByTestId('wizard-continue-error')).toHaveAttribute('data-continue-error-class', 'migration_db');
+    expect(screen.getByRole('button', { name: 'Reset' })).toBeInTheDocument();
+    expect(startDaemon).not.toHaveBeenCalled();
+    expect(reloadSpy).not.toHaveBeenCalled();
+    expect(onNext).not.toHaveBeenCalled();
+
+    // The retry path still works after a cancelled reset.
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await waitFor(() => expect(onNext).toHaveBeenCalled());
   });
 
   it('retries bootstrap after failure and advances on success', async () => {

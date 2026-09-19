@@ -47,7 +47,7 @@ This is a local tool for authors, some of whom rely on assistive tech. The bar i
 - **Screen-reader semantics** — tables/lists use correct roles; status badges and severity chips expose their meaning textually (not color alone); live regions for async state changes where useful.
 - **Contrast** — AA contrast minimums in **both** light and dark themes (dark is first-class, not an afterthought — authors write at night).
 - **Motion** — respect `prefers-reduced-motion`; transitions are subtle and purposeful, never decorative.
-- **Target sizes** — comfortable tap/click targets; this UI is Tauri-bound (V1.65 desktop, V1.66+ mobile), so do not design for mouse-only.
+- **Target sizes** — comfortable tap/click targets; this UI ships in a browser and the desktop host (Electron since v1.192; mobile deferred — DR-61), so do not design for mouse-only.
 
 Dark mode is **first-class**: the token system must define light **and** dark from day one (shared token names, different values — see `mstar-design-md` dual-theme rule), because the author persona writes across both.
 
@@ -113,7 +113,9 @@ All three V1.65 component classes — editor, table, context menu — must ship 
 
 ## 6. V1.66 desktop shell surface — component design requirements
 
-V1.66 wraps the V1.65 SPA in a Tauri v2 desktop shell (see [web-ui.md](web-ui.md) §14; contract: [desktop-shell.md](desktop-shell.md)). The shell introduces surface classes whose look/feel the design system must serve. As in §1–§5, this section fixes *product intent and constraints* — token values remain `@architect`'s in repo-root `DESIGN.md` **Desktop Shell Supplement** *(authored under `apps/web/DESIGN.md` pre-V1.98)* (**Standard+ desktop supplement** this iteration; Production polish — custom title bar, animated transitions, system tray — stays V1.67+).
+> **Host note (v1.192, RFT-11):** the Tauri desktop host was retired; the repository has exactly one desktop host — Electron, contract [desktop-shell.md](desktop-shell.md). The surface classes below (window chrome, app menu, native dialogs, desktop context menu, daemon-status indicator) remain the product design requirements for that host.
+
+V1.66 wrapped the V1.65 SPA in a Tauri v2 desktop shell (see [web-ui.md](web-ui.md) §14); since v1.192 the host is Electron ([desktop-shell.md](desktop-shell.md)). The shell introduces surface classes whose look/feel the design system must serve. As in §1–§5, this section fixes *product intent and constraints* — token values remain `@architect`'s in repo-root `DESIGN.md` **Desktop Shell Supplement** *(authored under `apps/web/DESIGN.md` pre-V1.98)* (**Standard+ desktop supplement** this iteration; Production polish — custom title bar, animated transitions, system tray — stays V1.67+).
 
 ### 6.1 Window chrome
 
@@ -128,7 +130,7 @@ V1.66 wraps the V1.65 SPA in a Tauri v2 desktop shell (see [web-ui.md](web-ui.md
 
 Standard macOS app menu bar (not a hamburger). Minimal; aligned with V1.64/V1.65 screen groups. Disable unavailable items rather than hiding roadmap commands.
 
-- **Nexus**: About Nexus (version/build/daemon status), Quit Nexus (also stops the sidecar).
+- **Nexus**: About Nexus (version/build/daemon status), Quit Nexus (stops or detaches the managed service per the quit choice — desktop-shell.md §7.3).
 - **File**: New Work… / New Preset… (disabled when not in an owning screen), Close Window.
 - **Edit**: standard Cut/Copy/Paste/Select All (routed to focused surface, incl. outline editor).
 - **View**: theme toggle (Light/Dark/System), reload, entry points to Control Room + Setup + Authoring groups.
@@ -137,7 +139,7 @@ Standard macOS app menu bar (not a hamburger). Minimal; aligned with V1.64/V1.65
 
 ### 6.3 Native dialogs (open / save / about)
 
-- Native `NSOpenPanel`/`NSSavePanel` via Tauri's dialog plugin where the OS provides them — restricted by the same workspace-root scope whitelist as `openWith`.
+- Native `NSOpenPanel`/`NSSavePanel` via Electron main (the `pickDirectory` bridge operation) where the OS provides them — restricted by the same workspace-root scope whitelist as `openWith`.
 - Native about panel (version + daemon status + port + docs link).
 - Reuse V1.64/V1.65 destructive-action visual language so confirmations are recognisable across browser and desktop.
 

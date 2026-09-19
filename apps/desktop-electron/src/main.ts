@@ -1,694 +1,900 @@
-import {
-  app,
-  BrowserWindow,
-  ipcMain,
-  protocol,
-  shell,
-  utilityProcess,
-  type IpcMainInvokeEvent,
-  type UtilityProcess,
-} from 'electron';
-import { randomUUID } from 'node:crypto';
-import { appendFileSync, existsSync } from 'node:fs';
+/**
+ * Product desktop host (v1.192 P0-T7) — the ONE Electron main process.
+ *
+ * Composes the reviewed modules into the shipped app:
+ *  - identity from `resources/product.json` (P1-T1): app name, bundle-id
+ *    userData, Dock icon, single instance (second launch focuses, never
+ *    spawns a duplicate service);
+ *  - window chrome (parity row 22): 1280×800, min 960×640, overlay titlebar,
+ *    traffic lights at 12,14, main-owned maximize toggle;
+ *  - `nexus://app` protocol + exact-origin CSP (P0-T1), refreshed per response
+ *    with the active connection origin;
+ *  - typed desktop IPC (P0-T1) with the mandatory live `getCurrentGeneration`
+ *    source, config handlers (P0-T2), guarded OS actions (P0-T3), connection
+ *    store + exact-origin network hooks (P0-T5), the serialized service
+ *    controller (P0-T4) with status events on `nexus:desktop:status-changed`,
+ *    and the three-choice quit gate (P0-T6) wired into `before-quit`;
+ *  - standard edit/quit menu roles only (plan menu decision — no native
+ *    product menu), no update route (parity row 29).
+ *
+ * The proof shell (proof scheme, proof step surface, proof DOM, proof
+ * home/log env) is deleted from the runtime path; the modules' retained proof
+ * exports died with this file's callsites (see task-7 report).
+ *
+ * The `electron` value import is dynamic (documented exception, same
+ * rationale as desktop-ipc.ts / protocol.ts): `composeDesktopHost` receives
+ * the Electron surfaces as an injected bag so
+ * `tests/desktop-host.test.mjs` can drive the whole composition headlessly
+ * under plain node. A real GUI launch is not exercisable headlessly — the
+ * report says so explicitly for what remains `[UNVERIFIED]`.
+ */
+import { execFile } from 'node:child_process';
+import { accessSync, constants, existsSync, readFileSync, statSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
+import type {
+  App,
+  BrowserWindow,
+  Dialog,
+  IpcMain,
+  Menu,
+  MenuItemConstructorOptions,
+  Session,
+  Shell,
+  UtilityProcess,
+} from 'electron';
+import type { DaemonStatus, PublicConnectionConfig } from './desktop-contract.js';
 import {
+  DESKTOP_HOST,
+  DESKTOP_RUNTIME_CHANNEL,
+  DESKTOP_SCHEME,
+  errorMessage,
+  isAllowedDesktopExternalUrl,
+} from './desktop-contract.js';
+import type { DesktopHandlers, RegisterDesktopIpcOptions, RegisterDesktopIpcResult } from './desktop-ipc.js';
+import { registerDesktopIpc, sendDesktopStatus } from './desktop-ipc.js';
+import { createDesktopConfig } from './desktop-config.js';
+import { createDesktopActions } from './desktop-actions.js';
+import type { ActiveConnectionAuth, SessionLike } from './desktop-network.js';
+import { attachDesktopNetworkHooks } from './desktop-network.js';
+import type { SecureStorageAdapter } from './connection-store.js';
+import { ConnectionStore } from './connection-store.js';
+import type { UtilityChildProcess } from './service-controller.js';
+import { DesktopServiceController } from './service-controller.js';
+import type { QuitChoice, QuitOutcome } from './quit-controller.js';
+import { DesktopQuitController, createDetachedServiceHandoff, findNodeOnPath } from './quit-controller.js';
+import {
+  DESKTOP_SERVICE_HOST,
   assertNativePayloadPresent,
-  buildUtilityConfig,
   nativeRefreshHint,
   repoRootFromMeta,
-  resolveProofHome,
+  resolveDesktopServicePort,
   sanitizeInheritedEnv,
 } from './env.js';
+import type { DesktopCspPolicy } from './protocol.js';
 import {
-  CLOSE_JOIN_MS,
-  DEFAULT_REQUEST_TIMEOUT_MS,
-  INTERRUPT_NOTIFY_MS,
-  MAX_ACTIVE_CALLS,
-  MAX_PENDING_BYTES,
-  MAX_PENDING_CALLS,
-  MAX_REQUEST_BYTES,
-  assertProofStep,
-  errorMessage,
-  estimatePayloadBytes,
-  ipcErr,
-  ipcOk,
-  isIpcResponse,
-  parseIpcRequest,
-  type IpcResponse,
-  type LifecycleStatus,
-} from './ipc.js';
-import {
-  attachExistingReadiness,
-  mergeUtilityReadyLifecycle,
-  remainingCloseBudget,
-  rendererDetachedAfterCreateWindow,
-  resolveCloseLifecycleAfterJoin,
-  resolveOpenProofPolicy,
-  shouldTreatUtilityExitAsUnexpected,
-} from './lifecycle-coord.js';
-import {
-  allowNavigation,
-  assertDistPresent,
-  isAllowedExternalUrl,
-  isProofOrigin,
-  proofIndexUrl,
-  registerProofProtocol,
+  allowDesktopNavigation,
+  buildDesktopCsp,
+  desktopIndexUrl,
+  registerDesktopProtocol,
+  registerDesktopSchemes,
   resolveDistRoot,
 } from './protocol.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const repoRoot = repoRootFromMeta(import.meta.url);
-const BUNDLE_ID = 'com.nexus42.rft-electron-proof';
-const DISPLAY_NAME = 'Nexus RFT Feasibility';
+const requireModule = createRequire(import.meta.url);
+const execFileAsync = promisify(execFile);
 
-interface PendingEntry {
-  generation: number;
-  payloadBytes: number;
-  resolve: (response: IpcResponse) => void;
-  timer: NodeJS.Timeout;
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// ---------------------------------------------------------------------------
+// Product identity (resources/product.json, P1-T1 producer / P0-T7 consumer)
+// ---------------------------------------------------------------------------
+
+export interface ProductIdentity {
+  /** Bundle id, e.g. io.nexus42.desktop — also the userData directory name. */
+  id: string;
+  /** Display name, e.g. Nexus. */
+  name: string;
+  /** Marketing version carried by the packaging layout. */
+  version: string;
+  /** Minimum macOS version, e.g. 13.0. */
+  minimumMacos: string;
 }
 
-function resolveWebDistRoot(): string {
-  const packaged = join(process.resourcesPath, 'web-dist');
-  if (existsSync(join(packaged, 'index.html'))) {
-    return packaged;
+export function loadProductIdentity(resourcesDir: string): ProductIdentity {
+  const raw = JSON.parse(readFileSync(join(resourcesDir, 'product.json'), 'utf8')) as Record<string, unknown>;
+  const id = raw.id;
+  const name = raw.name;
+  const version = raw.version;
+  const minimumMacos = raw.minimum_macos;
+  if (typeof id !== 'string' || id.length === 0 || !id.includes('.')) {
+    throw new Error(`resources/product.json: invalid product id: ${String(id)}`);
   }
-  // A packaged build must serve the bundled web artifact. Falling back to the
-  // monorepo dist would silently mask a broken package with development assets
-  // and make an incomplete proof bundle look functional (QC3 S2).
-  if (app.isPackaged) {
+  if (typeof name !== 'string' || name.length === 0) {
+    throw new Error(`resources/product.json: invalid product name: ${String(name)}`);
+  }
+  if (typeof version !== 'string' || version.length === 0) {
+    throw new Error(`resources/product.json: invalid product version: ${String(version)}`);
+  }
+  if (typeof minimumMacos !== 'string' || minimumMacos.length === 0) {
+    throw new Error(`resources/product.json: invalid minimum_macos: ${String(minimumMacos)}`);
+  }
+  return { id, name, version, minimumMacos };
+}
+
+/** Minimal app surface identity setup needs; the real `App` satisfies this. */
+export interface IdentityApp {
+  setName(name: string): void;
+  setPath(name: string, value: string): void;
+  getPath(name: string): string;
+  dock?: { setIcon(path: string): void };
+}
+
+/**
+ * Product identity on the app: display name, bundle-id userData (proof
+ * identity must never become production state) and the Dock icon from
+ * `resources/icons/app.icns`. MUST run before `app.whenReady()` resolves
+ * (userData is ready-fixed).
+ */
+export function applyProductIdentity(
+  app: IdentityApp,
+  product: ProductIdentity,
+  paths: { userDataDir: string; resourcesDir: string },
+): void {
+  app.setName(product.name);
+  app.setPath('userData', paths.userDataDir);
+  if (process.platform === 'darwin' && app.dock) {
+    const iconPath = join(paths.resourcesDir, 'icons', 'app.icns');
+    if (existsSync(iconPath)) {
+      app.dock.setIcon(iconPath);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Launch-time resolution (pure — covered headlessly by the host test)
+// ---------------------------------------------------------------------------
+
+/**
+ * Explicitly launched dev HMR URL. Only the two frozen Vite origins are
+ * accepted; packaged builds ignore the override entirely.
+ */
+export function resolveDevUrl(env: NodeJS.ProcessEnv, isPackaged: boolean): string | null {
+  if (isPackaged) return null;
+  const raw = env.NEXUS_DESKTOP_DEV_URL;
+  if (typeof raw !== 'string' || raw.trim() === '') return null;
+  const url = raw.trim();
+  const allowed =
+    url === 'http://localhost:5173' ||
+    url === 'http://127.0.0.1:5173' ||
+    url.startsWith('http://localhost:5173/') ||
+    url.startsWith('http://127.0.0.1:5173/');
+  return allowed ? url : null;
+}
+
+/**
+ * Packaged builds serve only the bundled `Resources/web-dist` (a missing
+ * artifact is an error, never a silent development-assets fallback); dev
+ * serves the built `apps/web/dist`.
+ */
+export function resolveDesktopDistRoot(input: {
+  isPackaged: boolean;
+  resourcesPath?: string;
+  repoRoot: string;
+}): string {
+  if (input.isPackaged) {
+    const packaged = join(input.resourcesPath ?? '', 'web-dist');
+    if (existsSync(join(packaged, 'index.html'))) {
+      return packaged;
+    }
     throw new Error(
       `packaged build is missing its bundled web artifact at ${packaged}. ` +
         'Repackage with the current web dist: pnpm --filter web build, then ' +
         'node apps/desktop-electron/scripts/package.mjs --arch <arm64|x64>.',
     );
   }
-  return resolveDistRoot(repoRoot);
+  return resolveDistRoot(input.repoRoot);
 }
 
-const distRoot = resolveWebDistRoot();
-
-let mainWindow: BrowserWindow | null = null;
-let utility: UtilityProcess | null = null;
-let utilityGeneration = 0;
-let lifecycle: LifecycleStatus = {
-  phase: 'idle',
-  owner_alive: false,
-  cleanup_confirmed: null,
-  pending_operations: [],
-  reason: null,
-  last_close_report: null,
-};
-let closeInitiatedForGeneration: number | null = null;
-let reopenRequired = false;
-let rendererDetached = false;
-let initialWindowBootstrap = true;
-let closeInFlight: Promise<void> | null = null;
-/**
- * Guards the quit handshake: while a close is being awaited, further
- * `before-quit` events (which a nested `app.quit()` re-raises) must not queue a
- * second close or a second `app.quit()`.
- */
-let quitRequested = false;
-const pendingRequests = new Map<string, PendingEntry>();
-
-/**
- * Proof-visible logging.
- *
- * A LaunchServices-launched app has no parent pipe, so `NEXUS_PROOF_LOG` names a
- * file the app appends its own diagnostics (including the utility process's
- * stdout/stderr) to. Without it this behaves exactly as before: stderr only.
- * Every line is mirrored to stderr so an attached run sees it live.
- */
-function proofLog(line: string): void {
-  process.stderr.write(line);
-  const target = process.env.NEXUS_PROOF_LOG;
-  if (!target) return;
+function isExecutableFile(path: string): boolean {
   try {
-    appendFileSync(target, line.endsWith('\n') ? line : `${line}\n`);
+    if (!statSync(path).isFile()) return false;
+    accessSync(path, constants.X_OK);
+    return true;
   } catch {
-    // a proof log that cannot be written must never break the app
+    return false;
   }
 }
 
-function syncPendingLifecycle(): void {
-  setLifecycle({ pending_operations: [...pendingRequests.keys()] });
-}
-
-function setLifecycle(next: Partial<LifecycleStatus>): void {
-  lifecycle = { ...lifecycle, ...next };
-  for (const win of BrowserWindow.getAllWindows()) {
-    win.webContents.send('nexus-proof:lifecycle-changed', lifecycle);
+/**
+ * Trusted standalone Node for the detached Keep-on-quit handoff (P0-T6
+ * carry-over): a GUI launch inherits launchd's minimal PATH, so a packaged
+ * bundle Node is preferred and PATH is only a fallback.
+ */
+export function resolveTrustedNodeExecutable(input: {
+  isPackaged: boolean;
+  resourcesPath?: string;
+  env: NodeJS.ProcessEnv;
+}): string | null {
+  if (input.isPackaged && input.resourcesPath) {
+    const bundled = join(input.resourcesPath, 'node', 'bin', 'node');
+    if (isExecutableFile(bundled)) return bundled;
   }
+  return findNodeOnPath(sanitizeInheritedEnv(input.env));
 }
 
-function preloadPath(): string {
-  return join(__dirname, 'preload.js');
+// ---------------------------------------------------------------------------
+// Injected Electron surfaces
+// ---------------------------------------------------------------------------
+
+/** Narrowest structural view of Electron's `utilityProcess` module main needs. */
+export interface UtilityProcessFork {
+  fork(modulePath: string, args?: string[], options?: Record<string, unknown>): UtilityProcess;
 }
 
-function settlePending(requestId: string, response: IpcResponse): boolean {
-  const entry = pendingRequests.get(requestId);
-  if (!entry) return false;
-  clearTimeout(entry.timer);
-  pendingRequests.delete(requestId);
-  syncPendingLifecycle();
-  entry.resolve(response);
-  return true;
+export interface DesktopElectronSurfaces {
+  app: App;
+  BrowserWindow: typeof BrowserWindow;
+  dialog: Dialog;
+  shell: Shell;
+  /** The main session the selected window loads in (defaultSession). */
+  session: Session;
+  ipcMain: IpcMain;
+  utilityProcess: UtilityProcessFork;
+  Menu: typeof Menu;
+  safeStorage: SecureStorageAdapter;
 }
 
-function settleAllPending(generation: number, code: string, message: string): void {
-  for (const requestId of [...pendingRequests.keys()]) {
-    const entry = pendingRequests.get(requestId);
-    if (!entry || entry.generation !== generation) continue;
-    settlePending(requestId, ipcErr(requestId, code, message));
-  }
+export interface DesktopHostPaths {
+  /** Directory holding product.json and icons/ (dev: apps/desktop-electron/resources). */
+  resourcesDir: string;
+  distRoot: string;
+  preloadPath: string;
+  /** Compiled utility owner entry (dist/utility-host.js). */
+  utilityEntry: string;
+  /** Packaged standalone TS service entry (nexus-service dist/main.js). */
+  serviceEntry: string;
+  userDataDir: string;
+  /** Trusted raw user home (launch environment). */
+  home: string;
+  documentsPath: string;
 }
 
-function applyResponseLifecycle(requestOperation: string | null, response: IpcResponse): void {
-  if (response.ok && requestOperation === 'open') {
-    setLifecycle({ phase: 'open', owner_alive: true, reason: null });
-    rendererDetached = false;
-  }
-  if (response.ok && requestOperation === 'close') {
-    lifecycle.last_close_report = response.result;
-  }
-  if (!response.ok && requestOperation === 'close') {
-    setLifecycle({
-      phase: 'interrupted',
-      owner_alive: false,
-      cleanup_confirmed: false,
-      reason: response.error.message,
-      last_close_report: null,
-    });
-    reopenRequired = true;
-  }
-}
-
-function onUtilityMessage(message: unknown, generation: number): void {
-  if (generation !== utilityGeneration) return;
-  const body = message as Record<string, unknown>;
-  if (body && typeof body === 'object' && 'type' in body) {
-    if (body.type === 'utility-ready') {
-      const snapshot = body.lifecycle as LifecycleStatus | undefined;
-      const merged = mergeUtilityReadyLifecycle(lifecycle, snapshot);
-      setLifecycle({ ...merged, reason: null });
-      return;
-    }
-    if (body.type === 'utility-crashed') {
-      void handleUtilityCrash(generation, (body.lifecycle as LifecycleStatus | undefined)?.reason ?? 'utility crashed');
-      return;
-    }
-    return;
-  }
-  if (!isIpcResponse(message)) return;
-  const pendingEntry = pendingRequests.get(message.request_id);
-  if (!pendingEntry || pendingEntry.generation !== generation) return;
-  settlePending(message.request_id, message);
-}
-
-function spawnUtilityOwner(): UtilityProcess {
-  utilityGeneration += 1;
-  const generation = utilityGeneration;
-  closeInitiatedForGeneration = null;
-  const proofHome = resolveProofHome(process.env.NEXUS_PROOF_HOME, repoRoot);
-  const config = buildUtilityConfig(proofHome);
-  const env = sanitizeInheritedEnv(process.env);
-  env.NEXUS_PROOF_UTILITY_CONFIG = JSON.stringify(config);
-
-  // The utility entry lives inside `app.asar` alongside `node_modules` and its
-  // sibling modules, which is what lets its imports resolve; Electron loads
-  // asar members transparently for utility processes too. Do NOT prefer
-  // `app.asar.unpacked/dist/utility-host.js`: that directory holds only the
-  // unpacked `.node` payload, and forking from there strands the entry with no
-  // reachable modules (ERR_MODULE_NOT_FOUND at startup).
-  const child = utilityProcess.fork(join(__dirname, 'utility-host.js'), [], {
-    serviceName: 'nexus-proof-native-owner',
-    env,
-    stdio: 'pipe',
-  });
-
-  child.on('spawn', () => {
-    if (generation !== utilityGeneration) return;
-    setLifecycle({ phase: 'starting', owner_alive: true, reason: null });
-  });
-
-  child.stdout?.on('data', (chunk) => {
-    proofLog(`[utility stdout] ${chunk.toString()}`);
-  });
-  child.stderr?.on('data', (chunk) => {
-    proofLog(`[utility stderr] ${chunk.toString()}`);
-  });
-
-  child.on('message', (msg) => onUtilityMessage(msg, generation));
-
-  child.on('exit', (code) => {
-    if (generation !== utilityGeneration) return;
-    utility = null;
-    settleAllPending(generation, 'interrupted', `utility exited unexpectedly (${code ?? 'unknown'})`);
-    if (shouldTreatUtilityExitAsUnexpected(closeInitiatedForGeneration, generation)) {
-      reopenRequired = true;
-      setLifecycle({
-        phase: 'interrupted',
-        owner_alive: false,
-        cleanup_confirmed: false,
-        reason: `utility exited unexpectedly (${code ?? 'unknown'})`,
-        pending_operations: [...pendingRequests.keys()],
-      });
-      notifyInterrupted();
-    }
-  });
-
-  utility = child;
-  return child;
-}
-
-async function killAndJoinUtility(generation: number, deadlineAt: number): Promise<boolean> {
-  const proc = utility;
-  if (!proc || generation !== utilityGeneration) {
-    return true;
-  }
-  const budgetMs = remainingCloseBudget(deadlineAt);
-  const { promise, resolve } = Promise.withResolvers<boolean>();
-  let exitConfirmed = false;
-  const onExit = () => {
-    exitConfirmed = true;
-    resolve(true);
+export interface ComposeDesktopHostOptions {
+  electron: DesktopElectronSurfaces;
+  product: ProductIdentity;
+  paths: DesktopHostPaths;
+  env: NodeJS.ProcessEnv;
+  isPackaged: boolean;
+  devUrl: string | null;
+  /** Trusted standalone Node (see {@link resolveTrustedNodeExecutable}). */
+  nodeExecutable: string | null;
+  /** Opened store override (test seam); defaults to the encrypted userData store. */
+  connectionStore?: ConnectionStore;
+  adapters?: {
+    registerProtocol?: (distRoot: string, policy: DesktopCspPolicy) => Promise<void>;
+    registerIpc?: (
+      window: BrowserWindow,
+      handlers: DesktopHandlers,
+      options: RegisterDesktopIpcOptions,
+    ) => Promise<RegisterDesktopIpcResult>;
+    attachNetworkHooks?: (
+      session: SessionLike,
+      getActiveAuth: () => ActiveConnectionAuth | null,
+    ) => void;
   };
-  proc.once('exit', onExit);
-  proc.kill();
-  setTimeout(() => resolve(exitConfirmed), budgetMs);
-  const confirmed = await promise;
-  if (confirmed && generation === utilityGeneration) {
-    utility = null;
-    return true;
-  }
-  reopenRequired = true;
-  setLifecycle({
-    phase: 'interrupted',
-    owner_alive: Boolean(utility),
-    cleanup_confirmed: false,
-    reason: 'utility join unconfirmed — owner remains fenced',
-    pending_operations: [...pendingRequests.keys()],
-  });
-  notifyInterrupted();
-  return false;
 }
 
-async function handleUtilityCrash(generation: number, reason: string): Promise<void> {
-  if (generation !== utilityGeneration) return;
-  reopenRequired = true;
-  setLifecycle({
-    phase: 'interrupted',
-    owner_alive: false,
-    cleanup_confirmed: false,
-    reason,
-    pending_operations: [...pendingRequests.keys()],
-  });
-  settleAllPending(generation, 'interrupted', reason);
-  notifyInterrupted();
-  await killAndJoinUtility(generation, Date.now() + CLOSE_JOIN_MS);
+export interface DesktopHostIpcBinding {
+  window: BrowserWindow;
+  options: RegisterDesktopIpcOptions;
 }
 
-function notifyInterrupted(): void {
-  setTimeout(() => {
-    if (lifecycle.phase === 'interrupted' && mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('nexus-proof:lifecycle-changed', lifecycle);
+export interface DesktopHost {
+  window: BrowserWindow;
+  handlers: DesktopHandlers;
+  controller: DesktopServiceController;
+  quitController: DesktopQuitController;
+  connectionStore: ConnectionStore;
+  /** Live generation source: bumps on every window replacement. */
+  generation(): number;
+  /** IPC bindings in registration order (one per window generation). */
+  ipcBindings: DesktopHostIpcBinding[];
+  /** Focuses the sole window; a second-instance launch never spawns anything. */
+  focusExistingWindow(): void;
+  /** Settles when the in-flight (re)registration has completed. */
+  settled(): Promise<void>;
+  dispose(): void;
+}
+
+const QUIT_BUTTONS = ['Stop Daemon & Quit', 'Keep Daemon & Quit', 'Cancel'] as const;
+
+function quitDetail(status: DaemonStatus): string {
+  const base = `The local service is ${status.state} on port ${status.port}.`;
+  return status.detail ? `${base} ${status.detail}` : base;
+}
+
+/**
+ * One-time legacy connection import (frozen secure-store contract): the old
+ * macOS keychain entry (`nexus42` / `connection_config`) via
+ * `/usr/bin/security` — no shell, the secret is never logged or returned
+ * anywhere else — otherwise the old app-data `connection_config.json`.
+ */
+function createLegacyConnectionReader(appDataDir: string): () => Promise<string | null> {
+  async function keychainSecret(): Promise<string | null> {
+    try {
+      const { stdout } = await execFileAsync(
+        '/usr/bin/security',
+        ['find-generic-password', '-s', 'nexus42', '-a', 'connection_config', '-w'],
+        { timeout: 5_000 },
+      );
+      const trimmed = String(stdout).trim();
+      return trimmed.length > 0 ? trimmed : null;
+    } catch {
+      return null;
     }
-  }, Math.min(INTERRUPT_NOTIFY_MS, CLOSE_JOIN_MS));
+  }
+  return async () => {
+    if (process.platform === 'darwin') {
+      const secret = await keychainSecret();
+      if (secret !== null) return secret;
+    }
+    const fallback = join(appDataDir, 'io.nexus42.desktop', 'connection_config.json');
+    try {
+      return readFileSync(fallback, 'utf8');
+    } catch {
+      return null;
+    }
+  };
 }
 
-function ensureUtilityOwner(): UtilityProcess {
-  if (!utility) {
-    return spawnUtilityOwner();
-  }
-  return utility;
-}
+/**
+ * Compose the product host: one selected window, the full typed handler map,
+ * the service controller + quit gate, the connection store and network hooks.
+ * All Electron effects go through the injected surfaces so the composition is
+ * exercisable headlessly; defaults bind the reviewed modules.
+ */
+export async function composeDesktopHost(input: ComposeDesktopHostOptions): Promise<DesktopHost> {
+  const e = input.electron;
+  const product = input.product;
+  const dev = input.devUrl !== null;
+  const adapters = input.adapters ?? {};
+  const registerProtocol = adapters.registerProtocol ?? registerDesktopProtocol;
+  const registerIpc = adapters.registerIpc ?? registerDesktopIpc;
+  const attachNetworkHooks = adapters.attachNetworkHooks ?? attachDesktopNetworkHooks;
 
-async function utilityRequest(
-  raw: unknown,
-  opts?: { timeoutMs?: number; operationHint?: string },
-): Promise<IpcResponse> {
-  const request = parseIpcRequest(raw);
-  if (reopenRequired && request.operation !== 'close') {
-    return ipcErr(request.request_id, 'interrupted', 'prior owner interrupted — explicit reopen required');
-  }
-  if (lifecycle.phase === 'closing' && request.operation !== 'close') {
-    return ipcErr(request.request_id, 'closing', 'owner is closing');
-  }
+  const resolvedPort = resolveDesktopServicePort(undefined, input.env);
+  const localEndpoint = `http://${DESKTOP_SERVICE_HOST}:${resolvedPort}`;
+  const navigationOptions = { dev };
 
-  const payloadBytes = estimatePayloadBytes(request.payload);
-  if (payloadBytes > MAX_REQUEST_BYTES) {
-    return ipcErr(request.request_id, 'input_too_large', 'request payload exceeds 1 MiB');
-  }
-  if (pendingRequests.size >= MAX_ACTIVE_CALLS + MAX_PENDING_CALLS) {
-    return ipcErr(request.request_id, 'busy', 'main admission cap exceeded');
-  }
-  let pendingBytes = 0;
-  for (const entry of pendingRequests.values()) {
-    pendingBytes += entry.payloadBytes;
-  }
-  if (pendingBytes + payloadBytes > MAX_PENDING_BYTES) {
-    return ipcErr(request.request_id, 'busy', 'main pending byte cap exceeded');
-  }
-
-  ensureUtilityOwner();
-  const activeGeneration = utilityGeneration;
-
-  const { promise, resolve } = Promise.withResolvers<IpcResponse>();
-  const timeoutMs = opts?.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
-  const timer = setTimeout(() => {
-    settlePending(
-      request.request_id,
-      ipcErr(request.request_id, 'timeout', `utility request timed out after ${timeoutMs}ms`),
-    );
-  }, timeoutMs);
-
-  pendingRequests.set(request.request_id, {
-    generation: activeGeneration,
-    payloadBytes,
-    resolve: (response) => {
-      applyResponseLifecycle(opts?.operationHint ?? request.operation, response);
-      resolve(response);
-    },
-    timer,
-  });
-  syncPendingLifecycle();
-
-  utility?.postMessage({
-    request_id: request.request_id,
-    operation: request.operation,
-    payload: request.payload,
+  // ── identity ──────────────────────────────────────────────────────────
+  applyProductIdentity(e.app, product, {
+    userDataDir: input.paths.userDataDir,
+    resourcesDir: input.paths.resourcesDir,
   });
 
-  return promise;
-}
+  // ── trusted runtime metadata (preload reads it synchronously) ─────────
+  const runtimeMetadata = { localEndpoint };
+  const onRuntimeChannel = (event: { returnValue: unknown }): void => {
+    event.returnValue = runtimeMetadata;
+  };
+  e.ipcMain.on(DESKTOP_RUNTIME_CHANNEL, onRuntimeChannel);
 
-async function initiateOwnerClose(): Promise<void> {
-  if (closeInFlight) return closeInFlight;
-  const { promise, resolve } = Promise.withResolvers<void>();
-  closeInFlight = promise;
-  closeInitiatedForGeneration = utilityGeneration;
-  setLifecycle({ phase: 'closing', owner_alive: Boolean(utility), reason: null });
+  // ── config, connection store, network policy ──────────────────────────
+  const config = createDesktopConfig(input.paths.home, input.paths.documentsPath);
+  const { resolveWorkspaceRoot, ...configHandlers } = config;
 
-  if (!utility) {
-    setLifecycle({ phase: 'closed', owner_alive: false, cleanup_confirmed: true, reason: null });
-    closeInFlight = null;
-    resolve();
-    return;
-  }
+  const connectionStore =
+    input.connectionStore ??
+    (await ConnectionStore.open({
+      filePath: join(input.paths.userDataDir, 'connection-config.enc'),
+      storage: e.safeStorage,
+      readLegacy: createLegacyConnectionReader(e.app.getPath('appData')),
+    }));
+  let activeConfig: PublicConnectionConfig | null = await connectionStore.get();
+  const refreshActiveConfig = async (): Promise<void> => {
+    activeConfig = await connectionStore.get();
+  };
 
-  const generation = utilityGeneration;
-  const deadlineAt = Date.now() + CLOSE_JOIN_MS;
-  const request_id = randomUUID();
-  let closeResponse: IpcResponse | null = null;
-  try {
-    closeResponse = await utilityRequest(
-      { request_id, operation: 'close' },
-      {
-        timeoutMs: remainingCloseBudget(deadlineAt),
-        operationHint: 'close',
+  attachNetworkHooks(e.session, () => connectionStore.getAuth());
+
+  // Exact-origin CSP, refreshed per response with the ACTIVE connection
+  // origin (frozen contract: main validates and inserts exact origins only).
+  const activeServiceOrigin = (): string => {
+    if (activeConfig?.active === true) {
+      try {
+        return new URL(activeConfig.endpointUrl).origin;
+      } catch {
+        // fall through to the app-managed local endpoint
+      }
+    }
+    return localEndpoint;
+  };
+  if (typeof e.session.webRequest.onHeadersReceived === 'function') {
+    e.session.webRequest.onHeadersReceived(
+      { urls: [`${DESKTOP_SCHEME}://${DESKTOP_HOST}/*`] },
+      (details, callback) => {
+        const headers: Record<string, string[]> = { ...(details.responseHeaders ?? {}) };
+        for (const key of Object.keys(headers)) {
+          if (key.toLowerCase() === 'content-security-policy') delete headers[key];
+        }
+        const origin = activeServiceOrigin();
+        headers['Content-Security-Policy'] = [
+          buildDesktopCsp({ serviceOrigin: origin, fingerprintProbeOrigin: origin, dev }),
+        ];
+        callback({ responseHeaders: headers });
       },
     );
-  } finally {
-    const confirmed = await killAndJoinUtility(generation, deadlineAt);
-    const outcome = resolveCloseLifecycleAfterJoin({
-      confirmed,
-      closeOk: Boolean(closeResponse?.ok),
-      ownerStillReferenced: Boolean(utility),
-      cleanupConfirmed: closeResponse?.ok
-        ? ((closeResponse.result as { cleanup_confirmed?: boolean })?.cleanup_confirmed ?? null)
-        : null,
-      closeErrorMessage: closeResponse && !closeResponse.ok ? closeResponse.error.message : undefined,
-    });
-    setLifecycle({
-      phase: outcome.phase,
-      owner_alive: outcome.owner_alive,
-      cleanup_confirmed: outcome.cleanup_confirmed,
-      reason: outcome.reason,
-      last_close_report: closeResponse?.ok ? closeResponse.result : lifecycle.last_close_report,
-    });
-    reopenRequired = outcome.reopenRequired;
-    closeInFlight = null;
-    resolve();
   }
-}
 
-function assertProofSender(event: IpcMainInvokeEvent): void {
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    throw Object.assign(new Error('proof window unavailable'), { code: 'invalid_sender' });
-  }
-  if (event.sender !== mainWindow.webContents) {
-    throw Object.assign(new Error('ipc sender is not the selected proof window'), { code: 'invalid_sender' });
-  }
-  const frameUrl = event.senderFrame?.url ?? event.sender.getURL();
-  if (!isProofOrigin(frameUrl)) {
-    throw Object.assign(new Error('ipc sender frame is not nexus-proof origin'), { code: 'invalid_origin' });
-  }
-}
+  // ── service controller (P0-T4) with renderer status events ────────────
+  const controller = new DesktopServiceController({
+    home: input.paths.home,
+    resolvedPort,
+    spawnUtility: () =>
+      e.utilityProcess.fork(input.paths.utilityEntry, [], {
+        serviceName: 'nexus-desktop-service',
+        env: sanitizeInheritedEnv(input.env),
+        stdio: 'ignore',
+      }) as unknown as UtilityChildProcess,
+    emitStatus: (_channel, status) => {
+      const win = currentWindow;
+      if (win && !win.isDestroyed()) {
+        void sendDesktopStatus(win, status).catch(() => undefined);
+      }
+    },
+    handoff: createDetachedServiceHandoff({
+      serviceEntry: input.paths.serviceEntry,
+      ...(input.nodeExecutable === null ? {} : { nodeExecutable: input.nodeExecutable }),
+      env: sanitizeInheritedEnv(input.env),
+    }),
+  });
 
-function hardenWindow(win: BrowserWindow): void {
-  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  win.webContents.on('will-navigate', (event, url) => {
-    if (!allowNavigation(url)) event.preventDefault();
-  });
-  win.webContents.on('will-redirect', (event, url) => {
-    if (!allowNavigation(url)) event.preventDefault();
-  });
-  win.webContents.on('render-process-gone', () => {
-    rendererDetached = true;
-    if (mainWindow === win) {
-      mainWindow = null;
-    }
-    if (utility && (lifecycle.phase === 'open' || lifecycle.phase === 'starting')) {
-      setLifecycle({
-        phase: lifecycle.phase,
-        owner_alive: true,
-        reason:
-          lifecycle.phase === 'starting'
-            ? 'renderer crashed while owner starting — replacement may attach and await utility-ready'
-            : 'renderer crashed — native owner remains authoritative',
-        pending_operations: [...pendingRequests.keys()],
-      });
-      notifyInterrupted();
+  // ── window + IPC generation ───────────────────────────────────────────
+  let generation = 0;
+  let currentWindow: BrowserWindow | null = null;
+  let ipcRegistration: RegisterDesktopIpcResult | null = null;
+  let lastSelect: Promise<void> = Promise.resolve();
+  const ipcBindings: DesktopHostIpcBinding[] = [];
+
+  // ── quit gate (P0-T6), wired into before-quit below ───────────────────
+  const chooseQuitChoice = async (status: DaemonStatus): Promise<QuitChoice | null> => {
+    const options = {
+      type: 'question' as const,
+      title: product.name,
+      message: `Quit ${product.name}?`,
+      detail: quitDetail(status),
+      buttons: [...QUIT_BUTTONS],
+      defaultId: 2,
+      cancelId: 2,
+      noLink: true,
+    };
+    const result =
+      currentWindow && !currentWindow.isDestroyed()
+        ? await e.dialog.showMessageBox(currentWindow, options)
+        : await e.dialog.showMessageBox(options);
+    if (result.response === 0) return 'stop';
+    if (result.response === 1) return 'keep';
+    return 'cancel';
+  };
+  const reportQuitOutcome = (outcome: QuitOutcome): void => {
+    if (!outcome.allowed) {
+      void e.dialog
+        .showMessageBox({
+          type: 'warning',
+          title: product.name,
+          message: `Quit cancelled — ${product.name} stays open`,
+          detail: outcome.detail ?? 'the local service could not be stopped safely',
+          buttons: ['OK'],
+          noLink: true,
+        })
+        .catch(() => undefined);
       return;
     }
-    setLifecycle({
-      phase: lifecycle.phase === 'closed' ? 'closed' : 'interrupted',
-      owner_alive: Boolean(utility),
-      cleanup_confirmed: utility ? false : lifecycle.cleanup_confirmed,
-      reason: 'renderer crashed — awaiting explicit reopen or replacement window',
-      pending_operations: [...pendingRequests.keys()],
-    });
-    notifyInterrupted();
-  });
-}
-
-function createMainWindow(): BrowserWindow {
-  const win = new BrowserWindow({
-    title: DISPLAY_NAME,
-    width: 1280,
-    height: 800,
-    show: false,
-    webPreferences: {
-      preload: preloadPath(),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      webSecurity: true,
-      disableBlinkFeatures: 'Auxclick',
-    },
-  });
-  hardenWindow(win);
-  rendererDetached = rendererDetachedAfterCreateWindow({
-    initialBootstrap: initialWindowBootstrap,
-    rendererDetached,
-  });
-  initialWindowBootstrap = false;
-  win.on('close', () => {
-    initiateOwnerClose().catch(() => undefined);
-  });
-  // A proof run launches the packaged app many times in a row (cold/warm
-  // cohorts). Presenting a window each time is intrusive for the operator and
-  // changes nothing that is being measured — readiness is the renderer reaching
-  // an interactive graph, not the window being on screen. NEXUS_PROOF_HIDDEN
-  // keeps the launch real but screenless; interactive use is unaffected.
-  if (process.env.NEXUS_PROOF_HIDDEN !== '1') {
-    win.once('ready-to-show', () => win.show());
-  }
-  win.loadURL(proofIndexUrl()).catch((err) => {
-    proofLog(`[main] web dist failed to load: ${errorMessage(err)}\n`);
-    app.exit(1);
-  });
-  return win;
-}
-
-function registerIpcHandlers(): void {
-  ipcMain.handle('nexus-proof:lifecycle', async (event) => {
-    assertProofSender(event);
-    return lifecycle;
-  });
-
-  ipcMain.handle('nexus-proof:quit', async (event) => {
-    assertProofSender(event);
-    // Deferred so the IPC reply is delivered before the close handshake begins.
-    setImmediate(() => app.quit());
-    return { ok: true };
-  });
-
-  ipcMain.handle('nexus-proof:renderer-ready', async (event) => {
-    assertProofSender(event);
-    return { lifecycle, bundle_id: BUNDLE_ID };
-  });
-
-  ipcMain.handle('nexus-proof:proof-step', async (event, raw: { step?: string; payload?: Record<string, unknown> }) => {
-    assertProofSender(event);
-    if (lifecycle.phase === 'closing') {
-      return ipcErr(randomUUID(), 'closing', 'owner is closing');
+    if (outcome.choice === 'keep') {
+      // D-21: the user is told in-flight work was interrupted.
+      void e.dialog
+        .showMessageBox({
+          type: 'info',
+          title: product.name,
+          message: 'The service continues as an independent process',
+          detail: outcome.detail,
+          buttons: ['OK'],
+          noLink: true,
+        })
+        .catch(() => undefined);
     }
-    const step = assertProofStep(raw?.step);
-    const request_id = randomUUID();
-    switch (step) {
-      case 'lifecycle_status':
-        return ipcOk(request_id, lifecycle);
-      case 'compatibility':
-        return utilityRequest({ request_id, operation: 'compatibility' });
-      case 'open': {
-        const policy = resolveOpenProofPolicy({
-          reopenRequired,
-          rendererDetached,
-          phase: lifecycle.phase,
-          ownerAlive: lifecycle.owner_alive,
-        });
-        if (policy === 'reopen_after_fence') {
-          const confirmed = await killAndJoinUtility(utilityGeneration, Date.now() + CLOSE_JOIN_MS);
-          if (!confirmed) {
-            return ipcErr(
-              request_id,
-              'interrupted',
-              utility
-                ? 'prior owner join unconfirmed — reopen blocked'
-                : 'prior owner join unconfirmed — owner reference lost',
-            );
-          }
-          utility = null;
-          reopenRequired = false;
-          closeInitiatedForGeneration = null;
-          rendererDetached = false;
-          return utilityRequest({ request_id, operation: 'open' });
-        }
-        if (policy === 'attach_existing_owner') {
-          rendererDetached = false;
-          return ipcOk(request_id, {
-            readiness: attachExistingReadiness(lifecycle.phase),
-            attached: true,
-            lifecycle,
+  };
+  const quitController = new DesktopQuitController({ controller, chooseQuitChoice, reportQuitOutcome });
+
+  // ── the full typed handler map ────────────────────────────────────────
+  const handlers: DesktopHandlers = {
+    ...configHandlers,
+    ...createDesktopActions({
+      resolveWorkspaceRoot,
+      shell: {
+        openPath: (path) => e.shell.openPath(path),
+        showItemInFolder: (path) => e.shell.showItemInFolder(path),
+        openExternal: (url) => e.shell.openExternal(url),
+      },
+      dialog: {
+        pickDirectory: async (options) => {
+          const result = await e.dialog.showOpenDialog(currentWindow ?? e.BrowserWindow.getAllWindows()[0]!, {
+            properties: ['openDirectory', 'createDirectory'],
+            ...(options.defaultPath === undefined ? {} : { defaultPath: options.defaultPath }),
           });
-        }
-        return utilityRequest({ request_id, operation: 'open' });
+          return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0];
+        },
+        confirmReset: async () => {
+          const win = currentWindow ?? e.BrowserWindow.getAllWindows()[0] ?? null;
+          const options = {
+            type: 'warning' as const,
+            title: product.name,
+            message: 'Reset the local Nexus state?',
+            detail:
+              'This closes the local service and deletes the local state databases under the current workspace. In-flight work is interrupted. This cannot be undone.',
+            buttons: ['Reset Local State', 'Cancel'],
+            defaultId: 1,
+            cancelId: 1,
+            noLink: true,
+          };
+          const result = win
+            ? await e.dialog.showMessageBox(win, options)
+            : await e.dialog.showMessageBox(options);
+          return result.response === 0;
+        },
+      },
+      controller,
+    }),
+    async get_connection_config() {
+      return connectionStore.get();
+    },
+    async set_connection_config({ config: next, credential }) {
+      const saved = await connectionStore.set(next, credential);
+      await refreshActiveConfig();
+      return saved;
+    },
+    async delete_connection_config() {
+      await connectionStore.delete();
+      await refreshActiveConfig();
+      return null;
+    },
+    async get_daemon_status() {
+      return controller.getStatus();
+    },
+    async start_daemon() {
+      await controller.start();
+      return null;
+    },
+    async stop_daemon() {
+      await controller.stop();
+      return null;
+    },
+    async restart_daemon() {
+      await controller.restart();
+      return null;
+    },
+    /** Parity row 22: main-owned maximize toggle. */
+    async toggle_maximize_window() {
+      const win = currentWindow;
+      if (!win || win.isDestroyed()) {
+        return null;
       }
-      case 'graph':
-        return utilityRequest({ request_id, operation: 'graph', payload: raw.payload });
-      case 'patch':
-        return utilityRequest({ request_id, operation: 'patch', payload: raw.payload });
-      case 'provider_probe':
-        return utilityRequest({ request_id, operation: 'provider', payload: raw.payload });
-      case 'provider_pull':
-        return utilityRequest({ request_id, operation: 'pull', payload: raw.payload });
-      case 'close':
-        await initiateOwnerClose();
-        return ipcOk(request_id, lifecycle.last_close_report ?? lifecycle);
-      default:
-        return ipcErr(request_id, 'invalid_input', `unsupported proof step ${step}`);
+      if (win.isMaximized()) {
+        win.unmaximize();
+      } else {
+        win.maximize();
+      }
+      return null;
+    },
+  };
+
+  // ── window chrome + hardening (parity rows 22/26/25/29) ───────────────
+  const preloadPath = input.paths.preloadPath;
+
+  function hardenWindow(win: BrowserWindow): void {
+    // Deny all window.open and webview creation, everywhere.
+    win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    // Deny navigation/redirect outside the active app origin. An outbound
+    // link must call `open_external_url` — an untrusted navigation is never
+    // auto-opened as an external URL.
+    win.webContents.on('will-navigate', (event, url) => {
+      if (!allowDesktopNavigation(url, navigationOptions)) event.preventDefault();
+    });
+    win.webContents.on('will-redirect', (event, url) => {
+      if (!allowDesktopNavigation(url, navigationOptions)) event.preventDefault();
+    });
+    win.webContents.on('render-process-gone', () => {
+      if (currentWindow === win) {
+        currentWindow = null;
+      }
+      // The renderer alone is replaced; the service owner is never killed by
+      // a renderer crash and no second owner is created.
+      recreateWindow();
+    });
+  }
+
+  function createMainWindow(): BrowserWindow {
+    const win = new e.BrowserWindow({
+      title: product.name,
+      width: 1280,
+      height: 800,
+      minWidth: 960,
+      minHeight: 640,
+      show: false,
+      titleBarStyle: 'hiddenInset',
+      trafficLightPosition: { x: 12, y: 14 },
+      webPreferences: {
+        preload: preloadPath,
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        webSecurity: true,
+        disableBlinkFeatures: 'Auxclick',
+      },
+    });
+    hardenWindow(win);
+    win.once('ready-to-show', () => win.show());
+    win.loadURL(input.devUrl ?? desktopIndexUrl()).catch((err) => {
+      process.stderr.write(`[desktop] web dist failed to load: ${errorMessage(err)}\n`);
+      e.app.exit(1);
+    });
+    return win;
+  }
+
+  // Registration ownership is serialized: each selection awaits the previous
+  // one's registration and disposes it (it is superseded by definition —
+  // whether it won and was stored, or resolved late and was not) before the
+  // current one binds. ipcMain allows a single handler per channel, so a
+  // stale in-flight binding must never coexist with the live one (QC1 F-001).
+  let inflightRegistration: Promise<RegisterDesktopIpcResult | null> | null = null;
+  function selectWindow(win: BrowserWindow): Promise<void> {
+    generation += 1;
+    const boundGeneration = generation;
+    currentWindow = win;
+    const previous = inflightRegistration;
+    const attempt = (async (): Promise<RegisterDesktopIpcResult | null> => {
+      const stale = previous ? await previous.catch(() => null) : null;
+      stale?.dispose();
+      const registration = await registerIpc(win, handlers, {
+        generation: boundGeneration,
+        getCurrentGeneration: () => generation,
+        dev,
+      });
+      // A registration resolving after a newer generation won must not
+      // clobber the live binding. It is NOT disposed here: the newer
+      // selection (which is awaiting us as `previous`) disposes us exactly
+      // once, always before it re-binds the sole invoke channel.
+      if (currentWindow === win && generation === boundGeneration) {
+        ipcRegistration = registration;
+        ipcBindings.push({
+          window: win,
+          options: { generation: boundGeneration, getCurrentGeneration: () => generation, dev },
+        });
+      }
+      return registration;
+    })();
+    inflightRegistration = attempt;
+    return attempt.then(
+      () => undefined,
+      () => undefined,
+    );
+  }
+
+  // ── protocol BEFORE any window is created/loaded ──────────────────────
+  // The `nexus` scheme privilege is registered exactly once, pre-ready, by
+  // the bootstrap (`registerDesktopSchemes` before `app.whenReady()`); this
+  // composition never registers schemes again. The protocol handler must be
+  // installed before the first `loadURL('nexus://app/index.html')`.
+  await registerProtocol(input.paths.distRoot, {
+    serviceOrigin: localEndpoint,
+    fingerprintProbeOrigin: localEndpoint,
+    dev,
+  });
+
+  let recreateInFlight: Promise<void> | null = null;
+  function recreateWindow(): void {
+    if (recreateInFlight) return;
+    recreateInFlight = (async () => {
+      const win = createMainWindow();
+      await selectWindow(win);
+    })()
+      .catch((err) => {
+        // Surface, never swallow: a replacement that failed to register
+        // leaves the visible window without its bridge — that must be
+        // visible in main-process diagnostics (QC1 F-001).
+        process.stderr.write(`[desktop] window replacement registration failed: ${errorMessage(err)}\n`);
+      })
+      .finally(() => {
+        recreateInFlight = null;
+      });
+    lastSelect = recreateInFlight;
+  }
+
+  const firstWindow = createMainWindow();
+  lastSelect = selectWindow(firstWindow);
+
+  function focusExistingWindow(): void {
+    // Second-instance contract: focus the sole window, never spawn anything.
+    // With no live window this is an explicit no-op — window (re)creation is
+    // owned only by the guarded paths (`activate`, renderer-crash recreate),
+    // so a second launch can never race a replacement into existence.
+    const win = currentWindow;
+    if (!win || win.isDestroyed()) {
+      return;
+    }
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  }
+
+  // ── standard menu roles only (no native product menu) ─────────────────
+  const menuTemplate: MenuItemConstructorOptions[] =
+    process.platform === 'darwin'
+      ? [{ role: 'appMenu' }, { role: 'editMenu' }]
+      : [{ role: 'fileMenu' }, { role: 'editMenu' }];
+  e.Menu.setApplicationMenu(e.Menu.buildFromTemplate(menuTemplate));
+
+  // ── app-level wiring ──────────────────────────────────────────────────
+  // Second launch: focus the sole window — never spawn a duplicate service.
+  e.app.on('second-instance', () => {
+    focusExistingWindow();
+  });
+  e.app.on('activate', () => {
+    if (!currentWindow || currentWindow.isDestroyed()) {
+      recreateWindow();
     }
   });
+  e.app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') {
+      e.app.quit();
+    }
+  });
+
+  // The one quit gate: Cmd+Q / menu quit / window-all-closed all funnel
+  // through here. DesktopQuitController is single-flight, so a re-raised
+  // before-quit during the decision joins the same promise.
+  let quitAllowed = false;
+  e.app.on('before-quit', (event) => {
+    if (quitAllowed) return;
+    event.preventDefault();
+    void quitController
+      .requestQuit()
+      .then((allowed) => {
+        if (!allowed) return;
+        quitAllowed = true;
+        e.app.quit();
+      })
+      .catch(() => undefined);
+  });
+
+  // Outbound URLs only ever through the shared predicate + shell.openExternal.
+  e.app.on('open-url', (event, url) => {
+    event.preventDefault();
+    if (isAllowedDesktopExternalUrl(url)) {
+      e.shell.openExternal(url).catch(() => undefined);
+    }
+  });
+
+  e.app.on('web-contents-created', (_event, contents) => {
+    contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    contents.on('will-navigate', (event, url) => {
+      if (!allowDesktopNavigation(url, navigationOptions)) event.preventDefault();
+    });
+    contents.on('will-redirect', (event, url) => {
+      if (!allowDesktopNavigation(url, navigationOptions)) event.preventDefault();
+    });
+  });
+
+  return {
+    window: firstWindow,
+    handlers,
+    controller,
+    quitController,
+    connectionStore,
+    generation: () => generation,
+    ipcBindings,
+    focusExistingWindow,
+    settled: () => lastSelect,
+    dispose: () => {
+      ipcRegistration?.dispose();
+      e.ipcMain.removeListener(DESKTOP_RUNTIME_CHANNEL, onRuntimeChannel as never);
+    },
+  };
 }
+
+// ---------------------------------------------------------------------------
+// Bootstrap (the real Electron entry)
+// ---------------------------------------------------------------------------
 
 async function bootstrap(): Promise<void> {
+  const electron = (await import('electron')) as typeof import('electron');
+  const app = electron.app;
+
+  const resourcesDir = app.isPackaged
+    ? join(process.resourcesPath, 'resources')
+    : join(__dirname, '..', 'resources');
+  const product = loadProductIdentity(resourcesDir);
+
+  // Single instance: a second launch focuses the sole window and exits —
+  // it never spawns a duplicate service.
   if (!app.requestSingleInstanceLock()) {
     app.quit();
     return;
   }
 
-  app.setName(DISPLAY_NAME);
-  if (process.platform === 'darwin') {
-    app.dock?.show();
-  }
+  const userDataDir = join(app.getPath('appData'), product.id);
+  applyProductIdentity(app, product, { userDataDir, resourcesDir });
 
-  protocol.registerSchemesAsPrivileged([
-    {
-      scheme: 'nexus-proof',
-      privileges: {
-        standard: true,
-        secure: true,
-        supportFetchAPI: true,
-        corsEnabled: false,
-        stream: true,
-      },
-    },
-  ]);
+  const env = process.env;
+  const devUrl = resolveDevUrl(env, app.isPackaged);
+  const distRoot = resolveDesktopDistRoot({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    repoRoot: repoRootFromMeta(import.meta.url),
+  });
+  const nodeExecutable = resolveTrustedNodeExecutable({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    env,
+  });
+  const serviceEntry = join(
+    dirname(requireModule.resolve('@42ch/nexus-service/package.json')),
+    'dist',
+    'main.js',
+  );
 
+  // The `nexus` scheme must be privileged before the app is ready.
+  await registerDesktopSchemes();
   await app.whenReady();
 
-  assertDistPresent(distRoot);
   try {
     assertNativePayloadPresent();
   } catch (err) {
     throw new Error(`${errorMessage(err)}. ${nativeRefreshHint()}`);
   }
-  registerProofProtocol(distRoot);
-  registerIpcHandlers();
 
-  mainWindow = createMainWindow();
-
-  app.on('web-contents-created', (_event, contents) => {
-    contents.setWindowOpenHandler(() => ({ action: 'deny' }));
-    contents.on('will-navigate', (event, navigationUrl) => {
-      if (!allowNavigation(navigationUrl)) event.preventDefault();
-    });
-  });
-
-  app.on('open-url', (event, url) => {
-    event.preventDefault();
-    if (isAllowedExternalUrl(url)) {
-      shell.openExternal(url).catch(() => undefined);
-    }
-  });
-
-  app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') app.quit();
-  });
-
-  app.on('before-quit', (event) => {
-    // A close may already be in flight. `preventDefault` must still be called,
-    // and the quit must wait for that close to finish — returning early because
-    // `closeInFlight` is truthy abandons the in-flight join, leaves the utility
-    // owner alive, and lets Electron complete the quit with an orphaned child
-    // (QC2 F-003). Waiting on the same promise also keeps it a single close:
-    // `initiateOwnerClose()` is idempotent, so this can never start a second one.
-    if (lifecycle.phase === 'closed') return;
-    event.preventDefault();
-    if (quitRequested) return;
-    quitRequested = true;
-    const pending = closeInFlight ?? initiateOwnerClose();
-    pending
-      .catch(() => undefined)
-      .finally(() => {
-        quitRequested = false;
-        app.quit();
-      });
-  });
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      mainWindow = createMainWindow();
-    }
+  await composeDesktopHost({
+    electron: {
+      app,
+      BrowserWindow: electron.BrowserWindow,
+      dialog: electron.dialog,
+      shell: electron.shell,
+      session: electron.session.defaultSession,
+      ipcMain: electron.ipcMain,
+      utilityProcess: electron.utilityProcess,
+      Menu: electron.Menu,
+      safeStorage: {
+        isEncryptionAvailable: () => electron.safeStorage.isEncryptionAvailable(),
+        encryptString: (plain) => new Uint8Array(electron.safeStorage.encryptString(plain)),
+        decryptString: (bytes) => electron.safeStorage.decryptString(Buffer.from(bytes)),
+      },
+    },
+    product,
+    paths: {
+      resourcesDir,
+      distRoot,
+      preloadPath: join(__dirname, 'preload.js'),
+      utilityEntry: join(__dirname, 'utility-host.js'),
+      serviceEntry,
+      userDataDir,
+      home: app.getPath('home'),
+      documentsPath: app.getPath('documents'),
+    },
+    env,
+    isPackaged: app.isPackaged,
+    devUrl,
+    nodeExecutable,
   });
 }
 
-bootstrap().catch((err) => {
-  proofLog(`[main] bootstrap failed: ${errorMessage(err)}\n`);
-  app.exit(1);
-});
-
-export { BUNDLE_ID, DISPLAY_NAME, repoRoot, distRoot };
+// Auto-run only inside the real Electron main process; plain-node test
+// imports get the composition factory without side effects.
+if (process.type === 'browser') {
+  bootstrap().catch((err) => {
+    process.stderr.write(`[desktop] bootstrap failed: ${errorMessage(err)}\n`);
+    process.exit(1);
+  });
+}

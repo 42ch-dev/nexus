@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   createConnectionStorage,
@@ -6,6 +6,22 @@ import {
   normalizeEndpointUrl,
   type ConnectionConfig,
 } from '@/lib/nexus/connection-storage';
+import type { DesktopBridge } from '@/lib/nexus/desktop-bridge';
+
+/** Test seam: a structurally valid version-1 bridge with a plain invoke stub. */
+function mockBridge(invoke: (operation: string, payload?: unknown) => Promise<unknown>): void {
+  const bridge = {
+    version: 1,
+    runtime: { localEndpoint: 'http://localhost:8420' },
+    invoke,
+    onStatusChanged: () => () => {},
+  } as unknown as DesktopBridge;
+  (window as unknown as { nexusDesktop?: DesktopBridge }).nexusDesktop = bridge;
+}
+
+function restoreBridge(): void {
+  delete (window as unknown as { nexusDesktop?: unknown }).nexusDesktop;
+}
 
 describe('normalizeEndpointUrl', () => {
   it('trims whitespace and trailing slashes', () => {
@@ -95,20 +111,107 @@ describe('WebConnectionStorage', () => {
     expect(await storage.load()).toBeNull();
     expect(window.localStorage.getItem('nexus-connection-config-v1')).toBeNull();
   });
+
+  it('clears an active remote entry with a missing API key (never loads keyless remote mode)', async () => {
+    // Regression: the desktop redacted shape makes apiKey optional, but the
+    // web backend must never load an active remote record without the actual
+    // key — that would build an unauthenticated BrowserClient.
+    window.localStorage.setItem(
+      'nexus-connection-config-v1',
+      JSON.stringify({ endpointUrl: 'https://remote.example:8420', active: true, hasApiKey: true }),
+    );
+    const storage = createConnectionStorage();
+    expect(await storage.load()).toBeNull();
+    expect(window.localStorage.getItem('nexus-connection-config-v1')).toBeNull();
+  });
 });
 
-describe('DesktopConnectionStorage Tauri delegate', () => {
-  it('invokes get_connection_config when __TAURI__ is present', async () => {
-    const invoke = vi.fn().mockResolvedValue('{"endpointUrl":"https://t","apiKey":"k"}');
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (window as any).__TAURI__ = { core: { invoke } };
+describe('DesktopConnectionStorage (Electron redacted store)', () => {
+  afterEach(() => {
+    restoreBridge();
+  });
+
+  it('loads the public projection through the bridge (never the API key — D-18)', async () => {
+    const invoke = vi.fn(() =>
+      Promise.resolve({
+        endpointUrl: 'https://t',
+        label: 'Home',
+        active: true,
+        pinnedFingerprint: 'SHA256:aa',
+        hasApiKey: true,
+      }),
+    );
+    mockBridge(invoke);
 
     const storage = createConnectionStorage();
     const loaded = await storage.load();
-    expect(invoke).toHaveBeenCalledWith('get_connection_config', undefined);
-    expect(loaded).toEqual({ endpointUrl: 'https://t', apiKey: 'k' });
+    expect(invoke).toHaveBeenCalledWith('get_connection_config');
+    expect(loaded).toEqual({
+      endpointUrl: 'https://t',
+      label: 'Home',
+      active: true,
+      pinnedFingerprint: 'SHA256:aa',
+      hasApiKey: true,
+      apiKey: '',
+    });
+  });
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    delete (window as any).__TAURI__;
+  it('returns null when no desktop config is saved', async () => {
+    const invoke = vi.fn(() => Promise.resolve(null));
+    mockBridge(invoke);
+    const storage = createConnectionStorage();
+    expect(await storage.load()).toBeNull();
+  });
+
+  it('converts an omitted key to a keep credential update', async () => {
+    const invoke = vi.fn((operation: string, payload?: unknown) =>
+      Promise.resolve(
+        operation === 'set_connection_config' ? (payload as { config: unknown }).config : null,
+      ),
+    );
+    mockBridge(invoke);
+
+    const storage = createConnectionStorage();
+    await storage.save({ endpointUrl: 'https://t', hasApiKey: true, active: true });
+    expect(invoke).toHaveBeenCalledWith('set_connection_config', {
+      config: {
+        endpointUrl: 'https://t',
+        label: undefined,
+        active: true,
+        pinnedFingerprint: undefined,
+        hasApiKey: true,
+      },
+      credential: { action: 'keep' },
+    });
+  });
+
+  it('converts a present key to a replace credential update', async () => {
+    const invoke = vi.fn((operation: string, payload?: unknown) =>
+      Promise.resolve(
+        operation === 'set_connection_config' ? (payload as { config: unknown }).config : null,
+      ),
+    );
+    mockBridge(invoke);
+
+    const storage = createConnectionStorage();
+    await storage.save({ endpointUrl: 'https://t', apiKey: 'fresh-key', active: true });
+    expect(invoke).toHaveBeenCalledWith('set_connection_config', {
+      config: {
+        endpointUrl: 'https://t',
+        label: undefined,
+        active: true,
+        pinnedFingerprint: undefined,
+        hasApiKey: true,
+      },
+      credential: { action: 'replace', value: 'fresh-key' },
+    });
+  });
+
+  it('clears via delete_connection_config', async () => {
+    const invoke = vi.fn(() => Promise.resolve(null));
+    mockBridge(invoke);
+    const storage = createConnectionStorage();
+    await storage.clear();
+    expect(invoke).toHaveBeenCalledWith('delete_connection_config');
   });
 });

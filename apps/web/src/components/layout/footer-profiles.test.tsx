@@ -24,7 +24,7 @@ function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapab
     onDaemonStatusChanged: vi.fn().mockResolvedValue(() => {}),
     startDaemon: vi.fn().mockResolvedValue(undefined),
     stopDaemon: vi.fn().mockResolvedValue(undefined),
-    resetLocalDatabase: vi.fn().mockResolvedValue(undefined),
+    resetLocalDatabase: vi.fn().mockResolvedValue({ status: 'confirmed' }),
     getSetupCompleted: vi.fn().mockResolvedValue(true),
     setSetupCompleted: vi.fn().mockResolvedValue(undefined),
     getEntrance: vi.fn().mockResolvedValue('content-creator'),

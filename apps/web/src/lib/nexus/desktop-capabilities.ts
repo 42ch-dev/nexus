@@ -5,13 +5,13 @@
  *   - {@link DesktopCapabilities.openWith} — open a path in the system default editor.
  *   - {@link DesktopCapabilities.revealInFinder} — reveal a path in Finder.
  *   - {@link DesktopCapabilities.getDaemonStatus} / `startDaemon` / `stopDaemon`
- *     — daemon lifecycle via Tauri custom commands backed by the bundled
- *       `nexus42` sidecar (P1).
+ *     — daemon lifecycle owned by main's `DesktopServiceController`.
  *
- * Transport = Tauri custom commands (Tauri IPC), **not** Daemon API HTTP — so
- * `wire_contracts_changed` stays `false` (compass §5 #5). The commands live in
- * `apps/desktop/src-tauri/src/lib.rs` and enforce the authoritative runtime path
- * guard (§5 #8) for file actions.
+ * Transport = the typed preload bridge (`window.nexusDesktop.invoke`, frozen
+ * operation union from `apps/desktop-electron/src/desktop-contract.ts`),
+ * **not** Daemon API HTTP — so `wire_contracts_changed` stays `false`
+ * (compass §5 #5). Main enforces the authoritative runtime path guard (§5 #8)
+ * for file actions.
  *
  * Browser build: the {@link DesktopCapabilities} context value is `null`, so
  * screens hide the desktop-only affordances (Copy Path stays — it is plain
@@ -19,10 +19,13 @@
  */
 import { errorMessage } from '@/lib/error-message';
 import { isEntranceId, type EntranceId } from '@/components/layout/entrance-registry';
-import type { DaemonHealth } from './types';
+import { getDesktopBridge, invokeDesktop } from './desktop-bridge';
+import type { DaemonStatus, ResetLocalDatabaseResult } from '../../../../desktop-electron/src/desktop-contract';
 
-/** Structured error thrown by desktop capability methods. Mirrors the Rust
- * `PathGuardError` shape (`{ code, message }`) so the toast layer can read it
+export type { DaemonStatus, ResetLocalDatabaseResult };
+
+/** Structured error thrown by desktop capability methods. Mirrors the main
+ * action error shape (`{ code, message }`) so the toast layer can read it
  * uniformly. */
 export interface DesktopCapabilityError {
   code:
@@ -34,22 +37,11 @@ export interface DesktopCapabilityError {
   message: string;
 }
 
-/** Daemon lifecycle state surfaced by `getDaemonStatus` (drives the indicator). */
-export interface DaemonStatus {
-  /** Coarse lifecycle state (DESIGN.md "Daemon Status Indicator" table). */
-  state: 'starting' | 'running' | 'degraded' | 'stopped' | 'error';
-  /** Daemon package version when known (carried from the health probe). */
-  version?: string;
-  /** Resolved loopback port. */
-  port: number;
-  /** Plain-language recovery/next-step copy (never just a code). */
-  detail?: string;
-}
-
 /**
  * Desktop-only capability surface. Provided via React context; `null` in browser
  * mode. Screens must depend on this interface (via `useDesktopCapabilities`),
- * never on `window.__TAURI__` directly — that keeps a clean boundary for tests.
+ * never on `window.nexusDesktop` directly — that keeps a clean boundary for
+ * tests.
  */
 export interface DesktopCapabilities {
   /** Open `path` in the system default editor (path-guarded). */
@@ -58,28 +50,31 @@ export interface DesktopCapabilities {
   revealInFinder(path: string): Promise<void>;
   /**
    * Open a URL in the system default browser. Only `http:` / `https:` URLs
-   * are accepted (validated by the Rust command). Returns a structured error
-   * on invalid scheme or open failure.
+   * are accepted (validated by main). Returns a structured error on invalid
+   * scheme or open failure.
    */
   openExternalUrl(url: string): Promise<void>;
   /**
-   * Current daemon lifecycle state. P1 returns the sidecar-controlled state
-   * from the Tauri sidecar manager.
+   * Current daemon lifecycle state, from the main-owned controller.
    */
   getDaemonStatus(): Promise<DaemonStatus>;
-  /** Subscribe to daemon status changes emitted by the Rust sidecar manager. */
+  /** Subscribe to daemon status changes emitted by the controller. */
   onDaemonStatusChanged(callback: (status: DaemonStatus) => void): Promise<() => void>;
-  /** Start/restart the owned sidecar. */
+  /** Start/restart the owned service. */
   startDaemon(): Promise<void>;
-  /** Stop the owned sidecar. */
+  /** Stop the owned service. */
   stopDaemon(): Promise<void>;
-  /** Restart the sidecar atomically (owned or attached). */
+  /** Restart the service atomically (owned or explicitly authorized attached). */
   restartDaemon(): Promise<void>;
   /**
    * Wipe the daemon's local state database(s) under `~/.nexus42/` so the daemon
-   * can boot fresh. Creative files in the workspace are untouched.
+   * can boot fresh. Creative files in the workspace are untouched. Resolves
+   * `{status:'confirmed'}` only after main's explicit native confirmation and a
+   * completed bounded reset; `{status:'cancelled'}` when the user declines the
+   * native dialog (nothing was closed, deleted or restarted — stay in
+   * recovery); rejects with a coded error on failure.
    */
-  resetLocalDatabase(): Promise<void>;
+  resetLocalDatabase(): Promise<ResetLocalDatabaseResult>;
   /**
    * Open a native directory picker starting at `defaultPath` and return the
    * selected directory path, or `null` if the user cancelled.
@@ -91,8 +86,8 @@ export interface DesktopCapabilities {
    */
   setWorkspacePath(path: string): Promise<void>;
   /**
-  /** Whether the first-launch setup wizard has been completed.
-   * Browser build defaults to `true`; desktop reads from Tauri config store.
+   * Whether the first-launch setup wizard has been completed.
+   * Browser build defaults to `true`; desktop reads from the main-owned config.
    */
   getSetupCompleted(): Promise<boolean>;
   /** Mark setup as completed (desktop only). */
@@ -100,7 +95,7 @@ export interface DesktopCapabilities {
   /**
    * Read the persisted user-layer entrance (AR-16) from `~/.nexus42/config.toml`.
    * Missing/unparseable values resolve to `content-creator` (the default) —
-   * never a third state. Command errors throw `DesktopCapabilityError` (the
+   * never a third state. Invoke errors throw `DesktopCapabilityError` (the
    * provider fails open to the default).
    */
   getEntrance(): Promise<EntranceId>;
@@ -133,40 +128,9 @@ export interface DesktopCapabilities {
   ensureSetupBootstrap(): Promise<{ creator_id: string; already_bootstrapped: boolean }>;
 }
 
-/**
- * The global Tauri namespace shape this adapter calls into. Only `core.invoke`
- * and `event.listen` are used (custom commands + lifecycle events); the opener
- * plugin's JS API is not called directly because the custom commands own the
- * path guard (§5 #8).
- */
-interface TauriGlobal {
-  core: {
-    invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T>;
-  };
-  event: {
-    listen<T>(event: string, handler: (event: { payload: T }) => void): Promise<() => void>;
-  };
-}
-
-const DAEMON_STATUS_EVENT = 'nexus://daemon-status-changed';
-
-function tauriInvoke(): TauriGlobal {
-  // `withGlobalTauri: true` (tauri.conf.json) guarantees `window.__TAURI__` in
-  // the desktop webview. Resolved lazily so the browser build never touches it.
-  const w = window as unknown as { __TAURI__?: TauriGlobal };
-  const tauri = w.__TAURI__;
-  if (!tauri?.core?.invoke) {
-    throw {
-      code: 'invoke_failed',
-      message: 'Desktop commands are not available. Is the Nexus shell running?',
-    } satisfies DesktopCapabilityError;
-  }
-  return tauri;
-}
-
 function asDesktopError(err: unknown): DesktopCapabilityError {
-  // Rust PathGuardError / string errors serialize as `{ code, message }`.
-  // Anything else (incl. Tauri invoke transport failures) collapses to
+  // Main action errors serialize as `{ code, message }` (the preload rethrows
+  // them as `Error` with a `code` own-property). Anything else collapses to
   // `invoke_failed`.
   if (err && typeof err === 'object' && 'code' in err && 'message' in err) {
     const e = err as { code: string; message: string };
@@ -177,13 +141,14 @@ function asDesktopError(err: unknown): DesktopCapabilityError {
 }
 
 /**
- * Real `DesktopCapabilities` backed by Tauri custom commands. Constructed only
- * when {@link isDesktopBuild} is `true` (the client factory).
+ * Real `DesktopCapabilities` backed by the typed preload bridge. Constructed
+ * only when {@link isDesktopBuild} is `true` (the client factory); every
+ * method resolves the bridge lazily so construction never throws.
  */
-export class TauriDesktopCapabilities implements DesktopCapabilities {
+export class ElectronDesktopCapabilities implements DesktopCapabilities {
   async openWith(path: string): Promise<void> {
     try {
-      await tauriInvoke().core.invoke<void>('open_with', { path });
+      await invokeDesktop('open_with', { path });
     } catch (err) {
       throw asDesktopError(err);
     }
@@ -191,7 +156,7 @@ export class TauriDesktopCapabilities implements DesktopCapabilities {
 
   async openExternalUrl(url: string): Promise<void> {
     try {
-      await tauriInvoke().core.invoke<void>('open_external_url', { url });
+      await invokeDesktop('open_external_url', { url });
     } catch (err) {
       throw asDesktopError(err);
     }
@@ -199,7 +164,7 @@ export class TauriDesktopCapabilities implements DesktopCapabilities {
 
   async revealInFinder(path: string): Promise<void> {
     try {
-      await tauriInvoke().core.invoke<void>('reveal_in_finder', { path });
+      await invokeDesktop('reveal_in_finder', { path });
     } catch (err) {
       throw asDesktopError(err);
     }
@@ -207,7 +172,7 @@ export class TauriDesktopCapabilities implements DesktopCapabilities {
 
   async getDaemonStatus(): Promise<DaemonStatus> {
     try {
-      return await tauriInvoke().core.invoke<DaemonStatus>('get_daemon_status');
+      return await invokeDesktop('get_daemon_status');
     } catch (err) {
       throw asDesktopError(err);
     }
@@ -217,9 +182,11 @@ export class TauriDesktopCapabilities implements DesktopCapabilities {
     callback: (status: DaemonStatus) => void,
   ): Promise<() => void> {
     try {
-      return await tauriInvoke().event.listen<DaemonStatus>(DAEMON_STATUS_EVENT, (event) => {
-        callback(event.payload);
-      });
+      const bridge = getDesktopBridge();
+      if (!bridge) throw new Error('Desktop bridge unavailable.');
+      // The preload's subscription returns the unsubscribe synchronously and
+      // never passes Electron event objects across the boundary.
+      return bridge.onStatusChanged(callback);
     } catch (err) {
       throw asDesktopError(err);
     }
@@ -227,7 +194,7 @@ export class TauriDesktopCapabilities implements DesktopCapabilities {
 
   async startDaemon(): Promise<void> {
     try {
-      await tauriInvoke().core.invoke<void>('start_daemon', undefined);
+      await invokeDesktop('start_daemon');
     } catch (err) {
       throw asDesktopError(err);
     }
@@ -235,7 +202,7 @@ export class TauriDesktopCapabilities implements DesktopCapabilities {
 
   async stopDaemon(): Promise<void> {
     try {
-      await tauriInvoke().core.invoke<void>('stop_daemon', undefined);
+      await invokeDesktop('stop_daemon');
     } catch (err) {
       throw asDesktopError(err);
     }
@@ -243,15 +210,15 @@ export class TauriDesktopCapabilities implements DesktopCapabilities {
 
   async restartDaemon(): Promise<void> {
     try {
-      await tauriInvoke().core.invoke<void>('restart_daemon', undefined);
+      await invokeDesktop('restart_daemon');
     } catch (err) {
       throw asDesktopError(err);
     }
   }
 
-  async resetLocalDatabase(): Promise<void> {
+  async resetLocalDatabase(): Promise<ResetLocalDatabaseResult> {
     try {
-      await tauriInvoke().core.invoke<void>('reset_local_database', undefined);
+      return await invokeDesktop('reset_local_database');
     } catch (err) {
       throw asDesktopError(err);
     }
@@ -259,7 +226,7 @@ export class TauriDesktopCapabilities implements DesktopCapabilities {
 
   async pickDirectory(defaultPath: string): Promise<string | null> {
     try {
-      return await tauriInvoke().core.invoke<string | null>('pick_directory', { defaultPath });
+      return await invokeDesktop('pick_directory', { defaultPath });
     } catch (err) {
       throw asDesktopError(err);
     }
@@ -267,7 +234,7 @@ export class TauriDesktopCapabilities implements DesktopCapabilities {
 
   async setWorkspacePath(path: string): Promise<void> {
     try {
-      await tauriInvoke().core.invoke<void>('set_workspace_path', { path });
+      await invokeDesktop('set_workspace_path', { path });
     } catch (err) {
       throw asDesktopError(err);
     }
@@ -275,10 +242,7 @@ export class TauriDesktopCapabilities implements DesktopCapabilities {
 
   async ensureSetupBootstrap(): Promise<{ creator_id: string; already_bootstrapped: boolean }> {
     try {
-      return await tauriInvoke().core.invoke<{ creator_id: string; already_bootstrapped: boolean }>(
-        'ensure_setup_bootstrap',
-        undefined,
-      );
+      return await invokeDesktop('ensure_setup_bootstrap');
     } catch (err) {
       throw asDesktopError(err);
     }
@@ -286,7 +250,7 @@ export class TauriDesktopCapabilities implements DesktopCapabilities {
 
   async getSetupCompleted(): Promise<boolean> {
     try {
-      return await tauriInvoke().core.invoke<boolean>('get_setup_completed');
+      return await invokeDesktop('get_setup_completed');
     } catch (err) {
       throw asDesktopError(err);
     }
@@ -294,7 +258,7 @@ export class TauriDesktopCapabilities implements DesktopCapabilities {
 
   async setSetupCompleted(value: boolean): Promise<void> {
     try {
-      await tauriInvoke().core.invoke<void>('set_setup_completed', { value });
+      await invokeDesktop('set_setup_completed', { value });
     } catch (err) {
       throw asDesktopError(err);
     }
@@ -302,10 +266,10 @@ export class TauriDesktopCapabilities implements DesktopCapabilities {
 
   async getEntrance(): Promise<EntranceId> {
     try {
-      const value = await tauriInvoke().core.invoke<string>('get_entrance');
-      // Stored-but-unparseable resolves content-creator (AR-16) — the Rust
-      // command only ever writes valid values, but a hand-edited config.toml
-      // must not produce a third state.
+      const value = await invokeDesktop('get_entrance');
+      // Stored-but-unparseable resolves content-creator (AR-16) — main only
+      // ever writes valid values, but a hand-edited config.toml must not
+      // produce a third state.
       return isEntranceId(value) ? value : 'content-creator';
     } catch (err) {
       throw asDesktopError(err);
@@ -314,7 +278,7 @@ export class TauriDesktopCapabilities implements DesktopCapabilities {
 
   async setEntrance(value: EntranceId): Promise<void> {
     try {
-      await tauriInvoke().core.invoke<void>('set_entrance', { value });
+      await invokeDesktop('set_entrance', { value });
     } catch (err) {
       throw asDesktopError(err);
     }
@@ -322,7 +286,7 @@ export class TauriDesktopCapabilities implements DesktopCapabilities {
 
   async setAgentProfile(name: string, launchCommand?: string): Promise<void> {
     try {
-      await tauriInvoke().core.invoke<void>('set_agent_profile', { name, launchCommand });
+      await invokeDesktop('set_agent_profile', { name, launchCommand });
     } catch (err) {
       throw asDesktopError(err);
     }
@@ -330,9 +294,7 @@ export class TauriDesktopCapabilities implements DesktopCapabilities {
 
   async getAgentProfile(): Promise<{ name: string; launchCommand?: string } | null> {
     try {
-      return await tauriInvoke().core.invoke<{ name: string; launchCommand?: string } | null>(
-        'get_agent_profile',
-      );
+      return await invokeDesktop('get_agent_profile');
     } catch {
       // Preselect path: treat invoke/transport failures as "no saved profile".
       return null;
@@ -341,7 +303,7 @@ export class TauriDesktopCapabilities implements DesktopCapabilities {
 
   async switchActiveCreator(creatorId: string): Promise<string> {
     try {
-      return await tauriInvoke().core.invoke<string>('switch_active_creator', { creatorId });
+      return await invokeDesktop('switch_active_creator', { creatorId });
     } catch (err) {
       throw asDesktopError(err);
     }
@@ -349,7 +311,7 @@ export class TauriDesktopCapabilities implements DesktopCapabilities {
 
   async getWorkspaceRoot(): Promise<string> {
     try {
-      return await tauriInvoke().core.invoke<string>('get_workspace_root');
+      return await invokeDesktop('get_workspace_root');
     } catch (err) {
       throw asDesktopError(err);
     }
@@ -357,7 +319,7 @@ export class TauriDesktopCapabilities implements DesktopCapabilities {
 
   async toggleMaximizeWindow(): Promise<void> {
     try {
-      await tauriInvoke().core.invoke<void>('toggle_maximize_window', undefined);
+      await invokeDesktop('toggle_maximize_window');
     } catch (err) {
       throw asDesktopError(err);
     }
@@ -371,6 +333,3 @@ export const DESKTOP_CAPABILITIES_UNAVAILABLE: DesktopCapabilityError = {
   code: 'not_in_desktop_build',
   message: 'This action is only available in the Nexus desktop app.',
 };
-
-/** Re-export for consumers that still need the HTTP health shape elsewhere. */
-export type { DaemonHealth };

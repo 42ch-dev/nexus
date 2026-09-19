@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** RFT DX proof runner — cold/warm/no-Cargo evidence for web/studio/shared-ui/desktop-web. */
+/** RFT DX proof runner — cold/warm/no-Cargo evidence for web/studio/shared-ui. */
 import { execFile, spawn } from 'node:child_process';
 import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { cpus, freemem, totalmem, arch, platform, release } from 'node:os';
@@ -43,26 +43,20 @@ const VITE_ORIGIN_RE = /Local:\s+(https?:\/\/[^\s]+)/;
 
 export const SURFACE_CONFIG = {
   web: {
-    label: 'web', vitePort: 5173, needsDaemon: true, needsSidecar: false, needsUiWatcher: false,
+    label: 'web', vitePort: 5173, needsDaemon: true, needsUiWatcher: false,
     markerRelative: 'apps/web/src/proof-rft-dx-marker.ts', markerUrlPath: '/src/proof-rft-dx-marker.ts',
     servedProbePath: '/', devCommand: ['pnpm', '--filter', 'web', 'dev'],
   },
   studio: {
-    label: 'studio', vitePort: 5174, needsDaemon: false, needsSidecar: false, needsUiWatcher: false,
+    label: 'studio', vitePort: 5174, needsDaemon: false, needsUiWatcher: false,
     markerRelative: 'apps/design-studio/src/proof-rft-dx-marker.ts', markerUrlPath: '/src/proof-rft-dx-marker.ts',
     servedProbePath: '/', devCommand: ['pnpm', '--filter', 'design-studio', 'dev'],
   },
   'shared-ui': {
-    label: 'shared-ui', vitePort: 5173, needsDaemon: true, needsSidecar: false, needsUiWatcher: true,
+    label: 'shared-ui', vitePort: 5173, needsDaemon: true, needsUiWatcher: true,
     markerRelative: 'packages/nexus-ui/src/proof-rft-dx-marker.ts', markerUrlPath: null,
     servedProbePath: '/', devCommand: ['pnpm', '--filter', 'web', 'dev'],
     uiWatcherCommand: ['pnpm', '--filter', '@42ch/nexus-ui', 'dev'],
-  },
-  'desktop-web': {
-    label: 'desktop-web', vitePort: 5173, needsDaemon: true, needsSidecar: true, needsUiWatcher: false,
-    markerRelative: 'apps/web/src/proof-rft-dx-marker.ts', markerUrlPath: '/src/proof-rft-dx-marker.ts',
-    servedProbePath: '/', devCommand: ['pnpm', 'run', 'dev:desktop:web'],
-    loopAlias: 'pnpm run dev:desktop:web',
   },
 };
 
@@ -355,7 +349,7 @@ function spawnLogged(command, args, { cwd, env, label }) {
 
 const EVIDENCE_FIELDS = new Set([
   'runKind', 'pass', 'command', 'error', 'cleanupOutcome', 'timestamps', 'environment', 'surface',
-  'artifact', 'criteria', 'endpoint', 'loopCommand', 'sidecarBaseline', 'observedOutcomes', 'notes',
+  'artifact', 'criteria', 'endpoint', 'loopCommand', 'observedOutcomes', 'notes',
   'negativeCase', 'observedError', 'remediation', 'sample', 'boundary', 'beforeSha256', 'afterSha256',
   'artifactPath',
 ]);
@@ -495,15 +489,6 @@ export async function resolveViteOrigin({ child, config, rootPids, fallbackOrigi
   throw new Error(`Timed out resolving Vite origin for ${config.label}; last fallback=${fallbackOrigin}`);
 }
 
-async function runSidecarBaseline(repoRoot) {
-  const startedAt = new Date().toISOString(); const t0 = performance.now();
-  await new Promise((resolvePromise, reject) => {
-    const child = spawn('bash', ['scripts/fetch-sidecar.sh'], { cwd: repoRoot, env: { ...process.env, SIDECAR_ENSURE_ONLY: '1' }, stdio: 'inherit' });
-    child.on('error', reject); child.on('close', code => (code === 0 ? resolvePromise() : reject(new Error(`sidecar exit ${code}`))));
-  });
-  return { kind: 'desktop-web-sidecar-baseline', durationMs: performance.now() - t0, startedAt, endedAt: new Date().toISOString() };
-}
-
 async function buildArtifactRecord(artifactPath, manifest) {
   const manifestPath = manifestPathForArtifact(artifactPath);
   return {
@@ -579,7 +564,6 @@ export async function runSurfaceLoop(options) {
       daemonStartedByRunner = ensured.startedByRunner;
       endpointCheck = await validateEndpointGraph(ensured.baseUrl);
     }
-    const sidecarBaseline = config.needsSidecar ? await runSidecarBaseline(repoRoot) : null;
     const markerPath = join(repoRoot, config.markerRelative);
     markerEdit = new TrackedEdit(markerPath); await markerEdit.capture();
     const fallbackOrigin = `http://127.0.0.1:${config.vitePort}`;
@@ -631,7 +615,7 @@ export async function runSurfaceLoop(options) {
     const dx1CargoTotal = dx1Traces.reduce((sum, trace) => sum + (trace.anyCargo ? 1 : 0), 0);
     const dx1TauriTotal = dx1Traces.reduce((sum, trace) => sum + (trace.anyTauri ? 1 : 0), 0);
     const dx2 = evaluateDx2(warmSamples); const dx3 = evaluateDx3(coldSampleValues);
-    const dx1Pass = dx1Traces.every(trace => !trace.anyCargo) && (surface !== 'desktop-web' || dx1Traces.every(trace => !trace.anyTauri));
+    const dx1Pass = dx1Traces.every(trace => !trace.anyCargo);
     const payload = {
       runKind: `${surface}-stable-loop`, pass: dx1Pass && dx2.pass && dx3.pass, command, surface,
       loopCommand: config.loopAlias ?? config.devCommand.join(' '),
@@ -652,7 +636,6 @@ export async function runSurfaceLoop(options) {
         },
       },
       endpoint: config.needsDaemon ? { port, baseUrl: `http://127.0.0.1:${port}`, health: endpointCheck.health, graph: endpointCheck.graph, viteOrigin } : { viteOrigin },
-      sidecarBaseline,
       artifact: await buildArtifactRecord(artifactPath, manifest),
       timestamps: { utcStart: startedAt, utcEnd: new Date().toISOString() },
       environment,
@@ -660,7 +643,6 @@ export async function runSurfaceLoop(options) {
       notes: [
         'HTTP fetch of Vite-served page; no browser automation.',
         'DX-3 cold samples measure spawn→served-page; origin-resolution wait is recorded separately and never subtracted.',
-        config.needsSidecar ? 'Desktop-web sidecar baseline executed before timed DX-2/DX-3 windows.' : null,
       ].filter(Boolean),
     };
     return { payload, evidencePath: await writeEvidence(outDir, payload) };
@@ -920,7 +902,7 @@ export async function runRefreshReproof({ outDir, repoRoot }) {
 }
 
 function printHelp() {
-  console.log(`Usage:\n  node scripts/proof-rft-dx.mjs --surface <web|studio|shared-ui|desktop-web> --samples 30 --cold-samples 10 --port 18420 --out <dir>\n  node scripts/proof-rft-dx.mjs --negative <missing-artifact|mismatched-contract|wrong-digest|incompatible-daemon> --port 18420 --out <dir>\n  node scripts/proof-rft-dx.mjs --boundary-demo --port 18420 --out <dir>\n  node scripts/proof-rft-dx.mjs --refresh-reproof --out <dir>\n  node scripts/proof-rft-dx.mjs --surface web --inject-fail --samples 0 --cold-samples 0 --port 18420 --out <dir>`);
+  console.log(`Usage:\n  node scripts/proof-rft-dx.mjs --surface <web|studio|shared-ui> --samples 30 --cold-samples 10 --port 18420 --out <dir>\n  node scripts/proof-rft-dx.mjs --negative <missing-artifact|mismatched-contract|wrong-digest|incompatible-daemon> --port 18420 --out <dir>\n  node scripts/proof-rft-dx.mjs --boundary-demo --port 18420 --out <dir>\n  node scripts/proof-rft-dx.mjs --refresh-reproof --out <dir>\n  node scripts/proof-rft-dx.mjs --surface web --inject-fail --samples 0 --cold-samples 0 --port 18420 --out <dir>`);
 }
 
 async function main() {

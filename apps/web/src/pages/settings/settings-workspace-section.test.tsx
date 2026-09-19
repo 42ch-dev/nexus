@@ -26,7 +26,7 @@ function makeDesktopCapabilities(): DesktopCapabilities {
     onDaemonStatusChanged: vi.fn(() => Promise.resolve(() => {})),
     startDaemon: vi.fn(() => Promise.resolve()),
     stopDaemon: vi.fn(() => Promise.resolve()),
-    resetLocalDatabase: vi.fn(() => Promise.resolve()),
+    resetLocalDatabase: vi.fn(() => Promise.resolve({ status: 'confirmed' as const })),
     getSetupCompleted: vi.fn(() => Promise.resolve(true)),
     setSetupCompleted: vi.fn(() => Promise.resolve()),
     getEntrance: vi.fn(() => Promise.resolve('content-creator' as const)),

@@ -2,7 +2,7 @@
   "name": "web",
   "private": true,
   "version": "0.0.0",
-  "description": "Nexus local Web UI — Control Room + Setup SPA (Tauri-ready)",
+  "description": "Nexus local Web UI — Control Room + Setup SPA (browser + Electron desktop host)",
   "author": "42ch",
   "license": "Apache-2.0",
   "type": "module",

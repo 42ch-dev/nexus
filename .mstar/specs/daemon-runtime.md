@@ -4,7 +4,7 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Normative — V1.65 Prepare amendment (bundled local Web UI serving + chapter-content Daemon API route family); **V1.66 Phase 2b amendment** (§12: Tauri sidecar mode launch/readiness/lifecycle contract); **V1.86 amendment** (§13: Daemon API trust-boundary security — Origin allowlist, deny-fs-without-workspace, component-wise path guard); **V1.90 amendment** (§14: Daemon API remote bind gate; normative surface renaming from Local API to Daemon API with `/v1/daemon/` path prefix); **V1.92 amendment** (§15–16: transport security (TLS) + remote client connection model); **V1.118 amendment** (§17: no-Profile boot + lazy `state.db` open); **V1.153 amendment** (§4.6: headless `nexus-runtime` profile — second user-facing executable artifact for the integrator channel) |
+| **Status** | Normative — V1.65 Prepare amendment (bundled local Web UI serving + chapter-content Daemon API route family); **V1.66 Phase 2b amendment** (§12: Tauri sidecar mode launch/readiness/lifecycle contract); **V1.86 amendment** (§13: Daemon API trust-boundary security — Origin allowlist, deny-fs-without-workspace, component-wise path guard); **V1.90 amendment** (§14: Daemon API remote bind gate; normative surface renaming from Local API to Daemon API with `/v1/daemon/` path prefix); **V1.92 amendment** (§15–16: transport security (TLS) + remote client connection model); **V1.118 amendment** (§17: no-Profile boot + lazy `state.db` open); **V1.153 amendment** (§4.6: headless `nexus-runtime` profile — second user-facing executable artifact for the integrator channel); **v1.192 amendment** (§12: Tauri desktop host retired — the sidecar section is a historical record; the desktop host is Electron, contract [desktop-shell.md](desktop-shell.md)) |
 | **Document class** | Master |
 | **Normative scope** | Architecture boundaries, process model, subsystem responsibilities, pre-release constraints |
 | **Related** | [cli-spec.md](./cli-spec.md), [local-runtime-boundary.md](./local-runtime-boundary.md), [agent-host.md](./agent-host.md) |
@@ -77,7 +77,7 @@ Normative serving model:
 2. **SPA shell route**: the static Web UI shell (`index.html` plus assets) is unauthenticated so a local browser can load the app and present setup/auth guidance. This does not grant data access.
 3. **Data boundary**: all `/v1/daemon/*` data routes remain protected according to the existing `require_api_key` model except the explicitly unguarded runtime/daemon health and status routes listed in §2/§4 acceptance. The SPA obtains data only through those Daemon API routes.
 4. **Dev mode**: during frontend development, Vite serves `apps/web` and proxies `/v1/daemon/*` to a running daemon. Dev proxy behavior is a development convenience only; release behavior is daemon-served embedded static assets.
-5. **Tauri readiness**: the future Tauri shell loads the same `apps/web` build output and swaps the frontend transport implementation behind the `NexusClient` boundary. The daemon runtime remains the local supervisor and is still not an ACP Agent/Server.
+5. **Desktop readiness**: the desktop host loads the same `apps/web` build output and swaps the frontend transport implementation behind the `NexusClient` boundary. The desktop host is Electron since v1.192 ([desktop-shell.md](desktop-shell.md)) and supervises its own service — see §12's retirement note; the daemon runtime remains the local supervisor for the CLI/browser flows and is still not an ACP Agent/Server.
 
 The router integration point is the top-level `create_router` composition in `crates/nexus-daemon-runtime/src/api/mod.rs`: static serving is added beside the unguarded runtime routes and protected Daemon API route tree, without moving the auth middleware boundary for data endpoints.
 
@@ -524,7 +524,9 @@ Both capabilities receive the `sqlx::SqlitePool` through the standard `with_pool
 
 ---
 
-## 12. Tauri sidecar mode (V1.66)
+## 12. Tauri sidecar mode (V1.66 — historical record; desktop sidecar retired in v1.192)
+
+> **v1.192 host note (RFT-11):** the Tauri desktop host was retired; the repository has exactly one desktop host — Electron ([desktop-shell.md](desktop-shell.md) §7). The Electron host does **not** bundle or launch `nexus42` as a sidecar: it supervises its own TS service (`@42ch/nexus-service`) in an Electron utility process. The app-ownership, launch and asset-serving clauses below are a historical record of V1.66–V1.191. The daemon-side contract they rest on (`nexus42 daemon start [--foreground]`, port resolution explicit → `NEXUS_DAEMON_PORT` → `8420`, readiness = `GET /v1/daemon/runtime/health`) remains the shipped daemon/CLI behavior.
 
 The Tauri desktop shell ([desktop-shell.md](desktop-shell.md)) may bundle the user-facing `nexus42` binary as a sidecar process. This does **not** create a second daemon product binary: the sidecar is still `nexus42`, launched in daemon foreground mode by the desktop app. (Compass: v1.66 §5 #2/#3 LOCKED.)
 
@@ -611,7 +613,7 @@ The daemon derives its allowed origins at startup from the following sources (no
 
 The Vite dev origin (`http://localhost:5173`) is allowed unconditionally because the dev proxy is a development convenience operated by the same local user; it does not weaken the remote-attack surface since the dev flow requires the user to explicitly run the Vite server.
 
-**Design invariant:** the allowlist is derived from codebase-verified client origins (not guessed). The Tauri webview origins match the Tauri v2 protocol configuration in `tauri.conf.json`; the Vite origin matches `vite.config.ts`; the own-origin is computed from the resolved port at startup.
+**Design invariant:** the allowlist is derived from codebase-verified client origins (not guessed). The `tauri://localhost` / `http://tauri.localhost` entries are retained V1.66 webview origins — still present in the runtime allowlist source (`auth_middleware.rs::default_allowed_origins`) although the Tauri host was retired in v1.192 (§12); the Vite origin matches `vite.config.ts`; the own-origin is computed from the resolved port at startup.
 
 #### 13.1.2 Request handling
 
@@ -703,7 +705,7 @@ This section codifies the security contract for optional non-loopback binding of
 
 ### 14.1 Default: loopback only
 
-The daemon binds to loopback (`127.0.0.1`) by default. This requires no additional configuration. The default behavior provides a local-first experience where the Daemon API is reachable only from the same machine (browser SPA, CLI, Tauri desktop shell).
+The daemon binds to loopback (`127.0.0.1`) by default. This requires no additional configuration. The default behavior provides a local-first experience where the Daemon API is reachable only from the same machine (browser SPA, CLI, desktop shell).
 
 ### 14.2 Opt-in: non-loopback bind
 
@@ -868,11 +870,11 @@ Example: `SHA256:aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99:aa:bb:cc:dd:ee:
 
 ## 16. Remote Client Connection Model (V1.92)
 
-This section codifies the client-side contract for connecting to a remote daemon. It is authoritative for both the web SPA (BrowserClient) and the Tauri desktop shell (TauriClient). The local same-origin mode is the backwards-compatible default; remote access is opt-in per the setup-screen flow.
+This section codifies the client-side contract for connecting to a remote daemon. It is authoritative for both the web SPA (`BrowserClient`) and the desktop shell (`DesktopClient`, renamed from `TauriClient` in v1.192 without aliases; credential injection is main-owned — [desktop-shell.md](desktop-shell.md) §5). The local same-origin mode is the backwards-compatible default; remote access is opt-in per the setup-screen flow.
 
 ### 16.1 Client transport parameterisation
 
-The `BrowserClient` and `TauriClient` accept a base URL plus an optional `X-API-Key` header value. In local same-origin mode, the base URL is the current page's origin and no API key header is sent (keyless-localhost shortcut — §14.4). In remote mode, the base URL is the configured remote daemon endpoint and the API key header is sent on every protected request.
+The `BrowserClient` and `DesktopClient` accept a base URL plus an optional `X-API-Key` header value. In local same-origin mode, the base URL is the current page's origin and no API key header is sent (keyless-localhost shortcut — §14.4). In remote mode, the base URL is the configured remote daemon endpoint and the API key header is sent on every protected request.
 
 **Connection config shape** (client-side storage only — NOT a wire contract):
 
@@ -936,7 +938,7 @@ The daemon's Origin allowlist (§13.1) already covers: own-origin, Tauri webview
 - The connecting client's origin MUST be added to `NEXUS_DAEMON_ALLOWED_ORIGINS` — there is **no magic auto-allowlisting** of remote origins.
 - The daemon does not automatically trust the remote bind address as a browser origin; the author controls the allowlist explicitly.
 - A remote client that sends an `Origin` header not in the allowlist will receive `403 Forbidden` (consistent with §13.1.2), regardless of whether it holds a valid API key or a pinned TLS fingerprint.
-- Tauri webview origins (`tauri://localhost`, `http://tauri.localhost`) are already hardcoded in the allowlist (§13.1.1); a remote desktop app using Tauri will use those same origins and be automatically allowed.
+- The retained Tauri webview origins (`tauri://localhost`, `http://tauri.localhost`) are still hardcoded in the allowlist (§13.1.1) even though the Tauri host itself was retired in v1.192 (§12); they no longer correspond to a shipped desktop runtime.
 - A remote web-app (browser SPA connecting to a remote daemon) needs its serving origin in `NEXUS_DAEMON_ALLOWED_ORIGINS`.
 
 ### 16.5 Client key storage
@@ -944,7 +946,7 @@ The daemon's Origin allowlist (§13.1) already covers: own-origin, Tauri webview
 | Platform | Storage mechanism | Notes |
 |----------|-------------------|-------|
 | Web SPA | `localStorage` | SPA trust boundary equal to the app itself. Key is always user-entered, never compiled in. |
-| Tauri desktop | OS keychain (Tauri secure-store plugin) where available; fallback to app-data dir | Keychain is the preferred secure storage; fallback is a local-first trade-off for platforms without OS keychain support. |
+| Desktop (Electron) | Main-process encrypted store (Electron `safeStorage`; atomic replace, owner-only permissions) with a one-time import of the legacy keychain/app-data entry | No plaintext-write fallback; see [desktop-shell.md](desktop-shell.md) §5. |
 
 The API key is always **user-entered** — never compiled into the binary, never stored in version control, never embedded in build artifacts. Full secret-store hardening (hardware-backed keystore, biometric unlock) is a future concern. **Durable roadmap:** DR-05 (secret-store hardening).
 
