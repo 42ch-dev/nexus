@@ -6,7 +6,7 @@
  * It never discovers credentials, invokes signing tools, or fetches dependencies.
  */
 import { execFileSync, spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -88,7 +88,7 @@ function nativeResetBindingProbe() {
     "const compatibility = native.nativeCompatibility();",
     "process.stdout.write(JSON.stringify(compatibility));",
   ].join(' ');
-  const output = command(process.execPath, ['--input-type=module', '-e', probe], { cwd: repoRoot });
+  const output = command(process.execPath, ['--input-type=module', '-e', probe], { cwd: appRoot });
   return JSON.parse(output);
 }
 
@@ -135,12 +135,14 @@ function verifyLoadedNative(preflightInfo, arch) {
 
 function ensureBuildOutputs() {
   const outputs = [
+    [join(repoRoot, 'packages', 'nexus-contracts', 'dist', 'index.js'), ['--dir', 'packages/nexus-contracts', 'run', 'build']],
+    [join(repoRoot, 'packages', 'nexus-provider-acp', 'dist', 'index.js'), ['--dir', 'packages/nexus-provider-acp', 'run', 'build']],
+    [join(nativeLoaderRoot, 'dist', 'index.js'), ['--dir', 'packages/nexus-native', 'run', 'build']],
+    [join(serviceRoot, 'dist', 'index.js'), ['--dir', 'apps/nexus-service', 'run', 'build']],
+    [join(serviceRoot, 'dist', 'main.js'), ['--dir', 'apps/nexus-service', 'run', 'build']],
     [join(webDist, 'index.html'), ['--dir', 'apps/web', 'run', 'build']],
     [join(appRoot, 'dist', 'main.js'), ['--dir', 'apps/desktop-electron', 'run', 'build']],
     [join(appRoot, 'dist', 'preload.js'), ['--dir', 'apps/desktop-electron', 'run', 'build']],
-    [join(serviceRoot, 'dist', 'index.js'), ['--dir', 'apps/nexus-service', 'run', 'build']],
-    [join(serviceRoot, 'dist', 'main.js'), ['--dir', 'apps/nexus-service', 'run', 'build']],
-    [join(nativeLoaderRoot, 'dist', 'index.js'), ['--dir', 'packages/nexus-native', 'run', 'build']],
   ];
   for (const [path, args] of outputs) {
     if (!existsSync(path)) command('pnpm', args, { stdio: 'inherit' });
@@ -148,23 +150,96 @@ function ensureBuildOutputs() {
   assertRequiredFiles(outputs.map(([path]) => path), 'compiled package input');
 }
 
-function deployWorkspacePackage(filter, destination) {
+function materializeSymlinks(root) {
+  const queue = [root];
+  while (queue.length > 0) {
+    const current = queue.pop();
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      const absolute = join(current, entry.name);
+      if (lstatSync(absolute).isSymbolicLink()) {
+        const target = realpathSync(absolute);
+        rmSync(absolute, { recursive: true, force: true });
+        cpSync(target, absolute, { recursive: true, dereference: true });
+      }
+      if (statSync(absolute).isDirectory()) queue.push(absolute);
+    }
+  }
+}
+function copyVirtualPackage(name, destination) {
+  const virtualRoot = join(repoRoot, 'node_modules', '.pnpm');
+  for (const entry of readdirSync(virtualRoot, { withFileTypes: true })) {
+    const candidate = join(virtualRoot, entry.name, 'node_modules', ...name.split('/'));
+    if (existsSync(join(candidate, 'package.json'))) {
+      const target = join(destination, 'node_modules', ...name.split('/'));
+      if (!existsSync(target)) cpSync(candidate, target, { recursive: true, dereference: true });
+      copyVirtualSiblings(candidate, destination);
+      return;
+    }
+  }
+}
+function copyAllVirtualPackages(destination) {
+  const virtualRoot = join(repoRoot, 'node_modules', '.pnpm');
+  for (const entry of readdirSync(virtualRoot, { withFileTypes: true })) {
+    const packageRoot = join(virtualRoot, entry.name, 'node_modules');
+    if (!entry.isDirectory() || !existsSync(packageRoot)) continue;
+    for (const dependency of readdirSync(packageRoot, { withFileTypes: true })) {
+      if (dependency.name.startsWith('@') && dependency.isDirectory()) {
+        for (const child of readdirSync(join(packageRoot, dependency.name), { withFileTypes: true })) {
+          copyVirtualPackage(`${dependency.name}/${child.name}`, destination);
+        }
+      } else {
+        copyVirtualPackage(dependency.name, destination);
+      }
+    }
+  }
+}
+function copyVirtualSiblings(packagePath, destination) {
+  if (!existsSync(packagePath)) return;
+  const packageParent = dirname(realpathSync(packagePath));
+  const virtualNodeModules = basename(packageParent) === 'node_modules' ? packageParent : dirname(packageParent);
+  for (const entry of readdirSync(virtualNodeModules, { withFileTypes: true })) {
+    const target = join(destination, 'node_modules', entry.name);
+    if (entry.name.startsWith('@') && entry.isDirectory() && existsSync(target)) {
+      for (const child of readdirSync(join(virtualNodeModules, entry.name), { withFileTypes: true })) {
+        const scopedTarget = join(target, child.name);
+        if (!existsSync(scopedTarget)) cpSync(join(virtualNodeModules, entry.name, child.name), scopedTarget, { recursive: true, dereference: true });
+      }
+    } else if (!existsSync(target)) {
+      cpSync(join(virtualNodeModules, entry.name), target, { recursive: true, dereference: true });
+    }
+  }
+}
+
+function stageWorkspacePackage(sourceRoot, destination) {
   mkdirSync(destination, { recursive: true });
-  command('pnpm', ['deploy', '--filter', filter, '--prod', '--offline', destination], { stdio: 'inherit' });
+  cpSync(join(sourceRoot, 'package.json'), join(destination, 'package.json'));
+  cpSync(join(sourceRoot, 'dist'), join(destination, 'dist'), { recursive: true, dereference: true });
+  cpSync(join(sourceRoot, 'node_modules'), join(destination, 'node_modules'), { recursive: true, dereference: true });
+  copyVirtualSiblings(join(sourceRoot, 'node_modules', '@electron', 'packager'), destination);
+  copyVirtualSiblings(join(sourceRoot, 'node_modules', '@electron', 'asar'), destination);
+  copyVirtualSiblings(join(destination, 'node_modules', '@electron', 'asar'), destination);
+  copyAllVirtualPackages(destination);
+  for (const dependency of ['glob', 'minimatch', '@electron-internal/extract-zip']) {
+    copyVirtualPackage(dependency, destination);
+    copyVirtualSiblings(join(destination, 'node_modules', ...dependency.split('/')), destination);
+  }
+  materializeSymlinks(join(destination, 'node_modules'));
   assertNoSymlinkEscape(destination);
 }
 
 function stageWorkspace(stagingRoot, arch) {
   const appStage = join(stagingRoot, 'app');
   const serviceStage = join(stagingRoot, 'service');
-  deployWorkspacePackage('nexus-desktop-electron', appStage);
-  deployWorkspacePackage('@42ch/nexus-service', serviceStage);
+  stageWorkspacePackage(appRoot, appStage);
+  stageWorkspacePackage(serviceRoot, serviceStage);
   cpSync(join(appRoot, 'resources'), join(appStage, 'resources'), { recursive: true, dereference: true });
   cpSync(webDist, join(stagingRoot, 'web-dist'), { recursive: true, dereference: true });
-  assertNoSymlinkEscape(stagingRoot);
-  // Ensure deploy selected the same target package as the native preflight.
-  const platformPackage = join(serviceStage, 'node_modules', '@42ch', `nexus-native-darwin-${arch}`, 'native', 'nexus_core_node.node');
-  assertRequiredFiles([platformPackage], 'deployed native closure');
+  const platformCandidates = [
+    join(serviceStage, 'node_modules', '@42ch', 'nexus-native', 'node_modules', '@42ch', `nexus-native-darwin-${arch}`, 'native', 'nexus_core_node.node'),
+    join(serviceStage, 'node_modules', '@42ch', `nexus-native-darwin-${arch}`, 'native', 'nexus_core_node.node'),
+  ];
+  const platformPackage = platformCandidates.find((candidate) => existsSync(candidate));
+  if (!platformPackage) assertRequiredFiles([platformCandidates[0]], 'deployed native closure');
   return { appStage, serviceStage, webStage: join(stagingRoot, 'web-dist') };
 }
 
@@ -172,7 +247,7 @@ function appFileManifest(appPath) {
   const entries = [];
   const walk = (root, current = root) => {
     for (const entry of readdirSyncSafe(current)) {
-      const absolute = join(current, entry);
+      const absolute = join(current, entry.name);
       const rel = relative(root, absolute).split('\\').join('/');
       if (entry.isDirectory()) walk(root, absolute);
       else entries.push({ path: rel, bytes: statSafe(absolute), sha256: sha256File(absolute) });
@@ -260,10 +335,19 @@ function createDmg(appPath, destination) {
 function createZip(appPath, destination) {
   command('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', appPath, destination], { stdio: 'inherit' });
 }
+function normalizeAppBundle(appPath) {
+  const nested = join(appPath, 'Nexus.app');
+  if (!existsSync(nested) || existsSync(join(appPath, 'Contents'))) return;
+  for (const entry of readdirSync(nested)) renameSync(join(nested, entry), join(appPath, entry));
+  rmSync(nested, { recursive: true, force: true });
+}
 
 function publishAtomic(stagingDir, finalDir) {
+  const appPath = join(stagingDir, 'Nexus.app');
+  if (!existsSync(appPath) || !statSync(appPath).isDirectory()) {
+    throw new Error(`package.publish: staged app directory is missing: ${appPath}`);
+  }
   const required = [
-    join(stagingDir, 'Nexus.app'),
     join(stagingDir, `Nexus-${version}-darwin-${basename(finalDir).replace('darwin-', '')}-unsigned.dmg`),
     join(stagingDir, `Nexus-${version}-darwin-${basename(finalDir).replace('darwin-', '')}-unsigned.app.zip`),
     join(stagingDir, 'SHA256SUMS'),
@@ -325,6 +409,7 @@ async function main() {
     const appPath = artifacts.find((path) => path.endsWith('.app')) ?? artifacts[0];
     const publishedApp = join(publishStage, 'Nexus.app');
     cpSync(appPath, publishedApp, { recursive: true, dereference: true });
+    normalizeAppBundle(publishedApp);
     rmSync(packageParent, { recursive: true, force: true });
     const dmgName = `Nexus-${version}-darwin-${args.arch}-unsigned.dmg`;
     const zipName = `Nexus-${version}-darwin-${args.arch}-unsigned.app.zip`;
