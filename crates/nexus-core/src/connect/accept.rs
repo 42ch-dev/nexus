@@ -185,8 +185,12 @@ pub fn ensure_remote_bind_allowed(host: &str) -> CoreResult<()> {
 /// the shape is fixed at authoring time).
 #[must_use]
 pub fn daemon_manifest(host_id: &str, tool_ids: &[String]) -> HostCapabilityManifest {
-    let mut capabilities = vec!["spoke-baseline".to_owned()];
-    capabilities.extend(tool_ids.iter().cloned());
+    // v1.191 P1 T14 (durable §9): the tools-only derivation lives with the
+    // allowlist that feeds it (`config::tools_only_capabilities`) — the
+    // baseline plus exact allowlisted tool ids, and never a KE family. This
+    // responder is composed with `ports: None`, so it advertises no
+    // `ke-ownership` / `ke-extraction`.
+    let capabilities = crate::connect::config::tools_only_capabilities(tool_ids);
     // Tool grammar is exactly `tools.<ns>.<id>` (3 segments), so `nth(1)`
     // is the namespace. Dedup keeps the hello stable when the allowlist
     // names several tools in one namespace (T2 review M-1/M-2).
@@ -765,5 +769,56 @@ mod tests {
                 && msg.contains("127.0.0.1"),
             "error must name the TLS refusal and the loopback default: {msg}"
         );
+    }
+
+    /// v1.191 P1 T14 (durable §9) — the daemon peer-tools responder is
+    /// **tools-only**: its hello declares the spoke baseline plus the exact
+    /// operator-allowlisted tool ids, never a KE family, and the operator
+    /// allowlist can never name one (a KE capability/family name is refused
+    /// at config load with the truthful reason).
+    #[test]
+    fn v1191_holder_connect_tools_only_hello_declares_no_ke_family() {
+        let tool_ids = vec!["tools.acme.lookup".to_string(), "tools.other.ping".to_string()];
+        let manifest = daemon_manifest("daemon-host-uuid-0000", &tool_ids);
+        let manifest_json = serde_json::to_string(&manifest).expect("serializes");
+        for forbidden in crate::connect::config::KE_CAPABILITIES.iter().chain(crate::connect::config::KE_OPERATION_FAMILIES.iter()) {
+            assert!(
+                !manifest.capabilities.iter().any(|c| c == forbidden),
+                "a tools-only hello must never declare {forbidden}"
+            );
+            assert!(
+                !manifest_json.contains(&format!("\"{forbidden}\"")),
+                "a tools-only hello must never mention {forbidden}: {manifest_json}"
+            );
+        }
+        assert_eq!(
+            manifest.capabilities,
+            vec![
+                "spoke-baseline".to_string(),
+                "tools.acme.lookup".to_string(),
+                "tools.other.ping".to_string(),
+            ],
+            "the tools-only hello is the baseline plus the exact allowlisted tool ids"
+        );
+        assert!(manifest.tools.is_empty(), "the daemon hello serves no tools of its own");
+        assert_eq!(manifest.namespaces.len(), 2, "namespaces derive from the tool ids only");
+
+        // An operator cannot allowlist a KE name: config load fails with the
+        // truthful reason, so the hello above can never grow one.
+        for entry in crate::connect::config::KE_CAPABILITIES.iter().chain(crate::connect::config::KE_OPERATION_FAMILIES.iter()) {
+            let dir = tempfile::tempdir().expect("tempdir");
+            std::fs::create_dir_all(nexus_home_layout::connect_dir(dir.path())).expect("mkdir");
+            std::fs::write(
+                nexus_home_layout::connect_daemon_config_path(dir.path()),
+                serde_json::json!({ "tool_allowlist": [entry] }).to_string(),
+            )
+            .expect("write daemon.json");
+            let err = crate::connect::config::PeerToolsConfig::load(dir.path())
+                .expect_err("a KE name must not be allowlistable");
+            assert!(
+                matches!(err, crate::connect::config::ConnectConfigError::InvalidAllowlist { .. }),
+                "{entry} must be refused as a KE name, got {err:?}"
+            );
+        }
     }
 }

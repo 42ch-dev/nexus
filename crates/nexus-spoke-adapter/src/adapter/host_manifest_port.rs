@@ -303,14 +303,16 @@ mod tests {
         };
 
         assert_eq!(manifest.host_id.as_str(), "test-host-uuid-0000");
+        // v1.191 P1 T14: the same feature filter the shared builder applies —
+        // the compute role is advertised only when the `compute` feature owns
+        // the engine (the honesty rule the builder enforces).
         assert_eq!(
             manifest.roles,
-            vec![
-                "data-store".to_string(),
-                "checker".to_string(),
-                "assembler".to_string(),
-                "computable-engine".to_string()
-            ]
+            crate::manifest::LOCAL_ROLES
+                .iter()
+                .filter(|role| !crate::manifest::compute_owned_name(role))
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
         );
         // V1.173 T1: the shared builder now serves the user-locked tool set
         // S — capabilities = baseline 3 ++ LOCAL_TOOL_OPS (the serving
@@ -319,6 +321,7 @@ mod tests {
             manifest.capabilities,
             crate::manifest::LOCAL_CAPABILITIES
                 .iter()
+                .filter(|capability| !crate::manifest::compute_owned_name(capability))
                 .map(ToString::to_string)
                 .collect::<Vec<_>>()
         );
@@ -343,7 +346,13 @@ mod tests {
                 .and_then(serde_json::Value::as_str),
             Some("n-c2")
         );
-        let expected_ops_value = serde_json::json!(crate::manifest::LOCAL_SERVED_OPS);
+        let expected_ops_value = serde_json::json!(
+            crate::manifest::LOCAL_SERVED_OPS
+                .iter()
+                .filter(|op| !crate::manifest::compute_owned_name(op))
+                .copied()
+                .collect::<Vec<_>>()
+        );
         let expected_ops = expected_ops_value
             .as_array()
             .expect("locked op list serializes as an array");
@@ -668,5 +677,35 @@ mod tests {
             }
             SpokeResult::Ok(_) => panic!("corrupt row must reject, never silently skip"),
         }
+    }
+    /// v1.191 P1 T14 (durable §9) — the port surface composes the SAME
+    /// manifest as the Connect host (single builder SSOT): `ke-ownership` is
+    /// declared from the shared capability list, and `ke-extraction` never
+    /// appears (remote extraction is not served).
+    #[tokio::test]
+    async fn v1191_holder_connect_port_self_manifest_declares_the_shared_ke_capability() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
+        nexus_local_db::run_migrations(&pool).await.unwrap();
+        let adapter = NexusAdapter::new_host(pool).with_host_id("test-host-uuid-0000");
+        let manifest = match adapter.get_host_capability_manifest().await {
+            SpokeResult::Ok(m) => m,
+            SpokeResult::Reject(r) => panic!("self manifest is Ok: {r:?}"),
+        };
+        assert!(
+            manifest
+                .capabilities
+                .iter()
+                .any(|c| c == crate::manifest::CAPABILITY_KE_OWNERSHIP),
+            "the port self-manifest declares the shared ke-ownership capability"
+        );
+        assert!(
+            !manifest
+                .capabilities
+                .iter()
+                .any(|c| c == crate::manifest::CAPABILITY_KE_EXTRACTION),
+            "the port self-manifest never declares ke-extraction"
+        );
     }
 }

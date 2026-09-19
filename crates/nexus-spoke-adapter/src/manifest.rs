@@ -106,6 +106,13 @@ fn advertised(name: &str) -> bool {
     COMPUTE_OWNED_NAMES.iter().all(|owned| owned != &name)
 }
 
+/// Whether `name` is owned by the `compute` feature (the inverse lens of
+/// [`advertised`], for callers that keep the unfiltered locked list).
+#[must_use]
+pub fn compute_owned_name(name: &str) -> bool {
+    !advertised(name)
+}
+
 /// The locked `ToolDescriptor` set ([`LOCAL_TOOL_OPS`] in declaration
 /// order) — the `tools[]` member of the local manifest.
 ///
@@ -185,6 +192,33 @@ pub fn local_tool_descriptors() -> Vec<ToolDescriptor> {
     .collect()
 }
 
+/// Capabilities the six KE operation families require (v1.191 P1 T14,
+/// durable `holder-governance.md` §9).
+///
+/// `ke-ownership` is a **capability, not an op**: it declares that this host
+/// enforces holder governance on its KE surface — every `KnowledgeEntryPort`
+/// / `ScopeQueryPort` / `RelationPort` / `FindingPort` / `ComputablePort`
+/// call runs inside an admitted request-bound selection and a Scope-bearing
+/// request's declared `viewpoint` can only *narrow* it (the same
+/// `ke-ownership` conditional requirement `spoke-connect` evaluates for its
+/// scope-bearing remote ops).
+///
+/// It is declared by the host that serves those guards (the local adapter,
+/// whose read/write ports are all scope-bound). A responder composed
+/// **without** KE ports is tools-only and declares neither this nor
+/// [`CAPABILITY_KE_EXTRACTION`] — the daemon peer-tools hello is derived
+/// separately (`nexus-core` `connect::accept::daemon_manifest`), so a
+/// tools-only composition cannot inherit this list.
+pub const CAPABILITY_KE_OWNERSHIP: &str = "ke-ownership";
+
+/// The extraction capability — **never advertised by this host**.
+///
+/// Remote extraction is not served in this target (durable §8/§9): the
+/// extract path is a local adapter-wrapper call with caller-supplied
+/// admission, so no host here may advertise `ke-extraction`, and the
+/// `extract` op stays outside [`LOCAL_SERVED_OPS`].
+pub const CAPABILITY_KE_EXTRACTION: &str = "ke-extraction";
+
 /// The three baseline capabilities (N-C0 → N-C2, unchanged) — the head
 /// of [`LOCAL_CAPABILITIES`].
 ///
@@ -193,26 +227,29 @@ pub fn local_tool_descriptors() -> Vec<ToolDescriptor> {
 /// only through the [`LOCAL_TOOL_OPS`] composition below.
 pub const BASELINE_CAPABILITIES: [&str; 3] = ["spoke-baseline", "l2-computable", "l5-fork"];
 
-/// Capabilities advertised by the local host: the baseline 3 **then** each
-/// user-locked tool id ([`LOCAL_TOOL_OPS`] order, AR-48).
+/// Capabilities advertised by the local host: the baseline 3, then
+/// [`CAPABILITY_KE_OWNERSHIP`] (durable §9 — the guards are wired), then
+/// each user-locked tool id ([`LOCAL_TOOL_OPS`] order, AR-48).
 ///
 /// The tool ids let a calling peer negotiate the served tools (spoke
 /// intersection semantics); each baseline capability maps to a production
 /// adapter port (see the honesty test below for the compile-time proof).
-/// Composed at const time from [`BASELINE_CAPABILITIES`] ++
-/// [`LOCAL_TOOL_OPS`] (mirror of the dispatch `SERVED_OPS` const-block
-/// pattern) — adding a tool to `S` is a one-place edit in
+/// Composed at const time from [`BASELINE_CAPABILITIES`] ++ the KE
+/// capability ++ [`LOCAL_TOOL_OPS`] (mirror of the dispatch `SERVED_OPS`
+/// const-block pattern) — adding a tool to `S` is a one-place edit in
 /// [`LOCAL_TOOL_OPS`], never a second literal here.
-pub const LOCAL_CAPABILITIES: [&str; BASELINE_CAPABILITIES.len() + LOCAL_TOOL_OPS.len()] = {
-    let mut caps = [""; BASELINE_CAPABILITIES.len() + LOCAL_TOOL_OPS.len()];
+pub const LOCAL_CAPABILITIES: [&str;
+    BASELINE_CAPABILITIES.len() + 1 + LOCAL_TOOL_OPS.len()] = {
+    let mut caps = [""; BASELINE_CAPABILITIES.len() + 1 + LOCAL_TOOL_OPS.len()];
     let mut i = 0;
     while i < BASELINE_CAPABILITIES.len() {
         caps[i] = BASELINE_CAPABILITIES[i];
         i += 1;
     }
+    caps[BASELINE_CAPABILITIES.len()] = CAPABILITY_KE_OWNERSHIP;
     let mut j = 0;
     while j < LOCAL_TOOL_OPS.len() {
-        caps[BASELINE_CAPABILITIES.len() + j] = LOCAL_TOOL_OPS[j];
+        caps[BASELINE_CAPABILITIES.len() + 1 + j] = LOCAL_TOOL_OPS[j];
         j += 1;
     }
     caps
@@ -531,6 +568,19 @@ mod tests {
                 let _: &dyn crate::ForkPorts = adapter;
                 let _: &dyn crate::ForkTimelineQueryPort = adapter;
             }
+            // v1.191 P1 T14 (durable §9): `ke-ownership` is advertised only
+            // because every KE-bearing port is production AND scope-bound —
+            // the upcasts prove the port families exist, and the adapter's
+            // request-bound selection is what enforces the governance axis.
+            crate::manifest::CAPABILITY_KE_OWNERSHIP => {
+                let _: &dyn crate::KnowledgeEntryPort = adapter;
+                let _: &dyn crate::ScopeQueryPort = adapter;
+                let _: &dyn crate::RelationPort = adapter;
+                let _: &dyn crate::FindingPort = adapter;
+                #[cfg(feature = "compute")]
+                let _: &dyn crate::ComputablePorts = adapter;
+                let _: &dyn crate::BaselinePorts = adapter;
+            }
             // V1.173 tool capabilities — backed by the adapter reads the
             // Task 2 tool handlers serve (no new port types): observed
             // peers via HostManifestPort (the production N-C3 read) and
@@ -577,8 +627,13 @@ mod tests {
         }
         assert_eq!(
             manifest.capabilities,
-            LOCAL_CAPABILITIES.map(ToString::to_string).to_vec(),
-            "capabilities must be exactly the locked list (baseline 3 ++ LOCAL_TOOL_OPS)"
+            LOCAL_CAPABILITIES
+                .iter()
+                .filter(|capability| advertised(capability))
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            "capabilities must be exactly the advertised locked list \
+             (baseline ++ ke-ownership ++ LOCAL_TOOL_OPS, compute names only with the feature)"
         );
         assert!(
             matches!(
@@ -596,22 +651,30 @@ mod tests {
         //    assemble, computable-engine backs compute — both directions.
         assert_eq!(
             manifest.roles,
-            LOCAL_ROLES.map(ToString::to_string).to_vec()
+            LOCAL_ROLES
+                .iter()
+                .filter(|role| advertised(role))
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            "roles must be exactly the advertised locked list (compute role only with the feature)"
         );
         let has_role = |role: &str| manifest.roles.iter().any(|r| r == role);
+        // The advertised op set (feature-filtered) — the pairing below must
+        // compare like with like in both build configurations.
+        let advertised_op = |op: &str| LOCAL_SERVED_OPS.iter().any(|served| *served == op && advertised(op));
         assert_eq!(
             has_role("checker"),
-            LOCAL_SERVED_OPS.contains(&"check"),
+            advertised_op("check"),
             "role checker ⇔ served op check must hold in both directions"
         );
         assert_eq!(
             has_role("assembler"),
-            LOCAL_SERVED_OPS.contains(&"assemble"),
+            advertised_op("assemble"),
             "role assembler ⇔ served op assemble must hold in both directions"
         );
         assert_eq!(
             has_role("computable-engine"),
-            LOCAL_SERVED_OPS.contains(&"compute"),
+            advertised_op("compute"),
             "role computable-engine ⇔ served op compute must hold in both directions"
         );
 
@@ -680,8 +743,13 @@ mod tests {
                 .iter()
                 .map(|op| op.as_str().expect("served op is a string"))
                 .collect::<Vec<_>>(),
-            LOCAL_SERVED_OPS,
-            "advertised served_ops must be exactly the served-op set (6 core ++ S)"
+            LOCAL_SERVED_OPS
+                .iter()
+                .filter(|op| advertised(op))
+                .copied()
+                .collect::<Vec<_>>(),
+            "advertised served_ops must be exactly the advertised served-op set \
+             (core ++ S, compute only with the feature)"
         );
         for op in served_ops
             .iter()
@@ -791,7 +859,13 @@ mod tests {
         );
         assert_eq!(
             hello_json["extensions"]["nexus"]["served_ops"],
-            serde_json::json!(LOCAL_SERVED_OPS)
+            serde_json::json!(
+                LOCAL_SERVED_OPS
+                    .iter()
+                    .filter(|op| advertised(op))
+                    .copied()
+                    .collect::<Vec<_>>()
+            )
         );
 
         // The round-tripped value deserializes back into the data type
@@ -932,5 +1006,52 @@ mod tests {
             tools_ops, LOCAL_TOOL_OPS,
             "LOCAL_SERVED_OPS may carry only the S tool ids as tools.-prefixed ops"
         );
+    }
+
+    /// v1.191 P1 T14 (durable §9) — truthful KE capability declaration: the
+    /// host that serves the six guarded KE families declares
+    /// `ke-ownership`, never `ke-extraction` (remote extraction is not
+    /// served), and advertises no `extract` op in `served_ops`.
+    #[test]
+    fn v1191_holder_connect_manifest_declares_ke_ownership_and_never_extraction() {
+        let data = match build_local_host_manifest("test-device-uuid-0000") {
+            SpokeResult::Ok(m) => m,
+            SpokeResult::Reject(r) => panic!("builder rejected: {r:?}"),
+        };
+        let hello = match build_connect_hello_manifest("test-device-uuid-0000") {
+            SpokeResult::Ok(m) => m,
+            SpokeResult::Reject(r) => panic!("connect hello builder rejected: {r:?}"),
+        };
+        for (label, capabilities) in [
+            ("data manifest", &data.capabilities),
+            ("connect_hello manifest", &hello.capabilities),
+        ] {
+            assert!(
+                capabilities.iter().any(|c| c == CAPABILITY_KE_OWNERSHIP),
+                "{label} must declare {CAPABILITY_KE_OWNERSHIP} (the guards are wired)"
+            );
+            assert!(
+                !capabilities.iter().any(|c| c == CAPABILITY_KE_EXTRACTION),
+                "{label} must never declare {CAPABILITY_KE_EXTRACTION} (no remote extraction)"
+            );
+        }
+        assert_eq!(
+            serde_json::to_value(&data).expect("serializes")["extensions"]["nexus"]["served_ops"],
+            serde_json::to_value(&hello).expect("serializes")["extensions"]["nexus"]["served_ops"],
+            "both generated manifest types advertise the same served ops"
+        );
+        for (label, manifest_json) in [
+            ("data", serde_json::to_value(&data).expect("serializes")),
+            ("hello", serde_json::to_value(&hello).expect("serializes")),
+        ] {
+            let ops = manifest_json["extensions"]["nexus"]["served_ops"]
+                .as_array()
+                .expect("served_ops array")
+                .clone();
+            assert!(
+                !ops.iter().any(|op| op.as_str() == Some("extract")),
+                "{label} must not advertise an extract op: {ops:?}"
+            );
+        }
     }
 }
