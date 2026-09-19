@@ -1,35 +1,50 @@
-import type { IpcRequest } from './ipc.js';
+/**
+ * Lifecycle admission for the app-managed service owner (v1.192 P0-T4).
+ *
+ * The utility process owns at most one service handle and answers at most one
+ * lifecycle request at a time, so every operation is admitted against the
+ * current owner state before it can touch the service or the native binding.
+ * An unconfirmed close retains the owner and refuses work that would race it.
+ */
 
-/** Tracks one outstanding pull per operation_id from admission through settlement. */
-export class PullReservationLedger {
-  private readonly byOperation = new Map<string, string>();
+import type { UtilityOperation } from './service-controller.js';
 
-  pullOperationId(request: IpcRequest): string | null {
-    if (request.operation !== 'pull') return null;
-    const body = request.payload as { operation_id?: string } | undefined;
-    if (typeof body?.operation_id !== 'string' || body.operation_id.length === 0) {
-      return null;
+export type ServiceOwnerState = 'none' | 'running' | 'closing' | 'closed' | 'unconfirmed';
+
+export type UtilityAdmission = { ok: true } | { ok: false; code: string; message: string };
+
+const RETRY_FIRST = 'the previous close was not confirmed; the retained owner must be released first';
+
+export function admitUtilityOperation(
+  operation: UtilityOperation,
+  state: ServiceOwnerState,
+): UtilityAdmission {
+  if (state === 'unconfirmed' && operation !== 'close') {
+    return { ok: false, code: 'interrupted', message: RETRY_FIRST };
+  }
+  switch (operation) {
+    case 'start': {
+      if (state === 'running') {
+        return { ok: false, code: 'owner_busy', message: 'a service is already running in this owner' };
+      }
+      if (state === 'closing') {
+        return { ok: false, code: 'busy', message: 'a service close is still in flight' };
+      }
+      return { ok: true };
     }
-    return body.operation_id;
-  }
-
-  isReserved(operationId: string): boolean {
-    return this.byOperation.has(operationId);
-  }
-
-  tryReserve(request: IpcRequest): boolean {
-    const operationId = this.pullOperationId(request);
-    if (!operationId) return false;
-    if (this.byOperation.has(operationId)) return false;
-    this.byOperation.set(operationId, request.request_id);
-    return true;
-  }
-
-  release(request: IpcRequest): void {
-    const operationId = this.pullOperationId(request);
-    if (!operationId) return;
-    if (this.byOperation.get(operationId) === request.request_id) {
-      this.byOperation.delete(operationId);
+    case 'close':
+      // Idempotent join and retry path: a confirmed close is final, an
+      // unconfirmed one may be retried until cleanup is confirmed.
+      return { ok: true };
+    case 'reset-local-state': {
+      if (state === 'running' || state === 'closing') {
+        return {
+          ok: false,
+          code: 'busy',
+          message: 'local-state reset requires the service to be closed first',
+        };
+      }
+      return { ok: true };
     }
   }
 }

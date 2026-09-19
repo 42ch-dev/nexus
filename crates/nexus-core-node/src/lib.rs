@@ -26,7 +26,9 @@ use nexus_contracts::{
     CoreChangesRequest, CoreCloseReport, CoreHostQuery, CoreHostQueryResponse, NativeCompatibility,
     NativeOpenOptions, ProviderCall, WorldKbPatchEntityRequest,
 };
+use nexus_contracts::{CoreError, CoreErrorCode};
 use nexus_core::Principal;
+use serde_json::Value;
 
 use env_state::{EnvInstance, EnvState};
 
@@ -283,4 +285,91 @@ pub fn open(env: Env, options_json: String, callbacks: Option<Object<'_>>) -> Re
         .block_on(lifecycle::open_core(state.clone(), options, js_port))
         .map_err(core_error::napi_error_from_open_reason)?;
     Ok(NativeCore { inner: state })
+}
+
+/// Reset the product's local state (`state.db` + its WAL/SHM siblings) under
+/// the trusted `home`, resolving with the number of reset stores.
+///
+/// The deletion runs in Rust behind the writer protocol's exclusive migration
+/// fences (v1.192 P0 row 19, compass D18/D20); this binding only forwards the
+/// trusted home and hands back the count or a refusal. The filesystem work is
+/// offloaded so a reset cannot stall the async runtime.
+///
+/// # Errors
+///
+/// Rejects with the wire `CoreError` envelope: `owner_busy` when a live writer
+/// holds a target's fence, `forbidden` when a target is a symlink or not the
+/// declared file, `invalid_input` when `home` is not an absolute path, and
+/// `internal` for filesystem failures or a failed worker.
+#[napi]
+pub async fn reset_local_state(home: String) -> Result<u32> {
+    let reset = tokio::task::spawn_blocking(move || {
+        nexus_local_db::reset_local_state(std::path::Path::new(&home))
+    })
+    .await;
+    let count = match reset {
+        Ok(result) => result.map_err(napi_error_from_reset)?,
+        Err(_) => return Err(internal_reset_error("reset worker failed")),
+    };
+    u32::try_from(count).map_err(|_| internal_reset_error("reset count out of range"))
+}
+
+/// Map a local-state reset failure to the wire `CoreError` envelope.
+fn wire_core_error_from_reset(err: &nexus_local_db::LocalDbError) -> CoreError {
+    match err {
+        nexus_local_db::LocalDbError::OwnerBusy { resource } => CoreError {
+            code: CoreErrorCode::OwnerBusy,
+            message: "local state reset refused: a live writer holds the store".into(),
+            details: serde_json::Map::from_iter([(
+                "resource".into(),
+                Value::String(resource.clone()),
+            )]),
+            http_status: Some(409),
+        },
+        nexus_local_db::LocalDbError::PathEscape { path, prefix } => CoreError {
+            code: CoreErrorCode::Forbidden,
+            message: "local state reset refused: the target is not the product's own state file"
+                .into(),
+            details: serde_json::Map::from_iter([
+                ("path".into(), Value::String(path.clone())),
+                ("prefix".into(), Value::String(prefix.clone())),
+            ]),
+            http_status: Some(403),
+        },
+        nexus_local_db::LocalDbError::ValidationError(reason) => CoreError {
+            code: CoreErrorCode::InvalidInput,
+            message: reason.clone(),
+            details: serde_json::Map::new(),
+            http_status: Some(400),
+        },
+        nexus_local_db::LocalDbError::IoWithPath { path, .. } => CoreError {
+            code: CoreErrorCode::Internal,
+            message: "local state reset failed: filesystem error".into(),
+            details: serde_json::Map::from_iter([("path".into(), Value::String(path.clone()))]),
+            http_status: Some(500),
+        },
+        // The reset cannot produce another variant; refuse honestly rather than
+        // leaking an unrelated diagnostic.
+        _ => CoreError {
+            code: CoreErrorCode::Internal,
+            message: "local state reset failed".into(),
+            details: serde_json::Map::new(),
+            http_status: Some(500),
+        },
+    }
+}
+
+/// Wire rejection for a reset failure, with the native reason attached.
+fn napi_error_from_reset(err: nexus_local_db::LocalDbError) -> Error {
+    core_error::napi_error_from_wire(wire_core_error_from_reset(&err))
+}
+
+/// Wire rejection for a reset infrastructure failure.
+fn internal_reset_error(message: &str) -> Error {
+    core_error::napi_error_from_wire(CoreError {
+        code: CoreErrorCode::Internal,
+        message: message.to_string(),
+        details: serde_json::Map::new(),
+        http_status: Some(500),
+    })
 }
