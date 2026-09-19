@@ -252,6 +252,26 @@ test('entrance: missing default, enum round-trip, invalid stored value, no mutat
   assert.equal(await config.get_entrance(), 'content-creator');
 });
 
+test('set_entrance rejects a non-enum value at the handler boundary, byte-preserving', async (t) => {
+  const { home, config } = setup(t);
+  // Nothing to mutate yet: a rejected write must not create the document.
+  await expectCode(config.set_entrance({ value: 'banana' }), 'invalid_input');
+  assert.equal(existsSync(configPath(home)), false);
+
+  const stored = 'entrance = "developer"\nfuture_key = "keep"\n';
+  writeTomlFile(configPath(home), stored);
+  for (const invalid of ['banana', '', 'Developer', 'content_creator']) {
+    await expectCode(config.set_entrance({ value: invalid }), 'invalid_input');
+  }
+  assert.equal(readText(configPath(home)), stored);
+  assert.equal(await config.get_entrance(), 'developer');
+
+  // Both enum values still write.
+  assert.equal(await config.set_entrance({ value: 'content-creator' }), null);
+  assert.equal(await config.get_entrance(), 'content-creator');
+  assert.deepEqual(readdirSync(join(home, '.nexus42')), ['config.toml']);
+});
+
 test('setup_completed: absent is false, writes round-trip, unreadable reads false', async (t) => {
   const { home, config } = setup(t);
   assert.equal(await config.get_setup_completed(), false);
@@ -409,6 +429,33 @@ test('agent profile read skips malformed rows; unreadable documents never clobbe
   assert.equal(await config.get_agent_profile(), null);
   await expectCode(config.set_agent_profile({ name: 'x' }), 'config_corrupt');
   assert.equal(readText(agentPath(home)), corrupt);
+});
+
+test('agent profile write fails closed on non-table provider rows, byte-preserving', async (t) => {
+  const { home, config } = setup(t);
+  const cases = [
+    'providers = ["not-a-provider"]\nfuture_key = "keep"\n',
+    'providers = [{ id = "ok", protocol = "http" }, "bad"]\n',
+    'providers = [42]\n',
+  ];
+  for (const malformed of cases) {
+    writeTomlFile(agentPath(home), malformed);
+    await expectCode(config.set_agent_profile({ name: 'codex' }), 'config_corrupt');
+    assert.equal(readText(agentPath(home)), malformed);
+  }
+  assert.deepEqual(readdirSync(join(home, '.nexus42', 'agent-host')), ['config.toml']);
+
+  // A well-formed array-of-tables still upserts.
+  writeTomlFile(
+    agentPath(home),
+    '[[providers]]\nid = "other"\nprotocol = "http"\n',
+  );
+  assert.equal(await config.set_agent_profile({ name: 'codex' }), null);
+  const doc = parseToml(agentPath(home));
+  assert.deepEqual(doc.providers, [
+    { id: 'other', protocol: 'http' },
+    { id: 'codex', protocol: 'native_cli' },
+  ]);
 });
 
 test('a saved launch command is never executed here', async (t) => {

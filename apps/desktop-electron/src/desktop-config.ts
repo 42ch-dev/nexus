@@ -333,6 +333,13 @@ export function createDesktopConfig(home: string, documentsPath: string): Deskto
     },
 
     async set_entrance({ value }) {
+      // The handler boundary owns the enum check (retired `set_entrance`
+      // validated on write). The frozen parser rejects a non-enum value in the
+      // IPC path, but this exported map is also reachable directly — an
+      // out-of-enum write must never reach the document.
+      if (!ENTRANCE_VALUES.includes(value)) {
+        throw desktopError('invalid_input', `invalid entrance value: ${value}`);
+      }
       await mutate(configGate, configPath, (doc) => {
         doc['entrance'] = value;
       });
@@ -376,6 +383,17 @@ export function createDesktopConfig(home: string, documentsPath: string): Deskto
           throw desktopError('config_corrupt', `${agentProfilePath}: providers is not an array of tables`);
         }
         const providers: TomlValue[] = existing ?? [];
+        // Every existing row must be a table (retired `as_array_of_tables_mut`
+        // rejected the wrong shape). A malformed owned value fails closed here
+        // instead of being normalized in place and written back.
+        for (const row of providers) {
+          if (!isTomlTable(row)) {
+            throw desktopError(
+              'config_corrupt',
+              `${agentProfilePath}: providers is not an array of tables`,
+            );
+          }
+        }
         // Upsert: the stored profile is the sole native_cli entry, so the agent
         // host and the Settings preselect (first native_cli) always agree.
         for (let index = providers.length - 1; index >= 0; index -= 1) {
