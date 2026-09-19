@@ -34,6 +34,7 @@ const webDist = join(repoRoot, 'apps', 'web', 'dist');
 const serviceRoot = join(repoRoot, 'apps', 'nexus-service');
 const nativeLoaderRoot = join(repoRoot, 'packages', 'nexus-native');
 const lockfile = join(repoRoot, 'pnpm-lock.yaml');
+const nativePlatformRoot = (arch) => join(repoRoot, 'packages', arch === 'arm64' ? 'nexus-native-darwin-arm64' : 'nexus-native-darwin-x64');
 const outputRoot = (out) => resolveOutputRoot(out, { repoRoot });
 
 function usage() {

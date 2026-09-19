@@ -82,7 +82,7 @@ function appManifest(appPath) {
 
 function jsonPlist(path) {
   const result = spawnSync('plutil', ['-convert', 'json', '-o', '-', '--', path], { encoding: 'utf8' });
-  if (result.status !== 0) fail(`Info.plist cannot be read as JSON: ${(result.stderr || '').trim()}`);
+  if (result.status !== 0) fail(`Info.plist cannot be read as JSON: ${(result.stderr ?? '').trim()}`);
   try {
     return JSON.parse(result.stdout);
   } catch (error) {
@@ -187,7 +187,7 @@ function verifyPackage(dir) {
   if (plist.CFBundleIdentifier !== PACKAGE_CONTRACT.bundleId) fail(`Info.plist bundle ID mismatch: ${plist.CFBundleIdentifier}`);
   if (plist.CFBundleName !== PACKAGE_CONTRACT.productName && plist.CFBundleDisplayName !== PACKAGE_CONTRACT.productName) fail('Info.plist product name mismatch');
   if (String(plist.CFBundleShortVersionString ?? plist.CFBundleVersion) !== String(receipt.version)) fail('Info.plist version mismatch');
-  const executable = plist.CFBundleExecutable || 'Nexus';
+  const executable = (plist.CFBundleExecutable ?? '') ? plist.CFBundleExecutable : 'Nexus';
   const executablePath = join(appPath, 'Contents', 'MacOS', executable);
   requireFile(executablePath, 'app executable');
   const headers = [{ path: executablePath, label: 'app executable', header: inspectMachO(executablePath, receipt.arch, receipt.minimum_macos, 'app executable') }];
