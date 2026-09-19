@@ -10,7 +10,9 @@
  * Frozen shape (`rust-core-service-boundary.md` §8.1, plan "TS-service lifecycle
  * and quit"): `start`/`stop`/`restart`/`resetLocalState` are serialized,
  * `getStatus`/`subscribe` expose the existing `DaemonStatus`, `keepForQuit`
- * hands a running service to an independent owner.
+ * hands a running service to an independent owner. The authenticated
+ * attached-service stop is the separate `stopExplicit()` (P0-T6), so the frozen
+ * `stop(): Promise<void>` keeps its exact argument-free shape.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -303,9 +305,28 @@ function sameEndpoint(a: CoreServiceDiscovery['endpoint'], b: CoreServiceDiscove
 }
 
 /**
+ * Depth-bounded walk of a `fetch` failure chain for a socket-level `code`
+ * (undici wraps the real error as `cause`). Used to tell a refused connect —
+ * no listener at all — from a timeout or a transport failure that proves
+ * nothing about the owner.
+ */
+function socketErrorCode(error: unknown): string | null {
+  let current: unknown = error;
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (!current || typeof current !== 'object') return null;
+    if ('code' in current && typeof current.code === 'string') return current.code;
+    if (!('cause' in current)) return null;
+    current = current.cause;
+  }
+  return null;
+}
+
+/**
  * Attach identity (`§8.1`): the authenticated response must name the same
  * instance, home, endpoint and engine epoch as the private published record.
- * A replaced instance or a stale epoch never attaches.
+ * A replaced instance or a stale epoch never attaches. The record itself is
+ * bound to this session's trusted home and endpoint before any probe, so the
+ * response is transitively bound to them too.
  */
 function identityMatches(response: CoreServiceDiscovery, expected: CoreServiceDiscovery): boolean {
   return (
@@ -331,6 +352,15 @@ interface LiveEndpoint {
   endpoint: CoreServiceDiscovery['endpoint'];
   port: number | null;
   discovery: CoreServiceDiscovery;
+}
+
+/** Guarded probe outcome; `absent` is the only transport-level proof of no listener. */
+interface ProbeResult {
+  ok: boolean;
+  body: unknown;
+  code: string;
+  message: string;
+  absent: boolean;
 }
 
 type OwnerProbe =
@@ -399,13 +429,23 @@ export class DesktopServiceController {
   }
 
   /**
-   * Ordinary stop: the owned handle is closed cooperatively; an attached
-   * independent service is left running (row 8). `explicit` is the
-   * authenticated instance/epoch-bound stop that explicit Restart and
-   * Stop-and-Quit require (P0-T6), including for an attached service.
+   * Frozen lifecycle shape (`§8.1`): stops the service this app owns. An
+   * attached independent service is left running (row 8) — only the explicit
+   * path below may stop it.
    */
-  stop(options?: { explicit?: boolean }): Promise<void> {
-    return this.serialize(() => this.stopLocked(options?.explicit === true));
+  stop(): Promise<void> {
+    return this.serialize(() => this.stopLocked(false));
+  }
+
+  /**
+   * The authenticated instance/epoch-bound stop that explicit Restart and
+   * Stop-and-Quit require (P0-T6), including for an attached independent
+   * service. Deliberately *not* part of the frozen public surface — the frozen
+   * `stop(): Promise<void>` stays argument-free — and only reachable from the
+   * desktop main process.
+   */
+  stopExplicit(): Promise<void> {
+    return this.serialize(() => this.stopLocked(true));
   }
 
   /** Single-flight restart: concurrent callers join the one attempt. */
@@ -714,11 +754,21 @@ export class DesktopServiceController {
   private async probeOwner(): Promise<OwnerProbe> {
     const record = this.readRecord();
     if (record) {
-      const port = endpointPort(record.endpoint);
-      if (port === null) {
+      // Trusted-home and trusted-endpoint binding, before any probe: a record
+      // published by another home (or naming another endpoint) is a planted or
+      // foreign-session record. It is never adopted, and the guarded probe —
+      // which carries this session's API key — is never sent to it.
+      if (record.user_home !== this.home) {
         return {
           kind: 'conflict',
-          detail: 'published service endpoint is not an attachable HTTP endpoint',
+          detail: `the published service record belongs to a different home; refusing to attach on ${this.host}:${this.targetPort}`,
+        };
+      }
+      if (!this.isTrustedEndpoint(record.endpoint)) {
+        const named = record.endpoint.transport === 'http' ? record.endpoint.url : record.endpoint.path;
+        return {
+          kind: 'conflict',
+          detail: `the published service record names ${named}, not this session's service endpoint ${this.host}:${this.targetPort}`,
         };
       }
       const confirmed = await this.confirmIdentity(record.endpoint, record, this.clock.now() + READINESS_DEADLINE_MS);
@@ -731,6 +781,17 @@ export class DesktopServiceController {
       };
     }
     return { kind: 'none' };
+  }
+
+  /** This session's trusted service endpoint: loopback host and resolved port, HTTP only. */
+  private isTrustedEndpoint(endpoint: CoreServiceDiscovery['endpoint']): boolean {
+    const origin = endpointOrigin(endpoint);
+    if (!origin) return false;
+    try {
+      return new URL(origin).hostname === this.host && endpointPort(endpoint) === this.targetPort;
+    } catch {
+      return false;
+    }
   }
 
   private async startOwned(): Promise<void> {
@@ -753,20 +814,29 @@ export class DesktopServiceController {
     const reportedDiscovery =
       reported && typeof reported === 'object' && 'discovery' in reported ? reported.discovery : undefined;
     const replyDiscovery = assertDiscoveryShape(reportedDiscovery);
-    if (replyDiscovery.instance_id !== ready.instance_id) {
-      this.setStatus({
-        state: 'error',
-        port: this.targetPort,
-        detail: 'service owner reported inconsistent service identity',
-      });
-      throw utilityError('internal', 'service owner reported inconsistent service identity');
+    if (replyDiscovery.user_home !== this.home || replyDiscovery.instance_id !== ready.instance_id) {
+      const detail = 'service owner reported inconsistent service identity';
+      this.setStatus({ state: 'error', port: this.targetPort, detail });
+      throw utilityError('internal', detail);
     }
     // Readiness means the service's own published record is this instance's,
-    // answered over authenticated discovery and healthy HTTP.
+    // answered over authenticated discovery and healthy HTTP. The file is
+    // replaceable, so it must agree with the owner's own report: this home's
+    // record, this instance, this endpoint.
     const record = this.readRecord();
     if (!record || record.instance_id !== ready.instance_id) {
       const detail =
         'the published discovery record does not name the service instance the owner started';
+      this.setStatus({ state: 'error', port: this.targetPort, detail });
+      throw utilityError('internal', detail);
+    }
+    if (record.user_home !== this.home) {
+      const detail = 'the published discovery record belongs to a different home';
+      this.setStatus({ state: 'error', port: this.targetPort, detail });
+      throw utilityError('internal', detail);
+    }
+    if (!sameEndpoint(record.endpoint, replyDiscovery.endpoint)) {
+      const detail = 'the published discovery record does not match the service endpoint the owner reported';
       this.setStatus({ state: 'error', port: this.targetPort, detail });
       throw utilityError('internal', detail);
     }
@@ -886,7 +956,7 @@ export class DesktopServiceController {
       );
     }
     // A 200 {status:'stopping'} is not confirmed closure: wait for the port to be released.
-    const released = await this.waitForPortRelease(origin, PORT_RELEASE_DEADLINE_MS);
+    const released = await this.waitForPortRelease(origin, live.discovery, PORT_RELEASE_DEADLINE_MS);
     if (!released) {
       this.markUnconfirmed(
         `attached service did not release ${this.host}:${live.port ?? this.targetPort} within ${PORT_RELEASE_DEADLINE_MS}ms`,
@@ -898,11 +968,32 @@ export class DesktopServiceController {
     this.setStatus({ state: 'stopped', port: this.targetPort, detail: undefined, version: undefined });
   }
 
-  private async waitForPortRelease(origin: string, budgetMs: number): Promise<boolean> {
+  /**
+   * Positive release proof only. An independent owner is released when the
+   * trusted endpoint has no listener at all (refused connect — verified
+   * discovery absence) or when the guarded route answers as a *different*
+   * instance, so the stopped one no longer owns the port. A still-listening
+   * service that answers an HTTP error (401/5xx/…), an unparsable body, or
+   * times out proves nothing: the owner is retained and the fence stays.
+   */
+  private async waitForPortRelease(
+    origin: string,
+    stopped: CoreServiceDiscovery,
+    budgetMs: number,
+  ): Promise<boolean> {
     const deadline = this.clock.now() + budgetMs;
     for (;;) {
       const discovery = await this.probeJson(`${origin}/v1/daemon/runtime/discovery`, { method: 'GET' });
-      if (!discovery.ok || discovery.body === null) return true;
+      if (discovery.absent) return true;
+      if (discovery.ok && discovery.body !== null) {
+        let other: CoreServiceDiscovery | null = null;
+        try {
+          other = assertDiscoveryShape(discovery.body);
+        } catch {
+          other = null;
+        }
+        if (other && other.instance_id !== stopped.instance_id) return true;
+      }
       const now = this.clock.now();
       if (now >= deadline) return false;
       await this.clock.sleep(Math.min(PROBE_FAST_INTERVAL_MS, Math.max(1, deadline - now)));
@@ -968,6 +1059,18 @@ export class DesktopServiceController {
     await handoff.start({ home: this.home, host: this.host, port });
     const record = this.readRecord();
     if (!record) throw utilityError('interrupted', 'the detached service published no discovery record');
+    if (record.user_home !== this.home) {
+      throw utilityError(
+        'interrupted',
+        'the detached service published a discovery record for a different home',
+      );
+    }
+    if (!this.isTrustedEndpoint(record.endpoint)) {
+      throw utilityError(
+        'interrupted',
+        `the detached service published a discovery record for another endpoint, not ${this.host}:${this.targetPort}`,
+      );
+    }
     const confirmed = await this.confirmIdentity(
       record.endpoint,
       record,
@@ -1064,7 +1167,7 @@ export class DesktopServiceController {
   private async probeJson(
     url: string,
     request: { method: 'GET' | 'POST'; body?: unknown },
-  ): Promise<{ ok: boolean; body: unknown; code: string; message: string }> {
+  ): Promise<ProbeResult> {
     try {
       const response = await fetch(url, {
         method: request.method,
@@ -1082,7 +1185,7 @@ export class DesktopServiceController {
       } catch {
         body = null;
       }
-      if (response.ok) return { ok: true, body, code: 'ok', message: 'ok' };
+      if (response.ok) return { ok: true, body, absent: false, code: 'ok', message: 'ok' };
       const envelope = body && typeof body === 'object' && 'error' in body ? body.error : undefined;
       const code =
         envelope && typeof envelope === 'object' && 'code' in envelope && typeof envelope.code === 'string'
@@ -1092,9 +1195,18 @@ export class DesktopServiceController {
         envelope && typeof envelope === 'object' && 'message' in envelope && typeof envelope.message === 'string'
           ? envelope.message
           : `service probe answered ${response.status}`;
-      return { ok: false, body, code, message };
+      // The endpoint answered: whatever it said, a listener is there.
+      return { ok: false, body, absent: false, code, message };
     } catch (error) {
-      return { ok: false, body: null, code: 'unreachable', message: utilityMessageText(error) };
+      // Only a refused connect proves no listener; a timeout or any other
+      // transport failure leaves the owner question open.
+      return {
+        ok: false,
+        body: null,
+        absent: socketErrorCode(error) === 'ECONNREFUSED',
+        code: 'unreachable',
+        message: utilityMessageText(error),
+      };
     }
   }
 }
