@@ -335,6 +335,13 @@ export interface NativeCoreBinding {
 export interface NativeBinding {
   compatibility(): string;
   open(optionsJson: string, callbacks?: ProviderCallbacksNative): NativeCoreBinding;
+  /**
+   * Reset the product's local state (`state.db` + WAL/SHM siblings) under the
+   * trusted `home`; resolves with the number of reset stores, rejects with the
+   * wire `CoreError` envelope. Deletion happens in Rust behind the writer
+   * protocol's exclusive migration fences (v1.192 P0-T3R).
+   */
+  resetLocalState(home: string): Promise<number>;
 }
 
 interface PlatformPackageManifest {
