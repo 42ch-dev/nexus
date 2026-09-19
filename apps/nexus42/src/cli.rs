@@ -184,7 +184,7 @@ pub enum Commands {
         command: CapabilityCommand,
     },
 
-    /// Manage the Tauri desktop shell (build, sign, diagnostics)
+    /// Manage the Electron desktop bundle (unsigned macOS packaging)
     #[cfg(feature = "legacy-cli")]
     Desktop {
         #[command(subcommand)]
