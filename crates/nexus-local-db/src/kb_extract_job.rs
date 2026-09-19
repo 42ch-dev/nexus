@@ -460,21 +460,32 @@ pub async fn claim_job(
     Ok(Some(claimed))
 }
 
-/// Mark a job as done. Sets `finished_at` to now.
+/// Claim the successful terminal for one extract job **inside the caller's
+/// transaction** (v1.191 P1 T13).
+///
+/// The claim is conditional on the job still being claimable (`queued` /
+/// `running`): a job another actor already completed or failed is never
+/// reported done, and a caller that gets `Ok(false)` rolls its transaction back
+/// so the candidate rows in it cannot survive a cancelled run.
 ///
 /// # Errors
 ///
 /// Returns `sqlx::Error` on database failure.
-pub async fn mark_done(pool: &SqlitePool, job_id: &str) -> Result<(), sqlx::Error> {
-    sqlx::query!(
-        r#"UPDATE kb_extract_jobs
-           SET status = 'done', finished_at = datetime('now')
-           WHERE job_id = ?"#,
-        job_id,
+pub async fn mark_done_in_tx(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    job_id: &str,
+) -> Result<bool, sqlx::Error> {
+    // SAFETY: static UPDATE on a known table/column set; runtime `query()`
+    // keeps the shared offline `.sqlx` cache untouched (the worker-protocol
+    // checkpoint owns regeneration).
+    let result = sqlx::query(
+        "UPDATE kb_extract_jobs SET status = 'done', finished_at = datetime('now') \
+         WHERE job_id = ? AND status IN ('queued', 'running')",
     )
-    .execute(pool)
+    .bind(job_id)
+    .execute(&mut **tx)
     .await?;
-    Ok(())
+    Ok(result.rows_affected() == 1)
 }
 
 /// Mark a job as failed. Sets `finished_at` to now and records error text.

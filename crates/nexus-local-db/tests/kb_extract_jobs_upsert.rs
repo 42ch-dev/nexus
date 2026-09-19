@@ -517,3 +517,66 @@ async fn v1191_extract_unresolved_endpoint_leaves_zero_relationship_rows() {
     let pending = list_for_chapter(&pool, WORK, 1).await.unwrap();
     assert!(pending.is_empty(), "zero candidate rows after the failure");
 }
+
+/// The finalize transaction is the cancellable unit: when the job is no longer
+/// claimable (another actor cancelled/finished it) the terminal claim refuses,
+/// the caller rolls back, and the candidate rows in that transaction leave no
+/// trace and no `done` status (v1.191 P1 T13 review C1).
+#[tokio::test]
+async fn v1191_extract_cancelled_job_rolls_back_the_candidate_transaction() {
+    let (pool, _dir) = fresh_pool().await;
+    nexus_local_db::kb_store::seed::world(&pool, WORLD, CREATOR, "T13", "t13", "private", "manual")
+        .await;
+
+    // A queued job that another actor cancels (marks failed) while the
+    // extraction run is in flight.
+    let job = nexus_local_db::enqueue_extract_job_with_artifact(
+        &pool,
+        CREATOR,
+        "ws",
+        "kb_t13_work",
+        WORLD,
+        Some("work_chapter"),
+        Some("Works/t13/Stories/ch03.md"),
+        Some("novel"),
+        Some("wrk_t13"),
+    )
+    .await
+    .unwrap();
+    nexus_local_db::mark_extract_job_failed(&pool, &job.job_id, "cancelled by operator")
+        .await
+        .unwrap();
+
+    // The finalize's transaction: candidate row + terminal claim, both in the
+    // caller's transaction (the repair the queue capability now performs).
+    let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO kb_key_blocks (key_block_id, world_id, canonical_name, block_type, status, \
+         revision, created_at, updated_at) \
+         VALUES ('kb_t13_inflight', ?, 'Lin Xia', 'character', 'provisional', 0, \
+                 datetime('now'), datetime('now'))",
+    )
+    .bind(WORLD)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+
+    let claimed = nexus_local_db::kb_extract_job::mark_done_in_tx(&mut tx, &job.job_id)
+        .await
+        .unwrap();
+    assert!(!claimed, "a cancelled job is no longer claimable");
+    tx.rollback().await.unwrap();
+
+    // Zero candidate writes, no successful terminal.
+    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE world_id = ?")
+        .bind(WORLD)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(rows, 0, "the rolled-back transaction left no candidate");
+    let stored = nexus_local_db::get_extract_job(&pool, &job.job_id)
+        .await
+        .unwrap()
+        .expect("job row");
+    assert_eq!(stored.status, "failed", "no successful terminal");
+}

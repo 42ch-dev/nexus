@@ -533,16 +533,24 @@ impl Capability for KbExtractWork {
             );
         }
 
-        // ── Phase 4b: Persist the validated candidates BEFORE marking done ─────
-        // The candidates are persisted exactly as the protocol validated them
-        // (same ids, same governance); only then is the job flipped to done, so
-        // a refused/failed run can never leave a done job without its entry.
+        // ── Phase 4b: commit the validated candidates AND the job terminal in
+        // ONE caller-owned transaction (durable §8) ──────────────────────────
+        // The candidates are written exactly as the protocol validated them
+        // (same ids, same governance) through the bound-tx persist seam, and the
+        // job is flipped to done in the same transaction. A refused/failed run
+        // therefore can never leave a done job without its entry, and dropping
+        // this future mid-commit (cancellation) rolls the whole thing back: zero
+        // candidate writes and no successful terminal.
         let store = nexus_local_db::kb_store::SqliteKbStore::new(pool.as_ref().clone());
+        let mut tx = nexus_local_db::begin_immediate(pool)
+            .await
+            .map_err(|e| CapabilityError::Internal(format!("Failed to open finalize tx: {e}")))?;
         let mut insert_result = None;
         for candidate in outcome.candidates {
-            match nexus_knowledge::world_kb::persist_prepared_extract(&store, candidate).await {
+            match store.insert_key_block_in_tx(&mut tx, candidate.record).await {
                 Ok(r) => insert_result = Some(r),
                 Err(e) => {
+                    drop(tx);
                     // Mark job as failed so the content loss window is closed.
                     let _ = nexus_local_db::mark_extract_job_failed(
                         pool,
@@ -557,15 +565,39 @@ impl Capability for KbExtractWork {
             }
         }
         let Some(insert_result) = insert_result else {
+            drop(tx);
             let reason = "ke-extraction accepted the run without a candidate".to_string();
             let _ = nexus_local_db::mark_extract_job_failed(pool, &job_id, &reason).await;
             return Err(CapabilityError::Internal(reason));
         };
 
-        // Mark done only after the KnowledgeEntryRecord was successfully inserted.
-        nexus_local_db::mark_extract_job_done(pool, &job_id)
+        // The terminal claim rechecks the job's stored status in the same
+        // transaction: a job another actor already cancelled/finished rolls the
+        // candidates back instead of reporting success.
+        match nexus_local_db::kb_extract_job::mark_done_in_tx(&mut tx, &job_id).await {
+            Ok(true) => {}
+            Ok(false) => {
+                drop(tx);
+                return Err(CapabilityError::Internal(format!(
+                    "Job '{job_id}' is no longer claimable; refused to report success"
+                )));
+            }
+            Err(e) => {
+                drop(tx);
+                let _ = nexus_local_db::mark_extract_job_failed(
+                    pool,
+                    &job_id,
+                    &format!("Failed to mark job done: {e}"),
+                )
+                .await;
+                return Err(CapabilityError::Internal(format!(
+                    "Failed to mark job done: {e}"
+                )));
+            }
+        }
+        tx.commit()
             .await
-            .map_err(|e| CapabilityError::Internal(format!("Failed to mark job done: {e}")))?;
+            .map_err(|e| CapabilityError::Internal(format!("Failed to commit finalize: {e}")))?;
 
         Ok(json!({
             "job_id": job_id,

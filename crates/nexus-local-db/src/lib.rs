@@ -225,7 +225,7 @@ pub use kb_extract_job::{
     get_promotion as get_extract_promotion, insert_pending as insert_pending_extract,
     is_idempotent as is_extract_idempotent, list_by_creator as list_extract_jobs,
     list_pending_for_world as list_pending_extracts_for_world,
-    mark_confirmed as mark_extract_confirmed, mark_done as mark_extract_job_done,
+    mark_confirmed as mark_extract_confirmed, mark_done_in_tx as mark_extract_job_done_in_tx,
     mark_failed as mark_extract_job_failed, mark_rejected as mark_extract_rejected,
     mark_running as mark_extract_job_running, next_queued as next_queued_extract_job, KbExtractJob,
     KbExtractPromotion,
