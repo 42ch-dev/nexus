@@ -582,7 +582,15 @@ async fn v1191_holder_ports_same_world_timeline_target_accepted_cross_world_refu
     let (pool, _dir) = fresh_pool().await;
     seed_world(&pool, "wld_test").await;
     seed_world(&pool, "wld_foreign").await;
-    seed::event(&pool, "evt_home", "wld_test", "fbk_root", "story_advance", 0).await;
+    seed::event(
+        &pool,
+        "evt_home",
+        "wld_test",
+        "fbk_root",
+        "story_advance",
+        0,
+    )
+    .await;
     seed::event(
         &pool,
         "evt_abroad",
