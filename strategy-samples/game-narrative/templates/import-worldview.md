@@ -105,7 +105,7 @@ Respond with ONLY a JSON object (no markdown code fences):
 }
 ```
 
-## SDK-side import pattern (N-C1, @42ch/spoke-connect@0.13.1)
+## SDK-side import pattern (N-C1, `@42ch/spoke-connect` — the pinned lockstep release)
 
 The partner's backend persists these drafts — the preset itself does not write.
 The host peer needs an operator-stored Actor **grant** (`grant` in

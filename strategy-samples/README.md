@@ -14,7 +14,7 @@ This repository ships everything you use together:
 | Strategy samples | [`game-narrative/`](./game-narrative/) and [`react-trpg-turn/`](./react-trpg-turn/) | Forkable strategy bundles: capability routing + prompt templates for lore import lanes (game-narrative) and for a TRPG turn loop (react-trpg-turn). Nothing here is compiled into any binary. |
 | Validator | [`validate.sh`](./validate.sh) | One command, daemon-free: runs the real validator core on any strategy directory. |
 | WASM compute modules | `~/.nexus42/modules/<id>/` (see [Compute](#5-compute-basic-combat-n-c2-compute-half)) | Operator-installed, host-local compute modules (e.g. `modules/basic-combat`) the runtime invokes over Connect. Bytes are never peer-supplied. |
-| Connect SDK | `@42ch/spoke-connect@0.13.1` (npm) | Your backend's connection + invoke surface to the runtime (and to any SPOKE connect host). |
+| Connect SDK | `@42ch/spoke-connect` (npm, **the pinned upstream lockstep release**) | Your backend's connection + invoke surface to the runtime (and to any SPOKE connect host). |
 
 **The division of labor (read this first).** The strategy declares *capability
 routing and prompt templates* — it does not execute on the runtime. Your
@@ -32,8 +32,12 @@ never computes, rewrites, or overrides settlement results.
    temp dir keeps a run hermetic).
 3. Start the runtime; the readiness line is `nexus-runtime: Connect Host
    (N-C2 E2) ready`.
-4. Install the Connect SDK: `npm install @42ch/spoke-connect@0.13.1`, and
-   allowlist your peer (with `module_scope` for compute).
+4. Install the Connect SDK at the pinned upstream lockstep release — resolve it
+   from the manifests instead of copying a literal (see
+   [Version pins](#version-pins-do-not-hardcode)): `npm install
+   "@42ch/spoke-connect@${PIN}"`, and
+   allowlist your peer (with `module_scope` for compute, plus the peer's Actor
+   `grant` — see [Allowlist your peer on the host](#allowlist-your-peer-on-the-host)).
 5. Import lore: `upsert` → `promote` → `relate` over Connect (N-C1 write ops).
 6. Reason: `check` / `assemble` over Connect (N-C2 read half).
 7. Compute: install `basic-combat` under `~/.nexus42/modules/`, stage a
@@ -155,11 +159,29 @@ nexus42 creator world create --title "E2 demo world"       # creates a world; no
 
 ## 2. Connect with the SDK
 
-The TypeScript SDK is published as **`@42ch/spoke-connect`** (this is the
-canonical name — not `spoke-connect-ts`), pinned exactly to **0.13.1**:
+### Version pins (do not hardcode)
+
+This guide never writes the SPOKE version as a literal — the lockstep release is
+recorded once, in this repository's manifests: `Cargo.toml` (`spoke-schemas` /
+`spoke-operations` / `spoke-connect`, exact pins) and `package.json`
+(`@42ch/spoke-schemas` / `@42ch/spoke-operations`), mirrored by
+`tooling/check-wire-drift.sh::SPOKE_PIN`. Resolve it rather than copying it:
 
 ```bash
-npm install @42ch/spoke-connect@0.13.1
+PIN="$(grep -E '^[[:space:]]*spoke-connect[[:space:]]*=' Cargo.toml | sed -E 's/.*"=?([^"]*)".*/\1/')"
+npm install "@42ch/spoke-connect@${PIN}"
+```
+
+The drift gate (`tooling/check-wire-drift.sh`, gate 1c) still fails if any file
+under `strategy-samples/` carries a `@42ch/spoke-connect@<semver>` literal that
+disagrees with the pinned release.
+
+The TypeScript SDK is published as **`@42ch/spoke-connect`** (this is the
+canonical name — not `spoke-connect-ts`), pinned exactly to **that same pinned
+upstream lockstep release**:
+
+```bash
+npm install "@42ch/spoke-connect@${PIN}"     # PIN resolved above
 ```
 
 The SDK ships the connect wire family: the core session helpers (`.`), a Node
@@ -736,7 +758,7 @@ idempotency ledger.
 - Reference module: [`../modules/basic-combat/`](../modules/basic-combat/)
 - Headless runtime spec: [`../.mstar/specs/daemon-runtime.md`](../.mstar/specs/daemon-runtime.md) §4.6
 - Connect invoke surface (N-C2 E2): `apps/nexus42/src/commands/connect/invoke.rs`
-- Connect SDK + wire family: `@42ch/spoke-connect@0.13.1` on npm
+- Connect SDK + wire family: `@42ch/spoke-connect` on npm (the pinned upstream lockstep release)
 - SPOKE connect-demo (runnable mock host + third-party RemoteAdapter client):
   `../../spoke/examples/connect-demo` — the TS-side story: a `BaselinePorts`
   adapter served by a spec-faithful `ConnectHost` over WebSocket, dialed by

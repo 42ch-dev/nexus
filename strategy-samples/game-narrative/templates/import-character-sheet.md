@@ -139,7 +139,7 @@ the lane's final import manifest:
 }
 ```
 
-## SDK-side import pattern (N-C1, @42ch/spoke-connect@0.13.1)
+## SDK-side import pattern (N-C1, `@42ch/spoke-connect` — the pinned lockstep release)
 
 The partner's backend persists these drafts — the preset itself does not write.
 The host peer needs an operator-stored Actor **grant** (`grant` in
@@ -159,4 +159,6 @@ for this whole flow. The granted Actor is the peer's ceiling: `owner` /
    endpoint entries exist; resolve `to_id` targets first.
 
 World writes are scoped by the host's Connect allowlist (`world_scope` /
-`op_scope`); a peer without the target world in scope is denied.
+`op_scope`) **and** the peer's stored Actor `grant`; a peer without the target
+world in its scope/grant, or without a grant at all, is denied with zero side
+effects.
