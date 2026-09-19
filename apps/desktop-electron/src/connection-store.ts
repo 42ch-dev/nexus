@@ -10,6 +10,8 @@
  *   operation fails with a structured error and nothing is written.
  * - One-time legacy import reads the old keychain/app-data config and
  *   encrypts it before the new store becomes authoritative.
+ * - Clear writes a durable tombstone marker: a later open sees the marker
+ *   and never re-imports the legacy material (D-18).
  * - Writes are atomic (temp file + rename); a failed encrypt leaves the
  *   previous state fully intact.
  *
@@ -76,6 +78,9 @@ function sameEndpoint(a: PublicConnectionConfig, b: PublicConnectionConfig): boo
   return a.endpointUrl === b.endpointUrl;
 }
 
+/** Non-secret tombstone written next to the store when the user clears it. */
+const CLEARED_MARKER_NAME = 'connection-config.cleared';
+
 /**
  * Public projection + main-only credential access. The renderer sees only
  * {@link ConnectionStore.get}; {@link ConnectionStore.getAuth} is main-side
@@ -88,11 +93,11 @@ export class ConnectionStore {
   ) {}
 
   /**
-   * Open (or create) the store. When no store file exists and a legacy source
-   * is configured, performs the one-time import: legacy JSON is validated and
-   * encrypted BEFORE the new store is written; originals are left untouched.
-   * A failed/unavailable encryption aborts the import without writing
-   * anything in the clear.
+   * Open (or create) the store. When no store file exists, no cleared
+   * tombstone is present, and a legacy source is configured, performs the
+   * one-time import: legacy JSON is validated and encrypted BEFORE the new
+   * store is written; originals are left untouched. A failed/unavailable
+   * encryption aborts the import without writing anything in the clear.
    */
   static async open(deps: ConnectionStoreDeps): Promise<ConnectionStore> {
     let state: StoredFile | null = null;
@@ -104,7 +109,14 @@ export class ConnectionStore {
       void err;
       state = null;
     }
-    if (state === null && deps.readLegacy) {
+    let cleared = false;
+    try {
+      readFileSync(join(dirname(deps.filePath), CLEARED_MARKER_NAME), 'utf8');
+      cleared = true;
+    } catch {
+      cleared = false;
+    }
+    if (state === null && deps.readLegacy && !cleared) {
       const legacy = await deps.readLegacy();
       if (legacy !== null) {
         const imported = ConnectionStore.importLegacy(deps, legacy);
@@ -258,15 +270,18 @@ export class ConnectionStore {
   }
 
   /**
-   * Remove all stored material. Does NOT trigger a legacy re-import: the
-   * one-time import only runs from {@link ConnectionStore.open} when no
-   * store file exists, so a subsequent import is possible exactly once (on
-   * the next open after this delete) and "clear never reimports" holds.
+   * Remove all stored material. Writes a durable cleared tombstone next to
+   * the store so a later {@link ConnectionStore.open} sees the marker and
+   * never re-imports the legacy material (D-18): clear is a deliberate user
+   * action and must not be undone by the still-present legacy key. The
+   * marker is non-secret and is created only after the store file is
+   * confirmed gone.
    *
    * Resolves only when the material is actually gone: a removal failure
    * (permissions, I/O, …) throws `secure_store_delete_failed` and the
    * in-memory state is left intact so no false "cleared" is reported while
-   * bytes remain on disk. An already-absent file counts as removed.
+   * bytes remain on disk. An already-absent file counts as removed. A
+   * tombstone write failure surfaces the same way.
    */
   async delete(): Promise<void> {
     const remove = this.deps.removeFile ?? rmSync;
@@ -280,6 +295,15 @@ export class ConnectionStore {
           `connection store file could not be removed (${code ?? 'unknown error'})`,
         );
       }
+    }
+    try {
+      atomicWrite(join(dirname(this.deps.filePath), CLEARED_MARKER_NAME), '{"cleared":true}\n');
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException | null)?.code;
+      throw desktopError(
+        'secure_store_delete_failed',
+        `cleared tombstone could not be written (${code ?? 'unknown error'})`,
+      );
     }
     this.state = null;
   }
