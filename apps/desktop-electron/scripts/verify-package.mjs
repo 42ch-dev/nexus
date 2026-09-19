@@ -106,11 +106,17 @@ function inspectMachO(path, expectedArch, minimumMacos, label) {
   } catch (error) {
     fail(`${label} load-command inspection failed for ${path}: ${error.message}`);
   }
-  const floors = [...loadCommands.matchAll(/\bminos\s+(\d+)\.(\d+)(?:\.(\d+))?/g)].map((match) => [
+  const floors = [
+    ...loadCommands.matchAll(/\bminos\s+(\d+)\.(\d+)(?:\.(\d+))?/g),
+    ...loadCommands.matchAll(/LC_VERSION_MIN_MACOSX[\s\S]{0,200}?\n\s*version\s+(\d+)\.(\d+)(?:\.(\d+))?/g),
+  ].map((match) => [
     Number(match[1]),
     Number(match[2]),
     Number(match[3] ?? 0),
   ]);
+  if (floors.length === 0) {
+    fail(`${label} has no minimum macOS load command (minos or LC_VERSION_MIN_MACOSX.version): ${path}`);
+  }
   const maximum = String(minimumMacos).split('.').map(Number);
   if (floors.some(([major, minor, patch]) => major > maximum[0] || (major === maximum[0] && (minor > maximum[1] || (minor === maximum[1] && patch > (maximum[2] ?? 0)))))) {
     fail(`${label} requires a macOS release newer than ${minimumMacos}: ${path}`);
