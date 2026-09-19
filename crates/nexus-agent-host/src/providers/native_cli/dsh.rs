@@ -3592,6 +3592,120 @@ mod tests {
         );
     }
 
+    /// The spawned runtime pid once the fixture records `_turn_open`, i.e.
+    /// after it flushed the `session/prompt` response and the inbox receipt
+    /// (`HOLD_TURN` arm). `None` while the turn has not reached that point.
+    ///
+    /// This is the write-completion barrier for the closed-transport fixture:
+    /// both frames are already in the pipe when the marker appears, and a
+    /// pipe keeps them readable after the writer dies, so the SDK's read loop
+    /// must dispatch the prompt response (and the receipt) before it observes
+    /// EOF. Killing after the marker therefore cannot fail a still-pending
+    /// `session/prompt` request — whose `Error::TransportClosed` would reach
+    /// Nexus through the exact same mapping and be indistinguishable
+    /// downstream — and the only remaining failure origin is the park on the
+    /// notification subscription that the 0.2.1 EOF tail wakes.
+    #[cfg(unix)]
+    fn pid_when_turn_open(req_log: &Path) -> Option<i32> {
+        let raw = std::fs::read_to_string(req_log).ok()?;
+        let entries: Vec<serde_json::Value> = raw
+            .lines()
+            .filter_map(|line| serde_json::from_str(line).ok())
+            .collect();
+        if entries.iter().any(|entry| entry["method"] == "_turn_open") {
+            spawn_pids(&entries).pop()
+        } else {
+            None
+        }
+    }
+
+    /// Closed-transport regression (deepseek-harness-sdk 0.2.1 "wakes closed
+    /// transport"): the `hold_turn` runtime is killed only after it has
+    /// flushed the prompt response and the inbox receipt (`_turn_open`), so
+    /// the run is provably parked on the SDK notification subscription rather
+    /// than awaiting `session/prompt`. The death then closes the notification
+    /// channel, the parked receive resolves with `Error::TransportClosed`, and
+    /// Nexus emits `OpStarted` then exactly one `OpFailed(stream_closed)` — no
+    /// fabricated root text, no second terminal, and none of the SDK's process
+    /// diagnostics on the author-visible event.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn dsh_runtime_death_mid_turn_is_one_stream_closed_terminal() {
+        let req_log_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = req_log_dir.path().join("reqs.jsonl");
+        let dsh_home = req_log_dir.path().join("dsh-home");
+        let provider = stub_provider(
+            "test-dsh-closed-transport",
+            stub_env_scenario(&req_log, &dsh_home, "hold_turn"),
+        );
+        let handle = launch_hermetic(&provider).await;
+
+        // The env lock covers the eager spawn (the fixture's shebang
+        // resolves python3 through PATH) and is held until the child has
+        // reached the wire, so a parallel env-mutating discovery test cannot
+        // disturb resolution.
+        let env_lock = lock_test_env().await;
+        let stream = provider
+            .execute(
+                &handle,
+                HostOperation::Prompt {
+                    op_id: HostOperationId::new(),
+                    content: vec![HostContentBlock::Text {
+                        text: "die mid-turn".to_string(),
+                    }],
+                    permission_scope: None,
+                },
+            )
+            .await
+            .expect("execute");
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let pid = loop {
+            if let Some(pid) = pid_when_turn_open(&req_log) {
+                break pid;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the fixture must hold the turn open before the deadline"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        };
+        rustix::process::kill_process(
+            rustix::process::Pid::from_raw(pid).expect("valid pid"),
+            rustix::process::Signal::KILL,
+        )
+        .expect("kill the runtime mid-turn");
+        drop(env_lock);
+
+        let events =
+            tokio::time::timeout(std::time::Duration::from_secs(10), collect_events(stream))
+                .await
+                .expect("a closed transport must wake the run, not park it until the turn timeout");
+
+        assert_eq!(terminal_count(&events), 1, "{events:?}");
+        assert!(
+            matches!(events.first(), Some(HostEvent::OpStarted(_))),
+            "OpStarted still precedes the terminal: {events:?}"
+        );
+        // The message pins the SDK-surfaced `Error::TransportClosed` mapping
+        // (`classify_run_error`) rather than a Nexus-side backstop, whose
+        // stream_closed messages read "…session closed…" / "…event stream
+        // closed…": only the runtime's own stdio death produces this one.
+        assert!(
+            matches!(
+                terminal_of(&events),
+                Some(HostEvent::OpFailed(f))
+                    if f.error_category == "stream_closed"
+                        && f.error_message == "dsh runtime closed the transport before the turn completed"
+            ),
+            "runtime death must close the turn as the SDK transport error: {events:?}"
+        );
+        assert!(
+            message_texts(&events).is_empty(),
+            "a closed transport must not fabricate root text: {events:?}"
+        );
+    }
+
     // ── Probe (P0 T2: both recipes, no model call) ──────────────────────
 
     /// An invalid explicit override probes unavailable even when

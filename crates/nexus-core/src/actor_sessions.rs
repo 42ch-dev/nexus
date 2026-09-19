@@ -30,7 +30,6 @@ use tokio::sync::Mutex as AsyncMutex;
 
 use crate::actors::{AdmittedActor, AdmittedActorContext};
 use crate::error::{CoreError, CoreResult};
-use crate::service::CoreService;
 
 /// Discriminant participating in exact Actor session equality.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -56,6 +55,34 @@ pub struct ActorSessionKey {
     /// A material archive/restore bumps the epoch, so a post-transition admit
     /// can never reuse a pre-transition session.
     pub character_epoch: Option<i64>,
+    /// Knowledge fingerprint at admission (durable §4.3): the server-chosen
+    /// read-policy kind plus the stored World/Character `knowledge_revision`
+    /// pair. A material governance change (or a policy switch) retires the
+    /// session on its next use instead of reusing a context that no longer
+    /// describes the stored governance.
+    pub knowledge: crate::actor_knowledge::ActorKnowledgeIdentity,
+}
+
+/// Outcome of revalidating one indexed session against a freshly admitted
+/// knowledge fingerprint (durable §4.3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KnowledgeReuse {
+    /// The recorded fingerprint still matches; the session stays indexed and
+    /// its reuse key stays live.
+    Reusable,
+    /// The fingerprint diverged: the session was retired in place through the
+    /// tombstone machinery and must never be reused. The id is returned for
+    /// one physical Host shutdown attempt.
+    Retired(HostSessionId),
+}
+
+/// The retained `409 actor_session_stale` refusal for an indexed/retired Actor
+/// session whose admission no longer describes stored state.
+pub(crate) fn actor_session_stale(session_id: &str) -> CoreError {
+    CoreError::ActorConflict {
+        code: "actor_session_stale".into(),
+        message: format!("actor session {session_id} is stale"),
+    }
 }
 
 struct IndexedActorSession {
@@ -208,7 +235,8 @@ impl ActorSessionRegistry {
         })
     }
 
-    /// Build the exact tuple key from an admitted Actor context.
+    /// Build the exact tuple key from an admitted Actor context and its
+    /// admitted knowledge fingerprint.
     ///
     /// # Errors
     ///
@@ -219,6 +247,7 @@ impl ActorSessionRegistry {
         model: Option<String>,
         mode: Option<String>,
         ctx: &AdmittedActorContext,
+        knowledge: crate::actor_knowledge::ActorKnowledgeIdentity,
     ) -> CoreResult<ActorSessionKey> {
         let (actor_kind, actor_id) = match &ctx.actor {
             AdmittedActor::Creator { creator_id } => {
@@ -240,7 +269,41 @@ impl ActorSessionRegistry {
             branch_id: ctx.branch_id.clone(),
             event_id: ctx.event_id.clone(),
             character_epoch: ctx.character_epoch,
+            knowledge,
         })
+    }
+
+    /// Revalidate one indexed Actor session against a freshly admitted
+    /// knowledge fingerprint (durable §4.3): the session is reusable only
+    /// while the read-policy kind and both stored knowledge revisions still
+    /// match. On divergence the session is retired in place through the
+    /// existing tombstone machinery so its reuse key can never match again,
+    /// and the caller admits a fresh context under the new fingerprint.
+    ///
+    /// # Errors
+    ///
+    /// Returns `actor_session_stale` when the id is not a live indexed Actor
+    /// session (retired ids and legacy ids are never reusable).
+    #[allow(clippy::significant_drop_tightening)] // the session map guard is held across the identity comparison and the retire
+    pub fn revalidate_knowledge(
+        &self,
+        session_id: &HostSessionId,
+        fresh: &crate::actor_knowledge::ActorKnowledgeIdentity,
+    ) -> CoreResult<KnowledgeReuse> {
+        let mut maps = self.maps();
+        let stored = maps
+            .by_session
+            .get(session_id)
+            .map(|row| (row.key.clone(), row.key.knowledge == *fresh));
+        let Some((key, matches)) = stored else {
+            return Err(actor_session_stale(&session_id.to_string()));
+        };
+        if matches {
+            return Ok(KnowledgeReuse::Reusable);
+        }
+        Self::evict_locked(&mut maps, &key, session_id);
+        maps.indexed_operations.retain(|_, sid| sid != session_id);
+        Ok(KnowledgeReuse::Retired(session_id.clone()))
     }
 
     /// Admitted context for an indexed Actor session, if any.
@@ -518,24 +581,6 @@ impl ActorSessionRegistry {
     #[must_use]
     pub fn is_closed(&self) -> bool {
         self.maps().closed
-    }
-
-    /// Admit one side-effecting Character activity through the P2
-    /// [`CoreService`] lease: owner-check before allocating a fence, then the
-    /// status/epoch re-read under the fence. The caller holds the returned
-    /// lease through every DB/file/provider/terminal-capture effect; drop
-    /// releases the fence.
-    ///
-    /// # Errors
-    ///
-    /// Owner, inactive-Character, or busy/transition lease failures.
-    pub async fn admit_character_activity(
-        &self,
-        core: &CoreService,
-        principal: &crate::principal::Principal,
-        actor: &AdmittedActor,
-    ) -> CoreResult<crate::actor_fence::ActorActivityLease> {
-        core.acquire_actor_activity(principal, actor).await
     }
 
     /// Retire every indexed session of a Character after a **material**

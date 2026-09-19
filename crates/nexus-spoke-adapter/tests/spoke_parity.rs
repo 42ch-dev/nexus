@@ -25,7 +25,9 @@
 use nexus_contracts::BlockType;
 use nexus_knowledge::world_kb::knowledge_entry::{ConflictCheckResult, MembershipPermissionCheck};
 use nexus_knowledge::world_kb::{KbError, KnowledgeEntryRecord};
-use nexus_spoke_adapter::conversion::{knowledge_record_to_spoke, KnowledgeEntryRecordSpokeExt};
+use nexus_spoke_adapter::conversion::{
+    knowledge_record_to_spoke, spoke_to_knowledge_record, KnowledgeEntryRecordSpokeExt,
+};
 use nexus_spoke_adapter::ops::{assert_revision, transition_status};
 use nexus_spoke_adapter::KnowledgeEntry;
 use nexus_spoke_adapter::SpokeResult;
@@ -224,6 +226,48 @@ fn confirm_with_revision_mismatch_maps_back_to_revision_mismatch() {
                 actual: 3
             }
         ),
+        "got {err:?}"
+    );
+}
+
+// ── 4. v1.191 P1 T8: holder governance conversion parity ─────────────────
+
+/// `v1191_holder_ports`: the sole conversion seam maps the native governance
+/// pair onto the wire fields and back with no normalization, and refuses the
+/// retired legacy `creator_only` key (false included) with the stable reason.
+#[test]
+fn v1191_holder_ports_governance_conversion_is_exact_and_legacy_key_refused() {
+    let mut e = entry_in("confirmed");
+    e.holder_entry_id = Some("hld_parity".to_string());
+    e.disclosure = Some("owner-private".to_string());
+
+    let spoke = knowledge_record_to_spoke(&e);
+    assert_eq!(spoke.owner.as_ref().map(|o| o.as_str()), Some("hld_parity"));
+    assert_eq!(
+        spoke.disclosure.as_ref().map(|d| d.as_str()),
+        Some("owner-private")
+    );
+    let back = spoke_to_knowledge_record(spoke).expect("reverse conversion");
+    assert_eq!(back.holder_entry_id.as_deref(), Some("hld_parity"));
+    assert_eq!(back.disclosure.as_deref(), Some("owner-private"));
+    assert_eq!(back.owner, e.owner, "the container axis is untouched");
+
+    // A legacy-flag entry is refused before any field is read.
+    let legacy = nexus_spoke_adapter::extensions::refuse_legacy_creator_only;
+    let mut wire = knowledge_record_to_spoke(&entry_in("confirmed"));
+    let key = spoke_schemas::knowledge_entry::KnowledgeEntryExtensionsKey::try_from("nexus")
+        .expect("nexus namespace key");
+    wire.extensions
+        .entry(key)
+        .or_default()
+        .insert("creator_only".to_string(), serde_json::Value::Bool(false));
+    assert!(
+        legacy(&wire).is_err(),
+        "the retired key must be refused even when false"
+    );
+    let err = spoke_to_knowledge_record(wire).expect_err("legacy key must reject");
+    assert!(
+        err.to_string().contains("legacy_creator_only_unsupported"),
         "got {err:?}"
     );
 }

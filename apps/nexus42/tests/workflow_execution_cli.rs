@@ -1349,8 +1349,24 @@ async fn admission_normal_boot_bundle_pool_backed_capability() {
     let kb = registry
         .get("kb.extract_work")
         .expect("kb.extract_work must be registered on the boot aggregate");
+    // v1.191 P1 T13: the run identity is trusted context the engine injects,
+    // and the worldless no-op is defined on the claimed job's (absent) World —
+    // so the probe seeds a worldless queued job and carries the real run id.
+    // SAFETY: test-only seed against the known kb_extract_jobs schema.
+    sqlx::query(
+        "INSERT OR IGNORE INTO kb_extract_jobs \
+           (job_id, creator_id, workspace_id, work_entry_id, world_id, status, created_at) \
+         VALUES ('xj_normal_boot_probe', 'test_creator', 'ws', 'wrk_probe', '', 'queued', datetime('now'))",
+    )
+    .execute(&daemon.pool)
+    .await
+    .expect("seed worldless queued job");
+
     let out = kb
-        .run(serde_json::json!({ "creator_id": "test_creator" }))
+        .run(serde_json::json!({
+            "creator_id": "test_creator",
+            "_session_id": "run_normal_boot_probe",
+        }))
         .await
         .expect("pool-backed kb.extract_work must execute, not return WorkerUnavailable");
     assert_eq!(

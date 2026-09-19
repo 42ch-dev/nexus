@@ -3,7 +3,7 @@
   "$id": "https://nexus42.invalid/schemas/daemon-api/actor-knowledge/update-knowledge-entry-request.schema.json",
   "schema_version": 1,
   "title": "Nexus UpdateKnowledgeEntryRequest",
-  "description": "Request body for PATCH /v1/daemon/characters/:character_id/knowledge/:entry_id. Only canonical_name and summary are mutable; null removes summary, omission keeps it.",
+  "description": "Request body for PATCH /v1/daemon/characters/:character_id/knowledge/:entry_id. Only canonical_name, summary and audience are mutable; null removes summary, omission keeps it. Governance moves under the same expected_revision CAS: an omitted audience preserves the stored holder/disclosure pair, and an explicit \"shared\" clears both. The legacy `creator_only` key is not a member of this schema and its presence is rejected (including `false`), never ignored.",
   "type": "object",
   "required": ["expected_revision"],
   "additionalProperties": false,
@@ -22,6 +22,53 @@
       "type": ["string", "null"],
       "maxLength": 65536,
       "description": "Plain UTF-8 summary stored in body.summary. Null removes the summary member; omission keeps it."
+    },
+    "audience": {
+      "description": "Closed author audience for holder governance. Omission preserves the stored governance columns; explicit \"shared\" clears both. A private audience resolves against the admitted identity: the author never supplies a holder id or a management flag.",
+      "oneOf": [
+        {
+          "title": "SharedKnowledgeAudience",
+          "type": "object",
+          "required": ["kind"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": ["shared"],
+              "description": "In-scope shared knowledge: clears holder and disclosure."
+            }
+          }
+        },
+        {
+          "title": "AuthorOnlyKnowledgeAudience",
+          "type": "object",
+          "required": ["kind"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": ["author-only"],
+              "description": "Resolves to the admitted controlling Creator's own holder with disclosure owner-private."
+            }
+          }
+        },
+        {
+          "title": "CharacterPrivateKnowledgeAudience",
+          "type": "object",
+          "required": ["kind", "character_id"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": ["character-private"],
+              "description": "Resolves to a Character this Creator owns; for a World-owned row that Character must be bound to that World."
+            },
+            "character_id": {
+              "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CharacterId"
+            }
+          }
+        }
+      ]
     }
   }
 }

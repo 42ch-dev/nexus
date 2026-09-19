@@ -214,6 +214,11 @@ impl CoreHomeService {
 
         Ok(CreatorDetail {
             creator_id,
+            // Registration activates the global identity; the workspace
+            // `creators` row (and with it the holder registry row) is
+            // materialized by the workspace-selection path, so no registry
+            // state is at hand to project here.
+            holder_entry_id: None,
             display_name,
             handle: None,
             has_api_key: false,
@@ -239,6 +244,9 @@ impl CoreHomeService {
         }
         Ok(CreatorDetail {
             creator_id: creator_id.to_string(),
+            // Convergence is a config/selection read: it holds no workspace
+            // pool, so there is no registry state to project.
+            holder_entry_id: None,
             display_name: display_name.map(str::to_string),
             handle: None,
             has_api_key: false,

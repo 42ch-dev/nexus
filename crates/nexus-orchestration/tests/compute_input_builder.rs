@@ -6,13 +6,18 @@
 //! - Cross-world reference rejected
 //! - Empty computable set → `NoComputableEntries`
 //! - `narrative_state` shape + default branch
+//! - Admitted-scope eligibility (v1.191 P1 R5): another holder's
+//!   `owner-private` World row never reaches `key_blocks` or a referenced-id
+//!   load, the caller's own private row and shared rows still do, and a
+//!   selection that does not authorize the World reads nothing.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use nexus_contracts::BlockType;
 use nexus_knowledge::world_kb::knowledge_entry::{
-    KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeOwnerRef,
+    KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeOwnerRef, DISCLOSURE_OWNER_PRIVATE,
 };
+use nexus_knowledge::world_kb::store::KnowledgeReadScope;
 use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::init_engine_pool;
 use nexus_local_db::kb_store::SqliteKbStore;
@@ -21,6 +26,25 @@ use nexus_wasm_host::ModuleManifest;
 use serde_json::{json, Map, Value};
 
 // ── Helpers ────────────────────────────────────────────────────────────
+
+/// The holder the admitted `ActorView` selection resolves to in these cases.
+const READER_HOLDER: &str = "hld_test_reader";
+
+/// The admitted `ActorView` selection these cases read through: the World
+/// container plus a resolved holder.
+///
+/// The seeded rows are shared unless a case deliberately governs them, so the
+/// holder only decides private-row admission — exactly what the production
+/// caller resolves from stored ownership before building the payload.
+fn test_scope(world_id: &str) -> KnowledgeReadScope {
+    scope_as(world_id, READER_HOLDER)
+}
+
+/// [`test_scope`] for another resolved holder (or another set of containers).
+fn scope_as(world_id: &str, holder: &str) -> KnowledgeReadScope {
+    KnowledgeReadScope::actor_view(holder, vec![KnowledgeOwnerRef::world(world_id)])
+        .expect("a nonempty holder always forms an ActorView selection")
+}
 
 async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
@@ -78,6 +102,30 @@ async fn seed_kb_entry(
     name: &str,
     computable: bool,
 ) -> KnowledgeEntryRecord {
+    insert_kb_entry(pool, world_id, block_type, name, computable, None, None).await
+}
+
+/// Seed a **stored creator and its registry holder**, returning the holder id a
+/// selection resolves to. The `kb_key_blocks` governance FK requires the holder
+/// row to exist before a private row can be written.
+async fn seed_holder(pool: &sqlx::SqlitePool, creator_id: &str) -> String {
+    nexus_local_db::ensure_creator_row(pool, creator_id, "Holder")
+        .await
+        .unwrap();
+    nexus_local_db::creator_holder_entry_id(creator_id)
+}
+
+/// [`seed_kb_entry`] with an explicit governance pair, so a case can store an
+/// `owner-private` row under a real holder (`None`/`None` is the shared row).
+async fn insert_kb_entry(
+    pool: &sqlx::SqlitePool,
+    world_id: &str,
+    block_type: BlockType,
+    name: &str,
+    computable: bool,
+    holder_entry_id: Option<&str>,
+    disclosure: Option<&str>,
+) -> KnowledgeEntryRecord {
     let mut body = KnowledgeEntryBody {
         summary: Some(format!("{name} entry")),
         computable: Some(computable),
@@ -86,16 +134,33 @@ async fn seed_kb_entry(
     if computable {
         body.state = Some(json!({"hp": 100, "atk": 10}));
     }
-    let kb = KnowledgeEntryRecord {
+    let mut kb = KnowledgeEntryRecord {
         owner: KnowledgeOwnerRef::world(world_id),
         block_type,
         canonical_name: name.to_string(),
         body: Some(body),
         ..KnowledgeEntryRecord::new(world_id, block_type, name)
     };
+    kb.holder_entry_id = holder_entry_id.map(str::to_string);
+    kb.disclosure = disclosure.map(str::to_string);
     let kb_store = SqliteKbStore::new(pool.clone());
     kb_store.insert_knowledge_entry(kb.clone()).await.unwrap();
     kb
+}
+
+/// The `entry_id`s of the assembled `key_blocks`, in payload order.
+fn key_block_ids(
+    input: &nexus_contracts::generated::daemon_api::compute::compute_input::ComputeInput,
+) -> Vec<String> {
+    input
+        .key_blocks
+        .iter()
+        .filter_map(|kb| {
+            kb.get("entry_id")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .collect()
 }
 
 fn basic_manifest(required_types: Vec<&str>) -> ModuleManifest {
@@ -129,7 +194,13 @@ async fn empty_computable_set_returns_no_computable_entries() {
     // No KB entries seeded → query returns empty set.
 
     let manifest = basic_manifest(vec!["character"]);
-    let builder = ComputeInputBuilder::new(pool, "wld_abc123", manifest, Map::new());
+    let builder = ComputeInputBuilder::new(
+        pool,
+        "wld_abc123",
+        manifest,
+        Map::new(),
+        test_scope("wld_abc123"),
+    );
 
     let result = builder.build().await;
     match result {
@@ -150,7 +221,13 @@ async fn filters_by_required_key_block_types() {
 
     // Manifest only wants characters.
     let manifest = basic_manifest(vec!["character"]);
-    let builder = ComputeInputBuilder::new(pool, "wld_test", manifest, Map::new());
+    let builder = ComputeInputBuilder::new(
+        pool,
+        "wld_test",
+        manifest,
+        Map::new(),
+        test_scope("wld_test"),
+    );
 
     let input = builder.build().await.expect("build should succeed");
 
@@ -174,7 +251,13 @@ async fn non_computable_entries_excluded() {
     seed_kb_entry(&pool, "wld_test", BlockType::Character, "npc", false).await;
 
     let manifest = basic_manifest(vec!["character"]);
-    let builder = ComputeInputBuilder::new(pool, "wld_test", manifest, Map::new());
+    let builder = ComputeInputBuilder::new(
+        pool,
+        "wld_test",
+        manifest,
+        Map::new(),
+        test_scope("wld_test"),
+    );
 
     let input = builder.build().await.expect("build should succeed");
     assert_eq!(
@@ -219,7 +302,8 @@ async fn referenced_id_entries_loaded() {
     // Manifest only wants characters; only the attacker will be in the
     // initial computable query — the defender is loaded via `_id`.
     let manifest = basic_manifest(vec!["character"]);
-    let builder = ComputeInputBuilder::new(pool, "wld_test", manifest, params);
+    let builder =
+        ComputeInputBuilder::new(pool, "wld_test", manifest, params, test_scope("wld_test"));
 
     let input = builder.build().await.expect("build should succeed");
 
@@ -238,9 +322,16 @@ async fn referenced_id_entries_loaded() {
     assert!(entry_ids.contains(&defender.entry_id.as_str()));
 }
 
-/// Step 5: Cross-world reference is rejected.
+/// Step 5: A reference outside the admitted selection is not admitted.
+///
+/// v1.191 P1 R5: an entry in another World is outside the selection's
+/// containers, so it is indistinguishable from a missing id (durable §4.2) and
+/// the build refuses as `ReferencedEntryNotFound` — the previous
+/// `ReferencedEntryNotInWorld` arm named the foreign World, which is exactly the
+/// existence disclosure the container scope removes. The row itself is
+/// untouched: the unscoped listing still holds it.
 #[tokio::test]
-async fn cross_world_reference_rejected() {
+async fn cross_world_reference_is_not_admitted() {
     let (pool, _dir) = fresh_pool().await;
     seed_world(&pool, "wld_test").await;
     seed_world(&pool, "wld_other").await;
@@ -258,26 +349,199 @@ async fn cross_world_reference_rejected() {
     );
 
     let manifest = basic_manifest(vec!["character"]);
-    let builder = ComputeInputBuilder::new(pool, "wld_test", manifest, params);
+    let builder = ComputeInputBuilder::new(
+        pool.clone(),
+        "wld_test",
+        manifest,
+        params,
+        test_scope("wld_test"),
+    );
 
     let result = builder.build().await;
     match result {
-        Err(ComputeBuildError::ReferencedEntryNotInWorld(msg)) => {
-            assert!(
-                msg.contains("belongs to world"),
-                "error message should mention world mismatch, got: {msg}"
-            );
+        Err(ComputeBuildError::ReferencedEntryNotFound(msg)) => {
             assert!(
                 msg.contains(&other_entry.entry_id),
-                "error should name the offending entry id"
-            );
-            assert!(
-                msg.contains("wld_other"),
-                "error should mention the referenced world"
+                "error should name the offending entry id, got: {msg}"
             );
         }
-        other => panic!("expected ReferencedEntryNotInWorld, got {other:?}"),
+        other => panic!("expected ReferencedEntryNotFound, got {other:?}"),
     }
+
+    // The refusal is the selection's, not an absent row.
+    let unscoped = SqliteKbStore::new(pool)
+        .query(&nexus_knowledge::world_kb::KbQuery::new("wld_other"))
+        .await
+        .unwrap();
+    assert_eq!(unscoped.total_count, 1, "the foreign row still exists");
+}
+
+/// R5: another holder's `owner-private` World row never reaches `key_blocks`,
+/// while shared rows and the reading holder's own private row do.
+#[tokio::test]
+async fn holder_private_rows_excluded_from_the_admitted_scope() {
+    let (pool, _dir) = fresh_pool().await;
+    seed_world(&pool, "wld_test").await;
+    let reader_holder = seed_holder(&pool, "ctr_reader").await;
+    let other_holder = seed_holder(&pool, "ctr_other").await;
+
+    let shared = seed_kb_entry(&pool, "wld_test", BlockType::Character, "SharedHero", true).await;
+    let own_private = insert_kb_entry(
+        &pool,
+        "wld_test",
+        BlockType::Character,
+        "ReaderPrivate",
+        true,
+        Some(&reader_holder),
+        Some(DISCLOSURE_OWNER_PRIVATE),
+    )
+    .await;
+    let other_private = insert_kb_entry(
+        &pool,
+        "wld_test",
+        BlockType::Character,
+        "OtherHolderPrivate",
+        true,
+        Some(&other_holder),
+        Some(DISCLOSURE_OWNER_PRIVATE),
+    )
+    .await;
+
+    // Differential: the unscoped World listing holds all three rows, so the
+    // exclusion below is the selection's policy rather than an empty store.
+    let unscoped = SqliteKbStore::new(pool.clone())
+        .query(&nexus_knowledge::world_kb::KbQuery::new("wld_test"))
+        .await
+        .unwrap();
+    assert_eq!(
+        unscoped.total_count, 3,
+        "the store holds the shared row and both private rows"
+    );
+
+    let manifest = basic_manifest(vec!["character"]);
+    let builder = ComputeInputBuilder::new(
+        pool,
+        "wld_test",
+        manifest,
+        Map::new(),
+        scope_as("wld_test", &reader_holder),
+    );
+    let input = builder.build().await.expect("build should succeed");
+
+    let ids = key_block_ids(&input);
+    assert!(
+        ids.contains(&shared.entry_id) && ids.contains(&own_private.entry_id),
+        "shared and own-holder private rows stay in the payload: {ids:?}"
+    );
+    assert!(
+        !ids.contains(&other_private.entry_id),
+        "another holder's private World row must not reach the module: {ids:?}"
+    );
+}
+
+/// R5: a referenced `*_id` that names another holder's private row is not
+/// admitted — the load is the by-id arm of the same eligibility rule.
+#[tokio::test]
+async fn referenced_private_entry_of_another_holder_is_not_admitted() {
+    let (pool, _dir) = fresh_pool().await;
+    seed_world(&pool, "wld_test").await;
+    let reader_holder = seed_holder(&pool, "ctr_reader").await;
+    let other_holder = seed_holder(&pool, "ctr_other").await;
+
+    seed_kb_entry(&pool, "wld_test", BlockType::Character, "hero", true).await;
+    let own_private = insert_kb_entry(
+        &pool,
+        "wld_test",
+        BlockType::Character,
+        "ReaderPrivate",
+        false,
+        Some(&reader_holder),
+        Some(DISCLOSURE_OWNER_PRIVATE),
+    )
+    .await;
+    let other_private = insert_kb_entry(
+        &pool,
+        "wld_test",
+        BlockType::Character,
+        "OtherHolderPrivate",
+        false,
+        Some(&other_holder),
+        Some(DISCLOSURE_OWNER_PRIVATE),
+    )
+    .await;
+
+    // Own private row: admitted through the by-id read.
+    let mut own_params = Map::new();
+    own_params.insert(
+        "ally_id".to_string(),
+        Value::String(own_private.entry_id.clone()),
+    );
+    let own_input = ComputeInputBuilder::new(
+        pool.clone(),
+        "wld_test",
+        basic_manifest(vec!["character"]),
+        own_params,
+        scope_as("wld_test", &reader_holder),
+    )
+    .build()
+    .await
+    .expect("own private reference is admitted");
+    assert!(
+        key_block_ids(&own_input).contains(&own_private.entry_id),
+        "the reader's own private row loads by id"
+    );
+
+    // Another holder's private row: hidden and absent are indistinguishable.
+    let mut other_params = Map::new();
+    other_params.insert(
+        "ally_id".to_string(),
+        Value::String(other_private.entry_id.clone()),
+    );
+    let result = ComputeInputBuilder::new(
+        pool,
+        "wld_test",
+        basic_manifest(vec!["character"]),
+        other_params,
+        scope_as("wld_test", &reader_holder),
+    )
+    .build()
+    .await;
+    match result {
+        Err(ComputeBuildError::ReferencedEntryNotFound(msg)) => assert!(
+            msg.contains(&other_private.entry_id),
+            "the refusal names the requested id, got: {msg}"
+        ),
+        other => panic!("expected ReferencedEntryNotFound, got {other:?}"),
+    }
+}
+
+/// R5 fail-closed: a selection that does not authorize this World reads nothing
+/// rather than widening to the World listing.
+#[tokio::test]
+async fn selection_without_the_world_container_reads_nothing() {
+    let (pool, _dir) = fresh_pool().await;
+    seed_world(&pool, "wld_test").await;
+    seed_kb_entry(&pool, "wld_test", BlockType::Character, "hero", true).await;
+
+    let manifest = basic_manifest(vec!["character"]);
+    let builder = ComputeInputBuilder::new(
+        pool.clone(),
+        "wld_test",
+        manifest,
+        Map::new(),
+        test_scope("wld_other"),
+    );
+    match builder.build().await {
+        Err(ComputeBuildError::NoComputableEntries) => {}
+        other => panic!("expected NoComputableEntries, got {other:?}"),
+    }
+
+    // The row is still there for the listing the selection refused to fall back on.
+    let unscoped = SqliteKbStore::new(pool)
+        .query(&nexus_knowledge::world_kb::KbQuery::new("wld_test"))
+        .await
+        .unwrap();
+    assert_eq!(unscoped.total_count, 1);
 }
 
 /// Step 5b: Referenced `*_id` entry that does not exist → `ReferencedEntryNotFound`.
@@ -297,7 +561,8 @@ async fn referenced_entry_not_found_error() {
     );
 
     let manifest = basic_manifest(vec!["character"]);
-    let builder = ComputeInputBuilder::new(pool, "wld_test", manifest, params);
+    let builder =
+        ComputeInputBuilder::new(pool, "wld_test", manifest, params, test_scope("wld_test"));
 
     let result = builder.build().await;
     match result {
@@ -319,7 +584,13 @@ async fn narrative_state_shape() {
     seed_kb_entry(&pool, "wld_test", BlockType::Character, "hero", true).await;
 
     let manifest = basic_manifest(vec!["character"]);
-    let builder = ComputeInputBuilder::new(pool, "wld_test", manifest, Map::new());
+    let builder = ComputeInputBuilder::new(
+        pool,
+        "wld_test",
+        manifest,
+        Map::new(),
+        test_scope("wld_test"),
+    );
 
     let input = builder.build().await.expect("build should succeed");
 
@@ -346,7 +617,13 @@ async fn world_ref_contains_expected_fields() {
     seed_kb_entry(&pool, "wld_test", BlockType::Character, "hero", true).await;
 
     let manifest = basic_manifest(vec!["character"]);
-    let builder = ComputeInputBuilder::new(pool, "wld_test", manifest, Map::new());
+    let builder = ComputeInputBuilder::new(
+        pool,
+        "wld_test",
+        manifest,
+        Map::new(),
+        test_scope("wld_test"),
+    );
 
     let input = builder.build().await.expect("build should succeed");
 
@@ -378,7 +655,8 @@ async fn invocation_params_passed_through() {
     params.insert("seed".to_string(), json!(42));
 
     let manifest = basic_manifest(vec!["character"]);
-    let builder = ComputeInputBuilder::new(pool, "wld_test", manifest, params);
+    let builder =
+        ComputeInputBuilder::new(pool, "wld_test", manifest, params, test_scope("wld_test"));
 
     let input = builder.build().await.expect("build should succeed");
 
@@ -400,7 +678,13 @@ async fn schema_version_is_one() {
     seed_kb_entry(&pool, "wld_test", BlockType::Character, "hero", true).await;
 
     let manifest = basic_manifest(vec!["character"]);
-    let builder = ComputeInputBuilder::new(pool, "wld_test", manifest, Map::new());
+    let builder = ComputeInputBuilder::new(
+        pool,
+        "wld_test",
+        manifest,
+        Map::new(),
+        test_scope("wld_test"),
+    );
 
     let input = builder.build().await.expect("build should succeed");
     assert_eq!(u64::from(input.schema_version), 1);
@@ -416,7 +700,13 @@ async fn empty_required_types_passes_all_computable() {
     seed_kb_entry(&pool, "wld_test", BlockType::Item, "sword", true).await;
 
     let manifest = basic_manifest(vec![]); // no type filter
-    let builder = ComputeInputBuilder::new(pool, "wld_test", manifest, Map::new());
+    let builder = ComputeInputBuilder::new(
+        pool,
+        "wld_test",
+        manifest,
+        Map::new(),
+        test_scope("wld_test"),
+    );
 
     let input = builder.build().await.expect("build should succeed");
     assert_eq!(input.key_blocks.len(), 2, "all computable entries passed");

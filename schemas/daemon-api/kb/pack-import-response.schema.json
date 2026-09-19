@@ -3,7 +3,7 @@
   "$id": "https://nexus42.invalid/schemas/daemon-api/kb/pack-import-response.schema.json",
   "schema_version": 1,
   "title": "Nexus PackImportResponse",
-  "description": "Response for POST /v1/daemon/worlds/:world_id/kb/pack/import (V1.152 P0 DF-77). Per-atom-type summary counts plus a details list.",
+  "description": "Response for POST /v1/daemon/worlds/:world_id/kb/pack/import (V1.152 P0 DF-77). Per-atom-type summary counts plus a details list, the quarantined atoms of an import run (v1.191 P1 T10) and the bounded payload of the read-only review arm. On the review arm the counts are zero and `details` is empty; the batch's atoms are in `review`.",
   "type": "object",
   "required": ["entries", "relations", "details"],
   "additionalProperties": false,
@@ -18,10 +18,21 @@
     },
     "details": {
       "type": "array",
-      "description": "Per-atom outcome details (entry or relation).",
+      "description": "Per-atom outcome details (entry or relation). A quarantined atom is also reported here as `rejected`, so the retained counts stay complete.",
       "items": {
         "$ref": "#/definitions/import_detail"
       }
+    },
+    "quarantined": {
+      "type": "array",
+      "description": "Atoms this import held outside the KB stores (v1.191 P1 T10, holder-governance.md §6): ids, reasons and original wire governance. These atoms are absent from every ordinary read, export, search and compute path until a mapping adopts them.",
+      "items": {
+        "$ref": "#/definitions/quarantined_atom"
+      }
+    },
+    "review": {
+      "$ref": "#/definitions/review_batch",
+      "description": "Present on the read-only review arm: one import batch's bounded quarantined atoms with their immutable original KE JSON."
     }
   },
   "definitions": {
@@ -70,7 +81,88 @@
         },
         "reason": {
           "type": "string",
-          "description": "Optional human-readable reason (e.g. why rejected or skipped)."
+          "description": "Optional human-readable reason (e.g. why rejected, skipped or quarantined)."
+        }
+      }
+    },
+    "quarantined_atom": {
+      "type": "object",
+      "required": ["quarantine_id", "batch_id", "entry_id", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "quarantine_id": {
+          "type": "string",
+          "description": "Stable qrn_ id of the quarantine row."
+        },
+        "batch_id": {
+          "type": "string",
+          "description": "The import batch that first held this atom; pass it to review_import."
+        },
+        "entry_id": {
+          "type": "string",
+          "description": "The pack atom's entry_id."
+        },
+        "reason": {
+          "type": "string",
+          "enum": ["unresolved_holder", "unknown_disclosure"],
+          "description": "Why the atom is held: its foreign holder id is unmapped, or its disclosure is outside the native vocabulary."
+        },
+        "original_owner": {
+          "type": ["string", "null"],
+          "description": "The atom's original wire owner, exactly as the pack carried it."
+        },
+        "original_disclosure": {
+          "type": ["string", "null"],
+          "description": "The atom's original wire disclosure, exactly as the pack carried it."
+        }
+      }
+    },
+    "review_batch": {
+      "type": "object",
+      "required": ["batch_id", "truncated", "atoms"],
+      "additionalProperties": false,
+      "properties": {
+        "batch_id": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean",
+          "description": "Whether the batch held more atoms than the review bound returns."
+        },
+        "atoms": {
+          "type": "array",
+          "description": "Up to the review bound atoms, stable-id order, each with its immutable original KE JSON.",
+          "items": {
+            "type": "object",
+            "required": ["quarantine_id", "entry_id", "reason", "original_entry"],
+            "additionalProperties": false,
+            "properties": {
+              "quarantine_id": {
+                "type": "string"
+              },
+              "batch_id": {
+                "type": "string"
+              },
+              "entry_id": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string",
+                "enum": ["unresolved_holder", "unknown_disclosure"]
+              },
+              "original_owner": {
+                "type": ["string", "null"]
+              },
+              "original_disclosure": {
+                "type": ["string", "null"]
+              },
+              "original_entry": {
+                "type": "object",
+                "additionalProperties": true,
+                "description": "The immutable original wire KnowledgeEntry JSON, verbatim as the pack carried it. Isolated local review only — never a knowledge view."
+              }
+            }
+          }
         }
       }
     }

@@ -41,6 +41,7 @@ use nexus_contracts::daemon_api::characters::{
     list_character_bindings_response::ListCharacterBindingsResponse,
     list_characters_response::ListCharactersResponse,
 };
+use nexus_knowledge::world_kb::knowledge_entry::LEGACY_CREATOR_ONLY_UNSUPPORTED;
 use nexus_local_db::ACTOR_KNOWLEDGE_SUMMARY_MAX_UTF8_BYTES;
 use std::path::PathBuf;
 
@@ -248,8 +249,21 @@ pub enum KnowledgeCommand {
         character_id: Option<String>,
         #[arg(long)]
         binding_id: Option<String>,
-        #[arg(long, default_value_t = false)]
-        creator_only: bool,
+        /// Author audience: `shared`, `author-only`, or `character-private`.
+        ///
+        /// Omitted means in-scope shared (no holder, no disclosure). The author
+        /// never supplies a holder id or a management flag: `author-only`
+        /// resolves to the admitted controlling Creator's own holder and
+        /// `character-private` to a Character this Creator owns.
+        #[arg(long, value_name = "AUDIENCE")]
+        audience: Option<String>,
+        /// Character a `character-private` audience resolves to.
+        #[arg(long, value_name = "CHARACTER_ID", requires = "audience")]
+        audience_character: Option<String>,
+        /// Retired World-only visibility flag. Refused on presence — including
+        /// `--creator-only=false`: use `--audience author-only` instead.
+        #[arg(long, num_args = 0..=1, default_missing_value = "true")]
+        creator_only: Option<bool>,
         #[arg(long)]
         block_type: String,
         #[arg(long)]
@@ -317,6 +331,19 @@ pub enum KnowledgeCommand {
         summary_file: Option<PathBuf>,
         #[arg(long, default_value_t = false)]
         clear_summary: bool,
+        /// Move the governance pair under the same `--expected-revision` CAS:
+        /// `shared` clears holder+disclosure, `author-only` resolves the
+        /// Creator's holder, `character-private` a permitted Character's.
+        /// Omitted preserves the stored pair.
+        #[arg(long, value_name = "AUDIENCE")]
+        audience: Option<String>,
+        /// Character a `character-private` audience resolves to.
+        #[arg(long, value_name = "CHARACTER_ID", requires = "audience")]
+        audience_character: Option<String>,
+        /// Retired World-only visibility flag. Refused on presence — including
+        /// `--creator-only=false`: use `--audience author-only` instead.
+        #[arg(long, num_args = 0..=1, default_missing_value = "true")]
+        creator_only: Option<bool>,
         #[arg(long, default_value_t = false)]
         json: bool,
     },
@@ -582,6 +609,8 @@ pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
                 world_id,
                 character_id,
                 binding_id,
+                audience,
+                audience_character,
                 creator_only,
                 block_type,
                 canonical_name,
@@ -589,13 +618,15 @@ pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
                 summary_file,
                 json,
             } => {
+                refuse_legacy_creator_only_flag(creator_only)?;
+                let audience = audience_wire(audience.as_deref(), audience_character.as_deref())?;
                 add_knowledge(
                     &client,
                     &owner,
                     world_id,
                     character_id,
                     binding_id,
-                    creator_only,
+                    audience,
                     block_type,
                     canonical_name,
                     summary,
@@ -617,8 +648,13 @@ pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
                 summary,
                 summary_file,
                 clear_summary,
+                audience,
+                audience_character,
+                creator_only,
                 json,
             } => {
+                refuse_legacy_creator_only_flag(creator_only)?;
+                let audience = audience_wire(audience.as_deref(), audience_character.as_deref())?;
                 edit_knowledge(
                     &client,
                     &character_id,
@@ -628,6 +664,7 @@ pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
                     summary,
                     summary_file,
                     clear_summary,
+                    audience,
                     json,
                 )
                 .await
@@ -1278,6 +1315,60 @@ fn print_knowledge_detail(resp: &KnowledgeEntryDetail, json: bool) -> Result<()>
     Ok(())
 }
 
+/// Durable §5: the retired World-only `--creator-only` flag is refused by
+/// **presence**, `--creator-only=false` included — it is the compatibility
+/// input to refuse, never a permanent alias.
+fn refuse_legacy_creator_only_flag(present: Option<bool>) -> Result<()> {
+    if present.is_some() {
+        return Err(CliError::Other(format!(
+            "{LEGACY_CREATOR_ONLY_UNSUPPORTED}: --creator-only is not accepted; use              --audience shared|author-only|character-private"
+        )));
+    }
+    Ok(())
+}
+
+/// Map the closed `--audience` / `--audience-character` pair onto the frozen
+/// wire object (durable §3). The author supplies intent only: the permitted
+/// identity and its holder are resolved by core admission against stored state.
+fn audience_wire(
+    audience: Option<&str>,
+    character_id: Option<&str>,
+) -> Result<Option<serde_json::Value>> {
+    let Some(audience) = audience else {
+        if character_id.is_some() {
+            return Err(CliError::Other(
+                "--audience-character requires --audience character-private".into(),
+            ));
+        }
+        return Ok(None);
+    };
+    if audience != "character-private" && character_id.is_some() {
+        return Err(CliError::Other(format!(
+            "--audience-character is only meaningful with --audience character-private, \
+             not '{audience}'"
+        )));
+    }
+    match audience {
+        "shared" => Ok(Some(serde_json::json!({ "kind": "shared" }))),
+        "author-only" => Ok(Some(serde_json::json!({ "kind": "author-only" }))),
+        "character-private" => {
+            let character_id = character_id.ok_or_else(|| {
+                CliError::Other(
+                    "--audience character-private requires --audience-character <CHARACTER_ID>"
+                        .into(),
+                )
+            })?;
+            Ok(Some(serde_json::json!({
+                "kind": "character-private",
+                "character_id": character_id,
+            })))
+        }
+        other => Err(CliError::Other(format!(
+            "unknown --audience {other}; expected shared, author-only, or character-private"
+        ))),
+    }
+}
+
 fn owner_kind_wire(owner: &str) -> Result<&'static str> {
     match owner {
         "world" => Ok("world"),
@@ -1296,7 +1387,7 @@ async fn add_knowledge(
     world_id: Option<String>,
     character_id: Option<String>,
     binding_id: Option<String>,
-    creator_only: bool,
+    audience: Option<serde_json::Value>,
     block_type: String,
     canonical_name: String,
     summary: Option<String>,
@@ -1307,8 +1398,10 @@ async fn add_knowledge(
         "owner_kind": owner_kind_wire(owner)?,
         "block_type": block_type,
         "canonical_name": canonical_name,
-        "creator_only": creator_only,
     });
+    if let Some(audience) = audience {
+        body["audience"] = audience;
+    }
     if let Some(id) = world_id {
         body["world_id"] = serde_json::Value::String(id);
     }
@@ -1359,6 +1452,7 @@ async fn edit_knowledge(
     summary: Option<String>,
     summary_file: Option<PathBuf>,
     clear_summary: bool,
+    audience: Option<serde_json::Value>,
     json: bool,
 ) -> Result<()> {
     if clear_summary && (summary.is_some() || summary_file.is_some()) {
@@ -1366,12 +1460,22 @@ async fn edit_knowledge(
             "use either --clear-summary or --summary/--summary-file, not both".into(),
         ));
     }
-    if canonical_name.is_none() && !clear_summary && summary.is_none() && summary_file.is_none() {
+    if canonical_name.is_none()
+        && !clear_summary
+        && summary.is_none()
+        && summary_file.is_none()
+        && audience.is_none()
+    {
         return Err(CliError::Other(
-            "edit requires --canonical-name, --summary, --summary-file, or --clear-summary".into(),
+            "edit requires --canonical-name, --summary, --summary-file, --clear-summary, or \
+             --audience"
+                .into(),
         ));
     }
     let mut body = serde_json::json!({ "expected_revision": expected_revision });
+    if let Some(audience) = audience {
+        body["audience"] = audience;
+    }
     if let Some(name) = canonical_name {
         body["canonical_name"] = serde_json::Value::String(name);
     }
@@ -1500,12 +1604,25 @@ async fn view_knowledge(
         println!("No knowledge entries.");
     } else {
         for item in &resp.items {
+            // Durable §7: the projection carries the native governance pair,
+            // never the retired `creator_only` boolean — shared is the
+            // *absence* of disclosure.
+            let governance = item
+                .disclosure
+                .as_ref()
+                .map_or_else(String::new, |disclosure| {
+                    format!(
+                        "  disclosure={disclosure} holder={}",
+                        item.holder_entry_id
+                            .as_deref()
+                            .map_or("(none)", std::ops::Deref::deref)
+                    )
+                });
             println!(
-                "{}  {}  {}  creator_only={}",
+                "{}  {}  {}{governance}",
                 *item.entry_id,
                 *item.canonical_name,
-                serde_json::to_string(&item.owner)?,
-                item.creator_only
+                serde_json::to_string(&item.owner)?
             );
         }
         if resp.pagination.has_more {
@@ -1999,4 +2116,52 @@ fn format_tom_item_human(row: &NexusCharacterTomBeliefItem) -> String {
         "- [{}] holder={} truth={} {} (carrier={})",
         row.order, holder, truth, proposition, &*row.carrier_entry_id
     )
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod holder_public_tests {
+    use super::{audience_wire, refuse_legacy_creator_only_flag};
+
+    // v1.191 P1 T9 (durable §5/§6): the CLI request surface for the shipped
+    // `creator character knowledge` authoring commands.
+
+    #[test]
+    fn v1191_holder_public_audience_flag_maps_the_frozen_wire_object() {
+        assert_eq!(audience_wire(None, None).unwrap(), None);
+        assert_eq!(
+            audience_wire(Some("shared"), None).unwrap(),
+            Some(serde_json::json!({ "kind": "shared" }))
+        );
+        assert_eq!(
+            audience_wire(Some("author-only"), None).unwrap(),
+            Some(serde_json::json!({ "kind": "author-only" }))
+        );
+        assert_eq!(
+            audience_wire(Some("character-private"), Some("chr_1")).unwrap(),
+            Some(serde_json::json!({ "kind": "character-private", "character_id": "chr_1" }))
+        );
+    }
+
+    #[test]
+    fn v1191_holder_public_audience_flag_rejects_incomplete_or_unknown_values() {
+        assert!(audience_wire(Some("character-private"), None).is_err());
+        assert!(audience_wire(None, Some("chr_1")).is_err());
+        assert!(audience_wire(Some("owner-private"), Some("chr_1")).is_err());
+        assert!(audience_wire(Some("shared"), Some("chr_1")).is_err());
+    }
+
+    #[test]
+    fn v1191_holder_public_legacy_creator_only_flag_is_refused_by_presence() {
+        // `--creator-only` and `--creator-only=false` are both refused; only
+        // an absent flag is accepted.
+        for present in [Some(true), Some(false)] {
+            let err = refuse_legacy_creator_only_flag(present).unwrap_err();
+            assert!(
+                err.to_string().contains("legacy_creator_only_unsupported"),
+                "{err}"
+            );
+        }
+        assert!(refuse_legacy_creator_only_flag(None).is_ok());
+    }
 }

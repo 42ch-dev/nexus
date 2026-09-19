@@ -25,7 +25,7 @@ use nexus_contracts::generated::daemon_api::creators::{
     set_active_creator_request::SetActiveCreatorRequest,
     set_active_creator_response::SetActiveCreatorResponse,
 };
-use nexus_contracts::CreatorDetail;
+use nexus_contracts::{CreatorDetail, CreatorDetailHolderEntryId};
 use nexus_home_layout::active_context::{read_active_creator_id, try_resolve_state_db_path};
 use nexus_home_layout::validate_creator_id_safe;
 
@@ -209,24 +209,27 @@ impl CoreHomeService {
         let pool = nexus_local_db::init_pool(&db_path)
             .await
             .map_err(crate::error::local_db_err)?;
-        let now = chrono::Utc::now().to_rfc3339();
-        let insert = sqlx::query(
-            "INSERT INTO creators (creator_id, display_name, status, cached_at, data) \
-             VALUES (?, ?, 'active', ?, '{}')",
-        )
-        .bind(&creator_id)
-        .bind(&display_name)
-        .bind(&now)
-        .execute(&pool)
-        .await;
-        if let Err(e) = insert {
-            pool.close().await;
-            return Err(db_err(&e));
-        }
+        // v1.191 P1 T4: the one transaction-taking local-db materialization —
+        // the workspace `creators` row and its stable holder registry row
+        // commit together (§2.1), so no second Creator create SQL exists here.
+        let materialized = nexus_local_db::ensure_creator_row(&pool, &creator_id, &display_name)
+            .await
+            .map_err(crate::error::local_db_err);
+        // §2.2: the detail's holder projection reads the registry row that
+        // just committed with the subject back through the read-only
+        // primitive (a read never provisions), while the pool is still open.
+        let holder = match materialized {
+            Ok(()) => nexus_local_db::require_creator_holder(&pool, &creator_id)
+                .await
+                .map_err(crate::error::local_db_err),
+            Err(err) => Err(err),
+        };
         pool.close().await;
+        let holder_entry_id = Some(holder_projection(holder?));
 
         Ok(CreatorDetail {
             creator_id,
+            holder_entry_id,
             handle: None,
             display_name: Some(display_name),
             has_api_key: false,
@@ -532,12 +535,26 @@ fn creator_detail_from_parts(
 ) -> CreatorDetail {
     CreatorDetail {
         creator_id: creator_id.to_string(),
+        // Home-level detail reads hold no workspace pool, so the
+        // service-managed holder is not projected here (the trusted
+        // management read path resolves it).
+        holder_entry_id: None,
         handle: entry.and_then(|e| e.handle.clone()),
         display_name: entry.and_then(|e| e.display_name.clone()),
         has_api_key: has_creator_api_key(auth_store, creator_id),
         has_cached_token: has_cached_token(auth_store, creator_id),
         is_active: active_id == Some(creator_id),
     }
+}
+
+/// Wire holder projection for an already-authorized identity (durable §7).
+///
+/// The registry id is `hld_` plus the lowercase BLAKE3 digest of the subject
+/// (§2.1), so it always satisfies the wire pattern; a caller with no registry
+/// state to read resolves absence before calling this.
+fn holder_projection(holder_entry_id: String) -> CreatorDetailHolderEntryId {
+    CreatorDetailHolderEntryId::try_from(holder_entry_id)
+        .expect("registry-derived holder id is wire-valid")
 }
 
 /// Reject path segments that look like Google-AIP custom verbs (`id:verb`):
@@ -703,34 +720,22 @@ pub fn save_identity_cache(cache_path: &Path, cache: &serde_json::Value) -> Core
 }
 
 /// Update the SQL `creators` row for `creator_id`, inserting a minimal active
-/// row if one does not exist.
+/// row if one does not exist (v1.191 P1 T4: the daemon/core creators flow
+/// delegates to the one transaction-taking local-db materialization, so the
+/// workspace subject and its stable holder registry row commit together, §2.1).
+///
+/// # Errors
+///
+/// Returns the retained `DATABASE_ERROR` carrier when the materialization, its
+/// transaction, or the holder registration fails.
 async fn upsert_creator_display_name(
     pool: &sqlx::SqlitePool,
     creator_id: &str,
     display_name: &str,
 ) -> CoreResult<()> {
-    let now = chrono::Utc::now().to_rfc3339();
-    let rows =
-        sqlx::query("UPDATE creators SET display_name = ?, cached_at = ? WHERE creator_id = ?")
-            .bind(display_name)
-            .bind(&now)
-            .bind(creator_id)
-            .execute(pool)
-            .await
-            .map_err(|e| db_err(&e))?;
-    if rows.rows_affected() == 0 {
-        sqlx::query(
-            "INSERT INTO creators (creator_id, display_name, status, cached_at, data) \
-             VALUES (?, ?, 'active', ?, '{}')",
-        )
-        .bind(creator_id)
-        .bind(display_name)
-        .bind(&now)
-        .execute(pool)
+    nexus_local_db::ensure_creator_row(pool, creator_id, display_name)
         .await
-        .map_err(|e| db_err(&e))?;
-    }
-    Ok(())
+        .map_err(crate::error::local_db_err)
 }
 
 /// Active-workspace `creators` rows ordered by recency (retained list order

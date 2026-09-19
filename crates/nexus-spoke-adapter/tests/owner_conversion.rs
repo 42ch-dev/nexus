@@ -7,7 +7,9 @@
 //!   fabricated `world_id`;
 //! - the reverse conversion fails closed when no canonical owner key exists
 //!   (no fabricated World owner);
-//! - `creator_only` round-trips as Nexus metadata;
+//! - native `holder_entry_id` / `disclosure` map exactly onto the wire
+//!   `owner` / `disclosure` fields and back (v1.191 P1 T8);
+//! - the retired legacy `creator_only` key is refused, not carried;
 //! - unknown `extensions.nexus` keys survive the round-trip for every owner.
 
 #![allow(clippy::unwrap_used)]
@@ -58,7 +60,11 @@ fn world_owner_emits_world_id_and_round_trips() {
 
     let back = spoke_to_knowledge_record(spoke).unwrap();
     assert_eq!(back.owner, KnowledgeOwnerRef::world("wld_golden"));
-    assert!(!back.creator_only);
+    assert_eq!(
+        (back.holder_entry_id, back.disclosure),
+        (None, None),
+        "a shared record carries no governance on either side"
+    );
     assert_eq!(back.entry_id, rec.entry_id);
     assert_eq!(back.body, rec.body);
 }
@@ -128,21 +134,66 @@ fn reverse_conversion_without_owner_fails_closed() {
     assert!(spoke_to_knowledge_record(spoke).is_err());
 }
 
-/// `creator_only` round-trips as Nexus metadata on World-owned entries.
+/// v1.191 P1 T8: the native governance pair maps exactly onto the wire
+/// `owner` / `disclosure` fields in both directions, and the holder axis is
+/// never confused with the narrative container (`extensions.nexus.world_id`).
 #[test]
-fn creator_only_round_trips_as_nexus_metadata() {
+fn holder_and_disclosure_map_exactly_onto_the_wire_fields() {
     let mut rec = record_for(&KnowledgeOwnerRef::world("wld_x"), "Creator lore");
-    rec.creator_only = true;
+    rec.holder_entry_id = Some("hld_creator".to_string());
+    rec.disclosure = Some("owner-private".to_string());
+
     let spoke = knowledge_record_to_spoke(&rec);
+    assert_eq!(
+        spoke.owner.as_ref().map(|o| o.as_str()),
+        Some("hld_creator"),
+        "native holder_entry_id is the wire owner"
+    );
+    assert_eq!(
+        spoke.disclosure.as_ref().map(|d| d.as_str()),
+        Some("owner-private")
+    );
     let ns = nexus_ns(&spoke);
     assert_eq!(
-        ns.get("creator_only").and_then(serde_json::Value::as_bool),
-        Some(true)
+        ns.get("world_id").and_then(|v| v.as_str()),
+        Some("wld_x"),
+        "the container keeps riding extensions.nexus, never wire owner"
     );
+    assert!(!ns.contains_key("holder_entry_id"));
+    assert!(!ns.contains_key("disclosure"));
 
     let back = spoke_to_knowledge_record(spoke).unwrap();
-    assert!(back.creator_only);
+    assert_eq!(back.holder_entry_id.as_deref(), Some("hld_creator"));
+    assert_eq!(back.disclosure.as_deref(), Some("owner-private"));
     assert_eq!(back.owner, KnowledgeOwnerRef::world("wld_x"));
+}
+
+/// v1.191 P1 T8: an unknown (open-domain) disclosure value is carried verbatim
+/// by the seam — normalization to "shared" is a storage-boundary decision, not
+/// a conversion one, so an adopted foreign row keeps its vocabulary.
+#[test]
+fn unknown_disclosure_vocabulary_round_trips_verbatim() {
+    let mut rec = record_for(&KnowledgeOwnerRef::world("wld_x"), "Foreign lore");
+    rec.holder_entry_id = Some("hld_foreign".to_string());
+    rec.disclosure = Some("party-only".to_string());
+
+    let back = spoke_to_knowledge_record(knowledge_record_to_spoke(&rec)).unwrap();
+    assert_eq!(back.holder_entry_id.as_deref(), Some("hld_foreign"));
+    assert_eq!(back.disclosure.as_deref(), Some("party-only"));
+}
+
+/// v1.191 P1 T8: holder-only rows (an adopted foreign owner without a
+/// disclosure) keep their holder and stay shared.
+#[test]
+fn holder_without_disclosure_round_trips_as_shared() {
+    let mut rec = record_for(&KnowledgeOwnerRef::world("wld_x"), "Adopted lore");
+    rec.holder_entry_id = Some("hld_adopted".to_string());
+
+    let spoke = knowledge_record_to_spoke(&rec);
+    assert!(spoke.disclosure.is_none(), "no disclosure is authored");
+    let back = spoke_to_knowledge_record(spoke).unwrap();
+    assert_eq!(back.holder_entry_id.as_deref(), Some("hld_adopted"));
+    assert_eq!(back.disclosure, None);
 }
 
 /// Build a spoke entry whose `extensions.nexus` JSON is exactly the supplied
@@ -211,25 +262,24 @@ fn wrong_typed_or_null_owner_key_rejects() {
     }
 }
 
-/// `creator_only` is World-only (v1.184 P1 fix): a Character- or
-/// binding-owned wire entry carrying the flag is rejected at the conversion
-/// seam, matching the store invariants.
+/// v1.191 P1 T8: the retired legacy `extensions.nexus.creator_only` key is
+/// refused at the conversion seam with the stable reason — `false` included —
+/// and never carried as an unknown extra. The native governance pair is the
+/// only governance channel.
 #[test]
-fn creator_only_on_non_world_owner_rejects() {
-    for owner in [
-        KnowledgeOwnerRef::character("chr_1"),
-        KnowledgeOwnerRef::actor_world_binding("awb_1"),
+fn legacy_creator_only_key_is_refused_not_carried() {
+    for legacy in [
+        serde_json::Value::Bool(true),
+        serde_json::Value::Bool(false),
     ] {
-        let mut rec = record_for(&owner, "Flagged");
-        rec.creator_only = true;
-        let spoke = knowledge_record_to_spoke(&rec);
+        let spoke = spoke_with_nexus(&serde_json::json!({
+            "world_id": "wld_x",
+            "creator_only": legacy,
+        }));
         let err = spoke_to_knowledge_record(spoke).unwrap_err();
         assert!(
-            matches!(
-                err,
-                nexus_knowledge::world_kb::errors::KbError::CreatorOnlyRequiresWorld(_)
-            ),
-            "creator_only on {owner:?} must reject, got {err:?}"
+            err.to_string().contains("legacy_creator_only_unsupported"),
+            "the stable reason must ride the refusal, got {err:?}"
         );
     }
 }

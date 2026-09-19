@@ -3,7 +3,7 @@
   "$id": "https://nexus42.invalid/schemas/daemon-api/actor-knowledge/list-character-knowledge-response.schema.json",
   "schema_version": 1,
   "title": "Nexus ListCharacterKnowledgeResponse",
-  "description": "Response for GET /v1/daemon/characters/:character_id/knowledge.",
+  "description": "Response for GET /v1/daemon/characters/:character_id/knowledge. Items are the admitted page under the server-chosen read policy, each carrying the native holder_entry_id/disclosure projection.",
   "type": "object",
   "required": ["items", "pagination"],
   "additionalProperties": false,

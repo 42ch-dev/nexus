@@ -628,39 +628,56 @@ fn reject_produce_when_novel_complete(
 
 /// V1.40 P2 (QC3 C-1 fix): assemble the World KB context block for a Work.
 ///
-/// Opens the local workspace KB store, queries all characters/locations/rules
-/// for the given world, and returns the YAML-rendered block string.
-/// Returns empty string on missing data (world has no KB items).
+/// Resolves the active creator's admitted `ActorView` snapshot for the Work's
+/// World through the scoped MCA store and renders it as the chapter KB block.
+/// Returns an empty block when the World has no admitted KB items.
+///
+/// v1.191 P1 T11 (durable §4.2): the block is the ActorView-filtered snapshot
+/// — an unscoped World read (which would carry other holders' private rows
+/// into the prompt) is not reachable from this path, and a missing holder
+/// registry row fails closed before any row is read.
 ///
 /// # Errors
 ///
-/// Returns an error if the local DB cannot be opened or the KB query fails.
+/// Returns an error if the local DB cannot be opened, the admitted selection
+/// cannot be resolved (no active creator / `holder_state_invalid`), or the
+/// scoped KB read fails.
 async fn assemble_world_kb_block(
     world_id: &str,
     config: &CliConfig,
 ) -> crate::errors::Result<String> {
-    use nexus_moment_context_assembly::{build_chapter_kb_block, ChapterKbBlockParams};
+    use nexus_knowledge::world_kb::KbStore as _;
+    use nexus_moment_context_assembly::{
+        build_chapter_kb_block, ChapterKbBlockParams, CharacterViewInput,
+    };
 
     let db_path = crate::config::resolve_state_db_path(config)?;
     let pool = crate::db::Schema::init(&db_path).await?;
-    let store = nexus_local_db::kb_store::SqliteKbStore::new(pool);
+
+    // The MCA `WorldKB` read crosses the spoke-adapter boundary inside the
+    // caller's admitted selection — the same ActorView selection the CLI
+    // preview and the daemon inspector use — so `list_by_world` returns the
+    // complete admitted snapshot (no silent row window).
+    let selection =
+        crate::commands::platform::context::creator_view_scope(&pool, config, Some(world_id))
+            .await?;
+    let kb = nexus_spoke_adapter::SpokeBackedKbStore::new(pool.clone(), selection);
+    let rows = kb.list_by_world(world_id).await.map_err(|e| {
+        crate::errors::CliError::Other(format!(
+            "World KB snapshot failed for world {world_id}: {e}"
+        ))
+    })?;
 
     let params = ChapterKbBlockParams {
         world_id: world_id.to_string(),
         world_name: String::new(), // Populated from KB if available
         current_timeline: String::new(),
-        world_refs: vec![], // Empty: falls back to all characters/locations
+        world_refs: vec![], // Empty: takes every admitted character/location
         chapter_text: None,
         max_tokens: None,
     };
 
-    match build_chapter_kb_block(&store, &params).await {
-        Ok(Some(block)) => Ok(block.to_yaml()),
-        Ok(None) => Ok(String::new()),
-        Err(e) => Err(crate::errors::CliError::Other(format!(
-            "World KB query failed for world {world_id}: {e}"
-        ))),
-    }
+    Ok(build_chapter_kb_block(&CharacterViewInput::from_entries(rows), &params).to_yaml())
 }
 
 /// V1.48 P1 (overlay §2 Consumer) — fetch open findings for the active
@@ -1890,5 +1907,268 @@ mod tests {
             "safe description text must survive sanitization: {out}"
         );
         assert!(out.contains("red"), "safe text 'red' must survive: {out}");
+    }
+
+    // -----------------------------------------------------------------------
+    // v1.191 P1 T11: the run prompt's chapter KB block is the admitted
+    // ActorView snapshot (durable §4.2)
+    // -----------------------------------------------------------------------
+
+    const CHAPTER_BLOCK_OWNER: &str = "ctr_chapter_block_owner";
+    const CHAPTER_BLOCK_OTHER: &str = "ctr_chapter_block_other";
+    const CHAPTER_BLOCK_WORLD: &str = "wld_chapter_block";
+
+    struct ChapterBlockFixture {
+        config: CliConfig,
+        pool: sqlx::SqlitePool,
+        own_holder: String,
+        other_holder: String,
+    }
+
+    /// v1.191 P1 T11 fixture — call while an `isolated_home()` guard is held:
+    /// the active creator's workspace with both creators materialized, their
+    /// holders registered and one owned World.
+    async fn chapter_block_fixture() -> ChapterBlockFixture {
+        let config = CliConfig {
+            active_creator_id: Some(CHAPTER_BLOCK_OWNER.to_string()),
+            ..CliConfig::default()
+        };
+
+        let db_path = crate::config::resolve_state_db_path(&config).expect("state db path");
+        let pool = crate::db::Schema::init(&db_path)
+            .await
+            .expect("init workspace pool");
+        nexus_local_db::ensure_creator_row(&pool, CHAPTER_BLOCK_OWNER, "Owner")
+            .await
+            .unwrap();
+        nexus_local_db::ensure_creator_row(&pool, CHAPTER_BLOCK_OTHER, "Other")
+            .await
+            .unwrap();
+        let mut tx = pool.begin().await.unwrap();
+        let own_holder =
+            nexus_local_db::holders::ensure_creator_holder_in_tx(&mut tx, CHAPTER_BLOCK_OWNER)
+                .await
+                .unwrap();
+        let other_holder =
+            nexus_local_db::holders::ensure_creator_holder_in_tx(&mut tx, CHAPTER_BLOCK_OTHER)
+                .await
+                .unwrap();
+        tx.commit().await.unwrap();
+
+        // SAFETY: test-only static INSERT with a bind param.
+        sqlx::query(
+            "INSERT INTO narrative_worlds \
+             (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
+              time_policy, metadata_json) \
+             VALUES (?, 'wrk_chapter_block', ?, 'Chapter Block World', 'chapter-block-world', \
+                     'active', 'private', 'manual', '{}')",
+        )
+        .bind(CHAPTER_BLOCK_WORLD)
+        .bind(CHAPTER_BLOCK_OWNER)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        ChapterBlockFixture {
+            config,
+            pool,
+            own_holder,
+            other_holder,
+        }
+    }
+
+    /// The chapter KB block read through the scoped MCA store carries the
+    /// creator's admitted rows only — a foreign holder's private row never
+    /// reaches the run prompt — and a missing admitted selection (no active
+    /// creator) fails closed instead of widening.
+    #[tokio::test]
+    async fn v1191_holder_context_chapter_block_is_the_admitted_snapshot() {
+        use nexus_contracts::BlockType;
+        use nexus_knowledge::world_kb::knowledge_entry::{
+            KnowledgeEntryRecord, DISCLOSURE_OWNER_PRIVATE,
+        };
+        use nexus_knowledge::world_kb::KbStore as _;
+        use nexus_local_db::kb_store::SqliteKbStore;
+
+        let _home = crate::testutil::isolated_home();
+        let fixture = chapter_block_fixture().await;
+        let store = SqliteKbStore::new(fixture.pool.clone());
+        let shared = KnowledgeEntryRecord::new(
+            CHAPTER_BLOCK_WORLD,
+            BlockType::Character,
+            "ChapterSharedRow",
+        );
+        let mut own_private =
+            KnowledgeEntryRecord::new(CHAPTER_BLOCK_WORLD, BlockType::Scene, "OwnPrivateDock");
+        own_private.holder_entry_id = Some(fixture.own_holder);
+        own_private.disclosure = Some(DISCLOSURE_OWNER_PRIVATE.to_string());
+        let mut other_private =
+            KnowledgeEntryRecord::new(CHAPTER_BLOCK_WORLD, BlockType::Scene, "OtherPrivateDock");
+        other_private.holder_entry_id = Some(fixture.other_holder);
+        other_private.disclosure = Some(DISCLOSURE_OWNER_PRIVATE.to_string());
+        for row in [shared, own_private, other_private] {
+            store.insert_knowledge_entry(row).await.unwrap();
+        }
+
+        let block = assemble_world_kb_block(CHAPTER_BLOCK_WORLD, &fixture.config)
+            .await
+            .expect("the admitted snapshot renders");
+        assert!(block.contains("ChapterSharedRow"), "{block}");
+        assert!(
+            block.contains("OwnPrivateDock"),
+            "the creator's own holder row is in its ActorView: {block}"
+        );
+        assert!(
+            !block.contains("OtherPrivateDock"),
+            "a foreign holder's private row must never reach the run prompt: {block}"
+        );
+
+        // Fail-closed: without an admitted creator there is no selection to
+        // read — the caller omits the block instead of widening the read.
+        // (`CliConfig::default()` already carries no active creator.)
+        let unselected = CliConfig::default();
+        let err = assemble_world_kb_block(CHAPTER_BLOCK_WORLD, &unselected)
+            .await
+            .expect_err("no active creator must fail closed");
+        assert!(
+            !err.to_string().contains("OtherPrivateDock"),
+            "the refusal must not carry row data: {err}"
+        );
+    }
+
+    /// v1.191 P1 T11 review I-001: the CLI selection is core's `ActorView`
+    /// derivation, not a CLI-local `[World]`-only one — so the owned
+    /// Character/binding containers are authorized, a Character-container row
+    /// the Creator holds (`author-only` private) is visible to the CLI
+    /// snapshot exactly as it is to core, and the same container's
+    /// Character-held private row stays out.
+    #[allow(clippy::too_many_lines)] // one CLI/ core parity journey; splitting would obscure the container sequence
+    #[tokio::test]
+    async fn v1191_holder_context_cli_scope_matches_core_containers() {
+        use nexus_contracts::BlockType;
+        use nexus_core::{ActorKnowledgeViewService, AdmittedActor};
+        use nexus_knowledge::world_kb::knowledge_entry::{
+            KnowledgeEntryRecord, DISCLOSURE_OWNER_PRIVATE,
+        };
+        use nexus_knowledge::world_kb::{KbStore as _, KnowledgeOwnerRef};
+        use nexus_local_db::kb_store::SqliteKbStore;
+
+        let _home = crate::testutil::isolated_home();
+        let fixture = chapter_block_fixture().await;
+        let pool = fixture.pool.clone();
+
+        let created = nexus_local_db::create_character_with_initial_binding(
+            &pool,
+            nexus_local_db::CreateCharacterParams {
+                owner_creator_id: CHAPTER_BLOCK_OWNER,
+                display_name: "Ada",
+                image_uri: None,
+                persona_json: "{}",
+                world_id: CHAPTER_BLOCK_WORLD,
+                world_sheet_entry_id: None,
+            },
+        )
+        .await
+        .expect("owned Character + binding");
+        let character_id = created.character.character_id.clone();
+        let binding_id = created.binding.binding_id.clone();
+        let character_holder = nexus_local_db::character_holder_entry_id(&character_id);
+
+        let store = SqliteKbStore::new(pool.clone());
+        let mut author_only = KnowledgeEntryRecord::for_character(
+            &character_id,
+            BlockType::Item,
+            "CharacterContainerAuthorOnly",
+        );
+        author_only.holder_entry_id = Some(fixture.own_holder.clone());
+        author_only.disclosure = Some(DISCLOSURE_OWNER_PRIVATE.to_string());
+        let mut character_private = KnowledgeEntryRecord::for_character(
+            &character_id,
+            BlockType::Item,
+            "CharacterContainerPrivate",
+        );
+        character_private.holder_entry_id = Some(character_holder);
+        character_private.disclosure = Some(DISCLOSURE_OWNER_PRIVATE.to_string());
+        let binding_shared = KnowledgeEntryRecord::for_binding(
+            &binding_id,
+            BlockType::Item,
+            "BindingContainerShared",
+        );
+        for row in [author_only, character_private, binding_shared] {
+            store.insert_knowledge_entry(row).await.unwrap();
+        }
+
+        let cli_scope = crate::commands::platform::context::creator_view_scope(
+            &pool,
+            &fixture.config,
+            Some(CHAPTER_BLOCK_WORLD),
+        )
+        .await
+        .expect("CLI ActorView selection");
+        let core_scope = ActorKnowledgeViewService::new(pool.clone())
+            .actor_view_scope(
+                CHAPTER_BLOCK_OWNER,
+                &AdmittedActor::Creator {
+                    creator_id: CHAPTER_BLOCK_OWNER.to_string(),
+                },
+                CHAPTER_BLOCK_WORLD,
+                None,
+            )
+            .await
+            .expect("core ActorView selection");
+
+        assert_eq!(
+            cli_scope.containers(),
+            core_scope.containers(),
+            "the CLI selection must derive core's containers (I-001)"
+        );
+        assert_eq!(cli_scope.policy(), core_scope.policy());
+        assert_eq!(cli_scope.holder_entry_id(), core_scope.holder_entry_id());
+        assert!(
+            cli_scope
+                .containers()
+                .contains(&KnowledgeOwnerRef::character(&character_id)),
+            "the owned Character container is authorized"
+        );
+        assert!(
+            cli_scope
+                .containers()
+                .contains(&KnowledgeOwnerRef::actor_world_binding(&binding_id)),
+            "the owned binding container is authorized"
+        );
+
+        // Differential rows through the CLI selection: the Character-global
+        // `author-only` private row (Creator-held, owned Character container) is
+        // visible — a World-only selection could not see this container at all —
+        // while the Character-held private row of the same container stays out.
+        let character_rows = SqliteKbStore::new(pool.clone())
+            .list_by_owner_complete(&KnowledgeOwnerRef::character(&character_id), &cli_scope)
+            .await
+            .unwrap();
+        let names: Vec<&str> = character_rows
+            .iter()
+            .map(|row| row.canonical_name.as_str())
+            .collect();
+        assert!(
+            names.contains(&"CharacterContainerAuthorOnly"),
+            "the Creator-held private row of the owned Character container is in the CLI snapshot: {names:?}"
+        );
+        assert!(
+            !names.contains(&"CharacterContainerPrivate"),
+            "the Character-held private row stays out: {names:?}"
+        );
+        let binding_rows = SqliteKbStore::new(pool)
+            .list_by_owner_complete(
+                &KnowledgeOwnerRef::actor_world_binding(&binding_id),
+                &cli_scope,
+            )
+            .await
+            .unwrap();
+        assert!(
+            binding_rows
+                .iter()
+                .any(|row| row.canonical_name == "BindingContainerShared"),
+            "the owned binding container's shared row is in the CLI snapshot"
+        );
     }
 }

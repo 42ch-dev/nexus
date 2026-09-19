@@ -32,26 +32,22 @@ use crate::commands::creator::world::active_creator_id;
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
-use nexus_daemon_runtime::pack_import::{import_pack, ConflictPolicy, ImportOutcome};
-use nexus_knowledge::world_kb::KbStore;
-use nexus_local_db::kb_relationships::list_relationships_for_world;
-use nexus_local_db::kb_store::SqliteKbStore;
-use nexus_spoke_adapter::conversion::{kb_relationship_row_to_spoke, knowledge_record_to_spoke};
+use nexus_contracts::daemon_api::kb::PackExportRequest;
+use nexus_core::{
+    CoreError, CoreService, HolderMapping, ImportOutcome, ImportQuarantineReview,
+    QuarantinedAtomReport,
+};
+use nexus_daemon_runtime::pack_import::{import_pack, review_import, ConflictPolicy};
+use nexus_spoke_adapter::pack::parse_pack;
 use nexus_spoke_adapter::pack::st_lorebook::{
     parse_st_lorebook, ConversionDiagnostic, DiagnosticSeverity, StLorebookError,
 };
-use nexus_spoke_adapter::pack::{build_pack, parse_pack};
 use sqlx::SqlitePool;
-use std::collections::HashSet;
 use std::path::PathBuf;
 
 /// Default version string stamped into `modules.pack.version` when
 /// `--pack-version` is not supplied.
 const DEFAULT_PACK_VERSION: &str = "0.1.0";
-
-/// Fallback author string stamped into `modules.pack.creator` when no active
-/// Creator profile is resolvable (e.g. hermetic tests, ad-hoc workspaces).
-const FALLBACK_CREATOR: &str = "nexus42";
 
 /// `creator world kb pack` subcommands.
 #[derive(Debug, Subcommand)]
@@ -92,6 +88,13 @@ pub struct ExportArgs {
     /// is accepted for forward-compatibility with the spoke handbook shape.
     #[arg(long)]
     pub include_anchors: bool,
+
+    /// Explicit author intent to include **owned known-private** material.
+    /// Without it the export emits only the rows the exporting Creator's
+    /// admitted policy may read (shared rows); private material of another
+    /// holder and quarantined import atoms are never emitted either way.
+    #[arg(long)]
+    pub include_owned_private: bool,
 }
 
 /// Dispatch a `creator world kb pack` subcommand.
@@ -131,13 +134,24 @@ pub struct ImportArgs {
     /// World reference — the world ID (e.g. `wld_abc123`).
     pub world_ref: String,
 
-    /// Input path for the pack JSON file (required unless `--from-st`).
-    #[arg(long, conflicts_with = "from_st", required_unless_present = "from_st")]
+    /// Input path for the pack JSON file (required unless `--from-st` or
+    /// `--review-import`).
+    #[arg(
+        long,
+        conflicts_with = "from_st",
+        conflicts_with = "review_import",
+        required_unless_present_any = ["from_st", "review_import"]
+    )]
     pub r#in: Option<PathBuf>,
 
     /// Import a `SillyTavern` lorebook JSON file (documented format) instead
     /// of a pack — converted to a pack before the standard import path.
-    #[arg(long, conflicts_with = "in", required_unless_present = "in")]
+    #[arg(
+        long,
+        conflicts_with = "in",
+        conflicts_with = "review_import",
+        required_unless_present_any = ["in", "review_import"]
+    )]
     pub from_st: Option<PathBuf>,
 
     /// Print the create/skip plan without performing any writes.
@@ -148,6 +162,23 @@ pub struct ImportArgs {
     /// exists in the target world.
     #[arg(long, value_enum, default_value_t = ConflictStrategy::Skip)]
     pub conflict: ConflictStrategy,
+
+    /// Adopt one foreign holder id into a permitted local identity:
+    /// `<foreign-id>=author-only` (the admitted Creator) or
+    /// `<foreign-id>=character-private:<character_id>`. Repeat the flag for
+    /// several ids. Without a mapping a foreign-governed atom is quarantined,
+    /// never adopted by string equality.
+    #[arg(
+        long = "holder-map",
+        value_name = "FOREIGN-ID=SELECTOR",
+        conflicts_with = "review_import"
+    )]
+    pub holder_map: Vec<String>,
+
+    /// Read-only review of one import batch's quarantined atoms (mutually
+    /// exclusive with pack/ST input and holder mappings).
+    #[arg(long = "review-import", value_name = "BATCH-ID")]
+    pub review_import: Option<String>,
 }
 
 /// `creator world kb pack export` implementation.
@@ -158,82 +189,31 @@ pub struct ImportArgs {
 /// fails, relation listing fails, or writing the pack file fails.
 async fn export(args: ExportArgs, config: &CliConfig, pool: &SqlitePool) -> Result<()> {
     let world_id = args.world_ref.as_str();
+    let creator_id = active_creator_id(config)?;
+    // The CLI's own admission keeps its retained refusal texture (a missing
+    // World names itself and the list hint) before the core re-checks it.
+    super::require_world_owner(pool, world_id, &creator_id).await?;
 
-    // ── Resolve world title (for default pack title) ──────────────────
-    let world_title = resolve_world_title(pool, world_id).await?;
-
-    // ── Resolve creator string (active creator id/name, else fallback) ─
-    let creator = resolve_creator_string(pool, config.active_creator_id.as_deref()).await?;
-
-    // ── Load Knowledge entries ────────────────────────────────────────
-    let store = SqliteKbStore::new(pool.clone());
-    let mut entries = if args.include_deprecated {
-        store
-            .list_by_world_including_deprecated(world_id)
-            .await
-            .map_err(|e| CliError::Other(format!("World KB list failed for {world_id}: {e}")))?
-    } else {
-        store
-            .list_by_world(world_id)
-            .await
-            .map_err(|e| CliError::Other(format!("World KB list failed for {world_id}: {e}")))?
+    // Durable §6/§9: the export converges on the core's admitted read path
+    // instead of loading a raw store, so a row outside the exporting Creator's
+    // authority is never read, let alone emitted.
+    let request = PackExportRequest {
+        title: args.title.clone(),
+        pack_version: Some(args.pack_version.clone()),
+        include_deprecated: args.include_deprecated,
+        include_anchors: args.include_anchors,
+        description: None,
+        ..Default::default()
     };
-
-    // Stable order: by canonical_name ascending (deterministic packs for
-    // diffability — product behavior doc §Export defaults).
-    entries.sort_by(|a, b| a.canonical_name.cmp(&b.canonical_name));
-
-    let entry_ids: HashSet<String> = entries.iter().map(|e| e.entry_id.clone()).collect();
-
-    // ── Load relations, filter to both-endpoints-in-set ───────────────
-    //
-    // Product behavior doc (pack-io-product-behavior.md §Export defaults):
-    // "relations where BOTH endpoints are in the exported entry set". We
-    // list confirmed (non-suggested) relations for the world and intersect.
-    // `list_relationships_for_world(..., include_suggested=false, ...)`
-    // excludes `needs_review = 1` extraction suggestions; `--include-deprecated`
-    // does not widen relations (relations are not deprecated individually).
-    let relation_rows = list_relationships_for_world(pool, world_id, false, i64::MAX)
-        .await
-        .map_err(|e| CliError::Other(format!("Failed to list relations for {world_id}: {e}")))?;
-
-    let mut relations: Vec<nexus_spoke_adapter::Relation> = relation_rows
-        .iter()
-        .filter(|r| {
-            entry_ids.contains(&r.source_entity_id) && entry_ids.contains(&r.target_entity_id)
-        })
-        .map(kb_relationship_row_to_spoke)
-        .collect();
-
-    // Stable order: by relationship_id ascending (deterministic packs).
-    relations.sort_by(|a, b| a.relation_id.cmp(&b.relation_id));
-
-    // ── Convert entries to spoke KnowledgeEntry ───────────────────────
-    let spoke_entries: Vec<nexus_spoke_adapter::KnowledgeEntry> =
-        entries.iter().map(knowledge_record_to_spoke).collect();
-
-    // ── Anchors ───────────────────────────────────────────────────────
-    // nexus has no persisted SourceAnchor store; accept the flag but emit
-    // an empty array (per task brief — do NOT fabricate anchors).
-    let anchors: Option<&[nexus_spoke_adapter::SourceAnchor]> = if args.include_anchors {
-        Some(&[])
-    } else {
-        None
-    };
-
-    // ── Pack metadata ─────────────────────────────────────────────────
-    let title = args.title.unwrap_or(world_title);
-
-    let pack_value = build_pack(
-        &spoke_entries,
-        &relations,
-        anchors,
-        &title,
-        &args.pack_version,
-        &creator,
-        None,
-        None,
-    );
+    let response = CoreService::export_legacy_world_pack(
+        pool,
+        &creator_id,
+        world_id,
+        request,
+        args.include_owned_private,
+    )
+    .await
+    .map_err(map_core_error)?;
 
     // ── Write to disk ─────────────────────────────────────────────────
     let out_path = &args.out;
@@ -247,6 +227,16 @@ async fn export(args: ExportArgs, config: &CliConfig, pool: &SqlitePool) -> Resu
             })?;
         }
     }
+    let mut pack_value = serde_json::to_value(&response)?;
+    // The generated response type omits an empty anchors list on the wire; the
+    // CLI's documented pack shape keeps the key when `--include-anchors` asked
+    // for it (nexus persists no SourceAnchor store, so it is always empty).
+    if args.include_anchors {
+        if let Some(obj) = pack_value.as_object_mut() {
+            obj.entry("source_anchors".to_string())
+                .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+        }
+    }
     let json_str = serde_json::to_string_pretty(&pack_value)?;
     std::fs::write(out_path, json_str.as_bytes()).map_err(|e| {
         CliError::Other(format!(
@@ -256,17 +246,51 @@ async fn export(args: ExportArgs, config: &CliConfig, pool: &SqlitePool) -> Resu
     })?;
 
     // ── Success summary ───────────────────────────────────────────────
+    let pack_meta = response.modules.get("pack");
+    let meta_str = |key: &str| {
+        pack_meta
+            .and_then(|pack| pack.get(key))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
     println!("✓ Knowledge pack exported: {}", out_path.display());
-    println!("  Title:     {title}");
-    println!("  Version:   {}", args.pack_version);
-    println!("  Creator:   {creator}");
-    println!("  Entries:   {}", spoke_entries.len());
-    println!("  Relations: {}", relations.len());
+    println!("  Title:     {}", meta_str("title"));
+    println!("  Version:   {}", meta_str("version"));
+    println!("  Creator:   {}", meta_str("creator"));
+    println!("  Entries:   {}", response.entries.len());
+    println!("  Relations: {}", response.relations.len());
+    if !args.include_owned_private {
+        println!(
+            "  Scope:     shared rows only (pass --include-owned-private for owned private facts)"
+        );
+    }
     if args.include_anchors {
         println!("  Anchors:   0 (no persisted SourceAnchor store in nexus)");
     }
 
     Ok(())
+}
+
+/// Map one core refusal onto the CLI's error family (the retained labels the
+/// `creator world kb` surface already prints).
+fn map_core_error(err: CoreError) -> CliError {
+    match err {
+        CoreError::AuthRequired | CoreError::Uninitialized => CliError::CreatorNotSelected,
+        CoreError::NotFound { resource } => CliError::Other(format!("{resource} not found")),
+        CoreError::WorldOwnerDenied { world_id, reason } => CliError::Api {
+            status: 403,
+            message: format!("world '{world_id}': {reason}"),
+        },
+        CoreError::Forbidden { resource } => CliError::Api {
+            status: 403,
+            message: resource,
+        },
+        CoreError::InvalidInput { field, reason } => {
+            CliError::Other(format!("invalid {field}: {reason}"))
+        }
+        other => CliError::Other(other.to_string()),
+    }
 }
 
 // ── Import ─────────────────────────────────────────────────────────────
@@ -286,6 +310,13 @@ async fn import(args: ImportArgs, config: &CliConfig, pool: &SqlitePool) -> Resu
 
     let creator_id = active_creator_id(config)?;
     super::require_world_owner(pool, world_id, &creator_id).await?;
+
+    // Read-only review arm (durable §6): the same command, mutually exclusive
+    // with pack/ST input and mappings (clap enforces it), authorized to the
+    // stored controlling Creator that ran the batch.
+    if let Some(batch_id) = args.review_import.as_deref() {
+        return review_quarantine(pool, world_id, &creator_id, batch_id).await;
+    }
 
     // Source selection: pack JSON (`--in`) or SillyTavern lorebook
     // (`--from-st`). clap enforces exactly one. The ST converter runs before
@@ -350,6 +381,12 @@ async fn import(args: ImportArgs, config: &CliConfig, pool: &SqlitePool) -> Resu
         ConflictStrategy::Overwrite => ConflictPolicy::Overwrite,
     };
 
+    let holder_map = args
+        .holder_map
+        .iter()
+        .map(|raw| HolderMapping::parse(raw).map_err(map_core_error))
+        .collect::<Result<Vec<_>>>()?;
+
     let summary = import_pack(
         pool,
         world_id,
@@ -357,6 +394,7 @@ async fn import(args: ImportArgs, config: &CliConfig, pool: &SqlitePool) -> Resu
         parsed,
         conflict,
         false,
+        holder_map,
         args.dry_run,
     )
     .await
@@ -373,6 +411,8 @@ async fn import(args: ImportArgs, config: &CliConfig, pool: &SqlitePool) -> Resu
             }
         }
     }
+
+    report_quarantine(&summary.quarantined, &summary.batch_id, args.dry_run);
 
     let e = &summary.entries;
     let r = &summary.relations;
@@ -399,6 +439,83 @@ async fn import(args: ImportArgs, config: &CliConfig, pool: &SqlitePool) -> Resu
     }
 
     Ok(())
+}
+
+/// `--review-import <batch-id>`: print one batch's quarantined atoms.
+///
+/// Read-only, owner-only, bounded by the core review arm. The original wire
+/// governance is printed exactly as the pack carried it — this is isolated
+/// local review, never a promotion of the row into a knowledge view.
+///
+/// # Errors
+///
+/// Returns `CliError` when the batch cannot be read (authorization, missing
+/// World, storage) — never a write.
+async fn review_quarantine(
+    pool: &SqlitePool,
+    world_id: &str,
+    creator_id: &str,
+    batch_id: &str,
+) -> Result<()> {
+    let review: ImportQuarantineReview = review_import(pool, world_id, creator_id, batch_id)
+        .await
+        .map_err(|e| CliError::Other(e.to_string()))?;
+    println!(
+        "quarantined atoms in batch {}: {}",
+        review.batch_id,
+        review.atoms.len()
+    );
+    if review.truncated {
+        println!("  (truncated: the review is bounded; re-run after adopting mappings)");
+    }
+    for atom in &review.atoms {
+        println!(
+            "  {} entry {} reason {} owner {} disclosure {}",
+            atom.quarantine_id,
+            atom.entry_id,
+            atom.reason.as_str(),
+            atom.original_owner.as_deref().unwrap_or("<none>"),
+            atom.original_disclosure.as_deref().unwrap_or("<none>"),
+        );
+        // The original atom JSON is printed exactly as the pack document
+        // carried it (never a re-serialization of the typed entry).
+        if let Some(original) = atom.original_entry.as_deref() {
+            println!("    original: {original}");
+        }
+    }
+    Ok(())
+}
+
+/// Report the atoms one import held outside the KB stores.
+///
+/// The ids, reasons and original governance are printed so the operator can
+/// adopt them explicitly with `--holder-map` and then inspect them with
+/// `--review-import <batch-id>`.
+fn report_quarantine(quarantined: &[QuarantinedAtomReport], batch_id: &str, dry_run: bool) {
+    if quarantined.is_empty() {
+        return;
+    }
+    if dry_run {
+        println!(
+            "[dry-run] would quarantine {} atom(s) in batch {batch_id}:",
+            quarantined.len()
+        );
+    } else {
+        println!(
+            "quarantined {} atom(s) in batch {batch_id} (review with: nexus42 creator world kb pack import <world> --review-import {batch_id}):",
+            quarantined.len()
+        );
+    }
+    for atom in quarantined {
+        println!(
+            "  {} entry {} reason {} owner {} disclosure {}",
+            atom.quarantine_id,
+            atom.entry_id,
+            atom.reason.as_str(),
+            atom.original_owner.as_deref().unwrap_or("<none>"),
+            atom.original_disclosure.as_deref().unwrap_or("<none>"),
+        );
+    }
 }
 
 /// Render the ST lorebook conversion diagnostics summary (printed before the
@@ -433,65 +550,15 @@ fn render_st_diagnostics(diagnostics: &[ConversionDiagnostic]) -> String {
     out
 }
 
-/// Resolve a world's human title from `narrative_worlds`.
-///
-/// Returns a clean `CliError::Other` (with a hint listing existing worlds)
-/// when the world row is absent, matching the style used elsewhere in
-/// `creator world show`.
-async fn resolve_world_title(pool: &SqlitePool, world_id: &str) -> Result<String> {
-    // SAFETY: static SELECT against known narrative_worlds table schema.
-    let title: Option<String> =
-        sqlx::query_scalar("SELECT title FROM narrative_worlds WHERE world_id = ?")
-            .bind(world_id)
-            .fetch_optional(pool)
-            .await
-            .map_err(|e| CliError::Other(format!("Failed to query world '{world_id}': {e}")))?
-            .flatten();
-
-    title.ok_or_else(|| {
-        CliError::Other(format!(
-            "World '{world_id}' not found.\n  \
-                 ↳ List existing worlds: nexus42 creator world list"
-        ))
-    })
-}
-
-/// Resolve the `modules.pack.creator` string.
-///
-/// Locked policy (product behavior doc): active Creator profile id/name if
-/// resolvable from the workspace config + creators table; else the string
-/// `"nexus42"`. We prefer the human `display_name` when available so packs
-/// authored by a named profile carry the name, falling back to the raw
-/// `creator_id` when the `display_name` is missing, then to the `nexus42`
-/// fallback.
-async fn resolve_creator_string(
-    pool: &SqlitePool,
-    active_creator_id: Option<&str>,
-) -> Result<String> {
-    let Some(cid) = active_creator_id else {
-        return Ok(FALLBACK_CREATOR.to_string());
-    };
-
-    // SAFETY: static SELECT against known creators table schema.
-    let display_name: Option<String> =
-        sqlx::query_scalar("SELECT display_name FROM creators WHERE creator_id = ?")
-            .bind(cid)
-            .fetch_optional(pool)
-            .await
-            .map_err(|e| CliError::Other(format!("Failed to resolve creator '{cid}': {e}")))?
-            .flatten();
-
-    Ok(display_name
-        .filter(|n| !n.trim().is_empty())
-        .unwrap_or_else(|| cid.to_string()))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use nexus_contracts::BlockType;
     use nexus_daemon_runtime::pack_import::IMPORT_PROVENANCE;
     use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
+    use nexus_knowledge::world_kb::KbStore;
+    use nexus_local_db::kb_relationships::list_relationships_for_world;
+    use nexus_local_db::kb_store::SqliteKbStore;
     // parse_pack is re-exported at module level from the parent `pack` module;
     // the explicit import below is a reminder of the path but resolves to the
     // same item.
@@ -519,15 +586,9 @@ mod tests {
 
         // Seed creator with a human display_name.
         // SAFETY: test-only INSERT.
-        sqlx::query(
-            "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
-             VALUES (?, ?, 'active', datetime('now'), '{}')",
-        )
-        .bind(OWNER)
-        .bind(OWNER_NAME)
-        .execute(&pool)
-        .await
-        .unwrap();
+        nexus_local_db::ensure_creator_row(&pool, OWNER, OWNER_NAME)
+            .await
+            .unwrap();
 
         nexus_local_db::kb_store::seed::world(
             &pool,
@@ -606,6 +667,7 @@ mod tests {
             pack_version: DEFAULT_PACK_VERSION.to_string(),
             include_deprecated: false,
             include_anchors: false,
+            include_owned_private: false,
         };
 
         export(args, &config_with_active_creator(), &pool)
@@ -668,6 +730,7 @@ mod tests {
             pack_version: DEFAULT_PACK_VERSION.to_string(),
             include_deprecated: false,
             include_anchors: true,
+            include_owned_private: false,
         };
 
         export(args, &config_with_active_creator(), &pool)
@@ -698,6 +761,7 @@ mod tests {
             pack_version: DEFAULT_PACK_VERSION.to_string(),
             include_deprecated: false,
             include_anchors: false,
+            include_owned_private: false,
         };
 
         let err = export(args, &config_with_active_creator(), &pool)
@@ -710,8 +774,11 @@ mod tests {
         );
     }
 
+    /// The export is author-scoped: without an active Creator there is no
+    /// admitted policy to export under, so the command refuses instead of
+    /// emitting a pack under a fallback label.
     #[tokio::test]
-    async fn export_falls_back_to_nexus42_creator_when_no_active_creator() {
+    async fn export_requires_active_creator() {
         let (pool, _dir, _entry_ids, _rel_ids) = seeded_pool().await;
         let tmp_out = tempfile::NamedTempFile::new().unwrap();
         let out_path = tmp_out.path().to_path_buf();
@@ -724,17 +791,22 @@ mod tests {
             pack_version: DEFAULT_PACK_VERSION.to_string(),
             include_deprecated: false,
             include_anchors: false,
+            include_owned_private: false,
         };
 
         // No active creator set.
         let config = CliConfig::default();
-        export(args, &config, &pool)
+        let err = export(args, &config, &pool)
             .await
-            .expect("export must succeed");
-
-        let text = std::fs::read_to_string(&out_path).unwrap();
-        let value: serde_json::Value = serde_json::from_str(&text).unwrap();
-        assert_eq!(value["modules"]["pack"]["creator"], FALLBACK_CREATOR);
+            .expect_err("export without an active creator must be refused");
+        assert!(
+            matches!(err, CliError::CreatorNotSelected),
+            "expected the retained creator-not-selected refusal, got: {err}"
+        );
+        assert!(
+            !out_path.exists() || std::fs::read_to_string(&out_path).unwrap().is_empty(),
+            "a refused export must not write a pack file"
+        );
     }
 
     // ── Import helpers ──────────────────────────────────────────────────
@@ -747,15 +819,9 @@ mod tests {
 
         // Seed creator so that the world seed works.
         // SAFETY: test-only INSERT.
-        sqlx::query(
-            "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
-             VALUES (?, ?, 'active', datetime('now'), '{}')",
-        )
-        .bind(OWNER)
-        .bind(OWNER_NAME)
-        .execute(&pool)
-        .await
-        .unwrap();
+        nexus_local_db::ensure_creator_row(&pool, OWNER, OWNER_NAME)
+            .await
+            .unwrap();
 
         nexus_local_db::kb_store::seed::world(
             &pool,
@@ -784,6 +850,7 @@ mod tests {
             pack_version: DEFAULT_PACK_VERSION.to_string(),
             include_deprecated: false,
             include_anchors: false,
+            include_owned_private: false,
         };
         let config = config_with_active_creator();
         export(args, &config, pool)
@@ -827,6 +894,8 @@ mod tests {
             from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Skip,
+            holder_map: Vec::new(),
+            review_import: None,
         };
         import(args, &config_with_active_creator(), &pool2)
             .await
@@ -849,6 +918,8 @@ mod tests {
             from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Skip,
+            holder_map: Vec::new(),
+            review_import: None,
         };
         import(args, &config_with_active_creator(), &pool2)
             .await
@@ -863,6 +934,8 @@ mod tests {
             from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Skip,
+            holder_map: Vec::new(),
+            review_import: None,
         };
         import(args2, &config_with_active_creator(), &pool2)
             .await
@@ -895,6 +968,8 @@ mod tests {
             from_st: None,
             dry_run: true,
             conflict: ConflictStrategy::Skip,
+            holder_map: Vec::new(),
+            review_import: None,
         };
         import(args, &config_with_active_creator(), &pool2)
             .await
@@ -943,6 +1018,8 @@ mod tests {
             from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Skip,
+            holder_map: Vec::new(),
+            review_import: None,
         };
         import(args, &config_with_active_creator(), &pool2)
             .await
@@ -979,6 +1056,8 @@ mod tests {
             from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Skip,
+            holder_map: Vec::new(),
+            review_import: None,
         };
         import(args, &config_with_active_creator(), &pool2)
             .await
@@ -1040,6 +1119,8 @@ mod tests {
             from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Rename,
+            holder_map: Vec::new(),
+            review_import: None,
         };
         import(args, &config_with_active_creator(), &pool2)
             .await
@@ -1096,6 +1177,8 @@ mod tests {
             from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Overwrite,
+            holder_map: Vec::new(),
+            review_import: None,
         };
         import(args, &config_with_active_creator(), &pool2)
             .await
@@ -1151,6 +1234,8 @@ mod tests {
             from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Overwrite,
+            holder_map: Vec::new(),
+            review_import: None,
         };
         import(args, &config_with_active_creator(), &pool)
             .await
@@ -1186,6 +1271,8 @@ mod tests {
             from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Rename,
+            holder_map: Vec::new(),
+            review_import: None,
         };
         import(args, &config_with_active_creator(), &pool)
             .await
@@ -1238,6 +1325,8 @@ mod tests {
             from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Skip,
+            holder_map: Vec::new(),
+            review_import: None,
         };
         import(args, &config_with_active_creator(), &pool)
             .await
@@ -1293,6 +1382,8 @@ mod tests {
             from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Skip,
+            holder_map: Vec::new(),
+            review_import: None,
         };
         import(args, &config_with_active_creator(), &pool)
             .await
@@ -1342,15 +1433,9 @@ mod tests {
 
         // Seed creator for FK satisfaction.
         // SAFETY: test-only INSERT.
-        sqlx::query(
-            "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
-             VALUES (?, ?, 'active', datetime('now'), '{}')",
-        )
-        .bind(OWNER)
-        .bind(OWNER_NAME)
-        .execute(&pool_b)
-        .await
-        .unwrap();
+        nexus_local_db::ensure_creator_row(&pool_b, OWNER, OWNER_NAME)
+            .await
+            .unwrap();
 
         nexus_local_db::kb_store::seed::world(
             &pool_b,
@@ -1381,6 +1466,8 @@ mod tests {
             from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Skip,
+            holder_map: Vec::new(),
+            review_import: None,
         };
         import(args, &config_with_active_creator(), &pool_b)
             .await
@@ -1428,6 +1515,8 @@ mod tests {
             from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Skip,
+            holder_map: Vec::new(),
+            review_import: None,
         };
         import(args2, &config_with_active_creator(), &pool_b)
             .await
@@ -1462,15 +1551,9 @@ mod tests {
             .unwrap();
 
         // SAFETY: test-only INSERT.
-        sqlx::query(
-            "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
-             VALUES (?, ?, 'active', datetime('now'), '{}')",
-        )
-        .bind(OWNER)
-        .bind(OWNER_NAME)
-        .execute(&pool_a)
-        .await
-        .unwrap();
+        nexus_local_db::ensure_creator_row(&pool_a, OWNER, OWNER_NAME)
+            .await
+            .unwrap();
 
         nexus_local_db::kb_store::seed::world(
             &pool_a,
@@ -1525,15 +1608,9 @@ mod tests {
             .await
             .unwrap();
 
-        sqlx::query(
-            "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
-             VALUES (?, ?, 'active', datetime('now'), '{}')",
-        )
-        .bind(OWNER)
-        .bind(OWNER_NAME)
-        .execute(&pool_b)
-        .await
-        .unwrap();
+        nexus_local_db::ensure_creator_row(&pool_b, OWNER, OWNER_NAME)
+            .await
+            .unwrap();
 
         nexus_local_db::kb_store::seed::world(
             &pool_b,
@@ -1553,6 +1630,7 @@ mod tests {
             parsed.clone(),
             ConflictPolicy::Skip,
             false,
+            Vec::new(),
             false,
         )
         .await
@@ -1608,6 +1686,7 @@ mod tests {
             parsed,
             ConflictPolicy::Skip,
             false,
+            Vec::new(),
             false,
         )
         .await
@@ -1650,6 +1729,8 @@ mod tests {
             from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Skip,
+            holder_map: Vec::new(),
+            review_import: None,
         };
         let err = import(args, &config_with_active_creator(), &pool)
             .await
@@ -1694,6 +1775,8 @@ mod tests {
             from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Skip,
+            holder_map: Vec::new(),
+            review_import: None,
         };
         import(args, &config_with_active_creator(), &pool2)
             .await
@@ -1729,15 +1812,9 @@ mod tests {
         let pool = crate::db::Schema::init(&db_path).await.unwrap();
 
         // Seed creator + world.
-        sqlx::query(
-            "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
-             VALUES (?, ?, 'active', datetime('now'), '{}')",
-        )
-        .bind(OWNER)
-        .bind(OWNER_NAME)
-        .execute(&pool)
-        .await
-        .unwrap();
+        nexus_local_db::ensure_creator_row(&pool, OWNER, OWNER_NAME)
+            .await
+            .unwrap();
         nexus_local_db::kb_store::seed::world(
             &pool,
             WORLD,
@@ -1805,6 +1882,8 @@ mod tests {
             from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Skip,
+            holder_map: Vec::new(),
+            review_import: None,
         };
         import(args, &config_with_active_creator(), &pool2)
             .await
@@ -1841,6 +1920,8 @@ mod tests {
             from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Skip,
+            holder_map: Vec::new(),
+            review_import: None,
         };
         let err = import(args, &config_with_active_creator(), &pool)
             .await
@@ -1865,6 +1946,8 @@ mod tests {
             from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Skip,
+            holder_map: Vec::new(),
+            review_import: None,
         };
         let err = import(args, &config_with_active_creator(), &pool)
             .await
@@ -1900,15 +1983,9 @@ mod tests {
 
         // Reuse owner/creator seeding from the shared helpers.
         // SAFETY: test-only INSERT.
-        sqlx::query(
-            "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
-             VALUES (?, ?, 'active', datetime('now'), '{}')",
-        )
-        .bind(OWNER)
-        .bind(OWNER_NAME)
-        .execute(&pool_a)
-        .await
-        .unwrap();
+        nexus_local_db::ensure_creator_row(&pool_a, OWNER, OWNER_NAME)
+            .await
+            .unwrap();
 
         nexus_local_db::kb_store::seed::world(
             &pool_a,
@@ -1956,15 +2033,9 @@ mod tests {
         let pool_b = crate::db::Schema::init(&db_path_b).await.unwrap();
 
         // SAFETY: test-only INSERT.
-        sqlx::query(
-            "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
-             VALUES (?, ?, 'active', datetime('now'), '{}')",
-        )
-        .bind(OWNER)
-        .bind(OWNER_NAME)
-        .execute(&pool_b)
-        .await
-        .unwrap();
+        nexus_local_db::ensure_creator_row(&pool_b, OWNER, OWNER_NAME)
+            .await
+            .unwrap();
 
         nexus_local_db::kb_store::seed::world(
             &pool_b,
@@ -1983,6 +2054,8 @@ mod tests {
             from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Skip,
+            holder_map: Vec::new(),
+            review_import: None,
         };
         import(import_args, &config_with_active_creator(), &pool_b)
             .await
@@ -2106,6 +2179,7 @@ mod tests {
             pack_version: DEFAULT_PACK_VERSION.to_string(),
             include_deprecated: false,
             include_anchors: false,
+            include_owned_private: false,
         };
         let config = config_with_active_creator();
         export(args, &config, pool)
@@ -2158,6 +2232,7 @@ mod tests {
             parsed,
             ConflictPolicy::Skip,
             false,
+            Vec::new(),
             false,
         )
         .await
@@ -2172,6 +2247,8 @@ mod tests {
             from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Skip,
+            holder_map: Vec::new(),
+            review_import: None,
         };
         import(args, &config_with_active_creator(), &pool)
             .await
@@ -2208,6 +2285,7 @@ mod tests {
             parsed,
             ConflictPolicy::Rename,
             false,
+            Vec::new(),
             true,
         )
         .await
@@ -2245,6 +2323,7 @@ mod tests {
             parsed,
             ConflictPolicy::Overwrite,
             false,
+            Vec::new(),
             true,
         )
         .await
@@ -2286,6 +2365,7 @@ mod tests {
             parse_pack(&pack_json).unwrap(),
             ConflictPolicy::Rename,
             false,
+            Vec::new(),
             false,
         )
         .await
@@ -2336,6 +2416,7 @@ mod tests {
             parsed,
             ConflictPolicy::Overwrite,
             false,
+            Vec::new(),
             false,
         )
         .await
@@ -2344,6 +2425,7 @@ mod tests {
         assert_eq!(count_relations(&pool2, WORLD).await, 1);
     }
 
+    #[allow(clippy::too_many_lines)] // one activation journey asserted end to end
     #[tokio::test(flavor = "multi_thread")]
     async fn pack_io_modules_preserved_on_rename_and_overwrite_collision() {
         use nexus_spoke_adapter::adapter::activation;
@@ -2352,7 +2434,9 @@ mod tests {
         let pool_a = crate::db::Schema::init(&dir_a.path().join("state.db"))
             .await
             .unwrap();
-        sqlx::query("INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) VALUES (?, ?, 'active', datetime('now'), '{}')").bind(OWNER).bind(OWNER_NAME).execute(&pool_a).await.unwrap();
+        nexus_local_db::ensure_creator_row(&pool_a, OWNER, OWNER_NAME)
+            .await
+            .unwrap();
         nexus_local_db::kb_store::seed::world(
             &pool_a,
             WORLD_A,
@@ -2392,6 +2476,7 @@ mod tests {
             parsed,
             ConflictPolicy::Rename,
             false,
+            Vec::new(),
             false,
         )
         .await
@@ -2424,6 +2509,7 @@ mod tests {
             parsed2,
             ConflictPolicy::Overwrite,
             false,
+            Vec::new(),
             false,
         )
         .await
@@ -2469,6 +2555,8 @@ mod tests {
             from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Skip,
+            holder_map: Vec::new(),
+            review_import: None,
         };
         let err = import(args, &config_with_active_creator(), &pool)
             .await
@@ -2549,6 +2637,8 @@ mod tests {
             from_st: Some(st_path),
             dry_run: false,
             conflict: ConflictStrategy::Skip,
+            holder_map: Vec::new(),
+            review_import: None,
         };
         import(args, &config_with_active_creator(), &pool)
             .await
@@ -2608,6 +2698,8 @@ mod tests {
             from_st: Some(st_path),
             dry_run: false,
             conflict: ConflictStrategy::Skip,
+            holder_map: Vec::new(),
+            review_import: None,
         };
         import(args, &config_with_active_creator(), &pool)
             .await
@@ -2631,6 +2723,8 @@ mod tests {
             from_st: Some(st_path),
             dry_run: false,
             conflict: ConflictStrategy::Skip,
+            holder_map: Vec::new(),
+            review_import: None,
         };
         let err = import(args, &config_with_active_creator(), &pool)
             .await
@@ -2674,6 +2768,8 @@ mod tests {
             from_st: Some(st_path),
             dry_run: false,
             conflict: ConflictStrategy::Rename,
+            holder_map: Vec::new(),
+            review_import: None,
         };
         import(args, &config_with_active_creator(), &pool)
             .await

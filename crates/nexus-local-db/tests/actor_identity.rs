@@ -3,11 +3,13 @@
 #![allow(clippy::unwrap_used)]
 
 use nexus_local_db::{
-    add_actor_world_binding, create_character_with_initial_binding, get_actor_world_binding,
-    get_character, list_bindings_for_character, mint_character_id, remove_binding,
+    add_actor_world_binding, character_holder_entry_id, create_character_with_initial_binding,
+    creator_holder_entry_id, delete_character, delete_creator, ensure_creator_row,
+    get_actor_world_binding, get_character, list_bindings_for_character, mint_character_id,
+    remove_binding, require_character_holder, require_creator_holder, resolve_subject_holder,
     transition_character, update_actor_world_binding, update_character, ActorContractConflict,
     CharacterPatch, CharacterStatus, CreateBindingParams, CreateCharacterParams, FieldPatch,
-    LocalDbError,
+    HolderSubject, LocalDbError,
 };
 use sqlx::SqlitePool;
 
@@ -64,6 +66,24 @@ async fn seed_sheet(
     .bind(world_id)
     .bind(block_type)
     .bind(status)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// Seed a World-owned `character` sheet governed by `OWNER`'s holder: the
+/// native `owner-private` pair that replaced the retired `creator_only` bool
+/// (v1.191 P1 T3/T4).
+async fn seed_private_sheet(pool: &SqlitePool, key_block_id: &str, world_id: &str) {
+    sqlx::query(
+        "INSERT INTO kb_key_blocks \
+         (key_block_id, world_id, block_type, canonical_name, status, body_json, created_at, \
+          holder_entry_id, disclosure) \
+         VALUES (?, ?, 'character', 'private', 'confirmed', '{}', datetime('now'), ?, 'owner-private')",
+    )
+    .bind(key_block_id)
+    .bind(world_id)
+    .bind(nexus_local_db::creator_holder_entry_id(OWNER))
     .execute(pool)
     .await
     .unwrap();
@@ -276,7 +296,7 @@ async fn world_sheet_rejects_wrong_world_type_or_deleted() {
 }
 
 #[tokio::test]
-async fn world_sheet_rejects_merged_deprecated_and_creator_only() {
+async fn world_sheet_rejects_merged_deprecated_and_private() {
     let (pool, _dir) = fresh_pool().await;
     seed_creator_and_worlds(&pool).await;
     for (sheet, status) in [("kb_merged", "merged"), ("kb_deprecated", "deprecated")] {
@@ -304,14 +324,9 @@ async fn world_sheet_rejects_merged_deprecated_and_creator_only() {
             "sheet {sheet} status {status} should fail, got {err:?}"
         );
     }
-    sqlx::query(
-        "INSERT INTO kb_key_blocks          (key_block_id, world_id, block_type, canonical_name, status, body_json, created_at, creator_only)          VALUES (?, ?, 'character', 'private', 'confirmed', '{}', datetime('now'), 1)",
-    )
-    .bind("kb_creator_only")
-    .bind(WORLD_A)
-    .execute(&pool)
-    .await
-    .unwrap();
+    // v1.191 P1 T4: the retired `creator_only` column is replaced by the native
+    // governance pair — a governed (disclosed) World sheet is not linkable.
+    seed_private_sheet(&pool, "kb_private", WORLD_A).await;
     let err = create_character_with_initial_binding(
         &pool,
         CreateCharacterParams {
@@ -320,7 +335,7 @@ async fn world_sheet_rejects_merged_deprecated_and_creator_only() {
             image_uri: None,
             persona_json: "{}",
             world_id: WORLD_A,
-            world_sheet_entry_id: Some("kb_creator_only"),
+            world_sheet_entry_id: Some("kb_private"),
         },
     )
     .await
@@ -1070,21 +1085,16 @@ async fn binding_update_rejects_invalid_world_sheets() {
             "sheet {sheet} should fail, got {err:?}"
         );
     }
-    sqlx::query(
-        "INSERT INTO kb_key_blocks          (key_block_id, world_id, block_type, canonical_name, status, body_json, created_at, creator_only)          VALUES (?, ?, 'character', 'private', 'confirmed', '{}', datetime('now'), 1)",
-    )
-    .bind("kb_creator_only")
-    .bind(WORLD_A)
-    .execute(&pool)
-    .await
-    .unwrap();
+    // v1.191 P1 T4: the retired `creator_only` bool is replaced by the native
+    // governance pair — a governed sheet is rejected on relink as well.
+    seed_private_sheet(&pool, "kb_private", WORLD_A).await;
     let err = update_actor_world_binding(
         &pool,
         OWNER,
         &created.character.character_id,
         &created.binding.binding_id,
         0,
-        FieldPatch::Set("kb_creator_only"),
+        FieldPatch::Set("kb_private"),
     )
     .await
     .unwrap_err();
@@ -1583,4 +1593,566 @@ async fn noop_binding_clear_still_checks_revision() {
             code: ActorContractConflict::BindingRevisionConflict
         }
     ));
+}
+
+// ── v1.191 P1 T4 — holder lifecycle provisioning ───────────────────────
+//
+// Durable contract: `.mstar/specs/holder-governance.md` §2.1 (subject and
+// registry row commit together; one stable holder per stored identity) and
+// §2.2 (identity stability across rename/archive/restore, retained archived
+// reads, fail-closed missing/corrupt registry on a normal read,
+// unreferenced-only Actor deletion).
+
+/// Count the registry rows of a subject kind, so "no row was provisioned or
+/// duplicated" is asserted on the storage itself.
+async fn holder_rows(pool: &SqlitePool, column: &str, subject_id: &str) -> i64 {
+    sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT COUNT(*) FROM knowledge_holders WHERE {column} = ?"
+    )))
+    .bind(subject_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+async fn seed_character(pool: &SqlitePool, display_name: &str) -> String {
+    create_character_with_initial_binding(
+        pool,
+        CreateCharacterParams {
+            owner_creator_id: OWNER,
+            display_name,
+            image_uri: None,
+            persona_json: "{}",
+            world_id: WORLD_A,
+            world_sheet_entry_id: None,
+        },
+    )
+    .await
+    .unwrap()
+    .character
+    .character_id
+}
+
+#[tokio::test]
+async fn v1191_holder_lifecycle_creator_materialization_is_holder_stable() {
+    let (pool_a, _dir_a) = fresh_pool().await;
+    let (pool_b, _dir_b) = fresh_pool().await;
+
+    // Two independently materialized workspaces of the same global Creator.
+    ensure_creator_row(&pool_a, OWNER, "Owner").await.unwrap();
+    ensure_creator_row(&pool_b, OWNER, "Owner Renamed")
+        .await
+        .unwrap();
+
+    let holder_a = require_creator_holder(&pool_a, OWNER).await.unwrap();
+    let holder_b = require_creator_holder(&pool_b, OWNER).await.unwrap();
+    assert_eq!(holder_a, creator_holder_entry_id(OWNER));
+    assert_eq!(holder_a, holder_b, "one identity resolves one holder id");
+    assert_eq!(holder_rows(&pool_a, "creator_id", OWNER).await, 1);
+    assert_eq!(holder_rows(&pool_b, "creator_id", OWNER).await, 1);
+
+    // Re-materializing (rename/repair) keeps the same holder and one row.
+    ensure_creator_row(&pool_a, OWNER, "Owner Renamed Again")
+        .await
+        .unwrap();
+    assert_eq!(
+        require_creator_holder(&pool_a, OWNER).await.unwrap(),
+        holder_a
+    );
+    assert_eq!(holder_rows(&pool_a, "creator_id", OWNER).await, 1);
+
+    // The subject-addressed read agrees with the id-addressed read.
+    assert_eq!(
+        resolve_subject_holder(&pool_a, &HolderSubject::Creator(OWNER.to_string()))
+            .await
+            .unwrap()
+            .as_deref(),
+        Some(holder_a.as_str())
+    );
+    // An unmaterialized Creator is absent, not a minted id.
+    assert!(
+        resolve_subject_holder(&pool_a, &HolderSubject::Creator("ctr_absent".to_string()))
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn v1191_holder_lifecycle_character_create_rename_archive_restore_keep_one_holder() {
+    let (pool, _dir) = fresh_pool().await;
+    seed_creator_and_worlds(&pool).await;
+    let character_id = seed_character(&pool, "Ava").await;
+
+    let created = require_character_holder(&pool, OWNER, &character_id)
+        .await
+        .unwrap();
+    assert_eq!(created, character_holder_entry_id(&character_id));
+    assert_eq!(holder_rows(&pool, "character_id", &character_id).await, 1);
+
+    // Rename: the projected label moves, the holder does not.
+    let renamed = update_character(
+        &pool,
+        OWNER,
+        &character_id,
+        0,
+        CharacterPatch {
+            display_name: Some("Ava Renamed"),
+            image_uri: FieldPatch::Keep,
+            persona_json: FieldPatch::Keep,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(renamed.display_name, "Ava Renamed");
+    assert_eq!(
+        require_character_holder(&pool, OWNER, &character_id)
+            .await
+            .unwrap(),
+        created
+    );
+
+    // Archive increments the lifecycle epoch and retains the holder.
+    let archived = transition_character(
+        &pool,
+        OWNER,
+        &character_id,
+        renamed.revision,
+        CharacterStatus::Archived,
+    )
+    .await
+    .unwrap();
+    assert_eq!(archived.status, "archived");
+    assert!(archived.lifecycle_epoch > renamed.lifecycle_epoch);
+    assert_eq!(
+        require_character_holder(&pool, OWNER, &character_id)
+            .await
+            .unwrap(),
+        created,
+        "an archived Character keeps its holder"
+    );
+
+    // Retained archived read: the detail row still answers, foreign owners do not.
+    let retained = get_character(&pool, OWNER, &character_id).await.unwrap();
+    assert_eq!(retained.map(|row| row.status), Some("archived".to_string()));
+    assert!(matches!(
+        require_character_holder(&pool, OTHER, &character_id)
+            .await
+            .unwrap_err(),
+        LocalDbError::ActorNotFound { .. }
+    ));
+
+    // Restore reuses the same holder and the same epoch rules.
+    let restored = transition_character(
+        &pool,
+        OWNER,
+        &character_id,
+        archived.revision,
+        CharacterStatus::Active,
+    )
+    .await
+    .unwrap();
+    assert_eq!(restored.status, "active");
+    assert!(restored.lifecycle_epoch > archived.lifecycle_epoch);
+    assert_eq!(
+        require_character_holder(&pool, OWNER, &character_id)
+            .await
+            .unwrap(),
+        created
+    );
+    assert_eq!(holder_rows(&pool, "character_id", &character_id).await, 1);
+}
+
+#[tokio::test]
+async fn v1191_holder_lifecycle_missing_registry_read_fails_without_provisioning() {
+    let (pool, _dir) = fresh_pool().await;
+    seed_creator_and_worlds(&pool).await;
+    let character_id = seed_character(&pool, "Ava").await;
+
+    // Corrupt the registry by removing the Character's row behind the API (the
+    // only reachable way to break the subject+holder invariant).
+    sqlx::query("DELETE FROM knowledge_holders WHERE character_id = ?")
+        .bind(&character_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(holder_rows(&pool, "character_id", &character_id).await, 0);
+
+    let err = require_character_holder(&pool, OWNER, &character_id)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, LocalDbError::HolderStateInvalid { reason }
+            if reason.contains("never provisions")),
+        "expected holder_state_invalid, got {err:?}"
+    );
+    // The read may not repair the state, and the missing Registry must not
+    // become a second (minted) holder.
+    assert_eq!(holder_rows(&pool, "character_id", &character_id).await, 0);
+    assert!(
+        resolve_subject_holder(&pool, &HolderSubject::Character(character_id.clone()))
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    // Rename/archive fail closed on the same state instead of writing an
+    // identity that has no holder.
+    assert!(matches!(
+        update_character(
+            &pool,
+            OWNER,
+            &character_id,
+            0,
+            CharacterPatch {
+                display_name: Some("Ava"),
+                image_uri: FieldPatch::Keep,
+                persona_json: FieldPatch::Keep,
+            },
+        )
+        .await
+        .unwrap_err(),
+        LocalDbError::HolderStateInvalid { .. }
+    ));
+    assert!(matches!(
+        transition_character(&pool, OWNER, &character_id, 0, CharacterStatus::Archived)
+            .await
+            .unwrap_err(),
+        LocalDbError::HolderStateInvalid { .. }
+    ));
+    // The Character row itself is untouched by either refusal.
+    assert_eq!(
+        get_character(&pool, OWNER, &character_id)
+            .await
+            .unwrap()
+            .map(|row| (row.status, row.revision)),
+        Some(("active".to_string(), 0))
+    );
+
+    // A non-deriving registry row is corrupt state, not a holder.
+    sqlx::query(
+        "INSERT INTO knowledge_holders (holder_entry_id, character_id, created_at) \
+         VALUES ('hld_foreign', ?, datetime('now'))",
+    )
+    .bind(&character_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(matches!(
+        require_character_holder(&pool, OWNER, &character_id)
+            .await
+            .unwrap_err(),
+        LocalDbError::HolderStateInvalid { .. }
+    ));
+}
+
+#[tokio::test]
+async fn v1191_holder_lifecycle_referenced_character_delete_refuses_without_mutation() {
+    let (pool, _dir) = fresh_pool().await;
+    seed_creator_and_worlds(&pool).await;
+    let character_id = seed_character(&pool, "Ava").await;
+    let holder = require_character_holder(&pool, OWNER, &character_id)
+        .await
+        .unwrap();
+
+    // The active binding refuses deletion (zero mutation).
+    assert!(matches!(
+        delete_character(&pool, OWNER, &character_id)
+            .await
+            .unwrap_err(),
+        LocalDbError::ActorContractConflict {
+            code: ActorContractConflict::ActorInUse
+        }
+    ));
+    assert!(get_character(&pool, OWNER, &character_id)
+        .await
+        .unwrap()
+        .is_some());
+    assert_eq!(holder_rows(&pool, "character_id", &character_id).await, 1);
+
+    // A governance reference (a row governed by this Character's holder)
+    // refuses deletion even after the binding is gone.
+    sqlx::query("DELETE FROM actor_world_bindings WHERE character_id = ?")
+        .bind(&character_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO kb_key_blocks \
+         (key_block_id, owner_kind, world_id, character_id, block_type, canonical_name, status, \
+          body_json, created_at, holder_entry_id, disclosure) \
+         VALUES ('kb_private', 'character', NULL, ?, 'character', 'private', 'confirmed', '{}', \
+                 datetime('now'), ?, 'owner-private')",
+    )
+    .bind(&character_id)
+    .bind(&holder)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(matches!(
+        delete_character(&pool, OWNER, &character_id)
+            .await
+            .unwrap_err(),
+        LocalDbError::ActorContractConflict {
+            code: ActorContractConflict::ActorInUse
+        }
+    ));
+    assert_eq!(holder_rows(&pool, "character_id", &character_id).await, 1);
+
+    // Retained Character-owned rows refuse deletion too (independent of the
+    // governance pair).
+    sqlx::query("DELETE FROM kb_key_blocks WHERE key_block_id = 'kb_private'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO character_soul_meta \
+         (character_id, file_path, schema_version, created_at, updated_at) \
+         VALUES (?, 'SOUL.md', 1, datetime('now'), datetime('now'))",
+    )
+    .bind(&character_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(matches!(
+        delete_character(&pool, OWNER, &character_id)
+            .await
+            .unwrap_err(),
+        LocalDbError::ActorContractConflict {
+            code: ActorContractConflict::ActorInUse
+        }
+    ));
+
+    // Foreign owners cannot delete the subject at all.
+    assert!(matches!(
+        delete_character(&pool, OTHER, &character_id)
+            .await
+            .unwrap_err(),
+        LocalDbError::ActorNotFound { .. }
+    ));
+}
+
+#[tokio::test]
+async fn v1191_holder_lifecycle_unreferenced_character_delete_removes_subject_and_holder() {
+    let (pool, _dir) = fresh_pool().await;
+    seed_creator_and_worlds(&pool).await;
+    let character_id = seed_character(&pool, "Ava").await;
+    let holder = require_character_holder(&pool, OWNER, &character_id)
+        .await
+        .unwrap();
+
+    // The last-active-binding rule keeps a Character bound in production, so
+    // the unreferenced state is constructed directly (a Character whose
+    // bindings and retained rows are gone) to exercise the removal path.
+    sqlx::query("DELETE FROM actor_world_bindings WHERE character_id = ?")
+        .bind(&character_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    delete_character(&pool, OWNER, &character_id).await.unwrap();
+
+    assert!(get_character(&pool, OWNER, &character_id)
+        .await
+        .unwrap()
+        .is_none());
+    assert!(nexus_local_db::resolve_holder(&pool, &holder)
+        .await
+        .unwrap()
+        .is_none());
+    assert_eq!(holder_rows(&pool, "character_id", &character_id).await, 0);
+}
+
+#[tokio::test]
+async fn v1191_holder_lifecycle_referenced_creator_delete_refuses_and_unreferenced_is_atomic() {
+    let (pool, _dir) = fresh_pool().await;
+    seed_creator_and_worlds(&pool).await;
+    let holder = require_creator_holder(&pool, OWNER).await.unwrap();
+
+    // An owned World would be CASCADE-deleted by the inherited FK; the guard
+    // refuses first, so governed rows cannot be dropped silently.
+    assert!(matches!(
+        delete_creator(&pool, OWNER).await.unwrap_err(),
+        LocalDbError::ActorContractConflict {
+            code: ActorContractConflict::ActorInUse
+        }
+    ));
+    assert_eq!(holder_rows(&pool, "creator_id", OWNER).await, 1);
+    let worlds: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM narrative_worlds")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(worlds, 2, "the refusal cascades nothing");
+
+    // Character-owned rows and a governance reference refuse as well.
+    let character_id = seed_character(&pool, "Ava").await;
+    assert!(matches!(
+        delete_creator(&pool, OWNER).await.unwrap_err(),
+        LocalDbError::ActorContractConflict {
+            code: ActorContractConflict::ActorInUse
+        }
+    ));
+
+    // A Creator with no Worlds/Characters but a governed row still refuses.
+    ensure_creator_row(&pool, OTHER, "Other").await.unwrap();
+    sqlx::query(
+        "INSERT INTO kb_key_blocks \
+         (key_block_id, world_id, block_type, canonical_name, status, body_json, created_at, \
+          holder_entry_id, disclosure) \
+         VALUES ('kb_other_private', ?, 'world', 'private', 'confirmed', '{}', datetime('now'), \
+                 ?, 'owner-private')",
+    )
+    .bind(WORLD_B)
+    .bind(creator_holder_entry_id(OTHER))
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(matches!(
+        delete_creator(&pool, OTHER).await.unwrap_err(),
+        LocalDbError::ActorContractConflict {
+            code: ActorContractConflict::ActorInUse
+        }
+    ));
+    sqlx::query("DELETE FROM kb_key_blocks WHERE key_block_id = 'kb_other_private'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Unreferenced: holder and subject go together.
+    delete_creator(&pool, OTHER).await.unwrap();
+    assert_eq!(holder_rows(&pool, "creator_id", OTHER).await, 0);
+    let creators: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM creators WHERE creator_id = ?")
+        .bind(OTHER)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(creators, 0);
+    assert!(
+        nexus_local_db::resolve_holder(&pool, &creator_holder_entry_id(OTHER))
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    // The Character (and its holder) of the still-referenced Creator is intact.
+    assert!(matches!(
+        delete_creator(&pool, OWNER).await.unwrap_err(),
+        LocalDbError::ActorContractConflict {
+            code: ActorContractConflict::ActorInUse
+        }
+    ));
+    assert_eq!(
+        require_character_holder(&pool, OWNER, &character_id)
+            .await
+            .unwrap(),
+        character_holder_entry_id(&character_id)
+    );
+    assert_eq!(
+        require_creator_holder(&pool, OWNER).await.unwrap(),
+        holder,
+        "removing another Creator leaves this registry row untouched"
+    );
+}
+
+#[tokio::test]
+async fn v1191_holder_lifecycle_creator_guard_covers_every_creator_scoped_table() {
+    let (pool, _dir) = fresh_pool().await;
+
+    // Every persistent table carrying a Creator-identifying column, straight
+    // from the migrated schema (never a hand-kept copy).
+    let tables: Vec<String> = sqlx::query_scalar(
+        "SELECT m.name FROM sqlite_master m \
+         WHERE m.type = 'table' AND m.name NOT LIKE 'sqlite_%' \
+           AND EXISTS (SELECT 1 FROM pragma_table_info(m.name) c \
+                       WHERE c.name IN ('creator_id', 'owner_creator_id', 'controlling_creator_id')) \
+         ORDER BY m.name",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+
+    let classified: Vec<&str> = nexus_local_db::creators::CREATOR_RETAINED_TABLES
+        .iter()
+        .copied()
+        .chain(
+            nexus_local_db::creators::CREATOR_SCOPE_HANDLED_ELSEWHERE
+                .iter()
+                .map(|(table, _reason)| *table),
+        )
+        .collect();
+    let unclassified: Vec<&str> = tables
+        .iter()
+        .map(String::as_str)
+        .filter(|table| !classified.contains(table))
+        .collect();
+
+    assert!(
+        unclassified.is_empty(),
+        "Creator-scoped tables neither counted as retained rows nor classified as \
+         handled elsewhere — the delete_creator guard would let them be orphaned: {unclassified:?}"
+    );
+    // And the declared inventory names only tables that really exist.
+    let all_tables: Vec<String> = sqlx::query_scalar(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let stale: Vec<&str> = classified
+        .iter()
+        .copied()
+        .filter(|table| !all_tables.iter().any(|t| t == table))
+        .collect();
+    assert!(
+        stale.is_empty(),
+        "declared tables missing from the schema: {stale:?}"
+    );
+}
+
+#[tokio::test]
+async fn v1191_holder_lifecycle_reference_source_refuses_creator_delete() {
+    let (pool, _dir) = fresh_pool().await;
+    seed_creator_and_worlds(&pool).await;
+    // OWNER owns the seeded Worlds; use a Creator that owns nothing else so the
+    // reference registry row is the only possible refusal cause.
+    ensure_creator_row(&pool, OTHER, "Other").await.unwrap();
+    let holder = require_creator_holder(&pool, OTHER).await.unwrap();
+
+    // A creator-scoped reference registry row is retained owned data: it must
+    // refuse the deletion even though the Creator owns no World or Character.
+    sqlx::query(
+        "INSERT INTO reference_sources \
+         (reference_source_id, creator_id, source_type, uri, title, created_at) \
+         VALUES ('ref_guard', ?, 'note', 'note://guard', 'Guard', datetime('now'))",
+    )
+    .bind(OTHER)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    assert!(matches!(
+        delete_creator(&pool, OTHER).await.unwrap_err(),
+        LocalDbError::ActorContractConflict {
+            code: ActorContractConflict::ActorInUse
+        }
+    ));
+    // Zero mutation: holder, subject and the retained row all survive.
+    assert_eq!(holder_rows(&pool, "creator_id", OTHER).await, 1);
+    assert_eq!(require_creator_holder(&pool, OTHER).await.unwrap(), holder);
+    let sources: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM reference_sources WHERE creator_id = ?")
+            .bind(OTHER)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(sources, 1, "the retained reference source row is untouched");
+
+    // The same Creator is deletable once the retained row is gone.
+    sqlx::query("DELETE FROM reference_sources WHERE creator_id = ?")
+        .bind(OTHER)
+        .execute(&pool)
+        .await
+        .unwrap();
+    delete_creator(&pool, OTHER).await.unwrap();
+    assert_eq!(holder_rows(&pool, "creator_id", OTHER).await, 0);
 }

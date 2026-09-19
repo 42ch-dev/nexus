@@ -35,10 +35,11 @@ use super::NexusAdapter;
 use crate::conversion::{knowledge_record_to_spoke, spoke_to_knowledge_record};
 use crate::extensions::set_nexus_body;
 use crate::{KnowledgeEntry, Scope, ScopeExtensionsKey};
-use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
+use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryRecord, KnowledgeOwnerRef};
 use nexus_knowledge::world_kb::query::{KbQuery, KbQueryResult};
 use nexus_knowledge::world_kb::source_anchor::SourceAnchor;
 use nexus_knowledge::world_kb::store::{KbStore, KbStoreError};
+use nexus_knowledge::world_kb::KnowledgeReadScope;
 use nexus_local_db::kb_store::SqliteKbStore;
 use serde_json::Value;
 use sqlx::SqlitePool;
@@ -92,6 +93,14 @@ impl NexusAdapter<'_> {
     /// [`SpokeBackedKbStore`] recovers the exact body (V1.143 body-fidelity
     /// mechanism, applied to the read path).
     ///
+    /// # Request-bound scope (HARD, v1.191 P1 T8)
+    ///
+    /// The read requires the adapter's bound selection: a host-only adapter
+    /// rejects, a wire `scope_id` outside the selection's containers yields an
+    /// empty read (never a wider one), and a wire `viewpoint` that is not the
+    /// bound resolved holder is refused — the storage selection then applies
+    /// the durable §4.2 eligibility predicate in SQL.
+    ///
     /// # Errors
     ///
     /// Returns [`KbStoreError`] on storage failure (same surface as
@@ -100,10 +109,30 @@ impl NexusAdapter<'_> {
         &self,
         scope: &Scope,
     ) -> Result<ScopedKbRead, KbStoreError> {
-        let query = kb_query_from_scope(scope);
+        let selection = self
+            .require_read_scope("list_knowledge_entries_scoped")
+            .map_err(|reject| KbStoreError::Storage(reject.message))?;
+        if let Err(reject) = self.refuse_foreign_scope_viewpoint(scope) {
+            return Err(KbStoreError::Storage(reject.message));
+        }
+        let mut query = kb_query_from_scope(scope);
+        // Preserve the pre-T8 MCA window: a wire scope that carries no explicit
+        // `limit` reads at most `LIST_BY_WORLD_LIMIT` matching rows and never
+        // rejects on overflow (the MCA contract — distinct from the orchestrator
+        // ScopeQueryPort reject). The window is applied AFTER the admitted
+        // selection, so only eligible rows ever occupy it.
+        if query.limit.is_none() {
+            query.limit = Some(
+                usize::try_from(nexus_local_db::kb_store::LIST_BY_WORLD_LIMIT)
+                    .unwrap_or(usize::MAX),
+            );
+        }
 
         let store = SqliteKbStore::new(self.pool.clone());
-        let result = store.query(&query).await?;
+        // `query_with_scope` (v1.191 P1 T6 selection) applies the authorized
+        // container AND disclosure predicate before the listing window, so a
+        // hidden row is never counted, ranked or truncated into the page.
+        let result = store.query_with_scope(&query, selection).await?;
 
         let items = result
             .items
@@ -158,39 +187,42 @@ pub struct SpokeBackedKbStore {
 }
 
 impl SpokeBackedKbStore {
-    /// Construct from a [`SqlitePool`]. The adapter's port methods are
-    /// natively `async fn` (spoke-operations 0.9.1 surface) and await
-    /// `SQLite` I/O on the caller's runtime — no runtime handle is captured
-    /// and no tokio runtime is required at construction (see
+    /// Construct from a [`SqlitePool`] and the caller's validated
+    /// request-bound read selection (v1.191 P1 T8 — the MCA `WorldKB` read is
+    /// a KE read and is served only inside that selection). The adapter's port
+    /// methods are natively `async fn` (spoke-operations 0.9.1 surface) and
+    /// await `SQLite` I/O on the caller's runtime — no runtime handle is
+    /// captured and no tokio runtime is required at construction (see
     /// [`NexusAdapter::new`]).
     #[must_use]
-    pub fn new(pool: SqlitePool) -> Self {
-        let adapter = NexusAdapter::new(pool.clone());
+    pub fn new(pool: SqlitePool, read_scope: KnowledgeReadScope) -> Self {
+        let adapter = NexusAdapter::new(pool.clone(), read_scope);
         Self { adapter, pool }
+    }
+
+    /// The bound admitted read selection (v1.191 P1 T8).
+    ///
+    /// # Panics
+    ///
+    /// Panics when the adapter was built without a bound read scope
+    /// (`NexusAdapter::new_host`); [`Self::new`] always binds one.
+    #[must_use]
+    pub const fn read_scope(&self) -> &KnowledgeReadScope {
+        self.adapter
+            .read_scope()
+            .expect("SpokeBackedKbStore is constructed with a bound read scope")
     }
 }
 
 /// Map an inbound [`KbQuery::block_type`] to the spoke `Scope.entry_types`
 /// wire string (`snake_case`). MCA sends at most one; `None` → empty.
 ///
-/// Reuses `BlockType`'s serde mapping (the single source of truth for the
-/// wire string — `#[serde(rename_all = "snake_case")]`) rather than a
-/// hand-written variant table, so newly-added variants map automatically.
-/// The serde representation of a unit enum is always a `Value::String`, so the
-/// non-string / error arms are unreachable for the current `BlockType`; any
-/// divergence is surfaced loudly rather than turned into a silent query miss.
+/// Delegates to the conversion seam's [`block_type_to_entry_type`] so the
+/// forward and reverse directions of the scope bridge cannot drift from the
+/// wire vocabulary the entry conversion emits (v1.191 P1 T8).
 fn block_type_to_entry_types(block_type: Option<nexus_contracts::BlockType>) -> Vec<String> {
     block_type
-        .map(|bt| match serde_json::to_value(bt) {
-            Ok(serde_json::Value::String(s)) => s,
-            Ok(other) => unreachable!(
-                "BlockType serialized to non-string {other:?}; \
-                 rename_all = snake_case invariant broken — update the wire mapping deliberately"
-            ),
-            Err(e) => {
-                unreachable!("BlockType (unit enum) serialization cannot fail: {e}")
-            }
-        })
+        .map(crate::conversion::knowledge_entry::block_type_to_entry_type)
         .into_iter()
         .collect()
 }
@@ -254,19 +286,22 @@ impl KbStore for SpokeBackedKbStore {
         &self,
         entry_id: &str,
     ) -> Result<KnowledgeEntryRecord, KbStoreError> {
-        // Delegate to SqliteKbStore (MCA does not call this; the daemon CRUD
-        // path uses SqliteKbStore directly — unchanged).
-        SqliteKbStore::new(self.pool.clone())
-            .get_knowledge_entry(entry_id)
-            .await
+        // v1.191 P1 T8: the delegated read goes through the adapter's bound
+        // selection, so a row outside it (or hidden from it) is not found —
+        // this store has no unscoped hole next to its scoped `query`.
+        self.adapter
+            .load_admitted_entry(entry_id)
+            .await?
+            .ok_or_else(|| KbStoreError::NotFound(entry_id.to_string()))
     }
 
     async fn list_by_world(
         &self,
         world_id: &str,
     ) -> Result<Vec<KnowledgeEntryRecord>, KbStoreError> {
+        // Admitted selection only; a world outside it contributes nothing.
         SqliteKbStore::new(self.pool.clone())
-            .list_by_world(world_id)
+            .list_by_owner_complete(&KnowledgeOwnerRef::world(world_id), self.read_scope())
             .await
     }
 
@@ -279,6 +314,12 @@ impl KbStore for SpokeBackedKbStore {
     }
 
     async fn get_anchors(&self, entry_id: &str) -> Result<Vec<SourceAnchor>, KbStoreError> {
+        // Anchors are provenance for one entry, so they are only readable for
+        // an entry the bound selection admits (an unreadable entry's anchors
+        // are indistinguishable from an absent entry's).
+        if self.adapter.load_admitted_entry(entry_id).await?.is_none() {
+            return Ok(Vec::new());
+        }
         SqliteKbStore::new(self.pool.clone())
             .get_anchors(entry_id)
             .await
@@ -444,6 +485,20 @@ mod tests {
     use nexus_knowledge::world_kb::KbStore;
     use nexus_local_db::{open_pool, run_migrations};
 
+    /// The admitted selection the MCA fixtures read inside (v1.191 P1 T8):
+    /// Creator management over `wld_mca`, the world they seed.
+    fn mca_scope() -> KnowledgeReadScope {
+        KnowledgeReadScope::creator_management(
+            vec![KnowledgeOwnerRef::world("wld_mca")],
+            Vec::new(),
+        )
+    }
+
+    /// A scoped MCA store over `wld_mca`.
+    fn scoped(pool: sqlx::SqlitePool) -> SpokeBackedKbStore {
+        SpokeBackedKbStore::new(pool, mca_scope())
+    }
+
     async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test.db");
@@ -503,7 +558,7 @@ mod tests {
         let (world_id, _seeded) = seed_world_with_entries(&pool).await;
 
         let sqlite = SqliteKbStore::new(pool.clone());
-        let spoke_backed = SpokeBackedKbStore::new(pool);
+        let spoke_backed = scoped(pool);
 
         // Unfiltered
         let q = KbQuery::new(&world_id);
@@ -567,7 +622,7 @@ mod tests {
         let sqlite_store = SqliteKbStore::new(pool.clone());
         sqlite_store.insert_knowledge_entry(entry).await.unwrap();
 
-        let spoke_backed = SpokeBackedKbStore::new(pool);
+        let spoke_backed = scoped(pool);
         let q = KbQuery::new(&world_id).with_canonical_name("Numeric");
         let res = spoke_backed.query(&q).await.unwrap();
         let body = res.items[0].body.as_ref().unwrap();
@@ -580,7 +635,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn write_methods_return_read_only_error() {
         let (pool, _dir) = fresh_pool().await;
-        let store = SpokeBackedKbStore::new(pool);
+        let store = scoped(pool);
         let entry = KnowledgeEntryRecord::new("wld_mca", BlockType::Character, "Ghost");
         let err = store.insert_knowledge_entry(entry).await.unwrap_err();
         assert!(matches!(err, KbStoreError::Storage(ref s) if s.contains("read-only")));
@@ -618,10 +673,22 @@ mod tests {
             sqlite.insert_knowledge_entry(entry).await.unwrap();
         }
 
-        let spoke_backed = SpokeBackedKbStore::new(pool);
+        // The scoped MCA read for this world (the fixture helper binds
+        // `wld_mca`; this test seeds its own world).
+        let spoke_backed = SpokeBackedKbStore::new(
+            pool,
+            KnowledgeReadScope::creator_management(
+                vec![KnowledgeOwnerRef::world("wld_big")],
+                Vec::new(),
+            ),
+        );
 
-        // Unfiltered query: both stores MUST return the same silently-truncated
-        // window (LIST_BY_WORLD_LIMIT rows) — neither rejects.
+        // Unfiltered query: neither store rejects, and both return the same
+        // silently-truncated window (LIST_BY_WORLD_LIMIT rows) in the same
+        // order. v1.191 P1 T8: the MCA read is scoped, so its `total_count` /
+        // `has_more` describe the COMPLETE admitted matching set (the T6
+        // selection counts eligible rows before the window), while the legacy
+        // unscoped store still counts the window it fetched.
         let q = KbQuery::new("wld_big");
         let sqlite_res = sqlite
             .query(&q)
@@ -631,17 +698,29 @@ mod tests {
             .query(&q)
             .await
             .expect("SpokeBackedKbStore query must NOT reject on >500 rows");
+        let window = usize::try_from(nexus_local_db::kb_store::LIST_BY_WORLD_LIMIT).unwrap();
         assert_eq!(
             sqlite_res.items.len(),
+            window,
+            "the legacy store truncates to the window"
+        );
+        assert_eq!(
             spoke_res.items.len(),
-            "both stores truncate to the same window"
+            window,
+            "the scoped MCA read preserves the same window"
         );
         assert_eq!(
-            sqlite_res.items.len(),
-            usize::try_from(nexus_local_db::kb_store::LIST_BY_WORLD_LIMIT).unwrap(),
+            sqlite_res.total_count, spoke_res.total_count,
+            "both stores report the same windowed count"
         );
-        assert_eq!(sqlite_res.total_count, spoke_res.total_count);
-        assert_eq!(sqlite_res.has_more, spoke_res.has_more);
+        assert_eq!(
+            spoke_res.total_count, window,
+            "the scoped read reports the window it served"
+        );
+        assert_eq!(
+            sqlite_res.has_more, spoke_res.has_more,
+            "both stores agree on whether the window was exhausted"
+        );
         // The actual rows match (same ordering, same canonical_names).
         let sqlite_names: Vec<&str> = sqlite_res
             .items
@@ -654,5 +733,81 @@ mod tests {
             .map(|e| e.canonical_name.as_str())
             .collect();
         assert_eq!(sqlite_names, spoke_names);
+    }
+
+    /// v1.191 P1 T11 (consumer side): the novel-writing run's chapter KB block
+    /// reads its rows through [`SpokeBackedKbStore::list_by_world`] — the
+    /// complete admitted listing the MCA `WorldKB` snapshot is composed from.
+    /// The exact admitted holder's private row is in; another holder's private
+    /// row is out, so a prompt built from this snapshot carries no foreign
+    /// private text.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn v1191_holder_context_list_by_world_serves_the_admitted_snapshot() {
+        use nexus_knowledge::world_kb::knowledge_entry::DISCLOSURE_OWNER_PRIVATE;
+
+        let (pool, _dir) = fresh_pool().await;
+        let (world_id, seeded) = seed_world_with_entries(&pool).await;
+
+        // Two stored creators with one registered holder each.
+        nexus_local_db::ensure_creator_row(&pool, "ctr_other", "Other")
+            .await
+            .unwrap();
+        let mut tx = pool.begin().await.unwrap();
+        let own_holder = nexus_local_db::holders::ensure_creator_holder_in_tx(&mut tx, "ctr_test")
+            .await
+            .unwrap();
+        let other_holder =
+            nexus_local_db::holders::ensure_creator_holder_in_tx(&mut tx, "ctr_other")
+                .await
+                .unwrap();
+        tx.commit().await.unwrap();
+
+        let sqlite = SqliteKbStore::new(pool.clone());
+        for (entry_id, name, holder) in [
+            ("kb_mca_own_private", "OwnPrivateRow", &own_holder),
+            (
+                "kb_mca_other_private",
+                "OtherHolderPrivateRow",
+                &other_holder,
+            ),
+        ] {
+            let mut row = KnowledgeEntryRecord::new(&world_id, BlockType::Item, name);
+            row.entry_id = entry_id.to_string();
+            row.holder_entry_id = Some(holder.clone());
+            row.disclosure = Some(DISCLOSURE_OWNER_PRIVATE.to_string());
+            sqlite.insert_knowledge_entry(row).await.unwrap();
+        }
+
+        let scoped = SpokeBackedKbStore::new(
+            pool,
+            KnowledgeReadScope::actor_view(
+                own_holder,
+                vec![KnowledgeOwnerRef::world(world_id.as_str())],
+            )
+            .expect("actor view scope"),
+        );
+        let names: Vec<String> = scoped
+            .list_by_world(&world_id)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|row| row.canonical_name)
+            .collect();
+
+        for entry in &seeded {
+            assert!(
+                names.contains(&entry.canonical_name),
+                "the Character-global shared row {} stays visible: {names:?}",
+                entry.canonical_name
+            );
+        }
+        assert!(
+            names.contains(&"OwnPrivateRow".to_string()),
+            "the exact admitted holder's private row is in the snapshot: {names:?}"
+        );
+        assert!(
+            !names.contains(&"OtherHolderPrivateRow".to_string()),
+            "another holder's private row must not enter the model snapshot: {names:?}"
+        );
     }
 }

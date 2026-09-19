@@ -3,7 +3,7 @@
   "$id": "https://nexus42.invalid/schemas/daemon-api/canvas/world-kb/world-kb-patch-entity-request.schema.json",
   "schema_version": 1,
   "title": "Nexus WorldKbPatchEntityRequest",
-  "description": "Request body for POST /v1/daemon/worlds/{world_id}/kb/patch-entity (V1.73). Edits an entity (KnowledgeEntry) title/body/aliases/block_type with per-row OCC on kb_key_blocks.revision.",
+  "description": "Request body for POST /v1/daemon/worlds/{world_id}/kb/patch-entity (V1.73). Edits an entity (KnowledgeEntry) title/body/aliases/block_type/audience (native holder governance) with per-row OCC on kb_key_blocks.revision: the same expected_version covers content and governance, and a refused or no-op patch changes neither the row nor its revision.",
   "type": "object",
   "required": ["entity_id", "expected_version", "patch"],
   "properties": {

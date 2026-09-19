@@ -20,6 +20,7 @@
 
 use crate::capability::{Capability, CapabilityError};
 use async_trait::async_trait;
+use nexus_knowledge::world_kb::store::KnowledgeReadScope;
 use nexus_knowledge::world_kb::KbStore;
 use nexus_narrative::NarrativeGateway;
 use serde::Deserialize;
@@ -55,6 +56,42 @@ pub async fn ensure_world_owned(
             "world ownership check: {e}"
         ))),
     }
+}
+
+/// Resolve the admitted `ActorView` read selection of one owned World
+/// (durable §4.1) for a capability that reads World KB rows.
+///
+/// The selection is derived from stored ownership and the holder registry, so
+/// a capability can never widen it from its own input. Fail-closed: an
+/// unresolvable selection refuses, and the caller then reads no KB rows at all
+/// instead of falling back to the World listing — an `ActorView` admits the
+/// exact resolved Creator holder plus authorized containers, never a
+/// management review (durable §4.2).
+///
+/// # Errors
+///
+/// Returns `Forbidden` for a foreign/missing World and for a missing/corrupt
+/// holder registry row (the stable `holder_state_invalid` code is named in the
+/// message), and `Internal` on database failure.
+pub async fn admitted_creator_view_scope(
+    pool: &sqlx::SqlitePool,
+    creator_id: &str,
+    world_id: &str,
+) -> Result<KnowledgeReadScope, CapabilityError> {
+    nexus_local_db::read_scope::creator_actor_view_scope(pool, creator_id, world_id)
+        .await
+        .map_err(|err| match err {
+            nexus_local_db::LocalDbError::ActorNotFound { .. } => {
+                CapabilityError::Forbidden("world not found or not owned by creator".into())
+            }
+            nexus_local_db::LocalDbError::HolderStateInvalid { .. } => {
+                CapabilityError::Forbidden(format!(
+                    "admitted knowledge read selection unavailable ({})",
+                    nexus_local_db::HOLDER_STATE_INVALID_CODE
+                ))
+            }
+            other => CapabilityError::Internal(format!("admitted read selection: {other}")),
+        })
 }
 
 /// Resolve the workspace slug for a world (diagnostics / audit context).
@@ -224,11 +261,17 @@ impl Capability for WorldStateQuery {
         let world_json =
             serde_json::to_value(&world).map_err(|e| CapabilityError::Internal(e.to_string()))?;
 
-        // KB slice.
+        // KB slice. The KB rows are model-facing, so they are read through the
+        // admitted Creator ActorView — another holder's `owner-private` World
+        // row is never part of the slice, and an unresolvable selection refuses
+        // rather than widening to the World listing. A timeline-only slice
+        // reads no KB rows, so it needs no KB selection.
         let kb_blocks = if want_kb {
+            let selection =
+                admitted_creator_view_scope(pool, &parsed.creator_id, &parsed.world_id).await?;
             let store = nexus_local_db::kb_store::SqliteKbStore::new((**pool).clone());
             store
-                .list_by_world(&parsed.world_id)
+                .list_by_world_admitted(&parsed.world_id, false, &selection)
                 .await
                 .map_err(|e| CapabilityError::Internal(format!("kb list: {e}")))?
                 .into_iter()
@@ -772,8 +815,17 @@ mod tests {
         (pool, dir)
     }
 
+    /// Seed the creator **and its registry holder**: the KB reads resolve an
+    /// admitted `ActorView` selection, which fails closed without the holder row.
     async fn seed_creator(pool: &sqlx::SqlitePool, creator_id: &str) {
-        // SAFETY: test-only seed.
+        nexus_local_db::ensure_creator_row(pool, creator_id, "Test Creator")
+            .await
+            .unwrap();
+    }
+
+    /// Seed only the stored `creators` row, with no registry holder: the shape a
+    /// KB read must refuse rather than read unscoped.
+    async fn seed_creator_without_holder(pool: &sqlx::SqlitePool, creator_id: &str) {
         sqlx::query(
             "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
              VALUES (?, ?, 'active', datetime('now'), '{}')",
@@ -783,6 +835,39 @@ mod tests {
         .execute(pool)
         .await
         .unwrap();
+    }
+
+    /// Seed one World-row `KnowledgeEntry` with an explicit governance pair
+    /// (`None`/`None` is the shared row), returning its id.
+    async fn seed_kb_row(
+        pool: &sqlx::SqlitePool,
+        world_id: &str,
+        name: &str,
+        holder_entry_id: Option<&str>,
+        disclosure: Option<&str>,
+    ) -> String {
+        let mut kb = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
+            world_id,
+            nexus_contracts::BlockType::Item,
+            name,
+        );
+        kb.holder_entry_id = holder_entry_id.map(str::to_string);
+        kb.disclosure = disclosure.map(str::to_string);
+        nexus_local_db::kb_store::SqliteKbStore::new(pool.clone())
+            .insert_knowledge_entry(kb)
+            .await
+            .unwrap()
+            .entry_id
+    }
+
+    /// The `entry_id`s of the returned `kb_blocks` slice.
+    fn kb_block_ids(out: &Value) -> Vec<String> {
+        out["kb_blocks"]
+            .as_array()
+            .expect("kb_blocks is an array")
+            .iter()
+            .filter_map(|kb| kb["entry_id"].as_str().map(str::to_string))
+            .collect()
     }
 
     async fn seed_world(pool: &sqlx::SqlitePool, owner: &str, world_id: &str) {
@@ -860,6 +945,93 @@ mod tests {
         let cap = WorldStateQuery::with_pool(pool);
         let err = cap.run(json!(42)).await.unwrap_err();
         assert!(matches!(err, CapabilityError::InputInvalid(_)));
+    }
+
+    /// R5: the KB slice holds the shared rows and the creator's own private
+    /// rows, never another holder's private World row.
+    #[tokio::test]
+    async fn world_state_query_excludes_other_holders_private_rows() {
+        use nexus_knowledge::world_kb::knowledge_entry::DISCLOSURE_OWNER_PRIVATE;
+
+        let (pool, _dir) = fresh_pool().await;
+        seed_creator(&pool, "ctr_a").await;
+        seed_creator(&pool, "ctr_other").await;
+        seed_world(&pool, "ctr_a", "wld_a").await;
+
+        let own_holder = nexus_local_db::creator_holder_entry_id("ctr_a");
+        let other_holder = nexus_local_db::creator_holder_entry_id("ctr_other");
+        let shared = seed_kb_row(&pool, "wld_a", "WorldSharedRow", None, None).await;
+        let own_private = seed_kb_row(
+            &pool,
+            "wld_a",
+            "CreatorPrivateRow",
+            Some(&own_holder),
+            Some(DISCLOSURE_OWNER_PRIVATE),
+        )
+        .await;
+        let other_private = seed_kb_row(
+            &pool,
+            "wld_a",
+            "OtherHolderPrivateRow",
+            Some(&other_holder),
+            Some(DISCLOSURE_OWNER_PRIVATE),
+        )
+        .await;
+
+        // Differential: the unscoped listing holds all three rows, so the
+        // exclusion below is the selection's policy, not an empty KB.
+        let unscoped = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone())
+            .list_by_world("wld_a")
+            .await
+            .unwrap();
+        assert_eq!(
+            unscoped.len(),
+            3,
+            "the store holds the shared row and both private rows"
+        );
+
+        let cap = WorldStateQuery::with_pool(pool);
+        let out = cap
+            .run(json!({"world_id": "wld_a", "creator_id": "ctr_a", "slice": "kb"}))
+            .await
+            .unwrap();
+
+        let ids = kb_block_ids(&out);
+        assert!(
+            ids.contains(&shared) && ids.contains(&own_private),
+            "shared and own private rows stay in the slice: {ids:?}"
+        );
+        assert!(
+            !ids.contains(&other_private),
+            "another holder's private World row must not reach the model: {ids:?}"
+        );
+    }
+
+    /// R5 fail-closed: without an admitted scope the capability refuses instead
+    /// of reading the World listing.
+    #[tokio::test]
+    async fn world_state_query_fails_closed_without_a_holder() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_creator_without_holder(&pool, "ctr_a").await;
+        seed_world(&pool, "ctr_a", "wld_a").await;
+        let row = seed_kb_row(&pool, "wld_a", "WorldSharedRow", None, None).await;
+
+        let cap = WorldStateQuery::with_pool(pool);
+        let err = cap
+            .run(json!({"world_id": "wld_a", "creator_id": "ctr_a", "slice": "kb"}))
+            .await
+            .unwrap_err();
+        match err {
+            CapabilityError::Forbidden(msg) => assert!(
+                msg.contains(nexus_local_db::HOLDER_STATE_INVALID_CODE),
+                "the refusal names the stable holder code, got: {msg}"
+            ),
+            other => panic!("expected a fail-closed refusal, got {other:?}"),
+        }
+        assert!(
+            !row.is_empty(),
+            "the row exists; the refusal is the missing selection"
+        );
     }
 
     // ── nexus.world.delta.propose ────────────────────────────────────────────

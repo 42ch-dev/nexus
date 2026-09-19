@@ -17,6 +17,10 @@ pub const NAME_A_SHARE: &str = "AShare";
 pub const NAME_B_SHARE: &str = "BShare";
 pub const NAME_A_W1_LOCAL: &str = "AW1Local";
 
+/// Character-private arm entry authored through the `creator character
+/// knowledge add --audience character-private` CLI surface (v1.191 P1 T9).
+pub const NAME_A_PRIVATE: &str = "APrivate";
+
 /// Coherent `ctr_…` creator every `rn_act4` journey boots with.
 pub const FIXTURE_CREATOR: &str = "ctr_rnact4fixture01";
 
@@ -230,7 +234,7 @@ pub async fn seed(d: &LiveDaemon) -> RnAct4Graph {
                 "world_id": world_w1,
                 "block_type": "item",
                 "canonical_name": NAME_W1_SECRET,
-                "creator_only": true
+                "audience": { "kind": "author-only" }
             }),
         )
         .await,
@@ -416,6 +420,16 @@ pub async fn view_creator_cli(d: &LiveDaemon, creator_id: &str, world_id: &str) 
     .await
 }
 
+/// The `entry_id` set one Character reads for a (world, binding) viewpoint.
+pub async fn view_character_ids(
+    d: &LiveDaemon,
+    character_id: &str,
+    world_id: &str,
+    binding_id: &str,
+) -> BTreeSet<String> {
+    entry_ids(&view_character_cli(d, character_id, world_id, binding_id).await)
+}
+
 /// Index a view page by stable `entry_id`. Duplicate ids mean a copied row.
 pub fn page_index(page: &Value) -> BTreeMap<String, Value> {
     let mut map = BTreeMap::new();
@@ -450,4 +464,168 @@ pub fn named_item<'a>(index: &'a BTreeMap<String, Value>, canonical_name: &str) 
         "expected exactly one {canonical_name} in this fixture page"
     );
     matches[0]
+}
+
+// ── v1.191 P1 T9: authored audience (holder governance) ──────────────────────
+//
+// The retired World-only `creator_only` boolean is gone: an audience is the
+// closed `{kind}` pair the CLI maps onto the frozen wire object, and the
+// governance pair (`holder_entry_id` / `disclosure`) is what the read surfaces
+// project. These helpers drive the shipped CLI verbs so the dogfood journey
+// exercises the public authoring path, never a request-shaped shortcut.
+
+/// The `knowledge_holders` registry row id of one stored Creator.
+pub async fn creator_holder(d: &LiveDaemon, creator_id: &str) -> String {
+    sqlx::query_scalar("SELECT holder_entry_id FROM knowledge_holders WHERE creator_id = ?")
+        .bind(creator_id)
+        .fetch_one(&d.pool)
+        .await
+        .expect("stored Creator holder")
+}
+
+/// The `knowledge_holders` registry row id of one stored Character.
+pub async fn character_holder(d: &LiveDaemon, character_id: &str) -> String {
+    sqlx::query_scalar("SELECT holder_entry_id FROM knowledge_holders WHERE character_id = ?")
+        .bind(character_id)
+        .fetch_one(&d.pool)
+        .await
+        .expect("stored Character holder")
+}
+
+/// Author one Character-owned entry with a `character-private` audience through
+/// `creator character knowledge add --audience character-private`, returning the
+/// new `entry_id`.
+pub async fn add_character_private(
+    d: &LiveDaemon,
+    character_id: &str,
+    canonical_name: &str,
+) -> String {
+    entry_id(
+        &cli_json(
+            d,
+            &[
+                "creator",
+                "character",
+                "knowledge",
+                "add",
+                "--owner",
+                "character",
+                "--character-id",
+                character_id,
+                "--block-type",
+                "item",
+                "--canonical-name",
+                canonical_name,
+                "--audience",
+                "character-private",
+                "--audience-character",
+                character_id,
+                "--json",
+            ],
+        )
+        .await,
+    )
+}
+
+/// Move one entry's audience through `creator character knowledge edit
+/// --audience <…>` under the caller's revision, returning the detail page.
+pub async fn edit_audience(
+    d: &LiveDaemon,
+    character_id: &str,
+    entry_id: &str,
+    expected_revision: u64,
+    audience: &str,
+    audience_character: Option<&str>,
+) -> Value {
+    let expected_revision = expected_revision.to_string();
+    let mut args = vec![
+        "creator",
+        "character",
+        "knowledge",
+        "edit",
+        "--character-id",
+        character_id,
+        "--entry-id",
+        entry_id,
+        "--expected-revision",
+        &expected_revision,
+        "--audience",
+        audience,
+    ];
+    if let Some(target) = audience_character {
+        args.push("--audience-character");
+        args.push(target);
+    }
+    args.push("--json");
+    cli_json(d, &args).await
+}
+
+/// Author one World KB entity's audience through `creator world kb entity patch
+/// --audience <…>` under the caller's version, returning the patch response.
+pub async fn patch_entity_audience(
+    d: &LiveDaemon,
+    world_id: &str,
+    entity_id: &str,
+    expected_version: u64,
+    audience: &str,
+    audience_character: Option<&str>,
+) -> Value {
+    let expected_version = expected_version.to_string();
+    let mut args = vec![
+        "creator",
+        "world",
+        "kb",
+        "entity",
+        "patch",
+        "--world-id",
+        world_id,
+        "--entity-id",
+        entity_id,
+        "--expected-version",
+        &expected_version,
+        "--audience",
+        audience,
+    ];
+    if let Some(target) = audience_character {
+        args.push("--audience-character");
+        args.push(target);
+    }
+    args.push("--json");
+    cli_json(d, &args).await
+}
+
+/// One entity of `creator world kb graph --json` by `key_block_id`.
+pub fn graph_entity<'a>(graph: &'a Value, entity_id: &str) -> &'a Value {
+    graph["entities"]
+        .as_array()
+        .expect("graph entities")
+        .iter()
+        .find(|entity| entity["key_block_id"] == entity_id)
+        .unwrap_or_else(|| panic!("{entity_id} missing from the world KB graph"))
+}
+
+/// `creator world kb graph --world-id <…> --json` for one World.
+pub async fn world_kb_graph(d: &LiveDaemon, world_id: &str) -> Value {
+    cli_json(
+        d,
+        &[
+            "creator",
+            "world",
+            "kb",
+            "graph",
+            "--world-id",
+            world_id,
+            "--json",
+        ],
+    )
+    .await
+}
+
+/// The stored per-row version of one World KB entity, read through the shipped
+/// graph projection (the governance half of an authoring transaction owns its
+/// own bump, so the patch response's version is not the CAS preimage).
+pub async fn entity_version(d: &LiveDaemon, world_id: &str, entity_id: &str) -> u64 {
+    graph_entity(&world_kb_graph(d, world_id).await, entity_id)["version"]
+        .as_u64()
+        .expect("entity version")
 }

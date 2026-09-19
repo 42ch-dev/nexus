@@ -48,12 +48,12 @@
     "dev": "bash scripts/dev-cli-web.sh"
   },
   "devDependencies": {
-    "oxlint": "^1.81.0",
+    "oxlint": "^1.83.0",
     "oxlint-tsgolint": "7.0.2001",
     "typescript": "7.0.2"
   },
   "dependencies": {
-    "@42ch/spoke-operations": "0.11.1",
-    "@42ch/spoke-schemas": "0.11.1"
+    "@42ch/spoke-operations": "0.13.1",
+    "@42ch/spoke-schemas": "0.13.1"
   }
 }

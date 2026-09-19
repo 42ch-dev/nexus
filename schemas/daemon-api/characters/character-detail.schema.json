@@ -3,7 +3,7 @@
   "$id": "https://nexus42.invalid/schemas/daemon-api/characters/character-detail.schema.json",
   "schema_version": 1,
   "title": "Nexus CharacterDetail",
-  "description": "Response for GET /v1/daemon/characters/:character_id.",
+  "description": "Response for GET /v1/daemon/characters/:character_id. The identity projection includes the read-only service-managed holder_entry_id; there is no holder CRUD route.",
   "type": "object",
   "required": [
     "character"

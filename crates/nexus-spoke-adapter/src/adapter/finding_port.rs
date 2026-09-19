@@ -69,6 +69,7 @@ use crate::{
     SpokeResult,
 };
 use async_trait::async_trait;
+use nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef;
 use nexus_local_db::findings::{validate_finding_enums, Finding as NexusFinding};
 use nexus_local_db::world_findings::insert_world_finding_in_tx;
 use nexus_local_db::LocalDbError;
@@ -76,7 +77,14 @@ use serde_json::{json, Map, Value};
 
 #[async_trait]
 impl FindingPort for NexusAdapter<'_> {
+    #[allow(clippy::too_many_lines)] // one linear domain operation
     async fn put_findings(&self, findings: Vec<SpokeFinding>) -> SpokeResult<Vec<SpokeFinding>> {
+        // Request-bound scope (durable §4.1, v1.191 P1 T8): the finding
+        // family carries KE references (the world route's `target_entry_id`),
+        // so a host-only adapter rejects instead of writing them.
+        if let Err(reject) = self.require_read_scope("put_findings") {
+            return SpokeResult::Reject(reject);
+        }
         let pool = self.pool.clone();
         let mut persisted: Vec<SpokeFinding> = Vec::with_capacity(findings.len());
 
@@ -121,6 +129,80 @@ impl FindingPort for NexusAdapter<'_> {
                     }
                 }
                 (None, Some(world_id)) => {
+                    // Durable §4.2/§9 (v1.191 P1 T8): the world route writes a
+                    // row that cites this world and (optionally) one entry in
+                    // it — both must be inside the bound selection. A hidden
+                    // target id is refused with the same unknown-target shape,
+                    // so the caller cannot use findings to probe for rows it
+                    // cannot read.
+                    if !self.admits_container(&KnowledgeOwnerRef::world(world_id)) {
+                        return reject(
+                            SpokeRejectCode::InvalidInput,
+                            format!(
+                                "Finding {finding_id} cites world {world_id}, which is outside \
+                                 the bound read selection"
+                            ),
+                            json!({ "finding_id": finding_id, "world_id": world_id }),
+                        );
+                    }
+                    if let Some(target) = finding.target_entry_id.as_deref() {
+                        // L2 F4: a *knowledge-entry* target must be admitted IN
+                        // THIS WORLD. A multi-world selection admits rows from
+                        // several containers, so admission alone is not enough —
+                        // a cross-world entry would otherwise be readable
+                        // through the finding.
+                        let ke_target_world_ok = match self.load_admitted_entry(target).await {
+                            Ok(Some(record)) => record.world_id() == Some(world_id),
+                            // Hidden or absent: indistinguishable, and not a
+                            // knowledge target of this world.
+                            Ok(None) => false,
+                            Err(e) => {
+                                return reject(
+                                    SpokeRejectCode::InternalError,
+                                    format!("storage error on finding target read: {e}"),
+                                    json!({ "finding_id": finding_id }),
+                                );
+                            }
+                        };
+                        // T8 CI product-scope fix (option a): the rules
+                        // evaluator's findings legitimately target this world's
+                        // TIMELINE EVENTS (`rules_eval.rs` observer_cardinality),
+                        // which carry their own world authorization. A target
+                        // that is neither an admitted KE of this world nor one of
+                        // this world's timeline events is refused with the
+                        // unknown-target shape, so the hidden-KE contract
+                        // (hidden == absent) is unchanged.
+                        let timeline_target_ok = if ke_target_world_ok {
+                            false
+                        } else {
+                            match is_world_timeline_event(&self.pool, world_id, target).await {
+                                Ok(found) => found,
+                                Err(e) => {
+                                    return reject(
+                                        SpokeRejectCode::InternalError,
+                                        format!(
+                                            "storage error on finding timeline-target read: {e}"
+                                        ),
+                                        json!({ "finding_id": finding_id }),
+                                    );
+                                }
+                            }
+                        };
+                        if !ke_target_world_ok && !timeline_target_ok {
+                            return reject(
+                                SpokeRejectCode::InvalidInput,
+                                format!(
+                                    "Finding {finding_id} targets an unknown knowledge entry \
+                                     in world {world_id}"
+                                ),
+                                json!({
+                                    "finding_id": finding_id,
+                                    "world_id": world_id,
+                                    "target_entry_id": target,
+                                }),
+                            );
+                        }
+                    }
                     if let Err(e) = insert_world_finding_tx(&mut tx, &finding, world_id).await {
                         return reject(
                             SpokeRejectCode::InternalError,
@@ -283,6 +365,29 @@ async fn insert_world_finding_tx(
         updated_at,
     )
     .await
+}
+
+/// Whether `timeline_event_id` names a timeline event of `world_id`.
+///
+/// Rule-evaluator findings (`observer_cardinality`) target timeline events, not
+/// knowledge entries; the timeline read is world-scoped by the storage
+/// primitive, so a cross-world event id is not found here and the finding is
+/// refused exactly like an unknown KE target.
+///
+/// # Errors
+///
+/// Returns [`LocalDbError`] on database failure.
+async fn is_world_timeline_event(
+    pool: &sqlx::SqlitePool,
+    world_id: &str,
+    timeline_event_id: &str,
+) -> Result<bool, LocalDbError> {
+    let ids = [timeline_event_id.to_string()];
+    let events =
+        nexus_local_db::narrative_gateway::list_timeline_events_scoped(pool, world_id, None, &ids)
+            .await
+            .map_err(|e| LocalDbError::ValidationError(e.to_string()))?;
+    Ok(!events.is_empty())
 }
 
 /// Map a single spoke [`SpokeFinding`] onto a nexus [`NexusFinding`] row
@@ -496,8 +601,19 @@ fn reject<T>(code: SpokeRejectCode, message: impl Into<String>, details: Value) 
 mod tests {
     use super::*;
     use crate::FindingPort;
+    use nexus_knowledge::world_kb::KnowledgeReadScope;
     use nexus_local_db::{open_pool, run_migrations};
     use serde_json::json;
+
+    /// A KE-capable adapter for the legacy work route: the finding family
+    /// requires a bound selection (v1.191 P1 T8), and the work route cites no
+    /// container, so an empty container set is the honest scope here.
+    fn scoped(pool: sqlx::SqlitePool) -> NexusAdapter<'static> {
+        NexusAdapter::new(
+            pool,
+            KnowledgeReadScope::creator_management(Vec::new(), Vec::new()),
+        )
+    }
 
     async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
@@ -617,7 +733,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_work(&pool).await;
 
-        let adapter = NexusAdapter::new(pool.clone());
+        let adapter = scoped(pool.clone());
         let spoke = spoke_finding(
             "fnd_happy",
             "warning",
@@ -653,7 +769,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_work(&pool).await;
 
-        let adapter = NexusAdapter::new(pool.clone());
+        let adapter = scoped(pool.clone());
         let spoke = spoke_finding("fnd_voc", "error", "dismissed", None, None);
 
         match adapter.put_findings(vec![spoke]).await {
@@ -675,7 +791,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_work(&pool).await;
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = scoped(pool);
         // Strip the work_id; keep creator_id so the rejection is
         // specifically about the missing work_id.
         let spoke: SpokeFinding = serde_json::from_value(json!({
@@ -708,7 +824,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_work(&pool).await;
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = scoped(pool);
         // `critical` is not in the spoke documented vocabulary.
         let spoke: SpokeFinding = serde_json::from_value(json!({
             "schema_version": 1,
@@ -740,7 +856,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_work(&pool).await;
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = scoped(pool);
         let result = adapter.put_findings(Vec::new()).await;
         match result {
             SpokeResult::Ok(v) => assert!(v.is_empty()),
@@ -774,7 +890,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_work(&pool).await;
 
-        let adapter = NexusAdapter::new(pool.clone());
+        let adapter = scoped(pool.clone());
 
         // First item: valid, would persist on its own.
         let first = spoke_finding("fnd_rb_first", "info", "open", None, None);
@@ -813,7 +929,7 @@ mod tests {
             .await
             .unwrap();
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = scoped(pool);
         let finding = spoke_finding("fnd_fail", "info", "open", None, None);
         match adapter.put_findings(vec![finding]).await {
             SpokeResult::Reject(r) => {

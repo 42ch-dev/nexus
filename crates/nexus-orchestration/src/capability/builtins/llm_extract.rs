@@ -18,9 +18,184 @@
 //!    hook owns the fallback decision; see `quality_loop`).
 
 use crate::capability::{Capability, CapabilityError, PromptExecutor, PromptRequest, ToolPolicy};
+use crate::quality_loop::ExtractionTarget;
 use async_trait::async_trait;
+use nexus_knowledge::world_kb::source_anchor::SourceAnchor;
+use nexus_knowledge::world_kb::{
+    prepare_extract, ExtractPrepareInput, KnowledgeEntryBody, PreparedExtractCandidate,
+    ValidationMode,
+};
+use nexus_spoke_adapter::{
+    extract_candidates, ExtractRequest, NativeExtractionOutput, ResolvedExtractionInput,
+    SpokeReject, SpokeRejectCode, SpokeResult,
+};
 use serde_json::{json, Value};
 use std::sync::Arc;
+
+/// What the native callback hands back across the adapter's driver thread.
+///
+/// The callback cannot borrow the capability's stack (it crosses threads), so
+/// both the precise failure and the local-shape candidates travel here.
+#[derive(Debug, Default)]
+struct ExtractionSlot {
+    /// The exact error the extractor produced, when it failed.
+    failure: Option<CapabilityError>,
+    /// The local result shape, projected from the candidates the protocol
+    /// accepted.
+    candidates: Vec<Value>,
+}
+
+/// Parse the trusted `_extract_target` context field.
+///
+/// Fails closed: a missing target refuses the run instead of extracting under
+/// an invented policy.
+fn parse_extract_target(input: &Value) -> Result<ExtractionTarget, CapabilityError> {
+    let raw = input.get("_extract_target").ok_or_else(|| {
+        CapabilityError::Forbidden(
+            "missing trusted _extract_target: the orchestration caller must resolve the \
+             extraction job/task target policy"
+                .to_string(),
+        )
+    })?;
+    ExtractionTarget::from_context(raw)
+}
+
+/// Whether a model-supplied citation actually occurs in the admitted source.
+///
+/// The prompt demands a verbatim excerpt; an invented quote is not provenance.
+/// Whitespace is normalized and the comparison is case-insensitive, so a
+/// reflowed line break or a sentence-initial capitalization drift does not
+/// defeat a genuine quote, while a citation the chapter does not contain is
+/// still refused (review I1).
+fn cited_in_admitted_text(quote: &str, admitted_text: &str) -> bool {
+    fn normalize(text: &str) -> String {
+        text.split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase()
+    }
+    normalize(admitted_text).contains(&normalize(quote))
+}
+
+/// Prepare one model-judged candidate under the trusted target policy.
+///
+/// Returns `None` — drop + log, exactly like the pre-wrapper pathway dropped
+/// nameless candidates — when the model output cannot become a candidate at
+/// all: no name, an unknown wire `block_type`, or a name/body the domain rules
+/// refuse. The governance pair is never read from `raw`.
+fn prepare_candidate(
+    raw: &Value,
+    target: &ExtractionTarget,
+    admitted_text: &str,
+    source_id: &str,
+) -> Option<(PreparedExtractCandidate, Option<String>)> {
+    let canonical_name = raw
+        .get("canonical_name")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if canonical_name.is_empty() {
+        return None;
+    }
+    let block_type_raw = raw
+        .get("block_type")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let Ok(block_type) =
+        serde_json::from_value::<nexus_contracts::BlockType>(json!(block_type_raw))
+    else {
+        tracing::warn!(
+            block_type = %block_type_raw,
+            "nexus.llm.extract: unknown wire block_type; dropping the candidate"
+        );
+        return None;
+    };
+    // The anchor comes from the actual artifact: the model's verbatim chapter
+    // quote when it gave one *and it occurs in the admitted text*, else the
+    // admitted chapter text it read, else the admitted source's own identity.
+    // Never empty, and never a citation the source does not contain.
+    let source_quote = raw
+        .get("source_quote")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|q| !q.is_empty())
+        .filter(|quote| {
+            let cited = cited_in_admitted_text(quote, admitted_text);
+            if !cited {
+                tracing::warn!(
+                    canonical_name = %canonical_name,
+                    "nexus.llm.extract: model source_quote does not occur in the admitted source; \
+                     dropping the citation"
+                );
+            }
+            cited
+        });
+    let anchor_text = source_quote.unwrap_or_else(|| {
+        let admitted = admitted_text.trim();
+        if admitted.is_empty() {
+            source_id
+        } else {
+            admitted
+        }
+    });
+    let body = KnowledgeEntryBody {
+        summary: raw
+            .get("summary")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned),
+        ..Default::default()
+    };
+
+    match prepare_extract(ExtractPrepareInput {
+        world_id: target.world_id.clone(),
+        block_type,
+        canonical_name: canonical_name.clone(),
+        body,
+        source_anchor: SourceAnchor::from_excerpt(
+            &anchor_text.chars().take(256).collect::<String>(),
+        ),
+        validation_mode: ValidationMode::Generic,
+        governance: target.governance.clone(),
+    }) {
+        Ok(prepared) => Some((prepared, source_quote.map(str::to_owned))),
+        Err(e) => {
+            tracing::warn!(
+                canonical_name = %canonical_name,
+                error = %e,
+                "nexus.llm.extract: model candidate refused by the domain rules; dropping it"
+            );
+            None
+        }
+    }
+}
+
+/// Project one prepared candidate back into the capability's local result
+/// shape, keeping the id the protocol validated.
+///
+/// The review-time caller reads `canonical_name` / `block_type` / `summary` /
+/// `confidence` / `source_quote`; `entry_id` is the prepared candidate id the
+/// `ke-extraction` response echoed. `canonical_name` and `block_type` come from
+/// the prepared record itself, so the local shape cannot diverge from the
+/// candidate the protocol accepted.
+fn local_candidate(
+    raw: &Value,
+    prepared: &PreparedExtractCandidate,
+    validated_quote: Option<&str>,
+) -> Value {
+    let record = &prepared.record;
+    json!({
+        "canonical_name": record.canonical_name,
+        "block_type": serde_json::to_value(record.block_type).unwrap_or(Value::Null),
+        "summary": record.body.as_ref().and_then(|b| b.summary.clone()),
+        "confidence": raw.get("confidence").cloned().unwrap_or(Value::Null),
+        // The quote the admitted source actually contains, never the raw one.
+        "source_quote": validated_quote,
+        "entry_id": record.entry_id,
+    })
+}
 
 /// The `nexus.llm.extract` capability.
 ///
@@ -89,7 +264,9 @@ impl Capability for LlmExtract {
     // Identity fields ("_creator_id", "_session_id") are injected by
     // orchestration context, NOT accepted from user input (security:
     // prevents cross-creator routing — SEC-V131-01, same rule as
-    // judge.llm).
+    // judge.llm). `_extract_target` / `_extract_source_id` are the same kind
+    // of trusted context: the caller's stored-state-resolved target policy and
+    // the admitted chapter artifact (v1.191 P1 T13).
     fn input_schema(&self) -> &'static str {
         nexus_preset::capability_catalog::NEXUS_LLM_EXTRACT_INPUT_SCHEMA
     }
@@ -137,6 +314,7 @@ impl Capability for LlmExtract {
     }"#
     }
 
+    #[allow(clippy::too_many_lines)] // one linear domain operation
     async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
         let prompt_text = input
             .get("prompt")
@@ -165,10 +343,13 @@ impl Capability for LlmExtract {
             )
             })?;
 
-        let executor = self
-            .executor
-            .as_ref()
-            .ok_or(CapabilityError::WorkerUnavailable)?;
+        // The callback crosses to the adapter's driver thread, so the executor
+        // handle it uses must be owned (`Arc`), not borrowed from `&self`.
+        let executor = Arc::clone(
+            self.executor
+                .as_ref()
+                .ok_or(CapabilityError::WorkerUnavailable)?,
+        );
 
         // A1: resolve the coordinator cancellation token for this run from
         // the shared per-run map. FAIL-CLOSED: a run with no registered
@@ -177,6 +358,43 @@ impl Capability for LlmExtract {
         // admission path (engine start/spawn/recovery) registers the token.
         let cancellation =
             crate::capability::resolve_session_cancellation(&self.session_cancels, session_id)?;
+
+        // v1.191 P1 T13 (durable §8): the trusted job/task target policy and
+        // the admitted source identity. Both arrive as trusted context from
+        // the orchestration caller; neither is model output.
+        let target = parse_extract_target(&input)?;
+        let source_id = input
+            .get("_extract_source_id")
+            .and_then(|v| v.as_str())
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| {
+                CapabilityError::Forbidden(
+                    "missing trusted _extract_source_id: the admitted chapter artifact must be \
+                     named"
+                        .to_string(),
+                )
+            })?;
+
+        // The wire request: the real run identity plus the actual chapter
+        // artifact as its single admitted source. `ExtractRequest.run_id`
+        // rejects an empty id at deserialize, so a run without a stored
+        // identity can never reach the orchestrator.
+        let request: ExtractRequest = serde_json::from_value(json!({
+            "run_id": session_id,
+            "sources": [{
+                "schema_version": 1,
+                "source_id": source_id,
+                "extensions": {},
+            }],
+        }))
+        .map_err(|e| CapabilityError::Forbidden(format!("extract request refused: {e}")))?;
+        // The admitted, bounded native source bundle the run resolves over.
+        // The adapter hands exactly this back to the orchestrator; it performs
+        // no source I/O.
+        let admitted = json!({
+            "container": target.world_id,
+            "sources": [{ "source_id": source_id, "text": chapter_prose }],
+        });
 
         // Build the extraction prompt: instruction + verbatim prose, framed so
         // the agent returns a JSON object with a `candidates` array (entities)
@@ -200,20 +418,120 @@ impl Capability for LlmExtract {
          CHAPTER PROSE:\n{chapter_prose}"
         );
 
-        let result = executor
-            .execute(PromptRequest {
-                run_id: session_id.to_string(),
-                task_id: "nexus.llm.extract".to_string(),
-                agent_ref: None,
-                prompt: extract_prompt,
-                tool_policy: ToolPolicy::DenyAll,
-                cancellation,
-            })
-            .await?;
+        // The native extractor callback: it runs the real prompt through the
+        // host over the admitted source, then prepares every candidate under
+        // the trusted target policy. The callback crosses to the adapter's
+        // driver thread, so its outcome crosses back through this slot: the
+        // precise capability error (a `WorkerUnavailable` must stay
+        // distinguishable from a refusal) and the local-shape candidates.
+        let slot = Arc::new(std::sync::Mutex::new(ExtractionSlot::default()));
+        let run_id = session_id.to_string();
+        let outcome = {
+            let slot = Arc::clone(&slot);
+            let target = target.clone();
+            let source_id = source_id.to_string();
+            extract_candidates(
+                request,
+                ResolvedExtractionInput {
+                    run_id: run_id.clone(),
+                    bundle: admitted,
+                },
+                move |run_input| async move {
+                    // The admitted bundle is the only source the extractor sees:
+                    // the orchestrator resolved it and the port handed it back.
+                    let admitted_text = run_input.input["sources"][0]["text"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_string();
+                    let result = executor
+                        .execute(PromptRequest {
+                            run_id: run_id.clone(),
+                            task_id: "nexus.llm.extract".to_string(),
+                            agent_ref: None,
+                            prompt: extract_prompt,
+                            tool_policy: ToolPolicy::DenyAll,
+                            cancellation,
+                        })
+                        .await;
+                    let result = match result {
+                        Ok(result) => result,
+                        Err(e) => {
+                            slot.lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                .failure = Some(e);
+                            return SpokeResult::Reject(reject_extraction_failed());
+                        }
+                    };
 
-        let candidates = parse_extract_response(&result.full_text);
-        let relationships = parse_relationships_response(&result.full_text);
-        Ok(json!({ "candidates": candidates, "relationships": relationships }))
+                    let parsed = parse_extract_response(&result.full_text);
+                    let relationships = parse_relationships_response(&result.full_text);
+                    let mut prepared = Vec::with_capacity(parsed.len());
+                    let mut local = Vec::with_capacity(parsed.len());
+                    for raw in &parsed {
+                        if let Some((candidate, quote)) =
+                            prepare_candidate(raw, &target, &admitted_text, &source_id)
+                        {
+                            local.push(local_candidate(raw, &candidate, quote.as_deref()));
+                            prepared.push(candidate);
+                        }
+                    }
+                    slot.lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .candidates = local;
+
+                    SpokeResult::Ok(NativeExtractionOutput {
+                        candidates: prepared,
+                        method: Some("nexus.llm.extract".to_string()),
+                        coverage_hint: None,
+                        relationships,
+                    })
+                },
+            )
+            .await
+        };
+
+        let ExtractionSlot {
+            failure,
+            candidates: local_candidates,
+        } = std::mem::take(
+            &mut *slot
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        // A callback failure is the precise error, not the placeholder reject
+        // the callback returned to the orchestrator.
+        if let Some(e) = failure {
+            return Err(e);
+        }
+        let outcome = match outcome {
+            SpokeResult::Ok(outcome) => outcome,
+            SpokeResult::Reject(reject) => {
+                return Err(CapabilityError::PermanentExternal(format!(
+                    "ke-extraction refused the run: {}: {}",
+                    reject.code.as_str(),
+                    reject.message
+                )));
+            }
+        };
+
+        Ok(json!({
+            "candidates": local_candidates,
+            "relationships": outcome.relationships,
+            // The upstream-validated protocol echo (run id + method echo +
+            // candidate ids), so a caller can verify what the orchestrator
+            // accepted. The candidate ids equal the local candidates' ids.
+            "extract_run": outcome.response,
+        }))
+    }
+}
+
+/// The placeholder the native callback returns when the extractor itself fails;
+/// the precise error is carried out of the callback and returned instead.
+fn reject_extraction_failed() -> SpokeReject {
+    SpokeReject {
+        code: SpokeRejectCode::InternalError,
+        message: "the native extractor failed".to_string(),
+        details: None,
     }
 }
 
@@ -444,6 +762,35 @@ mod tests {
         })
     }
 
+    /// The trusted extraction context the orchestration caller resolves from
+    /// stored state before the model runs (v1.191 P1 T13, durable §§3, 8).
+    fn trusted_context(session_id: &str) -> Value {
+        json!({
+            "_extract_target": {
+                "world_id": "wld_fixture",
+                "holder_entry_id": null,
+                "disclosure": null,
+            },
+            "_extract_source_id": "Works/fixture/Stories/ch03.md",
+            "_session_id": session_id,
+        })
+    }
+
+    /// Decorate a fixture input with the trusted extraction context.
+    fn with_trusted_context(mut input: Value, session_id: &str) -> Value {
+        let trusted = trusted_context(session_id);
+        let object = input
+            .as_object_mut()
+            .expect("fixture input is a JSON object");
+        for (key, value) in trusted
+            .as_object()
+            .expect("trusted context is a JSON object")
+        {
+            object.insert(key.clone(), value.clone());
+        }
+        input
+    }
+
     #[tokio::test]
     async fn llm_extract_with_mock_executor_returns_candidates() {
         let cap = LlmExtract::with_prompt_executor(mock_executor(
@@ -453,8 +800,10 @@ mod tests {
             ]}"#,
         ))
             .with_session_cancels(cancels_with(&["default"]));
-        let input =
-            json!({ "prompt": "extract", "chapter_prose": "...", "_session_id": "default" });
+        let input = with_trusted_context(
+            json!({ "prompt": "extract", "chapter_prose": "..." }),
+            "default",
+        );
         let result = cap.run(input).await.unwrap();
         let candidates = result.get("candidates").and_then(|v| v.as_array()).unwrap();
         assert_eq!(candidates.len(), 2);
@@ -469,8 +818,10 @@ mod tests {
             "```json\n{\"candidates\":[{\"canonical_name\":\"X\",\"block_type\":\"item\",\"confidence\":0.5,\"source_quote\":\"q\"}]}\n```",
         ))
             .with_session_cancels(cancels_with(&["default"]));
-        let input =
-            json!({ "prompt": "extract", "chapter_prose": "...", "_session_id": "default" });
+        let input = with_trusted_context(
+            json!({ "prompt": "extract", "chapter_prose": "..." }),
+            "default",
+        );
         let result = cap.run(input).await.unwrap();
         let candidates = result.get("candidates").and_then(|v| v.as_array()).unwrap();
         assert_eq!(candidates.len(), 1);
@@ -481,8 +832,10 @@ mod tests {
     async fn llm_extract_malformed_json_returns_empty_candidates() {
         let cap = LlmExtract::with_prompt_executor(mock_executor("this is not json at all"))
             .with_session_cancels(cancels_with(&["default"]));
-        let input =
-            json!({ "prompt": "extract", "chapter_prose": "...", "_session_id": "default" });
+        let input = with_trusted_context(
+            json!({ "prompt": "extract", "chapter_prose": "..." }),
+            "default",
+        );
         let result = cap.run(input).await.unwrap();
         let candidates = result.get("candidates").and_then(|v| v.as_array()).unwrap();
         assert!(candidates.is_empty(), "malformed JSON → empty candidates");
@@ -581,8 +934,10 @@ mod tests {
             ]}"#,
         ))
             .with_session_cancels(cancels_with(&["default"]));
-        let input =
-            json!({ "prompt": "extract", "chapter_prose": "...", "_session_id": "default" });
+        let input = with_trusted_context(
+            json!({ "prompt": "extract", "chapter_prose": "..." }),
+            "default",
+        );
         let result = cap.run(input).await.unwrap();
         // candidates still present.
         let candidates = result.get("candidates").and_then(|v| v.as_array()).unwrap();
@@ -641,5 +996,164 @@ mod tests {
         );
         let captured = executor.captured.lock().expect("capture lock").clone();
         assert_eq!(captured, "", "SEC-V131-01: raw session_id leaked through");
+    }
+
+    // ── v1.191 P1 T13: real caller path through the adapter wrapper ────────
+
+    /// An executor that also reports the run identity it was invoked with.
+    struct RunCapturingExecutor {
+        response: String,
+        run_id: std::sync::Mutex<String>,
+    }
+
+    #[async_trait]
+    impl PromptExecutor for RunCapturingExecutor {
+        async fn execute(
+            &self,
+            request: PromptRequest,
+        ) -> Result<crate::capability::PromptResult, CapabilityError> {
+            *self.run_id.lock().expect("run id lock") = request.run_id;
+            Ok(crate::capability::PromptResult {
+                full_text: self.response.clone(),
+                host_session_id: "host-sess".to_string(),
+                operation_id: "op-1".to_string(),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn v1191_extract_run_reaches_the_orchestrator_and_keeps_the_local_shape() {
+        let executor = Arc::new(RunCapturingExecutor {
+            response: json!({
+                "candidates": [
+                    {
+                        "canonical_name": "Lin Xia",
+                        "block_type": "character",
+                        "summary": "A warrior",
+                        "confidence": 0.9,
+                        "source_quote": "Lin Xia drew her blade.",
+                    }
+                ],
+                "relationships": [
+                    {
+                        "source_canonical_name": "Lin Xia",
+                        "target_canonical_name": "Kael",
+                        "relation_type": "allied_with",
+                        "symmetric": true,
+                        "confidence": 0.8,
+                        "source_quote": "Aria and Kael fought together",
+                    }
+                ],
+            })
+            .to_string(),
+            run_id: std::sync::Mutex::new(String::new()),
+        });
+        let cap = LlmExtract::with_prompt_executor(executor.clone())
+            .with_session_cancels(cancels_with(&["run_t13"]));
+        let input = with_trusted_context(
+            json!({ "prompt": "extract", "chapter_prose": "Lin Xia drew her blade." }),
+            "run_t13",
+        );
+
+        let result = cap.run(input).await.expect("the run is accepted");
+
+        // The real production run identity reached the prompt executor.
+        assert_eq!(
+            executor.run_id.lock().expect("run id lock").as_str(),
+            "run_t13"
+        );
+        // The orchestrator's response echoed the request run id and the method.
+        assert_eq!(result["extract_run"]["run"]["run_id"], "run_t13");
+        assert_eq!(result["extract_run"]["run"]["method"], "nexus.llm.extract");
+
+        // The local result shape is preserved, and each candidate carries the
+        // id the protocol validated (the wire candidate's own id).
+        let candidates = result["candidates"].as_array().expect("candidates");
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0]["canonical_name"], "Lin Xia");
+        assert_eq!(candidates[0]["block_type"], "character");
+        assert_eq!(candidates[0]["summary"], "A warrior");
+        assert_eq!(candidates[0]["confidence"], json!(0.9));
+        assert_eq!(candidates[0]["source_quote"], "Lin Xia drew her blade.");
+        let wire = result["extract_run"]["candidates"]
+            .as_array()
+            .expect("wire candidates");
+        assert_eq!(wire.len(), 1);
+        assert_eq!(candidates[0]["entry_id"], wire[0]["entry_id"]);
+        // The relationship sidecar survives SPOKE's KE-only success arm.
+        let relationships = result["relationships"].as_array().expect("relationships");
+        assert_eq!(relationships.len(), 1);
+        assert_eq!(relationships[0]["relation_type"], "allied_with");
+        assert_eq!(relationships[0]["target_canonical_name"], "Kael");
+    }
+
+    #[tokio::test]
+    async fn v1191_extract_model_output_cannot_choose_governance() {
+        // The model tries to hand the candidate an owner and an owner-private
+        // disclosure; the trusted target policy decides instead.
+        let cap = LlmExtract::with_prompt_executor(mock_executor(
+            r#"{"candidates":[{"canonical_name":"Lin Xia","block_type":"character","summary":"A warrior","confidence":0.9,"source_quote":"Lin Xia drew her blade."}]}"#,
+        ))
+        .with_session_cancels(cancels_with(&["run_t13"]));
+        let mut input = with_trusted_context(
+            json!({ "prompt": "extract", "chapter_prose": "Lin Xia drew her blade." }),
+            "run_t13",
+        );
+        // Model output reaching the wire conversion by every path it owns.
+        input["model_holder_entry_id"] = json!("hld_model_choice");
+        input["model_disclosure"] = json!("owner-private");
+
+        let result = cap.run(input).await.expect("the run is accepted");
+        let wire = result["extract_run"]["candidates"]
+            .as_array()
+            .expect("wire candidates");
+        assert_eq!(wire.len(), 1);
+        assert_eq!(
+            wire[0]["owner"],
+            Value::Null,
+            "the model cannot name a holder"
+        );
+        assert_eq!(
+            wire[0]["disclosure"],
+            Value::Null,
+            "the model cannot make the row owner-private"
+        );
+    }
+
+    #[tokio::test]
+    async fn v1191_extract_missing_trusted_context_refuses() {
+        // Missing target: refuse rather than extract under an invented policy.
+        let cap = LlmExtract::with_prompt_executor(mock_executor("{\"candidates\":[]}"))
+            .with_session_cancels(cancels_with(&["run_t13"]));
+        let error = cap
+            .run(json!({
+                "prompt": "extract",
+                "chapter_prose": "Lin Xia drew her blade.",
+                "_session_id": "run_t13",
+            }))
+            .await
+            .expect_err("a missing target must refuse");
+        assert!(
+            error.to_string().contains("_extract_target"),
+            "error: {error}"
+        );
+
+        // Missing admitted source identity: same refusal.
+        let mut input = with_trusted_context(
+            json!({ "prompt": "extract", "chapter_prose": "Lin Xia drew her blade." }),
+            "run_t13",
+        );
+        input
+            .as_object_mut()
+            .expect("object input")
+            .remove("_extract_source_id");
+        let error = cap
+            .run(input)
+            .await
+            .expect_err("a missing source identity must refuse");
+        assert!(
+            error.to_string().contains("_extract_source_id"),
+            "error: {error}"
+        );
     }
 }

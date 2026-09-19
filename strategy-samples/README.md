@@ -14,7 +14,7 @@ This repository ships everything you use together:
 | Strategy samples | [`game-narrative/`](./game-narrative/) and [`react-trpg-turn/`](./react-trpg-turn/) | Forkable strategy bundles: capability routing + prompt templates for lore import lanes (game-narrative) and for a TRPG turn loop (react-trpg-turn). Nothing here is compiled into any binary. |
 | Validator | [`validate.sh`](./validate.sh) | One command, daemon-free: runs the real validator core on any strategy directory. |
 | WASM compute modules | `~/.nexus42/modules/<id>/` (see [Compute](#5-compute-basic-combat-n-c2-compute-half)) | Operator-installed, host-local compute modules (e.g. `modules/basic-combat`) the runtime invokes over Connect. Bytes are never peer-supplied. |
-| Connect SDK | `@42ch/spoke-connect@0.11.1` (npm) | Your backend's connection + invoke surface to the runtime (and to any SPOKE connect host). |
+| Connect SDK | `@42ch/spoke-connect` (npm, **the pinned upstream lockstep release**) | Your backend's connection + invoke surface to the runtime (and to any SPOKE connect host). |
 
 **The division of labor (read this first).** The strategy declares *capability
 routing and prompt templates* — it does not execute on the runtime. Your
@@ -32,8 +32,12 @@ never computes, rewrites, or overrides settlement results.
    temp dir keeps a run hermetic).
 3. Start the runtime; the readiness line is `nexus-runtime: Connect Host
    (N-C2 E2) ready`.
-4. Install the Connect SDK: `npm install @42ch/spoke-connect@0.11.1`, and
-   allowlist your peer (with `module_scope` for compute).
+4. Install the Connect SDK at the pinned upstream lockstep release — resolve it
+   from the manifests instead of copying a literal (see
+   [Version pins](#version-pins-do-not-hardcode)): `npm install
+   "@42ch/spoke-connect@${PIN}"`, and
+   allowlist your peer (with `module_scope` for compute, plus the peer's Actor
+   `grant` — see [Allowlist your peer on the host](#allowlist-your-peer-on-the-host)).
 5. Import lore: `upsert` → `promote` → `relate` over Connect (N-C1 write ops).
 6. Reason: `check` / `assemble` over Connect (N-C2 read half).
 7. Compute: install `basic-combat` under `~/.nexus42/modules/`, stage a
@@ -155,11 +159,29 @@ nexus42 creator world create --title "E2 demo world"       # creates a world; no
 
 ## 2. Connect with the SDK
 
-The TypeScript SDK is published as **`@42ch/spoke-connect`** (this is the
-canonical name — not `spoke-connect-ts`), pinned exactly to **0.11.1**:
+### Version pins (do not hardcode)
+
+This guide never writes the SPOKE version as a literal — the lockstep release is
+recorded once, in this repository's manifests: `Cargo.toml` (`spoke-schemas` /
+`spoke-operations` / `spoke-connect`, exact pins) and `package.json`
+(`@42ch/spoke-schemas` / `@42ch/spoke-operations`), mirrored by
+`tooling/check-wire-drift.sh::SPOKE_PIN`. Resolve it rather than copying it:
 
 ```bash
-npm install @42ch/spoke-connect@0.11.1
+PIN="$(grep -E '^[[:space:]]*spoke-connect[[:space:]]*=' Cargo.toml | sed -E 's/.*"=?([^"]*)".*/\1/')"
+npm install "@42ch/spoke-connect@${PIN}"
+```
+
+The drift gate (`tooling/check-wire-drift.sh`, gate 1c) still fails if any file
+under `strategy-samples/` carries a `@42ch/spoke-connect@<semver>` literal that
+disagrees with the pinned release.
+
+The TypeScript SDK is published as **`@42ch/spoke-connect`** (this is the
+canonical name — not `spoke-connect-ts`), pinned exactly to **that same pinned
+upstream lockstep release**:
+
+```bash
+npm install "@42ch/spoke-connect@${PIN}"     # PIN resolved above
 ```
 
 The SDK ships the connect wire family: the core session helpers (`.`), a Node
@@ -187,7 +209,12 @@ peer id **your node** uses in
       "peer_id": "12D3KooW...",
       "world_scope": ["wld_..."],
       "op_scope": ["upsert", "promote", "relate", "check", "assemble", "compute"],
-      "module_scope": ["basic-combat"]
+      "module_scope": ["basic-combat"],
+      "grant": {
+        "creator_id": "crt_...",
+        "actor": { "kind": "creator", "id": "crt_..." },
+        "world_id": "wld_..."
+      }
     }
   ]
 }
@@ -200,10 +227,30 @@ peer id **your node** uses in
 - `module_scope` is the list of host-local compute modules the peer may
   invoke. **Missing or empty ⇒ all compute is denied** (fail-closed; the
   denial is `module_not_scoped`). It is required for the `compute` op.
+- `grant` is the **operator-stored Actor grant** (holder-era, v1.191). It names
+  the stored Actor the peer acts as — a controlling Creator plus the ActorRef
+  (that same Creator, or one of its Characters) — and the granted World.
+  `"actor": {"kind": "character", "id": "chr_..."}` additionally requires
+  `"binding_id": "awb_..."`. **Absent ⇒ the peer is handshake/scope allowlisted
+  but every knowledge-entry op is denied** with `op_unsupported`; the two
+  `tools.nexus.*` ops keep working. A Creator grant whose `actor.id` differs
+  from `creator_id`, a Character grant without `binding_id`, and any unknown
+  member are hard config errors at load.
 - A bare string entry (`"peer_ids": ["12D3KooW..."]`) is the N-C0 shape —
-  handshake-only, no op scope.
+  handshake-only, no op scope and no grant.
 - `--allow-peer <PEER_ID>` on the runtime CLI unions with this file
-  (handshake-allowlist only; scoped entries come from the file).
+  (handshake-allowlist only; scoped entries and grants come from the file).
+
+> **Grant resolution is live, and the grant is the ceiling.** Each authenticated
+> invoke re-resolves the grant against **stored** ownership, lifecycle and the
+> holder registry: a renamed/foreign subject, a no-longer-owned World or a
+> deleted holder row denies fail-closed on the next invoke, with zero writes.
+> The grant always admits under the holder-filtered ActorView policy — a Creator
+> grant never inherits Creator management review, and a request-carried
+> `owner` / `scope.viewpoint` / container selector can only narrow or match the
+> grant, never choose another Actor. Write ops (`upsert` / `promote` / `relate` /
+> `compute`) additionally require live state (an active binding); the read ops
+> (`check` / `assemble`) keep the retained-read texture.
 
 > **Caller identity = the session peer.** The per-invoke caller identity is
 > the authenticated Connect session peer (the node that passed the allowlist,
@@ -211,9 +258,9 @@ peer id **your node** uses in
 > payload that carries `extensions.nexus.peer_id` carries it
 > **informationally only**: it must equal the session peer; a differing or
 > unparseable claim is denied in full (zero side effects). Omitting the field
-> is fine. Per-peer `world_scope` / `op_scope` / `module_scope` scoping is
-> therefore authentic for any number of allowlisted peers — there is no
-> spoofing path.
+> is fine. Per-peer `world_scope` / `op_scope` / `module_scope` / `grant`
+> scoping is therefore authentic for any number of allowlisted peers — there is
+> no spoofing path.
 
 ### Start the runtime
 
@@ -239,10 +286,7 @@ The runtime serves exactly six ops (everything else — `project`, unknown —
 | `assemble` | N-C2 read | Assemble a context packet over a world scope |
 | `compute` | N-C2 compute | Invoke a host-local WASM module (read-only — see [Compute](#5-compute-basic-combat-n-c2-compute-half)) |
 
-All six are world-scoped; all denials happen before any orchestrator call with
-zero side effects. Per-invoke limits: 8 concurrent orchestrator lanes, a
-30,000 ms invoke deadline, 500 collection entries / 2 MiB request, 2 MiB
-response.
+All six require the peer's operator-stored Actor `grant` (see [Allowlist your peer on the host](#allowlist-your-peer-on-the-host)) and are world-scoped; the grant is re-resolved against stored ownership/lifecycle plus the holder registry on every invoke. All denials happen before any orchestrator call with zero side effects. Per-invoke limits: 8 concurrent orchestrator lanes, a 30,000 ms invoke deadline, 500 collection entries / 2 MiB request, 2 MiB response.
 
 ---
 
@@ -260,6 +304,39 @@ Every entry/relation must carry `extensions.nexus.world_id`; a payload missing
 a world id, claiming a world outside the peer's `world_scope`, or replaying a
 stored world mismatch is denied **in full** with zero side effects. `relate`
 additionally requires both endpoints to exist in the claimed world.
+
+### Holder governance on the wire (v1.191)
+
+Holder governance travels in the SPOKE **core** fields, never in `extensions.nexus`:
+
+| Wire field | Meaning |
+|---|---|
+| `owner` | opaque **holder** KnowledgeEntry id (`hld_` + 64 lowercase hex, e.g. `hld_4d6d…`). Absent ⇒ ownership unspecified, i.e. an in-scope shared row |
+| `disclosure` | `"owner-private"`. Absent ⇒ shared. Any other string is unknown vocabulary: excluded from reads and quarantined on import, never silently treated as shared |
+| `scope.viewpoint` | optional reader-context holder id consumed by ownership-aware operations. It can only **narrow** the peer's grant — a viewpoint outside the granted Actor is refused |
+
+Rules for a partner backend:
+
+- **Shared by default.** An entry with neither `owner` nor `disclosure` is shared
+  inside the granted world and stays visible to that world's admitted Character
+  views.
+- **Private rows belong to the grant.** A row written with
+  `"disclosure": "owner-private"` must carry the peer's own granted holder id in
+  `owner`. A foreign holder id, or a private row with no holder, is refused
+  (`invalid_input`) with zero writes — a peer can never assign another Actor's
+  holder or a management selection.
+- **Governance moves under the same CAS as content.** Setting or clearing
+  governance is part of the entry's `revision` CAS; a stale `revision` is
+  rejected (`stored_revision_stale` / `revision_conflict`) and no partial write
+  is kept.
+- **No legacy bool.** The retired `extensions.nexus.creator_only` key is refused
+  by presence — including `"creator_only": false` — with the stable reason
+  `legacy_creator_only_unsupported`. It is never folded into governance, ignored,
+  or carried through as an unknown extension.
+- **Foreign packs are a host operation.** Mapping a foreign holder id into a local
+  holder is an explicit `creator world kb pack import --holder-map` adoption by
+  the authorized Creator; unmapped or unknown governance stays quarantined and is
+  never readable over Connect.
 
 A worked `upsert` (the extraction drafts from the game-narrative templates):
 
@@ -681,7 +758,7 @@ idempotency ledger.
 - Reference module: [`../modules/basic-combat/`](../modules/basic-combat/)
 - Headless runtime spec: [`../.mstar/specs/daemon-runtime.md`](../.mstar/specs/daemon-runtime.md) §4.6
 - Connect invoke surface (N-C2 E2): `apps/nexus42/src/commands/connect/invoke.rs`
-- Connect SDK + wire family: `@42ch/spoke-connect@0.11.1` on npm
+- Connect SDK + wire family: `@42ch/spoke-connect` on npm (the pinned upstream lockstep release)
 - SPOKE connect-demo (runnable mock host + third-party RemoteAdapter client):
   `../../spoke/examples/connect-demo` — the TS-side story: a `BaselinePorts`
   adapter served by a spec-faithful `ConnectHost` over WebSocket, dialed by

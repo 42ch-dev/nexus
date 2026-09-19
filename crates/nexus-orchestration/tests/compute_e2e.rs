@@ -40,16 +40,18 @@ async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
     (pool, dir)
 }
 
+/// Seed a Creator through the production creation path, which also
+/// materializes its holder registry row in the same transaction.
+///
+/// v1.191 P1 (R5): `narrative.compute` reads its input through the admitted
+/// Creator `ActorView`, and that selection resolves the Creator's stable holder
+/// (`require_creator_holder`, fail-closed). A hand-rolled `creators` insert would
+/// leave the registry row missing, so admission refuses with
+/// `holder_state_invalid` before any compute runs.
 async fn seed_creator(pool: &sqlx::SqlitePool, creator_id: &str) {
-    sqlx::query(
-        "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
-         VALUES (?, ?, 'active', datetime('now'), '{}')",
-    )
-    .bind(creator_id)
-    .bind("E2E Creator")
-    .execute(pool)
-    .await
-    .unwrap();
+    nexus_local_db::ensure_creator_row(pool, creator_id, "E2E Creator")
+        .await
+        .unwrap();
 }
 
 async fn seed_world(pool: &sqlx::SqlitePool, owner: &str, world_id: &str) {

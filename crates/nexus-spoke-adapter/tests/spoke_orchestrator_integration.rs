@@ -55,6 +55,21 @@ const WORLD_ID: &str = "wld_1";
 /// own `fresh_pool` in `src/spoke_adapter/knowledge_entry_port.rs`). Returns
 /// the pool AND the `TempDir` guard so the temp DB stays alive for the test
 /// body.
+/// A KE-capable adapter whose selection authorizes the worlds these
+/// fixtures own (v1.191 P1 T8 — the check/relate paths read knowledge).
+fn scoped(pool: sqlx::SqlitePool) -> NexusAdapter<'static> {
+    NexusAdapter::new(
+        pool,
+        nexus_knowledge::world_kb::KnowledgeReadScope::creator_management(
+            vec![
+                nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef::world("wld_1"),
+                nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef::world("wld_2"),
+            ],
+            Vec::new(),
+        ),
+    )
+}
+
 async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test.db");
@@ -186,7 +201,7 @@ fn expect_reject_with_code<T: std::fmt::Debug>(result: SpokeResult<T>, code: Spo
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn orchestrate_upsert_happy_create() {
     let (pool, _dir) = fresh_pool().await;
-    let adapter = NexusAdapter::new(pool.clone());
+    let adapter = scoped(pool.clone());
 
     let entry_id = "kb_create_happy";
     let candidate = spoke_entry(entry_id, "CreateHappy", None, "provisional");
@@ -231,7 +246,7 @@ async fn orchestrate_upsert_happy_create() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn orchestrate_upsert_happy_update() {
     let (pool, _dir) = fresh_pool().await;
-    let adapter = NexusAdapter::new(pool.clone());
+    let adapter = scoped(pool.clone());
 
     // Create → stored at revision 1.
     let entry_id = "kb_update_happy";
@@ -284,7 +299,7 @@ async fn orchestrate_upsert_happy_update() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn orchestrate_upsert_stale_reject() {
     let (pool, _dir) = fresh_pool().await;
-    let adapter = NexusAdapter::new(pool.clone());
+    let adapter = scoped(pool.clone());
 
     // Create → revision 1.
     let entry_id = "kb_stale_reject";
@@ -327,7 +342,7 @@ async fn orchestrate_upsert_stale_reject() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn orchestrate_promote_happy() {
     let (pool, _dir) = fresh_pool().await;
-    let adapter = NexusAdapter::new(pool.clone());
+    let adapter = scoped(pool.clone());
 
     // Create a provisional entry → stored at revision 1.
     let entry_id = "kb_promote_happy";
@@ -379,7 +394,7 @@ async fn orchestrate_assemble_scope_filtered() {
     use nexus_spoke_adapter::{orchestrate_assemble, AssembleResponse};
 
     let (pool, _dir) = fresh_pool().await;
-    let adapter = NexusAdapter::new(pool);
+    let adapter = scoped(pool);
 
     // Create two entries in wld_1.
     let a = spoke_entry("kb_assemble_a", "AssembleA", None, "provisional");
@@ -531,7 +546,7 @@ async fn move_key_block_to_world(pool: &sqlx::SqlitePool, entry_id: &str, world_
 async fn orchestrate_upsert_denies_row_moved_to_another_world_between_verification_and_cas() {
     let (pool, _dir) = fresh_pool().await;
     seed_second_world(&pool).await;
-    let adapter = NexusAdapter::new(pool.clone());
+    let adapter = scoped(pool.clone());
 
     // Writer 1 creates the entry in WORLD_ID → revision 1.
     let entry_id = "kb_wc_upsert";
@@ -573,7 +588,7 @@ async fn orchestrate_upsert_denies_row_moved_to_another_world_between_verificati
 async fn orchestrate_promote_denies_row_moved_to_another_world_between_verification_and_cas() {
     let (pool, _dir) = fresh_pool().await;
     seed_second_world(&pool).await;
-    let adapter = NexusAdapter::new(pool.clone());
+    let adapter = scoped(pool.clone());
 
     // Writer 1 creates a provisional entry in WORLD_ID → revision 1.
     let entry_id = "kb_wc_promote";
@@ -599,7 +614,7 @@ async fn orchestrate_promote_denies_row_moved_to_another_world_between_verificat
 async fn orchestrate_relate_denies_row_moved_to_another_world_between_verification_and_cas() {
     let (pool, _dir) = fresh_pool().await;
     seed_second_world(&pool).await;
-    let adapter = NexusAdapter::new(pool.clone());
+    let adapter = scoped(pool.clone());
 
     // Endpoints must exist in WORLD_ID (kb_relationships FKs on key_block_id).
     for endpoint in ["kb_wc_src", "kb_wc_dst"] {

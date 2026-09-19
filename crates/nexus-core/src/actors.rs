@@ -26,7 +26,10 @@ use nexus_contracts::generated::daemon_api::characters::{
     character_binding_detail::{
         CharacterBindingDetail, NexusActorWorldBinding as DetailBindingWire,
     },
-    character_detail::{CharacterDetail, NexusCharacter as DetailCharacterWire},
+    character_detail::{
+        CharacterDetail, NexusCharacter as DetailCharacterWire,
+        NexusCharacterHolderEntryId as DetailCharacterHolderId,
+    },
     create_character_request::CreateCharacterRequest,
     create_character_response::{
         CreateCharacterResponse, NexusActorWorldBinding as CreatedBindingWire,
@@ -161,8 +164,22 @@ where
 }
 
 pub fn nexus_character_from_record(record: &CharacterRecord) -> CoreResult<DetailCharacterWire> {
+    nexus_character_with_holder(record, None)
+}
+
+/// Identity projection with the read-only `holder_entry_id` member (durable
+/// §7): the holder is service-resolved from the registry and never accepted
+/// from a request, so it is a projection input rather than a stored column on
+/// [`CharacterRecord`].
+pub fn nexus_character_with_holder(
+    record: &CharacterRecord,
+    holder_entry_id: Option<String>,
+) -> CoreResult<DetailCharacterWire> {
     let persona: serde_json::Map<String, serde_json::Value> =
         serde_json::from_str(&record.persona_json).map_err(wire_err)?;
+    let holder_entry_id: Option<DetailCharacterHolderId> = holder_entry_id
+        .map(|id| DetailCharacterHolderId::try_from(id).map_err(wire_err))
+        .transpose()?;
     build_wire(
         DetailCharacterWire::builder()
             .schema_version(1u64)
@@ -172,6 +189,7 @@ pub fn nexus_character_from_record(record: &CharacterRecord) -> CoreResult<Detai
             .status(record.status.as_str())
             .revision(record.revision)
             .persona(persona)
+            .holder_entry_id(holder_entry_id)
             .image_uri(parse_optional(record.image_uri.as_deref())?)
             .created_at(parse_rfc3339(&record.created_at)?)
             .updated_at(parse_rfc3339(&record.updated_at)?)
@@ -382,6 +400,18 @@ impl CoreService {
                 CharacterStatus::Active
             }
         };
+        // §2.2: resolve the identity's holder through the same exported read the
+        // admission paths use, before the lifecycle write. The storage layer
+        // re-resolves it inside the transaction, so the archive/restore commit
+        // still fails closed on a registry that changed under the fence.
+        require_actor_holder(
+            &self.inner.pool,
+            principal.creator_id(),
+            &AdmittedActor::Character {
+                character_id: lease.character_id().to_string(),
+            },
+        )
+        .await?;
         let record = nexus_local_db::transition_character(
             &self.inner.pool,
             principal.creator_id(),
@@ -393,7 +423,10 @@ impl CoreService {
         .map_err(actor_db_err)?;
         lease.set_epoch(record.lifecycle_epoch);
         let character: nexus_contracts::generated::core::core_character_transition_response::NexusCharacter =
-            map_wire_one(nexus_character_from_record(&record)?)?;
+            map_wire_one(
+                self.character_identity_wire(principal.creator_id(), &record)
+                    .await?,
+            )?;
         CoreCharacterTransitionResponse::builder()
             .character(character)
             .try_into()
@@ -456,7 +489,7 @@ fn admit_viewpoint(viewpoint: NexusSessionViewpoint) -> ActorViewpoint {
 /// Validate stored ownership for an admission (durable §11.3 admission
 /// ordering: Creator self-ownership, binding shape, active owned World,
 /// active owned Character, active stored binding).
-async fn require_admitted_ownership(
+pub async fn require_admitted_ownership(
     pool: &SqlitePool,
     caller_creator_id: &str,
     actor: &AdmittedActor,
@@ -482,11 +515,57 @@ async fn require_admitted_ownership(
             require_active_binding(pool, character_id, binding, &viewpoint.world_id).await?;
         }
     }
+    // §2.1: the identity is usable only while its holder registry row exists;
+    // admission is a normal read, so missing/corrupt registry state fails
+    // closed here instead of provisioning a holder.
+    require_actor_holder(pool, caller_creator_id, actor).await?;
     Ok(())
+}
+
+/// Resolve the stable holder of an admitted Actor's stored identity for a
+/// normal read (durable §2.2).
+///
+/// Fails closed when the registry row is missing or corrupt
+/// (`holder_state_invalid`): a normal read never provisions a holder, so an
+/// identity whose subject committed without its registry row is not usable.
+/// Foreign/missing rows stay the retained not-found shape, so this read does
+/// not widen existence.
+///
+/// # Errors
+///
+/// Returns [`CoreError::NotFound`] for a foreign or missing subject,
+/// [`CoreError::ActorConflict`] `holder_state_invalid` for missing/corrupt
+/// registry state, and the mapped storage error otherwise.
+pub async fn require_actor_holder(
+    pool: &SqlitePool,
+    caller_creator_id: &str,
+    actor: &AdmittedActor,
+) -> CoreResult<String> {
+    match actor {
+        AdmittedActor::Creator { creator_id } => {
+            if creator_id != caller_creator_id {
+                return Err(not_found("actor_ref", creator_id));
+            }
+            nexus_local_db::require_creator_holder(pool, creator_id)
+                .await
+                .map_err(actor_db_err)
+        }
+        AdmittedActor::Character { character_id } => {
+            nexus_local_db::require_character_holder(pool, caller_creator_id, character_id)
+                .await
+                .map_err(actor_db_err)
+        }
+    }
 }
 
 /// Active owned World (PR #240 finding 1): foreign/missing → 404, owned but
 /// inactive → 409 `world_inactive`.
+///
+/// # Errors
+///
+/// Returns [`CoreError::NotFound`] for a foreign or missing World, the
+/// `world_inactive` [`CoreError::ActorConflict`] for an owned but inactive
+/// World, and [`CoreError::Internal`] on database failure.
 pub async fn require_active_owned_world(
     pool: &SqlitePool,
     creator_id: &str,
@@ -519,6 +598,12 @@ pub async fn require_active_owned_world(
 
 /// Active owned Character: foreign/missing → 404, owned but archived → 409
 /// `character_inactive`. Returns the stored record for epoch capture.
+///
+/// # Errors
+///
+/// Returns [`CoreError::NotFound`] for a foreign or missing Character, the
+/// `character_inactive` [`CoreError::ActorConflict`] for an owned but archived
+/// Character, and the mapped storage fault on database failure.
 pub async fn require_active_owned_character(
     pool: &SqlitePool,
     creator_id: &str,
@@ -608,7 +693,9 @@ impl CoreService {
         )
         .await
         .map_err(actor_db_err)?;
-        let character: DetailCharacterWire = nexus_character_from_record(&created.character)?;
+        let character: DetailCharacterWire = self
+            .character_identity_wire(principal.creator_id(), &created.character)
+            .await?;
         let binding: DetailBindingWire = binding_wire_from_record(&created.binding)?;
         let character: CreatedCharacterWire = map_wire_one(character)?;
         let binding: CreatedBindingWire = map_wire_one(binding)?;
@@ -668,7 +755,10 @@ impl CoreService {
         let row =
             require_character_row(&self.inner.pool, principal.creator_id(), &character_id).await?;
         CharacterDetail::builder()
-            .character(nexus_character_from_record(&row)?)
+            .character(
+                self.character_identity_wire(principal.creator_id(), &row)
+                    .await?,
+            )
             .try_into()
             .map_err(wire_err)
     }
@@ -697,6 +787,17 @@ impl CoreService {
                 },
             )
             .await?;
+        // §2.2: the lifecycle write resolves the identity's holder through the
+        // same exported read the admission paths use (the storage layer
+        // re-resolves it inside its own transaction).
+        require_actor_holder(
+            &self.inner.pool,
+            principal.creator_id(),
+            &AdmittedActor::Character {
+                character_id: character_id.clone(),
+            },
+        )
+        .await?;
         let record = nexus_local_db::update_character(
             &self.inner.pool,
             principal.creator_id(),
@@ -707,9 +808,33 @@ impl CoreService {
         .await
         .map_err(actor_db_err)?;
         CharacterDetail::builder()
-            .character(nexus_character_from_record(&record)?)
+            .character(
+                self.character_identity_wire(principal.creator_id(), &record)
+                    .await?,
+            )
             .try_into()
             .map_err(wire_err)
+    }
+
+    /// The **identity detail** projection of one stored Character (durable §7):
+    /// the same wire shape as [`nexus_character_from_record`] plus the
+    /// read-only `holder_entry_id`, resolved from the holder registry. The
+    /// registry is only ever **read** here — a missing row fails closed as
+    /// `holder_state_invalid` rather than provisioning one (§2.2), and there is
+    /// no holder CRUD route behind this member.
+    async fn character_identity_wire(
+        &self,
+        creator_id: &str,
+        record: &CharacterRecord,
+    ) -> CoreResult<DetailCharacterWire> {
+        let holder = nexus_local_db::require_character_holder(
+            &self.inner.pool,
+            creator_id,
+            &record.character_id,
+        )
+        .await
+        .map_err(actor_db_err)?;
+        nexus_character_with_holder(record, Some(holder))
     }
 
     /// Add one active `ActorWorldBinding` behind the shared activity lease.
@@ -1005,6 +1130,9 @@ impl CoreActorAdmission {
                     .await?;
             }
         }
+        // §2.1/§2.2: the same fail-closed holder resolution as the core
+        // admission path — a normal read never provisions a missing holder.
+        require_actor_holder(&self.pool, caller_creator_id, &actor).await?;
         let view = self
             .views
             .admitted_view(

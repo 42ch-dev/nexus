@@ -6,7 +6,7 @@
 //! Lifecycle: `queued` → `running` → `done` | `failed`.
 //! SSOT in `nexus-local-db`; no second in-memory queue.
 
-use sqlx::{Sqlite, SqlitePool};
+use sqlx::{Sqlite, SqliteConnection, SqlitePool};
 
 use crate::error::LocalDbError;
 
@@ -460,21 +460,32 @@ pub async fn claim_job(
     Ok(Some(claimed))
 }
 
-/// Mark a job as done. Sets `finished_at` to now.
+/// Claim the successful terminal for one extract job **inside the caller's
+/// transaction** (v1.191 P1 T13).
+///
+/// The claim is conditional on the job still being claimable (`queued` /
+/// `running`): a job another actor already completed or failed is never
+/// reported done, and a caller that gets `Ok(false)` rolls its transaction back
+/// so the candidate rows in it cannot survive a cancelled run.
 ///
 /// # Errors
 ///
 /// Returns `sqlx::Error` on database failure.
-pub async fn mark_done(pool: &SqlitePool, job_id: &str) -> Result<(), sqlx::Error> {
-    sqlx::query!(
-        r#"UPDATE kb_extract_jobs
-           SET status = 'done', finished_at = datetime('now')
-           WHERE job_id = ?"#,
-        job_id,
+pub async fn mark_done_in_tx(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    job_id: &str,
+) -> Result<bool, sqlx::Error> {
+    // SAFETY: static UPDATE on a known table/column set; runtime `query()`
+    // keeps the shared offline `.sqlx` cache untouched (the worker-protocol
+    // checkpoint owns regeneration).
+    let result = sqlx::query(
+        "UPDATE kb_extract_jobs SET status = 'done', finished_at = datetime('now') \
+         WHERE job_id = ? AND status IN ('queued', 'running')",
     )
-    .execute(pool)
+    .bind(job_id)
+    .execute(&mut **tx)
     .await?;
-    Ok(())
+    Ok(result.rows_affected() == 1)
 }
 
 /// Mark a job as failed. Sets `finished_at` to now and records error text.
@@ -792,8 +803,11 @@ pub async fn insert_pending(
     canonical_name_guess: &str,
     proposed_payload: &str,
 ) -> Result<KbExtractPromotion, sqlx::Error> {
+    // The insert runs on one pooled connection; the caller-owned transaction
+    // lane passes its own connection to `insert_pending_with_llm` directly.
+    let mut conn = pool.acquire().await?;
     insert_pending_with_llm(
-        pool,
+        &mut conn,
         creator_id,
         workspace_id,
         world_id,
@@ -825,7 +839,7 @@ pub async fn insert_pending(
 // single call-site.
 #[allow(clippy::too_many_arguments)]
 pub async fn insert_pending_with_llm(
-    pool: &SqlitePool,
+    conn: &mut SqliteConnection,
     creator_id: &str,
     workspace_id: &str,
     world_id: &str,
@@ -865,10 +879,10 @@ pub async fn insert_pending_with_llm(
     .bind(canonical_name_guess)
     .bind(llm_confidence)
     .bind(llm_source_quote)
-    .execute(pool)
+    .execute(&mut *conn)
     .await?;
 
-    fetch_promotion_by_id(pool, &job_id).await
+    fetch_promotion_by_id(&mut *conn, &job_id).await
 }
 
 /// Fetch a single promotion row by ID.
@@ -985,11 +999,14 @@ where
 /// # Errors
 ///
 /// Returns `sqlx::Error` on database failure.
-pub async fn is_idempotent(
-    pool: &SqlitePool,
+pub async fn is_idempotent<'e, E>(
+    executor: E,
     work_id: &str,
     canonical_name_guess: &str,
-) -> Result<bool, sqlx::Error> {
+) -> Result<bool, sqlx::Error>
+where
+    E: sqlx::Executor<'e, Database = Sqlite>,
+{
     // SAFETY: static SELECT with bind params.
     let existing: Option<(i64,)> = sqlx::query_as(
         "SELECT COUNT(*) FROM kb_extract_jobs \
@@ -998,7 +1015,7 @@ pub async fn is_idempotent(
     )
     .bind(work_id)
     .bind(canonical_name_guess)
-    .fetch_optional(pool)
+    .fetch_optional(executor)
     .await?;
     Ok(existing.is_some_and(|(c,)| c > 0))
 }
@@ -1232,19 +1249,25 @@ pub async fn mark_rejected(pool: &SqlitePool, job_id: &str) -> Result<bool, sqlx
 
 // ── internal fetchers ─────────────────────────────────────────────────
 
-async fn fetch_promotion_by_id(
-    pool: &SqlitePool,
+async fn fetch_promotion_by_id<'e, E>(
+    executor: E,
     job_id: &str,
-) -> Result<KbExtractPromotion, sqlx::Error> {
-    fetch_promotion_optional_by_id(pool, job_id)
+) -> Result<KbExtractPromotion, sqlx::Error>
+where
+    E: sqlx::Executor<'e, Database = Sqlite>,
+{
+    fetch_promotion_optional_by_id(executor, job_id)
         .await?
         .ok_or(sqlx::Error::RowNotFound)
 }
 
-async fn fetch_promotion_optional_by_id(
-    pool: &SqlitePool,
+async fn fetch_promotion_optional_by_id<'e, E>(
+    executor: E,
     job_id: &str,
-) -> Result<Option<KbExtractPromotion>, sqlx::Error> {
+) -> Result<Option<KbExtractPromotion>, sqlx::Error>
+where
+    E: sqlx::Executor<'e, Database = Sqlite>,
+{
     // SAFETY: static SELECT by PK with bind param.
     sqlx::query_as::<_, KbExtractPromotion>(
         "SELECT job_id, creator_id, workspace_id, world_id, work_id, \
@@ -1255,7 +1278,7 @@ async fn fetch_promotion_optional_by_id(
          FROM kb_extract_jobs WHERE job_id = ?",
     )
     .bind(job_id)
-    .fetch_optional(pool)
+    .fetch_optional(executor)
     .await
 }
 
@@ -1315,7 +1338,11 @@ mod tests {
         assert_eq!(j.status, "running");
         assert!(j.started_at.is_some());
 
-        mark_done(&pool, &j.job_id).await.unwrap();
+        {
+            let mut tx = crate::begin_immediate(&pool).await.unwrap();
+            assert!(mark_done_in_tx(&mut tx, &j.job_id).await.unwrap());
+            tx.commit().await.unwrap();
+        }
         let j = get(&pool, &job.job_id).await.unwrap().unwrap();
         assert_eq!(j.status, "done");
         assert!(j.finished_at.is_some());
@@ -1487,7 +1514,11 @@ mod tests {
         assert_eq!(claimed.job_id, j.job_id);
         assert_eq!(claimed.status, "running");
 
-        mark_done(&pool, &claimed.job_id).await.unwrap();
+        {
+            let mut tx = crate::begin_immediate(&pool).await.unwrap();
+            assert!(mark_done_in_tx(&mut tx, &claimed.job_id).await.unwrap());
+            tx.commit().await.unwrap();
+        }
         let done = get(&pool, &claimed.job_id).await.unwrap().unwrap();
         assert_eq!(done.status, "done");
     }
@@ -1580,7 +1611,7 @@ mod tests {
         })
         .to_string();
         let pending = insert_pending_with_llm(
-            &pool,
+            &mut pool.acquire().await.unwrap(),
             "ctr_1",
             "ws",
             "wld_1",

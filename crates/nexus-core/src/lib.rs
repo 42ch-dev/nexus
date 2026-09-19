@@ -40,19 +40,24 @@ mod world_pack;
 mod world_rules;
 mod worlds;
 
-pub use actor_fence::{ActorActivityLease, CharacterTransitionLease};
+pub use actor_fence::{
+    ActorActivityLease, ActorFenceKind, CharacterTransitionLease, KnowledgeEffectLeases,
+    KnowledgeGovernanceLease,
+};
 pub use actor_knowledge::{
-    ActorKnowledgePage, ActorKnowledgeViewQuery, ActorKnowledgeViewService,
+    authored_patch_audience, ActorKnowledgeIdentity, ActorKnowledgePage, ActorKnowledgeViewQuery,
+    ActorKnowledgeViewService, AdmittedKnowledgeContext, KnowledgeRevisions,
     KNOWLEDGE_INSERT_FAILED_PREFIX, KNOWLEDGE_VIEW_COMPONENT_FAILED_PREFIX,
     KNOWLEDGE_WIRE_INVALID_PREFIX,
 };
 #[cfg(feature = "provider-host")]
 pub use actor_sessions::{
     echo_actor_pair, ActorSessionKey, ActorSessionKind, ActorSessionRegistry,
-    CharacterOperationSnapshot,
+    CharacterOperationSnapshot, KnowledgeReuse,
 };
 pub use actors::{
-    classify_pair, ActorPairMode, ActorViewpoint, AdmittedActor, AdmittedActorContext,
+    classify_pair, require_active_owned_character, require_active_owned_world,
+    require_actor_holder, ActorPairMode, ActorViewpoint, AdmittedActor, AdmittedActorContext,
     CoreActorAdmission, CHARACTER_WIRE_INVALID_PREFIX,
 };
 pub use chronology::CoreWorkChronology;
@@ -90,5 +95,10 @@ pub use works::{
     PromoteInspirationRequest, PromoteInspirationResponse, PromotePoolRequest,
     ReconcileDryRunQuery, SetPoolActiveRequest, WorkDetails, WorkInspirationItem, WorkPatchRequest,
     WorkPoolEntry, WorkReconcileReport,
+};
+pub use world_pack::{
+    AtomCounts, HolderMapping, HolderMappingSelector, ImportAtomKind, ImportDetail, ImportOutcome,
+    ImportQuarantineReview, ImportSummary, QuarantineReason, QuarantinedAtomReport,
+    REVIEW_IMPORT_MAX_ATOMS,
 };
 pub use worlds::DELETE_WORLD_BLOCKED_BY_BINDINGS;

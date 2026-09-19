@@ -4,8 +4,12 @@
 //! Uses in-memory stores for KB and `SQLite` for job lifecycle.
 
 use nexus_contracts::BlockType;
-use nexus_knowledge::world_kb::extract_finalize::{finalize_extract, ExtractFinalizeInput};
-use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeOwnerRef};
+use nexus_knowledge::world_kb::extract_finalize::{
+    persist_prepared_extract, prepare_extract, ExtractPrepareInput,
+};
+use nexus_knowledge::world_kb::knowledge_entry::{
+    KnowledgeEntryBody, KnowledgeGovernance, KnowledgeOwnerRef,
+};
 use nexus_knowledge::world_kb::source_anchor::SourceAnchor;
 use nexus_knowledge::world_kb::store::InMemoryKbStore;
 use nexus_knowledge::world_kb::validation::ValidationMode;
@@ -77,16 +81,18 @@ async fn test_persist_extract_chapter_block_e2e() {
     };
     let source_anchor = SourceAnchor::from_excerpt("Chapter 01: Lin Xia appeared...");
 
-    let input = ExtractFinalizeInput {
+    let input = ExtractPrepareInput {
         world_id: world_id.to_string(),
         block_type: BlockType::Character,
         canonical_name: "char_lin_xia".to_string(),
         body,
         source_anchor,
         validation_mode: ValidationMode::Novel,
+        governance: KnowledgeGovernance::shared(),
     };
 
-    let result = finalize_extract(&store, input).await.unwrap();
+    let prepared = prepare_extract(input).expect("prepare candidate");
+    let result = persist_prepared_extract(&store, prepared).await.unwrap();
     assert!(result.entry_id.starts_with("kb_"));
     assert_eq!(result.owner, KnowledgeOwnerRef::world(world_id));
 
@@ -102,7 +108,7 @@ async fn test_persist_extract_chapter_block_e2e() {
 async fn test_worldless_work_skips_world_promotion() {
     // Legacy V1.39 worldless Works: world_id is None, no World KB promotion.
     // This test verifies the enqueue still works (no FK violation) and
-    // that finalize_extract uses Generic validation mode.
+    // that prepare_extract uses Generic validation mode.
 
     // WAIVER: pre-1.0 local-first; see V1.41 P-last residual R-V140P3-S3
     // — AC3 empty/absent world_id test gap: this test uses a present world_id
@@ -117,16 +123,18 @@ async fn test_worldless_work_skips_world_promotion() {
     };
     let source_anchor = SourceAnchor::from_excerpt("Generic excerpt");
 
-    let input = ExtractFinalizeInput {
+    let input = ExtractPrepareInput {
         world_id: "wld_no_world".to_string(),
         block_type: BlockType::InfoPoint,
         canonical_name: "info_generic".to_string(),
         body,
         source_anchor,
         validation_mode: ValidationMode::Generic,
+        governance: KnowledgeGovernance::shared(),
     };
 
-    let result = finalize_extract(&store, input).await.unwrap();
+    let prepared = prepare_extract(input).expect("prepare candidate");
+    let result = persist_prepared_extract(&store, prepared).await.unwrap();
     assert!(result.entry_id.starts_with("kb_"));
 
     let blocks = store.list_by_world("wld_no_world").await.unwrap();
@@ -183,7 +191,8 @@ async fn test_extract_idempotent_job() {
 
 #[tokio::test]
 async fn test_extract_novel_requires_novel_category() {
-    let store = InMemoryKbStore::with_validation_mode(ValidationMode::Novel);
+    // v1.191 P1 T12: the mode requirement is enforced by prepare, before any
+    // id is allocated or any store is touched.
     let body = KnowledgeEntryBody {
         summary: Some("Test".to_string()),
         attributes: Some(serde_json::json!({})), // missing novel_category
@@ -192,16 +201,17 @@ async fn test_extract_novel_requires_novel_category() {
     };
     let source_anchor = SourceAnchor::from_excerpt("test");
 
-    let input = ExtractFinalizeInput {
+    let input = ExtractPrepareInput {
         world_id: "wld_test".to_string(),
         block_type: BlockType::Character,
         canonical_name: "char_test".to_string(),
         body,
         source_anchor,
         validation_mode: ValidationMode::Novel,
+        governance: KnowledgeGovernance::shared(),
     };
 
-    let err = finalize_extract(&store, input).await.unwrap_err();
+    let err = prepare_extract(input).unwrap_err();
     assert!(
         format!("{err}").contains("novel_category"),
         "expected novel_category validation error, got: {err}"

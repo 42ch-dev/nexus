@@ -95,6 +95,36 @@ pub enum LocalDbError {
         revision: String,
         workspace_root: String,
     },
+    /// V1.191 P1 T4 (durable §2.2): a normal Actor read resolved a missing or
+    /// corrupt holder registry row. The read never provisions the row, so this
+    /// is a refusal rather than a repair; hosts surface the stable
+    /// `holder_state_invalid` code (mapped from this variant, like the other
+    /// payload-carrying API-precision variants above).
+    HolderStateInvalid { reason: String },
+}
+
+impl LocalDbError {
+    /// Unreferenced-only Actor deletion refusal (durable §2.2): governance
+    /// references, bindings, or retained owned rows still exist.
+    #[must_use]
+    pub(crate) const fn actor_in_use() -> Self {
+        Self::ActorContractConflict {
+            code: ActorContractConflict::ActorInUse,
+        }
+    }
+
+    /// Map a residual referential refusal onto [`Self::actor_in_use`]: the
+    /// deletion paths pre-count every reference class they know, and SQLite's
+    /// own `RESTRICT` refusal is the backstop for one they do not.
+    #[must_use]
+    pub(crate) fn actor_reference_refusal(err: sqlx::Error) -> Self {
+        if let sqlx::Error::Database(db) = &err {
+            if db.is_foreign_key_violation() {
+                return Self::actor_in_use();
+            }
+        }
+        Self::from(err)
+    }
 }
 
 /// Stable actor-contract conflict codes (wire `error.code` at HTTP 409).
@@ -130,6 +160,10 @@ pub enum ActorContractConflict {
     RunCaptureProvenanceConflict,
     /// v1.185 P3: run capture scope changed (epoch/binding/Character) before commit.
     RunCaptureScopeChanged,
+    /// v1.191 P1 T4: unreferenced-only Actor deletion refused because the
+    /// subject still has governance references, bindings, or retained owned
+    /// rows (durable §2.2).
+    ActorInUse,
 }
 
 impl ActorContractConflict {
@@ -157,6 +191,7 @@ impl ActorContractConflict {
             Self::KnowledgeEntryNotMutable => "knowledge_entry_not_mutable",
             Self::RunCaptureProvenanceConflict => "run_capture_provenance_conflict",
             Self::RunCaptureScopeChanged => "run_capture_scope_changed",
+            Self::ActorInUse => "actor_in_use",
         }
     }
 
@@ -218,6 +253,9 @@ impl ActorContractConflict {
             }
             Self::RunCaptureScopeChanged => {
                 "Run capture scope changed before the capture transaction could commit"
+            }
+            Self::ActorInUse => {
+                "Actor still has references (governance, bindings or retained owned rows) that prevent deletion"
             }
         }
     }
@@ -376,6 +414,9 @@ impl fmt::Display for LocalDbError {
                     f,
                     "corrupt workspace commit intent {revision} at {workspace_root}"
                 )
+            }
+            Self::HolderStateInvalid { reason } => {
+                write!(f, "holder_state_invalid: {reason}")
             }
         }
     }

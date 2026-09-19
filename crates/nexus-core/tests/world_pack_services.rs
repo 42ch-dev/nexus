@@ -3,7 +3,13 @@
 #![allow(clippy::too_many_lines)] // one end-to-end scenario per test
 
 use nexus_contracts::daemon_api::kb::{PackExportRequest, PackImportRequest};
-use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService};
+use nexus_contracts::BlockType;
+use nexus_core::{
+    CoreAccess, CoreError, CoreOpenOptions, CoreService, HolderMapping, HolderMappingSelector,
+    QuarantineReason,
+};
+use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryRecord, DISCLOSURE_OWNER_PRIVATE};
+use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::writer_protocol::{init_engine_pool, GuardedPoolOptions};
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
@@ -16,8 +22,11 @@ const FOREIGN: &str = "wld_pack_foreign";
 
 async fn seed(pool: &SqlitePool) {
     for owner in [CREATOR, "other_creator"] {
-        sqlx::query("INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) VALUES (?, 'Test', 'active', datetime('now'), '{}')")
-            .bind(owner).execute(pool).await.unwrap();
+        // Production materialization: a stored Creator always has its holder
+        // registry row, which the admitted read selections resolve.
+        nexus_local_db::ensure_creator_row(pool, owner, "Test")
+            .await
+            .unwrap();
     }
     for (world, owner) in [
         (SOURCE, CREATOR),
@@ -111,14 +120,19 @@ async fn pack_import_skip_cross_world_and_reimport_is_idempotent() {
     let principal = core.active_principal().await.unwrap();
     let export_request: PackExportRequest = serde_json::from_value(json!({})).unwrap();
     let exported = core
-        .export_world_pack(&principal, SOURCE.to_string(), export_request)
+        .export_world_pack(&principal, SOURCE.to_string(), export_request, false)
         .await
         .unwrap();
     let mut pack = serde_json::to_value(exported).unwrap();
 
     // Foreign-world PKs are not silently stolen or overwritten.
     let foreign_ids = core
-        .import_world_pack(&principal, TARGET.to_string(), request(&pack, "skip"))
+        .import_world_pack(
+            &principal,
+            TARGET.to_string(),
+            request(&pack, "skip"),
+            Vec::new(),
+        )
         .await
         .unwrap();
     assert_eq!(foreign_ids.entries.skipped, 3);
@@ -127,7 +141,12 @@ async fn pack_import_skip_cross_world_and_reimport_is_idempotent() {
     fresh_entry_ids_in_pack(&mut pack);
 
     let preview = core
-        .preview_world_pack_import(&principal, TARGET.to_string(), request(&pack, "skip"))
+        .preview_world_pack_import(
+            &principal,
+            TARGET.to_string(),
+            request(&pack, "skip"),
+            Vec::new(),
+        )
         .await
         .unwrap();
     assert_eq!(preview.entries.created, 3);
@@ -136,7 +155,12 @@ async fn pack_import_skip_cross_world_and_reimport_is_idempotent() {
 
     // The service denies a foreign World before parsing or writing the pack.
     let denied = core
-        .import_world_pack(&principal, FOREIGN.to_string(), request(&pack, "skip"))
+        .import_world_pack(
+            &principal,
+            FOREIGN.to_string(),
+            request(&pack, "skip"),
+            Vec::new(),
+        )
         .await
         .unwrap_err();
     assert!(matches!(denied, CoreError::WorldOwnerDenied { .. }));
@@ -149,6 +173,7 @@ async fn pack_import_skip_cross_world_and_reimport_is_idempotent() {
         "ctr_forged",
         FOREIGN,
         request(&pack, "skip"),
+        Vec::new(),
         false,
     )
     .await
@@ -159,6 +184,7 @@ async fn pack_import_skip_cross_world_and_reimport_is_idempotent() {
         CREATOR,
         FOREIGN,
         request(&pack, "skip"),
+        Vec::new(),
         false,
     )
     .await
@@ -175,6 +201,7 @@ async fn pack_import_skip_cross_world_and_reimport_is_idempotent() {
         CREATOR,
         TARGET,
         request(&pack, "skip"),
+        Vec::new(),
         false
     )
     .await
@@ -188,13 +215,23 @@ async fn pack_import_skip_cross_world_and_reimport_is_idempotent() {
     .unwrap();
     let read_principal = readonly.active_principal().await.unwrap();
     let denied = readonly
-        .import_world_pack(&read_principal, TARGET.to_string(), request(&pack, "skip"))
+        .import_world_pack(
+            &read_principal,
+            TARGET.to_string(),
+            request(&pack, "skip"),
+            Vec::new(),
+        )
         .await
         .unwrap_err();
     assert!(matches!(denied, CoreError::Forbidden { .. }));
 
     let first = core
-        .import_world_pack(&principal, TARGET.to_string(), request(&pack, "skip"))
+        .import_world_pack(
+            &principal,
+            TARGET.to_string(),
+            request(&pack, "skip"),
+            Vec::new(),
+        )
         .await
         .unwrap();
     assert_eq!(first.entries.created, 3);
@@ -202,7 +239,12 @@ async fn pack_import_skip_cross_world_and_reimport_is_idempotent() {
     assert_eq!(first.entries.rejected, 0);
     assert_eq!(first.relations.rejected, 0);
     let second = core
-        .import_world_pack(&principal, TARGET.to_string(), request(&pack, "skip"))
+        .import_world_pack(
+            &principal,
+            TARGET.to_string(),
+            request(&pack, "skip"),
+            Vec::new(),
+        )
         .await
         .unwrap();
     assert_eq!(second.entries.created, 0);
@@ -226,6 +268,7 @@ async fn pack_import_skip_cross_world_and_reimport_is_idempotent() {
         CREATOR,
         TARGET,
         request(&pack, "skip"),
+        Vec::new(),
         false,
     )
     .await
@@ -285,7 +328,7 @@ async fn bridge_admits_non_bootstrap_owner_on_bootstrap_pool() {
     let reader_principal = reader_core.active_principal().await.unwrap();
     let export_request: PackExportRequest = serde_json::from_value(json!({})).unwrap();
     let exported = reader_core
-        .export_world_pack(&reader_principal, SOURCE.to_string(), export_request)
+        .export_world_pack(&reader_principal, SOURCE.to_string(), export_request, false)
         .await
         .unwrap();
     let mut pack = serde_json::to_value(exported).unwrap();
@@ -297,6 +340,7 @@ async fn bridge_admits_non_bootstrap_owner_on_bootstrap_pool() {
         CREATOR,
         TARGET,
         request(&pack, "skip"),
+        Vec::new(),
         true,
     )
     .await
@@ -311,6 +355,7 @@ async fn bridge_admits_non_bootstrap_owner_on_bootstrap_pool() {
         CREATOR,
         TARGET,
         request(&pack, "skip"),
+        Vec::new(),
         false,
     )
     .await
@@ -325,6 +370,7 @@ async fn bridge_admits_non_bootstrap_owner_on_bootstrap_pool() {
         "ctr_forged",
         TARGET,
         request(&pack, "skip"),
+        Vec::new(),
         false,
     )
     .await
@@ -338,6 +384,7 @@ async fn bridge_admits_non_bootstrap_owner_on_bootstrap_pool() {
         CREATOR,
         FOREIGN,
         request(&pack, "skip"),
+        Vec::new(),
         false,
     )
     .await
@@ -346,4 +393,396 @@ async fn bridge_admits_non_bootstrap_owner_on_bootstrap_pool() {
     assert_eq!(atom_counts(&cli_pool, FOREIGN).await, (0, 0));
     reader_core.close().await.unwrap();
     cli_pool.close().await;
+}
+
+// ── v1.191 P1 T10: pack import/export identity (durable §6) ───────────────
+
+/// One governed pack entry: `owner` is the wire holder id, `disclosure` the
+/// wire governance value, both carried exactly as the pack states them.
+fn governed_pack(entries: &[(&str, &str, Option<&str>, Option<&str>)]) -> Value {
+    let entries: Vec<Value> = entries
+        .iter()
+        .map(|(id, name, owner, disclosure)| {
+            let mut entry = json!({
+                "schema_version": 1,
+                "entry_id": id,
+                "entry_type": "character",
+                "canonical_name": name,
+                "status": "confirmed",
+                "body": { "summary": format!("{name} summary") },
+                "extensions": { "nexus": { "world_id": SOURCE } }
+            });
+            if let Some(owner) = owner {
+                entry["owner"] = json!(owner);
+            }
+            if let Some(disclosure) = disclosure {
+                entry["disclosure"] = json!(disclosure);
+            }
+            entry
+        })
+        .collect();
+    json!({
+        "modules": { "pack": { "title": "Governed", "version": "0.1.0", "creator": "packAuthor" } },
+        "entries": entries,
+        "relations": []
+    })
+}
+
+async fn quarantine_rows(pool: &SqlitePool) -> Vec<(String, String, String)> {
+    sqlx::query_as(
+        "SELECT quarantine_reason, json_extract(original_entry_json, '$.entry_id'), \
+                json_extract(original_entry_json, '$.owner') \
+         FROM knowledge_import_quarantine ORDER BY 2",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+async fn stored_governance(pool: &SqlitePool, entry_id: &str) -> (Option<String>, Option<String>) {
+    sqlx::query_as("SELECT holder_entry_id, disclosure FROM kb_key_blocks WHERE key_block_id = ?")
+        .bind(entry_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// Boots an `EngineOwner` core over a seeded workspace.
+async fn pack_test_core() -> (tempfile::TempDir, sqlx::SqlitePool, CoreService) {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().to_path_buf();
+    let nexus_home = home.join(".nexus42");
+    std::fs::create_dir_all(&nexus_home).unwrap();
+    std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
+        &home, CREATOR, "default",
+    ))
+    .unwrap();
+    std::fs::write(nexus_home.join("config.toml"), format!("active_creator_id = \"{CREATOR}\"\n[active_workspace_slug_by_creator]\n\"{CREATOR}\" = \"default\"\n")).unwrap();
+    let db_path = nexus_home_layout::workspace_state_db_path(&home, CREATOR, "default");
+    let pool = nexus_local_db::init_pool(&db_path).await.unwrap();
+    seed(&pool).await;
+    let core = CoreService::open(CoreOpenOptions {
+        user_home: home,
+        access: CoreAccess::EngineOwner,
+    })
+    .await
+    .unwrap();
+    (tmp, pool, core)
+}
+
+/// A foreign holder id is never adopted by equality, and an unmapped one is
+/// held outside the KB stores — the exact string of the local Creator holder
+/// included.
+#[tokio::test]
+async fn v1191_holder_pack_unmapped_and_colliding_holders_stay_quarantined() {
+    let (_tmp, pool, core) = pack_test_core().await;
+    let principal = core.active_principal().await.unwrap();
+    let local_holder = nexus_local_db::holders::creator_holder_entry_id(CREATOR);
+    let pack = governed_pack(&[
+        ("kb_gov_shared", "Shared Row", None, None),
+        (
+            "kb_gov_collide",
+            "Colliding Row",
+            Some(local_holder.as_str()),
+            Some(DISCLOSURE_OWNER_PRIVATE),
+        ),
+        (
+            "kb_gov_foreign",
+            "Foreign Row",
+            Some("hld_foreign_peer"),
+            Some(DISCLOSURE_OWNER_PRIVATE),
+        ),
+    ]);
+
+    let summary = CoreService::import_legacy_world_pack(
+        &pool,
+        CREATOR,
+        TARGET,
+        request(&pack, "skip"),
+        Vec::new(),
+        false,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        summary.entries.created, 1,
+        "only the shared atom is storable"
+    );
+    assert_eq!(summary.entries.rejected, 2);
+    assert_eq!(summary.quarantined.len(), 2);
+    assert!(summary
+        .quarantined
+        .iter()
+        .all(|atom| atom.reason == QuarantineReason::UnresolvedHolder));
+    assert!(summary
+        .quarantined
+        .iter()
+        .all(|atom| atom.quarantine_id.starts_with("qrn_")));
+    assert_eq!(
+        quarantine_rows(&pool).await,
+        vec![
+            (
+                "unresolved_holder".into(),
+                "kb_gov_collide".into(),
+                local_holder.clone()
+            ),
+            (
+                "unresolved_holder".into(),
+                "kb_gov_foreign".into(),
+                "hld_foreign_peer".into()
+            ),
+        ]
+    );
+    // The colliding atom did NOT claim the local identity: nothing was
+    // stored for it at all (neither the local holder nor any other).
+    let colliding_rows: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE key_block_id = ?")
+            .bind("kb_gov_collide")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(colliding_rows, 0, "no adoption by string equality");
+    assert_eq!(atom_counts(&pool, TARGET).await, (1, 0));
+    let (shared_holder, shared_disclosure) = stored_governance(&pool, "kb_gov_shared").await;
+    assert_eq!((shared_holder, shared_disclosure), (None, None));
+
+    // The bounded review arm reads the batch back, owner-only, with the
+    // immutable original JSON and never a knowledge view.
+    let batch_id = summary.quarantined[0].import_batch_id.clone();
+    let review = core
+        .review_world_pack_import(&principal, TARGET.to_string(), batch_id.clone())
+        .await
+        .unwrap();
+    assert!(!review.truncated);
+    assert_eq!(review.batch_id, batch_id);
+    assert_eq!(review.atoms.len(), 2);
+    let colliding = review
+        .atoms
+        .iter()
+        .find(|atom| atom.entry_id == "kb_gov_collide")
+        .expect("colliding atom is reviewable");
+    assert_eq!(
+        colliding.original_owner.as_deref(),
+        Some(local_holder.as_str())
+    );
+    assert_eq!(
+        colliding.original_disclosure.as_deref(),
+        Some(DISCLOSURE_OWNER_PRIVATE)
+    );
+    // The reviewed original is the **pack document's** atom JSON verbatim, not
+    // a re-serialization of the typed entry.
+    let document_atom = pack["entries"][1].to_string();
+    assert_eq!(
+        colliding.original_entry.as_deref(),
+        Some(document_atom.as_str()),
+        "review returns the document's atom JSON byte-for-byte"
+    );
+    // A foreign World's batch is not reviewable by this Creator.
+    let denied = core
+        .review_world_pack_import(&principal, FOREIGN.to_string(), batch_id)
+        .await
+        .unwrap_err();
+    assert!(matches!(denied, CoreError::WorldOwnerDenied { .. }));
+    core.close().await.unwrap();
+    pool.close().await;
+}
+
+/// An explicit mapping adopts the atom natively in one transaction with its
+/// quarantine removal; a repeat import re-adopts nothing and adds nothing.
+#[tokio::test]
+async fn v1191_holder_pack_mapped_adoption_removes_quarantine_atomically() {
+    let (_tmp, pool, core) = pack_test_core().await;
+    let local_holder = nexus_local_db::holders::creator_holder_entry_id(CREATOR);
+    let pack = governed_pack(&[(
+        "kb_gov_foreign",
+        "Foreign Row",
+        Some("hld_foreign_peer"),
+        Some(DISCLOSURE_OWNER_PRIVATE),
+    )]);
+
+    let held = CoreService::import_legacy_world_pack(
+        &pool,
+        CREATOR,
+        TARGET,
+        request(&pack, "skip"),
+        Vec::new(),
+        false,
+    )
+    .await
+    .unwrap();
+    assert_eq!(held.quarantined.len(), 1);
+    assert_eq!(quarantine_rows(&pool).await.len(), 1);
+    assert_eq!(atom_counts(&pool, TARGET).await, (0, 0));
+
+    // Inadmissible mapping: a Character selector for a non-existent Character
+    // refuses the whole import with zero writes.
+    let refused = CoreService::import_legacy_world_pack(
+        &pool,
+        CREATOR,
+        TARGET,
+        request(&pack, "skip"),
+        vec![HolderMapping {
+            foreign_holder_id: "hld_foreign_peer".to_string(),
+            selector: HolderMappingSelector::CharacterPrivate("chr_missing".to_string()),
+        }],
+        false,
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(refused, CoreError::InvalidInput { .. }));
+    assert_eq!(
+        quarantine_rows(&pool).await.len(),
+        1,
+        "refusal keeps the row"
+    );
+
+    // The admitted mapping adopts the atom and drops its quarantine row.
+    let adopted = CoreService::import_legacy_world_pack(
+        &pool,
+        CREATOR,
+        TARGET,
+        request(&pack, "skip"),
+        vec![HolderMapping {
+            foreign_holder_id: "hld_foreign_peer".to_string(),
+            selector: HolderMappingSelector::AuthorOnly,
+        }],
+        false,
+    )
+    .await
+    .unwrap();
+    assert_eq!(adopted.entries.created, 1);
+    assert!(adopted.quarantined.is_empty());
+    assert!(
+        quarantine_rows(&pool).await.is_empty(),
+        "quarantine row released with the adoption"
+    );
+    assert_eq!(
+        stored_governance(&pool, "kb_gov_foreign").await,
+        (
+            Some(local_holder.clone()),
+            Some(DISCLOSURE_OWNER_PRIVATE.to_string())
+        ),
+        "adopted atom carries the mapped local holder and its original disclosure"
+    );
+
+    // Repeat import: nothing re-created, nothing re-quarantined.
+    let repeat = CoreService::import_legacy_world_pack(
+        &pool,
+        CREATOR,
+        TARGET,
+        request(&pack, "skip"),
+        vec![HolderMapping {
+            foreign_holder_id: "hld_foreign_peer".to_string(),
+            selector: HolderMappingSelector::AuthorOnly,
+        }],
+        false,
+    )
+    .await
+    .unwrap();
+    assert_eq!(repeat.entries.created, 0);
+    assert_eq!(repeat.entries.skipped, 1);
+    assert!(repeat.quarantined.is_empty());
+    assert!(quarantine_rows(&pool).await.is_empty());
+    assert_eq!(atom_counts(&pool, TARGET).await, (1, 0));
+    core.close().await.unwrap();
+    pool.close().await;
+}
+
+/// Unknown disclosure vocabulary is not native and stays quarantined even when
+/// its holder is mapped.
+#[tokio::test]
+async fn v1191_holder_pack_unknown_disclosure_stays_quarantined_when_mapped() {
+    let (_tmp, pool, core) = pack_test_core().await;
+    let pack = governed_pack(&[(
+        "kb_gov_unknown",
+        "Unknown Disclosure Row",
+        Some("hld_foreign_peer"),
+        Some("team-shared"),
+    )]);
+
+    let summary = CoreService::import_legacy_world_pack(
+        &pool,
+        CREATOR,
+        TARGET,
+        request(&pack, "skip"),
+        vec![HolderMapping {
+            foreign_holder_id: "hld_foreign_peer".to_string(),
+            selector: HolderMappingSelector::AuthorOnly,
+        }],
+        false,
+    )
+    .await
+    .unwrap();
+    assert_eq!(summary.entries.created, 0);
+    assert_eq!(summary.quarantined.len(), 1);
+    assert_eq!(
+        summary.quarantined[0].reason,
+        QuarantineReason::UnknownDisclosure
+    );
+    assert_eq!(
+        summary.quarantined[0].original_disclosure.as_deref(),
+        Some("team-shared")
+    );
+    assert_eq!(
+        quarantine_rows(&pool).await,
+        vec![(
+            "unknown_disclosure".into(),
+            "kb_gov_unknown".into(),
+            "hld_foreign_peer".into()
+        )]
+    );
+    assert_eq!(atom_counts(&pool, TARGET).await, (0, 0));
+    core.close().await.unwrap();
+    pool.close().await;
+}
+
+/// The export reads through the exporting Creator's admitted selection:
+/// owned private material only under explicit author intent, governance
+/// preserved exactly.
+#[tokio::test]
+async fn v1191_holder_pack_export_filters_private_rows_without_explicit_intent() {
+    let (_tmp, pool, core) = pack_test_core().await;
+    let principal = core.active_principal().await.unwrap();
+    let local_holder = nexus_local_db::holders::creator_holder_entry_id(CREATOR);
+    let store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
+    let mut private = KnowledgeEntryRecord::new(SOURCE, BlockType::Character, "Private Row");
+    private.holder_entry_id = Some(local_holder.clone());
+    private.disclosure = Some(DISCLOSURE_OWNER_PRIVATE.to_string());
+    store.insert_knowledge_entry(private).await.unwrap();
+
+    let export_request: PackExportRequest = serde_json::from_value(json!({})).unwrap();
+    let filtered = core
+        .export_world_pack(&principal, SOURCE.to_string(), export_request, false)
+        .await
+        .unwrap();
+    let names: Vec<String> = filtered
+        .entries
+        .iter()
+        .map(|entry| entry["canonical_name"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        names,
+        vec!["Aria", "Kael", "Mira"],
+        "owned private row excluded without explicit intent"
+    );
+
+    let export_request: PackExportRequest = serde_json::from_value(json!({})).unwrap();
+    let with_intent = core
+        .export_world_pack(&principal, SOURCE.to_string(), export_request, true)
+        .await
+        .unwrap();
+    assert_eq!(with_intent.entries.len(), 4, "explicit intent includes it");
+    let exported_private = with_intent
+        .entries
+        .iter()
+        .find(|entry| entry["canonical_name"] == "Private Row")
+        .expect("private row exported");
+    assert_eq!(exported_private["owner"], json!(local_holder));
+    assert_eq!(
+        exported_private["disclosure"],
+        json!(DISCLOSURE_OWNER_PRIVATE)
+    );
+    core.close().await.unwrap();
+    pool.close().await;
 }

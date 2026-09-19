@@ -783,6 +783,33 @@ mod tests {
     }
 
     #[test]
+    fn test_load_malformed_policy_is_rejected() {
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+        let workspace_root = temp_dir.path();
+        let path = PermissionPolicy::policy_path(workspace_root);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("create dir failed");
+        }
+        std::fs::write(&path, "this is not valid toml {{{{").expect("write failed");
+
+        // A malformed policy file must be rejected by both readers — never
+        // silently downgraded to defaults or to an empty document, which
+        // `save_toml_edit` would then write back over the author's rules.
+        assert!(PermissionPolicy::load(workspace_root).is_err());
+        assert!(PermissionPolicy::load_toml_edit(workspace_root).is_err());
+
+        // A save against an unparseable file fails before writing, so the
+        // author's bytes survive verbatim.
+        assert!(PermissionPolicy::new()
+            .save_toml_edit(workspace_root)
+            .is_err());
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read back"),
+            "this is not valid toml {{{{"
+        );
+    }
+
+    #[test]
     fn test_toml_serialization() {
         let mut policy = PermissionPolicy::new();
         policy.default = DefaultPolicy::Grant;

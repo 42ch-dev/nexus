@@ -34,6 +34,7 @@
 
 use crate::auto_chain::AutoChainError;
 use crate::capability::{CapabilityError, CapabilityRegistry};
+use nexus_knowledge::world_kb::KnowledgeGovernance;
 use nexus_local_db::kb_extract_job::{insert_pending_with_llm, is_idempotent};
 use nexus_local_db::kb_relationships::{
     resolve_entity_by_canonical_name, upsert_extraction_relationship,
@@ -440,6 +441,130 @@ fn inject_source_chapters(base_payload: &str, chapters: &[i32]) -> String {
     serde_json::to_string(&value).unwrap_or_else(|_| base_payload.to_string())
 }
 
+// ── Trusted extraction target (v1.191 P1 T13) ─────────────────────────
+
+/// The trusted target of one production extraction run (durable §§3, 8;
+/// `holder-product.md` §11).
+///
+/// Resolved from stored state by [`resolve_extraction_target`] before the
+/// model runs, then threaded to the extraction capability as trusted context.
+/// Model output never reaches either field, so the LLM cannot mark an author
+/// secret shared and cannot name someone else's holder.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ExtractionTarget {
+    /// The World container the extracted entries belong to.
+    pub world_id: String,
+    /// The governance pair the service decided for this target.
+    pub governance: KnowledgeGovernance,
+}
+
+impl ExtractionTarget {
+    /// The trusted-context JSON field the extraction capability consumes.
+    fn context_value(&self) -> serde_json::Value {
+        serde_json::json!({
+            "world_id": self.world_id,
+            "holder_entry_id": self.governance.holder_entry_id,
+            "disclosure": self.governance.disclosure,
+        })
+    }
+
+    /// Parse a trusted target out of its context value.
+    ///
+    /// Fails closed on an empty container or a malformed native governance
+    /// pair, so a caller cannot hand the extractor an invented policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CapabilityError::Forbidden`] for a missing/empty `world_id` or
+    /// a pair the domain rules refuse.
+    pub(crate) fn from_context(value: &serde_json::Value) -> Result<Self, CapabilityError> {
+        let world_id = value.get("world_id").and_then(|v| v.as_str()).unwrap_or("");
+        if world_id.is_empty() {
+            return Err(CapabilityError::Forbidden(
+                "extraction target world_id must be non-empty".to_string(),
+            ));
+        }
+        let holder_entry_id = value.get("holder_entry_id").and_then(|v| v.as_str());
+        let disclosure = value.get("disclosure").and_then(|v| v.as_str());
+        nexus_knowledge::world_kb::validate_native_governance(holder_entry_id, disclosure)
+            .map_err(|e| {
+                CapabilityError::Forbidden(format!("extraction target governance: {e}"))
+            })?;
+        Ok(Self {
+            world_id: world_id.to_string(),
+            governance: KnowledgeGovernance {
+                holder_entry_id: holder_entry_id.map(str::to_owned),
+                disclosure: disclosure.map(str::to_owned),
+            },
+        })
+    }
+}
+
+/// Resolve the trusted extraction target of one production run from stored
+/// state (durable §§3, 8).
+///
+/// Two trusted steps, both outside the model's reach:
+///
+/// 1. **Stored-state recheck.** The target World must still exist and still be
+///    owned by the stored controlling Creator. A stale admission (foreign or
+///    missing World) refuses instead of extracting into a container the run is
+///    no longer authorized for.
+/// 2. **Audience resolution.** The service chooses the audience of an
+///    extraction target — `holder-product.md` §11 fixes it to the in-scope
+///    shared default, because no extraction surface carries an audience
+///    selector — and resolves the native pair through the same domain rule an
+///    authored write uses, so a private extraction target would resolve its
+///    holder the same way (never from a client or model string).
+///
+/// # Errors
+///
+/// Returns [`CapabilityError::Forbidden`] for an empty identity or an
+/// unowned/missing World, and [`CapabilityError::Internal`] on database
+/// failure or a resolution the domain rule refuses.
+pub(crate) async fn resolve_extraction_target(
+    pool: &SqlitePool,
+    creator_id: &str,
+    world_id: &str,
+) -> Result<ExtractionTarget, CapabilityError> {
+    if creator_id.is_empty() || world_id.is_empty() {
+        return Err(CapabilityError::Forbidden(
+            "extraction target requires a stored controlling creator and World".into(),
+        ));
+    }
+    match nexus_local_db::narrative_write::is_world_owned(pool, creator_id, world_id).await {
+        Ok(true) => {}
+        Ok(false) => {
+            return Err(CapabilityError::Forbidden(format!(
+                "extraction target World {world_id} is missing or not owned by creator \
+                 {creator_id}; refusing to extract"
+            )));
+        }
+        Err(e) => {
+            return Err(CapabilityError::Internal(format!(
+                "extraction target ownership recheck: {e}"
+            )));
+        }
+    }
+
+    let audience = nexus_knowledge::world_kb::KnowledgeAudience::Shared;
+    let governance = nexus_knowledge::world_kb::resolve_authored_governance(
+        nexus_knowledge::world_kb::KnowledgeAuthoringOp::Create,
+        Some(&audience),
+        None,
+    )
+    .map_err(|e| CapabilityError::Internal(format!("extraction target audience: {e}")))?
+    .ok_or_else(|| {
+        CapabilityError::Internal(
+            "the in-scope extraction audience resolved no governance pair".into(),
+        )
+    })?;
+
+    Ok(ExtractionTarget {
+        world_id: world_id.to_string(),
+        governance,
+    })
+}
+
 // ── Hook entry point ──────────────────────────────────────────────────
 
 /// Review-time KB extraction hook (V1.50 T-B P1; V1.51 T-A P0 LLM swap).
@@ -493,9 +618,29 @@ pub async fn extract_kb_candidates_for_review(
     let Some(ctx) = load_review_context(pool, schedule_id, workspace_dir).await? else {
         return Ok(0);
     };
+    // The trusted target policy is resolved from stored state before the model
+    // runs (durable §§3, 8). A stale admission writes nothing at all — it must
+    // not become a heuristic pass over a container the run is no longer
+    // authorized for.
+    let target = match resolve_extraction_target(pool, &ctx.creator_id, &ctx.world_id).await {
+        Ok(target) => target,
+        Err(refusal) => {
+            tracing::warn!(
+                schedule_id,
+                creator_id = %ctx.creator_id,
+                world_id = %ctx.world_id,
+                refusal = %refusal,
+                "kb-extract: extraction target refused; writing no candidates"
+            );
+            return Ok(0);
+        }
+    };
     // Pathway selection: LLM when a registry + worker is available, else the
-    // V1.50 heuristic fallback (llm-extract.md §5.1).
-    let (candidates, relationships) = match extract_via_llm(registry, &ctx).await {
+    // V1.50 heuristic fallback (llm-extract.md §5.1). A refused extraction run
+    // (protocol reject, cancelled run, missing trusted identity) is NOT a
+    // worker outage: it falls through to zero writes rather than to heuristic
+    // candidates.
+    let (candidates, relationships) = match extract_via_llm(registry, &ctx, &target).await {
         LlmExtractOutcome::Candidates {
             candidates,
             relationships,
@@ -507,21 +652,34 @@ pub async fn extract_kb_candidates_for_review(
             );
             (extract_candidates_from_text(&ctx.prose), Vec::new())
         }
-        LlmExtractOutcome::CapabilityError(ref reason) => {
+        LlmExtractOutcome::Refused(reason) => {
             tracing::warn!(
                 schedule_id,
                 reason,
-                "kb-extract: LLM extraction failed; falling back to heuristic"
+                "kb-extract: extraction run refused; writing no candidates"
             );
-            (extract_candidates_from_text(&ctx.prose), Vec::new())
+            return Ok(0);
         }
     };
     let existing_names = existing_canonical_names(pool, &ctx.world_id).await?;
-    let inserted = persist_candidates(pool, schedule_id, &ctx, &existing_names, candidates).await?;
+    // The candidates AND the relationship suggestions commit in ONE
+    // caller-owned transaction (v1.191 P1 T13 review C1, durable §8): a write
+    // failure or a dropped (cancelled) future rolls the whole extraction result
+    // back, so a failed/cancelled run leaves zero candidate and relationship
+    // writes. All in-transaction reads go through the transaction, so the
+    // hook never borrows a second pool connection while holding the write lock.
+    let mut tx = nexus_local_db::begin_immediate(pool)
+        .await
+        .map_err(|e| AutoChainError::InvalidState(format!("kb-extract: finalize tx: {e}")))?;
+    let inserted =
+        persist_candidates(&mut tx, schedule_id, &ctx, &existing_names, candidates).await?;
     // V1.76: persist relationship candidates (idempotent; entity-existence
     // prerequisite enforced inside persist_relationship_candidates).
     let rel_inserted =
-        persist_relationship_candidates(pool, schedule_id, &ctx, relationships).await?;
+        persist_relationship_candidates(&mut tx, schedule_id, &ctx, relationships).await?;
+    tx.commit()
+        .await
+        .map_err(|e| AutoChainError::InvalidState(format!("kb-extract: finalize commit: {e}")))?;
     if inserted > 0 || rel_inserted > 0 {
         tracing::info!(
             schedule_id,
@@ -573,8 +731,21 @@ pub async fn detect_missing_kb_on_finalize(
     let Some(ctx) = load_finalize_context(pool, schedule_id, workspace_dir).await? else {
         return Ok(0);
     };
+    let target = match resolve_extraction_target(pool, &ctx.creator_id, &ctx.world_id).await {
+        Ok(target) => target,
+        Err(refusal) => {
+            tracing::warn!(
+                schedule_id,
+                creator_id = %ctx.creator_id,
+                world_id = %ctx.world_id,
+                refusal = %refusal,
+                "kb-missing: extraction target refused; writing no log"
+            );
+            return Ok(0);
+        }
+    };
 
-    let candidates = match extract_via_llm(registry, &ctx).await {
+    let candidates = match extract_via_llm(registry, &ctx, &target).await {
         LlmExtractOutcome::Candidates { candidates, .. } => candidates,
         LlmExtractOutcome::WorkerUnavailable => {
             tracing::debug!(
@@ -583,13 +754,13 @@ pub async fn detect_missing_kb_on_finalize(
             );
             extract_candidates_from_text(&ctx.prose)
         }
-        LlmExtractOutcome::CapabilityError(ref reason) => {
+        LlmExtractOutcome::Refused(reason) => {
             tracing::warn!(
                 schedule_id,
                 reason,
-                "kb-missing: LLM extraction failed; falling back to heuristic"
+                "kb-missing: extraction run refused; writing no log"
             );
-            extract_candidates_from_text(&ctx.prose)
+            return Ok(0);
         }
     };
 
@@ -632,15 +803,18 @@ pub async fn detect_missing_kb_on_finalize(
     Ok(written)
 }
 
-/// Outcome of an LLM extraction attempt (V1.52 T-A P0; V1.76 adds relationships).
+/// Outcome of an LLM extraction attempt (V1.52 T-A P0; V1.76 adds relationships;
+/// v1.191 P1 T13 adds the refusal arm).
 ///
 /// - `Candidates`: LLM returned parsed candidates (may be empty if the LLM
 ///   produced no entities) + optional relationship candidates (V1.76).
 /// - `WorkerUnavailable`: no worker IPC was available. The caller should
 ///   fall back to the heuristic rather than treat this as "zero candidates".
-/// - `CapabilityError`: the capability was missing or returned a non-worker
-///   error. Best-effort callers may fall back to the heuristic and log the
-///   reason (closes R-V151Q3-W002).
+/// - `Refused`: the extraction run failed or was refused — the `ke-extraction`
+///   protocol rejected it, the extractor failed, the run was cancelled, or the
+///   trusted run identity/target was missing. The caller writes NOTHING: only a
+///   worker outage may fall back to the heuristic (review I2), so heuristic
+///   candidates never stand in for a failed extraction.
 #[derive(Debug)]
 pub(crate) enum LlmExtractOutcome {
     Candidates {
@@ -650,7 +824,7 @@ pub(crate) enum LlmExtractOutcome {
         relationships: Vec<KbRelationshipCandidate>,
     },
     WorkerUnavailable,
-    CapabilityError(String),
+    Refused(String),
 }
 
 /// Shared LLM extraction invocation used by both the review-time hook and
@@ -675,6 +849,7 @@ pub(crate) enum LlmExtractOutcome {
 /// source (default review prompt vs. rendered preset template); parsing,
 /// profile-aware payload shaping, and the `MAX_CANDIDATES_PER_PASS` cap are
 /// shared.
+#[allow(clippy::too_many_arguments)] // one shared LLM-extract seam forwarding the caller context
 pub(crate) async fn run_llm_extract(
     registry: Option<&CapabilityRegistry>,
     capability_name: &str,
@@ -683,12 +858,16 @@ pub(crate) async fn run_llm_extract(
     creator_id: &str,
     session_id: &str,
     work_profile: &str,
+    target: &ExtractionTarget,
+    source_id: &str,
 ) -> LlmExtractOutcome {
     let Some(registry) = registry else {
         return LlmExtractOutcome::WorkerUnavailable;
     };
     let Some(cap) = registry.get(capability_name) else {
-        return LlmExtractOutcome::CapabilityError(format!(
+        // A missing extraction capability is not a worker outage: refuse rather
+        // than stand in with heuristic candidates (review I2).
+        return LlmExtractOutcome::Refused(format!(
             "capability '{capability_name}' not registered"
         ));
     };
@@ -697,19 +876,29 @@ pub(crate) async fn run_llm_extract(
         "prompt": prompt,
         "chapter_prose": chapter_prose,
         "_creator_id": creator_id,
-        // The review-time hook runs outside a preset session; pass an empty
-        // session id. The capability only forwards it to the worker IPC for
-        // routing — it is not a security identity (SEC-V131-01 covers creator_id).
+        // The review-time hook passes the run identity it resolved from the
+        // schedule's stored session (v1.191 P1 T13). The capability refuses an
+        // empty/missing identity instead of inventing a default run.
         "_session_id": session_id,
+        // The trusted job/task target policy resolved from stored state before
+        // the model ran (durable §§3, 8). Never model output.
+        "_extract_target": target.context_value(),
+        // The admitted chapter artifact the run is resolved over.
+        "_extract_source_id": source_id,
     });
 
     let output = match cap.run(input).await {
         Ok(o) => o,
+        // The only outcome that may fall back to the heuristic: no worker IPC.
         Err(CapabilityError::WorkerUnavailable) => {
             return LlmExtractOutcome::WorkerUnavailable;
         }
+        // Everything else is a failed/refused extraction run: a `ke-extraction`
+        // protocol reject, an extractor failure, a cancelled run, or a missing
+        // trusted identity/target. The caller writes NOTHING — a heuristic pass
+        // must never stand in for a failed extraction (durable §8, review I2).
         Err(e) => {
-            return LlmExtractOutcome::CapabilityError(format!(
+            return LlmExtractOutcome::Refused(format!(
                 "capability '{capability_name}' failed: {e}"
             ));
         }
@@ -755,6 +944,7 @@ pub(crate) async fn run_llm_extract(
 async fn extract_via_llm(
     registry: Option<&CapabilityRegistry>,
     ctx: &ChapterContext,
+    target: &ExtractionTarget,
 ) -> LlmExtractOutcome {
     // High-level extraction instruction. The capability wraps this with the
     // JSON output-format framing + the verbatim chapter prose (llm-extract.md §1.3).
@@ -766,8 +956,12 @@ async fn extract_via_llm(
         prompt,
         &ctx.prose,
         &ctx.creator_id,
-        "",
+        // v1.191 P1 T13: the real production run identity resolved from the
+        // schedule's stored session — never an empty placeholder.
+        &ctx.run_id,
         &ctx.work_profile,
+        target,
+        &ctx.source_id,
     )
     .await
 }
@@ -1077,6 +1271,14 @@ struct ChapterContext {
     world_id: String,
     chapter: i32,
     workspace_id: String,
+    /// The schedule's stored production run identity (`current_session_id`),
+    /// resolved at admission. A missing one is a no-op skip, never an empty
+    /// placeholder session (v1.191 P1 T13, durable §8).
+    run_id: String,
+    /// The admitted chapter artifact's workspace-relative path: the source the
+    /// extraction run is resolved over and the wire `sources[].source_id`
+    /// (v1.191 P1 T13, durable §8).
+    source_id: String,
     /// Human-readable Work slug for on-disk paths (`work_ref`, falling back to
     /// `story_ref`). `None` in hermetic DB-only tests where no workspace exists.
     work_ref: Option<String>,
@@ -1139,7 +1341,7 @@ async fn load_context_for_preset(
 ) -> Result<Option<ChapterContext>, AutoChainError> {
     // SAFETY: dynamic SQL — single-row schedule lookup by PK (nullable work_id).
     let row = sqlx::query(
-        "SELECT preset_id, work_id, creator_id
+        "SELECT preset_id, work_id, creator_id, current_session_id
          FROM creator_schedules WHERE schedule_id = ?",
     )
     .bind(schedule_id)
@@ -1161,6 +1363,12 @@ async fn load_context_for_preset(
         .map_err(|e| AutoChainError::InvalidState(format!("decode work_id: {e}")))?;
     let creator_id: String = sqlx::Row::try_get(&row, "creator_id")
         .map_err(|e| AutoChainError::InvalidState(format!("decode creator_id: {e}")))?;
+    // The run identity the schedule was admitted under. Extraction runs through
+    // `orchestrate_extract`, which refuses an empty run id, so a schedule with
+    // no stored session is a skip rather than a fabricated `""` run
+    // (v1.191 P1 T13, durable §8: never invent a default session).
+    let run_id: Option<String> = sqlx::Row::try_get(&row, "current_session_id")
+        .map_err(|e| AutoChainError::InvalidState(format!("decode current_session_id: {e}")))?;
 
     if preset_id != expected_preset_id {
         return Ok(None);
@@ -1174,6 +1382,13 @@ async fn load_context_for_preset(
     };
     let Some(ws_dir) = workspace_dir else {
         tracing::debug!(schedule_id, "{log_prefix}: no workspace_dir; skipping");
+        return Ok(None);
+    };
+    let Some(run_id) = run_id.filter(|id| !id.is_empty()) else {
+        tracing::warn!(
+            schedule_id,
+            "{log_prefix}: schedule has no stored run identity; skipping"
+        );
         return Ok(None);
     };
 
@@ -1204,7 +1419,7 @@ async fn load_context_for_preset(
         .clone()
         .filter(|p| !p.is_empty())
         .unwrap_or_else(|| "novel".to_string());
-    let Some(prose) =
+    let Some((prose, source_id)) =
         load_chapter_prose(pool, schedule_id, &work_id, work.current_chapter, ws_dir).await?
     else {
         return Ok(None);
@@ -1216,6 +1431,8 @@ async fn load_context_for_preset(
         world_id: world_id.to_string(),
         chapter: work.current_chapter,
         workspace_id,
+        run_id,
+        source_id,
         work_ref,
         work_profile,
         prose,
@@ -1232,7 +1449,7 @@ async fn load_chapter_prose(
     work_id: &str,
     chapter: i32,
     ws_dir: &std::path::Path,
-) -> Result<Option<String>, AutoChainError> {
+) -> Result<Option<(String, String)>, AutoChainError> {
     // Volume defaults to 1 for single-volume works (V1.42 backfill).
     let chapter_row =
         match nexus_local_db::work_chapters::get_chapter(pool, work_id, chapter, 1).await {
@@ -1259,7 +1476,7 @@ async fn load_chapter_prose(
     };
     let body_path = ws_dir.join(body_path_rel);
     match std::fs::read_to_string(&body_path) {
-        Ok(t) => Ok(Some(t)),
+        Ok(t) => Ok(Some((t, body_path_rel.to_string()))),
         Err(e) => {
             tracing::debug!(
                 schedule_id, work_id, chapter, path = %body_path.display(), error = %e,
@@ -1280,7 +1497,7 @@ async fn load_chapter_prose(
 /// via [`insert_pending_with_llm`]. Heuristic candidates pass `None` for both
 /// LLM fields so the dedicated columns stay NULL (entity-scope-model §5.5.6).
 async fn persist_candidates(
-    pool: &SqlitePool,
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     schedule_id: &str,
     ctx: &ChapterContext,
     existing_names: &[String],
@@ -1294,7 +1511,7 @@ async fn persist_candidates(
         {
             continue;
         }
-        if is_idempotent(pool, &ctx.work_id, &candidate.canonical_name_guess)
+        if is_idempotent(&mut **tx, &ctx.work_id, &candidate.canonical_name_guess)
             .await
             .map_err(nexus_local_db::LocalDbError::from)?
         {
@@ -1304,7 +1521,7 @@ async fn persist_candidates(
         let llm_confidence = candidate.confidence;
         let llm_source_quote = candidate.source_quote.as_deref();
         match insert_pending_with_llm(
-            pool,
+            &mut *tx,
             &ctx.creator_id,
             &ctx.workspace_id,
             &ctx.world_id,
@@ -1350,7 +1567,7 @@ async fn persist_candidates(
 /// do not abort the loop. Best-effort + non-blocking like
 /// [`persist_candidates`].
 async fn persist_relationship_candidates(
-    pool: &SqlitePool,
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     schedule_id: &str,
     ctx: &ChapterContext,
     relationships: Vec<KbRelationshipCandidate>,
@@ -1365,14 +1582,14 @@ async fn persist_relationship_candidates(
         // block_type hint is provided, resolve by (world, block_type, name);
         // otherwise case-insensitive by name only when exactly one matches.
         let source_id = resolve_entity_by_canonical_name(
-            pool,
+            &mut **tx,
             &ctx.world_id,
             &rel.source_canonical_name,
             rel.source_block_type.as_deref(),
         )
         .await?;
         let target_id = resolve_entity_by_canonical_name(
-            pool,
+            &mut **tx,
             &ctx.world_id,
             &rel.target_canonical_name,
             rel.target_block_type.as_deref(),
@@ -1396,7 +1613,7 @@ async fn persist_relationship_candidates(
         };
 
         match upsert_extraction_relationship(
-            pool,
+            &mut *tx,
             &ctx.world_id,
             &source_id,
             &target_id,

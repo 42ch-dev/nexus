@@ -82,4 +82,30 @@ export interface NexusWorldKbEntityPatch {
       | unknown[]
       | undefined;
   };
+  /**
+   * Closed author audience for holder governance (the same contract as the actor-knowledge create/patch families). Omission on this patch preserves the stored governance columns; explicit "shared" clears both. The author never supplies a holder id or a management flag. The legacy `creator_only` key is not a member of this schema and its presence is rejected (including `false`), never ignored.
+   */
+  audience?: SharedKnowledgeAudience | AuthorOnlyKnowledgeAudience | CharacterPrivateKnowledgeAudience;
+}
+export interface SharedKnowledgeAudience {
+  /**
+   * In-scope shared knowledge: clears holder and disclosure.
+   */
+  kind: "shared";
+}
+export interface AuthorOnlyKnowledgeAudience {
+  /**
+   * Resolves to the admitted controlling Creator's own holder with disclosure owner-private.
+   */
+  kind: "author-only";
+}
+export interface CharacterPrivateKnowledgeAudience {
+  /**
+   * Resolves to a Character this Creator owns; for a World-owned row that Character must be bound to that World.
+   */
+  kind: "character-private";
+  /**
+   * Character ID (lowercase prefix chr_ and exactly 32 hex characters)
+   */
+  character_id: string;
 }

@@ -853,6 +853,34 @@ platform_url = "https://direct.api.io"
     }
 
     #[test]
+    fn load_corrupt_toml_recovers_to_defaults_with_backup() {
+        let _home = crate::testutil::isolated_home();
+        let nexus_dir = std::env::var("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_default()
+            .join(".nexus42");
+        std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
+
+        let corrupt = "this is not valid toml {{{{";
+        std::fs::write(nexus_dir.join("config.toml"), corrupt).expect("write corrupt toml");
+
+        let result = CliConfig::load().expect("corrupt config still loads");
+
+        // A malformed config is never silently accepted: the user gets defaults
+        // and their original bytes are moved aside verbatim, not rewritten.
+        assert_eq!(result.active_creator_id, None);
+        assert!(result.workspace_path.is_none());
+        assert!(
+            !nexus_dir.join("config.toml").exists(),
+            "corrupt config.toml should be moved aside"
+        );
+        assert_eq!(
+            std::fs::read_to_string(nexus_dir.join("config.toml.bak")).expect("read backup"),
+            corrupt
+        );
+    }
+
+    #[test]
     fn load_from_home_reads_only_the_explicit_home() {
         let home = tempfile::tempdir().expect("explicit home tempdir");
         let nexus_dir = nexus_home_layout::nexus_root_from_home(home.path());

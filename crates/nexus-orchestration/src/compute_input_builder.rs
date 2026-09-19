@@ -1,17 +1,24 @@
 //! Shared `ComputeInput` assembly for WASM compute invocations.
 //!
 //! Extracted from the duplicate logic in `narrative_compute.rs` L216–291.
-//! This builder queries the KB store, filters by the module manifest's
+//! This builder reads the KB store through an **admitted read selection**
+//! (durable §4.1/§4.2), filters by the module manifest's
 //! `required_key_block_types`, loads referenced entries for `*_id`
 //! invocation-param keys (with cross-world reject), converts domain entries
 //! to spoke `KnowledgeEntry` JSON, and assembles the full [`ComputeInput`]
 //! envelope.
 //!
+//! The selection is a required constructor input, so a compute payload cannot
+//! be assembled without one: another holder's `owner-private` World row never
+//! reaches a module, and a caller that cannot resolve a selection refuses
+//! instead of widening to the World listing.
+//!
 //! Consumed by both the daemon handler (direct Control Room lane, Task 4)
 //! and (in a future refactor) the `narrative.compute` capability.
 
 use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
-use nexus_knowledge::world_kb::{KbQuery, KbStore};
+use nexus_knowledge::world_kb::store::KnowledgeReadScope;
+use nexus_knowledge::world_kb::KbQuery;
 use nexus_local_db::kb_store::SqliteKbStore;
 use nexus_local_db::narrative_gateway::SqliteNarrativeGateway;
 use nexus_narrative::NarrativeGateway;
@@ -19,6 +26,7 @@ use nexus_spoke_adapter::conversion::knowledge_record_to_spoke;
 use nexus_wasm_host::ModuleManifest;
 use serde_json::{Map, Value};
 use sqlx::SqlitePool;
+use std::collections::HashMap;
 use std::num::NonZeroU64;
 use thiserror::Error;
 
@@ -78,7 +86,8 @@ impl From<nexus_knowledge::world_kb::KbStoreError> for ComputeBuildError {
 /// # use serde_json::Map;
 /// # let pool: sqlx::SqlitePool = unimplemented!();
 /// # let manifest: nexus_wasm_host::ModuleManifest = unimplemented!();
-/// let builder = ComputeInputBuilder::new(pool, "wld_abc123", manifest, Map::new());
+/// # let selection: nexus_knowledge::world_kb::store::KnowledgeReadScope = unimplemented!();
+/// let builder = ComputeInputBuilder::new(pool, "wld_abc123", manifest, Map::new(), selection);
 /// let input = builder.build().await?;
 /// # Ok::<(), nexus_orchestration::compute_input_builder::ComputeBuildError>(())
 /// ```
@@ -87,6 +96,11 @@ pub struct ComputeInputBuilder {
     world_id: String,
     module_manifest: ModuleManifest,
     invocation_params: Map<String, Value>,
+    /// The admitted read selection every KB row of this payload is read
+    /// through (durable §4.1). Required, never optional: an absent selection
+    /// would have to mean "read the whole World", which is exactly the read
+    /// this payload must not perform.
+    selection: KnowledgeReadScope,
     /// Optional branch/head override resolved by the caller (direct lane).
     /// When `None`, [`Self::read_narrative_state`] falls back to the
     /// gateway's world state (world root branch) — preserving the original
@@ -95,19 +109,21 @@ pub struct ComputeInputBuilder {
 }
 
 impl ComputeInputBuilder {
-    /// Create a new builder.
+    /// Create a new builder bound to an admitted read selection.
     #[must_use]
     pub fn new(
         pool: SqlitePool,
         world_id: impl Into<String>,
         module_manifest: ModuleManifest,
         invocation_params: Map<String, Value>,
+        selection: KnowledgeReadScope,
     ) -> Self {
         Self {
             pool,
             world_id: world_id.into(),
             module_manifest,
             invocation_params,
+            selection,
             narrative_position: None,
         }
     }
@@ -134,11 +150,18 @@ impl ComputeInputBuilder {
     ///
     /// # Errors
     ///
-    /// Returns [`ComputeBuildError::NoComputableEntries`] when no computable
-    /// entries matching the manifest's block types exist in the world.
+    /// Returns [`ComputeBuildError::NoComputableEntries`] when no admitted
+    /// computable entry matching the manifest's block types exists in the
+    /// World.
     ///
-    /// Returns [`ComputeBuildError::ReferencedEntryNotInWorld`] when an
-    /// `*_id` invocation parameter points to an entry in a different world.
+    /// Returns [`ComputeBuildError::ReferencedEntryNotFound`] when an `*_id`
+    /// invocation parameter names an entry the admitted selection does not
+    /// admit — absent, another holder's private row, or outside the selection's
+    /// containers (durable §4.2: hidden and absent are indistinguishable).
+    ///
+    /// Returns [`ComputeBuildError::ReferencedEntryNotInWorld`] when an `*_id`
+    /// invocation parameter names an admitted entry that is not a World-owned
+    /// row of this World.
     /// # Panics
     ///
     /// Panics if `schema_version` literal 1 is not representable as `NonZeroU64`
@@ -170,13 +193,19 @@ impl ComputeInputBuilder {
         })
     }
 
-    /// Query computable entries and filter by manifest's `required_key_block_types`.
+    /// Query admitted computable entries and filter by the manifest's
+    /// `required_key_block_types`.
+    ///
+    /// The World container must be one of the selection's authorized
+    /// containers; a selection that does not authorize this World yields the
+    /// empty result rather than a filtered view of unauthorized rows, so the
+    /// module never receives another holder's private row.
     async fn query_entries(
         &self,
         kb_store: &SqliteKbStore,
     ) -> Result<Vec<KnowledgeEntryRecord>, ComputeBuildError> {
         let q = KbQuery::new(&self.world_id).with_computable(Some(true));
-        let computable_blocks = kb_store.query(&q).await?;
+        let computable_blocks = kb_store.query_with_scope(&q, &self.selection).await?;
 
         let required_types: Vec<&str> = self
             .module_manifest
@@ -200,7 +229,15 @@ impl ComputeInputBuilder {
         Ok(key_blocks)
     }
 
-    /// Load entries referenced by `*_id` invocation-param keys, with cross-world check.
+    /// Load entries referenced by `*_id` invocation-param keys.
+    ///
+    /// The referenced ids are read through the admitted selection, so an id
+    /// whose row another holder owns privately — or whose container the
+    /// selection never authorized — is indistinguishable from a missing id and
+    /// refuses the build instead of entering the compute payload (durable
+    /// §4.2). An admitted row that is not a World-owned row of this World keeps
+    /// the documented cross-World refusal: a module never receives another
+    /// World's rows.
     async fn load_referenced_entries(
         &self,
         kb_store: &SqliteKbStore,
@@ -219,12 +256,21 @@ impl ComputeInputBuilder {
             }
         }
 
+        let mut admitted: HashMap<String, KnowledgeEntryRecord> = kb_store
+            .list_entries_by_ids_admitted(&referenced_entry_ids, &self.selection)
+            .await?
+            .into_iter()
+            .map(|entry| (entry.entry_id.clone(), entry))
+            .collect();
+
+        // Reported per referenced id, in the caller's `*_id` key order, so the
+        // refusal names exactly the parameter the module asked for.
         for ref_id in &referenced_entry_ids {
-            let ref_entry = kb_store.get_knowledge_entry(ref_id).await.map_err(|e| {
-                ComputeBuildError::ReferencedEntryNotFound(format!(
-                    "referenced entry {ref_id} not found: {e}"
-                ))
-            })?;
+            let Some(ref_entry) = admitted.remove(ref_id) else {
+                return Err(ComputeBuildError::ReferencedEntryNotFound(format!(
+                    "referenced entry {ref_id} not found"
+                )));
+            };
 
             if ref_entry.world_id() != Some(self.world_id.as_str()) {
                 return Err(ComputeBuildError::ReferencedEntryNotInWorld(format!(

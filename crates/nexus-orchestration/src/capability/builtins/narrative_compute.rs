@@ -49,7 +49,7 @@
 //! with `event_type: StateUpdate`, title `"compute_error"`, and a summary
 //! containing the error details. The error is also logged at `warn` level.
 
-use crate::capability::builtins::world::ensure_world_owned;
+use crate::capability::builtins::world::{admitted_creator_view_scope, ensure_world_owned};
 use crate::capability::{Capability, CapabilityError};
 use crate::state_delta;
 use async_trait::async_trait;
@@ -201,11 +201,17 @@ impl Capability for NarrativeCompute {
         ensure_world_owned(pool, &parsed.creator_id, &parsed.world_id).await?;
 
         // 1. Read computable KnowledgeEntries from the KB store.
+        // The compute payload is model-facing, so its rows are read through the
+        // admitted Creator ActorView: another holder's `owner-private` World row
+        // never reaches the module, and a caller whose selection cannot be
+        // resolved refuses here instead of widening to the World listing.
+        let selection =
+            admitted_creator_view_scope(pool, &parsed.creator_id, &parsed.world_id).await?;
         let kb_store = nexus_local_db::kb_store::SqliteKbStore::new((**pool).clone());
         let q =
             nexus_knowledge::world_kb::KbQuery::new(&parsed.world_id).with_computable(Some(true));
         let computable_blocks = kb_store
-            .query(&q)
+            .query_with_scope(&q, &selection)
             .await
             .map_err(|e| CapabilityError::Internal(format!("kb query computable: {e}")))?;
 
@@ -544,7 +550,17 @@ mod tests {
         .expect("minimal spoke KnowledgeEntry wire fixture")
     }
 
+    /// Seed the creator **and its registry holder**: the compute input resolves
+    /// an admitted `ActorView` selection, which fails closed without the holder
+    /// row.
     async fn seed_creator(pool: &sqlx::SqlitePool, creator_id: &str) {
+        nexus_local_db::ensure_creator_row(pool, creator_id, "Test Creator")
+            .await
+            .unwrap();
+    }
+
+    /// Seed only the stored `creators` row, with no registry holder.
+    async fn seed_creator_without_holder(pool: &sqlx::SqlitePool, creator_id: &str) {
         sqlx::query(
             "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
              VALUES (?, ?, 'active', datetime('now'), '{}')",
@@ -554,6 +570,31 @@ mod tests {
         .execute(pool)
         .await
         .unwrap();
+    }
+
+    /// Seed one computable World-row `KnowledgeEntry` with an explicit
+    /// governance pair (`None`/`None` is the shared row).
+    async fn seed_computable_row(
+        pool: &sqlx::SqlitePool,
+        world_id: &str,
+        name: &str,
+        holder_entry_id: Option<&str>,
+        disclosure: Option<&str>,
+    ) {
+        let mut kb =
+            KnowledgeEntryRecord::new(world_id, nexus_contracts::BlockType::Character, name);
+        kb.body = Some(KnowledgeEntryBody {
+            summary: Some(format!("{name} summary")),
+            computable: Some(true),
+            state: Some(json!({"hp": 100})),
+            ..KnowledgeEntryBody::default()
+        });
+        kb.holder_entry_id = holder_entry_id.map(str::to_string);
+        kb.disclosure = disclosure.map(str::to_string);
+        nexus_local_db::kb_store::SqliteKbStore::new(pool.clone())
+            .insert_knowledge_entry(kb)
+            .await
+            .unwrap();
     }
 
     async fn seed_world(pool: &sqlx::SqlitePool, owner: &str, world_id: &str) {
@@ -840,6 +881,81 @@ mod tests {
         let cap = NarrativeCompute::with_pool(pool);
         let err = cap.run(json!(42)).await.unwrap_err();
         assert!(matches!(err, CapabilityError::InputInvalid(_)));
+    }
+
+    /// R5: only the admitted computable rows reach the compute input — another
+    /// holder's private row does not, so a World whose only computable row is
+    /// governed privately by another holder admits no computable entry at all.
+    #[tokio::test]
+    async fn narrative_compute_excludes_other_holders_private_rows() {
+        use nexus_knowledge::world_kb::knowledge_entry::DISCLOSURE_OWNER_PRIVATE;
+
+        let (pool, _dir) = fresh_pool().await;
+        seed_creator(&pool, "ctr_a").await;
+        seed_creator(&pool, "ctr_other").await;
+        seed_world(&pool, "ctr_a", "wld_a").await;
+
+        let other_holder = nexus_local_db::creator_holder_entry_id("ctr_other");
+        seed_computable_row(
+            &pool,
+            "wld_a",
+            "ForeignPrivate",
+            Some(&other_holder),
+            Some(DISCLOSURE_OWNER_PRIVATE),
+        )
+        .await;
+
+        // Differential: the unscoped listing holds the row, so the refusal below
+        // is the selection's policy and not an empty KB.
+        let unscoped = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone())
+            .list_by_world("wld_a")
+            .await
+            .unwrap();
+        assert_eq!(unscoped.len(), 1, "the private computable row exists");
+
+        let cap = NarrativeCompute::with_pool(pool);
+        let err = cap
+            .run(json!({
+                "world_id": "wld_a",
+                "creator_id": "ctr_a",
+                "module_id": "basic-combat",
+            }))
+            .await
+            .unwrap_err();
+        match err {
+            CapabilityError::InputInvalid(msg) => assert!(
+                msg.contains("no computable knowledge entries"),
+                "the admitted computable set is empty, got: {msg}"
+            ),
+            other => panic!("expected the empty-admitted-set refusal, got {other:?}"),
+        }
+    }
+
+    /// R5 fail-closed: without an admitted scope the capability refuses instead
+    /// of reading the World listing.
+    #[tokio::test]
+    async fn narrative_compute_fails_closed_without_a_holder() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_creator_without_holder(&pool, "ctr_a").await;
+        seed_world(&pool, "ctr_a", "wld_a").await;
+        seed_computable_row(&pool, "wld_a", "Shared", None, None).await;
+
+        let cap = NarrativeCompute::with_pool(pool);
+        let err = cap
+            .run(json!({
+                "world_id": "wld_a",
+                "creator_id": "ctr_a",
+                "module_id": "basic-combat",
+            }))
+            .await
+            .unwrap_err();
+        match err {
+            CapabilityError::Forbidden(msg) => assert!(
+                msg.contains(nexus_local_db::HOLDER_STATE_INVALID_CODE),
+                "the refusal names the stable holder code, got: {msg}"
+            ),
+            other => panic!("expected a fail-closed refusal, got {other:?}"),
+        }
     }
 
     #[tokio::test]

@@ -40,6 +40,25 @@
 //! fence (both layers) so the lease witnesses an exact pre-transition epoch
 //! and `actor_session_stale` detection stays possible after a material
 //! transition.
+//!
+//! # Typed knowledge fences (v1.191 P1 T5, durable §4.3)
+//!
+//! The same two layers carry a second typed family: World and Character
+//! knowledge-effect leases. An ActorView/management knowledge operation holds
+//! a **shared** lease on every World it selects and then on every selected
+//! Character; a World-governance edit takes the World **exclusive** lease and
+//! a Character-global/binding-governance edit takes the Character exclusive
+//! lease, so a disclosure edit cannot land while a stream is still reading,
+//! and a read cannot start while a governance edit holds the subject. Each
+//! kind has its own lock namespace (`world_locks/`, `character_locks/`) so a
+//! World and a Character that happen to share a name never contend.
+//!
+//! Multi-subject acquisition is canonical — World ids first, then Character
+//! ids, lexicographically within each kind, duplicates collapsed — so two
+//! operations selecting the same subjects can never deadlock by inverting the
+//! order. Acquisition stays non-blocking per subject and a failure releases
+//! every lease already taken in that attempt (returning the partial set is a
+//! bug: the caller never sees a half-held plan).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -49,9 +68,34 @@ use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
 
 use crate::error::{CoreError, CoreResult};
 
-/// Per-Character fence state owned by a [`crate::CoreService`].
+/// Lock family for one fenced subject kind (§4.3).
+///
+/// The kind selects the lock namespace and the busy refusal code; it is not an
+/// authority carrier and grants nothing on its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ActorFenceKind {
+    World,
+    Character,
+}
+
+impl ActorFenceKind {
+    /// Lock subdirectory under the state DB directory.
+    #[must_use]
+    pub const fn dir_name(self) -> &'static str {
+        match self {
+            Self::World => "world_locks",
+            Self::Character => "character_locks",
+        }
+    }
+}
+
+/// The per-subject process fence cell: one `RwLock` per `(kind, subject)`,
+/// reclaimed once no guard keeps it alive.
+type FenceCell = Arc<RwLock<()>>;
+
+/// Per-subject fence state owned by a [`crate::CoreService`].
 pub struct ActorFenceTable {
-    process: Mutex<HashMap<String, Arc<RwLock<()>>>>,
+    process: Mutex<HashMap<(ActorFenceKind, String), FenceCell>>,
     locks_dir: PathBuf,
 }
 
@@ -63,6 +107,31 @@ pub struct ActorActivityLease {
     owner_creator_id: String,
     character_id: String,
     epoch: i64,
+}
+
+/// Shared knowledge-effect leases for one admitted read/effect plan (§4.3).
+///
+/// The plan is acquired World ids then Character ids; the guards are held
+/// together and dropped together, so a caller cannot hold a Character lease
+/// whose World lease already drained. Every field is a held guard, never
+/// introspected beyond its length.
+pub struct KnowledgeEffectLeases {
+    world_read: Vec<OwnedRwLockReadGuard<()>>,
+    world_os: Vec<OsSharedLock>,
+    character_read: Vec<OwnedRwLockReadGuard<()>>,
+    character_os: Vec<OsSharedLock>,
+}
+
+/// Exclusive governance lease for one World or Character subject (§4.3).
+///
+/// Busy refusal against every in-flight shared knowledge lease of that exact
+/// subject: a disclosure edit is refused while a read/stream is still running,
+/// and a read is refused while the edit holds the subject.
+pub struct KnowledgeGovernanceLease {
+    kind: ActorFenceKind,
+    subject_id: String,
+    _write: OwnedRwLockWriteGuard<()>,
+    _os: OsExclusiveLock,
 }
 
 /// Exclusive transition lease (durable §11.3.2).
@@ -89,14 +158,16 @@ impl ActorFenceTable {
         }
     }
 
-    /// Stable per-Character OS lock file path.
-    fn lock_path(&self, character_id: &str) -> PathBuf {
-        self.locks_dir.join(format!("{character_id}.lock"))
+    /// Stable per-subject OS lock file path (its own namespace per kind).
+    fn lock_path(&self, kind: ActorFenceKind, subject_id: &str) -> PathBuf {
+        self.locks_dir
+            .join(kind.dir_name())
+            .join(format!("{subject_id}.lock"))
     }
 
-    /// Fetch or create the per-Character process fence, sweeping entries with
+    /// Fetch or create the per-subject process fence, sweeping entries with
     /// no live guard (live-Arc reclaim, mirroring the daemon §11.3.6 sweep).
-    fn fence_for(&self, character_id: &str) -> Arc<RwLock<()>> {
+    fn fence_for(&self, kind: ActorFenceKind, subject_id: &str) -> Arc<RwLock<()>> {
         let mut fences = self
             .process
             .lock()
@@ -104,9 +175,39 @@ impl ActorFenceTable {
         fences.retain(|_, fence| Arc::strong_count(fence) > 1);
         Arc::clone(
             fences
-                .entry(character_id.to_string())
+                .entry((kind, subject_id.to_string()))
                 .or_insert_with(|| Arc::new(RwLock::new(()))),
         )
+    }
+
+    /// Try to take one shared fence: process read guard first, then the
+    /// non-blocking OS shared lock.
+    fn try_shared(
+        &self,
+        kind: ActorFenceKind,
+        subject_id: &str,
+    ) -> CoreResult<(OwnedRwLockReadGuard<()>, OsSharedLock)> {
+        let read = Arc::clone(&self.fence_for(kind, subject_id))
+            .try_read_owned()
+            .map_err(|_| busy(kind, subject_id))?;
+        let os = OsSharedLock::try_acquire(self.lock_path(kind, subject_id))
+            .map_err(|err| lock_error(kind, subject_id, err))?;
+        Ok((read, os))
+    }
+
+    /// Try to take one exclusive fence: process write guard, then the
+    /// non-blocking OS exclusive lock.
+    fn try_exclusive(
+        &self,
+        kind: ActorFenceKind,
+        subject_id: &str,
+    ) -> CoreResult<(OwnedRwLockWriteGuard<()>, OsExclusiveLock)> {
+        let write = Arc::clone(&self.fence_for(kind, subject_id))
+            .try_write_owned()
+            .map_err(|_| busy(kind, subject_id))?;
+        let os = OsExclusiveLock::try_acquire(self.lock_path(kind, subject_id))
+            .map_err(|err| lock_error(kind, subject_id, err))?;
+        Ok((write, os))
     }
 
     /// Try to take the shared activity fence for one Character: process read
@@ -123,11 +224,7 @@ impl ActorFenceTable {
         &self,
         character_id: &str,
     ) -> CoreResult<ActivityFenceParts> {
-        let read = Arc::clone(&self.fence_for(character_id))
-            .try_read_owned()
-            .map_err(|_| busy_error(character_id))?;
-        let os = OsSharedLock::try_acquire(self.lock_path(character_id))
-            .map_err(|err| lock_error(character_id, err))?;
+        let (read, os) = self.try_shared(ActorFenceKind::Character, character_id)?;
         Ok(ActivityFenceParts { read, os })
     }
 
@@ -138,22 +235,93 @@ impl ActorFenceTable {
         &self,
         character_id: &str,
     ) -> CoreResult<TransitionFenceParts> {
-        let write = Arc::clone(&self.fence_for(character_id))
-            .try_write_owned()
-            .map_err(|_| busy_error(character_id))?;
-        let os = OsExclusiveLock::try_acquire(self.lock_path(character_id))
-            .map_err(|err| lock_error(character_id, err))?;
+        let (write, os) = self.try_exclusive(ActorFenceKind::Character, character_id)?;
         Ok(TransitionFenceParts { write, os })
+    }
+
+    /// Try to take the whole shared knowledge-effect plan (§4.3): World ids
+    /// then Character ids, lexicographically within each kind, duplicates
+    /// collapsed.
+    ///
+    /// Non-blocking per subject. A failure at any subject drops the partial
+    /// plan before returning, so a caller that observes an error observes no
+    /// held lease from this attempt.
+    pub(crate) fn try_acquire_knowledge_effect(
+        &self,
+        world_ids: &[String],
+        character_ids: &[String],
+    ) -> CoreResult<KnowledgeEffectLeases> {
+        let worlds = canonical_subjects(world_ids);
+        let characters = canonical_subjects(character_ids);
+        let mut world_read = Vec::with_capacity(worlds.len());
+        let mut world_os = Vec::with_capacity(worlds.len());
+        let mut character_read = Vec::with_capacity(characters.len());
+        let mut character_os = Vec::with_capacity(characters.len());
+        for world_id in worlds {
+            let (read, os) = self.try_shared(ActorFenceKind::World, world_id)?;
+            world_read.push(read);
+            world_os.push(os);
+        }
+        for character_id in characters {
+            let (read, os) = self.try_shared(ActorFenceKind::Character, character_id)?;
+            character_read.push(read);
+            character_os.push(os);
+        }
+        Ok(KnowledgeEffectLeases {
+            world_read,
+            world_os,
+            character_read,
+            character_os,
+        })
+    }
+
+    /// Try to take the exclusive governance fence for one World/Character
+    /// subject (§4.3). Non-blocking: any in-flight shared knowledge lease of
+    /// that subject is the busy refusal.
+    pub(crate) fn try_acquire_knowledge_governance(
+        &self,
+        kind: ActorFenceKind,
+        subject_id: &str,
+    ) -> CoreResult<KnowledgeGovernanceLease> {
+        let (write, os) = self.try_exclusive(kind, subject_id)?;
+        Ok(KnowledgeGovernanceLease {
+            kind,
+            subject_id: subject_id.to_string(),
+            _write: write,
+            _os: os,
+        })
     }
 }
 
-/// Translate a non-blocking lock outcome: a held lease is the retained
-/// `character_busy` refusal; anything else is a real fault.
-fn lock_error(character_id: &str, err: std::fs::TryLockError) -> CoreError {
+/// Canonical acquisition order inside one kind: lexical, duplicates collapsed.
+fn canonical_subjects(ids: &[String]) -> Vec<&str> {
+    let mut unique: Vec<&str> = ids.iter().map(String::as_str).collect();
+    unique.sort_unstable();
+    unique.dedup();
+    unique
+}
+
+/// Translate a non-blocking lock outcome: a held lease is the retained busy
+/// refusal for that kind; anything else is a real fault.
+fn lock_error(kind: ActorFenceKind, subject_id: &str, err: std::fs::TryLockError) -> CoreError {
     match err {
-        std::fs::TryLockError::WouldBlock => busy_error(character_id),
+        std::fs::TryLockError::WouldBlock => busy(kind, subject_id),
         std::fs::TryLockError::Error(io) => CoreError::Internal {
-            category: format!("character_lock: {io}"),
+            category: format!("{}: {io}", kind.dir_name()),
+        },
+    }
+}
+
+/// The retained refusal for a contended subject: `character_busy` keeps its
+/// verbatim daemon wording, World contention is its own typed code.
+fn busy(kind: ActorFenceKind, subject_id: &str) -> CoreError {
+    match kind {
+        ActorFenceKind::Character => busy_error(subject_id),
+        ActorFenceKind::World => CoreError::ActorConflict {
+            code: "world_busy".to_string(),
+            message: format!(
+                "world {subject_id} has an in-flight knowledge activity; retry after it drains"
+            ),
         },
     }
 }
@@ -337,6 +505,42 @@ impl std::fmt::Debug for CharacterTransitionLease {
             .field("owner_creator_id", &self.owner_creator_id)
             .field("character_id", &self.character_id)
             .field("epoch", &self.epoch())
+            .finish_non_exhaustive()
+    }
+}
+
+impl std::fmt::Debug for KnowledgeEffectLeases {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Non-exhaustive: the held subject ids are not retained here, and the
+        // guards must not be introspected beyond their counts.
+        f.debug_struct("KnowledgeEffectLeases")
+            .field("world_read_leases", &self.world_read.len())
+            .field("world_os_leases", &self.world_os.len())
+            .field("character_read_leases", &self.character_read.len())
+            .field("character_os_leases", &self.character_os.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl KnowledgeGovernanceLease {
+    /// Fenced subject kind.
+    #[must_use]
+    pub const fn kind(&self) -> ActorFenceKind {
+        self.kind
+    }
+
+    /// Fenced World/Character id.
+    #[must_use]
+    pub fn subject_id(&self) -> &str {
+        &self.subject_id
+    }
+}
+
+impl std::fmt::Debug for KnowledgeGovernanceLease {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KnowledgeGovernanceLease")
+            .field("kind", &self.kind)
+            .field("subject_id", &self.subject_id)
             .finish_non_exhaustive()
     }
 }

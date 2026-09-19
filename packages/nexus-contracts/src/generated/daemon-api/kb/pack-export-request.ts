@@ -5,7 +5,7 @@
  */
 
 /**
- * POST /v1/daemon/worlds/:world_id/kb/pack/export — export one World's lore as a Narrative Knowledge Pack (V1.152 P0 DF-77).
+ * POST /v1/daemon/worlds/:world_id/kb/pack/export — export one World's lore as a Narrative Knowledge Pack (V1.152 P0 DF-77). The export reads through the exporting Creator's admitted selection: shared rows always, owned known-private material only under explicit author intent.
  */
 export interface PackExportRequest {
   /**
@@ -16,6 +16,10 @@ export interface PackExportRequest {
    * Include source_anchors in the export response envelope.
    */
   include_anchors?: boolean;
+  /**
+   * Explicit author intent to include owned known-private material in the export (v1.191 P1 T10, holder-governance.md §6). Absent/false exports only the shared rows the exporting Creator's admitted policy may read; private material of another holder and quarantined import atoms are never emitted. Character/Connect exports never set this.
+   */
+  include_owned_private?: boolean;
   /**
    * Override modules.pack.title (default: World title).
    */

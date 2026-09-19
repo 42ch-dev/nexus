@@ -59,7 +59,6 @@ use crate::{
     ArchivePoolRequest, PromotePoolRequest, UpdateFindingRequest, WorkDetails, WorkPatchRequest,
 };
 use nexus_home_layout::active_context::{read_active_creator_id, read_active_workspace_slug};
-use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::works;
 use nexus_narrative::NarrativeGateway;
 use nexus_spoke_adapter::{parse_tool_capability_id, SpokeResult};
@@ -1266,12 +1265,30 @@ async fn execute_kb_snapshot_read(
 
     ensure_world_accessible_for_creator(pool, creator_id, world_id).await?;
 
+    // The snapshot is a model-facing payload: the rows are read through the
+    // admitted Creator ActorView (durable §4.1/§4.2), so another holder's
+    // `owner-private` World row is not in the snapshot and an unresolvable
+    // selection refuses instead of falling back to the World listing.
+    let selection = crate::actor_knowledge::ActorKnowledgeViewService::new(pool.clone())
+        .actor_view_scope(
+            creator_id,
+            &crate::actors::AdmittedActor::Creator {
+                creator_id: creator_id.to_string(),
+            },
+            world_id,
+            None,
+        )
+        .await?;
+
     let kb_store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
-    let blocks = kb_store.list_by_world(world_id).await.map_err(
-        |e: nexus_knowledge::world_kb::store::KbStoreError| NexusApiError::Internal {
-            category: format!("KB_STORE_ERROR: {e}"),
-        },
-    )?;
+    let blocks = kb_store
+        .list_by_world_admitted(world_id, false, &selection)
+        .await
+        .map_err(
+            |e: nexus_knowledge::world_kb::store::KbStoreError| NexusApiError::Internal {
+                category: format!("KB_STORE_ERROR: {e}"),
+            },
+        )?;
 
     Ok(serde_json::to_value(&blocks).unwrap_or_else(|_| serde_json::json!([])))
 }

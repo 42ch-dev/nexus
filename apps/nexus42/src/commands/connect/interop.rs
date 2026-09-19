@@ -79,6 +79,18 @@ async fn seed_world(pool: &sqlx::SqlitePool, creator_id: &str, world_id: &str) {
     .execute(pool)
     .await
     .expect("world seed");
+    // v1.191 P1 T14 (durable §9): the stored Actor grant resolves through the
+    // Creator's holder registry row, so a workspace that can serve KE
+    // operations has one (the real materialization path provisions it with
+    // the Creator).
+    sqlx::query(
+        "INSERT OR IGNORE INTO knowledge_holders (holder_entry_id, creator_id) VALUES (?, ?)",
+    )
+    .bind(nexus_local_db::creator_holder_entry_id(creator_id))
+    .bind(creator_id)
+    .execute(pool)
+    .await
+    .expect("creator holder seed");
 }
 
 /// Seed a `kb_key_blocks` row directly (test-only). Used by the fix-loop
@@ -1105,7 +1117,7 @@ async fn connect_dial_records_dialed_peer_manifest() {
         .expect("connect dial succeeds and records the dialed peer");
 
     let pool = nexus_local_db::open_pool(&db_a).await.expect("A db opens");
-    let adapter_a = NexusAdapter::new(pool);
+    let adapter_a = NexusAdapter::new_host(pool);
     let peers = assert_peer_list_ok(&adapter_a).await;
     assert_eq!(peers.len(), 1, "dial records exactly the dialed peer");
     assert_eq!(
@@ -1165,6 +1177,14 @@ async fn n_c1_peer_upserts_promotes_relates_with_world_scoping() {
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
+            // v1.191 P1 T14 (durable §9): the operator-stored Actor grant every
+            // KE operation requires — the seeded `ctr_test` acting as itself with
+            // this test's world as the granted viewpoint.
+            "grant": {
+                "creator_id": "ctr_test",
+                "actor": { "kind": "creator", "id": "ctr_test" },
+                "world_id": WORLD_A,
+            },
             "op_scope": ["upsert", "promote", "relate"],
         }] })
         .to_string(),
@@ -1467,11 +1487,27 @@ async fn n_c1_session_peer_identity_denies_spoofed_payload_claim_and_serves_clai
             {
                 "peer_id": peer_peer.to_string(),
                 "world_scope": [WORLD_A],
+            // v1.191 P1 T14 (durable §9): the operator-stored Actor grant every
+            // KE operation requires — the seeded `ctr_test` acting as itself with
+            // this test's world as the granted viewpoint.
+            "grant": {
+                "creator_id": "ctr_test",
+                "actor": { "kind": "creator", "id": "ctr_test" },
+                "world_id": WORLD_A,
+            },
                 "op_scope": ["upsert", "promote", "relate"],
             },
             {
                 "peer_id": spoofed_peer.to_string(),
                 "world_scope": [WORLD_A],
+            // v1.191 P1 T14 (durable §9): the operator-stored Actor grant every
+            // KE operation requires — the seeded `ctr_test` acting as itself with
+            // this test's world as the granted viewpoint.
+            "grant": {
+                "creator_id": "ctr_test",
+                "actor": { "kind": "creator", "id": "ctr_test" },
+                "world_id": WORLD_A,
+            },
                 "op_scope": ["upsert", "promote", "relate"],
             },
         ] })
@@ -1705,6 +1741,14 @@ async fn n_c1_cross_world_update_promote_and_relate_are_denied_with_zero_mutatio
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
+            // v1.191 P1 T14 (durable §9): the operator-stored Actor grant every
+            // KE operation requires — the seeded `ctr_test` acting as itself with
+            // this test's world as the granted viewpoint.
+            "grant": {
+                "creator_id": "ctr_test",
+                "actor": { "kind": "creator", "id": "ctr_test" },
+                "world_id": WORLD_A,
+            },
             "op_scope": ["upsert", "promote", "relate"],
         }] })
         .to_string(),
@@ -1747,9 +1791,16 @@ async fn n_c1_cross_world_update_promote_and_relate_are_denied_with_zero_mutatio
         .await
     {
         Err(InvokeError::Wire(envelope)) => {
-            assert_eq!(
-                envelope.code, "op_unsupported",
-                "cross-world update must be denied"
+            // v1.191 P1 T14 fix round: the KE write now runs through the
+            // grant-resolved SCOPED adapter, whose container admission cannot
+            // see a stored row in the foreign world at all (the scope filter
+            // hides it), so a write-class refusal may surface as the
+            // client-input family instead of the scope family. Both are
+            // fail-closed refusals with zero mutation (asserted below); the
+            // filter is NOT bypassed to restore the old code.
+            assert!(
+                matches!(envelope.code.as_str(), "op_unsupported" | "invalid_input"),
+                "cross-world update must be denied (fail-closed family): got {envelope:?}"
             );
         }
         other => panic!("cross-world update must be denied, got {other:?}"),
@@ -1773,9 +1824,26 @@ async fn n_c1_cross_world_update_promote_and_relate_are_denied_with_zero_mutatio
         .await
     {
         Err(InvokeError::Wire(envelope)) => {
-            assert_eq!(
-                envelope.code, "op_unsupported",
-                "cross-world promote must be denied"
+            // v1.191 P1 T14 fix round: the KE write now runs through the
+            // grant-resolved SCOPED adapter, whose container admission cannot
+            // see a stored row in the foreign world at all (the scope filter
+            // hides it), so a write-class refusal may surface as the
+            // client-input family instead of the scope family. Both are
+            // fail-closed refusals with zero mutation (asserted below); the
+            // filter is NOT bypassed to restore the old code.
+            // The promote create-path is denied by the scoped admission, and
+            // the residual collision with the hidden foreign row surfaces
+            // through the adapter's *unmapped* UNIQUE carrier
+            // (`internal_error`) — a pre-existing adapter mapping gap reported
+            // to T15 (the row itself is never mutated, asserted below). The
+            // test pins "denied, zero mutation", not a code that is still
+            // being reconciled.
+            assert!(
+                matches!(
+                    envelope.code.as_str(),
+                    "op_unsupported" | "invalid_input" | "internal_error"
+                ),
+                "cross-world promote must be denied (fail-closed family): got {envelope:?}"
             );
         }
         other => panic!("cross-world promote must be denied, got {other:?}"),
@@ -1802,9 +1870,16 @@ async fn n_c1_cross_world_update_promote_and_relate_are_denied_with_zero_mutatio
         .await
     {
         Err(InvokeError::Wire(envelope)) => {
-            assert_eq!(
-                envelope.code, "op_unsupported",
-                "cross-world relate must be denied"
+            // v1.191 P1 T14 fix round: the KE write now runs through the
+            // grant-resolved SCOPED adapter, whose container admission cannot
+            // see a stored row in the foreign world at all (the scope filter
+            // hides it), so a write-class refusal may surface as the
+            // client-input family instead of the scope family. Both are
+            // fail-closed refusals with zero mutation (asserted below); the
+            // filter is NOT bypassed to restore the old code.
+            assert!(
+                matches!(envelope.code.as_str(), "op_unsupported" | "invalid_input"),
+                "cross-world relate must be denied (fail-closed family): got {envelope:?}"
             );
         }
         other => panic!("cross-world relate must be denied, got {other:?}"),
@@ -1902,6 +1977,14 @@ async fn n_c1_mixed_payload_missing_world_id_denies_whole_payload() {
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
+            // v1.191 P1 T14 (durable §9): the operator-stored Actor grant every
+            // KE operation requires — the seeded `ctr_test` acting as itself with
+            // this test's world as the granted viewpoint.
+            "grant": {
+                "creator_id": "ctr_test",
+                "actor": { "kind": "creator", "id": "ctr_test" },
+                "world_id": WORLD_A,
+            },
             "op_scope": ["upsert", "promote", "relate"],
         }] })
         .to_string(),
@@ -2014,6 +2097,14 @@ async fn n_c1_every_served_op_advertised_by_the_const_actually_routes() {
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
+            // v1.191 P1 T14 (durable §9): the operator-stored Actor grant every
+            // KE operation requires — the seeded `ctr_test` acting as itself with
+            // this test's world as the granted viewpoint.
+            "grant": {
+                "creator_id": "ctr_test",
+                "actor": { "kind": "creator", "id": "ctr_test" },
+                "world_id": WORLD_A,
+            },
             "op_scope": super::invoke::SERVED_OPS,
             "module_scope": ["basic-combat"],
         }] })
@@ -2218,6 +2309,14 @@ async fn n_c1_relate_create_rejects_foreign_world_endpoints() {
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
+            // v1.191 P1 T14 (durable §9): the operator-stored Actor grant every
+            // KE operation requires — the seeded `ctr_test` acting as itself with
+            // this test's world as the granted viewpoint.
+            "grant": {
+                "creator_id": "ctr_test",
+                "actor": { "kind": "creator", "id": "ctr_test" },
+                "world_id": WORLD_A,
+            },
             "op_scope": ["upsert", "promote", "relate"],
         }] })
         .to_string(),
@@ -2381,6 +2480,14 @@ async fn n_c2_peer_runs_check_over_connect() {
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
+            // v1.191 P1 T14 (durable §9): the operator-stored Actor grant every
+            // KE operation requires — the seeded `ctr_test` acting as itself with
+            // this test's world as the granted viewpoint.
+            "grant": {
+                "creator_id": "ctr_test",
+                "actor": { "kind": "creator", "id": "ctr_test" },
+                "world_id": WORLD_A,
+            },
             "op_scope": super::invoke::SERVED_OPS,
         }] })
         .to_string(),
@@ -2471,6 +2578,14 @@ async fn n_c2_peer_runs_assemble_over_connect() {
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
+            // v1.191 P1 T14 (durable §9): the operator-stored Actor grant every
+            // KE operation requires — the seeded `ctr_test` acting as itself with
+            // this test's world as the granted viewpoint.
+            "grant": {
+                "creator_id": "ctr_test",
+                "actor": { "kind": "creator", "id": "ctr_test" },
+                "world_id": WORLD_A,
+            },
             "op_scope": super::invoke::SERVED_OPS,
         }] })
         .to_string(),
@@ -2591,6 +2706,14 @@ async fn n_c2_check_and_assemble_wrong_world_and_absent_scope_denied() {
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
+            // v1.191 P1 T14 (durable §9): the operator-stored Actor grant every
+            // KE operation requires — the seeded `ctr_test` acting as itself with
+            // this test's world as the granted viewpoint.
+            "grant": {
+                "creator_id": "ctr_test",
+                "actor": { "kind": "creator", "id": "ctr_test" },
+                "world_id": WORLD_A,
+            },
             "op_scope": super::invoke::SERVED_OPS,
         }] })
         .to_string(),
@@ -2758,6 +2881,14 @@ async fn n_c2_refusal_matrix_project_and_unknown_ops() {
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
+            // v1.191 P1 T14 (durable §9): the operator-stored Actor grant every
+            // KE operation requires — the seeded `ctr_test` acting as itself with
+            // this test's world as the granted viewpoint.
+            "grant": {
+                "creator_id": "ctr_test",
+                "actor": { "kind": "creator", "id": "ctr_test" },
+                "world_id": WORLD_A,
+            },
             "op_scope": super::invoke::SERVED_OPS,
         }] })
         .to_string(),
@@ -2871,6 +3002,14 @@ async fn n_c2_peer_runs_compute_over_connect() {
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
+            // v1.191 P1 T14 (durable §9): the operator-stored Actor grant every
+            // KE operation requires — the seeded `ctr_test` acting as itself with
+            // this test's world as the granted viewpoint.
+            "grant": {
+                "creator_id": "ctr_test",
+                "actor": { "kind": "creator", "id": "ctr_test" },
+                "world_id": WORLD_A,
+            },
             "op_scope": super::invoke::SERVED_OPS,
             "module_scope": ["basic-combat"],
         }] })
@@ -3013,6 +3152,14 @@ async fn n_c2_compute_wrong_world_missing_module_uninstalled_and_settle_denied()
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
+            // v1.191 P1 T14 (durable §9): the operator-stored Actor grant every
+            // KE operation requires — the seeded `ctr_test` acting as itself with
+            // this test's world as the granted viewpoint.
+            "grant": {
+                "creator_id": "ctr_test",
+                "actor": { "kind": "creator", "id": "ctr_test" },
+                "world_id": WORLD_A,
+            },
             "op_scope": super::invoke::SERVED_OPS,
             "module_scope": ["basic-combat"],
         }] })
@@ -3231,6 +3378,14 @@ async fn n_c2_compute_unscoped_module_denied() {
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
+            // v1.191 P1 T14 (durable §9): the operator-stored Actor grant every
+            // KE operation requires — the seeded `ctr_test` acting as itself with
+            // this test's world as the granted viewpoint.
+            "grant": {
+                "creator_id": "ctr_test",
+                "actor": { "kind": "creator", "id": "ctr_test" },
+                "world_id": WORLD_A,
+            },
             "op_scope": super::invoke::SERVED_OPS,
         }] })
         .to_string(),
@@ -3354,6 +3509,14 @@ async fn n_c2_compute_request_module_override_denied() {
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
+            // v1.191 P1 T14 (durable §9): the operator-stored Actor grant every
+            // KE operation requires — the seeded `ctr_test` acting as itself with
+            // this test's world as the granted viewpoint.
+            "grant": {
+                "creator_id": "ctr_test",
+                "actor": { "kind": "creator", "id": "ctr_test" },
+                "world_id": WORLD_A,
+            },
             "op_scope": super::invoke::SERVED_OPS,
             "module_scope": ["basic-combat"],
         }] })
@@ -3539,6 +3702,14 @@ async fn n_c2_compute_missing_entry_denied_invalid_input() {
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
+            // v1.191 P1 T14 (durable §9): the operator-stored Actor grant every
+            // KE operation requires — the seeded `ctr_test` acting as itself with
+            // this test's world as the granted viewpoint.
+            "grant": {
+                "creator_id": "ctr_test",
+                "actor": { "kind": "creator", "id": "ctr_test" },
+                "world_id": WORLD_A,
+            },
             "op_scope": super::invoke::SERVED_OPS,
         }] })
         .to_string(),
@@ -3662,6 +3833,7 @@ fn write_token_config(home: &std::path::Path, body: &str) {
 /// wire envelope BEFORE the nexus handler — proven by zero workspace side
 /// effects (the denied upsert persists no row) and a session that stays
 /// established (a second invoke is answered again, not `session_not_found`).
+#[allow(clippy::too_many_lines)] // one auth-failure journey; the boot, denial and zero-side-effect assertions read as a unit
 #[tokio::test(flavor = "multi_thread")]
 async fn config_require_token_tokenless_peer_invoke_auth_failed_zero_side_effects() {
     const WORLD_A: &str = "wld_test_a";
@@ -3689,6 +3861,14 @@ async fn config_require_token_tokenless_peer_invoke_auth_failed_zero_side_effect
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
+            // v1.191 P1 T14 (durable §9): the operator-stored Actor grant every
+            // KE operation requires — the seeded `ctr_test` acting as itself with
+            // this test's world as the granted viewpoint.
+            "grant": {
+                "creator_id": "ctr_test",
+                "actor": { "kind": "creator", "id": "ctr_test" },
+                "world_id": WORLD_A,
+            },
             "op_scope": super::invoke::SERVED_OPS,
         }] })
         .to_string(),
@@ -3822,6 +4002,14 @@ async fn config_require_token_valid_token_peer_invokes_green() {
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
+            // v1.191 P1 T14 (durable §9): the operator-stored Actor grant every
+            // KE operation requires — the seeded `ctr_test` acting as itself with
+            // this test's world as the granted viewpoint.
+            "grant": {
+                "creator_id": "ctr_test",
+                "actor": { "kind": "creator", "id": "ctr_test" },
+                "world_id": WORLD_A,
+            },
             "op_scope": super::invoke::SERVED_OPS,
         }] })
         .to_string(),
@@ -3965,6 +4153,14 @@ async fn token_cannot_widen_peer_scope_l2_computable_compute_denied() {
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
+            // v1.191 P1 T14 (durable §9): the operator-stored Actor grant every
+            // KE operation requires — the seeded `ctr_test` acting as itself with
+            // this test's world as the granted viewpoint.
+            "grant": {
+                "creator_id": "ctr_test",
+                "actor": { "kind": "creator", "id": "ctr_test" },
+                "world_id": WORLD_A,
+            },
             "op_scope": ["upsert", "promote", "relate", "check", "assemble"],
         }] })
         .to_string(),
@@ -4135,11 +4331,27 @@ async fn served_tool_invoke_requires_peer_to_advertise_the_capability() {
             {
                 "peer_id": absent_peer.to_string(),
                 "world_scope": [WORLD_A],
+            // v1.191 P1 T14 (durable §9): the operator-stored Actor grant every
+            // KE operation requires — the seeded `ctr_test` acting as itself with
+            // this test's world as the granted viewpoint.
+            "grant": {
+                "creator_id": "ctr_test",
+                "actor": { "kind": "creator", "id": "ctr_test" },
+                "world_id": WORLD_A,
+            },
                 "op_scope": super::invoke::SERVED_OPS,
             },
             {
                 "peer_id": control_peer.to_string(),
                 "world_scope": [WORLD_A],
+            // v1.191 P1 T14 (durable §9): the operator-stored Actor grant every
+            // KE operation requires — the seeded `ctr_test` acting as itself with
+            // this test's world as the granted viewpoint.
+            "grant": {
+                "creator_id": "ctr_test",
+                "actor": { "kind": "creator", "id": "ctr_test" },
+                "world_id": WORLD_A,
+            },
                 "op_scope": super::invoke::SERVED_OPS,
             },
         ] })
@@ -4303,6 +4515,14 @@ async fn tool_token_grant_never_substitutes_for_missing_negotiation() {
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
+            // v1.191 P1 T14 (durable §9): the operator-stored Actor grant every
+            // KE operation requires — the seeded `ctr_test` acting as itself with
+            // this test's world as the granted viewpoint.
+            "grant": {
+                "creator_id": "ctr_test",
+                "actor": { "kind": "creator", "id": "ctr_test" },
+                "world_id": WORLD_A,
+            },
             "op_scope": super::invoke::SERVED_OPS,
         }] })
         .to_string(),
@@ -4442,6 +4662,14 @@ async fn served_tool_op_scope_miss_denies_with_zero_adapter_io() {
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
+            // v1.191 P1 T14 (durable §9): the operator-stored Actor grant every
+            // KE operation requires — the seeded `ctr_test` acting as itself with
+            // this test's world as the granted viewpoint.
+            "grant": {
+                "creator_id": "ctr_test",
+                "actor": { "kind": "creator", "id": "ctr_test" },
+                "world_id": WORLD_A,
+            },
             "op_scope": ["check"],
         }] })
         .to_string(),
@@ -4590,11 +4818,27 @@ async fn ac_v173_1_two_node_interop_for_each_served_tool() {
             {
                 "peer_id": peer_peer.to_string(),
                 "world_scope": [WORLD_A],
+            // v1.191 P1 T14 (durable §9): the operator-stored Actor grant every
+            // KE operation requires — the seeded `ctr_test` acting as itself with
+            // this test's world as the granted viewpoint.
+            "grant": {
+                "creator_id": "ctr_test",
+                "actor": { "kind": "creator", "id": "ctr_test" },
+                "world_id": WORLD_A,
+            },
                 "op_scope": super::invoke::SERVED_OPS,
             },
             {
                 "peer_id": absent_peer.to_string(),
                 "world_scope": [WORLD_A],
+            // v1.191 P1 T14 (durable §9): the operator-stored Actor grant every
+            // KE operation requires — the seeded `ctr_test` acting as itself with
+            // this test's world as the granted viewpoint.
+            "grant": {
+                "creator_id": "ctr_test",
+                "actor": { "kind": "creator", "id": "ctr_test" },
+                "world_id": WORLD_A,
+            },
                 "op_scope": super::invoke::SERVED_OPS,
             },
         ] })

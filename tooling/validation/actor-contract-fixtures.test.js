@@ -15,6 +15,8 @@ const CHR = `chr_${HEX32}`;
 const CTR = `ctr_${HEX32}`;
 const AWB = `awb_${HEX32}`;
 const WLD = `wld_${HEX32}`;
+/** Resolved holder entry id (`hld_` + the full lowercase 256-bit digest). */
+const HLD = `hld_${'a'.repeat(64)}`;
 const TS = '2026-09-05T00:00:00Z';
 
 function loadSchema(rel) {
@@ -165,6 +167,10 @@ function main() {
   const knowledgeDetail = compile('schemas/daemon-api/actor-knowledge/knowledge-entry-detail.schema.json', cache);
   const updateKnowledgeReq = compile('schemas/daemon-api/actor-knowledge/update-knowledge-entry-request.schema.json', cache);
   const deleteKnowledgeQuery = compile('schemas/daemon-api/actor-knowledge/delete-knowledge-entry-query.schema.json', cache);
+  const viewRequest = compile('schemas/daemon-api/actor-knowledge/view-request.schema.json', cache);
+  const creatorDetail = compile('schemas/daemon-api/creators/creator-detail.schema.json', cache);
+  const entityPatch = compile('schemas/daemon-api/canvas/world-kb/world-kb-entity-patch.schema.json', cache);
+  const entityProjection = compile('schemas/daemon-api/canvas/world-kb/world-kb-entity-projection.schema.json', cache);
 
   assertAccept(actor, { actor_kind: 'creator', creator_id: CTR }, 'creator actor');
   assertAccept(actor, { actor_kind: 'character', character_id: CHR }, 'character actor');
@@ -249,14 +255,24 @@ function main() {
   const validKnowledgeItem = {
     entry_id: `kb_${HEX32}`,
     owner: { kind: 'character', id: CHR },
-    creator_only: false,
     block_type: 'info_point',
     canonical_name: 'note-alpha',
     status: 'confirmed',
     revision: 0,
     created_at: TS,
   };
-  assertAccept(knowledgeItem, validKnowledgeItem, 'knowledge view item');
+  assertAccept(knowledgeItem, validKnowledgeItem, 'knowledge view item (in-scope shared)');
+  assertAccept(
+    knowledgeItem,
+    { ...validKnowledgeItem, holder_entry_id: HLD, disclosure: 'owner-private' },
+    'knowledge view item (holder-private projection)',
+  );
+  assertAccept(knowledgeItem, { ...validKnowledgeItem, holder_entry_id: HLD }, 'holder without disclosure');
+  assertReject(knowledgeItem, { ...validKnowledgeItem, holder_entry_id: 'hld_short' }, 'malformed holder id');
+  assertReject(knowledgeItem, { ...validKnowledgeItem, holder_entry_id: HLD.toUpperCase() }, 'uppercase holder id');
+  assertReject(knowledgeItem, { ...validKnowledgeItem, disclosure: 'shared' }, 'shared is absence, not a string');
+  assertReject(knowledgeItem, { ...validKnowledgeItem, disclosure: 'owner-public' }, 'unknown disclosure');
+  assertReject(knowledgeItem, { ...validKnowledgeItem, creator_only: false }, 'legacy boolean is not a projection member');
   assertReject(knowledgeItem, { ...validKnowledgeItem, revision: undefined }, 'knowledge item missing revision');
   assertReject(knowledgeItem, { ...validKnowledgeItem, extra: true }, 'knowledge item extra properties');
   assertAccept(knowledgeDetail, { item: validKnowledgeItem, summary: 'hello' }, 'knowledge detail');
@@ -268,6 +284,69 @@ function main() {
     canonical_name: 'note-alpha',
     summary: '',
   }, 'add knowledge with empty summary');
+  assertAccept(addKnowledgeReq, {
+    owner_kind: 'world',
+    world_id: WLD,
+    block_type: 'info_point',
+    canonical_name: 'note-alpha',
+    audience: { kind: 'shared' },
+  }, 'add knowledge explicit shared audience');
+  assertAccept(addKnowledgeReq, {
+    owner_kind: 'world',
+    world_id: WLD,
+    block_type: 'info_point',
+    canonical_name: 'note-alpha',
+    audience: { kind: 'author-only' },
+  }, 'add knowledge author-only audience');
+  assertAccept(addKnowledgeReq, {
+    owner_kind: 'world',
+    world_id: WLD,
+    block_type: 'info_point',
+    canonical_name: 'note-alpha',
+    audience: { kind: 'character-private', character_id: CHR },
+  }, 'add knowledge character-private audience');
+  assertReject(addKnowledgeReq, {
+    owner_kind: 'world',
+    world_id: WLD,
+    block_type: 'info_point',
+    canonical_name: 'note-alpha',
+    audience: { kind: 'character-private' },
+  }, 'character-private audience without character_id');
+  assertReject(addKnowledgeReq, {
+    owner_kind: 'world',
+    world_id: WLD,
+    block_type: 'info_point',
+    canonical_name: 'note-alpha',
+    audience: { kind: 'character-private', character_id: CHR, extra: 1 },
+  }, 'audience extra property');
+  assertReject(addKnowledgeReq, {
+    owner_kind: 'world',
+    world_id: WLD,
+    block_type: 'info_point',
+    canonical_name: 'note-alpha',
+    audience: { kind: 'author_only' },
+  }, 'audience unknown kind');
+  assertReject(addKnowledgeReq, {
+    owner_kind: 'world',
+    world_id: WLD,
+    block_type: 'info_point',
+    canonical_name: 'note-alpha',
+    audience: CHR,
+  }, 'audience must be the closed object, not a bare id');
+  assertReject(addKnowledgeReq, {
+    owner_kind: 'world',
+    world_id: WLD,
+    block_type: 'info_point',
+    canonical_name: 'note-alpha',
+    creator_only: false,
+  }, 'add knowledge legacy creator_only false is rejected');
+  assertReject(addKnowledgeReq, {
+    owner_kind: 'world',
+    world_id: WLD,
+    block_type: 'info_point',
+    canonical_name: 'note-alpha',
+    holder_entry_id: HLD,
+  }, 'add knowledge client-authored holder is rejected');
   assertReject(addKnowledgeReq, {
     owner_kind: 'character',
     character_id: CHR,
@@ -276,11 +355,74 @@ function main() {
     body: { summary: 'x' },
   }, 'add knowledge body injection');
   assertAccept(updateKnowledgeReq, { expected_revision: 0, summary: null }, 'update knowledge null summary');
+  assertAccept(updateKnowledgeReq, {
+    expected_revision: 0,
+    audience: { kind: 'shared' },
+  }, 'update knowledge explicit shared clears governance');
+  assertAccept(updateKnowledgeReq, {
+    expected_revision: 0,
+    audience: { kind: 'author-only' },
+    canonical_name: 'note-beta',
+  }, 'update knowledge author-only audience with content');
+  assertReject(updateKnowledgeReq, {
+    audience: { kind: 'shared' },
+  }, 'governance edit without expected_revision');
+  assertReject(updateKnowledgeReq, {
+    expected_revision: 0,
+    creator_only: false,
+  }, 'update knowledge legacy creator_only false is rejected');
   assertReject(updateKnowledgeReq, { expected_revision: 0, modules: {} }, 'update knowledge modules injection');
   assertAccept(deleteKnowledgeQuery, { expected_revision: 0 }, 'delete knowledge query');
   assertReject(deleteKnowledgeQuery, { expected_revision: 0, extra: true }, 'delete knowledge extra query param');
   assertReject(knowledgeItem, { ...validKnowledgeItem, revision: -1 }, 'knowledge item negative revision');
   assertReject(deleteKnowledgeQuery, { expected_revision: -1 }, 'delete knowledge negative revision');
+
+  const actorClaim = { actor_ref: { actor_kind: 'creator', creator_id: CTR }, world_id: WLD };
+  assertAccept(viewRequest, actorClaim, 'actor knowledge view request');
+  assertReject(viewRequest, { ...actorClaim, read_policy: 'CreatorManagement' }, 'client-selected read policy');
+  assertReject(viewRequest, { ...actorClaim, holder_entry_id: HLD }, 'client-selected holder');
+  assertReject(viewRequest, { ...actorClaim, viewpoint: HLD }, 'client-selected viewpoint');
+  assertReject(viewRequest, { ...actorClaim, creator_only: false }, 'view request legacy boolean');
+
+  assertAccept(character, { ...validCharacter, holder_entry_id: HLD }, 'character identity holder projection');
+  assertReject(character, { ...validCharacter, holder_entry_id: 'hld_' + 'a'.repeat(63) }, 'character short holder id');
+  assertReject(character, { ...validCharacter, holder_entry_id: 'kb_' + HEX32 }, 'character non-holder id');
+  assertAccept(creatorDetail, {
+    creator_id: CTR,
+    holder_entry_id: HLD,
+    has_api_key: false,
+    has_cached_token: false,
+    is_active: true,
+  }, 'creator detail holder projection');
+  assertReject(creatorDetail, {
+    creator_id: CTR,
+    holder_entry_id: 'hld_zz',
+    has_api_key: false,
+    has_cached_token: false,
+    is_active: true,
+  }, 'creator detail malformed holder id');
+  assertAccept(entityProjection, {
+    key_block_id: `kb_${HEX32}`,
+    world_id: WLD,
+    block_type: 'info_point',
+    canonical_name: 'note-alpha',
+    status: 'confirmed',
+    version: 0,
+    holder_entry_id: HLD,
+    disclosure: 'owner-private',
+  }, 'world kb entity projection holder governance');
+  assertReject(entityProjection, {
+    key_block_id: `kb_${HEX32}`,
+    world_id: WLD,
+    block_type: 'info_point',
+    canonical_name: 'note-alpha',
+    status: 'confirmed',
+    version: 0,
+    disclosure: 'shared',
+  }, 'world kb entity projection shared string');
+  assertAccept(entityPatch, { audience: { kind: 'shared' } }, 'world kb governance patch');
+  assertReject(entityPatch, { creator_only: true }, 'world kb patch legacy creator_only');
+  assertReject(entityPatch, { holder_entry_id: HLD }, 'world kb patch client-authored holder');
 
 
   process.stdout.write('actor-contract-fixtures: all assertions passed\n');

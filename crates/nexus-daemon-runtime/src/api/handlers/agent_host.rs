@@ -681,7 +681,21 @@ async fn assemble_admitted_prompt(
         request = request.with_user(creator_id);
     }
     let narrative = SqliteNarrativeGateway::new(pool.clone());
-    let kb = SpokeBackedKbStore::new(pool.clone());
+    // v1.191 P1 T9 (durable §4.2/§5.1): the Agent Host prompt is a
+    // **Character-view** consumer — it assembles over the same complete
+    // ActorView selection its admitted context was built from (the exact
+    // admitted holder plus the authorized containers), never a management
+    // review and never an unscoped store.
+    let (core, principal) = super::world_kb_guards::resolve_core_principal(state).await?;
+    let view_scope = core
+        .actor_view_read_scope(
+            &principal,
+            &ctx.actor,
+            ctx.world_id.as_str(),
+            ctx.binding_id.as_deref(),
+        )
+        .await?;
+    let kb = SpokeBackedKbStore::new(pool.clone(), view_scope);
     let knowledge = SqliteKnowledgeStore::new(pool);
     let assembled = assemble_moment(&request, &narrative, &kb, &knowledge).await;
     Ok(assembled.to_full_context())
@@ -2675,12 +2689,17 @@ mod tests {
         WorkspaceState,
         Arc<PromptHost>,
     ) {
-        let (tmp, nexus_home, db_path) = create_test_workspace().await;
-        std::fs::write(
-            nexus_home.join("config.toml"),
-            "active_creator_id = \"ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\n[active_workspace_slug_by_creator]\n\"ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\" = \"default\"\n",
+        // The actor fixtures own `ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`, so the
+        // home must be materialized FOR that creator/workspace: a post-hoc
+        // `config.toml` rewrite would leave the host's bound pool and the
+        // config-resolved selection naming different databases, and the
+        // T9 admitted-prompt read scope (`actor_view_read_scope`) resolves its
+        // principal from the opened core, not from the rewritten file.
+        let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace_for(
+            "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "default",
         )
-        .unwrap();
+        .await;
         let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
         let host = PromptHost::new();
         let facade: Arc<dyn nexus_agent_host::HostFacade> = host.clone();

@@ -418,8 +418,9 @@ async fn v151_insert_pending_with_llm_round_trips_metadata() {
     })
     .to_string();
 
+    let mut conn = pool.acquire().await.unwrap();
     let row = insert_pending_with_llm(
-        &pool,
+        &mut conn,
         "ctr_v151b",
         "wrk_v151b",
         "wld_v151b",
