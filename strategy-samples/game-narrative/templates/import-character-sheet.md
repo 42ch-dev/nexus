@@ -19,7 +19,7 @@ into the target World over Connect.
 If the character sheet section is empty or absent, respond with an empty
 `knowledge_entries` array — never invent source material.
 
-## Wire contract (spoke 0.9.2 KnowledgeEntry)
+## Wire contract (spoke `KnowledgeEntry` — the pinned lockstep release)
 
 | Field | Rule |
 |-------|------|
@@ -29,9 +29,22 @@ If the character sheet section is empty or absent, respond with an empty
 | `canonical_name` | human-readable name (e.g. "Lin Xia") |
 | `status` | `"provisional"` — the partner promotes to `"confirmed"` after verification |
 | `revision` | optional — update path only: the entry's last-known revision from your last read (the OCC base; omitted on first create). The host CAS-checks it and rejects with `stored_revision_stale` / `revision_conflict` on mismatch |
+| `owner` | **holder governance**: omit for a shared row (the default). A partner backend that wants an owner-private row may only set it to its own Connect-granted holder id; the host refuses any foreign holder |
+| `disclosure` | **holder governance**: omit for shared; `"owner-private"` requires `owner` to be the granted holder. Any other value is unknown vocabulary and is refused |
 | `body` | JSON object: `{ "summary": <one-line descriptor>, "attributes": { ... }, "tags": [...] }` |
 | `source_anchor` | optional: `{ "schema_version": 1, "source_id": "<sheet id>", "label": "<section title>", "extensions": {} }` |
-| `extensions` | `{}` (reserved) |
+| `extensions` | `{}` (reserved). Never put holder governance here — the retired `creator_only` key is refused, `false` included |
+
+Two governance rules for extracted drafts:
+
+1. **The model never chooses governance.** These drafts are *shared* by default;
+   this template emits no `owner`/`disclosure` at all. If the partner needs a
+   private row it applies its own granted holder at write time — an LLM-chosen
+   holder id is never trusted.
+2. **Private means isolated between narrative actors, not hidden from the
+   Creator.** The owning Creator keeps management review over its own private
+   rows; Characters, `--actor character` previews and every Connect read stay
+   filtered.
 
 ## `entry_type` — curated subset of the nexus BlockType vocabulary (snake_case on wire — use these exact values)
 
@@ -68,8 +81,11 @@ is the subset this template emits; it is not the full enum.
 5. Emit a `relation_hints` entry for every hard relationship stated in the
    sheet (member of faction, home location, relationship to another character,
    owns item). The hint contract is below.
+6. Emit **no** `owner` / `disclosure` and **no** `extensions.nexus.creator_only`:
+   these drafts are shared rows. Private audiences are the partner backend's
+   write-time decision at the host, never the extraction model's.
 
-## Relation hint contract (spoke 0.9.2 Relation — written via Connect `relate`)
+## Relation hint contract (spoke `Relation` — written via Connect `relate`)
 
 | Field | Rule |
 |-------|------|
@@ -125,7 +141,12 @@ the lane's final import manifest:
 
 ## SDK-side import pattern (N-C1, @42ch/spoke-connect@0.13.1)
 
-The partner's backend persists these drafts — the preset itself does not write:
+The partner's backend persists these drafts — the preset itself does not write.
+The host peer needs an operator-stored Actor **grant** (`grant` in
+`connect/allowlist.json`, see [strategy-samples/README.md §2](../../README.md#2-connect-with-the-sdk));
+without it every knowledge-entry op is denied, so a grant is the prerequisite
+for this whole flow. The granted Actor is the peer's ceiling: `owner` /
+`scope.viewpoint` can only narrow or match it.
 
 1. `upsert` with `{ "knowledge_entries": <drafts> }` creates the entries as
    `provisional`. When updating an entry, carry its last-known `revision` from
