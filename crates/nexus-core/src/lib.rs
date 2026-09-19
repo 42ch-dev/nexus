@@ -56,8 +56,9 @@ pub use actor_sessions::{
     CharacterOperationSnapshot, KnowledgeReuse,
 };
 pub use actors::{
-    classify_pair, require_actor_holder, ActorPairMode, ActorViewpoint, AdmittedActor,
-    AdmittedActorContext, CoreActorAdmission, CHARACTER_WIRE_INVALID_PREFIX,
+    classify_pair, require_active_owned_character, require_active_owned_world,
+    require_actor_holder, ActorPairMode, ActorViewpoint, AdmittedActor, AdmittedActorContext,
+    CoreActorAdmission, CHARACTER_WIRE_INVALID_PREFIX,
 };
 pub use chronology::CoreWorkChronology;
 pub use content::{resolve_guarded_path, resolve_guarded_path_async, CoreChapterContentQuery};

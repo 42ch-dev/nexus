@@ -130,6 +130,28 @@ pub enum GrantActor {
     },
 }
 
+/// How a granted Actor is admitted for one invoke (v1.191 P1 T14 fix round,
+/// durable §2.2/§9).
+///
+/// The grant is resolved the same way in both modes — the containers and the
+/// holder come from the stored ownership/registry rows — but the **liveness**
+/// requirement differs, exactly as the durable rules do:
+///
+/// * [`GrantAdmission::RetainedRead`] keeps the retained-read texture
+///   (§11.2): an archived but still-owned World/Character keeps its
+///   containers *readable*, which is what `check` / `assemble` need;
+/// * [`GrantAdmission::LiveWrite`] requires **live** admission: the granted
+///   World (and, for a Character grant, the Character and its binding) must
+///   be `active`, so an archived/paused Actor can never mutate knowledge or
+///   run compute.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GrantAdmission {
+    /// `check` / `assemble` — retained read of owned containers.
+    RetainedRead,
+    /// `upsert` / `promote` / `relate` / `compute` — live subject + binding.
+    LiveWrite,
+}
+
 impl PeerGrant {
     /// The granted World viewpoint.
     #[must_use]
@@ -211,7 +233,17 @@ impl PeerGrant {
     pub async fn resolve_scope(
         &self,
         pool: &sqlx::SqlitePool,
+        admission: GrantAdmission,
     ) -> Result<nexus_knowledge::world_kb::KnowledgeReadScope> {
+        // Live admission (durable §2.2/§9): a write/compute invoke requires
+        // the granted subject and binding to be ACTIVE, resolved from storage
+        // on this invoke. The guards are the core's own liveness authority —
+        // the retained-read resolution below is reused for the containers and
+        // the holder, so there is one container derivation and one liveness
+        // source.
+        if admission == GrantAdmission::LiveWrite {
+            self.require_live(pool).await?;
+        }
         let actor = match &self.actor {
             GrantActor::Creator { id } => nexus_core::AdmittedActor::Creator {
                 creator_id: id.clone(),
@@ -228,14 +260,40 @@ impl PeerGrant {
                 self.binding_id.as_deref(),
             )
             .await
-            .map_err(|e| {
-                CliError::Other(format!(
-                    "stored Actor grant (creator {}, actor {}, world {}) does not resolve: {e}",
-                    self.creator_id,
-                    self.actor_id(),
-                    self.world_id
-                ))
-            })
+            .map_err(|e| self.unresolvable(&e.to_string()))
+    }
+
+    /// The live-admission guards for `upsert` / `promote` / `relate` /
+    /// `compute` (v1.191 P1 T14 fix round, durable §2.2/§9): the granted
+    /// World must be active, and a Character grant additionally requires an
+    /// active Character and an **active** binding whose stored tuple matches
+    /// the grant.
+    async fn require_live(&self, pool: &sqlx::SqlitePool) -> Result<()> {
+        nexus_core::require_active_owned_world(pool, &self.creator_id, &self.world_id)
+            .await
+            .map_err(|e| self.unresolvable(&e.to_string()))?;
+        if let GrantActor::Character { id } = &self.actor {
+            nexus_core::require_active_owned_character(pool, &self.creator_id, id)
+                .await
+                .map_err(|e| self.unresolvable(&e.to_string()))?;
+            // `validate` guarantees a binding for a Character grant.
+            let binding = self.binding_id.as_deref().unwrap_or_default();
+            nexus_core::ActorKnowledgeViewService::new(pool.clone())
+                .require_active_binding(id, binding, &self.world_id)
+                .await
+                .map_err(|e| self.unresolvable(&e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// The stable, non-leaking denial message for an unresolvable grant.
+    fn unresolvable(&self, reason: &str) -> CliError {
+        CliError::Other(format!(
+            "stored Actor grant (creator {}, actor {}, world {}) does not resolve: {reason}",
+            self.creator_id,
+            self.actor_id(),
+            self.world_id
+        ))
     }
 }
 

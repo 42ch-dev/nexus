@@ -183,7 +183,7 @@
 //! without one is refused). `extract` stays unserved (`op_unsupported`),
 //! and the host never advertises `ke-extraction`.
 
-use super::allowlist::{PeerGrant, PeerScope};
+use super::allowlist::{GrantAdmission, PeerGrant, PeerScope};
 use libp2p::PeerId;
 use nexus_knowledge::world_kb::knowledge_entry::DISCLOSURE_OWNER_PRIVATE;
 use nexus_knowledge::world_kb::KnowledgeReadScope;
@@ -438,6 +438,19 @@ enum Route {
     /// set `S` from the adapter manifest's [`LOCAL_TOOL_OPS`]). Tools are
     /// host-local adapter reads, never core ops (AR-56).
     Tool,
+}
+
+/// The grant admission a route runs under (v1.191 P1 T14 fix round, durable
+/// §2.2/§9): writes and compute need **live** subject/binding admission,
+/// while the read half (`check` / `assemble`) keeps the retained-read
+/// texture of owned containers. Host-level tools carry no grant at all.
+const fn grant_admission(route: Route) -> GrantAdmission {
+    match route {
+        Route::Upsert | Route::Promote | Route::Relate | Route::Compute => {
+            GrantAdmission::LiveWrite
+        }
+        Route::Check | Route::Assemble | Route::Tool => GrantAdmission::RetainedRead,
+    }
 }
 
 /// The full dispatch pipeline. Every gate is fail-closed and runs before
@@ -721,7 +734,10 @@ fn run_in_lane(
             // KE port on the host adapter fails closed).
             let adapter_for_lane = match grant_for_lane.as_ref() {
                 None => ports_for_lane.host_adapter(),
-                Some(grant) => match grant.resolve_scope(ports_for_lane.pool()).await {
+                Some(grant) => match grant
+                    .resolve_scope(ports_for_lane.pool(), grant_admission(route))
+                    .await
+                {
                     Ok(selection) => ports_for_lane.scoped_adapter(selection),
                     Err(e) => return Err(denied(&e.to_string())),
                 },
@@ -2241,11 +2257,15 @@ mod tests {
 
     /// The admitted selection `peer`'s stored grant resolves to (the real
     /// resolution path, used to stage fixtures through a scoped adapter).
-    async fn granted_selection(scope: &PeerScope, peer: &PeerId, pool: &sqlx::SqlitePool) -> KnowledgeReadScope {
+    async fn granted_selection(
+        scope: &PeerScope,
+        peer: &PeerId,
+        pool: &sqlx::SqlitePool,
+    ) -> KnowledgeReadScope {
         scope
             .grant_for(peer)
             .expect("fixture scope carries a grant")
-            .resolve_scope(pool)
+            .resolve_scope(pool, GrantAdmission::LiveWrite)
             .await
             .expect("fixture grant resolves against the seeded rows")
     }
@@ -3377,6 +3397,84 @@ mod tests {
                 .await
                 .expect("count");
         assert_eq!(written, 0, "a denied invoke writes nothing");
+        drop(temp);
+    }
+
+    /// Durable §2.2/§9 (fix round): writes and compute need **live**
+    /// admission — once the granted binding is paused, `upsert` is denied
+    /// with zero writes while the read half (`check`) keeps serving the
+    /// retained read of the same grant.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn v1191_holder_connect_writes_need_live_admission_and_reads_stay_retained() {
+        let peer = fixed_keypair(40).public().to_peer_id();
+        let scope = allowlist_for(
+            peer,
+            &["upsert", "check"],
+            Some(character_grant(CHARACTER, BINDING)),
+        );
+        let (temp, pool) = test_pool().await;
+        let ports = ConnectPorts::new(pool.clone(), None);
+        let (handler, _lane, _serializer) =
+            build_handler_with_limits(scope, ports, BridgeLimits::default());
+        let payload = || {
+            serde_json::json!({
+                "knowledge_entries": [entry_fixture("kb_live_admission", WORLD_A)],
+            })
+        };
+        let check = || serde_json::json!({ "scope": { "scope_id": WORLD_A } });
+
+        handler(&peer, "upsert", payload())
+            .expect("an active binding admits the write");
+        handler(&peer, "check", check()).expect("the read half is served");
+
+        // Pause the binding: the stored tuple still resolves for a retained
+        // read, but it is no longer a live write admission.
+        sqlx::query("UPDATE actor_world_bindings SET status = 'inactive' WHERE binding_id = ?")
+            .bind(BINDING)
+            .execute(&pool)
+            .await
+            .expect("pause binding");
+        match handler(
+            &peer,
+            "upsert",
+            serde_json::json!({
+                "knowledge_entries": [entry_fixture("kb_live_admission_denied", WORLD_A)],
+            }),
+        ) {
+            Err(envelope) => {
+                assert_eq!(envelope.code, "op_unsupported");
+                assert!(
+                    envelope.message.contains("does not resolve"),
+                    "the denial must report the live admission failure: {}",
+                    envelope.message
+                );
+            }
+            Ok(served) => panic!("a paused binding must deny the write, got {served}"),
+        }
+        let written: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE key_block_id = ?")
+                .bind("kb_live_admission_denied")
+                .fetch_one(&pool)
+                .await
+                .expect("count");
+        assert_eq!(written, 0, "a denied write persists nothing");
+        handler(&peer, "check", check())
+            .expect("the retained read stays served while the binding is paused");
+
+        // Resume: live admission holds again.
+        sqlx::query("UPDATE actor_world_bindings SET status = 'active' WHERE binding_id = ?")
+            .bind(BINDING)
+            .execute(&pool)
+            .await
+            .expect("resume binding");
+        handler(
+            &peer,
+            "upsert",
+            serde_json::json!({
+                "knowledge_entries": [entry_fixture("kb_live_admission_resumed", WORLD_A)],
+            }),
+        )
+        .expect("a resumed binding admits the write again");
         drop(temp);
     }
 
