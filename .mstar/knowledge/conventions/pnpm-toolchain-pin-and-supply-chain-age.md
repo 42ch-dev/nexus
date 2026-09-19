@@ -5,7 +5,7 @@ problem_type: knowledge
 category: conventions
 severity: medium
 tags: [pnpm, toolchain, supply-chain, minimumReleaseAge, lockfile, ci-pin, allowBuilds]
-last_updated: 2026-08-19
+last_updated: 2026-09-18
 applies_when: Installing or upgrading npm deps (especially same-day releases, spoke lockstep bumps); any pnpm install failure mentioning ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION, ERR_PNPM_IGNORED_BUILDS, or MODULE_NOT_FOUND after a partial install
 ---
 
@@ -19,6 +19,8 @@ CI and local both run pnpm **11** (`.github/actions/setup-monorepo/action.yml` d
 2. **Dependency lifecycle scripts are blocked by default.** Without an `allowBuilds` allowlist, `pnpm install` fails with `ERR_PNPM_IGNORED_BUILDS` (exit 1 — breaks `--frozen-lockfile` in CI, not just a warning). `allowBuilds: { esbuild: true, msw: true }` preserves the pnpm-9 behavior; esbuild needs its postinstall to place the platform binary (vite/tsup break without it), msw's postinstall is a guarded no-op.
 
 Historical note (why this pin lagged): until 2026-08-15 CI pinned pnpm 9 while dev machines ran 11, and a local pnpm 11 `minimumReleaseAge` supply-chain policy rejected same-day publishes (e.g. `@42ch/spoke-*@0.10.0`), with failed installs sometimes partially wiping `node_modules/.pnpm`. Hit 3× in V1.164 before the pin caught up.
+
+**2026-09-18 recurrence (v1.191 P1 lockstep to `@42ch/spoke-*@0.13.1`)**: the 720-minute window applies to first-party lockstep releases too — `pnpm install --frozen-lockfile` fails on the two spoke packages until `publish time + 12h`, and pnpm 11's `verify-deps-before-run` preflight makes **every `pnpm run <script>`** fail the same way (not just install), because it auto-runs an install. CLI-only env override for scripts during the window (no config file edit): `pnpm --config.verify_deps_before_run=false --config.minimumReleaseAge=0 run <script>`. CI `--frozen-lockfile` must simply wait out the window (schedule PRs after it) or the policy needs a first-party exemption mechanism.
 
 ## Guidance
 
