@@ -16,7 +16,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { lstatSync, readFileSync } from 'node:fs';
+import { closeSync, constants, fstatSync, openSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { CoreServiceDiscovery } from '@42ch/nexus-contracts';
 import type { ServiceOptions } from '@42ch/nexus-service';
@@ -764,14 +764,15 @@ export class DesktopServiceController {
           detail: `the published service record belongs to a different home; refusing to attach on ${this.host}:${this.targetPort}`,
         };
       }
-      if (!this.isTrustedEndpoint(record.endpoint)) {
+      const target = this.admittedEndpoint(record.endpoint);
+      if (!target) {
         const named = record.endpoint.transport === 'http' ? record.endpoint.url : record.endpoint.path;
         return {
           kind: 'conflict',
           detail: `the published service record names ${named}, not this session's service endpoint ${this.host}:${this.targetPort}`,
         };
       }
-      const confirmed = await this.confirmIdentity(record.endpoint, record, this.clock.now() + READINESS_DEADLINE_MS);
+      const confirmed = await this.confirmIdentity(target, record, this.clock.now() + READINESS_DEADLINE_MS);
       if (confirmed) return { kind: 'attached', live: confirmed.live, version: confirmed.version };
     }
     if (await this.listenerAnswers()) {
@@ -783,15 +784,29 @@ export class DesktopServiceController {
     return { kind: 'none' };
   }
 
-  /** This session's trusted service endpoint: loopback host and resolved port, HTTP only. */
-  private isTrustedEndpoint(endpoint: CoreServiceDiscovery['endpoint']): boolean {
-    const origin = endpointOrigin(endpoint);
-    if (!origin) return false;
-    try {
-      return new URL(origin).hostname === this.host && endpointPort(endpoint) === this.targetPort;
-    } catch {
-      return false;
-    }
+  /**
+   * This session's service endpoint — the loopback origin the app starts and
+   * probes the service on. Every request this controller issues targets it.
+   */
+  private trustedOrigin(): string {
+    return `http://${this.host}:${this.targetPort}`;
+  }
+
+  /**
+   * The endpoint a published record may be probed on, or `null` when the record
+   * is not this session's service. A record is admitted only when it names
+   * exactly this session's loopback origin (HTTP only, §8.1); another host,
+   * port, scheme or a decorated URL is a planted or foreign-session record.
+   * The returned endpoint is built from this session's own fields, so no part
+   * of a record — host, port, scheme or path — can reach a request, and the
+   * guarded probe that carries this session's API key can only ever go to this
+   * session's own service.
+   */
+  private admittedEndpoint(
+    endpoint: CoreServiceDiscovery['endpoint'],
+  ): CoreServiceDiscovery['endpoint'] | null {
+    const origin = this.trustedOrigin();
+    return endpointOrigin(endpoint) === origin ? { transport: 'http', url: origin } : null;
   }
 
   private async startOwned(): Promise<void> {
@@ -840,7 +855,9 @@ export class DesktopServiceController {
       this.setStatus({ state: 'error', port: this.targetPort, detail });
       throw utilityError('internal', detail);
     }
-    const confirmed = await this.confirmIdentity(record.endpoint, record, deadline);
+    // The probe targets the endpoint the owner itself reported (equal to the
+    // published record's above) — never the record's string off disk.
+    const confirmed = await this.confirmIdentity(replyDiscovery.endpoint, record, deadline);
     if (!confirmed) {
       const detail = `service did not answer authenticated discovery and health within ${READINESS_DEADLINE_MS}ms`;
       this.setStatus({ state: 'error', port: this.targetPort, detail });
@@ -941,8 +958,7 @@ export class DesktopServiceController {
       this.setStatus({ state: 'stopped', port: this.targetPort, detail: undefined });
       return;
     }
-    const origin = endpointOrigin(live.endpoint);
-    if (!origin) throw utilityError('invalid_input', 'attached service endpoint is not HTTP');
+    const origin = this.trustedOrigin();
     const response = await this.probeJson(`${origin}/v1/daemon/runtime/stop`, {
       method: 'POST',
       body: {
@@ -1065,17 +1081,14 @@ export class DesktopServiceController {
         'the detached service published a discovery record for a different home',
       );
     }
-    if (!this.isTrustedEndpoint(record.endpoint)) {
+    const target = this.admittedEndpoint(record.endpoint);
+    if (!target) {
       throw utilityError(
         'interrupted',
         `the detached service published a discovery record for another endpoint, not ${this.host}:${this.targetPort}`,
       );
     }
-    const confirmed = await this.confirmIdentity(
-      record.endpoint,
-      record,
-      this.clock.now() + READINESS_DEADLINE_MS,
-    );
+    const confirmed = await this.confirmIdentity(target, record, this.clock.now() + READINESS_DEADLINE_MS);
     if (!confirmed) {
       throw utilityError(
         'interrupted',
@@ -1094,14 +1107,24 @@ export class DesktopServiceController {
 
   // ── probes ───────────────────────────────────────────────────────────────
 
+  /**
+   * Read the published discovery record through a single descriptor: the file
+   * is opened once and the descriptor is both type-checked (`fstat`) and read,
+   * so a leaf swapped after a separate check cannot redirect the read.
+   * `O_NOFOLLOW` keeps the retired no-symlink posture — a planted symlink at
+   * the leaf is refused, not followed.
+   */
   private readRecord(): CoreServiceDiscovery | null {
     const path = join(this.home, ...RECORD_SEGMENTS);
+    let fd: number | null = null;
     try {
-      // lstat, never stat: a planted symlink at the leaf is refused, not read.
-      if (!lstatSync(path).isFile()) return null;
-      return assertDiscoveryShape(JSON.parse(readFileSync(path, 'utf8')));
+      fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+      if (!fstatSync(fd).isFile()) return null;
+      return assertDiscoveryShape(JSON.parse(readFileSync(fd, 'utf8')));
     } catch {
       return null;
+    } finally {
+      if (fd !== null) closeSync(fd);
     }
   }
 
@@ -1152,7 +1175,7 @@ export class DesktopServiceController {
   /** Any HTTP answer on the target port means a listener exists (identity unproven). */
   private async listenerAnswers(): Promise<boolean> {
     try {
-      await fetch(`http://${this.host}:${this.targetPort}/v1/daemon/runtime/health`, {
+      await fetch(`${this.trustedOrigin()}/v1/daemon/runtime/health`, {
         method: 'GET',
         redirect: 'error',
         signal: AbortSignal.timeout(PROBE_REQUEST_TIMEOUT_MS),

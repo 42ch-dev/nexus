@@ -11,7 +11,7 @@
  */
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -1007,6 +1007,59 @@ test('a record naming another endpoint is a conflict, not an attach', async () =
   assert.equal(controller.getStatus().state, 'error');
   assert.equal(recorded.children.length, 0);
   assert.equal(service.requests.length, 0, 'the named endpoint is never probed');
+
+  await service.close();
+});
+
+test('a record that does not name exactly this session endpoint is never probed', async () => {
+  const home = tempHome();
+  const service = await startStubService();
+  // Same loopback host and port, decorated URL: not this session's endpoint.
+  const record = makeRecord({
+    home,
+    origin: `${service.url}/decoy`,
+    instanceId: 'inst-decorated',
+    readiness: 'ready',
+  });
+  service.setRecord(record);
+  writeRecord(home, record);
+  const clock = testClock();
+  const recorded = spawnRecorder(() => {});
+  const controller = makeController({ home, port: service.port, spawnUtility: recorded.spawn, clock });
+
+  await assert.rejects(controller.start(), /not this session's service endpoint/);
+  assert.equal(controller.getStatus().state, 'error');
+  assert.equal(recorded.children.length, 0);
+  assert.equal(service.requests.length, 0, 'a record string never becomes a request target');
+
+  await service.close();
+});
+
+test('a symlinked discovery record leaf is refused, not followed', async () => {
+  const home = tempHome();
+  const linked = tempHome();
+  const service = await startStubService();
+  // A record that would attach if its leaf were followed: this home, this
+  // instance, this session's endpoint — planted behind a symlink.
+  const record = makeRecord({ home, origin: service.url, instanceId: 'inst-linked', readiness: 'ready' });
+  service.setRecord(record);
+  writeRecord(linked, record);
+  mkdirSync(dirname(recordPath(home)), { recursive: true, mode: 0o700 });
+  symlinkSync(recordPath(linked), recordPath(home));
+
+  const clock = testClock();
+  const recorded = spawnRecorder(() => {});
+  const controller = makeController({ home, port: service.port, spawnUtility: recorded.spawn, clock });
+
+  // The leaf is refused at open, so the record is never adopted and no second
+  // owner is spawned: the listener on this session's endpoint cannot prove the
+  // identity a planted record would claim.
+  await assert.rejects(
+    controller.start(),
+    /does not provide matching authenticated service discovery/,
+  );
+  assert.equal(controller.getStatus().state, 'error');
+  assert.equal(recorded.children.length, 0);
 
   await service.close();
 });

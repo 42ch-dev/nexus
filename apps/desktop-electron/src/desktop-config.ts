@@ -188,12 +188,19 @@ export function createDesktopConfig(home: string, documentsPath: string): Deskto
     }
   }
 
-  /** Atomic replace: write a sibling temp file, then rename it into place. */
+  /**
+   * Atomic replace: write a sibling temp file, then rename it into place.
+   *
+   * The temp file is created `0600` — owner-only, like the service's own
+   * published record (`service.json`) — so a temporarily materialized copy of
+   * the document is never readable by another user. It stays in the target's
+   * directory because the rename must not cross a filesystem.
+   */
   async function writeDocument(path: string, doc: TomlTable): Promise<void> {
     const tmp = `${path}.${randomUUID()}.tmp`;
     try {
       await mkdir(dirname(path), { recursive: true });
-      await writeFile(tmp, stringify(doc), 'utf8');
+      await writeFile(tmp, stringify(doc), { encoding: 'utf8', mode: 0o600 });
       await rename(tmp, path);
     } catch (err) {
       await rm(tmp, { force: true }).catch(() => undefined);
