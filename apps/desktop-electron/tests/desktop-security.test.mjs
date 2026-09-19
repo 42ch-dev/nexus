@@ -41,7 +41,6 @@ import {
   desktopPathHasTraversal,
   isAllowedDesktopExternalUrl,
   isDesktopHtmlNavigation,
-  registerProofProtocol,
   resolveDesktopAssetPath,
   resolveDesktopNavigationPath,
 } from '../dist/protocol.js';
@@ -715,15 +714,7 @@ test('compiled preload mirrors the contract parity manifest exactly', async () =
 });
 
 // ---------------------------------------------------------------------------
-// Retained proof protocol: main.ts (P0-T7's file) calls registerProofProtocol
-// synchronously, so the shim must install registration before returning.
+// Proof protocol: retired with the proof shell's runtime callsites (P0-T7) —
+// no product proof IPC remains (covered by tests/desktop-host.test.mjs).
 // ---------------------------------------------------------------------------
 
-test('registerProofProtocol keeps a synchronous registration contract', () => {
-  // Under plain node the electron API is unavailable; a synchronous contract
-  // therefore THROWS synchronously here. The previous async implementation
-  // returned a rejected promise instead — this assertion pins the sync shape
-  // so P0-T7's un-awaited callsite cannot race window creation.
-  assert.throws(() => registerProofProtocol('/nonexistent-dist'), /electron main API unavailable/);
-  assert.equal(registerProofProtocol.length, 1);
-});

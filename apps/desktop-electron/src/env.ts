@@ -1,9 +1,8 @@
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ServiceOptions } from '@42ch/nexus-service';
-import type { UtilityConfig } from './ipc.js';
 
 const ALLOWED_ENV_KEYS = new Set([
   'PATH',
@@ -25,28 +24,6 @@ const PATH_DENY_SEGMENTS = ['rustup', '.cargo/bin', 'node-gyp'];
 
 export function repoRootFromMeta(metaUrl: string): string {
   return resolve(fileURLToPath(new URL('../../..', metaUrl)));
-}
-
-export function resolveProofHome(raw: string | undefined, repoRoot: string): string {
-  if (!raw || raw.trim() === '') {
-    throw new Error(
-      'NEXUS_PROOF_HOME is required (absolute path to a disposable seeded home). ' +
-        'The renderer cannot supply home/principal claims.',
-    );
-  }
-  const candidate = isAbsolute(raw) ? raw : resolve(repoRoot, raw);
-  if (!existsSync(candidate)) {
-    throw new Error(`NEXUS_PROOF_HOME does not exist: ${candidate}`);
-  }
-  return realpathSync(candidate);
-}
-
-export function buildUtilityConfig(home: string): UtilityConfig {
-  return {
-    user_home: home,
-    access: 'engine_owner',
-    allow_uninitialized: false,
-  };
 }
 
 /** Desktop compatibility port (`rust-core-service-boundary.md` §8.1). */

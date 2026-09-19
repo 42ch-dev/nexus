@@ -1,61 +1,20 @@
 /**
  * Protocol + navigation policy for the Electron desktop shell (v1.192 P0-T1).
- *
- * Two scheme families coexist while P0-T7 integrates the product host:
- *  - `nexus-proof:` — the retired proof shell (kept compiling for main.ts until
- *    P0-T7 deletes its callsites).
- *  - `nexus:` — the production desktop scheme (THIS contract): standard,
- *    secure, fetch, streaming; packaged resources only under the canonical
- *    dist root; exact-origin CSP with main-validated origins only.
+/**
+ * The production desktop scheme `nexus:` is the one host scheme: standard,
+ * secure, fetch, streaming; packaged resources only under the canonical
+ * dist root; exact-origin CSP with main-validated origins only. The retired
+ * proof scheme and its open-policy helpers were deleted with the proof
+ * shell's runtime callsites in P0-T7.
  *
  * The `electron` value import is dynamic (see desktop-ipc.ts for the same
  * rationale): the pure path/origin/CSP policy below must stay importable in
  * plain node tests.
  */
-import { createRequire } from 'node:module';
 import { createReadStream, existsSync, lstatSync, realpathSync, statSync } from 'node:fs';
 import { join, normalize, sep } from 'node:path';
 import { Readable } from 'node:stream';
 import { DESKTOP_HOST, DESKTOP_SCHEME, isDesktopAppOrigin } from './desktop-contract.js';
-
-/**
- * Synchronous accessor for the Electron main-process API. Plain static
- * imports would break the plain-node test import of this module (the
- * `electron` package entry outside Electron is a binary-path string, not the
- * API), and a lazy `await import()` makes registration async — which races
- * the synchronous main.ts callsite of the retained proof shim. `createRequire`
- * resolves the real API synchronously when running under Electron and throws
- * a clear error otherwise. (Documented exception to the static-import rule.)
- */
-const requireModule = createRequire(import.meta.url);
-
-function electronMainApi(): typeof import('electron') {
-  const mod: unknown = requireModule('electron');
-  if (!mod || typeof mod !== 'object' || !('protocol' in mod)) {
-    throw new Error('electron main API unavailable outside the desktop main process');
-  }
-  return mod as typeof import('electron');
-}
-
-// ---------------------------------------------------------------------------
-// Proof scheme (retired — removed with main.ts callsites in P0-T7)
-// ---------------------------------------------------------------------------
-
-export const PROOF_SCHEME = 'nexus-proof';
-export const PROOF_HOST = 'app';
-
-const PROOF_CSP = [
-  "default-src 'self' nexus-proof:",
-  "script-src 'self' nexus-proof:",
-  "style-src 'self' 'unsafe-inline' nexus-proof:",
-  "img-src 'self' data: blob: nexus-proof:",
-  "font-src 'self' data: nexus-proof:",
-  "connect-src 'self' nexus-proof: http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*",
-  "object-src 'none'",
-  "base-uri 'none'",
-  "frame-ancestors 'none'",
-  "form-action 'none'",
-].join('; ');
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -74,10 +33,8 @@ const MIME: Record<string, string> = {
   '.map': 'application/json; charset=utf-8',
 };
 
-let canonicalDistRoot: string | null = null;
-
-export function proofIndexUrl(): string {
-  return `${PROOF_SCHEME}://${PROOF_HOST}/index.html`;
+function isUnderRoot(candidate: string, root: string): boolean {
+  return candidate === root || candidate.startsWith(root + sep);
 }
 
 export function resolveDistRoot(repoRoot: string): string {
@@ -94,49 +51,6 @@ export function assertDistPresent(distRoot: string): void {
   }
 }
 
-function canonicalRoot(distRoot: string): string {
-  return (canonicalDistRoot ??= realpathSync.native(distRoot));
-}
-
-function isUnderRoot(candidate: string, root: string): boolean {
-  return candidate === root || candidate.startsWith(root + sep);
-}
-
-function resolveSafePath(distRoot: string, urlPath: string): string | null {
-  let decoded: string;
-  try {
-    decoded = decodeURIComponent(urlPath.split('?')[0]?.split('#')[0] ?? '');
-  } catch {
-    return null;
-  }
-  const relative = decoded.replace(/^\/+/, '');
-  if (relative.includes('..')) {
-    return null;
-  }
-  const candidate = normalize(join(distRoot, relative));
-  const root = normalize(distRoot + sep);
-  if (!candidate.startsWith(root)) {
-    return null;
-  }
-  if (!existsSync(candidate)) {
-    return null;
-  }
-  let canonicalCandidate: string;
-  try {
-    canonicalCandidate = realpathSync.native(candidate);
-  } catch {
-    return null;
-  }
-  if (!isUnderRoot(canonicalCandidate, canonicalRoot(distRoot))) {
-    return null;
-  }
-  const stat = lstatSync(candidate);
-  if (!stat.isFile()) {
-    return null;
-  }
-  return canonicalCandidate;
-}
-
 function contentType(filePath: string): string {
   const ext = filePath.slice(filePath.lastIndexOf('.')).toLowerCase();
   return MIME[ext] ?? 'application/octet-stream';
@@ -149,73 +63,6 @@ function hasControlChars(value: string): boolean {
     if (code < 0x20 || code === 0x7f) return true;
   }
   return false;
-}
-
-/**
- * Retired proof-scheme registration, kept alive solely because P0-T7 (sole
- * writer of main.ts) removes its callsite; deleted with that callsite.
- *
- * SYNCHRONOUS contract: main.ts calls this without awaiting, so registration
- * must be installed before the call returns. The Electron API is resolved
- * synchronously via createRequire (see module header) — a lazy async import
- * would yield before registration and race the window creation that follows.
- */
-export function registerProofProtocol(distRoot: string): void {
-  const { protocol } = electronMainApi();
-  assertDistPresent(distRoot);
-  canonicalDistRoot = realpathSync.native(distRoot);
-
-  protocol.handle(PROOF_SCHEME, (request) => {
-    const url = new URL(request.url);
-    if (url.hostname !== PROOF_HOST) {
-      return new Response('forbidden', { status: 403 });
-    }
-    let pathname = url.pathname;
-    if (pathname.endsWith('/')) pathname += 'index.html';
-    if (pathname === '/' || pathname === '') pathname = '/index.html';
-    const filePath = resolveSafePath(distRoot, pathname);
-    if (!filePath) {
-      return new Response('not found', { status: 404 });
-    }
-    const stat = statSync(filePath);
-    if (!stat.isFile()) {
-      return new Response('not found', { status: 404 });
-    }
-    const body = Readable.toWeb(createReadStream(filePath)) as ReadableStream;
-    return new Response(body, {
-      status: 200,
-      headers: {
-        'Content-Type': contentType(filePath),
-        'Content-Security-Policy': PROOF_CSP,
-        'X-Content-Type-Options': 'nosniff',
-        'Cache-Control': 'no-store',
-      },
-    });
-  });
-}
-
-export function isProofOrigin(url: string): boolean {
-  return allowNavigation(url);
-}
-
-export function allowNavigation(url: string): boolean {
-  try {
-    const parsed = new URL(url);
-    return parsed.protocol === `${PROOF_SCHEME}:` && parsed.hostname === PROOF_HOST;
-  } catch {
-    return false;
-  }
-}
-
-export function isAllowedExternalUrl(url: string): boolean {
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol !== 'https:') return false;
-    const host = parsed.hostname.toLowerCase();
-    return host === 'github.com' || host.endsWith('.github.com') || host === 'nexus42.invalid';
-  } catch {
-    return false;
-  }
 }
 
 // ---------------------------------------------------------------------------
