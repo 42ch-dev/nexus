@@ -25,6 +25,11 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 // --- mirrors of desktop-contract.ts (canonical definitions live there) ---
+// Every mirror value is pinned against DESKTOP_BRIDGE_MANIFEST by
+// tests/desktop-security.test.mjs — a drift on either side fails the parity
+// lock. Keep in lockstep with desktop-contract.ts.
+const DESKTOP_BRIDGE_VERSION = 1 as const;
+const DESKTOP_ENVELOPE_VERSION = 1 as const;
 const DESKTOP_INVOKE_CHANNEL = 'nexus:desktop:invoke' as const;
 const DESKTOP_STATUS_CHANNEL = 'nexus:desktop:status-changed' as const;
 const DESKTOP_RUNTIME_CHANNEL = 'nexus:desktop:runtime' as const;
@@ -124,14 +129,19 @@ function readTrustedRuntime(): { localEndpoint: string } {
 function isDesktopResponse(
   value: unknown,
 ): value is {
+  version: number;
   request_id: string;
   ok: boolean;
   result?: unknown;
   error?: { code: string; message: string };
 } {
   if (!value || typeof value !== 'object') return false;
-  const body = value as { request_id?: unknown; ok?: unknown };
-  return typeof body.request_id === 'string' && typeof body.ok === 'boolean';
+  if (!('version' in value) || !('request_id' in value) || !('ok' in value)) return false;
+  return (
+    value.version === DESKTOP_ENVELOPE_VERSION &&
+    typeof value.request_id === 'string' &&
+    typeof value.ok === 'boolean'
+  );
 }
 
 /** Preload-side bound re-check; main already validated before sending. */
@@ -152,7 +162,9 @@ function invoke(operation: DesktopOperation, payload?: unknown): Promise<unknown
   }
   const request_id = crypto.randomUUID();
   const envelope =
-    payload === undefined ? { request_id, operation } : { request_id, operation, payload };
+    payload === undefined
+      ? { version: DESKTOP_ENVELOPE_VERSION, request_id, operation }
+      : { version: DESKTOP_ENVELOPE_VERSION, request_id, operation, payload };
   return ipcRenderer.invoke(DESKTOP_INVOKE_CHANNEL, envelope).then((raw: unknown) => {
     if (!isDesktopResponse(raw)) {
       throw typedError('internal', 'malformed desktop response envelope');
@@ -166,7 +178,7 @@ function invoke(operation: DesktopOperation, payload?: unknown): Promise<unknown
 }
 
 const bridge: DesktopBridge = {
-  version: 1,
+  version: DESKTOP_BRIDGE_VERSION,
   runtime: readTrustedRuntime(),
   invoke,
   onStatusChanged(listener) {

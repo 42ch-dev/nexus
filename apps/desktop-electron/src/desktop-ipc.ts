@@ -50,8 +50,21 @@ export type DesktopHandlers = {
 };
 
 export interface RegisterDesktopIpcOptions extends DesktopOriginOptions {
-  /** Current window generation; events from an older generation are stale. */
+  /**
+   * Generation this registration was bound to. Events are checked against
+   * the LIVE current generation (see `getCurrentGeneration`), not just this
+   * value, so a stale registration left installed after navigation is
+   * rejected with `stale_sender`.
+   */
   generation?: number;
+  /**
+   * Live current-generation source owned by main. REQUIRED for the
+   * registered path to enforce the frozen "current window generation"
+   * invariant; without it the check degenerates to the registration
+   * constant (vacuous). Main increments this on every window
+   * replacement/navigation generation transition (P0-T7).
+   */
+  getCurrentGeneration?: () => number;
   requestTimeoutMs?: number;
 }
 
@@ -92,6 +105,22 @@ export function assertDesktopSender(
   if (typeof view.frameUrl !== 'string' || !isDesktopAppOrigin(view.frameUrl, options)) {
     throw desktopError('invalid_origin', 'ipc sender frame is not the app origin');
   }
+}
+
+/**
+ * Sender check for the REGISTERED invoke path: binds the event view to the
+ * registration's generation, then compares it against the live
+ * `getCurrentGeneration()` source owned by main. A registration left
+ * installed after a window-generation transition therefore rejects events
+ * with `stale_sender` instead of comparing a closure constant to itself.
+ */
+export function assertDesktopEventSender(
+  view: Omit<DesktopSenderView, 'generation'>,
+  options: RegisterDesktopIpcOptions = {},
+): void {
+  const boundGeneration = options.generation ?? 0;
+  const currentGeneration = options.getCurrentGeneration?.() ?? boundGeneration;
+  assertDesktopSender({ ...view, generation: boundGeneration }, currentGeneration, options);
 }
 
 interface QueueEntry {
@@ -159,7 +188,6 @@ export async function registerDesktopIpc(
   options: RegisterDesktopIpcOptions = {},
 ): Promise<RegisterDesktopIpcResult> {
   const { ipcMain } = await import('electron');
-  const generation = options.generation ?? 0;
   const timeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   const admission = new DesktopAdmission();
 
@@ -167,16 +195,14 @@ export async function registerDesktopIpc(
     const webContents = window.webContents;
     let request;
     try {
-      assertDesktopSender(
+      assertDesktopEventSender(
         {
           windowAlive: !window.isDestroyed(),
           senderIsSelectedWebContents: event.sender === webContents,
           senderFramePresent: event.senderFrame != null,
           senderFrameIsMainFrame: event.senderFrame === webContents.mainFrame,
           frameUrl: event.senderFrame?.url ?? null,
-          generation,
         },
-        generation,
         options,
       );
       request = parseDesktopRequest(raw);

@@ -12,10 +12,30 @@
  * rationale): the pure path/origin/CSP policy below must stay importable in
  * plain node tests.
  */
+import { createRequire } from 'node:module';
 import { createReadStream, existsSync, lstatSync, realpathSync, statSync } from 'node:fs';
 import { join, normalize, sep } from 'node:path';
 import { Readable } from 'node:stream';
 import { DESKTOP_HOST, DESKTOP_SCHEME, isDesktopAppOrigin } from './desktop-contract.js';
+
+/**
+ * Synchronous accessor for the Electron main-process API. Plain static
+ * imports would break the plain-node test import of this module (the
+ * `electron` package entry outside Electron is a binary-path string, not the
+ * API), and a lazy `await import()` makes registration async — which races
+ * the synchronous main.ts callsite of the retained proof shim. `createRequire`
+ * resolves the real API synchronously when running under Electron and throws
+ * a clear error otherwise. (Documented exception to the static-import rule.)
+ */
+const requireModule = createRequire(import.meta.url);
+
+function electronMainApi(): typeof import('electron') {
+  const mod: unknown = requireModule('electron');
+  if (!mod || typeof mod !== 'object' || !('protocol' in mod)) {
+    throw new Error('electron main API unavailable outside the desktop main process');
+  }
+  return mod as typeof import('electron');
+}
 
 // ---------------------------------------------------------------------------
 // Proof scheme (retired — removed with main.ts callsites in P0-T7)
@@ -134,9 +154,14 @@ function hasControlChars(value: string): boolean {
 /**
  * Retired proof-scheme registration, kept alive solely because P0-T7 (sole
  * writer of main.ts) removes its callsite; deleted with that callsite.
+ *
+ * SYNCHRONOUS contract: main.ts calls this without awaiting, so registration
+ * must be installed before the call returns. The Electron API is resolved
+ * synchronously via createRequire (see module header) — a lazy async import
+ * would yield before registration and race the window creation that follows.
  */
-export async function registerProofProtocol(distRoot: string): Promise<void> {
-  const { protocol } = await import('electron');
+export function registerProofProtocol(distRoot: string): void {
+  const { protocol } = electronMainApi();
   assertDistPresent(distRoot);
   canonicalDistRoot = realpathSync.native(distRoot);
 
@@ -367,12 +392,18 @@ export function resolveDesktopAssetPath(distRoot: string, urlPath: string): stri
   return canonicalCandidate;
 }
 
-/** SPA route fallback applies to HTML navigations only, never API/assets. */
+/**
+ * SPA route fallback applies to HTML navigations only, never API/assets.
+ * A bare wildcard Accept value (star/star) is NOT a navigation signal — it
+ * is the default fetch/asset Accept value — so it must not trigger the
+ * index.html fallback for unknown API/asset paths; only an explicit
+ * text/html media type qualifies.
+ */
 export function isDesktopHtmlNavigation(acceptHeader: string | null | undefined): boolean {
   if (!acceptHeader) return false;
   return acceptHeader.split(',').some((part) => {
     const media = part.trim().split(';')[0]?.trim().toLowerCase();
-    return media === 'text/html' || media === '*/*';
+    return media === 'text/html';
   });
 }
 
@@ -415,6 +446,25 @@ export function isAllowedDesktopExternalUrl(url: string): boolean {
 // ---------------------------------------------------------------------------
 
 /**
+ * Pure resolution chain of the `nexus` protocol handler: exact asset first;
+ * SPA route fallback to index.html ONLY for an explicit HTML navigation on a
+ * non-traversal path; null maps to 404 in the handler. Extracted so the
+ * handler-level fallback behavior is testable without launching Electron.
+ */
+export function resolveDesktopNavigationPath(
+  distRoot: string,
+  pathname: string,
+  acceptHeader: string | null | undefined,
+): string | null {
+  const direct = resolveDesktopAssetPath(distRoot, pathname);
+  if (direct) return direct;
+  if (!isDesktopHtmlNavigation(acceptHeader) || desktopPathHasTraversal(pathname)) {
+    return null;
+  }
+  return resolveDesktopAssetPath(distRoot, '/index.html');
+}
+
+/**
  * Register the `nexus` protocol handler. Packaged resources only — callers
  * pass the resolved dist root (packaged: Resources/web-dist; dev: built
  * apps/web/dist). No repository fallback here; the caller decides.
@@ -440,12 +490,7 @@ export async function registerDesktopProtocol(
     if (pathname.endsWith('/')) pathname += 'index.html';
     if (pathname === '/' || pathname === '') pathname = '/index.html';
 
-    let filePath = resolveDesktopAssetPath(root, pathname);
-    if (!filePath && isDesktopHtmlNavigation(request.headers.get('accept')) && !desktopPathHasTraversal(pathname)) {
-      // SPA route fallback: index.html only, for HTML navigations on
-      // extension-less route paths — never API/assets or traversal.
-      filePath = resolveDesktopAssetPath(root, '/index.html');
-    }
+    const filePath = resolveDesktopNavigationPath(root, pathname, request.headers.get('accept'));
     if (!filePath) {
       return new Response('not found', { status: 404 });
     }

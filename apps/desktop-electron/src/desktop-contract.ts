@@ -16,6 +16,14 @@
 
 export const DESKTOP_BRIDGE_VERSION = 1;
 
+/**
+ * Envelope wire version. Every request/response frame on the desktop invoke
+ * channel carries `version: DESKTOP_ENVELOPE_VERSION`; main and preload both
+ * reject any other value before any effect, so a future incompatible
+ * envelope cannot be silently processed.
+ */
+export const DESKTOP_ENVELOPE_VERSION = 1;
+
 /** Renderer → main invoke channel (typed operation envelope). */
 export const DESKTOP_INVOKE_CHANNEL = 'nexus:desktop:invoke';
 /** Main → renderer status event channel. */
@@ -210,18 +218,21 @@ export interface DesktopOperationResult {
 // ---------------------------------------------------------------------------
 
 export interface DesktopRequest {
+  version: typeof DESKTOP_ENVELOPE_VERSION;
   request_id: string;
   operation: DesktopOperation;
   payload?: unknown;
 }
 
 export interface DesktopSuccess {
+  version: typeof DESKTOP_ENVELOPE_VERSION;
   request_id: string;
   ok: true;
   result: unknown;
 }
 
 export interface DesktopFailure {
+  version: typeof DESKTOP_ENVELOPE_VERSION;
   request_id: string;
   ok: false;
   error: { code: string; message: string };
@@ -256,21 +267,66 @@ export function errorMessage(err: unknown): string {
   return String(err);
 }
 
+/**
+ * Success envelope: the COMPLETE serialized response frame (version,
+ * request_id, ok, result) must fit the frozen 1 MiB bound — not just the
+ * result body.
+ */
 export function desktopOk(request_id: string, result: unknown): DesktopSuccess {
-  if (jsonBytes(result ?? null) > MAX_REQUEST_BYTES) {
+  const response: DesktopSuccess = {
+    version: DESKTOP_ENVELOPE_VERSION,
+    request_id,
+    ok: true,
+    result,
+  };
+  if (jsonBytes(response) > MAX_REQUEST_BYTES) {
     throw desktopError('internal', 'response exceeds bounded encode limit');
   }
-  return { request_id, ok: true, result };
+  return response;
 }
 
+/** Machine-readable error codes are short identifiers; longer ones collapse. */
+const MAX_ERROR_CODE_CHARS = 64;
+
+/**
+ * Failure envelope: never throws (it IS the failure path). Error code and
+ * message are bounded so the COMPLETE serialized frame fits the frozen 1 MiB
+ * response bound; an over-long message is trimmed and, as a hard guard, any
+ * still-oversized frame collapses to a minimal internal failure.
+ */
 export function desktopErr(request_id: string, code: string, message: string): DesktopFailure {
-  return { request_id, ok: false, error: { code, message } };
+  const boundedCode =
+    typeof code === 'string' && code.length > 0 && code.length <= MAX_ERROR_CODE_CHARS
+      ? code
+      : 'internal';
+  const build = (msg: string): DesktopFailure => ({
+    version: DESKTOP_ENVELOPE_VERSION,
+    request_id,
+    ok: false,
+    error: { code: boundedCode, message: msg },
+  });
+  let boundedMessage = typeof message === 'string' ? message : String(message);
+  // Trim the message until the complete frame fits; JSON escaping overhead is
+  // covered by measuring the built envelope, not just the raw string bytes.
+  let response = build(boundedMessage);
+  while (jsonBytes(response) > MAX_REQUEST_BYTES && boundedMessage.length > 0) {
+    boundedMessage = boundedMessage.slice(0, Math.floor(boundedMessage.length / 2));
+    response = build(boundedMessage);
+  }
+  if (jsonBytes(response) > MAX_REQUEST_BYTES) {
+    response = build('desktop operation failed');
+  }
+  return response;
 }
 
 export function isDesktopResponse(value: unknown): value is DesktopResponse {
   if (!value || typeof value !== 'object') return false;
-  const body = value as Partial<DesktopResponse>;
-  return typeof body.request_id === 'string' && typeof body.ok === 'boolean';
+  if (!('version' in value) || !('request_id' in value) || !('ok' in value)) return false;
+  return (
+    value.version === DESKTOP_ENVELOPE_VERSION &&
+    typeof value.request_id === 'string' &&
+    typeof value.ok === 'boolean'
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -499,14 +555,20 @@ export function parseDesktopRequest(raw: unknown): DesktopRequest {
   if (jsonBytes(raw ?? null) > MAX_REQUEST_BYTES) {
     throw desktopError('input_too_large', `request exceeds ${MAX_REQUEST_BYTES} bytes`);
   }
-  const body = exactObject(raw, ['request_id', 'operation', 'payload'], 'request');
+  const body = exactObject(raw, ['version', 'request_id', 'operation', 'payload'], 'request');
+  if (body.version !== DESKTOP_ENVELOPE_VERSION) {
+    throw desktopError(
+      'invalid_input',
+      `unsupported envelope version: ${String(body.version)}`,
+    );
+  }
   const request_id = body.request_id;
   if (typeof request_id !== 'string' || !REQUEST_ID_RE.test(request_id)) {
     throw desktopError('invalid_input', 'request_id must be a bounded identifier');
   }
   const operation = assertDesktopOperation(body.operation);
   const validated = OPERATION_VALIDATORS[operation](operation, body.payload);
-  const request: DesktopRequest = { request_id, operation };
+  const request: DesktopRequest = { version: DESKTOP_ENVELOPE_VERSION, request_id, operation };
   if (validated !== undefined && validated !== null) request.payload = validated;
   return request;
 }
@@ -514,6 +576,25 @@ export function parseDesktopRequest(raw: unknown): DesktopRequest {
 export function isNullPayloadOperation(operation: DesktopOperation): boolean {
   return operation in NULL_PAYLOAD_OPS;
 }
+
+/**
+ * Host-agnostic preload/contract parity manifest. The sandboxed preload
+ * mirrors the contract by compilation constraint (CommonJS preload + ESM
+ * contract share one dist/); tests assert the COMPILED preload's mirror
+ * values against this manifest, so a drift on either side fails the parity
+ * lock. Every value here is the canonical definition.
+ */
+export const DESKTOP_BRIDGE_MANIFEST = {
+  version: DESKTOP_BRIDGE_VERSION,
+  envelopeVersion: DESKTOP_ENVELOPE_VERSION,
+  invokeChannel: DESKTOP_INVOKE_CHANNEL,
+  statusChannel: DESKTOP_STATUS_CHANNEL,
+  runtimeChannel: DESKTOP_RUNTIME_CHANNEL,
+  maxStatusBytes: MAX_STATUS_BYTES,
+  maxDiagnosticBytes: MAX_DIAGNOSTIC_BYTES,
+  maxUrlBytes: MAX_URL_BYTES,
+  operations: DESKTOP_OPERATIONS,
+} as const;
 
 // ---------------------------------------------------------------------------
 // Status frame + runtime metadata bounds (preload and main both enforce)

@@ -28,7 +28,7 @@ import {
   parseDesktopRequest,
   parseDesktopRuntimeMetadata,
 } from '../dist/desktop-contract.js';
-import { DesktopAdmission, assertDesktopSender } from '../dist/desktop-ipc.js';
+import { DesktopAdmission, assertDesktopEventSender, assertDesktopSender } from '../dist/desktop-ipc.js';
 import {
   allowDesktopNavigation,
   assertDesktopServiceOrigin,
@@ -36,7 +36,9 @@ import {
   desktopPathHasTraversal,
   isAllowedDesktopExternalUrl,
   isDesktopHtmlNavigation,
+  registerProofProtocol,
   resolveDesktopAssetPath,
+  resolveDesktopNavigationPath,
 } from '../dist/protocol.js';
 
 const VALID_SENDER = {
@@ -58,6 +60,7 @@ function expectCode(fn, code) {
 
 test('valid top-frame request parses with normalized payload', () => {
   const req = parseDesktopRequest({
+    version: 1,
     request_id: 'req-1.2_3-4',
     operation: 'open_with',
     payload: { path: '/workspace/chapter.md' },
@@ -68,17 +71,17 @@ test('valid top-frame request parses with normalized payload', () => {
 });
 
 test('request_id must match the frozen ASCII identifier grammar', () => {
-  expectCode(() => parseDesktopRequest({ request_id: 'bad id!', operation: 'get_daemon_status' }), 'invalid_input');
+  expectCode(() => parseDesktopRequest({ version: 1, request_id: 'bad id!', operation: 'get_daemon_status' }), 'invalid_input');
   expectCode(
-    () => parseDesktopRequest({ request_id: 'x'.repeat(129), operation: 'get_daemon_status' }),
+    () => parseDesktopRequest({ version: 1, request_id: 'x'.repeat(129), operation: 'get_daemon_status' }),
     'invalid_input',
   );
-  expectCode(() => parseDesktopRequest({ request_id: 42, operation: 'get_daemon_status' }), 'invalid_input');
+  expectCode(() => parseDesktopRequest({ version: 1, request_id: 42, operation: 'get_daemon_status' }), 'invalid_input');
 });
 
 test('unknown operation is rejected before effects', () => {
   expectCode(
-    () => parseDesktopRequest({ request_id: 'r1', operation: 'exec_arbitrary', payload: {} }),
+    () => parseDesktopRequest({ version: 1, request_id: 'r1', operation: 'exec_arbitrary', payload: {} }),
     'invalid_input',
   );
   assert.equal(DESKTOP_OPERATIONS.includes('exec_arbitrary'), false);
@@ -87,7 +90,7 @@ test('unknown operation is rejected before effects', () => {
 test('oversized frame is rejected (1 MiB request bound)', () => {
   const huge = 'a'.repeat(MAX_REQUEST_BYTES);
   expectCode(
-    () => parseDesktopRequest({ request_id: 'r1', operation: 'set_workspace_path', payload: { path: huge } }),
+    () => parseDesktopRequest({ version: 1, request_id: 'r1', operation: 'set_workspace_path', payload: { path: huge } }),
     'input_too_large',
   );
 });
@@ -96,6 +99,7 @@ test('unknown payload fields are rejected (closed shapes)', () => {
   expectCode(
     () =>
       parseDesktopRequest({
+        version: 1,
         request_id: 'r1',
         operation: 'open_with',
         payload: { path: '/ok', extra: 'nope' },
@@ -103,29 +107,30 @@ test('unknown payload fields are rejected (closed shapes)', () => {
     'invalid_input',
   );
   expectCode(
-    () => parseDesktopRequest({ request_id: 'r1', operation: 'open_with', payload: ['/ok'] }),
+    () => parseDesktopRequest({ version: 1, request_id: 'r1', operation: 'open_with', payload: ['/ok'] }),
     'invalid_input',
   );
 });
 
 test('null-payload operations reject any payload', () => {
   expectCode(
-    () => parseDesktopRequest({ request_id: 'r1', operation: 'get_workspace_root', payload: { path: '/x' } }),
+    () => parseDesktopRequest({ version: 1, request_id: 'r1', operation: 'get_workspace_root', payload: { path: '/x' } }),
     'invalid_input',
   );
   // explicit null is tolerated
-  const req = parseDesktopRequest({ request_id: 'r1', operation: 'get_workspace_root', payload: null });
+  const req = parseDesktopRequest({ version: 1, request_id: 'r1', operation: 'get_workspace_root', payload: null });
   assert.equal(req.payload, undefined);
 });
 
 test('path fields: control characters and oversized paths rejected', () => {
   expectCode(
-    () => parseDesktopRequest({ request_id: 'r1', operation: 'open_with', payload: { path: '/ok\x00.sh' } }),
+    () => parseDesktopRequest({ version: 1, request_id: 'r1', operation: 'open_with', payload: { path: '/ok\x00.sh' } }),
     'invalid_input',
   );
   expectCode(
     () =>
       parseDesktopRequest({
+        version: 1,
         request_id: 'r1',
         operation: 'open_with',
         payload: { path: 'a'.repeat(MAX_PATH_BYTES + 1) },
@@ -138,6 +143,7 @@ test('url and id fields enforce frozen byte bounds', () => {
   expectCode(
     () =>
       parseDesktopRequest({
+        version: 1,
         request_id: 'r1',
         operation: 'open_external_url',
         payload: { url: `https://example.com/${'u'.repeat(MAX_URL_BYTES)}` },
@@ -147,6 +153,7 @@ test('url and id fields enforce frozen byte bounds', () => {
   expectCode(
     () =>
       parseDesktopRequest({
+        version: 1,
         request_id: 'r1',
         operation: 'switch_active_creator',
         payload: { creatorId: 'c'.repeat(257) },
@@ -159,6 +166,7 @@ test('connection config is public-only: unknown fields and key readback rejected
   expectCode(
     () =>
       parseDesktopRequest({
+        version: 1,
         request_id: 'r1',
         operation: 'set_connection_config',
         payload: {
@@ -169,6 +177,7 @@ test('connection config is public-only: unknown fields and key readback rejected
     'invalid_input',
   );
   const req = parseDesktopRequest({
+    version: 1,
     request_id: 'r1',
     operation: 'set_connection_config',
     payload: {
@@ -180,6 +189,7 @@ test('connection config is public-only: unknown fields and key readback rejected
   expectCode(
     () =>
       parseDesktopRequest({
+        version: 1,
         request_id: 'r1',
         operation: 'set_connection_config',
         payload: {
@@ -191,14 +201,59 @@ test('connection config is public-only: unknown fields and key readback rejected
   );
 });
 
-test('response envelope helpers honor the 1 MiB response bound', () => {
+test('envelope version is required on requests: missing, wrong, or non-literal values rejected', () => {
+  // Missing version (legacy unversioned shape) is rejected before any effect.
+  expectCode(
+    () => parseDesktopRequest({ request_id: 'r1', operation: 'get_daemon_status' }),
+    'invalid_input',
+  );
+  // Any version other than the frozen literal 1 is rejected.
+  expectCode(
+    () => parseDesktopRequest({ version: 2, request_id: 'r1', operation: 'get_daemon_status' }),
+    'invalid_input',
+  );
+  expectCode(
+    () => parseDesktopRequest({ version: '1', request_id: 'r1', operation: 'get_daemon_status' }),
+    'invalid_input',
+  );
+  // Versioned frame parses and preserves the literal.
+  const req = parseDesktopRequest({ version: 1, request_id: 'r1', operation: 'get_daemon_status' });
+  assert.equal(req.version, 1);
+});
+
+test('response envelope helpers honor the 1 MiB bound on the COMPLETE serialized frame', () => {
   const ok = desktopOk('r1', { value: 1 });
   assert.equal(ok.ok, true);
+  assert.equal(ok.version, 1);
   assert.equal(isDesktopResponse(ok), true);
+  // Unversioned or wrong-version frames are not desktop responses.
   assert.equal(isDesktopResponse({ nope: 1 }), false);
+  assert.equal(isDesktopResponse({ request_id: 'r1', ok: true, result: 1 }), false);
+  assert.equal(isDesktopResponse({ version: 2, request_id: 'r1', ok: true, result: 1 }), false);
   const failure = desktopErr('r1', 'busy', 'cap');
-  assert.deepEqual(failure, { request_id: 'r1', ok: false, error: { code: 'busy', message: 'cap' } });
-  assert.throws(() => desktopOk('r1', { blob: 'x'.repeat(MAX_REQUEST_BYTES) }), (err) => errorCode(err) === 'internal');
+  assert.deepEqual(failure, {
+    version: 1,
+    request_id: 'r1',
+    ok: false,
+    error: { code: 'busy', message: 'cap' },
+  });
+  // Exact boundary: the COMPLETE frame (envelope overhead included) must fit.
+  // A result that fits 1 MiB by itself but not with the envelope is rejected.
+  const encoder = new TextEncoder();
+  const requestId = 'boundary-req';
+  const overhead = encoder.encode(JSON.stringify({ version: 1, request_id: requestId, ok: true, result: '' })).length;
+  const fits = 'x'.repeat(MAX_REQUEST_BYTES - overhead);
+  assert.doesNotThrow(() => desktopOk(requestId, fits));
+  const oneOver = 'x'.repeat(MAX_REQUEST_BYTES - overhead + 1);
+  assert.throws(() => desktopOk(requestId, oneOver), (err) => errorCode(err) === 'internal');
+  // desktopErr never throws and always emits a frame within the bound,
+  // trimming over-long messages (including JSON escaping overhead).
+  const hugeMessage = ' '.repeat(MAX_REQUEST_BYTES);
+  const boundedFailure = desktopErr(requestId, 'internal', hugeMessage);
+  assert.equal(boundedFailure.ok, false);
+  assert.ok(encoder.encode(JSON.stringify(boundedFailure)).length <= MAX_REQUEST_BYTES);
+  // Over-long error codes collapse to `internal`.
+  assert.equal(desktopErr(requestId, 'c'.repeat(100), 'm').error.code, 'internal');
 });
 
 test('runtime metadata is nonsecret and http(s)-only', () => {
@@ -227,6 +282,25 @@ test('subframe and frameless senders are rejected (no getURL fallback)', () => {
 
 test('stale sender from a previous window generation is rejected', () => {
   expectCode(() => assertDesktopSender({ ...VALID_SENDER, generation: 6 }, 7), 'stale_sender');
+});
+
+test('registered IPC path rejects events once main moves to a newer generation', () => {
+  // Registration bound to generation 7 while main's live source still reads 7.
+  const view = (({ generation: _ignored, ...rest }) => rest)(VALID_SENDER);
+  assert.doesNotThrow(() =>
+    assertDesktopEventSender(view, { generation: 7, getCurrentGeneration: () => 7 }),
+  );
+  // Main advances to generation 8 (navigation/window replacement): the stale
+  // registration left installed must now reject with stale_sender — the check
+  // compares the registration's bound generation against the LIVE source,
+  // not a closure constant against itself.
+  expectCode(
+    () => assertDesktopEventSender(view, { generation: 7, getCurrentGeneration: () => 8 }),
+    'stale_sender',
+  );
+  // Without a live source the check degenerates to the registration constant
+  // (vacuous) — documents the contract P0-T7 must satisfy by supplying one.
+  assert.doesNotThrow(() => assertDesktopEventSender(view, { generation: 7 }));
 });
 
 test('dead window or foreign webContents is rejected', () => {
@@ -380,8 +454,36 @@ test('SPA fallback applies to HTML navigation only, never API/assets/traversal',
   assert.equal(isDesktopHtmlNavigation('text/html,application/xhtml+xml'), true);
   assert.equal(isDesktopHtmlNavigation('application/json'), false);
   assert.equal(isDesktopHtmlNavigation(undefined), false);
+  // Accept: */* is the default fetch/asset value, NOT a navigation signal.
+  assert.equal(isDesktopHtmlNavigation('*/*'), false);
+  assert.equal(isDesktopHtmlNavigation('application/json, */*;q=0.8'), false);
   // fallback decision chain mirrors the handler: traversal never falls back
   assert.equal(desktopPathHasTraversal('/v1/daemon/health/../../secret'), true);
+});
+
+test('handler resolution chain: */* on missing API/assets yields 404, HTML nav falls back to index', () => {
+  const root = makeDist();
+  try {
+    const canonicalRoot = realpathSync(root);
+    // Missing API/asset path with the common Accept: */* → 404 (no SPA fallback).
+    assert.equal(resolveDesktopNavigationPath(root, '/v1/daemon/health', '*/*'), null);
+    assert.equal(resolveDesktopNavigationPath(root, '/assets/missing.js', '*/*'), null);
+    assert.equal(resolveDesktopNavigationPath(root, '/assets/missing.js', 'application/json'), null);
+    // Real browser HTML navigation (text/html present among accepted types) → index.html.
+    assert.equal(
+      resolveDesktopNavigationPath(root, '/workspace/chapter', 'text/html,application/xhtml+xml,image/avif,*/*;q=0.8'),
+      join(canonicalRoot, 'index.html'),
+    );
+    // Traversal paths never fall back, even with an HTML accept header.
+    assert.equal(resolveDesktopNavigationPath(root, '/../secret', 'text/html'), null);
+    // Existing assets are served directly regardless of Accept.
+    assert.equal(
+      resolveDesktopNavigationPath(root, '/assets/app.js', '*/*'),
+      join(canonicalRoot, 'assets', 'app.js'),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -477,30 +579,100 @@ test('desktopError carries a machine-readable code', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Preload/contract channel parity: the sandboxed preload mirrors the channel
-// names locally (it compiles CommonJS and cannot import the ESM contract —
-// see preload.ts header); the compiled artifact must stay in lockstep.
+// Preload/contract parity: the sandboxed preload mirrors contract values
+// locally (it compiles CommonJS and cannot import the ESM contract — see
+// preload.ts header). The lock below extracts the COMPILED preload's mirror
+// values and asserts structural equality against the canonical
+// DESKTOP_BRIDGE_MANIFEST, so drift on EITHER side fails the test.
 // ---------------------------------------------------------------------------
 
-test('compiled preload uses the exact contract channels and no proof surface', async () => {
+/** Evaluate a mirrored numeric const expression (digits, +, *, parens only). */
+function evalConstExpr(expr) {
+  if (!/^[0-9+*()\s]+$/.test(expr)) throw new Error(`unsafe const expression: ${expr}`);
+  const tokens = expr.match(/\d+|[()+*]/g) ?? [];
+  let pos = 0;
+  const factor = () => {
+    if (tokens[pos] === '(') {
+      pos += 1;
+      const value = sum();
+      if (tokens[pos] !== ')') throw new Error(`unbalanced const expression: ${expr}`);
+      pos += 1;
+      return value;
+    }
+    const value = Number(tokens[pos]);
+    pos += 1;
+    return value;
+  };
+  const product = () => {
+    let value = factor();
+    while (tokens[pos] === '*') {
+      pos += 1;
+      value *= factor();
+    }
+    return value;
+  };
+  const sum = () => {
+    let value = product();
+    while (tokens[pos] === '+') {
+      pos += 1;
+      value += product();
+    }
+    return value;
+  };
+  const result = sum();
+  if (pos !== tokens.length) throw new Error(`trailing tokens in const expression: ${expr}`);
+  return result;
+}
+
+/** Extract a mirrored numeric const from the compiled preload source. */
+function preloadNumber(source, name) {
+  const match = source.match(new RegExp(`const ${name} = ([0-9 *()+]+);`));
+  assert.ok(match, `compiled preload must mirror numeric const ${name}`);
+  return evalConstExpr(match[1]);
+}
+
+/** Extract a mirrored string const from the compiled preload source. */
+function preloadString(source, name) {
+  const match = source.match(new RegExp(`const ${name} = '([^']+)';`));
+  assert.ok(match, `compiled preload must mirror string const ${name}`);
+  return match[1];
+}
+
+/** Extract the mirrored operation union (order-sensitive) from compiled preload. */
+function preloadOperations(source) {
+  const match = source.match(/const DESKTOP_OPERATIONS = \[([\s\S]*?)\];/);
+  assert.ok(match, 'compiled preload must mirror the DESKTOP_OPERATIONS union');
+  return [...match[1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
+}
+
+test('compiled preload mirrors the contract parity manifest exactly', async () => {
   const { readFileSync } = await import('node:fs');
   const { fileURLToPath } = await import('node:url');
   const preloadPath = fileURLToPath(new URL('../dist/preload.js', import.meta.url));
   const source = readFileSync(preloadPath, 'utf8');
   const contract = await import('../dist/desktop-contract.js');
-  for (const channel of [
-    contract.DESKTOP_INVOKE_CHANNEL,
-    contract.DESKTOP_STATUS_CHANNEL,
-    contract.DESKTOP_RUNTIME_CHANNEL,
-  ]) {
-    assert.ok(source.includes(channel), `preload must use channel ${channel}`);
-  }
-  for (const operation of contract.DESKTOP_OPERATIONS) {
-    assert.ok(
-      source.includes(`'${operation}'`),
-      `preload operation union must include ${operation}`,
-    );
-  }
+  const manifest = contract.DESKTOP_BRIDGE_MANIFEST;
+
+  // Bridge + envelope versions.
+  assert.equal(preloadNumber(source, 'DESKTOP_BRIDGE_VERSION'), manifest.version);
+  assert.equal(preloadNumber(source, 'DESKTOP_ENVELOPE_VERSION'), manifest.envelopeVersion);
+  // Channels.
+  assert.equal(preloadString(source, 'DESKTOP_INVOKE_CHANNEL'), manifest.invokeChannel);
+  assert.equal(preloadString(source, 'DESKTOP_STATUS_CHANNEL'), manifest.statusChannel);
+  assert.equal(preloadString(source, 'DESKTOP_RUNTIME_CHANNEL'), manifest.runtimeChannel);
+  // Mirrored bounds.
+  assert.equal(preloadNumber(source, 'MAX_STATUS_BYTES'), manifest.maxStatusBytes);
+  assert.equal(preloadNumber(source, 'MAX_DIAGNOSTIC_BYTES'), manifest.maxDiagnosticBytes);
+  assert.equal(preloadNumber(source, 'MAX_URL_BYTES'), manifest.maxUrlBytes);
+  // Operation union: EXACT structural equality (same set, same order).
+  assert.deepEqual(preloadOperations(source), [...manifest.operations]);
+  // The bridge object exposes the manifest bridge version.
+  assert.match(source, /version: DESKTOP_BRIDGE_VERSION/);
+  // The invoke path emits the mirrored envelope version on every request.
+  assert.match(source, /\{ version: DESKTOP_ENVELOPE_VERSION, request_id, operation(, payload)? \}/);
+  // Response guard requires the mirrored envelope version.
+  assert.match(source, /value\.version === DESKTOP_ENVELOPE_VERSION/);
+
   // Preload must be self-contained: importing the contract module would
   // re-emit it as CommonJS and clobber the ESM artifact the main process loads.
   assert.ok(!/require\(["']\.\/desktop-contract/.test(source), 'preload must not require desktop-contract');
@@ -510,4 +682,18 @@ test('compiled preload uses the exact contract channels and no proof surface', a
   assert.ok(!source.includes('nexus-proof:'));
   assert.ok(!source.includes('runProofStep'));
   assert.ok(source.includes('contextBridge'));
+});
+
+// ---------------------------------------------------------------------------
+// Retained proof protocol: main.ts (P0-T7's file) calls registerProofProtocol
+// synchronously, so the shim must install registration before returning.
+// ---------------------------------------------------------------------------
+
+test('registerProofProtocol keeps a synchronous registration contract', () => {
+  // Under plain node the electron API is unavailable; a synchronous contract
+  // therefore THROWS synchronously here. The previous async implementation
+  // returned a rejected promise instead — this assertion pins the sync shape
+  // so P0-T7's un-awaited callsite cannot race window creation.
+  assert.throws(() => registerProofProtocol('/nonexistent-dist'), /electron main API unavailable/);
+  assert.equal(registerProofProtocol.length, 1);
 });
