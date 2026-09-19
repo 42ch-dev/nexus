@@ -181,6 +181,7 @@ import type {
   SignalScheduleRequest,
   SignalScheduleResponse,
 } from '@42ch/nexus-contracts';
+import { isAbsolute } from 'node:path';
 import {
   expectedPlatformPackage,
   fenceCompatibilityPair,
@@ -1363,6 +1364,36 @@ export function nativeCompatibility(): NativeCompatibility {
     package_version: pkgManifest.version,
   });
   return manifest;
+}
+
+/**
+ * Reset the product's local state stores and resolve with the number of stores
+ * reset.
+ *
+ * Scope is exactly `state.db`, `state.db-wal` and `state.db-shm` under
+ * `<home>/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/`: the
+ * native side refuses a symlinked target or a store with a live writer and
+ * deletes nothing outside that scope — resolving every deletion against the
+ * store directory it admitted, so a rename or symlink swap after admission
+ * cannot redirect it (v1.192 P0 row 19, compass D18/D20). This opens no
+ * database, so it does not run the DB-open compatibility fence.
+ *
+ * `home` is the trusted home resolved by the caller (main); it is never derived
+ * here. A non-string, empty or relative `home` is rejected here with a plain
+ * `Error` before the native binding is called; the native side re-checks
+ * absoluteness, so a direct binding user still gets `invalid_input`. Every
+ * other rejection carries the wire `CoreError` envelope, so
+ * `parseNativeCoreError` yields `owner_busy` (live writer), `forbidden`
+ * (symlinked/non-file target) or `internal`.
+ */
+export async function resetLocalState(home: string): Promise<number> {
+  if (typeof home !== 'string' || home.length === 0) {
+    throw new Error('resetLocalState: home must be a non-empty path string');
+  }
+  if (!isAbsolute(home)) {
+    throw new Error('resetLocalState: home must be an absolute path');
+  }
+  return loadNativeBinding().resetLocalState(home);
 }
 
 /**

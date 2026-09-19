@@ -157,12 +157,19 @@ export function httpOriginForBindHost(host: string, port: number): string {
   return `http://${formatHttpAuthority(host, port)}`;
 }
 
+/**
+ * Production desktop app origin (`nexus://app`), frozen by the host contract.
+ * The obsolete Tauri-only origins are replaced by exactly this one; loopback and
+ * Vite dev origins stay, the `NEXUS_DAEMON_ALLOWED_ORIGINS` escape hatch stays,
+ * and no wildcard or null-origin relaxation is added.
+ */
+export const DESKTOP_APP_ORIGIN = 'nexus://app';
+
 export function resolveAllowedOrigins(port: number, host: string): string[] {
   const origins = new Set<string>([
     `http://127.0.0.1:${port}`,
     `http://localhost:${port}`,
-    'tauri://localhost',
-    'http://tauri.localhost',
+    DESKTOP_APP_ORIGIN,
     'http://localhost:5173',
     'http://127.0.0.1:5173',
   ]);
