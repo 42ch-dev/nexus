@@ -2,6 +2,7 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { ServiceOptions } from '@42ch/nexus-service';
 import type { UtilityConfig } from './ipc.js';
 
 const ALLOWED_ENV_KEYS = new Set([
@@ -45,6 +46,53 @@ export function buildUtilityConfig(home: string): UtilityConfig {
     user_home: home,
     access: 'engine_owner',
     allow_uninitialized: false,
+  };
+}
+
+/** Desktop compatibility port (`rust-core-service-boundary.md` §8.1). */
+export const DESKTOP_SERVICE_PORT = 8420;
+/** The app-managed local service is loopback-only. */
+export const DESKTOP_SERVICE_HOST = '127.0.0.1';
+
+function parseServicePort(value: unknown): number | null {
+  const parsed = typeof value === 'string' ? Number.parseInt(value.trim(), 10) : value;
+  if (typeof parsed !== 'number' || !Number.isSafeInteger(parsed) || parsed < 1 || parsed > 65_535) {
+    return null;
+  }
+  return parsed;
+}
+
+/**
+ * Explicit desktop launch port → valid `NEXUS_DAEMON_PORT` → {@link DESKTOP_SERVICE_PORT}.
+ * An invalid explicit port is an error; the TS standalone default (8421) is not
+ * silently changed.
+ */
+export function resolveDesktopServicePort(
+  explicit?: number,
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  if (explicit !== undefined) {
+    const port = parseServicePort(explicit);
+    if (port === null) {
+      throw new Error(`invalid desktop service port: ${JSON.stringify(explicit)}`);
+    }
+    return port;
+  }
+  return parseServicePort(env.NEXUS_DAEMON_PORT) ?? DESKTOP_SERVICE_PORT;
+}
+
+/** Trusted launch options for the app-managed service (main-owned input). */
+export function buildDesktopServiceOptions(input: {
+  home: string;
+  port?: number;
+  env?: NodeJS.ProcessEnv;
+}): ServiceOptions {
+  return {
+    home: input.home,
+    host: DESKTOP_SERVICE_HOST,
+    port: resolveDesktopServicePort(input.port, input.env),
+    allowRemote: false,
+    domainOnly: false,
   };
 }
 
