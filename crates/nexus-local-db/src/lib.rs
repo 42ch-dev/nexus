@@ -952,11 +952,31 @@ const STATE_DB_FILES: [&str; 3] = [STATE_DB_NAME, "state.db-wal", "state.db-shm"
 /// The store's primary database file — the reset's counting unit.
 const STATE_DB_NAME: &str = "state.db";
 
-/// One stored workspace scanned for reset: its directory plus the state files
-/// that exist there.
-struct ResetTarget {
+/// One stored workspace admitted for reset: the store directory the scan
+/// validated — held open on Unix — plus the state files that exist in it.
+struct AdmittedDir {
+    /// The store directory's path: the fence path, and the directory every
+    /// refusal payload names. On Unix the deletion resolves through `handle`,
+    /// never through this path again.
     dir: std::path::PathBuf,
-    files: Vec<&'static str>,
+    /// The admitted directory itself, held for the whole reset, so deleting a
+    /// state file resolves against the exact directory the scan admitted —
+    /// wherever that directory lives by the time of the deletion, and whatever
+    /// the path points at then.
+    #[cfg(unix)]
+    handle: DirHandle,
+    /// The state files that exist in it, in deletion order.
+    files: Vec<AdmittedStateFile>,
+}
+
+/// One state file admitted inside a store directory.
+struct AdmittedStateFile {
+    name: &'static str,
+    /// The identity the admission saw. Deletion refuses an entry that is no
+    /// longer this file, so a swapped-in symlink or replacement file is denied
+    /// instead of deleted. Unix-only; the non-Unix arm re-verifies the path.
+    #[cfg(unix)]
+    stat: nix::sys::stat::FileStat,
 }
 
 /// Reset the product's local state stores under `home`, returning the number of
@@ -968,12 +988,15 @@ struct ResetTarget {
 /// is removed: the stable admission lock files, sibling workspace data (`kb/`,
 /// `Pool/`, TOML), user documents, harness, knowledge and specs all survive.
 ///
-/// Safety order (compass D18/D20): the scan validates every candidate first —
-/// a symlink, or a non-file where a state file belongs, refuses the whole reset
-/// — and then every target's exclusive migration fence is acquired through
-/// [`writer_protocol::acquire_store_reset_fence`] *before* the first deletion,
-/// so a live writer refuses the reset with no store half-reset. Deletion
-/// happens here in Rust, behind those fences; no caller deletes state files.
+/// Safety order (compass D18/D20): the scan validates and *admits* every
+/// candidate first — a symlink, or a non-file where a state file belongs,
+/// refuses the whole reset — and then every target's exclusive migration fence
+/// is acquired through [`writer_protocol::acquire_store_reset_fence`] *before*
+/// the first deletion, so a live writer refuses the reset with no store
+/// half-reset. Deletion happens here in Rust, behind those fences and through
+/// the admitted directory rather than through the path again, so a rename or a
+/// symlink swap after admission cannot redirect a deletion outside the store
+/// the scan admitted; no caller deletes state files.
 ///
 /// # Errors
 ///
@@ -983,6 +1006,21 @@ struct ResetTarget {
 /// writer holds a target's fence, and [`LocalDbError::IoWithPath`] when the scan
 /// or a deletion fails.
 pub fn reset_local_state(home: &std::path::Path) -> Result<usize, LocalDbError> {
+    reset_local_state_with_post_fence_hook(home, &mut || {})
+}
+
+/// [`reset_local_state`] with a seam that runs once every target is fenced and
+/// before the first deletion.
+///
+/// The race tests in `tests/desktop_reset.rs` use it to swap a target inside the
+/// window a hostile local actor would use — between admission and deletion — and
+/// prove the deletion still resolves against the admitted directory.
+/// Production callers use [`reset_local_state`], which passes a no-op seam.
+#[doc(hidden)]
+pub fn reset_local_state_with_post_fence_hook(
+    home: &std::path::Path,
+    post_fence: &mut dyn FnMut(),
+) -> Result<usize, LocalDbError> {
     if !home.is_absolute() {
         return Err(LocalDbError::ValidationError(
             "local state reset requires an absolute home path".to_string(),
@@ -997,8 +1035,11 @@ pub fn reset_local_state(home: &std::path::Path) -> Result<usize, LocalDbError> 
         return Ok(0);
     }
 
-    // Scan every store before touching anything: an unsafe candidate refuses
-    // the whole reset instead of leaving a half-applied one.
+    // Scan and admit every store before touching anything: an unsafe candidate
+    // refuses the whole reset instead of leaving a half-applied one. The path
+    // checks below describe a moment; admission holds the directory itself, so
+    // the deletions resolve against what was admitted rather than against
+    // whatever the path points at later.
     let mut targets = Vec::new();
     for entry in read_entries(&creators_root)? {
         let creator_dir = entry.path();
@@ -1014,12 +1055,11 @@ pub fn reset_local_state(home: &std::path::Path) -> Result<usize, LocalDbError> 
             if !is_real_dir(&store_dir, home)? {
                 continue;
             }
-            let files = existing_state_files(&store_dir, home)?;
-            if !files.is_empty() {
-                targets.push(ResetTarget {
-                    dir: store_dir,
-                    files,
-                });
+            let Some(admitted) = AdmittedDir::admit(home, &store_dir)? else {
+                continue;
+            };
+            if !admitted.files().is_empty() {
+                targets.push(admitted);
             }
         }
     }
@@ -1028,22 +1068,16 @@ pub fn reset_local_state(home: &std::path::Path) -> Result<usize, LocalDbError> 
     // the reset with no bytes removed from any store.
     let fences = targets
         .iter()
-        .map(|target| writer_protocol::acquire_store_reset_fence(&target.dir.join(STATE_DB_NAME)))
+        .map(|target| writer_protocol::acquire_store_reset_fence(&target.dir().join(STATE_DB_NAME)))
         .collect::<Result<Vec<_>, _>>()?;
+
+    post_fence();
 
     let mut reset = 0;
     for target in &targets {
-        for name in &target.files {
-            let path = target.dir.join(name);
-            match std::fs::remove_file(&path) {
-                Ok(()) => reset += usize::from(*name == STATE_DB_NAME),
-                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-                Err(source) => {
-                    return Err(LocalDbError::IoWithPath {
-                        path: path.display().to_string(),
-                        source,
-                    })
-                }
+        for file in target.files() {
+            if target.remove(file, home)? && file.name == STATE_DB_NAME {
+                reset += 1;
             }
         }
     }
@@ -1051,6 +1085,239 @@ pub fn reset_local_state(home: &std::path::Path) -> Result<usize, LocalDbError> 
     // of the reset.
     drop(fences);
     Ok(reset)
+}
+
+/// An owned directory descriptor, closed on drop.
+///
+/// The workspace forbids `unsafe`, so `nix`'s raw descriptor cannot be wrapped
+/// in an `OwnedFd`; it is owned here and released through `close(2)`.
+#[cfg(unix)]
+struct DirHandle(std::os::fd::RawFd);
+
+#[cfg(unix)]
+impl DirHandle {
+    /// The raw descriptor this handle owns.
+    const fn fd(&self) -> std::os::fd::RawFd {
+        self.0
+    }
+}
+
+#[cfg(unix)]
+impl Drop for DirHandle {
+    fn drop(&mut self) {
+        let _ = nix::unistd::close(self.0);
+    }
+}
+
+/// `open(2)` flags for `home` itself: a real directory, nothing more. The
+/// trusted home may legitimately be a symlink (`/tmp` is one on macOS).
+#[cfg(unix)]
+const HOME_OPEN_FLAGS: nix::fcntl::OFlag = nix::fcntl::OFlag::O_RDONLY
+    .union(nix::fcntl::OFlag::O_DIRECTORY)
+    .union(nix::fcntl::OFlag::O_CLOEXEC);
+
+/// `openat(2)` flags for every component below `home`: `O_NOFOLLOW` refuses a
+/// component someone swapped for a symlink instead of following it out of the
+/// admitted tree.
+#[cfg(unix)]
+const ADMITTED_DIR_FLAGS: nix::fcntl::OFlag = nix::fcntl::OFlag::O_RDONLY
+    .union(nix::fcntl::OFlag::O_DIRECTORY)
+    .union(nix::fcntl::OFlag::O_NOFOLLOW)
+    .union(nix::fcntl::OFlag::O_CLOEXEC);
+
+#[cfg(unix)]
+impl AdmittedDir {
+    /// Admit the store directory at `path`, walking it from `home` one
+    /// `O_NOFOLLOW` component at a time, plus the state files it holds.
+    ///
+    /// Returns `None` when the directory is gone (nothing left to reset), and
+    /// refuses the reset when a component is a symlink or is no longer a
+    /// directory: a deletion must never resolve through a link someone swapped
+    /// into the trusted path.
+    fn admit(home: &std::path::Path, path: &std::path::Path) -> Result<Option<Self>, LocalDbError> {
+        let Ok(rel) = path.strip_prefix(home) else {
+            return Err(untrusted_target(path, home));
+        };
+        let home_fd = match nix::fcntl::open(home, HOME_OPEN_FLAGS, nix::sys::stat::Mode::empty()) {
+            Ok(fd) => DirHandle(fd),
+            Err(err) => return Err(io_with_path(home, err)),
+        };
+        let mut current: Option<DirHandle> = None;
+        for component in rel.components() {
+            let std::path::Component::Normal(name) = component else {
+                return Err(untrusted_target(path, home));
+            };
+            let parent = current.as_ref().map_or_else(|| home_fd.fd(), DirHandle::fd);
+            match nix::fcntl::openat(
+                Some(parent),
+                name,
+                ADMITTED_DIR_FLAGS,
+                nix::sys::stat::Mode::empty(),
+            ) {
+                Ok(fd) => current = Some(DirHandle(fd)),
+                Err(nix::errno::Errno::ENOENT) => return Ok(None),
+                Err(nix::errno::Errno::ELOOP | nix::errno::Errno::ENOTDIR) => {
+                    return Err(untrusted_target(path, home))
+                }
+                Err(err) => return Err(io_with_path(path, err)),
+            }
+        }
+        let Some(handle) = current else {
+            return Err(untrusted_target(path, home));
+        };
+        let mut files = Vec::new();
+        for name in STATE_DB_FILES {
+            let file_path = path.join(name);
+            match nix::sys::stat::fstatat(
+                Some(handle.fd()),
+                name,
+                nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
+            ) {
+                Ok(stat) if is_regular_file(stat.st_mode) => {
+                    files.push(AdmittedStateFile { name, stat });
+                }
+                Ok(_) => return Err(untrusted_target(&file_path, home)),
+                Err(nix::errno::Errno::ENOENT) => {}
+                Err(err) => return Err(io_with_path(&file_path, err)),
+            }
+        }
+        Ok(Some(Self {
+            dir: path.to_path_buf(),
+            handle,
+            files,
+        }))
+    }
+
+    /// The store directory's path — the fence path and the refusal payload's
+    /// directory.
+    fn dir(&self) -> &std::path::Path {
+        &self.dir
+    }
+
+    /// The state files admitted here, in deletion order.
+    fn files(&self) -> &[AdmittedStateFile] {
+        &self.files
+    }
+
+    /// Delete one admitted state file, `false` when it is already gone.
+    ///
+    /// The entry is re-checked against the admission inside the fence — a target
+    /// that is no longer the admitted regular file (swapped for a symlink or for
+    /// another file) refuses the reset rather than being deleted — and the
+    /// removal itself resolves against the admitted directory.
+    fn remove(
+        &self,
+        file: &AdmittedStateFile,
+        home: &std::path::Path,
+    ) -> Result<bool, LocalDbError> {
+        let file_path = self.dir.join(file.name);
+        match nix::sys::stat::fstatat(
+            Some(self.handle.fd()),
+            file.name,
+            nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
+        ) {
+            Ok(stat)
+                if is_regular_file(stat.st_mode)
+                    && stat.st_dev == file.stat.st_dev
+                    && stat.st_ino == file.stat.st_ino => {}
+            Ok(_) => return Err(untrusted_target(&file_path, home)),
+            Err(nix::errno::Errno::ENOENT) => return Ok(false),
+            Err(err) => return Err(io_with_path(&file_path, err)),
+        }
+        match nix::unistd::unlinkat(
+            Some(self.handle.fd()),
+            file.name,
+            nix::unistd::UnlinkatFlags::NoRemoveDir,
+        ) {
+            Ok(()) => Ok(true),
+            Err(nix::errno::Errno::ENOENT) => Ok(false),
+            Err(err) => Err(io_with_path(&file_path, err)),
+        }
+    }
+}
+
+/// The non-Unix [`AdmittedDir`]: no directory descriptor exists, so admission is
+/// a re-checked path and the deletion re-verifies it immediately before each
+/// removal — narrower than the Unix arm, which is the `[UNVERIFIED]` gap
+/// recorded in the task report.
+#[cfg(not(unix))]
+impl AdmittedDir {
+    /// Admit the store directory at `path` — refusing a path that is no longer a
+    /// real (non-symlink) directory — plus the state files it holds.
+    fn admit(home: &std::path::Path, path: &std::path::Path) -> Result<Option<Self>, LocalDbError> {
+        match std::fs::symlink_metadata(path) {
+            Ok(meta) if meta.is_dir() => {}
+            Ok(_) => return Err(untrusted_target(path, home)),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(source) => return Err(io_with_path(path, source)),
+        }
+        let mut files = Vec::new();
+        for name in STATE_DB_FILES {
+            let file_path = path.join(name);
+            match std::fs::symlink_metadata(&file_path) {
+                Ok(meta) if meta.is_file() => files.push(AdmittedStateFile { name }),
+                Ok(_) => return Err(untrusted_target(&file_path, home)),
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                Err(source) => return Err(io_with_path(&file_path, source)),
+            }
+        }
+        Ok(Some(Self {
+            dir: path.to_path_buf(),
+            files,
+        }))
+    }
+
+    /// The store directory's path — the fence path and the refusal payload's
+    /// directory.
+    fn dir(&self) -> &std::path::Path {
+        &self.dir
+    }
+
+    /// The state files admitted here, in deletion order.
+    fn files(&self) -> &[AdmittedStateFile] {
+        &self.files
+    }
+
+    /// Delete one admitted state file, `false` when it is already gone.
+    ///
+    /// Re-verifying the path immediately before the removal still denies a
+    /// symlink or a non-file; without a directory descriptor it narrows the
+    /// swap window rather than closing it.
+    fn remove(
+        &self,
+        file: &AdmittedStateFile,
+        home: &std::path::Path,
+    ) -> Result<bool, LocalDbError> {
+        let file_path = self.dir.join(file.name);
+        match std::fs::symlink_metadata(&file_path) {
+            Ok(meta) if meta.is_file() => {}
+            Ok(_) => return Err(untrusted_target(&file_path, home)),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(source) => return Err(io_with_path(&file_path, source)),
+        }
+        match std::fs::remove_file(&file_path) {
+            Ok(()) => Ok(true),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(source) => Err(io_with_path(&file_path, source)),
+        }
+    }
+}
+
+/// True when a `stat(2)` mode describes a regular file.
+///
+/// Compared through the file-type field: the type bits overlap, so a
+/// `contains(S_IFREG)` test would accept a symlink (`0o120000`).
+#[cfg(unix)]
+fn is_regular_file(mode: nix::sys::stat::mode_t) -> bool {
+    nix::sys::stat::SFlag::from_bits_truncate(mode) == nix::sys::stat::SFlag::S_IFREG
+}
+
+/// Carry a filesystem path with an IO failure.
+fn io_with_path(path: &std::path::Path, source: impl Into<std::io::Error>) -> LocalDbError {
+    LocalDbError::IoWithPath {
+        path: path.display().to_string(),
+        source: source.into(),
+    }
 }
 
 /// True when `path` is an existing real (non-symlink) directory, `false` when
@@ -1063,51 +1330,16 @@ fn is_real_dir(path: &std::path::Path, home: &std::path::Path) -> Result<bool, L
         Ok(meta) if meta.file_type().is_symlink() => Err(untrusted_target(path, home)),
         Ok(meta) => Ok(meta.is_dir()),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(source) => Err(LocalDbError::IoWithPath {
-            path: path.display().to_string(),
-            source,
-        }),
+        Err(source) => Err(io_with_path(path, source)),
     }
-}
-
-/// The state files that exist in `dir`, in deletion order.
-///
-/// A symlink or any non-file where one of the three names belongs refuses the
-/// reset: the exact-file contract is what keeps unrelated data safe.
-fn existing_state_files(
-    dir: &std::path::Path,
-    home: &std::path::Path,
-) -> Result<Vec<&'static str>, LocalDbError> {
-    let mut files = Vec::new();
-    for name in STATE_DB_FILES {
-        let path = dir.join(name);
-        match std::fs::symlink_metadata(&path) {
-            Ok(meta) if meta.is_file() => files.push(name),
-            Ok(_) => return Err(untrusted_target(&path, home)),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-            Err(source) => {
-                return Err(LocalDbError::IoWithPath {
-                    path: path.display().to_string(),
-                    source,
-                })
-            }
-        }
-    }
-    Ok(files)
 }
 
 /// Read a directory's entries, carrying the directory path on IO failure.
 fn read_entries(dir: &std::path::Path) -> Result<Vec<std::fs::DirEntry>, LocalDbError> {
     std::fs::read_dir(dir)
-        .map_err(|source| LocalDbError::IoWithPath {
-            path: dir.display().to_string(),
-            source,
-        })?
+        .map_err(|source| io_with_path(dir, source))?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|source| LocalDbError::IoWithPath {
-            path: dir.display().to_string(),
-            source,
-        })
+        .map_err(|source| io_with_path(dir, source))
 }
 
 /// Refusal for a path that is not the real product file/directory the layout

@@ -9,7 +9,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use nexus_local_db::writer_protocol::release_retained_writer_guards;
-use nexus_local_db::{init_guarded_pool, reset_local_state, LocalDbError};
+use nexus_local_db::{
+    init_guarded_pool, reset_local_state, reset_local_state_with_post_fence_hook, LocalDbError,
+};
 use tempfile::TempDir;
 
 const STATE_FILES: [&str; 3] = ["state.db", "state.db-wal", "state.db-shm"];
@@ -251,5 +253,100 @@ fn relative_home_is_refused() {
     assert!(
         matches!(refused, Err(LocalDbError::ValidationError(_))),
         "a relative home must be refused, got {refused:?}"
+    );
+}
+
+/// A final target swapped for a symlink inside the fence window: the deletion
+/// re-checks the admitted entry and refuses instead of following or removing it.
+#[cfg(unix)]
+#[test]
+fn a_state_file_swapped_for_a_symlink_after_fencing_is_refused() {
+    use std::os::unix::fs::symlink;
+
+    let home = TempDir::new().expect("home");
+    let store = seed_store(home.path(), "ctr_alpha", "default", &STATE_FILES);
+    let outside = home.path().join("outside");
+    fs::create_dir_all(&outside).expect("outside dir");
+    let victim = outside.join("state.db");
+    fs::write(&victim, "victim-payload").expect("victim file");
+
+    // The seam runs with every fence held and before the first deletion: it
+    // swaps the admitted `state.db` for a symlink out of the store.
+    let refused = reset_local_state_with_post_fence_hook(home.path(), &mut || {
+        fs::remove_file(store.join("state.db")).expect("remove the admitted file");
+        symlink(&victim, store.join("state.db")).expect("swap for a symlink");
+    });
+
+    assert!(
+        matches!(&refused, Err(LocalDbError::PathEscape { path, .. }) if path.ends_with("state.db")),
+        "a state file swapped for a symlink must refuse the reset, got {refused:?}"
+    );
+    assert_eq!(
+        fs::read_to_string(&victim).expect("victim survives"),
+        "victim-payload",
+        "the swapped-in link's target is never deleted"
+    );
+    assert!(
+        exists(&store.join("state.db-wal")) && exists(&store.join("state.db-shm")),
+        "the refusal precedes every deletion"
+    );
+    assert!(
+        fs::symlink_metadata(store.join("state.db"))
+            .expect("swapped entry metadata")
+            .file_type()
+            .is_symlink(),
+        "the swapped-in symlink is preserved, never followed or removed"
+    );
+}
+
+/// A store directory swapped out of its admitted path inside the fence window:
+/// deletion resolves against the admitted directory, so the replacement at that
+/// path keeps its data and the admitted store is the one that is reset.
+#[cfg(unix)]
+#[test]
+fn a_store_directory_swapped_after_fencing_cannot_redirect_the_deletion() {
+    use std::os::unix::fs::symlink;
+
+    let home = TempDir::new().expect("home");
+    let store = seed_store(home.path(), "ctr_alpha", "default", &STATE_FILES);
+    fs::write(store.join("workspace.toml"), "keep").expect("sibling data");
+    // A replacement directory put at the admitted path: a rival store whose
+    // state files are not this reset's target.
+    let replacement = home.path().join("replacement-workspace");
+    fs::create_dir_all(&replacement).expect("replacement dir");
+    for name in STATE_FILES {
+        fs::write(replacement.join(name), "replacement-payload").expect("replacement state file");
+    }
+    let admitted_move = home.path().join("moved-admitted");
+
+    // The seam runs with every fence held: move the admitted directory aside and
+    // point its path at the replacement.
+    let reset = reset_local_state_with_post_fence_hook(home.path(), &mut || {
+        fs::rename(&store, &admitted_move).expect("move the admitted directory");
+        symlink(&replacement, &store).expect("point the admitted path at the replacement");
+    })
+    .expect("reset");
+
+    assert_eq!(reset, 1, "the admitted store is the one that was reset");
+    for name in STATE_FILES {
+        assert!(
+            !exists(&admitted_move.join(name)),
+            "the admitted store's {name} must be deleted"
+        );
+        assert!(
+            exists(&replacement.join(name)),
+            "the directory swapped into the path must keep its {name}"
+        );
+    }
+    assert!(
+        exists(&admitted_move.join("workspace.toml")),
+        "sibling data of the admitted store survives"
+    );
+    assert!(
+        fs::symlink_metadata(&store)
+            .expect("swapped path metadata")
+            .file_type()
+            .is_symlink(),
+        "the swapped-in symlink is preserved, never followed or removed"
     );
 }

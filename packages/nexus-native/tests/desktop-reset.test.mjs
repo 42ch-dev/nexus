@@ -95,12 +95,18 @@ describe('desktop local-state reset (real native binding)', () => {
     },
   );
 
-  test('a relative home is refused with a structured error', async () => {
+  test('a relative home is rejected at the facade before the native call', async () => {
     await assert.rejects(resetLocalState('relative-home'), (error) => {
-      const wire = parseNativeCoreError(error);
-      assert.equal(wire?.code, 'invalid_input');
+      assert.match(error.message, /must be an absolute path/);
+      assert.equal(
+        parseNativeCoreError(error),
+        null,
+        'the facade refused it, so no native CoreError envelope exists',
+      );
       return true;
     });
+    // The empty/non-string boundary keeps its own rejection.
+    await assert.rejects(resetLocalState(''), /must be a non-empty path string/);
   });
 
   test('a home without product state resets zero stores', async () => {
