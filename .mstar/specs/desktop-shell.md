@@ -1,6 +1,6 @@
 # Desktop Shell — Product and Host Contract
 
-**Classification:** Master. **Status:** Electron target contract selected for implementation; **not a claim that the Electron product cutover or dual-architecture GUI qualification has shipped**. The existing Tauri implementation is the source baseline until its replacement passes the cutover gates. This in-place revision replaces Tauri-specific normative hosting, preserves the shipped setup/product behavior, and leaves historical evidence unchanged.
+**Classification:** Master. **Status:** Electron is the shipped desktop host: the v1.192 cutover (RFT-09) is accepted, unsigned packaging is delivered (RFT-10), and the replaced Tauri composition is retired (RFT-11), leaving exactly one desktop host. This is **not a claim that dual-architecture GUI qualification, Gatekeeper trust or installed-deployment behavior has been verified** — those rows remain **[UNVERIFIED]** (§12). This in-place revision replaces Tauri-specific normative hosting, preserves the shipped setup/product behavior, and leaves historical evidence unchanged.
 
 Architecture authority: [rust-core-service-boundary.md](rust-core-service-boundary.md) §§5,7–12,16. This Master owns desktop capability, window/setup, IPC and packaging contracts; service/domain HTTP schemas remain schema-owned. No second desktop UI or competing desktop spec is introduced.
 
