@@ -33,7 +33,7 @@ function makeDesktop(
     },
     startDaemon: () => Promise.resolve(),
     stopDaemon: () => Promise.resolve(),
-    resetLocalDatabase: () => Promise.resolve({ status: 'confirmed' }),
+    resetLocalDatabase: () => Promise.resolve({ status: 'confirmed' as const }),
     getSetupCompleted: () => Promise.resolve(true),
     setSetupCompleted: () => Promise.resolve(),
     getEntrance: () => Promise.resolve('content-creator'),
@@ -106,7 +106,7 @@ describe('SettingsSetupSection', () => {
   it('confirm clears setup_completed, syncs context, and navigates to /setup', async () => {
     const user = userEvent.setup();
     const setSetupCompleted = vi.fn(() => Promise.resolve());
-    const resetLocalDatabase = vi.fn(() => Promise.resolve({ status: 'confirmed' }));
+    const resetLocalDatabase = vi.fn(() => Promise.resolve({ status: 'confirmed' as const }));
     const setWorkspacePath = vi.fn(() => Promise.resolve());
     const setAgentProfile = vi.fn(() => Promise.resolve());
 
@@ -208,7 +208,7 @@ describe('SettingsSetupSection', () => {
   it('shows a toast and stays on Setup when clear IPC fails', async () => {
     const user = userEvent.setup();
     const setSetupCompleted = vi.fn(() => Promise.reject(new Error('ipc unavailable')));
-    const resetLocalDatabase = vi.fn(() => Promise.resolve({ status: 'confirmed' }));
+    const resetLocalDatabase = vi.fn(() => Promise.resolve({ status: 'confirmed' as const }));
 
     renderInApp(
       <>

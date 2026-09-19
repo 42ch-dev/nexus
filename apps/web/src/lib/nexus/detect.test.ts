@@ -29,7 +29,7 @@ function mockBridge(): void {
 describe('isDesktopBuild (capability detection — §5 #7)', () => {
   afterEach(() => {
     // jsdom defaults: no bridge, no flag. Restore between cases.
-    delete (window as Partial<Window>).NEXUS_DESKTOP;
+    delete (window as unknown as { NEXUS_DESKTOP?: unknown }).NEXUS_DESKTOP;
     delete (window as unknown as { nexusDesktop?: unknown }).nexusDesktop;
   });
 
