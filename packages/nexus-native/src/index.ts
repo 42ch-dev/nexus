@@ -1366,6 +1366,29 @@ export function nativeCompatibility(): NativeCompatibility {
 }
 
 /**
+ * Reset the product's local state stores and resolve with the number of stores
+ * reset.
+ *
+ * Scope is exactly `state.db`, `state.db-wal` and `state.db-shm` under
+ * `<home>/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/`: the
+ * native side refuses a relative `home`, a symlinked target, or a store with a
+ * live writer, and deletes nothing outside that scope (v1.192 P0 row 19,
+ * compass D18/D20). This opens no database, so it does not run the DB-open
+ * compatibility fence.
+ *
+ * `home` is the trusted home resolved by the caller (main); it is never derived
+ * here. Rejections carry the wire `CoreError` envelope, so
+ * `parseNativeCoreError` yields `owner_busy` (live writer), `forbidden`
+ * (symlinked/non-file target), `invalid_input` (relative home) or `internal`.
+ */
+export async function resetLocalState(home: string): Promise<number> {
+  if (typeof home !== 'string' || home.length === 0) {
+    throw new Error('resetLocalState: home must be a non-empty path string');
+  }
+  return loadNativeBinding().resetLocalState(home);
+}
+
+/**
  * Open the native core. Always awaited: the frozen facade returns a Promise so
  * callers can await the open boundary.
  */

@@ -946,6 +946,179 @@ pub async fn init_engine_pool(db_path: &std::path::Path) -> Result<GuardedPool, 
     .await
 }
 
+/// The three `SQLite` files a local-state reset owns, in deletion order.
+const STATE_DB_FILES: [&str; 3] = [STATE_DB_NAME, "state.db-wal", "state.db-shm"];
+
+/// The store's primary database file — the reset's counting unit.
+const STATE_DB_NAME: &str = "state.db";
+
+/// One stored workspace scanned for reset: its directory plus the state files
+/// that exist there.
+struct ResetTarget {
+    dir: std::path::PathBuf,
+    files: Vec<&'static str>,
+}
+
+/// Reset the product's local state stores under `home`, returning the number of
+/// stores whose primary `state.db` was deleted.
+///
+/// Scope is exactly the three `SQLite` files of each stored workspace —
+/// `home/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/` plus
+/// `state.db`, `state.db-wal`, `state.db-shm` (v1.192 P0 row 19). Nothing else
+/// is removed: the stable admission lock files, sibling workspace data (`kb/`,
+/// `Pool/`, TOML), user documents, harness, knowledge and specs all survive.
+///
+/// Safety order (compass D18/D20): the scan validates every candidate first —
+/// a symlink, or a non-file where a state file belongs, refuses the whole reset
+/// — and then every target's exclusive migration fence is acquired through
+/// [`writer_protocol::acquire_store_reset_fence`] *before* the first deletion,
+/// so a live writer refuses the reset with no store half-reset. Deletion
+/// happens here in Rust, behind those fences; no caller deletes state files.
+///
+/// # Errors
+///
+/// Returns [`LocalDbError::ValidationError`] when `home` is not absolute,
+/// [`LocalDbError::PathEscape`] for a symlinked product root or a target that is
+/// not the declared real file/directory, [`LocalDbError::OwnerBusy`] when a live
+/// writer holds a target's fence, and [`LocalDbError::IoWithPath`] when the scan
+/// or a deletion fails.
+pub fn reset_local_state(home: &std::path::Path) -> Result<usize, LocalDbError> {
+    if !home.is_absolute() {
+        return Err(LocalDbError::ValidationError(
+            "local state reset requires an absolute home path".to_string(),
+        ));
+    }
+    let nexus_root = nexus_home_layout::nexus_root_from_home(home);
+    if !is_real_dir(&nexus_root, home)? {
+        return Ok(0);
+    }
+    let creators_root = nexus_root.join("creators");
+    if !is_real_dir(&creators_root, home)? {
+        return Ok(0);
+    }
+
+    // Scan every store before touching anything: an unsafe candidate refuses
+    // the whole reset instead of leaving a half-applied one.
+    let mut targets = Vec::new();
+    for entry in read_entries(&creators_root)? {
+        let creator_dir = entry.path();
+        if !is_real_dir(&creator_dir, home)? {
+            continue;
+        }
+        let workspaces_root = creator_dir.join("workspaces");
+        if !is_real_dir(&workspaces_root, home)? {
+            continue;
+        }
+        for entry in read_entries(&workspaces_root)? {
+            let store_dir = entry.path();
+            if !is_real_dir(&store_dir, home)? {
+                continue;
+            }
+            let files = existing_state_files(&store_dir, home)?;
+            if !files.is_empty() {
+                targets.push(ResetTarget {
+                    dir: store_dir,
+                    files,
+                });
+            }
+        }
+    }
+
+    // Every target is fenced before the first deletion: a live writer aborts
+    // the reset with no bytes removed from any store.
+    let fences = targets
+        .iter()
+        .map(|target| writer_protocol::acquire_store_reset_fence(&target.dir.join(STATE_DB_NAME)))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut reset = 0;
+    for target in &targets {
+        for name in &target.files {
+            let path = target.dir.join(name);
+            match std::fs::remove_file(&path) {
+                Ok(()) => reset += usize::from(*name == STATE_DB_NAME),
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                Err(source) => {
+                    return Err(LocalDbError::IoWithPath {
+                        path: path.display().to_string(),
+                        source,
+                    })
+                }
+            }
+        }
+    }
+    // The fences stay held for every deletion above; releasing them is the end
+    // of the reset.
+    drop(fences);
+    Ok(reset)
+}
+
+/// True when `path` is an existing real (non-symlink) directory, `false` when
+/// it is absent or not a directory.
+///
+/// A symlink refuses the reset instead of being followed or skipped: the
+/// trusted `home` scope would otherwise escape it.
+fn is_real_dir(path: &std::path::Path, home: &std::path::Path) -> Result<bool, LocalDbError> {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_symlink() => Err(untrusted_target(path, home)),
+        Ok(meta) => Ok(meta.is_dir()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(source) => Err(LocalDbError::IoWithPath {
+            path: path.display().to_string(),
+            source,
+        }),
+    }
+}
+
+/// The state files that exist in `dir`, in deletion order.
+///
+/// A symlink or any non-file where one of the three names belongs refuses the
+/// reset: the exact-file contract is what keeps unrelated data safe.
+fn existing_state_files(
+    dir: &std::path::Path,
+    home: &std::path::Path,
+) -> Result<Vec<&'static str>, LocalDbError> {
+    let mut files = Vec::new();
+    for name in STATE_DB_FILES {
+        let path = dir.join(name);
+        match std::fs::symlink_metadata(&path) {
+            Ok(meta) if meta.is_file() => files.push(name),
+            Ok(_) => return Err(untrusted_target(&path, home)),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(source) => {
+                return Err(LocalDbError::IoWithPath {
+                    path: path.display().to_string(),
+                    source,
+                })
+            }
+        }
+    }
+    Ok(files)
+}
+
+/// Read a directory's entries, carrying the directory path on IO failure.
+fn read_entries(dir: &std::path::Path) -> Result<Vec<std::fs::DirEntry>, LocalDbError> {
+    std::fs::read_dir(dir)
+        .map_err(|source| LocalDbError::IoWithPath {
+            path: dir.display().to_string(),
+            source,
+        })?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|source| LocalDbError::IoWithPath {
+            path: dir.display().to_string(),
+            source,
+        })
+}
+
+/// Refusal for a path that is not the real product file/directory the layout
+/// declares it to be (symlink, or a file where a directory belongs).
+fn untrusted_target(path: &std::path::Path, home: &std::path::Path) -> LocalDbError {
+    LocalDbError::PathEscape {
+        path: path.display().to_string(),
+        prefix: home.display().to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

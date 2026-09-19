@@ -400,6 +400,40 @@ fn try_exclusive_lock(path: &Path) -> Result<File, LocalDbError> {
     }
 }
 
+/// Exclusive admission fence held while one store's files are deleted.
+///
+/// The `File` is RAII and never read: dropping the fence releases the OS
+/// migration lock. The lock file itself is deliberately *not* deleted — it is
+/// the store's stable admission fence for the workspace's lifetime.
+#[allow(dead_code)]
+pub struct StoreResetFence {
+    migration_lock: File,
+}
+
+/// Take the exclusive migration fence for `db_path`, refusing `db_path`'s store
+/// immediately when any writer or migration is live on it.
+///
+/// This is the same lock file every writer must hold — `Direct` / `Engine` take
+/// it shared and `Migration` exclusive (see [`acquire_writer_guard`]) — so an
+/// exclusive acquisition is proof that no writer is live on the store. It
+/// deliberately does not go through [`acquire_writer_guard`]: that path
+/// registers a writer row inside the database being reset and requires the
+/// protocol tables, while a reset must also be able to clear a pre-protocol or
+/// corrupt store. Acquisition is fail-fast, like the engine owner's (§4.1): a
+/// live writer is refused rather than out-waited, and the caller deletes no
+/// bytes.
+///
+/// # Errors
+///
+/// Returns [`LocalDbError::OwnerBusy`] when the fence is held by a live writer
+/// or migration, and [`LocalDbError::IoWithPath`] when the lock file cannot be
+/// opened.
+pub fn acquire_store_reset_fence(db_path: &Path) -> Result<StoreResetFence, LocalDbError> {
+    Ok(StoreResetFence {
+        migration_lock: try_exclusive_lock(&migration_lock_path(db_path))?,
+    })
+}
+
 fn sqlite_url(db_path: &Path, read_only: bool) -> String {
     if read_only {
         format!("sqlite://{}?mode=ro", db_path.display())
