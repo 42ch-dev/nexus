@@ -620,8 +620,7 @@ async fn old_migrated_db_upgrades_cleanly() {
     for entry in std::fs::read_dir(&src).expect("read migrations dir") {
         let entry = entry.expect("entry");
         let name = entry.file_name().to_string_lossy().to_string();
-        if name == "20260907000001_workflow_execution_state.sql"
-            || name == RUNNER_CUTOVER_MIGRATION
+        if name == "20260907000001_workflow_execution_state.sql" || name == RUNNER_CUTOVER_MIGRATION
         {
             continue;
         }
