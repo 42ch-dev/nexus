@@ -20,7 +20,7 @@ const HEALTH_POLL_MS = 1_500;
  * Map a desktop daemon status failure to a transport-error kind (V1.129 P1).
  *
  * The desktop launch gate does NOT consume the browser-client classifier —
- * its failures come from Tauri IPC `getDaemonStatus` / wait timeout. The kind
+ * its failures come from the desktop bridge `getDaemonStatus` / wait timeout. The kind
  * is therefore inferred from the path the gate took, not from a thrown
  * `NexusClientError`. This keeps the recovery UX consistent across surfaces
  * (same primitive, same copy table) without inventing a new error path.
@@ -42,15 +42,19 @@ function kindForErrorState(errorState: 'daemon-error' | 'timeout' | 'unknown'): 
 }
 
 /**
- * Outer application launch gate (V1.105 P0, V1.125 tightened).
+ * Outer application launch gate (V1.105 P0, V1.125 tightened; v1.192 P0-T8
+ * Electron recovery honesty).
  *
  * Desktop: fullscreen splash until daemon status is `running` only. Browser:
  * instant pass. Health probes during wait are attach-race helpers — they do
  * not unlock without a `running` status (V1.125 AC-V1125-1).
  *
- * Happy path never calls `startDaemon` — Tauri `.setup()` always starts the
- * sidecar (D2). Recovery: reload (retry) or `resetLocalDatabase` then reload
- * (no post-reset `startDaemon`; reload re-runs always-start).
+ * Happy path never calls `startDaemon` — main's `DesktopServiceController`
+ * owns the service lifecycle. Recovery consumes the controller's REAL
+ * readiness: a renderer reload never reruns main (the controller survives),
+ * so retry reloads purely to re-mount the gate, and a confirmed reset
+ * re-enters the wait against the live subscription — never assuming main
+ * restarts, and a cancelled/failed reset shows no success reload.
  */
 export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
   const { t } = useTranslation('setup');
@@ -60,6 +64,9 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [errorKind, setErrorKind] = useState<TransportErrorKind | null>(null);
   const [resetBusy, setResetBusy] = useState(false);
+  // Bumped after a CONFIRMED reset to re-enter the wait against the live
+  // controller (re-subscribe + status poll). Never bumped on cancel/failure.
+  const [resetNonce, setResetNonce] = useState(0);
 
   useEffect(() => {
     if (!desktop) {
@@ -214,10 +221,12 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
       clearHealthPoll();
       unsub?.();
     };
-  }, [client, desktop, t]);
+  }, [client, desktop, t, resetNonce]);
 
   function retry() {
-    // Reload re-enters Tauri `.setup()` always-start (D2). No startDaemon.
+    // Renderer reload only remounts the SPA — main's controller survives and
+    // keeps owning the service. The re-mounted gate consumes the controller's
+    // real readiness (status subscribe/poll); no startDaemon, no main rerun.
     window.location.reload();
   }
 
@@ -228,13 +237,16 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
     setErrorKind(null);
     try {
       await desktop.resetLocalDatabase();
-      // Explicit D2 decision: do NOT call startDaemon after reset — reload
-      // re-runs `.setup()` which always starts/attaches the sidecar.
-      window.location.reload();
+      // Confirmed reset: the main-owned controller drives daemon recovery and
+      // emits real status transitions. Re-enter the wait against the live
+      // subscription — a renderer reload would not rerun main, so recovery
+      // truth comes from the controller, not from navigation.
+      setResetBusy(false);
+      setResetNonce((n) => n + 1);
     } catch (err) {
       setResetBusy(false);
-      // Keep the error until Restart (reload). Do not re-subscribe here —
-      // that would re-run applyStatus and clear the reset-failure message.
+      // Cancelled/failed reset stays in recovery: surface the error, keep the
+      // existing subscription, and never show a success reload.
       setErrorMessage(toErrorMessage(err) || t('error.resetDatabaseFailed'));
       setErrorKind(kindForErrorState('unknown'));
     }

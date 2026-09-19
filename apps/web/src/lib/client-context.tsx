@@ -11,8 +11,11 @@ import { useNavigate, useLocation } from 'react-router';
 import { useTranslation } from 'react-i18next';
 
 import { BrowserClient, type NexusClient } from '@/lib/nexus';
-import { TauriClient } from '@/lib/nexus/tauri-client';
-import { TauriDesktopCapabilities, type DesktopCapabilities } from '@/lib/nexus/desktop-capabilities';
+import { DesktopClient } from '@/lib/nexus/desktop-client';
+import {
+  ElectronDesktopCapabilities,
+  type DesktopCapabilities,
+} from '@/lib/nexus/desktop-capabilities';
 import { isDesktopBuild } from '@/lib/nexus/detect';
 import {
   createConnectionStorage,
@@ -36,9 +39,9 @@ import { TransportErrorBlock } from '@42ch/nexus-ui';
  *
  * Capability detection runs **once** here, at the factory (compass §5 #7 LOCKED)
  * — not scattered across screens. Browser build selects {@link BrowserClient}
- * with `desktop = null`; the desktop webview selects {@link TauriClient}
- * (thin-over-`BrowserClient`, same HTTP transport) plus a
- * {@link TauriDesktopCapabilities} for the native actions.
+ * with `desktop = null`; the desktop shell selects {@link DesktopClient}
+ * (thin-over-`BrowserClient`, same HTTP transport) plus an
+ * {@link ElectronDesktopCapabilities} for the native actions.
  *
  * Tests may inject an explicit `client` (and `desktop`) to bypass detection.
  */
@@ -75,12 +78,14 @@ function buildClient(config: ConnectionConfig | null, desktop: boolean): NexusCl
   // config, or a leaked test fallback without `active` must not redirect
   // the desktop client off loopback (V1.130 dogfood: poison
   // `connection_config.json` with only `endpointUrl`/`apiKey` produced the
-  // remote transport blob against `https://x`).
+  // remote transport blob against `https://x`). On desktop the persisted
+  // key is injected by main's session hook (D-18 redacted load), so the
+  // renderer-side `apiKey` may be absent for remote mode.
   if (config?.active !== true) {
-    return desktop ? new TauriClient() : new BrowserClient();
+    return desktop ? new DesktopClient() : new BrowserClient();
   }
   return desktop
-    ? new TauriClient({ baseUrl: config.endpointUrl, apiKey: config.apiKey })
+    ? new DesktopClient({ baseUrl: config.endpointUrl, apiKey: config.apiKey })
     : new BrowserClient({ baseUrl: config.endpointUrl, apiKey: config.apiKey });
 }
 
@@ -92,9 +97,7 @@ export function selectClients(): ResolvedClients {
   if (!isDesktopBuild()) {
     return { client: new BrowserClient(), desktop: null };
   }
-  const tauri = new TauriClient();
-  const desktop = new TauriDesktopCapabilities();
-  return { client: tauri, desktop };
+  return { client: new DesktopClient(), desktop: new ElectronDesktopCapabilities() };
 }
 
 /**
@@ -247,6 +250,12 @@ export function ClientProvider({
           } else {
             await storage.save(next);
           }
+          // Reload the persisted projection after save: the desktop store
+          // returns the redacted public config (never the entered key — D-18),
+          // so the ephemeral API key is dropped from memory immediately.
+          const persisted = await storage.load();
+          setStoredConfig(persisted);
+          storedConfigRef.current = persisted;
         } catch (err) {
           setStoredConfig(previous);
           storedConfigRef.current = previous;
@@ -260,13 +269,13 @@ export function ClientProvider({
     if (client) return { client, desktop: desktop ?? null };
     if (!loaded) {
       if (isDesktop) {
-        return { client: new TauriClient(), desktop: new TauriDesktopCapabilities() };
+        return { client: new DesktopClient(), desktop: new ElectronDesktopCapabilities() };
       }
       return { client: new BrowserClient(), desktop: null };
     }
     return {
       client: buildClient(config, isDesktop),
-      desktop: isDesktop ? new TauriDesktopCapabilities() : null,
+      desktop: isDesktop ? new ElectronDesktopCapabilities() : null,
     };
   }, [client, desktop, config, loaded, isDesktop]);
 

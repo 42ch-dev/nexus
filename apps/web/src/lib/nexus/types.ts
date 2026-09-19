@@ -1,10 +1,10 @@
 /**
- * `tauri-api` adapter boundary — the `NexusClient` interface.
+ * Adapter boundary — the `NexusClient` interface.
  *
  * Spec: `.mstar/specs/web-ui.md` §5. All daemon access from the UI
  * goes through this interface; core screen logic never calls `fetch`/`invoke`
- * directly. This is what makes the V1.65 Tauri desktop shell a one-impl swap
- * (`BrowserClient` → `TauriClient`) instead of a rewrite.
+ * directly. This is what makes the desktop shell a one-impl swap
+ * (`BrowserClient` → `DesktopClient`) instead of a rewrite.
  *
  * Method coverage reflects the MVP screen groups (web-ui.md §6) against the
  * V1.64 hardened contract base (Track B / plan P0 merged): cursor pagination
@@ -304,7 +304,8 @@ export interface UpdateWorkCronRequest {
  *
  * Two implementations ship with this scaffold:
  *  - {@link BrowserClient} (V1.64) — `fetch` against same-origin `/v1/daemon/*`.
- *  - `TauriClient` (V1.65 stub) — Tauri `invoke` behind the same interface.
+ *  - `DesktopClient` (V1.65 → v1.192 P0-T8) — desktop loopback/remote transport
+ *    behind the same interface.
  *
  * Daemon API data endpoints are keyless on loopback (V1.20 model); the browser
  * client sends no credentials.

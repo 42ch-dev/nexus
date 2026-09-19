@@ -6,14 +6,14 @@
  * 1. **Contract guard (architectural invariant).** web-ui.md §5 + apps/web
  *    AGENTS.md: every screen/component/query must depend on the `NexusClient`
  *    *interface* — never on `fetch`/`invoke` directly. That boundary is what
- *    keeps the V1.66 Tauri desktop shell a one-impl swap instead of a rewrite.
+ *    keeps the desktop shell a one-impl swap instead of a rewrite.
  *    The guard scans every non-test source module outside the adapter
  *    implementations and fails if any calls the global `fetch` (the browser
- *    transport). The adapter impls (`browser-client.ts`, `tauri-client.ts`,
+ *    transport). The adapter impls (`browser-client.ts`, `desktop-client.ts`,
  *    `desktop-capabilities.ts`) are the only modules permitted to touch transport
- *    primitives (`fetch` / `window.__TAURI__`).
+ *    primitives (`fetch` / `window.nexusDesktop`).
  *
- * 2. **TauriClient transport parity (V1.66 §5 #1).** `TauriClient` is thin-over-
+ * 2. **DesktopClient transport parity (V1.66 §5 #1).** `DesktopClient` is thin-over-
  *    `BrowserClient`: the 24 `NexusClient` methods reuse the identical HTTP
  *    transport to the resolved desktop loopback origin. This pins that contract
  *    — every data method hits the same `/v1/daemon/*` path as `BrowserClient`,
@@ -29,7 +29,7 @@ import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 
 import { BrowserClient, NexusClientError, type NexusClient } from '@/lib/nexus';
-import { TauriClient, resolveDesktopPort } from '@/lib/nexus/tauri-client';
+import { DesktopClient, resolveDesktopPort } from '@/lib/nexus/desktop-client';
 import { useHandlers } from '@/test/msw-server';
 import { createWorkCreated, healthOk, worksList } from '@/test/handlers';
 
@@ -37,13 +37,14 @@ import { createWorkCreated, healthOk, worksList } from '@/test/handlers';
 
 /**
  * Modules allowed to use transport primitives. The browser adapter owns
- * `fetch`; the Tauri adapter + desktop-capabilities own `window.__TAURI__` +
+ * `fetch`; the desktop adapter + desktop-capabilities own `window.nexusDesktop` +
  * the loopback `fetch`. Everything else must go through the `NexusClient` /
  * `DesktopCapabilities` interfaces.
  */
 const ADAPTER_IMPLS = new Set([
   '/src/lib/nexus/browser-client.ts',
-  '/src/lib/nexus/tauri-client.ts',
+  '/src/lib/nexus/desktop-client.ts',
+  '/src/lib/nexus/desktop-bridge.ts',
   '/src/lib/nexus/desktop-capabilities.ts',
 ]);
 
@@ -77,9 +78,9 @@ describe('NexusClient adapter contract guard', () => {
   });
 });
 
-// ── 2. TauriClient transport parity (V1.66 §5 #1) ───────────────────────────
+// ── 2. DesktopClient transport parity (V1.66 §5 #1) ───────────────────────────
 
-describe('TauriClient transport parity (thin-over-BrowserClient)', () => {
+describe('DesktopClient transport parity (thin-over-BrowserClient)', () => {
   it('resolves the desktop port per §5 #3 (explicit → NEXUS_DAEMON_PORT → 8420)', () => {
     expect(resolveDesktopPort()).toBe(8420);
     expect(resolveDesktopPort(9000)).toBe(9000);
@@ -98,7 +99,7 @@ describe('TauriClient transport parity (thin-over-BrowserClient)', () => {
       );
     };
 
-    const client = new TauriClient({ port: 8421, fetchImpl });
+    const client = new DesktopClient({ port: 8421, fetchImpl });
     expect(client.port).toBe(8421);
     await client.health();
     // The desktop origin is the resolved loopback — NOT same-origin (the
@@ -108,7 +109,7 @@ describe('TauriClient transport parity (thin-over-BrowserClient)', () => {
   });
 
   it('delegates every NexusClient data method to the same /v1/daemon/* path as BrowserClient', async () => {
-    // Capture every request URL TauriClient issues; assert each maps to the
+    // Capture every request URL DesktopClient issues; assert each maps to the
     // identical Daemon API path the browser transport uses. This is the §5 #1
     // "reuse the identical HTTP transport" invariant, pinned method-by-method.
     const seen = new Set<string>();
@@ -122,7 +123,7 @@ describe('TauriClient transport parity (thin-over-BrowserClient)', () => {
         }),
       );
     };
-    const client = new TauriClient({ fetchImpl });
+    const client = new DesktopClient({ fetchImpl });
     const workId = 'w1';
     // Exercise the core NexusClient data surfaces promoted through V1.166 P2
     // (health + 42 data method invocations here). The three preset methods
@@ -207,7 +208,7 @@ describe('TauriClient transport parity (thin-over-BrowserClient)', () => {
     // V1.166 P2 (DR-64 surfacing half) — world-scoped read-only surfaces:
     // findings panel (T1) + rules section (T2). Both are plain GETs through
     // the shared transport; pinning them here keeps the parity set complete
-    // even though TauriClient inherits them via `extends BrowserClient`.
+    // even though DesktopClient inherits them via `extends BrowserClient`.
     await client.listWorldFindings(workId);
     await client.listWorldRules(workId);
 
@@ -486,12 +487,12 @@ describe('NexusClient preset-method parity guard (R-V167P1-QC3-S1)', () => {
     }
   });
 
-  it('TauriClient implements every preset method on the NexusClient interface', () => {
-    // TauriClient is thin-over-BrowserClient (extends it); the guard pins that
+  it('DesktopClient implements every preset method on the NexusClient interface', () => {
+    // DesktopClient is thin-over-BrowserClient (extends it); the guard pins that
     // the inheritance is not accidentally broken by a future override that
     // drops a preset method. The methods are never invoked here, so the
     // fetchImpl is a defensive stub only.
-    const client = new TauriClient({
+    const client = new DesktopClient({
       fetchImpl: async () =>
         new Response(JSON.stringify({ ok: true }), {
           status: 200,
@@ -499,7 +500,7 @@ describe('NexusClient preset-method parity guard (R-V167P1-QC3-S1)', () => {
         }),
     });
     for (const method of PRESET_METHODS) {
-      expect(typeof client[method], `TauriClient.${method} must be a function`).toBe('function');
+      expect(typeof client[method], `DesktopClient.${method} must be a function`).toBe('function');
     }
   });
 });
@@ -529,8 +530,8 @@ describe('NexusClient findings-method parity guard (V1.77)', () => {
     }
   });
 
-  it('TauriClient inherits every findings method (thin-over-BrowserClient)', () => {
-    const client = new TauriClient({
+  it('DesktopClient inherits every findings method (thin-over-BrowserClient)', () => {
+    const client = new DesktopClient({
       fetchImpl: async () =>
         new Response(JSON.stringify({ ok: true }), {
           status: 200,
@@ -538,7 +539,7 @@ describe('NexusClient findings-method parity guard (V1.77)', () => {
         }),
     });
     for (const method of FINDINGS_METHODS) {
-      expect(typeof client[method], `TauriClient.${method} must be a function`).toBe('function');
+      expect(typeof client[method], `DesktopClient.${method} must be a function`).toBe('function');
     }
   });
 
@@ -637,8 +638,8 @@ describe('NexusClient memory-method parity guard (V1.78)', () => {
     }
   });
 
-  it('TauriClient inherits every memory method (thin-over-BrowserClient)', () => {
-    const client = new TauriClient({
+  it('DesktopClient inherits every memory method (thin-over-BrowserClient)', () => {
+    const client = new DesktopClient({
       fetchImpl: async () =>
         new Response(JSON.stringify({ ok: true }), {
           status: 200,
@@ -646,7 +647,7 @@ describe('NexusClient memory-method parity guard (V1.78)', () => {
         }),
     });
     for (const method of MEMORY_METHODS) {
-      expect(typeof client[method], `TauriClient.${method} must be a function`).toBe('function');
+      expect(typeof client[method], `DesktopClient.${method} must be a function`).toBe('function');
     }
   });
 
@@ -732,8 +733,8 @@ describe('NexusClient reading-depth-method parity guard (V1.89)', () => {
     }
   });
 
-  it('TauriClient inherits every reading-depth method (thin-over-BrowserClient)', () => {
-    const client = new TauriClient({
+  it('DesktopClient inherits every reading-depth method (thin-over-BrowserClient)', () => {
+    const client = new DesktopClient({
       fetchImpl: async () =>
         new Response(JSON.stringify({ ok: true }), {
           status: 200,
@@ -741,7 +742,7 @@ describe('NexusClient reading-depth-method parity guard (V1.89)', () => {
         }),
     });
     for (const method of READING_METHODS) {
-      expect(typeof client[method], `TauriClient.${method} must be a function`).toBe('function');
+      expect(typeof client[method], `DesktopClient.${method} must be a function`).toBe('function');
     }
   });
 
@@ -829,8 +830,8 @@ describe('NexusClient compute-run-method parity guard (V1.147 P1)', () => {
     }
   });
 
-  it('TauriClient inherits every compute-run method (thin-over-BrowserClient)', () => {
-    const client = new TauriClient({
+  it('DesktopClient inherits every compute-run method (thin-over-BrowserClient)', () => {
+    const client = new DesktopClient({
       fetchImpl: async () =>
         new Response(JSON.stringify({ ok: true }), {
           status: 200,
@@ -838,7 +839,7 @@ describe('NexusClient compute-run-method parity guard (V1.147 P1)', () => {
         }),
     });
     for (const method of COMPUTE_RUN_METHODS) {
-      expect(typeof client[method], `TauriClient.${method} must be a function`).toBe('function');
+      expect(typeof client[method], `DesktopClient.${method} must be a function`).toBe('function');
     }
   });
 
@@ -912,8 +913,8 @@ describe('NexusClient schedule-edit + work-cron + delete parity guard (V1.171 P2
     }
   });
 
-  it('TauriClient inherits every schedule-edit method (thin-over-BrowserClient)', () => {
-    const client = new TauriClient({
+  it('DesktopClient inherits every schedule-edit method (thin-over-BrowserClient)', () => {
+    const client = new DesktopClient({
       fetchImpl: async () =>
         new Response(JSON.stringify({ ok: true }), {
           status: 200,
@@ -921,7 +922,7 @@ describe('NexusClient schedule-edit + work-cron + delete parity guard (V1.171 P2
         }),
     });
     for (const method of SCHEDULE_EDIT_METHODS) {
-      expect(typeof client[method], `TauriClient.${method} must be a function`).toBe('function');
+      expect(typeof client[method], `DesktopClient.${method} must be a function`).toBe('function');
     }
   });
 

@@ -1292,7 +1292,7 @@ export class BrowserClient implements NexusClient {
    * `NexusClientError.kind` for honest per-kind copy + CTAs.
    */
   private static transportMessage(baseUrl: string): string {
-    // Desktop `TauriClient` uses loopback (`http://localhost:<port>`) or an
+    // Desktop `DesktopClient` uses loopback (`http://localhost:<port>`) or an
     // empty baseUrl (Vite `:5173` same-origin proxy). Treat both as local so
     // failures do not render the remote multi-cause blob.
     if (!baseUrl || BrowserClient.isLoopbackBaseUrl(baseUrl)) {

@@ -1,28 +1,27 @@
 /**
- * Desktop capability detection (compass §5 #7 LOCKED).
+ * Desktop capability detection (compass §5 #7 LOCKED; parity row 27).
  *
- * `apps/web` is a single bundle served both as a browser tab (daemon-served via
- * rust-embed) and inside the Tauri webview (`build.frontendDist`). The two modes
- * are distinguished at **runtime**, not build time, so detection must be a
- * runtime signal — not a compile-time flag that would require two builds.
+ * `apps/web` is a single bundle served both as a browser tab (daemon-served)
+ * and inside the Electron shell (packaged `nexus://app` or the Vite dev
+ * origin). The two modes are distinguished at **runtime**, not build time, so
+ * detection is a runtime signal.
  *
  * Resolution (checked **once** at the client factory, never scattered across
  * screens):
  *   1. Explicit `NEXUS_DESKTOP` override (build flag via Vite `define`, or a
- *      runtime global Tauri can inject). Primary signal per §5 #7.
- *   2. `window.__TAURI_INTERNALS__` presence — the authoritative runtime marker
- *      that `@tauri-apps/api/core`'s `isTauri()` also checks. `app.withGlobalTauri`
- *      is set `true` in `tauri.conf.json` so the full `window.__TAURI__` namespace
- *      (incl. `core.invoke`) is available; this internal key is present in every
- *      Tauri v2 webview regardless of that flag.
+ *      runtime global the shell can inject). Primary signal per §5 #7.
+ *   2. Valid typed preload bridge — `window.nexusDesktop.version === 1`
+ *      (see {@link ./desktop-bridge.ts}). No Tauri runtime marker remains:
+ *      the Tauri baseline is rollback source until P2, not a supported
+ *      concurrent runtime.
  *
  * Browser build → `false` → `BrowserClient`. Desktop build → `true` →
- * `TauriClient` + desktop capability object.
+ * `DesktopClient` + `ElectronDesktopCapabilities`.
  */
+import { getDesktopBridge } from './desktop-bridge';
 
 declare global {
   interface Window {
-    __TAURI_INTERNALS__?: unknown;
     NEXUS_DESKTOP?: boolean;
   }
 }
@@ -33,17 +32,19 @@ interface NexusImportMetaEnv {
 }
 
 /**
- * `true` only when running inside the Tauri desktop webview (or when the
+ * `true` only when running inside the Electron desktop shell (or when the
  * `NEXUS_DESKTOP` flag is explicitly set). Use at the client factory, not in
- * screen components — screens consume the `DesktopCapabilities` context which is
- * `null` in browser mode.
+ * screen components — screens consume the `DesktopCapabilities` context which
+ * is `null` in browser mode.
  */
 export function isDesktopBuild(): boolean {
   // 1. Explicit flag (build-time via Vite `define` or runtime global).
   const env = (import.meta as unknown as { env?: NexusImportMetaEnv }).env;
-  const flag = env?.NEXUS_DESKTOP ?? (typeof window !== 'undefined' ? window.NEXUS_DESKTOP : undefined);
+  const flag =
+    env?.NEXUS_DESKTOP ??
+    (typeof window !== 'undefined' ? window.NEXUS_DESKTOP : undefined);
   if (flag === true) return true;
 
-  // 2. Tauri runtime presence (sanity check + the real signal for a shared bundle).
-  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+  // 2. Typed preload bridge (the real runtime signal for a shared bundle).
+  return getDesktopBridge() !== null;
 }

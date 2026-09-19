@@ -53,7 +53,9 @@ export function ConnectDaemonForm() {
   useEffect(() => {
     if (savedConfig) {
       setUrl(savedConfig.endpointUrl);
-      setApiKey(savedConfig.apiKey);
+      // The desktop store never returns the persisted key (D-18 redacted
+      // load) — prefill only what the saved config actually carries.
+      setApiKey(savedConfig.apiKey ?? '');
       setLabel(savedConfig.label ?? '');
     }
   }, [savedConfig]);
@@ -62,6 +64,11 @@ export function ConnectDaemonForm() {
 
   const hasSavedConfig = Boolean(savedConfig);
   const savedEndpointMatches = savedConfig?.endpointUrl === normalizedUrl;
+  // Retained-credential reconnect (desktop): the saved endpoint has a stored
+  // key the author is not required to re-enter. An endpoint change can never
+  // retain the old endpoint's credential (main enforces this on save too).
+  const canRetainCredential =
+    hasSavedConfig && savedEndpointMatches && Boolean(savedConfig?.hasApiKey);
   const savedFingerprint = savedConfig?.pinnedFingerprint;
   const reconnectWithMatch =
     hasSavedConfig &&
@@ -87,16 +94,19 @@ export function ConnectDaemonForm() {
   }
 
   async function activateConfig(nextFingerprint?: string) {
-    if (!normalizedUrl || !apiKey) {
+    if (!normalizedUrl || (!apiKey && !canRetainCredential)) {
       toast({ variant: 'error', title: commonT('toast.enterDaemonUrlAndApiKey') });
       return;
     }
     const next: ConnectionConfig = {
       endpointUrl: normalizedUrl,
-      apiKey,
+      // Omitted key means "keep the stored credential" on the desktop store;
+      // the browser backend persists the entered key as before.
+      apiKey: apiKey || undefined,
       label: label.trim() || endpointLabel(normalizedUrl),
       active: true,
       pinnedFingerprint: nextFingerprint,
+      hasApiKey: apiKey ? true : canRetainCredential,
     };
     try {
       await setConfig(next);

@@ -270,7 +270,7 @@ describe('DaemonLaunchGate', () => {
     expect(reloadSpy).toHaveBeenCalled();
   });
 
-  it('reset local database does not call startDaemon (reload owns D2 restart)', async () => {
+  it('confirmed reset recovers via real controller readiness without a success reload', async () => {
     healthUnavailable();
     const user = userEvent.setup();
     const startDaemon = vi.fn(() => Promise.resolve());
@@ -280,18 +280,21 @@ describe('DaemonLaunchGate', () => {
       value: { ...window.location, reload: reloadSpy },
       writable: true,
     });
+    // Controller truth: error before the reset, running once recovery proceeds.
+    let status: DaemonStatus = { state: 'error', port: 8420, detail: 'sidecar crashed' };
+    const getDaemonStatus = vi.fn(() => Promise.resolve(status));
+    let emit: ((status: DaemonStatus) => void) | undefined;
+    const onDaemonStatusChanged = vi.fn((callback: (status: DaemonStatus) => void) => {
+      emit = callback;
+      return Promise.resolve(() => {});
+    });
 
     renderGate({
       desktop: makeDesktop({
         startDaemon,
         resetLocalDatabase,
-        getDaemonStatus: () =>
-          Promise.resolve({
-            state: 'error',
-            port: 8420,
-            detail: 'sidecar crashed',
-          }),
-        onDaemonStatusChanged: () => Promise.resolve(() => {}),
+        getDaemonStatus,
+        onDaemonStatusChanged,
       }),
     });
 
@@ -303,8 +306,23 @@ describe('DaemonLaunchGate', () => {
 
     await user.click(screen.getByRole('button', { name: /^Reset$/i }));
     await waitFor(() => expect(resetLocalDatabase).toHaveBeenCalled());
+    // No post-reset startDaemon, and no success reload — a renderer reload
+    // would not rerun main; recovery consumes the controller's readiness.
     expect(startDaemon).not.toHaveBeenCalled();
-    expect(reloadSpy).toHaveBeenCalled();
+    expect(reloadSpy).not.toHaveBeenCalled();
+
+    // The confirmed reset re-entered the wait (fresh subscription against the
+    // live controller).
+    await waitFor(() => expect(onDaemonStatusChanged.mock.calls.length).toBeGreaterThanOrEqual(2));
+
+    // Controller emits real readiness → the gate unlocks.
+    status = { state: 'running', port: 8420, version: 'test' };
+    act(() => {
+      emit?.({ state: 'running', port: 8420, version: 'test' });
+    });
+    await waitFor(() => expect(screen.getByTestId('routes')).toBeInTheDocument());
+    expect(reloadSpy).not.toHaveBeenCalled();
+    expect(startDaemon).not.toHaveBeenCalled();
   });
 
   it('keeps reset-failure error without re-subscribing (no retryToken bump)', async () => {

@@ -197,11 +197,13 @@ export function SetupStepWorkspace({
     setResetBusy(true);
     try {
       await desktop.resetLocalDatabase();
-      // Explicit D2 decision: do NOT call startDaemon after reset — reload
-      // re-runs `.setup()` which always starts/attaches the sidecar.
-      window.location.reload();
+      // Confirmed reset: stay in the wizard and clear the migration error so
+      // the author can retry Continue — recovery truth comes from the
+      // controller on the next bootstrap attempt. A renderer reload would not
+      // rerun main, so no success reload is shown (v1.192 P0-T8).
+      setContinueError(null);
+      setContinueErrorPhase(null);
     } catch (err) {
-      setResetBusy(false);
       const message = errorMessage(err) || t('error.resetDatabaseFailed');
       toast({
         variant: 'error',
@@ -209,6 +211,8 @@ export function SetupStepWorkspace({
         description: message,
       });
       console.error('Failed to reset local database:', err);
+    } finally {
+      setResetBusy(false);
     }
   }
 
