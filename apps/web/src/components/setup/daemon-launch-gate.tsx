@@ -102,7 +102,8 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
       if (status.state === 'running') {
         markReady();
       } else if (status.state === 'starting' || status.state === 'stopped') {
-        // D2: Tauri `.setup()` owns start — keep waiting; do not call startDaemon.
+        // Main's DesktopServiceController owns start — keep waiting; do not
+        // call startDaemon from the renderer.
         setDaemonReady(false);
         setErrorMessage(null);
         setErrorKind(null);

@@ -68,7 +68,7 @@ class WebConnectionStorage implements ConnectionStorage {
     if (!raw) return null;
     try {
       const parsed = JSON.parse(raw) as unknown;
-      if (!isValidConnectionConfig(parsed)) {
+      if (!isValidWebConnectionConfig(parsed)) {
         await this.clear();
         return null;
       }
@@ -127,12 +127,18 @@ class DesktopConnectionStorage implements ConnectionStorage {
   }
 }
 
-/** Validate the raw parsed JSON has the minimal fields we require. */
-function isValidConnectionConfig(value: unknown): value is ConnectionConfig {
+/**
+ * Validate the raw parsed JSON has the minimal fields the WEB backend
+ * requires. The browser localStorage record must carry the actual key —
+ * an active keyless remote record would otherwise build an unauthenticated
+ * remote BrowserClient. (The desktop redacted shape is constructed from the
+ * typed bridge result, never from this validator.)
+ */
+function isValidWebConnectionConfig(value: unknown): value is ConnectionConfig {
   if (value === null || typeof value !== 'object') return false;
   const c = value as Record<string, unknown>;
   if (typeof c.endpointUrl !== 'string' || c.endpointUrl.length === 0) return false;
-  if (c.apiKey !== undefined && typeof c.apiKey !== 'string') return false;
+  if (typeof c.apiKey !== 'string') return false;
   if (c.hasApiKey !== undefined && typeof c.hasApiKey !== 'boolean') return false;
   if (c.pinnedFingerprint !== undefined && typeof c.pinnedFingerprint !== 'string') return false;
   if (c.label !== undefined && typeof c.label !== 'string') return false;
