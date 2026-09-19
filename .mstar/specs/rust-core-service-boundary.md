@@ -197,7 +197,7 @@ Callable but incomplete rows remain inventory rows until a named plan owns them:
 - hidden hard-deprecated `creator workspace clone`
 - coming-soon `workspace link|unlink|status`
 - platform-only `explore browse|search`, deferred `platform context assemble`, coming-soon `publish`
-- hidden compatibility aliases (`system preset`, top-level `sync`/`preset`)
+- visible deprecated `system preset` forwarding alias; hidden but callable top-level `sync`/`preset`/`capability`
 
 Removal only at RFT-11 with help/docs/parity proof. Never a quiet cleanup.
 
@@ -216,9 +216,9 @@ RFT-00–04 shipped together as milestone **RFT-M1** (v1.189). RFT-05–08 are o
 | RFT-06 | Actor/Character/admission/memory/context | M2 / not started |
 | RFT-07 | Execution/scheduler/Host/providers/capabilities/MCP/Connect control plane **and** complete TS API/default service entry | M2 / not started |
 | RFT-08 | Complete independent Rust CLI + headless product cutover (default authoring entry; operator commands control TS; Connect-only runtime) | M2 / not started |
-| RFT-09 | Formal desktop cutover (Electron preferred after the M1 development GO; reuse web/Studio; no visual redesign) | M3 |
-| RFT-10 | Production distribution / Developer ID signing / notarization / stapling | M3 |
-| RFT-11 | Obsolete-host retirement **and** retained v1.188 P5 public first-run / Quick Start / live request | M3 |
+| RFT-09 | Formal desktop cutover (Electron preferred after the M1 development GO; reuse web/Studio; no visual redesign) | M3 / **v1.192 in scope** |
+| RFT-10 | Production distribution / Developer ID signing / notarization / stapling | M3. **v1.192 delivers the unsigned half only** (`.app` and `.dmg`, both macOS architectures, no Apple credentials required). Signing remains the durable destination and is a Non-Goal until explicit release authorization |
+| RFT-11 | Obsolete-host retirement **and** retained v1.188 P5 public first-run / Quick Start / live request | M3. **v1.192 deletes Tauri only after accepted RFT-09 and unsigned packaging.** Current source inventory confirms default `legacy-cli`/`web-embed`, integrated daemon start, embedded SPA and DaemonClient consumers remain; dormant CLI rows have real handlers. Both families are kept until retained-leaf/default-switch completion, zero-consumer evidence and/or reviewed help/docs/parity proof authorize a later retirement. Retained P5 stays out |
 
 ## 8. Concurrent writes (user-locked)
 
@@ -273,11 +273,11 @@ Preserve current cohorts. Selected candidate pins distinguish tooling, standalon
 | Browser / Studio | Current ESNext / system webview; Studio daemon-free on 5174 | No new browser matrix. No visual redesign. |
 | Node / native API | Root tooling remains `node >=22.22`, `pnpm >=11` | Standalone service floor Node22.22.0; proof Node22.22.0 and24.20.0 independently. Node-API8; napi3.12.4/derive3.6.5/build2.4.2, CLI3.9.1, Rust1.98.1. napi's MSRV1.88 is not a workspace support claim. |
 
-No new ARM Linux, musl, or Windows ARM support promise. Missing signing credentials are named Execute blockers, not unsigned success and not a silent support shrink.
+No new ARM Linux, musl, or Windows ARM support promise. Missing signing credentials are named Execute blockers for a **signed** release, not unsigned success and not a silent support shrink. **v1.192 amendment (2026-09-19):** ordinary unsigned `.app`/`.dmg` packaging must succeed with no Apple credentials present; fail-closed applies to unsupported signed/release requests, never to that unsigned path.
 
 Native targets: Windows x64 MSVC (Windows10/Server2016 ABI floor), macOS arm64/x64 (11.0 ABI floor), Linux x64 GNU (kernel4.18/glibc2.28). Use one existing sqlx0.9.0/libsqlite3-sys0.30.1 link. Electron44.3.0 embeds Node24.20.0/Chromium152.0.7977.78; packager20.3.0; TS ACP SDK1.4.0/zod4.6.2. Exact build candidates are Xcode16.4/deployment11.0, VS2022 17.14/v143/Windows SDK10.0.26100 and a glibc2.28 GNU sysroot/GCC10.1+.
 
-**Desktop floor (resolved 2026-09-13):** Electron44 requires macOS13+ (Ventura); the current Tauri config does not state a `minimumSystemVersion`. The user accepted macOS 13+ on arm64 and x86_64 as the future Electron desktop target floor. That authorizes the target only: shipped Tauri support and sidecar behavior stay unchanged until a formal RFT-09 cutover, and a P3 go still requires actual signed dual-architecture execution plus the fixed resource/security gates. The accepted floor is not evidence and is not a shipped migration. Missing runners, SDKs or signing evidence block qualification, not permission to reduce cohorts.
+**Desktop floor (resolved 2026-09-13):** Electron44 requires macOS13+ (Ventura); the current Tauri config does not state a `minimumSystemVersion`. The user accepted macOS 13+ on arm64 and x86_64 as the future Electron desktop target floor. That authorizes the target only: shipped Tauri support and sidecar behavior stay unchanged until a formal RFT-09 cutover. The M1 development GO did not require signed dual-architecture execution (signing is release-only / RFT-10 durable). **v1.192** does not implement signing. The accepted floor is not evidence and is not a shipped migration. Missing runners, SDKs or signing evidence block qualification, not permission to reduce cohorts.
 
 ## 12. Desktop: Electron preferred, Tauri shipped
 
@@ -285,7 +285,7 @@ Electron is the **preferred** future desktop host **subject to a real package / 
 
 - Reuse `apps/web`, Design Studio, and `packages/nexus-ui`. No visual redesign and no second desktop UI.
 - P3 is feasibility, not production distribution (RFT-10) and not Tauri retirement (RFT-11).
-- **No-go does not complete M1.** M1 recorded a **development GO**. That GO is not a shipped desktop migration, not production signing, and not permission to drop Tauri in M2. RFT-09 is the formal product switch; RFT-10 is production distribution; RFT-11 retires the obsolete host. Product does not silently pick an alternative desktop.
+- **No-go does not complete M1.** M1 recorded a **development GO**, authorized by the v1.189 compass and native matrix run `34881345823`, not shipped desktop migration or production signing. The historical decision JSON remains blocked (13 pass / 0 fail / 22 missing-or-unobserved, including x64 GUI rows); the CI matrix does not prove those rows passed. RFT-09 is the formal product switch; v1.192 delivers unsigned app+DMG only. RFT-11 deletes the replaced Tauri family after host/packaging acceptance; verified still-consumed daemon/SPA and callable dormant CLI rows stay. Product does not silently choose an alternative desktop.
 - Current Tauri sidecar/IPC/path-guard behavior stays until that later decision.
 
 ## 13. Frontend DX (hard product goal)
@@ -346,7 +346,7 @@ Measurement protocol: same candidate hardware and seeded real DB (500 entities,1
 - Uninterrupted native continuation across TS restart
 - New ARM Linux / musl / Windows ARM / Windows-or-Linux GUI support
 - Paid/live model requests; P5 public first-run
-- Destructive data reset
+- Destructive data reset as migration/implementation shortcut; this does not remove the shipped explicitly confirmed desktop local-state-reset function, whose scope/fencing/recovery contract is preserved in [desktop-shell.md](desktop-shell.md) §8
 - Browser/device/installed-deployment E2E as a development acceptance gate
 
 ## 17. Conflict with shipped Masters
