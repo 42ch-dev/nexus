@@ -147,7 +147,7 @@ describe('ClientProvider resume-time fingerprint gate', () => {
 
     function Probe() {
       const client = useNexusClient();
-      // TauriClient exposes `port` only for loopback mode; remote overrides
+      // DesktopClient exposes `port` only for loopback mode; remote overrides
       // leave it undefined.
       const port = 'port' in client ? (client as { port?: number }).port : undefined;
       return (
@@ -168,7 +168,7 @@ describe('ClientProvider resume-time fingerprint gate', () => {
       </QueryClientProvider>,
     );
 
-    expect(await screen.findByTestId('client-type')).toHaveTextContent('TauriClient');
+    expect(await screen.findByTestId('client-type')).toHaveTextContent('DesktopClient');
     // Loopback default port — not undefined remote-override mode.
     expect(screen.getByTestId('client-port')).toHaveTextContent('8420');
   });
@@ -362,11 +362,11 @@ describe('ClientProvider resume-time fingerprint gate', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
-  it('selects TauriClient on first render while config is loading in desktop build', () => {
+  it('selects DesktopClient on first render while config is loading in desktop build', () => {
     vi.mocked(isDesktopBuild).mockReturnValue(true);
     renderWithGate(undefined, undefined, ['/']);
 
-    expect(screen.getByTestId('client-type')).toHaveTextContent('TauriClient');
+    expect(screen.getByTestId('client-type')).toHaveTextContent('DesktopClient');
   });
 
   it('treats /setup as a bypass route for the fingerprint gate', async () => {

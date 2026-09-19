@@ -24,6 +24,7 @@ import {
   type ResolvedServiceConfig,
 } from './config.js';
 import { HttpError, mapNativeError, stringifyJsonSafe, toErrorBody } from './errors.js';
+import { createDiscoveryRecord } from './discovery.js';
 import type { ServiceCore } from './lifecycle.js';
 import { checkApiKey, checkOrigin, corsAllowHeaders, corsAllowMethods } from './security.js';
 import { handleRoute, matchRoute } from './routes.js';
@@ -43,6 +44,61 @@ export interface RunningService {
 
 /** Instance-bound operator stop endpoint (architecture §7). */
 const RUNTIME_STOP_PATH = '/v1/daemon/runtime/stop';
+
+/**
+ * Guarded instance-identity anchor (D17, `rust-core-service-boundary.md` §8.1):
+ * the closed v1 discovery record of *this* service instance, under the same
+ * API-key/loopback admission as the operator stop path. A client compares it
+ * against the private `<user_home>/.nexus42/run/service.json` record before
+ * attaching, so the response is derived from this process's own state — never
+ * read back from the replaceable published file.
+ */
+const RUNTIME_DISCOVERY_PATH = '/v1/daemon/runtime/discovery';
+
+/** Port the listener actually serves; 0 resolves to the kernel-assigned port. */
+function boundPort(server: Server, config: ResolvedServiceConfig): number {
+  const address = server.address();
+  return address && typeof address === 'object' ? address.port : config.port;
+}
+
+/** Base URL for a bound HTTP listener on this config's host. */
+function httpUrlFor(config: ResolvedServiceConfig, port: number): string {
+  const protocol = config.tlsCert && config.tlsKey ? 'https' : 'http';
+  return `${protocol}://${formatHttpAuthority(config.host, port)}`;
+}
+
+/** Tagged wire endpoint of the running listener (the value the record publishes). */
+function boundEndpoint(server: Server, config: ResolvedServiceConfig): CoreServiceDiscovery['endpoint'] {
+  if (config.transport === 'unix') {
+    if (!config.socketPath) {
+      throw new HttpError(500, 'internal', 'unix transport requires a socket path');
+    }
+    return { transport: 'unix', path: config.socketPath };
+  }
+  return { transport: 'http', url: httpUrlFor(config, boundPort(server, config)) };
+}
+
+/**
+ * The published record of this instance, built with the same schema-derived
+ * constructor `startService` publishes, so the response cannot fork the record
+ * shape or leak a secret field.
+ */
+function discoveryRecordFor(
+  service: ServiceCore,
+  config: ResolvedServiceConfig,
+  server: Server,
+): CoreServiceDiscovery {
+  return createDiscoveryRecord({
+    instanceId: service.instanceId,
+    userHome: config.home,
+    endpoint: boundEndpoint(server, config),
+    tlsFingerprint: service.tlsFingerprint?.fingerprint ?? null,
+    readiness: service.workspaceInitialized ? 'ready' : 'uninitialized',
+    creatorId: service.creatorId,
+    workspaceSlug: service.workspaceSlug,
+    engineEpoch: service.engineEpoch,
+  });
+}
 
 /**
  * Closed admission of the generated `CoreServiceStopRequest` shape. Rejected
@@ -294,6 +350,24 @@ export function createServiceServer(
         return;
       }
 
+      // Guarded instance-identity anchor (D17): same admission as the operator
+      // stop path, answered from this instance's own identity.
+      if (method === 'GET' && urlObj.pathname === RUNTIME_DISCOVERY_PATH) {
+        const auth = checkApiKey(req, config, remoteAddress);
+        if (!auth.ok) {
+          sendError(
+            res,
+            new HttpError(auth.status, auth.code, auth.message, auth.details),
+            id,
+            origin,
+            config.allowedOrigins,
+          );
+          return;
+        }
+        sendJson(res, 200, discoveryRecordFor(service, config, server), id, origin, config.allowedOrigins);
+        return;
+      }
+
       const route = matchRoute(method, urlObj.pathname);
       if (!route) {
         sendError(res, new HttpError(501, 'route_not_migrated', `Route is not migrated: ${urlObj.pathname}`), id, origin, config.allowedOrigins);
@@ -425,8 +499,7 @@ export async function listenServer(
     server.once('error', rejectListen);
     server.listen(config.port, config.host, () => resolveListen());
   });
-  const bound = server.address();
-  const port = bound && typeof bound === 'object' ? bound.port : config.port;
+  const port = boundPort(server, config);
   if (port !== config.port) {
     // The allowlist was frozen from the *requested* port; with port 0 the
     // kernel picked the real one. Extend it with the actually-served origin
@@ -437,9 +510,8 @@ export async function listenServer(
       ...new Set([...config.allowedOrigins, ...resolveAllowedOrigins(port, config.host)]),
     ];
   }
-  const protocol = config.tlsCert && config.tlsKey ? 'https' : 'http';
   return {
     transport: 'http',
-    url: `${protocol}://${formatHttpAuthority(config.host, port)}`,
+    url: httpUrlFor(config, port),
   };
 }

@@ -1,413 +1,196 @@
 /**
- * Electron utility-process owner for @42ch/nexus-native + @42ch/nexus-provider-acp.
- * Loaded only via utilityProcess.fork — never in the sandboxed renderer.
+ * Electron utility-process owner of the app-managed TypeScript service
+ * (v1.192 P0-T4). Loaded only via `utilityProcess.fork` — never in the
+ * sandboxed renderer.
+ *
+ * The utility is the app's single native owner: it imports the existing
+ * `startService(options): Promise<RunningService>` and closes the returned
+ * handle, and it is the only process that loads the native binding, for the
+ * user-confirmed local-state reset. It opens no core/provider owner of its own
+ * — the proof shell's separate `openCore` owner and its
+ * `compatibility/open/graph/patch/provider/pull` operation bodies are gone.
+ *
+ * Wire protocol (frozen by the plan's "TS-service lifecycle and quit"):
+ * `{generation,request_id,operation,payload}` in, `{generation,request_id,ok,…}`
+ * plus the `service-ready` discovery push out. Main is the only sender: a
+ * renderer never reaches this process and never supplies a filesystem path.
  */
-import { createAcpProvider } from '@42ch/nexus-provider-acp';
-import type {
-  NativeOpenOptions,
-  ProviderCall,
-  WorldKbPatchEntityRequest,
-} from '@42ch/nexus-contracts';
+
+import { isAbsolute } from 'node:path';
+import type { CoreCloseReport } from '@42ch/nexus-contracts';
+import { resetLocalState } from '@42ch/nexus-native';
+import { startService, type RunningService, type ServiceOptions } from '@42ch/nexus-service';
+import { isConfirmedCloseReport } from './lifecycle-coord.js';
 import {
-  nativeCompatibility,
-  openCore,
-  type NativeCore,
-  type PrincipalHandle,
-} from '@42ch/nexus-native';
-import {
-  CLOSE_JOIN_MS,
-  MAX_ACTIVE_CALLS,
-  MAX_BATCH_BYTES,
-  MAX_PENDING_BYTES,
-  MAX_PENDING_CALLS,
-  MAX_REQUEST_BYTES,
-  clampPullBounds,
-  errorCode,
-  errorMessage,
-  estimatePayloadBytes,
-  ipcErr,
-  ipcOk,
-  parseIpcRequest,
-  type IpcRequest,
-  type IpcResponse,
-  type LifecyclePhase,
-  type UtilityConfig,
-} from './ipc.js';
-import { PullReservationLedger } from './utility-admission.js';
+  SERVICE_CLOSE_BUDGET_MS,
+  parseUtilityRequest,
+  utilityErr,
+  utilityError,
+  utilityMessageCode,
+  utilityMessageText,
+  utilityOk,
+  type ServiceReadyMessage,
+  type UtilityCrashedMessage,
+  type UtilityRequest,
+  type UtilityReadyMessage,
+} from './service-controller.js';
+import { admitUtilityOperation, type ServiceOwnerState } from './utility-admission.js';
 
 interface OwnerState {
-  phase: LifecyclePhase;
-  core: NativeCore | null;
-  principal: PrincipalHandle | null;
-  acceptingWork: boolean;
-  closeReport: unknown | null;
-  lastError: string | null;
+  serviceState: ServiceOwnerState;
+  running: RunningService | null;
 }
 
-interface QueuedWork {
-  request: IpcRequest;
-  payloadBytes: number;
-}
-
-const state: OwnerState = {
-  phase: 'idle',
-  core: null,
-  principal: null,
-  acceptingWork: true,
-  closeReport: null,
-  lastError: null,
-};
-
-let frozenConfig: UtilityConfig | null = null;
-let closePromise: Promise<IpcResponse> | null = null;
-let activeCount = 0;
-let queuedCount = 0;
-let queuedBytes = 0;
-const pendingOperationIds: string[] = [];
-const workQueue: QueuedWork[] = [];
-const pullReservations = new PullReservationLedger();
-let draining = false;
-
-function readConfig(): UtilityConfig {
-  if (!frozenConfig) {
-    const raw = process.env.NEXUS_PROOF_UTILITY_CONFIG;
-    if (!raw) {
-      throw new Error('NEXUS_PROOF_UTILITY_CONFIG missing — main must inject frozen open options');
-    }
-    frozenConfig = JSON.parse(raw) as UtilityConfig;
-  }
-  return frozenConfig;
-}
-
-function lifecycleSnapshot() {
-  return {
-    phase: state.phase,
-    owner_alive: state.phase !== 'closed' && state.phase !== 'interrupted',
-    cleanup_confirmed:
-      state.closeReport && typeof state.closeReport === 'object' && state.closeReport !== null
-        ? (state.closeReport as { cleanup_confirmed?: boolean }).cleanup_confirmed ?? null
-        : null,
-    pending_operations: [...pendingOperationIds],
-    reason: state.lastError,
-    last_close_report: state.closeReport,
-  };
-}
-
-function rejectIfClosing(): void {
-  if (!state.acceptingWork || state.phase === 'closing' || state.phase === 'closed' || state.phase === 'interrupted') {
-    throw Object.assign(new Error('owner is closing or interrupted'), { code: 'closing' });
-  }
-}
-
-function trackOperationStart(requestId: string): void {
-  pendingOperationIds.push(requestId);
-}
-
-function trackOperationEnd(requestId: string, request: IpcRequest): void {
-  const index = pendingOperationIds.indexOf(requestId);
-  if (index >= 0) pendingOperationIds.splice(index, 1);
-  pullReservations.release(request);
-}
-
-function admitOrReject(request: IpcRequest): IpcResponse | null {
-  const payloadBytes = estimatePayloadBytes(request.payload);
-  if (payloadBytes > MAX_REQUEST_BYTES) {
-    return ipcErr(request.request_id, 'input_too_large', 'request payload exceeds 1 MiB');
-  }
-  if (request.operation === 'pull') {
-    const body = request.payload as { operation_id?: string } | undefined;
-    if (typeof body?.operation_id !== 'string' || body.operation_id.length === 0) {
-      return ipcErr(request.request_id, 'invalid_input', 'operation_id is required');
-    }
-    if (pullReservations.isReserved(body.operation_id)) {
-      return ipcErr(request.request_id, 'busy', 'one outstanding pull per operation');
-    }
-  }
-  if (activeCount < MAX_ACTIVE_CALLS) {
-    if (request.operation === 'pull' && !pullReservations.tryReserve(request)) {
-      return ipcErr(request.request_id, 'busy', 'one outstanding pull per operation');
-    }
-    return null;
-  }
-  if (queuedCount >= MAX_PENDING_CALLS || queuedBytes + payloadBytes > MAX_PENDING_BYTES) {
-    return ipcErr(request.request_id, 'busy', 'utility admission cap exceeded');
-  }
-  if (request.operation === 'pull' && !pullReservations.tryReserve(request)) {
-    return ipcErr(request.request_id, 'busy', 'one outstanding pull per operation');
-  }
-  return null;
-}
-
-async function runRequest(request: IpcRequest): Promise<void> {
-  activeCount += 1;
-  trackOperationStart(request.request_id);
-  try {
-    const response = await dispatch(request);
-    port.postMessage(response);
-  } catch (err) {
-    port.postMessage(ipcErr(request.request_id, errorCode(err), errorMessage(err)));
-  } finally {
-    trackOperationEnd(request.request_id, request);
-    activeCount -= 1;
-    void drainQueue();
-  }
-}
-
-async function drainQueue(): Promise<void> {
-  if (draining) return;
-  draining = true;
-  try {
-    while (activeCount < MAX_ACTIVE_CALLS && workQueue.length > 0) {
-      const next = workQueue.shift();
-      if (!next) break;
-      queuedCount -= 1;
-      queuedBytes -= next.payloadBytes;
-      await runRequest(next.request);
-    }
-  } finally {
-    draining = false;
-  }
-}
-
-function enqueue(request: IpcRequest, payloadBytes: number): void {
-  workQueue.push({ request, payloadBytes });
-  queuedCount += 1;
-  queuedBytes += payloadBytes;
-}
-
-async function handleCompatibility(request_id: string): Promise<IpcResponse> {
-  return ipcOk(request_id, nativeCompatibility());
-}
-
-async function handleOpen(request_id: string): Promise<IpcResponse> {
-  rejectIfClosing();
-  if (state.core) {
-    return ipcErr(request_id, 'owner_busy', 'native core already open in this utility owner');
-  }
-  const config = readConfig();
-  state.phase = 'starting';
-  const options: NativeOpenOptions = {
-    user_home: config.user_home,
-    access: config.access,
-    allow_uninitialized: config.allow_uninitialized,
-  };
-  const providers = createAcpProvider();
-  state.core = await openCore(options, providers);
-  state.principal = await state.core.activePrincipal();
-  state.phase = 'open';
-  return ipcOk(request_id, { readiness: 'open', principal: 'opaque' });
-}
-
-async function handleGraph(request_id: string, payload: unknown): Promise<IpcResponse> {
-  rejectIfClosing();
-  if (!state.core || !state.principal) {
-    return ipcErr(request_id, 'uninitialized', 'open the native core before graph');
-  }
-  const body = payload as { world_id?: string; include_suggested?: boolean };
-  if (typeof body?.world_id !== 'string' || body.world_id.length === 0) {
-    return ipcErr(request_id, 'invalid_input', 'world_id is required');
-  }
-  const graph = await state.core.worldKbGraph(
-    state.principal,
-    body.world_id,
-    Boolean(body.include_suggested),
-  );
-  return ipcOk(request_id, graph);
-}
-
-async function handlePatch(request_id: string, payload: unknown): Promise<IpcResponse> {
-  rejectIfClosing();
-  if (!state.core || !state.principal) {
-    return ipcErr(request_id, 'uninitialized', 'open the native core before patch');
-  }
-  const body = payload as { world_id?: string; request?: WorldKbPatchEntityRequest };
-  if (typeof body?.world_id !== 'string' || !body.request) {
-    return ipcErr(request_id, 'invalid_input', 'world_id and request are required');
-  }
-  const encoded = Buffer.byteLength(JSON.stringify(body.request), 'utf8');
-  if (encoded > MAX_REQUEST_BYTES) {
-    return ipcErr(request_id, 'input_too_large', 'patch request too large');
-  }
-  const response = await state.core.patchWorldKbEntity(state.principal, body.world_id, body.request);
-  return ipcOk(request_id, response);
-}
-
-async function handleProvider(request_id: string, payload: unknown): Promise<IpcResponse> {
-  rejectIfClosing();
-  if (!state.core) {
-    return ipcErr(request_id, 'uninitialized', 'open the native core before provider');
-  }
-  const call = payload as ProviderCall;
-  if (!call || typeof call !== 'object') {
-    return ipcErr(request_id, 'invalid_input', 'provider payload required');
-  }
-  const encoded = Buffer.byteLength(JSON.stringify(call), 'utf8');
-  if (encoded > MAX_REQUEST_BYTES) {
-    return ipcErr(request_id, 'input_too_large', 'provider call too large');
-  }
-  const reply = await state.core.providerCall(call);
-  return ipcOk(request_id, reply);
-}
-
-async function handlePull(request_id: string, payload: unknown): Promise<IpcResponse> {
-  rejectIfClosing();
-  if (!state.core) {
-    return ipcErr(request_id, 'uninitialized', 'open the native core before pull');
-  }
-  const body = payload as { operation_id?: string; max_events?: unknown; max_bytes?: unknown };
-  if (typeof body?.operation_id !== 'string') {
-    return ipcErr(request_id, 'invalid_input', 'operation_id is required');
-  }
-  let bounds: { maxEvents: number; maxBytes: number };
-  try {
-    bounds = clampPullBounds(body.max_events, body.max_bytes);
-  } catch (err) {
-    return ipcErr(request_id, errorCode(err), errorMessage(err));
-  }
-  const batch = await state.core.nextProviderEvents(body.operation_id, bounds.maxEvents, bounds.maxBytes);
-  const encoded = Buffer.byteLength(JSON.stringify(batch), 'utf8');
-  if (encoded > MAX_BATCH_BYTES) {
-    return ipcErr(request_id, 'delivery_overflow', 'provider batch exceeds bounded encode limit');
-  }
-  return ipcOk(request_id, batch);
-}
-
-async function handleClose(request_id: string): Promise<IpcResponse> {
-  if (closePromise) {
-    const prior = await closePromise;
-    return prior.request_id === request_id ? prior : ipcOk(request_id, state.closeReport ?? lifecycleSnapshot());
-  }
-  state.acceptingWork = false;
-  state.phase = 'closing';
-  workQueue.length = 0;
-  queuedCount = 0;
-  queuedBytes = 0;
-  closePromise = (async () => {
-    const { promise: onTimeout, resolve: resolveTimeout } = Promise.withResolvers<IpcResponse>();
-    const timer = setTimeout(() => {
-      state.phase = 'interrupted';
-      state.lastError = 'close join exceeded 5s';
-      state.closeReport = {
-        state: 'interrupted',
-        cleanup_confirmed: false,
-        pending_operations: [...pendingOperationIds],
-        reason: state.lastError,
-      };
-      resolveTimeout(ipcErr(request_id, 'interrupted', state.lastError));
-    }, CLOSE_JOIN_MS);
-
-    const closeTask = (async (): Promise<IpcResponse> => {
-      try {
-        if (state.core) {
-          const report = await state.core.close();
-          state.closeReport = report;
-          state.phase = report.state === 'closed' ? 'closed' : 'interrupted';
-          if (report.state !== 'closed') {
-            state.lastError = report.reason ?? 'interrupted';
-          }
-          return ipcOk(request_id, state.closeReport);
-        }
-        state.phase = 'closed';
-        state.closeReport = { state: 'closed', cleanup_confirmed: true, pending_operations: [] };
-        return ipcOk(request_id, state.closeReport);
-      } catch (err) {
-        state.phase = 'interrupted';
-        state.lastError = errorMessage(err);
-        state.closeReport = {
-          state: 'interrupted',
-          cleanup_confirmed: false,
-          pending_operations: [...pendingOperationIds],
-          reason: 'writer_fenced',
-        };
-        return ipcErr(request_id, errorCode(err), errorMessage(err));
-      } finally {
-        clearTimeout(timer);
-        state.core = null;
-        state.principal = null;
-      }
-    })();
-
-    return Promise.race([closeTask, onTimeout]);
-  })();
-  return closePromise;
-}
-
-async function dispatch(message: IpcRequest): Promise<IpcResponse> {
-  switch (message.operation) {
-    case 'compatibility':
-      return handleCompatibility(message.request_id);
-    case 'open':
-      return handleOpen(message.request_id);
-    case 'graph':
-      return handleGraph(message.request_id, message.payload);
-    case 'patch':
-      return handlePatch(message.request_id, message.payload);
-    case 'provider':
-      return handleProvider(message.request_id, message.payload);
-    case 'pull':
-      return handlePull(message.request_id, message.payload);
-    case 'close':
-      return handleClose(message.request_id);
-    default:
-      return ipcErr(message.request_id, 'invalid_input', `unsupported operation ${message.operation}`);
-  }
-}
+const state: OwnerState = { serviceState: 'none', running: null };
+let inFlight = false;
 
 const port = process.parentPort;
 if (!port) {
   throw new Error('utility-host must run inside an Electron utility process');
 }
 
-port.on('message', (event) => {
-  let request_id = 'unknown';
-  let parsedForRelease: IpcRequest | null = null;
-  try {
-    const parsed = parseIpcRequest(event.data);
-    parsedForRelease = parsed;
-    request_id = parsed.request_id;
-    if (parsed.operation === 'close') {
-      state.acceptingWork = false;
-    } else {
-      rejectIfClosing();
-    }
-    const rejection = admitOrReject(parsed);
-    if (rejection) {
-      port.postMessage(rejection);
-      return;
-    }
-    const payloadBytes = estimatePayloadBytes(parsed.payload);
-    if (activeCount < MAX_ACTIVE_CALLS) {
-      void runRequest(parsed).catch((err) => {
-        pullReservations.release(parsed);
-        port.postMessage(ipcErr(parsed.request_id, errorCode(err), errorMessage(err)));
-      });
-      return;
-    }
-    enqueue(parsed, payloadBytes);
-  } catch (err) {
-    if (parsedForRelease) {
-      pullReservations.release(parsedForRelease);
-    }
-    port.postMessage(ipcErr(request_id, errorCode(err), errorMessage(err)));
+const post = (message: unknown): void => port.postMessage(message);
+
+/** Main-owned trusted launch payload; `startService` re-validates every field. */
+function requireServiceOptions(payload: unknown): ServiceOptions {
+  if (!payload || typeof payload !== 'object') {
+    throw utilityError('invalid_input', 'start payload must be the trusted service options');
   }
+  if (!('home' in payload) || typeof payload.home !== 'string' || !isAbsolute(payload.home)) {
+    throw utilityError('invalid_input', 'start requires an absolute trusted home');
+  }
+  if (!('host' in payload) || typeof payload.host !== 'string') {
+    throw utilityError('invalid_input', 'start requires a host');
+  }
+  if (!('port' in payload) || typeof payload.port !== 'number') {
+    throw utilityError('invalid_input', 'start requires a port');
+  }
+  const options = payload as ServiceOptions; // home/host/port admitted above; service validates the rest
+  return options;
+}
+
+/** Reset carries the trusted home only, after main confirmed the service close. */
+function requireResetHome(payload: unknown): string {
+  if (!payload || typeof payload !== 'object' || !('home' in payload)) {
+    throw utilityError('invalid_input', 'reset-local-state requires the trusted home');
+  }
+  const { home } = payload;
+  if (typeof home !== 'string' || !isAbsolute(home)) {
+    throw utilityError('invalid_input', 'reset-local-state requires an absolute trusted home');
+  }
+  return home;
+}
+
+function closeBudgetExceeded(): Promise<never> {
+  const { promise, reject } = Promise.withResolvers<never>();
+  setTimeout(
+    () => reject(utilityError('interrupted', `service close exceeded the ${SERVICE_CLOSE_BUDGET_MS}ms budget`)),
+    SERVICE_CLOSE_BUDGET_MS,
+  ).unref?.();
+  return promise;
+}
+
+/**
+ * Cooperative close inside the frozen 5s budget. A confirmed report releases
+ * the handle; an unconfirmed close retains it (and the published discovery) so
+ * a retry can still confirm cleanup — never a successful forced cleanup.
+ */
+async function closeService(): Promise<CoreCloseReport> {
+  const running = state.running;
+  if (!running) {
+    state.serviceState = 'closed';
+    return { state: 'closed', cleanup_confirmed: true, pending_operations: [] };
+  }
+  state.serviceState = 'closing';
+  let report: CoreCloseReport;
+  try {
+    report = await Promise.race([running.close(), closeBudgetExceeded()]);
+  } catch (error) {
+    state.serviceState = 'unconfirmed';
+    throw error;
+  }
+  if (isConfirmedCloseReport(report)) {
+    state.running = null;
+    state.serviceState = 'closed';
+  } else {
+    state.serviceState = 'unconfirmed';
+  }
+  return report;
+}
+
+async function dispatch(request: UtilityRequest): Promise<unknown> {
+  switch (request.operation) {
+    case 'start': {
+      const options = requireServiceOptions(request.payload);
+      let running: RunningService;
+      try {
+        running = await startService(options);
+      } catch (error) {
+        state.running = null;
+        state.serviceState = 'none';
+        throw error;
+      }
+      state.running = running;
+      state.serviceState = 'running';
+      // The published, schema-derived discovery of the service that just
+      // reached readiness — the same record `startService` returns.
+      post({ type: 'service-ready', generation: request.generation, discovery: running.discovery } satisfies ServiceReadyMessage);
+      return { discovery: running.discovery };
+    }
+    case 'close':
+      return closeService();
+    case 'reset-local-state': {
+      const home = requireResetHome(request.payload);
+      const removed = await resetLocalState(home);
+      return { removed };
+    }
+  }
+}
+
+async function handleMessage(raw: unknown): Promise<void> {
+  let generation = 0;
+  let request_id = 'unknown';
+  try {
+    const request = parseUtilityRequest(raw);
+    generation = request.generation;
+    request_id = request.request_id;
+    if (inFlight) {
+      post(utilityErr(generation, request_id, 'busy', 'a lifecycle request is already in flight'));
+      return;
+    }
+    const admission = admitUtilityOperation(request.operation, state.serviceState);
+    if (!admission.ok) {
+      post(utilityErr(generation, request_id, admission.code, admission.message));
+      return;
+    }
+    inFlight = true;
+    try {
+      const result = await dispatch(request);
+      post(utilityOk(generation, request_id, result));
+    } catch (error) {
+      post(utilityErr(generation, request_id, utilityMessageCode(error), utilityMessageText(error)));
+    } finally {
+      inFlight = false;
+    }
+  } catch (error) {
+    // A frame that failed admission cannot be correlated beyond its own ids.
+    post(utilityErr(generation, request_id, utilityMessageCode(error), utilityMessageText(error)));
+  }
+}
+
+port.on('message', (event) => {
+  void handleMessage(event.data);
 });
 
-port.postMessage({ type: 'utility-ready', lifecycle: lifecycleSnapshot() });
+post({ type: 'utility-ready' } satisfies UtilityReadyMessage);
 
 function reportCrash(reason: unknown): void {
-  state.phase = 'interrupted';
-  state.acceptingWork = false;
-  state.lastError = errorMessage(reason);
-  port.postMessage({ type: 'utility-crashed', message: state.lastError, lifecycle: lifecycleSnapshot() });
+  post({ type: 'utility-crashed', message: utilityMessageText(reason) } satisfies UtilityCrashedMessage);
   setImmediate(() => {
     process.exit(1);
   });
 }
 
-process.on('uncaughtException', (err) => {
-  reportCrash(err);
-});
+process.on('uncaughtException', reportCrash);
 
-process.on('unhandledRejection', (reason) => {
-  reportCrash(reason);
-});
+process.on('unhandledRejection', reportCrash);

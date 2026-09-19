@@ -107,6 +107,55 @@ describe('ConnectDaemonForm', () => {
     );
   });
 
+  it('reconnects with the retained credential without re-entering the key (desktop redacted load)', async () => {
+    const setConfig = vi.fn().mockResolvedValue(undefined);
+    vi.spyOn(clientContext, 'useSetConnectionConfig').mockReturnValue(setConfig);
+    // Desktop redacted load: the persisted key is never returned (D-18) —
+    // only hasApiKey presence.
+    const saved: ConnectionConfig = {
+      endpointUrl: 'https://remote.example:8420',
+      apiKey: '',
+      hasApiKey: true,
+      pinnedFingerprint: 'SHA256:aa:bb:cc',
+      active: true,
+    };
+    vi.spyOn(clientContext, 'useConnectionConfig').mockReturnValue(saved);
+
+    useHandlers(
+      http.get('https://remote.example:8420/v1/daemon/runtime/cert-fingerprint', () =>
+        HttpResponse.json({ fingerprint: 'SHA256:aa:bb:cc', algorithm: 'sha256' }),
+      ),
+    );
+
+    renderInApp(
+      <clientContext.ClientProvider
+        client={noopClient}
+        connectionConfig={saved}
+        onConnectionConfigChange={setConfig}
+      >
+        <ConnectDaemonForm />
+      </clientContext.ClientProvider>,
+    );
+
+    await userEvent.click(screen.getByTestId('fetch-fingerprint-button'));
+    await waitFor(() => {
+      expect(screen.getByTestId('fingerprint-match-hint')).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByTestId('trust-connect-button'));
+    await waitFor(() => {
+      expect(setConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          endpointUrl: 'https://remote.example:8420',
+          apiKey: undefined,
+          hasApiKey: true,
+          active: true,
+          pinnedFingerprint: 'SHA256:aa:bb:cc',
+        }),
+      );
+    });
+  });
+
   it('shows a blocking warning when the fingerprint changes', async () => {
     const setConfig = vi.fn().mockResolvedValue(undefined);
     vi.spyOn(clientContext, 'useSetConnectionConfig').mockReturnValue(setConfig);

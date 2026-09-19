@@ -38,7 +38,7 @@ function makeDesktop(
     }),
     startDaemon: vi.fn().mockResolvedValue(undefined),
     stopDaemon: vi.fn().mockResolvedValue(undefined),
-    resetLocalDatabase: vi.fn().mockResolvedValue(undefined),
+    resetLocalDatabase: vi.fn().mockResolvedValue({ status: 'confirmed' }),
     ...impl,
     _triggerStatusChange: trigger,
   } as DesktopCapabilities;

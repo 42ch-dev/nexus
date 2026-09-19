@@ -1,0 +1,6 @@
+{
+  "id": "io.nexus42.desktop",
+  "name": "Nexus",
+  "version": "0.1.0",
+  "minimum_macos": "13.0"
+}

@@ -122,11 +122,52 @@ Do not relabel macOS15 package inspection as macOS13 launch proof, unsigned as t
 
 ## 12. Acceptance and explicit host differences
 
-All29 capability rows in the implementation acceptance inventory require evidence; no “same web bundle implies native parity.” Security/lifecycle negative cases, public entries, both artifact types/CPUs, config/bootstrap/profile, guarded paths and user-confirmed reset are load-bearing.
+### 12.1 Evidence scope, not a shipping declaration
 
-Explicit target differences from Tauri/proof: no killing PID-only/legacy listener (identity-safe attach/restart); stored secrets not returned to renderer or written plaintext; utility-owned Keep uses confirmed independent-service handoff with possible Interrupted work and installed-Node precondition; proof CSP/sandbox security is retained rather than Tauri's null CSP. No native product-menu/auto-update expansion is implied. Reset remains functional, not an approved omission.
+All 29 stable capability IDs require an explicit disposition; “same web bundle” is not native parity. The implementation reconciliation at `b61a59f59e427e53039609161a7f753c18e13b36` demonstrates the layers below, **not an installed Electron GUI or dual-architecture qualification**. Later corrections require evidence for the affected behavior; an earlier passing suite must not silently certify a changed contract.
 
-Historical Electron decision JSON missing/unobserved rows remain unverified. New scoped evidence binds to the new implementation revision; it does not rewrite past qualification. Runtime checks, accepted package receipts and actual-surface evidence must be described at their exercised scope; no fabricated GUI/E2E success.
+| Stable IDs | Evidenced implementation layer | Qualification still absent |
+|---|---|---|
+| 1, 2, 5, 20, 25 — open/reveal, path guard, directory picker, external URLs | Temporary-tree path tests and injected shell/dialog actions; canonical paths, deny-before-effect, directory-only selection/cancel, shared raw-input URL policy | Actual default-app/Finder/browser opening and native directory dialog; OS permission-denial depth |
+| 3 — copy path | Retained `navigator.clipboard.writeText` source in the web path menu and reading surface; no shell IPC | No clipboard exercise is recorded in the reconciled test set; source retention alone is not a pass |
+| 4, 13–17 — workspace/config/setup/profile | Real temporary-home TOML tests: precedence, enum/defaults, serialized atomic mutations, unknown-key preservation, corrupt-write refusal, idempotent bootstrap and no execution of saved commands | Installed first-run/setup/settings journeys; host config convenience is not native domain registration |
+| 6–12 — service lifecycle/readiness/status | Controller tests with a stub utility and virtual clock; real HTTP route requests with a boundary service-core stub; headless event/window composition | Real Electron utility → TS service → native ownership, publication/cleanup and renderer delivery; virtual deadlines are not production latency measurements |
+| 18 — connection config | Redacted store/form, encryption-unavailable refusal and header-map isolation at injected safeStorage/session seams | Durable-clear mismatch described in §12.3; real macOS encryption/keychain import, renderer header isolation and TOFU runtime |
+| 19 — reset | macOS arm64 Rust tests with real writer fences/files, rebuilt native binding tests, controller sequencing and component recovery tests | Cross-layer cancellation mismatch described in §12.3; real Electron → utility → native reset/recovery and macOS x64 binding exercise |
+| 21 — quit | Three-choice gate, failed-close/absent-Node refusal, headless before-quit composition; detached fixture child survives parent with separate process group | Real packaged TS-service/native handoff, launchd Node discovery and native quit sheet; fixture survival is not product-service survival |
+| 22, 26, 28 — chrome/security/single instance | Headless window options, maximize/quit handlers, versioned IPC/sender/generation/path/CSP checks, protocol-before-window and focus-only second-instance composition | Actual chrome geometry, custom-scheme/preload enforcement, OS lock/LaunchServices and extracted-bundle policy equivalence |
+| 23, 24 — icons/identity | Tauri-free ICNS generation and source-preview inspection; product manifest/root-version validation; headless host consumption; recorded arm64 app/ZIP/DMG construction | Retained/extracted package receipt, Info.plist/icon verification and source-revision/dirty-input reconciliation; no x64 receipt, installed Dock or macOS13 launch proof |
+| 27 — web client selection | Typed version1 bridge, synchronous nondefault local endpoint, thin BrowserClient inheritance, browser-storage isolation and migrated Tauri names | Bridge-only selection mismatch described in §12.3; actual packaged SPA/preload execution |
+| 29 — auto-update | Explicit non-addition; no updater route or dependency in the scoped host checks | No updater is required or claimed by this cutover |
+
+The package construction observation is **arm64 only** and its generated receipt/artifacts were removed afterward. Recorded output checksums do not establish the unavailable receipt's source revision, dirty delta, input hashes or extracted bundle contents. Package implementation revision `ed1d191ad8f55a4fe907cd1241f3a0d187143234` is not a replacement for that provenance. In particular, the package observation does not certify the final web-adapter revision above. Both architectures and the retained artifact-verification evidence remain required by §11.
+
+### 12.2 Explicit host differences and reset safety
+
+- **D-7:** never auto-kill a legacy/PID-only listener. Attachment requires trusted home/endpoint plus authenticated instance/epoch discovery and health; an unrelated listener is a conflict.
+- **D-9:** restart is single-flight and replacement is identity-safe. Ordinary attached stop is a no-op; explicit restart/Stop-and-Quit must use the matching instance/epoch stop. A stopping acknowledgment or HTTP error is not proof of shutdown, and a successor is not a PID-kill target.
+- **D-18:** no persisted-secret readback to the renderer and no plaintext-write fallback. Redacted metadata and main-only credential authority replace the old readback behavior. This difference does **not** waive durable clear or permit a deleted credential to reappear on the next launch.
+- **D-21:** a utility cannot outlive the app. Keep on an owned utility requires confirmed close and a ready independent TS-service handoff, with an installed compatible Node precondition and explicitly Interrupted in-flight work. Missing Node/entry or failed close/handoff keeps the app open. A packaged Node lookup path is not proof that Node is bundled or discoverable from launchd.
+- Workspace-root resolution preserves map → legacy → default precedence but is a pure read: it does not create the directory or migrate the legacy key into the map on read. Missing/empty values fall through; corrupt authoritative config fails closed. Mutations remain serialized and atomic; the renderer never gains root authority.
+- Stronger CSP/sandbox/isolation replaces the old null-CSP posture. Standard native edit/quit roles do not add a product menu or global shortcut system. Auto-update remains out of scope.
+
+**Row19 is retained, not an accepted omission.** Confirmed reset closes the service before the narrow native operation. Existing migration locks are acquired exclusively for all admitted targets before deletion; a live cooperating writer refuses before any file is removed. Only the three local-state filenames in §8 are targets; stable locks and unrelated/user-document trees survive. A missing stable lock may be created and must remain. The returned count counts removed primary databases, not WAL/SHM-only cleanup.
+
+On Unix the tested deletion uses admitted directory descriptors and file identity checks: a post-fence symlink/file replacement refuses, and a renamed directory cannot redirect deletion to another directory. This is not a transactional rollback guarantee after arbitrary I/O failure. The implementation report also discloses a narrower remaining bound: migration-fence acquisition is path-based, so a same-permission actor able to rename the parent between descriptor admission and fence acquisition could separate the lock path from the admitted directory. Do not claim that race was exercised or eliminated. macOS x64 uses the Unix implementation but was not exercised; the separate non-Unix path-recheck fallback is unqualified and outside the macOS desktop cohort. No safety-driven removal of the reset capability is accepted.
+
+### 12.3 Contract corrections and incomplete demonstrations
+
+For acceptance, the §4 envelope shapes are **versioned end-to-end**: request `{version:1,request_id,operation,payload}`, success `{version:1,request_id,ok:true,result}` and failure `{version:1,request_id,ok:false,error:{code,message}}`. Missing/wrong versions reject before effects. Main supplies synchronous nonsecret runtime metadata; the preload's mechanically mirrored constants are checked against the canonical contract because the main/preload emit formats differ. Neither that parity check nor headless host composition proves actual preload execution.
+
+At the reconciled revision, three observed mismatches remain **fix-required, not accepted deviations**:
+
+1. **Row18 — durable clear:** the store test currently demonstrates deletion followed by legacy re-import on the next `ConnectionStore.open()`. A same-call “clear never reimports” claim is insufficient. §5's durable cleared marker remains required; redaction/no-plaintext tests cannot close this gap.
+2. **Row19 — cancellation:** native Cancel returns false, but the action resolves null for both cancel and successful reset. Web recovery consumers interpret any resolution as confirmed. Cancel must be distinguishable from success across the full bridge/consumer contract, preserving recovery state without claiming a completed reset; byte-preserving cancellation alone does not prove this.
+3. **Row27 — bridge-only selection:** the current detector/test still allows `NEXUS_DESKTOP=true` without the version1 bridge. §5 prohibits build-env-only selection. The override must not qualify as a valid desktop runtime.
+
+These gaps have a fix-now disposition; only affected regression evidence and review can change their partial status. No GUI test is substituted for missing unit/contract evidence, and no unobserved GUI behavior is relabeled as passing.
+
+Historical Electron decision JSON missing/unobserved rows remain **[UNVERIFIED]**. New scoped evidence does not rewrite prior qualification, and native package CI is not historical x64 GUI/resource proof. Real-environment qualification, when separately requested, must name the actual architecture/OS and exercised surface; macOS13 metadata, headless composition and unsigned package construction are not GUI, Gatekeeper-trust or installed-deployment success.
 
 ## 13. Setup Wizard — preserved product behavior
 

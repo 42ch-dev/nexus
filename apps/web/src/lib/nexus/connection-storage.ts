@@ -1,21 +1,38 @@
 /**
- * Connection config persistence abstraction (V1.92 P1).
+ * Connection config persistence abstraction (V1.92 P1; v1.192 P0-T8 Electron
+ * redacted store).
  *
  * The config shape is a client-side only data model — it is never sent to the
  * daemon as a wire payload. Storage backends differ by platform:
- *   - Web SPA: localStorage (trust boundary equals the SPA itself).
- *   - Tauri desktop: OS keychain / secure storage via custom Tauri commands,
- *     with fallback to app-data dir handled on the Rust side.
+ *   - Web SPA: localStorage (trust boundary equals the SPA itself); the actual
+ *     API key is stored and required.
+ *   - Electron desktop: main-owned encrypted store behind the typed bridge.
+ *     Load returns the **public projection only** (never the API key — D-18);
+ *     save passes the ephemeral user-entered key once as a credential update
+ *     (`keep` / `replace`, empty value explicitly clears).
  *
  * Spec: daemon-runtime.md §16.1, §16.5.
  */
+import {
+  getDesktopBridge,
+  invokeDesktop,
+  type ConnectionCredentialUpdate,
+} from './desktop-bridge';
 
 /** Active (or saved-but-inactive) remote connection configuration. */
 export interface ConnectionConfig {
   /** Full daemon URL including protocol and port. */
   endpointUrl: string;
-  /** User-entered API key; sent as `X-API-Key` on protected requests. */
-  apiKey: string;
+  /**
+   * User-entered API key; sent as `X-API-Key` on protected requests. Optional:
+   * the desktop store never returns the persisted key (redacted load), so a
+   * desktop-saved config carries `hasApiKey` instead and an omitted `apiKey`
+   * on save means "keep the stored credential". The browser backend requires
+   * the actual key.
+   */
+  apiKey?: string;
+  /** Whether a credential is persisted for this endpoint (desktop redacted load). */
+  hasApiKey?: boolean;
   /** SHA-256 fingerprint pinned after TOFU confirmation, if any. */
   pinnedFingerprint?: string;
   /** User-visible connection name; defaults to hostname if blank. */
@@ -32,23 +49,6 @@ export interface ConnectionStorage {
 }
 
 const STORAGE_KEY = 'nexus-connection-config-v1';
-
-function isTauri(): boolean {
-  return (
-    typeof window !== 'undefined' &&
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (window as any).__TAURI__ !== undefined
-  );
-}
-
-async function tauriInvoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const tauri = (window as any).__TAURI__;
-  if (!tauri?.core?.invoke) {
-    throw new Error(`Tauri invoke unavailable for command ${command}`);
-  }
-  return tauri.core.invoke(command, args) as Promise<T>;
-}
 
 /**
  * Web backend: persists the connection config in `localStorage`.
@@ -68,7 +68,7 @@ class WebConnectionStorage implements ConnectionStorage {
     if (!raw) return null;
     try {
       const parsed = JSON.parse(raw) as unknown;
-      if (!isValidConnectionConfig(parsed)) {
+      if (!isValidWebConnectionConfig(parsed)) {
         await this.clear();
         return null;
       }
@@ -90,39 +90,56 @@ class WebConnectionStorage implements ConnectionStorage {
   }
 }
 
-/** Desktop backend: delegate to Rust secure-store custom commands. */
+/**
+ * Desktop backend: main-owned encrypted store behind the typed bridge (P0-T5).
+ *
+ * Load returns the **public projection only** — never the persisted API key
+ * (D-18); the in-memory config carries `apiKey: ''` plus `hasApiKey`. Save
+ * converts an omitted `apiKey` to a `keep` credential update and a present
+ * (possibly empty) `apiKey` to `replace` — empty explicitly clears.
+ */
 class DesktopConnectionStorage implements ConnectionStorage {
   async load(): Promise<ConnectionConfig | null> {
-    const raw = await tauriInvoke<string | null>('get_connection_config');
-    if (!raw) return null;
-    try {
-      const parsed = JSON.parse(raw) as unknown;
-      if (!isValidConnectionConfig(parsed)) {
-        await this.clear();
-        return null;
-      }
-      return parsed;
-    } catch {
-      await this.clear();
-      return null;
-    }
+    const pub = await invokeDesktop('get_connection_config');
+    if (!pub) return null;
+    return { ...pub, apiKey: '' };
   }
 
   async save(config: ConnectionConfig): Promise<void> {
-    await tauriInvoke('set_connection_config', { config: JSON.stringify(config) });
+    const credential: ConnectionCredentialUpdate =
+      config.apiKey === undefined
+        ? { action: 'keep' }
+        : { action: 'replace', value: config.apiKey };
+    await invokeDesktop('set_connection_config', {
+      config: {
+        endpointUrl: config.endpointUrl,
+        label: config.label,
+        active: config.active,
+        pinnedFingerprint: config.pinnedFingerprint,
+        hasApiKey: config.apiKey ? true : (config.hasApiKey ?? false),
+      },
+      credential,
+    });
   }
 
   async clear(): Promise<void> {
-    await tauriInvoke('delete_connection_config');
+    await invokeDesktop('delete_connection_config');
   }
 }
 
-/** Validate the raw parsed JSON has the minimal fields we require. */
-function isValidConnectionConfig(value: unknown): value is ConnectionConfig {
+/**
+ * Validate the raw parsed JSON has the minimal fields the WEB backend
+ * requires. The browser localStorage record must carry the actual key —
+ * an active keyless remote record would otherwise build an unauthenticated
+ * remote BrowserClient. (The desktop redacted shape is constructed from the
+ * typed bridge result, never from this validator.)
+ */
+function isValidWebConnectionConfig(value: unknown): value is ConnectionConfig {
   if (value === null || typeof value !== 'object') return false;
   const c = value as Record<string, unknown>;
   if (typeof c.endpointUrl !== 'string' || c.endpointUrl.length === 0) return false;
   if (typeof c.apiKey !== 'string') return false;
+  if (c.hasApiKey !== undefined && typeof c.hasApiKey !== 'boolean') return false;
   if (c.pinnedFingerprint !== undefined && typeof c.pinnedFingerprint !== 'string') return false;
   if (c.label !== undefined && typeof c.label !== 'string') return false;
   if (c.active !== undefined && typeof c.active !== 'boolean') return false;
@@ -131,7 +148,7 @@ function isValidConnectionConfig(value: unknown): value is ConnectionConfig {
 
 /** Select the appropriate storage backend for the current runtime. */
 export function createConnectionStorage(): ConnectionStorage {
-  return isTauri() ? new DesktopConnectionStorage() : new WebConnectionStorage();
+  return getDesktopBridge() ? new DesktopConnectionStorage() : new WebConnectionStorage();
 }
 
 /** Normalise a user-entered endpoint URL. */

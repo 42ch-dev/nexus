@@ -1,16 +1,33 @@
 /**
- * `TauriClient` / desktop port resolution tests (compass §5 #3 LOCKED).
+ * `DesktopClient` / desktop port resolution tests (compass §5 #3 LOCKED;
+ * v1.192 P0-T8).
  *
- * Resolution order: explicit `port` argument → `NEXUS_DAEMON_PORT` (valid u16)
- * → `8420`.
+ * Resolution order: explicit `port` argument → `window.nexusDesktop.runtime.
+ * localEndpoint` (typed preload bridge, synchronous — parity row 27) →
+ * `NEXUS_DAEMON_PORT` (valid u16) → `8420`.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { DesktopBridge } from '@/lib/nexus/desktop-bridge';
 import {
   resolveDesktopBaseUrl,
   resolveDesktopPort,
-  TauriClient,
-} from '@/lib/nexus/tauri-client';
+  DesktopClient,
+} from '@/lib/nexus/desktop-client';
+
+/** Install a fake typed preload bridge with the given trusted runtime metadata. */
+function mockBridge(localEndpoint: string): void {
+  (window as unknown as { nexusDesktop?: DesktopBridge }).nexusDesktop = {
+    version: 1,
+    runtime: { localEndpoint },
+    invoke: vi.fn(),
+    onStatusChanged: vi.fn(() => () => {}),
+  };
+}
+
+function restoreBridge(): void {
+  delete (window as unknown as { nexusDesktop?: unknown }).nexusDesktop;
+}
 
 /** Pin `window.location` for origin-sensitive desktop base URL resolution. */
 function stubLocation(partial: { hostname?: string; port?: string; protocol?: string }) {
@@ -28,12 +45,12 @@ function stubLocation(partial: { hostname?: string; port?: string; protocol?: st
 
 describe('resolveDesktopPort', () => {
   beforeEach(() => {
-    delete (window as unknown as { __NEXUS_DAEMON_PORT__?: number }).__NEXUS_DAEMON_PORT__;
+    restoreBridge();
   });
 
   afterEach(() => {
     vi.unstubAllEnvs();
-    delete (window as unknown as { __NEXUS_DAEMON_PORT__?: number }).__NEXUS_DAEMON_PORT__;
+    restoreBridge();
   });
 
   it('returns the explicit port argument when valid', () => {
@@ -47,13 +64,18 @@ describe('resolveDesktopPort', () => {
     expect(resolveDesktopPort('abc')).toBe(8888);
   });
 
-  it('prefers the injected Tauri global over env var', () => {
+  it('prefers the bridge localEndpoint (incl. nondefault port) over the env var', () => {
     vi.stubEnv('NEXUS_DAEMON_PORT', '8888');
-    (window as unknown as { __NEXUS_DAEMON_PORT__: number }).__NEXUS_DAEMON_PORT__ = 7777;
+    mockBridge('http://localhost:7777');
     expect(resolveDesktopPort()).toBe(7777);
   });
 
-  it('uses NEXUS_DAEMON_PORT when no explicit port or injected global is given', () => {
+  it('falls through a malformed bridge localEndpoint to the env/default chain', () => {
+    mockBridge('not-a-url');
+    expect(resolveDesktopPort()).toBe(8420);
+  });
+
+  it('uses NEXUS_DAEMON_PORT when no explicit port or bridge is given', () => {
     vi.stubEnv('NEXUS_DAEMON_PORT', '8888');
     expect(resolveDesktopPort()).toBe(8888);
   });
@@ -91,17 +113,17 @@ describe('resolveDesktopBaseUrl', () => {
   });
 });
 
-describe('TauriClient', () => {
+describe('DesktopClient', () => {
   const originalLocation = window.location;
 
   beforeEach(() => {
-    delete (window as unknown as { __NEXUS_DAEMON_PORT__?: number }).__NEXUS_DAEMON_PORT__;
+    restoreBridge();
     // Packaged / non-Vite origin — absolute localhost loopback.
     stubLocation({ hostname: 'localhost', port: '', protocol: 'http:' });
   });
 
   afterEach(() => {
-    delete (window as unknown as { __NEXUS_DAEMON_PORT__?: number }).__NEXUS_DAEMON_PORT__;
+    restoreBridge();
     Object.defineProperty(window, 'location', {
       configurable: true,
       value: originalLocation,
@@ -109,16 +131,16 @@ describe('TauriClient', () => {
   });
 
   it('fixes the base URL to the resolved desktop loopback port', () => {
-    const client = new TauriClient({ port: 9001 });
+    const client = new DesktopClient({ port: 9001 });
     expect(client.port).toBe(9001);
   });
 
-  it('uses the injected Tauri global port when no explicit port is given', async () => {
-    (window as unknown as { __NEXUS_DAEMON_PORT__: number }).__NEXUS_DAEMON_PORT__ = 9420;
+  it('consumes the bridge localEndpoint synchronously (incl. nondefault port)', async () => {
+    mockBridge('http://localhost:9420');
     const fetchImpl = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ status: 'ok', version: '1.0.0' }), { status: 200 }),
     );
-    const client = new TauriClient({ fetchImpl });
+    const client = new DesktopClient({ fetchImpl });
     expect(client.port).toBe(9420);
     await client.health();
     expect(fetchImpl).toHaveBeenCalledWith(
@@ -131,7 +153,7 @@ describe('TauriClient', () => {
     const fetchImpl = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ status: 'ok', version: '1.0.0' }), { status: 200 }),
     );
-    const client = new TauriClient({ port: 8420, fetchImpl });
+    const client = new DesktopClient({ port: 8420, fetchImpl });
     const health = await client.health();
     expect(health).toMatchObject({ status: 'ok', version: '1.0.0' });
     expect(fetchImpl).toHaveBeenCalledWith(
@@ -145,7 +167,7 @@ describe('TauriClient', () => {
     const fetchImpl = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ status: 'ok', version: '1.0.0' }), { status: 200 }),
     );
-    const client = new TauriClient({ port: 8420, fetchImpl });
+    const client = new DesktopClient({ port: 8420, fetchImpl });
     expect(client.port).toBe(8420);
     await client.health();
     expect(fetchImpl).toHaveBeenCalledWith(
