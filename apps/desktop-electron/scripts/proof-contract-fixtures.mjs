@@ -25,8 +25,8 @@ import {
   runtimeCriterionVerdict,
   sha256File,
   walkFiles,
+  compareEntitlements,
 } from './proof-contract.mjs';
-import { compareEntitlements } from './proof-package.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..', '..');
@@ -1305,24 +1305,25 @@ check(
 );
 
 const MAIN_SRC = readFileSync(join(__dirname, '..', 'src', 'main.ts'), 'utf8');
+const SERVICE_SRC = readFileSync(join(__dirname, '..', 'src', 'service-controller.ts'), 'utf8');
 check(
-  'F-003: before-quit waits for an in-flight close instead of abandoning it',
-  /const pending = closeInFlight \?\? initiateOwnerClose\(\)/.test(MAIN_SRC),
+  'F-003: service close retains ownership while close is in flight',
+  /if \(this\.closeInFlight\)/.test(SERVICE_SRC) && /this\.closeInFlight = true/.test(SERVICE_SRC),
   true,
 );
 check(
-  'F-003: the old `&& !closeInFlight` abandonment is gone',
+  'F-003: the old close-in-flight abandonment predicate is absent',
   /lifecycle\.phase !== 'closed' && !closeInFlight/.test(MAIN_SRC),
   false,
 );
 check(
   'F-003: the quit handshake is guarded against re-entry',
-  /let quitRequested = false/.test(MAIN_SRC) && /if \(quitRequested\) return/.test(MAIN_SRC),
+  /if \(quitAllowed\) return/.test(MAIN_SRC) && /requestQuit\(\)/.test(MAIN_SRC),
   true,
 );
 check(
-  'F-003: the proof window can request a quit',
-  /nexus-proof:quit/.test(MAIN_SRC) && /requestQuit/.test(readFileSync(join(__dirname, '..', 'src', 'preload.ts'), 'utf8')),
+  'F-003: product quit is requested through the desktop quit controller',
+  /requestQuit\(\)/.test(MAIN_SRC),
   true,
 );
 
@@ -1439,14 +1440,14 @@ check(
   false,
 );
 check(
-  'W1: main forks the asar-resident utility entry',
-  /utilityProcess\.fork\(join\(__dirname, 'utility-host\.js'\)/.test(MAIN_SRC),
+  'W1: main forks the injected asar-resident utility entry',
+  /utilityProcess\.fork\(input\.paths\.utilityEntry/.test(MAIN_SRC),
   true,
 );
 check(
-  'W1: the app accepts an explicit proof log path for detached launches',
-  /NEXUS_PROOF_LOG/.test(MAIN_SRC) && /appendFileSync/.test(MAIN_SRC),
-  true,
+  'W1: the product host has no proof-only log environment',
+  /NEXUS_PROOF_LOG/.test(MAIN_SRC),
+  false,
 );
 check(
   'W1: the driver routes app diagnostics into the evidence on owner-unavailable',
