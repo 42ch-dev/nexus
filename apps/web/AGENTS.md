@@ -1,7 +1,7 @@
 # apps/web — AGENTS.md
 
-The local-first **Control Room + Setup** Web UI. Daemon-served React SPA,
-Tauri-ready. Parent rules: [`../../AGENTS.md`](../../AGENTS.md) (repo),
+The local-first **Control Room + Setup** Web UI. Daemon-served React SPA that
+also runs inside the Electron desktop host. Parent rules: [`../../AGENTS.md`](../../AGENTS.md) (repo),
 [`../../.mstar/AGENTS.md`](../../.mstar/AGENTS.md) (harness).
 
 ## Identity & placement
@@ -20,10 +20,11 @@ Tauri-ready. Parent rules: [`../../AGENTS.md`](../../AGENTS.md) (repo),
 - **Product contract**: [`web-ui.md`](../../.mstar/specs/web-ui.md).
 - **Transport boundary**: the `NexusClient` interface
   (`src/lib/nexus/types.ts`). Screens must depend only on the interface, never
-  on `fetch`/`invoke` directly — that is what keeps the V1.65 Tauri shell a
-  one-impl swap (web-ui.md §5, §9). The HTTP path prefix for the daemon
-  surface is `/v1/daemon/*`; the SPA reaches the daemon at
-  `http://127.0.0.1:<port>/v1/daemon/*`.
+  on `fetch`/`window.nexusDesktop` directly — the client factory selects
+  `BrowserClient` or `DesktopClient` (web-ui.md §5; desktop-shell.md §5), which
+  keeps a host change a one-impl swap rather than a rewrite. The HTTP path
+  prefix for the daemon surface is `/v1/daemon/*`; the SPA reaches the daemon
+  at `http://127.0.0.1:<port>/v1/daemon/*`.
 
 ## Contracts status (post Wave-1 merge)
 

@@ -33,8 +33,8 @@ const daemonProxy = {
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
-  // Modern-only target: the local-first app ships in a current browser or a
-  // V1.65 Tauri system webview, so the transformer need not lower syntax.
+  // Modern-only target: the local-first app ships in a current browser or the
+  // Electron host's bundled Chromium, so the transformer need not lower syntax.
   // Vite 8 transforms with Oxc (build + dev source transform); `esnext` skips
   // syntax lowering there. The historical esbuild destructuring failure is
   // covered by `optimizeDeps.rolldownOptions.transform.target` below for dep
