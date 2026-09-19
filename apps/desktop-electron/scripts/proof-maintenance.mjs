@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 /**
- * P3-T3 MAINT-1 driver — measure one Electron patch-upgrade rebuild.
+ * Product maintenance driver — measure one Electron patch-upgrade rebuild.
  *
- * The proof matrix requires a demonstrably reproducible patch upgrade within one
- * explicit package rebuild per architecture and <= 30 min elapsed, with no manual
- * binary patch. This driver performs exactly that and records the trace; it never
- * publishes and never edits the pin itself (that is a reviewed change).
+ * The maintenance evidence row requires a demonstrably reproducible patch
+ * upgrade within one explicit package rebuild per architecture and <= 30 min
+ * elapsed, with no manual binary patch. This driver records that trace using
+ * the current unsigned product package layout; it never publishes and never
+ * edits the pin itself (that is a reviewed change).
  *
  * Usage:
  *   node apps/desktop-electron/scripts/proof-maintenance.mjs \
@@ -24,7 +25,6 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = resolve(__dirname, '..');
 const ROOT = resolve(APP_ROOT, '..', '..');
-const PRODUCT_NAME = 'Nexus RFT Feasibility';
 const MAX_SECONDS = 1800;
 
 function parseArgs(argv) {
@@ -64,7 +64,7 @@ function sourceIdentity() {
   const porcelain = run('git', ['status', '--porcelain']).stdout;
   const diff = run('git', ['diff', 'HEAD']).stdout;
   return {
-    source_sha: sha || 'unknown',
+    source_sha: sha ?? 'unknown',
     tree_digest: createHash('sha256').update(`${sha}\0${porcelain}\0${diff}`).digest('hex'),
     tree_dirty: porcelain.trim().length > 0,
   };
@@ -129,8 +129,8 @@ function main() {
 
   const packaged = run('node', [join(__dirname, 'package.mjs'), '--arch', args.arch, '--out', outDir]);
   record('package_rebuild', packaged.status === 0, { exit: packaged.status, stderr_tail: packaged.stderr.slice(-800) });
-
-  const appPath = join(outDir, `${PRODUCT_NAME}-darwin-${args.arch}`, `${PRODUCT_NAME}.app`);
+  const rootPackage = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
+  const appPath = join(outDir, rootPackage.version, `darwin-${args.arch}`, 'Nexus.app');
   const bundledVersion = packagedElectronVersion(appPath);
   record('packaged_version_matches_target', bundledVersion === args.to, { bundled: bundledVersion, target: args.to });
 

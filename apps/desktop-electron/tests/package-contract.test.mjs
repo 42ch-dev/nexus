@@ -13,6 +13,7 @@ import {
   assertPreflightFiles,
   assertReceipt,
   parsePackageArgs,
+  resolveOutputRoot,
 } from '../scripts/package-contract.mjs';
 
 const validNative = {
@@ -41,6 +42,14 @@ test('package options are closed and default to the native architecture', () => 
   throwsCode(() => parsePackageArgs(['--release'], 'arm64'), 'package.args.unknown');
   throwsCode(() => parsePackageArgs(['--arch', 'arm64', '--arch', 'arm64'], 'arm64'), 'package.args.duplicate');
   throwsCode(() => parsePackageArgs(['--unknown'], 'arm64'), 'package.args.unknown');
+});
+
+test('explicit relative output resolves from caller cwd while default stays repository-rooted', () => {
+  const repoRoot = '/repo/nexus';
+  const callerCwd = '/tmp/package-caller';
+  assert.equal(resolveOutputRoot('./dist', { repoRoot, callerCwd }), '/tmp/package-caller/dist');
+  assert.equal(resolveOutputRoot('/var/tmp/nexus-dist', { repoRoot, callerCwd }), '/var/tmp/nexus-dist');
+  assert.equal(resolveOutputRoot(null, { repoRoot, callerCwd }), '/repo/nexus/artifacts/desktop');
 });
 
 test('missing web dist is rejected before staging with no partial output', () => {

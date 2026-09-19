@@ -100,7 +100,7 @@ jobs:
           sentinel_log="${RUNNER_TEMP}/unsigned-package-sentinel-calls-${TARGET_ARCH}.log"
           mkdir -p "${sentinel_dir}"
           : > "${sentinel_log}"
-          for tool in codesign notarytool stapler xcrun; do
+          for tool in codesign notarytool stapler; do
             cat > "${sentinel_dir}/${tool}" <<EOF
           #!/bin/sh
           printf '%s %s\\n' '${tool}' "\$*" >> '${sentinel_log}'
@@ -108,6 +108,19 @@ jobs:
           EOF
             chmod +x "${sentinel_dir}/${tool}"
           done
+          cat > "${sentinel_dir}/xcrun" <<EOF
+          #!/bin/sh
+          case " \$* " in
+            *" codesign "*|*" notarytool "*|*" stapler "*)
+              printf '%s %s\\n' 'xcrun' "\$*" >> '${sentinel_log}'
+              exit 97
+              ;;
+            *)
+              exec /usr/bin/xcrun "\$@"
+              ;;
+          esac
+          EOF
+          chmod +x "${sentinel_dir}/xcrun"
           PATH="${sentinel_dir}:${PATH}" pnpm build:desktop -- --arch "${TARGET_ARCH}"
           if [ -s "${sentinel_log}" ]; then
             echo 'forbidden signing dispatch observed:'

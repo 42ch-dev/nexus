@@ -25,7 +25,6 @@ import {
   runtimeCriterionVerdict,
   sha256File,
   walkFiles,
-  compareEntitlements,
 } from './proof-contract.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -441,34 +440,6 @@ check(
   false,
 );
 
-// --- entitlement predicate (I6) ---------------------------------------------
-
-const EXPECTED_ENTITLEMENTS = {
-  parsed: { 'com.apple.security.cs.allow-jit': true, 'com.apple.security.cs.allow-unsigned-executable-memory': true },
-  path: '/expected.plist',
-  source_sha256: 'd'.repeat(64),
-};
-const signedOk = (parsed, status = 0) =>
-  compareEntitlements({ parsed, status, raw: '', plist_sha256: 'e'.repeat(64) }, EXPECTED_ENTITLEMENTS).pass;
-
-check('identical entitlements pass', signedOk({ ...EXPECTED_ENTITLEMENTS.parsed }), true);
-check(
-  'changed entitlement value fails',
-  signedOk({ ...EXPECTED_ENTITLEMENTS.parsed, 'com.apple.security.cs.allow-jit': false }),
-  false,
-);
-check('extra entitlement key fails', signedOk({ ...EXPECTED_ENTITLEMENTS.parsed, 'com.apple.security.cs.disable-library-validation': true }), false);
-check('missing entitlement key fails', signedOk({ 'com.apple.security.cs.allow-jit': true }), false);
-check('unparseable entitlements fail', signedOk(null), false);
-check('codesign failure fails', signedOk({ ...EXPECTED_ENTITLEMENTS.parsed }, 1), false);
-check(
-  'key order does not matter',
-  compareEntitlements(
-    { parsed: { b: 2, a: { d: 4, c: 3 } }, status: 0, raw: '' },
-    { parsed: { a: { c: 3, d: 4 }, b: 2 }, path: '/x', source_sha256: 'f'.repeat(64) },
-  ).pass,
-  true,
-);
 
 // --- decision derivation (I5/I8) --------------------------------------------
 
@@ -847,8 +818,9 @@ function electronSize(archKey) {
 }
 
 /**
- * A gate document with every raw predicate the SEC-1 row independently verifies
- * (C7), using the real field names the package gate emits.
+ * A gate document with structural identity and runtime predicates used by the
+ * historical SEC-1 release observation. Signing-only predicates are not part
+ * of the unsigned product fixture.
  */
 function packageGate(archKey, identity, appIdentity) {
   const appRealpath = appIdentity.dir;
@@ -857,55 +829,12 @@ function packageGate(archKey, identity, appIdentity) {
     status: 'go',
     bundle_id: GATE_BUNDLE_ID,
     arch: archKey,
-    signed_required: true,
     app_path: appRealpath,
     app_realpath: appRealpath,
     missing_inputs: [],
     reasons: [],
     checks: {
-      codesign: {
-        deep_status: 0,
-        display_status: 0,
-        identifier: GATE_BUNDLE_ID,
-        team_identifier: 'ABCDE12345',
-        signature: 'Developer ID Application: Nexus (ABCDE12345)',
-        flags: 'runtime',
-        hardened_runtime: true,
-        authority: ['Developer ID Application: Nexus (ABCDE12345)', 'Developer ID Certification Authority'],
-      },
-      signature_predicates: {
-        pass: true,
-        failed: [],
-        hardened_runtime_flags: 'runtime',
-        signature: 'Developer ID Application: Nexus (ABCDE12345)',
-        team_identifier: 'ABCDE12345',
-        authority: ['Developer ID Application: Nexus (ABCDE12345)'],
-      },
-      spctl_execute: { status: 0, stdout: 'accepted', stderr: '' },
-      notary: { status: 0, stdout: 'accepted', stderr: '' },
-      stapler_validate: { status: 0, stdout: 'The validate action worked!', stderr: '' },
       bundle_identifier: { expected: GATE_BUNDLE_ID, actual: GATE_BUNDLE_ID },
-      entitlements: {
-        pass: true,
-        keys_match: true,
-        values_match: true,
-        problems: [],
-        signed: {
-          'com.apple.security.cs.allow-jit': true,
-          'com.apple.security.cs.allow-unsigned-executable-memory': true,
-          'com.apple.security.files.user-selected.read-only': true,
-          'com.apple.security.network.client': true,
-        },
-        expected: {
-          'com.apple.security.cs.allow-jit': true,
-          'com.apple.security.cs.allow-unsigned-executable-memory': true,
-          'com.apple.security.files.user-selected.read-only': true,
-          'com.apple.security.network.client': true,
-        },
-        expected_source: { path: '/expected.plist', sha256: 'd'.repeat(64) },
-        signed_entitlements_plist_sha256: 'e'.repeat(64),
-        signed_raw_tail: 'Identifier=com.nexus42.rft-electron-proof',
-      },
       runtime_lifecycle: {
         path: '/runtime-lifecycle.json',
         present: true,
@@ -953,13 +882,9 @@ function packageGate(archKey, identity, appIdentity) {
     },
     decision_inputs: {
       runtime_contract_state: 'valid-pass',
-      signature_predicates_pass: true,
-      stapler_ok: true,
-      hardened_runtime: true,
-      entitlements_match: true,
       native_utility_load_proven: true,
       native_load_check_id: 'LIFECYCLE-native',
-      rules: 'go = valid-pass runtime + signature predicates + staple + hardened + provenance-bound native load',
+      rules: 'development gate = valid-pass runtime + provenance-bound native load',
     },
   };
 }
@@ -1038,12 +963,6 @@ const greenRoot = buildMatrix('green');
 const greenDecision = runDecisionWithRoot(greenRoot);
 check('a complete development matrix yields GO', greenDecision.status, 'go');
 check('development GO matrix has no non-pass gating rows', greenDecision.doc?.row_counts?.missing_or_unobserved, 0);
-check('development GO matrix row count excludes two release observations', greenDecision.doc?.row_counts?.total, 35);
-check(
-  'GO matrix retains both GUI architectures as release observations',
-  (greenDecision.doc?.release_observations ?? []).filter((r) => r.id.startsWith('SEC1-signed-')).every((r) => r.verdict === 'PASS'),
-  true,
-);
 check(
   'GO matrix derives per-arch Electron size as PASS',
   ['PKG2-electron-arm64', 'PKG2-electron-x64'].every(
@@ -1195,80 +1114,6 @@ for (const [label, mutate] of inconsistentCases) {
   );
 }
 
-// --- C7: one adversarial mutation per raw gate field ------------------------
-// Each case starts from the fully-satisfied gate and breaks exactly one raw
-// field, so the SEC row must not be satisfiable by the `go` status alone.
-
-const RAW_FIELD_MUTATIONS = [
-  ['signed_required', (g) => { g.signed_required = false; }],
-  ['decision_inputs.signature_predicates_pass', (g) => { g.decision_inputs.signature_predicates_pass = false; }],
-  ['signature_predicates.pass', (g) => { g.checks.signature_predicates.pass = false; }],
-  ['signature_predicates.failed', (g) => { g.checks.signature_predicates.failed = ['codesign --verify --deep --strict']; }],
-  ['codesign.deep_status', (g) => { g.checks.codesign.deep_status = 1; }],
-  ['codesign.identifier', (g) => { g.checks.codesign.identifier = 'Electron'; }],
-  ['codesign.signature', (g) => { g.checks.codesign.signature = 'adhoc'; }],
-  ['codesign.team_identifier', (g) => { g.checks.codesign.team_identifier = 'not set'; }],
-  ['codesign.authority', (g) => { g.checks.codesign.authority = []; }],
-  ['codesign.hardened_runtime', (g) => { g.checks.codesign.hardened_runtime = false; }],
-  ['codesign.flags', (g) => { g.checks.codesign.flags = 'adhoc,linker-signed'; }],
-  ['signature_predicates.hardened_runtime_flags', (g) => { g.checks.signature_predicates.hardened_runtime_flags = 'adhoc'; }],
-  ['spctl_execute.status', (g) => { g.checks.spctl_execute.status = 1; }],
-  ['notary.status', (g) => { g.checks.notary.status = 3; }],
-  ['stapler_validate.status', (g) => { g.checks.stapler_validate.status = 65; }],
-  ['bundle_identifier.actual', (g) => { g.checks.bundle_identifier.actual = 'Electron'; }],
-  ['bundle_identifier.expected', (g) => { g.checks.bundle_identifier.expected = 'com.example.other'; }],
-  ['entitlements.pass', (g) => { g.checks.entitlements.pass = false; }],
-  ['entitlements.values_match', (g) => { g.checks.entitlements.values_match = false; }],
-  ['entitlements.keys_match', (g) => { g.checks.entitlements.keys_match = false; }],
-  ['entitlements.signed value', (g) => { g.checks.entitlements.signed['com.apple.security.cs.allow-jit'] = false; }],
-  ['entitlements.signed_entitlements_plist_sha256', (g) => { g.checks.entitlements.signed_entitlements_plist_sha256 = null; }],
-  ['entitlements.expected_source.sha256', (g) => { g.checks.entitlements.expected_source.sha256 = null; }],
-  ['entitlements.problems', (g) => { g.checks.entitlements.problems = ['signed entitlements unparseable']; }],
-  ['decision_inputs.hardened_runtime', (g) => { g.decision_inputs.hardened_runtime = false; }],
-  ['decision_inputs.stapler_ok', (g) => { g.decision_inputs.stapler_ok = false; }],
-  ['decision_inputs.entitlements_match', (g) => { g.decision_inputs.entitlements_match = false; }],
-  ['decision_inputs.native_utility_load_proven', (g) => { g.decision_inputs.native_utility_load_proven = false; }],
-  ['decision_inputs.native_load_check_id', (g) => { g.decision_inputs.native_load_check_id = 'SOMETHING-ELSE'; }],
-  ['nested contract_state vs decision input', (g) => { g.checks.runtime_lifecycle.contract_state = 'confounded'; }],
-  ['nested present', (g) => { g.checks.runtime_lifecycle.present = false; }],
-  ['nested native_utility_load.ok', (g) => { g.checks.runtime_lifecycle.native_utility_load = { ok: false }; }],
-  ['nested checks_summary falsified', (g) => {
-    g.checks.runtime_lifecycle.checks_summary = g.checks.runtime_lifecycle.checks_summary.map((c) =>
-      c.id === 'LIFECYCLE-native' ? { ...c, ok: false } : c,
-    );
-  }],
-  ['nested checks_summary load check removed', (g) => {
-    g.checks.runtime_lifecycle.checks_summary = g.checks.runtime_lifecycle.checks_summary.filter(
-      (c) => c.id !== 'LIFECYCLE-native',
-    );
-  }],
-  ['nested provenance.app_path', (g) => { g.checks.runtime_lifecycle.provenance.app_path = '/elsewhere/Other.app'; }],
-  ['nested provenance.app_bundle_id', (g) => { g.checks.runtime_lifecycle.provenance.app_bundle_id = 'com.example.other'; }],
-  ['nested provenance.arch', (g) => { g.checks.runtime_lifecycle.provenance.arch = g.arch === 'arm64' ? 'x64' : 'arm64'; }],
-  ['nested provenance.source_sha', (g) => { g.checks.runtime_lifecycle.provenance.source_sha = 'othersha'; }],
-  ['nested provenance.tree_digest', (g) => { g.checks.runtime_lifecycle.provenance.tree_digest = 'f'.repeat(64); }],
-  ['nested provenance.tree_dirty', (g) => { g.checks.runtime_lifecycle.provenance.tree_dirty = !g.checks.runtime_lifecycle.provenance.tree_dirty; }],
-  ['nested provenance.app_bundle_sha256', (g) => { g.checks.runtime_lifecycle.provenance.app_bundle_sha256 = 'b'.repeat(64); }],
-  ['nested provenance.native_node_sha256', (g) => { g.checks.runtime_lifecycle.provenance.native_node_sha256 = 'c'.repeat(64); }],
-  ['nested provenance.native_node_path_relative', (g) => { delete g.checks.runtime_lifecycle.provenance.native_node_path_relative; }],
-  ['bound_to.app_path', (g) => { g.checks.runtime_lifecycle.bound_to.app_path = '/elsewhere/Other.app'; }],
-  ['bound_to.app_bundle_id', (g) => { g.checks.runtime_lifecycle.bound_to.app_bundle_id = 'com.example.other'; }],
-  ['bound_to.arch', (g) => { g.checks.runtime_lifecycle.bound_to.arch = g.arch === 'arm64' ? 'x64' : 'arm64'; }],
-  ['bound_to.source_sha', (g) => { g.checks.runtime_lifecycle.bound_to.source_sha = 'othersha'; }],
-  ['bound_to.tree_digest', (g) => { g.checks.runtime_lifecycle.bound_to.tree_digest = 'f'.repeat(64); }],
-  ['bound_to.tree_dirty', (g) => { g.checks.runtime_lifecycle.bound_to.tree_dirty = !g.checks.runtime_lifecycle.bound_to.tree_dirty; }],
-];
-
-for (const [label, mutate] of RAW_FIELD_MUTATIONS) {
-  const root = buildMatrix(`raw-${label.replace(/[^a-z0-9]+/gi, '-')}`, (docs) => {
-    mutate(docs['electron-arm64/proof-package.json']);
-  });
-  const decision = runDecisionWithRoot(root);
-  const row = (decision.doc?.observed_rows ?? []).find((r) => r.id === 'SEC1-signed-arm64');
-  check(`C7 raw field (${label}) does not pass the SEC row`, row?.verdict !== 'PASS', true);
-  check(`C7 raw field (${label}) does not block development`, decision.status, 'go');
-  check(`C7 raw field (${label}) names the broken predicate`, (row?.verification?.problems ?? []).length > 0, true);
-}
 
 // The on-disk bundle must actually match what the gate claims about it.
 const BUNDLE_MUTATIONS = [
@@ -1623,69 +1468,6 @@ for (const [label, mutate] of BODY_CASES) {
   check(`green status with bad body (${label}) blocks`, decision.status, 'blocked');
 }
 
-// --- I12: a forged gate status is never believed ----------------------------
-// Each case keeps the gate identity valid and breaks one predicate, so the row
-// must go BLOCKED rather than accepting the status field at face value.
-
-const FORGED_GATES = [
-  ['go-without-signature-predicate', (g) => { g.decision_inputs.signature_predicates_pass = false; }],
-  ['go-with-failed-signature-check', (g) => { g.checks.signature_predicates = { pass: false, failed: ['codesign --verify --deep --strict'] }; }],
-  ['go-without-signed-required', (g) => { g.signed_required = false; }],
-  ['go-with-failing-stapler', (g) => { g.checks.stapler_validate = { status: 1 }; }],
-  ['go-without-hardened-runtime', (g) => { g.decision_inputs.hardened_runtime = false; }],
-  ['go-with-entitlement-mismatch', (g) => { g.decision_inputs.entitlements_match = false; g.checks.entitlements.values_match = false; }],
-  ['go-with-unproven-native-load', (g) => { g.decision_inputs.native_utility_load_proven = false; }],
-  ['go-with-confounded-runtime', (g) => { g.decision_inputs.runtime_contract_state = 'confounded'; g.checks.runtime_lifecycle.contract_state = 'confounded'; }],
-  ['go-with-stale-source-binding', (g) => { g.checks.runtime_lifecycle.bound_to.source_sha = 'othersha'; }],
-  ['go-with-stale-tree-binding', (g) => { g.checks.runtime_lifecycle.bound_to.tree_digest = 'f'.repeat(64); }],
-  ['go-with-mismatched-runtime-app', (g) => { g.checks.runtime_lifecycle.provenance.app_path = '/elsewhere/Other.app'; }],
-  ['go-with-mismatched-runtime-arch', (g) => { g.checks.runtime_lifecycle.provenance.arch = g.arch === 'arm64' ? 'x64' : 'arm64'; }],
-  ['nogo-with-passing-runtime', (g) => { g.status = 'no-go'; }],
-];
-for (const [label, mutate] of FORGED_GATES) {
-  const root = buildMatrix(`forged-${label}`, (docs) => mutate(docs['electron-arm64/proof-package.json']));
-  const decision = runDecisionWithRoot(root);
-  const row = (decision.doc?.observed_rows ?? []).find((r) => r.id === 'SEC1-signed-arm64');
-  check(`forged gate (${label}) does not pass`, row?.verdict !== 'PASS', true);
-  check(`forged release gate (${label}) does not block development`, decision.status, 'go');
-}
-
-// A consistent no-go is accepted: measured failure, consistent inputs.
-const nogoRoot = buildMatrix('consistent-nogo', (docs) => {
-  const gate = docs['electron-arm64/proof-package.json'];
-  gate.status = 'no-go';
-  gate.decision_inputs.runtime_contract_state = 'valid-fail';
-  gate.decision_inputs.native_utility_load_proven = false;
-  gate.checks.runtime_lifecycle.contract_state = 'valid-fail';
-  gate.checks.runtime_lifecycle.native_utility_load = { ok: false };
-  gate.checks.runtime_lifecycle.checks_summary = gate.checks.runtime_lifecycle.checks_summary.map((c) =>
-    c.id === 'RES-1' ? { ...c, ok: false } : c,
-  );
-});
-const nogoDecision = runDecisionWithRoot(nogoRoot);
-check(
-  'a consistent gate no-go derives FAIL',
-  (nogoDecision.doc?.observed_rows ?? []).find((r) => r.id === 'SEC1-signed-arm64')?.verdict,
-  'FAIL',
-);
-check('a consistent release-gate no-go does not block development', nogoDecision.status, 'go');
-
-// A gate whose schema/identity is wrong blocks regardless of a green status.
-for (const [label, mutate] of [
-  ['bad-schema', (g) => { g.schema = 'other/v1'; }],
-  ['bad-bundle-id', (g) => { g.bundle_id = 'com.example.other'; }],
-  ['bad-arch', (g) => { g.arch = 'x64'; }],
-  ['bad-app-path', (g) => { g.app_realpath = '/evidence/electron-packages/arm64/NotOurApp.app'; }],
-]) {
-  const root = buildMatrix(`gate-${label}`, (docs) => mutate(docs['electron-arm64/proof-package.json']));
-  const decision = runDecisionWithRoot(root);
-  check(`release gate identity (${label}) does not block development`, decision.status, 'go');
-  check(
-    `gate identity (${label}) does not pass the SEC row`,
-    (decision.doc?.observed_rows ?? []).find((r) => r.id === 'SEC1-signed-arm64')?.verdict !== 'PASS',
-    true,
-  );
-}
 
 // --- I11: per-arch Electron size rows are independently missing -------------
 

@@ -6,7 +6,7 @@
  * It never discovers credentials, invokes signing tools, or fetches dependencies.
  */
 import { execFileSync, spawnSync } from 'node:child_process';
-import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, cpSync, existsSync, fsyncSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,6 +21,7 @@ import {
   assertRequiredFiles,
   digestTree,
   parsePackageArgs,
+  resolveOutputRoot,
   sha256File,
 } from './package-contract.mjs';
 
@@ -33,24 +34,27 @@ const webDist = join(repoRoot, 'apps', 'web', 'dist');
 const serviceRoot = join(repoRoot, 'apps', 'nexus-service');
 const nativeLoaderRoot = join(repoRoot, 'packages', 'nexus-native');
 const lockfile = join(repoRoot, 'pnpm-lock.yaml');
-const nativePlatformRoot = (arch) => join(repoRoot, 'packages', arch === 'arm64' ? 'nexus-native-darwin-arm64' : 'nexus-native-darwin-x64');
-const outputRoot = (out) => resolve(repoRoot, out ?? 'artifacts/desktop');
+const outputRoot = (out) => resolveOutputRoot(out, { repoRoot });
 
 function usage() {
   console.error('Usage: pnpm --dir apps/desktop-electron run package -- [--arch arm64|x64] [--out <dir>]');
   console.error('Options are intentionally closed: --arch, --out, --help. This lane always produces unsigned artifacts.');
 }
-
 function command(commandName, args, options = {}) {
   const result = spawnSync(commandName, args, {
     cwd: options.cwd ?? repoRoot,
     env: { ...process.env, ...(options.env ?? {}) },
     encoding: 'utf8',
+    maxBuffer: options.maxBuffer ?? 64 * 1024 * 1024,
     stdio: options.stdio ?? 'pipe',
+    timeout: options.timeout ?? 30_000,
   });
+  const invocation = `${commandName} ${args.join(' ')}`;
+  if (result.error) throw new Error(`${invocation} failed: ${result.error.message}`);
+  if (result.signal) throw new Error(`${invocation} terminated by ${result.signal} after ${options.timeout ?? 30_000}ms`);
   if (result.status !== 0) {
     const details = `${result.stderr ?? ''}${result.stdout ?? ''}`.trim();
-    throw new Error(`${commandName} ${args.join(' ')} failed${details ? `: ${details}` : ''}`);
+    throw new Error(`${invocation} failed${details ? `: ${details}` : ''}`);
   }
   return result.stdout ?? '';
 }
@@ -367,14 +371,20 @@ function createDmg(appPath, destination) {
   try {
     cpSync(appPath, join(dmgStage, 'Nexus.app'), { recursive: true, dereference: true });
     symlinkSync('/Applications', join(dmgStage, 'Applications'));
-    command('hdiutil', ['create', '-volname', 'Nexus', '-srcfolder', dmgStage, '-ov', '-format', 'UDZO', destination], { stdio: 'inherit' });
+    command('hdiutil', ['create', '-volname', 'Nexus', '-srcfolder', dmgStage, '-ov', '-format', 'UDZO', destination], {
+      stdio: 'inherit',
+      timeout: 30 * 60 * 1000,
+    });
   } finally {
     rmSync(dmgStage, { recursive: true, force: true });
   }
 }
 
 function createZip(appPath, destination) {
-  command('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', appPath, destination], { stdio: 'inherit' });
+  command('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', appPath, destination], {
+    stdio: 'inherit',
+    timeout: 30 * 60 * 1000,
+  });
 }
 function normalizeAppBundle(appPath) {
   const nested = join(appPath, 'Nexus.app');
@@ -383,7 +393,44 @@ function normalizeAppBundle(appPath) {
   rmSync(nested, { recursive: true, force: true });
 }
 
+function fsyncTree(root) {
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    const path = join(root, entry.name);
+    if (entry.isDirectory()) fsyncTree(path);
+    else if (entry.isFile()) {
+      const fd = openSync(path, 'r');
+      try {
+        fsyncSync(fd);
+      } finally {
+        closeSync(fd);
+      }
+    }
+  }
+  const fd = openSync(root, 'r');
+  try {
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function cleanupStalePublicationArtifacts(parent, stagingDir, finalDir) {
+  const stagingPrefix = `.staging-${basename(finalDir).replace('darwin-', '')}-`;
+  const backupPrefix = `${basename(finalDir)}.previous-`;
+  for (const entry of readdirSync(parent, { withFileTypes: true })) {
+    if (
+      (entry.name.startsWith(stagingPrefix) && entry.name !== basename(stagingDir)) ||
+      entry.name.startsWith(backupPrefix)
+    ) {
+      rmSync(join(parent, entry.name), { recursive: true, force: true });
+    }
+  }
+}
+
 function publishAtomic(stagingDir, finalDir) {
+  const parent = dirname(finalDir);
+  mkdirSync(parent, { recursive: true });
+  cleanupStalePublicationArtifacts(parent, stagingDir, finalDir);
   const appPath = join(stagingDir, 'Nexus.app');
   if (!existsSync(appPath) || !statSync(appPath).isDirectory()) {
     throw new Error(`package.publish: staged app directory is missing: ${appPath}`);
@@ -395,8 +442,7 @@ function publishAtomic(stagingDir, finalDir) {
     join(stagingDir, 'receipt.json'),
   ];
   assertRequiredFiles(required, 'staged package');
-  const parent = dirname(finalDir);
-  mkdirSync(parent, { recursive: true });
+  fsyncTree(stagingDir);
   const backup = `${finalDir}.previous-${process.pid}`;
   let movedExisting = false;
   try {
@@ -407,6 +453,12 @@ function publishAtomic(stagingDir, finalDir) {
     }
     renameSync(stagingDir, finalDir);
     if (movedExisting) rmSync(backup, { recursive: true, force: true });
+    const parentFd = openSync(parent, 'r');
+    try {
+      fsyncSync(parentFd);
+    } finally {
+      closeSync(parentFd);
+    }
   } catch (error) {
     if (movedExisting && !existsSync(finalDir) && existsSync(backup)) renameSync(backup, finalDir);
     throw error;

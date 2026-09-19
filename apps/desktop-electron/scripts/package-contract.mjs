@@ -23,6 +23,11 @@ export class PackageContractError extends Error {
 function fail(message, code) {
   throw new PackageContractError(message, code);
 }
+export function resolveOutputRoot(out, { repoRoot, callerCwd = process.cwd() } = {}) {
+  if (!repoRoot) fail('repoRoot is required to resolve package output', 'package.output.root');
+  return resolve(callerCwd, out ?? join(repoRoot, 'artifacts', 'desktop'));
+}
+
 
 export function parsePackageArgs(argv, nativeArch = process.arch) {
   const args = { arch: nativeArch, out: null, help: false };
