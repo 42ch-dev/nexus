@@ -283,14 +283,13 @@ pub async fn seed_expired_token(
 ///
 /// Call this after `create_test_workspace()` to enable `create_work` tests.
 pub async fn seed_test_creator_and_world(pool: &sqlx::SqlitePool) {
-    // SAFETY: test-only data setup — seeds creators row for FK references.
-    sqlx::query(
-        "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
-         VALUES ('test_creator', 'Test Creator', 'active', datetime('now'), '{}')",
-    )
-    .execute(pool)
-    .await
-    .expect("seed test creator");
+    // v1.191 P1: a stored Creator always carries its holder registry row
+    // (§2.2), and the management/authoring read selections resolve it — so the
+    // shared fixture seeds a complete subject through the one transaction-taking
+    // materializer instead of a bare `creators` row.
+    nexus_local_db::ensure_creator_row(pool, "test_creator", "Test Creator")
+        .await
+        .expect("seed test creator");
 
     // SAFETY: test-only data setup — seeds narrative_worlds row for world_id FK.
     sqlx::query(

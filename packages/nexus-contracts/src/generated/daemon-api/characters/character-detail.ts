@@ -5,7 +5,7 @@
  */
 
 /**
- * Response for GET /v1/daemon/characters/:character_id.
+ * Response for GET /v1/daemon/characters/:character_id. The identity projection includes the read-only service-managed holder_entry_id; there is no holder CRUD route.
  */
 export interface CharacterDetail {
   character: NexusCharacter;
@@ -26,6 +26,10 @@ export interface NexusCharacter {
    * Owning Creator ID (`CreatorId`). Never accepted from create/bind request bodies.
    */
   owner_creator_id: string;
+  /**
+   * Read-only service-managed holder KnowledgeEntry id for this Character (`hld_` namespace). Never accepted from create/bind request bodies; there is no holder CRUD route behind this field.
+   */
+  holder_entry_id?: string;
   /**
    * Character display name. Trimmed non-empty; at most 120 Unicode scalars.
    */

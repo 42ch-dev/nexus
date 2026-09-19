@@ -486,12 +486,20 @@ impl NexusAdapter<'_> {}
 #[async_trait]
 impl ComputablePort for NexusAdapter<'_> {
     async fn project(&self, request: ProjectRequest) -> SpokeResult<ProjectResponse> {
+        // Request-bound scope (durable §4.1, v1.191 P1 T8): project stages a
+        // session for one entry, so it is a KE-capable operand path and a
+        // host-only adapter rejects before touching storage.
+        if let Err(reject) = self.require_read_scope("project") {
+            return SpokeResult::Reject(reject);
+        }
         let pool = self.pool.clone();
         let session_id = request.session_id.clone();
         let entry_id = request.entry_id.clone();
         let state = request.state;
 
         // Validate entry exists (rejects with InvalidInput if entry is missing).
+        // `get_knowledge_entry` reads inside the bound selection, so an entry
+        // the caller cannot see is "not found" here too (durable §4.2).
         let _entry = match self.get_knowledge_entry(&entry_id).await {
             SpokeResult::Ok(e) => e,
             SpokeResult::Reject(r) => {
@@ -538,11 +546,34 @@ impl ComputablePort for NexusAdapter<'_> {
 
     #[allow(clippy::too_many_lines)]
     async fn compute(&self, request: ComputeRequest) -> SpokeResult<ComputeResponse> {
+        // Request-bound scope (durable §4.1, v1.191 P1 T8): every operand this
+        // path loads (target entry, referenced entries, settle targets) is read
+        // through the bound selection, so a hidden operand fails closed.
+        if let Err(reject) = self.require_read_scope("compute") {
+            return SpokeResult::Reject(reject);
+        }
         let pool = self.pool.clone();
         let session_id = request.session_id.clone();
         let entry_id = request.entry_id.clone();
         let dynamic_computable = request.computable;
         let settle = request.settle.unwrap_or(false);
+
+        // ── 0. Scoped operand check (L2 F3) ──────────────────────────────
+        // The target entry is the request's operand: it must be one the bound
+        // selection admits BEFORE any session state is read, so a session row
+        // (and its stored entry id) is never observed — let alone echoed — for
+        // an entry the caller cannot read.
+        match self.get_knowledge_entry(&entry_id).await {
+            SpokeResult::Ok(_) => {}
+            SpokeResult::Reject(r) if r.code == SpokeRejectCode::KnowledgeEntryNotFound => {
+                return reject(
+                    SpokeRejectCode::InvalidInput,
+                    format!("target KnowledgeEntry not found for compute: {entry_id}"),
+                    json!({ "entry_id": entry_id }),
+                );
+            }
+            SpokeResult::Reject(r) => return SpokeResult::Reject(r),
+        }
 
         // ── 1. Load session row ──────────────────────────────────────────
         let session = get_compute_session(&pool, &session_id).await;
@@ -564,17 +595,16 @@ impl ComputablePort for NexusAdapter<'_> {
             }
         };
 
-        // Verify entry_id consistency.
+        // Verify entry_id consistency. L2 F3: the mismatched corpus entry id is
+        // NOT echoed — the caller already supplied its own `entry_id`, and the
+        // stored one is not proven readable by this caller.
         if session.entry_id != entry_id {
             return reject(
                 SpokeRejectCode::InvalidInput,
-                format!(
-                    "entry_id mismatch: session stores '{}' but compute request targets '{}'",
-                    session.entry_id, entry_id
-                ),
+                "entry_id mismatch: the compute request does not match the staged session"
+                    .to_string(),
                 json!({
                     "session_id": session_id,
-                    "session_entry_id": session.entry_id,
                     "request_entry_id": entry_id,
                 }),
             );
@@ -1084,14 +1114,32 @@ mod tests {
     use crate::KnowledgeEntryPort;
     use nexus_contracts::BlockType;
     use nexus_knowledge::world_kb::{KnowledgeEntryBody, KnowledgeEntryRecord};
-    use nexus_local_db::{open_pool, run_migrations};
 
+    /// A KE-capable compute adapter over the two worlds the fixtures own.
+    fn scoped(pool: sqlx::SqlitePool) -> NexusAdapter<'static> {
+        NexusAdapter::new(
+            pool,
+            nexus_knowledge::world_kb::KnowledgeReadScope::creator_management(
+                vec![
+                    nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef::world("wld_cmp"),
+                    nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef::world("wld_other"),
+                ],
+                Vec::new(),
+            ),
+        )
+    }
+
+    /// v1.191 P1 T8: `compute_sessions` is engine-owned under the core writer
+    /// protocol (`guard_compute_sessions_*`), so these fixtures need an
+    /// engine-owned pool — a bare `open_pool` is fenced (WRITER_FENCED) and the
+    /// compute paths could not persist a session at all.
     async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test.db");
-        let pool = open_pool(&db_path).await.unwrap();
-        run_migrations(&pool).await.unwrap();
-        (pool, dir)
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
+            .await
+            .expect("engine-owned guarded pool");
+        (guarded.clone_pool(), dir)
     }
 
     async fn seed_world(pool: &sqlx::SqlitePool) {
@@ -1165,7 +1213,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
 
-        let adapter = NexusAdapter::new(pool.clone());
+        let adapter = scoped(pool.clone());
 
         // Create a character entry first.
         let entry = spoke_character_entry("kb_hero", "Hero", 100, 20, 10, 100);
@@ -1224,7 +1272,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = scoped(pool);
         let project_req = ProjectRequest {
             session_id: "ses_missing".to_string(),
             entry_id: "kb_nonexistent".to_string(),
@@ -1246,7 +1294,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
 
-        let adapter = NexusAdapter::new(pool.clone());
+        let adapter = scoped(pool.clone());
         let entry = spoke_character_entry("kb_dup_ses", "DupSes", 100, 20, 10, 100);
         unwrap_ok(adapter.put_knowledge_entry(entry, None).await, "create");
 
@@ -1274,7 +1322,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = scoped(pool);
         let compute_req = ComputeRequest {
             session_id: "ses_nonexistent".to_string(),
             entry_id: "kb_whatever".to_string(),
@@ -1297,9 +1345,20 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
 
-        let adapter = NexusAdapter::new(pool.clone());
+        let adapter = scoped(pool.clone());
         let entry = spoke_character_entry("kb_mismatch", "Mismatch", 100, 20, 10, 100);
         unwrap_ok(adapter.put_knowledge_entry(entry, None).await, "create");
+        // L2 F3: the operand gate runs before the session read, so the mismatch
+        // branch needs a target the caller CAN read.
+        unwrap_ok(
+            adapter
+                .put_knowledge_entry(
+                    spoke_character_entry("kb_different", "Different", 100, 20, 10, 100),
+                    None,
+                )
+                .await,
+            "create other",
+        );
 
         // Stage a session against kb_mismatch.
         let project_req = ProjectRequest {
@@ -1323,6 +1382,12 @@ mod tests {
             SpokeResult::Reject(r) => {
                 assert_eq!(r.code, SpokeRejectCode::InvalidInput);
                 assert!(r.message.contains("mismatch"));
+                assert!(
+                    r.details
+                        .as_ref()
+                        .is_none_or(|d| !d.contains_key("session_entry_id")),
+                    "the staged session's entry id must not be echoed (L2 F3): {r:?}"
+                );
             }
             SpokeResult::Ok(_) => panic!("expected InvalidInput for mismatch"),
         }
@@ -1343,7 +1408,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
 
-        let adapter = NexusAdapter::new(pool.clone());
+        let adapter = scoped(pool.clone());
 
         // Create two character entries in spoke format.
         let hero = spoke_character_entry("kb_hero_c", "HeroC", 100, 25, 15, 100);
@@ -1439,7 +1504,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
 
-        let adapter = NexusAdapter::new(pool.clone());
+        let adapter = scoped(pool.clone());
 
         let hero = spoke_character_entry("kb_settle_h", "SettleHero", 100, 25, 15, 100);
         let monster = spoke_character_entry("kb_settle_m", "SettleMonster", 60, 15, 8, 60);
@@ -1546,7 +1611,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
 
-        let adapter = NexusAdapter::new(pool.clone());
+        let adapter = scoped(pool.clone());
         let entry = spoke_character_entry("kb_no_mod", "NoModule", 100, 20, 10, 100);
         unwrap_ok(adapter.put_knowledge_entry(entry, None).await, "create");
 
@@ -1589,7 +1654,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
 
-        let adapter = NexusAdapter::new(pool.clone());
+        let adapter = scoped(pool.clone());
         let entry = spoke_character_entry("kb_unknown_mod", "UnknownMod", 100, 20, 10, 100);
         unwrap_ok(adapter.put_knowledge_entry(entry, None).await, "create");
 
@@ -1630,6 +1695,121 @@ mod tests {
         }
     }
 
+    /// L2 F3: the compute operand is checked inside the bound selection BEFORE
+    /// the session row is read, and the refusal never echoes the session's
+    /// stored entry id.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn compute_operand_outside_selection_refused_before_the_session_read() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let owner = scoped(pool.clone());
+        unwrap_ok(
+            owner
+                .put_knowledge_entry(spoke_character_entry("kb_scope_h", "ScopeHero", 100, 20, 10, 100), None)
+                .await,
+            "create",
+        );
+        unwrap_ok(
+            owner
+                .project(ProjectRequest {
+                    session_id: "ses_scope".to_string(),
+                    entry_id: "kb_scope_h".to_string(),
+                    state: Map::new(),
+                    extensions: HashMap::default(),
+                })
+                .await,
+            "project",
+        );
+
+        // Same database, no authority over the entry's world.
+        let outsider = NexusAdapter::new(
+            pool,
+            nexus_knowledge::world_kb::KnowledgeReadScope::creator_management(
+                vec![nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef::world(
+                    "wld_none",
+                )],
+                Vec::new(),
+            ),
+        );
+        match outsider
+            .compute(ComputeRequest {
+                session_id: "ses_scope".to_string(),
+                entry_id: "kb_scope_h".to_string(),
+                computable: Map::new(),
+                settle: None,
+                extensions: HashMap::default(),
+            })
+            .await
+        {
+            SpokeResult::Reject(r) => {
+                assert_eq!(r.code, SpokeRejectCode::InvalidInput, "got {r:?}");
+                assert!(
+                    r.message.contains("not found for compute"),
+                    "the operand gate must refuse as not-found: {r:?}"
+                );
+                assert!(
+                    r.details
+                        .as_ref()
+                        .is_none_or(|d| !d.contains_key("session_entry_id")),
+                    "the stored session entry id must not be echoed: {r:?}"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("an unauthorized operand must be refused"),
+        }
+    }
+
+    /// v1.191 P1 T8: the compiled-module cache is host-owned. Binding a
+    /// request scope creates a new adapter per request, so the cache must be
+    /// injected — otherwise every per-request adapter would start empty and
+    /// recompile the module. Two scoped adapters over one `Arc<ModuleCache>`
+    /// must share the compiled entry.
+    #[cfg(not(nexus_spoke_adapter_no_wasm_target))]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn scoped_adapters_share_one_host_owned_module_cache() {
+        let (pool, _db_dir) = fresh_pool().await;
+
+        let module_root = tempfile::tempdir().unwrap();
+        let module_dir = module_root.path().join("basic-combat");
+        std::fs::create_dir_all(&module_dir).unwrap();
+        std::fs::write(
+            module_dir.join("basic-combat.wasm"),
+            nexus_wasm_host::embedded_module_bytes("basic-combat").expect("embedded bytes"),
+        )
+        .expect("write module wasm");
+        std::fs::write(
+            module_dir.join("manifest.json"),
+            nexus_wasm_host::embedded_module_manifest("basic-combat")
+                .expect("embedded manifest"),
+        )
+        .expect("write module manifest");
+
+        let cache = std::sync::Arc::new(nexus_wasm_host::ModuleCache::new());
+        let first = scoped(pool.clone())
+            .with_user_modules_dir(module_root.path().to_path_buf())
+            .with_module_cache(std::sync::Arc::clone(&cache));
+        let second = scoped(pool)
+            .with_user_modules_dir(module_root.path().to_path_buf())
+            .with_module_cache(std::sync::Arc::clone(&cache));
+
+        assert_eq!(cache.len(), 0, "the shared cache starts empty");
+        unwrap_ok(first.load_module("basic-combat"), "first adapter loads");
+        let compiled = cache.get("basic-combat").expect("cached after first load");
+
+        unwrap_ok(second.load_module("basic-combat"), "second adapter loads");
+        assert_eq!(
+            cache.len(),
+            1,
+            "the second adapter must not add its own entry"
+        );
+        let reused = cache.get("basic-combat").expect("cached after second load");
+        assert!(
+            std::sync::Arc::ptr_eq(&compiled, &reused),
+            "a per-request scoped adapter must reuse the host-owned compiled module, \
+             not recompile it"
+        );
+    }
+
     /// P2 QC fix wave FW-2: the user-module load path must reuse the
     /// per-adapter compiled-module cache — repeated loads of UNCHANGED
     /// bytes return the SAME cached entry (Arc identity across two loads is
@@ -1657,7 +1837,7 @@ mod tests {
         std::fs::write(&manifest_path, manifest).expect("write module manifest");
 
         let adapter =
-            NexusAdapter::new(pool).with_user_modules_dir(module_root.path().to_path_buf());
+            scoped(pool).with_user_modules_dir(module_root.path().to_path_buf());
         let cache = adapter.module_cache();
         assert_eq!(cache.len(), 0, "fresh adapter starts with an empty cache");
 
@@ -1777,7 +1957,7 @@ mod tests {
         std::fs::write(&manifest_path, manifest).expect("write module manifest");
 
         let adapter =
-            NexusAdapter::new(pool).with_user_modules_dir(module_root.path().to_path_buf());
+            scoped(pool).with_user_modules_dir(module_root.path().to_path_buf());
         let cache = adapter.module_cache();
         let (module, served_manifest) = unwrap_ok(
             adapter.load_module("basic-combat"),
@@ -1826,7 +2006,7 @@ mod tests {
         std::fs::write(&manifest_path, manifest).expect("write module manifest");
 
         let adapter =
-            NexusAdapter::new(pool).with_user_modules_dir(module_root.path().to_path_buf());
+            scoped(pool).with_user_modules_dir(module_root.path().to_path_buf());
         let cache = adapter.module_cache();
         assert_eq!(cache.len(), 0, "fresh adapter starts with an empty cache");
 
@@ -1884,7 +2064,7 @@ mod tests {
         std::fs::write(&manifest_path, &legacy_manifest).expect("write legacy module manifest");
 
         let adapter =
-            NexusAdapter::new(pool).with_user_modules_dir(module_root.path().to_path_buf());
+            scoped(pool).with_user_modules_dir(module_root.path().to_path_buf());
         let (module, served_manifest) = unwrap_ok(
             adapter.load_module("basic-combat"),
             "legacy manifest without wasm_sha256 loads via the stat fence",
@@ -2040,7 +2220,7 @@ mod tests {
         std::fs::write(&manifest_path, manifest).expect("write module manifest");
 
         let adapter =
-            NexusAdapter::new(pool).with_user_modules_dir(module_root.path().to_path_buf());
+            scoped(pool).with_user_modules_dir(module_root.path().to_path_buf());
         let adapter = std::sync::Arc::new(adapter);
 
         // Churn writer: alternate the pair while the loader runs.
@@ -2100,7 +2280,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
 
-        let adapter = NexusAdapter::new(pool.clone());
+        let adapter = scoped(pool.clone());
         let entry = spoke_character_entry("kb_vanished", "Vanished", 100, 20, 10, 100);
         unwrap_ok(adapter.put_knowledge_entry(entry, None).await, "create");
 
@@ -2208,7 +2388,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
 
-        let adapter = NexusAdapter::new(pool.clone());
+        let adapter = scoped(pool.clone());
 
         // Create attacker (hero) and defender (monster) entries.
         let hero = spoke_character_entry("kb_atk_r", "AttackerR", 100, 25, 15, 100);
@@ -2351,7 +2531,7 @@ mod tests {
         .await
         .unwrap();
 
-        let adapter = NexusAdapter::new(pool.clone());
+        let adapter = scoped(pool.clone());
 
         // Create a character in world A (wld_cmp, seeded by seed_world).
         let hero = spoke_character_entry("kb_hero_f003", "HeroF003", 100, 20, 10, 100);
@@ -2453,7 +2633,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
 
-        let adapter = NexusAdapter::new(pool.clone());
+        let adapter = scoped(pool.clone());
         let entry = spoke_character_entry("kb_pathmod", "PathMod", 100, 20, 10, 100);
         unwrap_ok(adapter.put_knowledge_entry(entry, None).await, "create");
 
@@ -2505,7 +2685,7 @@ mod tests {
 
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
-        let adapter = NexusAdapter::new(pool);
+        let adapter = scoped(pool);
 
         accepts_computable_port(&adapter);
         accepts_computable_ports(&adapter);

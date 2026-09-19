@@ -822,6 +822,10 @@ async fn timeline_recent_get_returns_recent_events() {
 }
 
 /// E2E test: `nexus.kb_snapshot.read` returns key blocks for a seeded world.
+///
+/// v1.191 P1 R5: the snapshot is read through the admitted Creator ActorView
+/// selection, so the seeded creator carries its registry holder row — the
+/// production shape a migrated workspace always has.
 #[tokio::test]
 async fn kb_snapshot_read_returns_key_blocks() {
     let (tmp, nexus_home, db_path) = create_test_workspace().await;
@@ -838,6 +842,9 @@ async fn kb_snapshot_read_returns_key_blocks() {
         "manual",
     )
     .await;
+    nexus_local_db::ensure_creator_row(&pool, "test_creator", "test_creator")
+        .await
+        .expect("seed the creator's holder");
     nexus_local_db::kb_store::seed::knowledge_entry(
         &pool,
         "kb_1",

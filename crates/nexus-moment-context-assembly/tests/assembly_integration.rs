@@ -338,3 +338,85 @@ async fn missing_world_yields_no_narrative_or_kb_but_keeps_knowledge() {
         "user knowledge is independent of world"
     );
 }
+
+// ── v1.191 P1 T11: ActorView-only model / inspect emission (durable §4.2) ──
+
+/// A store holding rows the actor's snapshot does not admit can only influence
+/// output through the admitted snapshot: neither the rendered World-KB section
+/// nor the inspector packet may carry an un-admitted id or name, and the
+/// inspector must not recompute a wider view of its own.
+#[tokio::test]
+async fn v1191_holder_context_model_and_inspect_emit_admitted_rows_only() {
+    use nexus_moment_context_assembly::{
+        build_inspector_packet, CharacterViewInput, MomentActorContext,
+    };
+
+    let stores = FixtureStores::empty();
+    seed_world(&stores, "wld_ctx", "Context World");
+    seed_event(&stores, "wld_ctx", "fbk_root", 1, "The Harbor Standoff");
+
+    // Store rows: an admitted Character-global shared row plus two rows no
+    // admitted selection hands this actor (a binding-local row and another
+    // holder's owner-private row).
+    let admitted = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
+        "wld_ctx",
+        BlockType::Character,
+        "AdmittedShared",
+    );
+    let admitted_id = admitted.entry_id.clone();
+    stores
+        .kb
+        .insert_knowledge_entry(admitted.clone())
+        .await
+        .expect("insert admitted key block");
+    let binding_local =
+        nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::for_binding(
+            "bnd_local",
+            BlockType::Scene,
+            "BindingLocalRow",
+        );
+    let binding_local_id = binding_local.entry_id.clone();
+    stores.kb.insert_knowledge_entry(binding_local).await.unwrap();
+    let mut other_private = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
+        "wld_ctx",
+        BlockType::Character,
+        "OtherHolderPrivateRow",
+    );
+    other_private.holder_entry_id = Some("hld_other".to_string());
+    other_private.disclosure =
+        Some(nexus_knowledge::world_kb::DISCLOSURE_OWNER_PRIVATE.to_string());
+    let other_private_id = other_private.entry_id.clone();
+    stores.kb.insert_knowledge_entry(other_private).await.unwrap();
+
+    let request = MomentRequest::new(Stage0Assembly {
+        user_prompt: "Write the standoff.".to_string(),
+        ..Stage0Assembly::default()
+    })
+    .with_world("wld_ctx")
+    .with_actor(MomentActorContext::creator_with_view(
+        CharacterViewInput::from_entries(vec![admitted]),
+    ));
+
+    let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+    let kb_text = ctx.world_kb.clone().expect("admitted snapshot renders");
+    assert!(kb_text.contains("AdmittedShared"), "{kb_text}");
+    assert!(
+        !kb_text.contains("BindingLocalRow") && !kb_text.contains("OtherHolderPrivateRow"),
+        "un-admitted rows must never reach the model input: {kb_text}"
+    );
+
+    let packet = build_inspector_packet(&ctx);
+    let packet_json = serde_json::to_string(&packet).expect("packet serializes");
+    assert!(
+        packet_json.contains(&admitted_id),
+        "admitted row is traced: {packet_json}"
+    );
+    assert!(
+        !packet_json.contains(&binding_local_id) && !packet_json.contains(&other_private_id),
+        "the inspector packet must not carry an un-admitted row id: {packet_json}"
+    );
+    assert!(
+        !packet_json.contains("BindingLocalRow") && !packet_json.contains("OtherHolderPrivateRow"),
+        "the inspector packet must not carry an un-admitted row name: {packet_json}"
+    );
+}

@@ -22,7 +22,8 @@ use nexus_local_db::writer_protocol::{
     run_guarded_migrations, WriterMode, BOOTSTRAP_CREATOR_ID,
 };
 use nexus_local_db::{
-    ensure_creator_row, init_engine_pool, init_pool, open_pool_read_only, LocalDbError,
+    creator_holder_entry_id, ensure_creator_row, init_engine_pool, init_pool, open_pool_read_only,
+    LocalDbError,
 };
 use nexus_storage_guard::{
     install_writer_functions, WriterConnectionContext, WriterMode as GuardWriterMode,
@@ -706,18 +707,201 @@ async fn pre_activation_state_preserved(dir: &Path) {
     pool.close().await;
 }
 
-/// Force a genuinely pending migration by dropping the newest applied
-/// `_sqlx_migrations` row — the state a binary whose migration set is ahead of
-/// the file would find. The newest migration is idempotent
-/// (`CREATE ... IF NOT EXISTS`), so re-applying it in the same test is safe.
+/// Version of the newest migration whose script is safe to re-apply: the
+/// JS-provider journal is `CREATE ... IF NOT EXISTS` throughout.
+///
+/// The v1.191 holder cutover is deliberately **not** re-appliable — its
+/// preflight refuses a pre-existing registry — so a helper that dropped "the
+/// newest applied migration" would try to re-run a migration whose whole point
+/// is to run exactly once. The pending state these quiescence and epoch tests
+/// need is therefore produced by dropping this pinned idempotent migration,
+/// which leaves the applied set genuinely incomplete.
+const IDEMPOTENT_MIGRATION_VERSION: i64 = 20_260_914_000_001;
+
+/// Force a genuinely pending migration by dropping the newest *idempotent*
+/// applied `_sqlx_migrations` row — the state a binary whose migration set is
+/// ahead of the file would find.
 async fn make_migration_pending(pool: &SqlitePool) {
+    let dropped = sqlx::query("DELETE FROM _sqlx_migrations WHERE version = ?")
+        .bind(IDEMPOTENT_MIGRATION_VERSION)
+        .execute(pool)
+        .await
+        .expect("drop the pinned idempotent applied migration row")
+        .rows_affected();
+    assert_eq!(dropped, 1, "the pinned migration must be applied");
+}
+
+/// v1.191 P1 T3: the two holder-cutover tables are writer-guarded like every
+/// other persistent application table, and a writer admitted *before* the
+/// cutover epoch is refused after the migration epoch advances.
+///
+/// Complements [`v1191_sqlite_writer`] (which proves the registry/refusal
+/// contract on `workspace_meta`): every mutation of `knowledge_holders` and
+/// `knowledge_import_quarantine` requires admission, and the epoch staleness
+/// that refuses an old binary/writer applies to them too.
+#[tokio::test]
+async fn v1191_holder_writer() {
+    let dir = TempDir::new().expect("tempdir");
+    let db = dir.path().join("v1191_holder_writer.db");
+
+    let bootstrap = init_pool(&db).await.expect("init_pool");
+    bootstrap.close().await;
+    release_retained_writer_guards(&db);
+
+    assert_holder_tables_fenced_for_raw_writer(&db).await;
+    assert_holder_tables_require_admission(&db).await;
+    assert_holder_table_trigger_coverage(&db).await;
+    // The admission refusal is exercised last: it leaves a deliberately
+    // unknown applied migration in the workspace.
+    assert_unknown_applied_migration_refused(&db).await;
+
+    release_retained_writer_guards(&db);
+}
+
+/// Every mutation of the new tables is fenced on a handle that never received
+/// the protocol scalars — the raw/pre-opened writer loophole.
+async fn assert_holder_tables_fenced_for_raw_writer(db: &Path) {
+    let raw = SqlitePool::connect(&format!("sqlite://{}?mode=rwc", db.display()))
+        .await
+        .expect("raw connect");
+    for sql in [
+        "INSERT INTO knowledge_holders (holder_entry_id, creator_id) VALUES ('hld_raw', 'ctr_raw')",
+        "UPDATE knowledge_holders SET created_at = 'x'",
+        "DELETE FROM knowledge_holders",
+        "INSERT INTO knowledge_import_quarantine \
+         (quarantine_id, import_batch_id, controlling_creator_id, owner_kind, world_id, \
+          quarantine_reason, original_entry_json, source_provenance_json) \
+         VALUES ('q1', 'b1', 'ctr_raw', 'world', 'wld_x', 'unresolved_holder', '{}', '{}')",
+        "UPDATE knowledge_import_quarantine SET quarantine_reason = 'unknown_disclosure'",
+        "DELETE FROM knowledge_import_quarantine",
+    ] {
+        assert_fenced(&raw, sql).await;
+    }
+    raw.close().await;
+}
+
+/// A registered direct writer is admitted to both tables, and the admitted rows
+/// read back.
+async fn assert_holder_tables_require_admission(db: &Path) {
+    let direct = open_admitted_pool(db, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
+        .await
+        .expect("direct admitted pool");
+    // The subject row alone: the holder is registered by the explicit insert
+    // below, which is what proves the guard admits a direct writer on the
+    // registry table. `ensure_creator_row` commits the holder together with the
+    // subject (§2.1) and would collide with that insert.
+    // SAFETY: fixture insert against the known `creators` DDL.
     sqlx::query(
-        "DELETE FROM _sqlx_migrations \
-         WHERE version = (SELECT MAX(version) FROM _sqlx_migrations)",
+        "INSERT INTO creators (creator_id, display_name, status, cached_at, data) \
+         VALUES ('ctr_holder_writer', 'Holder Writer', 'active', '2026-09-18T00:00:00Z', '{}')",
     )
-    .execute(pool)
+    .execute(&direct)
     .await
-    .expect("drop newest applied migration row");
+    .expect("creator subject row");
+    // The quarantine container is a real stored World (FK), not a placeholder.
+    sqlx::query(
+        "INSERT INTO narrative_worlds \
+         (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
+          time_policy, metadata_json, created_at) \
+         VALUES ('wld_holder_writer', 'ws', 'ctr_holder_writer', 'Holder World', \
+                 'holder-world', 'active', 'private', 'manual', '{}', \
+                 '2026-09-18T00:00:00Z')",
+    )
+    .execute(&direct)
+    .await
+    .expect("world container for the quarantined atom");
+    let holder = creator_holder_entry_id("ctr_holder_writer");
+    sqlx::query("INSERT INTO knowledge_holders (holder_entry_id, creator_id) VALUES (?, ?)")
+        .bind(&holder)
+        .bind("ctr_holder_writer")
+        .execute(&direct)
+        .await
+        .expect("an admitted direct writer registers the holder");
+    sqlx::query(
+        "INSERT INTO knowledge_import_quarantine \
+         (quarantine_id, import_batch_id, controlling_creator_id, owner_kind, world_id, \
+          quarantine_reason, original_entry_json, source_provenance_json) \
+         VALUES ('qrn_admitted', 'batch_admitted', 'ctr_holder_writer', 'world', \
+                 'wld_holder_writer', 'unresolved_holder', \
+                 '{\"entry_id\":\"kb_foreign\"}', '{\"pack\":\"p1\"}')",
+    )
+    .execute(&direct)
+    .await
+    .expect("an admitted direct writer quarantines a foreign atom");
+
+    let stored: (String, Option<String>) =
+        sqlx::query_as("SELECT holder_entry_id, creator_id FROM knowledge_holders")
+            .fetch_one(&direct)
+            .await
+            .expect("holding row");
+    assert_eq!(stored, (holder, Some("ctr_holder_writer".to_string())));
+    let quarantined: (String, String) =
+        sqlx::query_as("SELECT quarantine_id, quarantine_reason FROM knowledge_import_quarantine")
+            .fetch_one(&direct)
+            .await
+            .expect("quarantine row");
+    assert_eq!(
+        quarantined,
+        ("qrn_admitted".to_string(), "unresolved_holder".to_string())
+    );
+    direct.close().await;
+}
+
+/// Both tables carry INSERT/UPDATE/DELETE guards, so the generic coverage
+/// assertion (every persistent application table) holds with them added.
+async fn assert_holder_table_trigger_coverage(db: &Path) {
+    let pool = open_pool_read_only(db).await.expect("read-only pool");
+    let tables: Vec<String> = sqlx::query_scalar(
+        "SELECT name FROM sqlite_master WHERE type = 'table' \
+         AND name IN ('knowledge_holders', 'knowledge_import_quarantine') ORDER BY name",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("holder table list");
+    assert_eq!(
+        tables,
+        vec![
+            "knowledge_holders".to_string(),
+            "knowledge_import_quarantine".to_string()
+        ],
+        "the cutover tables exist"
+    );
+    assert_trigger_coverage(&pool).await;
+    pool.close().await;
+}
+
+/// A writer older than the cutover is refused by **strict migration
+/// admission**: when the workspace carries an applied migration the binary's
+/// source set does not know — exactly what the holder cutover looks like to a
+/// pre-v1.191 binary — the runner refuses instead of serving a partially
+/// understood schema.
+///
+/// The epoch-staleness arm of the guards is not reachable in a conforming
+/// system: every live direct/engine writer holds the shared migration lock, so
+/// `run_guarded_migrations` refuses (`OwnerBusy`) before an epoch can advance
+/// under a live writer — which is precisely the quiescence invariant.
+async fn assert_unknown_applied_migration_refused(db: &Path) {
+    let raw = SqlitePool::connect(&format!("sqlite://{}?mode=rwc", db.display()))
+        .await
+        .expect("raw connect");
+    sqlx::query(
+        "INSERT INTO _sqlx_migrations \
+         (version, description, success, checksum, execution_time) \
+         VALUES (?, 'future holder cutover', TRUE, x'00', 0)",
+    )
+    .bind(nexus_local_db::HOLDER_MIGRATION_VERSION + 1)
+    .execute(&raw)
+    .await
+    .expect("simulate a workspace migrated by a newer binary");
+    raw.close().await;
+
+    let err = run_guarded_migrations(db)
+        .await
+        .expect_err("an unknown applied migration must be refused");
+    assert!(
+        err.to_string().contains("previously applied"),
+        "expected strict admission to name the unknown applied version: {err}"
+    );
 }
 
 /// v1.189 P1 fix round 1 (proof-matrix DB-1): the guarded-migration fast path.

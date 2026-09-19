@@ -353,9 +353,10 @@ impl CoreService {
     /// # Errors
     /// Returns [`CoreError::AuthRequired`] when the principal fails
     /// verification, [`CoreError::Forbidden`] under read-only access,
-    /// [`CoreError::WorldKbValidation`] for invalid patches, and
-    /// [`CoreError::WorldKbConflict`] carrying the committed revision when
-    /// the expected version is stale.
+    /// [`CoreError::WorldKbValidation`] for invalid patches,
+    /// [`CoreError::ActorConflict`] `invalid_world_sheet` when a linked
+    /// WorldSheet would lose its eligibility, and [`CoreError::WorldKbConflict`]
+    /// carrying the committed revision when the expected version is stale.
     pub async fn patch_world_kb_entity(
         &self,
         principal: &Principal,
@@ -368,7 +369,64 @@ impl CoreService {
                 resource: "world_kb_patch: read-only core access".to_string(),
             });
         }
-        patch::patch_entity(&self.inner.pool, principal.creator_id(), &world_id, request).await
+        // v1.191 P1 T7 (durable §4.3): a World governance edit takes the World
+        // **exclusive** knowledge lease before the authoring transaction opens
+        // `BEGIN IMMEDIATE`, and a `character-private` audience additionally
+        // takes the named Character's exclusive lease in the durable
+        // multi-scope order (World ids first, then Character ids). The
+        // audience permission is then re-resolved inside that transaction, so
+        // an archive/unbind racing this call cannot land a row whose holder
+        // was no longer admitted. Both leases are released when this returns.
+        let mut _governance_leases: Vec<crate::actor_fence::KnowledgeGovernanceLease> = Vec::new();
+        if let Some(audience) = request.patch.audience.as_ref() {
+            _governance_leases.push(
+                self.acquire_knowledge_governance(
+                    principal,
+                    crate::actor_fence::ActorFenceKind::World,
+                    world_id.clone(),
+                )
+                .await?,
+            );
+            if let nexus_contracts::world_kb_patch_entity_request::NexusWorldKbEntityPatchAudience::CharacterPrivate(
+                character_id,
+            ) = audience
+            {
+                _governance_leases.push(
+                    self.acquire_knowledge_governance(
+                        principal,
+                        crate::actor_fence::ActorFenceKind::Character,
+                        character_id.to_string(),
+                    )
+                    .await?,
+                );
+            }
+        }
+        // Retained route texture (daemon world-KB family): a foreign World is
+        // refused by the typed ownership guard as 403 before any other
+        // admission runs, so adding the read selection below cannot turn that
+        // answer into an existence-revealing 404.
+        crate::world_kb::guards::require_world_owner(
+            &self.inner.pool,
+            &world_id,
+            principal.creator_id(),
+        )
+        .await?;
+        // Durable §5.1: World-KB authoring is Creator **management** authoring
+        // on owned containers, so it reads and writes under the management
+        // selection (owned World/Character/binding containers plus the
+        // known-governance holder set) — server-chosen from stored state, never
+        // from the request.
+        let read_scope = self
+            .creator_management_read_scope(principal, &world_id)
+            .await?;
+        patch::patch_entity(
+            &self.inner.pool,
+            principal.creator_id(),
+            &world_id,
+            &read_scope,
+            request,
+        )
+        .await
     }
 
     /// List pending World KB candidates with keyset pagination.

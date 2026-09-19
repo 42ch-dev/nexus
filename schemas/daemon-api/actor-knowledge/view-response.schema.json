@@ -3,7 +3,7 @@
   "$id": "https://nexus42.invalid/schemas/daemon-api/actor-knowledge/view-response.schema.json",
   "schema_version": 1,
   "title": "Nexus ActorKnowledgeViewResponse",
-  "description": "Response for POST /v1/daemon/actor-knowledge/view. All-or-error: never a partial page.",
+  "description": "Response for POST /v1/daemon/actor-knowledge/view. All-or-error: never a partial page. Every item is already selected under the server-chosen read policy and carries the native holder_entry_id/disclosure projection.",
   "type": "object",
   "required": ["items", "pagination"],
   "additionalProperties": false,

@@ -265,7 +265,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world_shuffled(&pool).await;
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = NexusAdapter::new_host(pool);
         // Request [evt_3, evt_1, evt_5] explicitly; remaining (evt_2 seq1,
         // evt_4 seq2) form the stable tail in sequence_no order.
         let ordered = match adapter
@@ -333,7 +333,7 @@ mod tests {
         seed::event(&pool, "evt_1", "wld_nomut", "fbk_root", "story_advance", 1).await;
         seed::event(&pool, "evt_2", "wld_nomut", "fbk_root", "story_advance", 2).await;
 
-        let adapter = NexusAdapter::new(pool.clone());
+        let adapter = NexusAdapter::new_host(pool.clone());
         let scope = ordered_scope("wld_nomut", Some("fbk_root"));
 
         // Baseline: the same rows via the un-ordered spoke read.
@@ -379,7 +379,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world_shuffled(&pool).await;
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = NexusAdapter::new_host(pool);
         let result = adapter
             .list_timeline_events_ordered(
                 &ordered_scope("wld_ord", Some("fbk_root")),
@@ -410,7 +410,7 @@ mod tests {
         .await;
         seed::event(&pool, "evt_1", "wld_dup", "fbk_root", "story_advance", 1).await;
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = NexusAdapter::new_host(pool);
         let result = adapter
             .list_timeline_events_ordered(
                 &ordered_scope("wld_dup", Some("fbk_root")),
@@ -440,7 +440,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world_shuffled(&pool).await;
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = NexusAdapter::new_host(pool);
         let ordered = match adapter
             .list_timeline_events_ordered(&ordered_scope("wld_ord", Some("fbk_root")), &[])
             .await
@@ -497,7 +497,7 @@ mod tests {
         seed::event(&pool, "evt_c", "wld_nb", "fbk_root", "story_advance", 4).await;
         seed::event(&pool, "evt_d", "wld_nb", "fbk_other", "story_advance", 3).await;
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = NexusAdapter::new_host(pool);
         // Scope carries world_id only — no `extensions.nexus.branch_id`.
         let ordered = match adapter
             .list_timeline_events_ordered(&ordered_scope("wld_nb", None), &[])
@@ -568,7 +568,7 @@ mod tests {
             .await
             .unwrap();
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = NexusAdapter::new_host(pool);
         match adapter
             .list_timeline_events_ordered(
                 &ordered_scope("wld_ord", Some("fbk_root")),

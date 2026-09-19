@@ -1,8 +1,9 @@
 //! v1.185 P2 — stored-owner summary CAS and referent-guarded delete.
 
-use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
+use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryRecord, KnowledgeGovernance};
+use crate::kb_store::AuthoredAudience;
 use nexus_knowledge::world_kb::validation::validate_canonical_name;
-use sqlx::SqlitePool;
+use sqlx::{AssertSqlSafe, SqlitePool};
 
 use crate::character::{check_expected_revision, require_active_owned_character_tx, FieldPatch};
 use crate::error::ActorContractConflict;
@@ -186,19 +187,41 @@ fn apply_summary_patch_to_body_json(
     Ok(Some(serde_json::Value::Object(obj).to_string()))
 }
 
+/// Whether the patch is a **complete** no-op (durable §3): every supplied
+/// content field materialises to the stored value **and** the resolved
+/// governance pair equals the stored pair.
+///
+/// The two halves are independent: an explicitly re-sent summary that equals
+/// the stored one may not mask an authored audience change (short-circuiting
+/// on the content half alone would silently drop the governance mutation), and
+/// an unchanged audience may not mask a content edit.
 fn actor_knowledge_patch_is_no_op(
     row: &KeyBlockRow,
     patch: ActorKnowledgePatch<'_>,
+    governance: Option<&KnowledgeGovernance>,
 ) -> Result<bool, LocalDbError> {
-    if let Some(name) = patch.canonical_name {
-        if name != row.canonical_name {
+    let name_unchanged = patch
+        .canonical_name
+        .is_none_or(|name| name == row.canonical_name);
+    let summary_unchanged = if patch.summary == FieldPatch::Keep {
+        true
+    } else {
+        let after = apply_summary_patch_to_body_json(row.body_json.as_deref(), patch.summary)?;
+        canonical_body_json(row.body_json.as_deref())?
+            == canonical_body_json(after.as_deref())?
+    };
+    if !name_unchanged || !summary_unchanged {
+        return Ok(false);
+    }
+    // An authored governance pair that already equals the stored pair is a
+    // no-op too — an explicit `shared` on a shared row (or the same private
+    // audience re-sent) may not bump either revision.
+    if let Some(governance) = governance {
+        if row.holder_entry_id != governance.holder_entry_id
+            || row.disclosure != governance.disclosure
+        {
             return Ok(false);
         }
-    }
-    if patch.summary != FieldPatch::Keep {
-        let after = apply_summary_patch_to_body_json(row.body_json.as_deref(), patch.summary)?;
-        return Ok(canonical_body_json(row.body_json.as_deref())?
-            == canonical_body_json(after.as_deref())?);
     }
     Ok(true)
 }
@@ -236,16 +259,20 @@ async fn load_key_block_row_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     entry_id: &str,
 ) -> Result<Option<KeyBlockRow>, LocalDbError> {
-    let row = sqlx::query_as!(
-        KeyBlockRow,
-        r#"SELECT key_block_id as "key_block_id!", owner_kind as "owner_kind!", world_id, character_id,
-                actor_world_binding_id, creator_only as "creator_only!", block_type as "block_type!",
-                canonical_name as "canonical_name!", status as "status!", revision, body_json,
-                source_anchor_json, created_from_command_id, created_at as "created_at!", updated_at,
-                source_work_id, source_chapter, source_provenance_kind, extensions_nexus_json, modules_json
-         FROM kb_key_blocks WHERE key_block_id = ?"#,
-        entry_id
+    // SAFETY: runtime query (not `query_as!`) because the v1.191 P1 T3
+    // governance columns are unknown to the committed `.sqlx` offline cache —
+    // the same convention `kb_store.rs` uses for `kb_key_blocks` column
+    // changes. Static SQL; the row shape is the shared `KeyBlockRow`.
+    let row = sqlx::query_as::<_, KeyBlockRow>(
+        r"SELECT key_block_id, owner_kind, world_id, character_id,
+                actor_world_binding_id, holder_entry_id, disclosure, block_type,
+                canonical_name, status, revision, body_json, source_anchor_json,
+                created_from_command_id, created_at, updated_at, source_work_id,
+                source_chapter, source_provenance_kind, extensions_nexus_json,
+                modules_json
+         FROM kb_key_blocks WHERE key_block_id = ?",
     )
+    .bind(entry_id)
     .fetch_optional(&mut **tx)
     .await?;
     Ok(row)
@@ -306,49 +333,85 @@ async fn row_in_character_retained_read_scope(
     }
 }
 
-async fn character_owned_for_read(
-    pool: &SqlitePool,
-    owner_creator_id: &str,
-    character_id: &str,
-) -> Result<bool, LocalDbError> {
-    let owned = sqlx::query_scalar!(
-        r#"SELECT owner_creator_id as "owner_creator_id!" FROM characters WHERE character_id = ?"#,
-        character_id
-    )
-    .fetch_optional(pool)
-    .await?;
-    Ok(matches!(owned.as_deref(), Some(stored) if stored == owner_creator_id))
-}
-
 /// Stored-owner scoped knowledge detail read (retained archive reads allowed).
+///
+/// v1.191 P1 T6 (durable §4.2): the authorized-container selection **and** the
+/// visibility rule are one eligibility `WHERE`, so the database returns a row
+/// only when it is inside the admitted Character's container **and** disclosure
+/// admits it for the resolved holder. Nothing is fetched and then filtered:
+///
+/// - container: a Character-owned row of this Character, or a binding-owned row
+///   whose binding belongs to this Character inside a World this Creator owns
+///   (the same retained provenance rule the write paths enforce, expressed in
+///   SQL);
+/// - holder: the registry holder of the requested Character, resolved through
+///   [`crate::character::require_character_holder`] — a missing or corrupt
+///   registry row fails closed with `holder_state_invalid` instead of admitting
+///   a predicate over a silently derived id;
+/// - disclosure: `owner-private` is admitted only for that exact holder, so a
+///   foreign-holder private row (or unknown vocabulary, which storage refuses)
+///   yields no row.
+///
+/// An entry outside the container, hidden from the holder, or simply absent is
+/// therefore indistinguishable from an absent id at the database boundary.
 ///
 /// # Errors
 ///
-/// Returns `LocalDbError` on database failure.
+/// [`LocalDbError::HolderStateInvalid`] when the requested Character's registry
+/// holder is missing/corrupt, [`LocalDbError::ActorNotFound`] when the requested
+/// Character is missing or belongs to another Creator, and `LocalDbError` on
+/// database failure.
 pub async fn get_actor_knowledge_entry(
     pool: &SqlitePool,
     owner_creator_id: &str,
     character_id: &str,
     entry_id: &str,
 ) -> Result<Option<KnowledgeEntryRecord>, LocalDbError> {
-    if !character_owned_for_read(pool, owner_creator_id, character_id).await? {
-        return Ok(None);
+    let holder_entry_id =
+        crate::character::require_character_holder(pool, owner_creator_id, character_id).await?;
+    let (visibility, holders) =
+        crate::kb_store::owner_private_visibility_conjunct(std::slice::from_ref(&holder_entry_id));
+    // SAFETY: runtime query (not `query_as!`) because the v1.191 P1 T3
+    // governance columns are unknown to the committed `.sqlx` offline cache —
+    // the same convention `kb_store.rs` uses for `kb_key_blocks` column
+    // changes. Static SQL with bound parameters only (no interpolated input);
+    // the row shape is the shared `KeyBlockRow`.
+    let sql = format!(
+        r"SELECT key_block_id, owner_kind, world_id, character_id,
+                actor_world_binding_id, holder_entry_id, disclosure, block_type,
+                canonical_name, status, revision, body_json, source_anchor_json,
+                created_from_command_id, created_at, updated_at, source_work_id,
+                source_chapter, source_provenance_kind, extensions_nexus_json,
+                modules_json
+         FROM kb_key_blocks
+         WHERE key_block_id = ?
+           AND (
+             (owner_kind = 'character' AND character_id = ?)
+             OR (
+               owner_kind = 'actor_world_binding'
+               AND actor_world_binding_id IN (
+                 SELECT b.binding_id
+                 FROM actor_world_bindings b
+                 INNER JOIN narrative_worlds w ON w.world_id = b.world_id
+                 WHERE b.character_id = ? AND w.owner_creator_id = ?
+               )
+             )
+           ){visibility}"
+    );
+    let mut query = sqlx::query_as::<_, KeyBlockRow>(AssertSqlSafe(sql))
+        .bind(entry_id)
+        .bind(character_id)
+        .bind(character_id)
+        .bind(owner_creator_id);
+    for holder in holders {
+        query = query.bind(holder);
     }
-    let row = sqlx::query_as!(
-        KeyBlockRow,
-        r#"SELECT key_block_id as "key_block_id!", owner_kind as "owner_kind!", world_id, character_id,
-                actor_world_binding_id, creator_only as "creator_only!", block_type as "block_type!",
-                canonical_name as "canonical_name!", status as "status!", revision, body_json,
-                source_anchor_json, created_from_command_id, created_at as "created_at!", updated_at,
-                source_work_id, source_chapter, source_provenance_kind, extensions_nexus_json, modules_json
-         FROM kb_key_blocks WHERE key_block_id = ?"#,
-        entry_id
-    )
-    .fetch_optional(pool)
-    .await?;
+    let row = query.fetch_optional(pool).await?;
     let Some(row) = row else {
         return Ok(None);
     };
+    // Defense in depth: re-check the same rule in Rust so a future SQL change
+    // cannot silently widen this read.
     if !row_in_character_retained_read_scope(pool, owner_creator_id, &row, character_id).await? {
         return Ok(None);
     }
@@ -565,6 +628,9 @@ async fn assert_no_protected_referents_tx(
     Ok(())
 }
 
+/// Ordinary Character/binding knowledge content patch: governance is not an
+/// input, so the stored `holder_entry_id`/`disclosure` pair is preserved.
+///
 /// # Errors
 ///
 /// Returns `LocalDbError` on ownership, CAS, validation, or database failure.
@@ -576,6 +642,72 @@ pub async fn update_actor_knowledge_entry(
     expected_revision: i64,
     patch: ActorKnowledgePatch<'_>,
 ) -> Result<KnowledgeEntryRecord, LocalDbError> {
+    apply_actor_knowledge_patch(
+        pool,
+        owner_creator_id,
+        character_id,
+        entry_id,
+        expected_revision,
+        patch,
+        AuthoredAudience::Keep,
+    )
+    .await
+}
+
+/// Admitted Character/binding audience authoring (durable §3): the same
+/// content CAS as [`update_actor_knowledge_entry`] plus the explicit native
+/// governance mutation, in **one** transaction.
+///
+/// `audience` is the admitted author intent `nexus_core` mapped from the
+/// closed wire `audience`: [`AuthoredAudience::Keep`] when the patch omitted
+/// the member (the stored pair is preserved), [`AuthoredAudience::Shared`] to
+/// clear both columns, or a private intent whose **permitted identity is
+/// resolved and re-checked inside this transaction** (durable §3 — the caller
+/// never supplies a holder id).
+///
+/// In-transaction order (durable §3): stored lifecycle/owner + row-scope
+/// recheck → CAS on `expected_revision` → resolve the authored audience from
+/// stored state → no-op decision over content **and** governance → one
+/// material write that carries content **and** governance → bump the KE
+/// revision and the owning Character's `knowledge_revision` once. A no-op
+/// (identical content and identical governance) writes nothing and bumps
+/// neither.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` on ownership, CAS, validation, the audience refusals
+/// of [`crate::kb_store::resolve_authored_audience_tx`], or database failure.
+/// Every refusal is zero-mutation.
+pub async fn author_actor_knowledge_entry(
+    pool: &SqlitePool,
+    owner_creator_id: &str,
+    character_id: &str,
+    entry_id: &str,
+    expected_revision: i64,
+    patch: ActorKnowledgePatch<'_>,
+    audience: AuthoredAudience<'_>,
+) -> Result<KnowledgeEntryRecord, LocalDbError> {
+    apply_actor_knowledge_patch(
+        pool,
+        owner_creator_id,
+        character_id,
+        entry_id,
+        expected_revision,
+        patch,
+        audience,
+    )
+    .await
+}
+
+async fn apply_actor_knowledge_patch(
+    pool: &SqlitePool,
+    owner_creator_id: &str,
+    character_id: &str,
+    entry_id: &str,
+    expected_revision: i64,
+    patch: ActorKnowledgePatch<'_>,
+    audience: AuthoredAudience<'_>,
+) -> Result<KnowledgeEntryRecord, LocalDbError> {
     let mut tx = crate::begin_immediate(pool).await?;
     let result = async {
         let row = prepare_actor_knowledge_write_tx(
@@ -586,8 +718,26 @@ pub async fn update_actor_knowledge_entry(
             expected_revision,
         )
         .await?;
-        if actor_knowledge_patch_is_no_op(&row, patch)? {
+        // The audience is resolved against stored state **in this
+        // transaction** (durable §3): ownership/activity, the World-row active
+        // binding and the fail-closed registry read all see the same snapshot
+        // as the write below.
+        let resolved = crate::kb_store::resolve_authored_audience_tx(
+            &mut tx,
+            audience,
+            crate::kb_store::AudienceContainer {
+                owner_creator_id,
+                owning_character_id: Some(character_id),
+                world_id: row.world_id.as_deref(),
+            },
+        )
+        .await?;
+        let governance = resolved.as_ref();
+        if actor_knowledge_patch_is_no_op(&row, patch, governance)? {
             return row.to_record().map_err(map_kb_store_to_local_db);
+        }
+        if let Some(governance) = governance {
+            crate::kb_store::validate_authored_governance(governance)?;
         }
 
         let canonical_name = if let Some(name) = patch.canonical_name {
@@ -605,39 +755,57 @@ pub async fn update_actor_knowledge_entry(
 
         let now = chrono::Utc::now().to_rfc3339();
         let new_revision = expected_revision + 1;
+        // SAFETY: the governance columns are unknown to the committed `.sqlx`
+        // offline cache, so the statement is runtime-checked with a fixed
+        // column list (never interpolated input) — the same convention
+        // `kb_store.rs` uses for `kb_key_blocks` column changes.
+        let mut sets = "canonical_name = ?, body_json = ?, revision = ?, updated_at = ?".to_string();
+        if governance.is_some() {
+            sets.push_str(", holder_entry_id = ?, disclosure = ?");
+        }
+        let sql = format!(
+            "UPDATE kb_key_blocks SET {sets}
+               WHERE key_block_id = ?
+                 AND COALESCE(revision, 0) = ?
+                 AND status NOT IN ('deleted', 'merged', 'deprecated')
+                 AND (
+                   (owner_kind = 'character' AND character_id = ?)
+                   OR (
+                     owner_kind = 'actor_world_binding'
+                     AND actor_world_binding_id IN (
+                       SELECT binding_id FROM actor_world_bindings
+                       WHERE character_id = ? AND status = 'active'
+                     )
+                   )
+                 )"
+        );
+        let mut query = sqlx::query(sqlx::AssertSqlSafe(sql))
+            .bind(&canonical_name)
+            .bind(&body_json)
+            .bind(new_revision)
+            .bind(&now);
+        if let Some(governance) = governance {
+            query = query
+                .bind(governance.holder_entry_id.as_deref())
+                .bind(governance.disclosure.as_deref());
+        }
         let updated = map_kb_actor_constraint(
-            sqlx::query!(
-                r#"UPDATE kb_key_blocks
-                   SET canonical_name = ?, body_json = ?, revision = ?, updated_at = ?
-                   WHERE key_block_id = ?
-                     AND COALESCE(revision, 0) = ?
-                     AND status NOT IN ('deleted', 'merged', 'deprecated')
-                     AND (
-                       (owner_kind = 'character' AND character_id = ?)
-                       OR (
-                         owner_kind = 'actor_world_binding'
-                         AND actor_world_binding_id IN (
-                           SELECT binding_id FROM actor_world_bindings
-                           WHERE character_id = ? AND status = 'active'
-                         )
-                       )
-                     )"#,
-                canonical_name,
-                body_json,
-                new_revision,
-                now,
-                entry_id,
-                expected_revision,
-                character_id,
-                character_id
-            )
-            .execute(&mut *tx)
-            .await,
+            query
+                .bind(entry_id)
+                .bind(expected_revision)
+                .bind(character_id)
+                .bind(character_id)
+                .execute(&mut *tx)
+                .await,
         )?
         .rows_affected();
         if updated == 0 {
             return Err(knowledge_revision_conflict());
         }
+        // v1.191 P1 T7 (durable §4.3): a binding-owned authoring write bumps
+        // its owning Character, never a World — the binding has no revision of
+        // its own — and a Character-owned write bumps that Character.
+        crate::kb_store::bump_character_knowledge_revision_tx(&mut tx, character_id).await?;
         load_key_block_row_tx(&mut tx, entry_id)
             .await?
             .ok_or_else(|| LocalDbError::ActorNotFound {

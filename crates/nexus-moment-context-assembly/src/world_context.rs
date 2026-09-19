@@ -7,10 +7,13 @@
 //!
 //! ```text
 //! novel-writing outline/draft
+//!   → admitted ActorView snapshot (nexus-core :: KnowledgeReadScope)
 //!   → build_chapter_kb_block (this module)
-//!   → KbStore::query (nexus-kb)
 //!   → compact YAML block in preset template vars
 //! ```
+//!
+//! The builder reads only the admitted snapshot — it issues no KB store query
+//! of its own (v1.191 P1 T11, durable §4.2).
 //!
 //! Legacy V1.39 worldless Works (`world_id == None`) receive no block.
 
@@ -19,15 +22,19 @@
 
 use nexus_contracts::BlockType;
 use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
-use nexus_knowledge::world_kb::{KbQuery, KbStore};
 
-/// Bounded Character KnowledgeView already admitted by the caller.
+/// The admitted ActorView snapshot already selected by the caller.
 ///
-/// When this input is present, MCA must use these entries instead of an
-/// unrestricted World `KbStore::query` (`list_by_world`).
+/// This is the **only** knowledge input the prompt builders accept
+/// (v1.191 P1 T11, durable §4.2): the rows were chosen by an admitted
+/// `KnowledgeReadScope` (the actor's exact holder plus its authorized
+/// containers, Character-global shared rows included), so MCA never performs
+/// a World-wide read of its own and has no way to fall back to one. An empty
+/// snapshot means "this actor sees nothing" — it yields empty sections,
+/// never a wider query.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CharacterViewInput {
-    /// Admitted P1 view rows for this Character + binding + World.
+    /// Complete admitted ActorView rows for this actor + World (+ binding).
     pub entries: Vec<KnowledgeEntryRecord>,
 }
 
@@ -177,53 +184,48 @@ pub struct ChapterKbBlockParams {
     pub max_tokens: Option<usize>,
 }
 
-/// Shared KB query builder for World-scoped queries.
+/// Shared KB filter helpers for an admitted ActorView snapshot.
 ///
 /// WAIVER: pre-1.0 local-first; see V1.41 P-last residual R-V140P2-S1
-/// — per-prompt KB queries use linear scan via InMemoryKbStore; acceptable
-/// for single-user local daemon with bounded KB size; index when needed.
+/// — per-prompt KB filters run as a linear scan over the admitted snapshot;
+/// acceptable for single-user local daemon with bounded KB size; index when
+/// needed.
 ///
-/// Encapsulates the filter/taxonomy logic used by both the chapter KB block
-/// and the generic `fetch_world_kb_entries` (in `moment.rs`) + `format_entries`
-/// (in `slots.rs`).
-pub struct WorldKbQueryBuilder<'a> {
-    world_id: &'a str,
-}
+/// v1.191 P1 T11: the builder no longer owns a store. It applies the same
+/// filter/taxonomy logic the store queries used to (`block_type`,
+/// `canonical_name`, `novel_category`) in memory over admitted rows, so both
+/// the chapter KB block and the Moment assembly consume one already-filtered
+/// snapshot instead of issuing a World query per prompt.
+pub struct WorldKbQueryBuilder;
 
-impl<'a> WorldKbQueryBuilder<'a> {
-    /// Create a new builder scoped to the given world.
+impl WorldKbQueryBuilder {
+    /// Rows of one `block_type` in `(created_at, entry_id)` snapshot order.
     #[must_use]
-    pub const fn new(world_id: &'a str) -> Self {
-        Self { world_id }
+    pub fn of_block_type(
+        entries: &[KnowledgeEntryRecord],
+        block_type: BlockType,
+    ) -> Vec<&KnowledgeEntryRecord> {
+        entries
+            .iter()
+            .filter(|kb| kb.block_type == block_type)
+            .collect()
     }
 
-    /// Build a `KbQuery` filtered by `block_type`.
-    #[must_use]
-    pub fn query_for_block_type(&self, block_type: BlockType) -> KbQuery {
-        KbQuery::new(self.world_id).with_block_type(block_type)
-    }
-
-    /// Build a `KbQuery` filtered by canonical_name.
-    #[must_use]
-    pub fn query_for_canonical_name(&self, name: &str) -> KbQuery {
-        KbQuery::new(self.world_id).with_canonical_name(name)
-    }
-
-    /// Build a `KbQuery` for all active items in the world.
-    #[must_use]
-    pub fn query_all(&self) -> KbQuery {
-        KbQuery::new(self.world_id)
-    }
-
-    /// Resolve World-KB rows: admitted Character view wins over `query_all`.
+    /// First snapshot row matching `canonical_name` + `block_type`.
     ///
-    /// Character mode never constructs an unrestricted World query.
+    /// Mirror of the retired store path (`KbQuery::with_canonical_name` +
+    /// `block_type`, first item): `apply_kb_query_filters` matches
+    /// `canonical_name` by exact equality, so this is an exact-match find
+    /// over admitted rows in snapshot order.
     #[must_use]
-    #[allow(clippy::single_option_map)] // named seam keeps the call-site contract readable
-    pub fn character_view_or_unrestricted(
-        view: Option<&CharacterViewInput>,
-    ) -> Option<Vec<KnowledgeEntryRecord>> {
-        view.map(|v| v.admitted_entries().to_vec())
+    pub fn by_canonical_name<'a>(
+        entries: &'a [KnowledgeEntryRecord],
+        canonical_name: &str,
+        block_type: BlockType,
+    ) -> Option<&'a KnowledgeEntryRecord> {
+        entries
+            .iter()
+            .find(|kb| kb.canonical_name == canonical_name && kb.block_type == block_type)
     }
 }
 
@@ -242,10 +244,8 @@ fn extract_novel_category(
         .map(std::string::ToString::to_string)
 }
 
-/// Convert a KnowledgeEntryRecord to a WorldContextItem.
-fn kb_to_item(
-    kb: nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord,
-) -> WorldContextItem {
+/// Convert a `KnowledgeEntryRecord` to a `WorldContextItem`.
+fn kb_to_item(kb: &KnowledgeEntryRecord) -> WorldContextItem {
     let descriptor = kb
         .body
         .as_ref()
@@ -254,66 +254,67 @@ fn kb_to_item(
         .to_string();
     WorldContextItem {
         id: kb.entry_id.clone(),
-        name: kb.canonical_name,
+        name: kb.canonical_name.clone(),
         descriptor,
     }
 }
 
-/// Build the compact World context block for a chapter prompt.
+/// Build the compact World context block for a chapter prompt from an
+/// admitted ActorView snapshot.
 ///
 /// This is the primary entry point for the chapter KB block. It:
-/// 1. Queries characters (BlockType::Character) and locations (BlockType::Scene).
+/// 1. Selects characters (BlockType::Character) and locations (BlockType::Scene)
+///    from the admitted snapshot.
 /// 2. If `world_refs` is non-empty, resolves items by canonical_name; otherwise
-///    falls back to all characters/locations in the world. If `chapter_text` is
-///    provided, uses heuristic text matching to narrow the fallback set.
-/// 3. Queries active rules (novel_category: foundation + rules).
+///    takes every admitted character/location. If `chapter_text` is provided,
+///    uses heuristic text matching to narrow the fallback set.
+/// 3. Selects active rules (novel_category: foundation + rules).
 /// 4. Applies token budget truncation.
+///
+/// # ActorView-only input (HARD, v1.191 P1 T11 — durable §4.2)
+///
+/// `view` is the caller's admitted snapshot (the exact admitted holder plus
+/// its authorized containers, Character-global shared rows included). This
+/// builder takes **no store**: a World-wide fallback query is not expressible
+/// here, so a missing or incomplete snapshot degrades to the rows it actually
+/// holds — an empty snapshot yields an empty block, never a wider read.
 ///
 /// # Ownership / Isolation (QC2-W02)
 ///
-/// This function is **intentionally world-scoped only**: it takes `world_id`
-/// but does NOT accept `creator_id` or `workspace_slug`. The caller is
-/// responsible for verifying that the authenticated creator owns (or has
-/// access to) the Work that references this `world_id` before calling.
-/// The underlying `KbStore` impl enforces world-scoped isolation.
+/// The row-level isolation now rides the snapshot itself: the caller is
+/// responsible for resolving the admitted `KnowledgeReadScope` (owner +
+/// holder) that produced `view.entries` for the Work's `world_id` before
+/// calling. The block is still world-scoped only — it takes no `creator_id`
+/// and performs no store read of its own.
 ///
 /// # Missing World / 404 Contract (QC2-W03)
 ///
-/// This function returns `Ok(Some(block))` even when the world has zero KB
-/// items — the block will have empty sections. It does NOT distinguish
-/// "world exists but has no items" from "world_id is unknown to the system."
-/// The 404/remediation contract lives one layer up (in the caller), which
-/// should validate `world_id` existence against the narrative store before
-/// calling this function.
-///
-/// # Errors
-///
-/// Returns `KbStoreError` if the underlying store query fails.
-///
-/// # Type parameters
-///
-/// - `K`: A [`KbStore`] implementation for World-scoped KB queries.
-// Traits use async fn in trait without Send bounds — same pattern as nexus-narrative.
-#[allow(clippy::future_not_send)]
-pub async fn build_chapter_kb_block<K: KbStore>(
-    store: &K,
+/// The returned block carries empty sections when the snapshot holds no
+/// matching items. It does NOT distinguish "world exists but has no admitted
+/// items" from "world_id is unknown to the system." The 404/remediation
+/// contract lives one layer up (in the caller), which should validate
+/// `world_id` existence against the narrative store before calling this
+/// function.
+#[must_use]
+pub fn build_chapter_kb_block(
+    view: &CharacterViewInput,
     params: &ChapterKbBlockParams,
-) -> Result<Option<WorldContextBlock>, nexus_knowledge::world_kb::KbStoreError> {
-    let builder = WorldKbQueryBuilder::new(&params.world_id);
+) -> WorldContextBlock {
+    let admitted = view.admitted_entries();
     let max_tokens = params
         .max_tokens
         .unwrap_or(DEFAULT_WORLD_CONTEXT_TOKEN_BUDGET);
     let max_chars = max_tokens.saturating_mul(CHARS_PER_TOKEN);
 
     // Resolve characters
-    let all_characters = if params.world_refs.is_empty() {
-        // Fallback: all characters in the world
-        let query = builder.query_for_block_type(BlockType::Character);
-        let result = store.query(&query).await?;
-        result.items.into_iter().map(kb_to_item).collect()
+    let all_characters: Vec<WorldContextItem> = if params.world_refs.is_empty() {
+        WorldKbQueryBuilder::of_block_type(admitted, BlockType::Character)
+            .into_iter()
+            .map(kb_to_item)
+            .collect()
     } else {
-        // Resolve by world_refs: query each ref by canonical_name, keep Character type
-        resolve_items_by_refs(store, &builder, &params.world_refs, BlockType::Character).await?
+        // Resolve by world_refs: match each ref by canonical_name, keep Character type
+        resolve_items_by_refs(admitted, &params.world_refs, BlockType::Character)
     };
 
     // QC1-W002 fix: heuristic fallback when world_refs is empty but chapter_text is provided.
@@ -337,12 +338,13 @@ pub async fn build_chapter_kb_block<K: KbStore>(
     characters.sort_by(|a, b| a.name.cmp(&b.name));
 
     // Resolve locations
-    let all_locations = if params.world_refs.is_empty() {
-        let query = builder.query_for_block_type(BlockType::Scene);
-        let result = store.query(&query).await?;
-        result.items.into_iter().map(kb_to_item).collect()
+    let all_locations: Vec<WorldContextItem> = if params.world_refs.is_empty() {
+        WorldKbQueryBuilder::of_block_type(admitted, BlockType::Scene)
+            .into_iter()
+            .map(kb_to_item)
+            .collect()
     } else {
-        resolve_items_by_refs(store, &builder, &params.world_refs, BlockType::Scene).await?
+        resolve_items_by_refs(admitted, &params.world_refs, BlockType::Scene)
     };
 
     // Heuristic fallback for locations.
@@ -364,7 +366,7 @@ pub async fn build_chapter_kb_block<K: KbStore>(
     locations.sort_by(|a, b| a.name.cmp(&b.name));
 
     // Resolve active rules: foundation + rules novel_category items
-    let mut active_rules = resolve_active_rules(store, &builder).await?;
+    let mut active_rules = resolve_active_rules(admitted);
     active_rules.sort_by(|a, b| a.name.cmp(&b.name));
 
     let mut block = WorldContextBlock {
@@ -384,50 +386,35 @@ pub async fn build_chapter_kb_block<K: KbStore>(
         apply_token_budget(&mut block, max_chars);
     }
 
-    Ok(Some(block))
+    block
 }
 
-/// Resolve KB items by canonical_name from world_refs, filtered to a specific block_type.
-#[allow(clippy::future_not_send)]
-async fn resolve_items_by_refs<K: KbStore>(
-    store: &K,
-    builder: &WorldKbQueryBuilder<'_>,
+/// Resolve snapshot items by canonical_name from world_refs, filtered to a
+/// specific block_type.
+fn resolve_items_by_refs(
+    admitted: &[KnowledgeEntryRecord],
     world_refs: &[String],
     block_type: BlockType,
-) -> Result<Vec<WorldContextItem>, nexus_knowledge::world_kb::KbStoreError> {
+) -> Vec<WorldContextItem> {
     let mut items = Vec::new();
     for r#ref in world_refs {
-        let query = builder
-            .query_for_canonical_name(r#ref)
-            .with_block_type(block_type);
-        let result = store.query(&query).await?;
-        if let Some(kb) = result.items.into_iter().next() {
+        if let Some(kb) = WorldKbQueryBuilder::by_canonical_name(admitted, r#ref, block_type) {
             items.push(kb_to_item(kb));
         }
     }
-    Ok(items)
+    items
 }
 
-/// Resolve active rules: items with novel_category "foundation" or "rules".
-///
-/// Queries all items in the world and filters by novel_category.
-#[allow(clippy::future_not_send)]
-async fn resolve_active_rules<K: KbStore>(
-    store: &K,
-    builder: &WorldKbQueryBuilder<'_>,
-) -> Result<Vec<WorldContextItem>, nexus_knowledge::world_kb::KbStoreError> {
-    let query = builder.query_all();
-    let result = store.query(&query).await?;
-    let items: Vec<WorldContextItem> = result
-        .items
-        .into_iter()
+/// Resolve active rules: admitted items with novel_category "foundation" or "rules".
+fn resolve_active_rules(admitted: &[KnowledgeEntryRecord]) -> Vec<WorldContextItem> {
+    admitted
+        .iter()
         .filter(|kb| {
             let cat = extract_novel_category(kb);
             matches!(cat.as_deref(), Some("foundation" | "rules"))
         })
         .map(kb_to_item)
-        .collect();
-    Ok(items)
+        .collect()
 }
 
 /// Apply token budget by truncating items from the end of each section.
@@ -519,19 +506,12 @@ mod tests {
     }
 
     // AC1: World-bound Work + populated World KB → block present with required fields.
-    #[tokio::test]
-    async fn world_bound_populated_kb_produces_block() {
-        let store = nexus_knowledge::world_kb::InMemoryKbStore::new();
-
+    #[test]
+    fn world_bound_populated_kb_produces_block() {
         let char_kb = make_novel_block("wld_1", BlockType::Character, "char_lin_xia", "character");
         let loc_kb = make_novel_block("wld_1", BlockType::Scene, "loc_neon_city", "location");
         let rule_kb = make_novel_block("wld_1", BlockType::Conflict, "rule_magic_cost", "rules");
         let fnd_kb = make_novel_block("wld_1", BlockType::InfoPoint, "fnd_cosmology", "foundation");
-
-        store.insert_knowledge_entry(char_kb.clone()).await.unwrap();
-        store.insert_knowledge_entry(loc_kb.clone()).await.unwrap();
-        store.insert_knowledge_entry(rule_kb.clone()).await.unwrap();
-        store.insert_knowledge_entry(fnd_kb.clone()).await.unwrap();
 
         let params = ChapterKbBlockParams {
             world_id: "wld_1".to_string(),
@@ -542,10 +522,10 @@ mod tests {
             max_tokens: None,
         };
 
-        let block = build_chapter_kb_block(&store, &params)
-            .await
-            .unwrap()
-            .unwrap();
+        let block = build_chapter_kb_block(
+            &CharacterViewInput::from_entries(vec![char_kb, loc_kb, rule_kb, fnd_kb]),
+            &params,
+        );
 
         assert_eq!(block.world_id, "wld_1");
         assert_eq!(block.world_name, "Neon River");
@@ -580,15 +560,10 @@ mod tests {
     }
 
     // AC2: World-bound Work + empty World KB → block present but with empty sections.
-    #[tokio::test]
-    async fn world_bound_empty_kb_produces_empty_block() {
-        let store = nexus_knowledge::world_kb::InMemoryKbStore::new();
-
+    #[test]
+    fn world_bound_empty_kb_produces_empty_block() {
         let params = make_params("wld_empty", &[]);
-        let block = build_chapter_kb_block(&store, &params)
-            .await
-            .unwrap()
-            .unwrap();
+        let block = build_chapter_kb_block(&CharacterViewInput::from_entries(Vec::new()), &params);
 
         assert_eq!(block.world_id, "wld_empty");
         assert!(block.characters_in_chapter.is_empty());
@@ -601,17 +576,11 @@ mod tests {
     }
 
     // AC3: world_refs populated → characters/locations use world_refs.
-    #[tokio::test]
-    async fn world_refs_filter_characters_and_locations() {
-        let store = nexus_knowledge::world_kb::InMemoryKbStore::new();
-
+    #[test]
+    fn world_refs_filter_characters_and_locations() {
         let char1 = make_novel_block("wld_1", BlockType::Character, "char_a", "character");
         let char2 = make_novel_block("wld_1", BlockType::Character, "char_b", "character");
         let loc1 = make_novel_block("wld_1", BlockType::Scene, "loc_x", "location");
-
-        store.insert_knowledge_entry(char1).await.unwrap();
-        store.insert_knowledge_entry(char2).await.unwrap();
-        store.insert_knowledge_entry(loc1).await.unwrap();
 
         // Only reference char_a and loc_x
         let params = ChapterKbBlockParams {
@@ -619,10 +588,10 @@ mod tests {
             ..make_params("wld_1", &[])
         };
 
-        let block = build_chapter_kb_block(&store, &params)
-            .await
-            .unwrap()
-            .unwrap();
+        let block = build_chapter_kb_block(
+            &CharacterViewInput::from_entries(vec![char1, char2, loc1]),
+            &params,
+        );
 
         // Should only contain char_a, not char_b
         assert_eq!(block.characters_in_chapter.len(), 1);
@@ -634,25 +603,18 @@ mod tests {
     }
 
     // AC4: world_refs empty → fall back to all characters/locations.
-    #[tokio::test]
-    async fn world_refs_empty_falls_back_to_all() {
-        let store = nexus_knowledge::world_kb::InMemoryKbStore::new();
-
+    #[test]
+    fn world_refs_empty_falls_back_to_all() {
         let char1 = make_novel_block("wld_1", BlockType::Character, "char_a", "character");
         let char2 = make_novel_block("wld_1", BlockType::Character, "char_b", "character");
         let loc1 = make_novel_block("wld_1", BlockType::Scene, "loc_x", "location");
         let evt = make_novel_block("wld_1", BlockType::Event, "evt_bg", "background");
 
-        store.insert_knowledge_entry(char1).await.unwrap();
-        store.insert_knowledge_entry(char2).await.unwrap();
-        store.insert_knowledge_entry(loc1).await.unwrap();
-        store.insert_knowledge_entry(evt).await.unwrap();
-
         let params = make_params("wld_1", &[]);
-        let block = build_chapter_kb_block(&store, &params)
-            .await
-            .unwrap()
-            .unwrap();
+        let block = build_chapter_kb_block(
+            &CharacterViewInput::from_entries(vec![char1, char2, loc1, evt]),
+            &params,
+        );
 
         // All characters
         assert_eq!(block.characters_in_chapter.len(), 2);
@@ -663,19 +625,12 @@ mod tests {
     }
 
     // QC1-W002 fix: chapter_text heuristic narrows fallback when world_refs is empty.
-    #[tokio::test]
-    async fn chapter_text_heuristic_narrows_fallback() {
-        let store = nexus_knowledge::world_kb::InMemoryKbStore::new();
-
+    #[test]
+    fn chapter_text_heuristic_narrows_fallback() {
         let char1 = make_novel_block("wld_1", BlockType::Character, "alice", "character");
         let char2 = make_novel_block("wld_1", BlockType::Character, "bob", "character");
         let loc1 = make_novel_block("wld_1", BlockType::Scene, "tavern", "location");
         let loc2 = make_novel_block("wld_1", BlockType::Scene, "forest", "location");
-
-        store.insert_knowledge_entry(char1).await.unwrap();
-        store.insert_knowledge_entry(char2).await.unwrap();
-        store.insert_knowledge_entry(loc1).await.unwrap();
-        store.insert_knowledge_entry(loc2).await.unwrap();
 
         // chapter_text mentions Alice and the tavern but not Bob or the forest
         let params = ChapterKbBlockParams {
@@ -687,10 +642,10 @@ mod tests {
             max_tokens: None,
         };
 
-        let block = build_chapter_kb_block(&store, &params)
-            .await
-            .unwrap()
-            .unwrap();
+        let block = build_chapter_kb_block(
+            &CharacterViewInput::from_entries(vec![char1, char2, loc1, loc2]),
+            &params,
+        );
 
         // Heuristic should narrow to only matching names
         let char_names: Vec<&str> = block
@@ -723,24 +678,20 @@ mod tests {
     }
 
     // Without chapter_text, fallback returns all items (no narrowing).
-    #[tokio::test]
-    async fn no_chapter_text_returns_all_in_fallback() {
-        let store = nexus_knowledge::world_kb::InMemoryKbStore::new();
-
+    #[test]
+    fn no_chapter_text_returns_all_in_fallback() {
         let char1 = make_novel_block("wld_1", BlockType::Character, "alice", "character");
         let char2 = make_novel_block("wld_1", BlockType::Character, "bob", "character");
-        store.insert_knowledge_entry(char1).await.unwrap();
-        store.insert_knowledge_entry(char2).await.unwrap();
 
         let params = ChapterKbBlockParams {
             chapter_text: None,
             ..make_params("wld_1", &[])
         };
 
-        let block = build_chapter_kb_block(&store, &params)
-            .await
-            .unwrap()
-            .unwrap();
+        let block = build_chapter_kb_block(
+            &CharacterViewInput::from_entries(vec![char1, char2]),
+            &params,
+        );
 
         // Without chapter_text, all characters are returned
         assert_eq!(block.characters_in_chapter.len(), 2);
@@ -762,20 +713,15 @@ mod tests {
         // signature (world_id: String, not Option<String>).
     }
 
-    // AC6: Missing world_id in query → store returns empty, block has empty sections.
-    #[tokio::test]
-    async fn missing_world_id_returns_empty_block() {
-        let store = nexus_knowledge::world_kb::InMemoryKbStore::new();
-
-        // Insert block in different world
-        let char1 = make_novel_block("wld_other", BlockType::Character, "char_x", "character");
-        store.insert_knowledge_entry(char1).await.unwrap();
-
+    // AC6 (v1.191 P1 T11 revised contract): the snapshot is the whole input.
+    // The builder performs no World query of its own, so an unknown World is
+    // simply an empty snapshot → empty sections. World scoping belongs to the
+    // caller's admitted `KnowledgeReadScope`, never to this builder.
+    #[test]
+    fn missing_world_id_returns_empty_block() {
         let params = make_params("wld_ghost", &[]);
-        let block = build_chapter_kb_block(&store, &params)
-            .await
-            .unwrap()
-            .unwrap();
+        let block =
+            build_chapter_kb_block(&CharacterViewInput::from_entries(Vec::new()), &params);
 
         // No data for wld_ghost
         assert!(block.characters_in_chapter.is_empty());
@@ -784,28 +730,29 @@ mod tests {
     }
 
     // AC7: Token budget exceeded → truncate gracefully with marker.
-    #[tokio::test]
-    async fn token_budget_truncates_gracefully() {
-        let store = nexus_knowledge::world_kb::InMemoryKbStore::new();
-
-        // Create many characters with long summaries
-        for i in 0..20 {
-            let mut kb = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
-                "wld_1",
-                BlockType::Character,
-                &format!("char_{i:02}"),
-            );
-            kb.set_body(KnowledgeEntryBody {
-                summary: Some(format!(
-                    "Character {i} with a very long descriptor that takes up space"
-                )),
-                attributes: None,
-                tags: None,
-                ..Default::default()
+    #[test]
+    fn token_budget_truncates_gracefully() {
+        // Many characters with long summaries.
+        let admitted: Vec<_> = (0..20)
+            .map(|i| {
+                let mut kb =
+                    nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
+                        "wld_1",
+                        BlockType::Character,
+                        &format!("char_{i:02}"),
+                    );
+                kb.set_body(KnowledgeEntryBody {
+                    summary: Some(format!(
+                        "Character {i} with a very long descriptor that takes up space"
+                    )),
+                    attributes: None,
+                    tags: None,
+                    ..Default::default()
+                })
+                .unwrap();
+                kb
             })
-            .unwrap();
-            store.insert_knowledge_entry(kb).await.unwrap();
-        }
+            .collect();
 
         let params = ChapterKbBlockParams {
             world_id: "wld_1".to_string(),
@@ -816,10 +763,7 @@ mod tests {
             max_tokens: Some(50), // Very small budget = 200 chars
         };
 
-        let block = build_chapter_kb_block(&store, &params)
-            .await
-            .unwrap()
-            .unwrap();
+        let block = build_chapter_kb_block(&CharacterViewInput::from_entries(admitted), &params);
 
         let yaml = block.to_yaml();
         // Should fit within reasonable bounds (may have truncated some items)
@@ -873,38 +817,28 @@ mod tests {
         assert!(!yaml.contains("truncated"));
     }
 
-    // QC3-W4 fix: output is deterministic regardless of insertion order.
-    #[tokio::test]
-    async fn output_is_deterministic_regardless_of_insertion_order() {
-        let store1 = nexus_knowledge::world_kb::InMemoryKbStore::new();
-        let store2 = nexus_knowledge::world_kb::InMemoryKbStore::new();
-
-        // Insert in opposite orders
+    // QC3-W4 fix: output is deterministic regardless of snapshot order.
+    #[test]
+    fn output_is_deterministic_regardless_of_insertion_order() {
         let char_a = make_novel_block("wld_1", BlockType::Character, "alpha", "character");
         let char_b = make_novel_block("wld_1", BlockType::Character, "beta", "character");
 
-        store1.insert_knowledge_entry(char_a.clone()).await.unwrap();
-        store1.insert_knowledge_entry(char_b.clone()).await.unwrap();
-
-        store2.insert_knowledge_entry(char_b).await.unwrap();
-        store2.insert_knowledge_entry(char_a).await.unwrap();
-
         let params = make_params("wld_1", &[]);
 
-        let yaml1 = build_chapter_kb_block(&store1, &params)
-            .await
-            .unwrap()
-            .unwrap()
-            .to_yaml();
-        let yaml2 = build_chapter_kb_block(&store2, &params)
-            .await
-            .unwrap()
-            .unwrap()
-            .to_yaml();
+        let yaml1 = build_chapter_kb_block(
+            &CharacterViewInput::from_entries(vec![char_a.clone(), char_b.clone()]),
+            &params,
+        )
+        .to_yaml();
+        let yaml2 = build_chapter_kb_block(
+            &CharacterViewInput::from_entries(vec![char_b, char_a]),
+            &params,
+        )
+        .to_yaml();
 
         assert_eq!(
             yaml1, yaml2,
-            "YAML output must be identical regardless of KB insertion order"
+            "YAML output must be identical regardless of snapshot order"
         );
     }
 
@@ -944,32 +878,64 @@ mod tests {
         assert!(yaml.contains(TRUNCATION_MARKER.trim_start_matches('\n')));
     }
 
-    // Unit test: WorldKbQueryBuilder produces correct queries.
+    // v1.191 P1 T11: the snapshot filter helpers replace the retired
+    // World-scoped `KbQuery` builders; both directions (present / absent) are
+    // pinned because the caller no longer has a store to fall back on.
     #[test]
-    fn query_builder_produces_correct_queries() {
-        let builder = WorldKbQueryBuilder::new("wld_test");
+    fn snapshot_helpers_filter_admitted_rows_only() {
+        let hero = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Ada");
+        let castle = KnowledgeEntryRecord::new("wld_test", BlockType::Scene, "Castle");
+        let admitted = vec![hero, castle];
 
-        let q = builder.query_for_block_type(BlockType::Character);
-        assert_eq!(q.world_id, "wld_test");
-        assert_eq!(q.block_type, Some(BlockType::Character));
+        let characters = WorldKbQueryBuilder::of_block_type(&admitted, BlockType::Character);
+        assert_eq!(characters.len(), 1);
+        assert_eq!(characters[0].canonical_name, "Ada");
 
-        let q = builder.query_for_canonical_name("char_hero");
-        assert_eq!(q.canonical_name, Some("char_hero".to_string()));
+        let located =
+            WorldKbQueryBuilder::by_canonical_name(&admitted, "Castle", BlockType::Scene)
+                .expect("exact canonical_name + block_type match");
+        assert!(!located.entry_id.is_empty());
 
-        let q = builder.query_all();
-        assert_eq!(q.world_id, "wld_test");
-        assert!(q.block_type.is_none());
+        // A row that is not in the snapshot can never be resolved: absence is
+        // "not admitted", never "query the World for it".
+        assert!(
+            WorldKbQueryBuilder::by_canonical_name(&admitted, "Ghost", BlockType::Character)
+                .is_none()
+        );
+        assert!(
+            WorldKbQueryBuilder::by_canonical_name(&admitted, "Ada", BlockType::Scene).is_none(),
+            "block_type must match as well as canonical_name"
+        );
+        assert!(WorldKbQueryBuilder::of_block_type(&[], BlockType::Character).is_empty());
     }
 
+    // v1.191 P1 T11 (durable §4.2): the chapter block reads the admitted
+    // snapshot alone — an empty snapshot yields an empty block, never a
+    // World-wide read (`build_chapter_kb_block` has no store to widen with).
     #[test]
-    fn character_view_bypasses_unrestricted_world_query() {
-        let entry = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Ada");
-        let view = CharacterViewInput::from_entries(vec![entry]);
-        let resolved = WorldKbQueryBuilder::character_view_or_unrestricted(Some(&view))
-            .expect("character view");
-        assert_eq!(resolved.len(), 1);
-        assert_eq!(resolved[0].canonical_name, "Ada");
-        assert!(WorldKbQueryBuilder::character_view_or_unrestricted(None).is_none());
+    fn v1191_holder_context_chapter_block_reads_admitted_snapshot_only() {
+        let params = ChapterKbBlockParams {
+            world_id: "wld_ctx".to_string(),
+            world_name: "Context World".to_string(),
+            current_timeline: "chapter 1".to_string(),
+            world_refs: vec![],
+            chapter_text: None,
+            max_tokens: None,
+        };
+
+        let empty = build_chapter_kb_block(&CharacterViewInput::from_entries(Vec::new()), &params);
+        assert!(empty.characters_in_chapter.is_empty());
+        assert!(empty.locations_referenced.is_empty());
+        assert!(empty.active_rules.is_empty());
+
+        let shared = KnowledgeEntryRecord::new("wld_ctx", BlockType::Character, "SharedAda");
+        let admitted = build_chapter_kb_block(
+            &CharacterViewInput::from_entries(vec![shared.clone()]),
+            &params,
+        );
+        assert_eq!(admitted.characters_in_chapter.len(), 1);
+        assert_eq!(admitted.characters_in_chapter[0].name, "SharedAda");
+        assert_eq!(admitted.characters_in_chapter[0].id, shared.entry_id);
     }
 
     // R-V141HYG-02: to_yaml must produce parseable YAML for strings with metacharacters.

@@ -50,9 +50,20 @@ async fn run_migrator(pool: &SqlitePool, migrator: Migrator) {
 }
 
 async fn seed_v21_fixture(pool: &SqlitePool) {
-    nexus_local_db::ensure_creator_row(pool, CREATOR, "Owner")
-        .await
-        .unwrap();
+    // The fixture models a database that predates the v1.191 holder registry,
+    // so the Creator subject is seeded raw. `ensure_creator_row` commits the
+    // subject and its holder registry row together (§2.1) and therefore cannot
+    // run before the cutover.
+    // SAFETY: fixture insert against the pre-cutover `creators` DDL.
+    sqlx::query(
+        "INSERT INTO creators (creator_id, display_name, status, cached_at, data) \
+         VALUES (?, 'Owner', 'active', ?, '{}')",
+    )
+    .bind(CREATOR)
+    .bind(CREATED_AT)
+    .execute(pool)
+    .await
+    .unwrap();
     sqlx::query(
         "INSERT INTO narrative_worlds \
          (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \

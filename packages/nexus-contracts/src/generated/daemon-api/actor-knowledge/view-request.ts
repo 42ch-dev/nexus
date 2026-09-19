@@ -10,7 +10,7 @@
 export type NexusActorRef = CreatorActorRef | CharacterActorRef;
 
 /**
- * Request body for POST /v1/daemon/actor-knowledge/view. actor_ref is admitted from stored owners; payload claims never establish scope. Character views require binding_id.
+ * Request body for POST /v1/daemon/actor-knowledge/view. actor_ref is admitted from stored owners; payload claims never establish scope. Character views require binding_id. The read policy is server-chosen from that admitted context (management review versus holder-filtered ActorView): this body has no client-selectable policy, holder id or viewpoint, and none of them can widen the selection.
  */
 export interface ViewRequest {
   actor_ref: NexusActorRef;

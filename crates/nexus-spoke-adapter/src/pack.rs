@@ -143,6 +143,11 @@ pub struct ParsedPack {
     /// Unknown `modules.*` keys preserved for round-trip (always includes at
     /// least "pack" for re-emission, plus any extra discovered keys).
     pub extra_modules: Map<String, Value>,
+    /// The pack document exactly as it was handed to [`parse_pack`], before any
+    /// typed conversion. Callers that must not re-serialize a parsed atom (the
+    /// import boundary records a quarantined atom's original JSON verbatim from
+    /// here) read the raw value instead of the typed [`KnowledgeEntry`].
+    pub source: Value,
 }
 
 // ── build_pack ────────────────────────────────────────────────────────────────
@@ -300,6 +305,7 @@ pub fn parse_pack(json: &Value) -> Result<ParsedPack, PackError> {
         relations,
         source_anchors,
         extra_modules,
+        source: json.clone(),
     })
 }
 

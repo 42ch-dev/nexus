@@ -10,7 +10,7 @@
 export type NexusKnowledgeOwnerRef = WorldKnowledgeOwner | CharacterKnowledgeOwner | BindingKnowledgeOwner;
 
 /**
- * Response for GET /v1/daemon/characters/:character_id/knowledge/:entry_id and successful PATCH on that path.
+ * Response for GET /v1/daemon/characters/:character_id/knowledge/:entry_id and successful PATCH on that path. `item` is the same admitted projection as the list families: narrative `owner` plus the native holder_entry_id/disclosure governance columns, both absent for an in-scope shared entry.
  */
 export interface KnowledgeEntryDetail {
   item: NexusActorKnowledgeViewItem;
@@ -20,12 +20,19 @@ export interface KnowledgeEntryDetail {
   summary: string | null;
 }
 /**
- * One KnowledgeEntry in an Actor KnowledgeView or Character knowledge list, with deterministic stored-owner metadata.
+ * One KnowledgeEntry in an Actor KnowledgeView or Character knowledge list, with deterministic stored-owner metadata and the native holder-governance projection. `owner` stays the narrative KnowledgeOwnerRef container; holder_entry_id and disclosure are the governance columns and are both absent for an in-scope shared entry. The legacy creator_only boolean is not part of this projection.
  */
 export interface NexusActorKnowledgeViewItem {
   entry_id: string;
   owner: NexusKnowledgeOwnerRef;
-  creator_only: boolean;
+  /**
+   * Resolved holder KnowledgeEntry id of the disclosure-restricted row (`hld_` namespace). Absent for an in-scope shared entry or an adopted row whose holder is unspecified. Service-resolved only: never accepted from a request body.
+   */
+  holder_entry_id?: string;
+  /**
+   * Stored disclosure vocabulary; the core knows only owner-private. Absent for an in-scope shared entry — shared is the absence of disclosure, never the string "shared".
+   */
+  disclosure?: "owner-private";
   /**
    * KnowledgeEntry content type (data-model-v1.md §5.5). V1.54 P1: added game-bible variants (species, faction, magic_system, technology, deity, level, economy_tier). V1.55 P3: added script variants (dialogue, beat, act). V1.123 P1: added era (cross-profile world-shape marker for Brief layer).
    */

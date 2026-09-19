@@ -11,7 +11,8 @@ use crate::config::{user_home_dir, CliConfig};
 use crate::errors::{CliError, Result};
 use nexus_contracts::{
     world_kb_patch_entity_request::{
-        NexusWorldKbEntityPatch, NexusWorldKbEntityPatchModulesKey,
+        NexusWorldKbEntityPatch, NexusWorldKbEntityPatchAudience,
+        NexusWorldKbEntityPatchAudienceCharacterPrivate, NexusWorldKbEntityPatchModulesKey,
         NexusWorldKbEntityPatchModulesValue, NexusWorldKbEntityPatchTitle,
     },
     WorldKbPatchEntityRequest,
@@ -333,6 +334,58 @@ fn map_patch_error(err: CoreError, expected_version: u64) -> CliError {
 /// taxonomy — `world_kb_conflict` (exit 76), `world_kb_validation_failed`
 /// (422), `not_found` (404), `forbidden` (403), writer-busy (exit 75).
 #[allow(clippy::too_many_arguments)]
+/// Map the closed `--audience` / `--audience-character` pair onto the frozen
+/// wire audience (`world-kb-entity-patch` schema). The author supplies intent
+/// only: core admission resolves the permitted identity and its holder against
+/// stored state inside the authoring transaction.
+///
+/// # Errors
+/// Returns [`CliError`] for an unknown audience, a `character-private` request
+/// without `--audience-character`, or a mismatched pair.
+pub fn audience_wire(
+    audience: Option<&str>,
+    character_id: Option<&str>,
+) -> Result<Option<NexusWorldKbEntityPatchAudience>> {
+    let Some(audience) = audience else {
+        if character_id.is_some() {
+            return Err(CliError::Other(
+                "--audience-character requires --audience character-private".into(),
+            ));
+        }
+        return Ok(None);
+    };
+    if audience != "character-private" && character_id.is_some() {
+        return Err(CliError::Other(format!(
+            "--audience-character is only meaningful with --audience character-private, \
+             not '{audience}'"
+        )));
+    }
+    match audience {
+        "shared" => Ok(Some(NexusWorldKbEntityPatchAudience::Shared)),
+        "author-only" => Ok(Some(NexusWorldKbEntityPatchAudience::AuthorOnly)),
+        "character-private" => {
+            let character_id = character_id.ok_or_else(|| {
+                CliError::Other(
+                    "--audience character-private requires --audience-character <CHARACTER_ID>"
+                        .into(),
+                )
+            })?;
+            let character_id =
+                NexusWorldKbEntityPatchAudienceCharacterPrivate::try_from(character_id.to_string())
+                    .map_err(|e| {
+                        CliError::Other(format!("--audience-character is invalid: {e}"))
+                    })?;
+            Ok(Some(NexusWorldKbEntityPatchAudience::CharacterPrivate(
+                character_id,
+            )))
+        }
+        other => Err(CliError::Other(format!(
+            "unknown --audience {other}; expected shared, author-only, or character-private"
+        ))),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 pub async fn run_entity_patch(
     config: &CliConfig,
     world_id: String,
@@ -343,6 +396,7 @@ pub async fn run_entity_patch(
     aliases: Option<Vec<String>>,
     block_type: Option<BlockTypeArg>,
     modules: Option<String>,
+    audience: Option<NexusWorldKbEntityPatchAudience>,
     json: bool,
 ) -> Result<()> {
     let mut patch = NexusWorldKbEntityPatch {
@@ -351,6 +405,7 @@ pub async fn run_entity_patch(
         body: serde_json::Map::new(),
         modules: HashMap::new(),
         title: None,
+        audience,
     };
     if let Some(body_str) = body {
         let value: serde_json::Value = serde_json::from_str(&body_str)
@@ -402,9 +457,11 @@ pub async fn run_entity_patch(
         && patch.aliases.is_empty()
         && patch.block_type.is_none()
         && patch.modules.is_empty()
+        && patch.audience.is_none()
     {
         return Err(CliError::Other(
-            "at least one of --title/--body/--aliases/--block-type/--modules must be provided"
+            "at least one of --title/--body/--aliases/--block-type/--modules/--audience must be \
+             provided"
                 .to_string(),
         ));
     }

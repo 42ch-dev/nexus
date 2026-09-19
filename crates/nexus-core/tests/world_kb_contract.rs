@@ -5,10 +5,14 @@ use nexus_contracts::{
     WorldKbPatchEntityRequest,
 };
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService};
+use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeGovernance, DISCLOSURE_OWNER_PRIVATE};
+use nexus_knowledge::world_kb::KbStore;
+use nexus_local_db::kb_store::SqliteKbStore;
 use nexus_local_db::open_pool_read_only;
 use nexus_local_db::writer_protocol::{init_engine_pool, GuardedPoolOptions};
+use nexus_local_db::{ActorContractConflict, LocalDbError};
 use sqlx::SqlitePool;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
 const CREATOR: &str = "test_creator";
@@ -23,13 +27,12 @@ struct Fixture {
 }
 
 async fn seed_world(pool: &SqlitePool, world_id: &str, owner: &str) {
-    sqlx::query(
-        "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) VALUES (?, 'Test', 'active', datetime('now'), '{}')",
-    )
-    .bind(owner)
-    .execute(pool)
-    .await
-    .unwrap();
+    // v1.191 P1: a stored Creator always carries its holder registry row
+    // (§2.2), and the management read selection resolves it — the fixture must
+    // therefore seed a complete subject, not a bare `creators` row.
+    nexus_local_db::ensure_creator_row(pool, owner, "Test")
+        .await
+        .unwrap();
     sqlx::query(
         "INSERT INTO narrative_worlds (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json) VALUES (?, 'wrk', ?, 't', 's', 'active', 'private', 'manual', '{}')",
     )
@@ -787,4 +790,401 @@ async fn provider_journal_contract_settle_rejects_stale_selection() {
     .await
     .unwrap();
     assert_eq!(status, "running", "stale workspace journal is untouched");
+}
+
+// ── v1.191 P1 T7: WorldSheet governance (durable §3) ────────────────────
+//
+// A WorldSheet link is a reverse reference: an entry linked as a sheet must
+// stay a live, World-owned, **shared** `character` KE of the same World. Both
+// directions are asserted here — the forward rule when a link is authored, and
+// the reverse rule when an already-linked entry's governance or status moves.
+//
+// The authoring half is driven through the local-db primitives the canvas
+// entity patch calls inside its own `BEGIN IMMEDIATE` transaction
+// (`author_world_knowledge_governance_tx` is the governance + invalidation
+// side-car of that transaction). The canvas *update* lane itself cannot be
+// exercised end to end yet: `nexus-spoke-adapter`'s `run_cas_update_in_tx`
+// still reads the retired `creator_only` column (finding F1, owner T8), which
+// reddens three pre-existing cases in this file. The end-to-end direction that
+// needs no update lane (canvas create with an audience) is asserted below.
+
+const SHEET_WORLD: &str = "wld_sheetworld";
+const SHEET_OTHER_WORLD: &str = "wld_sheetother";
+const SHEET_ID: &str = "kb_5hee7000000000000000000000000000";
+
+struct SheetFixture {
+    _tmp: TempDir,
+    db_path: PathBuf,
+    core: CoreService,
+    principal: nexus_core::Principal,
+    character_id: String,
+    binding_id: String,
+    unbound_character_id: String,
+}
+
+async fn sheet_pool(fx: &SheetFixture) -> SqlitePool {
+    nexus_local_db::open_pool(&fx.db_path).await.unwrap()
+}
+
+async fn world_revision(pool: &SqlitePool, world_id: &str) -> i64 {
+    sqlx::query_scalar("SELECT knowledge_revision FROM narrative_worlds WHERE world_id = ?")
+        .bind(world_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+async fn sheet_pair(pool: &SqlitePool, entry_id: &str) -> (Option<String>, Option<String>) {
+    sqlx::query_as(
+        "SELECT holder_entry_id, disclosure FROM kb_key_blocks WHERE key_block_id = ?",
+    )
+    .bind(entry_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+async fn sheet_revision(pool: &SqlitePool, entry_id: &str) -> i64 {
+    sqlx::query_scalar("SELECT COALESCE(revision, 0) FROM kb_key_blocks WHERE key_block_id = ?")
+        .bind(entry_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+async fn sheet_status(pool: &SqlitePool, entry_id: &str) -> String {
+    sqlx::query_scalar("SELECT status FROM kb_key_blocks WHERE key_block_id = ?")
+        .bind(entry_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+async fn linked_sheet(pool: &SqlitePool, binding_id: &str) -> Option<String> {
+    sqlx::query_scalar("SELECT world_sheet_entry_id FROM actor_world_bindings WHERE binding_id = ?")
+        .bind(binding_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+fn private_pair(holder: &str) -> KnowledgeGovernance {
+    KnowledgeGovernance {
+        holder_entry_id: Some(holder.to_string()),
+        disclosure: Some(DISCLOSURE_OWNER_PRIVATE.to_string()),
+    }
+}
+
+/// A Creator with its holder registry row, two Worlds, a bound Character and a
+/// second owned Character with no binding to `SHEET_WORLD`.
+async fn setup_sheet_fixture() -> SheetFixture {
+    let tmp = TempDir::new().unwrap();
+    let user_home = tmp.path().to_path_buf();
+    let nexus_home = user_home.join(".nexus42");
+    std::fs::create_dir_all(&nexus_home).unwrap();
+    std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
+        &user_home, CREATOR, SLUG,
+    ))
+    .unwrap();
+    std::fs::write(
+        nexus_home.join("config.toml"),
+        format!(
+            "active_creator_id = \"{CREATOR}\"
+[active_workspace_slug_by_creator]
+\"{CREATOR}\" = \"{SLUG}\""
+        ),
+    )
+    .unwrap();
+    let db_path = nexus_home_layout::workspace_state_db_path(&user_home, CREATOR, SLUG);
+    let (character_id, binding_id, unbound_character_id) = {
+        let guarded = init_engine_pool(&db_path, CREATOR, GuardedPoolOptions::default())
+            .await
+            .unwrap();
+        let pool = guarded.clone_pool();
+        nexus_local_db::ensure_creator_row(&pool, CREATOR, "Sheet Owner")
+            .await
+            .unwrap();
+        seed_world(&pool, SHEET_WORLD, CREATOR).await;
+        seed_world(&pool, SHEET_OTHER_WORLD, CREATOR).await;
+        let bound = nexus_local_db::create_character_with_initial_binding(
+            &pool,
+            nexus_local_db::CreateCharacterParams {
+                owner_creator_id: CREATOR,
+                display_name: "Sheet Holder",
+                image_uri: None,
+                persona_json: "{}",
+                world_id: SHEET_WORLD,
+                world_sheet_entry_id: None,
+            },
+        )
+        .await
+        .unwrap();
+        let unbound = nexus_local_db::create_character_with_initial_binding(
+            &pool,
+            nexus_local_db::CreateCharacterParams {
+                owner_creator_id: CREATOR,
+                display_name: "Unbound Audience",
+                image_uri: None,
+                persona_json: "{}",
+                world_id: SHEET_OTHER_WORLD,
+                world_sheet_entry_id: None,
+            },
+        )
+        .await
+        .unwrap();
+        // The linkable sheet: a live, World-owned, shared `character` entry.
+        seed_kb(
+            &pool,
+            SHEET_ID,
+            SHEET_WORLD,
+            "Sheet",
+            "confirmed",
+            Some(0),
+            None,
+        )
+        .await;
+        pool.close().await;
+        (
+            bound.character.character_id,
+            bound.binding.binding_id,
+            unbound.character.character_id,
+        )
+    };
+    let core = CoreService::open(CoreOpenOptions {
+        user_home,
+        access: CoreAccess::EngineOwner,
+    })
+    .await
+    .unwrap();
+    let principal = core.active_principal().await.unwrap();
+    SheetFixture {
+        _tmp: tmp,
+        db_path,
+        core,
+        principal,
+        character_id,
+        binding_id,
+        unbound_character_id,
+    }
+}
+
+#[tokio::test]
+async fn v1191_world_sheet_governance_rejects_both_directions() {
+    let fx = setup_sheet_fixture().await;
+    let pool = sheet_pool(&fx).await;
+    let holder = nexus_local_db::character_holder_entry_id(&fx.character_id);
+
+    // Forward: the shared sheet links.
+    let binding = nexus_local_db::update_actor_world_binding(
+        &pool,
+        CREATOR,
+        &fx.character_id,
+        &fx.binding_id,
+        0,
+        nexus_local_db::FieldPatch::Set(SHEET_ID),
+    )
+    .await
+    .unwrap();
+    assert_eq!(binding.world_sheet_entry_id.as_deref(), Some(SHEET_ID));
+
+    // Reverse (governance): privatizing the linked sheet refuses
+    // `invalid_world_sheet` with zero mutation — the pair stays null, the
+    // World revision stays put and the link is never silently dropped.
+    let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
+    let err = nexus_local_db::kb_store::author_world_knowledge_governance_tx(
+        &mut tx,
+        SHEET_WORLD,
+        SHEET_ID,
+        Some(&private_pair(&holder)),
+        nexus_local_db::kb_store::AuthoringRevision::Bump,
+    )
+    .await
+    .unwrap_err();
+    drop(tx);
+    assert!(
+        matches!(
+            err,
+            LocalDbError::ActorContractConflict {
+                code: ActorContractConflict::InvalidWorldSheet
+            }
+        ),
+        "the reverse rule keeps the link-time refusal, got {err:?}"
+    );
+    assert_eq!(sheet_pair(&pool, SHEET_ID).await, (None, None));
+    assert_eq!(world_revision(&pool, SHEET_WORLD).await, 0);
+    assert_eq!(
+        linked_sheet(&pool, &fx.binding_id).await.as_deref(),
+        Some(SHEET_ID)
+    );
+
+    // Reverse (status): the soft delete is a status change with the same
+    // refusal on the ordinary store lane.
+    let store = SqliteKbStore::new(pool.clone());
+    let mut row = store.get_knowledge_entry(SHEET_ID).await.unwrap();
+    row.status = "deprecated".to_string();
+    let err = store.update_knowledge_entry(row).await.unwrap_err();
+    assert!(
+        matches!(
+            err,
+            nexus_knowledge::world_kb::store::KbStoreError::LinkedWorldSheet(ref id)
+                if id == SHEET_ID
+        ),
+        "linked sheet status change must refuse, got {err:?}"
+    );
+    assert_eq!(sheet_status(&pool, SHEET_ID).await, "confirmed");
+    let err = store.delete_knowledge_entry(SHEET_ID).await.unwrap_err();
+    assert!(matches!(
+        err,
+        nexus_knowledge::world_kb::store::KbStoreError::LinkedWorldSheet(_)
+    ));
+    assert_eq!(sheet_status(&pool, SHEET_ID).await, "confirmed");
+
+    // The unlinked sheet can be privatized, and only then does the forward
+    // rule refuse a new link: the same predicate in both directions.
+    let cleared = nexus_local_db::update_actor_world_binding(
+        &pool,
+        CREATOR,
+        &fx.character_id,
+        &fx.binding_id,
+        binding.revision,
+        nexus_local_db::FieldPatch::Clear,
+    )
+    .await
+    .unwrap();
+    assert_eq!(cleared.world_sheet_entry_id, None);
+    let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
+    nexus_local_db::kb_store::author_world_knowledge_governance_tx(
+        &mut tx,
+        SHEET_WORLD,
+        SHEET_ID,
+        Some(&private_pair(&holder)),
+        nexus_local_db::kb_store::AuthoringRevision::Bump,
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(
+        sheet_pair(&pool, SHEET_ID).await,
+        (Some(holder.clone()), Some(DISCLOSURE_OWNER_PRIVATE.to_string()))
+    );
+    assert_eq!(world_revision(&pool, SHEET_WORLD).await, 1);
+
+    let refused = nexus_local_db::update_actor_world_binding(
+        &pool,
+        CREATOR,
+        &fx.character_id,
+        &fx.binding_id,
+        cleared.revision,
+        nexus_local_db::FieldPatch::Set(SHEET_ID),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(
+            refused,
+            LocalDbError::ActorContractConflict {
+                code: ActorContractConflict::InvalidWorldSheet
+            }
+        ),
+        "a disclosed sheet must not be linkable, got {refused:?}"
+    );
+    assert_eq!(linked_sheet(&pool, &fx.binding_id).await, None);
+    pool.close().await;
+}
+
+/// Regression (L2 C2): a patch that merely re-states stored values is a no-op
+/// for **both** revisions. The no-op decision is made on the materialised
+/// post-patch content (not on request-field presence) plus the resolved
+/// governance pair, and it short-circuits before any CAS.
+#[tokio::test]
+async fn v1191_world_sheet_governance_restated_content_is_a_no_op() {
+    let fx = setup_sheet_fixture().await;
+    let pool = sheet_pool(&fx).await;
+
+    // The stored row is `Sheet` (body `{}`, revision 0, shared). Re-stating the
+    // title and an explicitly `shared` audience changes nothing.
+    let restated: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
+        "entity_id": SHEET_ID,
+        "expected_version": 0,
+        "patch": {"title": "Sheet", "audience": {"kind": "shared"}},
+    }))
+    .unwrap();
+    let response = fx
+        .core
+        .patch_world_kb_entity(&fx.principal, SHEET_WORLD.to_string(), restated)
+        .await
+        .expect("a value-identical patch is a no-op, not a write");
+    assert_eq!(response.version, 0, "the KE revision does not move");
+    assert_eq!(sheet_revision(&pool, SHEET_ID).await, 0);
+    assert_eq!(
+        world_revision(&pool, SHEET_WORLD).await,
+        0,
+        "a no-op must not move the World knowledge revision"
+    );
+    assert_eq!(sheet_pair(&pool, SHEET_ID).await, (None, None));
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn v1191_world_sheet_governance_canvas_create_authors_the_audience() {
+    let fx = setup_sheet_fixture().await;
+    let pool = sheet_pool(&fx).await;
+    let creator_holder = nexus_local_db::creator_holder_entry_id(CREATOR);
+
+    let governed: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
+        "entity_id": "kb_4d111111111111111111111111111111",
+        "expected_version": 0,
+        "patch": {
+            "title": "Governed Sheet",
+            "block_type": "character",
+            "audience": {"kind": "author-only"},
+        },
+    }))
+    .unwrap();
+    let created = fx
+        .core
+        .patch_world_kb_entity(&fx.principal, SHEET_WORLD.to_string(), governed)
+        .await
+        .expect("an author-only canvas create admits");
+    assert_eq!(created.version, 1);
+    assert_eq!(
+        sheet_pair(&pool, "kb_4d111111111111111111111111111111").await,
+        (
+            Some(creator_holder),
+            Some(DISCLOSURE_OWNER_PRIVATE.to_string())
+        ),
+        "the canvas create authored the resolved governance pair"
+    );
+
+    // A Character with no binding to this World is not a permitted audience.
+    let unbound: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
+        "entity_id": "kb_4d222222222222222222222222222222",
+        "expected_version": 0,
+        "patch": {
+            "title": "Unbound Sheet",
+            "block_type": "character",
+            "audience": {
+                "kind": "character-private",
+                "character_id": fx.unbound_character_id,
+            },
+        },
+    }))
+    .unwrap();
+    let err = fx
+        .core
+        .patch_world_kb_entity(&fx.principal, SHEET_WORLD.to_string(), unbound)
+        .await
+        .unwrap_err();
+    // The permission refusal comes from the in-transaction resolution, so it
+    // keeps the actor-input family (a malformed id would be
+    // `InvalidInput { field: "patch.audience" }` from the wire mapping).
+    assert!(matches!(err, CoreError::ActorInput(_)), "got {err:?}");
+    let exists: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM kb_key_blocks WHERE key_block_id = 'kb_4d222222222222222222222222222222'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(exists, 0, "a refused audience writes no row");
+    pool.close().await;
 }

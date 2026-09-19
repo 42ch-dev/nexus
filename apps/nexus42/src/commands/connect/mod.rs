@@ -179,7 +179,9 @@ pub async fn run_peers(command: PeersCommand) -> Result<()> {
 /// [`CliError::Other`] when the DB open or the adapter read is rejected.
 async fn peers_list() -> Result<()> {
     let pool = open_workspace_pool(None, None).await?;
-    let adapter = NexusAdapter::new(pool);
+    // The observed-peer store is host metadata, not knowledge: the host
+    // adapter (v1.191 P1 T14) serves it and fails closed on every KE port.
+    let adapter = NexusAdapter::new_host(pool);
     let peers = match adapter.list_observed_peer_hosts().await {
         SpokeResult::Ok(peers) => peers,
         SpokeResult::Reject(reject) => {
@@ -554,10 +556,15 @@ pub async fn build_host_config(
     // P2: the adapter's ComputablePort resolves compute modules host-locally
     // from `~/.nexus42/modules/` (spec §2.1 — never peer-supplied bytes).
     let modules_dir = nexus_home_layout::user_modules_dir(home);
-    let adapter = Arc::new(NexusAdapter::new(pool).with_user_modules_dir(modules_dir));
-    config.invoke_handler_v2 = Some(invoke::build_handler(peer_scope, Arc::clone(&adapter)));
+    // v1.191 P1 T14 (durable §9): the port set carries ONE process-wide
+    // compiled-module cache and one host adapter; every KE invoke builds a
+    // scoped adapter from the caller's stored Actor grant and shares the
+    // cache (T8 hand-off — request binding never recompiles a module).
+    let ports = invoke::ConnectPorts::new(pool, Some(modules_dir));
+    let host_adapter = ports.host_adapter();
+    config.invoke_handler_v2 = Some(invoke::build_handler(peer_scope, ports));
 
-    Ok((config, host_id, allowlist_len, adapter))
+    Ok((config, host_id, allowlist_len, host_adapter))
 }
 
 /// N-C3 (V1.155 P0): record the dialed peer at `SpokeConnectNode::connect()`

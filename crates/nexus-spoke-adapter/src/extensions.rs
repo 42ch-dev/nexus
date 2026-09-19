@@ -6,15 +6,22 @@
 //! spec §2.1). The namespace key is the literal string `"nexus"` (lowercase;
 //! matches spoke's `^[a-z][a-z0-9_-]*$` namespace convention).
 //!
-//! ## Field inventory (5)
+//! ## Field inventory (7)
 //!
 //! | Field | JSON type | Required |
 //! |-------|-----------|----------|
 //! | `world_id` | string | yes |
+//! | `character_id` | string | no |
+//! | `actor_world_binding_id` | string | no |
 //! | `created_from_command_id` | string | no |
 //! | `source_work_id` | string | no |
 //! | `source_chapter` | integer | no |
 //! | `source_provenance_kind` | string | no |
+//!
+//! Exactly one of the three owner keys is present (the narrative container
+//! axis, v1.184); the holder/disclosure governance axis is **not** an
+//! extension key — the conversion seam maps it to the spoke
+//! `KnowledgeEntry.owner` / `.disclosure` fields (durable §1).
 //!
 //! ## Round-trip preservation
 //!
@@ -22,16 +29,29 @@
 //!   read→modify→write cycles — the accessors only ever touch the `"nexus"`
 //!   namespace key.
 //! - Unknown keys inside `extensions.nexus` are preserved verbatim — the
-//!   typed setters only insert/remove the 5 known keys listed above.
+//!   typed setters only insert/remove the 7 known keys listed above.
 //! - Empty `extensions.nexus` (`{}`) is valid and is not dropped.
+//!
+//! ## Retired legacy key (v1.191 P1 T8, durable §5)
+//!
+//! `extensions.nexus.creator_only` is **not** a typed key and **not** an
+//! unknown passthrough: it is the retired World-only visibility bool. It stays
+//! classified as *known* here so it can never ride out as product-local extras,
+//! every write removes it, and
+//! [`refuse_legacy_creator_only`] rejects its presence on raw input with the
+//! stable `legacy_creator_only_unsupported` reason (`false` included).
 //!
 //! See tracked spec §2.2 for the full round-trip contract.
 
 use nexus_knowledge::world_kb::errors::KbError;
-use nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef;
+use nexus_knowledge::world_kb::knowledge_entry::{
+    KnowledgeOwnerRef, LEGACY_CREATOR_ONLY_KEY, LEGACY_CREATOR_ONLY_UNSUPPORTED,
+};
 use serde_json::{Map, Value};
 use spoke_operations::ExtensionMap;
-use spoke_schemas::knowledge_entry::KnowledgeEntryExtensionsKey;
+use spoke_schemas::knowledge_entry::{
+    KnowledgeEntryExtensionsKey, KnowledgeEntryOwner as SpokeKnowledgeOwner,
+};
 use spoke_schemas::KnowledgeEntry;
 
 /// The `extensions.nexus` namespace key (lowercase, matches the
@@ -57,33 +77,83 @@ fn nexus_namespace(entry: &KnowledgeEntry) -> Option<&Map<String, Value>> {
     entry.extensions.get(&nexus_key())
 }
 
-/// The 8 typed identity/owner field names managed by the accessors in this
-/// module (v1.184 P1 adds the canonical owner keys + `creator_only`).
-const KNOWN_NEXUS_KEYS: [&str; 8] = [
+/// The 7 typed identity/owner field names managed by the accessors in this
+/// module (v1.184 P1 adds the canonical owner keys).
+const KNOWN_NEXUS_KEYS: [&str; 7] = [
     "world_id",
     "character_id",
     "actor_world_binding_id",
-    "creator_only",
     "created_from_command_id",
     "source_work_id",
     "source_chapter",
     "source_provenance_kind",
 ];
 
-/// Returns `true` if `key` is one of the 8 typed `extensions.nexus` identity
-/// / owner fields managed by the accessors in this module.
+/// Returns `true` if `key` belongs to the `extensions.nexus` namespace rather
+/// than to product-local extras.
 ///
 /// This is the single source of truth for the typed/unknown key boundary
 /// (spec §2.2 round-trip rule 2); storage and conversion-seam callers use it
 /// to separate authoritative typed columns from verbatim-carried extras.
+///
+/// The retired legacy key [`LEGACY_CREATOR_ONLY_KEY`] counts as *known* — not
+/// as an unknown passthrough (§5): it is filtered out of
+/// [`get_nexus_extras`] and removed by every typed write, exactly like the
+/// storage layer keeps it classified so a stale value can never round-trip as
+/// product-local content.
 #[must_use]
 pub fn is_known_nexus_key(key: &str) -> bool {
-    KNOWN_NEXUS_KEYS.contains(&key)
+    key == LEGACY_CREATOR_ONLY_KEY || KNOWN_NEXUS_KEYS.contains(&key)
+}
+
+/// Refuse the retired `extensions.nexus.creator_only` key on a wire entry
+/// (durable §5, v1.191 P1 T8).
+///
+/// The reverse conversion runs this before any of the key is interpreted: a
+/// raw client/import payload that still carries the legacy bool is rejected
+/// with the stable [`LEGACY_CREATOR_ONLY_UNSUPPORTED`] reason — `false`
+/// included, never silently ignored or folded into governance.
+///
+/// # Errors
+///
+/// Returns [`KbError::ValidationError`] naming the stable reason when the key
+/// is present on `entry`'s `extensions.nexus` namespace (whatever its value).
+pub fn refuse_legacy_creator_only(entry: &KnowledgeEntry) -> Result<(), KbError> {
+    if nexus_namespace(entry).is_some_and(|ns| ns.contains_key(LEGACY_CREATOR_ONLY_KEY)) {
+        return Err(KbError::ValidationError(format!(
+            "{LEGACY_CREATOR_ONLY_UNSUPPORTED}: extensions.nexus.{LEGACY_CREATOR_ONLY_KEY} \
+             is not accepted on a wire knowledge entry"
+        )));
+    }
+    Ok(())
+}
+
+/// Adopt one parsed wire entry's holder reference into a permitted local
+/// identity (durable §6, v1.191 P1 T10).
+///
+/// The import boundary calls this **only** for an atom an explicit
+/// `--holder-map` mapping authorizes. It rewrites exactly `KnowledgeEntry.owner`
+/// to the resolved local holder id and leaves `.disclosure` untouched, so an
+/// adopted atom keeps the governance the pack carried while naming a local
+/// identity. Nothing else on the entry is modified.
+///
+/// # Errors
+///
+/// Returns [`KbError::ValidationError`] when `local_holder_id` cannot be a wire
+/// `owner` value (spoke requires a non-empty string).
+pub fn adopt_wire_holder(entry: &mut KnowledgeEntry, local_holder_id: &str) -> Result<(), KbError> {
+    let holder = SpokeKnowledgeOwner::try_from(local_holder_id).map_err(|e| {
+        KbError::ValidationError(format!(
+            "holder {local_holder_id:?} is not a valid wire owner value: {e}"
+        ))
+    })?;
+    entry.owner = Some(holder);
+    Ok(())
 }
 
 /// Read the *unknown* keys under `extensions.nexus` — everything outside the
-/// 8 typed identity/owner fields. Returns an owned map; `None` when no
-/// unknown keys are present (or the namespace is absent).
+/// typed identity/owner fields (see [`is_known_nexus_key`]). Returns an owned
+/// map; `None` when no unknown keys are present (or the namespace is absent).
 ///
 /// Used by the conversion seam reverse direction to surface product-local
 /// extras onto the nexus domain type so they survive the spoke round-trip.
@@ -100,7 +170,7 @@ pub fn get_nexus_extras(entry: &KnowledgeEntry) -> Option<Map<String, Value>> {
 
 /// Insert unknown keys into `extensions.nexus`, preserving typed keys.
 ///
-/// The 5 typed keys (already set authoritatively by [`set_world_id`] /
+/// The typed keys (already set authoritatively by [`set_owner`] /
 /// [`set_provenance`] / [`set_created_from_command_id`]) and any unknown key
 /// already present are preserved; only keys outside the typed set are inserted.
 ///
@@ -228,24 +298,15 @@ pub fn get_owner(entry: &KnowledgeEntry) -> Result<KnowledgeOwnerRef, KbError> {
     }
 }
 
-/// Read the `creator_only` flag from `extensions.nexus` (default `false`).
-#[must_use]
-pub fn get_creator_only(entry: &KnowledgeEntry) -> bool {
-    nexus_namespace(entry)
-        .and_then(|m| m.get("creator_only"))
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-}
-
 /// Set the canonical owner on `extensions.nexus`, removing the other two
 /// owner keys so the projection is unambiguous (v1.184 P1).
 ///
 /// World owners emit `world_id`; Character owners emit `character_id`;
 /// binding owners emit `actor_world_binding_id`. A non-World owner NEVER
-/// carries a `world_id` key (no fabricated World id). When `creator_only` is
-/// `true` the flag is emitted; otherwise the key is removed. Unknown keys
-/// already present in `extensions.nexus` are preserved verbatim.
-pub fn set_owner(entry: &mut KnowledgeEntry, owner: &KnowledgeOwnerRef, creator_only: bool) {
+/// carries a `world_id` key (no fabricated World id). The retired legacy
+/// `creator_only` key is removed (durable §5 — never a passthrough). Unknown
+/// keys already present in `extensions.nexus` are preserved verbatim.
+pub fn set_owner(entry: &mut KnowledgeEntry, owner: &KnowledgeOwnerRef) {
     let ns = entry.extensions.entry(nexus_key()).or_default();
     ns.remove("world_id");
     ns.remove("character_id");
@@ -261,11 +322,7 @@ pub fn set_owner(entry: &mut KnowledgeEntry, owner: &KnowledgeOwnerRef, creator_
             ns.insert("actor_world_binding_id".into(), Value::String(id.clone()));
         }
     }
-    if creator_only {
-        ns.insert("creator_only".into(), Value::Bool(true));
-    } else {
-        ns.remove("creator_only");
-    }
+    ns.remove(LEGACY_CREATOR_ONLY_KEY);
 }
 
 /// Set the three provenance fields together.
@@ -299,14 +356,16 @@ pub fn set_provenance(
 /// when serialized). The owner is written authoritatively from
 /// [`KnowledgeOwnerRef`] (World → `world_id`, Character → `character_id`,
 /// binding → `actor_world_binding_id`); the other owner keys are removed so
-/// a non-World owner never fabricates a `world_id`. `creator_only` is emitted
-/// when set (World-owned only). Each optional provenance field is inserted
-/// when `Some`, removed when `None`.
+/// a non-World owner never fabricates a `world_id`. Each optional provenance
+/// field is inserted when `Some`, removed when `None`.
 ///
 /// Unknown keys already present under the `"nexus"` namespace of
 /// `existing_extensions` are preserved verbatim — they are carried over
 /// before the typed fields are applied. This is the round-trip guarantee
-/// from tracked spec §2.2 rule 2.
+/// from tracked spec §2.2 rule 2. The retired legacy
+/// [`LEGACY_CREATOR_ONLY_KEY`] is always removed (durable §5): it is not
+/// unknown passthrough, so a row that still carries the key loses it on the
+/// next write instead of re-emitting it.
 ///
 /// Operates on the wire-neutral [`ExtensionMap`] shape (plain `String`
 /// namespace keys). The caller is responsible for any
@@ -315,7 +374,6 @@ pub fn set_provenance(
 #[must_use]
 pub fn build_extensions_nexus(
     owner: &KnowledgeOwnerRef,
-    creator_only: bool,
     created_from_command_id: Option<&str>,
     source_work_id: Option<&str>,
     source_chapter: Option<i64>,
@@ -341,11 +399,7 @@ pub fn build_extensions_nexus(
             nexus.insert("actor_world_binding_id".into(), Value::String(id.clone()));
         }
     }
-    if creator_only {
-        nexus.insert("creator_only".into(), Value::Bool(true));
-    } else {
-        nexus.remove("creator_only");
-    }
+    nexus.remove(LEGACY_CREATOR_ONLY_KEY);
     insert_opt_string(
         &mut nexus,
         "created_from_command_id",

@@ -35,6 +35,8 @@
 
 #![cfg(feature = "compute")]
 
+use crate::actor_knowledge::ActorKnowledgeViewService;
+use crate::actors::AdmittedActor;
 use crate::error::{CoreError, CoreResult};
 use crate::principal::Principal;
 use crate::service::CoreService;
@@ -169,9 +171,28 @@ pub async fn compute_run(
 
     let invocation_params = request.invocation_params.clone();
     let invocation_params_str = serde_json::to_string(&invocation_params).ok();
-    let builder =
-        ComputeInputBuilder::new(pool.clone(), &request.world_id, manifest, invocation_params)
-            .with_narrative_position(branch_id.clone(), timeline_head_event_id.clone());
+    // The module input is a model-facing payload, so it reads through the
+    // admitted Creator ActorView — never a management review (durable §4.1/§4.2).
+    // A Creator whose holder registry row is missing refuses here instead of
+    // falling back to a World-wide read.
+    let selection = ActorKnowledgeViewService::new(pool.clone())
+        .actor_view_scope(
+            creator_id,
+            &AdmittedActor::Creator {
+                creator_id: creator_id.to_string(),
+            },
+            &request.world_id,
+            None,
+        )
+        .await?;
+    let builder = ComputeInputBuilder::new(
+        pool.clone(),
+        &request.world_id,
+        manifest,
+        invocation_params,
+        selection,
+    )
+    .with_narrative_position(branch_id.clone(), timeline_head_event_id.clone());
     let compute_input = builder.build().await.map_err(map_build_error)?;
 
     let run_id = compute_runs::insert_run(
@@ -937,13 +958,17 @@ async fn create_key_blocks_in_tx(
         let now = chrono::Utc::now().to_rfc3339();
 
         // The lane is World-owned only (world_id param), so owner_kind='world'
-        // and the non-World owner columns are NULL.
+        // and the non-World owner columns are NULL. The native governance
+        // columns are left at their shared defaults (NULL/NULL): v1.191 P1 T3
+        // removed the legacy `creator_only` column from `kb_key_blocks`, and
+        // compute output never assigns a holder or disclosure (authoring
+        // admission owns that).
         sqlx::query(
             "INSERT INTO kb_key_blocks \
              (key_block_id, owner_kind, world_id, character_id, \
-              actor_world_binding_id, creator_only, block_type, canonical_name, status, \
+              actor_world_binding_id, block_type, canonical_name, status, \
               body_json, source_anchor_json, created_at, updated_at) \
-             VALUES (?, 'world', ?, NULL, NULL, 0, ?, ?, ?, ?, ?, ?, ?)",
+             VALUES (?, 'world', ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&kb.entry_id)
         .bind(world_id)

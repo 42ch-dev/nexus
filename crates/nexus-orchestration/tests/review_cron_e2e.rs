@@ -216,11 +216,32 @@ async fn review_cron_fire_triggers_kb_extraction_hook() {
     // hook itself only needs the schedule row + work + chapter body, so we
     // transition the schedule to terminal and invoke the hook directly (the
     // same hermetic pattern used in review_time_extraction.rs).
-    sqlx::query("UPDATE creator_schedules SET status = 'completed' WHERE schedule_id = ?")
-        .bind(&schedule_id)
-        .execute(&pool)
-        .await
-        .unwrap();
+    //
+    // v1.191 P1 T13: the hook extracts under the run identity the executor
+    // admitted the schedule with, so the simulator seeds that run row and
+    // points `current_session_id` at it — exactly what run admission does.
+    let run_id = format!("run_{schedule_id}");
+    sqlx::query(
+        r"INSERT INTO orchestration_sessions
+           (session_id, creator_id, preset_id, preset_version, status,
+            context_json, created_at, updated_at)
+           VALUES (?, 'ctr_e2e', 'novel-review-master', 1, 'completed', '{}', ?, ?)",
+    )
+    .bind(&run_id)
+    .bind(chrono::Utc::now().timestamp())
+    .bind(chrono::Utc::now().timestamp())
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE creator_schedules SET status = 'completed', current_session_id = ? \
+         WHERE schedule_id = ?",
+    )
+    .bind(&run_id)
+    .bind(&schedule_id)
+    .execute(&pool)
+    .await
+    .unwrap();
 
     // ── Step 3: the T-B P1 extraction hook fires on the completed schedule. ─
     let inserted = quality_loop::extract_kb_candidates_for_review(

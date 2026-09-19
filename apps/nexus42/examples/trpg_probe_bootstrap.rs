@@ -33,17 +33,11 @@ async fn main() -> anyhow::Result<()> {
     let pool = Schema::init(&db_path)
         .await
         .context("initialize workspace DB")?;
-    let now = chrono::Utc::now().to_rfc3339();
-    sqlx::query(
-        "INSERT INTO creators (creator_id, display_name, status, cached_at, data) \
-         VALUES (?, 'Trpg Probe', 'active', ?, '{}') \
-         ON CONFLICT(creator_id) DO NOTHING",
-    )
-    .bind(CREATOR_ID)
-    .bind(now)
-    .execute(&pool)
-    .await
-    .context("seed probe creator")?;
+    // v1.191 P1 T4: the one Creator materialization helper also commits the
+    // stable holder registry row with the workspace subject (§2.1).
+    nexus_local_db::ensure_creator_row(&pool, CREATOR_ID, "Trpg Probe")
+        .await
+        .context("seed probe creator")?;
     let world = nexus_local_db::create_world(
         &pool,
         CREATOR_ID,

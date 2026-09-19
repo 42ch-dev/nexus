@@ -93,16 +93,40 @@ async fn seed_world(pool: &SqlitePool) {
 
 async fn insert_review_master_schedule(pool: &SqlitePool, schedule_id: &str, work_id: &str) {
     let now = chrono::Utc::now().timestamp();
+    // v1.191 P1 T13: the schedule's stored production run identity is what the
+    // review-time extraction is admitted under (`current_session_id` FK), so the
+    // run row is seeded with it.
+    let run_id = format!("run_{schedule_id}");
+    // SAFETY: test-only INSERT into orchestration_sessions (the FK target of
+    // `creator_schedules.current_session_id`).
+    sqlx::query(
+        r"INSERT INTO orchestration_sessions
+           (session_id, creator_id, preset_id, preset_version, status,
+            context_json, created_at, updated_at)
+           VALUES (?, ?, 'novel-review-master', 3, 'running', '{}', ?, ?)",
+    )
+    .bind(&run_id)
+    .bind(CREATOR)
+    .bind(now)
+    .bind(now)
+    .execute(pool)
+    .await
+    .unwrap();
+
     // SAFETY: test-only — DML helper for schedule row insertion.
     sqlx::query(
         r"INSERT INTO creator_schedules
            (schedule_id, creator_id, preset_id, preset_version, status,
-            concurrency_kind, current_core_context_version,
+            concurrency_kind, current_core_context_version, current_session_id,
             label, created_at, updated_at, work_id)
-           VALUES (?, ?, 'novel-review-master', 3, 'running', 'serial', 0, ?, ?, ?, ?)",
+           VALUES (?, ?, 'novel-review-master', 3, 'running', 'serial', 0, ?, ?, ?, ?, ?)",
     )
     .bind(schedule_id)
     .bind(CREATOR)
+    // v1.191 P1 T13: the review-time extraction run is admitted under the
+    // schedule's stored production run identity; extraction refuses an empty
+    // one instead of inventing a default session.
+    .bind(&run_id)
     .bind(format!("kb-extract-{work_id}"))
     .bind(now)
     .bind(now)
@@ -173,10 +197,16 @@ impl nexus_orchestration::capability::PromptExecutor for MockLlmExtractWorker {
 
 fn registry_with_mock_worker() -> CapabilityRegistry {
     // A1: prompt consumers resolve their coordinator cancellation token from
-    // this map and fail closed when none is registered. The review-time hook
-    // runs outside a preset session, so register the ids it can use.
+    // this map and fail closed when none is registered. v1.191 P1 T13: the
+    // review-time hook now passes the schedule's stored production run
+    // identity (`run_<schedule_id>`), so the fixture registers exactly those.
     let mut cancels = std::collections::HashMap::new();
-    for id in ["sch_v151_llm", "", "review-master"] {
+    for id in [
+        "run_sch_v151_llm",
+        "run_sch_v151_idem",
+        "run_sch_v151_fb",
+        "review-master",
+    ] {
         cancels.insert(id.to_string(), tokio_util::sync::CancellationToken::new());
     }
     let deps = CapabilityRuntimeDeps {

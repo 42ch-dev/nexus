@@ -36,7 +36,10 @@ use nexus_contracts::daemon_api::actor_knowledge::{
         ViewResponse,
     },
 };
-use nexus_knowledge::world_kb::knowledge_entry::{parse_stored_created_at, KnowledgeEntryRecord};
+use nexus_knowledge::world_kb::knowledge_entry::{
+    parse_stored_created_at, KnowledgeEntryRecord, LEGACY_CREATOR_ONLY_KEY,
+    LEGACY_CREATOR_ONLY_UNSUPPORTED,
+};
 use nexus_local_db::FieldPatch;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -157,7 +160,9 @@ fn parse_delete_expected_revision(uri: &Uri) -> Result<i64, NexusApiError> {
 }
 
 fn knowledge_patch_is_empty(raw: &serde_json::Map<String, serde_json::Value>) -> bool {
-    !raw.contains_key("canonical_name") && !raw.contains_key("summary")
+    !raw.contains_key("canonical_name")
+        && !raw.contains_key("summary")
+        && !raw.contains_key("audience")
 }
 
 fn build_knowledge_summary_patch<'a>(
@@ -204,17 +209,58 @@ fn item_from_record(record: &KnowledgeEntryRecord) -> Result<KnowledgeViewItem, 
         "kind": record.owner.kind(),
         "id": record.owner.id(),
     });
-    let value = serde_json::json!({
-        "entry_id": record.entry_id,
-        "owner": owner,
-        "creator_only": record.creator_only,
-        "block_type": serde_json::to_value(record.block_type).map_err(wire_err)?,
-        "canonical_name": record.canonical_name,
-        "status": record.status,
-        "revision": record.revision.unwrap_or(0),
-        "created_at": parse_rfc3339(&record.created_at)?,
-    });
-    serde_json::from_value(value).map_err(wire_err)
+    // v1.191 P1 T9 (durable §7): the projection carries the native governance
+    // pair (`holder_entry_id` / `disclosure`) and never the retired
+    // `creator_only` boolean. `owner` stays the narrative `KnowledgeOwnerRef`
+    // container; both governance members are absent for an in-scope shared
+    // entry (shared is the *absence* of disclosure).
+    let mut value = serde_json::Map::new();
+    value.insert("entry_id".into(), serde_json::json!(record.entry_id));
+    value.insert("owner".into(), owner);
+    value.insert(
+        "block_type".into(),
+        serde_json::to_value(record.block_type).map_err(wire_err)?,
+    );
+    value.insert(
+        "canonical_name".into(),
+        serde_json::json!(record.canonical_name),
+    );
+    value.insert("status".into(), serde_json::json!(record.status));
+    value.insert(
+        "revision".into(),
+        serde_json::json!(record.revision.unwrap_or(0)),
+    );
+    value.insert(
+        "created_at".into(),
+        serde_json::json!(parse_rfc3339(&record.created_at)?),
+    );
+    if let Some(holder) = record.holder_entry_id.as_deref() {
+        value.insert("holder_entry_id".into(), serde_json::json!(holder));
+    }
+    if let Some(disclosure) = record.disclosure.as_deref() {
+        value.insert("disclosure".into(), serde_json::json!(disclosure));
+    }
+    serde_json::from_value(serde_json::Value::Object(value)).map_err(wire_err)
+}
+
+/// Durable §5: the retired World-only `creator_only` key is refused by
+/// **presence** on the raw request object — including `false`, and before
+/// deserialization can discard it as an unknown member. The stable reason is
+/// the existing invalid-input family's `legacy_creator_only_unsupported`.
+fn refuse_legacy_creator_only_key(
+    raw: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), NexusApiError> {
+    if raw.contains_key(LEGACY_CREATOR_ONLY_KEY) {
+        return Err(NexusApiError::BadRequest {
+            code: "invalid_input".into(),
+            message: format!(
+                "{LEGACY_CREATOR_ONLY_UNSUPPORTED}: {LEGACY_CREATOR_ONLY_KEY} is not accepted on \
+                 a knowledge authoring request; use `audience` with kind \
+                 shared, author-only or character-private"
+            ),
+        });
+    }
+    Ok(())
 }
 
 fn view_pagination(page: &ActorKnowledgePage) -> Result<ViewPagination, NexusApiError> {
@@ -286,6 +332,7 @@ pub async fn add_entry(
     body: Bytes,
 ) -> Result<(StatusCode, Json<AddKnowledgeEntryResponse>), NexusApiError> {
     let raw = parse_request_object(&body)?;
+    refuse_legacy_creator_only_key(&raw)?;
     let req: AddKnowledgeEntryRequest =
         serde_json::from_value(serde_json::Value::Object(raw.clone())).map_err(|err| {
             NexusApiError::BadRequest {
@@ -353,6 +400,7 @@ pub async fn patch_knowledge_entry(
     body: Bytes,
 ) -> Result<Json<KnowledgeEntryDetail>, NexusApiError> {
     let raw = parse_request_object(&body)?;
+    refuse_legacy_creator_only_key(&raw)?;
     let req: UpdateKnowledgeEntryRequest =
         serde_json::from_value(serde_json::Value::Object(raw.clone())).map_err(|err| {
             NexusApiError::BadRequest {
@@ -367,6 +415,9 @@ pub async fn patch_knowledge_entry(
         });
     }
     let (canonical_name_patch, summary_patch) = build_actor_knowledge_patch(&raw, &req)?;
+    // v1.191 P1 T7 (durable §3): the closed `audience` member rides the same
+    // expected_revision CAS; core admission resolves the identity it names.
+    let audience = nexus_core::authored_patch_audience(req.audience.as_ref())?;
     let (core, principal) = resolve_core_principal(&state).await?;
     let record = core
         .patch_actor_knowledge_entry(
@@ -376,6 +427,7 @@ pub async fn patch_knowledge_entry(
             req.expected_revision,
             canonical_name_patch,
             summary_patch,
+            audience,
         )
         .await?;
     Ok(Json(detail_from_record(&record)?))

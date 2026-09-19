@@ -3,7 +3,7 @@
   "$id": "https://nexus42.invalid/schemas/daemon-api/actor-knowledge/knowledge-entry-detail.schema.json",
   "schema_version": 1,
   "title": "Nexus KnowledgeEntryDetail",
-  "description": "Response for GET /v1/daemon/characters/:character_id/knowledge/:entry_id and successful PATCH on that path.",
+  "description": "Response for GET /v1/daemon/characters/:character_id/knowledge/:entry_id and successful PATCH on that path. `item` is the same admitted projection as the list families: narrative `owner` plus the native holder_entry_id/disclosure governance columns, both absent for an in-scope shared entry.",
   "type": "object",
   "required": ["item", "summary"],
   "additionalProperties": false,

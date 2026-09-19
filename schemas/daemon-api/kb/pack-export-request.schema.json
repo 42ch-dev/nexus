@@ -3,7 +3,7 @@
   "$id": "https://nexus42.invalid/schemas/daemon-api/kb/pack-export-request.schema.json",
   "schema_version": 1,
   "title": "Nexus PackExportRequest",
-  "description": "POST /v1/daemon/worlds/:world_id/kb/pack/export — export one World's lore as a Narrative Knowledge Pack (V1.152 P0 DF-77).",
+  "description": "POST /v1/daemon/worlds/:world_id/kb/pack/export — export one World's lore as a Narrative Knowledge Pack (V1.152 P0 DF-77). The export reads through the exporting Creator's admitted selection: shared rows always, owned known-private material only under explicit author intent.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -15,6 +15,11 @@
     "include_anchors": {
       "type": "boolean",
       "description": "Include source_anchors in the export response envelope.",
+      "default": false
+    },
+    "include_owned_private": {
+      "type": "boolean",
+      "description": "Explicit author intent to include owned known-private material in the export (v1.191 P1 T10, holder-governance.md §6). Absent/false exports only the shared rows the exporting Creator's admitted policy may read; private material of another holder and quarantined import atoms are never emitted. Character/Connect exports never set this.",
       "default": false
     },
     "title": {

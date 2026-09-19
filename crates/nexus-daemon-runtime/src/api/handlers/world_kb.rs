@@ -34,6 +34,7 @@ use super::wire_cast;
 use crate::api::errors::NexusApiError;
 use crate::api::handlers::world_kb_guards::resolve_core_principal;
 use crate::workspace::WorkspaceState;
+use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
 use axum::Json;
 use nexus_contracts::{
@@ -42,16 +43,62 @@ use nexus_contracts::{
     WorldKbPatchRelationshipResponse, WorldKbPromoteCandidateRequest,
     WorldKbPromoteCandidateResponse,
 };
+use nexus_knowledge::world_kb::knowledge_entry::reject_reserved_authoring_keys;
 use serde::Deserialize;
+use serde_json::Value;
 
 // ─── patch-entity ───────────────────────────────────────────────────────────
+
+/// Raw authoring scopes of the entity patch that can carry a reserved
+/// governance key (durable §§3, 5, 7): the request root, its `patch` object,
+/// and a raw extension document under either — the `extensions.nexus`
+/// namespace included, whose legacy `creator_only` member the cutover removed
+/// rather than passing through as an unknown key.
+const RESERVED_KEY_SCOPES: [&str; 6] = [
+    "",
+    "/patch",
+    "/extensions",
+    "/extensions/nexus",
+    "/patch/extensions",
+    "/patch/extensions/nexus",
+];
+
+fn invalid_input(message: String) -> NexusApiError {
+    NexusApiError::BadRequest {
+        code: "invalid_input".into(),
+        message,
+    }
+}
+
+/// Parse the raw entity-patch body, refusing reserved authoring keys by
+/// **presence** — `false` included — at every raw scope before
+/// deserialization can discard them as unknown members (durable §§3, 5, 7).
+/// The retired World-only `creator_only` key keeps its stable
+/// `legacy_creator_only_unsupported` reason; a client-authored
+/// `holder_entry_id`/`disclosure` is `reserved_governance_key`.
+fn parse_patch_entity_request(body: &Bytes) -> Result<WorldKbPatchEntityRequest, NexusApiError> {
+    let value: Value = serde_json::from_slice(body).map_err(|err| invalid_input(err.to_string()))?;
+    for pointer in RESERVED_KEY_SCOPES {
+        let scope = value.pointer(pointer).unwrap_or(&Value::Null);
+        if let Err(rejected) = reject_reserved_authoring_keys(scope) {
+            return Err(invalid_input(format!(
+                "{}: {} is not accepted on a World KB entity patch; use `audience` with kind \
+                 shared, author-only or character-private",
+                rejected.reason(),
+                rejected.key()
+            )));
+        }
+    }
+    serde_json::from_value(value).map_err(|err| invalid_input(err.to_string()))
+}
 
 /// `POST /v1/daemon/worlds/{world_id}/kb/patch-entity` — entity-level patch.
 pub async fn patch_entity(
     State(state): State<WorkspaceState>,
     Path(world_id): Path<String>,
-    Json(req): Json<WorldKbPatchEntityRequest>,
+    body: Bytes,
 ) -> Result<Json<WorldKbPatchEntityResponse>, NexusApiError> {
+    let req = parse_patch_entity_request(&body)?;
     let (core, principal) = resolve_core_principal(&state).await?;
     let response = core
         .patch_world_kb_entity(&principal, world_id, req)

@@ -33,6 +33,7 @@
 //! timeline events are append-ordered and bounded per branch.
 
 use super::NexusAdapter;
+use crate::conversion::knowledge_entry::block_type_to_entry_type;
 use crate::conversion::knowledge_record_to_spoke;
 use crate::extensions::has_nexus_body;
 use crate::{
@@ -40,55 +41,111 @@ use crate::{
     SpokeResult, TimelineEvent,
 };
 use async_trait::async_trait;
-use nexus_local_db::kb_store::SqliteKbStore;
+use nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef;
+use nexus_local_db::kb_store::{SqliteKbStore, LIST_BY_WORLD_LIMIT};
 use nexus_local_db::narrative_gateway::list_timeline_events_scoped;
 use serde_json::{json, Map, Value};
 #[async_trait]
 impl ScopeQueryPort for NexusAdapter<'_> {
     /// List the active knowledge entries for the scope's world.
     ///
-    /// Routes through [`SqliteKbStore::list_by_world_scoped`] so optional
-    /// `entry_ids` / `entry_types` filters are applied in SQL. Unfiltered
-    /// full-world listings reject when more than `LIST_BY_WORLD_LIMIT` active
-    /// rows exist (no silent truncation).
+    /// v1.191 P1 T8 (durable §4.1/§4.2): the listing is served from the
+    /// adapter's **request-bound selection**, so the §4.2 visibility conjunct
+    /// is applied in SQL before the listing window and only eligible rows ever
+    /// count towards [`LIST_BY_WORLD_LIMIT`]. The spoke `Scope` can only narrow
+    /// that selection:
+    ///
+    /// - a wire `scope_id` outside the bound containers contributes nothing
+    ///   (the same empty answer the storage selection gives for a foreign
+    ///   container), and
+    /// - a wire `viewpoint` that is not the bound resolved holder is refused
+    ///   ([`NexusAdapter::refuse_foreign_scope_viewpoint`]).
+    ///
+    /// Unfiltered full-world listings still reject when more than
+    /// `LIST_BY_WORLD_LIMIT` *eligible* rows exist (no silent truncation); a
+    /// scoped `entry_ids` / `entry_types` filter narrows the eligible set and
+    /// is not capped, exactly as before.
     async fn list_knowledge_entries(&self, scope: &Scope) -> SpokeResult<Vec<KnowledgeEntry>> {
-        let pool = self.pool.clone();
+        let selection = match self.require_read_scope("list_knowledge_entries") {
+            Ok(selection) => selection,
+            Err(reject) => return SpokeResult::Reject(reject),
+        };
+        if let Err(reject) = self.refuse_foreign_scope_viewpoint(scope) {
+            return SpokeResult::Reject(reject);
+        }
         let world_id = scope.scope_id.clone();
+        let world_owner = KnowledgeOwnerRef::world(world_id.as_str());
+        if !selection.containers().contains(&world_owner) {
+            // Fail closed the way the storage selection does: a world the
+            // caller's selection never authorized yields no rows at all.
+            return SpokeResult::Ok(Vec::new());
+        }
         let entry_ids: Vec<String> = scope.entry_ids.clone();
         let entry_types: Vec<String> = scope.entry_types.clone();
 
-        let store = SqliteKbStore::new(pool);
-        let scoped = match store
-            .list_by_world_scoped(&world_id, &entry_ids, &entry_types)
-            .await
-        {
-            Ok(rows) => rows,
-            Err(e) => {
+        let store = SqliteKbStore::new(self.pool.clone());
+        let entries = if entry_ids.is_empty() && entry_types.is_empty() {
+            // Unfiltered: one keyset page of `LIMIT + 1` so the safety cap is
+            // measured over eligible rows only. The keyset order
+            // (`created_at`, `key_block_id`) is the ordering the pre-T8 read
+            // produced.
+            let probe = match u32::try_from(LIST_BY_WORLD_LIMIT) {
+                Ok(limit) => limit.saturating_add(1),
+                Err(_) => u32::MAX,
+            };
+            let rows = match store
+                .list_by_owner_keyset(&world_owner, None, probe, selection)
+                .await
+            {
+                Ok(rows) => rows,
+                Err(e) => {
+                    return reject(
+                        SpokeRejectCode::InternalError,
+                        format!("storage error on list_by_owner_keyset: {e}"),
+                        json!({ "scope_id": world_id }),
+                    );
+                }
+            };
+            let cap = usize::try_from(LIST_BY_WORLD_LIMIT).unwrap_or(usize::MAX);
+            if rows.len() > cap {
                 return reject(
-                    SpokeRejectCode::InternalError,
-                    format!("storage error on list_by_world_scoped: {e}"),
-                    json!({ "scope_id": world_id }),
+                    SpokeRejectCode::InvalidInput,
+                    format!(
+                        "world {world_id} has more active knowledge entries than the safety cap; \
+                         narrow the scope with entry_ids or entry_types"
+                    ),
+                    json!({
+                        "scope_id": world_id,
+                        "cap": LIST_BY_WORLD_LIMIT,
+                        "truncated": true,
+                    }),
                 );
             }
+            rows
+        } else {
+            // Filtered: the complete admitted set for the container, narrowed
+            // by the client filters (which can only shrink an already-eligible
+            // set — visibility is decided in SQL, never here).
+            let rows = match store.list_by_owner_complete(&world_owner, selection).await {
+                Ok(rows) => rows,
+                Err(e) => {
+                    return reject(
+                        SpokeRejectCode::InternalError,
+                        format!("storage error on list_by_owner_complete: {e}"),
+                        json!({ "scope_id": world_id }),
+                    );
+                }
+            };
+            rows.into_iter()
+                .filter(|row| {
+                    (entry_ids.is_empty() || entry_ids.contains(&row.entry_id))
+                        && (entry_types.is_empty()
+                            || entry_types.contains(&block_type_to_entry_type(row.block_type)))
+                })
+                .collect()
         };
 
-        if scoped.truncated {
-            return reject(
-                SpokeRejectCode::InvalidInput,
-                format!(
-                    "world {world_id} has more active knowledge entries than the safety cap; \
-                     narrow the scope with entry_ids or entry_types"
-                ),
-                json!({
-                    "scope_id": world_id,
-                    "cap": nexus_local_db::kb_store::LIST_BY_WORLD_LIMIT,
-                    "truncated": true,
-                }),
-            );
-        }
-
-        let wire: Vec<KnowledgeEntry> = scoped
-            .entries
+        let wire: Vec<KnowledgeEntry> = entries
             .iter()
             // Reuse the V1.139 conversion seam — sole boundary between
             // KnowledgeEntryRecord rows and the spoke wire type (spec §7.1); free
@@ -204,12 +261,38 @@ mod tests {
     use super::*;
     use crate::ScopeQueryPort;
     use nexus_contracts::BlockType;
+    use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeOwnerRef, DISCLOSURE_OWNER_PRIVATE};
     use nexus_knowledge::world_kb::store::KbStore;
-    use nexus_knowledge::world_kb::{KnowledgeEntryBody, KnowledgeEntryRecord};
+    use nexus_knowledge::world_kb::{KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeReadScope};
     use nexus_local_db::kb_store::LIST_BY_WORLD_LIMIT;
     use nexus_local_db::narrative_gateway::seed;
     use nexus_local_db::{open_pool, run_migrations};
     use spoke_schemas::timeline_event::TimelineEventExtensionsKey;
+
+    /// Register the fixture creator's holder so a governed row can be stored
+    /// (the native `holder_entry_id` column is FK-bound to the registry, and
+    /// these selections authorize no holder — so the row is private to them).
+    async fn register_creator_holder(pool: &sqlx::SqlitePool) -> String {
+        let mut tx = pool.begin().await.unwrap();
+        let holder = nexus_local_db::holders::ensure_creator_holder_in_tx(&mut tx, "ctr_test")
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        holder
+    }
+
+    /// A KE-capable adapter whose selection authorizes exactly `world_id`
+    /// (CreatorManagement over one World container, no known-governance
+    /// holders), so these tests exercise the request-bound listing.
+    fn scoped(pool: sqlx::SqlitePool, world_id: &str) -> NexusAdapter<'static> {
+        NexusAdapter::new(
+            pool,
+            KnowledgeReadScope::creator_management(
+                vec![KnowledgeOwnerRef::world(world_id)],
+                Vec::new(),
+            ),
+        )
+    }
 
     async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
@@ -277,7 +360,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         let (world_id, seeded) = seed_world_with_entries(&pool).await;
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = scoped(pool, &world_id);
         let entries = match adapter.list_knowledge_entries(&scope_for(&world_id)).await {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
@@ -300,7 +383,7 @@ mod tests {
     async fn list_knowledge_entries_empty_world_returns_empty_vec() {
         let (pool, _dir) = fresh_pool().await;
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = scoped(pool, "wld_empty");
         let entries = match adapter
             .list_knowledge_entries(&scope_for("wld_empty"))
             .await
@@ -325,7 +408,7 @@ mod tests {
         let mut scope = scope_for(&world_id);
         scope.entry_ids = vec![target_id.clone()];
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = scoped(pool, &world_id);
         let entries = match adapter.list_knowledge_entries(&scope).await {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
@@ -342,13 +425,96 @@ mod tests {
         let mut scope = scope_for(&world_id);
         scope.entry_types = vec!["character".to_string()];
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = scoped(pool, &world_id);
         let entries = match adapter.list_knowledge_entries(&scope).await {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
         };
         assert_eq!(entries.len(), 1, "only the character row matches");
         assert_eq!(entries[0].canonical_name.to_string(), "Alice");
+    }
+
+    /// v1.191 P1 T8: the listing is served from the bound selection, so a
+    /// private row of another holder never appears — and a world outside the
+    /// selection yields nothing at all (the wire scope cannot widen it).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn list_knowledge_entries_stays_inside_the_bound_selection() {
+        let (pool, _dir) = fresh_pool().await;
+        let (world_id, _seeded) = seed_world_with_entries(&pool).await;
+
+        // A foreign-holder private row in the same world.
+        let mut private =
+            KnowledgeEntryRecord::new(&world_id, BlockType::Character, "HiddenNote");
+        private.entry_id = "kb_hidden_scope".to_string();
+        private.holder_entry_id = Some(register_creator_holder(&pool).await);
+        private.disclosure = Some(DISCLOSURE_OWNER_PRIVATE.to_string());
+        SqliteKbStore::new(pool.clone())
+            .insert_knowledge_entry(private)
+            .await
+            .unwrap();
+
+        let adapter = scoped(pool, &world_id);
+        let entries = match adapter.list_knowledge_entries(&scope_for(&world_id)).await {
+            SpokeResult::Ok(v) => v,
+            SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
+        };
+        assert!(
+            entries.iter().all(|e| e.entry_id != "kb_hidden_scope"),
+            "a foreign-holder private row must not be listed: {entries:?}"
+        );
+
+        // A world the selection never authorized yields no rows at all.
+        let foreign = match adapter
+            .list_knowledge_entries(&scope_for("wld_foreign"))
+            .await
+        {
+            SpokeResult::Ok(v) => v,
+            SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
+        };
+        assert!(foreign.is_empty(), "foreign world must contribute nothing");
+    }
+
+    /// v1.191 P1 T8 (durable §4.1/§9): a wire `Scope.viewpoint` is a client
+    /// value — it must equal the bound resolved holder, and a management
+    /// selection carries none, so any supplied viewpoint is refused.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn list_knowledge_entries_refuses_foreign_scope_viewpoint() {
+        let (pool, _dir) = fresh_pool().await;
+        let (world_id, _seeded) = seed_world_with_entries(&pool).await;
+
+        let adapter = scoped(pool.clone(), &world_id);
+        let mut scope = scope_for(&world_id);
+        scope.viewpoint = Some(
+            spoke_schemas::ScopeViewpoint::try_from("hld_spoofed")
+                .expect("non-empty viewpoint is schema-valid"),
+        );
+
+        match adapter.list_knowledge_entries(&scope).await {
+            SpokeResult::Reject(r) => {
+                assert_eq!(r.code, SpokeRejectCode::InvalidInput, "got {r:?}");
+                assert_eq!(
+                    r.details.as_ref().and_then(|d| d.get("scope_id")),
+                    Some(&Value::String(world_id.clone()))
+                );
+                assert!(
+                    !r.message.contains("hld_spoofed"),
+                    "the client viewpoint must not be echoed as authority: {}",
+                    r.message
+                );
+            }
+            SpokeResult::Ok(_) => panic!("a foreign viewpoint must reject"),
+        }
+
+        // And the host-only construction cannot serve the listing at all.
+        let host = NexusAdapter::new_host(pool.clone());
+        match host.list_knowledge_entries(&scope_for("wld_any")).await {
+            SpokeResult::Reject(r) => assert_eq!(
+                r.details.as_ref().and_then(|d| d.get("read_scope_missing")),
+                Some(&Value::Bool(true)),
+                "got {r:?}"
+            ),
+            SpokeResult::Ok(_) => panic!("host-only adapter must not list knowledge"),
+        }
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -370,7 +536,7 @@ mod tests {
         let mut scope = scope_for(&world_id);
         scope.entry_ids = vec![target_id.clone()];
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = scoped(pool, &world_id);
         let entries = match adapter.list_knowledge_entries(&scope).await {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
@@ -410,7 +576,7 @@ mod tests {
             store.insert_knowledge_entry(entry).await.unwrap();
         }
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = scoped(pool, "wld_big");
         match adapter.list_knowledge_entries(&scope_for("wld_big")).await {
             SpokeResult::Ok(_) => panic!("unfiltered cap overflow must reject"),
             SpokeResult::Reject(r) => {
@@ -429,7 +595,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         let (world_id, _) = seed_world_with_timeline_events(&pool).await;
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = NexusAdapter::new_host(pool);
         let events = match adapter.list_timeline_events(&scope_for(&world_id)).await {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
@@ -475,7 +641,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         let (world_id, _) = seed_world_with_timeline_events(&pool).await;
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = NexusAdapter::new_host(pool);
         // branch_id rides scope.extensions["nexus"] (spoke-native ≥ 0.6.0).
         let scope = timeline_scope(&world_id, Some("fbk_root"), &[]);
         let events = match adapter.list_timeline_events(&scope).await {
@@ -500,7 +666,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         let (world_id, _) = seed_world_with_timeline_events(&pool).await;
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = NexusAdapter::new_host(pool);
         // timeline_event_ids is a native Scope field (not under extensions).
         let scope = timeline_scope(&world_id, None, &["evt_tl_1"]);
         let events = match adapter.list_timeline_events(&scope).await {
@@ -520,7 +686,7 @@ mod tests {
     async fn list_timeline_events_empty_world_returns_empty_vec() {
         let (pool, _dir) = fresh_pool().await;
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = NexusAdapter::new_host(pool);
         let events = match adapter.list_timeline_events(&scope_for("wld_empty")).await {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
@@ -640,7 +806,7 @@ mod tests {
             .await
             .unwrap();
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = scoped(pool, &world_id);
         match adapter.list_knowledge_entries(&scope_for(&world_id)).await {
             SpokeResult::Reject(r) => {
                 assert_eq!(
@@ -663,7 +829,7 @@ mod tests {
             .await
             .unwrap();
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = NexusAdapter::new_host(pool);
         match adapter.list_timeline_events(&scope_for(&world_id)).await {
             SpokeResult::Reject(r) => {
                 assert_eq!(

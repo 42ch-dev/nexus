@@ -6,6 +6,7 @@
 //! never leaks state).
 
 use nexus_contracts::daemon_api::inspector::moment_directive_request::MomentDirectiveRequest;
+use nexus_contracts::BlockType;
 use nexus_core::{
     CoreAccess, CoreError, CoreOpenOptions, CoreService, LocalDirectiveStore,
     ReadOnlyDirectiveStore,
@@ -190,6 +191,80 @@ async fn open_core(env: &Env) -> (CoreService, nexus_core::Principal) {
     .unwrap();
     let principal = core.active_principal().await.unwrap();
     (core, principal)
+}
+
+/// v1.191 P1 T11 fixture: one row per governance class in `WORLD_A`, written
+/// through one engine pool released before the core opens. Names are what the
+/// inspector packet renders; the shared row's entry id is what a revision-bound
+/// re-read is asserted on.
+struct ViewFixture {
+    shared_row: String,
+    creator_private_row: String,
+    character_private_row: String,
+    character_shared_row: String,
+    character_shared_entry_id: String,
+    binding_row: String,
+}
+
+async fn seed_view_fixture(env: &Env) -> ViewFixture {
+    use nexus_knowledge::world_kb::knowledge_entry::{
+        KnowledgeEntryRecord, DISCLOSURE_OWNER_PRIVATE,
+    };
+    use nexus_knowledge::world_kb::KbStore as _;
+    use nexus_local_db::kb_store::SqliteKbStore;
+
+    let guarded = init_engine_pool(&env.db_path, CREATOR, GuardedPoolOptions::default())
+        .await
+        .unwrap();
+    let pool = guarded.clone_pool();
+    let store = SqliteKbStore::new(pool.clone());
+    let creator_holder = nexus_local_db::creator_holder_entry_id(CREATOR);
+    let character_holder = nexus_local_db::character_holder_entry_id(&env.character_id);
+
+    let private = |row: &mut KnowledgeEntryRecord, holder: &str| {
+        row.holder_entry_id = Some(holder.to_string());
+        row.disclosure = Some(DISCLOSURE_OWNER_PRIVATE.to_string());
+    };
+
+    let shared = KnowledgeEntryRecord::new(WORLD_A, BlockType::Item, "WorldSharedRow");
+    let mut creator_private =
+        KnowledgeEntryRecord::new(WORLD_A, BlockType::Item, "CreatorPrivateRow");
+    private(&mut creator_private, &creator_holder);
+    let mut character_private =
+        KnowledgeEntryRecord::new(WORLD_A, BlockType::Item, "CharacterPrivateRow");
+    private(&mut character_private, &character_holder);
+    let character_shared = KnowledgeEntryRecord::for_character(
+        &env.character_id,
+        BlockType::Item,
+        "CharacterSharedRow",
+    );
+    let mut binding_row =
+        KnowledgeEntryRecord::for_binding(&env.binding_id, BlockType::Item, "BindingLocalRow");
+    private(&mut binding_row, &character_holder);
+
+    let character_shared_entry_id = character_shared.entry_id.clone();
+    for row in [
+        shared.clone(),
+        creator_private,
+        character_private,
+        character_shared,
+        binding_row,
+    ] {
+        store.insert_knowledge_entry(row).await.unwrap();
+    }
+    // Release the engine writer before the core opens.
+    drop(store);
+    drop(pool);
+    drop(guarded);
+
+    ViewFixture {
+        shared_row: shared.entry_id,
+        creator_private_row: "CreatorPrivateRow".to_string(),
+        character_private_row: "CharacterPrivateRow".to_string(),
+        character_shared_row: "CharacterSharedRow".to_string(),
+        character_shared_entry_id,
+        binding_row: "BindingLocalRow".to_string(),
+    }
 }
 
 fn dto<T: serde::de::DeserializeOwned>(value: serde_json::Value) -> T {
@@ -560,4 +635,188 @@ async fn actor_context_projects_viewpoint_and_epoch() {
     assert_eq!(value["actor_ref"]["creator_id"], CREATOR);
     assert_eq!(value["binding_id"], serde_json::Value::Null);
     assert_eq!(value["character_epoch"], serde_json::Value::Null);
+}
+
+/// v1.191 P1 T11 (durable §4.1/§4.2/§4.3): the inspect/model consumer reads the
+/// admitted ActorView snapshot only — the Creator's own private fact and every
+/// Character-global shared row are in it, another holder's private World row
+/// and a binding-local row are not, although the management selection over the
+/// same World does hold the Character's private row. A material governance
+/// change then advances the stored Character knowledge revision, so the
+/// snapshot identity a cached session was keyed on no longer matches and the
+/// next read serves the new governance instead of the stale rows.
+#[tokio::test]
+async fn v1191_holder_context_inspect_reads_actor_view_and_retires_a_stale_snapshot() {
+    use nexus_knowledge::world_kb::knowledge_entry::KnowledgeAudience;
+    use nexus_knowledge::world_kb::KnowledgeOwnerRef;
+    use nexus_local_db::kb_store::SqliteKbStore;
+
+    let env = seed_env().await;
+    let fixture = seed_view_fixture(&env).await;
+    let (core, principal) = open_core(&env).await;
+
+    // ── The inspect packet is the admitted ActorView, not management ─────
+    let packet = core
+        .inspect_moment(&principal, dto(serde_json::json!({ "world_id": WORLD_A })))
+        .await
+        .expect("owned world inspect");
+    let packet_json = serde_json::to_string(&packet).unwrap();
+
+    assert!(
+        packet_json.contains(&fixture.shared_row),
+        "a Character-global shared row is in the ActorView: {packet_json}"
+    );
+    assert!(
+        packet_json.contains(&fixture.creator_private_row),
+        "the Creator's own holder row is in its own ActorView: {packet_json}"
+    );
+    assert!(
+        !packet_json.contains(&fixture.character_private_row),
+        "another holder's private World row must not reach the model input: {packet_json}"
+    );
+    assert!(
+        !packet_json.contains(&fixture.binding_row),
+        "a binding-local row must not reach the model input: {packet_json}"
+    );
+
+    // Differential: the Creator *management* selection over the same World does
+    // hold the Character's private row — the exclusion above is the ActorView
+    // policy, not an empty store. Management review is never model input.
+    let pool = plain_pool(&env).await;
+    let management = core
+        .creator_management_read_scope(&principal, WORLD_A)
+        .await
+        .expect("management selection");
+    let management_rows = SqliteKbStore::new(pool.clone())
+        .list_by_owner_complete(&KnowledgeOwnerRef::world(WORLD_A), &management)
+        .await
+        .unwrap();
+    assert!(
+        management_rows
+            .iter()
+            .any(|row| row.canonical_name == fixture.character_private_row),
+        "management review sees the owned Character's private row"
+    );
+    assert!(
+        !management_rows
+            .iter()
+            .any(|row| row.canonical_name == fixture.binding_row),
+        "the binding container is not a World-container row"
+    );
+
+    // ── Revision binding: a stale snapshot is retired, not reused ────────
+    let chr = env.character_id.clone();
+    let character_actor = nexus_core::AdmittedActor::Character {
+        character_id: chr.clone(),
+    };
+    let viewpoint = nexus_core::ActorViewpoint {
+        world_id: WORLD_A.to_string(),
+        binding_id: Some(env.binding_id.clone()),
+        branch_id: None,
+        event_id: None,
+    };
+
+    let before = core
+        .admit_actor_knowledge_view(&principal, &character_actor, viewpoint.clone())
+        .await
+        .expect("Character ActorView admission");
+    let before_identity = before.identity();
+    let before_rows = SqliteKbStore::new(pool.clone())
+        .list_by_owner_complete(&KnowledgeOwnerRef::character(&chr), &before.scope())
+        .await
+        .unwrap();
+    let shared_before = before_rows
+        .iter()
+        .find(|row| row.canonical_name == fixture.character_shared_row)
+        .expect("the Character's shared row is in its own ActorView");
+    assert_eq!(
+        shared_before.disclosure, None,
+        "a shared row carries no disclosure"
+    );
+    // Release the shared leases before the exclusive governance edit.
+    drop(before);
+
+    core.patch_actor_knowledge_entry(
+        &principal,
+        chr.clone(),
+        fixture.character_shared_entry_id.clone(),
+        i64::try_from(shared_before.revision.unwrap_or(0)).unwrap_or(0),
+        None,
+        nexus_local_db::FieldPatch::<&str>::Keep,
+        Some(KnowledgeAudience::CharacterPrivate {
+            character_id: chr.clone(),
+        }),
+    )
+    .await
+    .expect("author the Character-private audience");
+
+    let after = core
+        .admit_actor_knowledge_view(&principal, &character_actor, viewpoint)
+        .await
+        .expect("re-admission after the governance change");
+    assert!(
+        after.identity().character_revision() > before_identity.character_revision(),
+        "a material governance change advances the Character knowledge revision \
+         (the signal a cached session is retired on)"
+    );
+    assert_ne!(
+        after.identity(),
+        before_identity,
+        "the session-key identity changes, so a snapshot cached under the old \
+         identity is stale on next use"
+    );
+
+    let after_rows = SqliteKbStore::new(pool.clone())
+        .list_by_owner_complete(&KnowledgeOwnerRef::character(&chr), &after.scope())
+        .await
+        .unwrap();
+    let shared_after = after_rows
+        .iter()
+        .find(|row| row.canonical_name == fixture.character_shared_row)
+        .expect("the Character still sees its own private row");
+    assert_eq!(
+        shared_after.disclosure.as_deref(),
+        Some(nexus_knowledge::world_kb::knowledge_entry::DISCLOSURE_OWNER_PRIVATE),
+        "the fresh read carries the new governance — no stale private text is reused"
+    );
+
+    // Once private to the Character, the row leaves the Creator's ActorView
+    // (the model-input policy), while it stays in the Character's own.
+    let creator_scope = core
+        .creator_view_read_scope(&principal, WORLD_A)
+        .await
+        .expect("Creator ActorView selection");
+    let creator_character_rows = SqliteKbStore::new(pool.clone())
+        .list_by_owner_complete(&KnowledgeOwnerRef::character(&chr), &creator_scope)
+        .await
+        .unwrap();
+    assert!(
+        !creator_character_rows
+            .iter()
+            .any(|row| row.canonical_name == fixture.character_shared_row),
+        "a Character-private fact is excluded from the Creator's model input"
+    );
+
+    // The Creator's own holder keeps its World rows readable (the exact-holder
+    // half of ActorView), and the Character-global shared row stays visible.
+    let creator_world_rows = SqliteKbStore::new(pool)
+        .list_by_owner_complete(&KnowledgeOwnerRef::world(WORLD_A), &creator_scope)
+        .await
+        .unwrap();
+    let names: Vec<&str> = creator_world_rows
+        .iter()
+        .map(|row| row.canonical_name.as_str())
+        .collect();
+    assert!(
+        names.contains(&"WorldSharedRow"),
+        "Character-global sharing stays visible: {names:?}"
+    );
+    assert!(
+        names.contains(&fixture.creator_private_row.as_str()),
+        "the Creator's own private World fact stays readable to its holder: {names:?}"
+    );
+    assert!(
+        !names.contains(&fixture.character_private_row.as_str()),
+        "another holder's private World row stays excluded: {names:?}"
+    );
 }

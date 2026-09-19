@@ -51,6 +51,14 @@ export interface NexusWorldKbEntityProjection {
    */
   world_id: string;
   /**
+   * Resolved holder KnowledgeEntry id (`hld_` namespace) when the row is disclosure-restricted. Absent for an in-scope shared row. Service-resolved only: never accepted from a patch body.
+   */
+  holder_entry_id?: string;
+  /**
+   * Stored disclosure vocabulary; the core knows only owner-private. Absent for an in-scope shared row — shared is the absence of disclosure, never the string "shared".
+   */
+  disclosure?: "owner-private";
+  /**
    * Entity content type (entity-scope-model §5.1.1).
    */
   block_type:

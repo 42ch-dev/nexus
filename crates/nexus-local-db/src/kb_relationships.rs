@@ -11,7 +11,7 @@
 
 use crate::cas::cas_check_with_version_column;
 use crate::LocalDbError;
-use sqlx::SqlitePool;
+use sqlx::{SqliteConnection, SqlitePool};
 
 /// Provenance marker for a relationship row (V1.76).
 ///
@@ -654,12 +654,15 @@ pub async fn list_confirmed_relationships_paginated(
 /// # Errors
 ///
 /// Returns [`LocalDbError::Sqlx`] on database failure.
-pub async fn resolve_entity_by_canonical_name(
-    pool: &SqlitePool,
+pub async fn resolve_entity_by_canonical_name<'e, E>(
+    executor: E,
     world_id: &str,
     canonical_name: &str,
     block_type: Option<&str>,
-) -> Result<Option<String>, LocalDbError> {
+) -> Result<Option<String>, LocalDbError>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+{
     if let Some(bt) = block_type {
         let id: Option<String> = sqlx::query_scalar(
             "SELECT key_block_id FROM kb_key_blocks \
@@ -670,7 +673,7 @@ pub async fn resolve_entity_by_canonical_name(
         .bind(world_id)
         .bind(bt)
         .bind(canonical_name)
-        .fetch_optional(pool)
+        .fetch_optional(executor)
         .await?;
         Ok(id)
     } else {
@@ -682,7 +685,7 @@ pub async fn resolve_entity_by_canonical_name(
         )
         .bind(world_id)
         .bind(canonical_name)
-        .fetch_all(pool)
+        .fetch_all(executor)
         .await?;
         if rows.len() == 1 {
             Ok(Some(rows[0].0.clone()))
@@ -717,7 +720,7 @@ pub async fn resolve_entity_by_canonical_name(
 // indirection for one call-site, mirroring the insert_pending_with_llm allow.
 #[allow(clippy::too_many_arguments)]
 pub async fn upsert_extraction_relationship(
-    pool: &SqlitePool,
+    conn: &mut SqliteConnection,
     world_id: &str,
     source_entity_id: &str,
     target_entity_id: &str,
@@ -741,7 +744,7 @@ pub async fn upsert_extraction_relationship(
     .bind(target_entity_id)
     .bind(relation_type)
     .bind(custom_label)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *conn)
     .await?;
 
     if existing_id.is_some() {
@@ -776,7 +779,7 @@ pub async fn upsert_extraction_relationship(
         now,
         now,
     )
-    .execute(pool)
+    .execute(&mut *conn)
     .await?;
 
     Ok(true)
@@ -1358,7 +1361,7 @@ mod tests {
 
         // First call inserts a suggestion.
         let inserted = upsert_extraction_relationship(
-            &pool,
+            &mut pool.acquire().await.unwrap(),
             &world_id,
             &source_id,
             &target_id,
@@ -1375,7 +1378,7 @@ mod tests {
 
         // Second call with the same composite key is a no-op (dedup).
         let inserted_again = upsert_extraction_relationship(
-            &pool,
+            &mut pool.acquire().await.unwrap(),
             &world_id,
             &source_id,
             &target_id,
@@ -1409,7 +1412,7 @@ mod tests {
         let now = chrono::Utc::now().to_rfc3339();
 
         let _ = upsert_extraction_relationship(
-            &pool,
+            &mut pool.acquire().await.unwrap(),
             &world_id,
             &source_id,
             &target_id,
@@ -1423,7 +1426,7 @@ mod tests {
         .await
         .unwrap();
         let second = upsert_extraction_relationship(
-            &pool,
+            &mut pool.acquire().await.unwrap(),
             &world_id,
             &source_id,
             &target_id,

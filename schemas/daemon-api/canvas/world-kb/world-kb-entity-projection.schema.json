@@ -9,6 +9,16 @@
   "properties": {
     "key_block_id": { "type": "string", "description": "KnowledgeEntry identifier." },
     "world_id": { "type": "string", "description": "Owning World identifier." },
+    "holder_entry_id": {
+      "type": "string",
+      "pattern": "^hld_[0-9a-f]{64}$",
+      "description": "Resolved holder KnowledgeEntry id (`hld_` namespace) when the row is disclosure-restricted. Absent for an in-scope shared row. Service-resolved only: never accepted from a patch body."
+    },
+    "disclosure": {
+      "type": "string",
+      "enum": ["owner-private"],
+      "description": "Stored disclosure vocabulary; the core knows only owner-private. Absent for an in-scope shared row — shared is the absence of disclosure, never the string \"shared\"."
+    },
     "block_type": {
       "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/BlockType",
       "description": "Entity content type (entity-scope-model §5.1.1)."

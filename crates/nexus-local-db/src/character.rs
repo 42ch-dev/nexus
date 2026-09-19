@@ -9,6 +9,7 @@ use crate::actor_world_binding::{
 };
 use crate::begin_immediate;
 use crate::error::{ActorContractConflict, LocalDbError};
+use crate::holders::{ensure_character_holder_in_tx, require_subject_holder, HolderSubject};
 
 const PERSONA_JSON_MAX_BYTES: usize = 16_384;
 const IMAGE_URI_MAX_BYTES: usize = 2048;
@@ -336,6 +337,29 @@ pub async fn get_character(
     }))
 }
 
+/// Resolve the stable holder of an owned stored Character for a normal read
+/// (§2.2), including archived Characters (retained management reads).
+///
+/// Fails closed when the registry row is missing or corrupt — a normal read
+/// never provisions one. Foreign and missing Characters stay a 404-shaped
+/// `ActorNotFound`, so this read does not widen existence beyond
+/// [`get_character`].
+///
+/// # Errors
+///
+/// Returns [`LocalDbError::ActorNotFound`] when the Character is missing or
+/// owned by another Creator, [`LocalDbError::HolderStateInvalid`] when its
+/// registry row is missing or corrupt, and [`LocalDbError::Sqlx`] on database
+/// failure.
+pub async fn require_character_holder(
+    pool: &SqlitePool,
+    owner_creator_id: &str,
+    character_id: &str,
+) -> Result<String, LocalDbError> {
+    require_owned_character_pool(pool, owner_creator_id, character_id).await?;
+    require_subject_holder(pool, &HolderSubject::Character(character_id.to_string())).await
+}
+
 /// List Characters owned by `owner_creator_id` with SQL `LIMIT`/`OFFSET`.
 ///
 /// Callers that paginate should pass `limit + 1` so they can detect `has_more`.
@@ -389,12 +413,13 @@ pub async fn list_characters(
         .collect())
 }
 
-/// Insert Character + first active binding in one write-serialized transaction.
+/// Insert Character + holder registry row + first active binding in one
+/// write-serialized transaction (§2.1).
 ///
 /// # Errors
 ///
 /// Returns `LocalDbError` if validation, ownership, `WorldSheet`, uniqueness, or SQL fails.
-/// Any failure rolls back both inserts.
+/// Any failure rolls back every insert.
 pub async fn create_character_with_initial_binding(
     pool: &SqlitePool,
     params: CreateCharacterParams<'_>,
@@ -456,6 +481,10 @@ async fn create_in_tx(
     .execute(&mut **tx)
     .await;
     map_actor_constraint(insert)?;
+
+    // §2.1: the Character and its holder registry row commit in this same
+    // transaction, so the identity is never usable without its holder.
+    ensure_character_holder_in_tx(tx, character_id).await?;
 
     let binding = insert_binding_tx(
         tx,
@@ -613,6 +642,11 @@ pub async fn update_character(
     let mut tx = begin_immediate(pool).await?;
     let result = async {
         let current = require_active_owned_character_tx(&mut tx, owner_creator_id, character_id).await?;
+        // §2.2: a lifecycle write resolves the same registry row it must keep
+        // across the transition. A missing/corrupt holder fails closed rather
+        // than editing an identity that has none; a rename never changes it.
+        require_subject_holder(&mut *tx, &HolderSubject::Character(character_id.to_string()))
+            .await?;
         if current.revision != expected_revision { return Err(revision_conflict()); }
         if patch_is_no_op(&current, patch)? { return Ok(current); }
         let (display_name, image_uri, persona_json) = apply_character_patch_fields(&current, patch)?;
@@ -674,6 +708,15 @@ pub async fn transition_character(
     let mut tx = begin_immediate(pool).await?;
     let result = async {
         let current = require_owned_character(&mut tx, owner_creator_id, character_id).await?;
+        // §2.2: archive and restore reuse the same holder; resolving it here
+        // fails closed when the registry row is missing or corrupt, and the row
+        // is never written by the transition (identity and lifecycle epoch are
+        // the only things that move).
+        require_subject_holder(
+            &mut *tx,
+            &HolderSubject::Character(character_id.to_string()),
+        )
+        .await?;
         if current.revision != expected_revision {
             return Err(revision_conflict());
         }
@@ -715,6 +758,105 @@ pub async fn transition_character(
             Err(err)
         }
     }
+}
+
+/// Unreferenced-only deletion of a stored Character and its holder (§2.2).
+///
+/// The holder row and the Character row are removed in one transaction, and
+/// only when the subject is unreferenced: any binding, governance reference
+/// (rows governed by the Character's holder), retained Character-owned row
+/// (knowledge, memory, SOUL, run capture) or quarantined import atom refuses
+/// the deletion with a zero-mutation `actor_in_use` conflict. Governed rows are
+/// never cascaded and no ownership is transferred.
+///
+/// # Errors
+///
+/// Returns [`LocalDbError::ActorNotFound`] for a missing or foreign Character,
+/// [`LocalDbError::HolderStateInvalid`] when its registry row is missing or
+/// corrupt, [`LocalDbError::ActorContractConflict`] (`actor_in_use`) when any
+/// reference remains, and [`LocalDbError::Sqlx`] on database failure.
+pub async fn delete_character(
+    pool: &SqlitePool,
+    owner_creator_id: &str,
+    character_id: &str,
+) -> Result<(), LocalDbError> {
+    let mut tx = begin_immediate(pool).await?;
+    let result = delete_character_in_tx(&mut tx, owner_creator_id, character_id).await;
+    match result {
+        Ok(()) => {
+            tx.commit().await?;
+            Ok(())
+        }
+        Err(err) => {
+            let _ = tx.rollback().await;
+            Err(err)
+        }
+    }
+}
+
+async fn delete_character_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    owner_creator_id: &str,
+    character_id: &str,
+) -> Result<(), LocalDbError> {
+    require_owned_character(tx, owner_creator_id, character_id).await?;
+    let holder_entry_id = require_subject_holder(
+        &mut **tx,
+        &HolderSubject::Character(character_id.to_string()),
+    )
+    .await?;
+    let in_use = character_reference_count(tx, character_id, &holder_entry_id).await?;
+    if in_use > 0 {
+        return Err(LocalDbError::actor_in_use());
+    }
+    // Holder first (it references the subject), then the subject — one
+    // transaction, so a refusal anywhere leaves both rows untouched.
+    sqlx::query("DELETE FROM knowledge_holders WHERE holder_entry_id = ? AND character_id = ?")
+        .bind(&holder_entry_id)
+        .bind(character_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(LocalDbError::actor_reference_refusal)?;
+    sqlx::query("DELETE FROM characters WHERE character_id = ? AND owner_creator_id = ?")
+        .bind(character_id)
+        .bind(owner_creator_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(LocalDbError::actor_reference_refusal)?;
+    Ok(())
+}
+
+/// Count every row that still references a Character subject: bindings,
+/// governance references (rows governed by its holder), retained owned rows and
+/// the quarantine atoms that name it as their container.
+///
+/// Every referencing column of this schema version is a `RESTRICT` foreign key,
+/// so an incomplete explicit list would surface as an opaque constraint error
+/// rather than the stable unreferenced-only conflict; the list is deliberately
+/// exhaustive for that reason.
+async fn character_reference_count(
+    conn: &mut sqlx::SqliteConnection,
+    character_id: &str,
+    holder_entry_id: &str,
+) -> Result<i64, LocalDbError> {
+    let count: i64 = sqlx::query_scalar(
+        "WITH subject(character_id, holder_entry_id) AS (VALUES (?, ?)) \
+         SELECT \
+             (SELECT COUNT(*) FROM actor_world_bindings r JOIN subject s ON r.character_id = s.character_id) \
+           + (SELECT COUNT(*) FROM kb_key_blocks r JOIN subject s ON r.character_id = s.character_id) \
+           + (SELECT COUNT(*) FROM kb_key_blocks r JOIN subject s ON r.holder_entry_id = s.holder_entry_id) \
+           + (SELECT COUNT(*) FROM character_soul_meta r JOIN subject s ON r.character_id = s.character_id) \
+           + (SELECT COUNT(*) FROM character_soul_narratives r JOIN subject s ON r.character_id = s.character_id) \
+           + (SELECT COUNT(*) FROM character_memory_pending_review r JOIN subject s ON r.character_id = s.character_id) \
+           + (SELECT COUNT(*) FROM character_memory_fragments r JOIN subject s ON r.character_id = s.character_id) \
+           + (SELECT COUNT(*) FROM character_run_captures r JOIN subject s ON r.character_id = s.character_id) \
+           + (SELECT COUNT(*) FROM knowledge_import_quarantine r JOIN subject s ON r.character_id = s.character_id)",
+    )
+    .bind(character_id)
+    .bind(holder_entry_id)
+    .fetch_one(conn)
+    .await?;
+    Ok(count)
 }
 
 /// Map unique/check failures onto stable actor conflicts when possible.

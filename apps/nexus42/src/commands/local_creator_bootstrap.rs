@@ -786,12 +786,19 @@ mod tests {
         assert_eq!(identities.len(), 1);
         let id = identities[0].creator_id.clone();
 
-        // Simulate the partial: delete the workspace `creators` row.
+        // Simulate the partial: delete the workspace `creators` row and the
+        // holder registry row that commit with it (v1.191 P1 T4; the holder
+        // references the subject, so it goes first).
         let config = CliConfig::load().expect("reload config");
         let db_path = crate::config::resolve_state_db_path(&config).expect("resolve state db path");
         let workspace_pool = crate::db::Schema::init(&db_path)
             .await
             .expect("init workspace pool");
+        sqlx::query("DELETE FROM knowledge_holders WHERE creator_id = ?")
+            .bind(&id)
+            .execute(&workspace_pool)
+            .await
+            .expect("delete holder registry row");
         sqlx::query("DELETE FROM creators WHERE creator_id = ?")
             .bind(&id)
             .execute(&workspace_pool)
@@ -883,12 +890,18 @@ mod tests {
         assert_eq!(identities.len(), 1);
         let active_id = identities[0].creator_id.clone();
 
-        // Simulate the partial: delete the workspace row.
+        // Simulate the partial: delete the workspace row and the holder
+        // registry row that commits with it (v1.191 P1 T4).
         let config = CliConfig::load().expect("reload config");
         let db_path = crate::config::resolve_state_db_path(&config).expect("resolve state db path");
         let workspace_pool = crate::db::Schema::init(&db_path)
             .await
             .expect("init workspace pool");
+        sqlx::query("DELETE FROM knowledge_holders WHERE creator_id = ?")
+            .bind(&active_id)
+            .execute(&workspace_pool)
+            .await
+            .expect("delete holder registry row");
         sqlx::query("DELETE FROM creators WHERE creator_id = ?")
             .bind(&active_id)
             .execute(&workspace_pool)

@@ -70,34 +70,88 @@ pub(crate) async fn validate_world_sheet_tx(
         return Ok(());
     };
     if sheet_id.len() > 128 {
-        return Err(LocalDbError::ActorContractConflict {
-            code: ActorContractConflict::InvalidWorldSheet,
-        });
+        return Err(invalid_world_sheet());
     }
     if !sheet_id.starts_with("kb_") {
-        return Err(LocalDbError::ActorContractConflict {
-            code: ActorContractConflict::InvalidWorldSheet,
-        });
+        return Err(invalid_world_sheet());
     }
-    let ok = sqlx::query_scalar!(
-        r#"SELECT EXISTS(
-            SELECT 1 FROM kb_key_blocks
+    let ok: i64 = sqlx::query_scalar(WORLD_SHEET_ELIGIBILITY_EXISTS_SQL)
+        .bind(sheet_id)
+        .bind(world_id)
+        .bind(world_id)
+        .fetch_one(&mut **tx)
+        .await?;
+    if ok == 0 {
+        return Err(invalid_world_sheet());
+    }
+    Ok(())
+}
+
+/// `invalid_world_sheet` conflict (durable §3).
+pub(crate) const fn invalid_world_sheet() -> LocalDbError {
+    LocalDbError::ActorContractConflict {
+        code: ActorContractConflict::InvalidWorldSheet,
+    }
+}
+
+/// The forward (link-time) WorldSheet eligibility rule as one `EXISTS`
+/// (durable §3): a live, World-owned `character` entry of the same World with
+/// no disclosure.
+///
+/// `disclosure IS NULL` is the native replacement for the retired
+/// `creator_only = 0` predicate: a linkable sheet must be shared. `owner_kind =
+/// 'world'` plus the `world_id` bind is the same-world clause, `block_type =
+/// 'character'` the World-owned-character clause and the status clause the
+/// liveness clause.
+const WORLD_SHEET_ELIGIBILITY_EXISTS_SQL: &str =
+    "SELECT EXISTS(SELECT 1 FROM kb_key_blocks
             WHERE key_block_id = ?
               AND world_id = ?
               AND owner_kind = 'world'
               AND block_type = 'character'
               AND status NOT IN ('deleted', 'merged', 'deprecated')
-              AND creator_only = 0
-         ) as "ok!: i64""#,
-        sheet_id,
-        world_id
+              AND disclosure IS NULL)";
+
+/// Reverse-reference guard (durable §3): after a World-owned entry was
+/// written, every binding that links it as its `WorldSheet` must still be
+/// satisfied by the stored row.
+///
+/// The forward rule (link time) lives in [`validate_world_sheet_tx`]; this is
+/// the same rule evaluated from the binding side, so a governance or status
+/// change that would strip a live, World-owned, shared `character` entry of its
+/// eligibility refuses with `invalid_world_sheet` instead of silently
+/// unlinking the binding. Callers run it inside the same transaction as the
+/// material write and roll back on the refusal (zero mutation).
+///
+/// # Errors
+///
+/// Returns [`LocalDbError::ActorContractConflict`] `invalid_world_sheet` when
+/// any linking binding's sheet no longer satisfies the rule, and
+/// `LocalDbError` on database failure.
+pub(crate) async fn assert_linked_world_sheets_remain_eligible_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    entry_id: &str,
+) -> Result<(), LocalDbError> {
+    let broken: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(
+            SELECT 1 FROM actor_world_bindings b
+            WHERE b.world_sheet_entry_id = ?
+              AND NOT EXISTS (
+                SELECT 1 FROM kb_key_blocks
+                WHERE key_block_id = b.world_sheet_entry_id
+                  AND world_id = b.world_id
+                  AND owner_kind = 'world'
+                  AND block_type = 'character'
+                  AND status NOT IN ('deleted', 'merged', 'deprecated')
+                  AND disclosure IS NULL
+              )
+         )",
     )
+    .bind(entry_id)
     .fetch_one(&mut **tx)
     .await?;
-    if ok == 0 {
-        return Err(LocalDbError::ActorContractConflict {
-            code: ActorContractConflict::InvalidWorldSheet,
-        });
+    if broken != 0 {
+        return Err(invalid_world_sheet());
     }
     Ok(())
 }
@@ -309,6 +363,50 @@ pub async fn add_actor_world_binding(
         }
     }
 }
+
+/// Whether an owned Character holds an active binding to an owned World
+/// (durable §3 `character-private` audience permission on a World row).
+///
+/// The probe is transaction-taking on purpose: authoring admission must
+/// re-read the stored binding state inside its own transaction, so a
+/// bind/unbind racing the write cannot land a private row whose audience was
+/// no longer bound when it committed.
+///
+/// `Ok(false)` covers a missing/inactive binding, a foreign World and a
+/// binding whose World is not owned by `owner_creator_id`; the caller owns the
+/// refusal shape. The Character's own ownership/activity is a separate,
+/// existing admission check — this probe answers only the binding question.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` on database failure.
+pub(crate) async fn has_active_binding_to_world_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    owner_creator_id: &str,
+    character_id: &str,
+    world_id: &str,
+) -> Result<bool, LocalDbError> {
+    let exists: i64 = sqlx::query_scalar(ACTIVE_BINDING_TO_WORLD_EXISTS_SQL)
+        .bind(character_id)
+        .bind(world_id)
+        .bind(owner_creator_id)
+        .fetch_one(&mut **tx)
+        .await?;
+    Ok(exists != 0)
+}
+
+/// The active-owned-binding `EXISTS` behind [`has_active_binding_to_world_tx`]:
+/// the binding is
+/// active, targets `world_id`, and that World belongs to `owner_creator_id`.
+const ACTIVE_BINDING_TO_WORLD_EXISTS_SQL: &str =
+    "SELECT EXISTS(
+        SELECT 1 FROM actor_world_bindings b
+        INNER JOIN narrative_worlds w ON w.world_id = b.world_id
+        WHERE b.character_id = ?
+          AND b.world_id = ?
+          AND b.status = 'active'
+          AND w.owner_creator_id = ?
+     )";
 
 /// Ownership-scoped binding list for a Character.
 ///

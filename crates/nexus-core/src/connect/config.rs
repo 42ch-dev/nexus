@@ -49,6 +49,43 @@ pub const DEFAULT_CONNECT_HOST: &str = "127.0.0.1";
 /// `DEFAULT_INVOKE_TIMEOUT_MS` in spoke-connect.
 pub const DEFAULT_INVOKE_TIMEOUT_MS: u64 = 5000;
 
+/// The spoke baseline capability every peer-tools responder declares.
+pub const CAPABILITY_SPOKE_BASELINE: &str = "spoke-baseline";
+
+/// KE capabilities a **tools-only** responder must never declare
+/// (v1.191 P1 T14, durable §9).
+///
+/// The daemon peer-tools responder is composed with `ports: None` — it
+/// serves reverse tool invokes, not KE operations — so its hello declares
+/// only the baseline plus operator-allowlisted tool ids. `ke-ownership` and
+/// `ke-extraction` are the two existing KE capability names; neither may
+/// appear, and the operator allowlist can never carry one (see
+/// [`validate_allowlist_entry`]).
+pub const KE_CAPABILITIES: [&str; 2] = ["ke-ownership", "ke-extraction"];
+
+/// The six KE operation families (durable §9) — served only by a fully
+/// enforced KE host (the Connect host CLI), never by this tools-only
+/// responder. Named here so an operator entry that mistakes a family name
+/// for a tool id fails config load with the truthful reason.
+pub const KE_OPERATION_FAMILIES: [&str; 6] =
+    ["upsert", "promote", "relate", "check", "assemble", "compute"];
+
+/// The capabilities a tools-only peer-tools responder hello may declare
+/// (v1.191 P1 T14, durable §9): the spoke baseline plus the exact
+/// operator-allowlisted tool ids, in allowlist order.
+///
+/// The derivation can only ever emit tool ids — the allowlist validator
+/// refuses a KE capability or family name — so the tools-only responder
+/// declares neither new family. The KE-enforcing Connect host derives its
+/// own list in `nexus-spoke-adapter` (`manifest::LOCAL_CAPABILITIES`); the
+/// two compositions are deliberately separate single sources.
+#[must_use]
+pub fn tools_only_capabilities(tool_ids: &[String]) -> Vec<String> {
+    let mut capabilities = vec![CAPABILITY_SPOKE_BASELINE.to_owned()];
+    capabilities.extend(tool_ids.iter().cloned());
+    capabilities
+}
+
 /// Duplicate tool-id collision policy (DF-91, V1.179 P0 T2).
 ///
 /// `first_stays` (the serde default) keeps the AR-68 #3 behavior for
@@ -260,6 +297,18 @@ fn validate_allowlist_entry(entry: &str) -> Result<(), ConnectConfigError> {
         return Err(ConnectConfigError::InvalidAllowlist {
             entry: entry.to_owned(),
             reason: "reserved namespace (tools.nexus.* is daemon-owned)".to_owned(),
+        });
+    }
+    // KE names are not tool ids (v1.191 P1 T14, durable §9): the responder
+    // this allowlist feeds is tools-only, so a capability name or an
+    // operation family name can never be admitted — declaring one would
+    // advertise unenforced KE capability.
+    if KE_CAPABILITIES.contains(&entry) || KE_OPERATION_FAMILIES.contains(&entry) {
+        return Err(ConnectConfigError::InvalidAllowlist {
+            entry: entry.to_owned(),
+            reason: "KE capability/operation name — the peer-tools responder is tools-only \
+                     (durable §9): allowlist exact tool ids (tools.<ns>.<id>) only"
+                .to_owned(),
         });
     }
     // Grammar: `^tools\.[a-z][a-z0-9_-]*\.[a-z0-9][a-z0-9_-]*$`.

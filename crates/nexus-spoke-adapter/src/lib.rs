@@ -57,6 +57,10 @@ pub mod adapter;
 pub mod constraint;
 pub mod conversion;
 pub mod extensions;
+// v1.191 P1 T12 — the adapter-owned production extraction wrapper (durable §8):
+// `ResolvedExtractionPort` + `extract_candidates` around upstream
+// `orchestrate_extract`. No orchestration/core import; no persistence.
+pub mod extraction;
 pub mod ops;
 
 /// The HostCapabilityManifest single builder SSOT (DF-72 N-C0, §4.1).
@@ -138,9 +142,10 @@ pub use spoke_operations::{
 // envelopes + capability types the orchestrators accept/return.
 pub use spoke_schemas::{
     AssemblePacket, AssembleRequest, AssembleResponse, CheckRequest, CheckResponse, ComputeRequest,
-    ComputeResponse, Finding, HostCapabilityManifest, KnowledgeEntry, ProjectRequest,
-    ProjectResponse, PromoteRequest, PromoteResponse, RelateRequest, RelateResponse, Relation,
-    Rule, Scope, SourceAnchor, TimelineEvent, UpsertRequest, UpsertResponse,
+    ComputeResponse, ExtractRequest, ExtractResponse, Finding, HostCapabilityManifest,
+    KnowledgeEntry, ProjectRequest, ProjectResponse, PromoteRequest, PromoteResponse,
+    RelateRequest, RelateResponse, Relation, Rule, Scope, SourceAnchor, TimelineEvent,
+    UpsertRequest, UpsertResponse,
 };
 
 // ── Spoke extension-key newtypes (re-export) ─────────────────────────
@@ -183,6 +188,30 @@ pub use spoke_operations::{
 // boundary (call-boundary invariant above).
 pub use spoke_operations::{
     parse_tool_capability_id, validate_manifest_tools, validate_tool_arguments, ToolDescriptor,
+};
+
+// v1.191 P1 T1 (spoke 0.13.0) — the `ke-extraction` surface: the injected
+// product source loader, its operand/result types and the `orchestrate_extract`
+// entrypoint. `ExtractionPort` is deliberately NOT a member of
+// `BaselinePorts` / `FullPorts` upstream (it is a standalone injected boundary,
+// like `ToolInvokePort`), so re-exporting it here adds no baseline/full port
+// obligation and the adapter's own port impls stay unchanged. T12 owns the
+// production wrapper that actually calls `orchestrate_extract`.
+pub use spoke_operations::{
+    orchestrate_extract, ExtractRunInput, ExtractionPort, ExtractionResult,
+};
+
+// v1.191 P1 T12 (durable §8) — the production wrapper that actually drives
+// `orchestrate_extract` for nexus: an injected admitted source bundle
+// (`ResolvedExtractionInput` → `ResolvedExtractionPort`) plus the native
+// callback (`NativeExtractionOutput`), returning the upstream-validated
+// response with the prepared candidates and the relationship sidecar
+// (`ExtractCandidatesOutcome`). Persistence stays with the caller, so the
+// `ExtractionPort` here is still standalone — not a `BaselinePorts` /
+// `FullPorts` member.
+pub use extraction::{
+    extract_candidates, ExtractCandidatesOutcome, NativeExtractionOutput, ResolvedExtractionInput,
+    ResolvedExtractionPort,
 };
 
 // V1.166 AR-1 — the world-scoped `orchestrate_check` seam (nexus semantics

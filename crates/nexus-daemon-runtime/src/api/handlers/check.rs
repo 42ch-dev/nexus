@@ -182,7 +182,18 @@ pub async fn run_check(
     // family, PD-1), and stamps `extensions.nexus.world_id` (the AR-2
     // routing key) + `creator_id` (provenance). FindingPort routes
     // world-scoped findings onto `world_findings` (DR-68, AR-2).
-    let adapter = NexusAdapter::new(pool.clone());
+    // v1.191 P1 T9 (durable §5.1): `/v1/daemon/check` is a Creator-run
+    // consistency audit over an owned World, so it reads under the **Creator
+    // management** selection (owned World/Character/binding containers plus
+    // the known-governance holder set) — server-chosen by core admission from
+    // the stored principal, never a request value. The route is not a
+    // Character view, so no row this route could read before cutover becomes
+    // invisible to it.
+    let (core, principal) = super::world_kb_guards::resolve_core_principal(&state).await?;
+    let read_scope = core
+        .creator_management_read_scope(&principal, req.world_id.as_str())
+        .await?;
+    let adapter = NexusAdapter::new(pool.clone(), read_scope);
     // V1.166 AR-1 — world-scoped seam: `orchestrate_check_world_scoped`
     // pre-expands empty `rule_refs` to this world's `status=active` rules
     // and fail-closes on embedded rules / foreign-world refs BEFORE spoke
