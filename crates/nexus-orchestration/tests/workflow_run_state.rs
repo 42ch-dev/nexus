@@ -610,10 +610,19 @@ async fn old_migrated_db_upgrades_cleanly() {
     let old_migrations_dir = tempfile::tempdir().unwrap();
     let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../crates/nexus-local-db/migrations");
+    // v1.191 P1 T17: the holder-registry cutover migration is
+    // runner-coupled by design — its preflight aborts any path that does not
+    // stage the digest rows (`holders::stage_holder_digests_in_tx`), and the
+    // raw sqlx migrator used for the "old" schema has no such hook. A DB that
+    // predates the cutover therefore predates this file too, and the guarded
+    // upgrade below is what applies it (through the real runner).
+    const RUNNER_CUTOVER_MIGRATION: &str = "20260918000001_holder_registry.sql";
     for entry in std::fs::read_dir(&src).expect("read migrations dir") {
         let entry = entry.expect("entry");
         let name = entry.file_name().to_string_lossy().to_string();
-        if name == "20260907000001_workflow_execution_state.sql" {
+        if name == "20260907000001_workflow_execution_state.sql"
+            || name == RUNNER_CUTOVER_MIGRATION
+        {
             continue;
         }
         std::fs::copy(entry.path(), old_migrations_dir.path().join(name)).expect("copy migration");

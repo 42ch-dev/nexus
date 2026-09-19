@@ -322,6 +322,33 @@ fn r3_context_assemble_moment_executes_without_placeholder_skip() {
         .assert()
         .success();
 
+    // v1.191 P1 T9: the admitted knowledge view is World-scoped — a worldless
+    // assemble-moment is refused with a `pass --world-id` hint (asserted by
+    // `integration.rs::context_assemble_requires_world_id`), so the R3 chain
+    // materializes a World and names it.
+    let world_out = Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("creator")
+        .arg("world")
+        .arg("create")
+        .arg("--title")
+        .arg("R3 World")
+        .env("HOME", home)
+        .current_dir(&workspace)
+        .output()
+        .expect("world create");
+    assert!(
+        world_out.status.success(),
+        "world create failed: {}",
+        String::from_utf8_lossy(&world_out.stderr)
+    );
+    let world_id = String::from_utf8_lossy(&world_out.stdout)
+        .split("World created: ")
+        .nth(1)
+        .and_then(|rest| rest.split_whitespace().next())
+        .expect("created world id")
+        .to_string();
+
     // Run context assemble-moment — must not panic and succeed
     Command::cargo_bin("nexus42")
         .unwrap()
@@ -329,6 +356,8 @@ fn r3_context_assemble_moment_executes_without_placeholder_skip() {
             "platform",
             "context",
             "assemble-moment",
+            "--world-id",
+            &world_id,
             "--max-tokens",
             "1200",
         ])
