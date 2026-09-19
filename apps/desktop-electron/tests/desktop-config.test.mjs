@@ -19,6 +19,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -310,6 +311,21 @@ test('corrupt config is never replaced with an empty document and leaves no temp
 
   assert.equal(readText(configPath(home)), corrupt);
   assert.deepEqual(readdirSync(join(home, '.nexus42')), ['config.toml']);
+});
+
+// ---------------------------------------------------------------------------
+// Owner-only writes
+// ---------------------------------------------------------------------------
+
+test('written documents are owner-only (0600)', async (t) => {
+  const { home, config } = setup(t);
+  await config.ensure_setup_bootstrap();
+  await config.set_agent_profile({ name: 'claude', launchCommand: 'claude' });
+
+  // The atomic replace creates a 0600 temp file and renames it into place, so
+  // neither the materialized copy nor the document is readable by other users.
+  assert.equal(statSync(configPath(home)).mode & 0o777, 0o600);
+  assert.equal(statSync(agentPath(home)).mode & 0o777, 0o600);
 });
 
 test('mutations preserve unrelated keys and their value types', async (t) => {
