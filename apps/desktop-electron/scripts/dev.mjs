@@ -59,6 +59,54 @@ function signalProcessGroup(child, signal) {
     }
   }
 }
+function childHasExited(child) {
+  return child.exitCode !== null || child.signalCode !== null;
+}
+
+function waitForChildExit(child, timeoutMs = null) {
+  if (childHasExited(child)) {
+    children.delete(child);
+    return Promise.resolve(true);
+  }
+  return new Promise((resolvePromise) => {
+    let settled = false;
+    const finish = (reaped) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      child.off('exit', onExit);
+      child.off('error', onError);
+      if (reaped) children.delete(child);
+      resolvePromise(reaped);
+    };
+    const onExit = () => finish(true);
+    const onError = () => finish(true);
+    const timeout = timeoutMs === null ? null : setTimeout(() => finish(false), timeoutMs);
+    child.once('exit', onExit);
+    child.once('error', onError);
+  });
+}
+
+export async function terminateChild(
+  child,
+  { signal = 'SIGINT', sendSignal = signalProcessGroup, timeoutMs = CHILD_STOP_TIMEOUT_MS } = {},
+) {
+  if (childHasExited(child)) {
+    children.delete(child);
+    return true;
+  }
+  const initialTermination = waitForChildExit(child, timeoutMs);
+  sendSignal(child, signal);
+  if (await initialTermination) return true;
+
+  const forcedTermination = waitForChildExit(child);
+  sendSignal(child, 'SIGKILL');
+  return await forcedTermination;
+}
+async function stopChild(child, signal = 'SIGINT') {
+  await terminateChild(child, { signal });
+}
+
 
 function spawnOwned(command, args, options = {}) {
   const child = spawn(command, args, {
@@ -161,7 +209,7 @@ async function launch(mode) {
     electron.once('exit', (code, signal) => resolvePromise(code ?? (signal ? 128 : 1)));
   });
   if (vite && !shuttingDown) {
-    signalProcessGroup(vite, 'SIGTERM');
+    await stopChild(vite, 'SIGTERM');
   }
   if (exitCode !== 0 && !shuttingDown) {
     throw new Error(`Electron exited with ${exitCode}`);
@@ -169,14 +217,7 @@ async function launch(mode) {
 }
 
 async function stopChildren() {
-  const owned = [...children];
-  if (owned.length === 0) return;
-  for (const child of owned) signalProcessGroup(child, 'SIGINT');
-  const deadline = Date.now() + CHILD_STOP_TIMEOUT_MS;
-  while (children.size > 0 && Date.now() < deadline) {
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
-  }
-  for (const child of children) signalProcessGroup(child, 'SIGKILL');
+  await Promise.all([...children].map((child) => stopChild(child)));
 }
 
 function installSignalHandlers() {
@@ -199,8 +240,10 @@ async function main() {
   await launch(mode);
 }
 
-main().catch(async (error) => {
-  process.stderr.write(`[desktop-dev] ${error instanceof Error ? error.message : String(error)}\n`);
-  await stopChildren();
-  process.exitCode = 1;
-});
+if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
+  main().catch(async (error) => {
+    process.stderr.write(`[desktop-dev] ${error instanceof Error ? error.message : String(error)}\n`);
+    await stopChildren();
+    process.exitCode = 1;
+  });
+}
