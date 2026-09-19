@@ -192,6 +192,28 @@ test('clear removes stored material; a subsequent import is possible exactly onc
   assert.equal(again.getAuth()?.apiKey, 'sk-legacy');
 });
 
+test('delete failure surfaces as structured error; bytes and prior state survive', async (t) => {
+  const deps = makeDeps(t);
+  const store = await ConnectionStore.open(deps);
+  await store.set({ ...BASE_CONFIG }, { action: 'replace', value: 'sk-live-secret' });
+  assert.equal(existsSync(deps.filePath), true);
+
+  const failing = await ConnectionStore.open({
+    ...deps,
+    removeFile() {
+      const err = new Error('EPERM: operation not permitted');
+      err.code = 'EPERM';
+      throw err;
+    },
+  });
+  await assert.rejects(
+    () => failing.delete(),
+    (err) => errorCode(err) === 'secure_store_delete_failed',
+  );
+  assert.equal(existsSync(deps.filePath), true, 'failed clear must leave the file in place');
+  assert.equal(failing.getAuth()?.apiKey, 'sk-live-secret', 'no false clear: state stays intact');
+});
+
 test('legacy import leaves the original untouched and encrypts before switching', async (t) => {
   const deps = makeDeps(t);
   const legacyPath = join(deps.filePath, '..', 'connection_config.json');

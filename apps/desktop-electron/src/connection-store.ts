@@ -41,6 +41,12 @@ export interface ConnectionStoreDeps {
    * never log or return the secret anywhere else. Absent ⇒ no import.
    */
   readLegacy?: () => Promise<string | null>;
+  /**
+   * Filesystem removal primitive (defaults to `rmSync`). Injectable so a
+   * removal failure is observable in tests; any failure other than a
+   * confirmed-absent file makes {@link ConnectionStore.delete} throw.
+   */
+  removeFile?: (filePath: string) => void;
 }
 
 interface StoredFile {
@@ -190,18 +196,19 @@ export class ConnectionStore {
    * inactive or has no credential.
    */
   getAuth(): { endpointOrigin: string; apiKey: string } | null {
-    if (!this.state || this.state.config.active !== true || !this.state.credential) {
+    const state = this.state;
+    if (state?.config.active !== true || !state?.credential) {
       return null;
     }
     let apiKey: string;
     try {
-      apiKey = this.deps.storage.decryptString(decodeCredential(this.state.credential));
+      apiKey = this.deps.storage.decryptString(decodeCredential(state.credential));
     } catch {
       return null;
     }
     let origin: string;
     try {
-      origin = new URL(this.state.config.endpointUrl).origin;
+      origin = new URL(state.config.endpointUrl).origin;
     } catch {
       return null;
     }
@@ -233,7 +240,7 @@ export class ConnectionStore {
       if (!previous?.credential) {
         // No stored key and none supplied: valid, simply keyless.
         nextCredential = undefined;
-      } else if (previous && sameEndpoint(previous.config, config)) {
+      } else if (sameEndpoint(previous.config, config)) {
         nextCredential = previous.credential;
       } else {
         // Endpoint changed: the old endpoint's credential never carries over.
@@ -255,13 +262,25 @@ export class ConnectionStore {
    * one-time import only runs from {@link ConnectionStore.open} when no
    * store file exists, so a subsequent import is possible exactly once (on
    * the next open after this delete) and "clear never reimports" holds.
+   *
+   * Resolves only when the material is actually gone: a removal failure
+   * (permissions, I/O, …) throws `secure_store_delete_failed` and the
+   * in-memory state is left intact so no false "cleared" is reported while
+   * bytes remain on disk. An already-absent file counts as removed.
    */
   async delete(): Promise<void> {
-    this.state = null;
+    const remove = this.deps.removeFile ?? rmSync;
     try {
-      rmSync(this.deps.filePath);
-    } catch {
-      /* absent file is already the desired state */
+      remove(this.deps.filePath);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException | null)?.code;
+      if (code !== 'ENOENT') {
+        throw desktopError(
+          'secure_store_delete_failed',
+          `connection store file could not be removed (${code ?? 'unknown error'})`,
+        );
+      }
     }
+    this.state = null;
   }
 }

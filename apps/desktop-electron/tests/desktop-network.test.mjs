@@ -24,9 +24,21 @@ const AUTH = { endpointOrigin: 'https://daemon.example.com:8443', apiKey: 'sk-li
 const GOOD_URL = 'https://daemon.example.com:8443/v1/daemon/runtime/discovery';
 const FETCH = { url: GOOD_URL, resourceType: 'fetch' };
 
+/**
+ * Read a header from Electron's real `webRequest` header-map shape
+ * (`Record<string, string>`), case-insensitively.
+ */
 function headerValue(headers, name) {
-  const entry = headers.find((h) => h.name.toLowerCase() === name.toLowerCase());
-  return entry?.value;
+  if (headers == null || typeof headers !== 'object' || Array.isArray(headers)) {
+    throw new Error(`requestHeaders must be Electron's header map, got: ${JSON.stringify(headers)}`);
+  }
+  const key = Object.keys(headers).find((k) => k.toLowerCase() === name.toLowerCase());
+  return key === undefined ? undefined : headers[key];
+}
+
+/** Count headers matching a name (case-insensitive) in the header map. */
+function headerCount(headers, name) {
+  return Object.keys(headers).filter((k) => k.toLowerCase() === name.toLowerCase()).length;
 }
 
 // ---------------------------------------------------------------------------
@@ -97,6 +109,29 @@ test('never injects for non-fetch resource types (image, media, subresource)', (
   }
 });
 
+test('inherited/prototype resource-type names never match the allowlist', () => {
+  for (const resourceType of ['constructor', 'toString', 'hasOwnProperty', '__proto__', 'valueOf']) {
+    assert.deepEqual(
+      decideAuthInjection(AUTH, { url: GOOD_URL, resourceType }),
+      { inject: null },
+      resourceType,
+    );
+    assert.equal(
+      headerValue(applyAuthHeaders(AUTH, { url: GOOD_URL, resourceType }), 'x-api-key'),
+      undefined,
+      resourceType,
+    );
+  }
+});
+
+test('hook response uses the real Electron header-map shape, not a HeaderEntry[]', () => {
+  const request = fakeSession();
+  const authed = request({ url: GOOD_URL, resourceType: 'xhr' }, () => AUTH);
+  assert.ok(authed !== null && typeof authed === 'object' && !Array.isArray(authed),
+    'callback response must be Electron\'s Record<string, string> header map');
+  assert.equal(authed['X-API-Key'], 'sk-live-secret');
+});
+
 test('inactive or keyless endpoint: no auth anywhere', () => {
   assert.deepEqual(decideAuthInjection(null, FETCH), { inject: null });
   assert.equal(headerValue(applyAuthHeaders(null, FETCH), 'x-api-key'), undefined);
@@ -119,9 +154,8 @@ test('renderer-supplied X-API-Key is stripped before injection decision', () => 
     resourceType: 'fetch',
     requestHeaders: { 'X-API-Key': 'sk-evil-renderer', 'Accept': 'application/json' },
   });
-  const values = headers.filter((h) => h.name.toLowerCase() === AUTH_HEADER);
-  assert.equal(values.length, 1, 'exactly one auth header survives');
-  assert.equal(values[0].value, 'sk-live-secret', 'renderer value replaced by main-owned key');
+  const values = headerCount(headers, AUTH_HEADER);
+  assert.equal(values, 1, 'exactly one auth header survives');
   assert.equal(headerValue(headers, 'accept'), 'application/json');
 });
 
@@ -131,7 +165,7 @@ test('renderer-supplied auth is stripped even when no injection is allowed', () 
     resourceType: 'fetch',
     requestHeaders: { 'x-api-key': 'sk-evil-renderer' },
   });
-  assert.equal(headers.length, 0, 'foreign request leaves with no auth header at all');
+  assert.equal(Object.keys(headers).length, 0, 'foreign request leaves with no auth header at all');
 });
 
 // ---------------------------------------------------------------------------
@@ -185,9 +219,9 @@ test('hook strips renderer auth on every request class', () => {
       { url, resourceType: 'fetch', requestHeaders: { 'x-api-key': 'sk-evil' } },
       () => AUTH,
     );
-    const values = (headers ?? []).filter((h) => h.name.toLowerCase() === AUTH_HEADER);
-    assert.equal(values.length, expected === undefined ? 0 : 1, url);
-    assert.equal(values[0]?.value, expected, url);
+    const values = headerCount(headers ?? {}, AUTH_HEADER);
+    assert.equal(values, expected === undefined ? 0 : 1, url);
+    assert.equal(headerValue(headers, AUTH_HEADER), expected, url);
   }
 });
 

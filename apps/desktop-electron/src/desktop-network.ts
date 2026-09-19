@@ -56,7 +56,7 @@ export function decideAuthInjection(
   details: RequestDetailsLike,
 ): AuthDecision {
   if (!auth) return { inject: null };
-  if (!(details.resourceType in AUTH_RESOURCE_TYPES)) return { inject: null };
+  if (!Object.hasOwn(AUTH_RESOURCE_TYPES, details.resourceType)) return { inject: null };
   let origin: string;
   let path: string;
   try {
@@ -71,26 +71,23 @@ export function decideAuthInjection(
   return { inject: auth.apiKey };
 }
 
-export interface HeaderEntry {
-  name: string;
-  value: string;
-}
-
 /**
- * Compute the outgoing header list for a request: any renderer-supplied
- * `X-API-Key` is stripped first, then the main-owned credential is
- * appended only when the policy decision allows it. Header names are
- * compared case-insensitively (HTTP tokens).
+ * Compute the outgoing request-headers map for a request, in Electron's
+ * `webRequest` header-map shape (`Record<string, string>`): any
+ * renderer-supplied `X-API-Key` is stripped first, then the main-owned
+ * credential is set only when the policy decision allows it. Header names
+ * are compared case-insensitively (HTTP tokens).
  */
 export function applyAuthHeaders(
   auth: ActiveConnectionAuth | null,
   details: RequestDetailsLike,
-): HeaderEntry[] {
-  const headers = Object.entries(details.requestHeaders ?? {})
-    .filter(([name]) => name.toLowerCase() !== AUTH_HEADER)
-    .map(([name, value]) => ({ name, value }));
+): Record<string, string> {
+  const headers: Record<string, string> = {};
+  for (const [name, value] of Object.entries(details.requestHeaders ?? {})) {
+    if (name.toLowerCase() !== AUTH_HEADER) headers[name] = value;
+  }
   const { inject } = decideAuthInjection(auth, details);
-  if (inject !== null) headers.push({ name: 'X-API-Key', value: inject });
+  if (inject !== null) headers['X-API-Key'] = inject;
   return headers;
 }
 
@@ -103,7 +100,7 @@ export interface SessionLike {
   webRequest: {
     onBeforeSendHeaders(
       filter: { urls: string[] },
-      listener: (details: RequestDetailsLike & { requestHeaders?: Record<string, string> }, callback: (response: { requestHeaders?: HeaderEntry[] }) => void) => void,
+      listener: (details: RequestDetailsLike & { requestHeaders?: Record<string, string> }, callback: (response: { requestHeaders?: Record<string, string> }) => void) => void,
     ): void;
     onHeadersReceived?(
       filter: { urls: string[] },
