@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -15,6 +15,19 @@ const iconDir = path.join(appRoot, 'resources/icons');
 const sourcePath = path.join(iconDir, 'source-1024.png');
 const previewPath = path.join(iconDir, 'app-icon-preview-256.png');
 const icnsPath = path.join(iconDir, 'app.icns');
+const rootPackagePath = path.join(repoRoot, 'package.json');
+const productManifestPath = path.join(appRoot, 'resources/product.json');
+
+const rootVersion = JSON.parse(readFileSync(rootPackagePath, 'utf8')).version;
+const productManifest = JSON.parse(readFileSync(productManifestPath, 'utf8'));
+if (productManifest.version !== rootVersion) {
+  throw new Error(`Product manifest version ${productManifest.version} does not match root package version ${rootVersion}`);
+}
+if (productManifest.minimum_macos !== '13.0') {
+  throw new Error(`Product manifest minimum_macos must be 13.0, got ${productManifest.minimum_macos}`);
+}
+
+mkdirSync(iconDir, { recursive: true });
 
 const CANVAS = 1024;
 const PLATE_COLOR = '#0D2B3E';
