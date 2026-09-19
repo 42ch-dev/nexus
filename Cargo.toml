@@ -251,13 +251,13 @@ codex-codes = { version = "=0.154.2", default-features = false, features = ["asy
 # dep. Consumed by `nexus-agent-host`. Version must never be mirrored in
 # `docs/` (PD-6).
 deepseek-harness-sdk = "=0.2.1"
-napi = { version = "=3.12.4", default-features = false, features = [
+napi = { version = "=3.12.5", default-features = false, features = [
     "napi8",
     "tokio_rt",
     "serde-json",
     "dyn-symbols",
 ] }
-napi-derive = "=3.6.5"
+napi-derive = "=3.6.6"
 napi-build = "=2.4.2"
 futures-core = "0.3"
 
