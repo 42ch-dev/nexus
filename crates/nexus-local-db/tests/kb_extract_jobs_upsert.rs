@@ -334,3 +334,186 @@ async fn delete_pending_for_chapter_removes_only_pending() {
         .unwrap();
     assert_eq!(keep.promotion_status, "confirmed");
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// v1.191 P1 T13 — the atomic job result the extraction callers depend on
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A rescan of the same extraction run reuses the candidate row and the
+/// relationship suggestion: both ids are retained, and neither is duplicated.
+/// This is the job-result identity the review-time caller persists into.
+#[tokio::test]
+async fn v1191_extract_candidate_and_relationship_ids_survive_a_rescan() {
+    let (pool, _dir) = fresh_pool().await;
+    nexus_local_db::kb_store::seed::world(&pool, WORLD, CREATOR, "T13", "t13", "private", "manual")
+        .await;
+    for (id, name) in [("kb_t13_aria", "Aria"), ("kb_t13_kael", "Kael")] {
+        nexus_local_db::kb_store::seed::knowledge_entry(
+            &pool,
+            id,
+            WORLD,
+            "character",
+            name,
+            "confirmed",
+        )
+        .await;
+    }
+    let body = payload("A warrior", "Lin Xia");
+
+    // ── First extraction pass ───────────────────────────────────────────────
+    let first = upsert_pending_candidate(
+        &pool,
+        CREATOR,
+        "ws",
+        WORLD,
+        Some(WORK),
+        Some(1),
+        "character",
+        "Lin Xia",
+        &body,
+    )
+    .await
+    .unwrap();
+    let candidate_id = match first {
+        UpsertOutcome::Inserted(job_id) => job_id,
+        other => panic!("expected Inserted, got {other:?}"),
+    };
+
+    let now = "2026-09-18T00:00:00Z";
+    let inserted = nexus_local_db::kb_relationships::upsert_extraction_relationship(
+        &pool,
+        WORLD,
+        "kb_t13_aria",
+        "kb_t13_kael",
+        "allied_with",
+        None,
+        true,
+        Some(0.7),
+        Some("Aria and Kael fought together"),
+        now,
+    )
+    .await
+    .unwrap();
+    assert!(inserted, "the first suggestion is inserted");
+    let before =
+        nexus_local_db::kb_relationships::list_relationships_for_world(&pool, WORLD, true, 10)
+            .await
+            .unwrap();
+    assert_eq!(before.len(), 1);
+    let relationship_id = before[0].relationship_id.clone();
+
+    // ── Rescan of the same run ──────────────────────────────────────────────
+    let second = upsert_pending_candidate(
+        &pool,
+        CREATOR,
+        "ws",
+        WORLD,
+        Some(WORK),
+        Some(1),
+        "character",
+        "Lin Xia",
+        &body,
+    )
+    .await
+    .unwrap();
+    let retained_id = match second {
+        UpsertOutcome::Unchanged(job_id) => job_id,
+        other => panic!("expected Unchanged on rescan, got {other:?}"),
+    };
+    assert_eq!(retained_id, candidate_id, "candidate id is retained");
+
+    let reinserted = nexus_local_db::kb_relationships::upsert_extraction_relationship(
+        &pool,
+        WORLD,
+        "kb_t13_aria",
+        "kb_t13_kael",
+        "allied_with",
+        None,
+        true,
+        Some(0.7),
+        Some("Aria and Kael fought together"),
+        now,
+    )
+    .await
+    .unwrap();
+    assert!(!reinserted, "a rescan does not re-insert the suggestion");
+    let after =
+        nexus_local_db::kb_relationships::list_relationships_for_world(&pool, WORLD, true, 10)
+            .await
+            .unwrap();
+    assert_eq!(after.len(), 1, "no duplicate suggestion row");
+    assert_eq!(
+        after[0].relationship_id, relationship_id,
+        "relationship id is retained"
+    );
+    assert_eq!(after[0].source, "extraction");
+    assert_eq!(
+        after[0].needs_review, 1,
+        "an extraction suggestion stays hidden"
+    );
+}
+
+/// A failed relationship write persists nothing: an unresolved endpoint cannot
+/// leave a half-written suggestion behind, which is why the caller resolves both
+/// endpoints before it writes anything.
+#[tokio::test]
+async fn v1191_extract_unresolved_endpoint_leaves_zero_relationship_rows() {
+    let (pool, _dir) = fresh_pool().await;
+    nexus_local_db::kb_store::seed::world(&pool, WORLD, CREATOR, "T13", "t13", "private", "manual")
+        .await;
+    nexus_local_db::kb_store::seed::knowledge_entry(
+        &pool,
+        "kb_t13_aria",
+        WORLD,
+        "character",
+        "Aria",
+        "confirmed",
+    )
+    .await;
+
+    // The endpoint resolution the caller performs: an unknown name resolves to
+    // nothing, so the caller skips instead of writing a foreign endpoint.
+    let unknown = nexus_local_db::kb_relationships::resolve_entity_by_canonical_name(
+        &pool,
+        WORLD,
+        "Nobody",
+        Some("character"),
+    )
+    .await
+    .unwrap();
+    assert!(unknown.is_none(), "an unknown endpoint resolves to nothing");
+    let known = nexus_local_db::kb_relationships::resolve_entity_by_canonical_name(
+        &pool,
+        WORLD,
+        "Aria",
+        Some("character"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(known.as_deref(), Some("kb_t13_aria"));
+
+    // Skipping is what keeps the write honest: a forced write with a
+    // non-existent endpoint is refused by the FK and leaves zero rows.
+    let forced = nexus_local_db::kb_relationships::upsert_extraction_relationship(
+        &pool,
+        WORLD,
+        "kb_t13_aria",
+        "kb_t13_missing",
+        "allied_with",
+        None,
+        true,
+        None,
+        None,
+        "2026-09-18T00:00:00Z",
+    )
+    .await;
+    assert!(forced.is_err(), "an unresolved endpoint cannot be written");
+
+    let rows =
+        nexus_local_db::kb_relationships::list_relationships_for_world(&pool, WORLD, true, 10)
+            .await
+            .unwrap();
+    assert!(rows.is_empty(), "zero relationship rows after the failure");
+    let pending = list_for_chapter(&pool, WORK, 1).await.unwrap();
+    assert!(pending.is_empty(), "zero candidate rows after the failure");
+}

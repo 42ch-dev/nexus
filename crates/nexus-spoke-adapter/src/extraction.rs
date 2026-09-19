@@ -38,6 +38,7 @@
 //! here.
 
 use std::future::Future;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use nexus_knowledge::world_kb::PreparedExtractCandidate;
@@ -158,42 +159,56 @@ pub struct ExtractCandidatesOutcome {
 /// Cancellation is the caller's future being dropped — the wrapper spawns
 /// nothing and swallows nothing, so dropping it after the source load or
 /// mid-callback stops the run before any candidate is persisted.
+///
+/// # `Send` bridge (v1.191 P1 T13)
+///
+/// `spoke_operations::orchestrate_extract` is the one upstream orchestrator
+/// whose injected source loader is a trait object (`ports: &dyn ExtractionPort`)
+/// — every other family takes `&impl BaselinePorts`. A `dyn` trait object
+/// carries no `Sync` bound, so the orchestrator's future is `!Send`, while both
+/// nexus production extraction callers are `Send`-bound `#[async_trait]`
+/// capabilities (`Capability: Send + Sync`) driven from spawned tasks. The
+/// adapter therefore drives the orchestrator on its own short-lived driver
+/// thread (see [`drive_orchestrator`]) instead of awaiting it inline, and both
+/// the callback and the request gain `'static` so they can cross to it.
 pub async fn extract_candidates<F, Fut>(
     request: ExtractRequest,
     resolved_input: ResolvedExtractionInput,
     extractor: F,
 ) -> SpokeResult<ExtractCandidatesOutcome>
 where
-    F: FnOnce(ExtractRunInput) -> Fut + Send,
-    Fut: Future<Output = SpokeResult<NativeExtractionOutput>> + Send,
+    F: FnOnce(ExtractRunInput) -> Fut + Send + 'static,
+    Fut: Future<Output = SpokeResult<NativeExtractionOutput>> + Send + 'static,
 {
     let request_run_id = request.run_id.as_str().to_owned();
-    let port = ResolvedExtractionPort::new(resolved_input);
 
     // The native output is produced inside the callback and must survive
     // upstream's fixed `SpokeResult<ExtractionResult>` callback shape, so the
-    // callback hands it back through a slot owned here.
-    let mut native_output: Option<NativeExtractionOutput> = None;
+    // callback hands it back through this slot.
+    let native_output: Arc<Mutex<Option<NativeExtractionOutput>>> = Arc::new(Mutex::new(None));
     let response = {
-        let slot = &mut native_output;
-        orchestrate_extract(&port, request, move |run_input| async move {
-            let mut native = match extractor(run_input).await {
-                SpokeResult::Ok(native) => native,
-                SpokeResult::Reject(reject) => return SpokeResult::Reject(reject),
-            };
-            let method = native.method.take();
-            let coverage_hint = native.coverage_hint.take();
-            let candidates = native
-                .candidates
-                .iter()
-                .map(|prepared| knowledge_record_to_spoke(&prepared.record))
-                .collect::<Vec<_>>();
-            *slot = Some(native);
-            SpokeResult::Ok(ExtractionResult {
-                candidates,
-                method,
-                coverage_hint,
-            })
+        let slot = Arc::clone(&native_output);
+        drive_orchestrator(request, resolved_input, move |run_input| {
+            let slot = Arc::clone(&slot);
+            async move {
+                let mut native = match extractor(run_input).await {
+                    SpokeResult::Ok(native) => native,
+                    SpokeResult::Reject(reject) => return SpokeResult::Reject(reject),
+                };
+                let method = native.method.take();
+                let coverage_hint = native.coverage_hint.take();
+                let candidates = native
+                    .candidates
+                    .iter()
+                    .map(|prepared| knowledge_record_to_spoke(&prepared.record))
+                    .collect::<Vec<_>>();
+                *slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(native);
+                SpokeResult::Ok(ExtractionResult {
+                    candidates,
+                    method,
+                    coverage_hint,
+                })
+            }
         })
         .await
     };
@@ -204,7 +219,11 @@ where
     };
 
     // Success upstream means the callback ran and stored its native output.
-    let Some(native) = native_output.take() else {
+    let native = native_output
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .take();
+    let Some(native) = native else {
         return spoke_reject(
             SpokeRejectCode::InternalError,
             "extract callback reported success without a native result",
@@ -219,6 +238,82 @@ where
             relationships: native.relationships,
         }),
         SpokeResult::Reject(reject) => SpokeResult::Reject(reject),
+    }
+}
+
+/// Drive `orchestrate_extract` on a dedicated driver thread.
+///
+/// The orchestrator's future is `!Send` (see [`extract_candidates`]): it holds a
+/// `&dyn ExtractionPort`. Running it here keeps the adapter's public future
+/// `Send` for its `Send`-bound callers without touching spoke's lifecycle: the
+/// orchestrator still gates the request, loads through the injected port, awaits
+/// the callback exactly once, gates candidate status and assembles the response.
+///
+/// The driver owns a current-thread runtime and hands the `Send` response back
+/// over a channel. **Cancellation is preserved**: dropping this future drops
+/// `cancel_tx`, the driver's `select!` resolves, and the orchestrator future
+/// (with the native callback) is dropped mid-flight — so a cancelled run can
+/// never reach the caller's persistence. The driver thread exits with its
+/// runtime as soon as the run settles or is cancelled; it is never leaked.
+async fn drive_orchestrator<F, Fut>(
+    request: ExtractRequest,
+    resolved_input: ResolvedExtractionInput,
+    extractor: F,
+) -> SpokeResult<ExtractResponse>
+where
+    F: FnOnce(ExtractRunInput) -> Fut + Send + 'static,
+    Fut: Future<Output = SpokeResult<ExtractionResult>> + Send + 'static,
+{
+    let (result_tx, result_rx) = tokio::sync::oneshot::channel::<SpokeResult<ExtractResponse>>();
+    // Held for the whole call, never read: dropping it is the cancellation
+    // signal the driver's `select!` observes, so the orchestrator future (and
+    // the native callback) is dropped when this future is.
+    let (_cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
+
+    let spawned = std::thread::Builder::new()
+        .name("spoke-extract-driver".to_string())
+        .spawn(move || {
+            let runtime = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(runtime) => runtime,
+                Err(e) => {
+                    let _ = result_tx.send(spoke_reject(
+                        SpokeRejectCode::InternalError,
+                        format!("extraction driver runtime: {e}"),
+                        None,
+                    ));
+                    return;
+                }
+            };
+            let port = ResolvedExtractionPort::new(resolved_input);
+            let driven = runtime.block_on(async move {
+                tokio::select! {
+                    response = orchestrate_extract(&port, request, extractor) => Some(response),
+                    // Resolves only when the caller's future was dropped.
+                    _ = cancel_rx => None,
+                }
+            });
+            if let Some(response) = driven {
+                let _ = result_tx.send(response);
+            }
+        });
+    if let Err(e) = spawned {
+        return spoke_reject(
+            SpokeRejectCode::InternalError,
+            format!("extraction driver thread: {e}"),
+            None,
+        );
+    }
+
+    match result_rx.await {
+        Ok(response) => response,
+        Err(_) => spoke_reject(
+            SpokeRejectCode::InternalError,
+            "extraction driver stopped without a response",
+            None,
+        ),
     }
 }
 
@@ -571,4 +666,36 @@ mod tests {
             "cancellation before commit leaves zero writes"
         );
     }
+
+    /// v1.191 P1 T13: the wrapper's future must stay `Send`.
+    ///
+    /// Both production extraction callers are `Send`-bound `#[async_trait]`
+    /// capabilities (`Capability: Send + Sync`) driven from spawned tasks, and
+    /// upstream `orchestrate_extract` captures a `&dyn ExtractionPort` (no
+    /// `Sync` bound) — so its future is `!Send`. This guard fails the moment the
+    /// adapter stops driving the orchestrator on the driver thread, i.e. the
+    /// moment a production caller would no longer be able to await it.
+    #[test]
+    fn v1191_extract_candidates_future_is_send() {
+        fn assert_send<T: Send>(_: T) {}
+
+        let request: ExtractRequest = serde_json::from_value(json!({
+            "run_id": RUN_ID,
+            "sources": [{ "schema_version": 1, "source_id": "c03.md", "extensions": {} }],
+        }))
+        .expect("valid ExtractRequest");
+        assert_send(extract_candidates(
+            request,
+            admitted_bundle(RUN_ID),
+            |_| async {
+                SpokeResult::Ok(NativeExtractionOutput {
+                    candidates: Vec::new(),
+                    method: None,
+                    coverage_hint: None,
+                    relationships: Vec::new(),
+                })
+            },
+        ));
+    }
 }
+

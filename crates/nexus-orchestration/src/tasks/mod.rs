@@ -677,6 +677,28 @@ impl LlmExtractTask {
         let chapter_prose: String = context.get("chapter_prose").unwrap_or_default();
         let creator_id: String = context.get("_creator_id").unwrap_or_default();
         let session_id: String = context.get("_session_id").unwrap_or_default();
+        // v1.191 P1 T13: the trusted extraction target + admitted source
+        // identity the orchestration caller resolved from stored state. The
+        // capability refuses a missing target rather than extracting under an
+        // invented policy, so the task surfaces that refusal to its caller.
+        let target = match context.get::<serde_json::Value>("_extract_target") {
+            Some(value) => match crate::quality_loop::ExtractionTarget::from_context(&value) {
+                Ok(target) => target,
+                Err(e) => {
+                    return Ok(crate::quality_loop::LlmExtractOutcome::Refused(format!(
+                        "extract target: {e}"
+                    )));
+                }
+            },
+            None => {
+                return Ok(crate::quality_loop::LlmExtractOutcome::Refused(
+                    "missing trusted extraction target: the orchestration caller must resolve \
+                     the job/task target policy"
+                        .to_string(),
+                ));
+            }
+        };
+        let source_id: String = context.get("_extract_source_id").unwrap_or_default();
         // V1.55 P2 fix-wave (F-001): read work_profile from context so the
         // extraction path produces profile-aware payloads. Defaults to "novel"
         // for backward compatibility with existing callers.
@@ -693,6 +715,8 @@ impl LlmExtractTask {
             &creator_id,
             &session_id,
             &work_profile,
+            &target,
+            &source_id,
         )
         .await)
     }
@@ -3260,15 +3284,40 @@ mod tests {
         }
     }
 
+    /// The extraction run identity the `LlmExtractTask` fixtures run under.
+    const EXTRACT_TASK_SESSION: &str = "sess_extract_task";
+
+    /// Decorate a task context with the trusted extraction context the
+    /// production caller resolves from stored state before the model runs
+    /// (v1.191 P1 T13, durable §§3, 8): the target policy and the admitted
+    /// chapter artifact, plus the real run identity.
+    fn set_trusted_extract_context(ctx: &graph_flow::Context) {
+        ctx.set("_session_id", EXTRACT_TASK_SESSION.to_string())
+            .unwrap();
+        ctx.set(
+            "_extract_source_id",
+            "Works/fixture/Stories/ch03.md".to_string(),
+        )
+        .unwrap();
+        ctx.set(
+            "_extract_target",
+            serde_json::json!({
+                "world_id": "wld_fixture",
+                "holder_entry_id": null,
+                "disclosure": null,
+            }),
+        )
+        .unwrap();
+    }
+
     fn extract_registry_with_mock(response: &str) -> Arc<CapabilityRegistry> {
         use crate::capability::CapabilityRuntimeDeps;
         let map = session_cancels_with_default();
-        // The extract regression context sets no `_session_id`, so the
-        // capability resolves run id "" — register its coordinator token
-        // (fail-closed contract) so the prompt reaches the mock executor.
+        // The capability resolves the coordinator token of the fixture's run id
+        // (fail-closed contract) before the prompt reaches the mock executor.
         map.write()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .entry(String::new())
+            .entry(EXTRACT_TASK_SESSION.to_string())
             .or_default();
         let deps = CapabilityRuntimeDeps {
             pool: None,
@@ -3299,6 +3348,7 @@ mod tests {
         );
 
         let ctx = graph_flow::Context::new();
+        set_trusted_extract_context(&ctx);
         ctx.set(
             "chapter_prose".to_string(),
             "Lin Xia drew her blade.".to_string(),
@@ -3330,6 +3380,7 @@ mod tests {
             registry,
         );
         let ctx = graph_flow::Context::new();
+        set_trusted_extract_context(&ctx);
         let outcome = task.evaluate(&ctx).await.unwrap();
         assert!(
             matches!(
@@ -3350,6 +3401,7 @@ mod tests {
             registry,
         );
         let ctx = graph_flow::Context::new();
+        set_trusted_extract_context(&ctx);
         let outcome = task.evaluate(&ctx).await.unwrap();
         match outcome {
             crate::quality_loop::LlmExtractOutcome::CapabilityError(err) => {
@@ -3373,6 +3425,7 @@ mod tests {
             registry,
         );
         let ctx = graph_flow::Context::new();
+        set_trusted_extract_context(&ctx);
         let outcome = task.evaluate(&ctx).await.unwrap();
         match outcome {
             crate::quality_loop::LlmExtractOutcome::Candidates { candidates: c, .. } => {
@@ -3396,6 +3449,7 @@ mod tests {
             registry,
         );
         let ctx = graph_flow::Context::new();
+        set_trusted_extract_context(&ctx);
         let outcome = task.evaluate(&ctx).await.unwrap();
         let candidates = match outcome {
             crate::quality_loop::LlmExtractOutcome::Candidates { candidates: c, .. } => c,
@@ -3427,6 +3481,7 @@ mod tests {
         );
 
         let ctx = graph_flow::Context::new();
+        set_trusted_extract_context(&ctx);
         ctx.set(
             "chapter_prose".to_string(),
             "The Ironfang Legion marched through the gates at dawn.".to_string(),

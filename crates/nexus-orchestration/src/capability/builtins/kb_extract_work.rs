@@ -49,6 +49,22 @@ fn deserialize_body<'de, D: serde::Deserializer<'de>>(de: D) -> Result<String, D
 // KbExtractWork capability
 // ---------------------------------------------------------------------------
 
+/// Bounded length of the source-anchor excerpt taken from the admitted Work
+/// artifact (v1.191 P1 T13). The anchor is built from the artifact the
+/// orchestrator loaded, never from the model's own prose.
+const SOURCE_ANCHOR_EXCERPT_CHARS: usize = 256;
+
+/// The placeholder the native callback returns when preparing the model's
+/// candidate fails; the precise error is carried out of the callback and
+/// returned instead of this reject.
+fn extract_reject() -> nexus_spoke_adapter::SpokeReject {
+    nexus_spoke_adapter::SpokeReject {
+        code: nexus_spoke_adapter::SpokeRejectCode::InternalError,
+        message: "the native extractor failed".to_string(),
+        details: None,
+    }
+}
+
 /// The `kb.extract_work` capability.
 ///
 /// Holds an optional `SqlitePool` for job lifecycle management and `KnowledgeEntryRecord`
@@ -187,17 +203,22 @@ impl Capability for KbExtractWork {
             .and_then(|v| v.as_str())
             .ok_or_else(|| CapabilityError::InputInvalid("missing 'creator_id'".into()))?;
 
-        // QC1/2 W-002: Guard against worldless Works — when world_id is absent
-        // or empty (legacy V1.39 worldless Works), return a success no-op so
-        // the preset state machine can cleanly transition to done.
-        let world_id_input = input.get("world_id").and_then(|v| v.as_str()).unwrap_or("");
-        if world_id_input.is_empty() {
-            return Ok(json!({
-                "job_id": null,
-                "status": "skipped",
-                "reason": "world_id absent — worldless Work, no KB extraction needed"
-            }));
-        }
+        // v1.191 P1 T13 (durable §8): the real production run identity. The
+        // engine injects the trusted `_session_id` at run admission; the
+        // extraction runs through `orchestrate_extract`, whose request type
+        // refuses an empty run id. A capability invoked outside a trusted run
+        // context refuses here — before any job claim or mutation — instead of
+        // inventing a default session.
+        let run_id = input
+            .get("_session_id")
+            .and_then(|v| v.as_str())
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| {
+                CapabilityError::Forbidden(
+                    "missing trusted _session_id: orchestration context must inject the run identity"
+                        .to_string(),
+                )
+            })?;
 
         // ── Phase 1: Load or claim job ──────────────────────────────
         let job = if let Some(job_id) = input.get("job_id").and_then(|v| v.as_str()) {
@@ -241,9 +262,15 @@ impl Capability for KbExtractWork {
         };
 
         let job_id = job.job_id.clone();
+        // The job row is the authority for the extraction target (v1.191 P1
+        // T13, durable §8): the stored target is what the run is admitted for,
+        // so a caller that omits `world_id` cannot make the capability skip a
+        // World-bound job. An explicit `world_id` stays an override, and the
+        // stored-state recheck still refuses a foreign World.
         let world_id = input
             .get("world_id")
             .and_then(|v| v.as_str())
+            .filter(|id| !id.is_empty())
             .unwrap_or(&job.world_id)
             .to_string();
         let work_entry_id = input
@@ -251,6 +278,17 @@ impl Capability for KbExtractWork {
             .and_then(|v| v.as_str())
             .unwrap_or(&job.work_entry_id)
             .to_string();
+
+        // QC1/2 W-002: a worldless Work (legacy V1.39 job with no World to
+        // promote into) is a success no-op so the preset state machine can
+        // cleanly transition to done.
+        if world_id.is_empty() {
+            return Ok(json!({
+                "job_id": job_id,
+                "status": "skipped",
+                "reason": "world_id absent — worldless Work, no KB extraction needed"
+            }));
+        }
 
         // ── Phase 2: Load work content ──────────────────────────────
         let work_content = input
@@ -290,7 +328,7 @@ impl Capability for KbExtractWork {
             }));
         };
 
-        // ── Phase 4: Parse LLM response → KnowledgeEntryRecord insert ───────────
+        // ── Phase 4: Parse LLM response → prepared candidate via the wrapper ────
         let extract = match parse_extraction_response(response_text) {
             Ok(resp) => resp,
             Err(e) => {
@@ -342,58 +380,186 @@ impl Capability for KbExtractWork {
                 }
             };
 
-        // Build source anchor from artifact locator.
-        let source_locator = input
-            .get("source_locator")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let source_anchor = if source_locator.is_empty() {
-            nexus_knowledge::world_kb::source_anchor::SourceAnchor::from_excerpt(
-                &extract.body.chars().take(256).collect::<String>(),
+        // The trusted job target policy (durable §§3, 8): the job's stored
+        // controlling Creator must still own the target World, and the audience
+        // is the service's in-scope default. Resolved before the model's
+        // candidate can name anything — the model never reaches this pair.
+        let target =
+            match crate::quality_loop::resolve_extraction_target(pool, &job.creator_id, &world_id)
+                .await
+            {
+                Ok(target) => target,
+                Err(e) => {
+                    let _ = nexus_local_db::mark_extract_job_failed(
+                        pool,
+                        &job_id,
+                        &format!("Extraction target refused: {e}"),
+                    )
+                    .await;
+                    return Err(e);
+                }
+            };
+
+        // The admitted source bundle and the source anchor both come from the
+        // actual Work artifact: the text the orchestrator loaded plus the job's
+        // stored artifact locator. Never the model's own prose, never empty.
+        let source_id = job
+            .source_locator
+            .clone()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| work_entry_id.clone());
+        let anchor_excerpt = {
+            let admitted = work_content.trim();
+            if admitted.is_empty() {
+                source_id.clone()
+            } else {
+                admitted.chars().take(SOURCE_ANCHOR_EXCERPT_CHARS).collect()
+            }
+        };
+        let request: nexus_spoke_adapter::ExtractRequest = serde_json::from_value(json!({
+            "run_id": run_id,
+            "sources": [{
+                "schema_version": 1,
+                "source_id": source_id,
+                "extensions": {},
+            }],
+        }))
+        .map_err(|e| CapabilityError::Internal(format!("extract request refused: {e}")))?;
+        let bundle = json!({
+            "work_entry_id": work_entry_id,
+            "source_kind": job.source_kind,
+            "source_locator": job.source_locator,
+            "text": work_content,
+        });
+
+        // The native extractor callback prepares the model's candidate under the
+        // trusted target policy; the adapter converts it to the wire candidate
+        // and the upstream orchestrator validates the run. The callback crosses
+        // to the adapter's driver thread, so its failure travels back through
+        // this slot.
+        let failure: Arc<std::sync::Mutex<Option<CapabilityError>>> =
+            Arc::new(std::sync::Mutex::new(None));
+        let outcome = {
+            let failure = Arc::clone(&failure);
+            let target = target.clone();
+            let world_id = world_id.clone();
+            let canonical_name = extract.canonical_name.clone();
+            let body = body.clone();
+            let anchor_excerpt = anchor_excerpt.clone();
+            nexus_spoke_adapter::extract_candidates(
+                request,
+                nexus_spoke_adapter::ResolvedExtractionInput {
+                    run_id: run_id.to_string(),
+                    bundle,
+                },
+                move |run_input| async move {
+                    // The admitted bundle is the only source the extractor sees.
+                    if run_input.input["text"].as_str().is_none() {
+                        *failure
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                            Some(CapabilityError::Internal(
+                                "admitted extraction bundle carries no source text".to_string(),
+                            ));
+                        return nexus_spoke_adapter::SpokeResult::Reject(extract_reject());
+                    }
+                    match nexus_knowledge::world_kb::prepare_extract(
+                        nexus_knowledge::world_kb::ExtractPrepareInput {
+                            world_id: world_id.clone(),
+                            block_type,
+                            canonical_name: canonical_name.clone(),
+                            body: body.clone(),
+                            source_anchor:
+                                nexus_knowledge::world_kb::source_anchor::SourceAnchor::from_excerpt(
+                                    &anchor_excerpt,
+                                ),
+                            validation_mode,
+                            governance: target.governance.clone(),
+                        },
+                    ) {
+                        Ok(prepared) => nexus_spoke_adapter::SpokeResult::Ok(
+                            nexus_spoke_adapter::NativeExtractionOutput {
+                                candidates: vec![prepared],
+                                method: Some("kb.extract_work".to_string()),
+                                coverage_hint: None,
+                                // This path's prompt extracts a single KE and
+                                // proposes no relationships; SPOKE's success arm
+                                // is KE-only, so the sidecar is carried (never
+                                // dropped) and stays empty here.
+                                relationships: Vec::new(),
+                            },
+                        ),
+                        Err(e) => {
+                            *failure
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                                Some(CapabilityError::Internal(format!(
+                                    "KnowledgeEntryRecord prepare failed: {e}"
+                                )));
+                            nexus_spoke_adapter::SpokeResult::Reject(extract_reject())
+                        }
+                    }
+                },
             )
-        } else {
-            nexus_knowledge::world_kb::source_anchor::SourceAnchor::from_excerpt(source_locator)
+            .await
         };
 
-        let prepare_input = nexus_knowledge::world_kb::ExtractPrepareInput {
-            world_id: world_id.clone(),
-            block_type,
-            canonical_name: extract.canonical_name.clone(),
-            body,
-            source_anchor,
-            validation_mode,
-            // v1.191 P1 T12: the trusted job policy is attached here, before
-            // persistence. Until T13 wires the real policy this stays shared —
-            // the same columns the combined finalizer wrote before the split.
-            governance: nexus_knowledge::world_kb::KnowledgeGovernance::shared(),
+        // A callback failure is the precise error, not the placeholder reject.
+        let callback_failure = failure
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        if let Some(e) = callback_failure {
+            let _ = nexus_local_db::mark_extract_job_failed(pool, &job_id, &e.to_string()).await;
+            return Err(e);
+        }
+        let outcome = match outcome {
+            nexus_spoke_adapter::SpokeResult::Ok(outcome) => outcome,
+            nexus_spoke_adapter::SpokeResult::Reject(reject) => {
+                let reason = format!(
+                    "ke-extraction refused the run: {}: {}",
+                    reject.code.as_str(),
+                    reject.message
+                );
+                let _ = nexus_local_db::mark_extract_job_failed(pool, &job_id, &reason).await;
+                return Err(CapabilityError::PermanentExternal(reason));
+            }
         };
+        if !outcome.relationships.is_empty() {
+            tracing::debug!(
+                job_id,
+                relationships = outcome.relationships.len(),
+                "kb-extract: extraction returned a relationship sidecar"
+            );
+        }
 
-        // ── Phase 4b: Insert KnowledgeEntryRecord BEFORE marking job done ──────────
-        // Prepare (validate + allocate the id once) then persist the exact
-        // record; only mark done on success. On failure, mark the job as failed
-        // so the preset state machine can surface or retry. This prevents
-        // "done job with no KnowledgeEntryRecord" data loss.
+        // ── Phase 4b: Persist the validated candidates BEFORE marking done ─────
+        // The candidates are persisted exactly as the protocol validated them
+        // (same ids, same governance); only then is the job flipped to done, so
+        // a refused/failed run can never leave a done job without its entry.
         let store = nexus_local_db::kb_store::SqliteKbStore::new(pool.as_ref().clone());
-        let insert_result = match nexus_knowledge::world_kb::prepare_extract(prepare_input) {
-            Ok(prepared) => {
-                nexus_knowledge::world_kb::persist_prepared_extract(&store, prepared).await
+        let mut insert_result = None;
+        for candidate in outcome.candidates {
+            match nexus_knowledge::world_kb::persist_prepared_extract(&store, candidate).await {
+                Ok(r) => insert_result = Some(r),
+                Err(e) => {
+                    // Mark job as failed so the content loss window is closed.
+                    let _ = nexus_local_db::mark_extract_job_failed(
+                        pool,
+                        &job_id,
+                        &format!("KnowledgeEntryRecord insert failed: {e}"),
+                    )
+                    .await;
+                    return Err(CapabilityError::Internal(format!(
+                        "KnowledgeEntryRecord insert failed: {e}"
+                    )));
+                }
             }
-            Err(e) => Err(e),
-        };
-        let insert_result = match insert_result {
-            Ok(r) => r,
-            Err(e) => {
-                // Mark job as failed so the content loss window is closed.
-                let _ = nexus_local_db::mark_extract_job_failed(
-                    pool,
-                    &job_id,
-                    &format!("KnowledgeEntryRecord insert failed: {e}"),
-                )
-                .await;
-                return Err(CapabilityError::Internal(format!(
-                    "KnowledgeEntryRecord insert failed: {e}"
-                )));
-            }
+        }
+        let Some(insert_result) = insert_result else {
+            let reason = "ke-extraction accepted the run without a candidate".to_string();
+            let _ = nexus_local_db::mark_extract_job_failed(pool, &job_id, &reason).await;
+            return Err(CapabilityError::Internal(reason));
         };
 
         // Mark done only after the KnowledgeEntryRecord was successfully inserted.
@@ -470,5 +636,300 @@ mod tests {
     fn test_default_creates_no_pool() {
         let cap = KbExtractWork::default();
         assert!(cap.pool.is_none());
+    }
+
+    // ── v1.191 P1 T13: real caller path through the adapter wrapper ────────
+
+    const CREATOR: &str = "ctr_t13";
+    const WORLD: &str = "wld_t13";
+
+    /// A guarded engine pool with one World owned by `CREATOR`.
+    async fn test_pool_with_world() -> (sqlx::SqlitePool, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = nexus_local_db::init_engine_pool(&dir.path().join("t13.db"))
+            .await
+            .unwrap()
+            .clone_pool();
+        nexus_local_db::kb_store::seed::world(
+            &pool,
+            WORLD,
+            CREATOR,
+            "T13 World",
+            "t13",
+            "private",
+            "manual",
+        )
+        .await;
+        (pool, dir)
+    }
+
+    /// Enqueue one queued extract job for the seeded World.
+    async fn enqueue_job(pool: &sqlx::SqlitePool) -> String {
+        nexus_local_db::enqueue_extract_job_with_artifact(
+            pool,
+            CREATOR,
+            "ws_t13",
+            "kb_work_t13",
+            WORLD,
+            Some("work_chapter"),
+            Some("Works/t13/Stories/ch03.md"),
+            Some("novel"),
+            Some("wrk_t13"),
+        )
+        .await
+        .unwrap()
+        .job_id
+    }
+
+    /// A model response for one novel-profile candidate.
+    fn model_response(attributes: serde_json::Value) -> String {
+        json!({
+            "block_type": "character",
+            "canonical_name": "char_lin_xia",
+            "body": { "summary": "A warrior", "attributes": attributes, "tags": ["novel"] },
+            "source_work_entry_id": "kb_work_t13",
+        })
+        .to_string()
+    }
+
+    fn finalize_input(job_id: &str) -> Value {
+        json!({
+            "creator_id": CREATOR,
+            "job_id": job_id,
+            "work_content": "Lin Xia drew her blade at the Azure Gate.",
+            "llm_response": model_response(json!({ "novel_category": "character" })),
+            "_session_id": "run_t13",
+        })
+    }
+
+    /// Rows in the World KB of the seeded World.
+    async fn world_rows(
+        pool: &sqlx::SqlitePool,
+    ) -> Vec<nexus_knowledge::world_kb::KnowledgeEntryRecord> {
+        use nexus_knowledge::world_kb::store::KbStore;
+        let store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
+        store.list_by_world(WORLD).await.unwrap()
+    }
+
+    async fn job_status(pool: &sqlx::SqlitePool, job_id: &str) -> String {
+        nexus_local_db::get_extract_job(pool, job_id)
+            .await
+            .unwrap()
+            .expect("job row")
+            .status
+    }
+
+    #[tokio::test]
+    async fn v1191_extract_success_persists_the_validated_candidate_and_completes_the_job() {
+        let (pool, _dir) = test_pool_with_world().await;
+        let job_id = enqueue_job(&pool).await;
+        let cap = KbExtractWork::with_pool(pool.clone());
+
+        let result = cap.run(finalize_input(&job_id)).await.unwrap();
+
+        assert_eq!(result["status"], "done");
+        let entry_id = result["key_block_id"].as_str().expect("entry id");
+        assert!(entry_id.starts_with("kb_"), "candidate id: {entry_id}");
+        assert_eq!(result["canonical_name"], "char_lin_xia");
+        assert_eq!(job_status(&pool, &job_id).await, "done");
+
+        let rows = world_rows(&pool).await;
+        assert_eq!(rows.len(), 1, "exactly the validated candidate");
+        assert_eq!(rows[0].entry_id, entry_id, "same id the job reported");
+        // The trusted job target policy (an in-scope World container) resolved
+        // to shared: neither governance column is written.
+        assert_eq!(rows[0].holder_entry_id, None);
+        assert_eq!(rows[0].disclosure, None);
+        // The source anchor comes from the admitted Work artifact, not the
+        // model's own prose.
+        let anchor = rows[0].source_anchor.as_ref().expect("source anchor");
+        assert_eq!(
+            anchor.excerpt.as_deref(),
+            Some("Lin Xia drew her blade at the Azure Gate.")
+        );
+    }
+
+    #[tokio::test]
+    async fn v1191_extract_model_output_cannot_choose_governance() {
+        let (pool, _dir) = test_pool_with_world().await;
+        let job_id = enqueue_job(&pool).await;
+        let cap = KbExtractWork::with_pool(pool.clone());
+
+        // The model tries to make the row owner-private under its own holder;
+        // the trusted target policy decides instead.
+        let input = json!({
+            "creator_id": CREATOR,
+            "job_id": job_id,
+            "work_content": "Lin Xia drew her blade.",
+            "llm_response": model_response(json!({
+                "novel_category": "character",
+                "holder_entry_id": "hld_model_choice",
+                "disclosure": "owner-private",
+            })),
+            "_session_id": "run_t13",
+        });
+        let result = cap.run(input).await.unwrap();
+        assert_eq!(result["status"], "done");
+
+        let rows = world_rows(&pool).await;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0].holder_entry_id, None,
+            "holder must not be model-chosen"
+        );
+        assert_eq!(
+            rows[0].disclosure, None,
+            "disclosure must not be model-chosen"
+        );
+    }
+
+    #[tokio::test]
+    async fn v1191_extract_invalid_terminal_writes_nothing_and_fails_the_job() {
+        let (pool, _dir) = test_pool_with_world().await;
+        let job_id = enqueue_job(&pool).await;
+        let cap = KbExtractWork::with_pool(pool.clone());
+
+        let input = json!({
+            "creator_id": CREATOR,
+            "job_id": job_id,
+            "work_content": "Lin Xia drew her blade.",
+            "llm_response": "{\"block_type\": \"character\", \"canonical_name\":",
+            "_session_id": "run_t13",
+        });
+        let error = cap
+            .run(input)
+            .await
+            .expect_err("incomplete terminal must fail");
+
+        assert!(error.to_string().contains("parse"), "error: {error}");
+        assert!(world_rows(&pool).await.is_empty(), "zero candidate writes");
+        assert_eq!(
+            job_status(&pool, &job_id).await,
+            "failed",
+            "no successful job terminal"
+        );
+    }
+
+    #[tokio::test]
+    async fn v1191_extract_protocol_failure_writes_nothing_and_fails_the_job() {
+        let (pool, _dir) = test_pool_with_world().await;
+        let job_id = enqueue_job(&pool).await;
+        let cap = KbExtractWork::with_pool(pool.clone());
+
+        // The model output names a candidate the domain rules refuse (a path
+        // separator in the canonical name), so the native extractor rejects and
+        // the run never reaches persistence.
+        let input = json!({
+            "creator_id": CREATOR,
+            "job_id": job_id,
+            "work_content": "Lin Xia drew her blade.",
+            "llm_response": json!({
+                "block_type": "character",
+                "canonical_name": "char/lin*xia",
+                "body": { "summary": "A warrior", "attributes": { "novel_category": "character" } },
+                "source_work_entry_id": "kb_work_t13",
+            })
+            .to_string(),
+            "_session_id": "run_t13",
+        });
+        let error = cap.run(input).await.expect_err("a refused run must fail");
+
+        assert!(
+            error.to_string().contains("prepare"),
+            "expected the extractor failure, got: {error}"
+        );
+        assert!(world_rows(&pool).await.is_empty(), "zero candidate writes");
+        assert_eq!(
+            job_status(&pool, &job_id).await,
+            "failed",
+            "no success terminal"
+        );
+    }
+
+    #[tokio::test]
+    async fn v1191_extract_stale_target_writes_nothing_and_fails_the_job() {
+        let (pool, _dir) = test_pool_with_world().await;
+        let job_id = enqueue_job(&pool).await;
+        let cap = KbExtractWork::with_pool(pool.clone());
+
+        // The stored controlling Creator no longer matches the job's: the
+        // trusted target refuses before anything is written.
+        sqlx::query("UPDATE kb_extract_jobs SET creator_id = ? WHERE job_id = ?")
+            .bind("ctr_other")
+            .bind(&job_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let mut input = finalize_input(&job_id);
+        input["creator_id"] = json!("ctr_other");
+        let error = cap
+            .run(input)
+            .await
+            .expect_err("a stale target must refuse");
+
+        assert!(error.to_string().contains("not owned"), "error: {error}");
+        assert!(world_rows(&pool).await.is_empty(), "zero candidate writes");
+        assert_eq!(
+            job_status(&pool, &job_id).await,
+            "failed",
+            "no success terminal"
+        );
+    }
+
+    #[tokio::test]
+    async fn v1191_extract_missing_run_identity_refuses_before_touching_the_job() {
+        let (pool, _dir) = test_pool_with_world().await;
+        let job_id = enqueue_job(&pool).await;
+        let cap = KbExtractWork::with_pool(pool.clone());
+
+        let mut input = finalize_input(&job_id);
+        input.as_object_mut().unwrap().remove("_session_id");
+        let error = cap
+            .run(input)
+            .await
+            .expect_err("no run identity must refuse");
+
+        assert!(error.to_string().contains("_session_id"), "error: {error}");
+        assert_eq!(
+            job_status(&pool, &job_id).await,
+            "queued",
+            "the job is untouched"
+        );
+        assert!(world_rows(&pool).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn v1191_extract_interrupted_finalize_leaves_zero_candidates_and_no_success_terminal() {
+        let (pool, _dir) = test_pool_with_world().await;
+        let job_id = enqueue_job(&pool).await;
+        let cap = KbExtractWork::with_pool(pool.clone());
+
+        // Hold the write lock so the finalize's candidate insert can never
+        // commit, then drop the run future on the timeout: a run that cannot
+        // commit must leave zero candidate rows and no `done` terminal.
+        let mut blocker = nexus_local_db::begin_immediate(&pool).await.unwrap();
+        sqlx::query("UPDATE kb_extract_jobs SET status = status WHERE job_id = ?")
+            .bind(&job_id)
+            .execute(&mut *blocker)
+            .await
+            .unwrap();
+
+        let interrupted = tokio::time::timeout(
+            std::time::Duration::from_millis(300),
+            cap.run(finalize_input(&job_id)),
+        )
+        .await;
+        drop(blocker);
+
+        assert!(
+            world_rows(&pool).await.is_empty(),
+            "an interrupted finalize writes no candidate (outcome: {interrupted:?})"
+        );
+        assert_ne!(
+            job_status(&pool, &job_id).await,
+            "done",
+            "no successful job terminal without a persisted candidate"
+        );
     }
 }
