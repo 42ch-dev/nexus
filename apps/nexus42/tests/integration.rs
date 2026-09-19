@@ -993,6 +993,10 @@ fn single_persistent_id(home: &std::path::Path) -> String {
 
 /// Delete the workspace `creators` row for `creator_id` — simulates the
 /// DF-83 partial (identity present, workspace row missing).
+///
+/// v1.191 P1 T4 commits a Creator's `knowledge_holders` row with the subject
+/// (`ON DELETE RESTRICT`), so the partial state is reproduced by dropping both:
+/// a registry row can never outlive the Creator it names.
 fn delete_workspace_row(home: &std::path::Path, creator_id: &str) {
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
@@ -1001,6 +1005,11 @@ fn delete_workspace_row(home: &std::path::Path, creator_id: &str) {
             .await
             .expect("open workspace db")
             .clone_pool();
+        sqlx::query("DELETE FROM knowledge_holders WHERE creator_id = ?")
+            .bind(creator_id)
+            .execute(&pool)
+            .await
+            .expect("delete holder row");
         sqlx::query("DELETE FROM creators WHERE creator_id = ?")
             .bind(creator_id)
             .execute(&pool)

@@ -91,15 +91,38 @@ async fn seed_world(pool: &SqlitePool) {
 
 async fn insert_novel_writing_schedule(pool: &SqlitePool, schedule_id: &str, work_id: &str) {
     let now = chrono::Utc::now().timestamp();
+    // v1.191 P1 T13: the stored production run identity is what the
+    // finalize-time detection is admitted under (`current_session_id` FK), so
+    // the run row is seeded with it.
+    let run_id = format!("run_{schedule_id}");
+    // SAFETY: test-only INSERT into orchestration_sessions (the FK target of
+    // `creator_schedules.current_session_id`).
+    sqlx::query(
+        r"INSERT INTO orchestration_sessions
+           (session_id, creator_id, preset_id, preset_version, status,
+            context_json, created_at, updated_at)
+           VALUES (?, ?, 'novel-writing', 1, 'running', '{}', ?, ?)",
+    )
+    .bind(&run_id)
+    .bind(CREATOR)
+    .bind(now)
+    .bind(now)
+    .execute(pool)
+    .await
+    .unwrap();
+
     sqlx::query(
         r"INSERT INTO creator_schedules
            (schedule_id, creator_id, preset_id, preset_version, status,
-            concurrency_kind, current_core_context_version,
+            concurrency_kind, current_core_context_version, current_session_id,
             label, created_at, updated_at, work_id)
-           VALUES (?, ?, 'novel-writing', 1, 'running', 'serial', 0, ?, ?, ?, ?)",
+           VALUES (?, ?, 'novel-writing', 1, 'running', 'serial', 0, ?, ?, ?, ?, ?)",
     )
     .bind(schedule_id)
     .bind(CREATOR)
+    // v1.191 P1 T13: an empty run identity is a skip, never a fabricated
+    // default session, so the fixture seeds the real one.
+    .bind(&run_id)
     .bind(format!("missing-{work_id}"))
     .bind(now)
     .bind(now)
