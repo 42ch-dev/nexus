@@ -355,8 +355,9 @@ impl CoreService {
     /// verification, [`CoreError::Forbidden`] under read-only access,
     /// [`CoreError::WorldKbValidation`] for invalid patches,
     /// [`CoreError::ActorConflict`] `invalid_world_sheet` when a linked
-    /// WorldSheet would lose its eligibility, and [`CoreError::WorldKbConflict`]
+    /// `WorldSheet` would lose its eligibility, and [`CoreError::WorldKbConflict`]
     /// carrying the committed revision when the expected version is stale.
+    #[allow(clippy::collection_is_never_read, clippy::significant_drop_tightening)] // held-only: the governance leases fence this call (durable §4.3) and are never read
     pub async fn patch_world_kb_entity(
         &self,
         principal: &Principal,
@@ -377,9 +378,9 @@ impl CoreService {
         // audience permission is then re-resolved inside that transaction, so
         // an archive/unbind racing this call cannot land a row whose holder
         // was no longer admitted. Both leases are released when this returns.
-        let mut _governance_leases: Vec<crate::actor_fence::KnowledgeGovernanceLease> = Vec::new();
+        let mut governance_leases: Vec<crate::actor_fence::KnowledgeGovernanceLease> = Vec::new();
         if let Some(audience) = request.patch.audience.as_ref() {
-            _governance_leases.push(
+            governance_leases.push(
                 self.acquire_knowledge_governance(
                     principal,
                     crate::actor_fence::ActorFenceKind::World,
@@ -391,7 +392,7 @@ impl CoreService {
                 character_id,
             ) = audience
             {
-                _governance_leases.push(
+                governance_leases.push(
                     self.acquire_knowledge_governance(
                         principal,
                         crate::actor_fence::ActorFenceKind::Character,

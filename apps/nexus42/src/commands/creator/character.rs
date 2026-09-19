@@ -15,7 +15,6 @@ use nexus_contracts::daemon_api::actor_knowledge::{
     list_character_knowledge_response::ListCharacterKnowledgeResponse, view_request::ViewRequest,
     view_response::ViewResponse,
 };
-use nexus_knowledge::world_kb::knowledge_entry::LEGACY_CREATOR_ONLY_UNSUPPORTED;
 use nexus_contracts::daemon_api::characters::memory::capture_character_pending_review_request::CaptureCharacterPendingReviewRequest;
 use nexus_contracts::daemon_api::characters::memory::capture_character_pending_review_response::CaptureCharacterPendingReviewResponse;
 use nexus_contracts::daemon_api::characters::memory::count_character_pending_reviews_response::CountCharacterPendingReviewsResponse;
@@ -42,6 +41,7 @@ use nexus_contracts::daemon_api::characters::{
     list_character_bindings_response::ListCharacterBindingsResponse,
     list_characters_response::ListCharactersResponse,
 };
+use nexus_knowledge::world_kb::knowledge_entry::LEGACY_CREATOR_ONLY_UNSUPPORTED;
 use nexus_local_db::ACTOR_KNOWLEDGE_SUMMARY_MAX_UTF8_BYTES;
 use std::path::PathBuf;
 
@@ -1607,15 +1607,17 @@ async fn view_knowledge(
             // Durable §7: the projection carries the native governance pair,
             // never the retired `creator_only` boolean — shared is the
             // *absence* of disclosure.
-            let governance = match item.disclosure.as_ref() {
-                Some(disclosure) => format!(
-                    "  disclosure={disclosure} holder={}",
-                    item.holder_entry_id
-                        .as_deref()
-                        .map_or("(none)", std::ops::Deref::deref)
-                ),
-                None => String::new(),
-            };
+            let governance = item
+                .disclosure
+                .as_ref()
+                .map_or_else(String::new, |disclosure| {
+                    format!(
+                        "  disclosure={disclosure} holder={}",
+                        item.holder_entry_id
+                            .as_deref()
+                            .map_or("(none)", std::ops::Deref::deref)
+                    )
+                });
             println!(
                 "{}  {}  {}{governance}",
                 *item.entry_id,

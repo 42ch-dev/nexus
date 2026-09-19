@@ -53,6 +53,7 @@ pub enum PackImportError {
 /// Panics only if the caller supplies a `world_id`/`creator_id` pair the core
 /// admission rejects as malformed (the CLI always passes resolved ids).
 // transitional: single deletion owner P6-T1; no new callers
+#[allow(clippy::too_many_arguments)] // one admission seam forwarding every import dependency
 pub async fn import_pack(
     pool: &SqlitePool,
     world_id: &str,
@@ -86,12 +87,7 @@ pub async fn import_pack(
         review_import: None,
     };
     nexus_core::CoreService::import_legacy_world_pack(
-        pool,
-        creator_id,
-        world_id,
-        request,
-        holder_map,
-        dry_run,
+        pool, creator_id, world_id, request, holder_map, dry_run,
     )
     .await
     .map_err(|e| PackImportError::Storage(e.to_string()))

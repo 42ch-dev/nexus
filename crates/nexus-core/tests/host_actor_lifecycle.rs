@@ -287,7 +287,9 @@ async fn stale_actor_and_journal_failure_never_redispatch() {
     // survives the close.
     let h2 = restarted.open_host(CountingPort::new()).await.unwrap();
     let ctx2 = admit_character(&restarted, &principal2, &env).await;
-    let knowledge2 = admitted_knowledge(&restarted, &principal2, &env).await.identity();
+    let knowledge2 = admitted_knowledge(&restarted, &principal2, &env)
+        .await
+        .identity();
     let key2 = registry_key(h2.actor_sessions(), &ctx2, knowledge2, &env.user_home);
     let sid2 = Uuid::new_v4();
     h2.actor_sessions()

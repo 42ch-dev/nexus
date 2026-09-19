@@ -947,7 +947,12 @@ const KEEP_CONTENT: ActorKnowledgePatch<'static> = ActorKnowledgePatch {
     summary: FieldPatch::Keep,
 };
 
-async fn create_binding_owned_ke(pool: &SqlitePool, chr: &str, binding: &str, name: &str) -> String {
+async fn create_binding_owned_ke(
+    pool: &SqlitePool,
+    chr: &str,
+    binding: &str,
+    name: &str,
+) -> String {
     let store = SqliteKbStore::new(pool.clone());
     let kb = KnowledgeEntryRecord::for_binding(binding, BlockType::InfoPoint, name);
     let entry_id = kb.entry_id.clone();
@@ -985,7 +990,11 @@ async fn v1191_audience_cas_authoring_writes_pair_and_bumps_both_revisions() {
     .await
     .unwrap();
 
-    assert_eq!(authored.revision, Some(1), "the KE revision bumps exactly once");
+    assert_eq!(
+        authored.revision,
+        Some(1),
+        "the KE revision bumps exactly once"
+    );
     let (holder, disclosure, revision) = stored_pair(&pool, &entry).await;
     assert_eq!(holder.as_deref(), Some(creator_holder.as_str()));
     assert_eq!(disclosure.as_deref(), Some(DISCLOSURE_OWNER_PRIVATE));
@@ -1056,7 +1065,11 @@ async fn v1191_audience_cas_shared_clears_pair_and_identical_reauthoring_is_a_no
     .await
     .unwrap();
     assert_eq!(unchanged.revision, Some(2));
-    assert_eq!(row_snapshot(&pool, &entry).await, before, "byte-identical row");
+    assert_eq!(
+        row_snapshot(&pool, &entry).await,
+        before,
+        "byte-identical row"
+    );
     assert_eq!(character_knowledge_revision(&pool, &chr).await, 2);
 }
 
@@ -1130,7 +1143,11 @@ async fn v1191_audience_cas_content_restating_the_stored_value_still_applies_gov
     )
     .await
     .unwrap();
-    assert_eq!(authored.revision, Some(1), "the governance write is material");
+    assert_eq!(
+        authored.revision,
+        Some(1),
+        "the governance write is material"
+    );
     assert_eq!(
         stored_pair(&pool, &entry).await,
         (
@@ -1182,7 +1199,11 @@ async fn v1191_audience_cas_stale_revision_refuses_with_zero_mutation() {
     .await
     .unwrap_err();
     assert_conflict(err, ActorContractConflict::KnowledgeRevisionConflict);
-    assert_eq!(row_snapshot(&pool, &entry).await, before, "refusal wrote nothing");
+    assert_eq!(
+        row_snapshot(&pool, &entry).await,
+        before,
+        "refusal wrote nothing"
+    );
     assert_eq!(character_knowledge_revision(&pool, &chr).await, 0);
 }
 
@@ -1216,7 +1237,11 @@ async fn v1191_audience_cas_unregistered_holder_refuses_with_zero_mutation() {
         matches!(err, LocalDbError::HolderStateInvalid { .. }),
         "missing registry state must fail closed, got {err:?}"
     );
-    assert_eq!(row_snapshot(&pool, &entry).await, before, "refusal wrote nothing");
+    assert_eq!(
+        row_snapshot(&pool, &entry).await,
+        before,
+        "refusal wrote nothing"
+    );
     assert_eq!(character_knowledge_revision(&pool, &chr).await, 0);
 }
 
@@ -1239,7 +1264,9 @@ async fn v1191_audience_cas_character_audience_refuses_a_non_owning_character() 
         &entry,
         0,
         KEEP_CONTENT,
-        AuthoredAudience::Character { character_id: &other },
+        AuthoredAudience::Character {
+            character_id: &other,
+        },
     )
     .await
     .unwrap_err();
@@ -1269,7 +1296,7 @@ async fn v1191_audience_cas_character_audience_refuses_a_non_owning_character() 
 /// Regression (L2 C3): a World container's `character-private` audience is
 /// resolved in-transaction against ownership, activity and an **active
 /// binding** to that World.
-fn world_container() -> nexus_local_db::kb_store::AudienceContainer<'static> {
+const fn world_container() -> nexus_local_db::kb_store::AudienceContainer<'static> {
     nexus_local_db::kb_store::AudienceContainer {
         owner_creator_id: OWNER,
         owning_character_id: None,
@@ -1299,9 +1326,7 @@ async fn v1191_audience_cas_world_container_audience_requires_an_active_binding(
     let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
     let resolved = nexus_local_db::kb_store::resolve_authored_audience_tx(
         &mut tx,
-        AuthoredAudience::Character {
-            character_id: &chr,
-        },
+        AuthoredAudience::Character { character_id: &chr },
         world_container(),
     )
     .await
@@ -1312,7 +1337,10 @@ async fn v1191_audience_cas_world_container_audience_requires_an_active_binding(
         resolved.holder_entry_id.as_deref(),
         Some(character_holder_entry_id(&chr).as_str())
     );
-    assert_eq!(resolved.disclosure.as_deref(), Some(DISCLOSURE_OWNER_PRIVATE));
+    assert_eq!(
+        resolved.disclosure.as_deref(),
+        Some(DISCLOSURE_OWNER_PRIVATE)
+    );
 
     // An owned Character without a binding to that World is refused.
     let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
@@ -1339,9 +1367,7 @@ async fn v1191_audience_cas_world_container_audience_requires_an_active_binding(
     let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
     let err = nexus_local_db::kb_store::resolve_authored_audience_tx(
         &mut tx,
-        AuthoredAudience::Character {
-            character_id: &chr,
-        },
+        AuthoredAudience::Character { character_id: &chr },
         world_container(),
     )
     .await

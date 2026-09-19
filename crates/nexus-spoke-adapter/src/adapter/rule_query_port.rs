@@ -263,8 +263,8 @@ mod tests {
             pool,
             nexus_knowledge::world_kb::KnowledgeReadScope::creator_management(
                 vec![
-                nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef::world("wld_1"),
-                nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef::world("wld_2"),
+                    nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef::world("wld_1"),
+                    nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef::world("wld_2"),
                 ],
                 Vec::new(),
             ),

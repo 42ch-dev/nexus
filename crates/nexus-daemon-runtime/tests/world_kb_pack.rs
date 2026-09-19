@@ -667,14 +667,12 @@ async fn stored_governance(
 
 /// How many KB rows the World holds for one pack `entry_id`.
 async fn stored_row_count(pool: &sqlx::SqlitePool, world_id: &str, key_block_id: &str) -> i64 {
-    sqlx::query_scalar(
-        "SELECT COUNT(*) FROM kb_key_blocks WHERE world_id = ? AND key_block_id = ?",
-    )
-    .bind(world_id)
-    .bind(key_block_id)
-    .fetch_one(pool)
-    .await
-    .unwrap()
+    sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE world_id = ? AND key_block_id = ?")
+        .bind(world_id)
+        .bind(key_block_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
 }
 
 /// The exported canonical names of one pack envelope, in response order.
@@ -702,7 +700,9 @@ fn assert_quarantine_id(quarantine_id: &str) {
         "quarantine id {quarantine_id} must carry the 32-byte atom digest"
     );
     assert!(
-        digest.chars().all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)),
+        digest
+            .chars()
+            .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)),
         "quarantine id {quarantine_id} must be lowercase hex"
     );
 }
@@ -793,7 +793,10 @@ async fn v1191_holder_pack_http_unmapped_and_colliding_holders_stay_quarantined(
         stored_row_count(&ctx.pool, TARGET_WORLD, "kb_gov_foreign").await,
         0
     );
-    assert_eq!(stored_governance(&ctx.pool, "kb_gov_shared").await, (None, None));
+    assert_eq!(
+        stored_governance(&ctx.pool, "kb_gov_shared").await,
+        (None, None)
+    );
     assert_eq!(
         quarantine_rows(&ctx.pool).await,
         vec![
@@ -846,7 +849,10 @@ async fn v1191_holder_pack_http_unknown_disclosure_stays_quarantined_when_mapped
     assert_eq!(body["entries"]["created"], 0, "body={body}");
     let quarantined = body["quarantined"].as_array().expect("quarantined array");
     assert_eq!(quarantined.len(), 1, "body={body}");
-    assert_eq!(quarantined[0]["reason"], "unknown_disclosure", "body={body}");
+    assert_eq!(
+        quarantined[0]["reason"], "unknown_disclosure",
+        "body={body}"
+    );
     assert_eq!(quarantined[0]["original_owner"], "hld_foreign_peer");
     assert_eq!(quarantined[0]["original_disclosure"], "team-shared");
 
@@ -949,7 +955,10 @@ async fn v1191_holder_pack_http_holder_map_adopts_and_releases_quarantine() {
     assert_eq!(body["entries"]["created"], 1, "body={body}");
     // The held-atom arm is optional on the wire: an adopting run reports none.
     if let Some(held) = body["quarantined"].as_array() {
-        assert!(held.is_empty(), "the adopted atom releases its held row: {body}");
+        assert!(
+            held.is_empty(),
+            "the adopted atom releases its held row: {body}"
+        );
     }
     assert_eq!(
         stored_governance(&ctx.pool, "kb_gov_foreign").await,
@@ -1029,7 +1038,11 @@ async fn v1191_holder_pack_http_review_is_owner_only() {
     if let Some(held) = review["quarantined"].as_array() {
         assert!(held.is_empty(), "review={review}");
     }
-    assert_eq!(review["review"]["batch_id"], json!(batch_id), "review={review}");
+    assert_eq!(
+        review["review"]["batch_id"],
+        json!(batch_id),
+        "review={review}"
+    );
     assert_eq!(review["review"]["truncated"], false, "review={review}");
     let atoms = review["review"]["atoms"]
         .as_array()
@@ -1093,10 +1106,7 @@ async fn v1191_holder_pack_http_review_is_bounded() {
     assert_eq!(status, StatusCode::OK, "review={review}");
     assert_eq!(review["review"]["truncated"], true, "review={review}");
     assert_eq!(
-        review["review"]["atoms"]
-            .as_array()
-            .expect("atoms")
-            .len(),
+        review["review"]["atoms"].as_array().expect("atoms").len(),
         100,
         "the bounded review returns its cap: {review}"
     );
@@ -1174,6 +1184,10 @@ async fn v1191_holder_pack_http_export_intent_includes_owned_private() {
         .iter()
         .find(|entry| entry["canonical_name"] == "Private Row")
         .expect("the private row is exported");
-    assert_eq!(private["owner"], json!(holder), "governance travels verbatim");
+    assert_eq!(
+        private["owner"],
+        json!(holder),
+        "governance travels verbatim"
+    );
     assert_eq!(private["disclosure"], "owner-private");
 }

@@ -835,13 +835,11 @@ async fn world_revision(pool: &SqlitePool, world_id: &str) -> i64 {
 }
 
 async fn sheet_pair(pool: &SqlitePool, entry_id: &str) -> (Option<String>, Option<String>) {
-    sqlx::query_as(
-        "SELECT holder_entry_id, disclosure FROM kb_key_blocks WHERE key_block_id = ?",
-    )
-    .bind(entry_id)
-    .fetch_one(pool)
-    .await
-    .unwrap()
+    sqlx::query_as("SELECT holder_entry_id, disclosure FROM kb_key_blocks WHERE key_block_id = ?")
+        .bind(entry_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
 }
 
 async fn sheet_revision(pool: &SqlitePool, entry_id: &str) -> i64 {
@@ -968,6 +966,7 @@ async fn setup_sheet_fixture() -> SheetFixture {
     }
 }
 
+#[allow(clippy::too_many_lines)] // one both-directions journey over the sheet guard
 #[tokio::test]
 async fn v1191_world_sheet_governance_rejects_both_directions() {
     let fx = setup_sheet_fixture().await;
@@ -1065,7 +1064,10 @@ async fn v1191_world_sheet_governance_rejects_both_directions() {
     tx.commit().await.unwrap();
     assert_eq!(
         sheet_pair(&pool, SHEET_ID).await,
-        (Some(holder.clone()), Some(DISCLOSURE_OWNER_PRIVATE.to_string()))
+        (
+            Some(holder.clone()),
+            Some(DISCLOSURE_OWNER_PRIVATE.to_string())
+        )
     );
     assert_eq!(world_revision(&pool, SHEET_WORLD).await, 1);
 

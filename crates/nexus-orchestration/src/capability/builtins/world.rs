@@ -84,12 +84,12 @@ pub async fn admitted_creator_view_scope(
             nexus_local_db::LocalDbError::ActorNotFound { .. } => {
                 CapabilityError::Forbidden("world not found or not owned by creator".into())
             }
-            nexus_local_db::LocalDbError::HolderStateInvalid { .. } => CapabilityError::Forbidden(
-                format!(
+            nexus_local_db::LocalDbError::HolderStateInvalid { .. } => {
+                CapabilityError::Forbidden(format!(
                     "admitted knowledge read selection unavailable ({})",
                     nexus_local_db::HOLDER_STATE_INVALID_CODE
-                ),
-            ),
+                ))
+            }
             other => CapabilityError::Internal(format!("admitted read selection: {other}")),
         })
 }
@@ -816,7 +816,7 @@ mod tests {
     }
 
     /// Seed the creator **and its registry holder**: the KB reads resolve an
-    /// admitted ActorView selection, which fails closed without the holder row.
+    /// admitted `ActorView` selection, which fails closed without the holder row.
     async fn seed_creator(pool: &sqlx::SqlitePool, creator_id: &str) {
         nexus_local_db::ensure_creator_row(pool, creator_id, "Test Creator")
             .await
@@ -984,7 +984,11 @@ mod tests {
             .list_by_world("wld_a")
             .await
             .unwrap();
-        assert_eq!(unscoped.len(), 3, "the store holds the shared row and both private rows");
+        assert_eq!(
+            unscoped.len(),
+            3,
+            "the store holds the shared row and both private rows"
+        );
 
         let cap = WorldStateQuery::with_pool(pool);
         let out = cap
@@ -1024,7 +1028,10 @@ mod tests {
             ),
             other => panic!("expected a fail-closed refusal, got {other:?}"),
         }
-        assert!(!row.is_empty(), "the row exists; the refusal is the missing selection");
+        assert!(
+            !row.is_empty(),
+            "the row exists; the refusal is the missing selection"
+        );
     }
 
     // ── nexus.world.delta.propose ────────────────────────────────────────────

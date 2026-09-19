@@ -314,6 +314,7 @@ impl Capability for LlmExtract {
     }"#
     }
 
+    #[allow(clippy::too_many_lines)] // one linear domain operation
     async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
         let prompt_text = input
             .get("prompt")

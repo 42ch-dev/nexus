@@ -3,14 +3,14 @@
 #![allow(clippy::too_many_lines)] // one end-to-end scenario per test
 
 use nexus_contracts::daemon_api::kb::{PackExportRequest, PackImportRequest};
+use nexus_contracts::BlockType;
 use nexus_core::{
     CoreAccess, CoreError, CoreOpenOptions, CoreService, HolderMapping, HolderMappingSelector,
     QuarantineReason,
 };
-use nexus_local_db::writer_protocol::{init_engine_pool, GuardedPoolOptions};
-use nexus_knowledge::world_kb::knowledge_entry::{DISCLOSURE_OWNER_PRIVATE, KnowledgeEntryRecord};
+use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryRecord, DISCLOSURE_OWNER_PRIVATE};
 use nexus_knowledge::world_kb::KbStore;
-use nexus_contracts::BlockType;
+use nexus_local_db::writer_protocol::{init_engine_pool, GuardedPoolOptions};
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
 use std::collections::HashMap;
@@ -24,7 +24,9 @@ async fn seed(pool: &SqlitePool) {
     for owner in [CREATOR, "other_creator"] {
         // Production materialization: a stored Creator always has its holder
         // registry row, which the admitted read selections resolve.
-        nexus_local_db::ensure_creator_row(pool, owner, "Test").await.unwrap();
+        nexus_local_db::ensure_creator_row(pool, owner, "Test")
+            .await
+            .unwrap();
     }
     for (world, owner) in [
         (SOURCE, CREATOR),
@@ -125,7 +127,12 @@ async fn pack_import_skip_cross_world_and_reimport_is_idempotent() {
 
     // Foreign-world PKs are not silently stolen or overwritten.
     let foreign_ids = core
-        .import_world_pack(&principal, TARGET.to_string(), request(&pack, "skip"), Vec::new())
+        .import_world_pack(
+            &principal,
+            TARGET.to_string(),
+            request(&pack, "skip"),
+            Vec::new(),
+        )
         .await
         .unwrap();
     assert_eq!(foreign_ids.entries.skipped, 3);
@@ -134,7 +141,12 @@ async fn pack_import_skip_cross_world_and_reimport_is_idempotent() {
     fresh_entry_ids_in_pack(&mut pack);
 
     let preview = core
-        .preview_world_pack_import(&principal, TARGET.to_string(), request(&pack, "skip"), Vec::new())
+        .preview_world_pack_import(
+            &principal,
+            TARGET.to_string(),
+            request(&pack, "skip"),
+            Vec::new(),
+        )
         .await
         .unwrap();
     assert_eq!(preview.entries.created, 3);
@@ -143,7 +155,12 @@ async fn pack_import_skip_cross_world_and_reimport_is_idempotent() {
 
     // The service denies a foreign World before parsing or writing the pack.
     let denied = core
-        .import_world_pack(&principal, FOREIGN.to_string(), request(&pack, "skip"), Vec::new())
+        .import_world_pack(
+            &principal,
+            FOREIGN.to_string(),
+            request(&pack, "skip"),
+            Vec::new(),
+        )
         .await
         .unwrap_err();
     assert!(matches!(denied, CoreError::WorldOwnerDenied { .. }));
@@ -156,7 +173,7 @@ async fn pack_import_skip_cross_world_and_reimport_is_idempotent() {
         "ctr_forged",
         FOREIGN,
         request(&pack, "skip"),
-            Vec::new(),
+        Vec::new(),
         false,
     )
     .await
@@ -167,7 +184,7 @@ async fn pack_import_skip_cross_world_and_reimport_is_idempotent() {
         CREATOR,
         FOREIGN,
         request(&pack, "skip"),
-            Vec::new(),
+        Vec::new(),
         false,
     )
     .await
@@ -198,13 +215,23 @@ async fn pack_import_skip_cross_world_and_reimport_is_idempotent() {
     .unwrap();
     let read_principal = readonly.active_principal().await.unwrap();
     let denied = readonly
-        .import_world_pack(&read_principal, TARGET.to_string(), request(&pack, "skip"), Vec::new())
+        .import_world_pack(
+            &read_principal,
+            TARGET.to_string(),
+            request(&pack, "skip"),
+            Vec::new(),
+        )
         .await
         .unwrap_err();
     assert!(matches!(denied, CoreError::Forbidden { .. }));
 
     let first = core
-        .import_world_pack(&principal, TARGET.to_string(), request(&pack, "skip"), Vec::new())
+        .import_world_pack(
+            &principal,
+            TARGET.to_string(),
+            request(&pack, "skip"),
+            Vec::new(),
+        )
         .await
         .unwrap();
     assert_eq!(first.entries.created, 3);
@@ -212,7 +239,12 @@ async fn pack_import_skip_cross_world_and_reimport_is_idempotent() {
     assert_eq!(first.entries.rejected, 0);
     assert_eq!(first.relations.rejected, 0);
     let second = core
-        .import_world_pack(&principal, TARGET.to_string(), request(&pack, "skip"), Vec::new())
+        .import_world_pack(
+            &principal,
+            TARGET.to_string(),
+            request(&pack, "skip"),
+            Vec::new(),
+        )
         .await
         .unwrap();
     assert_eq!(second.entries.created, 0);
@@ -236,7 +268,7 @@ async fn pack_import_skip_cross_world_and_reimport_is_idempotent() {
         CREATOR,
         TARGET,
         request(&pack, "skip"),
-            Vec::new(),
+        Vec::new(),
         false,
     )
     .await
@@ -308,7 +340,7 @@ async fn bridge_admits_non_bootstrap_owner_on_bootstrap_pool() {
         CREATOR,
         TARGET,
         request(&pack, "skip"),
-            Vec::new(),
+        Vec::new(),
         true,
     )
     .await
@@ -323,7 +355,7 @@ async fn bridge_admits_non_bootstrap_owner_on_bootstrap_pool() {
         CREATOR,
         TARGET,
         request(&pack, "skip"),
-            Vec::new(),
+        Vec::new(),
         false,
     )
     .await
@@ -338,7 +370,7 @@ async fn bridge_admits_non_bootstrap_owner_on_bootstrap_pool() {
         "ctr_forged",
         TARGET,
         request(&pack, "skip"),
-            Vec::new(),
+        Vec::new(),
         false,
     )
     .await
@@ -352,7 +384,7 @@ async fn bridge_admits_non_bootstrap_owner_on_bootstrap_pool() {
         CREATOR,
         FOREIGN,
         request(&pack, "skip"),
-            Vec::new(),
+        Vec::new(),
         false,
     )
     .await
@@ -415,7 +447,7 @@ async fn stored_governance(pool: &SqlitePool, entry_id: &str) -> (Option<String>
         .unwrap()
 }
 
-/// Boots an EngineOwner core over a seeded workspace.
+/// Boots an `EngineOwner` core over a seeded workspace.
 async fn pack_test_core() -> (tempfile::TempDir, sqlx::SqlitePool, CoreService) {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().to_path_buf();
@@ -463,17 +495,20 @@ async fn v1191_holder_pack_unmapped_and_colliding_holders_stay_quarantined() {
     ]);
 
     let summary = CoreService::import_legacy_world_pack(
-            &pool,
-            CREATOR,
-            TARGET,
-            request(&pack, "skip"),
-            Vec::new(),
-            false,
-        )
-        .await
-        .unwrap();
+        &pool,
+        CREATOR,
+        TARGET,
+        request(&pack, "skip"),
+        Vec::new(),
+        false,
+    )
+    .await
+    .unwrap();
 
-    assert_eq!(summary.entries.created, 1, "only the shared atom is storable");
+    assert_eq!(
+        summary.entries.created, 1,
+        "only the shared atom is storable"
+    );
     assert_eq!(summary.entries.rejected, 2);
     assert_eq!(summary.quarantined.len(), 2);
     assert!(summary
@@ -567,15 +602,15 @@ async fn v1191_holder_pack_mapped_adoption_removes_quarantine_atomically() {
     )]);
 
     let held = CoreService::import_legacy_world_pack(
-            &pool,
-            CREATOR,
-            TARGET,
-            request(&pack, "skip"),
-            Vec::new(),
-            false,
-        )
-        .await
-        .unwrap();
+        &pool,
+        CREATOR,
+        TARGET,
+        request(&pack, "skip"),
+        Vec::new(),
+        false,
+    )
+    .await
+    .unwrap();
     assert_eq!(held.quarantined.len(), 1);
     assert_eq!(quarantine_rows(&pool).await.len(), 1);
     assert_eq!(atom_counts(&pool, TARGET).await, (0, 0));
@@ -583,35 +618,39 @@ async fn v1191_holder_pack_mapped_adoption_removes_quarantine_atomically() {
     // Inadmissible mapping: a Character selector for a non-existent Character
     // refuses the whole import with zero writes.
     let refused = CoreService::import_legacy_world_pack(
-            &pool,
-            CREATOR,
-            TARGET,
-            request(&pack, "skip"),
-            vec![HolderMapping {
-                foreign_holder_id: "hld_foreign_peer".to_string(),
-                selector: HolderMappingSelector::CharacterPrivate("chr_missing".to_string()),
-            }],
-            false,
-        )
-        .await
-        .unwrap_err();
+        &pool,
+        CREATOR,
+        TARGET,
+        request(&pack, "skip"),
+        vec![HolderMapping {
+            foreign_holder_id: "hld_foreign_peer".to_string(),
+            selector: HolderMappingSelector::CharacterPrivate("chr_missing".to_string()),
+        }],
+        false,
+    )
+    .await
+    .unwrap_err();
     assert!(matches!(refused, CoreError::InvalidInput { .. }));
-    assert_eq!(quarantine_rows(&pool).await.len(), 1, "refusal keeps the row");
+    assert_eq!(
+        quarantine_rows(&pool).await.len(),
+        1,
+        "refusal keeps the row"
+    );
 
     // The admitted mapping adopts the atom and drops its quarantine row.
     let adopted = CoreService::import_legacy_world_pack(
-            &pool,
-            CREATOR,
-            TARGET,
-            request(&pack, "skip"),
-            vec![HolderMapping {
-                foreign_holder_id: "hld_foreign_peer".to_string(),
-                selector: HolderMappingSelector::AuthorOnly,
-            }],
-            false,
-        )
-        .await
-        .unwrap();
+        &pool,
+        CREATOR,
+        TARGET,
+        request(&pack, "skip"),
+        vec![HolderMapping {
+            foreign_holder_id: "hld_foreign_peer".to_string(),
+            selector: HolderMappingSelector::AuthorOnly,
+        }],
+        false,
+    )
+    .await
+    .unwrap();
     assert_eq!(adopted.entries.created, 1);
     assert!(adopted.quarantined.is_empty());
     assert!(
@@ -629,18 +668,18 @@ async fn v1191_holder_pack_mapped_adoption_removes_quarantine_atomically() {
 
     // Repeat import: nothing re-created, nothing re-quarantined.
     let repeat = CoreService::import_legacy_world_pack(
-            &pool,
-            CREATOR,
-            TARGET,
-            request(&pack, "skip"),
-            vec![HolderMapping {
-                foreign_holder_id: "hld_foreign_peer".to_string(),
-                selector: HolderMappingSelector::AuthorOnly,
-            }],
-            false,
-        )
-        .await
-        .unwrap();
+        &pool,
+        CREATOR,
+        TARGET,
+        request(&pack, "skip"),
+        vec![HolderMapping {
+            foreign_holder_id: "hld_foreign_peer".to_string(),
+            selector: HolderMappingSelector::AuthorOnly,
+        }],
+        false,
+    )
+    .await
+    .unwrap();
     assert_eq!(repeat.entries.created, 0);
     assert_eq!(repeat.entries.skipped, 1);
     assert!(repeat.quarantined.is_empty());
@@ -663,18 +702,18 @@ async fn v1191_holder_pack_unknown_disclosure_stays_quarantined_when_mapped() {
     )]);
 
     let summary = CoreService::import_legacy_world_pack(
-            &pool,
-            CREATOR,
-            TARGET,
-            request(&pack, "skip"),
-            vec![HolderMapping {
-                foreign_holder_id: "hld_foreign_peer".to_string(),
-                selector: HolderMappingSelector::AuthorOnly,
-            }],
-            false,
-        )
-        .await
-        .unwrap();
+        &pool,
+        CREATOR,
+        TARGET,
+        request(&pack, "skip"),
+        vec![HolderMapping {
+            foreign_holder_id: "hld_foreign_peer".to_string(),
+            selector: HolderMappingSelector::AuthorOnly,
+        }],
+        false,
+    )
+    .await
+    .unwrap();
     assert_eq!(summary.entries.created, 0);
     assert_eq!(summary.quarantined.len(), 1);
     assert_eq!(

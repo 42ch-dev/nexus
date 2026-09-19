@@ -385,6 +385,12 @@ pub fn audience_wire(
     }
 }
 
+/// # Errors
+///
+/// Returns [`CliError`] when the active creator/workspace cannot be resolved,
+/// the core refuses the patch (admission, validation, `world_kb_conflict`, or
+/// the linked-`WorldSheet` guard), or the request/response cannot be
+/// serialized.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_entity_patch(
     config: &CliConfig,

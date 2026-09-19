@@ -9,8 +9,9 @@
 //! error and no partial page.
 
 use crate::actors::{
-    map_wire_one, require_actor_holder, require_active_binding, require_active_owned_character,
-    require_active_owned_world, require_admitted_ownership, ActorViewpoint, AdmittedActor,
+    map_wire_one, require_active_binding, require_active_owned_character,
+    require_active_owned_world, require_actor_holder, require_admitted_ownership, ActorViewpoint,
+    AdmittedActor,
 };
 use crate::error::{actor_db_err, actor_insert_db_err, db_err, CoreError, CoreResult};
 use crate::principal::Principal;
@@ -479,9 +480,9 @@ impl ActorKnowledgeIdentity {
 ///
 /// Private fields on purpose. The two policies are chosen by admission, never
 /// by a caller or a payload: [`CoreService::admit_actor_knowledge_view`] is
-/// always an ActorView (exact admitted holder, authorized containers) and
+/// always an `ActorView` (exact admitted holder, authorized containers) and
 /// [`CoreService::admit_creator_management_knowledge`] is always
-/// CreatorManagement (owned containers plus the known-governance holder set).
+/// `CreatorManagement` (owned containers plus the known-governance holder set).
 pub struct AdmittedKnowledgeContext {
     identity: ActorKnowledgeIdentity,
     scope: KnowledgeReadScope,
@@ -575,7 +576,7 @@ async fn read_knowledge_revisions(
 /// the World itself plus every owned Character bound to it and those bindings.
 /// Archived Characters stay in the retained management selection.
 ///
-/// Container derivation is shared with the ActorView resolution
+/// Container derivation is shared with the `ActorView` resolution
 /// (`nexus-local-db` `read_scope`), so both policies authorize exactly the
 /// containers the stored ownership rows describe.
 async fn management_containers(
@@ -600,18 +601,16 @@ async fn management_containers(
 /// [`CoreService::admit_creator_management_knowledge`], and the authoring /
 /// maintenance paths that already hold their own fence reuse it without
 /// re-taking the shared effect leases.
-pub(crate) async fn management_read_scope(
+pub async fn management_read_scope(
     pool: &SqlitePool,
     creator_id: &str,
     world_id: &str,
 ) -> CoreResult<(KnowledgeReadScope, Vec<String>)> {
     require_owned_world(pool, creator_id, world_id).await?;
     let (containers, character_ids) = management_containers(pool, creator_id, world_id).await?;
-    let mut authorized_holders = vec![
-        nexus_local_db::require_creator_holder(pool, creator_id)
-            .await
-            .map_err(actor_db_err)?,
-    ];
+    let mut authorized_holders = vec![nexus_local_db::require_creator_holder(pool, creator_id)
+        .await
+        .map_err(actor_db_err)?];
     for character_id in &character_ids {
         authorized_holders.push(
             nexus_local_db::require_character_holder(pool, creator_id, character_id)
@@ -687,7 +686,7 @@ impl CoreService {
         .await
     }
 
-    /// Admit an operation-scoped **ActorView** knowledge context (durable
+    /// Admit an operation-scoped **`ActorView`** knowledge context (durable
     /// §4.1): the exact admitted Creator/Character holder plus the authorized
     /// containers, minted only after the principal, stored-owner and admitted
     /// Actor checks.
@@ -727,21 +726,19 @@ impl CoreService {
                 Some(self.acquire_actor_activity(principal, actor).await?)
             }
         };
-        let _leases = self
-            .inner
-            .character_fences
-            .try_acquire_knowledge_effect(std::slice::from_ref(&viewpoint.world_id), &character_ids)?;
-        let revisions = read_knowledge_revisions(
-            &self.inner.pool,
-            &viewpoint.world_id,
-            actor.character_id(),
-        )
-        .await?;
-        let scope = KnowledgeReadScope::actor_view(holder_entry_id, containers)
-            .map_err(|err| CoreError::ActorConflict {
+        let leases = self.inner.character_fences.try_acquire_knowledge_effect(
+            std::slice::from_ref(&viewpoint.world_id),
+            &character_ids,
+        )?;
+        let revisions =
+            read_knowledge_revisions(&self.inner.pool, &viewpoint.world_id, actor.character_id())
+                .await?;
+        let scope = KnowledgeReadScope::actor_view(holder_entry_id, containers).map_err(|err| {
+            CoreError::ActorConflict {
                 code: "holder_state_invalid".to_string(),
                 message: err.to_string(),
-            })?;
+            }
+        })?;
         Ok(AdmittedKnowledgeContext {
             identity: ActorKnowledgeIdentity {
                 policy: KnowledgeReadPolicy::ActorView,
@@ -750,17 +747,17 @@ impl CoreService {
             },
             scope,
             activity,
-            _leases,
+            _leases: leases,
         })
     }
 
-    /// Admit the **CreatorManagement** knowledge context for one owned World
+    /// Admit the **`CreatorManagement`** knowledge context for one owned World
     /// (durable §4.1): the owned World/Character/binding containers plus the
     /// known-governance holder set, so owned private rows are reviewable.
     ///
     /// Retained reads: an archived World or Character stays reviewable. Never
     /// encoded as an absent viewpoint, and never reachable through the
-    /// ActorView path.
+    /// `ActorView` path.
     ///
     /// # Errors
     /// [`CoreError::AuthRequired`], [`CoreError::NotFound`] for foreign/missing
@@ -775,7 +772,7 @@ impl CoreService {
         let creator_id = principal.creator_id();
         let (scope, character_ids) =
             management_read_scope(&self.inner.pool, creator_id, &world_id).await?;
-        let _leases = self
+        let leases = self
             .inner
             .character_fences
             .try_acquire_knowledge_effect(std::slice::from_ref(&world_id), &character_ids)?;
@@ -788,7 +785,7 @@ impl CoreService {
             },
             scope,
             activity: None,
-            _leases,
+            _leases: leases,
         })
     }
 
@@ -1025,7 +1022,7 @@ impl CoreService {
     /// Returns [`CoreError::AuthRequired`] when the principal fails
     /// verification, [`CoreError::ActorInput`] for shape violations, and the
     /// mapped storage/kb-store conflicts otherwise.
-    #[allow(clippy::too_many_lines)] // one linear domain operation
+    #[allow(clippy::too_many_lines, clippy::significant_drop_tightening)] // one linear domain operation; the governance leases are held until it returns (durable §4.3)
     pub async fn add_actor_knowledge_entry(
         &self,
         principal: &Principal,
@@ -1145,14 +1142,14 @@ impl CoreService {
                         self.acquire_knowledge_governance(
                             principal,
                             crate::actor_fence::ActorFenceKind::Character,
-                            owner_character_id.clone().ok_or_else(|| {
-                                CoreError::Internal {
+                            owner_character_id
+                                .clone()
+                                .ok_or_else(|| CoreError::Internal {
                                     category: format!(
                                         "{KNOWLEDGE_INSERT_FAILED_PREFIX}: a Character/binding \
                                          create must carry its admitted Character"
                                     ),
-                                }
-                            })?,
+                                })?,
                         )
                         .await?,
                     );
@@ -1175,15 +1172,17 @@ impl CoreService {
         }
         let store = SqliteKbStore::new(self.inner.pool.clone());
         let inserted = match &owner {
-            KnowledgeOwnerRef::World(_) => nexus_local_db::kb_store::author_world_knowledge_entry(
-                &self.inner.pool,
-                creator_id,
-                record.clone(),
-                intent,
-            )
-            .await
-            .map_err(actor_insert_db_err)?
-            .entry_id,
+            KnowledgeOwnerRef::World(_) => {
+                nexus_local_db::kb_store::author_world_knowledge_entry(
+                    &self.inner.pool,
+                    creator_id,
+                    record.clone(),
+                    intent,
+                )
+                .await
+                .map_err(actor_insert_db_err)?
+                .entry_id
+            }
             KnowledgeOwnerRef::Character(id) => {
                 let _activity = if governance_authored {
                     None
@@ -1199,7 +1198,13 @@ impl CoreService {
                     )
                 };
                 store
-                    .author_actor_owned_key_block(creator_id, id.as_str(), None, record.clone(), intent)
+                    .author_actor_owned_key_block(
+                        creator_id,
+                        id.as_str(),
+                        None,
+                        record.clone(),
+                        intent,
+                    )
                     .await
                     .map_err(actor_insert_db_err)?
                     .entry_id
@@ -1290,6 +1295,7 @@ impl CoreService {
     /// verification and the mapped storage conflicts otherwise
     /// (`knowledge_revision_conflict`, `knowledge_entry_not_mutable`,
     /// `holder_state_invalid`, `character_busy`).
+    #[allow(clippy::too_many_arguments)] // mirrors the wire patch body field for field; a struct would only restate it
     pub async fn patch_actor_knowledge_entry(
         &self,
         principal: &Principal,
@@ -1490,9 +1496,9 @@ fn audience_intent<'a>(
         None => AuthoredAudience::Keep,
         Some(KnowledgeAudience::Shared) => AuthoredAudience::Shared,
         Some(KnowledgeAudience::AuthorOnly) => AuthoredAudience::Creator { creator_id },
-        Some(KnowledgeAudience::CharacterPrivate { character_id }) => AuthoredAudience::Character {
-            character_id,
-        },
+        Some(KnowledgeAudience::CharacterPrivate { character_id }) => {
+            AuthoredAudience::Character { character_id }
+        }
     }
 }
 
@@ -1502,10 +1508,10 @@ fn create_audience_intent<'a>(
     audience: Option<&'a KnowledgeAudience>,
     creator_id: &'a str,
 ) -> nexus_local_db::kb_store::AuthoredAudience<'a> {
-    match audience {
-        None => nexus_local_db::kb_store::AuthoredAudience::Shared,
-        Some(audience) => audience_intent(Some(audience), creator_id),
-    }
+    audience.map_or(
+        nexus_local_db::kb_store::AuthoredAudience::Shared,
+        |audience| audience_intent(Some(audience), creator_id),
+    )
 }
 
 /// Map the closed wire **patch** audience onto the domain audience (durable

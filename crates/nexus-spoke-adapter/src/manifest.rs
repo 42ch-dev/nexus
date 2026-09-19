@@ -238,8 +238,7 @@ pub const BASELINE_CAPABILITIES: [&str; 3] = ["spoke-baseline", "l2-computable",
 /// capability ++ [`LOCAL_TOOL_OPS`] (mirror of the dispatch `SERVED_OPS`
 /// const-block pattern) — adding a tool to `S` is a one-place edit in
 /// [`LOCAL_TOOL_OPS`], never a second literal here.
-pub const LOCAL_CAPABILITIES: [&str;
-    BASELINE_CAPABILITIES.len() + 1 + LOCAL_TOOL_OPS.len()] = {
+pub const LOCAL_CAPABILITIES: [&str; BASELINE_CAPABILITIES.len() + 1 + LOCAL_TOOL_OPS.len()] = {
     let mut caps = [""; BASELINE_CAPABILITIES.len() + 1 + LOCAL_TOOL_OPS.len()];
     let mut i = 0;
     while i < BASELINE_CAPABILITIES.len() {
@@ -661,7 +660,11 @@ mod tests {
         let has_role = |role: &str| manifest.roles.iter().any(|r| r == role);
         // The advertised op set (feature-filtered) — the pairing below must
         // compare like with like in both build configurations.
-        let advertised_op = |op: &str| LOCAL_SERVED_OPS.iter().any(|served| *served == op && advertised(op));
+        let advertised_op = |op: &str| {
+            LOCAL_SERVED_OPS
+                .iter()
+                .any(|served| *served == op && advertised(op))
+        };
         assert_eq!(
             has_role("checker"),
             advertised_op("check"),
@@ -859,13 +862,11 @@ mod tests {
         );
         assert_eq!(
             hello_json["extensions"]["nexus"]["served_ops"],
-            serde_json::json!(
-                LOCAL_SERVED_OPS
-                    .iter()
-                    .filter(|op| advertised(op))
-                    .copied()
-                    .collect::<Vec<_>>()
-            )
+            serde_json::json!(LOCAL_SERVED_OPS
+                .iter()
+                .filter(|op| advertised(op))
+                .copied()
+                .collect::<Vec<_>>())
         );
 
         // The round-tripped value deserializes back into the data type

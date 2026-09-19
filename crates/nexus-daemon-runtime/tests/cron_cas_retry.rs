@@ -55,8 +55,11 @@ async fn seed_pending(pool: &SqlitePool) -> String {
         "canonical_name": "Cron CAS Test Character",
     })
     .to_string();
+    // v1.191 P1 fix round (mechanical): the DAO seam takes a caller-owned
+    // connection (`&mut SqliteConnection`) since the T13 writer-protocol change.
+    let mut conn = pool.acquire().await.expect("acquire workspace connection");
     let row = insert_pending_with_llm(
-        pool,
+        &mut conn,
         OWNER,
         "ws",
         WORLD,

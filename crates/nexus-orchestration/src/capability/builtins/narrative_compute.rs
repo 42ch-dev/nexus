@@ -551,7 +551,7 @@ mod tests {
     }
 
     /// Seed the creator **and its registry holder**: the compute input resolves
-    /// an admitted ActorView selection, which fails closed without the holder
+    /// an admitted `ActorView` selection, which fails closed without the holder
     /// row.
     async fn seed_creator(pool: &sqlx::SqlitePool, creator_id: &str) {
         nexus_local_db::ensure_creator_row(pool, creator_id, "Test Creator")
@@ -581,7 +581,8 @@ mod tests {
         holder_entry_id: Option<&str>,
         disclosure: Option<&str>,
     ) {
-        let mut kb = KnowledgeEntryRecord::new(world_id, nexus_contracts::BlockType::Character, name);
+        let mut kb =
+            KnowledgeEntryRecord::new(world_id, nexus_contracts::BlockType::Character, name);
         kb.body = Some(KnowledgeEntryBody {
             summary: Some(format!("{name} summary")),
             computable: Some(true),

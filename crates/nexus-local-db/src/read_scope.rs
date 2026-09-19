@@ -4,10 +4,10 @@
 //! derived from stored ownership rows and the holder registry, never from a
 //! request body. This module is the shared home for that derivation, so every
 //! layer that reads a World KB on behalf of an admitted Creator resolves the
-//! same containers and the same holder — the `nexus-core` ActorView arm and the
+//! same containers and the same holder — the `nexus-core` `ActorView` arm and the
 //! orchestration capabilities/paths both build their selection from here.
 //!
-//! The selection resolved here is the **ActorView** one (durable §4.1): the
+//! The selection resolved here is the **`ActorView`** one (durable §4.1): the
 //! owned World plus its owned Character/binding containers, admitting exactly
 //! the Creator's own holder. A `CreatorManagement` review selection is never
 //! minted here — management review is its own surface, and a model/consumer

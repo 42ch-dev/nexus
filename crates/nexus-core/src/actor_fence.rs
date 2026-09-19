@@ -89,9 +89,13 @@ impl ActorFenceKind {
     }
 }
 
+/// The per-subject process fence cell: one `RwLock` per `(kind, subject)`,
+/// reclaimed once no guard keeps it alive.
+type FenceCell = Arc<RwLock<()>>;
+
 /// Per-subject fence state owned by a [`crate::CoreService`].
 pub struct ActorFenceTable {
-    process: Mutex<HashMap<(ActorFenceKind, String), Arc<RwLock<()>>>>,
+    process: Mutex<HashMap<(ActorFenceKind, String), FenceCell>>,
     locks_dir: PathBuf,
 }
 
@@ -109,12 +113,13 @@ pub struct ActorActivityLease {
 ///
 /// The plan is acquired World ids then Character ids; the guards are held
 /// together and dropped together, so a caller cannot hold a Character lease
-/// whose World lease already drained.
+/// whose World lease already drained. Every field is a held guard, never
+/// introspected beyond its length.
 pub struct KnowledgeEffectLeases {
-    _world_read: Vec<OwnedRwLockReadGuard<()>>,
-    _world_os: Vec<OsSharedLock>,
-    _character_read: Vec<OwnedRwLockReadGuard<()>>,
-    _character_os: Vec<OsSharedLock>,
+    world_read: Vec<OwnedRwLockReadGuard<()>>,
+    world_os: Vec<OsSharedLock>,
+    character_read: Vec<OwnedRwLockReadGuard<()>>,
+    character_os: Vec<OsSharedLock>,
 }
 
 /// Exclusive governance lease for one World or Character subject (§4.3).
@@ -128,7 +133,6 @@ pub struct KnowledgeGovernanceLease {
     _write: OwnedRwLockWriteGuard<()>,
     _os: OsExclusiveLock,
 }
-
 
 /// Exclusive transition lease (durable §11.3.2).
 ///
@@ -249,23 +253,26 @@ impl ActorFenceTable {
     ) -> CoreResult<KnowledgeEffectLeases> {
         let worlds = canonical_subjects(world_ids);
         let characters = canonical_subjects(character_ids);
-        let mut plan = KnowledgeEffectLeases {
-            _world_read: Vec::with_capacity(worlds.len()),
-            _world_os: Vec::with_capacity(worlds.len()),
-            _character_read: Vec::with_capacity(characters.len()),
-            _character_os: Vec::with_capacity(characters.len()),
-        };
+        let mut world_read = Vec::with_capacity(worlds.len());
+        let mut world_os = Vec::with_capacity(worlds.len());
+        let mut character_read = Vec::with_capacity(characters.len());
+        let mut character_os = Vec::with_capacity(characters.len());
         for world_id in worlds {
             let (read, os) = self.try_shared(ActorFenceKind::World, world_id)?;
-            plan._world_read.push(read);
-            plan._world_os.push(os);
+            world_read.push(read);
+            world_os.push(os);
         }
         for character_id in characters {
             let (read, os) = self.try_shared(ActorFenceKind::Character, character_id)?;
-            plan._character_read.push(read);
-            plan._character_os.push(os);
+            character_read.push(read);
+            character_os.push(os);
         }
-        Ok(plan)
+        Ok(KnowledgeEffectLeases {
+            world_read,
+            world_os,
+            character_read,
+            character_os,
+        })
     }
 
     /// Try to take the exclusive governance fence for one World/Character
@@ -296,11 +303,7 @@ fn canonical_subjects(ids: &[String]) -> Vec<&str> {
 
 /// Translate a non-blocking lock outcome: a held lease is the retained busy
 /// refusal for that kind; anything else is a real fault.
-fn lock_error(
-    kind: ActorFenceKind,
-    subject_id: &str,
-    err: std::fs::TryLockError,
-) -> CoreError {
+fn lock_error(kind: ActorFenceKind, subject_id: &str, err: std::fs::TryLockError) -> CoreError {
     match err {
         std::fs::TryLockError::WouldBlock => busy(kind, subject_id),
         std::fs::TryLockError::Error(io) => CoreError::Internal {
@@ -506,27 +509,15 @@ impl std::fmt::Debug for CharacterTransitionLease {
     }
 }
 
-impl KnowledgeEffectLeases {
-    /// Number of held World shared leases (tests / diagnostics).
-    #[must_use]
-    pub fn world_lease_count(&self) -> usize {
-        self._world_read.len()
-    }
-
-    /// Number of held Character shared leases (tests / diagnostics).
-    #[must_use]
-    pub fn character_lease_count(&self) -> usize {
-        self._character_read.len()
-    }
-}
-
 impl std::fmt::Debug for KnowledgeEffectLeases {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Non-exhaustive: the held subject ids are not retained here, and the
-        // guards must not be introspected.
+        // guards must not be introspected beyond their counts.
         f.debug_struct("KnowledgeEffectLeases")
-            .field("world_leases", &self.world_lease_count())
-            .field("character_leases", &self.character_lease_count())
+            .field("world_read_leases", &self.world_read.len())
+            .field("world_os_leases", &self.world_os.len())
+            .field("character_read_leases", &self.character_read.len())
+            .field("character_os_leases", &self.character_os.len())
             .finish_non_exhaustive()
     }
 }

@@ -80,7 +80,7 @@ pub struct ResolvedExtractionPort {
 impl ResolvedExtractionPort {
     /// Wrap one admitted bundle as an [`ExtractionPort`].
     #[must_use]
-    pub fn new(input: ResolvedExtractionInput) -> Self {
+    pub const fn new(input: ResolvedExtractionInput) -> Self {
         Self { input }
     }
 }
@@ -202,7 +202,9 @@ where
                     .iter()
                     .map(|prepared| knowledge_record_to_spoke(&prepared.record))
                     .collect::<Vec<_>>();
-                *slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(native);
+                *slot
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(native);
                 SpokeResult::Ok(ExtractionResult {
                     candidates,
                     method,
@@ -307,14 +309,13 @@ where
         );
     }
 
-    match result_rx.await {
-        Ok(response) => response,
-        Err(_) => spoke_reject(
+    result_rx.await.unwrap_or_else(|_| {
+        spoke_reject(
             SpokeRejectCode::InternalError,
             "extraction driver stopped without a response",
             None,
-        ),
-    }
+        )
+    })
 }
 
 /// Protocol validation before the wrapper returns.
@@ -698,4 +699,3 @@ mod tests {
         ));
     }
 }
-

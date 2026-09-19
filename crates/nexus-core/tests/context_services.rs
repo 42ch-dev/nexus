@@ -638,13 +638,14 @@ async fn actor_context_projects_viewpoint_and_epoch() {
 }
 
 /// v1.191 P1 T11 (durable §4.1/§4.2/§4.3): the inspect/model consumer reads the
-/// admitted ActorView snapshot only — the Creator's own private fact and every
+/// admitted `ActorView` snapshot only — the Creator's own private fact and every
 /// Character-global shared row are in it, another holder's private World row
 /// and a binding-local row are not, although the management selection over the
 /// same World does hold the Character's private row. A material governance
 /// change then advances the stored Character knowledge revision, so the
 /// snapshot identity a cached session was keyed on no longer matches and the
 /// next read serves the new governance instead of the stale rows.
+#[allow(clippy::too_many_lines, clippy::significant_drop_tightening)] // one stale-snapshot journey; the admitted contexts are held across the assertions
 #[tokio::test]
 async fn v1191_holder_context_inspect_reads_actor_view_and_retires_a_stale_snapshot() {
     use nexus_knowledge::world_kb::knowledge_entry::KnowledgeAudience;

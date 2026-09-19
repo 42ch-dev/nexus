@@ -3833,6 +3833,7 @@ fn write_token_config(home: &std::path::Path, body: &str) {
 /// wire envelope BEFORE the nexus handler — proven by zero workspace side
 /// effects (the denied upsert persists no row) and a session that stays
 /// established (a second invoke is answered again, not `session_not_found`).
+#[allow(clippy::too_many_lines)] // one auth-failure journey; the boot, denial and zero-side-effect assertions read as a unit
 #[tokio::test(flavor = "multi_thread")]
 async fn config_require_token_tokenless_peer_invoke_auth_failed_zero_side_effects() {
     const WORLD_A: &str = "wld_test_a";

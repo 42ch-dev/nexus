@@ -3594,7 +3594,7 @@ mod tests {
 
     /// The spawned runtime pid once the fixture records `_turn_open`, i.e.
     /// after it flushed the `session/prompt` response and the inbox receipt
-    /// (HOLD_TURN arm). `None` while the turn has not reached that point.
+    /// (`HOLD_TURN` arm). `None` while the turn has not reached that point.
     ///
     /// This is the write-completion barrier for the closed-transport fixture:
     /// both frames are already in the pipe when the marker appears, and a

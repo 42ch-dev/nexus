@@ -346,13 +346,11 @@ mod tests {
                 .and_then(serde_json::Value::as_str),
             Some("n-c2")
         );
-        let expected_ops_value = serde_json::json!(
-            crate::manifest::LOCAL_SERVED_OPS
-                .iter()
-                .filter(|op| !crate::manifest::compute_owned_name(op))
-                .copied()
-                .collect::<Vec<_>>()
-        );
+        let expected_ops_value = serde_json::json!(crate::manifest::LOCAL_SERVED_OPS
+            .iter()
+            .filter(|op| !crate::manifest::compute_owned_name(op))
+            .copied()
+            .collect::<Vec<_>>());
         let expected_ops = expected_ops_value
             .as_array()
             .expect("locked op list serializes as an array");

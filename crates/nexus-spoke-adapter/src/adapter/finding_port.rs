@@ -77,6 +77,7 @@ use serde_json::{json, Map, Value};
 
 #[async_trait]
 impl FindingPort for NexusAdapter<'_> {
+    #[allow(clippy::too_many_lines)] // one linear domain operation
     async fn put_findings(&self, findings: Vec<SpokeFinding>) -> SpokeResult<Vec<SpokeFinding>> {
         // Request-bound scope (durable §4.1, v1.191 P1 T8): the finding
         // family carries KE references (the world route's `target_entry_id`),

@@ -9,12 +9,12 @@
 use nexus_contracts::generated::core::{
     CoreCharacterTransitionRequest, CoreCharacterTransitionRequestTargetStatus,
 };
+use nexus_contracts::generated::daemon_api::actor_knowledge::add_knowledge_entry_request::AddKnowledgeEntryRequest;
 use nexus_contracts::BlockType;
 use nexus_core::{
     classify_pair, ActorFenceKind, ActorKnowledgeViewQuery, ActorViewpoint, AdmittedActor,
     CoreAccess, CoreActorAdmission, CoreError, CoreOpenOptions, CoreService,
 };
-use nexus_contracts::generated::daemon_api::actor_knowledge::add_knowledge_entry_request::AddKnowledgeEntryRequest;
 use nexus_knowledge::world_kb::knowledge_entry::{
     KnowledgeAudience, KnowledgeEntryRecord, KnowledgeOwnerRef, DISCLOSURE_OWNER_PRIVATE,
 };
@@ -897,7 +897,10 @@ fn selection_admits(scope: &KnowledgeReadScope, row: &KnowledgeEntryRecord) -> b
             match scope.policy() {
                 KnowledgeReadPolicy::ActorView => holder == scope.holder_entry_id(),
                 KnowledgeReadPolicy::CreatorManagement => holder.is_some_and(|holder| {
-                    scope.authorized_holders().iter().any(|known| known == holder)
+                    scope
+                        .authorized_holders()
+                        .iter()
+                        .any(|known| known == holder)
                 }),
             }
         }
@@ -908,7 +911,7 @@ fn selection_admits(scope: &KnowledgeReadScope, row: &KnowledgeEntryRecord) -> b
 }
 
 fn governed_entry(
-    owner: KnowledgeOwnerRef,
+    owner: &KnowledgeOwnerRef,
     name: &str,
     holder: Option<&str>,
     disclosure: Option<&str>,
@@ -949,7 +952,12 @@ async fn set_knowledge_revision(pool: &SqlitePool, subject: &str, id: &str, valu
         "character" => "UPDATE characters SET knowledge_revision = ? WHERE character_id = ?",
         other => panic!("unknown subject {other}"),
     };
-    sqlx::query(sql).bind(value).bind(id).execute(pool).await.unwrap();
+    sqlx::query(sql)
+        .bind(value)
+        .bind(id)
+        .execute(pool)
+        .await
+        .unwrap();
 }
 
 struct GovernanceFixture {
@@ -974,33 +982,33 @@ async fn seed_governance_fixture(env: &Env) -> GovernanceFixture {
     let first_holder = nexus_local_db::character_holder_entry_id(&env.character_id);
     let second_holder = nexus_local_db::character_holder_entry_id(&second_character_id);
     for row in [
-        governed_entry(KnowledgeOwnerRef::world(WORLD), "WorldShared", None, None),
+        governed_entry(&KnowledgeOwnerRef::world(WORLD), "WorldShared", None, None),
         governed_entry(
-            KnowledgeOwnerRef::world(WORLD),
+            &KnowledgeOwnerRef::world(WORLD),
             "WorldAuthorPrivate",
             Some(&creator_holder),
             Some(DISCLOSURE_OWNER_PRIVATE),
         ),
         governed_entry(
-            KnowledgeOwnerRef::world(WORLD),
+            &KnowledgeOwnerRef::world(WORLD),
             "WorldFirstPrivate",
             Some(&first_holder),
             Some(DISCLOSURE_OWNER_PRIVATE),
         ),
         governed_entry(
-            KnowledgeOwnerRef::world(WORLD),
+            &KnowledgeOwnerRef::world(WORLD),
             "WorldSecondPrivate",
             Some(&second_holder),
             Some(DISCLOSURE_OWNER_PRIVATE),
         ),
         governed_entry(
-            KnowledgeOwnerRef::character(&second_character_id),
+            &KnowledgeOwnerRef::character(&second_character_id),
             "SecondCharacterPrivate",
             Some(&second_holder),
             Some(DISCLOSURE_OWNER_PRIVATE),
         ),
         governed_entry(
-            KnowledgeOwnerRef::world(FOREIGN_WORLD),
+            &KnowledgeOwnerRef::world(FOREIGN_WORLD),
             "ForeignPrivate",
             Some(&first_holder),
             Some(DISCLOSURE_OWNER_PRIVATE),
@@ -1010,25 +1018,25 @@ async fn seed_governance_fixture(env: &Env) -> GovernanceFixture {
         // somebody else (the shape a hidden read-by-id must not reveal); its
         // binding carries a binding-local private row.
         governed_entry(
-            KnowledgeOwnerRef::character(&env.character_id),
+            &KnowledgeOwnerRef::character(&env.character_id),
             "FirstCharacterShared",
             None,
             None,
         ),
         governed_entry(
-            KnowledgeOwnerRef::character(&env.character_id),
+            &KnowledgeOwnerRef::character(&env.character_id),
             "FirstCharacterPrivate",
             Some(&first_holder),
             Some(DISCLOSURE_OWNER_PRIVATE),
         ),
         governed_entry(
-            KnowledgeOwnerRef::character(&env.character_id),
+            &KnowledgeOwnerRef::character(&env.character_id),
             "FirstCharacterForeignPrivate",
             Some(&second_holder),
             Some(DISCLOSURE_OWNER_PRIVATE),
         ),
         governed_entry(
-            KnowledgeOwnerRef::actor_world_binding(&env.binding_id),
+            &KnowledgeOwnerRef::actor_world_binding(&env.binding_id),
             "FirstBindingPrivate",
             Some(&first_holder),
             Some(DISCLOSURE_OWNER_PRIVATE),
@@ -1082,7 +1090,7 @@ fn container_ids(scope: &KnowledgeReadScope) -> Vec<(String, String)> {
     ids
 }
 
-#[allow(clippy::too_many_lines)] // one fixture asserted across both policies
+#[allow(clippy::too_many_lines, clippy::significant_drop_tightening)] // one fixture asserted across both policies; the admitted contexts are held across the assertions
 #[tokio::test]
 async fn v1191_knowledge_admission_management_visible_actor_hidden() {
     let env = seed_env().await;
@@ -1413,7 +1421,7 @@ async fn v1191_knowledge_admission_fence_blocks_and_releases_partial_plan() {
     // Canonical order inside a plan is World ids then Character ids. Holding
     // both the World and the lexically-last Character exclusively must refuse
     // on the World, proving the World is attempted first.
-    let mut characters = vec![
+    let mut characters = [
         env.character_id.clone(),
         fixture.second_character_id.clone(),
     ];
@@ -1792,6 +1800,7 @@ async fn v1191_holder_visibility_detail_hidden_equals_absent() {
 /// narrow (that would hide owned private facts from their author), and the
 /// Character side may not widen (that would leak another identity's private
 /// rows).
+#[allow(clippy::too_many_lines)] // one visibility journey asserted across both policies
 #[allow(clippy::significant_drop_tightening)] // each context is held across its page call
 #[tokio::test]
 async fn v1191_holder_visibility_management_and_actor_view_stay_separate() {
@@ -1922,7 +1931,11 @@ async fn v1191_holder_visibility_management_and_actor_view_stay_separate() {
     let second_names = sorted_names(&second_page.items);
     assert_eq!(
         second_names,
-        vec!["SecondCharacterPrivate", "WorldSecondPrivate", "WorldShared"],
+        vec![
+            "SecondCharacterPrivate",
+            "WorldSecondPrivate",
+            "WorldShared"
+        ],
         "a Character ActorView holds exactly its own holder's rows"
     );
     assert!(
@@ -2048,6 +2061,7 @@ async fn seed_unbound_character(env: &Env) -> String {
     character_id
 }
 
+#[allow(clippy::too_many_lines)] // one audience-resolution journey
 #[tokio::test]
 async fn v1191_audience_cas_create_resolves_permitted_identities() {
     let env = seed_env().await;
@@ -2062,7 +2076,14 @@ async fn v1191_audience_cas_create_resolves_permitted_identities() {
     let author_only_row = core
         .add_actor_knowledge_entry(
             &principal,
-            create_request("world", Some(WORLD), None, None, "AuthoredOnly", Some(author_only())),
+            create_request(
+                "world",
+                Some(WORLD),
+                None,
+                None,
+                "AuthoredOnly",
+                Some(author_only()),
+            ),
             false,
         )
         .await
@@ -2111,7 +2132,10 @@ async fn v1191_audience_cas_create_resolves_permitted_identities() {
         )
         .await
         .expect("omitted create audience admits");
-    assert_eq!(stored_governance(&pool, &omitted.entry_id).await, (None, None, 0));
+    assert_eq!(
+        stored_governance(&pool, &omitted.entry_id).await,
+        (None, None, 0)
+    );
     let explicit = core
         .add_actor_knowledge_entry(
             &principal,
@@ -2127,7 +2151,10 @@ async fn v1191_audience_cas_create_resolves_permitted_identities() {
         )
         .await
         .expect("explicit shared admits");
-    assert_eq!(stored_governance(&pool, &explicit.entry_id).await, (None, None, 0));
+    assert_eq!(
+        stored_governance(&pool, &explicit.entry_id).await,
+        (None, None, 0)
+    );
 
     // Character-owned row + character-private naming its own owning Character.
     let character_row = core
@@ -2179,7 +2206,10 @@ async fn v1191_audience_cas_create_resolves_permitted_identities() {
         )
     );
 
-    assert!(!unbound.is_empty(), "the unbound Character exists for the matrix");
+    assert!(
+        !unbound.is_empty(),
+        "the unbound Character exists for the matrix"
+    );
     assert_eq!(
         stored_governance(&pool, &omitted.entry_id).await.0,
         None,
@@ -2189,6 +2219,7 @@ async fn v1191_audience_cas_create_resolves_permitted_identities() {
     pool.close().await;
 }
 
+#[allow(clippy::too_many_lines)] // one audience-refusal journey
 #[tokio::test]
 async fn v1191_audience_cas_create_refuses_unpermitted_identities() {
     let env = seed_env().await;
@@ -2214,7 +2245,11 @@ async fn v1191_audience_cas_create_refuses_unpermitted_identities() {
         .await
         .unwrap_err();
     assert_invalid_input(&err);
-    assert_eq!(knowledge_row_count(&pool).await, before, "refusal wrote no row");
+    assert_eq!(
+        knowledge_row_count(&pool).await,
+        before,
+        "refusal wrote no row"
+    );
 
     // Foreign Character (another Creator's) stays hidden.
     let err = core
@@ -2300,11 +2335,16 @@ async fn v1191_audience_cas_create_refuses_unpermitted_identities() {
         .await
         .unwrap_err();
     assert_conflict(err, "character_inactive");
-    assert_eq!(knowledge_row_count(&pool).await, before, "no refusal wrote a row");
+    assert_eq!(
+        knowledge_row_count(&pool).await,
+        before,
+        "no refusal wrote a row"
+    );
     characters.close().await;
     pool.close().await;
 }
 
+#[allow(clippy::too_many_lines)] // one governance-move journey under the KE revision
 #[tokio::test]
 async fn v1191_audience_cas_patch_moves_governance_under_the_ke_revision() {
     let env = seed_env().await;
@@ -2646,7 +2686,11 @@ async fn v1191_audience_cas_governed_create_takes_the_exclusive_fence() {
         .await
         .unwrap_err();
     assert_conflict(err, "character_busy");
-    assert_eq!(knowledge_row_count(&pool).await, before, "refusal wrote no row");
+    assert_eq!(
+        knowledge_row_count(&pool).await,
+        before,
+        "refusal wrote no row"
+    );
 
     // The retained shared lane still admits under the same activity lease.
     core.add_actor_knowledge_entry(

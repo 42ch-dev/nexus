@@ -6,12 +6,12 @@ use nexus_contracts::{
     CharacterHolderEntryId, CharacterLifecycleRequest, CharacterOperationResult,
     CharacterPendingReviewInfo, CharacterRunCaptureOutcome, CharacterStatus,
     CreateCharacterRequest, CreateCharacterResponse, CreatorDetail, CreatorDetailHolderEntryId,
-    DeleteKnowledgeEntryQuery, KnowledgeEntryDetail, KnowledgeViewItem, KnowledgeViewItemDisclosure,
-    KnowledgeViewItemHolderEntryId, ListCharactersResponse, UpdateCharacterBindingRequest,
-    UpdateCharacterRequest, UpdateKnowledgeEntryRequest, UpdateKnowledgeEntryRequestAudience,
-    WorldKbEntityPatch, WorldKbEntityPatchAudience, WorldKbEntityProjection,
-    WorldKbEntityProjectionDisclosure, WorldKbEntityProjectionHolderEntryId,
-    WorldKbPatchEntityRequest,
+    DeleteKnowledgeEntryQuery, KnowledgeEntryDetail, KnowledgeViewItem,
+    KnowledgeViewItemDisclosure, KnowledgeViewItemHolderEntryId, ListCharactersResponse,
+    UpdateCharacterBindingRequest, UpdateCharacterRequest, UpdateKnowledgeEntryRequest,
+    UpdateKnowledgeEntryRequestAudience, WorldKbEntityPatch, WorldKbEntityPatchAudience,
+    WorldKbEntityProjection, WorldKbEntityProjectionDisclosure,
+    WorldKbEntityProjectionHolderEntryId, WorldKbPatchEntityRequest,
 };
 use std::str::FromStr;
 
@@ -615,7 +615,7 @@ fn hld() -> String {
 }
 
 /// The create body with a substituted `audience` member.
-fn add_request_with_audience(audience: serde_json::Value) -> serde_json::Value {
+fn add_request_with_audience(audience: &serde_json::Value) -> serde_json::Value {
     serde_json::json!({
         "owner_kind": "character",
         "character_id": chr(),
@@ -637,12 +637,13 @@ fn add_request_without_audience() -> serde_json::Value {
 #[test]
 fn add_knowledge_entry_audience_accepts_the_three_closed_kinds() {
     // Omission is the shared default, not a third state.
-    let omitted = serde_json::from_value::<AddKnowledgeEntryRequest>(add_request_without_audience())
-        .expect("omitted audience");
+    let omitted =
+        serde_json::from_value::<AddKnowledgeEntryRequest>(add_request_without_audience())
+            .expect("omitted audience");
     assert!(omitted.audience.is_none());
 
     let shared = serde_json::from_value::<AddKnowledgeEntryRequest>(add_request_with_audience(
-        serde_json::json!({ "kind": "shared" }),
+        &serde_json::json!({ "kind": "shared" }),
     ))
     .expect("shared audience");
     assert!(matches!(
@@ -655,7 +656,7 @@ fn add_knowledge_entry_audience_accepts_the_three_closed_kinds() {
     );
 
     let author_only = serde_json::from_value::<AddKnowledgeEntryRequest>(
-        add_request_with_audience(serde_json::json!({ "kind": "author-only" })),
+        add_request_with_audience(&serde_json::json!({ "kind": "author-only" })),
     )
     .expect("author-only audience");
     assert!(matches!(
@@ -664,7 +665,7 @@ fn add_knowledge_entry_audience_accepts_the_three_closed_kinds() {
     ));
 
     let private = serde_json::from_value::<AddKnowledgeEntryRequest>(add_request_with_audience(
-        serde_json::json!({ "kind": "character-private", "character_id": chr() }),
+        &serde_json::json!({ "kind": "character-private", "character_id": chr() }),
     ))
     .expect("character-private audience");
     let wire = serde_json::to_value(&private).expect("serializes");
@@ -685,13 +686,13 @@ fn add_knowledge_entry_audience_rejects_every_non_native_shape() {
     // and pattern-checked, exactly as the frozen `oneOf` declares.
     assert!(
         serde_json::from_value::<AddKnowledgeEntryRequest>(add_request_with_audience(
-            serde_json::json!({ "kind": "character-private" })
+            &serde_json::json!({ "kind": "character-private" })
         ))
         .is_err()
     );
     assert!(
         serde_json::from_value::<AddKnowledgeEntryRequest>(add_request_with_audience(
-            serde_json::json!({ "kind": "character-private", "character_id": "chr_nothex" })
+            &serde_json::json!({ "kind": "character-private", "character_id": "chr_nothex" })
         ))
         .is_err()
     );
@@ -704,7 +705,7 @@ fn add_knowledge_entry_audience_rejects_every_non_native_shape() {
     ] {
         assert!(
             serde_json::from_value::<AddKnowledgeEntryRequest>(add_request_with_audience(
-                audience.clone()
+                &audience.clone()
             ))
             .is_err(),
             "accepted non-native audience {audience}"
@@ -729,7 +730,7 @@ fn add_knowledge_entry_audience_rejects_every_non_native_shape() {
 #[test]
 fn audience_arm_extra_member_is_tolerated_by_the_generated_dto() {
     let tolerated = serde_json::from_value::<AddKnowledgeEntryRequest>(add_request_with_audience(
-        serde_json::json!({ "kind": "shared", "extra": true }),
+        &serde_json::json!({ "kind": "shared", "extra": true }),
     ))
     .expect("the generated DTO drops an unknown member inside the arm");
     assert!(matches!(
@@ -741,7 +742,7 @@ fn audience_arm_extra_member_is_tolerated_by_the_generated_dto() {
     // with or without the extra member.
     assert!(
         serde_json::from_value::<AddKnowledgeEntryRequest>(add_request_with_audience(
-            serde_json::json!({ "kind": "viewer", "extra": true })
+            &serde_json::json!({ "kind": "viewer", "extra": true })
         ))
         .is_err()
     );
@@ -752,14 +753,15 @@ fn knowledge_authoring_requests_reject_legacy_and_service_resolved_keys() {
     // Presence of the legacy `creator_only` key is rejected *including* `false`
     // (durable §3): the retired flag must never be read as "not restrictive".
     for value in [serde_json::json!(false), serde_json::json!(true)] {
-        let mut create = add_request_with_audience(serde_json::json!({ "kind": "shared" }));
+        let mut create = add_request_with_audience(&serde_json::json!({ "kind": "shared" }));
         create["creator_only"] = value.clone();
         assert!(
             serde_json::from_value::<AddKnowledgeEntryRequest>(create).is_err(),
             "create accepted creator_only={value}"
         );
 
-        let mut patch = serde_json::json!({ "expected_revision": 0, "canonical_name": "note-beta" });
+        let mut patch =
+            serde_json::json!({ "expected_revision": 0, "canonical_name": "note-beta" });
         patch["creator_only"] = value.clone();
         assert!(
             serde_json::from_value::<UpdateKnowledgeEntryRequest>(patch).is_err(),
@@ -773,7 +775,7 @@ fn knowledge_authoring_requests_reject_legacy_and_service_resolved_keys() {
         ("holder_entry_id", serde_json::json!(hld())),
         ("disclosure", serde_json::json!("owner-private")),
     ] {
-        let mut create = add_request_with_audience(serde_json::json!({ "kind": "author-only" }));
+        let mut create = add_request_with_audience(&serde_json::json!({ "kind": "author-only" }));
         create[key] = value.clone();
         assert!(
             serde_json::from_value::<AddKnowledgeEntryRequest>(create).is_err(),
@@ -793,12 +795,11 @@ fn knowledge_authoring_requests_reject_legacy_and_service_resolved_keys() {
 fn update_knowledge_entry_audience_is_cas_bound_and_omittable() {
     // Omission preserves stored governance; explicit `shared` is the authored
     // clear. Both ride the same `expected_revision` as content.
-    let preserved =
-        serde_json::from_value::<UpdateKnowledgeEntryRequest>(serde_json::json!({
-            "expected_revision": 0,
-            "canonical_name": "note-beta"
-        }))
-        .expect("omitted audience");
+    let preserved = serde_json::from_value::<UpdateKnowledgeEntryRequest>(serde_json::json!({
+        "expected_revision": 0,
+        "canonical_name": "note-beta"
+    }))
+    .expect("omitted audience");
     assert!(preserved.audience.is_none());
 
     let cleared = serde_json::from_value::<UpdateKnowledgeEntryRequest>(serde_json::json!({
@@ -1016,11 +1017,13 @@ fn world_kb_patch_and_projection_share_the_same_governance_contract() {
     let parsed = serde_json::from_value::<WorldKbPatchEntityRequest>(envelope)
         .expect("governance patch under CAS");
     assert_eq!(parsed.expected_version, 0);
-    assert!(serde_json::from_value::<WorldKbPatchEntityRequest>(serde_json::json!({
-        "entity_id": format!("kb_{HEX32}"),
-        "patch": { "audience": { "kind": "shared" } }
-    }))
-    .is_err());
+    assert!(
+        serde_json::from_value::<WorldKbPatchEntityRequest>(serde_json::json!({
+            "entity_id": format!("kb_{HEX32}"),
+            "patch": { "audience": { "kind": "shared" } }
+        }))
+        .is_err()
+    );
 
     // The canvas projection carries the same pair as the ActorView projection.
     WorldKbEntityProjectionHolderEntryId::from_str(&hld()).expect("valid holder id");

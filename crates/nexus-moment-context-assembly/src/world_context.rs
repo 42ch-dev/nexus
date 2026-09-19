@@ -332,7 +332,7 @@ pub fn build_chapter_kb_block(
             },
         )
     } else {
-        all_characters.clone()
+        all_characters
     };
     // QC3-W4 fix: sort by canonical_name for deterministic prompt output.
     characters.sort_by(|a, b| a.name.cmp(&b.name));
@@ -361,7 +361,7 @@ pub fn build_chapter_kb_block(
             },
         )
     } else {
-        all_locations.clone()
+        all_locations
     };
     locations.sort_by(|a, b| a.name.cmp(&b.name));
 
@@ -720,8 +720,7 @@ mod tests {
     #[test]
     fn missing_world_id_returns_empty_block() {
         let params = make_params("wld_ghost", &[]);
-        let block =
-            build_chapter_kb_block(&CharacterViewInput::from_entries(Vec::new()), &params);
+        let block = build_chapter_kb_block(&CharacterViewInput::from_entries(Vec::new()), &params);
 
         // No data for wld_ghost
         assert!(block.characters_in_chapter.is_empty());
@@ -735,12 +734,11 @@ mod tests {
         // Many characters with long summaries.
         let admitted: Vec<_> = (0..20)
             .map(|i| {
-                let mut kb =
-                    nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
-                        "wld_1",
-                        BlockType::Character,
-                        &format!("char_{i:02}"),
-                    );
+                let mut kb = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
+                    "wld_1",
+                    BlockType::Character,
+                    &format!("char_{i:02}"),
+                );
                 kb.set_body(KnowledgeEntryBody {
                     summary: Some(format!(
                         "Character {i} with a very long descriptor that takes up space"
@@ -891,9 +889,8 @@ mod tests {
         assert_eq!(characters.len(), 1);
         assert_eq!(characters[0].canonical_name, "Ada");
 
-        let located =
-            WorldKbQueryBuilder::by_canonical_name(&admitted, "Castle", BlockType::Scene)
-                .expect("exact canonical_name + block_type match");
+        let located = WorldKbQueryBuilder::by_canonical_name(&admitted, "Castle", BlockType::Scene)
+            .expect("exact canonical_name + block_type match");
         assert!(!located.entry_id.is_empty());
 
         // A row that is not in the snapshot can never be resolved: absence is

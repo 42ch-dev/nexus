@@ -29,7 +29,7 @@
 //!
 //! The packet is a pure projection of the assembled [`MomentContext`]: it
 //! never re-reads the KB and holds no `KbStore`, so it cannot recompute a view
-//! wider than the assembly's admitted ActorView snapshot. Every entry id it
+//! wider than the assembly's admitted `ActorView` snapshot. Every entry id it
 //! carries (`modules.placement`, `modules.activation_trace`, `slot_map`,
 //! `hygiene`) comes from an entry the snapshot admitted — a hidden row can
 //! neither appear nor be scored here.

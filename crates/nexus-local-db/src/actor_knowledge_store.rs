@@ -1,7 +1,7 @@
 //! v1.185 P2 — stored-owner summary CAS and referent-guarded delete.
 
-use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryRecord, KnowledgeGovernance};
 use crate::kb_store::AuthoredAudience;
+use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryRecord, KnowledgeGovernance};
 use nexus_knowledge::world_kb::validation::validate_canonical_name;
 use sqlx::{AssertSqlSafe, SqlitePool};
 
@@ -207,8 +207,7 @@ fn actor_knowledge_patch_is_no_op(
         true
     } else {
         let after = apply_summary_patch_to_body_json(row.body_json.as_deref(), patch.summary)?;
-        canonical_body_json(row.body_json.as_deref())?
-            == canonical_body_json(after.as_deref())?
+        canonical_body_json(row.body_json.as_deref())? == canonical_body_json(after.as_deref())?
     };
     if !name_unchanged || !summary_unchanged {
         return Ok(false);
@@ -753,55 +752,16 @@ async fn apply_actor_knowledge_patch(
             _ => apply_summary_patch_to_body_json(row.body_json.as_deref(), patch.summary)?,
         };
 
-        let now = chrono::Utc::now().to_rfc3339();
-        let new_revision = expected_revision + 1;
-        // SAFETY: the governance columns are unknown to the committed `.sqlx`
-        // offline cache, so the statement is runtime-checked with a fixed
-        // column list (never interpolated input) — the same convention
-        // `kb_store.rs` uses for `kb_key_blocks` column changes.
-        let mut sets = "canonical_name = ?, body_json = ?, revision = ?, updated_at = ?".to_string();
-        if governance.is_some() {
-            sets.push_str(", holder_entry_id = ?, disclosure = ?");
-        }
-        let sql = format!(
-            "UPDATE kb_key_blocks SET {sets}
-               WHERE key_block_id = ?
-                 AND COALESCE(revision, 0) = ?
-                 AND status NOT IN ('deleted', 'merged', 'deprecated')
-                 AND (
-                   (owner_kind = 'character' AND character_id = ?)
-                   OR (
-                     owner_kind = 'actor_world_binding'
-                     AND actor_world_binding_id IN (
-                       SELECT binding_id FROM actor_world_bindings
-                       WHERE character_id = ? AND status = 'active'
-                     )
-                   )
-                 )"
-        );
-        let mut query = sqlx::query(sqlx::AssertSqlSafe(sql))
-            .bind(&canonical_name)
-            .bind(&body_json)
-            .bind(new_revision)
-            .bind(&now);
-        if let Some(governance) = governance {
-            query = query
-                .bind(governance.holder_entry_id.as_deref())
-                .bind(governance.disclosure.as_deref());
-        }
-        let updated = map_kb_actor_constraint(
-            query
-                .bind(entry_id)
-                .bind(expected_revision)
-                .bind(character_id)
-                .bind(character_id)
-                .execute(&mut *tx)
-                .await,
-        )?
-        .rows_affected();
-        if updated == 0 {
-            return Err(knowledge_revision_conflict());
-        }
+        cas_actor_knowledge_patch_tx(
+            &mut tx,
+            entry_id,
+            character_id,
+            expected_revision,
+            &canonical_name,
+            body_json.as_deref(),
+            governance,
+        )
+        .await?;
         // v1.191 P1 T7 (durable §4.3): a binding-owned authoring write bumps
         // its owning Character, never a World — the binding has no revision of
         // its own — and a Character-owned write bumps that Character.
@@ -826,6 +786,74 @@ async fn apply_actor_knowledge_patch(
             Err(err)
         }
     }
+}
+
+/// CAS-write the patched row inside the caller's transaction (durable §3).
+///
+/// The `WHERE` clause re-asserts the Character/binding ownership the read
+/// preimage was prepared under, so a row that changed container between the read
+/// and this write is a revision conflict rather than a silent cross-owner write.
+/// The governance pair is written only when the resolved audience carries one:
+/// a patch never moves governance (§3), so a shared row keeps its NULL pair.
+async fn cas_actor_knowledge_patch_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    entry_id: &str,
+    character_id: &str,
+    expected_revision: i64,
+    canonical_name: &str,
+    body_json: Option<&str>,
+    governance: Option<&KnowledgeGovernance>,
+) -> Result<(), LocalDbError> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let new_revision = expected_revision + 1;
+    // SAFETY: the governance columns are unknown to the committed `.sqlx`
+    // offline cache, so the statement is runtime-checked with a fixed
+    // column list (never interpolated input) — the same convention
+    // `kb_store.rs` uses for `kb_key_blocks` column changes.
+    let mut sets = "canonical_name = ?, body_json = ?, revision = ?, updated_at = ?".to_string();
+    if governance.is_some() {
+        sets.push_str(", holder_entry_id = ?, disclosure = ?");
+    }
+    let sql = format!(
+        "UPDATE kb_key_blocks SET {sets}
+           WHERE key_block_id = ?
+             AND COALESCE(revision, 0) = ?
+             AND status NOT IN ('deleted', 'merged', 'deprecated')
+             AND (
+               (owner_kind = 'character' AND character_id = ?)
+               OR (
+                 owner_kind = 'actor_world_binding'
+                 AND actor_world_binding_id IN (
+                   SELECT binding_id FROM actor_world_bindings
+                   WHERE character_id = ? AND status = 'active'
+                 )
+               )
+             )"
+    );
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(sql))
+        .bind(canonical_name)
+        .bind(body_json)
+        .bind(new_revision)
+        .bind(&now);
+    if let Some(governance) = governance {
+        query = query
+            .bind(governance.holder_entry_id.as_deref())
+            .bind(governance.disclosure.as_deref());
+    }
+    let updated = map_kb_actor_constraint(
+        query
+            .bind(entry_id)
+            .bind(expected_revision)
+            .bind(character_id)
+            .bind(character_id)
+            .execute(&mut **tx)
+            .await,
+    )?
+    .rows_affected();
+    if updated == 0 {
+        return Err(knowledge_revision_conflict());
+    }
+    Ok(())
 }
 
 /// # Errors

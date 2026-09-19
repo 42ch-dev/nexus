@@ -89,10 +89,8 @@ impl ScopeQueryPort for NexusAdapter<'_> {
             // measured over eligible rows only. The keyset order
             // (`created_at`, `key_block_id`) is the ordering the pre-T8 read
             // produced.
-            let probe = match u32::try_from(LIST_BY_WORLD_LIMIT) {
-                Ok(limit) => limit.saturating_add(1),
-                Err(_) => u32::MAX,
-            };
+            let probe = u32::try_from(LIST_BY_WORLD_LIMIT)
+                .map_or(u32::MAX, |limit| limit.saturating_add(1));
             let rows = match store
                 .list_by_owner_keyset(&world_owner, None, probe, selection)
                 .await
@@ -282,7 +280,7 @@ mod tests {
     }
 
     /// A KE-capable adapter whose selection authorizes exactly `world_id`
-    /// (CreatorManagement over one World container, no known-governance
+    /// (`CreatorManagement` over one World container, no known-governance
     /// holders), so these tests exercise the request-bound listing.
     fn scoped(pool: sqlx::SqlitePool, world_id: &str) -> NexusAdapter<'static> {
         NexusAdapter::new(
@@ -443,8 +441,7 @@ mod tests {
         let (world_id, _seeded) = seed_world_with_entries(&pool).await;
 
         // A foreign-holder private row in the same world.
-        let mut private =
-            KnowledgeEntryRecord::new(&world_id, BlockType::Character, "HiddenNote");
+        let mut private = KnowledgeEntryRecord::new(&world_id, BlockType::Character, "HiddenNote");
         private.entry_id = "kb_hidden_scope".to_string();
         private.holder_entry_id = Some(register_creator_holder(&pool).await);
         private.disclosure = Some(DISCLOSURE_OWNER_PRIVATE.to_string());

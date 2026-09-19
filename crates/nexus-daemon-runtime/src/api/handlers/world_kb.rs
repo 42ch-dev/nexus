@@ -77,7 +77,8 @@ fn invalid_input(message: String) -> NexusApiError {
 /// `legacy_creator_only_unsupported` reason; a client-authored
 /// `holder_entry_id`/`disclosure` is `reserved_governance_key`.
 fn parse_patch_entity_request(body: &Bytes) -> Result<WorldKbPatchEntityRequest, NexusApiError> {
-    let value: Value = serde_json::from_slice(body).map_err(|err| invalid_input(err.to_string()))?;
+    let value: Value =
+        serde_json::from_slice(body).map_err(|err| invalid_input(err.to_string()))?;
     for pointer in RESERVED_KEY_SCOPES {
         let scope = value.pointer(pointer).unwrap_or(&Value::Null);
         if let Err(rejected) = reject_reserved_authoring_keys(scope) {

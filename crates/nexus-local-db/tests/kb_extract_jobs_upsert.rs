@@ -343,6 +343,7 @@ async fn delete_pending_for_chapter_removes_only_pending() {
 /// relationship suggestion: both ids are retained, and neither is duplicated.
 /// This is the job-result identity the review-time caller persists into.
 #[tokio::test]
+#[allow(clippy::too_many_lines)] // one rescan journey; splitting the fixtures would obscure the id-stability sequence
 async fn v1191_extract_candidate_and_relationship_ids_survive_a_rescan() {
     let (pool, _dir) = fresh_pool().await;
     nexus_local_db::kb_store::seed::world(&pool, WORLD, CREATOR, "T13", "t13", "private", "manual")

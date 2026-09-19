@@ -2540,8 +2540,25 @@ async fn promote_reject_cas_miss_conflict_carries_bumped_version() {
 /// window no such statement sequence can span is the blocked write — and
 /// therefore proves the target was read at revision V, whatever the runtime
 /// scheduling.
+#[allow(clippy::too_many_lines)] // one blocked-CAS journey; the wait and its assertions read as a unit
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn promote_merge_target_cas_miss_marks_target_conflict() {
+    // Promote must reach the blocked CAS write: while the lock is held the merge
+    // cannot complete, so the wait in this test only has to establish that its
+    // target read is already done. A read holds a core-pool connection for one
+    // statement and the CAS UPDATE it cannot execute holds one until the lock is
+    // released, so a connection held *continuously* across a window no
+    // short-statement sequence can span is that blocked write — the merge runs
+    // ~9 tiny statements before the CAS — and therefore proves the target was
+    // read at revision V. Timing the wait instead raced the scheduler: under a
+    // loaded parallel run the read landed after the bump and the intended CAS
+    // miss became a successful merge.
+    //
+    // SAFETY: test-only wait over the pool's own connection accounting.
+    const SAMPLE: std::time::Duration = std::time::Duration::from_millis(5);
+    const HELD_FOR: std::time::Duration = std::time::Duration::from_millis(1000);
+    const CAP: std::time::Duration = std::time::Duration::from_millis(3000);
+
     let (_tmp, state) = fresh_state().await;
     let pool = state.pool().unwrap();
     // Confirmed merge target at revision 0.
@@ -2604,19 +2621,8 @@ async fn promote_merge_target_cas_miss_marks_target_conflict() {
     });
 
     // Promote must reach the blocked CAS write: while the lock is held the merge
-    // cannot complete, so the wait only has to establish that its target read is
-    // already done. A read holds a core-pool connection for one statement and the
-    // CAS UPDATE it cannot execute holds one until the lock is released, so a
-    // connection held *continuously* across a window no short-statement sequence
-    // can span is that blocked write — the merge runs ~9 tiny statements before
-    // the CAS — and therefore proves the target was read at revision V. Timing
-    // the wait instead raced the scheduler: under a loaded parallel run the read
-    // landed after the bump and the intended CAS miss became a successful merge.
-    //
-    // SAFETY: test-only wait over the pool's own connection accounting.
-    const SAMPLE: std::time::Duration = std::time::Duration::from_millis(5);
-    const HELD_FOR: std::time::Duration = std::time::Duration::from_millis(1000);
-    const CAP: std::time::Duration = std::time::Duration::from_millis(3000);
+    // cannot complete, so the wait below only has to establish that its target
+    // read is already done (see the constants at the top of this test).
     let started = std::time::Instant::now();
     let mut held_since: Option<std::time::Instant> = None;
     let mut samples: Vec<(u32, usize)> = Vec::new();
@@ -2631,7 +2637,11 @@ async fn promote_merge_target_cas_miss_marks_target_conflict() {
             samples.remove(0);
         }
         if core_pool.size().saturating_sub(idle) >= 1 {
-            if held_since.get_or_insert_with(std::time::Instant::now).elapsed() >= HELD_FOR {
+            if held_since
+                .get_or_insert_with(std::time::Instant::now)
+                .elapsed()
+                >= HELD_FOR
+            {
                 break;
             }
         } else {

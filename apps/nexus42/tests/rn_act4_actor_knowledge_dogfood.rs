@@ -5,9 +5,8 @@ mod common;
 use common::rn_act4::{
     add_character_private, character_holder, creator_holder, edit_audience, entity_version,
     entry_ids, expected_ids, graph_entity, named_item, page_index, patch_entity_audience, seed,
-    view_character_cli, view_character_ids, view_creator_cli, world_kb_graph,
-    NAME_A_PRIVATE, NAME_A_SHARE, NAME_A_W1_LOCAL, NAME_B_SHARE, NAME_W1_PUBLIC, NAME_W1_SECRET,
-    NAME_W2_PUBLIC,
+    view_character_cli, view_character_ids, view_creator_cli, world_kb_graph, NAME_A_PRIVATE,
+    NAME_A_SHARE, NAME_A_W1_LOCAL, NAME_B_SHARE, NAME_W1_PUBLIC, NAME_W1_SECRET, NAME_W2_PUBLIC,
 };
 use common::LiveDaemon;
 use nexus_knowledge::world_kb::knowledge_entry::DISCLOSURE_OWNER_PRIVATE;
@@ -159,7 +158,8 @@ async fn rn_act4_five_views_share_row_identity_without_copies() {
     // Character and to the Creator's management review, hidden from every other
     // Character.
     let private_entry = add_character_private(&d, &g.character_a, NAME_A_PRIVATE).await;
-    let a_private = page_index(&view_character_cli(&d, &g.character_a, &g.world_w1, &g.bind_a_w1).await);
+    let a_private =
+        page_index(&view_character_cli(&d, &g.character_a, &g.world_w1, &g.bind_a_w1).await);
     let creator_private = page_index(&view_creator_cli(&d, &g.creator_id, &g.world_w1).await);
     let private_item = named_item(&a_private, NAME_A_PRIVATE);
     assert_eq!(private_item["entry_id"], private_entry);
@@ -181,7 +181,8 @@ async fn rn_act4_five_views_share_row_identity_without_copies() {
     let shared = edit_audience(&d, &g.character_a, &private_entry, 0, "shared", None).await;
     assert!(shared["item"]["holder_entry_id"].is_null());
     assert!(shared["item"]["disclosure"].is_null());
-    let a_shared = page_index(&view_character_cli(&d, &g.character_a, &g.world_w1, &g.bind_a_w1).await);
+    let a_shared =
+        page_index(&view_character_cli(&d, &g.character_a, &g.world_w1, &g.bind_a_w1).await);
     assert_eq!(
         named_item(&a_shared, NAME_A_PRIVATE)["entry_id"],
         private_entry

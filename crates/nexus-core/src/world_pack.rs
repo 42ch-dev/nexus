@@ -74,9 +74,12 @@ impl CoreService {
         // owned World, so the orchestrator persists under the management
         // selection (server-chosen from stored ownership + the holder
         // registry, never from the pack).
-        let (read_scope, _) =
-            crate::actor_knowledge::management_read_scope(&self.inner.pool, principal.creator_id(), &world_id)
-                .await?;
+        let (read_scope, _) = crate::actor_knowledge::management_read_scope(
+            &self.inner.pool,
+            principal.creator_id(),
+            &world_id,
+        )
+        .await?;
         let summary = run_world_pack_import(
             &self.inner.pool,
             &read_scope,
@@ -111,15 +114,17 @@ impl CoreService {
         request: PackImportRequest,
     ) -> CoreResult<PackImportResponse> {
         if let Some(import_batch_id) = request.review_import.as_deref() {
-            if !request.pack.is_empty() || !request.holder_map.is_empty() || request.include_anchors {
+            if !request.pack.is_empty() || !request.holder_map.is_empty() || request.include_anchors
+            {
                 return Err(CoreError::InvalidInput {
                     field: "review_import".to_string(),
-                    reason: "the review arm is exclusive: drop pack, holder_map and include_anchors"
-                        .to_string(),
+                    reason:
+                        "the review arm is exclusive: drop pack, holder_map and include_anchors"
+                            .to_string(),
                 });
             }
             let review = self
-                .review_world_pack_import(principal, world_id, import_batch_id.to_string())
+                .review_world_pack_import(principal, world_id, import_batch_id.clone())
                 .await?;
             return review_to_response(review);
         }
@@ -153,9 +158,12 @@ impl CoreService {
         // Same retained envelope as the import arm: ownership refusal first,
         // then the selection. A dry run never renders a different refusal.
         guards::require_world_owner(&self.inner.pool, &world_id, principal.creator_id()).await?;
-        let (read_scope, _) =
-            crate::actor_knowledge::management_read_scope(&self.inner.pool, principal.creator_id(), &world_id)
-                .await?;
+        let (read_scope, _) = crate::actor_knowledge::management_read_scope(
+            &self.inner.pool,
+            principal.creator_id(),
+            &world_id,
+        )
+        .await?;
         let summary = run_world_pack_import(
             &self.inner.pool,
             &read_scope,
@@ -556,20 +564,22 @@ async fn review_pack_import_quarantine(
 ) -> CoreResult<ImportQuarantineReview> {
     guards::require_world_owner(pool, world_id, creator_id).await?;
     let limit = i64::try_from(REVIEW_IMPORT_MAX_ATOMS).unwrap_or(100);
-    let mut stored =
-        nexus_local_db::kb_store::list_quarantine_atoms(pool, creator_id, world_id, import_batch_id, limit + 1)
-            .await
-            .map_err(|e| CoreError::Internal {
-                category: format!("quarantine review read failed: {e}"),
-            })?;
+    let mut stored = nexus_local_db::kb_store::list_quarantine_atoms(
+        pool,
+        creator_id,
+        world_id,
+        import_batch_id,
+        limit + 1,
+    )
+    .await
+    .map_err(|e| CoreError::Internal {
+        category: format!("quarantine review read failed: {e}"),
+    })?;
     let truncated = stored.len() > usize::try_from(limit).unwrap_or(100);
     if truncated {
         stored.truncate(usize::try_from(limit).unwrap_or(100));
     }
-    let atoms = stored
-        .into_iter()
-        .map(quarantined_atom_report)
-        .collect::<CoreResult<Vec<_>>>()?;
+    let atoms = stored.into_iter().map(quarantined_atom_report).collect();
     Ok(ImportQuarantineReview {
         batch_id: import_batch_id.to_string(),
         truncated,
@@ -581,8 +591,8 @@ async fn review_pack_import_quarantine(
 /// immutable original wire JSON verbatim.
 fn quarantined_atom_report(
     stored: nexus_local_db::kb_store::QuarantinedAtom,
-) -> CoreResult<QuarantinedAtomReport> {
-    Ok(QuarantinedAtomReport {
+) -> QuarantinedAtomReport {
+    QuarantinedAtomReport {
         quarantine_id: stored.quarantine_id,
         import_batch_id: stored.import_batch_id,
         entry_id: stored.entry_id,
@@ -590,7 +600,7 @@ fn quarantined_atom_report(
         original_owner: stored.original_owner,
         original_disclosure: stored.original_disclosure,
         original_entry: Some(stored.original_entry_json),
-    })
+    }
 }
 
 /// Map a stored `quarantine_reason` string onto the closed reason vocabulary
@@ -640,9 +650,8 @@ fn governance_disposition(
     original_disclosure: Option<&str>,
     resolved_mappings: &HashMap<String, KnowledgeGovernance>,
 ) -> GovernanceDisposition {
-    let is_owner_private = original_disclosure == Some(
-        nexus_knowledge::world_kb::knowledge_entry::DISCLOSURE_OWNER_PRIVATE,
-    );
+    let is_owner_private = original_disclosure
+        == Some(nexus_knowledge::world_kb::knowledge_entry::DISCLOSURE_OWNER_PRIVATE);
     if original_disclosure.is_some() && !is_owner_private {
         return GovernanceDisposition::Quarantine(QuarantineReason::UnknownDisclosure);
     }
@@ -654,10 +663,10 @@ fn governance_disposition(
         }
         return GovernanceDisposition::Shared;
     };
-    match resolved_mappings.get(foreign_holder_id) {
-        Some(governance) => GovernanceDisposition::Adoption(governance.clone()),
-        None => GovernanceDisposition::Quarantine(QuarantineReason::UnresolvedHolder),
-    }
+    resolved_mappings.get(foreign_holder_id).map_or_else(
+        || GovernanceDisposition::Quarantine(QuarantineReason::UnresolvedHolder),
+        |governance| GovernanceDisposition::Adoption(governance.clone()),
+    )
 }
 
 /// The quarantine row id a mapped re-import must remove for this atom: the
@@ -679,23 +688,23 @@ fn adoption_quarantine_id(
 }
 
 use nexus_contracts::BlockType;
+use nexus_knowledge::world_kb::knowledge_entry::KnowledgeGovernance;
+use nexus_knowledge::world_kb::store::KnowledgeReadScope;
 use nexus_knowledge::world_kb::validation::CANONICAL_NAME_MAX_LEN;
 use nexus_knowledge::world_kb::KbStore;
 use nexus_knowledge::world_kb::KnowledgeEntryRecord;
 use nexus_local_db::kb_relationships::{generate_relationship_id, get_relationship};
-use nexus_knowledge::world_kb::store::KnowledgeReadScope;
 use nexus_local_db::kb_store::SqliteKbStore;
+use nexus_local_db::kb_store::{AudienceContainer, AuthoredAudience};
+use nexus_local_db::kb_store::{
+    NewQuarantinedAtom, QUARANTINE_REASON_UNKNOWN_DISCLOSURE, QUARANTINE_REASON_UNRESOLVED_HOLDER,
+};
+use nexus_local_db::LocalDbError;
 use nexus_spoke_adapter::pack::ParsedPack;
 use nexus_spoke_adapter::{
     extensions, orchestrate_relate, orchestrate_upsert, KnowledgeEntry, NexusAdapter,
     RelateRequest, Relation, RelationExtensionsKey, UpsertRequest,
 };
-use nexus_local_db::kb_store::{
-    NewQuarantinedAtom, QUARANTINE_REASON_UNKNOWN_DISCLOSURE, QUARANTINE_REASON_UNRESOLVED_HOLDER,
-};
-use nexus_local_db::kb_store::{AuthoredAudience, AudienceContainer};
-use nexus_local_db::LocalDbError;
-use nexus_knowledge::world_kb::knowledge_entry::KnowledgeGovernance;
 use sqlx::SqlitePool;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
@@ -844,7 +853,7 @@ impl QuarantineReason {
 }
 
 /// One quarantined atom as the import response and the bounded review report it.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QuarantinedAtomReport {
     /// Stable id of the quarantine row.
     pub quarantine_id: String,
@@ -867,7 +876,7 @@ pub struct QuarantinedAtomReport {
 
 /// The bounded, read-only, owner-only quarantine review of one import batch
 /// (durable §6).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportQuarantineReview {
     /// The reviewed batch id.
     pub batch_id: String,
@@ -940,7 +949,7 @@ pub struct ImportDetail {
 /// This is the **complete** local report: the per-atom outcomes plus the atoms
 /// the run held outside the KB stores. The HTTP response is a projection of it
 /// onto the frozen wire shape (see [`import_summary_to_response`]).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportSummary {
     pub entries: AtomCounts,
     pub relations: AtomCounts,
@@ -964,7 +973,7 @@ enum PackImportError {
 
 impl PersistOutcome {
     /// A rejected atom carrying its reason.
-    fn rejected(reason: String) -> Self {
+    const fn rejected(reason: String) -> Self {
         Self {
             outcome: ImportOutcome::Rejected,
             reject_reason: Some(reason),
@@ -1059,10 +1068,7 @@ async fn import_pack(
         // touch the entry. The disposition is decided on these values only: a
         // foreign holder id is never resolved by equality against a local
         // digest, and unknown disclosure vocabulary is never rewritten.
-        let original_owner = entry
-            .owner
-            .as_ref()
-            .map(|owner| owner.as_str().to_string());
+        let original_owner = entry.owner.as_ref().map(|owner| owner.as_str().to_string());
         let original_disclosure = entry
             .disclosure
             .as_ref()
@@ -1129,8 +1135,8 @@ async fn import_pack(
                     source_entries
                         .get(entry_index)
                         .unwrap_or(&serde_json::Value::Null),
-                    &original_owner,
-                    &original_disclosure,
+                    original_owner.as_deref(),
+                    original_disclosure.as_deref(),
                     reason,
                     dry_run,
                 )
@@ -1393,7 +1399,8 @@ async fn import_pack(
         }
 
         prepare_create_entry(&mut entry, world_id);
-        match persist_entry_upsert(pool, read_scope, &entry, adopted_quarantine_id.as_deref()).await {
+        match persist_entry_upsert(pool, read_scope, &entry, adopted_quarantine_id.as_deref()).await
+        {
             PersistOutcome {
                 outcome: ImportOutcome::Created,
                 ..
@@ -1983,8 +1990,8 @@ async fn quarantine_pack_atom(
     world_id: &str,
     pack_entry_id: &str,
     raw_entry: &serde_json::Value,
-    original_owner: &Option<String>,
-    original_disclosure: &Option<String>,
+    original_owner: Option<&str>,
+    original_disclosure: Option<&str>,
     reason: QuarantineReason,
     dry_run: bool,
 ) -> Result<(), PackImportError> {
@@ -1998,7 +2005,7 @@ async fn quarantine_pack_atom(
         controlling_creator_id: identity.creator_id,
         world_id,
         reason: reason.as_str(),
-        foreign_holder_id: original_owner.as_deref(),
+        foreign_holder_id: original_owner,
         entry_id: pack_entry_id,
         original_entry_json: &original_entry_json,
         source_provenance_json: &identity.source_provenance_json,
@@ -2008,7 +2015,7 @@ async fn quarantine_pack_atom(
             identity.creator_id,
             world_id,
             reason.as_str(),
-            original_owner.as_deref(),
+            original_owner,
             pack_entry_id,
         )
     } else {
@@ -2021,8 +2028,8 @@ async fn quarantine_pack_atom(
         import_batch_id: identity.batch_id.to_string(),
         entry_id: pack_entry_id.to_string(),
         reason,
-        original_owner: original_owner.clone(),
-        original_disclosure: original_disclosure.clone(),
+        original_owner: original_owner.map(str::to_string),
+        original_disclosure: original_disclosure.map(str::to_string),
         original_entry: None,
     });
     summary.entries.rejected += 1;
@@ -2085,11 +2092,7 @@ async fn persist_entry_upsert(
     let result = adapter
         .with_bound_tx(|| orchestrate_upsert(&adapter, upsert_req))
         .await;
-    let Some(mut tx) = tx_cell
-        .lock()
-        .ok()
-        .and_then(|mut guard| guard.take())
-    else {
+    let Some(mut tx) = tx_cell.lock().ok().and_then(|mut guard| guard.take()) else {
         return PersistOutcome::rejected(
             "adoption transaction cell was empty after the orchestrator returned".to_string(),
         );
@@ -2125,7 +2128,11 @@ async fn persist_entry_upsert(
     }
 }
 
-async fn persist_relation_relate(pool: &SqlitePool, read_scope: &KnowledgeReadScope, relation: &Relation) -> PersistOutcome {
+async fn persist_relation_relate(
+    pool: &SqlitePool,
+    read_scope: &KnowledgeReadScope,
+    relation: &Relation,
+) -> PersistOutcome {
     let relate_req = build_import_relate_request(relation);
     let adapter = NexusAdapter::new(pool.clone(), read_scope.clone());
     match orchestrate_relate(&adapter, relate_req).await {
@@ -2336,7 +2343,9 @@ fn review_to_response(review: ImportQuarantineReview) -> CoreResult<PackImportRe
 }
 
 /// The frozen wire spelling of one quarantine reason.
-const fn quarantine_reason_to_wire(reason: QuarantineReason) -> PackImportResponseQuarantinedItemReason {
+const fn quarantine_reason_to_wire(
+    reason: QuarantineReason,
+) -> PackImportResponseQuarantinedItemReason {
     match reason {
         QuarantineReason::UnresolvedHolder => {
             PackImportResponseQuarantinedItemReason::UnresolvedHolder
@@ -2348,7 +2357,9 @@ const fn quarantine_reason_to_wire(reason: QuarantineReason) -> PackImportRespon
 }
 
 /// The frozen wire spelling of one review-atom reason.
-const fn review_reason_to_wire(reason: QuarantineReason) -> PackImportResponseReviewAtomsItemReason {
+const fn review_reason_to_wire(
+    reason: QuarantineReason,
+) -> PackImportResponseReviewAtomsItemReason {
     match reason {
         QuarantineReason::UnresolvedHolder => {
             PackImportResponseReviewAtomsItemReason::UnresolvedHolder

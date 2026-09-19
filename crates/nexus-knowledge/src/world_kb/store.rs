@@ -1654,10 +1654,8 @@ mod tests {
             KnowledgeOwnerRef::character(chr()),
         ];
 
-        let management = KnowledgeReadScope::creator_management(
-            containers.clone(),
-            vec![HLD.to_string()],
-        );
+        let management =
+            KnowledgeReadScope::creator_management(containers.clone(), vec![HLD.to_string()]);
         assert_eq!(management.policy(), KnowledgeReadPolicy::CreatorManagement);
         assert_eq!(management.holder_entry_id(), None);
         assert_eq!(management.authorized_holders(), &[HLD.to_string()]);

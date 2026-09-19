@@ -284,6 +284,7 @@ impl ActorSessionRegistry {
     ///
     /// Returns `actor_session_stale` when the id is not a live indexed Actor
     /// session (retired ids and legacy ids are never reusable).
+    #[allow(clippy::significant_drop_tightening)] // the session map guard is held across the identity comparison and the retire
     pub fn revalidate_knowledge(
         &self,
         session_id: &HostSessionId,
