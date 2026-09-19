@@ -150,13 +150,9 @@ pub fn knowledge_record_to_spoke(entry: &KnowledgeEntryRecord) -> SpokeKnowledge
         // value it has. The newtype requires a non-empty string; the domain
         // validates that on every write (`validate_native_governance`), so an
         // empty value here is stored-shape drift, not runtime input.
-        disclosure: entry
-            .disclosure
-            .as_deref()
-            .map(|value| {
-                SpokeKnowledgeDisclosure::try_from(value)
-                    .expect("disclosure is non-empty (validated)")
-            }),
+        disclosure: entry.disclosure.as_deref().map(|value| {
+            SpokeKnowledgeDisclosure::try_from(value).expect("disclosure is non-empty (validated)")
+        }),
         entry_id: entry.entry_id.clone(),
         entry_type: block_type_to_entry_type(entry.block_type),
         extensions: HashMap::new(),
@@ -167,8 +163,7 @@ pub fn knowledge_record_to_spoke(entry: &KnowledgeEntryRecord) -> SpokeKnowledge
         // `owner` is a holder KnowledgeEntry `entry_id`, never a World /
         // Character / binding entity id.
         owner: entry.holder_entry_id.as_deref().map(|holder| {
-            SpokeKnowledgeOwner::try_from(holder)
-                .expect("holder_entry_id is non-empty (validated)")
+            SpokeKnowledgeOwner::try_from(holder).expect("holder_entry_id is non-empty (validated)")
         }),
         revision: entry.revision,
         schema_version: NonZeroU64::new(u64::from(entry.schema_version))
@@ -246,7 +241,10 @@ pub fn spoke_to_knowledge_record(
     // disclosure vocabulary is carried verbatim here and refused/quarantined
     // by its owning boundary (never rewritten to shared).
     let holder_entry_id = s.owner.as_ref().map(|holder| holder.as_str().to_string());
-    let disclosure = s.disclosure.as_ref().map(|value| value.as_str().to_string());
+    let disclosure = s
+        .disclosure
+        .as_ref()
+        .map(|value| value.as_str().to_string());
     // Extract borrowed accessor data into owned values FIRST, so subsequent
     // field moves out of `s` are not blocked by outstanding borrows.
     let created_from_command_id = get_created_from_command_id(&s).map(String::from);

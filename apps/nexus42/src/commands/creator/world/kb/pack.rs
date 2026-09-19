@@ -38,10 +38,10 @@ use nexus_core::{
     QuarantinedAtomReport,
 };
 use nexus_daemon_runtime::pack_import::{import_pack, review_import, ConflictPolicy};
+use nexus_spoke_adapter::pack::parse_pack;
 use nexus_spoke_adapter::pack::st_lorebook::{
     parse_st_lorebook, ConversionDiagnostic, DiagnosticSeverity, StLorebookError,
 };
-use nexus_spoke_adapter::pack::parse_pack;
 use sqlx::SqlitePool;
 use std::path::PathBuf;
 
@@ -168,7 +168,11 @@ pub struct ImportArgs {
     /// `<foreign-id>=character-private:<character_id>`. Repeat the flag for
     /// several ids. Without a mapping a foreign-governed atom is quarantined,
     /// never adopted by string equality.
-    #[arg(long = "holder-map", value_name = "FOREIGN-ID=SELECTOR", conflicts_with = "review_import")]
+    #[arg(
+        long = "holder-map",
+        value_name = "FOREIGN-ID=SELECTOR",
+        conflicts_with = "review_import"
+    )]
     pub holder_map: Vec<String>,
 
     /// Read-only review of one import batch's quarantined atoms (mutually
@@ -257,7 +261,9 @@ async fn export(args: ExportArgs, config: &CliConfig, pool: &SqlitePool) -> Resu
     println!("  Entries:   {}", response.entries.len());
     println!("  Relations: {}", response.relations.len());
     if !args.include_owned_private {
-        println!("  Scope:     shared rows only (pass --include-owned-private for owned private facts)");
+        println!(
+            "  Scope:     shared rows only (pass --include-owned-private for owned private facts)"
+        );
     }
     if args.include_anchors {
         println!("  Anchors:   0 (no persisted SourceAnchor store in nexus)");
@@ -451,10 +457,9 @@ async fn review_quarantine(
     creator_id: &str,
     batch_id: &str,
 ) -> Result<()> {
-    let review: ImportQuarantineReview =
-        review_import(pool, world_id, creator_id, batch_id)
-            .await
-            .map_err(|e| CliError::Other(e.to_string()))?;
+    let review: ImportQuarantineReview = review_import(pool, world_id, creator_id, batch_id)
+        .await
+        .map_err(|e| CliError::Other(e.to_string()))?;
     println!(
         "quarantined atoms in batch {}: {}",
         review.batch_id,
@@ -550,10 +555,10 @@ mod tests {
     use super::*;
     use nexus_contracts::BlockType;
     use nexus_daemon_runtime::pack_import::IMPORT_PROVENANCE;
+    use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
     use nexus_knowledge::world_kb::KbStore;
     use nexus_local_db::kb_relationships::list_relationships_for_world;
     use nexus_local_db::kb_store::SqliteKbStore;
-    use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
     // parse_pack is re-exported at module level from the parent `pack` module;
     // the explicit import below is a reminder of the path but resolves to the
     // same item.
@@ -2420,6 +2425,7 @@ mod tests {
         assert_eq!(count_relations(&pool2, WORLD).await, 1);
     }
 
+    #[allow(clippy::too_many_lines)] // one activation journey asserted end to end
     #[tokio::test(flavor = "multi_thread")]
     async fn pack_io_modules_preserved_on_rename_and_overwrite_collision() {
         use nexus_spoke_adapter::adapter::activation;
@@ -2428,7 +2434,9 @@ mod tests {
         let pool_a = crate::db::Schema::init(&dir_a.path().join("state.db"))
             .await
             .unwrap();
-        nexus_local_db::ensure_creator_row(&pool_a, OWNER, OWNER_NAME).await.unwrap();
+        nexus_local_db::ensure_creator_row(&pool_a, OWNER, OWNER_NAME)
+            .await
+            .unwrap();
         nexus_local_db::kb_store::seed::world(
             &pool_a,
             WORLD_A,

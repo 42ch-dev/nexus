@@ -23,7 +23,7 @@ use nexus_local_db::kb_extract_job::list_pending_for_world_after;
 use nexus_local_db::kb_relationships::list_relationships_for_world_in_tx;
 use nexus_local_db::kb_store::{
     get_knowledge_entry_in_tx, list_by_world_in_tx, resolve_authored_audience_tx,
-    AuthoredAudience, AudienceContainer,
+    AudienceContainer, AuthoredAudience,
 };
 use nexus_spoke_adapter::conversion::{knowledge_record_to_spoke, spoke_to_knowledge_record};
 use nexus_spoke_adapter::extensions::set_nexus_body;
@@ -507,17 +507,16 @@ pub mod patch {
         actor_db_err, db_err, get_knowledge_entry_in_tx, guards, is_world_conflict_reject,
         knowledge_record_to_spoke, local_db_err, project_entity, put_knowledge_entry_in_tx,
         resolve_authored_audience_tx, set_nexus_body, spoke_to_knowledge_record, store_err,
-        validate_body, validate_canonical_name, validation_summary, wire_cast, AuthoredAudience,
-        AudienceContainer, BlockType, CoreError, CoreResult, HashMap, KbStoreError,
+        validate_body, validate_canonical_name, validation_summary, wire_cast, AudienceContainer,
+        AuthoredAudience, BlockType, CoreError, CoreResult, HashMap, KbStoreError,
         KnowledgeAudience, KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeGovernance,
-        KnowledgeReadScope,
-        NexusWorldKbEntityPatch,
-        NexusWorldKbEntityPatchAudience, NexusWorldKbEntityPatchModulesKey,
-        NexusWorldKbEntityPatchModulesValue, SpokeKnowledgeEntry, SpokeReject, SpokeRejectCode,
-        SpokeResult, Sqlite, SqlitePool, ValidationMode, WorldKbPatchEntityRequest,
-        WorldKbPatchEntityResponse,
+        KnowledgeReadScope, NexusWorldKbEntityPatch, NexusWorldKbEntityPatchAudience,
+        NexusWorldKbEntityPatchModulesKey, NexusWorldKbEntityPatchModulesValue,
+        SpokeKnowledgeEntry, SpokeReject, SpokeRejectCode, SpokeResult, Sqlite, SqlitePool,
+        ValidationMode, WorldKbPatchEntityRequest, WorldKbPatchEntityResponse,
     };
 
+    #[allow(clippy::too_many_lines)] // one linear domain operation
     pub async fn patch_entity(
         pool: &SqlitePool,
         creator_id: &str,
@@ -623,9 +622,14 @@ pub mod patch {
             return Ok(response);
         }
         let spoke_entry = build_spoke_entry(&post_patch);
-        let put_result =
-            put_knowledge_entry_in_tx(pool, read_scope, &mut tx, spoke_entry, Some(current_version))
-                .await;
+        let put_result = put_knowledge_entry_in_tx(
+            pool,
+            read_scope,
+            &mut tx,
+            spoke_entry,
+            Some(current_version),
+        )
+        .await;
         let persisted = match map_put_response(put_result, &req.entity_id, &mut tx).await {
             Ok(entry) => entry,
             Err(e) => {
@@ -743,16 +747,15 @@ pub mod patch {
 
     /// Whether the resolved governance equals the stored pair — an authored
     /// audience that changes nothing.
-    fn governance_is_stored(kb: &KnowledgeEntryRecord, governance: Option<&KnowledgeGovernance>) -> bool {
-        match governance {
-            None => true,
-            Some(governance) => {
-                kb.holder_entry_id == governance.holder_entry_id
-                    && kb.disclosure == governance.disclosure
-            }
-        }
+    fn governance_is_stored(
+        kb: &KnowledgeEntryRecord,
+        governance: Option<&KnowledgeGovernance>,
+    ) -> bool {
+        governance.is_none_or(|governance| {
+            kb.holder_entry_id == governance.holder_entry_id
+                && kb.disclosure == governance.disclosure
+        })
     }
-
 
     async fn patch_entity_create_in_tx(
         pool: &SqlitePool,
@@ -830,7 +833,8 @@ pub mod patch {
         .map_err(actor_db_err)?;
 
         let spoke_entry = build_spoke_entry(&fresh);
-        let put_result = put_knowledge_entry_in_tx(pool, read_scope, &mut tx, spoke_entry, None).await;
+        let put_result =
+            put_knowledge_entry_in_tx(pool, read_scope, &mut tx, spoke_entry, None).await;
         let persisted = match map_put_response(put_result, &req.entity_id, &mut tx).await {
             Ok(entry) => entry,
             Err(e) => {
@@ -1122,8 +1126,7 @@ impl CoreService {
         }
         // Retained route texture: the typed ownership guard answers 403 for a
         // foreign World before the read selection can answer 404.
-        guards::require_world_owner(&self.inner.pool, &world_id, principal.creator_id())
-            .await?;
+        guards::require_world_owner(&self.inner.pool, &world_id, principal.creator_id()).await?;
         let read_scope = self
             .creator_management_read_scope(principal, &world_id)
             .await?;
@@ -1160,8 +1163,7 @@ impl CoreService {
         }
         // Retained route texture: the typed ownership guard answers 403 for a
         // foreign World before the read selection can answer 404.
-        guards::require_world_owner(&self.inner.pool, &world_id, principal.creator_id())
-            .await?;
+        guards::require_world_owner(&self.inner.pool, &world_id, principal.creator_id()).await?;
         let read_scope = self
             .creator_management_read_scope(principal, &world_id)
             .await?;
@@ -1418,8 +1420,8 @@ pub mod promote {
 
         let tx = pool.begin().await.map_err(|e| db_err(&e))?;
         let tx_cell = Arc::new(Mutex::new(Some(tx)));
-        let adapter = NexusAdapter::new(pool.clone(), read_scope.clone())
-            .with_tx_cell(Arc::clone(&tx_cell));
+        let adapter =
+            NexusAdapter::new(pool.clone(), read_scope.clone()).with_tx_cell(Arc::clone(&tx_cell));
 
         let spoke_req = build_spoke_promote_request(&kb);
         let result = adapter

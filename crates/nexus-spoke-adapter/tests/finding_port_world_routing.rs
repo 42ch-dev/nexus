@@ -18,19 +18,17 @@ use nexus_local_db::{open_pool, run_migrations};
 use nexus_spoke_adapter::{Finding, FindingPort, NexusAdapter, SpokeRejectCode, SpokeResult};
 use serde_json::{json, Value};
 
-    /// A KE-capable adapter whose selection authorizes the worlds these
-    /// fixtures own (v1.191 P1 T8 — the check/relate paths read knowledge).
-    fn scoped(pool: sqlx::SqlitePool) -> NexusAdapter<'static> {
-        NexusAdapter::new(
-            pool,
-            nexus_knowledge::world_kb::KnowledgeReadScope::creator_management(
-                vec![
-                nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef::world("wld_test"),
-                ],
-                Vec::new(),
-            ),
-        )
-    }
+/// A KE-capable adapter whose selection authorizes the worlds these
+/// fixtures own (v1.191 P1 T8 — the check/relate paths read knowledge).
+fn scoped(pool: sqlx::SqlitePool) -> NexusAdapter<'static> {
+    NexusAdapter::new(
+        pool,
+        nexus_knowledge::world_kb::KnowledgeReadScope::creator_management(
+            vec![nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef::world("wld_test")],
+            Vec::new(),
+        ),
+    )
+}
 
 async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
@@ -450,13 +448,10 @@ async fn v1191_holder_ports_world_findings_stay_inside_the_bound_selection() {
 
     // (a) A world outside the bound selection is refused outright.
     let mut foreign = world_finding("fnd_foreign_world");
-    if let Some(ext) = foreign
-        .extensions
-        .get_mut(
-            &spoke_schemas::finding::FindingExtensionsKey::try_from("nexus")
-                .expect("nexus namespace key"),
-        )
-    {
+    if let Some(ext) = foreign.extensions.get_mut(
+        &spoke_schemas::finding::FindingExtensionsKey::try_from("nexus")
+            .expect("nexus namespace key"),
+    ) {
         ext.insert(
             "world_id".to_string(),
             Value::String("wld_foreign".to_string()),

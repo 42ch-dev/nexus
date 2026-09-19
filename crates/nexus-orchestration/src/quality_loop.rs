@@ -849,6 +849,7 @@ pub(crate) enum LlmExtractOutcome {
 /// source (default review prompt vs. rendered preset template); parsing,
 /// profile-aware payload shaping, and the `MAX_CANDIDATES_PER_PASS` cap are
 /// shared.
+#[allow(clippy::too_many_arguments)] // one shared LLM-extract seam forwarding the caller context
 pub(crate) async fn run_llm_extract(
     registry: Option<&CapabilityRegistry>,
     capability_name: &str,

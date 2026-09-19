@@ -665,6 +665,11 @@ pub(crate) async fn creator_view_scope(
         .map_err(|e| crate::errors::CliError::Other(e.to_string()))
 }
 
+/// # Errors
+///
+/// Returns [`CliError`] when the active creator/workspace cannot be resolved,
+/// the moment assembly fails (unknown World/Work/branch, no admitted read
+/// selection, an assembly fault), or the response cannot be serialized.
 #[allow(clippy::future_not_send)]
 #[allow(clippy::fn_params_excessive_bools)]
 #[allow(clippy::too_many_arguments)] // CLI param plumbing — acceptable until refactored into builder
@@ -1945,7 +1950,9 @@ mod tests {
         let spoke_store = nexus_spoke_adapter::SpokeBackedKbStore::new(
             pool.clone(),
             nexus_knowledge::world_kb::KnowledgeReadScope::creator_management(
-                vec![nexus_knowledge::world_kb::KnowledgeOwnerRef::world("wld_t4")],
+                vec![nexus_knowledge::world_kb::KnowledgeOwnerRef::world(
+                    "wld_t4",
+                )],
                 Vec::new(),
             ),
         );

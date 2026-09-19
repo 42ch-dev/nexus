@@ -547,7 +547,10 @@ impl Capability for KbExtractWork {
             .map_err(|e| CapabilityError::Internal(format!("Failed to open finalize tx: {e}")))?;
         let mut insert_result = None;
         for candidate in outcome.candidates {
-            match store.insert_key_block_in_tx(&mut tx, candidate.record).await {
+            match store
+                .insert_key_block_in_tx(&mut tx, candidate.record)
+                .await
+            {
                 Ok(r) => insert_result = Some(r),
                 Err(e) => {
                     drop(tx);
@@ -714,7 +717,7 @@ mod tests {
     }
 
     /// A model response for one novel-profile candidate.
-    fn model_response(attributes: serde_json::Value) -> String {
+    fn model_response(attributes: &serde_json::Value) -> String {
         json!({
             "block_type": "character",
             "canonical_name": "char_lin_xia",
@@ -729,7 +732,7 @@ mod tests {
             "creator_id": CREATOR,
             "job_id": job_id,
             "work_content": "Lin Xia drew her blade at the Azure Gate.",
-            "llm_response": model_response(json!({ "novel_category": "character" })),
+            "llm_response": model_response(&json!({ "novel_category": "character" })),
             "_session_id": "run_t13",
         })
     }
@@ -793,7 +796,7 @@ mod tests {
             "creator_id": CREATOR,
             "job_id": job_id,
             "work_content": "Lin Xia drew her blade.",
-            "llm_response": model_response(json!({
+            "llm_response": model_response(&json!({
                 "novel_category": "character",
                 "holder_entry_id": "hld_model_choice",
                 "disclosure": "owner-private",

@@ -336,10 +336,10 @@ impl HostHandle {
                 let remember = remember.unwrap_or(false);
                 let raw_prompt = content.clone();
                 let indexed = self.registry.context_for(&sid);
-                let is_character = match &indexed {
-                    Some(ctx) => matches!(ctx.actor, AdmittedActor::Character { .. }),
-                    None => self.registry.is_actor_session(&sid),
-                };
+                let is_character = indexed.as_ref().map_or_else(
+                    || self.registry.is_actor_session(&sid),
+                    |ctx| matches!(ctx.actor, AdmittedActor::Character { .. }),
+                );
                 if remember && !is_character {
                     return Err(invalid(
                         "remember",
@@ -856,7 +856,7 @@ impl HostHandle {
         let view_scope = self
             .core
             .actor_view_read_scope(
-                &principal,
+                principal,
                 &ctx.actor,
                 &ctx.world_id,
                 ctx.binding_id.as_deref(),
@@ -988,7 +988,12 @@ impl ActorSessionKey {
         knowledge: crate::actor_knowledge::ActorKnowledgeIdentity,
     ) -> CoreResult<Self> {
         crate::actor_sessions::ActorSessionRegistry::key_for(
-            provider_id, cwd, model, mode, ctx, knowledge,
+            provider_id,
+            cwd,
+            model,
+            mode,
+            ctx,
+            knowledge,
         )
     }
 }

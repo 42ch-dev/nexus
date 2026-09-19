@@ -45,20 +45,20 @@ use nexus_spoke_adapter::{NexusAdapter, Rule, RuleQueryPort, SpokeResult};
 ///
 /// Returns the pool AND the `TempDir` guard so the temp DB stays alive for
 /// the test body (mirrors `spoke_orchestrator_integration.rs::fresh_pool`).
-    /// A KE-capable adapter whose selection authorizes the worlds these
-    /// fixtures own (v1.191 P1 T8 — the check/relate paths read knowledge).
-    fn scoped(pool: sqlx::SqlitePool) -> NexusAdapter<'static> {
-        NexusAdapter::new(
-            pool,
-            nexus_knowledge::world_kb::KnowledgeReadScope::creator_management(
-                vec![
+/// A KE-capable adapter whose selection authorizes the worlds these
+/// fixtures own (v1.191 P1 T8 — the check/relate paths read knowledge).
+fn scoped(pool: sqlx::SqlitePool) -> NexusAdapter<'static> {
+    NexusAdapter::new(
+        pool,
+        nexus_knowledge::world_kb::KnowledgeReadScope::creator_management(
+            vec![
                 nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef::world("wld_a"),
                 nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef::world("wld_b"),
-                ],
-                Vec::new(),
-            ),
-        )
-    }
+            ],
+            Vec::new(),
+        ),
+    )
+}
 
 async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();

@@ -1122,7 +1122,9 @@ mod tests {
             nexus_knowledge::world_kb::KnowledgeReadScope::creator_management(
                 vec![
                     nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef::world("wld_cmp"),
-                    nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef::world("wld_other"),
+                    nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef::world(
+                        "wld_other",
+                    ),
                 ],
                 Vec::new(),
             ),
@@ -1131,7 +1133,7 @@ mod tests {
 
     /// v1.191 P1 T8: `compute_sessions` is engine-owned under the core writer
     /// protocol (`guard_compute_sessions_*`), so these fixtures need an
-    /// engine-owned pool — a bare `open_pool` is fenced (WRITER_FENCED) and the
+    /// engine-owned pool — a bare `open_pool` is fenced (`WRITER_FENCED`) and the
     /// compute paths could not persist a session at all.
     async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
@@ -1706,7 +1708,10 @@ mod tests {
         let owner = scoped(pool.clone());
         unwrap_ok(
             owner
-                .put_knowledge_entry(spoke_character_entry("kb_scope_h", "ScopeHero", 100, 20, 10, 100), None)
+                .put_knowledge_entry(
+                    spoke_character_entry("kb_scope_h", "ScopeHero", 100, 20, 10, 100),
+                    None,
+                )
                 .await,
             "create",
         );
@@ -1726,9 +1731,11 @@ mod tests {
         let outsider = NexusAdapter::new(
             pool,
             nexus_knowledge::world_kb::KnowledgeReadScope::creator_management(
-                vec![nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef::world(
-                    "wld_none",
-                )],
+                vec![
+                    nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef::world(
+                        "wld_none",
+                    ),
+                ],
                 Vec::new(),
             ),
         );
@@ -1779,8 +1786,7 @@ mod tests {
         .expect("write module wasm");
         std::fs::write(
             module_dir.join("manifest.json"),
-            nexus_wasm_host::embedded_module_manifest("basic-combat")
-                .expect("embedded manifest"),
+            nexus_wasm_host::embedded_module_manifest("basic-combat").expect("embedded manifest"),
         )
         .expect("write module manifest");
 
@@ -1836,8 +1842,7 @@ mod tests {
         std::fs::write(&wasm_path, bytes).expect("write module wasm");
         std::fs::write(&manifest_path, manifest).expect("write module manifest");
 
-        let adapter =
-            scoped(pool).with_user_modules_dir(module_root.path().to_path_buf());
+        let adapter = scoped(pool).with_user_modules_dir(module_root.path().to_path_buf());
         let cache = adapter.module_cache();
         assert_eq!(cache.len(), 0, "fresh adapter starts with an empty cache");
 
@@ -1956,8 +1961,7 @@ mod tests {
         std::fs::write(&wasm_path, bytes).expect("write module wasm");
         std::fs::write(&manifest_path, manifest).expect("write module manifest");
 
-        let adapter =
-            scoped(pool).with_user_modules_dir(module_root.path().to_path_buf());
+        let adapter = scoped(pool).with_user_modules_dir(module_root.path().to_path_buf());
         let cache = adapter.module_cache();
         let (module, served_manifest) = unwrap_ok(
             adapter.load_module("basic-combat"),
@@ -2005,8 +2009,7 @@ mod tests {
         std::fs::write(&wasm_path, changed).expect("write module wasm");
         std::fs::write(&manifest_path, manifest).expect("write module manifest");
 
-        let adapter =
-            scoped(pool).with_user_modules_dir(module_root.path().to_path_buf());
+        let adapter = scoped(pool).with_user_modules_dir(module_root.path().to_path_buf());
         let cache = adapter.module_cache();
         assert_eq!(cache.len(), 0, "fresh adapter starts with an empty cache");
 
@@ -2063,8 +2066,7 @@ mod tests {
         std::fs::write(&wasm_path, bytes).expect("write module wasm");
         std::fs::write(&manifest_path, &legacy_manifest).expect("write legacy module manifest");
 
-        let adapter =
-            scoped(pool).with_user_modules_dir(module_root.path().to_path_buf());
+        let adapter = scoped(pool).with_user_modules_dir(module_root.path().to_path_buf());
         let (module, served_manifest) = unwrap_ok(
             adapter.load_module("basic-combat"),
             "legacy manifest without wasm_sha256 loads via the stat fence",
@@ -2219,8 +2221,7 @@ mod tests {
         std::fs::write(&wasm_path, bytes).expect("write module wasm");
         std::fs::write(&manifest_path, manifest).expect("write module manifest");
 
-        let adapter =
-            scoped(pool).with_user_modules_dir(module_root.path().to_path_buf());
+        let adapter = scoped(pool).with_user_modules_dir(module_root.path().to_path_buf());
         let adapter = std::sync::Arc::new(adapter);
 
         // Churn writer: alternate the pair while the loader runs.

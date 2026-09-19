@@ -489,7 +489,7 @@ fn admit_viewpoint(viewpoint: NexusSessionViewpoint) -> ActorViewpoint {
 /// Validate stored ownership for an admission (durable §11.3 admission
 /// ordering: Creator self-ownership, binding shape, active owned World,
 /// active owned Character, active stored binding).
-pub(crate) async fn require_admitted_ownership(
+pub async fn require_admitted_ownership(
     pool: &SqlitePool,
     caller_creator_id: &str,
     actor: &AdmittedActor,
@@ -560,6 +560,12 @@ pub async fn require_actor_holder(
 
 /// Active owned World (PR #240 finding 1): foreign/missing → 404, owned but
 /// inactive → 409 `world_inactive`.
+///
+/// # Errors
+///
+/// Returns [`CoreError::NotFound`] for a foreign or missing World, the
+/// `world_inactive` [`CoreError::ActorConflict`] for an owned but inactive
+/// World, and [`CoreError::Internal`] on database failure.
 pub async fn require_active_owned_world(
     pool: &SqlitePool,
     creator_id: &str,
@@ -592,6 +598,12 @@ pub async fn require_active_owned_world(
 
 /// Active owned Character: foreign/missing → 404, owned but archived → 409
 /// `character_inactive`. Returns the stored record for epoch capture.
+///
+/// # Errors
+///
+/// Returns [`CoreError::NotFound`] for a foreign or missing Character, the
+/// `character_inactive` [`CoreError::ActorConflict`] for an owned but archived
+/// Character, and the mapped storage fault on database failure.
 pub async fn require_active_owned_character(
     pool: &SqlitePool,
     creator_id: &str,
@@ -743,7 +755,10 @@ impl CoreService {
         let row =
             require_character_row(&self.inner.pool, principal.creator_id(), &character_id).await?;
         CharacterDetail::builder()
-            .character(self.character_identity_wire(principal.creator_id(), &row).await?)
+            .character(
+                self.character_identity_wire(principal.creator_id(), &row)
+                    .await?,
+            )
             .try_into()
             .map_err(wire_err)
     }
@@ -793,7 +808,10 @@ impl CoreService {
         .await
         .map_err(actor_db_err)?;
         CharacterDetail::builder()
-            .character(self.character_identity_wire(principal.creator_id(), &record).await?)
+            .character(
+                self.character_identity_wire(principal.creator_id(), &record)
+                    .await?,
+            )
             .try_into()
             .map_err(wire_err)
     }

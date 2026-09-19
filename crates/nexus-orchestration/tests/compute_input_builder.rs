@@ -27,10 +27,10 @@ use serde_json::{json, Map, Value};
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
-/// The holder the admitted ActorView selection resolves to in these cases.
+/// The holder the admitted `ActorView` selection resolves to in these cases.
 const READER_HOLDER: &str = "hld_test_reader";
 
-/// The admitted ActorView selection these cases read through: the World
+/// The admitted `ActorView` selection these cases read through: the World
 /// container plus a resolved holder.
 ///
 /// The seeded rows are shared unless a case deliberately governs them, so the
@@ -155,7 +155,11 @@ fn key_block_ids(
     input
         .key_blocks
         .iter()
-        .filter_map(|kb| kb.get("entry_id").and_then(Value::as_str).map(str::to_string))
+        .filter_map(|kb| {
+            kb.get("entry_id")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
         .collect()
 }
 
@@ -298,13 +302,8 @@ async fn referenced_id_entries_loaded() {
     // Manifest only wants characters; only the attacker will be in the
     // initial computable query — the defender is loaded via `_id`.
     let manifest = basic_manifest(vec!["character"]);
-    let builder = ComputeInputBuilder::new(
-        pool,
-        "wld_test",
-        manifest,
-        params,
-        test_scope("wld_test"),
-    );
+    let builder =
+        ComputeInputBuilder::new(pool, "wld_test", manifest, params, test_scope("wld_test"));
 
     let input = builder.build().await.expect("build should succeed");
 
@@ -386,8 +385,7 @@ async fn holder_private_rows_excluded_from_the_admitted_scope() {
     let reader_holder = seed_holder(&pool, "ctr_reader").await;
     let other_holder = seed_holder(&pool, "ctr_other").await;
 
-    let shared =
-        seed_kb_entry(&pool, "wld_test", BlockType::Character, "SharedHero", true).await;
+    let shared = seed_kb_entry(&pool, "wld_test", BlockType::Character, "SharedHero", true).await;
     let own_private = insert_kb_entry(
         &pool,
         "wld_test",
@@ -563,13 +561,8 @@ async fn referenced_entry_not_found_error() {
     );
 
     let manifest = basic_manifest(vec!["character"]);
-    let builder = ComputeInputBuilder::new(
-        pool,
-        "wld_test",
-        manifest,
-        params,
-        test_scope("wld_test"),
-    );
+    let builder =
+        ComputeInputBuilder::new(pool, "wld_test", manifest, params, test_scope("wld_test"));
 
     let result = builder.build().await;
     match result {
@@ -662,13 +655,8 @@ async fn invocation_params_passed_through() {
     params.insert("seed".to_string(), json!(42));
 
     let manifest = basic_manifest(vec!["character"]);
-    let builder = ComputeInputBuilder::new(
-        pool,
-        "wld_test",
-        manifest,
-        params,
-        test_scope("wld_test"),
-    );
+    let builder =
+        ComputeInputBuilder::new(pool, "wld_test", manifest, params, test_scope("wld_test"));
 
     let input = builder.build().await.expect("build should succeed");
 

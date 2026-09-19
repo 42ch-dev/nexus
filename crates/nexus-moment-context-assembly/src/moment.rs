@@ -185,7 +185,7 @@ pub enum MomentActorKind {
 pub struct MomentActorContext {
     /// Admitted actor kind.
     pub kind: MomentActorKind,
-    /// The admitted ActorView snapshot: the complete filtered rows this actor
+    /// The admitted `ActorView` snapshot: the complete filtered rows this actor
     /// may see (Character-global shared rows included, other holders' private
     /// rows excluded).
     pub character_view: CharacterViewInput,
@@ -211,7 +211,7 @@ impl MomentActorContext {
         }
     }
 
-    /// Creator actor consuming its admitted ActorView snapshot.
+    /// Creator actor consuming its admitted `ActorView` snapshot.
     #[must_use]
     pub const fn creator_with_view(view: CharacterViewInput) -> Self {
         Self {
@@ -3227,11 +3227,7 @@ mod tests {
         let request = MomentRequest::new(minimal_stage0())
             .with_world("wld_1")
             .with_actor(MomentActorContext::character(
-                CharacterViewInput::from_entries(vec![
-                    shared_world,
-                    own_character,
-                    binding_local,
-                ]),
+                CharacterViewInput::from_entries(vec![shared_world, own_character, binding_local]),
             ));
         let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
         let kb_text = ctx.world_kb.expect("admitted snapshot must render");
@@ -3240,8 +3236,14 @@ mod tests {
             kb_text.contains("SharedHarbor"),
             "Character-global shared row stays visible: {kb_text}"
         );
-        assert!(kb_text.contains("CharacterOwnFact"), "own container row: {kb_text}");
-        assert!(kb_text.contains("BindingLocalDock"), "binding-local row: {kb_text}");
+        assert!(
+            kb_text.contains("CharacterOwnFact"),
+            "own container row: {kb_text}"
+        );
+        assert!(
+            kb_text.contains("BindingLocalDock"),
+            "binding-local row: {kb_text}"
+        );
         assert!(
             !kb_text.contains("OtherCharacterRow"),
             "another Character's container is never read from the store: {kb_text}"

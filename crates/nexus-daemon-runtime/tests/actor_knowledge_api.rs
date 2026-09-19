@@ -1415,7 +1415,12 @@ async fn character_create_oversize_multibyte_summary_is_invalid_input() {
 // --- v1.191 P1 T9: holder governance on the shipped actor-knowledge surface ---
 
 #[allow(clippy::future_not_send)]
-async fn view_page(server: &TestServer, actor: Value, world_id: &str, binding_id: Option<&str>) -> Value {
+async fn view_page(
+    server: &TestServer,
+    actor: Value,
+    world_id: &str,
+    binding_id: Option<&str>,
+) -> Value {
     let mut body = json!({ "actor_ref": actor, "world_id": world_id });
     if let Some(binding) = binding_id {
         body["binding_id"] = Value::String(binding.to_string());
@@ -1475,12 +1480,11 @@ async fn v1191_holder_public_legacy_creator_only_key_is_refused_by_presence() {
         );
     }
 
-    let refused: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM kb_key_blocks WHERE canonical_name = 'RefusedRow'",
-    )
-    .fetch_one(&ctx.pool)
-    .await
-    .unwrap();
+    let refused: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM kb_key_blocks WHERE canonical_name = 'RefusedRow'")
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
     assert_eq!(refused.0, 0, "a refused legacy key must author nothing");
 
     let entry_id = add_entry(
@@ -1526,9 +1530,10 @@ async fn v1191_holder_public_legacy_creator_only_key_is_refused_by_presence() {
 
 /// Durable §7: the item projection carries the native governance pair
 /// (`holder_entry_id` + `disclosure`) and never `creator_only`; a shared row
-/// carries neither member. The Creator actor_ref is the management review, the
-/// Character actor_ref the strict preview — they must differ on exactly the
+/// carries neither member. The Creator `actor_ref` is the management review, the
+/// Character `actor_ref` the strict preview — they must differ on exactly the
 /// author-only row.
+#[allow(clippy::too_many_lines)] // one projection journey; splitting would obscure the shared fixture
 #[tokio::test]
 async fn v1191_holder_public_item_projects_native_governance_not_the_legacy_bool() {
     let ctx = ctx().await;
@@ -1635,7 +1640,9 @@ async fn v1191_holder_public_item_projects_native_governance_not_the_legacy_bool
     assert!(char_row["item"].get("creator_only").is_none());
     let detail = ctx
         .server
-        .get(&format!("/v1/daemon/characters/{chr}/knowledge/{char_row_id}"))
+        .get(&format!(
+            "/v1/daemon/characters/{chr}/knowledge/{char_row_id}"
+        ))
         .await;
     assert_eq!(detail.status_code(), 200, "{}", detail.text());
     let detail: Value = detail.json();
@@ -1676,8 +1683,10 @@ async fn v1191_holder_public_audience_round_trip_moves_the_character_preview() {
     assert!(added["item"].get("disclosure").is_none());
 
     let actor = json!({ "actor_kind": "character", "character_id": chr });
-    assert!(names(&view_page(&ctx.server, actor.clone(), WORLD_A, Some(&binding)).await)
-        .contains(&"AudienceRow".into()));
+    assert!(
+        names(&view_page(&ctx.server, actor.clone(), WORLD_A, Some(&binding)).await)
+            .contains(&"AudienceRow".into())
+    );
 
     let patch_path = format!("/v1/daemon/characters/{chr}/knowledge/{entry_id}");
 
@@ -1690,12 +1699,19 @@ async fn v1191_holder_public_audience_round_trip_moves_the_character_preview() {
             "audience": { "kind": "author-only" }
         }))
         .await;
-    assert_eq!(to_author_only.status_code(), 200, "{}", to_author_only.text());
+    assert_eq!(
+        to_author_only.status_code(),
+        200,
+        "{}",
+        to_author_only.text()
+    );
     let body: Value = to_author_only.json();
     assert_eq!(body["item"]["holder_entry_id"], creator_holder);
     assert_eq!(body["item"]["disclosure"], "owner-private");
-    assert!(!names(&view_page(&ctx.server, actor.clone(), WORLD_A, Some(&binding)).await)
-        .contains(&"AudienceRow".into()));
+    assert!(
+        !names(&view_page(&ctx.server, actor.clone(), WORLD_A, Some(&binding)).await)
+            .contains(&"AudienceRow".into())
+    );
 
     // Character-private: the row comes back for exactly this Character.
     let to_character_private = ctx

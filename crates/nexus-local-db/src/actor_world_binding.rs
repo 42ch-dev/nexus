@@ -94,7 +94,7 @@ pub(crate) const fn invalid_world_sheet() -> LocalDbError {
     }
 }
 
-/// The forward (link-time) WorldSheet eligibility rule as one `EXISTS`
+/// The forward (link-time) `WorldSheet` eligibility rule as one `EXISTS`
 /// (durable §3): a live, World-owned `character` entry of the same World with
 /// no disclosure.
 ///
@@ -103,8 +103,7 @@ pub(crate) const fn invalid_world_sheet() -> LocalDbError {
 /// 'world'` plus the `world_id` bind is the same-world clause, `block_type =
 /// 'character'` the World-owned-character clause and the status clause the
 /// liveness clause.
-const WORLD_SHEET_ELIGIBILITY_EXISTS_SQL: &str =
-    "SELECT EXISTS(SELECT 1 FROM kb_key_blocks
+const WORLD_SHEET_ELIGIBILITY_EXISTS_SQL: &str = "SELECT EXISTS(SELECT 1 FROM kb_key_blocks
             WHERE key_block_id = ?
               AND world_id = ?
               AND owner_kind = 'world'
@@ -398,8 +397,7 @@ pub(crate) async fn has_active_binding_to_world_tx(
 /// The active-owned-binding `EXISTS` behind [`has_active_binding_to_world_tx`]:
 /// the binding is
 /// active, targets `world_id`, and that World belongs to `owner_creator_id`.
-const ACTIVE_BINDING_TO_WORLD_EXISTS_SQL: &str =
-    "SELECT EXISTS(
+const ACTIVE_BINDING_TO_WORLD_EXISTS_SQL: &str = "SELECT EXISTS(
         SELECT 1 FROM actor_world_bindings b
         INNER JOIN narrative_worlds w ON w.world_id = b.world_id
         WHERE b.character_id = ?

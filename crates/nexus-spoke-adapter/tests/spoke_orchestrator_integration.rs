@@ -55,20 +55,20 @@ const WORLD_ID: &str = "wld_1";
 /// own `fresh_pool` in `src/spoke_adapter/knowledge_entry_port.rs`). Returns
 /// the pool AND the `TempDir` guard so the temp DB stays alive for the test
 /// body.
-    /// A KE-capable adapter whose selection authorizes the worlds these
-    /// fixtures own (v1.191 P1 T8 — the check/relate paths read knowledge).
-    fn scoped(pool: sqlx::SqlitePool) -> NexusAdapter<'static> {
-        NexusAdapter::new(
-            pool,
-            nexus_knowledge::world_kb::KnowledgeReadScope::creator_management(
-                vec![
+/// A KE-capable adapter whose selection authorizes the worlds these
+/// fixtures own (v1.191 P1 T8 — the check/relate paths read knowledge).
+fn scoped(pool: sqlx::SqlitePool) -> NexusAdapter<'static> {
+    NexusAdapter::new(
+        pool,
+        nexus_knowledge::world_kb::KnowledgeReadScope::creator_management(
+            vec![
                 nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef::world("wld_1"),
                 nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef::world("wld_2"),
-                ],
-                Vec::new(),
-            ),
-        )
-    }
+            ],
+            Vec::new(),
+        ),
+    )
+}
 
 async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();

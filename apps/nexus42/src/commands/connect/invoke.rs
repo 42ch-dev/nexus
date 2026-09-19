@@ -160,7 +160,7 @@
 //! Every KE operation (`upsert` / `promote` / `relate` / `check` /
 //! `assemble` / `compute`) additionally requires an **operator-stored Actor
 //! grant** on the caller's allowlist row ([`PeerGrant`]): the granted
-//! controlling Creator + ActorRef + World/binding viewpoint. The grant is
+//! controlling Creator + `ActorRef` + World/binding viewpoint. The grant is
 //! keyed by the authenticated **session peer**, so it can only ever be the
 //! caller's own; a peer without one performs no KE operation, whatever its
 //! `op_scope` says. The two host-level tools (`tools.nexus.*`) are not KE
@@ -315,11 +315,10 @@ impl ConnectPorts {
     /// adapter's embedded ship set (a host without a store serves no module).
     #[must_use]
     pub fn new(pool: sqlx::SqlitePool, modules_dir: Option<PathBuf>) -> Self {
-        let host = match &modules_dir {
-            Some(dir) => NexusAdapter::new_host(pool.clone())
-                .with_user_modules_dir(dir.clone()),
-            None => NexusAdapter::new_host(pool.clone()),
-        };
+        let host = modules_dir.as_ref().map_or_else(
+            || NexusAdapter::new_host(pool.clone()),
+            |dir| NexusAdapter::new_host(pool.clone()).with_user_modules_dir(dir.clone()),
+        );
         Self {
             pool,
             modules_dir,
@@ -336,7 +335,7 @@ impl ConnectPorts {
 
     /// The workspace pool the per-invoke adapters bind to.
     #[must_use]
-    pub fn pool(&self) -> &sqlx::SqlitePool {
+    pub const fn pool(&self) -> &sqlx::SqlitePool {
         &self.pool
     }
 
@@ -460,6 +459,7 @@ const fn grant_admission(route: Route) -> GrantAdmission {
 /// ports, lane, compute serializer, limits, caller, op, payload);
 /// bundling it would obscure the explicit fail-closed ordering.
 #[expect(clippy::too_many_arguments)] // bundling it would obscure the explicit fail-closed ordering.
+#[expect(clippy::too_many_lines)] // the numbered fail-closed pipeline reads as one sequence.
 #[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope (String code + JSON Map details + HashMap extensions); boxing would churn every locked constructor and the wire-facing return types (AR-101)
 fn dispatch(
     scope: &PeerScope,
@@ -603,7 +603,10 @@ fn dispatch(
         //     world. The granted world is the stored allowlist value, so
         //     this is a pure comparison (no I/O on the event loop).
         if let Some(grant) = grant {
-            if let Some(world) = worlds.iter().find(|world| world.as_str() != grant.world_id()) {
+            if let Some(world) = worlds
+                .iter()
+                .find(|world| world.as_str() != grant.world_id())
+            {
                 return Err(denied(&format!(
                     "world {world} is outside this peer's granted Actor viewpoint ({}); \
                      a request selector can only narrow the stored grant",
@@ -837,8 +840,7 @@ fn verify_upsert_holder_narrowing(
             // `owner-private` without an owner is refused (wire contract +
             // §9: a private row belongs to a holder).
             None => {
-                if entry.get("disclosure").and_then(Value::as_str)
-                    == Some(DISCLOSURE_OWNER_PRIVATE)
+                if entry.get("disclosure").and_then(Value::as_str) == Some(DISCLOSURE_OWNER_PRIVATE)
                 {
                     return Err(holder_assignment_denied(entry_id, "disclosure"));
                 }
@@ -854,10 +856,7 @@ fn verify_upsert_holder_narrowing(
 /// peer can fix; zero side effects (the orchestrator never runs).
 fn holder_assignment_denied(entry_id: &str, field: &str) -> ErrorEnvelope {
     let mut details = Map::new();
-    details.insert(
-        "entry_id".to_string(),
-        Value::String(entry_id.to_string()),
-    );
+    details.insert("entry_id".to_string(), Value::String(entry_id.to_string()));
     details.insert("field".to_string(), Value::String(field.to_string()));
     ErrorEnvelope {
         code: "invalid_input".to_string(),
@@ -2144,12 +2143,14 @@ mod tests {
         }
         // The holder registry rows (`nexus_local_db` derives the ids from the
         // subjects — never hand-written registry state).
-        sqlx::query("INSERT OR IGNORE INTO knowledge_holders (holder_entry_id, creator_id) VALUES (?, ?)")
-            .bind(creator_holder())
-            .bind(CREATOR)
-            .execute(&pool)
-            .await
-            .expect("creator holder seed");
+        sqlx::query(
+            "INSERT OR IGNORE INTO knowledge_holders (holder_entry_id, creator_id) VALUES (?, ?)",
+        )
+        .bind(creator_holder())
+        .bind(CREATOR)
+        .execute(&pool)
+        .await
+        .expect("creator holder seed");
         for character in [CHARACTER, SIBLING_CHARACTER] {
             sqlx::query(
                 "INSERT OR IGNORE INTO knowledge_holders (holder_entry_id, character_id) \
@@ -2982,7 +2983,11 @@ mod tests {
         .fetch_one(&pool)
         .await
         .expect("stored row");
-        assert_eq!(holder, Some(creator_holder()), "new private owner is the granted holder");
+        assert_eq!(
+            holder,
+            Some(creator_holder()),
+            "new private owner is the granted holder"
+        );
         assert_eq!(disclosure.as_deref(), Some(DISCLOSURE_OWNER_PRIVATE));
         drop(temp);
     }
@@ -3033,7 +3038,10 @@ mod tests {
                     .fetch_one(&pool)
                     .await
                     .expect("count");
-            assert_eq!(stored, 0, "{entry_id}: a refused write must persist nothing");
+            assert_eq!(
+                stored, 0,
+                "{entry_id}: a refused write must persist nothing"
+            );
         }
         drop(temp);
     }
@@ -3044,17 +3052,21 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn v1191_holder_connect_no_grant_denies_every_ke_family_and_still_serves_tools() {
         let peer = fixed_keypair(33).public().to_peer_id();
-        let ops = ["upsert", "promote", "relate", "check", "assemble", "compute"]
-            .into_iter()
-            .chain(LOCAL_TOOL_OPS)
-            .collect::<Vec<_>>();
+        let ops = [
+            "upsert", "promote", "relate", "check", "assemble", "compute",
+        ]
+        .into_iter()
+        .chain(LOCAL_TOOL_OPS)
+        .collect::<Vec<_>>();
         let scope = grantless_scope(peer, &ops);
         let (temp, pool) = test_pool().await;
         let ports = ConnectPorts::new(pool, None);
         let (handler, _lane, _serializer) =
             build_handler_with_limits(scope, ports, BridgeLimits::default());
 
-        for op in ["upsert", "promote", "relate", "check", "assemble", "compute"] {
+        for op in [
+            "upsert", "promote", "relate", "check", "assemble", "compute",
+        ] {
             match handler(&peer, op, serde_json::json!({})) {
                 Err(envelope) => {
                     assert_eq!(
@@ -3132,7 +3144,9 @@ mod tests {
             serde_json::json!({ "scope": { "scope_id": WORLD_B }, "max_entries": 5 }),
         ) {
             Err(envelope) => assert_eq!(envelope.code, "op_unsupported"),
-            Ok(served) => panic!("a read outside the granted viewpoint must be denied, got {served}"),
+            Ok(served) => {
+                panic!("a read outside the granted viewpoint must be denied, got {served}")
+            }
         }
         drop(temp);
     }
@@ -3161,7 +3175,9 @@ mod tests {
         )
         .expect("the resolved holder's own viewpoint is admitted");
         assert!(
-            served.get("findings").is_some() || served.get("packet").is_some() || served.is_object(),
+            served.get("findings").is_some()
+                || served.get("packet").is_some()
+                || served.is_object(),
             "a check response is served: {served}"
         );
 
@@ -3244,7 +3260,7 @@ mod tests {
     /// Durable §9 / §4.2: a private row never leaks across Actors over the
     /// Connect face, and the granted Actor cannot widen into another
     /// Actor's viewpoint: the owning Creator's `assemble` carries it with
-    /// its own viewpoint (the positive control), the Character ActorView is
+    /// its own viewpoint (the positive control), the Character `ActorView` is
     /// **refused** the foreign viewpoint outright, and its own viewpoint
     /// (and no viewpoint at all) carries nothing of the Creator's.
     #[tokio::test(flavor = "multi_thread")]
@@ -3312,9 +3328,9 @@ mod tests {
                 envelope.code, "invalid_input",
                 "a foreign viewpoint is refused, never interpreted as authority"
             ),
-            Ok(served) => panic!(
-                "a Character ActorView must not be served the Creator's viewpoint: {served}"
-            ),
+            Ok(served) => {
+                panic!("a Character ActorView must not be served the Creator's viewpoint: {served}")
+            }
         }
 
         // Its own viewpoint is a legal narrowing — and carries no Creator
@@ -3356,12 +3372,14 @@ mod tests {
         .execute(&pool)
         .await
         .expect("foreign creator seed");
-        sqlx::query("INSERT OR IGNORE INTO knowledge_holders (holder_entry_id, creator_id) VALUES (?, ?)")
-            .bind(nexus_local_db::creator_holder_entry_id(OTHER_CREATOR))
-            .bind(OTHER_CREATOR)
-            .execute(&pool)
-            .await
-            .expect("foreign creator holder seed");
+        sqlx::query(
+            "INSERT OR IGNORE INTO knowledge_holders (holder_entry_id, creator_id) VALUES (?, ?)",
+        )
+        .bind(nexus_local_db::creator_holder_entry_id(OTHER_CREATOR))
+        .bind(OTHER_CREATOR)
+        .execute(&pool)
+        .await
+        .expect("foreign creator holder seed");
         let ports = ConnectPorts::new(pool.clone(), None);
         let (handler, _lane, _serializer) =
             build_handler_with_limits(scope, ports, BridgeLimits::default());
@@ -3387,7 +3405,9 @@ mod tests {
                         envelope.message
                     );
                 }
-                Ok(served) => panic!("{op} on another Creator's world must be denied, got {served}"),
+                Ok(served) => {
+                    panic!("{op} on another Creator's world must be denied, got {served}")
+                }
             }
         }
         let written: i64 =
@@ -3423,8 +3443,7 @@ mod tests {
         };
         let check = || serde_json::json!({ "scope": { "scope_id": WORLD_A } });
 
-        handler(&peer, "upsert", payload())
-            .expect("an active binding admits the write");
+        handler(&peer, "upsert", payload()).expect("an active binding admits the write");
         handler(&peer, "check", check()).expect("the read half is served");
 
         // Pause the binding: the stored tuple still resolves for a retained
@@ -3492,8 +3511,7 @@ mod tests {
             build_handler_with_limits(scope, ports, BridgeLimits::default());
 
         let mut entry = entry_fixture("kb_selector_escape", WORLD_A);
-        entry["extensions"] =
-            serde_json::json!({ "nexus": { "character_id": SIBLING_CHARACTER } });
+        entry["extensions"] = serde_json::json!({ "nexus": { "character_id": SIBLING_CHARACTER } });
         match handler(
             &peer,
             "upsert",
@@ -3503,7 +3521,9 @@ mod tests {
                 envelope.code, "op_unsupported",
                 "a world-less container selector must deny the whole payload"
             ),
-            Ok(served) => panic!("a container selector without a world must be denied, got {served}"),
+            Ok(served) => {
+                panic!("a container selector without a world must be denied, got {served}")
+            }
         }
         drop(temp);
     }

@@ -1929,8 +1929,10 @@ mod tests {
     /// the active creator's workspace with both creators materialized, their
     /// holders registered and one owned World.
     async fn chapter_block_fixture() -> ChapterBlockFixture {
-        let mut config = CliConfig::default();
-        config.active_creator_id = Some(CHAPTER_BLOCK_OWNER.to_string());
+        let config = CliConfig {
+            active_creator_id: Some(CHAPTER_BLOCK_OWNER.to_string()),
+            ..CliConfig::default()
+        };
 
         let db_path = crate::config::resolve_state_db_path(&config).expect("state db path");
         let pool = crate::db::Schema::init(&db_path)
@@ -1991,8 +1993,11 @@ mod tests {
         let _home = crate::testutil::isolated_home();
         let fixture = chapter_block_fixture().await;
         let store = SqliteKbStore::new(fixture.pool.clone());
-        let shared =
-            KnowledgeEntryRecord::new(CHAPTER_BLOCK_WORLD, BlockType::Character, "ChapterSharedRow");
+        let shared = KnowledgeEntryRecord::new(
+            CHAPTER_BLOCK_WORLD,
+            BlockType::Character,
+            "ChapterSharedRow",
+        );
         let mut own_private =
             KnowledgeEntryRecord::new(CHAPTER_BLOCK_WORLD, BlockType::Scene, "OwnPrivateDock");
         own_private.holder_entry_id = Some(fixture.own_holder);
@@ -2020,8 +2025,8 @@ mod tests {
 
         // Fail-closed: without an admitted creator there is no selection to
         // read — the caller omits the block instead of widening the read.
-        let mut unselected = CliConfig::default();
-        unselected.active_creator_id = None;
+        // (`CliConfig::default()` already carries no active creator.)
+        let unselected = CliConfig::default();
         let err = assemble_world_kb_block(CHAPTER_BLOCK_WORLD, &unselected)
             .await
             .expect_err("no active creator must fail closed");
@@ -2031,12 +2036,13 @@ mod tests {
         );
     }
 
-    /// v1.191 P1 T11 review I-001: the CLI selection is core's ActorView
+    /// v1.191 P1 T11 review I-001: the CLI selection is core's `ActorView`
     /// derivation, not a CLI-local `[World]`-only one — so the owned
     /// Character/binding containers are authorized, a Character-container row
     /// the Creator holds (`author-only` private) is visible to the CLI
     /// snapshot exactly as it is to core, and the same container's
     /// Character-held private row stays out.
+    #[allow(clippy::too_many_lines)] // one CLI/ core parity journey; splitting would obscure the container sequence
     #[tokio::test]
     async fn v1191_holder_context_cli_scope_matches_core_containers() {
         use nexus_contracts::BlockType;
@@ -2092,14 +2098,13 @@ mod tests {
             store.insert_knowledge_entry(row).await.unwrap();
         }
 
-        let cli_scope =
-            crate::commands::platform::context::creator_view_scope(
-                &pool,
-                &fixture.config,
-                Some(CHAPTER_BLOCK_WORLD),
-            )
-            .await
-            .expect("CLI ActorView selection");
+        let cli_scope = crate::commands::platform::context::creator_view_scope(
+            &pool,
+            &fixture.config,
+            Some(CHAPTER_BLOCK_WORLD),
+        )
+        .await
+        .expect("CLI ActorView selection");
         let core_scope = ActorKnowledgeViewService::new(pool.clone())
             .actor_view_scope(
                 CHAPTER_BLOCK_OWNER,
@@ -2153,7 +2158,10 @@ mod tests {
             "the Character-held private row stays out: {names:?}"
         );
         let binding_rows = SqliteKbStore::new(pool)
-            .list_by_owner_complete(&KnowledgeOwnerRef::actor_world_binding(&binding_id), &cli_scope)
+            .list_by_owner_complete(
+                &KnowledgeOwnerRef::actor_world_binding(&binding_id),
+                &cli_scope,
+            )
             .await
             .unwrap();
         assert!(

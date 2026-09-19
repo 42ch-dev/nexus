@@ -152,8 +152,10 @@ pub fn adopt_wire_holder(entry: &mut KnowledgeEntry, local_holder_id: &str) -> R
 }
 
 /// Read the *unknown* keys under `extensions.nexus` — everything outside the
-/// typed identity/owner fields (see [`is_known_nexus_key`]). Returns an owned
-/// map; `None` when no unknown keys are present (or the namespace is absent).
+/// typed identity/owner fields (see [`is_known_nexus_key`]).
+///
+/// Returns an owned map; `None` when no unknown keys are present (or the
+/// namespace is absent).
 ///
 /// Used by the conversion seam reverse direction to surface product-local
 /// extras onto the nexus domain type so they survive the spoke round-trip.

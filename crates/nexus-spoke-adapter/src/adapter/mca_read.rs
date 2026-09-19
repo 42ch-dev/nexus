@@ -201,8 +201,13 @@ impl SpokeBackedKbStore {
     }
 
     /// The bound admitted read selection (v1.191 P1 T8).
+    ///
+    /// # Panics
+    ///
+    /// Panics when the adapter was built without a bound read scope
+    /// (`NexusAdapter::new_host`); [`Self::new`] always binds one.
     #[must_use]
-    pub fn read_scope(&self) -> &KnowledgeReadScope {
+    pub const fn read_scope(&self) -> &KnowledgeReadScope {
         self.adapter
             .read_scope()
             .expect("SpokeBackedKbStore is constructed with a bound read scope")
@@ -296,10 +301,7 @@ impl KbStore for SpokeBackedKbStore {
     ) -> Result<Vec<KnowledgeEntryRecord>, KbStoreError> {
         // Admitted selection only; a world outside it contributes nothing.
         SqliteKbStore::new(self.pool.clone())
-            .list_by_owner_complete(
-                &KnowledgeOwnerRef::world(world_id),
-                self.read_scope(),
-            )
+            .list_by_owner_complete(&KnowledgeOwnerRef::world(world_id), self.read_scope())
             .await
     }
 
@@ -754,15 +756,20 @@ mod tests {
         let own_holder = nexus_local_db::holders::ensure_creator_holder_in_tx(&mut tx, "ctr_test")
             .await
             .unwrap();
-        let other_holder = nexus_local_db::holders::ensure_creator_holder_in_tx(&mut tx, "ctr_other")
-            .await
-            .unwrap();
+        let other_holder =
+            nexus_local_db::holders::ensure_creator_holder_in_tx(&mut tx, "ctr_other")
+                .await
+                .unwrap();
         tx.commit().await.unwrap();
 
         let sqlite = SqliteKbStore::new(pool.clone());
         for (entry_id, name, holder) in [
             ("kb_mca_own_private", "OwnPrivateRow", &own_holder),
-            ("kb_mca_other_private", "OtherHolderPrivateRow", &other_holder),
+            (
+                "kb_mca_other_private",
+                "OtherHolderPrivateRow",
+                &other_holder,
+            ),
         ] {
             let mut row = KnowledgeEntryRecord::new(&world_id, BlockType::Item, name);
             row.entry_id = entry_id.to_string();

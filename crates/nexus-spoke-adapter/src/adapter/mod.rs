@@ -35,12 +35,12 @@ pub mod relation_port;
 pub mod rule_query_port;
 pub mod scope_query_port;
 
-#[cfg(feature = "compute")]
-use nexus_wasm_host::ModuleCache;
 use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeOwnerRef, DISCLOSURE_OWNER_PRIVATE};
 use nexus_knowledge::world_kb::store::{KbStore, KbStoreError};
 use nexus_knowledge::world_kb::{KnowledgeEntryRecord, KnowledgeReadPolicy, KnowledgeReadScope};
 use nexus_local_db::kb_store::SqliteKbStore;
+#[cfg(feature = "compute")]
+use nexus_wasm_host::ModuleCache;
 use serde_json::{json, Map, Value};
 use sqlx::SqlitePool;
 use std::path::{Path, PathBuf};
@@ -162,7 +162,7 @@ impl NexusAdapter<'static> {
 impl<'a> NexusAdapter<'a> {
     /// The bound admitted read selection, or `None` for a host-only adapter.
     #[must_use]
-    pub fn read_scope(&self) -> Option<&KnowledgeReadScope> {
+    pub const fn read_scope(&self) -> Option<&KnowledgeReadScope> {
         self.read_scope.as_ref()
     }
 
@@ -175,7 +175,10 @@ impl<'a> NexusAdapter<'a> {
     /// # Errors
     ///
     /// Returns the `read_scope_missing` reject when no scope is bound.
-    pub(crate) fn require_read_scope(&self, context: &str) -> Result<&KnowledgeReadScope, SpokeReject> {
+    pub(crate) fn require_read_scope(
+        &self,
+        context: &str,
+    ) -> Result<&KnowledgeReadScope, SpokeReject> {
         self.read_scope
             .as_ref()
             .ok_or_else(|| unbound_scope_reject(context))
@@ -206,14 +209,19 @@ impl<'a> NexusAdapter<'a> {
         }
         match record.disclosure.as_deref() {
             None => true,
-            Some(DISCLOSURE_OWNER_PRIVATE) => record.holder_entry_id.as_deref().is_some_and(|holder| {
-                match selection.policy() {
-                    KnowledgeReadPolicy::ActorView => selection.holder_entry_id() == Some(holder),
-                    KnowledgeReadPolicy::CreatorManagement => {
-                        selection.authorized_holders().iter().any(|h| h == holder)
-                    }
-                }
-            }),
+            Some(DISCLOSURE_OWNER_PRIVATE) => {
+                record
+                    .holder_entry_id
+                    .as_deref()
+                    .is_some_and(|holder| match selection.policy() {
+                        KnowledgeReadPolicy::ActorView => {
+                            selection.holder_entry_id() == Some(holder)
+                        }
+                        KnowledgeReadPolicy::CreatorManagement => {
+                            selection.authorized_holders().iter().any(|h| h == holder)
+                        }
+                    })
+            }
             Some(_) => false,
         }
     }
@@ -329,7 +337,7 @@ impl<'a> NexusAdapter<'a> {
     /// proof compares two scoped adapters over one cache.
     #[cfg(feature = "compute")]
     #[must_use]
-    pub fn module_cache(&self) -> &Arc<ModuleCache> {
+    pub const fn module_cache(&self) -> &Arc<ModuleCache> {
         &self.module_cache
     }
 
@@ -416,7 +424,6 @@ fn scope_reject_details(scope_id: &str) -> Map<String, Value> {
     details.insert("scope_id".to_string(), json!(scope_id));
     details
 }
-
 
 #[cfg(test)]
 mod tests {

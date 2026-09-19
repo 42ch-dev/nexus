@@ -22,7 +22,7 @@
 //!
 //! V1.191 P1 T14 (`holder-governance.md` §9) adds the **Actor grant**: an
 //! optional per-peer `"grant"` object naming the *stored* Actor the peer
-//! acts as (`creator_id` + `actor` ActorRef) and its World/binding
+//! acts as (`creator_id` + `actor` `ActorRef`) and its World/binding
 //! viewpoint. The grant is the operator's pointer at stored state — it is
 //! never carried on a request, and every KE invoke re-resolves it against
 //! current stored ownership/lifecycle ([`PeerGrant::resolve_scope`]): a
@@ -88,7 +88,7 @@ struct PeerEntryScoped {
 /// durable `holder-governance.md` §9).
 ///
 /// The grant names the **stored** Actor the peer acts as — a controlling
-/// Creator plus the ActorRef (that Creator, or one of its Characters) — and
+/// Creator plus the `ActorRef` (that Creator, or one of its Characters) — and
 /// the World/binding viewpoint it is admitted at. It is persisted in the
 /// operator's `allowlist.json` and never travels on a request; each
 /// authenticated KE invoke re-resolves it against current stored state
@@ -103,7 +103,7 @@ pub struct PeerGrant {
     /// ownership rows authorize the containers (`actor_view_scope` resolves
     /// them server-side, never from the request).
     pub creator_id: String,
-    /// The granted ActorRef — the peer acts as this stored identity only.
+    /// The granted `ActorRef` — the peer acts as this stored identity only.
     pub actor: GrantActor,
     /// Granted World (world UUID string, never a path).
     pub world_id: String,
@@ -113,7 +113,7 @@ pub struct PeerGrant {
     pub binding_id: Option<String>,
 }
 
-/// The ActorRef half of a [`PeerGrant`] — mirrors `nexus_core::AdmittedActor`
+/// The `ActorRef` half of a [`PeerGrant`] — mirrors `nexus_core::AdmittedActor`
 /// without importing it into the on-disk schema.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -159,7 +159,7 @@ impl PeerGrant {
         &self.world_id
     }
 
-    /// The granted ActorRef id (Creator or Character id).
+    /// The granted `ActorRef` id (Creator or Character id).
     #[must_use]
     pub fn actor_id(&self) -> &str {
         match &self.actor {
@@ -171,9 +171,9 @@ impl PeerGrant {
     ///
     /// A grant is a pointer at stored state, so a malformed one must be a
     /// hard config error rather than a row that denies every invoke later:
-    /// empty ids are refused, a Creator grant whose ActorRef names a
+    /// empty ids are refused, a Creator grant whose `ActorRef` names a
     /// different subject is refused (the durable §9 pair is "controlling
-    /// Creator + ActorRef", and two different subjects would silently deny
+    /// Creator + `ActorRef`", and two different subjects would silently deny
     /// every invoke), and a Character grant without a binding is refused
     /// (the Character viewpoint is World + Character + binding).
     fn validate(&self) -> Result<()> {
@@ -356,7 +356,8 @@ impl PeerScope {
     /// `None` ⇒ no KE operation is served to this peer.
     #[must_use]
     pub fn grant_for(&self, peer: &PeerId) -> Option<&PeerGrant> {
-        self.access_for(peer).and_then(|access| access.grant.as_ref())
+        self.access_for(peer)
+            .and_then(|access| access.grant.as_ref())
     }
 
     /// Fail-closed world gate: true only when the peer is allowlisted AND its
@@ -866,7 +867,10 @@ mod tests {
         );
 
         let scope = load(temp.path(), &[]).expect("grantless entry loads");
-        assert!(scope.grant_for(&peer).is_none(), "no grant ⇒ no KE authority");
+        assert!(
+            scope.grant_for(&peer).is_none(),
+            "no grant ⇒ no KE authority"
+        );
         assert!(
             scope.allows_op(&peer, "upsert"),
             "the op gate stays independent of the grant"
@@ -894,7 +898,10 @@ mod tests {
         let scope = load(temp.path(), &[]).expect("grant-only entry loads");
         assert!(scope.grant_for(&peer).is_some());
         assert!(!scope.allows_op(&peer, "upsert"), "no op_scope ⇒ denied");
-        assert!(!scope.allows_world(&peer, "world-a"), "no world_scope ⇒ denied");
+        assert!(
+            !scope.allows_world(&peer, "world-a"),
+            "no world_scope ⇒ denied"
+        );
     }
 
     /// A Character grant requires its binding (the Character viewpoint is
@@ -937,7 +944,7 @@ mod tests {
         assert_eq!(grant.binding_id.as_deref(), Some("bnd_hero"));
     }
 
-    /// A Creator grant's ActorRef is its controlling Creator — two different
+    /// A Creator grant's `ActorRef` is its controlling Creator — two different
     /// subjects are refused at load (never a silently dead grant).
     #[test]
     fn v1191_holder_connect_creator_grant_must_name_its_controlling_creator() {
@@ -1052,7 +1059,11 @@ mod tests {
 
         let scope = load(temp.path(), &[]).expect("multi-world entry loads");
         let grant = scope.grant_for(&peer).expect("grant present");
-        assert_eq!(grant.world_id(), "world-a", "the grant viewpoint is stored, not derived");
+        assert_eq!(
+            grant.world_id(),
+            "world-a",
+            "the grant viewpoint is stored, not derived"
+        );
         assert!(
             scope.allows_world(&peer, "world-b"),
             "the scope gate stays independent (the grant is a second, narrowing gate)"

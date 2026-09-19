@@ -225,7 +225,7 @@ impl CoreHomeService {
             Err(err) => Err(err),
         };
         pool.close().await;
-        let holder_entry_id = holder_projection(holder?);
+        let holder_entry_id = Some(holder_projection(holder?));
 
         Ok(CreatorDetail {
             creator_id,
@@ -550,13 +550,11 @@ fn creator_detail_from_parts(
 /// Wire holder projection for an already-authorized identity (durable §7).
 ///
 /// The registry id is `hld_` plus the lowercase BLAKE3 digest of the subject
-/// (§2.1), so it always satisfies the wire pattern. `None` is the honest
-/// projection for a caller that holds no registry state to read.
-fn holder_projection(holder_entry_id: String) -> Option<CreatorDetailHolderEntryId> {
-    Some(
-        CreatorDetailHolderEntryId::try_from(holder_entry_id)
-            .expect("registry-derived holder id is wire-valid"),
-    )
+/// (§2.1), so it always satisfies the wire pattern; a caller with no registry
+/// state to read resolves absence before calling this.
+fn holder_projection(holder_entry_id: String) -> CreatorDetailHolderEntryId {
+    CreatorDetailHolderEntryId::try_from(holder_entry_id)
+        .expect("registry-derived holder id is wire-valid")
 }
 
 /// Reject path segments that look like Google-AIP custom verbs (`id:verb`):

@@ -200,5 +200,8 @@ fn governance_fields_have_no_null_state() {
     let restricted: KnowledgeViewItem =
         serde_json::from_str(&view_item(&format!(r#""{hld}""#))).expect("resolved holder");
     let wire = serde_json::to_string(&restricted).expect("serializes");
-    assert!(wire.contains(&format!(r#""holder_entry_id":"{hld}""#)), "{wire}");
+    assert!(
+        wire.contains(&format!(r#""holder_entry_id":"{hld}""#)),
+        "{wire}"
+    );
 }

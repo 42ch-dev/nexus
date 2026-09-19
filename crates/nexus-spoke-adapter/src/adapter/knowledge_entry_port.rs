@@ -29,7 +29,7 @@ use crate::conversion::{knowledge_record_to_spoke, spoke_to_knowledge_record};
 use crate::extensions::build_extensions_nexus;
 use crate::{KnowledgeEntry, KnowledgeEntryPort, SpokeReject, SpokeRejectCode, SpokeResult};
 use async_trait::async_trait;
-use nexus_knowledge::world_kb::store::{KbStore, KbStoreError};
+use nexus_knowledge::world_kb::store::KbStoreError;
 use nexus_knowledge::world_kb::{KnowledgeEntryRecord, KnowledgeReadScope};
 use nexus_local_db::kb_store::{
     cas_update_key_block_fields, CasKeyBlockFieldUpdate, SqliteKbStore,
@@ -880,11 +880,10 @@ async fn put_update_in_tx(
             );
         }
     };
-    let new_rev =
-        match run_cas_update_in_tx(tx, adapter, &entry_id, &world_entry, expected).await {
-            SpokeResult::Ok(rev) => rev,
-            SpokeResult::Reject(r) => return SpokeResult::Reject(r),
-        };
+    let new_rev = match run_cas_update_in_tx(tx, adapter, &entry_id, &world_entry, expected).await {
+        SpokeResult::Ok(rev) => rev,
+        SpokeResult::Reject(r) => return SpokeResult::Reject(r),
+    };
     let mut result = entry;
     result.revision = Some(new_rev);
     SpokeResult::Ok(result)
@@ -897,9 +896,8 @@ mod tests {
     use super::*;
     use crate::KnowledgeEntryPort;
     use nexus_contracts::BlockType;
-    use nexus_knowledge::world_kb::knowledge_entry::{
-        KnowledgeOwnerRef, DISCLOSURE_OWNER_PRIVATE,
-    };
+    use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeOwnerRef, DISCLOSURE_OWNER_PRIVATE};
+    use nexus_knowledge::world_kb::store::KbStore;
     use nexus_knowledge::world_kb::{KnowledgeEntryBody, KnowledgeEntryRecord};
     use nexus_local_db::{open_pool, run_migrations};
 
@@ -1453,7 +1451,10 @@ mod tests {
         seed_world(&pool).await;
 
         let adapter = scoped(pool);
-        for legacy in [serde_json::Value::Bool(false), serde_json::Value::Bool(true)] {
+        for legacy in [
+            serde_json::Value::Bool(false),
+            serde_json::Value::Bool(true),
+        ] {
             let mut entry = spoke_entry("kb_legacy", "Legacy", None);
             let key =
                 spoke_schemas::knowledge_entry::KnowledgeEntryExtensionsKey::try_from("nexus")
@@ -1491,8 +1492,7 @@ mod tests {
 
         // Seed a foreign-holder private row directly (the authoring path is
         // T7's; this test only needs the stored shape).
-        let mut private =
-            KnowledgeEntryRecord::new("wld_1", BlockType::Character, "HiddenNote");
+        let mut private = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "HiddenNote");
         private.entry_id = "kb_hidden".to_string();
         let holder = register_creator_holder(&pool).await;
         private.holder_entry_id = Some(holder);
@@ -1628,7 +1628,11 @@ mod tests {
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-        assert_eq!(revision, Some(1), "a refused update must not mutate the row");
+        assert_eq!(
+            revision,
+            Some(1),
+            "a refused update must not mutate the row"
+        );
     }
 
     /// L2 ruling: an existing **visible** id answers `ALREADY_EXISTS` before the

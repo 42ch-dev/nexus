@@ -791,14 +791,8 @@ impl SqliteKbStore {
         kb: KnowledgeEntryRecord,
         audience: AuthoredAudience<'_>,
     ) -> Result<KbInsertResult, LocalDbError> {
-        self.apply_actor_owned_create(
-            owner_creator_id,
-            character_id,
-            binding_id,
-            kb,
-            audience,
-        )
-        .await
+        self.apply_actor_owned_create(owner_creator_id, character_id, binding_id, kb, audience)
+            .await
     }
 
     async fn apply_actor_owned_create(
@@ -940,11 +934,13 @@ pub(crate) async fn bump_character_knowledge_revision_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     character_id: &str,
 ) -> Result<(), LocalDbError> {
-    sqlx::query("UPDATE characters SET knowledge_revision = knowledge_revision + 1 \
-                 WHERE character_id = ?")
-        .bind(character_id)
-        .execute(&mut **tx)
-        .await?;
+    sqlx::query(
+        "UPDATE characters SET knowledge_revision = knowledge_revision + 1 \
+                 WHERE character_id = ?",
+    )
+    .bind(character_id)
+    .execute(&mut **tx)
+    .await?;
     Ok(())
 }
 
@@ -1051,37 +1047,34 @@ pub async fn resolve_authored_audience_tx(
                 character_id,
             )
             .await?;
-            match container.owning_character_id {
-                Some(owning) => {
-                    // A Character/binding container authorizes only its own
-                    // owning Character.
-                    if owning != character_id {
-                        return Err(LocalDbError::ActorNotFound {
-                            resource: "character",
-                            id: character_id.to_string(),
-                        });
-                    }
+            if let Some(owning) = container.owning_character_id {
+                // A Character/binding container authorizes only its own
+                // owning Character.
+                if owning != character_id {
+                    return Err(LocalDbError::ActorNotFound {
+                        resource: "character",
+                        id: character_id.to_string(),
+                    });
                 }
-                None => {
-                    let world_id = container.world_id.ok_or_else(|| {
-                        LocalDbError::ValidationError(
-                            "a character-private audience requires a World or Character container"
-                                .to_string(),
-                        )
-                    })?;
-                    let bound = crate::actor_world_binding::has_active_binding_to_world_tx(
-                        tx,
-                        container.owner_creator_id,
-                        character_id,
-                        world_id,
+            } else {
+                let world_id = container.world_id.ok_or_else(|| {
+                    LocalDbError::ValidationError(
+                        "a character-private audience requires a World or Character container"
+                            .to_string(),
                     )
-                    .await?;
-                    if !bound {
-                        return Err(LocalDbError::ValidationError(format!(
-                            "character-private audience requires the named Character to hold an \
-                             active binding to world {world_id}"
-                        )));
-                    }
+                })?;
+                let bound = crate::actor_world_binding::has_active_binding_to_world_tx(
+                    tx,
+                    container.owner_creator_id,
+                    character_id,
+                    world_id,
+                )
+                .await?;
+                if !bound {
+                    return Err(LocalDbError::ValidationError(format!(
+                        "character-private audience requires the named Character to hold an \
+                         active binding to world {world_id}"
+                    )));
                 }
             }
             let holder = crate::holders::require_subject_holder(
@@ -1896,43 +1889,7 @@ impl KbStore for SqliteKbStore {
 
         // If name or type changed, check owner-scoped uniqueness.
         if existing.canonical_name != kb.canonical_name || existing.block_type != kb.block_type {
-            // Stable snake_case serialization matching wire format
-            let block_type_str = serde_json::to_string(&kb.block_type)
-                .unwrap_or_else(|_| format!("{:?}", kb.block_type));
-            let block_type_str = block_type_str.trim_matches('"').to_string();
-            // Owner-scoped count: the owner column is chosen from the closed
-            // [`KnowledgeOwnerRef`] (a fixed whitelist of owner-kinds), so the
-            // SQL fragment is static — not user input. Runs as a runtime query
-            // because the owner columns are new (unknown to sqlx offline mode).
-            let owner_column: &str = match &kb.owner {
-                KnowledgeOwnerRef::World(_) => "world_id",
-                KnowledgeOwnerRef::Character(_) => "character_id",
-                KnowledgeOwnerRef::ActorWorldBinding(_) => "actor_world_binding_id",
-            };
-            let q = format!(
-                "SELECT COUNT(*) FROM kb_key_blocks \
-                 WHERE {owner_column} = ? \
-                   AND block_type = ? \
-                   AND canonical_name = ? \
-                   AND key_block_id != ? \
-                   AND status NOT IN ('deleted', 'merged', 'deprecated')"
-            );
-            let count: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(q))
-                .bind(kb.owner.id())
-                .bind(&block_type_str)
-                .bind(&kb.canonical_name)
-                .bind(&kb.entry_id)
-                .fetch_one(&mut *tx)
-                .await
-                .map_err(|e| db_err(&e))?;
-
-            if count > 0 {
-                return Err(KbStoreError::Duplicate {
-                    owner: kb.owner.clone(),
-                    name: kb.canonical_name.clone(),
-                    block_type: kb.block_type,
-                });
-            }
+            assert_owner_scoped_name_unique_tx(&mut tx, &kb).await?;
         }
 
         let body_json = kb
@@ -2057,6 +2014,57 @@ impl KbStore for SqliteKbStore {
     }
 }
 
+/// Owner-scoped canonical-name/type uniqueness for a rename or retype.
+///
+/// The owner column is chosen from the closed [`KnowledgeOwnerRef`] (a fixed
+/// whitelist of owner-kinds), so the SQL fragment is static — never user input.
+/// It runs as a runtime query because the owner columns are post-`.sqlx` offline
+/// cache (mirrors the other widened `kb_key_blocks` statements here).
+///
+/// # Errors
+///
+/// Returns [`KbStoreError::Duplicate`] when another live row of the same owner
+/// already carries the name, or [`KbStoreError::Storage`] on database failure.
+async fn assert_owner_scoped_name_unique_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    kb: &KnowledgeEntryRecord,
+) -> Result<(), KbStoreError> {
+    // Stable snake_case serialization matching wire format
+    let block_type_str =
+        serde_json::to_string(&kb.block_type).unwrap_or_else(|_| format!("{:?}", kb.block_type));
+    let block_type_str = block_type_str.trim_matches('"').to_string();
+    let owner_column: &str = match &kb.owner {
+        KnowledgeOwnerRef::World(_) => "world_id",
+        KnowledgeOwnerRef::Character(_) => "character_id",
+        KnowledgeOwnerRef::ActorWorldBinding(_) => "actor_world_binding_id",
+    };
+    let q = format!(
+        "SELECT COUNT(*) FROM kb_key_blocks \
+         WHERE {owner_column} = ? \
+           AND block_type = ? \
+           AND canonical_name = ? \
+           AND key_block_id != ? \
+           AND status NOT IN ('deleted', 'merged', 'deprecated')"
+    );
+    let count: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(q))
+        .bind(kb.owner.id())
+        .bind(&block_type_str)
+        .bind(&kb.canonical_name)
+        .bind(&kb.entry_id)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(|e| db_err(&e))?;
+
+    if count > 0 {
+        return Err(KbStoreError::Duplicate {
+            owner: kb.owner.clone(),
+            name: kb.canonical_name.clone(),
+            block_type: kb.block_type,
+        });
+    }
+    Ok(())
+}
+
 // ── V1.146 P3: pack-IO widened list methods (inherent, not trait) ─────────
 
 impl SqliteKbStore {
@@ -2131,10 +2139,11 @@ const QUARANTINE_ID_DOMAIN: &[u8] = b"nexus-quarantine-v1\0";
 /// Reserved namespace for quarantine ids; never an ordinary narrative KE id.
 pub const QUARANTINE_ID_PREFIX: &str = "qrn_";
 
-/// The identity of one quarantined atom. Exactly these fields decide *which*
-/// foreign atom is held, so the derived id is stable across repeated imports
-/// (idempotent quarantine) and across a later adoption (the mapped re-import
-/// removes the row this same identity produced).
+/// The identity of one quarantined atom.
+///
+/// Exactly these fields decide *which* foreign atom is held, so the derived id
+/// is stable across repeated imports (idempotent quarantine) and across a later
+/// adoption (the mapped re-import removes the row this same identity produced).
 #[derive(Debug, Clone, Copy)]
 pub struct NewQuarantinedAtom<'a> {
     /// The import run's batch id (grouping label; never part of the identity).
@@ -2499,9 +2508,8 @@ impl SqliteKbStore {
             WHERE key_block_id IN (SELECT value FROM json_each(?)){containers}{visibility}
             ORDER BY created_at ASC, key_block_id ASC"
         );
-        let mut query = sqlx::query_as::<_, KeyBlockRow>(sqlx::AssertSqlSafe(sql)).bind(
-            serde_json::to_string(entry_ids).unwrap_or_else(|_| "[]".to_string()),
-        );
+        let mut query = sqlx::query_as::<_, KeyBlockRow>(sqlx::AssertSqlSafe(sql))
+            .bind(serde_json::to_string(entry_ids).unwrap_or_else(|_| "[]".to_string()));
         for value in container_binds {
             query = query.bind(value);
         }

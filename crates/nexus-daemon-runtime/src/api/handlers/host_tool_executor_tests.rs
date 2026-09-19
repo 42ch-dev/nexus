@@ -823,7 +823,7 @@ async fn timeline_recent_get_returns_recent_events() {
 
 /// E2E test: `nexus.kb_snapshot.read` returns key blocks for a seeded world.
 ///
-/// v1.191 P1 R5: the snapshot is read through the admitted Creator ActorView
+/// v1.191 P1 R5: the snapshot is read through the admitted Creator `ActorView`
 /// selection, so the seeded creator carries its registry holder row — the
 /// production shape a migrated workspace always has.
 #[tokio::test]

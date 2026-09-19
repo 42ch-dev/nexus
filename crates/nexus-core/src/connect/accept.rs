@@ -778,10 +778,16 @@ mod tests {
     /// at config load with the truthful reason).
     #[test]
     fn v1191_holder_connect_tools_only_hello_declares_no_ke_family() {
-        let tool_ids = vec!["tools.acme.lookup".to_string(), "tools.other.ping".to_string()];
+        let tool_ids = vec![
+            "tools.acme.lookup".to_string(),
+            "tools.other.ping".to_string(),
+        ];
         let manifest = daemon_manifest("daemon-host-uuid-0000", &tool_ids);
         let manifest_json = serde_json::to_string(&manifest).expect("serializes");
-        for forbidden in crate::connect::config::KE_CAPABILITIES.iter().chain(crate::connect::config::KE_OPERATION_FAMILIES.iter()) {
+        for forbidden in crate::connect::config::KE_CAPABILITIES
+            .iter()
+            .chain(crate::connect::config::KE_OPERATION_FAMILIES.iter())
+        {
             assert!(
                 !manifest.capabilities.iter().any(|c| c == forbidden),
                 "a tools-only hello must never declare {forbidden}"
@@ -800,12 +806,22 @@ mod tests {
             ],
             "the tools-only hello is the baseline plus the exact allowlisted tool ids"
         );
-        assert!(manifest.tools.is_empty(), "the daemon hello serves no tools of its own");
-        assert_eq!(manifest.namespaces.len(), 2, "namespaces derive from the tool ids only");
+        assert!(
+            manifest.tools.is_empty(),
+            "the daemon hello serves no tools of its own"
+        );
+        assert_eq!(
+            manifest.namespaces.len(),
+            2,
+            "namespaces derive from the tool ids only"
+        );
 
         // An operator cannot allowlist a KE name: config load fails with the
         // truthful reason, so the hello above can never grow one.
-        for entry in crate::connect::config::KE_CAPABILITIES.iter().chain(crate::connect::config::KE_OPERATION_FAMILIES.iter()) {
+        for entry in crate::connect::config::KE_CAPABILITIES
+            .iter()
+            .chain(crate::connect::config::KE_OPERATION_FAMILIES.iter())
+        {
             let dir = tempfile::tempdir().expect("tempdir");
             std::fs::create_dir_all(nexus_home_layout::connect_dir(dir.path())).expect("mkdir");
             std::fs::write(
@@ -816,7 +832,10 @@ mod tests {
             let err = crate::connect::config::PeerToolsConfig::load(dir.path())
                 .expect_err("a KE name must not be allowlistable");
             assert!(
-                matches!(err, crate::connect::config::ConnectConfigError::InvalidAllowlist { .. }),
+                matches!(
+                    err,
+                    crate::connect::config::ConnectConfigError::InvalidAllowlist { .. }
+                ),
                 "{entry} must be refused as a KE name, got {err:?}"
             );
         }

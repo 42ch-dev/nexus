@@ -376,7 +376,11 @@ async fn v1191_holder_context_model_and_inspect_emit_admitted_rows_only() {
             "BindingLocalRow",
         );
     let binding_local_id = binding_local.entry_id.clone();
-    stores.kb.insert_knowledge_entry(binding_local).await.unwrap();
+    stores
+        .kb
+        .insert_knowledge_entry(binding_local)
+        .await
+        .unwrap();
     let mut other_private = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
         "wld_ctx",
         BlockType::Character,
@@ -386,7 +390,11 @@ async fn v1191_holder_context_model_and_inspect_emit_admitted_rows_only() {
     other_private.disclosure =
         Some(nexus_knowledge::world_kb::DISCLOSURE_OWNER_PRIVATE.to_string());
     let other_private_id = other_private.entry_id.clone();
-    stores.kb.insert_knowledge_entry(other_private).await.unwrap();
+    stores
+        .kb
+        .insert_knowledge_entry(other_private)
+        .await
+        .unwrap();
 
     let request = MomentRequest::new(Stage0Assembly {
         user_prompt: "Write the standoff.".to_string(),

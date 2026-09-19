@@ -63,12 +63,14 @@ pub const CAPABILITY_SPOKE_BASELINE: &str = "spoke-baseline";
 /// [`validate_allowlist_entry`]).
 pub const KE_CAPABILITIES: [&str; 2] = ["ke-ownership", "ke-extraction"];
 
-/// The six KE operation families (durable §9) — served only by a fully
-/// enforced KE host (the Connect host CLI), never by this tools-only
-/// responder. Named here so an operator entry that mistakes a family name
-/// for a tool id fails config load with the truthful reason.
-pub const KE_OPERATION_FAMILIES: [&str; 6] =
-    ["upsert", "promote", "relate", "check", "assemble", "compute"];
+/// The six KE operation families (durable §9).
+///
+/// Served only by a fully enforced KE host (the Connect host CLI), never by
+/// this tools-only responder. Named here so an operator entry that mistakes a
+/// family name for a tool id fails config load with the truthful reason.
+pub const KE_OPERATION_FAMILIES: [&str; 6] = [
+    "upsert", "promote", "relate", "check", "assemble", "compute",
+];
 
 /// The capabilities a tools-only peer-tools responder hello may declare
 /// (v1.191 P1 T14, durable §9): the spoke baseline plus the exact
