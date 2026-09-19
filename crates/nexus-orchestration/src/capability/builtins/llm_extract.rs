@@ -62,12 +62,17 @@ fn parse_extract_target(input: &Value) -> Result<ExtractionTarget, CapabilityErr
 
 /// Whether a model-supplied citation actually occurs in the admitted source.
 ///
-/// The prompt demands a verbatim excerpt; a paraphrase or an invented quote is
-/// not provenance. Whitespace is normalized before the containment test so a
-/// reflowed line break does not defeat a genuine quote (review I1).
+/// The prompt demands a verbatim excerpt; an invented quote is not provenance.
+/// Whitespace is normalized and the comparison is case-insensitive, so a
+/// reflowed line break or a sentence-initial capitalization drift does not
+/// defeat a genuine quote, while a citation the chapter does not contain is
+/// still refused (review I1).
 fn cited_in_admitted_text(quote: &str, admitted_text: &str) -> bool {
     fn normalize(text: &str) -> String {
-        text.split_whitespace().collect::<Vec<_>>().join(" ")
+        text.split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase()
     }
     normalize(admitted_text).contains(&normalize(quote))
 }

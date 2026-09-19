@@ -662,11 +662,24 @@ pub async fn extract_kb_candidates_for_review(
         }
     };
     let existing_names = existing_canonical_names(pool, &ctx.world_id).await?;
-    let inserted = persist_candidates(pool, schedule_id, &ctx, &existing_names, candidates).await?;
+    // The candidates AND the relationship suggestions commit in ONE
+    // caller-owned transaction (v1.191 P1 T13 review C1, durable §8): a write
+    // failure or a dropped (cancelled) future rolls the whole extraction result
+    // back, so a failed/cancelled run leaves zero candidate and relationship
+    // writes. All in-transaction reads go through the transaction, so the
+    // hook never borrows a second pool connection while holding the write lock.
+    let mut tx = nexus_local_db::begin_immediate(pool)
+        .await
+        .map_err(|e| AutoChainError::InvalidState(format!("kb-extract: finalize tx: {e}")))?;
+    let inserted =
+        persist_candidates(&mut tx, schedule_id, &ctx, &existing_names, candidates).await?;
     // V1.76: persist relationship candidates (idempotent; entity-existence
     // prerequisite enforced inside persist_relationship_candidates).
     let rel_inserted =
-        persist_relationship_candidates(pool, schedule_id, &ctx, relationships).await?;
+        persist_relationship_candidates(&mut tx, schedule_id, &ctx, relationships).await?;
+    tx.commit()
+        .await
+        .map_err(|e| AutoChainError::InvalidState(format!("kb-extract: finalize commit: {e}")))?;
     if inserted > 0 || rel_inserted > 0 {
         tracing::info!(
             schedule_id,
@@ -1483,7 +1496,7 @@ async fn load_chapter_prose(
 /// via [`insert_pending_with_llm`]. Heuristic candidates pass `None` for both
 /// LLM fields so the dedicated columns stay NULL (entity-scope-model §5.5.6).
 async fn persist_candidates(
-    pool: &SqlitePool,
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     schedule_id: &str,
     ctx: &ChapterContext,
     existing_names: &[String],
@@ -1497,7 +1510,7 @@ async fn persist_candidates(
         {
             continue;
         }
-        if is_idempotent(pool, &ctx.work_id, &candidate.canonical_name_guess)
+        if is_idempotent(&mut **tx, &ctx.work_id, &candidate.canonical_name_guess)
             .await
             .map_err(nexus_local_db::LocalDbError::from)?
         {
@@ -1507,7 +1520,7 @@ async fn persist_candidates(
         let llm_confidence = candidate.confidence;
         let llm_source_quote = candidate.source_quote.as_deref();
         match insert_pending_with_llm(
-            pool,
+            &mut *tx,
             &ctx.creator_id,
             &ctx.workspace_id,
             &ctx.world_id,
@@ -1553,7 +1566,7 @@ async fn persist_candidates(
 /// do not abort the loop. Best-effort + non-blocking like
 /// [`persist_candidates`].
 async fn persist_relationship_candidates(
-    pool: &SqlitePool,
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     schedule_id: &str,
     ctx: &ChapterContext,
     relationships: Vec<KbRelationshipCandidate>,
@@ -1568,14 +1581,14 @@ async fn persist_relationship_candidates(
         // block_type hint is provided, resolve by (world, block_type, name);
         // otherwise case-insensitive by name only when exactly one matches.
         let source_id = resolve_entity_by_canonical_name(
-            pool,
+            &mut **tx,
             &ctx.world_id,
             &rel.source_canonical_name,
             rel.source_block_type.as_deref(),
         )
         .await?;
         let target_id = resolve_entity_by_canonical_name(
-            pool,
+            &mut **tx,
             &ctx.world_id,
             &rel.target_canonical_name,
             rel.target_block_type.as_deref(),
@@ -1599,7 +1612,7 @@ async fn persist_relationship_candidates(
         };
 
         match upsert_extraction_relationship(
-            pool,
+            &mut *tx,
             &ctx.world_id,
             &source_id,
             &target_id,

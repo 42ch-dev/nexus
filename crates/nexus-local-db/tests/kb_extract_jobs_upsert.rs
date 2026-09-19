@@ -380,8 +380,9 @@ async fn v1191_extract_candidate_and_relationship_ids_survive_a_rescan() {
     };
 
     let now = "2026-09-18T00:00:00Z";
+    let mut conn = pool.acquire().await.unwrap();
     let inserted = nexus_local_db::kb_relationships::upsert_extraction_relationship(
-        &pool,
+        &mut conn,
         WORLD,
         "kb_t13_aria",
         "kb_t13_kael",
@@ -423,7 +424,7 @@ async fn v1191_extract_candidate_and_relationship_ids_survive_a_rescan() {
     assert_eq!(retained_id, candidate_id, "candidate id is retained");
 
     let reinserted = nexus_local_db::kb_relationships::upsert_extraction_relationship(
-        &pool,
+        &mut conn,
         WORLD,
         "kb_t13_aria",
         "kb_t13_kael",
@@ -494,8 +495,9 @@ async fn v1191_extract_unresolved_endpoint_leaves_zero_relationship_rows() {
 
     // Skipping is what keeps the write honest: a forced write with a
     // non-existent endpoint is refused by the FK and leaves zero rows.
+    let mut conn = pool.acquire().await.unwrap();
     let forced = nexus_local_db::kb_relationships::upsert_extraction_relationship(
-        &pool,
+        &mut conn,
         WORLD,
         "kb_t13_aria",
         "kb_t13_missing",

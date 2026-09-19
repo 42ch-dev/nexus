@@ -804,3 +804,82 @@ async fn v1191_extract_review_hook_drops_a_fabricated_citation() {
         "a real citation is retained"
     );
 }
+
+/// Post-callback cancellation: the model has already answered (the protocol
+/// accepted the run) and the finalize transaction can never commit. Dropping the
+/// hook future must leave zero candidate and zero relationship writes — the
+/// callers' single transaction is what makes that true (v1.191 P1 T13 review C1).
+#[tokio::test]
+async fn v1191_extract_review_hook_post_callback_cancel_writes_nothing() {
+    let pool = test_pool().await;
+    seed_world(&pool).await;
+    let work = novel_work("wrk_t13_late", 3);
+    works::create_work(&pool, &work).await.unwrap();
+    let (ws_dir, body_rel) = write_workspace_with_chapter(
+        "Lin Xia drew her blade. Aria and Kael fought together at the Azure Gate.",
+    );
+    seed_chapter_with_body(&pool, "wrk_t13_late", 3, &body_rel).await;
+    insert_review_master_schedule(&pool, "sch_t13_late", "wrk_t13_late").await;
+    for (id, name) in [("kb_late_aria", "Aria"), ("kb_late_kael", "Kael")] {
+        nexus_local_db::kb_store::seed::knowledge_entry(
+            &pool,
+            id,
+            WORLD,
+            "character",
+            name,
+            "confirmed",
+        )
+        .await;
+    }
+
+    let executor = std::sync::Arc::new(MockReviewExtract {
+        response: serde_json::json!({
+            "candidates": [
+                {"canonical_name": "Lin Xia", "block_type": "character", "summary": "A warrior", "confidence": 0.9, "source_quote": "Lin Xia drew her blade."}
+            ],
+            "relationships": [
+                {"source_canonical_name": "Aria", "target_canonical_name": "Kael", "relation_type": "allied_with", "symmetric": true, "confidence": 0.7, "source_quote": "Aria and Kael fought together"}
+            ]
+        })
+        .to_string(),
+        run_id: std::sync::Mutex::new(String::new()),
+        pending: false,
+        failing: false,
+    });
+    let registry = review_registry("sch_t13_late", executor.clone());
+
+    // Hold the write lock so the finalize transaction cannot commit, then drop
+    // the hook future on the timeout — after the model has answered.
+    let mut blocker = nexus_local_db::begin_immediate(&pool).await.unwrap();
+    sqlx::query("UPDATE kb_extract_jobs SET status = status WHERE creator_id = ?")
+        .bind(CREATOR)
+        .execute(&mut *blocker)
+        .await
+        .unwrap();
+
+    let interrupted = tokio::time::timeout(
+        std::time::Duration::from_millis(400),
+        quality_loop::extract_kb_candidates_for_review(
+            &pool,
+            "sch_t13_late",
+            Some(ws_dir.path()),
+            Some(&registry),
+        ),
+    )
+    .await;
+    drop(blocker);
+
+    assert_eq!(
+        executor.run_id.lock().expect("run id lock").as_str(),
+        "run_sch_t13_late",
+        "the model had answered before the finalize (outcome: {interrupted:?})"
+    );
+    assert!(
+        pending_rows(&pool).await.is_empty(),
+        "a cancelled post-callback finalize writes no candidate"
+    );
+    assert!(
+        relationship_rows(&pool).await.is_empty(),
+        "a cancelled post-callback finalize writes no relationship"
+    );
+}
