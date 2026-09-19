@@ -196,7 +196,12 @@ export function SetupStepWorkspace({
     if (!desktop) return;
     setResetBusy(true);
     try {
-      await desktop.resetLocalDatabase();
+      const outcome = await desktop.resetLocalDatabase();
+      if (outcome.status !== 'confirmed') {
+        // Cancelled: keep the migration error visible so the author can retry
+        // Continue or Reset again — a declined dialog clears nothing.
+        return;
+      }
       // Confirmed reset: stay in the wizard and clear the migration error so
       // the author can retry Continue — recovery truth comes from the
       // controller on the next bootstrap attempt. A renderer reload would not

@@ -4,8 +4,10 @@
  * `isDesktopBuild()` is the single factory signal — runtime, not build-time,
  * because `apps/web` is one bundle served in both the browser tab and the
  * Electron shell. It must read `true` only with a valid
- * `window.nexusDesktop.version === 1` bridge (or the explicit `NEXUS_DESKTOP`
- * flag), and `false` in a plain browser/jsdom. No Tauri runtime marker remains.
+ * `window.nexusDesktop.version === 1` bridge, and `false` in a plain
+ * browser/jsdom — including when a legacy `NEXUS_DESKTOP` flag/global is
+ * present (desktop-shell.md §5 forbids build-env-only selection). No Tauri
+ * runtime marker remains.
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -48,9 +50,11 @@ describe('isDesktopBuild (capability detection — §5 #7)', () => {
     expect(isDesktopBuild()).toBe(false);
   });
 
-  it('returns true when the explicit NEXUS_DESKTOP flag is set (override)', () => {
-    (window as unknown as { NEXUS_DESKTOP: boolean }).NEXUS_DESKTOP = true;
-    expect(isDesktopBuild()).toBe(true);
+  it('ignores a legacy NEXUS_DESKTOP flag — selection is bridge-only (§5)', () => {
+    // Test seam: inject the legacy global to prove detection ignores it.
+    const legacyWindow = window as unknown as { NEXUS_DESKTOP: boolean };
+    legacyWindow.NEXUS_DESKTOP = true;
+    expect(isDesktopBuild()).toBe(false);
   });
 
   it('does not flip on unrelated global properties (defends against false positives)', () => {

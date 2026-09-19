@@ -361,7 +361,7 @@ test('reset cancellation leaves every byte untouched and invokes no recovery', a
   os.dialog.confirmResult = false;
   const before = tree.snapshot();
   const result = await handlers.reset_local_database(undefined, { operation: 'reset_local_database' });
-  assert.equal(result, null); // cancellation stays in recovery — never a success claim
+  assert.deepEqual(result, { status: 'cancelled' }); // cancellation stays in recovery — never a success claim
   assert.equal(controller.calls, 0);
   assert.equal(os.dialog.confirmCalls, 1);
   assert.equal(tree.snapshot(), before);
@@ -375,7 +375,7 @@ test('confirmed reset invokes the bounded real recovery once', async (t) => {
   os.dialog.confirmResult = true;
   const before = tree.snapshot();
   const result = await handlers.reset_local_database(undefined, { operation: 'reset_local_database' });
-  assert.equal(result, null); // success ONLY after confirmation + completed recovery
+  assert.deepEqual(result, { status: 'confirmed' }); // success ONLY after confirmation + completed recovery
   assert.equal(controller.calls, 1);
   // The controller owns close → native resetLocalState(home) → restart; the
   // handler never passes a renderer-supplied path.

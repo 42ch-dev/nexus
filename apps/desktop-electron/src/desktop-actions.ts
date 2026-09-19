@@ -11,11 +11,13 @@
  * `workspace_root_unknown`, `path_unresolvable`, `path_outside_workspace`.
  * The canonical (realpathed) path is what reaches the OS call.
  *
- * The reset is user-triggered and user-confirmed: cancellation returns null
- * and touches nothing; a confirmed reset invokes the bounded real recovery on
- * the P0-T4 controller (service close → native `resetLocalState(home)` →
- * readiness/restart), and any failure propagates — a failed reset never
- * surfaces as success.
+ * The reset is user-triggered and user-confirmed: cancellation resolves
+ * `{status:'cancelled'}` — discriminated from success — and touches nothing;
+ * a confirmed reset invokes the bounded real recovery on the P0-T4
+ * controller (service close → native `resetLocalState(home)` →
+ * readiness/restart) and resolves `{status:'confirmed'}` only after it
+ * completes; and any failure propagates — a failed reset never surfaces as
+ * success.
  *
  * Electron runtime objects (`shell`, `dialog`) are injected structurally, so
  * this module has no Electron import and the handlers are directly testable
@@ -212,10 +214,13 @@ export function createDesktopActions(options: DesktopActionsOptions): DesktopAct
 
     /**
      * Parity row 19 + D18/D20: reset only after explicit native confirmation.
-     * Cancellation returns null and leaves every byte untouched. A confirmed
-     * reset invokes the controller's bounded real recovery (confirmed service
-     * close → native `resetLocalState(home)` → readiness/restart); any
-     * failure propagates as a typed error — never a success envelope.
+     * Cancellation resolves `{status:'cancelled'}` — discriminated from
+     * success so renderer consumers never treat a declined dialog as a
+     * completed reset. A confirmed reset invokes the controller's bounded
+     * real recovery (confirmed service close → native `resetLocalState(home)`
+     * → readiness/restart) and resolves `{status:'confirmed'}` only after it
+     * completes; any failure propagates as a typed error — never a success
+     * envelope.
      */
     async reset_local_database() {
       let confirmed: boolean;
@@ -232,10 +237,10 @@ export function createDesktopActions(options: DesktopActionsOptions): DesktopAct
       }
       if (!confirmed) {
         // User declined: nothing was closed, deleted or restarted.
-        return null;
+        return { status: 'cancelled' };
       }
       await controller.resetLocalState();
-      return null;
+      return { status: 'confirmed' };
     },
   };
 }

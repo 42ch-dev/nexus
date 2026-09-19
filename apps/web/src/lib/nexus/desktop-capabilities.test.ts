@@ -127,10 +127,10 @@ describe('ElectronDesktopCapabilities', () => {
     restoreBridge();
   });
 
-  it('resetLocalDatabase invokes reset_local_database', async () => {
-    const { invoke } = mockBridge(() => Promise.resolve(null));
+  it('resetLocalDatabase invokes reset_local_database and returns the discriminated outcome', async () => {
+    const { invoke } = mockBridge(() => Promise.resolve({ status: 'confirmed' }));
     const caps = new ElectronDesktopCapabilities();
-    await caps.resetLocalDatabase();
+    await expect(caps.resetLocalDatabase()).resolves.toEqual({ status: 'confirmed' });
     expect(invoke).toHaveBeenCalledWith('reset_local_database');
     restoreBridge();
   });

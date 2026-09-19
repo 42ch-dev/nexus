@@ -154,6 +154,15 @@ export interface DesktopRuntimeMetadata {
   localEndpoint: string;
 }
 
+/**
+ * Discriminated outcome of the user-confirmed local-state reset (row 19).
+ * `confirmed` — the user approved the native dialog AND the bounded recovery
+ * completed. `cancelled` — the user declined; nothing was closed, deleted or
+ * restarted. Failure is NOT a variant: it rejects with a coded error
+ * (`reset_confirmation_failed` / `reset_failed`), never a success envelope.
+ */
+export type ResetLocalDatabaseResult = { status: 'confirmed' } | { status: 'cancelled' };
+
 // ---------------------------------------------------------------------------
 // Per-operation payload / result maps (typed invoke surface)
 // ---------------------------------------------------------------------------
@@ -209,7 +218,7 @@ export interface DesktopOperationResult {
   start_daemon: null;
   stop_daemon: null;
   restart_daemon: null;
-  reset_local_database: null;
+  reset_local_database: ResetLocalDatabaseResult;
   toggle_maximize_window: null;
 }
 

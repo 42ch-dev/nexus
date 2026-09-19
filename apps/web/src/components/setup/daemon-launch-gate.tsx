@@ -233,11 +233,24 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
 
   async function resetLocalDatabase() {
     if (!desktop) return;
+    // Capture the recovery state so a declined dialog can restore it — the
+    // attempt clears the splash error while the native dialog is up.
+    const prevErrorMessage = errorMessage;
+    const prevErrorKind = errorKind;
     setResetBusy(true);
     setErrorMessage(null);
     setErrorKind(null);
     try {
-      await desktop.resetLocalDatabase();
+      const outcome = await desktop.resetLocalDatabase();
+      if (outcome.status !== 'confirmed') {
+        // Cancelled: nothing was closed, deleted or restarted. Stay in
+        // recovery with the pre-attempt error restored — no success reload,
+        // no wait rerun.
+        setResetBusy(false);
+        setErrorMessage(prevErrorMessage);
+        setErrorKind(prevErrorKind);
+        return;
+      }
       // Confirmed reset: the main-owned controller drives daemon recovery and
       // emits real status transitions. Re-enter the wait against the live
       // subscription — a renderer reload would not rerun main, so recovery
@@ -246,7 +259,7 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
       setResetNonce((n) => n + 1);
     } catch (err) {
       setResetBusy(false);
-      // Cancelled/failed reset stays in recovery: surface the error, keep the
+      // Failed reset stays in recovery: surface the error, keep the
       // existing subscription, and never show a success reload.
       setErrorMessage(toErrorMessage(err) || t('error.resetDatabaseFailed'));
       setErrorKind(kindForErrorState('unknown'));

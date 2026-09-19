@@ -23,7 +23,7 @@ function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapab
     onDaemonStatusChanged: () => Promise.resolve(() => {}),
     startDaemon: () => Promise.resolve(),
     stopDaemon: () => Promise.resolve(),
-    resetLocalDatabase: () => Promise.resolve(),
+    resetLocalDatabase: () => Promise.resolve({ status: 'confirmed' }),
     getSetupCompleted: () => Promise.resolve(true),
     setSetupCompleted: () => Promise.resolve(),
     getEntrance: () => Promise.resolve('content-creator'),
@@ -274,7 +274,7 @@ describe('DaemonLaunchGate', () => {
     healthUnavailable();
     const user = userEvent.setup();
     const startDaemon = vi.fn(() => Promise.resolve());
-    const resetLocalDatabase = vi.fn(() => Promise.resolve());
+    const resetLocalDatabase = vi.fn(() => Promise.resolve({ status: 'confirmed' }));
     const reloadSpy = vi.fn();
     Object.defineProperty(window, 'location', {
       value: { ...window.location, reload: reloadSpy },
@@ -323,6 +323,54 @@ describe('DaemonLaunchGate', () => {
     await waitFor(() => expect(screen.getByTestId('routes')).toBeInTheDocument());
     expect(reloadSpy).not.toHaveBeenCalled();
     expect(startDaemon).not.toHaveBeenCalled();
+  });
+
+  it('cancelled reset stays in recovery — error kept, no re-subscribe, no reload', async () => {
+    healthUnavailable();
+    const user = userEvent.setup();
+    const startDaemon = vi.fn(() => Promise.resolve());
+    const resetLocalDatabase = vi.fn(() => Promise.resolve({ status: 'cancelled' }));
+    const reloadSpy = vi.fn();
+    Object.defineProperty(window, 'location', {
+      value: { ...window.location, reload: reloadSpy },
+      writable: true,
+    });
+    const onDaemonStatusChanged = vi.fn(() => Promise.resolve(() => {}));
+    const getDaemonStatus = vi.fn(() =>
+      Promise.resolve({
+        state: 'error',
+        port: 8420,
+        detail: 'sidecar crashed',
+      } as DaemonStatus),
+    );
+
+    renderGate({
+      desktop: makeDesktop({
+        startDaemon,
+        resetLocalDatabase,
+        getDaemonStatus,
+        onDaemonStatusChanged,
+      }),
+    });
+
+    const block = await screen.findByTestId('transport-error-block');
+    expect(block).toHaveAttribute('data-kind', 'daemon_down');
+    expect(screen.getByText('sidecar crashed')).toBeInTheDocument();
+    const subscribeCallsBefore = onDaemonStatusChanged.mock.calls.length;
+
+    await user.click(screen.getByRole('button', { name: /^Reset$/i }));
+    await waitFor(() => expect(resetLocalDatabase).toHaveBeenCalled());
+
+    // Declined native dialog: the recovery error survives, the wait effect
+    // does not re-run, and no success reload happens.
+    await waitFor(() => expect(screen.getByText('sidecar crashed')).toBeInTheDocument());
+    expect(onDaemonStatusChanged.mock.calls.length).toBe(subscribeCallsBefore);
+    expect(startDaemon).not.toHaveBeenCalled();
+    expect(reloadSpy).not.toHaveBeenCalled();
+    expect(screen.getByTestId('transport-error-primary')).toHaveAttribute(
+      'data-cta',
+      'retry',
+    );
   });
 
   it('keeps reset-failure error without re-subscribing (no retryToken bump)', async () => {

@@ -20,9 +20,9 @@
 import { errorMessage } from '@/lib/error-message';
 import { isEntranceId, type EntranceId } from '@/components/layout/entrance-registry';
 import { getDesktopBridge, invokeDesktop } from './desktop-bridge';
-import type { DaemonStatus } from '../../../../desktop-electron/src/desktop-contract';
+import type { DaemonStatus, ResetLocalDatabaseResult } from '../../../../desktop-electron/src/desktop-contract';
 
-export type { DaemonStatus };
+export type { DaemonStatus, ResetLocalDatabaseResult };
 
 /** Structured error thrown by desktop capability methods. Mirrors the main
  * action error shape (`{ code, message }`) so the toast layer can read it
@@ -69,10 +69,12 @@ export interface DesktopCapabilities {
   /**
    * Wipe the daemon's local state database(s) under `~/.nexus42/` so the daemon
    * can boot fresh. Creative files in the workspace are untouched. Resolves
-   * only after main's explicit native confirmation and a successful bounded
-   * reset; cancel/failure rejects and stays in recovery.
+   * `{status:'confirmed'}` only after main's explicit native confirmation and a
+   * completed bounded reset; `{status:'cancelled'}` when the user declines the
+   * native dialog (nothing was closed, deleted or restarted — stay in
+   * recovery); rejects with a coded error on failure.
    */
-  resetLocalDatabase(): Promise<void>;
+  resetLocalDatabase(): Promise<ResetLocalDatabaseResult>;
   /**
    * Open a native directory picker starting at `defaultPath` and return the
    * selected directory path, or `null` if the user cancelled.
@@ -214,9 +216,9 @@ export class ElectronDesktopCapabilities implements DesktopCapabilities {
     }
   }
 
-  async resetLocalDatabase(): Promise<void> {
+  async resetLocalDatabase(): Promise<ResetLocalDatabaseResult> {
     try {
-      await invokeDesktop('reset_local_database');
+      return await invokeDesktop('reset_local_database');
     } catch (err) {
       throw asDesktopError(err);
     }

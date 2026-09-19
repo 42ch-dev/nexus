@@ -55,7 +55,7 @@ function makeDesktop(
     },
     startDaemon: () => Promise.resolve(),
     stopDaemon: () => Promise.resolve(),
-    resetLocalDatabase: () => Promise.resolve(),
+    resetLocalDatabase: () => Promise.resolve({ status: 'confirmed' }),
     getSetupCompleted: () => Promise.resolve(true),
     setSetupCompleted: () => Promise.resolve(),
     getEntrance: () => Promise.resolve('content-creator'),

@@ -665,13 +665,13 @@ test('reset_local_database only proceeds after explicit native confirmation', as
     calls.push('reset');
   };
   electron.setDialogResponse(1); // Cancel
-  assert.equal(await host.handlers.reset_local_database(), null);
+  assert.deepEqual(await host.handlers.reset_local_database(), { status: 'cancelled' });
   assert.deepEqual(calls, []);
   assert.equal(dialogCalls[0].options.type, 'warning');
   assert.deepEqual(dialogCalls[0].options.buttons, ['Reset Local State', 'Cancel']);
 
   electron.setDialogResponse(0); // Confirm
-  assert.equal(await host.handlers.reset_local_database(), null);
+  assert.deepEqual(await host.handlers.reset_local_database(), { status: 'confirmed' });
   assert.deepEqual(calls, ['reset']);
   host.dispose();
 });
