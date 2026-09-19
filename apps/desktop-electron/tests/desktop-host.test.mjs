@@ -267,6 +267,7 @@ async function makeHost(overrides = {}) {
   // before any window is created (scheme privilege is bootstrap-only,
   // pre-ready — composeDesktopHost has no registerSchemes seam at all).
   electron.lifecycleEvents = [];
+  const { adapters: adapterOverrides = {}, ...hostOverrides } = overrides;
   const { BrowserWindow: FakeBrowserWindow } = electron;
   electron.BrowserWindow = class extends FakeBrowserWindow {
     constructor(options) {
@@ -298,8 +299,9 @@ async function makeHost(overrides = {}) {
       attachNetworkHooks: (sessionArg, getActiveAuth) => {
         networkHooks.push({ session: sessionArg, getActiveAuth });
       },
+      ...adapterOverrides,
     },
-    ...overrides,
+    ...hostOverrides,
   });
   return {
     electron,
@@ -512,6 +514,58 @@ test('renderer crash replaces only the renderer: generation bumps, stale senders
 
   // No service owner was spawned by a renderer crash.
   assert.equal(forkCalls.length, 0);
+  host.dispose();
+});
+
+test('delayed registration race: the superseded in-flight registration loses and the active window owns the channel (QC1 F-001)', async () => {
+  // Generation 1's registration never resolves until the test releases it,
+  // so a renderer-crash replacement starts (and would bind) while the stale
+  // registration is still in flight — the exact interleaving QC1 F-001 flags.
+  let releaseFirstRegistration;
+  const firstRegistrationGate = new Promise((resolve) => {
+    releaseFirstRegistration = resolve;
+  });
+  const events = [];
+  const calls = [];
+  const { host } = await makeHost({
+    adapters: {
+      registerIpc: async (window, handlers, options) => {
+        calls.push({ window, options });
+        if (options.generation === 1) await firstRegistrationGate;
+        events.push(`register:${options.generation}`);
+        return { dispose: () => events.push(`dispose:${options.generation}`) };
+      },
+    },
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(events.length, 0, 'generation 1 registration is still in flight');
+
+  // Renderer crash: replacement selection begins while generation 1's
+  // registration is unresolved. The replacement must NOT bind the sole
+  // invoke channel while the stale registration is still in flight — it
+  // waits, then the stale registration is disposed before the active one
+  // binds.
+  const gone = calls[0].window.webContents.listeners.get('render-process-gone');
+  gone();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(
+    events.includes('register:2'),
+    false,
+    'the active registration must wait for the superseded in-flight one',
+  );
+  releaseFirstRegistration();
+  await host.settled();
+
+  assert.deepEqual(events, ['register:1', 'dispose:1', 'register:2']);
+  assert.equal(host.generation(), 2);
+  assert.equal(host.ipcBindings.length, 1);
+  assert.equal(host.ipcBindings[0].options.generation, 2);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].options.generation, 2);
+  assert.equal(calls[1].options.getCurrentGeneration(), 2);
+  assert.doesNotThrow(() =>
+    assertDesktopEventSender(VALID_SENDER_VIEW, calls[1].options),
+  );
   host.dispose();
 });
 

@@ -644,25 +644,43 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
     return win;
   }
 
-  async function selectWindow(win: BrowserWindow): Promise<void> {
-    ipcRegistration?.dispose();
+  // Registration ownership is serialized: each selection awaits the previous
+  // one's registration and disposes it (it is superseded by definition —
+  // whether it won and was stored, or resolved late and was not) before the
+  // current one binds. ipcMain allows a single handler per channel, so a
+  // stale in-flight binding must never coexist with the live one (QC1 F-001).
+  let inflightRegistration: Promise<RegisterDesktopIpcResult | null> | null = null;
+  function selectWindow(win: BrowserWindow): Promise<void> {
     generation += 1;
     const boundGeneration = generation;
     currentWindow = win;
-    const registration = await registerIpc(win, handlers, {
-      generation: boundGeneration,
-      getCurrentGeneration: () => generation,
-      dev,
-    });
-    // A slow registration resolving after a newer generation won must not
-    // clobber the live binding.
-    if (currentWindow === win && generation === boundGeneration) {
-      ipcRegistration = registration;
-      ipcBindings.push({
-        window: win,
-        options: { generation: boundGeneration, getCurrentGeneration: () => generation, dev },
+    const previous = inflightRegistration;
+    const attempt = (async (): Promise<RegisterDesktopIpcResult | null> => {
+      const stale = previous ? await previous.catch(() => null) : null;
+      stale?.dispose();
+      const registration = await registerIpc(win, handlers, {
+        generation: boundGeneration,
+        getCurrentGeneration: () => generation,
+        dev,
       });
-    }
+      // A registration resolving after a newer generation won must not
+      // clobber the live binding. It is NOT disposed here: the newer
+      // selection (which is awaiting us as `previous`) disposes us exactly
+      // once, always before it re-binds the sole invoke channel.
+      if (currentWindow === win && generation === boundGeneration) {
+        ipcRegistration = registration;
+        ipcBindings.push({
+          window: win,
+          options: { generation: boundGeneration, getCurrentGeneration: () => generation, dev },
+        });
+      }
+      return registration;
+    })();
+    inflightRegistration = attempt;
+    return attempt.then(
+      () => undefined,
+      () => undefined,
+    );
   }
 
   // ── protocol BEFORE any window is created/loaded ──────────────────────
@@ -683,7 +701,12 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
       const win = createMainWindow();
       await selectWindow(win);
     })()
-      .catch(() => undefined)
+      .catch((err) => {
+        // Surface, never swallow: a replacement that failed to register
+        // leaves the visible window without its bridge — that must be
+        // visible in main-process diagnostics (QC1 F-001).
+        process.stderr.write(`[desktop] window replacement registration failed: ${errorMessage(err)}\n`);
+      })
       .finally(() => {
         recreateInFlight = null;
       });
