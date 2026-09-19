@@ -60,6 +60,18 @@ fn parse_extract_target(input: &Value) -> Result<ExtractionTarget, CapabilityErr
     ExtractionTarget::from_context(raw)
 }
 
+/// Whether a model-supplied citation actually occurs in the admitted source.
+///
+/// The prompt demands a verbatim excerpt; a paraphrase or an invented quote is
+/// not provenance. Whitespace is normalized before the containment test so a
+/// reflowed line break does not defeat a genuine quote (review I1).
+fn cited_in_admitted_text(quote: &str, admitted_text: &str) -> bool {
+    fn normalize(text: &str) -> String {
+        text.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+    normalize(admitted_text).contains(&normalize(quote))
+}
+
 /// Prepare one model-judged candidate under the trusted target policy.
 ///
 /// Returns `None` — drop + log, exactly like the pre-wrapper pathway dropped
@@ -71,7 +83,7 @@ fn prepare_candidate(
     target: &ExtractionTarget,
     admitted_text: &str,
     source_id: &str,
-) -> Option<PreparedExtractCandidate> {
+) -> Option<(PreparedExtractCandidate, Option<String>)> {
     let canonical_name = raw
         .get("canonical_name")
         .and_then(Value::as_str)
@@ -96,13 +108,25 @@ fn prepare_candidate(
         return None;
     };
     // The anchor comes from the actual artifact: the model's verbatim chapter
-    // quote when it gave one, else the admitted chapter text it read, else the
-    // admitted source's own identity. Never empty.
+    // quote when it gave one *and it occurs in the admitted text*, else the
+    // admitted chapter text it read, else the admitted source's own identity.
+    // Never empty, and never a citation the source does not contain.
     let source_quote = raw
         .get("source_quote")
         .and_then(Value::as_str)
         .map(str::trim)
-        .filter(|q| !q.is_empty());
+        .filter(|q| !q.is_empty())
+        .filter(|quote| {
+            let cited = cited_in_admitted_text(quote, admitted_text);
+            if !cited {
+                tracing::warn!(
+                    canonical_name = %canonical_name,
+                    "nexus.llm.extract: model source_quote does not occur in the admitted source; \
+                     dropping the citation"
+                );
+            }
+            cited
+        });
     let anchor_text = source_quote.unwrap_or_else(|| {
         let admitted = admitted_text.trim();
         if admitted.is_empty() {
@@ -131,7 +155,7 @@ fn prepare_candidate(
         validation_mode: ValidationMode::Generic,
         governance: target.governance.clone(),
     }) {
-        Ok(prepared) => Some(prepared),
+        Ok(prepared) => Some((prepared, source_quote.map(str::to_owned))),
         Err(e) => {
             tracing::warn!(
                 canonical_name = %canonical_name,
@@ -151,14 +175,19 @@ fn prepare_candidate(
 /// `ke-extraction` response echoed. `canonical_name` and `block_type` come from
 /// the prepared record itself, so the local shape cannot diverge from the
 /// candidate the protocol accepted.
-fn local_candidate(raw: &Value, prepared: &PreparedExtractCandidate) -> Value {
+fn local_candidate(
+    raw: &Value,
+    prepared: &PreparedExtractCandidate,
+    validated_quote: Option<&str>,
+) -> Value {
     let record = &prepared.record;
     json!({
         "canonical_name": record.canonical_name,
         "block_type": serde_json::to_value(record.block_type).unwrap_or(Value::Null),
         "summary": record.body.as_ref().and_then(|b| b.summary.clone()),
         "confidence": raw.get("confidence").cloned().unwrap_or(Value::Null),
-        "source_quote": raw.get("source_quote").cloned().unwrap_or(Value::Null),
+        // The quote the admitted source actually contains, never the raw one.
+        "source_quote": validated_quote,
         "entry_id": record.entry_id,
     })
 }
@@ -433,10 +462,10 @@ impl Capability for LlmExtract {
                     let mut prepared = Vec::with_capacity(parsed.len());
                     let mut local = Vec::with_capacity(parsed.len());
                     for raw in &parsed {
-                        if let Some(candidate) =
+                        if let Some((candidate, quote)) =
                             prepare_candidate(raw, &target, &admitted_text, &source_id)
                         {
-                            local.push(local_candidate(raw, &candidate));
+                            local.push(local_candidate(raw, &candidate, quote.as_deref()));
                             prepared.push(candidate);
                         }
                     }

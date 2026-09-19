@@ -337,6 +337,8 @@ struct MockReviewExtract {
     run_id: std::sync::Mutex<String>,
     /// When set, the executor never answers (a cancelled run).
     pending: bool,
+    /// When set, the executor fails (an extractor failure).
+    failing: bool,
 }
 
 #[async_trait::async_trait]
@@ -352,6 +354,11 @@ impl nexus_orchestration::capability::PromptExecutor for MockReviewExtract {
         if self.pending {
             std::future::pending::<()>().await;
         }
+        if self.failing {
+            return Err(nexus_orchestration::capability::CapabilityError::Internal(
+                "host prompt worker failed".to_string(),
+            ));
+        }
         Ok(nexus_orchestration::capability::PromptResult {
             full_text: self.response.clone(),
             host_session_id: "host-sess".to_string(),
@@ -363,7 +370,10 @@ impl nexus_orchestration::capability::PromptExecutor for MockReviewExtract {
 /// A registry whose `nexus.llm.extract` runs on the mock executor, with the
 /// review hook's stored run identity (`run_<schedule_id>`) registered as a
 /// cancellable run.
-fn review_registry(schedule_id: &str, executor: std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor>) -> nexus_orchestration::capability::CapabilityRegistry {
+fn review_registry(
+    schedule_id: &str,
+    executor: std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor>,
+) -> nexus_orchestration::capability::CapabilityRegistry {
     let mut cancels = std::collections::HashMap::new();
     cancels.insert(
         format!("run_{schedule_id}"),
@@ -380,7 +390,9 @@ fn review_registry(schedule_id: &str, executor: std::sync::Arc<dyn nexus_orchest
     nexus_orchestration::capability::CapabilityRegistry::with_runtime_deps(&deps)
 }
 
-async fn pending_rows(pool: &SqlitePool) -> Vec<nexus_local_db::kb_extract_job::KbExtractPromotion> {
+async fn pending_rows(
+    pool: &SqlitePool,
+) -> Vec<nexus_local_db::kb_extract_job::KbExtractPromotion> {
     list_pending_for_world(pool, WORLD, None).await.unwrap()
 }
 
@@ -412,11 +424,21 @@ async fn v1191_extract_review_hook_retains_candidate_and_relationship_ids() {
     // The relationship endpoints must already exist as KB rows (the
     // entity-existence prerequisite).
     nexus_local_db::kb_store::seed::knowledge_entry(
-        &pool, "kb_t13_aria", WORLD, "character", "Aria", "confirmed",
+        &pool,
+        "kb_t13_aria",
+        WORLD,
+        "character",
+        "Aria",
+        "confirmed",
     )
     .await;
     nexus_local_db::kb_store::seed::knowledge_entry(
-        &pool, "kb_t13_kael", WORLD, "character", "Kael", "confirmed",
+        &pool,
+        "kb_t13_kael",
+        WORLD,
+        "character",
+        "Kael",
+        "confirmed",
     )
     .await;
 
@@ -433,6 +455,7 @@ async fn v1191_extract_review_hook_retains_candidate_and_relationship_ids() {
         .to_string(),
         run_id: std::sync::Mutex::new(String::new()),
         pending: false,
+        failing: false,
     });
     let registry = review_registry("sch_t13_ok", executor.clone());
 
@@ -502,6 +525,7 @@ async fn v1191_extract_review_hook_without_a_run_identity_writes_nothing() {
         response: "{\"candidates\":[]}".to_string(),
         run_id: std::sync::Mutex::new(String::new()),
         pending: false,
+        failing: false,
     });
     let registry = review_registry("sch_t13_norun", executor.clone());
 
@@ -540,6 +564,7 @@ async fn v1191_extract_review_hook_invalid_terminal_writes_nothing() {
         response: "{\"candidates\":[{\"canonical_name\":".to_string(),
         run_id: std::sync::Mutex::new(String::new()),
         pending: false,
+        failing: false,
     });
     let registry = review_registry("sch_t13_bad", executor);
 
@@ -594,6 +619,7 @@ async fn v1191_extract_review_hook_stale_target_writes_nothing() {
         response: "{\"candidates\":[]}".to_string(),
         run_id: std::sync::Mutex::new(String::new()),
         pending: false,
+        failing: false,
     });
     let registry = review_registry("sch_t13_stale", executor.clone());
 
@@ -632,6 +658,7 @@ async fn v1191_extract_review_hook_cancelled_run_writes_nothing() {
         response: "{\"candidates\":[]}".to_string(),
         run_id: std::sync::Mutex::new(String::new()),
         pending: true,
+        failing: false,
     });
     let registry = review_registry("sch_t13_cancel", executor.clone());
 
@@ -659,5 +686,121 @@ async fn v1191_extract_review_hook_cancelled_run_writes_nothing() {
     assert!(
         relationship_rows(&pool).await.is_empty(),
         "a cancelled run writes no relationship"
+    );
+}
+
+/// An extractor failure (the host prompt worker errors) is a failed extraction
+/// run, not a worker outage: it writes nothing and never becomes heuristic
+/// persistence (v1.191 P1 T13 review I2).
+#[tokio::test]
+async fn v1191_extract_review_hook_extractor_failure_writes_nothing() {
+    let pool = test_pool().await;
+    seed_world(&pool).await;
+    let work = novel_work("wrk_t13_fail", 1);
+    works::create_work(&pool, &work).await.unwrap();
+    let (ws_dir, body_rel) = write_workspace_with_chapter("Lin Xia walked into the tavern.");
+    seed_chapter_with_body(&pool, "wrk_t13_fail", 1, &body_rel).await;
+    insert_review_master_schedule(&pool, "sch_t13_fail", "wrk_t13_fail").await;
+
+    let executor = std::sync::Arc::new(MockReviewExtract {
+        response: "{\"candidates\":[]}".to_string(),
+        run_id: std::sync::Mutex::new(String::new()),
+        pending: false,
+        failing: true,
+    });
+    let registry = review_registry("sch_t13_fail", executor.clone());
+
+    let inserted = quality_loop::extract_kb_candidates_for_review(
+        &pool,
+        "sch_t13_fail",
+        Some(ws_dir.path()),
+        Some(&registry),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(inserted, 0);
+    assert_eq!(
+        executor.run_id.lock().expect("run id lock").as_str(),
+        "run_sch_t13_fail",
+        "the run had started"
+    );
+    assert!(
+        pending_rows(&pool).await.is_empty(),
+        "an extractor failure must not become heuristic persistence \
+         (the prose contains a capitalized name the heuristic would extract)"
+    );
+    assert!(relationship_rows(&pool).await.is_empty());
+}
+
+/// A model citation the admitted chapter does not contain is dropped instead of
+/// being persisted as provenance (v1.191 P1 T13 review I1).
+#[tokio::test]
+async fn v1191_extract_review_hook_drops_a_fabricated_citation() {
+    let pool = test_pool().await;
+    seed_world(&pool).await;
+    let work = novel_work("wrk_t13_quote", 1);
+    works::create_work(&pool, &work).await.unwrap();
+    // The chapter never says "Lin Xia drew her blade.".
+    let (ws_dir, body_rel) = write_workspace_with_chapter("Lin Xia walked into the tavern.");
+    seed_chapter_with_body(&pool, "wrk_t13_quote", 1, &body_rel).await;
+    insert_review_master_schedule(&pool, "sch_t13_quote", "wrk_t13_quote").await;
+
+    let executor = std::sync::Arc::new(MockReviewExtract {
+        response: serde_json::json!({
+            "candidates": [
+                {
+                    "canonical_name": "Lin Xia",
+                    "block_type": "character",
+                    "summary": "A warrior",
+                    "confidence": 0.9,
+                    "source_quote": "Lin Xia drew her blade.",
+                },
+                {
+                    "canonical_name": "Tavern",
+                    "block_type": "scene",
+                    "summary": "A tavern",
+                    "confidence": 0.7,
+                    "source_quote": "Lin Xia walked into the tavern.",
+                }
+            ]
+        })
+        .to_string(),
+        run_id: std::sync::Mutex::new(String::new()),
+        pending: false,
+        failing: false,
+    });
+    let registry = review_registry("sch_t13_quote", executor);
+
+    let inserted = quality_loop::extract_kb_candidates_for_review(
+        &pool,
+        "sch_t13_quote",
+        Some(ws_dir.path()),
+        Some(&registry),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        inserted, 2,
+        "both candidates persist; only the citation is dropped"
+    );
+
+    let pending = pending_rows(&pool).await;
+    let lin_xia = pending
+        .iter()
+        .find(|c| c.canonical_name_guess.as_deref() == Some("Lin Xia"))
+        .expect("Lin Xia row");
+    assert_eq!(
+        lin_xia.llm_source_quote, None,
+        "a fabricated citation is not persisted as provenance"
+    );
+    let tavern = pending
+        .iter()
+        .find(|c| c.canonical_name_guess.as_deref() == Some("Tavern"))
+        .expect("Tavern row");
+    assert_eq!(
+        tavern.llm_source_quote.as_deref(),
+        Some("Lin Xia walked into the tavern."),
+        "a real citation is retained"
     );
 }

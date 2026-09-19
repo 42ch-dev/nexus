@@ -660,14 +660,6 @@ pub async fn extract_kb_candidates_for_review(
             );
             return Ok(0);
         }
-        LlmExtractOutcome::CapabilityError(reason) => {
-            tracing::warn!(
-                schedule_id,
-                reason,
-                "kb-extract: LLM extraction failed; falling back to heuristic"
-            );
-            (extract_candidates_from_text(&ctx.prose), Vec::new())
-        }
     };
     let existing_names = existing_canonical_names(pool, &ctx.world_id).await?;
     let inserted = persist_candidates(pool, schedule_id, &ctx, &existing_names, candidates).await?;
@@ -757,14 +749,6 @@ pub async fn detect_missing_kb_on_finalize(
             );
             return Ok(0);
         }
-        LlmExtractOutcome::CapabilityError(reason) => {
-            tracing::warn!(
-                schedule_id,
-                reason,
-                "kb-missing: LLM extraction failed; falling back to heuristic"
-            );
-            extract_candidates_from_text(&ctx.prose)
-        }
     };
 
     let existing_names = existing_canonical_names(pool, &ctx.world_id).await?;
@@ -813,13 +797,11 @@ pub async fn detect_missing_kb_on_finalize(
 ///   produced no entities) + optional relationship candidates (V1.76).
 /// - `WorkerUnavailable`: no worker IPC was available. The caller should
 ///   fall back to the heuristic rather than treat this as "zero candidates".
-/// - `Refused`: the extraction run itself was refused — the `ke-extraction`
-///   protocol rejected it, the run was cancelled, or the trusted run identity
-///   was missing. The caller writes NOTHING: a refused run is not a worker
-///   outage, so heuristic candidates must never stand in for it.
-/// - `CapabilityError`: the capability was missing or returned an unexpected
-///   error. Best-effort callers may fall back to the heuristic and log the
-///   reason (closes R-V151Q3-W002).
+/// - `Refused`: the extraction run failed or was refused — the `ke-extraction`
+///   protocol rejected it, the extractor failed, the run was cancelled, or the
+///   trusted run identity/target was missing. The caller writes NOTHING: only a
+///   worker outage may fall back to the heuristic (review I2), so heuristic
+///   candidates never stand in for a failed extraction.
 #[derive(Debug)]
 pub(crate) enum LlmExtractOutcome {
     Candidates {
@@ -830,7 +812,6 @@ pub(crate) enum LlmExtractOutcome {
     },
     WorkerUnavailable,
     Refused(String),
-    CapabilityError(String),
 }
 
 /// Shared LLM extraction invocation used by both the review-time hook and
@@ -870,7 +851,9 @@ pub(crate) async fn run_llm_extract(
         return LlmExtractOutcome::WorkerUnavailable;
     };
     let Some(cap) = registry.get(capability_name) else {
-        return LlmExtractOutcome::CapabilityError(format!(
+        // A missing extraction capability is not a worker outage: refuse rather
+        // than stand in with heuristic candidates (review I2).
+        return LlmExtractOutcome::Refused(format!(
             "capability '{capability_name}' not registered"
         ));
     };
@@ -892,23 +875,16 @@ pub(crate) async fn run_llm_extract(
 
     let output = match cap.run(input).await {
         Ok(o) => o,
+        // The only outcome that may fall back to the heuristic: no worker IPC.
         Err(CapabilityError::WorkerUnavailable) => {
             return LlmExtractOutcome::WorkerUnavailable;
         }
-        // A refused run: a protocol reject, a cancelled run, or a missing
-        // trusted identity/target. Write nothing — never a heuristic stand-in.
-        Err(e @ (CapabilityError::Forbidden(_) | CapabilityError::Cancelled)) => {
-            return LlmExtractOutcome::Refused(format!(
-                "capability '{capability_name}' refused: {e}"
-            ));
-        }
-        Err(CapabilityError::CancellationUnavailable(reason)) => {
-            return LlmExtractOutcome::Refused(format!(
-                "capability '{capability_name}' has no cancellable run: {reason}"
-            ));
-        }
+        // Everything else is a failed/refused extraction run: a `ke-extraction`
+        // protocol reject, an extractor failure, a cancelled run, or a missing
+        // trusted identity/target. The caller writes NOTHING — a heuristic pass
+        // must never stand in for a failed extraction (durable §8, review I2).
         Err(e) => {
-            return LlmExtractOutcome::CapabilityError(format!(
+            return LlmExtractOutcome::Refused(format!(
                 "capability '{capability_name}' failed: {e}"
             ));
         }

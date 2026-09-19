@@ -3392,8 +3392,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn llm_extract_task_missing_capability_returns_capability_error() {
-        // Unknown capability name → CapabilityError inside the outcome.
+    async fn llm_extract_task_missing_capability_returns_refused() {
+        // Unknown capability name → the run is refused (v1.191 P1 T13 review
+        // I2: a missing extractor is not a worker outage, so the outcome must
+        // not invite a heuristic stand-in).
         let registry = Arc::new(CapabilityRegistry::with_builtins());
         let task = LlmExtractTask::new(
             "Extract entities.".to_string(),
@@ -3404,13 +3406,13 @@ mod tests {
         set_trusted_extract_context(&ctx);
         let outcome = task.evaluate(&ctx).await.unwrap();
         match outcome {
-            crate::quality_loop::LlmExtractOutcome::CapabilityError(err) => {
+            crate::quality_loop::LlmExtractOutcome::Refused(err) => {
                 assert!(
                     err.contains("not registered"),
                     "expected 'not registered' in error: {err}"
                 );
             }
-            other => panic!("expected CapabilityError, got: {other:?}"),
+            other => panic!("expected Refused, got: {other:?}"),
         }
     }
 
