@@ -594,6 +594,14 @@ async fn corrupt_blobs_preserved_not_reinterpreted() {
 
 #[tokio::test]
 async fn old_migrated_db_upgrades_cleanly() {
+    // v1.191 P1 T17: the holder-registry cutover migration is runner-coupled by
+    // design — its preflight aborts any path that does not stage the digest
+    // rows (`holders::stage_holder_digests_in_tx`), and the raw sqlx migrator
+    // used for the "old" schema below has no such hook. A DB that predates the
+    // cutover therefore predates this file too, and the guarded upgrade below
+    // is what applies it (through the real runner).
+    const RUNNER_CUTOVER_MIGRATION: &str = "20260918000001_holder_registry.sql";
+
     // Build a DB with only the pre-v1.186 migrations (exclude the new
     // workflow_execution_state migration), then run the full migration set
     // to verify the upgrade path is clean and idempotent.
@@ -610,13 +618,6 @@ async fn old_migrated_db_upgrades_cleanly() {
     let old_migrations_dir = tempfile::tempdir().unwrap();
     let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../crates/nexus-local-db/migrations");
-    // v1.191 P1 T17: the holder-registry cutover migration is
-    // runner-coupled by design — its preflight aborts any path that does not
-    // stage the digest rows (`holders::stage_holder_digests_in_tx`), and the
-    // raw sqlx migrator used for the "old" schema has no such hook. A DB that
-    // predates the cutover therefore predates this file too, and the guarded
-    // upgrade below is what applies it (through the real runner).
-    const RUNNER_CUTOVER_MIGRATION: &str = "20260918000001_holder_registry.sql";
     for entry in std::fs::read_dir(&src).expect("read migrations dir") {
         let entry = entry.expect("entry");
         let name = entry.file_name().to_string_lossy().to_string();
