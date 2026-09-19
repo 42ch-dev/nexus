@@ -2689,12 +2689,17 @@ mod tests {
         WorkspaceState,
         Arc<PromptHost>,
     ) {
-        let (tmp, nexus_home, db_path) = create_test_workspace().await;
-        std::fs::write(
-            nexus_home.join("config.toml"),
-            "active_creator_id = \"ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\n[active_workspace_slug_by_creator]\n\"ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\" = \"default\"\n",
+        // The actor fixtures own `ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`, so the
+        // home must be materialized FOR that creator/workspace: a post-hoc
+        // `config.toml` rewrite would leave the host's bound pool and the
+        // config-resolved selection naming different databases, and the
+        // T9 admitted-prompt read scope (`actor_view_read_scope`) resolves its
+        // principal from the opened core, not from the rewritten file.
+        let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace_for(
+            "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "default",
         )
-        .unwrap();
+        .await;
         let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
         let host = PromptHost::new();
         let facade: Arc<dyn nexus_agent_host::HostFacade> = host.clone();

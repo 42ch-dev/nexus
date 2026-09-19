@@ -43,7 +43,7 @@ struct MockLlmExtractExecutor;
 impl PromptExecutor for MockLlmExtractExecutor {
     async fn execute(&self, _request: PromptRequest) -> Result<PromptResult, CapabilityError> {
         Ok(PromptResult {
-            full_text: "{\"candidates\":[{\"canonical_name\":\"Mock Character\",\"block_type\":\"character\",\"summary\":null,\"confidence\":0.8,\"source_quote\":\"mock quote\"}]}".to_string(),
+            full_text: "{\"candidates\":[{\"canonical_name\":\"Mock Character\",\"block_type\":\"character\",\"summary\":null,\"confidence\":0.8,\"source_quote\":\"Lin Xia drew her blade.\"}]}".to_string(),
             host_session_id: "host-sess".to_string(),
             operation_id: "op-1".to_string(),
         })
@@ -97,11 +97,17 @@ async fn with_runtime_deps_wiring_makes_llm_extract_run() {
         .get("nexus.llm.extract")
         .expect("nexus.llm.extract must be registered");
 
+    // v1.191 P1 T13: `_extract_target` / `_extract_source_id` are trusted
+    // context the orchestration caller resolves — the capability refuses a run
+    // without them instead of extracting under an invented policy. The shared
+    // in-scope default pair mirrors `resolve_extraction_target`.
     let input = json!({
         "prompt": "extract entities",
         "chapter_prose": "Lin Xia drew her blade.",
         "_creator_id": "test_creator",
         "_session_id": "test_session",
+        "_extract_target": {"world_id": "wld_wiring"},
+        "_extract_source_id": "ch02",
     });
     let result = cap.run(input).await;
 
@@ -154,6 +160,8 @@ async fn executor_failure_stays_typed_failure() {
         "chapter_prose": "...",
         "_creator_id": "test_creator",
         "_session_id": "test_session",
+        "_extract_target": {"world_id": "wld_wiring"},
+        "_extract_source_id": "ch02",
     });
     let result = cap.run(input).await;
     assert!(

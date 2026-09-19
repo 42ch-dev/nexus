@@ -409,6 +409,11 @@ async fn all_five_consumers_observe_non_echo_agent_output() {
             "chapter_prose": "Lin Xia drew her blade.",
             "_creator_id": "ctr_test",
             "_session_id": run_id,
+            // v1.191 P1 T13: trusted job/task target policy + admitted source
+            // id, both resolved by the orchestration caller; the capability
+            // refuses a run without them rather than inventing a policy.
+            "_extract_target": {"world_id": "wld_workflow"},
+            "_extract_source_id": "ch02",
         }))
         .await
         .expect("nexus.llm.extract succeeds");
