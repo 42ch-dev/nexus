@@ -32,7 +32,7 @@ function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapab
     onDaemonStatusChanged: () => Promise.resolve(() => {}),
     startDaemon: () => Promise.resolve(),
     stopDaemon: () => Promise.resolve(),
-    resetLocalDatabase: () => Promise.resolve({ status: 'confirmed' }),
+    resetLocalDatabase: () => Promise.resolve({ status: 'confirmed' as const }),
     getSetupCompleted: () => Promise.resolve(false),
     setSetupCompleted: () => Promise.resolve(),
     getEntrance: () => Promise.resolve('content-creator'),
@@ -355,7 +355,7 @@ describe('SetupStepWorkspace', () => {
         creator_id: 'ctr_local1234567890ab',
         already_bootstrapped: false,
       });
-    const resetLocalDatabase = vi.fn(() => Promise.resolve({ status: 'confirmed' }));
+    const resetLocalDatabase = vi.fn(() => Promise.resolve({ status: 'confirmed' as const }));
     const startDaemon = vi.fn(() => Promise.resolve());
     const reloadSpy = vi.fn();
     Object.defineProperty(window, 'location', {
@@ -404,7 +404,7 @@ describe('SetupStepWorkspace', () => {
         creator_id: 'ctr_local1234567890ab',
         already_bootstrapped: false,
       });
-    const resetLocalDatabase = vi.fn(() => Promise.resolve({ status: 'cancelled' }));
+    const resetLocalDatabase = vi.fn(() => Promise.resolve({ status: 'cancelled' as const }));
     const startDaemon = vi.fn(() => Promise.resolve());
     const reloadSpy = vi.fn();
     Object.defineProperty(window, 'location', {

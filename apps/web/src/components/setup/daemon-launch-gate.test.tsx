@@ -23,7 +23,7 @@ function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapab
     onDaemonStatusChanged: () => Promise.resolve(() => {}),
     startDaemon: () => Promise.resolve(),
     stopDaemon: () => Promise.resolve(),
-    resetLocalDatabase: () => Promise.resolve({ status: 'confirmed' }),
+    resetLocalDatabase: () => Promise.resolve({ status: 'confirmed' as const }),
     getSetupCompleted: () => Promise.resolve(true),
     setSetupCompleted: () => Promise.resolve(),
     getEntrance: () => Promise.resolve('content-creator'),
@@ -274,7 +274,7 @@ describe('DaemonLaunchGate', () => {
     healthUnavailable();
     const user = userEvent.setup();
     const startDaemon = vi.fn(() => Promise.resolve());
-    const resetLocalDatabase = vi.fn(() => Promise.resolve({ status: 'confirmed' }));
+    const resetLocalDatabase = vi.fn(() => Promise.resolve({ status: 'confirmed' as const }));
     const reloadSpy = vi.fn();
     Object.defineProperty(window, 'location', {
       value: { ...window.location, reload: reloadSpy },
@@ -329,7 +329,7 @@ describe('DaemonLaunchGate', () => {
     healthUnavailable();
     const user = userEvent.setup();
     const startDaemon = vi.fn(() => Promise.resolve());
-    const resetLocalDatabase = vi.fn(() => Promise.resolve({ status: 'cancelled' }));
+    const resetLocalDatabase = vi.fn(() => Promise.resolve({ status: 'cancelled' as const }));
     const reloadSpy = vi.fn();
     Object.defineProperty(window, 'location', {
       value: { ...window.location, reload: reloadSpy },
