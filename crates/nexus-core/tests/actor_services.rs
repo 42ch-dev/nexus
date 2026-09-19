@@ -1782,14 +1782,21 @@ async fn v1191_holder_visibility_detail_hidden_equals_absent() {
     pool.close().await;
 }
 
-/// Both policies read through the same page composition: management reaches
-/// the owned known-private rows, an `ActorView` does not, and a Creator's
-/// `ActorView` keeps the same holder filter as a Character's.
+/// Both policies read through the same page composition, and the *entry point*
+/// picks the policy (durable §5.1): the Creator knowledge-view surface is the
+/// **management review** — every owned known-private row, foreign Worlds
+/// excluded — while a Character `ActorView` stays strictly holder-filtered and
+/// is a proper subset of it.
+///
+/// The two directions are asserted independently: the management side may not
+/// narrow (that would hide owned private facts from their author), and the
+/// Character side may not widen (that would leak another identity's private
+/// rows).
 #[allow(clippy::significant_drop_tightening)] // each context is held across its page call
 #[tokio::test]
 async fn v1191_holder_visibility_management_and_actor_view_stay_separate() {
     let env = seed_env().await;
-    seed_governance_fixture(&env).await;
+    let fixture = seed_governance_fixture(&env).await;
     let (core, principal) = open_core(&env).await;
 
     let management = core
@@ -1848,8 +1855,10 @@ async fn v1191_holder_visibility_management_and_actor_view_stay_separate() {
         "a management snapshot is never returned as an ActorView"
     );
 
-    // A Creator's ActorView carries the Creator holder only: the private World
-    // facts they authored, never the Characters' private rows.
+    // Durable §5.1: the Creator knowledge-view surface **is** the management
+    // review (the authorized Creator reviews owned private facts). It therefore
+    // equals the management set above — never the old holder-filtered Creator
+    // ActorView — while still excluding the foreign World's row.
     let creator_page = core
         .actor_knowledge_view(
             &principal,
@@ -1864,11 +1873,76 @@ async fn v1191_holder_visibility_management_and_actor_view_stay_separate() {
             },
         )
         .await
-        .expect("Creator ActorView");
+        .expect("Creator knowledge view admits");
     assert_eq!(
         sorted_names(&creator_page.items),
-        vec!["FirstCharacterShared", "WorldAuthorPrivate", "WorldShared"],
-        "a Creator ActorView never inherits omniscient management review"
+        sorted_names(&management_page.items),
+        "the Creator knowledge-view surface is the management review (durable §5.1)"
+    );
+    assert_eq!(
+        sorted_names(&creator_page.items),
+        vec![
+            "FirstBindingPrivate",
+            "FirstCharacterForeignPrivate",
+            "FirstCharacterPrivate",
+            "FirstCharacterShared",
+            "SecondCharacterPrivate",
+            "WorldAuthorPrivate",
+            "WorldFirstPrivate",
+            "WorldSecondPrivate",
+            "WorldShared",
+        ],
+        "management review reaches every owned known-private row"
+    );
+    let creator_names = sorted_names(&creator_page.items);
+    assert!(
+        !creator_names.contains(&"ForeignPrivate".to_string()),
+        "the foreign World's row never enters the management review"
+    );
+
+    // The other direction: a Character `ActorView` stays strictly
+    // holder-filtered and never inherits that review. The second Character's
+    // view is the smallest case — its own holder plus the shared World row —
+    // and excludes both the binding-local private row and every row held by
+    // another identity.
+    let second = core
+        .admit_actor_knowledge_view(
+            &principal,
+            &AdmittedActor::Character {
+                character_id: fixture.second_character_id.clone(),
+            },
+            character_viewpoint(WORLD, &fixture.second_binding_id),
+        )
+        .await
+        .expect("second Character admits");
+    let second_page = core
+        .admitted_knowledge_page(&principal, &second, 100, None)
+        .await
+        .expect("second Character ActorView page");
+    let second_names = sorted_names(&second_page.items);
+    assert_eq!(
+        second_names,
+        vec!["SecondCharacterPrivate", "WorldSecondPrivate", "WorldShared"],
+        "a Character ActorView holds exactly its own holder's rows"
+    );
+    assert!(
+        !second_names.contains(&"FirstBindingPrivate".to_string())
+            && !second_names.contains(&"FirstCharacterForeignPrivate".to_string())
+            && !second_names.contains(&"WorldAuthorPrivate".to_string()),
+        "a Character ActorView never inherits the management review"
+    );
+
+    // The Character view is a **proper subset** of the management review: no
+    // rows are gained, so the two policies cannot be confused for one another.
+    for name in &second_names {
+        assert!(
+            creator_names.contains(name),
+            "{name} must also be visible to the Creator management review"
+        );
+    }
+    assert!(
+        second_names.len() < creator_names.len(),
+        "an ActorView must not equal the management review"
     );
 
     // The Character detail listing (no World filter) applies the same
