@@ -3,7 +3,6 @@
 # Entries mirror the repository's actual independent dependency graphs:
 #   npm            /                                one root pnpm workspace + pnpm-lock.yaml
 #   cargo          /                                root Cargo workspace (crates/* + apps/nexus42)
-#   cargo          /apps/desktop/src-tauri          standalone Tauri crate (own Cargo.lock)
 #   cargo          /modules/*                       standalone module crates (each own Cargo.lock)
 #   cargo          /tooling/codegen/rust-gen        standalone generator crate (own Cargo.lock)
 #   github-actions /                                .github/workflows
@@ -74,20 +73,6 @@ updates:
         applies-to: version-updates
         patterns:
           - "spoke-*"
-        update-types:
-          - minor
-          - patch
-
-  - package-ecosystem: cargo
-    directory: /apps/desktop/src-tauri
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
-    groups:
-      cargo-minor-patch:
-        applies-to: version-updates
-        patterns:
-          - "*"
         update-types:
           - minor
           - patch

@@ -15,15 +15,12 @@ import {
   computeContractHash,
   computeDbSchemaRange,
   computeDbSchemaRangeFromNames,
-  ensureSidecarFromArtifact,
-  getHostTriple,
   isDaemonCliStatusRunning,
   manifestPathForArtifact,
   readBackendManifest,
   refreshBackend,
   resolveDaemonEndpoint,
   sha256File,
-  sidecarDestPath,
   validateDaemonHealth,
   waitForDaemonHealth,
   writeManifestAtomic,
@@ -477,48 +474,6 @@ test('writeManifestAtomic uses pid and uuid temp filenames', async () => {
     assert.equal(entries.length, 1);
     assert.match(entries[0], /^nexus42\.manifest\.json$/);
   } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-});
-
-test('ensureSidecarFromArtifact copies compatible backend artifact without building', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'sidecar-ensure-'));
-  const repoRoot = (await import('./dev-backend-manifest.mjs')).getRepoRoot();
-  const hostTriple = await getHostTriple();
-  const dest = sidecarDestPath(repoRoot, hostTriple);
-  const hadDest = await import('node:fs/promises').then(m => m.access(dest).then(() => true).catch(() => false));
-  let priorDest = null;
-  if (hadDest) priorDest = await readFile(dest);
-  try {
-    const targetDir = join(dir, 'target');
-    const artifactPath = join(targetDir, 'debug', 'nexus42');
-    await mkdir(dirname(artifactPath), { recursive: true });
-    await writeFile(artifactPath, 'sidecar-binary');
-    const digest = await sha256File(artifactPath);
-    const contractHash = await computeContractHash(repoRoot);
-    const range = await computeDbSchemaRange(repoRoot);
-    const manifest = {
-      artifactPath,
-      sha256: digest,
-      targetTriple: hostTriple,
-      packageVersion: '0.1.0',
-      contractHash,
-      nativeApiVersion: null,
-      writerProtocol: CURRENT_WRITER_PROTOCOL,
-      dbSchemaRange: range,
-    };
-    await writeManifestAtomic(manifestPathForArtifact(artifactPath), manifest);
-    const result = await ensureSidecarFromArtifact({
-      repoRoot,
-      env: { ...process.env, CARGO_TARGET_DIR: targetDir },
-      profile: 'debug',
-    });
-    assert.equal(result.copied, true);
-    assert.equal(result.dest, dest);
-    assert.equal(await sha256File(result.dest), digest);
-  } finally {
-    if (priorDest !== null) await writeFile(dest, priorDest);
-    else await rm(dest, { force: true });
     await rm(dir, { recursive: true, force: true });
   }
 });

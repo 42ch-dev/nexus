@@ -46,8 +46,7 @@
       "files": [
         "tooling/validation/schema-validator.js",
         "tooling/design-tokens/scripts/**",
-        "tooling/codegen/src/utils.ts",
-        "apps/desktop/src-tauri/icons/source/compose-app-icon.mjs"
+        "tooling/codegen/src/utils.ts"
       ],
       "rules": {
         "no-console": "off"

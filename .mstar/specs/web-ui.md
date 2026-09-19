@@ -5,6 +5,8 @@
 **Created**: 2026-06-24  
 **Scope**: Nexus local Web UI product contract — placement (`apps/web`), stack, daemon-served model, `tauri-api` adapter boundary, MVP surface (Control Room + Setup), Content-Authoring stage (V1.65), Tauri / body-editor roadmap (V1.66), and strict separation from the private cloud SaaS  
 
+> **Desktop host note (v1.192, RFT-11):** the Tauri desktop host was retired; the repository has exactly one desktop host — Electron, contract [desktop-shell.md](desktop-shell.md). Tauri-era names below (`tauri-api`, `TauriClient`, `apps/desktop`, the V1.66 shell stage) are historical records of what shipped at that time, kept for traceability. The daemon-served browser SPA model (§§4, 11) is unchanged: the integrated daemon and its embedded SPA still ship.
+
 **Coordinates with**:
 
 - [cli-spec.md](cli-spec.md) §6.3 (daemon command group — Web UI access) + §7.1 (first-run path)
@@ -70,7 +72,7 @@ This is a **different product** from any web UI in the private `nexus-platform`:
 | Client routing | **React Router** | standard SPA routing for the screen groups |
 | Wire types | **`@42ch/nexus-contracts`** via `workspace:*` | zero version lag with `schemas/`; the UI is a first-class external consumer |
 
-This stack is the **Tauri-ready** foundation: it introduces no browser-only API in core logic, so the V1.65 desktop shell wraps the same `apps/web/dist` without a frontend rewrite (see §5, §9).
+This stack is the **desktop-ready** foundation: it introduces no browser-only API in core logic, so the desktop shell wraps the same `apps/web/dist` without a frontend rewrite (see §5, §9).
 
 ---
 
@@ -95,9 +97,11 @@ See §11 and the [cli-spec.md](cli-spec.md) §6.3 amendment (proposed by this it
 
 ---
 
-## 5. `tauri-api` adapter boundary (normative)
+## 5. `NexusClient` adapter boundary (normative; formerly the `tauri-api` boundary)
 
-All daemon access from the UI goes through a single **`NexusClient`** interface. Core screen logic depends only on this interface, never on a concrete transport, so the same screens run unchanged in the browser today and inside a Tauri webview in V1.65.
+> **Current client names (v1.192):** browser mode selects `BrowserClient`; desktop mode selects `DesktopClient` (renamed from `TauriClient`, no aliases) through the versioned preload bridge — [desktop-shell.md](desktop-shell.md) §5. The V1.64/V1.65 text below is the historical boundary record; the invariant it states is what remains normative.
+
+All daemon access from the UI goes through a single **`NexusClient`** interface. Core screen logic depends only on this interface, never on a concrete transport, so the same screens run unchanged in the browser today and inside the desktop host (Tauri through V1.191; Electron since v1.192).
 
 ```text
             ┌──────────────────────────────────────────┐
@@ -968,7 +972,7 @@ This model is locked in the UI. The world selector shows titles (not ids) and dr
 
 ### 28.1 Author-visible outcomes
 
-- Reopening a chapter restores the author's last scroll position automatically (across reloads, tabs, and the Tauri desktop shell).
+- Reopening a chapter restores the author's last scroll position automatically (across reloads, tabs, and the desktop shell).
 - Selecting text in the reading surface creates a persistent highlight with an optional note. The highlight survives navigation away from the chapter and reappears when the author returns.
 
 ### 28.2 Scope
@@ -1059,7 +1063,7 @@ Rendered at the bottom of the sidebar (always visible regardless of active tab).
 - **Keyboard**: arrow-left/right to navigate avatars; Home/End for first/last; Esc closes any transient UI (modal, dropdown).
 - **"+" CTA**: opens a lightweight create-Creator modal consuming the existing `POST /v1/daemon/creators` endpoint.
 - **Single-Creator case**: exactly one avatar + "+". Clicking the single avatar is a no-op (no error toast). The "+" is the only call-to-action.
-- **Persistence**: `active_creator_id` stored in `localStorage` (key: `nexus:activeCreatorId`) for browser; Tauri store equivalent for desktop. Restored on reload.
+- **Persistence**: `active_creator_id` stored in `localStorage` (key: `nexus:activeCreatorId`) for browser; in desktop mode the switch also goes through the `switch_active_creator` bridge operation, which persists it to the main-owned config (desktop-shell.md §8). Restored on reload.
 - **Avatar fallback**: initials (first character of `display_name`) or generic icon when no image; must be accessible (not color-only).
 
 ### 29.6 Daemon status bar simplification
@@ -1070,7 +1074,7 @@ The V1.64 5-state pill (`starting`/`healthy`/`degraded`/`stopped`/`error`) + alw
 - **Degraded/error/stopped/crash**: a **top-of-main-content banner** (`main-banner.tsx`, new) surfaces the failure with error detail + Restart CTA. Not a sidebar item.
 - **Never**: enabled-while-broken Start button; silent hang during daemon startup.
 
-The daemon status bar subscribes to `onDaemonStatusChanged` (existing Tauri event / daemon SSE).
+The daemon status bar is desktop-only in the current build; it subscribes to the preload bridge's `onDaemonStatusChanged` event and re-syncs periodically through `getDaemonStatus()` (desktop-shell.md §4).
 
 ### 29.7 Button contrast invariant
 
@@ -1085,8 +1089,8 @@ P1 implements a sweep audit of all button call sites in `apps/web/src/**` for th
 ### 29.8 Browser-build contract
 
 The wizard and per-launch daemon-ready gate are **desktop-first**:
-- **Desktop (Tauri)**: `setup_completed` read from Tauri command `get_setup_completed()`; wizard renders when false **after** the V1.105 fullscreen Daemon gate reaches Ready (see §29.13).
-- **Browser**: defaults `setup_completed = true` (i.e. no wizard). The daemon-ready gate is a no-op or instant pass. No Tauri command calls are assumed in the browser build. The browser SPA must not regress — existing Vite dev / static-serve flows continue unchanged.
+- **Desktop**: `setup_completed` read through the versioned preload bridge operation `get_setup_completed()`; wizard renders when false **after** the V1.105 fullscreen Daemon gate reaches Ready (see §29.13).
+- **Browser**: defaults `setup_completed = true` (i.e. no wizard). The daemon-ready gate is a no-op or instant pass. No desktop-bridge calls are assumed in the browser build. The browser SPA must not regress — existing Vite dev / static-serve flows continue unchanged.
 
 ### 29.9 Non-goals
 
@@ -1154,9 +1158,9 @@ On desktop builds, `ClientProvider` returns `TauriClient` + `TauriDesktopCapabil
 
 #### 29.11.3 Unified toast error surface + shared helper
 
-- Tauri invoke errors (picker, workspace persist, daemon status, finish, etc.) **never** render as inline `<p role="alert">` text inside a step.
+- Desktop-bridge invoke errors (picker, workspace persist, daemon status, finish, etc.) **never** render as inline `<p role="alert">` text inside a step.
 - All such errors surface via the page-level toast (error variant).
-- A shared `errorMessage(err)` helper (consumed by every wizard step) turns Tauri `{ message }` objects, `Error` instances, and strings into readable text. The literal `[object Object]` string does not appear.
+- A shared `errorMessage(err)` helper (consumed by every wizard step) turns bridge invoke errors, `Error` instances, and strings into readable text. The literal `[object Object]` string does not appear.
 
 #### 29.11.4 Primary bottom CTA pattern
 
@@ -1183,7 +1187,7 @@ All V1.95 amendments (ClientProvider, migration reset, workspace default rules, 
 **Product behavior (author-visible).** V1.97 keeps the V1.96 wizard IA but hardens the first-launch path so a new author either completes setup or reaches a bounded, actionable recovery state.
 
 - Step 1 remains visually calm at desktop window sizes: the step list does not crowd content, the card does not overflow the viewport or right edge, and long workspace paths truncate inside the workspace location affordance.
-- Browse remains a desktop-only native picker affordance and must pass the expected `defaultPath` argument to the Tauri command. If the picker cannot open, the user sees a readable toast/error, not a raw missing-key failure.
+- Browse remains a desktop-only native picker affordance and must pass the expected `defaultPath` argument to the `pick_directory` bridge operation. If the picker cannot open, the user sees a readable toast/error, not a raw missing-key failure.
 - The daemon step never treats indefinite progress as success. Clean-state launch must reach `running`, an actionable `error`, or a visible timeout/retry/reset state within the bounded V1.96 timeout behavior.
 - Existing-install launch preserves prior setup guarantees: `setup_completed` skip behavior, workspace path preservation unless stale, reset-local-database recovery, and daemon stderr/diagnostic visibility.
 - V1.97 does not add new onboarding steps, settings surfaces, daemon API fields, schema/contract changes, signing/update flows, or default-path consolidation work.
@@ -1191,7 +1195,7 @@ All V1.95 amendments (ClientProvider, migration reset, workspace default rules, 
 #### 29.12.1 Implementation invariants
 
 - The workspace-location row must be flex-safe at desktop window sizes: content containers that hold the resolved path can shrink, and the path truncates inside the card instead of expanding the right edge.
-- The native Browse path uses the existing desktop capability/IPC boundary. The frontend sends `defaultPath` to the Tauri command and does not introduce a second argument shape or compatibility shim.
+- The native Browse path uses the existing desktop capability/IPC boundary. The frontend sends `defaultPath` to the `pick_directory` bridge operation and does not introduce a second argument shape or compatibility shim.
 - The daemon step observes existing desktop daemon-status state and `detail` only. It must not require new daemon API fields, generated schemas, or contract package changes.
 - Clean-state smoke and existing-install smoke are hard product verification gates, not new UI features. Their evidence may be captured manually or with automation, but unit tests alone do not prove the author-visible first-launch path.
 
@@ -1204,7 +1208,7 @@ All V1.95 amendments (ClientProvider, migration reset, workspace default rules, 
 - **Every desktop launch** — first-launch and return visits — shows a fullscreen Daemon wait until Ready before `/setup` or main UI.
 - **Outer gate:** `DaemonLaunchGate` wraps `AppRoutes` in `apps/web/src/App.tsx`; renders `DaemonReadySplash` until Ready on desktop.
 - **Inner gate:** `SetupGate` on main-shell routes only — after Ready, `setup_completed=false` → `/setup`; `true` → main UI. Splash logic **removed** from `SetupGate` post-P0.
-- Desktop **always** auto-starts the bundled sidecar on app open (D2 — `apps/desktop/src-tauri/src/lib.rs` `.setup()` unconditional `SidecarManager::start`).
+- Desktop **always** starts or attaches its managed service on app open (D2; desktop-shell.md §7.1/§13.10.1) — independent of `setup_completed`.
 - The **Daemon wizard step is retired**. Diagnostic UX (timeout, retry, stderr detail, reset-local-database recovery) moves to the splash/gate surface — not a numbered setup step.
 - Happy path does **not** use `startDaemon` IPC from the wizard; recovery only on splash error paths.
 
@@ -1223,7 +1227,7 @@ Orchestrator: `setup-wizard-page.tsx` — `WizardStep = 'entrance' | 'agent' | '
 
 **Removed:** Welcome step (`setup-step-welcome.tsx`); Daemon step (`setup-step-daemon.tsx`).
 
-Agent scan remains `POST /v1/daemon/agent-host/scan` via `useScanAgents` after gate Ready (grill-me **B**). Five scan-safety constraints per §desktop-shell 14.3. No Tauri-side PATH probe duplicate.
+Agent scan remains `POST /v1/daemon/agent-host/scan` via `useScanAgents` after gate Ready (grill-me **B**). Scan-safety constraints per [desktop-shell.md](desktop-shell.md) §14 (bounded concurrency; no shell expansion). No desktop-side PATH probe duplicate.
 
 Bootstrap (`ensureSetupBootstrap`) on Workspace **Continue** only.
 
@@ -1267,7 +1271,7 @@ Bootstrap (`ensureSetupBootstrap`) on Workspace **Continue** only.
 | Dimension | `apps/web` (this spec) | `apps/design-studio` |
 | --- | --- | --- |
 | Audience | Authors on local product | Contributors / frontend devs |
-| Serving | Daemon rust-embed + Tauri bundle | Standalone `pnpm dev` only |
+| Serving | Daemon rust-embed + Electron desktop bundle | Standalone `pnpm dev` only |
 | Data | Daemon API / `NexusClient` | Static fixtures; no wire contracts |
 | DESIGN role | Consumer | Read-only mirror + gallery |
 | Shipped in `nexus42` | Yes | **No** |

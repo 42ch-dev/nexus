@@ -1,6 +1,6 @@
 # Desktop Shell — Product and Host Contract
 
-**Classification:** Master. **Status:** Electron target contract selected for implementation; **not a claim that the Electron product cutover or dual-architecture GUI qualification has shipped**. The existing Tauri implementation is the source baseline until its replacement passes the cutover gates. This in-place revision replaces Tauri-specific normative hosting, preserves the shipped setup/product behavior, and leaves historical evidence unchanged.
+**Classification:** Master. **Status:** Electron is the shipped desktop host: the v1.192 cutover (RFT-09) is accepted, unsigned packaging is delivered (RFT-10), and the replaced Tauri composition is retired (RFT-11), leaving exactly one desktop host. This is **not a claim that dual-architecture GUI qualification, Gatekeeper trust or installed-deployment behavior has been verified** — those rows remain **[UNVERIFIED]** (§12). This in-place revision replaces Tauri-specific normative hosting, preserves the shipped setup/product behavior, and leaves historical evidence unchanged.
 
 Architecture authority: [rust-core-service-boundary.md](rust-core-service-boundary.md) §§5,7–12,16. This Master owns desktop capability, window/setup, IPC and packaging contracts; service/domain HTTP schemas remain schema-owned. No second desktop UI or competing desktop spec is introduced.
 
@@ -16,7 +16,7 @@ Bundle id `io.nexus42.desktop`; product/app name `Nexus`. Product version comes 
 - Preload exposes only `window.nexusDesktop` version1. Renderer remains sandboxed, context-isolated, Node-disabled, web-security-enabled and never loads `.node`, native handles, Principal claims or persisted secrets. A path shown in UI is not path authority.
 - An Electron utility process hosts `@42ch/nexus-service`; the service calls the Rust/native authority. No separate proof `openCore` owner exists beside the service. Service code never imports Electron.
 - A utility process is app-lifetime-bound. Only independent TS-service composition may outlive the GUI; attach and keep/quit are defined in §7.
-- Tauri product tree/toolchain/CI are retired only after accepted host parity and unsigned packaging. The still-consumed integrated legacy daemon + embedded SPA and callable dormant CLI rows are **not** retired merely because desktop changed. Public operator names survive.
+- The Tauri product tree/toolchain/CI retirement landed in v1.192, after accepted host parity and unsigned packaging. The still-consumed integrated legacy daemon + embedded SPA and callable dormant CLI rows are **not** retired merely because desktop changed. Public operator names survive.
 
 ## 3. Public entries and resources
 

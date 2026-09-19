@@ -19,7 +19,7 @@
     "pnpm": ">=11"
   },
   "scripts": {
-    "build": "pnpm -r --filter '!desktop' run build",
+    "build": "pnpm -r run build",
     "test": "pnpm -r run test",
     "typecheck": "pnpm -r run typecheck",
     "lint": "oxlint .",
@@ -37,9 +37,6 @@
     "test:web": "pnpm -F web test",
     "build:cli": "cargo build -p nexus42",
     "build:cli:release": "cargo build -p nexus42 --release",
-    "sidecar": "bash scripts/fetch-sidecar.sh",
-    "sidecar:dev": "SIDECAR_PROFILE=debug bash scripts/fetch-sidecar.sh",
-    "sidecar:ensure": "SIDECAR_ENSURE_ONLY=1 bash scripts/fetch-sidecar.sh",
     "dev:design-studio": "pnpm -F design-studio dev",
     "dev:web": "pnpm -F web dev",
     "dev:desktop": "pnpm --dir apps/desktop-electron run dev",

@@ -6,7 +6,7 @@
 [![pnpm](https://img.shields.io/badge/pnpm-%3E%3D11-F69220.svg?logo=pnpm&logoColor=white)](package.json)
 [![TypeScript](https://img.shields.io/badge/TypeScript-contracts-3178C6.svg?logo=typescript&logoColor=white)](packages/nexus-contracts)
 [![Rust](https://img.shields.io/badge/Rust-CLI%20%2B%20daemon-DEA584.svg?logo=rust&logoColor=black)](apps/nexus42)
-[![Tauri](https://img.shields.io/badge/Tauri-v2-24C8DB.svg?logo=tauri&logoColor=white)](apps/desktop)
+[![Electron](https://img.shields.io/badge/Electron-desktop%20host-47848F.svg?logo=electron&logoColor=white)](apps/desktop-electron)
 [![Schema](https://img.shields.io/badge/JSON%20Schema-SSOT-0B7285.svg)](schemas)
 [![npm](https://img.shields.io/npm/v/@42ch/nexus-contracts.svg?logo=npm&logoColor=white)](https://www.npmjs.com/package/@42ch/nexus-contracts)
 [![Last commit](https://img.shields.io/github/last-commit/42ch-dev/nexus)](https://github.com/42ch-dev/nexus/commits/main)
@@ -42,16 +42,17 @@ pnpm install
 |------|------|
 | `pnpm run dev:design-studio` | Design Studio 画廊 — [http://localhost:5174](http://localhost:5174)；无需 daemon |
 | `pnpm run dev:web` | Web UI — [http://localhost:5173](http://localhost:5173)；请先启动 daemon（`nexus42 daemon start`） |
-| `pnpm run dev:desktop` | Tauri 桌面端开发 — 通过 `tauri.conf.json` 自动启动 web 开发服务 |
+| `pnpm run dev:desktop` | Electron 桌面端开发 — 宿主加载构建后的 `apps/web` dist（驱动自行构建 TS 依赖闭包与宿主；需已准备的 native payload） |
+| `pnpm run dev:desktop:web` | 桌面端 Vite HMR 开发 — Electron 宿主直连 Vite dev origin，不加载构建产物 |
 
 ### 构建
 
 | 命令 | 作用 |
 |------|------|
-| `pnpm run build` | 构建全部 TS workspace（**不含** desktop：web、design-studio、contracts、ui、codegen） |
+| `pnpm run build` | 构建全部 TS workspace（web、design-studio、contracts、ui、codegen、desktop 宿主；不含打包） |
 | `pnpm run build:web` | `apps/web` 生产构建 → `dist/` |
 | `pnpm run build:design-studio` | `apps/design-studio` 生产构建 |
-| `pnpm run build:desktop` | 未签名 macOS `.app` / `.dmg`（含 web 构建 + sidecar + Tauri bundle） |
+| `pnpm run build:desktop` | 未签名 macOS `.app` / `.dmg`（arm64/x64，`-- --arch <arch>`；Electron 打包，不含签名） |
 | `pnpm run build:cli` | `nexus42` Debug 构建 |
 | `pnpm run build:cli:release` | `nexus42` Release 构建 |
 
@@ -81,19 +82,17 @@ pnpm -F @42ch/nexus-ui build
 
 编辑 `schemas/` 后，先跑 `validate-schemas` 再跑 `codegen`，并将生成物与 schema 变更一并提交。完整 PR 前清单见 [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md)。
 
-### Desktop sidecar
+### 桌面端（Electron）
 
-桌面构建需要在 `apps/desktop/src-tauri/binaries/` 下捆绑 `nexus42` 二进制（全新 clone 时该目录被 gitignore）：
-
-```bash
-pnpm run sidecar
-```
-
-Intel Mac 请显式指定目标：
+桌面宿主位于 [`apps/desktop-electron`](apps/desktop-electron)，产出 arm64 与 x64 的未签名 macOS 构建。开发需要已准备的 native payload（`@42ch/nexus-native`）；开发驱动会自行构建 TypeScript 依赖闭包与宿主。
 
 ```bash
-SIDECAR_TARGETS="x86_64-apple-darwin" pnpm run sidecar
+pnpm run dev:desktop                     # 宿主加载构建后的 apps/web dist
+pnpm run dev:desktop:web                 # Vite HMR + Electron 宿主
+pnpm run build:desktop -- --arch arm64   # 未签名 .app + .dmg（默认当前架构）
 ```
+
+`nexus42 desktop bundle --arch <arch>` 转发到同一驱动。不再有 sidecar 拉取步骤 —— 打包步骤自行暂存 service 与 native payload。
 
 ### 清理
 
@@ -105,7 +104,7 @@ pnpm run clean    # 清理 contracts、nexus-ui、codegen 等包的 dist/
 
 | 目录 | 内容 |
 |------|------|
-| `apps/` | 产品表面 — `nexus42`（Rust CLI + daemon）、`desktop`（Tauri 客户端）、`web`（浏览器 SPA） |
+| `apps/` | 产品表面 — `nexus42`（Rust CLI + daemon）、`desktop-electron`（Electron 桌面宿主）、`web`（浏览器 SPA） |
 | `crates/` | 可复用 Rust 库（daemon runtime、orchestration、local DB、contracts 等） |
 | `packages/` | npm 包 — `@42ch/nexus-contracts` 由 `schemas/` 生成 |
 | `modules/` | 领域内容（内嵌 presets、WASM 模块、参考数据） |
