@@ -28,7 +28,12 @@ import {
   parseDesktopRequest,
   parseDesktopRuntimeMetadata,
 } from '../dist/desktop-contract.js';
-import { DesktopAdmission, assertDesktopEventSender, assertDesktopSender } from '../dist/desktop-ipc.js';
+import {
+  DesktopAdmission,
+  assertDesktopEventSender,
+  assertDesktopSender,
+  registerDesktopIpc,
+} from '../dist/desktop-ipc.js';
 import {
   allowDesktopNavigation,
   assertDesktopServiceOrigin,
@@ -248,9 +253,16 @@ test('response envelope helpers honor the 1 MiB bound on the COMPLETE serialized
   assert.throws(() => desktopOk(requestId, oneOver), (err) => errorCode(err) === 'internal');
   // desktopErr never throws and always emits a frame within the bound,
   // trimming over-long messages (including JSON escaping overhead).
-  const hugeMessage = ' '.repeat(MAX_REQUEST_BYTES);
+  const hugeMessage = 'e'.repeat(MAX_REQUEST_BYTES * 2);
   const boundedFailure = desktopErr(requestId, 'internal', hugeMessage);
   assert.equal(boundedFailure.ok, false);
+  assert.equal(boundedFailure.error.code, 'internal');
+  // The message was genuinely oversized and is actually trimmed: a strict
+  // prefix of the input, much smaller than the original, with the COMPLETE
+  // serialized frame inside the frozen 1 MiB response bound.
+  assert.ok(boundedFailure.error.message.length > 0);
+  assert.ok(hugeMessage.startsWith(boundedFailure.error.message));
+  assert.ok(boundedFailure.error.message.length < hugeMessage.length);
   assert.ok(encoder.encode(JSON.stringify(boundedFailure)).length <= MAX_REQUEST_BYTES);
   // Over-long error codes collapse to `internal`.
   assert.equal(desktopErr(requestId, 'c'.repeat(100), 'm').error.code, 'internal');
@@ -298,9 +310,25 @@ test('registered IPC path rejects events once main moves to a newer generation',
     () => assertDesktopEventSender(view, { generation: 7, getCurrentGeneration: () => 8 }),
     'stale_sender',
   );
-  // Without a live source the check degenerates to the registration constant
-  // (vacuous) — documents the contract P0-T7 must satisfy by supplying one.
-  assert.doesNotThrow(() => assertDesktopEventSender(view, { generation: 7 }));
+});
+
+test('registered IPC path fails closed without a live generation source', () => {
+  const view = (({ generation: _ignored, ...rest }) => rest)(VALID_SENDER);
+  // A captured generation alone must NOT pass: without the live source the
+  // check would degenerate to comparing a closure constant to itself.
+  expectCode(() => assertDesktopEventSender(view, { generation: 7 }), 'invalid_input');
+  expectCode(() => assertDesktopEventSender(view, {}), 'invalid_input');
+});
+
+test('registerDesktopIpc rejects registration without a live generation source', async () => {
+  // Fails closed BEFORE touching Electron, so the rejection is observable in
+  // plain Node: P0-T7 must supply getCurrentGeneration when wiring main.
+  const handlers = new Proxy({}, { get: () => async () => null });
+  await assert.rejects(
+    registerDesktopIpc({}, handlers, { generation: 7 }),
+    (err) => errorCode(err) === 'invalid_input',
+  );
+  await assert.rejects(registerDesktopIpc({}, handlers, {}), (err) => errorCode(err) === 'invalid_input');
 });
 
 test('dead window or foreign webContents is rejected', () => {

@@ -54,17 +54,20 @@ export interface RegisterDesktopIpcOptions extends DesktopOriginOptions {
    * Generation this registration was bound to. Events are checked against
    * the LIVE current generation (see `getCurrentGeneration`), not just this
    * value, so a stale registration left installed after navigation is
-   * rejected with `stale_sender`.
+   * rejected with `stale_sender`. Defaults to 0.
    */
   generation?: number;
   /**
-   * Live current-generation source owned by main. REQUIRED for the
-   * registered path to enforce the frozen "current window generation"
-   * invariant; without it the check degenerates to the registration
-   * constant (vacuous). Main increments this on every window
-   * replacement/navigation generation transition (P0-T7).
+   * Live current-generation source owned by main. MANDATORY: registration
+   * fails closed without it. Every sender check compares the registration's
+   * bound generation against `getCurrentGeneration()` evaluated at call
+   * time, so a registration left installed after a window-generation
+   * transition rejects events with `stale_sender` instead of comparing a
+   * closure constant to itself. Main increments the returned value on every
+   * window replacement/navigation generation transition — P0-T7 MUST supply
+   * this source when wiring `registerDesktopIpc`.
    */
-  getCurrentGeneration?: () => number;
+  getCurrentGeneration: () => number;
   requestTimeoutMs?: number;
 }
 
@@ -110,17 +113,25 @@ export function assertDesktopSender(
 /**
  * Sender check for the REGISTERED invoke path: binds the event view to the
  * registration's generation, then compares it against the live
- * `getCurrentGeneration()` source owned by main. A registration left
- * installed after a window-generation transition therefore rejects events
- * with `stale_sender` instead of comparing a closure constant to itself.
+ * `getCurrentGeneration()` source owned by main, evaluated at call time.
+ * A registration left installed after a window-generation transition
+ * therefore rejects events with `stale_sender` instead of comparing a
+ * closure constant to itself. The live source is MANDATORY — this throws
+ * when it is missing rather than falling back to the captured generation.
  */
 export function assertDesktopEventSender(
   view: Omit<DesktopSenderView, 'generation'>,
-  options: RegisterDesktopIpcOptions = {},
+  options: RegisterDesktopIpcOptions,
 ): void {
+  const getCurrentGeneration = options.getCurrentGeneration;
+  if (typeof getCurrentGeneration !== 'function') {
+    throw desktopError(
+      'invalid_input',
+      'registerDesktopIpc requires a live getCurrentGeneration source (P0-T7 wiring obligation)',
+    );
+  }
   const boundGeneration = options.generation ?? 0;
-  const currentGeneration = options.getCurrentGeneration?.() ?? boundGeneration;
-  assertDesktopSender({ ...view, generation: boundGeneration }, currentGeneration, options);
+  assertDesktopSender({ ...view, generation: boundGeneration }, getCurrentGeneration(), options);
 }
 
 interface QueueEntry {
@@ -185,8 +196,17 @@ function requestIdOf(raw: unknown): string {
 export async function registerDesktopIpc(
   window: BrowserWindow,
   handlers: DesktopHandlers,
-  options: RegisterDesktopIpcOptions = {},
+  options: RegisterDesktopIpcOptions,
 ): Promise<RegisterDesktopIpcResult> {
+  // Fail closed BEFORE touching Electron: a registration without a live
+  // generation source is rejected outright (P0-T7 wiring obligation), so the
+  // sender check can never degenerate to a captured closure constant.
+  if (typeof options.getCurrentGeneration !== 'function') {
+    throw desktopError(
+      'invalid_input',
+      'registerDesktopIpc requires a live getCurrentGeneration source (P0-T7 wiring obligation)',
+    );
+  }
   const { ipcMain } = await import('electron');
   const timeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   const admission = new DesktopAdmission();
