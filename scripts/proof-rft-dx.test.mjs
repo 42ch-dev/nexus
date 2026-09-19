@@ -78,9 +78,9 @@ test('requireOutDir rejects missing --out for all modes', () => {
   assert.equal(requireOutDir({ out: '/tmp/evidence' }), '/tmp/evidence');
 });
 
-test('desktop-web uses the real dev:desktop:web alias', () => {
-  assert.deepEqual(SURFACE_CONFIG['desktop-web'].devCommand, ['pnpm', 'run', 'dev:desktop:web']);
-  assert.equal(SURFACE_CONFIG['desktop-web'].loopAlias, 'pnpm run dev:desktop:web');
+test('retired desktop-web surface is not offered by the runner', () => {
+  assert.equal(SURFACE_CONFIG['desktop-web'], undefined);
+  assert.deepEqual(Object.keys(SURFACE_CONFIG), ['web', 'studio', 'shared-ui']);
 });
 
 test('shared-ui DX-1 roots include watcher and vite child', () => {
