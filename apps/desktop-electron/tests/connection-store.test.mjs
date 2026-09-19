@@ -164,7 +164,7 @@ test('failed encryption is non-destructive: previous state survives', async (t) 
 // Clear + one-time legacy import
 // ---------------------------------------------------------------------------
 
-test('clear removes stored material; a subsequent import is possible exactly once', async (t) => {
+test('clear removes stored material; reopen never reimports legacy (durable tombstone)', async (t) => {
   const deps = makeDeps(t);
   let legacyReads = 0;
   const withLegacy = {
@@ -175,21 +175,45 @@ test('clear removes stored material; a subsequent import is possible exactly onc
     },
   };
   const store = await ConnectionStore.open(withLegacy);
-  assert.equal(legacyReads, 1, 'import runs at open when store absent');
+  assert.equal(legacyReads, 1, 'fresh install (no marker, no store): one-time import runs');
   assert.equal(store.getAuth()?.apiKey, 'sk-legacy');
   assert.equal(existsSync(deps.filePath), true);
 
   await store.delete();
   assert.equal(existsSync(deps.filePath), false);
   assert.equal(await store.get(), null);
+  const markerPath = join(deps.filePath, '..', 'connection-config.cleared');
+  assert.equal(existsSync(markerPath), true, 'clear writes a durable tombstone');
+  assert.ok(!readFileSync(markerPath, 'utf8').includes('sk-legacy'), 'tombstone is non-secret');
 
-  // Clear itself never reimports; the next open performs the one allowed import.
+  // Reopen after clear: the untouched legacy key must NOT be re-imported.
   const reopened = await ConnectionStore.open(withLegacy);
-  assert.equal(legacyReads, 2, 'exactly one more import on next open after clear');
-  assert.equal(reopened.getAuth()?.apiKey, 'sk-legacy');
-  const again = await ConnectionStore.open(withLegacy);
-  assert.equal(legacyReads, 2, 'store now authoritative: no periodic dual-store fallback');
-  assert.equal(again.getAuth()?.apiKey, 'sk-legacy');
+  assert.equal(legacyReads, 1, 'cleared tombstone honored: no reimport on reopen');
+  assert.equal(await reopened.get(), null);
+  assert.equal(reopened.getAuth(), null);
+  assert.equal(existsSync(deps.filePath), false, 'no store recreated from legacy');
+  assert.equal(existsSync(markerPath), true, 'tombstone survives the reopen');
+});
+
+test('cleared tombstone survives a failed encryption attempt non-destructively', async (t) => {
+  const deps = makeDeps(t);
+  const store = await ConnectionStore.open(deps);
+  await store.set({ ...BASE_CONFIG }, { action: 'replace', value: 'sk-live-secret' });
+  await store.delete();
+  const markerPath = join(deps.filePath, '..', 'connection-config.cleared');
+  assert.equal(existsSync(markerPath), true);
+
+  // Open with encryption unavailable and legacy present: the tombstone must
+  // keep the import path closed and survive untouched — nothing encrypted,
+  // nothing written, marker bytes intact.
+  const reopened = await ConnectionStore.open({
+    ...deps,
+    storage: unavailableStorage,
+    readLegacy: async () => JSON.stringify({ endpointUrl: ENDPOINT, apiKey: 'sk-legacy' }),
+  });
+  assert.equal(await reopened.get(), null);
+  assert.equal(existsSync(deps.filePath), false, 'no store file created');
+  assert.equal(existsSync(markerPath), true, 'tombstone survives the failed-encryption open');
 });
 
 test('delete failure surfaces as structured error; bytes and prior state survive', async (t) => {
