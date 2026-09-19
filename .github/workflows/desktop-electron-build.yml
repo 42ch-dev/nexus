@@ -52,20 +52,25 @@ jobs:
         include:
           - arch: arm64
             os: macos-15
+            rust-target: aarch64-apple-darwin
           - arch: x64
             os: macos-15-intel
+            rust-target: x86_64-apple-darwin
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: true
 
-      - name: Set up Node and pnpm
+      - name: Set up Node, pnpm, and stable Rust
         uses: ./.github/actions/setup-monorepo
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
-          rust-toolchain: ''
+          rust-toolchain: stable
+          # install-deps defaults to true: pnpm install --frozen-lockfile.
+          # nexus-wasm-host's build.rs compiles embedded modules from source.
+          rust-targets: ${{ matrix.rust-target }},wasm32-unknown-unknown
 
       - name: Assert native runner architecture
         env:
@@ -81,17 +86,7 @@ jobs:
           console.log(`native runner: ${process.platform}/${process.arch}`);
           NODE
 
-      - name: Build packaging prerequisites
-        run: |
-          set -euo pipefail
-          pnpm run build:web
-          pnpm --filter @42ch/nexus-contracts run build
-          pnpm --filter @42ch/nexus-provider-acp run build
-          pnpm --filter @42ch/nexus-native run build
-          pnpm --dir apps/nexus-service run build
-          pnpm --dir apps/desktop-electron run build
-
-      - name: Package with signing-dispatch sentinels
+      - name: Install signing-dispatch sentinels
         env:
           TARGET_ARCH: ${{ matrix.arch }}
         run: |
@@ -121,13 +116,44 @@ jobs:
           esac
           EOF
           chmod +x "${sentinel_dir}/xcrun"
-          PATH="${sentinel_dir}:${PATH}" pnpm build:desktop -- --arch "${TARGET_ARCH}"
-          if [ -s "${sentinel_log}" ]; then
+          echo "${sentinel_dir}" >> "${GITHUB_PATH}"
+          echo "UNSIGNED_SENTINEL_LOG=${sentinel_log}" >> "${GITHUB_ENV}"
+
+      - name: Build packaging prerequisites
+        run: |
+          set -euo pipefail
+          pnpm run build:web
+          pnpm --filter @42ch/nexus-contracts run build
+          pnpm --filter @42ch/nexus-provider-acp run build
+          pnpm --filter @42ch/nexus-native run build
+          pnpm --dir apps/nexus-service run build
+          pnpm --dir apps/desktop-electron run build
+
+      - name: Build unsigned native payload
+        env:
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          # CI intentionally uses Cargo's runner-local default target/ directory:
+          # a scoped CARGO_TARGET_DIR deadlocks nexus-wasm-host's nested Cargo
+          # module builds when the outer build holds that directory's lock.
+          node packages/nexus-native/scripts/build.mjs --release
+          test -s "packages/nexus-native-darwin-${TARGET_ARCH}/native/nexus_core_node.node"
+          test -s "packages/nexus-native-darwin-${TARGET_ARCH}/native/compatibility.json"
+
+      - name: Package with signing-dispatch sentinels
+        env:
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          pnpm build:desktop -- --arch "${TARGET_ARCH}"
+          if [ -s "${UNSIGNED_SENTINEL_LOG}" ]; then
             echo 'forbidden signing dispatch observed:'
-            cat "${sentinel_log}"
+            cat "${UNSIGNED_SENTINEL_LOG}"
             exit 1
           fi
           echo 'signing-dispatch sentinel calls: 0'
+
 
       - name: Verify published package
         env:
