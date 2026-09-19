@@ -16,7 +16,7 @@ Bundle id `io.nexus42.desktop`; product/app name `Nexus`. Product version comes 
 - Preload exposes only `window.nexusDesktop` version1. Renderer remains sandboxed, context-isolated, Node-disabled, web-security-enabled and never loads `.node`, native handles, Principal claims or persisted secrets. A path shown in UI is not path authority.
 - An Electron utility process hosts `@42ch/nexus-service`; the service calls the Rust/native authority. No separate proof `openCore` owner exists beside the service. Service code never imports Electron.
 - A utility process is app-lifetime-bound. Only independent TS-service composition may outlive the GUI; attach and keep/quit are defined in §7.
-- Tauri product tree/toolchain/CI are retired only after accepted host parity and unsigned packaging. The still-consumed integrated legacy daemon + embedded SPA and callable dormant CLI rows are **not** retired merely because desktop changed. Public operator names survive.
+- The Tauri product tree/toolchain/CI retirement landed in v1.192, after accepted host parity and unsigned packaging. The still-consumed integrated legacy daemon + embedded SPA and callable dormant CLI rows are **not** retired merely because desktop changed. Public operator names survive.
 
 ## 3. Public entries and resources
 
