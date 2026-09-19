@@ -146,30 +146,16 @@ impl FindingPort for NexusAdapter<'_> {
                         );
                     }
                     if let Some(target) = finding.target_entry_id.as_deref() {
-                        match self.load_admitted_entry(target).await {
-                            // L2 F4: the target must live in the SAME world the
-                            // finding is routed to. A multi-world selection
-                            // admits rows from several containers, so admission
-                            // alone is not enough — a cross-world target would
-                            // otherwise be readable through the finding.
-                            Ok(Some(record)) if record.world_id() == Some(world_id) => {}
-                            // Admitted but living in another container, and a
-                            // target the caller cannot read at all, take the
-                            // same unknown-target refusal.
-                            Ok(Some(_) | None) => {
-                                return reject(
-                                    SpokeRejectCode::InvalidInput,
-                                    format!(
-                                        "Finding {finding_id} targets an unknown knowledge entry \
-                                         in world {world_id}"
-                                    ),
-                                    json!({
-                                        "finding_id": finding_id,
-                                        "world_id": world_id,
-                                        "target_entry_id": target,
-                                    }),
-                                );
-                            }
+                        // L2 F4: a *knowledge-entry* target must be admitted IN
+                        // THIS WORLD. A multi-world selection admits rows from
+                        // several containers, so admission alone is not enough —
+                        // a cross-world entry would otherwise be readable
+                        // through the finding.
+                        let ke_target_world_ok = match self.load_admitted_entry(target).await {
+                            Ok(Some(record)) => record.world_id() == Some(world_id),
+                            // Hidden or absent: indistinguishable, and not a
+                            // knowledge target of this world.
+                            Ok(None) => false,
                             Err(e) => {
                                 return reject(
                                     SpokeRejectCode::InternalError,
@@ -177,6 +163,44 @@ impl FindingPort for NexusAdapter<'_> {
                                     json!({ "finding_id": finding_id }),
                                 );
                             }
+                        };
+                        // T8 CI product-scope fix (option a): the rules
+                        // evaluator's findings legitimately target this world's
+                        // TIMELINE EVENTS (`rules_eval.rs` observer_cardinality),
+                        // which carry their own world authorization. A target
+                        // that is neither an admitted KE of this world nor one of
+                        // this world's timeline events is refused with the
+                        // unknown-target shape, so the hidden-KE contract
+                        // (hidden == absent) is unchanged.
+                        let timeline_target_ok = if ke_target_world_ok {
+                            false
+                        } else {
+                            match is_world_timeline_event(&self.pool, world_id, target).await {
+                                Ok(found) => found,
+                                Err(e) => {
+                                    return reject(
+                                        SpokeRejectCode::InternalError,
+                                        format!(
+                                            "storage error on finding timeline-target read: {e}"
+                                        ),
+                                        json!({ "finding_id": finding_id }),
+                                    );
+                                }
+                            }
+                        };
+                        if !ke_target_world_ok && !timeline_target_ok {
+                            return reject(
+                                SpokeRejectCode::InvalidInput,
+                                format!(
+                                    "Finding {finding_id} targets an unknown knowledge entry \
+                                     in world {world_id}"
+                                ),
+                                json!({
+                                    "finding_id": finding_id,
+                                    "world_id": world_id,
+                                    "target_entry_id": target,
+                                }),
+                            );
                         }
                     }
                     if let Err(e) = insert_world_finding_tx(&mut tx, &finding, world_id).await {
@@ -341,6 +365,29 @@ async fn insert_world_finding_tx(
         updated_at,
     )
     .await
+}
+
+/// Whether `timeline_event_id` names a timeline event of `world_id`.
+///
+/// Rule-evaluator findings (`observer_cardinality`) target timeline events, not
+/// knowledge entries; the timeline read is world-scoped by the storage
+/// primitive, so a cross-world event id is not found here and the finding is
+/// refused exactly like an unknown KE target.
+///
+/// # Errors
+///
+/// Returns [`LocalDbError`] on database failure.
+async fn is_world_timeline_event(
+    pool: &sqlx::SqlitePool,
+    world_id: &str,
+    timeline_event_id: &str,
+) -> Result<bool, LocalDbError> {
+    let ids = [timeline_event_id.to_string()];
+    let events =
+        nexus_local_db::narrative_gateway::list_timeline_events_scoped(pool, world_id, None, &ids)
+            .await
+            .map_err(|e| LocalDbError::ValidationError(e.to_string()))?;
+    Ok(!events.is_empty())
 }
 
 /// Map a single spoke [`SpokeFinding`] onto a nexus [`NexusFinding`] row

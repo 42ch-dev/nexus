@@ -225,6 +225,23 @@ async fn world_scoped_finding_routes_to_world_findings_table() {
     let (pool, _dir) = fresh_pool().await;
     seed_world(&pool, "wld_test").await;
 
+    // The cited target is a knowledge entry of the routed world, so the v1.191
+    // P1 T8 target gate admits it (L2 F4 + T8 CI fix: the entry must live in the
+    // routed world and be visible to the caller).
+    let mut cited = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
+        "wld_test",
+        nexus_contracts::BlockType::Character,
+        "Boxed Marble",
+    );
+    cited.entry_id = "kb_bo".to_string();
+    cited.status = "confirmed".to_string();
+    nexus_knowledge::world_kb::KbStore::insert_knowledge_entry(
+        &nexus_local_db::kb_store::SqliteKbStore::new(pool.clone()),
+        cited,
+    )
+    .await
+    .unwrap();
+
     let adapter = scoped(pool.clone());
     // Full AC-V165-3 shape: kind, spoke severity verbatim, target_entry_id,
     // description + text_position/source_anchor for verbatim JSON asserts.
@@ -551,5 +568,68 @@ async fn v1191_holder_ports_cross_world_target_is_refused() {
             .unwrap()
             .is_none(),
         "a refused cross-world finding must persist nothing"
+    );
+}
+
+/// `v1191_holder_ports` (T8 CI product-scope fix, option a): a rule finding may
+/// target one of the routed world's TIMELINE EVENTS (`rules_eval.rs`
+/// `observer_cardinality`), while a knowledge-entry target still has to be an
+/// admitted entry of that world.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn v1191_holder_ports_same_world_timeline_target_accepted_cross_world_refused() {
+    use nexus_local_db::narrative_gateway::seed;
+
+    let (pool, _dir) = fresh_pool().await;
+    seed_world(&pool, "wld_test").await;
+    seed_world(&pool, "wld_foreign").await;
+    seed::event(&pool, "evt_home", "wld_test", "fbk_root", "story_advance", 0).await;
+    seed::event(
+        &pool,
+        "evt_abroad",
+        "wld_foreign",
+        "fbk_root",
+        "story_advance",
+        0,
+    )
+    .await;
+
+    let adapter = scoped(pool.clone());
+
+    // (a) Same-world timeline target: accepted and visible on the stored row.
+    let mut same_world = world_finding("fnd_evt_home");
+    same_world.target_entry_id = Some("evt_home".to_string());
+    match adapter.put_findings(vec![same_world]).await {
+        SpokeResult::Ok(_) => {}
+        SpokeResult::Reject(r) => panic!("a same-world timeline target must be accepted: {r:?}"),
+    }
+    let stored = get_world_finding(&pool, "fnd_evt_home")
+        .await
+        .unwrap()
+        .expect("the accepted finding is persisted");
+    assert_eq!(
+        stored.target_entry_id.as_deref(),
+        Some("evt_home"),
+        "the rule target round-trips onto the row"
+    );
+
+    // (b) Cross-world timeline target: refused, nothing persisted.
+    let mut cross = world_finding("fnd_evt_abroad");
+    cross.target_entry_id = Some("evt_abroad".to_string());
+    match adapter.put_findings(vec![cross]).await {
+        SpokeResult::Reject(r) => {
+            assert_eq!(r.code, SpokeRejectCode::InvalidInput, "got {r:?}");
+            assert!(
+                r.message.contains("unknown knowledge entry"),
+                "a cross-world timeline target must use the unknown-target shape: {r:?}"
+            );
+        }
+        SpokeResult::Ok(_) => panic!("a cross-world timeline target must be refused"),
+    }
+    assert!(
+        get_world_finding(&pool, "fnd_evt_abroad")
+            .await
+            .unwrap()
+            .is_none(),
+        "a refused finding must persist nothing"
     );
 }
