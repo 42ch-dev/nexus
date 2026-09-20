@@ -470,6 +470,7 @@ async fn allowlisted_peer_handshakes_and_reads_nexus_manifest() {
             "spoke-baseline",
             "l2-computable",
             "l5-fork",
+            "ke-ownership",
             "tools.nexus.list_observed_peers",
             "tools.nexus.list_modules"
         ])
@@ -513,6 +514,7 @@ async fn allowlisted_peer_handshakes_and_reads_nexus_manifest() {
             "spoke-baseline",
             "l2-computable",
             "l5-fork",
+            "ke-ownership",
             "tools.nexus.list_observed_peers",
             "tools.nexus.list_modules"
         ]
@@ -2105,9 +2107,7 @@ async fn n_c1_every_served_op_advertised_by_the_const_actually_routes() {
 
     // Hermetic workspace DB with the world seeded.
     let db_path = temp.path().join("workspace").join("state.db");
-    let pool = crate::db::Schema::init(&db_path)
-        .await
-        .expect("workspace DB initializes");
+    let pool = compute_fixture_pool(&db_path).await;
     seed_world(&pool, "ctr_test", WORLD_A).await;
 
     // The peer is scoped to exactly the op set the const advertises (the
@@ -3137,10 +3137,12 @@ async fn n_c2_peer_runs_compute_over_connect() {
 }
 
 /// N-C2 (V1.154 P2) compute denial matrix — world + module gates (spec
-/// §2.1–§2.3): wrong-world ⇒ `op_unsupported` (the same fail-closed family
-/// as every other op); missing module name ⇒ defined `module_not_found`;
-/// module not installed under `~/.nexus42/modules/` ⇒ defined
-/// `module_not_found`; `settle: true` ⇒ defined `settle_not_enabled`
+/// §2.1–§2.3): wrong-world ⇒ `invalid_input` (the target entry is read through
+/// the caller's admitted selection, so an unadmitted row is indistinguishable
+/// from an absent one — durable §4.2 — and the denial is the same client-input
+/// family as a missing `entry_id`); missing module name ⇒ defined
+/// `module_not_found`; module not installed under `~/.nexus42/modules/` ⇒
+/// defined `module_not_found`; `settle: true` ⇒ defined `settle_not_enabled`
 /// (read-only compute lock, spec §5 / §6.5). All denials happen before any
 /// WASM execution with zero side effects, and the session stays usable.
 #[tokio::test(flavor = "multi_thread")]
@@ -3219,8 +3221,12 @@ async fn n_c2_compute_wrong_world_missing_module_uninstalled_and_settle_denied()
         .expect("seed same-world combatant");
 
     // (b) Wrong-world: the target entry is stored in WORLD_B (seeded
-    // directly — the peer cannot write there), so the stored-world gate
-    // denies with the same op_unsupported family as every other op.
+    // directly — the peer cannot write there). The stored entry is read
+    // through the caller's admitted selection, and a row that selection does
+    // not admit is indistinguishable from an absent one (durable §4.2), so
+    // the denial is the client-input family (`invalid_input`, the same code
+    // a missing `entry_id` produces) — never an id-existence oracle for a
+    // foreign world.
     seed_key_block(&pool, "kb_cmp_b", WORLD_B, "Banished", "confirmed", 1).await;
     nexus_local_db::compute_session::insert_compute_session(
         &pool,
@@ -3244,8 +3250,9 @@ async fn n_c2_compute_wrong_world_missing_module_uninstalled_and_settle_denied()
         .await
     {
         Err(InvokeError::Wire(envelope)) => assert_eq!(
-            envelope.code, "op_unsupported",
-            "wrong-world compute must be denied like every other op"
+            envelope.code, "invalid_input",
+            "wrong-world compute must be denied in the client-input family (an unadmitted row is \
+             indistinguishable from an absent one, durable §4.2)"
         ),
         other => panic!("wrong-world compute must be denied, got {other:?}"),
     }
@@ -4414,7 +4421,7 @@ async fn served_tool_invoke_requires_peer_to_advertise_the_capability() {
         .expect("allowlisted peer handshake succeeds");
     assert_eq!(
         absent_session.negotiated_capabilities(),
-        &["spoke-baseline", "l2-computable", "l5-fork"]
+        &["spoke-baseline", "l2-computable", "l5-fork", "ke-ownership"]
             .map(ToString::to_string)
             .to_vec(),
         "negotiation is the intersection — the absent peer's hello lacks the tool ids"
