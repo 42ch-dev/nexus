@@ -703,12 +703,13 @@ async fn v1191_knowledge_fence_stale_revision_retires_the_session() {
     );
 }
 
-
 /// Migrated from the retired daemon `characters_api.rs`
 /// (`restore_same_state_cas_no_op_keeps_session_executable_without_shutdown`):
 /// a same-state lifecycle transition is a no-op — it moves neither the
 /// revision nor the stored `lifecycle_epoch`, so a session indexed under the
-/// current epoch stays reusable and its effect still reaches the provider.
+/// current epoch stays reusable, and the post-restore prompt is still admitted
+/// and dispatched to the Host instead of being retired as stale.
+#[allow(clippy::too_many_lines)] // no-op invariants + the post-no-op operation are one path
 #[tokio::test]
 async fn retained_same_state_transition_no_op_keeps_the_indexed_session_reusable() {
     let env = seed_env().await;
@@ -792,6 +793,76 @@ async fn retained_same_state_transition_no_op_keeps_the_indexed_session_reusable
         matches!(reuse, nexus_core::KnowledgeReuse::Reusable),
         "a no-op transition leaves the reuse key usable, got {reuse:?}"
     );
+
+    // ── The operation half of the source assertion ────────────────────────
+    // The retired daemon case performed the post-restore prompt and asserted
+    // exactly one execution (`host.execs == 1`) with a `200`. A no-op restore
+    // must leave the session *executable*, so the post-restore prompt is
+    // admitted through every authority gate — stored owner, indexed context,
+    // stored epoch, knowledge revalidation, Character re-admission — and
+    // dispatched to the Host. A generation the no-op had retired would have
+    // produced `actor_session_stale` before the Host was ever reached.
+    let prompt = serde_json::from_value::<
+        nexus_contracts::generated::daemon_api::agent_host::ExecuteOperationRequest,
+    >(serde_json::json!({ "kind": "prompt", "content": "ping after the no-op" }))
+    .unwrap();
+    let dispatched = handle
+        .execute(&principal, session_id.to_string(), prompt)
+        .await;
+    // Observation point: this fixture indexes the session into the registry
+    // without a Host create, so the single dispatch lands on the authority's
+    // own Host plane and is refused there for the fixture's missing provider
+    // mapping — the Host boundary, never an Actor refusal. The composed
+    // transport port (`provider_port`) is not the authority's execution path,
+    // so it observes no call (the same zero-effect reading the refusal cases
+    // above rely on).
+    let Err(refusal) = &dispatched else {
+        panic!("the post-restore prompt is dispatched to the Host, got {dispatched:?}");
+    };
+    assert!(
+        matches!(refusal, CoreError::Internal { category } if category.starts_with("agent_host:")),
+        "the post-restore prompt reaches the Host boundary, got {refusal:?}"
+    );
+    assert_eq!(
+        port.call_count(),
+        0,
+        "the authority dispatches through its own Host plane, not the composed port"
+    );
+
+    // The dispatched prompt leaves no shadow: the authority released its
+    // Character operation reservation and its effect fences rather than
+    // retiring the generation, so the id is neither tombstoned nor stale and
+    // both shared knowledge leases are free again for an exclusive edit.
+    assert_eq!(
+        handle
+            .actor_sessions()
+            .stored_session_owner(&indexed)
+            .map(|(owner, _, retired)| (owner, retired)),
+        Some((CREATOR.to_string(), false)),
+        "a dispatched post-restore prompt never tombstones the session"
+    );
+    assert!(
+        handle.actor_sessions().context_for(&indexed).is_some(),
+        "the dispatched post-restore prompt keeps the session indexed"
+    );
+    let world_lease = core
+        .acquire_knowledge_governance(
+            &principal,
+            nexus_core::ActorFenceKind::World,
+            WORLD.to_string(),
+        )
+        .await
+        .expect("the post-restore prompt returns its World knowledge fence");
+    let character_lease = core
+        .acquire_knowledge_governance(
+            &principal,
+            nexus_core::ActorFenceKind::Character,
+            env.character_id.clone(),
+        )
+        .await
+        .expect("the post-restore prompt returns its Character knowledge fence");
+    drop(world_lease);
+    drop(character_lease);
 }
 
 /// Remembered capture is a **durable writer** boundary at the core authority
