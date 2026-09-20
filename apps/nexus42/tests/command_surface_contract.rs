@@ -36,8 +36,9 @@ fn current_state_visible_command_groups() {
 
     let help_text = String::from_utf8(output).unwrap();
 
-    // All user-visible commands after Plan 4 (6 visible groups, 6 more hidden)
-    let expected_commands = ["acp", "creator", "daemon", "platform", "sync", "system"];
+    // User-visible commands after the v1.193 P1-T6 `sync`-alias removal
+    // (5 visible groups, more hidden).
+    let expected_commands = ["acp", "creator", "daemon", "platform", "system"];
 
     for cmd in &expected_commands {
         assert!(
@@ -78,11 +79,11 @@ fn current_state_visible_command_groups() {
         );
     }
 
-    // Verify count: 6 user-visible commands
+    // Verify count: 5 user-visible commands
     let visible_count = expected_commands.len();
     assert_eq!(
-        visible_count, 6,
-        "Current-state snapshot: expected exactly 6 user-visible commands, found {visible_count}"
+        visible_count, 5,
+        "Current-state snapshot: expected exactly 5 user-visible commands, found {visible_count}"
     );
 }
 
@@ -131,29 +132,6 @@ fn current_state_creator_subcommands() {
         assert!(
             help_text.contains(subcmd),
             "Current-state creator: expected subcommand '{subcmd}'"
-        );
-    }
-}
-
-/// Snapshot: `sync` command has expected subcommands in V1.15.
-#[test]
-fn current_state_sync_subcommands() {
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("sync")
-        .arg("--help")
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
-
-    for subcmd in &["push", "pull", "status"] {
-        assert!(
-            help_text.contains(subcmd),
-            "Current-state sync: expected subcommand '{subcmd}'"
         );
     }
 }
@@ -216,15 +194,16 @@ fn current_state_system_subcommands() {
 //   - Plan 3 (system/platform): un-ignore `v2_target_system_subcommands`
 //     and `v2_target_platform_exists`
 //   - Plan 4 (creator/knowledge): un-ignore `v2_target_creator_subcommands`
-//   - Plan 2–4 together: un-ignore `v2_only_six_visible_command_groups`
+//   - Plan 2–4 together: un-ignore `v2_only_five_visible_command_groups`
 // =============================================================================
 
-/// V2 Target: Only 6 user-visible top-level command groups:
-/// `daemon`, `acp`, `creator`, `sync`, `platform`, `system`
+/// V2 Target: the user-visible top-level command groups:
+/// `daemon`, `acp`, `creator`, `platform`, `system`
 ///
-/// Un-ignored by Plans 2-4 completing the CLI restructuring.
+/// Un-ignored by Plans 2-4 completing the CLI restructuring. v1.193 P1-T6
+/// removed the hidden top-level `sync` alias, leaving five visible groups.
 #[test]
-fn v2_only_six_visible_command_groups() {
+fn v2_only_five_visible_command_groups() {
     let output = Command::cargo_bin("nexus42")
         .unwrap()
         .arg("--help")
@@ -236,7 +215,7 @@ fn v2_only_six_visible_command_groups() {
 
     let help_text = String::from_utf8(output).unwrap();
 
-    let v2_groups = ["daemon", "acp", "creator", "sync", "platform", "system"];
+    let v2_groups = ["daemon", "acp", "creator", "platform", "system"];
 
     for group in &v2_groups {
         assert!(
@@ -384,33 +363,6 @@ fn v2_target_creator_subcommands() {
         assert!(
             help_text.contains(subcmd),
             "V2 creator: expected subcommand '{subcmd}'"
-        );
-    }
-}
-
-/// V2 Target: `sync` command group subcommands.
-///
-/// Expected: pull, push, status, retry, resolve
-///
-/// Un-ignored by Plans 2-4 consolidating sync.
-#[test]
-fn v2_target_sync_subcommands() {
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("sync")
-        .arg("--help")
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
-
-    for subcmd in &["pull", "push", "status", "retry", "resolve"] {
-        assert!(
-            help_text.contains(subcmd),
-            "V2 sync: expected subcommand '{subcmd}'"
         );
     }
 }
@@ -756,31 +708,9 @@ fn v135_platform_sync_subcommands() {
     }
 }
 
-/// V1.35 P2: `nexus42 sync status` emits a deprecation warning on stderr.
-#[test]
-fn v135_sync_deprecation_warning() {
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .args(["sync", "status"])
-        .assert()
-        .get_output()
-        .stderr
-        .clone();
-
-    let stderr_text = String::from_utf8(output).unwrap();
-    assert!(
-        stderr_text.contains("deprecated"),
-        "V1.35: top-level `sync status` must emit deprecation warning on stderr"
-    );
-    assert!(
-        stderr_text.contains("platform sync"),
-        "V1.35: deprecation warning must point to `platform sync`"
-    );
-}
-
 /// V1.35 P2: Root `--help` lists exactly 5 user-visible command groups
-/// (per cli-command-ia.md §2). The deprecated top-level `sync` is hidden
-/// from help but remains callable as an alias.
+/// (per cli-command-ia.md §2). The deprecated top-level `sync` alias was
+/// removed from the parser in v1.193 P1-T6.
 #[test]
 fn v135_root_help_shows_five_groups_with_sync_hidden() {
     let output = Command::cargo_bin("nexus42")
@@ -803,14 +733,11 @@ fn v135_root_help_shows_five_groups_with_sync_hidden() {
         );
     }
 
-    // The deprecated `sync` group MUST be hidden from help (#[command(hide = true)]).
-    // We assert the absence of the word "sync" in the Commands: list to verify it's
-    // not surfaced as a peer of the 5 canonical groups.
-    //
-    // NOTE: The word "sync" may still appear in long_about examples
-    // ("nexus42 platform sync pull") which is intentional. So we check that
-    // `sync` does NOT appear as a top-level Commands entry — i.e. not in the
-    // "Commands:" section after the long_about examples.
+    // The top-level `sync` alias was removed in v1.193 P1-T6; the word "sync"
+    // may still appear in long_about examples ("nexus42 platform sync pull")
+    // which is intentional. So we check that `sync` does NOT appear as a
+    // top-level Commands entry — i.e. not in the "Commands:" section after
+    // the long_about examples.
     let commands_section = help_text
         .split("Commands:")
         .nth(1)
@@ -1388,4 +1315,52 @@ fn platform_retains_cloud_groups_without_local_launcher() {
             "v1.193 P1-T5: `platform` must not advertise '{forbidden}': {commands}"
         );
     }
+}
+
+// =============================================================================
+// Part 11: v1.193 P1-T6 Model A / host-call / sync-alias entrance removal
+// =============================================================================
+
+/// v1.193 P1-T6 (AC1/AC2/AC3): the Model A MCP bridge (`mcp serve`), the raw
+/// `host-call` debug entry and the hidden top-level `sync` alias are no longer
+/// parser entrances — each invocation is an unknown subcommand (clap exit 2),
+/// never a local service launcher, a deprecated forwarding alias, or a raw
+/// daemon-tool HTTP client. The hidden `ops inspect` operator entry stays
+/// callable, and the generic ACP `mcp_servers` descriptor path is covered by
+/// `tests/mcp_acp_probe.rs`.
+#[test]
+fn retired_operator_entrances_are_unknown() {
+    let home = tempfile::tempdir().expect("temp home");
+
+    let removed: [&[&str]; 4] = [
+        &["mcp", "serve"],
+        &["mcp", "--help"],
+        &["host-call", "nexus.context.whoami", "--args", "{}"],
+        &["sync", "status"],
+    ];
+    for args in removed {
+        let output = Command::cargo_bin("nexus42")
+            .unwrap()
+            .env("HOME", home.path())
+            .args(args)
+            .assert()
+            .code(2)
+            .get_output()
+            .clone();
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        assert!(
+            stderr.contains("unrecognized subcommand"),
+            "v1.193 P1-T6: `{}` must be an unknown subcommand: {stderr}",
+            args.join(" ")
+        );
+    }
+
+    // The hidden `ops inspect` operator entry is retained — the Model A cut
+    // removes routing, not the daemon-free inspector.
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .env("HOME", home.path())
+        .args(["ops", "inspect", "--help"])
+        .assert()
+        .success();
 }

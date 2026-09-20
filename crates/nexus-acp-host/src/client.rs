@@ -232,10 +232,9 @@ fn nexus_mcp_server_to_sdk(server: NexusMcpServer) -> McpServer {
         NexusMcpServer::Http(h) => McpServer::Http(McpServerHttp::new(h.name, h.url)),
         NexusMcpServer::Sse(s) => McpServer::Sse(McpServerSse::new(s.name, s.url)),
         NexusMcpServer::Stdio(s) => {
-            // W-C (QC2 W-1): carry `args` through the mapping so a hand-built
-            // `NexusMcpServer::Stdio { command: nexus42, args: [mcp, serve] }`
-            // spawns the correct subcommand. Mirrors the T1 helper
-            // `nexus_mcp_stdio_server()`'s safe shape.
+            // W-C (QC2 W-1): carry `args` through the mapping so a
+            // hand-built `NexusMcpServer::Stdio { command, args }` spawns
+            // the correct subcommand.
             McpServer::Stdio(McpServerStdio::new(s.name, s.command).args(s.args))
         }
     }

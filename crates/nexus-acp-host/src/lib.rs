@@ -13,11 +13,6 @@
 pub mod client;
 pub mod error;
 pub mod localset_bridge;
-// V1.174 P1 T1 (AR-75 C-1): first-class nexus MCP stdio server wiring for
-// ACP sessions. `connect-client`-gated — without the feature the
-// descriptor does not exist (compile-time absence, T1 DoD).
-#[cfg(feature = "connect-client")]
-pub mod mcp;
 pub mod policy;
 pub mod registry;
 pub mod session_manager;
@@ -51,11 +46,6 @@ pub use transport::{AcpSession, AgentSpawner, ManagedAcpProcess, Platform, Proce
 
 #[allow(unused_imports)]
 pub use localset_bridge::LocalSetBridge;
-
-// Re-export the gated MCP wiring for session construction.
-#[cfg(feature = "connect-client")]
-#[allow(unused_imports)]
-pub use mcp::{nexus_mcp_stdio_server, NEXUS_MCP_SERVER_NAME};
 
 // Re-export session management types.
 #[allow(unused_imports)]
