@@ -79,7 +79,7 @@ pub async fn run(cmd: SystemCommand, config: &CliConfig) -> Result<()> {
             println!("nexus42 {}", env!("CARGO_PKG_VERSION"));
             Ok(())
         }
-        SystemCommand::Doctor => run_combined_doctor(config).await,
+        SystemCommand::Doctor => run_combined_doctor().await,
         SystemCommand::Completion { shell } => print_completion(&shell),
         SystemCommand::Config { command } => config::run(command, config),
         SystemCommand::Debug { command } => debug::run(command, config).await,
@@ -111,33 +111,19 @@ fn print_completion(shell_str: &str) -> Result<()> {
     Ok(())
 }
 
-/// Run combined diagnostics: daemon connectivity + ACP registry + home directory.
+/// Run combined diagnostics: ACP registry + home directory.
 ///
 /// This is the `nexus42 system doctor` implementation — a unified diagnostic
-/// that combines infrastructure checks in a single pass.
-async fn run_combined_doctor(config: &CliConfig) -> Result<()> {
+/// that combines infrastructure checks in a single pass. Both checks are local
+/// or registry-backed; a stopped local HTTP service is not a doctor failure.
+async fn run_combined_doctor() -> Result<()> {
     println!("nexus42 system doctor — combined diagnostics");
     println!();
 
     let mut issues = 0u32;
 
-    // Check 1: Daemon connectivity
-    print!("  [1/3] Daemon connectivity... ");
-    let client = crate::api::DaemonClient::from_config(config)?;
-    match client.health_check().await {
-        Ok(true) => println!("✓ Running"),
-        Ok(false) => {
-            println!("✗ Not responding at {}", config.daemon_url);
-            issues += 1;
-        }
-        Err(e) => {
-            println!("✗ Error: {e}");
-            issues += 1;
-        }
-    }
-
-    // Check 2: ACP registry reachability
-    print!("  [2/3] ACP registry reachability... ");
+    // Check 1: ACP registry reachability
+    print!("  [1/2] ACP registry reachability... ");
     match nexus_acp_host::registry::RegistryClient::new() {
         Ok(reg_client) => match reg_client.get_registry().await {
             Ok(registry) => {
@@ -158,8 +144,8 @@ async fn run_combined_doctor(config: &CliConfig) -> Result<()> {
         }
     }
 
-    // Check 3: Home directory health
-    print!("  [3/3] Home directory (~/.nexus42/)... ");
+    // Check 2: Home directory health
+    print!("  [2/2] Home directory (~/.nexus42/)... ");
     match crate::config::nexus_home() {
         Ok(home) => {
             if home.exists() && home.is_dir() {

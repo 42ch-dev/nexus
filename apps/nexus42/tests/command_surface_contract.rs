@@ -319,8 +319,9 @@ fn v2_target_daemon_subcommands() {
 
 /// V2 Target: `acp` top-level command group exists.
 ///
-/// Expected subcommands: status, doctor, probe,
-///   registry (list, inspect), agent (use, list)
+/// Expected subcommands: probe,
+///   registry (list, inspect), agent (use, list), session, policy, permission,
+///   run. v1.193 P1-T4 removed the `status`/`doctor` daemon-health leaves.
 ///
 /// Un-ignored by Plan 2 (acp group created).
 #[test]
@@ -337,7 +338,7 @@ fn v2_target_acp_subcommands() {
 
     let help_text = String::from_utf8(output).unwrap();
 
-    for subcmd in &["status", "doctor", "probe", "registry", "agent"] {
+    for subcmd in &["probe", "registry", "agent", "session", "policy", "run"] {
         assert!(
             help_text.contains(subcmd),
             "V2 acp: expected subcommand '{subcmd}'"
@@ -445,7 +446,7 @@ fn v2_target_platform_subcommands() {
 /// V2 Target: `system` command group subcommands (extended).
 ///
 /// Expected: version, doctor, completion,
-///   config (get/set/unset/path), debug (dump-workspace/replay-delta)
+///   config (get/set/unset/path), debug (dump-workspace)
 ///
 /// Un-ignore after Plan 3 extends the `system` group.
 #[test]
@@ -1131,5 +1132,133 @@ fn preset_validation_rejects_invalid_bundle_without_daemon() {
     assert!(
         String::from_utf8_lossy(&offline.stderr).contains("--offline"),
         "v1.193 P1-T1: `--offline` must be an unexpected argument"
+    );
+}
+
+// =============================================================================
+// Part 9: v1.193 P1-T4 local-service probe removal contract tests
+// =============================================================================
+
+/// v1.193 P1-T4 (AC2/AC5): `system debug dump-workspace` is a purely local
+/// snapshot. The `daemon_status` block was removed together with its loopback
+/// probe, so the configured `daemon_url` is never contacted and the snapshot
+/// carries no daemon key.
+///
+/// Discriminating regression: the fixture points `daemon_url` at a counting
+/// loopback trap. Pre-fix, `dump_workspace` built a `DaemonClient` for that URL
+/// and issued `/v1/daemon/runtime/health` (observed as a connection) before
+/// inserting `daemon_status`; post-fix the dump stays local with zero observed
+/// connections and no `daemon_status` entry.
+#[test]
+fn workspace_dump_never_queries_local_service() {
+    use std::io::ErrorKind;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    let home = tempfile::tempdir().expect("temp home");
+    let cwd = tempfile::tempdir().expect("temp cwd");
+
+    // Counting loopback trap standing in for the configured local service.
+    // Accept-and-close: a probe is counted, never answered.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind probe listener");
+    listener
+        .set_nonblocking(true)
+        .expect("nonblocking listener");
+    let daemon_url = format!("http://{}", listener.local_addr().expect("probe addr"));
+    let probes = Arc::new(AtomicUsize::new(0));
+    let stop = Arc::new(AtomicBool::new(false));
+    let accept_loop = {
+        let probes = Arc::clone(&probes);
+        let stop = Arc::clone(&stop);
+        std::thread::spawn(move || {
+            while !stop.load(Ordering::SeqCst) {
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        probes.fetch_add(1, Ordering::SeqCst);
+                        drop(stream);
+                    }
+                    Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(_) => break,
+                }
+            }
+        })
+    };
+
+    let nexus_dir = home.path().join(".nexus42");
+    std::fs::create_dir_all(&nexus_dir).expect("create .nexus42");
+    std::fs::write(
+        nexus_dir.join("config.toml"),
+        format!("daemon_url = \"{daemon_url}\"\n"),
+    )
+    .expect("seed config.toml");
+
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .env("HOME", home.path())
+        .env_remove("NEXUS_API_KEY")
+        .current_dir(cwd.path())
+        .args(["system", "debug", "dump-workspace"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+
+    // Drain window: a connection the child opened is queued and accepted here.
+    std::thread::sleep(Duration::from_millis(100));
+    stop.store(true, Ordering::SeqCst);
+    accept_loop.join().expect("join probe listener");
+
+    let stdout = String::from_utf8(output.stdout).expect("utf8 dump");
+    let snapshot: serde_json::Value =
+        serde_json::from_str(&stdout).expect("dump-workspace emits JSON");
+    assert!(
+        snapshot.get("config").is_some() && snapshot.get("nexus_home").is_some(),
+        "v1.193 P1-T4: the dump must keep the local config and home snapshot: {stdout}"
+    );
+    assert!(
+        snapshot.get("daemon_status").is_none(),
+        "v1.193 P1-T4: dump-workspace must not carry a daemon_status block: {stdout}"
+    );
+    assert_eq!(
+        probes.load(Ordering::SeqCst),
+        0,
+        "v1.193 P1-T4: dump-workspace must not open any connection to the configured local service ({daemon_url})"
+    );
+}
+
+/// v1.193 P1-T4 (AC2): the daemon-HTTP delta replay leaf is removed while the
+/// local dump leaf remains the only `system debug` subcommand.
+#[test]
+fn system_debug_replay_delta_is_removed() {
+    let removed = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["system", "debug", "replay-delta", "delta-1"])
+        .assert()
+        .code(2)
+        .get_output()
+        .clone();
+    assert!(
+        String::from_utf8_lossy(&removed.stderr).contains("unrecognized subcommand"),
+        "v1.193 P1-T4: `system debug replay-delta` must be an unknown subcommand"
+    );
+
+    let help = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["system", "debug", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let help_text = String::from_utf8_lossy(&help.stdout).into_owned();
+    assert!(
+        help_text.contains("dump-workspace"),
+        "v1.193 P1-T4: `system debug` must retain the local dump leaf: {help_text}"
+    );
+    assert!(
+        !help_text.contains("replay-delta"),
+        "v1.193 P1-T4: `system debug` must not advertise the removed replay leaf: {help_text}"
     );
 }
