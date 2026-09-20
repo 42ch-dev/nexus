@@ -7,23 +7,30 @@
 //!   (`validate_preset_local`, moved here from `system`; V1.153 P3). It runs
 //!   entirely in process: the daemon leg and the `--offline` synonym it
 //!   shadowed were removed in v1.193 P1-T1.
-//! - `scaffold` reuses `POST /v1/daemon/presets` (`scaffold_preset`).
+//! - `list|show|scaffold` and `trigger` are typed `nexus-core` reads/writes
+//!   (v1.193 P1-T2) — no daemon route and no HTTP client.
+//! - `scaffold` authors a user preset bundle through
+//!   `CoreService::scaffold_preset`.
 //! - `run` was removed in v1.193 P1-T1: it only forwarded into
 //!   `creator run`'s daemon-API path and had no complete direct core
 //!   operation of its own (PL-5).
-//! - `show <id>` fetches the AR-20 profile (daemon-backed) and prints lanes +
-//!   orchestration fields; declared signals are labeled **Declared, not
-//!   delivered** (AR-25, locked trigger-lane vocabulary).
+//! - `show <id>` prints the AR-20 profile (`CoreService::get_preset_profile`)
+//!   with lanes + orchestration fields; declared signals are labeled
+//!   **Declared, not delivered** (AR-25, locked trigger-lane vocabulary).
 //! - `trigger <id>` prints trigger-lane classification only — never cron
-//!   authoring (cron authoring stays `creator works cron` until P2 owns the
-//!   UI; PL-5 / PL-18).
-//! - `--json` = daemon DTO verbatim (camelCase); no CLI-local renaming
+//!   authoring, never a runner (cron authoring stays `creator works cron`
+//!   until P2 owns the UI; PL-5 / PL-18).
+//! - `--json` = the core DTO verbatim (camelCase); no CLI-local renaming
 //!   (AR-25).
+//!
+//! The read/authoring leaves open the direct-writer core and await
+//! `finish_direct` **before** printing, so no row is reported ahead of a
+//! close that did not settle.
 
 #![allow(clippy::print_literal)]
 
-use crate::api::models::ScaffoldPresetRequest;
 use crate::config::CliConfig;
+use crate::core::{finish_direct, map_core_error, open_direct_core};
 use crate::errors::Result;
 use crate::CliError;
 use clap::Subcommand;
@@ -34,8 +41,14 @@ use clap::Subcommand;
 use nexus_contracts::generated::core::orchestration_presets::preset_profile_response::{
     PresetProfileExitWhen, PresetProfileLanes, PresetProfileNext, PresetProfileResponse,
 };
-
-const ORCHESTRATION_BASE: &str = "/v1/daemon/orchestration";
+// Same family note as above, for the grouped listing: the core returns the
+// generated `preset_management` response (its `source` enum displays the real
+// `embedded` / `system` / `user` label), so the CLI reads that type directly
+// instead of the retired daemon client's private copy.
+use nexus_contracts::generated::daemon_api::preset_management::list_presets_response::{
+    ListPresetsResponse,
+};
+use nexus_contracts::ScaffoldPresetRequest;
 
 pub mod patch;
 
@@ -84,7 +97,7 @@ pub enum PresetCommand {
     },
     /// Patch a strategy canvas node (state, transition, or prompt template)
     ///
-    /// CAS-guarded writes over the existing strategy patch routes
+    /// CAS-guarded direct-core writes over the strategy canvas seam
     /// (V1.175 P1 Task 2, group 1). Every leaf takes `--base-revision`;
     /// a stale revision returns 409 `strategy_conflict` (current revision,
     /// node, conflicting path, recovery hint). Re-read the Strategy and
@@ -119,8 +132,8 @@ pub async fn run(cmd: PresetCommand, config: &CliConfig) -> Result<()> {
 /// Moved from `system preset list` (V1.153) — the shared listing job, not
 /// re-implemented (AR-24).
 ///
-/// The display list is built from the grouped management endpoint
-/// (`GET /v1/daemon/presets` — embedded + system + user groups,
+/// The display list is built from the typed core listing
+/// (`CoreService::list_presets` — embedded + system + user groups,
 /// W-002/F-001), so user presets appear and each row is labeled by its real
 /// source. `--intent` filtering runs across all groups.
 async fn list_presets(
@@ -128,14 +141,16 @@ async fn list_presets(
     intent_filter: Option<&str>,
     json_output: bool,
 ) -> Result<()> {
-    let client = crate::api::DaemonClient::from_config(config)?;
-
-    // Grouped management endpoint: embedded + system + user (W-002/F-001).
-    // A failure here is a real daemon error — surface it instead of silently
-    // degrading the list to no presets (F-001 reliability nit).
-    let mgmt_resp: crate::api::models::ListPresetsGroupedResponse = client.list_presets().await?;
-
-    let presets: Vec<(String, String, Vec<String>)> = build_preset_rows(&mgmt_resp, intent_filter);
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        // A failure here is a real core refusal — surface it instead of
+        // silently degrading the list to no presets (F-001 reliability nit).
+        let response = core.list_presets(&principal).await.map_err(map_core_error)?;
+        Ok(build_preset_rows(&response, intent_filter))
+    }
+    .await;
+    let presets = finish_direct(&core, outcome).await?;
 
     if json_output {
         let output: Vec<serde_json::Value> = presets
@@ -170,11 +185,11 @@ async fn list_presets(
     Ok(())
 }
 
-/// Flatten the grouped management response into display rows
+/// Flatten the grouped core listing into display rows
 /// `(id, source, run_intents)`, optionally filtered by `run_intent`
-/// (W-002/F-001). Pure over the daemon DTO — hermetically testable.
+/// (W-002/F-001). Pure over the core DTO — hermetically testable.
 fn build_preset_rows(
-    resp: &crate::api::models::ListPresetsGroupedResponse,
+    resp: &ListPresetsResponse,
     intent_filter: Option<&str>,
 ) -> Vec<(String, String, Vec<String>)> {
     let mut presets: Vec<(String, String, Vec<String>)> = Vec::new();
@@ -183,7 +198,7 @@ fn build_preset_rows(
         for summary in group {
             presets.push((
                 summary.id.clone(),
-                summary.source.clone(),
+                summary.source.to_string(),
                 summary.run_intents.clone(),
             ));
         }
@@ -196,16 +211,21 @@ fn build_preset_rows(
     presets
 }
 
-/// Print the AR-20 profile for a preset (daemon-backed).
+/// Print the AR-20 profile for a preset (`CoreService::get_preset_profile`).
 ///
-/// `--json` serializes the daemon DTO verbatim (camelCase, AR-25). Text
+/// `--json` serializes the core DTO verbatim (camelCase, AR-25). Text
 /// output names lanes + orchestration fields; declared signals are labeled
 /// **Declared, not delivered**.
 async fn show_preset(config: &CliConfig, id: &str, json: bool) -> Result<()> {
-    let client = crate::api::DaemonClient::from_config(config)?;
-    let profile: PresetProfileResponse = client
-        .get(&format!("{ORCHESTRATION_BASE}/presets/{id}/profile"))
-        .await?;
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        core.get_preset_profile(&principal, id.to_string())
+            .await
+            .map_err(map_core_error)
+    }
+    .await;
+    let profile: PresetProfileResponse = finish_direct(&core, outcome).await?;
 
     if json {
         println!("{}", serde_json::to_string_pretty(&profile)?);
@@ -215,12 +235,18 @@ async fn show_preset(config: &CliConfig, id: &str, json: bool) -> Result<()> {
     Ok(())
 }
 
-/// Print trigger-lane classification only (AR-25) — never cron authoring.
+/// Print trigger-lane classification only (AR-25) — never cron authoring,
+/// never a runner.
 async fn trigger_preset(config: &CliConfig, id: &str, json: bool) -> Result<()> {
-    let client = crate::api::DaemonClient::from_config(config)?;
-    let profile: PresetProfileResponse = client
-        .get(&format!("{ORCHESTRATION_BASE}/presets/{id}/profile"))
-        .await?;
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        core.get_preset_profile(&principal, id.to_string())
+            .await
+            .map_err(map_core_error)
+    }
+    .await;
+    let profile: PresetProfileResponse = finish_direct(&core, outcome).await?;
 
     if json {
         println!("{}", serde_json::to_string_pretty(&profile.lanes)?);
@@ -230,14 +256,24 @@ async fn trigger_preset(config: &CliConfig, id: &str, json: bool) -> Result<()> 
     Ok(())
 }
 
-/// Scaffold a user preset bundle from templates (`POST /v1/daemon/presets`).
+/// Scaffold a user preset bundle from templates
+/// (`CoreService::scaffold_preset`).
 async fn scaffold_preset(config: &CliConfig, name: &str, json: bool) -> Result<()> {
-    let client = crate::api::DaemonClient::from_config(config)?;
-    let resp = client
-        .scaffold_preset(&ScaffoldPresetRequest {
-            name: name.to_string(),
-        })
-        .await?;
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        core.scaffold_preset(
+            &principal,
+            ScaffoldPresetRequest {
+                name: name.to_string(),
+            },
+        )
+        .await
+        .map_err(map_core_error)
+    }
+    .await;
+    let resp = finish_direct(&core, outcome).await?;
+
     if json {
         println!("{}", serde_json::to_string_pretty(&resp)?);
     } else {
@@ -842,26 +878,42 @@ mod tests {
         }
     }
 
-    // ── W-002/F-001: list rows from the grouped endpoint ─────────────────
+    // ── W-002/F-001: list rows from the grouped core listing ────────────
 
-    /// Grouped response fixture with all three sources.
-    fn grouped_fixture() -> crate::api::models::ListPresetsGroupedResponse {
-        crate::api::models::ListPresetsGroupedResponse {
-            embedded: vec![crate::api::models::PresetSummary {
-                id: "novel-writing".to_string(),
-                source: "embedded".to_string(),
-                run_intents: vec!["work_init".to_string()],
-            }],
-            system: vec![crate::api::models::PresetSummary {
-                id: "_system.maintenance".to_string(),
-                source: "system".to_string(),
-                run_intents: vec![],
-            }],
-            user: vec![crate::api::models::PresetSummary {
-                id: "my-strategy".to_string(),
-                source: "user".to_string(),
-                run_intents: vec!["work_continue".to_string()],
-            }],
+    /// Grouped core-listing fixture with all three sources.
+    fn grouped_fixture() -> ListPresetsResponse {
+        use nexus_contracts::generated::daemon_api::preset_management::list_presets_response::{
+            NexusPresetSummary, NexusPresetSummarySource,
+        };
+
+        fn summary(
+            id: &str,
+            source: NexusPresetSummarySource,
+            run_intents: &[&str],
+        ) -> NexusPresetSummary {
+            NexusPresetSummary {
+                id: id.to_string(),
+                source,
+                run_intents: run_intents.iter().map(|i| (*i).to_string()).collect(),
+            }
+        }
+
+        ListPresetsResponse {
+            embedded: vec![summary(
+                "novel-writing",
+                NexusPresetSummarySource::Embedded,
+                &["work_init"],
+            )],
+            system: vec![summary(
+                "_system.maintenance",
+                NexusPresetSummarySource::System,
+                &[],
+            )],
+            user: vec![summary(
+                "my-strategy",
+                NexusPresetSummarySource::User,
+                &["work_continue"],
+            )],
         }
     }
 
