@@ -34,11 +34,11 @@ use nexus_contracts::CoreCloseReport;
 ///
 /// Returns [`CliError::Config`] when the home directory cannot be resolved and
 /// the mapped core error ([`map_core_error`]) when no creator/workspace is
-/// selected, the selected workspace was never materialized, or the writer pool
-/// cannot be admitted.
+/// selected, the selected workspace was never materialized, its path cannot be
+/// probed, or the writer pool cannot be admitted.
 pub(crate) async fn open_direct_core(config: &CliConfig) -> Result<CoreService> {
     let user_home = user_home_dir().map_err(|e| CliError::Config(e.to_string()))?;
-    require_materialized_workspace(config, &user_home)?;
+    require_materialized_workspace_from_home(config, &user_home)?;
     CoreService::open(CoreOpenOptions {
         user_home,
         access: CoreAccess::DirectWriter,
@@ -47,8 +47,27 @@ pub(crate) async fn open_direct_core(config: &CliConfig) -> Result<CoreService> 
     .map_err(map_core_error)
 }
 
+/// The same admission, for the entrances that open the **legacy** writer pool
+/// instead of the direct core.
+///
+/// `open_workspace_pool` runs `Schema::init`, which migrates — and therefore
+/// creates — the selected workspace `state.db`. An entrance that fronts a core
+/// route with that pool (`creator world kb`'s local leaves, including the pack
+/// branch, which hands that pool to a core call) therefore owes the pre-flight
+/// [`open_direct_core`] runs, before its pool open.
+///
+/// # Errors
+///
+/// Returns [`CliError::Config`] when the home directory cannot be resolved and
+/// the mapped core error when no creator is selected, the selected workspace
+/// was never materialized, or its metadata cannot be read.
+pub(crate) fn require_materialized_workspace(config: &CliConfig) -> Result<()> {
+    let user_home = user_home_dir().map_err(|e| CliError::Config(e.to_string()))?;
+    require_materialized_workspace_from_home(config, &user_home)
+}
+
 /// Refuse a selection whose workspace was never materialized, before the
-/// direct writer can touch storage.
+/// writer can touch storage.
 ///
 /// [`CoreService::open`] resolves the selected workspace `state.db` and hands
 /// it to the guarded writer pool, which migrates — and therefore creates — the
@@ -65,17 +84,31 @@ pub(crate) async fn open_direct_core(config: &CliConfig) -> Result<CoreService> 
 /// same `config.toml` the core re-reads), and a workspace whose `state.db`
 /// exists keeps its own storage errors untouched — this only refuses the
 /// never-materialized case.
-fn require_materialized_workspace(config: &CliConfig, user_home: &Path) -> Result<()> {
-    let db_path = config.active_creator_id.as_deref().map(|creator_id| {
-        crate::paths::state_db_path(
+///
+/// The probe reads the metadata instead of asking [`Path::exists`], which
+/// answers `false` for **every** failed lookup — so an unreadable `state.db`
+/// (a metadata error on the file or an ancestor of an existing, materialized
+/// workspace) would be reported as the selection refusal. Only `NotFound` is
+/// that refusal; every other metadata error keeps the storage class the core's
+/// own open path reports (`database_error: …`), and a readable entry is
+/// admitted untouched.
+fn require_materialized_workspace_from_home(config: &CliConfig, user_home: &Path) -> Result<()> {
+    let db_path = match config.active_creator_id.as_deref() {
+        Some(creator_id) => crate::paths::state_db_path(
             user_home,
             creator_id,
             config.workspace_slug_for_creator(creator_id),
-        )
-    });
-    match db_path {
-        Some(path) if path.exists() => Ok(()),
-        _ => Err(map_core_error(CoreError::AuthRequired)),
+        ),
+        None => return Err(map_core_error(CoreError::AuthRequired)),
+    };
+    match std::fs::metadata(&db_path) {
+        Ok(_) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            Err(map_core_error(CoreError::AuthRequired))
+        }
+        Err(err) => Err(map_core_error(CoreError::Internal {
+            category: format!("database_error: {}: {err}", db_path.display()),
+        })),
     }
 }
 

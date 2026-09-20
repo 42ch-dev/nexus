@@ -14,6 +14,14 @@
 //! (the anonymous bootstrap) is refused with the declared selection class
 //! before the writer pool migrates anything.
 //!
+//! `anonymous_selection_is_refused_at_every_kb_entrance` extends that refusal
+//! to the whole `creator world kb` surface — the two direct-core leaves and the
+//! local leaves whose pool open used to migrate the workspace first.
+//!
+//! `unreadable_workspace_db_is_not_reported_as_an_unset_selection` pins the
+//! other half of the same admission: a metadata failure on the selected
+//! `state.db` is a storage error, never the selection refusal.
+//!
 //! Every mutation here runs in its own short-lived child, so process exit would
 //! release a writer the seam forgot to close. The in-process half of the same
 //! contract — the writer is released before `finish_direct` returns — lives in
@@ -300,5 +308,193 @@ fn anonymous_selection_is_refused_before_any_storage_write() {
         !workspace_dir.exists(),
         "no workspace may be materialized: {}",
         workspace_dir.display()
+    );
+}
+
+/// Every `creator world kb` entrance inherits that refusal.
+///
+/// The KB router opened the legacy workspace pool — whose `Schema::init`
+/// migrates, and therefore *creates*, the selected workspace — before it
+/// dispatched anything, so an anonymous selection could be materialized (or
+/// leak the migration error) through `creator world kb` even though the
+/// direct-core seam already refused it: the two direct-core leaves
+/// (`graph`, `entity patch`) reached `open_direct_core` only after that pool
+/// open, and the local leaves — including `pack`, which hands its pool to a
+/// core route — never reached it at all.
+///
+/// Both families are now admitted by the seam first, so the declared refusal is
+/// a property of the whole surface rather than of `creator world create` alone.
+#[test]
+fn anonymous_selection_is_refused_at_every_kb_entrance() {
+    let home = tempfile::tempdir().expect("temp home");
+
+    let created = assert_cmd::Command::cargo_bin("nexus42")
+        .expect("nexus42 binary")
+        .args(["system", "identity", "create", "--kind", "anonymous"])
+        .env("HOME", home.path())
+        .env("RUST_LOG", "off")
+        .output()
+        .expect("spawn nexus42 identity create");
+    assert!(
+        created.status.success(),
+        "the anonymous identity must be created: {}",
+        stderr(&created)
+    );
+    let creator_id = anonymous_creator_id(&stdout(&created));
+
+    let pack_out = home.path().join("pack.json");
+    let pack_out = pack_out.to_str().expect("utf-8 pack path");
+    let entrances: [&[&str]; 4] = [
+        // Direct-core leaves (the seam's own consumers).
+        &[
+            "creator",
+            "world",
+            "kb",
+            "graph",
+            "--world-id",
+            "wld_absent",
+            "--json",
+        ],
+        &[
+            "creator",
+            "world",
+            "kb",
+            "entity",
+            "patch",
+            "--world-id",
+            "wld_absent",
+            "--entity-id",
+            "kb_absent",
+            "--expected-version",
+            "0",
+            "--title",
+            "Absent",
+        ],
+        // Local leaves: `list` is pool-only, `pack export` hands that pool to a
+        // core route, so both owe the same admission.
+        &["creator", "world", "kb", "list", "wld_absent", "--json"],
+        &[
+            "creator",
+            "world",
+            "kb",
+            "pack",
+            "export",
+            "wld_absent",
+            "--out",
+            pack_out,
+        ],
+    ];
+
+    for args in entrances {
+        let refused = assert_cmd::Command::cargo_bin("nexus42")
+            .expect("nexus42 binary")
+            .args(args)
+            .env("HOME", home.path())
+            .env("RUST_LOG", "off")
+            .output()
+            .expect("spawn nexus42 kb leaf");
+        assert!(
+            !refused.status.success(),
+            "{args:?} must be refused: {}",
+            stdout(&refused)
+        );
+        assert_eq!(
+            refused.status.code(),
+            Some(1),
+            "{args:?}: {}",
+            stderr(&refused)
+        );
+        let refusal = stderr(&refused);
+        assert!(
+            refusal.contains("Creator not selected"),
+            "the declared selection refusal for {args:?}: {refusal}"
+        );
+        for leak in ["migration.lock", "database_error", "No such file or directory"] {
+            assert!(
+                !refusal.contains(leak),
+                "no raw storage I/O may leak through {args:?} ({leak}): {refusal}"
+            );
+        }
+    }
+
+    let workspace_db =
+        nexus_home_layout::workspace_state_db_path(home.path(), &creator_id, "default");
+    let workspace_dir = workspace_db.parent().expect("workspace dir");
+    assert!(
+        !workspace_dir.exists(),
+        "no KB entrance may materialize a workspace: {}",
+        workspace_dir.display()
+    );
+}
+
+/// The workspace `state.db` the fixture materialized (one creator, `default`).
+#[cfg(unix)]
+fn fixture_state_db(home: &Path) -> std::path::PathBuf {
+    let mut creators = std::fs::read_dir(home.join(".nexus42").join("creators"))
+        .expect("the fixture registers exactly one creator")
+        .map(|entry| entry.expect("creator dirent").path());
+    let creator = creators.next().expect("the fixture creator");
+    assert!(creators.next().is_none(), "exactly one fixture creator");
+    nexus_home_layout::workspace_state_db_path(
+        home,
+        creator
+            .file_name()
+            .expect("creator dir name")
+            .to_str()
+            .expect("utf-8 creator id"),
+        "default",
+    )
+}
+
+/// A selected workspace whose `state.db` cannot be probed is a storage failure,
+/// never the selection refusal.
+///
+/// `Path::exists()` answers `false` for **every** failed lookup, so a
+/// pre-flight built on it reported an unreadable (but present) `state.db` as
+/// `Creator not selected.` — the class reserved for a selection that names no
+/// workspace at all. The probe separates `NotFound` (the confirmed-absent file,
+/// and the only refusal) from every other metadata error, which keeps the
+/// storage class the core's own open path reports for this path.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn unreadable_workspace_db_is_not_reported_as_an_unset_selection() {
+    let fixture = DirectFixture::new().await;
+    let db_path = fixture_state_db(fixture.home.path());
+    assert!(
+        db_path.is_file(),
+        "the fixture materializes the selected workspace db: {}",
+        db_path.display()
+    );
+
+    // A self-referential symlink keeps the directory entry while making every
+    // metadata lookup fail with `ELOOP` — a `NotFound`-free metadata error, and
+    // one that does not depend on the test's uid (unlike a permission-only
+    // probe, which root bypasses).
+    std::fs::remove_file(&db_path).expect("clear the materialized db");
+    std::os::unix::fs::symlink(&db_path, &db_path).expect("self-referential db entry");
+    assert!(
+        !db_path.exists(),
+        "the discriminator's premise: exists() collapses this failure into false"
+    );
+
+    let out = fixture
+        .command()
+        .args(["creator", "world", "create", "--title", "Unreadable World"])
+        .output()
+        .expect("spawn nexus42 world create");
+    assert!(
+        !out.status.success(),
+        "an unreadable workspace db is not a success: {}",
+        stdout(&out)
+    );
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    let failure = stderr(&out);
+    assert!(
+        !failure.contains("Creator not selected"),
+        "a probed storage failure is never the selection refusal: {failure}"
+    );
+    assert!(
+        failure.contains("database_error"),
+        "the storage class the core's open path reports: {failure}"
     );
 }

@@ -30,6 +30,7 @@ pub mod pack;
 use super::{service, GraphArgs, KbEntityCommand};
 use crate::commands::creator::world::{active_creator_id, open_workspace_pool};
 use crate::config::CliConfig;
+use crate::core::require_materialized_workspace;
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
 use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
@@ -169,18 +170,43 @@ pub enum WorldKbCommand {
 
 /// Run a `creator world kb` subcommand.
 ///
-/// Resolves the active workspace pool and creator, then delegates to the
-/// hermetic logic functions below.
+/// The direct-core leaves route to the shared seam ([`service`]) first and
+/// never touch the local workspace pool; the local leaves are admitted by the
+/// same pre-flight before that pool is opened, so no `creator world kb`
+/// entrance can migrate — and therefore create — a workspace the selection
+/// never had.
 ///
 /// # Errors
 ///
-/// Returns `CliError` if the active creator is unset, the database is
-/// unavailable, the world is not found, or the active creator does not own
-/// the world (edit/delete only).
+/// Returns `CliError` if the active creator is unset, the selected workspace
+/// was never materialized, the database is unavailable, the world is not
+/// found, or the active creator does not own the world (edit/delete only).
 // CLI entry-point runs on a single-threaded tokio runtime — Send not required.
 #[allow(clippy::future_not_send)]
 pub async fn run(cmd: WorldKbCommand, config: &CliConfig) -> Result<()> {
+    match cmd {
+        // Direct-core leaves: `open_direct_core` inside the service owns their
+        // admission, and it refuses an unmaterialized selection *before*
+        // `CoreService::open`. The local pool [`run_local`] opens runs
+        // `Schema::init`, which migrates — and therefore creates — the selected
+        // workspace, so these two must not reach it at all.
+        WorldKbCommand::Entity { command } => run_entity(command, config).await,
+        WorldKbCommand::Graph { args } => super::run_graph(args, config).await,
+        cmd => run_local(cmd, config).await,
+    }
+}
+
+/// Run one local (workspace-pool) `creator world kb` leaf.
+///
+/// The seam's admission pre-flight runs before the pool open, so a selection
+/// that names no materialized workspace is refused instead of having one
+/// created for it. The pack branch is admitted the same way: it hands this
+/// pool to a core route, so it owes the same pre-flight as the direct-core
+/// leaves.
+#[allow(clippy::future_not_send)]
+async fn run_local(cmd: WorldKbCommand, config: &CliConfig) -> Result<()> {
     let creator_id = active_creator_id(config)?;
+    require_materialized_workspace(config)?;
     let pool = open_workspace_pool(config).await?;
     match cmd {
         WorldKbCommand::List { world_ref, json } => kb_list(&pool, &world_ref, json).await,
@@ -242,8 +268,43 @@ pub async fn run(cmd: WorldKbCommand, config: &CliConfig) -> Result<()> {
             kb_reject(&pool, &creator_id, &extract_job_id, ws_root.as_deref()).await
         }
         WorldKbCommand::Pack { command } => pack::run(command, config, &pool).await,
-        WorldKbCommand::Entity { command } => match command {
-            KbEntityCommand::Patch {
+        // `run` routes these two to the seam before this pool is opened.
+        WorldKbCommand::Entity { .. } | WorldKbCommand::Graph { .. } => {
+            unreachable!("direct-core KB leaves are routed before the local pool opens")
+        }
+    }
+}
+
+/// Run `creator world kb entity patch` through the shared direct-core seam.
+///
+/// One `CoreService` call, guarded by the CAS in `--expected-version`; the
+/// writer is closed before this leaf reports, on success and on failure.
+///
+/// # Errors
+///
+/// Returns [`CliError`] when the seam cannot be opened (including an
+/// unmaterialized selection) or the core refuses the patch (admission,
+/// validation, `world_kb_conflict`, storage).
+#[allow(clippy::future_not_send)]
+async fn run_entity(command: KbEntityCommand, config: &CliConfig) -> Result<()> {
+    match command {
+        KbEntityCommand::Patch {
+            world_id,
+            entity_id,
+            expected_version,
+            title,
+            body,
+            aliases,
+            block_type,
+            modules,
+            audience,
+            audience_character,
+            json,
+        } => {
+            let audience =
+                service::audience_wire(audience.as_deref(), audience_character.as_deref())?;
+            service::run_entity_patch(
+                config,
                 world_id,
                 entity_id,
                 expected_version,
@@ -253,28 +314,10 @@ pub async fn run(cmd: WorldKbCommand, config: &CliConfig) -> Result<()> {
                 block_type,
                 modules,
                 audience,
-                audience_character,
                 json,
-            } => {
-                let audience =
-                    service::audience_wire(audience.as_deref(), audience_character.as_deref())?;
-                service::run_entity_patch(
-                    config,
-                    world_id,
-                    entity_id,
-                    expected_version,
-                    title,
-                    body,
-                    aliases,
-                    block_type,
-                    modules,
-                    audience,
-                    json,
-                )
-                .await
-            }
-        },
-        WorldKbCommand::Graph { args } => super::run_graph(args, config).await,
+            )
+            .await
+        }
     }
 }
 
