@@ -417,10 +417,12 @@ fn v2_target_sync_subcommands() {
 
 /// V2 Target: `platform` top-level command group exists.
 ///
-/// Expected subcommands: auth (login/logout/status/profiles),
-///   context (assemble), explore, publish
+/// Expected subcommands: auth (login/logout/status), context (assemble-moment),
+///   sync (push/pull/status/resolve/world/retry).
 ///
-/// Un-ignore after Plan 3 creates the `platform` group.
+/// Un-ignored by Plan 3 (platform group created). v1.193 P1-T5 removed the
+/// deferred `explore` and `publish` leaves along with the `context assemble`
+/// guidance leaf, so those names must no longer be advertised.
 #[test]
 fn v2_target_platform_subcommands() {
     let output = Command::cargo_bin("nexus42")
@@ -435,7 +437,7 @@ fn v2_target_platform_subcommands() {
 
     let help_text = String::from_utf8(output).unwrap();
 
-    for subcmd in &["auth", "context", "explore", "publish"] {
+    for subcmd in &["auth", "context", "sync"] {
         assert!(
             help_text.contains(subcmd),
             "V2 platform: expected subcommand '{subcmd}'"
@@ -616,27 +618,6 @@ fn v2_target_acp_run() {
         help_text.contains("run"),
         "V2 acp: expected subcommand 'run'"
     );
-}
-
-/// V2 Target: `platform explore --help` shows browse and search subcommands.
-#[test]
-fn v2_target_platform_explore_subcommands() {
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .args(["platform", "explore", "--help"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
-    for subcmd in &["browse", "search"] {
-        assert!(
-            help_text.contains(subcmd),
-            "V2 platform explore: expected subcommand '{subcmd}'"
-        );
-    }
 }
 
 /// V2 Target: `system --help` shows `doctor` subcommand.
@@ -1261,4 +1242,150 @@ fn system_debug_replay_delta_is_removed() {
         !help_text.contains("replay-delta"),
         "v1.193 P1-T4: `system debug` must not advertise the removed replay leaf: {help_text}"
     );
+}
+
+// =============================================================================
+// Part 10: v1.193 P1-T5 platform stub removal & retained cloud groups
+// =============================================================================
+
+/// Extract the `Commands:` block of a clap `--help` page (everything between the
+/// `Commands:` heading and the following `Options:` heading).
+fn help_commands_section(help: &str) -> String {
+    help.split("Commands:")
+        .nth(1)
+        .and_then(|rest| rest.split("Options:").next())
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// v1.193 P1-T5 (AC2/AC3/AC5): the `platform` group keeps only its real leaves —
+/// the cloud transport (`auth` login/logout/status + hidden token, `sync`
+/// push/pull/status/resolve/world/retry) and the local `context assemble-moment`
+/// SSOT. The deferred `explore` and `publish` leaves and the exit-2
+/// `context assemble` guidance leaf are gone, and no local launcher or
+/// replacement service group took their place.
+///
+/// Discriminating regression: before this change `platform explore …`,
+/// `platform publish` and `platform context assemble --world-id …` all parsed;
+/// afterwards each is an unknown subcommand on the real binary. Parser only —
+/// the retained groups are exercised through `--help`, so no network call and no
+/// credential is involved.
+#[test]
+fn platform_retains_cloud_groups_without_local_launcher() {
+    let home = tempfile::tempdir().expect("temp home");
+
+    // ── Retained cloud transport: `platform auth` ─────────────────────────
+    let auth = Command::cargo_bin("nexus42")
+        .unwrap()
+        .env("HOME", home.path())
+        .env_remove("NEXUS_API_KEY")
+        .args(["platform", "auth", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let auth_help = String::from_utf8_lossy(&auth.stdout).into_owned();
+    for leaf in ["login", "logout", "status"] {
+        assert!(
+            auth_help.contains(leaf),
+            "v1.193 P1-T5: `platform auth` must retain the '{leaf}' leaf: {auth_help}"
+        );
+    }
+    // `token` is `#[command(hide = true)]`: absent from help, still callable.
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .env("HOME", home.path())
+        .env_remove("NEXUS_API_KEY")
+        .args(["platform", "auth", "token", "--help"])
+        .assert()
+        .success();
+
+    // ── Retained cloud transport: `platform sync` ─────────────────────────
+    let sync = Command::cargo_bin("nexus42")
+        .unwrap()
+        .env("HOME", home.path())
+        .env_remove("NEXUS_API_KEY")
+        .args(["platform", "sync", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let sync_help = String::from_utf8_lossy(&sync.stdout).into_owned();
+    for leaf in ["push", "pull", "status", "resolve", "world", "retry"] {
+        assert!(
+            sync_help.contains(leaf),
+            "v1.193 P1-T5: `platform sync` must retain the '{leaf}' leaf: {sync_help}"
+        );
+    }
+
+    // ── Retained local SSOT: `platform context assemble-moment` ───────────
+    let context = Command::cargo_bin("nexus42")
+        .unwrap()
+        .env("HOME", home.path())
+        .env_remove("NEXUS_API_KEY")
+        .args(["platform", "context", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let context_help = String::from_utf8_lossy(&context.stdout).into_owned();
+    assert!(
+        context_help.contains("assemble-moment"),
+        "v1.193 P1-T5: `platform context` must retain the local assemble-moment SSOT: {context_help}"
+    );
+
+    // ── Removed stubs are unknown subcommands (exit 2) ────────────────────
+    let removed: [&[&str]; 7] = [
+        &["platform", "explore", "browse"],
+        &["platform", "explore", "search"],
+        &["platform", "explore", "--help"],
+        &["platform", "publish"],
+        &["platform", "publish", "--help"],
+        &["platform", "context", "assemble", "--world-id", "wld_test"],
+        &["platform", "context", "assemble", "--help"],
+    ];
+    for args in removed {
+        let output = Command::cargo_bin("nexus42")
+            .unwrap()
+            .env("HOME", home.path())
+            .env_remove("NEXUS_API_KEY")
+            .args(args)
+            .assert()
+            .code(2)
+            .get_output()
+            .clone();
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        assert!(
+            stderr.contains("unrecognized subcommand"),
+            "v1.193 P1-T5: `{}` must be an unknown subcommand: {stderr}",
+            args.join(" ")
+        );
+    }
+
+    // ── No replacement local launcher or service group ────────────────────
+    let platform = Command::cargo_bin("nexus42")
+        .unwrap()
+        .env("HOME", home.path())
+        .env_remove("NEXUS_API_KEY")
+        .args(["platform", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let platform_help = String::from_utf8_lossy(&platform.stdout).into_owned();
+    let commands = help_commands_section(&platform_help);
+    for retained in ["auth", "context", "sync"] {
+        assert!(
+            commands.contains(retained),
+            "v1.193 P1-T5: `platform` must keep the '{retained}' group: {commands}"
+        );
+    }
+    for forbidden in [
+        "explore", "publish", "assemble", "serve", "service", "launcher", "launch", "daemon",
+    ] {
+        assert!(
+            !commands.contains(forbidden),
+            "v1.193 P1-T5: `platform` must not advertise '{forbidden}': {commands}"
+        );
+    }
 }

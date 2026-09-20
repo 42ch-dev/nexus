@@ -1,10 +1,10 @@
-//! Context Command — `nexus42 platform context assemble` and `assemble-moment`.
+//! Context Command — `nexus42 platform context assemble-moment`.
 //!
 //! V1.28: `assemble-moment` is the single local assembly SSOT.
 //! Stage0 / degradation / optional two-stage behavior are flags on that command.
 //!
-//! The `assemble` (platform) subcommand is **deferred** — it prints a guidance message
-//! and exits with code 2.
+//! v1.193 P1-T5: the deferred `assemble` (platform) subcommand was removed along
+//! with its guidance/exit-2 arm; `assemble-moment` is the only context leaf.
 
 use crate::config::CliConfig;
 use crate::errors::Result;
@@ -29,82 +29,8 @@ use nexus_moment_context_assembly::cloud_stage::{
     AssembleMetadata, MemoryItemRef, TimelineEventRef,
 };
 
-/// Validate `WorldId` format: must start with 'wld_' followed by alphanumeric characters.
-///
-/// # Errors
-///
-/// Returns an error string if:
-/// - The input does not start with 'wld_' prefix
-/// - The suffix after 'wld_' is empty
-/// - The suffix contains non-alphanumeric characters
-pub fn validate_world_id(s: &str) -> std::result::Result<String, String> {
-    // Check prefix
-    if !s.starts_with("wld_") {
-        return Err(format!("WorldId must start with 'wld_' prefix (got '{s}')"));
-    }
-
-    // Check that there's content after prefix
-    let suffix = &s[4..]; // Skip "wld_" prefix (4 chars)
-    if suffix.is_empty() {
-        return Err("WorldId must have alphanumeric characters after 'wld_' prefix".to_string());
-    }
-
-    // Check that suffix contains only alphanumeric characters
-    if !suffix.chars().all(char::is_alphanumeric) {
-        return Err(format!(
-            "WorldId must contain only alphanumeric characters after 'wld_' prefix (got '{suffix}')"
-        ));
-    }
-
-    // Return the validated string
-    Ok(s.to_string())
-}
-
 #[derive(Debug, Subcommand)]
 pub enum ContextCommand {
-    /// Assemble context for a world via future direct platform context API
-    Assemble {
-        /// World ID (required for context assembly, format: wld_[a-zA-Z0-9]+)
-        #[arg(long, value_parser = validate_world_id)]
-        world_id: String,
-
-        /// Workspace ID (defaults to current workspace)
-        #[arg(long)]
-        workspace_id: Option<String>,
-
-        /// Creator ID (defaults to active creator)
-        #[arg(long)]
-        creator_id: Option<String>,
-
-        /// Include memory items in assembled context
-        #[arg(long, default_value_t = true)]
-        include_memory: bool,
-
-        /// Include timeline events in assembled context
-        #[arg(long, default_value_t = true)]
-        include_timeline: bool,
-
-        /// Include story summaries in assembled context
-        #[arg(long, default_value_t = true)]
-        include_story_summaries: bool,
-
-        /// Maximum number of recent timeline events (null = platform default)
-        #[arg(long)]
-        max_timeline_events: Option<u64>,
-
-        /// Maximum number of story summaries (null = platform default)
-        #[arg(long)]
-        max_story_summaries: Option<u64>,
-
-        /// Maximum file size in bytes for summary generation (null = no limit)
-        #[arg(long)]
-        max_file_size: Option<u64>,
-
-        /// Output file path (default: stdout as JSON)
-        #[arg(long)]
-        output_file: Option<String>,
-    },
-
     /// Assemble four-domain Moment context from local persistent stores (SSOT)
     AssembleMoment {
         /// World ID to include in Moment context
@@ -187,28 +113,12 @@ pub enum ContextCommand {
 /// # Errors
 ///
 /// Returns `CliError` if:
-/// - Context assembly fails (platform API errors, file I/O errors)
-/// - Degradation guard checks fail
+/// - Moment assembly fails (unknown World/Work/branch, assembly fault)
+/// - The active creator/workspace cannot be resolved
 /// - Configuration cannot be loaded
 #[allow(clippy::too_many_lines)] // CLI dispatch arm — param plumbing (V1.150 P1 directive summary)
 pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
     match cmd {
-        ContextCommand::Assemble {
-            world_id: _,
-            workspace_id: _,
-            creator_id: _,
-            include_memory: _,
-            include_timeline: _,
-            include_story_summaries: _,
-            max_timeline_events: _,
-            max_story_summaries: _,
-            max_file_size: _,
-            output_file: _,
-        } => {
-            eprintln!("Platform cloud context assembly is not yet available.");
-            eprintln!("Use `assemble-moment` for local four-domain Moment assembly.");
-            std::process::exit(2);
-        }
         ContextCommand::AssembleMoment {
             world_id,
             work_id,
@@ -837,7 +747,10 @@ pub async fn run_assemble_moment(
     // slot and its TTL / scene-change lifecycle runs. When no directive is
     // active, `assemble_moment_with_directive` is byte-equivalent to the
     // plain `assemble_moment` (AC-I1b).
-    let directives = nexus_daemon_runtime::directive_store::LocalDirectiveStore::new(pool);
+    // v1.193 P1-T5: the store is the core composition root directly
+    // (`nexus_core::LocalDirectiveStore`); the old
+    // `nexus_daemon_runtime::directive_store` path was only a core re-export.
+    let directives = nexus_core::LocalDirectiveStore::new(pool);
     let ctx =
         assemble_moment_with_directive(&request, &narrative, &kb, &knowledge, &directives).await;
 
@@ -1026,62 +939,6 @@ mod tests {
     use nexus_moment_context_assembly::assemble_moment;
     use nexus_spoke_adapter::adapter::activation::ActivationTraceEntry;
 
-    /// Test valid `WorldId` formats
-    #[test]
-    fn validate_world_id_accepts_valid_formats() {
-        // Valid: starts with wld_ followed by alphanumeric
-        assert!(validate_world_id("wld_abc123").is_ok());
-        assert!(validate_world_id("wld_test").is_ok());
-        assert!(validate_world_id("wld_ABCDEF123456").is_ok());
-        assert!(validate_world_id("wld_1").is_ok());
-    }
-
-    /// Test invalid `WorldId` formats - missing prefix
-    #[test]
-    fn validate_world_id_rejects_missing_prefix() {
-        let result = validate_world_id("abc123");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("must start with 'wld_'"));
-    }
-
-    /// Test invalid `WorldId` formats - wrong prefix
-    #[test]
-    fn validate_world_id_rejects_wrong_prefix() {
-        let result = validate_world_id("world_123");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("must start with 'wld_'"));
-    }
-
-    /// Test invalid `WorldId` formats - empty
-    #[test]
-    fn validate_world_id_rejects_empty() {
-        let result = validate_world_id("");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("must start with 'wld_'"));
-    }
-
-    /// Test invalid `WorldId` formats - special characters
-    #[test]
-    fn validate_world_id_rejects_special_characters() {
-        let result = validate_world_id("wld_test-123");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("alphanumeric characters"));
-
-        let result = validate_world_id("wld_test@123");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("alphanumeric characters"));
-    }
-
-    /// Test invalid `WorldId` formats - only prefix
-    #[test]
-    fn validate_world_id_rejects_only_prefix() {
-        let result = validate_world_id("wld_");
-        assert!(result.is_err());
-        assert!(result
-            .expect_err("validation should fail")
-            .contains("alphanumeric characters"));
-    }
-
     /// L3.1: `AssembleLocal` variant no longer exists in `ContextCommand`.
     #[test]
     fn context_command_no_assemble_local() {
@@ -1137,31 +994,6 @@ mod tests {
             packet_out: None,
             stage: None,
         };
-    }
-
-    /// C1.3: Verify `Assemble` arm prints deferred message mentioning `assemble-moment` only.
-    #[test]
-    fn assemble_arm_deferred_message() {
-        let source = include_str!("context.rs");
-        // Strip test module to avoid false positives from test assertions
-        let non_test = source.split("#[cfg(test)]").next().unwrap_or(source);
-        assert!(
-            !non_test.contains("V1.10"),
-            "context.rs non-test code must not reference V1.10"
-        );
-        assert!(
-            source.contains("Platform cloud context assembly is not yet available"),
-            "context.rs must contain deferred platform message"
-        );
-        assert!(
-            source.contains("assemble-moment"),
-            "deferred message must mention assemble-moment"
-        );
-        // After L3.1, deferred message must NOT mention assemble-local
-        assert!(
-            !non_test.contains("assemble-local"),
-            "deferred message must not mention assemble-local"
-        );
     }
 
     /// C3.1: Test `run_assemble_moment` with persistent seed data.
@@ -2336,7 +2168,6 @@ mod tests {
                     ContextCommand::AssembleMoment { inspect, .. } => {
                         assert!(inspect, "--inspect must set inspect = true");
                     }
-                    ContextCommand::Assemble { .. } => panic!("unexpected context subcommand"),
                 },
                 _ => panic!("unexpected platform subcommand"),
             },
