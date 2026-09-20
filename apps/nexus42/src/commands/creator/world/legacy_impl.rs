@@ -102,8 +102,9 @@ pub enum WorldCommand {
         command: rule::RuleCommand,
     },
 
-    /// Timeline fork surface — `create` (daemon POST route) + `list`
-    /// (pure projection of the timeline-events read) — V1.175 P1 group 5.
+    /// Timeline fork surface — `create` (one `CoreService::create_fork` call)
+    /// + `list` (projection of the core timeline-events read) — V1.175 P1
+    /// group 5.
     Fork {
         #[command(subcommand)]
         command: fork::ForkCommand,
@@ -111,10 +112,10 @@ pub enum WorldCommand {
 
     /// World-attached check findings read surface (V1.175 P1 group 8, AR-87).
     ///
-    /// **GET-only by design** (V1.165): world findings are advisory
-    /// (`GET /v1/daemon/worlds/:world_id/findings`); there is NO
-    /// world-findings write route. Triage writes ride the work-findings
-    /// PATCH (`creator works findings set-status`).
+    /// **Read-only by design** (V1.165): world findings are advisory and
+    /// `list_world_findings` is a core read, so this surface has no write
+    /// owner at all. Triage writes ride the work-findings PATCH
+    /// (`creator works findings set-status`).
     Findings {
         #[command(subcommand)]
         command: FindingsCommand,
@@ -123,14 +124,14 @@ pub enum WorldCommand {
 
 /// `creator world findings` subcommands (V1.175 P1 group 8, AR-87).
 ///
-/// Read surface only — world findings are **GET-only by design** (V1.165):
-/// there is NO world-findings write route; triage writes ride the
-/// work-findings PATCH (`creator works findings set-status`).
+/// Read surface only — world findings are advisory and read through the core
+/// (V1.165): there is no world-findings write owner at all; triage writes ride
+/// the work-findings PATCH (`creator works findings set-status`).
 #[derive(Debug, Subcommand)]
 pub enum FindingsCommand {
     /// List world-attached check findings
-    /// (`GET /v1/daemon/worlds/:world_id/findings`, V1.165 read surface —
-    /// GET-only by design, AR-87 #1).
+    /// (`CoreService::list_world_findings`, V1.165 read surface — read-only
+    /// by design, AR-87 #1).
     List {
         /// World ID (wld_...).
         #[arg(long, value_name = "WORLD_ID")]

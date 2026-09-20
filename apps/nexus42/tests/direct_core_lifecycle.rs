@@ -9,6 +9,11 @@
 //! writer, so the next CLI writer opens and commits instead of finding the
 //! workspace held or the entity half-written.
 //!
+//! `anonymous_selection_is_refused_before_any_storage_write` defends the open
+//! side of the same seam: a selected identity with no materialized workspace
+//! (the anonymous bootstrap) is refused with the declared selection class
+//! before the writer pool migrates anything.
+//!
 //! Every mutation here runs in its own short-lived child, so process exit would
 //! release a writer the seam forgot to close. The in-process half of the same
 //! contract — the writer is released before `finish_direct` returns — lives in
@@ -220,4 +225,80 @@ async fn direct_writer_reopens_after_rejected_mutation() {
     assert_eq!(entity_id, ENTITY_ID);
     assert_eq!(version, committed_version, "the reopened writer commits");
     assert_eq!(canonical_name, REOPENED_TITLE);
+}
+
+/// The creator id the identity bootstrap reports
+/// (`Created anonymous identity: ctr_anon…`).
+fn anonymous_creator_id(out: &str) -> String {
+    out.lines()
+        .find_map(|line| line.split_once("anonymous identity: "))
+        .map(|(_, id)| id.trim().to_string())
+        .expect("the identity bootstrap reports the minted creator id")
+}
+
+/// A selection that names no materialized workspace is refused by the direct
+/// core open seam with the declared selection refusal — never a raw storage
+/// error, and never an implicitly materialized workspace.
+///
+/// `system identity create --kind anonymous` activates an ephemeral creator
+/// without initializing a workspace (AR-88 #5). Every direct-core leaf opens
+/// the core before it resolves anything else, so the open itself owes the
+/// declared refusal ([`CoreError::AuthRequired`], mapped to the established
+/// CLI selection class): reaching the writer pool's migration step would leak
+/// `state.db.migration.lock: No such file or directory` and create the
+/// workspace the identity was never given.
+#[test]
+fn anonymous_selection_is_refused_before_any_storage_write() {
+    let home = tempfile::tempdir().expect("temp home");
+
+    let created = assert_cmd::Command::cargo_bin("nexus42")
+        .expect("nexus42 binary")
+        .args(["system", "identity", "create", "--kind", "anonymous"])
+        .env("HOME", home.path())
+        .env("RUST_LOG", "off")
+        .output()
+        .expect("spawn nexus42 identity create");
+    assert!(
+        created.status.success(),
+        "the anonymous identity must be created: {}",
+        stderr(&created)
+    );
+    let creator_id = anonymous_creator_id(&stdout(&created));
+
+    let refused = assert_cmd::Command::cargo_bin("nexus42")
+        .expect("nexus42 binary")
+        .args(["creator", "world", "create", "--title", "Anon World"])
+        .env("HOME", home.path())
+        .env("RUST_LOG", "off")
+        .output()
+        .expect("spawn nexus42 world create");
+    assert!(
+        !refused.status.success(),
+        "an unmaterialized selection must be refused: {}",
+        stdout(&refused)
+    );
+    assert_eq!(refused.status.code(), Some(1), "{}", stderr(&refused));
+
+    let refusal = stderr(&refused);
+    assert!(
+        refusal.contains("Creator not selected"),
+        "the declared selection refusal: {refusal}"
+    );
+    for leak in ["migration.lock", "database_error", "No such file or directory"] {
+        assert!(
+            !refusal.contains(leak),
+            "no raw storage I/O may leak ({leak}): {refusal}"
+        );
+    }
+
+    // AR-88 #5: `select_workspace` is the only path that materializes a
+    // workspace, so the refused command must leave no workspace behind.
+    let workspace_db =
+        nexus_home_layout::workspace_state_db_path(home.path(), &creator_id, "default");
+    let workspace_dir = workspace_db.parent().expect("workspace dir");
+    assert!(
+        !workspace_dir.exists(),
+        "no workspace may be materialized: {}",
+        workspace_dir.display()
+    );
 }

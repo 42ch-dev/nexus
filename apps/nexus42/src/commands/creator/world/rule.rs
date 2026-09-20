@@ -8,13 +8,15 @@
 //! `rul_<uuid v4 simple>` id minting and the row assembly; this module maps
 //! the flags onto the generated request and renders the response.
 //!
-//! # Spoke vocabulary (verbatim — never nexus-coerced at rest)
+//! # Spoke vocabulary (core-validated)
 //!
-//! `kind` (core `rule` / `prohibition` / `style`), `status` (core `draft` /
-//! `active` / `deprecated`), `severity_hint` (core `info` / `warning` /
-//! `error`) are open strings stored verbatim. `statement` is the **human
-//! summary only** — it is never parsed by the evaluator (PD-1). Machine
-//! evaluation reads `extensions.nexus.constraint` (AR-2 carrier).
+//! `kind` (core `rule` / `prohibition` / `style`) and `severity_hint` (core
+//! `info` / `warning` / `error`) are open, non-empty strings stored verbatim.
+//! `status` is **not** one of them: it is the core's closed `draft` / `active`
+//! / `deprecated` grammar (AR-3), so any other value is refused by the core
+//! instead of being stored. `statement` is the **human summary only** — it is
+//! never parsed by the evaluator (PD-1). Machine evaluation reads
+//! `extensions.nexus.constraint` (AR-2 carrier).
 //!
 //! # Ownership
 //!
@@ -61,7 +63,8 @@ pub enum RuleCommand {
         /// carry no `entry_type` — AR-2).
         #[arg(long)]
         entry_type: Vec<String>,
-        /// Rule status (open string; core: draft / active / deprecated)
+        /// Rule status (the core's closed grammar: `draft` / `active` /
+        /// `deprecated`; any other value is refused, never stored)
         #[arg(long, default_value = "active")]
         status: String,
         /// Structured constraint carrier as a JSON object string (AR-2:

@@ -15,6 +15,13 @@
 //! No `EngineOwner`, server probe, Node child or live provider is involved:
 //! the raw user home plus [`CoreAccess::DirectWriter`] are the whole authority,
 //! and the caller awaits [`finish_direct`] before reporting anything.
+//!
+//! Opening refuses a selection that names no materialized workspace before the
+//! writer pool is admitted ([`require_materialized_workspace`]), so an
+//! ephemeral/anonymous identity reports the declared selection refusal instead
+//! of a raw migration error or an implicitly created workspace.
+
+use std::path::Path;
 
 use crate::config::{user_home_dir, CliConfig};
 use crate::errors::{CliError, Result};
@@ -27,15 +34,49 @@ use nexus_contracts::CoreCloseReport;
 ///
 /// Returns [`CliError::Config`] when the home directory cannot be resolved and
 /// the mapped core error ([`map_core_error`]) when no creator/workspace is
-/// selected or the writer pool cannot be admitted.
-pub(crate) async fn open_direct_core(_config: &CliConfig) -> Result<CoreService> {
+/// selected, the selected workspace was never materialized, or the writer pool
+/// cannot be admitted.
+pub(crate) async fn open_direct_core(config: &CliConfig) -> Result<CoreService> {
     let user_home = user_home_dir().map_err(|e| CliError::Config(e.to_string()))?;
+    require_materialized_workspace(config, &user_home)?;
     CoreService::open(CoreOpenOptions {
         user_home,
         access: CoreAccess::DirectWriter,
     })
     .await
     .map_err(map_core_error)
+}
+
+/// Refuse a selection whose workspace was never materialized, before the
+/// direct writer can touch storage.
+///
+/// [`CoreService::open`] resolves the selected workspace `state.db` and hands
+/// it to the guarded writer pool, which migrates — and therefore creates — the
+/// file. A selection that names no workspace (the anonymous identity bootstrap
+/// activates an ephemeral creator without initializing one) would thus either
+/// leak the pool's raw I/O error for the missing directory
+/// (`…/state.db.migration.lock: No such file or directory`) or silently
+/// materialize a workspace the identity never had. Both are refusals of the
+/// same declared class, so this pre-flight reports exactly what
+/// `CoreService::open` reports for an unset selection: [`CoreError::AuthRequired`]
+/// through the shared mapper, never a storage error.
+///
+/// The selection facts are the ones this leaf's `config` already carries (the
+/// same `config.toml` the core re-reads), and a workspace whose `state.db`
+/// exists keeps its own storage errors untouched — this only refuses the
+/// never-materialized case.
+fn require_materialized_workspace(config: &CliConfig, user_home: &Path) -> Result<()> {
+    let db_path = config.active_creator_id.as_deref().map(|creator_id| {
+        crate::paths::state_db_path(
+            user_home,
+            creator_id,
+            config.workspace_slug_for_creator(creator_id),
+        )
+    });
+    match db_path {
+        Some(path) if path.exists() => Ok(()),
+        _ => Err(map_core_error(CoreError::AuthRequired)),
+    }
 }
 
 /// Map a core error to the CLI taxonomy.
