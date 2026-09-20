@@ -271,3 +271,209 @@ fn works_reconcile_chapters_help_yes_does_not_promise_inline_preview() {
         "reconcile-chapters --help must point to --dry-run for the preview: {help_text}"
     );
 }
+
+// =============================================================================
+// `creator workspace` init/list/use + `creator demo-seed` — direct local path
+// (v1.193 P0-T2)
+// =============================================================================
+
+/// Run the real `nexus42` binary against a hermetic `HOME` from a working
+/// directory that contains no workspace marker.
+fn hermetic_cli(
+    home: &std::path::Path,
+    cwd: &std::path::Path,
+    args: &[&str],
+) -> std::process::Output {
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .env("HOME", home)
+        .env("RUST_LOG", "off")
+        .current_dir(cwd)
+        .args(args)
+        .output()
+        .expect("run nexus42")
+}
+
+/// NEW (v1.193 P0-T2): workspace initialization, selection and the demo seed
+/// are local core/filesystem work — no daemon is consulted.
+///
+/// Defends the removed daemon-first branch: `creator workspace init` must
+/// materialize the ADR-014 layout and commit the selection locally, the
+/// retained `creator demo-seed` must stay real and idempotent without
+/// `force`), the committed selection must stay usable, and the removed
+/// workspace leaves must be unknown. The fixture points `daemon_url` at a port
+/// nothing listens on, so a reintroduced health probe would print its
+/// "falling back" warning on stderr and fail the `daemon` assertions.
+#[allow(clippy::too_many_lines)] // single local-home lifecycle proof
+#[test]
+fn workspace_init_and_demo_seed_are_local_and_idempotent() {
+    let home = tempfile::tempdir().expect("temp home");
+    // Initialization refuses a directory tree that already contains a
+    // workspace marker (`.nexus42`), so the child runs from a clean tree.
+    let cwd = tempfile::tempdir().expect("temp cwd");
+    // Explicit creative root: the whole flow stays inside the temp home on
+    // every platform instead of resolving a documents directory.
+    let creative_root = home.path().join("creative");
+
+    let nexus_dir = home.path().join(".nexus42");
+    std::fs::create_dir_all(&nexus_dir).expect("create .nexus42");
+    std::fs::write(
+        nexus_dir.join("config.toml"),
+        "daemon_url = \"http://127.0.0.1:1\"\n",
+    )
+    .expect("seed config.toml");
+
+    // --- 1. A local creator selection, committed locally (no listener) ---
+    let select_creator = hermetic_cli(home.path(), cwd.path(), &["creator", "use", "local"]);
+    let select_creator_stdout = String::from_utf8_lossy(&select_creator.stdout);
+    let select_creator_stderr = String::from_utf8_lossy(&select_creator.stderr);
+    assert!(
+        select_creator.status.success(),
+        "creator use must commit the selection locally: {select_creator_stdout}\n\
+         {select_creator_stderr}"
+    );
+    assert!(
+        !select_creator_stderr.contains("daemon"),
+        "creator use must not consult a daemon: {select_creator_stderr}"
+    );
+
+    // --- 2. Init: local materialization + committed selection, no listener ---
+    let creative_arg = creative_root.to_str().expect("utf-8 creative root");
+    let init = hermetic_cli(
+        home.path(),
+        cwd.path(),
+        &[
+            "creator",
+            "workspace",
+            "init",
+            "workspace",
+            "--creative-root",
+            creative_arg,
+        ],
+    );
+    let init_stdout = String::from_utf8_lossy(&init.stdout);
+    let init_stderr = String::from_utf8_lossy(&init.stderr);
+    assert!(
+        init.status.success(),
+        "workspace init must succeed without a daemon:\n{init_stdout}\n{init_stderr}"
+    );
+    assert!(
+        !init_stderr.contains("daemon"),
+        "workspace init must not consult a daemon: {init_stderr}"
+    );
+    assert!(
+        home.path()
+            .join(".nexus42/creators/local/workspaces/default/meta.json")
+            .is_file(),
+        "init must materialize the operational workspace registration"
+    );
+    assert!(
+        creative_root.join(".nexus42/workspace.json").is_file(),
+        "init must materialize the creative tree"
+    );
+    let config = std::fs::read_to_string(nexus_dir.join("config.toml")).expect("read config.toml");
+    assert!(
+        config.contains("active_creator_id = \"local\""),
+        "init must commit the active creator locally: {config}"
+    );
+
+    // --- 3. The committed selection stays usable ---
+    let list = hermetic_cli(home.path(), cwd.path(), &["creator", "workspace", "list"]);
+    let list_stdout = String::from_utf8_lossy(&list.stdout);
+    let list_stderr = String::from_utf8_lossy(&list.stderr);
+    assert!(
+        list.status.success(),
+        "workspace list must succeed: {list_stdout}\n{list_stderr}"
+    );
+    assert!(
+        list_stdout.contains("default (active)"),
+        "workspace list must show the initialized workspace as active: {list_stdout}"
+    );
+    assert!(
+        !list_stderr.contains("daemon"),
+        "workspace list must not consult a daemon: {list_stderr}"
+    );
+
+    let reselect = hermetic_cli(
+        home.path(),
+        cwd.path(),
+        &["creator", "workspace", "use", "default"],
+    );
+    let reselect_stderr = String::from_utf8_lossy(&reselect.stderr);
+    assert!(
+        reselect.status.success(),
+        "re-selecting the initialized workspace must succeed: {reselect_stderr}"
+    );
+    assert!(
+        !reselect_stderr.contains("daemon"),
+        "workspace use must not consult a daemon: {reselect_stderr}"
+    );
+
+    let missing = hermetic_cli(
+        home.path(),
+        cwd.path(),
+        &["creator", "workspace", "use", "missing-slug"],
+    );
+    assert!(
+        !missing.status.success(),
+        "selecting a workspace that was never materialized must fail"
+    );
+
+    // --- 4. demo-seed is real work and idempotent without --force ---
+    let seed = hermetic_cli(home.path(), cwd.path(), &["creator", "demo-seed"]);
+    let seed_stdout = String::from_utf8_lossy(&seed.stdout);
+    let seed_stderr = String::from_utf8_lossy(&seed.stderr);
+    assert!(
+        seed.status.success(),
+        "demo-seed must succeed: {seed_stdout}\n{seed_stderr}"
+    );
+    assert!(
+        !seed_stderr.contains("daemon"),
+        "demo-seed must not consult a daemon: {seed_stderr}"
+    );
+    let world_id = seed_stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("✓ Demo world: "))
+        .expect("demo-seed must report the seeded world")
+        .trim()
+        .to_string();
+    assert!(
+        world_id.starts_with("wld_"),
+        "seeded world id must be a real `wld_` id, got {world_id:?}"
+    );
+
+    let seeded_again = hermetic_cli(home.path(), cwd.path(), &["creator", "demo-seed"]);
+    let seeded_again_stdout = String::from_utf8_lossy(&seeded_again.stdout);
+    let seeded_again_stderr = String::from_utf8_lossy(&seeded_again.stderr);
+    assert!(
+        seeded_again.status.success(),
+        "a repeated demo-seed must succeed: {seeded_again_stdout}\n{seeded_again_stderr}"
+    );
+    assert!(
+        seeded_again_stdout.contains(&format!("Demo world already exists: {world_id}")),
+        "a repeated demo-seed must find the same world instead of seeding another: \
+         {seeded_again_stdout}"
+    );
+    assert!(
+        !seeded_again_stdout.contains("✓ Demo world:"),
+        "a repeated demo-seed must not create a second world: {seeded_again_stdout}"
+    );
+
+    // --- 5. The removed workspace leaves are unknown ---
+    for leaf in ["clone", "link", "unlink", "status"] {
+        let output = hermetic_cli(home.path(), cwd.path(), &["creator", "workspace", leaf]);
+        let combined = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            !output.status.success(),
+            "removed leaf `creator workspace {leaf}` must not exit 0: {combined}"
+        );
+        assert!(
+            combined.contains("unrecognized subcommand"),
+            "removed leaf `creator workspace {leaf}` must be an unknown subcommand: {combined}"
+        );
+    }
+}

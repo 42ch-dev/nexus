@@ -35,16 +35,17 @@ use crate::config::{
     find_workspace_root, nexus_home, workspace_config_path, workspace_nexus_dir, CliConfig,
     DEFAULT_WORKSPACE_SLUG,
 };
+use crate::core::map_core_error;
 use crate::creator_identity::{self, CreatorIdentityEntry};
 use crate::errors::{CliError, Result};
 use crate::paths;
-use clap::{Args, Subcommand};
+use clap::Subcommand;
 use memory::MemoryCommand;
 use nexus_cloud_sync::platform_client::{PlatformClient, VerifyStatus};
-use nexus_contracts::Creator;
+use nexus_contracts::{Creator, SetActiveWorkspaceRequest};
+use nexus_core::CoreHomeService;
 use nexus_knowledge::world_kb::KbStore;
 use nexus_knowledge::KnowledgeStore;
-use serde::Deserialize;
 use soul::SoulCommand;
 use std::path::PathBuf;
 
@@ -196,6 +197,29 @@ fn persist_cli_workspace_selection(
     Ok(())
 }
 
+/// Commit the active creator/workspace selection through the core home entry.
+///
+/// This is the local replacement for the daemon `set_active_workspace` round
+/// trip the workspace leaves used to make: [`CoreHomeService::select_workspace`]
+/// initializes the chosen workspace's guarded state DB, materializes its
+/// `creators` row (the FK precheck world/Work creation relies on) and writes
+/// the active creator/slug into `config.toml` — preserving every other key,
+/// including the CLI's `workspace_path` handle.
+async fn select_workspace_via_core(
+    user_home: &std::path::Path,
+    creator_id: &str,
+    workspace_slug: &str,
+) -> Result<()> {
+    let home = CoreHomeService::open(user_home.to_path_buf()).map_err(map_core_error)?;
+    home.select_workspace(SetActiveWorkspaceRequest {
+        creator_id: Some(creator_id.to_string()),
+        workspace_slug: workspace_slug.to_string(),
+    })
+    .await
+    .map_err(map_core_error)?;
+    Ok(())
+}
+
 /// Run `init workspace` subcommand.
 async fn run_init(cmd: InitCommand) -> Result<()> {
     match cmd {
@@ -208,7 +232,7 @@ async fn run_init(cmd: InitCommand) -> Result<()> {
     }
 }
 
-/// Create workspace structure (daemon-first, FS fallback).
+/// Create workspace structure (filesystem materialization + core selection).
 #[allow(clippy::too_many_lines)]
 async fn init_workspace(
     name: Option<String>,
@@ -238,43 +262,6 @@ async fn init_workspace(
 
     let display_name = name.unwrap_or_else(|| workspace_slug.clone());
 
-    // Try daemon API first (T25: CLI → daemon migration)
-    let client = crate::api::DaemonClient::from_config(&CliConfig::load()?)?;
-    if client.health_check().await? {
-        let req = crate::api::models::CreateWorkspaceRequest {
-            creator_id: creator_id.clone(),
-            workspace_slug: workspace_slug.clone(),
-            creative_root: creative_root_arg.clone(),
-            display_name: Some(display_name.clone()),
-        };
-        match client.create_workspace(&req).await {
-            Ok(resp) => {
-                let active_req = crate::api::models::SetActiveWorkspaceRequest {
-                    creator_id: Some(creator_id.clone()),
-                    workspace_slug: workspace_slug.clone(),
-                };
-                if let Err(e) = client.set_active_workspace(&active_req).await {
-                    eprintln!(
-                        "nexus42: warning — workspace created but active selection failed: {e}"
-                    );
-                }
-                println!("✓ Workspace initialized: {display_name}");
-                println!("  Creative root: {}", resp.creative_root);
-                println!("  Operational: {}", resp.operational_dir);
-                println!("  state.db: {}", resp.state_db_path);
-                println!("  .nexus42/  — workspace configuration (creative root)");
-                print_next_steps();
-                return Ok(());
-            }
-            Err(e) => {
-                eprintln!(
-                    "nexus42: daemon workspace creation failed, falling back to local init: {e}"
-                );
-            }
-        }
-    }
-
-    // Fallback: direct FS operations
     let current_dir = std::env::current_dir()?;
     let creative_root = match creative_root_arg {
         Some(p) if p.is_absolute() => p,
@@ -294,6 +281,7 @@ async fn init_workspace(
         creator_id.clone(),
         workspace_slug.clone(),
     )?;
+    select_workspace_via_core(&user_home, &creator_id, &workspace_slug).await?;
 
     let nh = nexus_home()?;
     std::fs::create_dir_all(&nh)?;
@@ -340,116 +328,6 @@ fn print_next_steps() {
     println!("Workspace artifacts (stories, research reports) are created");
     println!("automatically by preset workflows as needed.");
 }
-
-// ── Inlined types from clone.rs (V1.22 deprecation cleanup) ──────────
-
-/// Clone command arguments (formerly in `commands::clone`).
-#[derive(Debug, Args)]
-pub struct CloneArgs {
-    /// World reference to clone (`world_id`, e.g. `wld_abc123`)
-    pub world_ref: String,
-    /// Clone source: platform (default) or local
-    #[arg(long, value_enum, default_value = "platform")]
-    pub source: CloneSourceArg,
-    /// Print the JSON request and exit without calling the daemon
-    #[arg(long)]
-    pub dry_run: bool,
-    /// Skip interactive confirmation
-    #[arg(long)]
-    pub yes: bool,
-}
-
-/// Clone source options (formerly in `commands::clone`).
-#[derive(Debug, Clone, Copy, clap::ValueEnum)]
-pub enum CloneSourceArg {
-    /// Clone from the platform (via daemon proxy)
-    Platform,
-    /// Clone from a local source
-    Local,
-}
-
-/// Response from the daemon clone endpoint (formerly in `commands::clone`).
-// Kept for future platform clone support; unused since V1.27 hard-deprecation.
-#[allow(dead_code)]
-#[derive(Debug, Deserialize)]
-struct WorldCloneResponse {
-    success: bool,
-    world_id: Option<String>,
-    world_revision: Option<u64>,
-    cloned_at: Option<String>,
-    error: Option<String>,
-}
-
-/// Validate `WorldId` format: must start with 'wld_' followed by alphanumeric characters.
-// Kept for future platform clone support; unused since V1.27 hard-deprecation.
-#[allow(dead_code)]
-fn validate_world_id(s: &str) -> std::result::Result<String, String> {
-    if !s.starts_with("wld_") {
-        return Err(format!("WorldId must start with 'wld_' prefix (got '{s}')"));
-    }
-    let suffix = &s[4..];
-    if suffix.is_empty() {
-        return Err("WorldId must have alphanumeric characters after 'wld_' prefix".to_string());
-    }
-    if !suffix.chars().all(char::is_alphanumeric) {
-        return Err(format!(
-            "WorldId must contain only alphanumeric characters after 'wld_' prefix (got '{suffix}')"
-        ));
-    }
-    Ok(s.to_string())
-}
-
-/// Validate world reference format (accepts wld_* and numeric).
-// Kept for future platform clone support; unused since V1.27 hard-deprecation.
-#[allow(dead_code)]
-fn validate_world_ref(s: &str) -> std::result::Result<String, String> {
-    if s.starts_with("wld_") {
-        return validate_world_id(s);
-    }
-    if s.is_empty() {
-        return Err("world-ref cannot be empty".to_string());
-    }
-    Ok(s.to_string())
-}
-
-/// Confirm clone interactively (or skip with --yes).
-// Kept for future platform clone support; unused since V1.27 hard-deprecation.
-#[allow(dead_code)]
-fn confirm_clone(yes: bool, world_ref: &str, source: CloneSourceArg) -> bool {
-    if yes {
-        return true;
-    }
-    let source_label = match source {
-        CloneSourceArg::Platform => "platform",
-        CloneSourceArg::Local => "local",
-    };
-    dialoguer::Confirm::new()
-        .with_prompt(format!("Clone world '{world_ref}' from {source_label}?"))
-        .default(false)
-        .interact()
-        .unwrap_or_else(|_| {
-            eprintln!("Non-interactive terminal: pass --yes to confirm clone.");
-            false
-        })
-}
-
-/// Run the clone command — hard-deprecated stub (V1.27 H1).
-///
-/// World cloning is a platform-only operation that cannot be performed
-/// locally by the CLI. The `/v1/daemon/world/clone` endpoint never existed.
-/// Users should use the platform UI or a future `nexus42 sync` command
-/// to pull a world skeleton from the platform.
-fn run_clone(_args: CloneArgs, _config: &CliConfig) -> Result<()> {
-    Err(CliError::Other(
-        "creator workspace clone is not available locally. \
-         World cloning is a platform-only operation. \
-         Use the platform UI or a future `nexus42 sync pull --world <id>` \
-         to pull a world skeleton."
-            .into(),
-    ))
-}
-
-// ── End inlined types ────────────────────────────────────────────────
 
 #[derive(Debug, Subcommand)]
 pub enum CreatorCommand {
@@ -694,33 +572,6 @@ pub enum CreatorWorkspaceCommand {
         #[command(subcommand)]
         command: InitCommand,
     },
-    /// Clone a world into the workspace (DEPRECATED — platform-only, not implemented locally)
-    #[command(hide = true)]
-    Clone {
-        /// World reference to clone (e.g. `wld_abc123`)
-        world_ref: String,
-        /// Clone source: platform (default) or local
-        #[arg(long, value_enum, default_value = "platform")]
-        source: CloneSourceArg,
-        /// Print the JSON request and exit without calling the daemon
-        #[arg(long)]
-        dry_run: bool,
-        /// Skip interactive confirmation
-        #[arg(long)]
-        yes: bool,
-    },
-    /// Link a workspace (coming soon)
-    Link {
-        /// Workspace slug to link
-        workspace_slug: String,
-    },
-    /// Unlink a workspace (coming soon)
-    Unlink {
-        /// Workspace slug to unlink
-        workspace_slug: String,
-    },
-    /// Show workspace status (coming soon)
-    Status,
 }
 
 #[derive(Debug, Subcommand)]
@@ -752,7 +603,7 @@ pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
             local,
         } => register_creator(config, name, source, handle, local).await,
         CreatorCommand::Status { creator_id } => creator_status(config, creator_id).await,
-        CreatorCommand::Use { creator_ref } => use_creator(config, creator_ref.as_str()).await,
+        CreatorCommand::Use { creator_ref } => use_creator(config, creator_ref.as_str()),
         CreatorCommand::List { json } => list_creators(config, json).await,
         CreatorCommand::Pair { creator_id } => {
             pair_creator(config, creator_id.as_str());
@@ -781,7 +632,7 @@ pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
         CreatorCommand::Run { command } => run::handle_run(command, config).await,
         CreatorCommand::Works { command } => works::handle_works(command, config).await,
         CreatorCommand::DemoSeed { force } => run_demo_seed(config, force).await,
-        CreatorCommand::Logout => logout_creator(config).await,
+        CreatorCommand::Logout => logout_creator(config),
     }
 }
 fn user_home() -> Result<PathBuf> {
@@ -935,54 +786,26 @@ async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand)
 
     match cmd {
         CreatorWorkspaceCommand::List => {
-            let home = user_home()?;
-            // Try daemon API first (T26: migration)
-            let client = crate::api::DaemonClient::from_config(config)?;
-            if client.health_check().await? {
-                match client.list_workspaces(Some(creator_id)).await {
-                    Ok(resp) => {
-                        println!("Workspaces for creator {creator_id}:");
-                        if resp.items.is_empty() {
-                            println!("  (none)");
-                        }
-                        let active = config.workspace_slug_for_creator(creator_id);
-                        for ws in &resp.items {
-                            let mark = if ws.workspace_slug == active {
-                                " (active)"
-                            } else {
-                                ""
-                            };
-                            println!("  {}{mark}", ws.workspace_slug);
-                        }
-                        return Ok(());
-                    }
-                    Err(e) => {
-                        eprintln!("nexus42: daemon workspace list failed, falling back: {e}");
-                    }
-                }
-            }
+            // The core home entry owns workspace discovery (creator dirs with an
+            // operational `meta.json`); this leaf filters to the active creator
+            // and marks the selected slug.
+            let home = CoreHomeService::open(user_home()?).map_err(map_core_error)?;
+            let resp = home.list_workspaces().await.map_err(map_core_error)?;
 
-            // Fallback: direct FS scan
-            let root = paths::creator_workspaces_root(&home, creator_id);
-            if !root.is_dir() {
-                println!("No workspaces directory yet ({}).", root.display());
-                println!(
-                    "Active slug (config): {}",
-                    config.workspace_slug_for_creator(creator_id)
-                );
-                return Ok(());
-            }
             println!("Workspaces for creator {creator_id}:");
-            let mut names: Vec<String> = std::fs::read_dir(&root)?
-                .filter_map(std::result::Result::ok)
-                .filter(|e| e.path().is_dir())
-                .filter_map(|e| e.file_name().into_string().ok())
-                .collect();
-            names.sort();
             let active = config.workspace_slug_for_creator(creator_id);
-            for n in names {
-                let mark = if n == active { " (active)" } else { "" };
-                println!("  {n}{mark}");
+            let mut listed = false;
+            for ws in resp.items.iter().filter(|ws| ws.creator_id == creator_id) {
+                listed = true;
+                let mark = if ws.workspace_slug == active {
+                    " (active)"
+                } else {
+                    ""
+                };
+                println!("  {}{mark}", ws.workspace_slug);
+            }
+            if !listed {
+                println!("  (none)");
             }
             Ok(())
         }
@@ -993,39 +816,6 @@ async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand)
         } => {
             validate_workspace_slug(&workspace_slug)?;
 
-            // Try daemon API first (T26: migration)
-            let client = crate::api::DaemonClient::from_config(config)?;
-            if client.health_check().await? {
-                let req = crate::api::models::CreateWorkspaceRequest {
-                    creator_id: creator_id.to_string(),
-                    workspace_slug: workspace_slug.clone(),
-                    creative_root: creative_root_arg.clone(),
-                    display_name: name.clone(),
-                };
-                match client.create_workspace(&req).await {
-                    Ok(resp) => {
-                        // Set as active workspace
-                        let active_req = crate::api::models::SetActiveWorkspaceRequest {
-                            creator_id: Some(creator_id.to_string()),
-                            workspace_slug: workspace_slug.clone(),
-                        };
-                        if let Err(e) = client.set_active_workspace(&active_req).await {
-                            eprintln!("nexus42: warning — active selection failed: {e}");
-                        }
-                        println!(
-                            "✓ Workspace {workspace_slug:?} created for creator {creator_id}."
-                        );
-                        println!("  Creative root: {}", resp.creative_root);
-                        println!("  state.db: {}", resp.state_db_path);
-                        return Ok(());
-                    }
-                    Err(e) => {
-                        eprintln!("nexus42: daemon workspace create failed, falling back: {e}");
-                    }
-                }
-            }
-
-            // Fallback: direct FS operations
             let home = user_home()?;
             let op_meta = paths::operational_workspace_dir(&home, creator_id, &workspace_slug)
                 .join("meta.json");
@@ -1054,6 +844,7 @@ async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand)
                 creator_id.to_string(),
                 workspace_slug.clone(),
             )?;
+            select_workspace_via_core(&home, creator_id, &workspace_slug).await?;
             println!("✓ Workspace {workspace_slug:?} created for creator {creator_id}.");
             println!("  Creative root: {}", creative_root.display());
             println!("  state.db: {}", db_path.display());
@@ -1062,73 +853,14 @@ async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand)
         CreatorWorkspaceCommand::Use { workspace_slug } => {
             validate_workspace_slug(&workspace_slug)?;
 
-            // Try daemon API first (T26: migration)
-            let client = crate::api::DaemonClient::from_config(config)?;
-            if client.health_check().await? {
-                let req = crate::api::models::SetActiveWorkspaceRequest {
-                    creator_id: Some(creator_id.to_string()),
-                    workspace_slug: workspace_slug.clone(),
-                };
-                match client.set_active_workspace(&req).await {
-                    Ok(_resp) => {
-                        println!(
-                            "✓ Active workspace slug for {creator_id} set to: {workspace_slug}"
-                        );
-                        return Ok(());
-                    }
-                    Err(e) => {
-                        eprintln!("nexus42: daemon set active failed, falling back: {e}");
-                    }
-                }
-            }
-
-            // Fallback: direct config update
-            let home = user_home()?;
-            let dir = paths::operational_workspace_dir(&home, creator_id, &workspace_slug);
-            if !dir.is_dir() {
-                return Err(CliError::Other(format!(
-                    "Workspace {:?} does not exist for creator {} (expected dir {}).",
-                    workspace_slug,
-                    creator_id,
-                    dir.display()
-                )));
-            }
-            let mut cli = CliConfig::load()?;
-            cli.active_workspace_slug_by_creator
-                .insert(creator_id.to_string(), workspace_slug.clone());
-            cli.save()?;
+            // The core home entry validates the workspace exists on disk under
+            // this creator and commits the selection (guarded state-DB init +
+            // `creators` row + `config.toml`).
+            select_workspace_via_core(&user_home()?, creator_id, &workspace_slug).await?;
             println!("✓ Active workspace slug for {creator_id} set to: {workspace_slug}");
             Ok(())
         }
         CreatorWorkspaceCommand::Init { command } => run_init(command).await,
-        CreatorWorkspaceCommand::Clone {
-            world_ref,
-            source,
-            dry_run,
-            yes,
-        } => {
-            let args = CloneArgs {
-                world_ref,
-                source,
-                dry_run,
-                yes,
-            };
-            run_clone(args, config)
-        }
-        CreatorWorkspaceCommand::Link { workspace_slug } => {
-            println!("Coming soon: `creator workspace link` — link workspace: {workspace_slug}");
-            Ok(())
-        }
-        CreatorWorkspaceCommand::Unlink { workspace_slug } => {
-            println!(
-                "Coming soon: `creator workspace unlink` — unlink workspace: {workspace_slug}"
-            );
-            Ok(())
-        }
-        CreatorWorkspaceCommand::Status => {
-            println!("Coming soon: `creator workspace status` — show workspace status.");
-            Ok(())
-        }
     }
 }
 
@@ -1498,49 +1230,11 @@ async fn creator_status(config: &CliConfig, creator_id: Option<String>) -> Resul
 /// 3. Path-safe but unknown → persist as explicit ID (backward compat).
 /// 4. Unsafe characters → error.
 ///
-/// Tries daemon API first (T33: migration), falls back to local config update.
-async fn use_creator(_config: &CliConfig, creator_ref: &str) -> Result<()> {
+/// The selection is committed to the local CLI config directly — no loopback
+/// HTTP probe.
+fn use_creator(_config: &CliConfig, creator_ref: &str) -> Result<()> {
     let resolved_id = creator_identity::resolve_creator_ref(creator_ref)?;
 
-    // Try daemon API first
-    let daemon_config = CliConfig::load()?;
-    let client = crate::api::DaemonClient::from_config(&daemon_config)?;
-    if client.health_check().await? {
-        let req = crate::api::models::SetActiveCreatorRequest {
-            creator_id: resolved_id.clone(),
-        };
-        match client.set_active_creator(&req).await {
-            Ok(_resp) => {
-                // Also update local config so CLI works without daemon
-                let mut cli_config = CliConfig::load()?;
-                cli_config.active_creator_id = Some(resolved_id.clone());
-                cli_config
-                    .active_workspace_slug_by_creator
-                    .remove(creator_ref);
-                cli_config
-                    .active_workspace_slug_by_creator
-                    .remove(&resolved_id);
-                cli_config.save()?;
-
-                if resolved_id == creator_ref {
-                    println!("✓ Active Creator set to: {resolved_id}");
-                } else {
-                    println!(
-                        "✓ Active Creator set to: {resolved_id} (resolved from: {creator_ref})"
-                    );
-                }
-                println!(
-                    "  Workspace slug: {DEFAULT_WORKSPACE_SLUG} (use `nexus42 creator workspace use <slug>` after the directory exists)"
-                );
-                return Ok(());
-            }
-            Err(e) => {
-                eprintln!("nexus42: daemon set active creator failed, falling back: {e}");
-            }
-        }
-    }
-
-    // Fallback: direct config update
     let mut cli_config = CliConfig::load()?;
     cli_config.active_creator_id = Some(resolved_id.clone());
     // Clear workspace slug for the old creator ref and the resolved ID.
@@ -1786,14 +1480,13 @@ fn unpair_creator(_config: &CliConfig, creator_id: &str) {
 
 /// Logout — clear active creator credentials from local config and auth store.
 ///
-/// Tries daemon API first (T33: migration), then clears local state.
-/// Local state is always cleared regardless of daemon result to ensure
-/// CLI works even when daemon is unreachable.
+/// Local state is the only state: the active creator and its cached
+/// credentials are cleared here, with no loopback HTTP probe.
 ///
 /// # Errors
 ///
 /// Returns I/O errors if config or auth store cannot be read or written.
-async fn logout_creator(config: &CliConfig) -> Result<()> {
+fn logout_creator(config: &CliConfig) -> Result<()> {
     let creator_id = config.active_creator_id.as_deref();
 
     if creator_id.is_none() {
@@ -1802,14 +1495,6 @@ async fn logout_creator(config: &CliConfig) -> Result<()> {
     }
 
     let creator_id = creator_id.expect("checked above");
-
-    // Try daemon API first (T33: migration)
-    let client = crate::api::DaemonClient::from_config(config)?;
-    if client.health_check().await? {
-        if let Err(e) = client.logout_creator(creator_id).await {
-            eprintln!("nexus42: daemon logout failed, continuing with local cleanup: {e}");
-        }
-    }
 
     // Always clear local state
     let mut store = auth::AuthStore::load()?;
