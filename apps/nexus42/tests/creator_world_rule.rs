@@ -155,7 +155,8 @@ async fn cli_rule_list_json_renders_core_projection() {
         MODULE_PRESENCE_CARRIER,
     )
     .await
-    .unwrap();
+    .unwrap()
+    .rule_id;
     env.core.close().await.expect("seed core closes");
 
     let out = env
@@ -262,7 +263,8 @@ async fn add_list_deactivate_round_trip() {
         r#"{"family":"required_field","field":"body.summary"}"#,
     )
     .await
-    .expect("add on an owned world must succeed");
+    .expect("add on an owned world must succeed")
+    .rule_id;
 
     assert!(
         rule_id.starts_with("rul_") && rule_id.len() == 4 + 32,
@@ -337,7 +339,8 @@ async fn json_summary_shape_projects_carrier_first_class() {
         OBSERVER_CARDINALITY_CARRIER,
     )
     .await
-    .unwrap();
+    .unwrap()
+    .rule_id;
 
     let rows = stored_rules(&env, WORLD).await;
     let summary = &rows[0];
@@ -541,7 +544,8 @@ async fn deactivate_cross_world_rule_rejected_naming_rule_id() {
         MODULE_PRESENCE_CARRIER,
     )
     .await
-    .unwrap();
+    .unwrap()
+    .rule_id;
 
     let err = rule_deactivate(&env.core, &env.principal, WORLD, &cross_world_rule_id)
         .await

@@ -1524,7 +1524,13 @@ async fn handle_pool(config: &CliConfig, action: PoolAction) -> Result<()> {
         }
     }
     .await;
-    finish_direct(&core, outcome).await
+    // The leaves return their report; nothing reaches stdout until the shared
+    // seam released the writer, so a promoted/archived entry is never reported
+    // ahead of a close that did not settle.
+    if let Some(text) = finish_direct(&core, outcome).await? {
+        println!("{text}");
+    }
+    Ok(())
 }
 
 async fn handle_pool_list(
@@ -1532,7 +1538,7 @@ async fn handle_pool_list(
     principal: &Principal,
     status: Option<String>,
     json: bool,
-) -> Result<()> {
+) -> Result<Option<String>> {
     let resp = core
         .list_work_pool(
             principal,
@@ -1553,31 +1559,32 @@ async fn handle_pool_list(
             limit: u64::from(resp.limit),
             offset: u64::from(resp.offset),
         };
-        println!("{}", serde_json::to_string_pretty(&wire)?);
-    } else if resp.entries.is_empty() {
-        println!("No pool entries found.");
-    } else {
-        println!(
-            "{:<36} {:36} {:12} {:30} PROMOTED",
-            "ENTRY_ID", "WORK_ID", "STATUS", "TITLE"
-        );
-        for e in &resp.entries {
-            let eid = e.entry_id.as_str();
-            let wid = if e.work_id.is_empty() {
-                "(none)"
-            } else {
-                e.work_id.as_str()
-            };
-            let st = e.status.as_str();
-            let title = e.title.as_str();
-            let promoted = e.promoted_at.as_str();
-            let display_title = truncate_with_ellipsis(title, 28);
-            println!("{eid:<36} {wid:<36} {st:<12} {display_title:<30} {promoted}");
-        }
-        println!("\n{} pool entry/entries", resp.entries.len());
+        return Ok(Some(serde_json::to_string_pretty(&wire)?));
     }
-
-    Ok(())
+    if resp.entries.is_empty() {
+        return Ok(Some("No pool entries found.".to_string()));
+    }
+    let mut lines = vec![format!(
+        "{:<36} {:36} {:12} {:30} PROMOTED",
+        "ENTRY_ID", "WORK_ID", "STATUS", "TITLE"
+    )];
+    for e in &resp.entries {
+        let eid = e.entry_id.as_str();
+        let wid = if e.work_id.is_empty() {
+            "(none)"
+        } else {
+            e.work_id.as_str()
+        };
+        let st = e.status.as_str();
+        let title = e.title.as_str();
+        let promoted = e.promoted_at.as_str();
+        let display_title = truncate_with_ellipsis(title, 28);
+        lines.push(format!(
+            "{eid:<36} {wid:<36} {st:<12} {display_title:<30} {promoted}"
+        ));
+    }
+    lines.push(format!("\n{} pool entry/entries", resp.entries.len()));
+    Ok(Some(lines.join("\n")))
 }
 
 async fn handle_pool_promote(
@@ -1585,7 +1592,7 @@ async fn handle_pool_promote(
     principal: &Principal,
     work_id: &str,
     set_default: bool,
-) -> Result<()> {
+) -> Result<Option<String>> {
     let entry = core
         .promote_work_pool_entry(
             principal,
@@ -1597,7 +1604,10 @@ async fn handle_pool_promote(
         .await
         .map_err(map_core_error)?;
 
-    println!("Promoted {work_id} to active (entry {})", entry.entry_id);
+    let mut lines = vec![format!(
+        "Promoted {work_id} to active (entry {})",
+        entry.entry_id
+    )];
 
     if set_default {
         // `works use` semantics: the pool `active` row is the CLI default. The
@@ -1606,17 +1616,17 @@ async fn handle_pool_promote(
         core.select_work(principal, work_id.to_string())
             .await
             .map_err(map_core_error)?;
-        println!("Also set as CLI default work.");
+        lines.push("Also set as CLI default work.".to_string());
     }
 
-    Ok(())
+    Ok(Some(lines.join("\n")))
 }
 
 async fn handle_pool_archive(
     core: &CoreService,
     principal: &Principal,
     entry_id: &str,
-) -> Result<()> {
+) -> Result<Option<String>> {
     let entry = core
         .archive_work_pool_entry(
             principal,
@@ -1627,9 +1637,7 @@ async fn handle_pool_archive(
         .await
         .map_err(map_core_error)?;
 
-    println!("Entry {entry_id} → {}", entry.status);
-
-    Ok(())
+    Ok(Some(format!("Entry {entry_id} → {}", entry.status)))
 }
 
 // ── Inspiration pool handlers (DF-61 §4) ───────────────────────────────
@@ -1638,7 +1646,7 @@ async fn handle_inspiration(
     core: &CoreService,
     principal: &Principal,
     action: InspirationAction,
-) -> Result<()> {
+) -> Result<Option<String>> {
     match action {
         InspirationAction::Add { title, json } => {
             handle_inspiration_add(core, principal, &title, json).await
@@ -1662,7 +1670,7 @@ async fn handle_inspiration_add(
     principal: &Principal,
     title: &str,
     json: bool,
-) -> Result<()> {
+) -> Result<Option<String>> {
     let added = core
         .add_work_inspiration(
             principal,
@@ -1673,18 +1681,18 @@ async fn handle_inspiration_add(
         .await
         .map_err(map_core_error)?;
 
-    if json {
+    Ok(Some(if json {
         let wire = WorkInspirationAddResponse {
             item_id: added.item_id,
             rel_path: added.rel_path,
         };
-        println!("{}", serde_json::to_string_pretty(&wire)?);
+        serde_json::to_string_pretty(&wire)?
     } else {
-        println!("Inspiration added: {}", added.item_id);
-        println!("  scaffold: {}", added.rel_path);
-    }
-
-    Ok(())
+        format!(
+            "Inspiration added: {}\n  scaffold: {}",
+            added.item_id, added.rel_path
+        )
+    }))
 }
 
 async fn handle_inspiration_list(
@@ -1692,7 +1700,7 @@ async fn handle_inspiration_list(
     principal: &Principal,
     status: Option<String>,
     json: bool,
-) -> Result<()> {
+) -> Result<Option<String>> {
     let resp = core
         .list_work_inspiration(
             principal,
@@ -1714,32 +1722,33 @@ async fn handle_inspiration_list(
             limit: u64::from(resp.limit),
             offset: u64::from(resp.offset),
         };
-        println!("{}", serde_json::to_string_pretty(&wire)?);
-    } else if resp.items.is_empty() {
-        println!("No inspiration items found.");
-    } else {
-        println!(
-            "{:<36} {:40} {:12} {:30} CREATED",
-            "ITEM_ID", "TITLE", "STATUS", "REL_PATH"
-        );
-        for i in &resp.items {
-            let iid = i.item_id.as_str();
-            let title = i.title.as_str();
-            let st = i.status.as_str();
-            let rp = i.rel_path.as_str();
-            let created = i.created_at.as_str();
-            let display_title = truncate_with_ellipsis(title, 38);
-            let display_rp = if rp.len() > 28 {
-                format!("{}…", &rp[..28])
-            } else {
-                rp.to_string()
-            };
-            println!("{iid:<36} {display_title:40} {st:<12} {display_rp:<30} {created}");
-        }
-        println!("\n{} inspiration item(s)", resp.items.len());
+        return Ok(Some(serde_json::to_string_pretty(&wire)?));
     }
-
-    Ok(())
+    if resp.items.is_empty() {
+        return Ok(Some("No inspiration items found.".to_string()));
+    }
+    let mut lines = vec![format!(
+        "{:<36} {:40} {:12} {:30} CREATED",
+        "ITEM_ID", "TITLE", "STATUS", "REL_PATH"
+    )];
+    for i in &resp.items {
+        let iid = i.item_id.as_str();
+        let title = i.title.as_str();
+        let st = i.status.as_str();
+        let rp = i.rel_path.as_str();
+        let created = i.created_at.as_str();
+        let display_title = truncate_with_ellipsis(title, 38);
+        let display_rp = if rp.len() > 28 {
+            format!("{}…", &rp[..28])
+        } else {
+            rp.to_string()
+        };
+        lines.push(format!(
+            "{iid:<36} {display_title:40} {st:<12} {display_rp:<30} {created}"
+        ));
+    }
+    lines.push(format!("\n{} inspiration item(s)", resp.items.len()));
+    Ok(Some(lines.join("\n")))
 }
 
 async fn handle_inspiration_promote(
@@ -1748,7 +1757,7 @@ async fn handle_inspiration_promote(
     item_id: &str,
     idea: Option<String>,
     set_default: bool,
-) -> Result<()> {
+) -> Result<Option<String>> {
     let promoted = core
         .promote_work_inspiration(
             principal,
@@ -1761,10 +1770,10 @@ async fn handle_inspiration_promote(
         .await
         .map_err(map_core_error)?;
 
-    println!(
+    let mut lines = vec![format!(
         "Inspiration {item_id} promoted → Work {} (pool entry {})",
         promoted.work_id, promoted.pool_entry_id
-    );
+    )];
 
     if set_default {
         // The atomic promotion already wrote the new Work as the pool `active`
@@ -1772,17 +1781,17 @@ async fn handle_inspiration_promote(
         core.select_work(principal, promoted.work_id.clone())
             .await
             .map_err(map_core_error)?;
-        println!("Also set as CLI default work.");
+        lines.push("Also set as CLI default work.".to_string());
     }
 
-    Ok(())
+    Ok(Some(lines.join("\n")))
 }
 
 async fn handle_inspiration_archive(
     core: &CoreService,
     principal: &Principal,
     item_id: &str,
-) -> Result<()> {
+) -> Result<Option<String>> {
     core.archive_work_inspiration(
         principal,
         ArchiveInspirationRequest {
@@ -1792,9 +1801,7 @@ async fn handle_inspiration_archive(
     .await
     .map_err(map_core_error)?;
 
-    println!("Inspiration item {item_id} archived.");
-
-    Ok(())
+    Ok(Some(format!("Inspiration item {item_id} archived.")))
 }
 
 /// Schema-owned pool-list element (`--json` only).

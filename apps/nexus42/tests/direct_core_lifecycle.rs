@@ -29,6 +29,13 @@
 //! other half of the same admission: a metadata failure on the selected
 //! `state.db` is a storage error, never the selection refusal.
 //!
+//! `pack_import_notes_are_not_printed_before_the_seam_settles` pins the
+//! render side of the seam for one migrated family (v1.193 P0-T13 fix 2,
+//! QC1-W001): `creator world kb pack import --from-st` resolves its conversion
+//! notes into the outcome instead of printing them there, so a refused run
+//! leaves stdout byte-empty and an admitted run still prints the notes ahead of
+//! its summary.
+//!
 //! Every mutation here runs in its own short-lived child, so process exit would
 //! release a writer the seam forgot to close. The in-process half of the same
 //! contract — the writer is released before `finish_direct` returns — lives in
@@ -240,6 +247,129 @@ async fn direct_writer_reopens_after_rejected_mutation() {
     assert_eq!(entity_id, ENTITY_ID);
     assert_eq!(version, committed_version, "the reopened writer commits");
     assert_eq!(canonical_name, REOPENED_TITLE);
+}
+
+/// The `creator world kb pack` family renders only after the seam settled.
+///
+/// `pack import --from-st` used to print its `SillyTavern` conversion notes
+/// *inside* the outcome — before `finish_direct` released the direct writer —
+/// so a run the seam refused still left command output on stdout. The notes now
+/// ride the outcome as data (`PackRender::Import`) and the post-settle render
+/// step in `run` is the only path that reaches stdout (v1.193 P0-T13 fix 2,
+/// QC1-W001).
+///
+/// **Limits of this regression.** The trigger the finding describes — a close
+/// that fails or reports `cleanup_confirmed == false` — cannot be forced with
+/// the real seam: `CoreService::close` for a `DirectWriter` is infallible
+/// (`crates/nexus-core/src/service.rs` reports `cleanup_confirmed: true` for
+/// every close), so the close-refusal branch is pinned by the seam's own
+/// precedence unit tests in `src/core.rs` (`resolve_direct`). What a child
+/// process can observe is the ordering this test pins: output the family
+/// produced before the seam's verdict cannot reach stdout at all — a refused
+/// import (unknown World) leaves stdout byte-empty while the seam refusal is on
+/// stderr — and the same invocation against an admitted World still emits the
+/// notes ahead of its summary, then leaves the writer free.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pack_import_notes_are_not_printed_before_the_seam_settles() {
+    let fixture = DirectFixture::new().await;
+    let (world_id, _) = seed_world_and_entity(fixture.home.path()).await;
+    let lorebook = fixture.home.path().join("lorebook.json");
+    // One documented entry carrying an undocumented field: the converter emits
+    // a Warning note, so the run has output of its own before it reaches the
+    // core.
+    std::fs::write(
+        &lorebook,
+        serde_json::json!({
+            "name": "Anon Notes",
+            "entries": [{
+                "comment": "Ghost Entry",
+                "content": "A ghost walks.",
+                "unknown_extra": 1
+            }]
+        })
+        .to_string(),
+    )
+    .expect("write lorebook");
+
+    // ── 1. A refused run prints nothing on stdout. ────────────────────────
+    let refused = fixture
+        .command()
+        .args([
+            "creator",
+            "world",
+            "kb",
+            "pack",
+            "import",
+            "wld_absent",
+            "--from-st",
+            lorebook.to_str().expect("lorebook path"),
+        ])
+        .output()
+        .expect("spawn nexus42 pack import");
+    assert!(
+        !refused.status.success(),
+        "an unknown World must be refused: {}",
+        stdout(&refused)
+    );
+    assert_eq!(
+        stdout(&refused),
+        "",
+        "the conversion notes must not precede the seam's refusal"
+    );
+    assert!(
+        stderr(&refused).contains("wld_absent"),
+        "the refusal names the World: {}",
+        stderr(&refused)
+    );
+
+    // ── 2. An admitted run still prints the notes, before its summary. ────
+    let admitted = fixture
+        .command()
+        .args([
+            "creator",
+            "world",
+            "kb",
+            "pack",
+            "import",
+            &world_id,
+            "--from-st",
+            lorebook.to_str().expect("lorebook path"),
+            "--dry-run",
+        ])
+        .output()
+        .expect("spawn nexus42 pack import");
+    assert!(
+        admitted.status.success(),
+        "the admitted dry run must succeed: {}",
+        stderr(&admitted)
+    );
+    let text = stdout(&admitted);
+    let notes = text
+        .find("ST lorebook conversion notes:")
+        .unwrap_or_else(|| panic!("the notes must survive the deferral: {text}"));
+    assert!(
+        text.contains("warning: entry 0 'Ghost Entry' field 'unknown_extra'"),
+        "the note names the dropped field: {text}"
+    );
+    let summary = text
+        .find("[dry-run] would create:")
+        .unwrap_or_else(|| panic!("the import summary is missing: {text}"));
+    assert!(
+        notes < summary,
+        "the retained order is notes-then-summary: {text}"
+    );
+
+    // ── 3. The writer is free again: the seam closed on this run. ─────────
+    let reopened = fixture
+        .command()
+        .args(["creator", "world", "kb", "graph", "--world-id", &world_id])
+        .output()
+        .expect("spawn nexus42 graph");
+    assert!(
+        reopened.status.success(),
+        "the direct writer reopens after the import: {}",
+        stderr(&reopened)
+    );
 }
 
 /// The creator id the identity bootstrap reports

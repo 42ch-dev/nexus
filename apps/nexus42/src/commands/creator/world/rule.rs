@@ -29,7 +29,7 @@ use crate::config::CliConfig;
 use crate::core::{finish_direct, map_core_error, open_direct_core};
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
-use nexus_contracts::{WorldRuleCreateRequest, WorldRuleUpdateRequest};
+use nexus_contracts::{WorldRuleCreateRequest, WorldRuleResponse, WorldRuleUpdateRequest};
 use nexus_core::{CoreService, Principal};
 use serde_json::{Map, Value};
 
@@ -107,21 +107,21 @@ pub enum RuleCommand {
 /// fails the core's AR-2 validation (add), or the core refuses the write
 /// (ownership, missing rule, storage).
 pub async fn run(cmd: RuleCommand, config: &CliConfig) -> Result<()> {
-    match cmd {
-        RuleCommand::Add {
-            world_id,
-            name,
-            kind,
-            statement,
-            severity,
-            entry_type,
-            status,
-            constraint,
-        } => {
-            let core = open_direct_core(config).await?;
-            let outcome = async {
-                let principal = core.active_principal().await.map_err(map_core_error)?;
-                rule_add(
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        match cmd {
+            RuleCommand::Add {
+                world_id,
+                name,
+                kind,
+                statement,
+                severity,
+                entry_type,
+                status,
+                constraint,
+            } => {
+                let rule = rule_add(
                     &core,
                     &principal,
                     &world_id,
@@ -133,31 +133,25 @@ pub async fn run(cmd: RuleCommand, config: &CliConfig) -> Result<()> {
                     &status,
                     &constraint,
                 )
-                .await
+                .await?;
+                Ok(Some(render_rule_add(&world_id, &rule)))
             }
-            .await;
-            finish_direct(&core, outcome).await?;
-            Ok(())
-        }
-        RuleCommand::List { world_id, json } => {
-            let core = open_direct_core(config).await?;
-            let outcome = async {
-                let principal = core.active_principal().await.map_err(map_core_error)?;
+            RuleCommand::List { world_id, json } => {
                 rule_list(&core, &principal, &world_id, json).await
             }
-            .await;
-            finish_direct(&core, outcome).await
-        }
-        RuleCommand::Deactivate { world_id, rule_id } => {
-            let core = open_direct_core(config).await?;
-            let outcome = async {
-                let principal = core.active_principal().await.map_err(map_core_error)?;
+            RuleCommand::Deactivate { world_id, rule_id } => {
                 rule_deactivate(&core, &principal, &world_id, &rule_id).await
             }
-            .await;
-            finish_direct(&core, outcome).await
         }
     }
+    .await;
+    // The leaves return their report; nothing reaches stdout until the shared
+    // seam released the writer, so a refused or unsettleable write is never
+    // reported as an added/listed/deactivated rule.
+    if let Some(text) = finish_direct(&core, outcome).await? {
+        println!("{text}");
+    }
+    Ok(())
 }
 
 // ── Leaf logic ────────────────────────────────────────────────────────
@@ -190,7 +184,8 @@ fn parse_constraint_object(constraint_json: &str) -> Result<Map<String, Value>> 
 /// `observer_cardinality` × `--entry-type` pair, the meta-field values and the
 /// AR-1 status set, mints the `rul_<32-hex>` id and inserts the full row.
 ///
-/// Returns the minted `rule_id`.
+/// Returns the created row (the core's own projection); [`render_rule_add`]
+/// renders it for the caller once the writer settled.
 ///
 /// # Errors
 ///
@@ -213,7 +208,7 @@ pub async fn rule_add(
     entry_types: &[String],
     status: &str,
     constraint_json: &str,
-) -> Result<String> {
+) -> Result<WorldRuleResponse> {
     let request = WorldRuleCreateRequest {
         canonical_name: name.to_string(),
         constraint: parse_constraint_object(constraint_json)?,
@@ -224,41 +219,47 @@ pub async fn rule_add(
         target_entry_types: entry_types.to_vec(),
     };
 
-    let rule = core
-        .create_world_rule(principal, world_id.to_string(), request)
+    core.create_world_rule(principal, world_id.to_string(), request)
         .await
-        .map_err(map_core_error)?;
+        .map_err(map_core_error)
+}
 
-    println!("✓ Rule added: {}", rule.rule_id);
-    println!("  World:       {world_id}");
-    println!("  Name:        {}", rule.canonical_name);
-    println!("  Kind:        {}", rule.kind);
-    println!(
-        "  Status:      {}",
-        rule.status.as_deref().unwrap_or("-")
-    );
-    println!(
-        "  Severity:    {}",
-        rule.severity_hint.as_deref().unwrap_or("-")
-    );
+/// Render one created rule — the human report `run` prints once the writer
+/// settled.
+fn render_rule_add(world_id: &str, rule: &WorldRuleResponse) -> String {
+    let mut lines = vec![
+        format!("✓ Rule added: {}", rule.rule_id),
+        format!("  World:       {world_id}"),
+        format!("  Name:        {}", rule.canonical_name),
+        format!("  Kind:        {}", rule.kind),
+        format!("  Status:      {}", rule.status.as_deref().unwrap_or("-")),
+        format!(
+            "  Severity:    {}",
+            rule.severity_hint.as_deref().unwrap_or("-")
+        ),
+    ];
     if !rule.target_entry_types.is_empty() {
-        println!("  Entry types: {}", rule.target_entry_types.join(", "));
+        lines.push(format!(
+            "  Entry types: {}",
+            rule.target_entry_types.join(", ")
+        ));
     }
-    println!(
+    lines.push(format!(
         "  Constraint:  {}",
         rule.constraint
             .get("family")
             .and_then(Value::as_str)
             .unwrap_or("-")
-    );
-    Ok(rule.rule_id)
+    ));
+    lines.join("\n")
 }
 
 /// `creator world rule list` — all rules of a world, **all statuses**
 /// (PD-1 list: store order `canonical_name ASC, rule_id ASC` — AR-3).
 ///
 /// `--json` emits the core's `WorldRulesListResponseRulesItem` array
-/// verbatim; the human table projects the same fields.
+/// verbatim; the human table projects the same fields. Returns the report
+/// `run` prints once the writer settled.
 ///
 /// # Errors
 ///
@@ -269,29 +270,29 @@ pub async fn rule_list(
     principal: &Principal,
     world_id: &str,
     json: bool,
-) -> Result<()> {
+) -> Result<Option<String>> {
     let response = core
         .list_world_rules(principal, world_id.to_string())
         .await
         .map_err(map_core_error)?;
 
     if json {
-        println!("{}", serde_json::to_string_pretty(&response.rules)?);
-        return Ok(());
+        return Ok(Some(serde_json::to_string_pretty(&response.rules)?));
     }
 
     if response.rules.is_empty() {
-        println!("No rules in world {world_id}.");
-        return Ok(());
+        return Ok(Some(format!("No rules in world {world_id}.")));
     }
 
-    println!("Rules in world {world_id}:");
-    println!(
-        "{:<24} {:<28} {:<12} {:<10} {:<10} STATEMENT",
-        "RULE_ID", "NAME", "KIND", "STATUS", "SEVERITY"
-    );
+    let mut lines = vec![
+        format!("Rules in world {world_id}:"),
+        format!(
+            "{:<24} {:<28} {:<12} {:<10} {:<10} STATEMENT",
+            "RULE_ID", "NAME", "KIND", "STATUS", "SEVERITY"
+        ),
+    ];
     for row in &response.rules {
-        println!(
+        lines.push(format!(
             "{:<24} {:<28} {:<12} {:<10} {:<10} {}",
             row.rule_id,
             row.canonical_name,
@@ -299,12 +300,12 @@ pub async fn rule_list(
             row.status.as_deref().unwrap_or("-"),
             row.severity_hint.as_deref().unwrap_or("-"),
             row.statement.as_deref().unwrap_or(""),
-        );
+        ));
     }
     if response.truncated {
-        println!("\n(truncated — more rules exist beyond the 500-row safety cap)");
+        lines.push("\n(truncated — more rules exist beyond the 500-row safety cap)".to_string());
     }
-    Ok(())
+    Ok(Some(lines.join("\n")))
 }
 
 /// `creator world rule deactivate` — set a rule's status to `deprecated`
@@ -313,6 +314,7 @@ pub async fn rule_list(
 /// This is the core's `status = deprecated` update: the World-ownership guard
 /// runs first and a `rule_id` that is unknown **or** belongs to another World
 /// is the core's 404 naming only the id (AR-6) — never a silent no-op.
+/// Returns the report `run` prints once the writer settled.
 ///
 /// # Errors
 ///
@@ -323,7 +325,7 @@ pub async fn rule_deactivate(
     principal: &Principal,
     world_id: &str,
     rule_id: &str,
-) -> Result<()> {
+) -> Result<Option<String>> {
     let request = WorldRuleUpdateRequest {
         status: Some(DEPRECATED_STATUS.to_string()),
         ..WorldRuleUpdateRequest::default()
@@ -338,6 +340,7 @@ pub async fn rule_deactivate(
     .await
     .map_err(map_core_error)?;
 
-    println!("✓ Rule deactivated: {rule_id} (status={DEPRECATED_STATUS})");
-    Ok(())
+    Ok(Some(format!(
+        "✓ Rule deactivated: {rule_id} (status={DEPRECATED_STATUS})"
+    )))
 }

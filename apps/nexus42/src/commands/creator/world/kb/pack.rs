@@ -126,12 +126,48 @@ pub async fn run(cmd: PackCommand, config: &CliConfig) -> Result<()> {
     let outcome = async {
         let principal = core.active_principal().await.map_err(map_core_error)?;
         match cmd {
-            PackCommand::Export(args) => export(args, &core, &principal).await,
+            PackCommand::Export(args) => {
+                export(args, &core, &principal).await.map(PackRender::Text)
+            }
             PackCommand::Import(args) => import(args, &core, &principal).await,
         }
     }
     .await;
-    finish_direct(&core, outcome).await
+    // Nothing reaches stdout until the shared seam released the writer, so a
+    // close that did not settle is never reported as an exported or imported
+    // pack.
+    match finish_direct(&core, outcome).await? {
+        PackRender::Text(text) => println!("{text}"),
+        PackRender::Import {
+            diagnostics,
+            response,
+            dry_run,
+        } => {
+            if !diagnostics.is_empty() {
+                print!("{diagnostics}");
+            }
+            render_import(&response, dry_run)?;
+        }
+    }
+    Ok(())
+}
+
+/// One `pack` leaf's post-settle render.
+///
+/// The leaves below return these values instead of printing, so the writer is
+/// always released before the first byte of command output.
+#[derive(Debug)]
+enum PackRender {
+    /// Text printed verbatim (`export`, `--review-import`).
+    Text(String),
+    /// One import run: the ST conversion notes that precede the summary (empty
+    /// on the pack path), the core's per-atom report, and the dry-run flag the
+    /// retained summary text depends on.
+    Import {
+        diagnostics: String,
+        response: PackImportResponse,
+        dry_run: bool,
+    },
 }
 
 /// Conflict-resolution policy for the import command.
@@ -203,12 +239,14 @@ pub struct ImportArgs {
 
 /// `creator world kb pack export` implementation.
 ///
+/// Returns the success summary `run` prints once the writer settled.
+///
 /// # Errors
 ///
 /// Returns `CliError` if the core refuses the export (no admitted Creator,
 /// unknown/foreign World, storage or pack projection failure) or the pack file
 /// cannot be written.
-async fn export(args: ExportArgs, core: &CoreService, principal: &Principal) -> Result<()> {
+async fn export(args: ExportArgs, core: &CoreService, principal: &Principal) -> Result<String> {
     let request = PackExportRequest {
         title: args.title.clone(),
         pack_version: Some(args.pack_version.clone()),
@@ -269,44 +307,68 @@ async fn export(args: ExportArgs, core: &CoreService, principal: &Principal) -> 
             .unwrap_or_default()
             .to_string()
     };
-    println!("✓ Knowledge pack exported: {}", out_path.display());
-    println!("  Title:     {}", meta_str("title"));
-    println!("  Version:   {}", meta_str("version"));
-    println!("  Creator:   {}", meta_str("creator"));
-    println!("  Entries:   {}", response.entries.len());
-    println!("  Relations: {}", response.relations.len());
+    let mut lines = vec![
+        format!("✓ Knowledge pack exported: {}", out_path.display()),
+        format!("  Title:     {}", meta_str("title")),
+        format!("  Version:   {}", meta_str("version")),
+        format!("  Creator:   {}", meta_str("creator")),
+        format!("  Entries:   {}", response.entries.len()),
+        format!("  Relations: {}", response.relations.len()),
+    ];
     if !args.include_owned_private {
-        println!(
+        lines.push(
             "  Scope:     shared rows only (pass --include-owned-private for owned private facts)"
+                .to_string(),
         );
     }
     if args.include_anchors {
-        println!("  Anchors:   0 (no persisted SourceAnchor store in nexus)");
+        lines.push("  Anchors:   0 (no persisted SourceAnchor store in nexus)".to_string());
     }
 
-    Ok(())
+    Ok(lines.join("\n"))
 }
 
 // ── Import ─────────────────────────────────────────────────────────────
 
 /// `creator world kb pack import` implementation.
 ///
+/// Returns the render `run` prints once the writer settled. A per-atom
+/// rejection (including a quarantine) is still the retained aggregate refusal,
+/// raised by [`render_import`] only after the report is visible.
+///
 /// # Errors
 ///
-/// Returns `CliError` if the source cannot be read or parsed, the review arm
-/// cannot read the batch, or any atom upsert/relate was rejected — including a
-/// quarantine (the atom is held outside the KB stores, so the run is not
-/// reported as a plain success).
-async fn import(args: ImportArgs, core: &CoreService, principal: &Principal) -> Result<()> {
+/// Returns `CliError` if the source cannot be read or parsed, a `--holder-map`
+/// is inadmissible, the review arm cannot read the batch, or the core refuses
+/// the World/admission.
+async fn import(args: ImportArgs, core: &CoreService, principal: &Principal) -> Result<PackRender> {
     // Read-only review arm (durable §6): the same command, mutually exclusive
     // with pack/ST input and mappings (clap enforces it). Core admission
     // authorizes it to the stored controlling Creator and the owning World.
     if let Some(batch_id) = args.review_import.as_deref() {
-        return review_quarantine(core, principal, &args.world_ref, batch_id).await;
+        return review_quarantine(core, principal, &args.world_ref, batch_id)
+            .await
+            .map(PackRender::Text);
     }
 
-    let response = import_report(core, principal, &args).await?;
-    render_import(&response, args.dry_run)
+    let run = import_report(core, principal, &args).await?;
+    Ok(PackRender::Import {
+        diagnostics: run.diagnostics,
+        response: run.response,
+        dry_run: args.dry_run,
+    })
+}
+
+/// One import run resolved through the core: the per-atom report plus the ST
+/// conversion notes that precede its summary (empty on the pack path).
+///
+/// The notes are carried out of the outcome instead of being printed inside it:
+/// a run the seam refuses must leave stdout untouched.
+struct ImportRun {
+    /// The core's per-atom import (or dry-run preview) report.
+    response: PackImportResponse,
+    /// `render_st_diagnostics` output, or empty when the source is a pack.
+    diagnostics: String,
 }
 
 /// Run one pack import (or its dry-run preview) through the typed core.
@@ -324,11 +386,13 @@ async fn import_report(
     core: &CoreService,
     principal: &Principal,
     args: &ImportArgs,
-) -> Result<PackImportResponse> {
+) -> Result<ImportRun> {
     let (value, diagnostics, source_display) = read_source(args)?;
-    if !diagnostics.is_empty() {
-        print!("{}", render_st_diagnostics(&diagnostics));
-    }
+    let diagnostics = if diagnostics.is_empty() {
+        String::new()
+    } else {
+        render_st_diagnostics(&diagnostics)
+    };
     let parsed = parse_pack(&value)
         .map_err(|e| CliError::Other(format!("Invalid pack format in {source_display}: {e}")))?;
     let serde_json::Value::Object(pack) = parsed.source else {
@@ -366,7 +430,10 @@ async fn import_report(
         core.import_world_pack(principal, world_id, request, holder_map)
             .await
     };
-    outcome.map_err(map_core_error)
+    Ok(ImportRun {
+        response: outcome.map_err(map_core_error)?,
+        diagnostics,
+    })
 }
 
 /// Read the selected pack/ST source: the document to import, the ST conversion
@@ -432,6 +499,10 @@ fn read_source(
 
 /// Render one core import report in the retained CLI texture.
 ///
+/// Called by `run` **after** [`finish_direct`] released the writer: the report
+/// and its stderr warnings describe a run the seam has already resolved, and
+/// the aggregate refusal below is returned only once they are visible.
+///
 /// # Errors
 ///
 /// Returns the retained aggregate refusal when any atom was rejected (a
@@ -482,7 +553,8 @@ fn render_import(response: &PackImportResponse, dry_run: bool) -> Result<()> {
 ///
 /// Read-only, owner-only, bounded by the core review arm. The original wire
 /// governance is printed exactly as the pack carried it — this is isolated
-/// local review, never a promotion of the row into a knowledge view.
+/// local review, never a promotion of the row into a knowledge view. Returns
+/// the report `run` prints once the writer settled.
 ///
 /// # Errors
 ///
@@ -493,35 +565,37 @@ async fn review_quarantine(
     principal: &Principal,
     world_id: &str,
     batch_id: &str,
-) -> Result<()> {
+) -> Result<String> {
     let review = core
         .review_world_pack_import(principal, world_id.to_string(), batch_id.to_string())
         .await
         .map_err(map_core_error)?;
-    println!(
+    let mut lines = vec![format!(
         "quarantined atoms in batch {}: {}",
         review.batch_id,
         review.atoms.len()
-    );
+    )];
     if review.truncated {
-        println!("  (truncated: the review is bounded; re-run after adopting mappings)");
+        lines.push(
+            "  (truncated: the review is bounded; re-run after adopting mappings)".to_string(),
+        );
     }
     for atom in &review.atoms {
-        println!(
+        lines.push(format!(
             "  {} entry {} reason {} owner {} disclosure {}",
             atom.quarantine_id,
             atom.entry_id,
             atom.reason.as_str(),
             atom.original_owner.as_deref().unwrap_or("<none>"),
             atom.original_disclosure.as_deref().unwrap_or("<none>"),
-        );
+        ));
         // The original atom JSON is printed exactly as the pack document
         // carried it (never a re-serialization of the typed entry).
         if let Some(original) = atom.original_entry.as_deref() {
-            println!("    original: {original}");
+            lines.push(format!("    original: {original}"));
         }
     }
-    Ok(())
+    Ok(lines.join("\n"))
 }
 
 /// Report the atoms one import held outside the KB stores.
@@ -1682,7 +1756,8 @@ mod tests {
             },
         )
         .await
-        .expect("first import must succeed");
+        .expect("first import must succeed")
+        .response;
 
         assert_eq!(
             summary.entries.created, 3,
@@ -1741,7 +1816,8 @@ mod tests {
             },
         )
         .await
-        .expect("re-import must succeed");
+        .expect("re-import must succeed")
+        .response;
 
         assert_eq!(
             summary2.entries.created, 0,
@@ -2210,7 +2286,8 @@ mod tests {
             },
         )
         .await
-        .expect("unknown entry_type must not fail import under skip");
+        .expect("unknown entry_type must not fail import under skip")
+        .response;
         assert_eq!(summary.entries.skipped, 1);
         assert_eq!(summary.entries.rejected, 0);
         assert_eq!(summary.entries.created, 1);
@@ -2259,7 +2336,8 @@ mod tests {
             },
         )
         .await
-        .unwrap();
+        .unwrap()
+        .response;
         assert!(summary.entries.renamed >= 1);
         assert_eq!(count_entries(&fx2.pool, WORLD).await, pre);
     }
@@ -2293,7 +2371,8 @@ mod tests {
             },
         )
         .await
-        .unwrap();
+        .unwrap()
+        .response;
         assert!(summary.entries.overwritten >= 1);
         assert_eq!(count_entries(&fx2.pool, WORLD).await, pre);
     }
@@ -2345,7 +2424,8 @@ mod tests {
             },
         )
         .await
-        .unwrap();
+        .unwrap()
+        .response;
         assert_eq!(summary.entries.renamed, 1);
         assert_eq!(summary.entries.rejected, 0);
         let entries = store.list_by_world(WORLD).await.unwrap();
@@ -2392,7 +2472,8 @@ mod tests {
             },
         )
         .await
-        .unwrap();
+        .unwrap()
+        .response;
         assert!(summary.relations.overwritten >= 1);
         assert_eq!(count_relations(&fx2.pool, WORLD).await, 1);
     }

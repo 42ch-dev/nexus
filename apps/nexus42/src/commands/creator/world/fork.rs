@@ -100,17 +100,17 @@ pub enum ForkCommand {
 /// or a named `CliError::Other` when the fork-point event cannot be resolved
 /// for parent-branch derivation.
 pub async fn run(cmd: ForkCommand, config: &CliConfig) -> Result<()> {
-    match cmd {
-        ForkCommand::Create {
-            world_id,
-            fork_point,
-            label,
-            parent_branch,
-            json,
-        } => {
-            let core = open_direct_core(config).await?;
-            let outcome = async {
-                let principal = core.active_principal().await.map_err(map_core_error)?;
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        match cmd {
+            ForkCommand::Create {
+                world_id,
+                fork_point,
+                label,
+                parent_branch,
+                json,
+            } => {
                 fork_create(
                     &core,
                     &principal,
@@ -122,23 +122,21 @@ pub async fn run(cmd: ForkCommand, config: &CliConfig) -> Result<()> {
                 )
                 .await
             }
-            .await;
-            finish_direct(&core, outcome).await
-        }
-        ForkCommand::List {
-            world_id,
-            branch,
-            json,
-        } => {
-            let core = open_direct_core(config).await?;
-            let outcome = async {
-                let principal = core.active_principal().await.map_err(map_core_error)?;
-                fork_list(&core, &principal, &world_id, branch.as_deref(), json).await
-            }
-            .await;
-            finish_direct(&core, outcome).await
+            ForkCommand::List {
+                world_id,
+                branch,
+                json,
+            } => fork_list(&core, &principal, &world_id, branch.as_deref(), json).await,
         }
     }
+    .await;
+    // The leaves return their report; nothing reaches stdout until the shared
+    // seam released the writer, so a close that did not settle is never
+    // reported as a created/listed fork.
+    if let Some(text) = finish_direct(&core, outcome).await? {
+        println!("{text}");
+    }
+    Ok(())
 }
 
 /// Read one bounded timeline-events page for an owned World through the core.
@@ -213,6 +211,8 @@ async fn resolve_parent_branch(
 /// `creator world fork create <world_id> --fork-point <event_id>` —
 /// create a new timeline fork through the core.
 ///
+/// Returns the human/`--json` report `run` prints once the writer settled.
+///
 /// # Errors
 ///
 /// Returns a named `CliError::Other` when the fork-point cannot be resolved, or
@@ -225,7 +225,7 @@ async fn fork_create(
     label: Option<&str>,
     parent_branch: Option<&str>,
     json: bool,
-) -> Result<()> {
+) -> Result<Option<String>> {
     let parent_branch_id =
         resolve_parent_branch(core, principal, world_id, fork_point, parent_branch).await?;
     let label = label
@@ -243,16 +243,15 @@ async fn fork_create(
         .create_fork(principal, world_id.to_string(), request)
         .await
         .map_err(map_core_error)?;
-    if json {
-        println!("{}", serde_json::to_string_pretty(&resp)?);
+    Ok(Some(if json {
+        serde_json::to_string_pretty(&resp)?
     } else {
-        println!("Fork created:");
-        println!("  branch_id:        {}", resp.branch_id);
-        println!("  parent_branch_id: {}", resp.parent_branch_id);
-        println!("  fork-point:       {}", resp.forked_from_event_id);
-        println!("  created_at:       {}", resp.created_at);
-    }
-    Ok(())
+        format!(
+            "Fork created:\n  branch_id:        {}\n  parent_branch_id: {}\n  \
+             fork-point:       {}\n  created_at:       {}",
+            resp.branch_id, resp.parent_branch_id, resp.forked_from_event_id, resp.created_at
+        )
+    }))
 }
 
 /// A projected fork marker (V1.162 carrier B lineage).
@@ -289,7 +288,8 @@ fn fork_marker(evt: &TimelineEventInfo) -> Option<ForkMarker> {
 /// Pure projection of the existing timeline-events read (V1.162 carrier B
 /// — no fork-list route exists by design; **no new read**). The read targets a
 /// single branch: the World's current branch by default (the AR-84 pinned
-/// query verbatim) or `--branch` when given.
+/// query verbatim) or `--branch` when given. Returns the report `run` prints
+/// once the writer settled.
 ///
 /// # Errors
 ///
@@ -301,7 +301,7 @@ async fn fork_list(
     world_id: &str,
     branch: Option<&str>,
     json: bool,
-) -> Result<()> {
+) -> Result<Option<String>> {
     let page = timeline_page(
         core,
         principal,
@@ -313,37 +313,38 @@ async fn fork_list(
     .await?;
     let markers: Vec<ForkMarker> = page.items.iter().filter_map(fork_marker).collect();
 
-    if json {
-        println!("{}", serde_json::to_string_pretty(&markers)?);
+    Ok(Some(if json {
+        serde_json::to_string_pretty(&markers)?
     } else if markers.is_empty() {
         if branch.is_some() {
-            println!(
+            format!(
                 "No fork marker on branch {} of {world_id}.",
                 branch.unwrap_or("")
-            );
+            )
         } else {
-            println!(
-                "No fork marker on the world's current branch (root branches carry no \
-                 marker — V1.162 carrier B is branch-scoped). Pass --branch <branch-id> \
-                 (the id printed by `fork create`) to read a fork branch's lineage."
-            );
+            "No fork marker on the world's current branch (root branches carry no \
+             marker — V1.162 carrier B is branch-scoped). Pass --branch <branch-id> \
+             (the id printed by `fork create`) to read a fork branch's lineage."
+                .to_string()
         }
     } else {
-        println!("Fork markers for {world_id}:");
-        println!(
-            "{:<20} {:<20} {:<20} LABEL",
-            "BRANCH_ID", "PARENT_BRANCH", "FORK-POINT"
-        );
+        let mut lines = vec![
+            format!("Fork markers for {world_id}:"),
+            format!(
+                "{:<20} {:<20} {:<20} LABEL",
+                "BRANCH_ID", "PARENT_BRANCH", "FORK-POINT"
+            ),
+        ];
         for marker in &markers {
-            println!(
+            lines.push(format!(
                 "{:<20} {:<20} {:<20} {}",
                 marker.branch_id,
                 marker.parent_branch_id,
                 marker.forked_from_event_id,
                 marker.label
-            );
+            ));
         }
-        println!("\n{} fork marker(s)", markers.len());
-    }
-    Ok(())
+        lines.push(format!("\n{} fork marker(s)", markers.len()));
+        lines.join("\n")
+    }))
 }

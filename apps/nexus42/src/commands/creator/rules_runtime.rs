@@ -80,13 +80,20 @@ pub async fn handle_findings(config: &CliConfig, command: FindingsCommand) -> Re
         }
     }
     .await;
-    finish_direct(&core, outcome).await
+    // The arms return their report; nothing reaches stdout until the shared
+    // seam released the writer, so an accepted/pruned/listed finding is never
+    // reported ahead of a close that did not settle.
+    if let Some(text) = finish_direct(&core, outcome).await? {
+        println!("{text}");
+    }
+    Ok(())
 }
 
 /// Handle `creator works rules …` (V1.48 P2).
 ///
 /// The Work read comes from the typed core; the `AGENTS.md` reset itself stays
-/// the guarded local library call it always was.
+/// the guarded local library call it always was. The outcome returns the report
+/// and the writer is released by [`finish_direct`] before any line is printed.
 ///
 /// # Errors
 ///
@@ -107,7 +114,10 @@ pub async fn handle_rules(config: &CliConfig, command: RulesCommand) -> Result<(
         }
     }
     .await;
-    finish_direct(&core, outcome).await
+    if let Some(text) = finish_direct(&core, outcome).await? {
+        println!("{text}");
+    }
+    Ok(())
 }
 
 /// `creator works findings accept <finding_id>` (overlay §3.2).
@@ -131,7 +141,7 @@ async fn handle_findings_accept(
     principal: &Principal,
     finding_id: &str,
     json: bool,
-) -> Result<()> {
+) -> Result<Option<String>> {
     // 1. Read the finding (creator-scoped, V1.48 P2).
     let finding = core
         .get_finding(principal, finding_id.to_string())
@@ -203,7 +213,7 @@ async fn handle_findings_accept(
         true
     };
 
-    if json {
+    Ok(Some(if json {
         let appended = matches!(
             outcome,
             nexus_orchestration::rules_layers::AppendOutcome::Appended
@@ -216,35 +226,32 @@ async fn handle_findings_accept(
             "appended": appended,
             "resolved_now": resolved_now,
         });
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&body).unwrap_or_default()
-        );
+        serde_json::to_string_pretty(&body).unwrap_or_default()
     } else {
         let agents_md_rel = std::path::Path::new("Works")
             .join(work_ref)
             .join("AGENTS.md");
-        match outcome {
+        let mut lines = vec![match outcome {
             nexus_orchestration::rules_layers::AppendOutcome::Appended => {
-                println!(
+                format!(
                     "✓ Appended rule suggestion from finding {finding_id} to {rel}",
                     rel = agents_md_rel.display()
-                );
+                )
             }
             nexus_orchestration::rules_layers::AppendOutcome::AlreadyPresent => {
-                println!(
+                format!(
                     "• Finding {finding_id} already recorded in {rel} (idempotent — no change)",
                     rel = agents_md_rel.display()
-                );
+                )
             }
-        }
+        }];
         if resolved_now {
-            println!("✓ Marked finding {finding_id} as resolved");
+            lines.push(format!("✓ Marked finding {finding_id} as resolved"));
         } else if already_resolved {
-            println!("• Finding {finding_id} was already resolved");
+            lines.push(format!("• Finding {finding_id} was already resolved"));
         }
-    }
-    Ok(())
+        lines.join("\n")
+    }))
 }
 
 /// `creator works findings prune [--older-than <days>] [--dry-run]`
@@ -264,42 +271,37 @@ async fn handle_findings_prune(
     older_than_days: i64,
     dry_run: bool,
     json: bool,
-) -> Result<()> {
+) -> Result<Option<String>> {
     let outcome = core
         .prune_findings(principal, Some(older_than_days), dry_run)
         .await
         .map_err(map_core_error)?;
 
     if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "count": outcome.count,
-                "older_than_days": outcome.older_than_days,
-                "dry_run": outcome.dry_run,
-                "now_epoch": outcome.now_epoch,
-            }))?
-        );
-        return Ok(());
+        return Ok(Some(serde_json::to_string_pretty(&serde_json::json!({
+            "count": outcome.count,
+            "older_than_days": outcome.older_than_days,
+            "dry_run": outcome.dry_run,
+            "now_epoch": outcome.now_epoch,
+        }))?));
     }
 
     let count = outcome.count;
     let days = outcome.older_than_days;
-    if outcome.dry_run {
+    Ok(Some(if outcome.dry_run {
         if count == 0 {
-            println!("• No resolved findings older than {days} days to prune (dry-run).");
+            format!("• No resolved findings older than {days} days to prune (dry-run).")
         } else {
-            println!(
+            format!(
                 "Dry run — {count} resolved finding(s) older than {days} day(s) \
                  would be pruned. Re-run without --dry-run to delete."
-            );
+            )
         }
     } else if count == 0 {
-        println!("• No resolved findings older than {days} days to prune; nothing deleted.");
+        format!("• No resolved findings older than {days} days to prune; nothing deleted.")
     } else {
-        println!("✓ Pruned {count} resolved finding(s) older than {days} day(s).");
-    }
-    Ok(())
+        format!("✓ Pruned {count} resolved finding(s) older than {days} day(s).")
+    }))
 }
 
 /// `creator works findings list <work_id> [--status …] [--severity …] [--json]`
@@ -319,7 +321,7 @@ async fn handle_findings_list(
     status: Option<String>,
     severity: Option<String>,
     json: bool,
-) -> Result<()> {
+) -> Result<Option<String>> {
     let resolved_id = match work_id {
         Some(id) => id,
         None => active_work_id_core(core, principal).await?,
@@ -342,38 +344,36 @@ async fn handle_findings_list(
         // the same shapes the generated wrapper nests (its element/pagination
         // types are re-declared per schema file and are not constructible from
         // the core's carriers), so the body is assembled from them directly.
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "items": resp.items,
-                "pagination": resp.pagination,
-            }))?
-        );
-        return Ok(());
+        return Ok(Some(serde_json::to_string_pretty(&serde_json::json!({
+            "items": resp.items,
+            "pagination": resp.pagination,
+        }))?));
     }
     if resp.items.is_empty() {
-        println!("No findings for work '{resolved_id}'.");
-        return Ok(());
+        return Ok(Some(format!("No findings for work '{resolved_id}'.")));
     }
-    println!("Findings for work '{resolved_id}':\n");
-    println!(
-        "{:<36} {:<10} {:<10} {:<12} TITLE",
-        "FINDING_ID", "STATUS", "SEVERITY", "TARGET"
-    );
-    println!("{}", "-".repeat(100));
+    let mut lines = vec![
+        format!("Findings for work '{resolved_id}':\n"),
+        format!(
+            "{:<36} {:<10} {:<10} {:<12} TITLE",
+            "FINDING_ID", "STATUS", "SEVERITY", "TARGET"
+        ),
+        "-".repeat(100),
+    ];
     for f in &resp.items {
-        println!(
+        lines.push(format!(
             "{:<36} {:<10} {:<10} {:<12} {}",
             f.finding_id, f.status, f.severity, f.target_executor, f.title
-        );
+        ));
     }
     if resp.pagination.has_more {
-        println!(
+        lines.push(
             "\n(truncated — more findings exist; refine with --status/--severity or use --json for the complete DTO)"
+                .to_string(),
         );
     }
-    println!("\n{} finding(s)", resp.items.len());
-    Ok(())
+    lines.push(format!("\n{} finding(s)", resp.items.len()));
+    Ok(Some(lines.join("\n")))
 }
 
 /// `creator works findings set-status <finding_id> --work <work_id> --status <s>
@@ -396,7 +396,7 @@ async fn handle_findings_set_status(
     status: &str,
     target_executor: Option<&str>,
     json: bool,
-) -> Result<()> {
+) -> Result<Option<String>> {
     // Work ownership on the work-scoped route: the core's creator-scoped
     // `update_finding` deliberately leaves that check to its caller, so the
     // read the retired route performed happens here — before any write.
@@ -416,12 +416,11 @@ async fn handle_findings_set_status(
         )
         .await
         .map_err(map_core_error)?;
-    if json {
-        println!("{}", serde_json::to_string_pretty(&resp)?);
-        return Ok(());
-    }
-    println!("Finding '{finding_id}' status set to '{}'.", resp.status);
-    Ok(())
+    Ok(Some(if json {
+        serde_json::to_string_pretty(&resp)?
+    } else {
+        format!("Finding '{finding_id}' status set to '{}'.", resp.status)
+    }))
 }
 
 /// Resolve the operational workspace dir or return a helpful error.
@@ -452,6 +451,12 @@ fn operational_workspace_dir_or_error() -> Result<std::path::PathBuf> {
 /// - Default (neither flag): print the diff, then prompt for confirmation
 ///   before overwriting. Non-interactive stdin without `--yes` is an error.
 ///
+/// Returns the report `handle_rules` prints once the writer settled. The
+/// confirmation prompt itself (the diff it shows and its question) necessarily
+/// runs inside the outcome: it decides whether the admitted writer writes at
+/// all, so it cannot be deferred past the seam without a second writer
+/// admission.
+///
 /// # Errors
 ///
 /// Returns [`crate::errors::CliError`] on the mapped core refusal, missing
@@ -468,7 +473,7 @@ async fn handle_rules_reset(
     dry_run: bool,
     yes: bool,
     json: bool,
-) -> Result<()> {
+) -> Result<Option<String>> {
     let resolved_work_id = match work_id {
         Some(id) => id,
         None => active_work_id_core(core, principal).await?,
@@ -514,8 +519,7 @@ async fn handle_rules_reset(
             } else {
                 serde_json::Value::String(diff)
             };
-            println!(
-                "{}",
+            return Ok(Some(
                 serde_json::to_string_pretty(&serde_json::json!({
                     "work_id": resolved_work_id,
                     "work_ref": work_ref,
@@ -524,54 +528,47 @@ async fn handle_rules_reset(
                     "would_change": would_change,
                     "diff": diff_value,
                 }))
-                .unwrap_or_default()
-            );
-        } else if current.is_none() {
-            println!(
-                "• {rel} does not exist; reset would create it with the default scaffold.",
-                rel = agents_md_rel.display()
-            );
-            println!("--- preview: default scaffold ---");
-            print!("{scaffold}");
-            if !scaffold.ends_with('\n') {
-                println!();
-            }
+                .unwrap_or_default(),
+            ));
+        }
+        return Ok(Some(if current.is_none() {
+            format!(
+                "• {rel} does not exist; reset would create it with the default scaffold.\n\
+                 --- preview: default scaffold ---\n{body}",
+                rel = agents_md_rel.display(),
+                body = without_trailing_newline(&scaffold)
+            )
         } else if !would_change {
-            println!(
+            format!(
                 "• {rel} already matches the default scaffold (no changes).",
                 rel = agents_md_rel.display()
-            );
+            )
         } else {
-            println!(
-                "Dry run — no files modified. Proposed reset of {rel}:",
-                rel = agents_md_rel.display()
-            );
-            print!("{diff}");
-        }
-        return Ok(());
+            format!(
+                "Dry run — no files modified. Proposed reset of {rel}:\n{body}",
+                rel = agents_md_rel.display(),
+                body = without_trailing_newline(&diff)
+            )
+        }));
     }
 
     // ── Nothing to do: file already matches the scaffold. ──────────────
     if !would_change {
-        if json {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&serde_json::json!({
-                    "work_id": resolved_work_id,
-                    "work_ref": work_ref,
-                    "agents_md_path": agents_md_path.to_string_lossy(),
-                    "reset": false,
-                    "reason": "already matches default scaffold",
-                }))
-                .unwrap_or_default()
-            );
+        return Ok(Some(if json {
+            serde_json::to_string_pretty(&serde_json::json!({
+                "work_id": resolved_work_id,
+                "work_ref": work_ref,
+                "agents_md_path": agents_md_path.to_string_lossy(),
+                "reset": false,
+                "reason": "already matches default scaffold",
+            }))
+            .unwrap_or_default()
         } else {
-            println!(
+            format!(
                 "• {rel} already matches the default scaffold (no changes).",
                 rel = agents_md_rel.display()
-            );
-        }
-        return Ok(());
+            )
+        }));
     }
 
     // ── Pending changes. Confirm unless `--yes`. ───────────────────────
@@ -579,8 +576,7 @@ async fn handle_rules_reset(
         if json {
             // Machine-readable mode cannot host an interactive prompt; report
             // that confirmation is required and exit without writing.
-            println!(
-                "{}",
+            return Ok(Some(
                 serde_json::to_string_pretty(&serde_json::json!({
                     "work_id": resolved_work_id,
                     "work_ref": work_ref,
@@ -589,16 +585,14 @@ async fn handle_rules_reset(
                     "confirmation_required": true,
                     "hint": "pass --yes to proceed non-interactively",
                 }))
-                .unwrap_or_default()
-            );
-            return Ok(());
+                .unwrap_or_default(),
+            ));
         }
         if !confirm_reset_interactive(&agents_md_rel, &diff)? {
-            println!(
+            return Ok(Some(format!(
                 "• Reset declined; {rel} left unchanged.",
                 rel = agents_md_rel.display()
-            );
-            return Ok(());
+            )));
         }
     }
 
@@ -607,27 +601,36 @@ async fn handle_rules_reset(
         CliError::Other(format!("Failed to reset {}: {e}", agents_md_path.display()))
     })?;
 
-    if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "work_id": resolved_work_id,
-                "work_ref": work_ref,
-                "agents_md_path": agents_md_path.to_string_lossy(),
-                "reset": true,
-            }))
-            .unwrap_or_default()
-        );
+    Ok(Some(if json {
+        serde_json::to_string_pretty(&serde_json::json!({
+            "work_id": resolved_work_id,
+            "work_ref": work_ref,
+            "agents_md_path": agents_md_path.to_string_lossy(),
+            "reset": true,
+        }))
+        .unwrap_or_default()
     } else {
-        println!(
+        format!(
             "✓ Reset {rel} to default scaffold",
             rel = agents_md_rel.display()
-        );
-    }
-    Ok(())
+        )
+    }))
+}
+
+/// The body of a renderable block whose own trailing newline the caller's
+/// single `println!` would otherwise double: `print!`-then-`println!` and
+/// `println!` produce the same bytes only when the body carries no final
+/// newline of its own.
+fn without_trailing_newline(text: &str) -> &str {
+    text.strip_suffix('\n').unwrap_or(text)
 }
 
 /// Human-mode confirmation: print the diff and prompt before the reset.
+///
+/// Its output **is** the prompt (the diff the operator decides on), so it runs
+/// inside the outcome by necessity — before the write and therefore before the
+/// seam settles. It is not part of the returned report, which carries only the
+/// outcome the seam has already resolved.
 ///
 /// Returns `Ok(true)` when the user confirms, `Ok(false)` when they decline.
 /// Errors when stdin is not a terminal (callers should pass `--yes` for
