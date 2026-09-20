@@ -34,8 +34,9 @@
 //!
 //! Topology rules (product draft `fl-r-connect-host-foundation.md` §2.1/§2.6):
 //! - mDNS is **never** enabled (`spoke-connect/mdns` not in the feature set).
-//! - `nexus42 daemon start` MUST NOT open a Connect listener — only
-//!   `connect start` does (feature-on binary still keeps the daemon unchanged).
+//! - The daemon boot MUST NOT open a Connect listener — only `connect start`
+//!   (and the headless `nexus-runtime` bin, which shares this boot) does;
+//!   enabling `connect-host` never turns the daemon into a Connect host.
 //! - Identity + allowlist persist under `~/.nexus42/connect/` (home-layout
 //!   path helpers); missing allowlist ⇒ fail-closed (rejects all peers).
 //! - N-C1 coexistence with a co-running daemon/CLI is governed by the

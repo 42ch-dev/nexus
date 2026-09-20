@@ -145,10 +145,11 @@ pub struct WorkspaceState {
     /// execution task. Dropped with the state; the daemon shutdown path calls
     /// [`nexus_core::execution::ExecutionHandle::close`] explicitly.
     execution_handle: Arc<RwLock<Option<Arc<nexus_core::execution::ExecutionHandle>>>>,
-    /// Production prompt executor (A1, v1.186 P1 T2) — the daemon-owned
-    /// `HostPromptExecutor` over the Host facade. Set at daemon boot when a
-    /// creator DB is present; `None` on Tier-0 boot. Schedule admission
-    /// resolves it here to wire the same executor into driven graphs.
+    /// Production prompt executor (A1, v1.186 P1 T2) — the
+    /// [`nexus_core::execution::prompt_executor::HostPromptExecutor`] (moved
+    /// to core execution by v1.193 P2-T2) over the Host facade. Set at daemon
+    /// boot when a creator DB is present; `None` on Tier-0 boot. Schedule
+    /// admission resolves it here to wire the same executor into driven graphs.
     prompt_executor: Arc<RwLock<Option<Arc<dyn nexus_orchestration::capability::PromptExecutor>>>>,
     /// Shared per-run cancellation tokens (A1, v1.186 P1 T2) — the same map
     /// the engine registers run tokens in and the prompt executor resolves.
