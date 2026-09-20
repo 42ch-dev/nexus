@@ -170,11 +170,11 @@ pub enum WorldKbCommand {
 
 /// Run a `creator world kb` subcommand.
 ///
-/// The direct-core leaves route to the shared seam ([`service`]) first and
-/// never touch the local workspace pool; the local leaves are admitted by the
-/// same pre-flight before that pool is opened, so no `creator world kb`
-/// entrance can migrate — and therefore create — a workspace the selection
-/// never had.
+/// The direct-core leaves route to the shared seam ([`service`] and [`pack`])
+/// first and never touch the local workspace pool; the local leaves are
+/// admitted by the same pre-flight before that pool is opened, so no
+/// `creator world kb` entrance can migrate — and therefore create — a workspace
+/// the selection never had.
 ///
 /// # Errors
 ///
@@ -185,13 +185,14 @@ pub enum WorldKbCommand {
 #[allow(clippy::future_not_send)]
 pub async fn run(cmd: WorldKbCommand, config: &CliConfig) -> Result<()> {
     match cmd {
-        // Direct-core leaves: `open_direct_core` inside the service owns their
-        // admission, and it refuses an unmaterialized selection *before*
-        // `CoreService::open`. The local pool [`run_local`] opens runs
-        // `Schema::init`, which migrates — and therefore creates — the selected
-        // workspace, so these two must not reach it at all.
+        // Direct-core leaves: `open_direct_core` inside the service (or the
+        // pack leaf) owns their admission, and it refuses an unmaterialized
+        // selection *before* `CoreService::open`. The local pool [`run_local`]
+        // opens runs `Schema::init`, which migrates — and therefore creates —
+        // the selected workspace, so these must not reach it at all.
         WorldKbCommand::Entity { command } => run_entity(command, config).await,
         WorldKbCommand::Graph { args } => super::run_graph(args, config).await,
+        WorldKbCommand::Pack { command } => pack::run(command, config).await,
         cmd => run_local(cmd, config).await,
     }
 }
@@ -200,8 +201,9 @@ pub async fn run(cmd: WorldKbCommand, config: &CliConfig) -> Result<()> {
 ///
 /// The seam's admission pre-flight runs before the pool open, so a selection
 /// that names no materialized workspace is refused instead of having one
-/// created for it. The pack branch is admitted the same way: it hands this
-/// pool to a core route, so it owes the same pre-flight as the direct-core
+/// created for it. The pack branch is not here: it no longer takes this pool
+/// (its export/import/review run on the typed core through the same seam), so
+/// it is routed before the local pool opens like the other direct-core
 /// leaves.
 #[allow(clippy::future_not_send)]
 async fn run_local(cmd: WorldKbCommand, config: &CliConfig) -> Result<()> {
@@ -267,9 +269,10 @@ async fn run_local(cmd: WorldKbCommand, config: &CliConfig) -> Result<()> {
             let ws_root = crate::config::find_workspace_root();
             kb_reject(&pool, &creator_id, &extract_job_id, ws_root.as_deref()).await
         }
-        WorldKbCommand::Pack { command } => pack::run(command, config, &pool).await,
-        // `run` routes these two to the seam before this pool is opened.
-        WorldKbCommand::Entity { .. } | WorldKbCommand::Graph { .. } => {
+        // `run` routes these to the seam before this pool is opened.
+        WorldKbCommand::Pack { .. }
+        | WorldKbCommand::Entity { .. }
+        | WorldKbCommand::Graph { .. } => {
             unreachable!("direct-core KB leaves are routed before the local pool opens")
         }
     }
