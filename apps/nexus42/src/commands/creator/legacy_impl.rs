@@ -51,7 +51,7 @@ use std::path::PathBuf;
 
 // Re-export KB types so `CreatorCommand::Kb` variant and `KbCommand` remain
 // accessible from `super::` for existing consumers and tests.
-pub use kb::{KbCommand, KbScope};
+pub use kb::KbCommand;
 
 /// Default registration source for the CLI.
 const DEFAULT_REGISTRATION_SOURCE: &str = "cli";
@@ -435,13 +435,13 @@ pub enum CreatorCommand {
         command: MemoryCommand,
     },
 
-    /// Work-scope file index and World KB knowledge entries
+    /// Work-scope file index (local per-creator, per-workspace documents under `kb/`)
     ///
-    /// Manages TWO knowledge scopes:
-    ///   • `--scope work` (default): local workspace file index — per-creator,
-    ///     per-workspace documents stored under `kb/`. NOT the World narrative KB.
-    ///   • `--scope world`: narrative KB knowledge entries (nexus-knowledge + nexus-narrative),
-    ///     requires `--world-id`.
+    /// The work index is the only `creator kb` scope: `list|search|show|add|remove`
+    /// run against the local files, `queue-extract|extract-status` against the
+    /// local extract queue, and `rescan` over chapter prose. There is no World
+    /// scope here — World narrative KB entries live on `creator world kb`, and
+    /// the old `--scope world` compatibility spelling is gone.
     ///
     /// For User-scoped global knowledge, use `creator knowledge` instead.
     /// See entity-scope-model §5.3–5.4 for the three KB namespaces.

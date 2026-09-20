@@ -1,20 +1,34 @@
-//! KB command handlers (local work-scope file index + world KB + extract queue).
+//! KB command handlers (local work-scope file index + extract queue).
 //!
 //! Extracted from `creator/mod.rs` (R19 module refactor).
-//! All `creator kb` subcommands are routed through [`run`].
+//! All `creator kb` subcommands are routed through `run`.
 //!
-//! # V1.52 T-A P1: Legacy World KB alias (R-V150KBED-01)
+//! The work-scope index leaves (`list|search|show|add|remove`) run on the
+//! shared direct-call seam (`crate::core`): one owner-scoped `CoreService` is
+//! opened, the typed index call is issued (`list_kb_entries`, `get_kb_entry`,
+//! `add_kb_entry`, `delete_kb_entry`), and the writer is released before
+//! anything is rendered. There is no daemon probe and no HTTP fallback.
 //!
-//! `creator kb --scope world <subcmd>` is a **deprecated alias** for the
-//! canonical `creator world kb <subcmd>` surface (see `world::kb` module).
-//! World-scope operations forward to the canonical hermetic functions and
-//! emit a deprecation warning on each invocation. Planned removal V1.53.
+//! The extract queue (`queue-extract`, `extract-status`) and the refreshable
+//! scan (`rescan`) stay on the existing local stores; both are admitted at the
+//! seam (`crate::core::require_materialized_workspace`) before their pool open,
+//! so no `creator kb` entrance can migrate — and therefore create — a workspace
+//! the selection never had.
+//!
+//! World-scoped narrative KB lives on the canonical `creator world kb` surface
+//! (`commands::creator::world::kb`); `creator kb` serves the work-scope file
+//! index only (entity-scope-model §5.3). User-scoped global knowledge is
+//! `creator knowledge`.
 
 use crate::config::CliConfig;
+use crate::core::{finish_direct, map_core_error, open_direct_core, require_materialized_workspace};
 use crate::errors::{CliError, Result};
 use crate::paths;
-use nexus_knowledge::world_kb::KbStore;
-use sqlx::SqlitePool;
+use nexus_contracts::{
+    AddKbEntryRequest, DeleteKbEntryResponse, GetKbEntryResponse, ListKbEntriesQuery,
+    ListKbEntriesResponse,
+};
+use nexus_core::Principal;
 use std::path::PathBuf;
 
 /// Refreshable-scan submodule (V1.50 T-B P2; V1.51 T-A P1 work-scoped).
@@ -28,75 +42,26 @@ pub use rescan::{
     RescanReport, WorkRescanReport,
 };
 
-/// KB scope: `work` (local workspace file index, default) or `world` (narrative KB via nexus-kb).
-///
-/// Per entity-scope-model §5.3, `creator kb --scope work` is the **CLI local work KB index** —
-/// a per-creator, per-workspace file-based index stored under
-/// `~/.nexus42/creators/<id>/workspaces/<slug>/kb/`. It is NOT `nexus-kb` (World-scoped
-/// narrative KB graph) or `nexus-knowledge` (User-scoped global knowledge).
-///
-/// `--scope world` routes to `nexus-kb` + `nexus-narrative` and requires
-/// a `--world-id <id>`. User/global knowledge will NOT be a `creator kb` scope.
-#[derive(Debug, Clone, clap::ValueEnum, Default, PartialEq, Eq)]
-pub enum KbScope {
-    /// Local workspace file index (default)
-    #[default]
-    Work,
-    /// World-scoped narrative KB (nexus-kb + nexus-narrative)
-    World,
-}
-
 /// Knowledge base subcommands.
 ///
-/// Two scopes via `--scope`:
-///   • `work` (default) — local workspace file index under `kb/`
-///   • `world` — narrative KB knowledge entries (requires `--world-id`)
-///
-/// For User-scoped global knowledge entries, use `creator knowledge` instead.
-/// For reference sources, use `creator reference`.
+/// All of them serve the work-scope file index (entity-scope-model §5.3).
+/// For World-scoped narrative KB entries use `creator world kb`; for
+/// User-scoped global knowledge entries use `creator knowledge`.
 #[derive(Debug, clap::Subcommand)]
 pub enum KbCommand {
-    /// List entries (work-scope file index by default; use --scope world for knowledge entries)
-    List {
-        /// Scope: `work` (local file index, default) or `world` (narrative KB).
-        ///
-        /// Note: `--scope world` is deprecated; use `creator world kb list` instead
-        /// (planned removal V1.53).
-        #[arg(long, value_enum, default_value_t = KbScope::default())]
-        scope: KbScope,
-        /// World ID for `--scope world` (required when scope is `world`)
-        #[arg(long)]
-        world_id: Option<String>,
-    },
+    /// List work-scope entries from the local workspace file index
+    List,
 
-    /// Search local work-scope entries by title/content
+    /// Search local work-scope entries by title
     Search {
         /// Search query string
         query: String,
-        /// Scope: `work` (local file index, default) or `world` (narrative KB).
-        ///
-        /// Note: `--scope world` is deprecated; use `creator world kb search`
-        /// instead (planned removal V1.53).
-        #[arg(long, value_enum, default_value_t = KbScope::default())]
-        scope: KbScope,
-        /// World ID for `--scope world` (required when scope is `world`)
-        #[arg(long)]
-        world_id: Option<String>,
     },
 
     /// Show a single local work-scope entry
     Show {
-        /// Entry ID to display (e.g. `kb_a1b2c3d4` or a key-block ID)
+        /// Entry ID to display (e.g. `kb_a1b2c3d4`)
         entry_id: String,
-        /// Scope: `work` (local file index, default) or `world` (narrative KB).
-        ///
-        /// Note: `--scope world` is deprecated; use `creator world kb show`
-        /// instead (planned removal V1.53).
-        #[arg(long, value_enum, default_value_t = KbScope::default())]
-        scope: KbScope,
-        /// World ID for `--scope world` (required when scope is `world`)
-        #[arg(long)]
-        world_id: Option<String>,
     },
 
     /// Add a local work-scope entry from a file
@@ -107,33 +72,12 @@ pub enum KbCommand {
         /// Optional title (defaults to filename stem)
         #[arg(long)]
         title: Option<String>,
-        /// Scope: `work` (local file index, default) or `world` (narrative KB).
-        ///
-        /// Note: `--scope world` is deprecated; use `creator world kb add`
-        /// instead (planned removal V1.53).
-        #[arg(long, value_enum, default_value_t = KbScope::default())]
-        scope: KbScope,
-        /// World ID for `--scope world` (required when scope is `world`)
-        #[arg(long)]
-        world_id: Option<String>,
-        /// Block type for `--scope world` (e.g. Character, Scene, Item)
-        #[arg(long)]
-        block_type: Option<String>,
     },
 
     /// Remove a local work-scope entry
     Remove {
         /// Entry ID to remove (e.g. `kb_a1b2c3d4`)
         entry_id: String,
-        /// Scope: `work` (local file index, default) or `world` (narrative KB).
-        ///
-        /// Note: `--scope world` is deprecated; use `creator world kb remove`
-        /// instead (planned removal V1.53).
-        #[arg(long, value_enum, default_value_t = KbScope::default())]
-        scope: KbScope,
-        /// World ID for `--scope world` (required when scope is `world`)
-        #[arg(long)]
-        world_id: Option<String>,
     },
 
     /// Queue a work-scope entry for KB extraction into a target world.
@@ -216,39 +160,11 @@ pub async fn run(cmd: KbCommand, config: &CliConfig) -> Result<()> {
         paths::validate_creator_id_safe(cid).map_err(CliError::Other)?;
     }
     match cmd {
-        KbCommand::List { scope, world_id } => kb_list(config, &scope, world_id.as_deref()).await,
-        KbCommand::Search {
-            query,
-            scope,
-            world_id,
-        } => kb_search(config, &query, &scope, world_id.as_deref()).await,
-        KbCommand::Show {
-            entry_id,
-            scope,
-            world_id,
-        } => kb_show(config, &entry_id, &scope, world_id.as_deref()).await,
-        KbCommand::Add {
-            file,
-            title,
-            scope,
-            world_id,
-            block_type,
-        } => {
-            kb_add(
-                config,
-                &file,
-                title.as_deref(),
-                &scope,
-                world_id.as_deref(),
-                block_type.as_deref(),
-            )
-            .await
-        }
-        KbCommand::Remove {
-            entry_id,
-            scope,
-            world_id,
-        } => kb_remove(config, &entry_id, &scope, world_id.as_deref()).await,
+        KbCommand::List => kb_list(config).await,
+        KbCommand::Search { query } => kb_search(config, &query).await,
+        KbCommand::Show { entry_id } => kb_show(config, &entry_id).await,
+        KbCommand::Add { file, title } => kb_add(config, &file, title.as_deref()).await,
+        KbCommand::Remove { entry_id } => kb_remove(config, &entry_id).await,
         KbCommand::QueueExtract {
             work_entry_id,
             world_id,
@@ -287,588 +203,157 @@ pub async fn run(cmd: KbCommand, config: &CliConfig) -> Result<()> {
 
 // ── Helpers ──────────────────────────────────────────────────────
 
-/// Require `--world-id` when `--scope world` is used. Returns the `world_id` or an error.
-fn require_world_id(world_id: Option<&str>) -> Result<String> {
-    world_id
-        .map(std::string::ToString::to_string)
-        .ok_or_else(|| {
-            CliError::Other(
-                "--world-id is required when using --scope world. \
-                  Usage: nexus42 creator kb <command> --scope world --world-id <id>"
-                    .into(),
-            )
-        })
-}
-
-fn user_home() -> Result<PathBuf> {
-    dirs::home_dir().ok_or_else(|| CliError::Other("Cannot determine home directory".into()))
-}
-
-/// Open a persistent KB store backed by the workspace `state.db`.
+/// The typed work-index query for the admitted principal.
 ///
-/// Uses `nexus_local_db::kb_store::SqliteKbStore` which implements
-/// `KbStore` via compile-time checked sqlx queries.
-async fn open_world_kb_store(
-    config: &CliConfig,
-) -> Result<nexus_local_db::kb_store::SqliteKbStore> {
-    let db_path = crate::config::resolve_state_db_path(config)?;
-    let pool = crate::db::Schema::init(&db_path).await?;
-    Ok(nexus_local_db::kb_store::SqliteKbStore::new(pool))
-}
-
-/// Parse a block type string from CLI argument.
-fn parse_block_type_cli(s: &str) -> Result<nexus_contracts::BlockType> {
-    match s {
-        "Character" => Ok(nexus_contracts::BlockType::Character),
-        "Ability" => Ok(nexus_contracts::BlockType::Ability),
-        "Scene" => Ok(nexus_contracts::BlockType::Scene),
-        "Organization" => Ok(nexus_contracts::BlockType::Organization),
-        "Item" => Ok(nexus_contracts::BlockType::Item),
-        "Conflict" => Ok(nexus_contracts::BlockType::Conflict),
-        "InfoPoint" => Ok(nexus_contracts::BlockType::InfoPoint),
-        "Event" => Ok(nexus_contracts::BlockType::Event),
-        _ => Err(CliError::Other(format!(
-            "Unknown block_type '{s}'. Valid: Character, Ability, Scene, Organization, Item, Conflict, InfoPoint, Event"
-        ))),
+/// `creator_id`/`workspace_slug` name the selection the principal was minted
+/// from, so the core's ownership re-check compares the request against its own
+/// authority; `q` is the title filter the search leaf passes (list passes none).
+fn kb_index_query(principal: &Principal, q: Option<&str>) -> ListKbEntriesQuery {
+    ListKbEntriesQuery {
+        creator_id: Some(principal.creator_id().to_string()),
+        workspace_slug: Some(principal.workspace_slug().to_string()),
+        q: q.map(std::string::ToString::to_string),
+        ..ListKbEntriesQuery::default()
     }
-}
-
-/// Emit a deprecation warning for `creator kb --scope world` callers (R-V150KBED-01).
-///
-/// Emits a `tracing::warn!` for log-based observability and an `eprintln!` for
-/// interactive terminal users. Planned removal V1.53.
-fn deprecation_notice_legacy_world_kb(subcmd: &str) {
-    let msg = format!(
-        "`creator kb --scope world {subcmd}` is deprecated; \
-         use `creator world kb {subcmd}` instead (planned removal V1.53)."
-    );
-    tracing::warn!("{}", msg);
-    eprintln!("nexus42: {msg}");
-}
-
-/// Open a workspace pool for World KB operations.
-///
-/// Returns the raw pool so the caller can pass it to the canonical
-/// `world::kb` hermetic functions (which take `&SqlitePool` directly).
-///
-/// Error Display matches the canonical `world::open_workspace_pool` path
-/// (`"local database error: …"`) for observability parity.
-async fn open_world_pool(config: &CliConfig) -> Result<SqlitePool> {
-    let db_path = crate::config::resolve_state_db_path(config)?;
-    Ok(crate::db::Schema::init(&db_path).await?)
-}
-
-/// Resolve active creator + workspace slug, returning `(creator_id, workspace_slug, home)`.
-fn resolve_kb_paths(config: &CliConfig) -> Result<(String, String, PathBuf)> {
-    let creator_id = config
-        .active_creator_id
-        .as_deref()
-        .ok_or(CliError::CreatorNotSelected)?
-        .to_string();
-    let slug = config.workspace_slug_for_creator(&creator_id).to_string();
-    let home = user_home()?;
-    Ok((creator_id, slug, home))
-}
-
-/// Local work index on disk: `{"entries": [{"entry_id": "...", "title": "...", "created_at": "..."}]}`.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
-pub(crate) struct KbIndex {
-    #[serde(default)]
-    pub(crate) entries: Vec<KbIndexEntry>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub(crate) struct KbIndexEntry {
-    pub(crate) entry_id: String,
-    pub(crate) title: String,
-    pub(crate) created_at: String,
-}
-
-/// Read the local work index from disk. Returns default (empty) if file is missing.
-/// Logs a warning if the file exists but contains invalid JSON.
-pub(crate) fn read_kb_index(index_path: &std::path::Path) -> KbIndex {
-    if !index_path.exists() {
-        return KbIndex::default();
-    }
-    let Ok(content) = std::fs::read_to_string(index_path) else {
-        return KbIndex::default();
-    };
-    if content.trim().is_empty() {
-        return KbIndex::default();
-    }
-    match serde_json::from_str(&content) {
-        Ok(index) => index,
-        Err(e) => {
-            tracing::warn!(
-                "Corrupt local work index file {}: {e}. \
-                 The file will be treated as empty. \
-                 Consider deleting it or re-adding entries to rebuild the index.",
-                index_path.display()
-            );
-            KbIndex::default()
-        }
-    }
-}
-
-/// Write the local work index to disk atomically.
-///
-/// Writes to a temporary file first, then renames to the final path.
-/// `std::fs::rename` is atomic on the same filesystem (POSIX), which
-/// prevents corruption from crashes mid-write or concurrent `kb add` races.
-#[allow(dead_code)] // Kept as utility; kb_add inlines the pattern for W2 ordering.
-pub(crate) fn write_kb_index(index_path: &std::path::Path, index: &KbIndex) -> Result<()> {
-    if let Some(parent) = index_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let json = serde_json::to_string_pretty(index)?;
-    let tmp_path = index_path.with_extension("json.tmp");
-    std::fs::write(&tmp_path, &json)?;
-    std::fs::rename(&tmp_path, index_path)?;
-    Ok(())
-}
-
-/// Generate a local work entry ID: `kb_` + 8 hex chars from timestamp + 4 hex chars
-/// from a simple hash to reduce collision risk under rapid successive calls.
-#[allow(clippy::cast_possible_truncation)]
-pub(crate) fn generate_entry_id() -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    let millis = now.as_millis() as u32;
-    // Mix in lower bits of sub-millisecond timing and a simple diversifier
-    // to avoid collisions when called in rapid succession.
-    let diversifier = ((millis << 16) ^ (now.subsec_nanos() >> 4)) as u16;
-    format!("kb_{:08x}{:04x}", millis % 0xFFFF_FFFF, diversifier)
-}
-
-/// Ensure an entry ID is unique within the index by appending a counter suffix
-/// if the generated ID already exists. Best-effort guard — not cryptographic.
-pub(crate) fn deduplicate_entry_id(base_id: &str, index: &KbIndex) -> String {
-    if !index.entries.iter().any(|e| e.entry_id == base_id) {
-        return base_id.to_string();
-    }
-    // Collision detected — append counter suffix (_1, _2, ...)
-    for counter in 1..100 {
-        let candidate = format!("{base_id}_{counter}");
-        if !index.entries.iter().any(|e| e.entry_id == candidate) {
-            return candidate;
-        }
-    }
-    // Extremely unlikely fallback: use a larger diversifier
-    format!("{base_id}_overflow")
 }
 
 // ── Command implementations ──────────────────────────────────────
 
-/// `kb list` implementation.
-async fn kb_list(config: &CliConfig, scope: &KbScope, world_id: Option<&str>) -> Result<()> {
-    if scope == &KbScope::World {
-        let wid = require_world_id(world_id)?;
-        deprecation_notice_legacy_world_kb("list");
-        let pool = open_world_pool(config).await?;
-        return super::world::kb::kb_list(&pool, &wid, false).await;
+/// `kb list` implementation — work-scope entries from the local file index.
+///
+/// One typed core call over the admitted principal; nothing is rendered before
+/// `finish_direct` releases the writer.
+async fn kb_list(config: &CliConfig) -> Result<()> {
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        let slug = principal.workspace_slug().to_string();
+        let response = core
+            .list_kb_entries(&principal, kb_index_query(&principal, None))
+            .await
+            .map_err(map_core_error)?;
+        Ok((slug, response))
     }
-    let (creator_id, slug, home) = resolve_kb_paths(config)?;
+    .await;
+    let (slug, response) = finish_direct(&core, outcome).await?;
 
-    // Try daemon API first (T40: migration)
-    let client = crate::api::DaemonClient::from_config(config)?;
-    if client.health_check().await? {
-        match client.list_kb_entries(&creator_id, Some(&slug), None).await {
-            Ok(resp) => {
-                if resp.items.is_empty() {
-                    println!("No local work entries in workspace {slug}.");
-                } else {
-                    println!("Local work entries in workspace {slug}:");
-                    println!("{:<20} {:<40} CREATED_AT", "ENTRY_ID", "TITLE");
-                    for entry in &resp.items {
-                        println!(
-                            "{:<20} {:<40} {}",
-                            entry.entry_id, entry.title, entry.created_at
-                        );
-                    }
-                }
-                return Ok(());
-            }
-            Err(e) => {
-                eprintln!("nexus42: daemon work-index list failed, falling back: {e}");
-            }
+    print_index_entries(&response, None, &slug);
+    Ok(())
+}
+
+/// `kb search` implementation — case-insensitive title match in the local index.
+async fn kb_search(config: &CliConfig, query: &str) -> Result<()> {
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        let slug = principal.workspace_slug().to_string();
+        let response = core
+            .list_kb_entries(&principal, kb_index_query(&principal, Some(query)))
+            .await
+            .map_err(map_core_error)?;
+        Ok((slug, response))
+    }
+    .await;
+    let (slug, response) = finish_direct(&core, outcome).await?;
+
+    print_index_entries(&response, Some(query), &slug);
+    Ok(())
+}
+
+/// Render the local work-index table, with or without a search query.
+fn print_index_entries(response: &ListKbEntriesResponse, query: Option<&str>, slug: &str) {
+    if response.items.is_empty() {
+        match query {
+            Some(q) => println!("No local work entries matching \"{q}\" in workspace {slug}."),
+            None => println!("No local work entries in workspace {slug}."),
         }
+        return;
     }
-
-    // Fallback: direct FS read
-    let kb_dir = paths::creator_kb_dir(&home, &creator_id, &slug);
-    let index_path = kb_dir.join("index.json");
-
-    if !index_path.exists() {
-        println!("No local work entries in workspace {slug}.");
-        return Ok(());
+    match query {
+        Some(q) => println!("Local work entries matching \"{q}\" in workspace {slug}:"),
+        None => println!("Local work entries in workspace {slug}:"),
     }
-
-    let index = read_kb_index(&index_path);
-    if index.entries.is_empty() {
-        println!("No local work entries in workspace {slug}.");
-        return Ok(());
-    }
-
-    println!("Local work entries in workspace {slug}:");
     println!("{:<20} {:<40} CREATED_AT", "ENTRY_ID", "TITLE");
-    for entry in &index.entries {
+    for entry in &response.items {
         println!(
             "{:<20} {:<40} {}",
             entry.entry_id, entry.title, entry.created_at
         );
     }
-    Ok(())
 }
 
-/// `kb search` implementation — case-insensitive substring match on title/content.
-async fn kb_search(
-    config: &CliConfig,
-    query: &str,
-    scope: &KbScope,
-    world_id: Option<&str>,
-) -> Result<()> {
-    if scope == &KbScope::World {
-        let wid = require_world_id(world_id)?;
-        deprecation_notice_legacy_world_kb("search");
-        let store = open_world_kb_store(config).await?;
-        let kb_query = nexus_knowledge::world_kb::KbQuery::new(&wid).with_text_search(query);
-        let result = store
-            .query(&kb_query)
-            .await
-            .map_err(|e| CliError::Other(format!("World KB search failed for {wid}: {e}")))?;
-        if result.items.is_empty() {
-            println!("No knowledge entries matching \"{query}\" in world {wid}.");
-        } else {
-            println!("Key blocks matching \"{query}\" in world {wid}:");
-            println!("{:<20} {:<15} {:<30} STATUS", "BLOCK_ID", "TYPE", "NAME");
-            for block in &result.items {
-                println!(
-                    "{:<20} {:<15} {:<30} {}",
-                    block.entry_id,
-                    format!("{:?}", block.block_type),
-                    block.canonical_name,
-                    block.status
-                );
-            }
-        }
-        return Ok(());
-    }
-    let (creator_id, slug, home) = resolve_kb_paths(config)?;
-
-    // Try daemon API first (T40: migration)
-    let client = crate::api::DaemonClient::from_config(config)?;
-    if client.health_check().await? {
-        match client
-            .list_kb_entries(&creator_id, Some(&slug), Some(query))
-            .await
-        {
-            Ok(resp) => {
-                if resp.items.is_empty() {
-                    println!("No local work entries matching \"{query}\" in workspace {slug}.");
-                } else {
-                    println!("Local work entries matching \"{query}\" in workspace {slug}:");
-                    println!("{:<20} {:<40} CREATED_AT", "ENTRY_ID", "TITLE");
-                    for entry in &resp.items {
-                        println!(
-                            "{:<20} {:<40} {}",
-                            entry.entry_id, entry.title, entry.created_at
-                        );
-                    }
-                }
-                return Ok(());
-            }
-            Err(e) => {
-                eprintln!("nexus42: daemon work-index search failed, falling back: {e}");
-            }
-        }
-    }
-
-    // Fallback: local search
-    let kb_dir = paths::creator_kb_dir(&home, &creator_id, &slug);
-    let index_path = kb_dir.join("index.json");
-
-    if !index_path.exists() {
-        println!("No local work entries in workspace {slug} to search.");
-        return Ok(());
-    }
-
-    let index = read_kb_index(&index_path);
-    let query_lower = query.to_lowercase();
-    let matches: Vec<&KbIndexEntry> = index
-        .entries
-        .iter()
-        .filter(|e| e.title.to_lowercase().contains(&query_lower))
-        .collect();
-
-    if matches.is_empty() {
-        println!("No local work entries matching \"{query}\" in workspace {slug}.");
-        return Ok(());
-    }
-
-    println!("Local work entries matching \"{query}\" in workspace {slug}:");
-    println!("{:<20} {:<40} CREATED_AT", "ENTRY_ID", "TITLE");
-    for entry in matches {
-        println!(
-            "{:<20} {:<40} {}",
-            entry.entry_id, entry.title, entry.created_at
-        );
-    }
-    Ok(())
-}
-
-/// `kb show` implementation — read and print a single entry file / knowledge entry.
-async fn kb_show(
-    config: &CliConfig,
-    entry_id: &str,
-    scope: &KbScope,
-    world_id: Option<&str>,
-) -> Result<()> {
-    if scope == &KbScope::World {
-        let wid = require_world_id(world_id)?;
-        deprecation_notice_legacy_world_kb("show");
-        let pool = open_world_pool(config).await?;
-        return super::world::kb::kb_show(&pool, &wid, entry_id, false).await;
-    }
-    // F001: Validate entry_id before constructing file path to prevent path traversal.
-    paths::validate_entry_id_safe(entry_id).map_err(CliError::Other)?;
-
-    // Try daemon API first (T40: migration)
-    let client = crate::api::DaemonClient::from_config(config)?;
-    if client.health_check().await? {
-        match client.get_kb_entry(entry_id).await {
-            Ok(resp) => {
-                println!("{}", resp.content);
-                return Ok(());
-            }
-            Err(e) => {
-                eprintln!("nexus42: daemon work-index show failed, falling back: {e}");
-            }
-        }
-    }
-
-    // Fallback: direct FS read
-    let (creator_id, slug, home) = resolve_kb_paths(config)?;
-    let entries_dir = paths::creator_kb_entries_dir(&home, &creator_id, &slug);
-    let entry_path = entries_dir.join(format!("{entry_id}.md"));
-
-    if !entry_path.exists() {
-        return Err(CliError::Other(format!(
-            "Work-scope entry {entry_id} not found in workspace {slug}."
-        )));
-    }
-
-    let content = std::fs::read_to_string(&entry_path)?;
-    println!("{content}");
-    Ok(())
-}
-
-/// `kb add` implementation — copy file into local work index, or add world KB block.
+/// `kb show` implementation — print one work-scope entry's content.
 ///
-/// For work scope: writes the index update to a temp file first, then copies the entry file,
-/// then atomically renames the index. This prevents orphan entry files on
-/// partial failure (W2).
-///
-/// For world scope: creates a `KnowledgeEntryRecord` via `SqliteKbStore::insert_knowledge_entry`.
-#[allow(clippy::too_many_lines)] // CLI kb add handler
-async fn kb_add(
-    config: &CliConfig,
-    file: &std::path::Path,
-    title: Option<&str>,
-    scope: &KbScope,
-    world_id: Option<&str>,
-    block_type: Option<&str>,
-) -> Result<()> {
-    if scope == &KbScope::World {
-        let wid = require_world_id(world_id)?;
-        deprecation_notice_legacy_world_kb("add");
-        let bt_str = block_type.unwrap_or("InfoPoint");
-        let bt = parse_block_type_cli(bt_str)?;
-        let entry_title = title
-            .map(std::string::ToString::to_string)
-            .or_else(|| file.file_stem().map(|s| s.to_string_lossy().to_string()))
-            .unwrap_or_else(|| "untitled".to_string());
-
-        let store = open_world_kb_store(config).await?;
-        let mut kb = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
-            &wid,
-            bt,
-            &entry_title,
-        );
-
-        // Read file content as summary if provided
-        if file.exists() {
-            let content = std::fs::read_to_string(file)?;
-            let summary = if content.len() > 500 {
-                format!("{}...", &content[..500])
-            } else {
-                content
-            };
-            kb.body = Some(
-                nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody {
-                    summary: Some(summary),
-                    attributes: None,
-                    tags: None,
-                    ..Default::default()
-                },
-            );
-        }
-
-        let result = store
-            .insert_knowledge_entry(kb)
+/// The core owns the entry-id validation and the ownership classification
+/// (foreign entries are refused, never silently hidden), so the leaf renders
+/// only after the read and the writer release both settled.
+async fn kb_show(config: &CliConfig, entry_id: &str) -> Result<()> {
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        core.get_kb_entry(&principal, entry_id.to_string())
             .await
-            .map_err(|e| CliError::Other(format!("World KB add failed for {wid}: {e}")))?;
-        println!("✓ Key block added: {}", result.entry_id);
-        println!("  World:  {wid}");
-        println!("  Type:   {bt_str}");
-        println!("  Name:   {entry_title}");
-        return Ok(());
+            .map_err(map_core_error)
     }
-    if !file.exists() {
-        return Err(CliError::Other(format!(
-            "Source file not found: {}",
-            file.display()
-        )));
-    }
+    .await;
+    let entry: GetKbEntryResponse = finish_direct(&core, outcome).await?;
 
-    let (creator_id, slug, _home) = resolve_kb_paths(config)?;
+    println!("{}", entry.content);
+    Ok(())
+}
 
-    // Try daemon API first (T40: migration)
-    let client = crate::api::DaemonClient::from_config(config)?;
-    if client.health_check().await? {
-        let content = std::fs::read_to_string(file)?;
-        let req = crate::api::models::AddKbEntryRequest {
-            creator_id: creator_id.clone(),
-            workspace_slug: Some(slug.clone()),
-            title: title.map(std::string::ToString::to_string),
-            content: Some(content),
-            file_path: None,
-        };
-        match client.add_kb_entry(&req).await {
-            Ok(resp) => {
-                println!("✓ Local work entry added: {}", resp.entry_id);
-                return Ok(());
-            }
-            Err(e) => {
-                eprintln!("nexus42: daemon work-index add failed, falling back: {e}");
-            }
-        }
-    }
-
-    // Fallback: direct FS operations
-    let (_, _, home) = resolve_kb_paths(config)?;
-    let kb_dir = paths::creator_kb_dir(&home, &creator_id, &slug);
-    let entries_dir = paths::creator_kb_entries_dir(&home, &creator_id, &slug);
-    let index_path = kb_dir.join("index.json");
-
-    // Create directories if needed
-    std::fs::create_dir_all(&entries_dir)?;
-
-    // Generate entry ID and determine title
-    let base_id = generate_entry_id();
-    let mut index = read_kb_index(&index_path);
-    let entry_id = deduplicate_entry_id(&base_id, &index);
+/// `kb add` implementation — copy a file into the local work-scope index.
+///
+/// The core owns the crash-consistent write sequence (index temp rename
+/// commits the metadata, then the content temp rename commits the entry), the
+/// entry-id generation/dedup and the missing-source refusal; this leaf only
+/// maps its flags onto the typed request. Title defaults to the file stem, as
+/// the flag documents; the core falls back to the entry id when both are
+/// absent.
+async fn kb_add(config: &CliConfig, file: &std::path::Path, title: Option<&str>) -> Result<()> {
     let entry_title = title
         .map(std::string::ToString::to_string)
-        .or_else(|| file.file_stem().map(|s| s.to_string_lossy().to_string()))
-        .unwrap_or_else(|| entry_id.clone());
+        .or_else(|| file.file_stem().map(|s| s.to_string_lossy().to_string()));
+    let file_path = file.display().to_string();
 
-    // Step 1: Write updated index to temp file (W2 — index update first)
-    let created_at = chrono::Utc::now().to_rfc3339();
-    index.entries.push(KbIndexEntry {
-        entry_id: entry_id.clone(),
-        title: entry_title,
-        created_at,
-    });
-    let tmp_index_path = index_path.with_extension("json.tmp");
-    {
-        if let Some(parent) = tmp_index_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let json = serde_json::to_string_pretty(&index)?;
-        std::fs::write(&tmp_index_path, json)?;
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        let request = AddKbEntryRequest {
+            content: None,
+            creator_id: principal.creator_id().to_string(),
+            file_path: Some(file_path),
+            scope: None,
+            title: entry_title,
+            workspace_slug: Some(principal.workspace_slug().to_string()),
+        };
+        core.add_kb_entry(&principal, request)
+            .await
+            .map_err(map_core_error)
     }
+    .await;
+    let response = finish_direct(&core, outcome).await?;
 
-    // Step 2: Copy source file to entries dir
-    let dest = entries_dir.join(format!("{entry_id}.md"));
-    std::fs::copy(file, &dest)?;
-
-    // Step 3: Atomically rename temp index to final (W2 — only committed after file is safe)
-    std::fs::rename(&tmp_index_path, &index_path)?;
-
-    println!("✓ Local work entry added: {entry_id}");
+    println!("✓ Local work entry added: {}", response.entry_id);
     Ok(())
 }
 
-/// `kb remove` implementation — delete a local work-scope entry or world KB block.
+/// `kb remove` implementation — delete one work-scope entry.
 ///
-/// Tries the daemon API first; falls back to direct FS removal
-/// (delete entry file + update index atomically).
-async fn kb_remove(
-    config: &CliConfig,
-    entry_id: &str,
-    scope: &KbScope,
-    world_id: Option<&str>,
-) -> Result<()> {
-    if scope == &KbScope::World {
-        let wid = require_world_id(world_id)?;
-        deprecation_notice_legacy_world_kb("remove");
-        let pool = open_world_pool(config).await?;
-        let cid = config
-            .active_creator_id
-            .clone()
-            .ok_or(CliError::CreatorNotSelected)?;
-        return super::world::kb::kb_delete(&pool, &cid, &wid, entry_id, true).await;
+/// The core owns the entry-id validation, the ownership classification and the
+/// index update (the entry file and its index row disappear together).
+async fn kb_remove(config: &CliConfig, entry_id: &str) -> Result<()> {
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        core.delete_kb_entry(&principal, entry_id.to_string())
+            .await
+            .map_err(map_core_error)
     }
-    // F001: Validate entry_id before use.
-    paths::validate_entry_id_safe(entry_id).map_err(CliError::Other)?;
+    .await;
+    let response: DeleteKbEntryResponse = finish_direct(&core, outcome).await?;
 
-    // Try daemon API first (T40: migration)
-    let client = crate::api::DaemonClient::from_config(config)?;
-    if client.health_check().await? {
-        match client.delete_kb_entry(entry_id).await {
-            Ok(_resp) => {
-                println!("✓ Local work entry removed: {entry_id}");
-                return Ok(());
-            }
-            Err(e) => {
-                eprintln!("nexus42: daemon work-index remove failed, falling back: {e}");
-            }
-        }
-    }
-
-    // Fallback: direct FS removal
-    let (creator_id, slug, home) = resolve_kb_paths(config)?;
-    let entries_dir = paths::creator_kb_entries_dir(&home, &creator_id, &slug);
-    let entry_path = entries_dir.join(format!("{entry_id}.md"));
-
-    if !entry_path.exists() {
-        return Err(CliError::Other(format!(
-            "Work-scope entry {entry_id} not found in workspace {slug}."
-        )));
-    }
-
-    // Remove the entry file
-    std::fs::remove_file(&entry_path)?;
-
-    // Update index to remove the entry
-    let kb_dir = paths::creator_kb_dir(&home, &creator_id, &slug);
-    let index_path = kb_dir.join("index.json");
-    let mut index = read_kb_index(&index_path);
-    let original_len = index.entries.len();
-    index.entries.retain(|e| e.entry_id != entry_id);
-    if index.entries.len() == original_len {
-        // Entry was not in index but file existed — still report success
-        tracing::warn!("Work-scope entry {entry_id} file existed but was not in index");
-    } else if !index.entries.is_empty() {
-        // Write updated index
-        write_kb_index(&index_path, &index)?;
-    } else if index_path.exists() {
-        // Last entry removed — clean up empty index
-        let _ = std::fs::remove_file(&index_path);
-    }
-
-    println!("✓ Local work entry removed: {entry_id}");
+    println!("✓ Local work entry removed: {}", response.entry_id);
     Ok(())
 }
 
@@ -901,6 +386,11 @@ async fn kb_queue_extract(
     // Validate entry_id format to prevent path traversal.
     paths::validate_entry_id_safe(work_entry_id).map_err(CliError::Other)?;
 
+    // The seam's admission pre-flight runs before the pool open: `Schema::init`
+    // migrates — and therefore creates — the selected workspace, so a selection
+    // that names no materialized workspace must be refused instead of having one
+    // created for it.
+    require_materialized_workspace(config)?;
     let db_path = crate::config::resolve_state_db_path(config)?;
     let pool = crate::db::Schema::init(&db_path).await?;
 
@@ -975,6 +465,11 @@ async fn kb_extract_status(config: &CliConfig, job_id: Option<&str>) -> Result<(
         .ok_or(CliError::CreatorNotSelected)?
         .to_string();
 
+    // The seam's admission pre-flight runs before the pool open: `Schema::init`
+    // migrates — and therefore creates — the selected workspace, so a selection
+    // that names no materialized workspace must be refused instead of having one
+    // created for it.
+    require_materialized_workspace(config)?;
     let db_path = crate::config::resolve_state_db_path(config)?;
     let pool = crate::db::Schema::init(&db_path).await?;
 
@@ -1048,325 +543,3 @@ fn truncate_str(s: &str, max_len: usize) -> String {
     }
 }
 
-#[cfg(test)]
-#[allow(clippy::unwrap_used)]
-mod tests {
-    use super::*;
-
-    // ── R-KB-002: ID collision guard tests ────────────────────────────
-
-    #[test]
-    fn deduplicate_entry_id_returns_base_when_no_collision() {
-        let index = KbIndex::default();
-        let result = deduplicate_entry_id("kb_abc12345", &index);
-        assert_eq!(result, "kb_abc12345");
-    }
-
-    #[test]
-    fn deduplicate_entry_id_appends_counter_on_collision() {
-        let mut index = KbIndex::default();
-        index.entries.push(KbIndexEntry {
-            entry_id: "kb_abc12345".to_string(),
-            title: "existing".to_string(),
-            created_at: "2026-01-01T00:00:00Z".to_string(),
-        });
-        let result = deduplicate_entry_id("kb_abc12345", &index);
-        assert_eq!(result, "kb_abc12345_1");
-        // Verify the suffixed ID is not already in the index
-        assert!(index.entries.iter().all(|e| e.entry_id != result));
-    }
-
-    #[test]
-    fn deduplicate_entry_id_increments_counter_for_multiple_collisions() {
-        let mut index = KbIndex::default();
-        index.entries.push(KbIndexEntry {
-            entry_id: "kb_abc12345".to_string(),
-            title: "first".to_string(),
-            created_at: "2026-01-01T00:00:00Z".to_string(),
-        });
-        index.entries.push(KbIndexEntry {
-            entry_id: "kb_abc12345_1".to_string(),
-            title: "second".to_string(),
-            created_at: "2026-01-01T00:00:00Z".to_string(),
-        });
-        let result = deduplicate_entry_id("kb_abc12345", &index);
-        assert_eq!(result, "kb_abc12345_2");
-    }
-
-    #[test]
-    fn kb_generate_entry_id_format() {
-        let id = generate_entry_id();
-        assert!(id.starts_with("kb_"));
-        assert_eq!(id.len(), 15, "entry ID should be kb_ + 12 hex chars");
-    }
-
-    // ── R-KB-001: Corrupt index.json detection tests ──────────────────
-
-    #[test]
-    fn read_kb_index_returns_empty_for_corrupt_json() {
-        let tmp = tempfile::TempDir::new().expect("tempdir");
-        let index_path = tmp.path().join("index.json");
-        std::fs::write(&index_path, "this is not valid json {{{").expect("write corrupt");
-
-        // Should return empty index (not panic)
-        let index = read_kb_index(&index_path);
-        assert!(
-            index.entries.is_empty(),
-            "corrupt index should return empty"
-        );
-    }
-
-    #[test]
-    fn read_kb_index_returns_empty_for_missing_file() {
-        let tmp = tempfile::TempDir::new().expect("tempdir");
-        let index_path = tmp.path().join("nonexistent.json");
-
-        let index = read_kb_index(&index_path);
-        assert!(index.entries.is_empty());
-    }
-
-    #[test]
-    fn read_kb_index_parses_valid_json() {
-        let tmp = tempfile::TempDir::new().expect("tempdir");
-        let index_path = tmp.path().join("index.json");
-        let content = r#"{"entries":[{"entry_id":"kb_test1234","title":"Test","created_at":"2026-01-01T00:00:00Z"}]}"#;
-        std::fs::write(&index_path, content).expect("write valid");
-
-        let index = read_kb_index(&index_path);
-        assert_eq!(index.entries.len(), 1);
-        assert_eq!(index.entries[0].entry_id, "kb_test1234");
-    }
-
-    // ── V1.52 T-A P1: Legacy World KB alias tests (R-V150KBED-01) ──
-
-    /// Error Display on pool init failure matches the canonical surface
-    /// (R-V152TAP1-W002). Both legacy `open_world_pool` and canonical
-    /// `open_workspace_pool` now use `From<LocalDbError>` → "local database
-    /// error: …".
-    #[tokio::test]
-    async fn open_world_pool_error_matches_canonical_format() {
-        // Error format assertion: when LocalDbError converts to CliError via
-        // the From impl, it yields "local database error: <details>".
-        // The legacy wrapper open_world_pool now uses `?` which triggers this
-        // same conversion, matching the canonical open_workspace_pool path.
-        use nexus_local_db::LocalDbError;
-
-        let source_err = LocalDbError::VersionMismatch {
-            table: "test_table".to_string(),
-            id: "test_id".to_string(),
-            expected: 1,
-            actual: Some(2),
-        };
-        let cli_err: crate::errors::CliError = source_err.into();
-        let msg = format!("{cli_err}");
-        assert!(
-            msg.contains("local database error:"),
-            "error must use canonical format 'local database error:', got: {msg}"
-        );
-        assert!(
-            !msg.contains("Failed to open workspace pool"),
-            "error must NOT use pre-fix legacy format 'Failed to open workspace pool', got: {msg}"
-        );
-    }
-
-    /// `deprecation_notice_legacy_world_kb` constructs the correct message format
-    /// and does not panic when called.
-    #[test]
-    fn deprecation_notice_emits_stderr_message() {
-        // Verify the function doesn't panic (it writes to stderr, not capturable
-        // in a synchronous unit test without extra crates).
-        super::deprecation_notice_legacy_world_kb("list");
-        super::deprecation_notice_legacy_world_kb("show");
-        super::deprecation_notice_legacy_world_kb("remove");
-    }
-
-    /// Forward-wiring: list via World scope exercises the deprecation + canonical
-    /// `kb_list` path (mirrors kb.rs:448-454 forwarding code).
-    #[tokio::test]
-    async fn legacy_kb_scope_world_list_exercises_forward_path() {
-        use crate::db::Schema;
-        use nexus_contracts::BlockType;
-        use nexus_knowledge::world_kb::knowledge_entry::{
-            KnowledgeEntryBody, KnowledgeEntryRecord,
-        };
-        use nexus_knowledge::world_kb::KbStore;
-        use nexus_local_db::kb_store::SqliteKbStore;
-
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("state.db");
-        let pool = Schema::init(&db_path).await.unwrap();
-
-        nexus_local_db::kb_store::seed::world(
-            &pool, "wld_ut", "ctr_ut", "UT World", "ut-world", "private", "manual",
-        )
-        .await;
-        let store = SqliteKbStore::new(pool.clone());
-        let mut kb_block =
-            KnowledgeEntryRecord::new("wld_ut", BlockType::Character, "char_ut_list");
-        kb_block.body = Some(KnowledgeEntryBody {
-            summary: Some("UT list summary".to_string()),
-            attributes: Some(serde_json::json!({"novel_category": "character"})),
-            tags: Some(vec!["ut-list".to_string()]),
-            ..Default::default()
-        });
-        let result = store.insert_knowledge_entry(kb_block).await.unwrap();
-        drop(result.entry_id);
-
-        // Exactly mirror the forwarding code at kb.rs:448-454:
-        //   deprecation_notice_legacy_world_kb("list");
-        //   let pool = open_world_pool(config).await?;
-        //   return super::world::kb::kb_list(&pool, &wid, false).await;
-        super::deprecation_notice_legacy_world_kb("list");
-        let forward_result = super::super::world::kb::kb_list(&pool, "wld_ut", false).await;
-        assert!(
-            forward_result.is_ok(),
-            "forwarded kb_list should succeed: {forward_result:?}"
-        );
-    }
-
-    /// Forward-wiring: show via World scope exercises the deprecation + canonical
-    /// `kb_show` path (mirrors kb.rs:610-615 forwarding code).
-    #[tokio::test]
-    async fn legacy_kb_scope_world_show_exercises_forward_path() {
-        use crate::db::Schema;
-        use nexus_contracts::BlockType;
-        use nexus_knowledge::world_kb::knowledge_entry::{
-            KnowledgeEntryBody, KnowledgeEntryRecord,
-        };
-        use nexus_knowledge::world_kb::KbStore;
-        use nexus_local_db::kb_store::SqliteKbStore;
-
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("state.db");
-        let pool = Schema::init(&db_path).await.unwrap();
-
-        nexus_local_db::kb_store::seed::world(
-            &pool,
-            "wld_ut_show",
-            "ctr_ut",
-            "UT Show World",
-            "ut-show-world",
-            "private",
-            "manual",
-        )
-        .await;
-        let store = SqliteKbStore::new(pool.clone());
-        let mut kb_block =
-            KnowledgeEntryRecord::new("wld_ut_show", BlockType::Character, "char_ut_show");
-        kb_block.body = Some(KnowledgeEntryBody {
-            summary: Some("UT show summary".to_string()),
-            attributes: Some(serde_json::json!({"novel_category": "character"})),
-            tags: Some(vec!["ut-show".to_string()]),
-            ..Default::default()
-        });
-        let result = store.insert_knowledge_entry(kb_block).await.unwrap();
-
-        // Mirror forwarding code at kb.rs:611-615
-        super::deprecation_notice_legacy_world_kb("show");
-        let forward_result =
-            super::super::world::kb::kb_show(&pool, "wld_ut_show", &result.entry_id, false).await;
-        assert!(
-            forward_result.is_ok(),
-            "forwarded kb_show should succeed: {forward_result:?}"
-        );
-    }
-
-    /// Forward-wiring: remove via World scope exercises the deprecation + canonical
-    /// `kb_delete` path with owner auth gate (mirrors kb.rs:789-797 forwarding code).
-    #[tokio::test]
-    async fn legacy_kb_scope_world_remove_exercises_forward_path() {
-        use crate::db::Schema;
-        use nexus_contracts::BlockType;
-        use nexus_knowledge::world_kb::knowledge_entry::{
-            KnowledgeEntryBody, KnowledgeEntryRecord,
-        };
-        use nexus_knowledge::world_kb::KbStore;
-        use nexus_local_db::kb_store::SqliteKbStore;
-
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("state.db");
-        let pool = Schema::init(&db_path).await.unwrap();
-
-        nexus_local_db::kb_store::seed::world(
-            &pool,
-            "wld_ut_rm",
-            "ctr_ut",
-            "UT Remove World",
-            "ut-rm-world",
-            "private",
-            "manual",
-        )
-        .await;
-        let store = SqliteKbStore::new(pool.clone());
-        let mut kb_block =
-            KnowledgeEntryRecord::new("wld_ut_rm", BlockType::Character, "char_ut_rm");
-        kb_block.body = Some(KnowledgeEntryBody {
-            summary: Some("UT remove summary".to_string()),
-            attributes: Some(serde_json::json!({"novel_category": "character"})),
-            tags: Some(vec!["ut-rm".to_string()]),
-            ..Default::default()
-        });
-        let result = store.insert_knowledge_entry(kb_block).await.unwrap();
-
-        // Mirror forwarding code at kb.rs:789-797
-        super::deprecation_notice_legacy_world_kb("remove");
-        let forward_result = super::super::world::kb::kb_delete(
-            &pool,
-            "ctr_ut",
-            "wld_ut_rm",
-            &result.entry_id,
-            true,
-        )
-        .await;
-        assert!(
-            forward_result.is_ok(),
-            "forwarded kb_delete (remove) should succeed: {forward_result:?}"
-        );
-
-        // Cross-author should fail (auth gate preserved by forwarding)
-        let dir2 = tempfile::tempdir().unwrap();
-        let db_path2 = dir2.path().join("state.db");
-        let pool2 = Schema::init(&db_path2).await.unwrap();
-        nexus_local_db::kb_store::seed::world(
-            &pool2,
-            "wld_ut_rm2",
-            "ctr_owner",
-            "UT RM2 World",
-            "ut-rm2",
-            "private",
-            "manual",
-        )
-        .await;
-        let store2 = SqliteKbStore::new(pool2.clone());
-        let mut kb_block2 =
-            KnowledgeEntryRecord::new("wld_ut_rm2", BlockType::Character, "char_ut_rm2");
-        kb_block2.body = Some(KnowledgeEntryBody {
-            summary: Some("UT cross-author".to_string()),
-            attributes: Some(serde_json::json!({"novel_category": "character"})),
-            tags: Some(vec!["ut-rm2".to_string()]),
-            ..Default::default()
-        });
-        let _result2 = store2.insert_knowledge_entry(kb_block2).await.unwrap();
-
-        super::deprecation_notice_legacy_world_kb("remove");
-        let cross_result = super::super::world::kb::kb_delete(
-            &pool2,
-            "ctr_stranger",
-            "wld_ut_rm2",
-            &result.entry_id,
-            true,
-        )
-        .await;
-        assert!(
-            cross_result.is_err(),
-            "cross-author forwarded remove should fail"
-        );
-        let err_msg = format!("{}", cross_result.unwrap_err());
-        assert!(
-            err_msg.contains("403")
-                || err_msg.contains("WORLD_KB_FORBIDDEN")
-                || err_msg.contains("not found"),
-            "cross-author error must mention auth, got: {err_msg}"
-        );
-    }
-}
