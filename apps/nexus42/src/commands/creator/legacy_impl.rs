@@ -1152,37 +1152,43 @@ struct CoreIdentity {
     display_name: Option<String>,
 }
 
-/// Read the identity projection from the core owner.
-///
-/// `CoreHomeService` owns the retained identity cache
-/// (`<nexus_home>/creator_identity_cache.json`): `patch_creator` is its
-/// production writer and `active_creator` reads it back. The status leaf
-/// reports what that owner holds rather than treating a second, CLI-private
-/// cache as the identity source (v1.193 P0-T2 fix 2).
+/// Open the core home entry the identity leaves project from.
 ///
 /// The home entry is the same direct-core path the sibling leaves open
 /// ([`CoreHomeService::open`] plus the seam's [`map_core_error`]): it assumes
-/// no selected workspace and writes nothing, so `creator status` keeps
-/// reporting before any workspace exists and never takes the writer lease.
+/// no selected workspace and writes nothing, so the identity leaves keep
+/// reporting before any workspace exists and never take the writer lease.
 ///
 /// # Errors
 ///
 /// Returns [`CliError::Config`] when the home directory cannot be resolved and
 /// the mapped core error when the home entry refuses that path.
-fn core_owned_identity(creator_id: &str) -> Result<CoreIdentity> {
+fn core_owned_home() -> Result<CoreHomeService> {
     let user_home = user_home_dir().map_err(|e| CliError::Config(e.to_string()))?;
-    let home = CoreHomeService::open(user_home).map_err(map_core_error)?;
-    // `creator_detail`'s one refusal is the id itself (path-unsafe or
-    // verb-shaped). Such an id owns no core identity, and turning a display
-    // read into a hard failure would change what `creator status` exits with
-    // for it — the local projection stays the source there.
-    Ok(match home.creator_detail(creator_id) {
+    CoreHomeService::open(user_home).map_err(map_core_error)
+}
+
+/// Read one creator's identity projection from the core owner.
+///
+/// `CoreHomeService` owns the retained identity cache
+/// (`<nexus_home>/creator_identity_cache.json`): `patch_creator` is its
+/// production writer, `creator_detail`/`active_creator` read it back. Both
+/// identity leaves (`creator status`, `creator list`) report what that owner
+/// holds rather than treating the CLI-private `creator-identities.json` as the
+/// identity source (v1.193 P0-T2 fix 2, fix 3).
+///
+/// `creator_detail`'s one refusal is the id itself (path-unsafe or
+/// verb-shaped). Such an id owns no core identity, and turning a display read
+/// into a hard failure would change what those leaves exit with for it — the
+/// CLI-local projection stays the source there.
+fn core_identity(home: &CoreHomeService, creator_id: &str) -> CoreIdentity {
+    match home.creator_detail(creator_id) {
         Ok(detail) => CoreIdentity {
             handle: detail.handle,
             display_name: detail.display_name,
         },
         Err(_) => CoreIdentity::default(),
-    })
+    }
 }
 
 /// Show Creator status with three-layer identity model (V1.16).
@@ -1195,7 +1201,8 @@ fn core_owned_identity(creator_id: &str) -> Result<CoreIdentity> {
 /// the local projection in the first place. The retired daemon probe is gone;
 /// it reached the same core-owned cache this leaf now reads directly.
 ///
-/// The identity fields come from the **core owner** ([`core_owned_identity`]).
+/// The identity fields come from the **core owner** ([`core_identity`] over
+/// the [`core_owned_home`] entry).
 /// The CLI-local `creator-identities.json` cache (written by the cloud
 /// registration bridge) stays a per-field **fallback** for entries the core
 /// does not hold; a CLI value never shadows a core value.
@@ -1218,15 +1225,13 @@ fn creator_status(config: &CliConfig, creator_id: Option<String>) -> Result<()> 
     }
 
     let store = crate::auth::AuthStore::load()?;
-    let core_identity = core_owned_identity(&id)?;
+    let core = core_identity(&core_owned_home()?, &id);
     let cache = creator_identity::load_creator_identity_cache();
     let entry = creator_identity::get_creator_identity(&cache, &id);
 
     // Per field: the core owner's value wins whenever it holds one.
-    let handle = core_identity
-        .handle
-        .or_else(|| entry.and_then(|e| e.handle.clone()));
-    let display_name = core_identity
+    let handle = core.handle.or_else(|| entry.and_then(|e| e.handle.clone()));
+    let display_name = core
         .display_name
         .or_else(|| entry.and_then(|e| e.display_name.clone()));
 
@@ -1317,13 +1322,24 @@ struct ListRow {
 ///
 /// Row-field precedence (AR-90 #3): local row `display_name` from
 /// `local_identities` (authoritative), `handle = None` (PL-6); platform row
-/// uses today's cache lookups unchanged (byte-stable).
+/// display metadata comes from the **core owner** first with the CLI-local
+/// `creator-identities.json` cache as the per-field fallback, so a CLI value
+/// can never shadow a core value (v1.193 P0-T2 fix 3). `core_home` is `None`
+/// when the home entry could not be opened; the platform rows then keep the
+/// CLI-cache projection they had before, which is why the caller warns
+/// instead of failing the listing.
+///
+/// Membership is deliberately **not** taken from the core: its SSOT is the
+/// on-disk Profile directory set (`CoreHomeService::list_creators`), which
+/// would add and remove rows this surface never showed and re-sort them by
+/// SQL recency.
 #[must_use]
 fn list_rows(
     cache: &creator_identity::CreatorIdentityCache,
     auth_store: &crate::auth::AuthStore,
     local_rows: &[nexus_local_db::LocalIdentityRow],
     active_id: Option<&str>,
+    core_home: Option<&CoreHomeService>,
 ) -> Vec<ListRow> {
     let local_by_id: std::collections::HashMap<&str, &nexus_local_db::LocalIdentityRow> =
         local_rows
@@ -1356,10 +1372,16 @@ fn list_rows(
             let local_row = local_by_id.get(id.as_str()).copied();
             let (handle, display_name) = local_row.map_or_else(
                 || {
+                    // Platform display metadata: the core owner's projection
+                    // first, the CLI cache as the per-field fallback.
+                    let core = core_home
+                        .map(|home| core_identity(home, &id))
+                        .unwrap_or_default();
                     let entry = creator_identity::get_creator_identity(cache, &id);
                     (
-                        entry.and_then(|e| e.handle.clone()),
-                        entry.and_then(|e| e.display_name.clone()),
+                        core.handle.or_else(|| entry.and_then(|e| e.handle.clone())),
+                        core.display_name
+                            .or_else(|| entry.and_then(|e| e.display_name.clone())),
                     )
                 },
                 |row| (None, row.display_name.clone()),
@@ -1418,6 +1440,11 @@ fn creator_id_column_width(rows: &[ListRow]) -> usize {
 /// active, origin}` objects with nullable `handle`/`display_name` — never a
 /// string dump of the table. Empty-state copy unchanged.
 ///
+/// v1.193 P0-T2 fix 3: a platform row's `handle`/`display_name` come from the
+/// **core owner** with the CLI-local cache as a per-field fallback — the same
+/// provenance `creator status` reports (fix 2), so the two surfaces cannot
+/// diverge. Row membership and ordering are unchanged (see `list_rows`).
+///
 /// # Errors
 ///
 /// Returns `CliError` if the identity store, config, or auth store cannot be
@@ -1455,7 +1482,27 @@ async fn list_creators(_config: &CliConfig, json: bool) -> Result<()> {
     };
     let auth_store = crate::auth::AuthStore::load()?;
 
-    let rows = list_rows(&cache, &auth_store, &local_rows, active_id);
+    // Display metadata belongs to the core owner (see `list_rows`). A home the
+    // owner cannot open degrades like the local-identity read above — the
+    // platform rows still render from the CLI-local cache instead of the
+    // listing failing over a source it has a fallback for.
+    let core_home = match core_owned_home() {
+        Ok(home) => Some(home),
+        Err(err) => {
+            eprintln!(
+                "warning: core identity unavailable ({err}); showing CLI-cached metadata only."
+            );
+            None
+        }
+    };
+
+    let rows = list_rows(
+        &cache,
+        &auth_store,
+        &local_rows,
+        active_id,
+        core_home.as_ref(),
+    );
 
     if rows.is_empty() {
         if json {
@@ -2496,7 +2543,13 @@ mod tests {
             },
         ];
 
-        let rows = list_rows(&cache, &auth_store, &local_rows, Some("ctr_local_xyz"));
+        let rows = list_rows(
+            &cache,
+            &auth_store,
+            &local_rows,
+            Some("ctr_local_xyz"),
+            None,
+        );
 
         assert_eq!(
             rows.iter()
@@ -2538,7 +2591,7 @@ mod tests {
             platform_creator_id: Some("ctr_plat_dup".to_string()),
         }];
 
-        let rows = list_rows(&cache, &auth_store, &local_rows, None);
+        let rows = list_rows(&cache, &auth_store, &local_rows, None, None);
 
         assert_eq!(rows.len(), 1, "same id in both sources appears once");
         assert_eq!(rows[0].origin, "local");

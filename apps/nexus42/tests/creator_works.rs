@@ -311,6 +311,19 @@ fn combined_output(output: &std::process::Output) -> String {
 /// [`patch_core_identity`].
 const CORE_OWNED_DISPLAY_NAME: &str = "Core Owned Author";
 
+/// Display name the core owner holds for a creator the CLI metadata cache
+/// knows by id only (v1.193 P0-T2 fix 3).
+const CORE_ONLY_DISPLAY_NAME: &str = "Core Only Author";
+
+/// Stale CLI-local display name for the creator the core owner also holds —
+/// the value a pre-fix `creator list` rendered (v1.193 P0-T2 fix 3).
+const CLI_STALE_DISPLAY_NAME: &str = "CLI Stale Name";
+
+/// Handle only the CLI-local cache holds: the core owner's production writer
+/// persists no handle, so this field must keep falling back to the CLI cache
+/// (v1.193 P0-T2 fix 3).
+const CLI_FALLBACK_HANDLE: &str = "cli-h";
+
 /// Seed the core-owned identity projection through its production writer
 /// (v1.193 P0-T2 fix 2).
 ///
@@ -332,6 +345,50 @@ fn patch_core_identity(home: &std::path::Path, creator_id: &str, display_name: &
             .await
             .expect("the production identity writer patches the core cache");
     });
+}
+
+/// Shared fixture for the core-owner identity regressions: a `daemon_url`
+/// nothing listens on, the `local` creator selected, and its workspace
+/// materialized.
+///
+/// The selection uses the path-safe `local` id so no identity store has to
+/// exist first, and the workspace must be materialized before
+/// [`patch_core_identity`] runs — the core writer upserts that workspace's
+/// `creators` row on its way to the identity cache.
+fn seed_selected_local_creator(home: &std::path::Path, cwd: &std::path::Path) {
+    let nexus_dir = home.join(".nexus42");
+    std::fs::create_dir_all(&nexus_dir).expect("create .nexus42");
+    std::fs::write(
+        nexus_dir.join("config.toml"),
+        "daemon_url = \"http://127.0.0.1:1\"\n",
+    )
+    .expect("seed config.toml");
+
+    let select = hermetic_cli(home, cwd, &["creator", "use", "local"]);
+    assert!(
+        select.status.success(),
+        "creator use must commit the selection locally: {}",
+        combined_output(&select)
+    );
+
+    let creative_root = home.join("creative");
+    let init = hermetic_cli(
+        home,
+        cwd,
+        &[
+            "creator",
+            "workspace",
+            "init",
+            "workspace",
+            "--creative-root",
+            creative_root.to_str().expect("utf-8 creative root"),
+        ],
+    );
+    assert!(
+        init.status.success(),
+        "workspace init must succeed without a daemon: {}",
+        combined_output(&init)
+    );
 }
 
 /// NEW (v1.193 P0-T2): workspace initialization, selection and the demo seed
@@ -656,48 +713,13 @@ fn creator_status_is_local_and_never_probes_the_daemon() {
 /// `daemon_url` at a port nothing listens on.
 ///
 /// What it does not establish: precedence when both caches hold a value for
-/// the same creator (only the cloud registration bridge writes the CLI-local
-/// cache, so that would need a second mock-platform fixture), and no coverage
-/// of any other retained leaf.
+/// the same creator (that is [`creator_list_renders_core_owned_identity`],
+/// v1.193 P0-T2 fix 3), and no coverage of any other retained leaf.
 #[test]
 fn creator_status_renders_core_owned_identity() {
     let home = tempfile::tempdir().expect("temp home");
     let cwd = tempfile::tempdir().expect("temp cwd");
-    let creative_root = home.path().join("creative");
-
-    let nexus_dir = home.path().join(".nexus42");
-    std::fs::create_dir_all(&nexus_dir).expect("create .nexus42");
-    std::fs::write(
-        nexus_dir.join("config.toml"),
-        "daemon_url = \"http://127.0.0.1:1\"\n",
-    )
-    .expect("seed config.toml");
-
-    // A selected creator with a materialized workspace: the core writer
-    // upserts that workspace's `creators` row, so the state DB must exist.
-    let select = hermetic_cli(home.path(), cwd.path(), &["creator", "use", "local"]);
-    assert!(
-        select.status.success(),
-        "creator use must commit the selection locally: {}",
-        combined_output(&select)
-    );
-    let init = hermetic_cli(
-        home.path(),
-        cwd.path(),
-        &[
-            "creator",
-            "workspace",
-            "init",
-            "workspace",
-            "--creative-root",
-            creative_root.to_str().expect("utf-8 creative root"),
-        ],
-    );
-    assert!(
-        init.status.success(),
-        "workspace init must succeed without a daemon: {}",
-        combined_output(&init)
-    );
+    seed_selected_local_creator(home.path(), cwd.path());
 
     // The production writer the daemon PATCH route calls: the core owns the
     // identity cache, not the CLI.
@@ -737,5 +759,124 @@ fn creator_status_renders_core_owned_identity() {
     assert!(
         !status_output.contains("daemon"),
         "creator status must not mention a daemon (stdout+stderr): {status_output}"
+    );
+}
+
+/// NEW (v1.193 P0-T2 fix 3): `creator list` renders the identity the **core
+/// owner** holds, per field over the CLI-local cache.
+///
+/// `list` projected `handle`/`display_name` from the CLI-private
+/// `creator-identities.json` alone while the core owner holds the same
+/// projection in `creator_identity_cache.json` — the divergence fix 2 closed
+/// for `creator status`, on a second surface of the same command family. The
+/// fixture seeds both sources: the core owner through its production writer
+/// ([`patch_core_identity`]) with a display name the CLI cache also claims for
+/// the same id, and the CLI cache with an id-only entry for a second creator.
+/// The listing must therefore show the core value over the stale CLI one, the
+/// core value where the CLI holds nothing, and the handle the core does not
+/// hold — with no daemon reachable.
+///
+/// What it does not establish: row membership and ordering (deliberately
+/// unchanged — the core's Profile-directory SSOT is not a listing source
+/// here), the DTO beyond the two seeded rows, and any other surface.
+#[test]
+fn creator_list_renders_core_owned_identity() {
+    let home = tempfile::tempdir().expect("temp home");
+    let cwd = tempfile::tempdir().expect("temp cwd");
+    seed_selected_local_creator(home.path(), cwd.path());
+
+    // The core owner's values: one overriding stale CLI metadata, one for a
+    // creator the CLI metadata cache knows by id only.
+    patch_core_identity(home.path(), "local", CORE_OWNED_DISPLAY_NAME);
+    patch_core_identity(home.path(), "ctr_coreonly", CORE_ONLY_DISPLAY_NAME);
+
+    // The CLI metadata cache is the platform row source and the per-field
+    // fallback. Seeded as JSON: its production writer resolves `HOME` from
+    // this process's environment, which a shared test binary must not mutate.
+    let cli_cache = serde_json::json!({
+        "creators": {
+            "local": {
+                "creator_id": "local",
+                "handle": CLI_FALLBACK_HANDLE,
+                "display_name": CLI_STALE_DISPLAY_NAME,
+            },
+            "ctr_coreonly": {
+                "creator_id": "ctr_coreonly",
+                "handle": null,
+                "display_name": null,
+            },
+        }
+    });
+    std::fs::write(
+        home.path().join(".nexus42").join("creator-identities.json"),
+        serde_json::to_string_pretty(&cli_cache).expect("serialize the CLI metadata cache"),
+    )
+    .expect("seed the CLI metadata cache");
+
+    let list = hermetic_cli(home.path(), cwd.path(), &["creator", "list"]);
+    let list_output = combined_output(&list);
+    let list_stdout = String::from_utf8_lossy(&list.stdout);
+    assert!(
+        list.status.success(),
+        "creator list must succeed without a daemon: {list_output}"
+    );
+    let overridden = list_stdout.lines().find(|line| line.starts_with("local"));
+    let overridden = overridden
+        .unwrap_or_else(|| panic!("creator list must render the seeded creator: {list_stdout}"));
+    assert!(
+        overridden.contains(CORE_OWNED_DISPLAY_NAME),
+        "creator list must project the display name the core owner holds: {list_stdout}"
+    );
+    assert!(
+        !overridden.contains(CLI_STALE_DISPLAY_NAME),
+        "a stale CLI display name must not shadow the core owner's value: {list_stdout}"
+    );
+    assert!(
+        overridden.contains(CLI_FALLBACK_HANDLE),
+        "the handle the core owner does not hold must still come from the CLI cache: {list_stdout}"
+    );
+
+    let core_only = list_stdout
+        .lines()
+        .find(|line| line.starts_with("ctr_coreonly"))
+        .unwrap_or_else(|| panic!("creator list must render the id-only creator: {list_stdout}"));
+    assert!(
+        core_only.contains(CORE_ONLY_DISPLAY_NAME),
+        "creator list must render a core-held identity the CLI cache lacks: {list_stdout}"
+    );
+
+    // The pinned machine DTO carries the same projection with exact fields
+    // (the human table above is asserted by content, not by column offsets).
+    let json = hermetic_cli(home.path(), cwd.path(), &["creator", "list", "--json"]);
+    let json_output = combined_output(&json);
+    assert!(
+        json.status.success(),
+        "creator list --json must succeed without a daemon: {json_output}"
+    );
+    let dto: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&json.stdout))
+        .expect("creator list --json must emit the pinned DTO array");
+    assert_eq!(
+        dto,
+        serde_json::json!([
+            {
+                "creator_id": "ctr_coreonly",
+                "handle": null,
+                "display_name": CORE_ONLY_DISPLAY_NAME,
+                "active": false,
+                "origin": "platform",
+            },
+            {
+                "creator_id": "local",
+                "handle": CLI_FALLBACK_HANDLE,
+                "display_name": CORE_OWNED_DISPLAY_NAME,
+                "active": true,
+                "origin": "platform",
+            }
+        ]),
+        "the DTO must carry the core-owned identity for both rows, sorted by id: {dto}"
+    );
+    assert!(
+        !list_output.contains("daemon") && !json_output.contains("daemon"),
+        "creator list must not consult a daemon (stdout+stderr): {list_output}{json_output}"
     );
 }
