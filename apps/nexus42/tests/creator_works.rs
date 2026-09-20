@@ -880,3 +880,434 @@ fn creator_list_renders_core_owned_identity() {
         "creator list must not consult a daemon (stdout+stderr): {list_output}{json_output}"
     );
 }
+
+// =============================================================================
+// `creator works pool` / `creator works inspire` — separate stores, direct core
+// (v1.193 P0-T5)
+// =============================================================================
+
+/// Parse a `--json` child's stdout, failing the case with both streams when the
+/// payload is not the expected JSON document.
+fn json_stdout(output: &std::process::Output) -> serde_json::Value {
+    serde_json::from_slice(&output.stdout).unwrap_or_else(|err| {
+        panic!(
+            "expected a JSON payload on stdout ({err}): {}",
+            combined_output(output)
+        )
+    })
+}
+
+/// NEW (v1.193 P0-T5): the pool-level inspiration store (`inspiration_items`,
+/// `works pool inspiration …`) and the per-Work `inspiration_log`
+/// (`works inspire`) are separate producers, and `works status|use` read the
+/// Work from the core without touching the configured daemon URL.
+///
+/// The regression this defends is confusing the two inspiration stores: a pool
+/// item append landing in the Work's `inspiration_log`, or — the direction a
+/// reader is most likely to get wrong — the Work leaf `works inspire` writing a
+/// pool item. The fixture therefore drives the real binary through the pool
+/// store (add → list → promote), through the Work the promotion created, and
+/// through `works inspire`, asserting after each step what the *other* store
+/// holds. It also reads both `--json` DTOs and the retained `works use`
+/// selection.
+///
+/// `daemon_url` is a counting loopback listener, so the whole sequence is also
+/// evidence that the Work read and the pool producers never consult the daemon
+/// (the retired leaves read the Work over HTTP). The `--json` status path is
+/// used for that claim: the retained findings/stale enrichment — still the
+/// daemon surface owned by the later governance task — makes no subcall for a
+/// non-novel Work like this one, while the human path would still issue its
+/// best-effort stale fetch.
+///
+/// What it does not establish: the completion-lock/reopen/reconcile and
+/// findings arms (their own tasks), pool pagination/filter edges beyond the
+/// single promoted row, and any concurrency behavior. It also records, rather
+/// than repairs, the pre-existing divergence between the pool `active` row
+/// `works use` writes and the `works.status = "active"` selection an omitted
+/// `<work_id>` reads: this task preserves both, and the omitted-id refusal
+/// below is that retained filter observed through the core.
+#[test]
+fn work_pool_and_work_inspiration_do_not_cross_write() {
+    use std::io::ErrorKind;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    let home = tempfile::tempdir().expect("temp home");
+    let cwd = tempfile::tempdir().expect("temp cwd");
+    seed_selected_local_creator(home.path(), cwd.path());
+
+    // Counting loopback listener standing in for the configured daemon URL:
+    // accept-and-close, so a probe is counted and never answered. The accept
+    // loop is deliberately local to this case — the frozen v1.193 P0-T2 case
+    // keeps its own copy rather than being reworked.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind probe listener");
+    listener
+        .set_nonblocking(true)
+        .expect("nonblocking listener");
+    let daemon_url = format!("http://{}", listener.local_addr().expect("probe addr"));
+    let probes = Arc::new(AtomicUsize::new(0));
+    let stop = Arc::new(AtomicBool::new(false));
+    let accept_loop = {
+        let probes = Arc::clone(&probes);
+        let stop = Arc::clone(&stop);
+        std::thread::spawn(move || {
+            while !stop.load(Ordering::SeqCst) {
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        probes.fetch_add(1, Ordering::SeqCst);
+                        drop(stream);
+                    }
+                    Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(_) => break,
+                }
+            }
+        })
+    };
+
+    // Re-point the seeded selection at the probe. `seed_selected_local_creator`
+    // writes the dead-port literal below; re-reading the file keeps the
+    // `active_creator_id` / workspace keys `workspace init` committed.
+    let config_path = home.path().join(".nexus42").join("config.toml");
+    let seeded_config = std::fs::read_to_string(&config_path).expect("read the seeded config.toml");
+    assert!(
+        seeded_config.contains("http://127.0.0.1:1"),
+        "the fixture must seed the dead-daemon URL this case re-points: {seeded_config}"
+    );
+    std::fs::write(
+        &config_path,
+        seeded_config.replace("http://127.0.0.1:1", &daemon_url),
+    )
+    .expect("re-point daemon_url at the probe listener");
+
+    // Attribute every observed connection to the sequence below.
+    probes.store(0, Ordering::SeqCst);
+
+    // --- 1. A pool inspiration item is a pool-store write only ------------
+    let add = hermetic_cli(
+        home.path(),
+        cwd.path(),
+        &[
+            "creator",
+            "works",
+            "pool",
+            "inspiration",
+            "add",
+            POOL_ITEM_TITLE,
+            "--json",
+        ],
+    );
+    assert!(
+        add.status.success(),
+        "pool inspiration add must succeed on the direct core: {}",
+        combined_output(&add)
+    );
+    let added = json_stdout(&add);
+    let item_id = added
+        .get("item_id")
+        .and_then(|v| v.as_str())
+        .expect("the add DTO must carry the item id")
+        .to_string();
+    assert!(
+        item_id.starts_with("npi_"),
+        "the pool store must mint an `npi_` item id, got {item_id:?}"
+    );
+    assert!(
+        added
+            .get("rel_path")
+            .and_then(|v| v.as_str())
+            .is_some_and(|p| !p.is_empty()),
+        "the add DTO must carry the item scaffold path: {added}"
+    );
+
+    let works_after_add = hermetic_cli(
+        home.path(),
+        cwd.path(),
+        &["creator", "works", "list", "--json"],
+    );
+    assert!(
+        works_after_add.status.success(),
+        "works list must succeed on the direct core: {}",
+        combined_output(&works_after_add)
+    );
+    let works_page = json_stdout(&works_after_add);
+    assert_eq!(
+        works_page
+            .get("items")
+            .and_then(|v| v.as_array())
+            .map(Vec::len),
+        Some(0),
+        "a pool inspiration item must not create a Work: {works_page}"
+    );
+
+    let listed_idea = hermetic_cli(
+        home.path(),
+        cwd.path(),
+        &["creator", "works", "pool", "inspiration", "list", "--json"],
+    );
+    assert!(
+        listed_idea.status.success(),
+        "pool inspiration list must succeed on the direct core: {}",
+        combined_output(&listed_idea)
+    );
+    let idea_page = json_stdout(&listed_idea);
+    let idea_items = idea_page
+        .get("items")
+        .and_then(|v| v.as_array())
+        .expect("the pool list DTO must carry an items array");
+    assert_eq!(
+        idea_items.len(),
+        1,
+        "the pool list must show exactly the added item: {idea_page}"
+    );
+    assert_eq!(
+        idea_items[0].get("item_id").and_then(|v| v.as_str()),
+        Some(item_id.as_str())
+    );
+    assert_eq!(
+        idea_items[0].get("status").and_then(|v| v.as_str()),
+        Some("idea"),
+        "a fresh pool item is an `idea`: {idea_page}"
+    );
+    assert_eq!(
+        idea_items[0].get("title").and_then(|v| v.as_str()),
+        Some(POOL_ITEM_TITLE)
+    );
+    assert!(
+        !idea_page.to_string().contains("creator_id"),
+        "the pool wire shape must not leak the stored creator id: {idea_page}"
+    );
+
+    // --- 2. Promotion creates the Work, and writes no Work note ----------
+    let promote = hermetic_cli(
+        home.path(),
+        cwd.path(),
+        &[
+            "creator",
+            "works",
+            "pool",
+            "inspiration",
+            "promote",
+            &item_id,
+        ],
+    );
+    assert!(
+        promote.status.success(),
+        "pool inspiration promote must succeed on the direct core: {}",
+        combined_output(&promote)
+    );
+
+    let promoted_page = json_stdout(&hermetic_cli(
+        home.path(),
+        cwd.path(),
+        &["creator", "works", "pool", "inspiration", "list", "--json"],
+    ));
+    let promoted_items = promoted_page
+        .get("items")
+        .and_then(|v| v.as_array())
+        .expect("the pool list DTO must carry an items array");
+    assert_eq!(
+        promoted_items.len(),
+        1,
+        "promotion must not add a second pool item: {promoted_page}"
+    );
+    assert_eq!(
+        promoted_items[0].get("status").and_then(|v| v.as_str()),
+        Some("promoted"),
+        "the promoted item records its own status: {promoted_page}"
+    );
+    let work_id = promoted_items[0]
+        .get("promoted_work_id")
+        .and_then(|v| v.as_str())
+        .expect("the promoted item must name the Work it created")
+        .to_string();
+    assert!(
+        work_id.starts_with("wrk_"),
+        "promotion must create a real `wrk_` Work, got {work_id:?}"
+    );
+
+    let status_after_promote = hermetic_cli(
+        home.path(),
+        cwd.path(),
+        &["creator", "works", "status", &work_id, "--json"],
+    );
+    assert!(
+        status_after_promote.status.success(),
+        "works status must read the promoted Work from the core: {}",
+        combined_output(&status_after_promote)
+    );
+    let promoted_work = json_stdout(&status_after_promote);
+    assert_eq!(
+        promoted_work.get("title").and_then(|v| v.as_str()),
+        Some(POOL_ITEM_TITLE),
+        "the promoted Work carries the pool item's title: {promoted_work}"
+    );
+    assert_eq!(
+        promoted_work
+            .get("inspiration_log")
+            .and_then(|v| v.as_array())
+            .map(Vec::len),
+        Some(0),
+        "a pool promotion must not append to the Work's inspiration_log: {promoted_work}"
+    );
+
+    // --- 3. `works inspire` writes the Work store only -------------------
+    let inspire = hermetic_cli(
+        home.path(),
+        cwd.path(),
+        &[
+            "creator", "works", "inspire", &work_id, "--note", WORK_NOTE, "--json",
+        ],
+    );
+    assert!(
+        inspire.status.success(),
+        "works inspire must succeed on the direct core: {}",
+        combined_output(&inspire)
+    );
+    let appended = json_stdout(&inspire);
+    assert_eq!(
+        appended.get("work_id").and_then(|v| v.as_str()),
+        Some(work_id.as_str()),
+        "the append DTO must name the Work it appended to: {appended}"
+    );
+    assert_eq!(
+        appended.get("inspiration_count").and_then(|v| v.as_i64()),
+        Some(1),
+        "the append DTO must report the Work's own note count: {appended}"
+    );
+
+    let status_after_inspire = hermetic_cli(
+        home.path(),
+        cwd.path(),
+        &["creator", "works", "status", &work_id, "--json"],
+    );
+    assert!(
+        status_after_inspire.status.success(),
+        "works status must still read the Work: {}",
+        combined_output(&status_after_inspire)
+    );
+    let inspired_work = json_stdout(&status_after_inspire);
+    let log = inspired_work
+        .get("inspiration_log")
+        .and_then(|v| v.as_array())
+        .expect("the Work DTO must carry its inspiration_log");
+    assert_eq!(
+        log.len(),
+        1,
+        "the Work leaf must append exactly one note: {inspired_work}"
+    );
+    assert_eq!(
+        log[0].get("note").and_then(|v| v.as_str()),
+        Some(WORK_NOTE),
+        "the Work store must hold the note text: {inspired_work}"
+    );
+
+    let pool_after_inspire = json_stdout(&hermetic_cli(
+        home.path(),
+        cwd.path(),
+        &["creator", "works", "pool", "inspiration", "list", "--json"],
+    ));
+    assert_eq!(
+        pool_after_inspire
+            .get("items")
+            .and_then(|v| v.as_array())
+            .map(Vec::len),
+        Some(1),
+        "`works inspire` must not create a pool inspiration item: {pool_after_inspire}"
+    );
+
+    let pool_entries = json_stdout(&hermetic_cli(
+        home.path(),
+        cwd.path(),
+        &["creator", "works", "pool", "list", "--json"],
+    ));
+    let entries = pool_entries
+        .get("entries")
+        .and_then(|v| v.as_array())
+        .expect("the pool list DTO must carry an entries array");
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.get("work_id").and_then(|v| v.as_str()) == Some(work_id.as_str())),
+        "the selection pool must hold the promoted Work's entry: {pool_entries}"
+    );
+    assert!(
+        !pool_entries.to_string().contains("creator_id"),
+        "the pool wire shape must not leak the stored creator id: {pool_entries}"
+    );
+
+    // --- 4. `works use` writes the selection, still from the core --------
+    let use_output = hermetic_cli(
+        home.path(),
+        cwd.path(),
+        &["creator", "works", "use", &work_id],
+    );
+    assert!(
+        use_output.status.success(),
+        "works use must set the active Work on the direct core: {}",
+        combined_output(&use_output)
+    );
+    assert!(
+        String::from_utf8_lossy(&use_output.stdout)
+            .contains(&format!("Active Work set to {work_id}")),
+        "works use must report the retained selection line: {}",
+        combined_output(&use_output)
+    );
+
+    let selected = json_stdout(&hermetic_cli(
+        home.path(),
+        cwd.path(),
+        &["creator", "works", "pool", "list", "--json"],
+    ));
+    assert!(
+        selected
+            .get("entries")
+            .and_then(|v| v.as_array())
+            .is_some_and(|entries| entries.iter().any(|e| {
+                e.get("work_id").and_then(|v| v.as_str()) == Some(work_id.as_str())
+                    && e.get("status").and_then(|v| v.as_str()) == Some("active")
+            })),
+        "works use must leave the selected Work as the pool `active` row: {selected}"
+    );
+
+    // The omitted `<work_id>` keeps the CLI's retained active-Work filter
+    // (`works.status = "active"`, the same selection `run`/`findings` resolve
+    // through) — no Work in this fixture holds it, and a pool promotion writes
+    // `draft`. The refusal must therefore be that selection refusal reported by
+    // the core, not a transport error, and it must open no connection: the
+    // retired leaf resolved the active Work with a daemon call.
+    let omitted_id_status = hermetic_cli(
+        home.path(),
+        cwd.path(),
+        &["creator", "works", "status", "--json"],
+    );
+    let omitted_id_output = combined_output(&omitted_id_status);
+    assert!(
+        !omitted_id_status.status.success(),
+        "the omitted <work_id> must refuse when no Work holds the active status: {omitted_id_output}"
+    );
+    assert!(
+        omitted_id_output.contains("No active Work found"),
+        "the omitted <work_id> must report the retained core selection refusal: {omitted_id_output}"
+    );
+
+    // --- 5. No step of the sequence consulted the configured daemon ------
+    // Drain window: a connection the child opened is queued and accepted here.
+    std::thread::sleep(Duration::from_millis(100));
+    let observed = probes.load(Ordering::SeqCst);
+    stop.store(true, Ordering::SeqCst);
+    accept_loop.join().expect("join probe listener");
+    assert_eq!(
+        observed, 0,
+        "works list/status/use, pool list/promote/inspiration and inspire must not open \
+         any connection to the configured daemon URL ({daemon_url})"
+    );
+}
+
+/// Title of the pool-level inspiration item this case adds.
+const POOL_ITEM_TITLE: &str = "Pool-only idea";
+
+/// Note appended to the Work's own `inspiration_log`.
+const WORK_NOTE: &str = "Work-side note";

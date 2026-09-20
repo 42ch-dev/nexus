@@ -16,10 +16,24 @@ use clap::Subcommand;
 
 use crate::api::DaemonClient;
 use crate::config::CliConfig;
+// v1.193 P0-T5: the Work selection/pool/inspiration arms below run on the typed
+// core seam ([`crate::core`]); the findings/governance arms that still ride the
+// daemon client are retargeted by their own task.
+use crate::core::{finish_direct, map_core_error, open_direct_core};
 // V1.42 P-last (R-V141P0-06): completion-lock file path check
 use nexus_home_layout;
 // V1.49 P2 (R-V147P1-01): intake re-trigger schedules via AddScheduleRequest.
 use nexus_contracts::local::schedule::http::AddScheduleRequest;
+// Schema-owned wire shapes for the `--json` output of the pool reads; the core
+// carriers are not wire types (they still hold the stored `creator_id`).
+use nexus_contracts::{
+    AppendInspirationRequest, ListWorksQuery, WorkInspirationAddResponse,
+    WorkInspirationListResponse, WorkPoolListResponse,
+};
+use nexus_core::{
+    AddInspirationRequest, ArchiveInspirationRequest, ArchivePoolRequest, CoreService,
+    ListInspirationQuery, ListPoolQuery, Principal, PromoteInspirationRequest, PromotePoolRequest,
+};
 
 pub mod chronology;
 pub mod cron;
@@ -512,21 +526,25 @@ pub enum InspirationAction {
 ///
 /// # Errors
 ///
-/// Returns an error if the daemon API call fails.
+/// Returns the typed core refusal for the arms on the direct seam
+/// (list/status/use/pool/inspire), and the daemon API error for the arms that
+/// still ride that transport.
 pub async fn handle_works(cmd: WorksCommand, config: &CliConfig) -> Result<()> {
     let client = crate::api::DaemonClient::from_config(config)?;
 
     match cmd {
-        WorksCommand::List { status, json } => handle_list(&client, status, json).await,
-        WorksCommand::Status { work_id, json } => handle_status(&client, work_id, json).await,
-        WorksCommand::Use { work_id } => handle_use(&client, &work_id).await,
+        WorksCommand::List { status, json } => handle_list(config, status, json).await,
+        WorksCommand::Status { work_id, json } => {
+            handle_status(&client, config, work_id, json).await
+        }
+        WorksCommand::Use { work_id } => handle_use(config, &work_id).await,
         WorksCommand::CompletionLock { command } => handle_completion_lock(&client, command).await,
-        WorksCommand::Pool { action } => handle_pool(&client, action).await,
+        WorksCommand::Pool { action } => handle_pool(config, action).await,
         WorksCommand::Inspire {
             work_id,
             note,
             json,
-        } => handle_inspire(&client, work_id, &note, json).await,
+        } => handle_inspire(config, work_id, &note, json).await,
         WorksCommand::Reopen {
             work_id,
             reason,
@@ -571,94 +589,133 @@ pub async fn handle_works(cmd: WorksCommand, config: &CliConfig) -> Result<()> {
     }
 }
 
-async fn handle_list(client: &DaemonClient, status: Option<String>, json: bool) -> Result<()> {
-    // Build query via url::Url to properly encode the status filter value.
-    let base = "/v1/daemon/works";
-    let path = status.as_ref().map_or_else(
-        || base.to_string(),
-        |s| {
-            let mut url = url::Url::parse("http://localhost").expect("valid base");
-            url.set_path(base);
-            url.query_pairs_mut().append_pair("status", s);
-            let q = url.query().unwrap_or("");
-            format!("{base}?{q}")
-        },
-    );
-
-    let resp: serde_json::Value = client.get::<serde_json::Value>(&path).await?;
+/// Handle `creator works list` — the active creator's Works page.
+///
+/// Reads the typed core producer ([`CoreService::list_works`]) with the
+/// retained query defaults: only the `--status` filter is set, so the core's
+/// own cursor/limit/default-sort policy applies unchanged.
+///
+/// # Errors
+///
+/// Returns the typed core refusal (no selected creator/workspace, malformed
+/// status filter, storage failure) and any cleanup refusal from
+/// [`finish_direct`].
+async fn handle_list(config: &CliConfig, status: Option<String>, json: bool) -> Result<()> {
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        core.list_works(
+            &principal,
+            ListWorksQuery {
+                status,
+                ..ListWorksQuery::default()
+            },
+        )
+        .await
+        .map_err(map_core_error)
+    }
+    .await;
+    let resp = finish_direct(&core, outcome).await?;
 
     if json {
         println!("{}", serde_json::to_string_pretty(&resp)?);
+    } else if resp.items.is_empty() {
+        println!("No works found.");
     } else {
-        let works = resp.get("works").and_then(|v| v.as_array());
-        match works {
-            Some(works) if works.is_empty() => {
-                println!("No works found.");
-            }
-            Some(works) => {
-                println!(
-                    "{:<36} {:30} {:12} {:12} LOCK UPDATED",
-                    "WORK_ID", "TITLE", "STATUS", "INTAKE"
-                );
-                for w in works {
-                    let id = w.get("work_id").and_then(|v| v.as_str()).unwrap_or("?");
-                    let title = w.get("title").and_then(|v| v.as_str()).unwrap_or("?");
-                    let ws = w.get("status").and_then(|v| v.as_str()).unwrap_or("?");
-                    let intake = w
-                        .get("intake_status")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("?");
-                    let updated = w.get("updated_at").and_then(|v| v.as_str()).unwrap_or("?");
-                    let locked = w
-                        .get("completion_locked_at")
-                        .and_then(|v| v.as_str())
-                        .is_some();
-                    let lock_icon = if locked { "🔒" } else { " " };
-                    let display_title = truncate_with_ellipsis(title, 28);
-                    println!(
-                        "{id:<36} {display_title:30} {ws:12} {intake:12} {lock_icon}   {updated}"
-                    );
-                }
-                println!("\n{} work(s)", works.len());
-            }
-            None => {
-                println!("No works found.");
-            }
+        println!(
+            "{:<36} {:30} {:12} {:12} LOCK UPDATED",
+            "WORK_ID", "TITLE", "STATUS", "INTAKE"
+        );
+        for w in &resp.items {
+            let id = w.work_id.as_str();
+            let title = w.title.as_str();
+            let ws = w.status.as_str();
+            let intake = w.intake_status.as_str();
+            let updated = w.updated_at.as_str();
+            let lock_icon = if w.completion_locked_at.is_some() {
+                "🔒"
+            } else {
+                " "
+            };
+            let display_title = truncate_with_ellipsis(title, 28);
+            println!("{id:<36} {display_title:30} {ws:12} {intake:12} {lock_icon}   {updated}");
         }
+        println!("\n{} work(s)", resp.items.len());
     }
 
     Ok(())
 }
 
-// Migrated from run.rs — preserved status display logic with DF-60 extensions.
-#[allow(clippy::too_many_lines)]
-async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: bool) -> Result<()> {
-    // Resolve work_id: if omitted, try to get the pool active Work.
-    let resolved_id = if let Some(id) = work_id {
-        id
-    } else {
-        // Try pool active Work endpoint.
-        let resp: serde_json::Value = client
-            .get::<serde_json::Value>("/v1/daemon/works?limit=1&status=active")
-            .await?;
-        resp.get("works")
-            .and_then(|v| v.as_array())
-            .and_then(|arr| arr.first())
-            .and_then(|w| w.get("work_id"))
-            .and_then(|v| v.as_str())
-            .map(String::from)
-            .ok_or_else(|| {
-                crate::errors::CliError::Config(
-                    "No active Work found. Specify <work_id> or run `nexus42 creator works use <work_id>`.".to_string(),
-                )
-            })?
-    };
+/// Resolve the pool `active` Work through the core.
+///
+/// The migrated arms (status/inspire) resolve their omitted `<work_id>` here
+/// instead of the daemon round trip
+/// ([`super::work_utils::resolve_active_work_id`], which the arms still owned
+/// by the later governance task keep using): the same
+/// `status=active, limit=1` selection over the same producer, with the same
+/// refusal text.
+///
+/// # Errors
+///
+/// Returns [`crate::errors::CliError::Config`] when the active creator has no
+/// pool `active` entry, and the mapped core error when the bounded query fails.
+async fn active_work_id_core(core: &CoreService, principal: &Principal) -> Result<String> {
+    let page = core
+        .list_works(
+            principal,
+            ListWorksQuery {
+                status: Some("active".to_string()),
+                limit: Some(1),
+                ..ListWorksQuery::default()
+            },
+        )
+        .await
+        .map_err(map_core_error)?;
+    page.items
+        .first()
+        .map(|w| w.work_id.clone())
+        .ok_or_else(|| {
+            crate::errors::CliError::Config(
+                "No active Work found. Specify <work_id> or run \
+             `nexus42 creator works use <work_id>`."
+                    .to_string(),
+            )
+        })
+}
 
-    // R-V139P1-W-3: DaemonClient already enforces DEFAULT_REQUEST_TIMEOUT
-    // (30s) on every request; no unbounded wait is possible.
-    let resp: serde_json::Value = client
-        .get::<serde_json::Value>(&format!("/v1/daemon/works/{resolved_id}"))
-        .await?;
+// Migrated from run.rs — preserved status display logic with DF-60 extensions.
+//
+// v1.193 P0-T5: the Work itself comes from the typed core (`get_work`, with the
+// active-Work selection resolved by `active_work_id_core`), so no part of the
+// retained Work display needs the daemon. The findings/stale enrichment below
+// is the retained daemon surface owned by the later governance task: a
+// non-novel Work makes no daemon subcall on the `--json` path.
+#[allow(clippy::too_many_lines)]
+async fn handle_status(
+    client: &DaemonClient,
+    config: &CliConfig,
+    work_id: Option<String>,
+    json: bool,
+) -> Result<()> {
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        let resolved = match work_id {
+            Some(id) => id,
+            None => active_work_id_core(&core, &principal).await?,
+        };
+        core.get_work(&principal, resolved)
+            .await
+            .map_err(map_core_error)
+    }
+    .await;
+    let work = finish_direct(&core, outcome).await?;
+
+    // `WorkDetails` derives `Serialize` as the retained tool/Work wire shape
+    // (it replaced the daemon's field-for-field copy), and every reader below
+    // treats an absent nullable key and an explicit `null` identically.
+    let resolved_id = work.work_id.clone();
+    let resp = serde_json::to_value(&work)?;
 
     if json {
         // V1.46 P0 (T1+T2): novel-only findings enrichment (Grill #6/#8; spec §4.1).
@@ -868,54 +925,88 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
     Ok(())
 }
 
-async fn handle_use(client: &DaemonClient, work_id: &str) -> Result<()> {
-    // Verify the work exists first.
-    let _work: serde_json::Value = client
-        .get::<serde_json::Value>(&format!("/v1/daemon/works/{work_id}"))
-        .await?;
+/// Handle `creator works use` — set the pool `active` row for a Work (DF-60 §1.1).
+///
+/// The Work is read first so an unknown id is refused before any write (the
+/// retired adapter's GET-then-POST order), then
+/// [`CoreService::select_work`] demotes the current `active` entry and
+/// promotes this one.
+///
+/// # Errors
+///
+/// Returns the typed core refusal (unknown Work, no selected creator/workspace,
+/// storage failure) and any cleanup refusal from [`finish_direct`].
+async fn handle_use(config: &CliConfig, work_id: &str) -> Result<()> {
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        let work = core
+            .get_work(&principal, work_id.to_string())
+            .await
+            .map_err(map_core_error)?;
+        core.select_work(&principal, work_id.to_string())
+            .await
+            .map_err(map_core_error)?;
+        Ok(work)
+    }
+    .await;
+    let work = finish_direct(&core, outcome).await?;
 
-    // Set pool active via the works API. The daemon handler will
-    // demote any current `active` entry and promote this one.
-    let body = serde_json::json!({
-        "action": "set_pool_active",
-        "work_id": work_id,
-    });
-    let resp: serde_json::Value = client
-        .post::<serde_json::Value, _>("/v1/daemon/works/pool", &body)
-        .await?;
-
-    println!(
-        "Active Work set to {work_id} ({})",
-        resp.get("title")
-            .and_then(|v| v.as_str())
-            .unwrap_or("(untitled)")
-    );
+    println!("Active Work set to {work_id} ({})", work.title);
 
     Ok(())
 }
 
 // ── V1.45 P2: atomic Work operations ──────────────────────────────────
 
-// resolve_active_work_id is shared via super::work_utils (QC1 W-3 dedup).
+// resolve_active_work_id is shared via super::work_utils (QC1 W-3 dedup) for
+// the arms still on the daemon transport; the migrated arms resolve through
+// `active_work_id_core` above.
 
-/// Handle `creator works inspire` — POST inspiration note (V1.45 P2).
+/// Handle `creator works inspire` — append an inspiration note to the Work's
+/// own `inspiration_log` (V1.45 P2).
 ///
-/// Pure side-input: appends to the Work's `inspiration_log` without
-/// creating a schedule. Migrated from `creator run continue` (drops `--preset`).
+/// Pure side-input: [`CoreService::append_work_inspiration`] appends to the
+/// Work's `inspiration_log` without creating a schedule, and never touches the
+/// pool-level inspiration store (`works pool inspiration …`, DB SSOT in
+/// `inspiration_items`) — the two stores are distinct. Migrated from
+/// `creator run continue` (drops `--preset`).
+///
+/// # Errors
+///
+/// Returns the typed core refusal (unknown Work, an active auto-chain driver, a
+/// held runtime lock, no selected creator/workspace) and any cleanup refusal
+/// from [`finish_direct`].
 async fn handle_inspire(
-    client: &DaemonClient,
+    config: &CliConfig,
     work_id: Option<String>,
     note: &str,
     json: bool,
 ) -> Result<()> {
-    let resolved_id = super::work_utils::resolve_active_work_id(client, work_id).await?;
-    let body = serde_json::json!({ "note": note });
-    let resp: serde_json::Value = client
-        .post::<serde_json::Value, _>(
-            &format!("/v1/daemon/works/{resolved_id}/inspiration"),
-            &body,
-        )
-        .await?;
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        let resolved_id = match work_id {
+            Some(id) => id,
+            None => active_work_id_core(&core, &principal).await?,
+        };
+        let resp = core
+            .append_work_inspiration(
+                &principal,
+                resolved_id.clone(),
+                // `cli:<kind>:<uuid>` runtime-lock holder; the daemon adapter
+                // passed `http` for its own surface.
+                "inspire",
+                AppendInspirationRequest {
+                    note: note.to_string(),
+                },
+            )
+            .await
+            .map_err(map_core_error)?;
+        Ok((resolved_id, resp))
+    }
+    .await;
+    let (resolved_id, resp) = finish_direct(&core, outcome).await?;
 
     if json {
         println!("{}", serde_json::to_string_pretty(&resp)?);
@@ -1292,259 +1383,353 @@ async fn handle_completion_lock(client: &DaemonClient, cmd: CompletionLockComman
 
 // ── Selection pool handlers (DF-61) ────────────────────────────────────
 
-async fn handle_pool(client: &DaemonClient, action: PoolAction) -> Result<()> {
-    match action {
-        PoolAction::List { status, json } => handle_pool_list(client, status, json).await,
-        PoolAction::Promote {
-            work_id,
-            set_default,
-        } => handle_pool_promote(client, &work_id, set_default).await,
-        PoolAction::Archive { entry_id } => handle_pool_archive(client, &entry_id).await,
-        PoolAction::Inspiration { action } => handle_inspiration(client, action).await,
-    }
-}
-
-async fn handle_pool_list(client: &DaemonClient, status: Option<String>, json: bool) -> Result<()> {
-    let base = "/v1/daemon/works/pool";
-    let path = status.as_ref().map_or_else(
-        || base.to_string(),
-        |s| {
-            let mut url = url::Url::parse("http://localhost").expect("valid base");
-            url.set_path(base);
-            url.query_pairs_mut().append_pair("status", s);
-            let q = url.query().unwrap_or("");
-            format!("{base}?{q}")
-        },
-    );
-
-    let resp: serde_json::Value = client.get::<serde_json::Value>(&path).await?;
-
-    if json {
-        println!("{}", serde_json::to_string_pretty(&resp)?);
-    } else {
-        let entries = resp.get("entries").and_then(|v| v.as_array());
-        match entries {
-            Some(entries) if entries.is_empty() => {
-                println!("No pool entries found.");
+/// Handle `creator works pool` — the selection pool and the pool-level
+/// inspiration store, each on its own typed core producer.
+///
+/// The four pool-inspiration methods
+/// ([`CoreService::add_work_inspiration`], `list_work_inspiration`,
+/// `promote_work_inspiration`, `archive_work_inspiration`) address the
+/// `inspiration_items` store and are distinct from the per-Work
+/// `works.inspiration_log` that [`handle_inspire`] appends to through
+/// [`CoreService::append_work_inspiration`]. The promotion itself stays the
+/// core's single atomic transaction (Work create + pool promote + item
+/// update) — this module never splits it into separate writes.
+///
+/// # Errors
+///
+/// Returns the typed core refusal (unknown Work/entry/item, an item that is
+/// not `idea`, a cross-creator item, no selected creator/workspace) and any
+/// cleanup refusal from [`finish_direct`].
+async fn handle_pool(config: &CliConfig, action: PoolAction) -> Result<()> {
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        match action {
+            PoolAction::List { status, json } => {
+                handle_pool_list(&core, &principal, status, json).await
             }
-            Some(entries) => {
-                println!(
-                    "{:<36} {:36} {:12} {:30} PROMOTED",
-                    "ENTRY_ID", "WORK_ID", "STATUS", "TITLE"
-                );
-                for e in entries {
-                    let eid = e.get("entry_id").and_then(|v| v.as_str()).unwrap_or("?");
-                    let wid = e
-                        .get("work_id")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("(none)");
-                    let st = e.get("status").and_then(|v| v.as_str()).unwrap_or("?");
-                    let title = e.get("title").and_then(|v| v.as_str()).unwrap_or("?");
-                    let promoted = e.get("promoted_at").and_then(|v| v.as_str()).unwrap_or("-");
-                    let display_title = truncate_with_ellipsis(title, 28);
-                    println!("{eid:<36} {wid:<36} {st:<12} {display_title:<30} {promoted}");
-                }
-                println!("\n{} pool entry/entries", entries.len());
+            PoolAction::Promote {
+                work_id,
+                set_default,
+            } => handle_pool_promote(&core, &principal, &work_id, set_default).await,
+            PoolAction::Archive { entry_id } => {
+                handle_pool_archive(&core, &principal, &entry_id).await
             }
-            None => {
-                println!("No pool entries found.");
+            PoolAction::Inspiration { action } => {
+                handle_inspiration(&core, &principal, action).await
             }
         }
+    }
+    .await;
+    finish_direct(&core, outcome).await
+}
+
+async fn handle_pool_list(
+    core: &CoreService,
+    principal: &Principal,
+    status: Option<String>,
+    json: bool,
+) -> Result<()> {
+    let resp = core
+        .list_work_pool(
+            principal,
+            ListPoolQuery {
+                status,
+                limit: None,
+                offset: None,
+            },
+        )
+        .await
+        .map_err(map_core_error)?;
+
+    if json {
+        let entries: Vec<PoolListEntry> = resp.entries.into_iter().map(pool_entry_wire).collect();
+        let wire = WorkPoolListResponse {
+            entries,
+            total: u64::from(resp.total),
+            limit: u64::from(resp.limit),
+            offset: u64::from(resp.offset),
+        };
+        println!("{}", serde_json::to_string_pretty(&wire)?);
+    } else if resp.entries.is_empty() {
+        println!("No pool entries found.");
+    } else {
+        println!(
+            "{:<36} {:36} {:12} {:30} PROMOTED",
+            "ENTRY_ID", "WORK_ID", "STATUS", "TITLE"
+        );
+        for e in &resp.entries {
+            let eid = e.entry_id.as_str();
+            let wid = if e.work_id.is_empty() {
+                "(none)"
+            } else {
+                e.work_id.as_str()
+            };
+            let st = e.status.as_str();
+            let title = e.title.as_str();
+            let promoted = e.promoted_at.as_str();
+            let display_title = truncate_with_ellipsis(title, 28);
+            println!("{eid:<36} {wid:<36} {st:<12} {display_title:<30} {promoted}");
+        }
+        println!("\n{} pool entry/entries", resp.entries.len());
     }
 
     Ok(())
 }
 
 async fn handle_pool_promote(
-    client: &DaemonClient,
+    core: &CoreService,
+    principal: &Principal,
     work_id: &str,
     set_default: bool,
 ) -> Result<()> {
-    let body = serde_json::json!({
-        "work_id": work_id,
-        "set_default": set_default,
-    });
-    let resp: serde_json::Value = client
-        .post::<serde_json::Value, _>("/v1/daemon/works/pool/promote", &body)
-        .await?;
+    let entry = core
+        .promote_work_pool_entry(
+            principal,
+            PromotePoolRequest {
+                work_id: work_id.to_string(),
+                set_default: Some(set_default),
+            },
+        )
+        .await
+        .map_err(map_core_error)?;
 
-    let entry_id = resp.get("entry_id").and_then(|v| v.as_str()).unwrap_or("?");
-    println!("Promoted {work_id} to active (entry {entry_id})");
+    println!("Promoted {work_id} to active (entry {})", entry.entry_id);
 
     if set_default {
-        // T5: also wire as CLI default via `works use`
-        let use_body = serde_json::json!({
-            "action": "set_pool_active",
-            "work_id": work_id,
-        });
-        let _use_resp: serde_json::Value = client
-            .post::<serde_json::Value, _>("/v1/daemon/works/pool", &use_body)
-            .await?;
+        // `works use` semantics: the pool `active` row is the CLI default. The
+        // retired adapter issued this selection as a second control request;
+        // the core promotes to `active` on both paths.
+        core.select_work(principal, work_id.to_string())
+            .await
+            .map_err(map_core_error)?;
         println!("Also set as CLI default work.");
     }
 
     Ok(())
 }
 
-async fn handle_pool_archive(client: &DaemonClient, entry_id: &str) -> Result<()> {
-    let body = serde_json::json!({ "entry_id": entry_id });
-    let resp: serde_json::Value = client
-        .post::<serde_json::Value, _>("/v1/daemon/works/pool/archive", &body)
-        .await?;
+async fn handle_pool_archive(
+    core: &CoreService,
+    principal: &Principal,
+    entry_id: &str,
+) -> Result<()> {
+    let entry = core
+        .archive_work_pool_entry(
+            principal,
+            ArchivePoolRequest {
+                entry_id: entry_id.to_string(),
+            },
+        )
+        .await
+        .map_err(map_core_error)?;
 
-    let status = resp
-        .get("status")
-        .and_then(|v| v.as_str())
-        .unwrap_or("archived");
-    println!("Entry {entry_id} → {status}");
+    println!("Entry {entry_id} → {}", entry.status);
 
     Ok(())
 }
 
 // ── Inspiration pool handlers (DF-61 §4) ───────────────────────────────
 
-async fn handle_inspiration(client: &DaemonClient, action: InspirationAction) -> Result<()> {
+async fn handle_inspiration(
+    core: &CoreService,
+    principal: &Principal,
+    action: InspirationAction,
+) -> Result<()> {
     match action {
         InspirationAction::Add { title, json } => {
-            handle_inspiration_add(client, &title, json).await
+            handle_inspiration_add(core, principal, &title, json).await
         }
         InspirationAction::List { status, json } => {
-            handle_inspiration_list(client, status, json).await
+            handle_inspiration_list(core, principal, status, json).await
         }
         InspirationAction::Promote {
             item_id,
             idea,
             set_default,
-        } => handle_inspiration_promote(client, &item_id, idea, set_default).await,
+        } => handle_inspiration_promote(core, principal, &item_id, idea, set_default).await,
         InspirationAction::Archive { item_id } => {
-            handle_inspiration_archive(client, &item_id).await
+            handle_inspiration_archive(core, principal, &item_id).await
         }
     }
 }
 
-async fn handle_inspiration_add(client: &DaemonClient, title: &str, json: bool) -> Result<()> {
-    let body = serde_json::json!({ "title": title });
-    let resp: serde_json::Value = client
-        .post::<serde_json::Value, _>("/v1/daemon/works/pool/inspiration", &body)
-        .await?;
+async fn handle_inspiration_add(
+    core: &CoreService,
+    principal: &Principal,
+    title: &str,
+    json: bool,
+) -> Result<()> {
+    let added = core
+        .add_work_inspiration(
+            principal,
+            AddInspirationRequest {
+                title: title.to_string(),
+            },
+        )
+        .await
+        .map_err(map_core_error)?;
 
     if json {
-        println!("{}", serde_json::to_string_pretty(&resp)?);
+        let wire = WorkInspirationAddResponse {
+            item_id: added.item_id,
+            rel_path: added.rel_path,
+        };
+        println!("{}", serde_json::to_string_pretty(&wire)?);
     } else {
-        let item_id = resp.get("item_id").and_then(|v| v.as_str()).unwrap_or("?");
-        let rel_path = resp.get("rel_path").and_then(|v| v.as_str()).unwrap_or("?");
-        println!("Inspiration added: {item_id}");
-        println!("  scaffold: {rel_path}");
+        println!("Inspiration added: {}", added.item_id);
+        println!("  scaffold: {}", added.rel_path);
     }
 
     Ok(())
 }
 
 async fn handle_inspiration_list(
-    client: &DaemonClient,
+    core: &CoreService,
+    principal: &Principal,
     status: Option<String>,
     json: bool,
 ) -> Result<()> {
-    let base = "/v1/daemon/works/pool/inspiration";
-    let path = status.as_ref().map_or_else(
-        || base.to_string(),
-        |s| {
-            let mut url = url::Url::parse("http://localhost").expect("valid base");
-            url.set_path(base);
-            url.query_pairs_mut().append_pair("status", s);
-            let q = url.query().unwrap_or("");
-            format!("{base}?{q}")
-        },
-    );
-
-    let resp: serde_json::Value = client.get::<serde_json::Value>(&path).await?;
+    let resp = core
+        .list_work_inspiration(
+            principal,
+            ListInspirationQuery {
+                status,
+                limit: None,
+                offset: None,
+            },
+        )
+        .await
+        .map_err(map_core_error)?;
 
     if json {
-        println!("{}", serde_json::to_string_pretty(&resp)?);
+        let items: Vec<InspirationListItem> =
+            resp.items.into_iter().map(inspiration_item_wire).collect();
+        let wire = WorkInspirationListResponse {
+            items,
+            total: u64::from(resp.total),
+            limit: u64::from(resp.limit),
+            offset: u64::from(resp.offset),
+        };
+        println!("{}", serde_json::to_string_pretty(&wire)?);
+    } else if resp.items.is_empty() {
+        println!("No inspiration items found.");
     } else {
-        let items = resp.get("items").and_then(|v| v.as_array());
-        match items {
-            Some(items) if items.is_empty() => {
-                println!("No inspiration items found.");
-            }
-            Some(items) => {
-                println!(
-                    "{:<36} {:40} {:12} {:30} CREATED",
-                    "ITEM_ID", "TITLE", "STATUS", "REL_PATH"
-                );
-                for i in items {
-                    let iid = i.get("item_id").and_then(|v| v.as_str()).unwrap_or("?");
-                    let title = i.get("title").and_then(|v| v.as_str()).unwrap_or("?");
-                    let st = i.get("status").and_then(|v| v.as_str()).unwrap_or("?");
-                    let rp = i.get("rel_path").and_then(|v| v.as_str()).unwrap_or("?");
-                    let created = i.get("created_at").and_then(|v| v.as_str()).unwrap_or("-");
-                    let display_title = truncate_with_ellipsis(title, 38);
-                    let display_rp = if rp.len() > 28 {
-                        format!("{}…", &rp[..28])
-                    } else {
-                        rp.to_string()
-                    };
-                    println!("{iid:<36} {display_title:40} {st:<12} {display_rp:<30} {created}");
-                }
-                println!("\n{} inspiration item(s)", items.len());
-            }
-            None => {
-                println!("No inspiration items found.");
-            }
+        println!(
+            "{:<36} {:40} {:12} {:30} CREATED",
+            "ITEM_ID", "TITLE", "STATUS", "REL_PATH"
+        );
+        for i in &resp.items {
+            let iid = i.item_id.as_str();
+            let title = i.title.as_str();
+            let st = i.status.as_str();
+            let rp = i.rel_path.as_str();
+            let created = i.created_at.as_str();
+            let display_title = truncate_with_ellipsis(title, 38);
+            let display_rp = if rp.len() > 28 {
+                format!("{}…", &rp[..28])
+            } else {
+                rp.to_string()
+            };
+            println!("{iid:<36} {display_title:40} {st:<12} {display_rp:<30} {created}");
         }
+        println!("\n{} inspiration item(s)", resp.items.len());
     }
 
     Ok(())
 }
 
 async fn handle_inspiration_promote(
-    client: &DaemonClient,
+    core: &CoreService,
+    principal: &Principal,
     item_id: &str,
     idea: Option<String>,
     set_default: bool,
 ) -> Result<()> {
-    let mut body = serde_json::json!({
-        "item_id": item_id,
-        "set_default": set_default,
-    });
-    if let Some(ref idea) = idea {
-        body["idea"] = serde_json::Value::String(idea.clone());
-    }
+    let promoted = core
+        .promote_work_inspiration(
+            principal,
+            PromoteInspirationRequest {
+                item_id: item_id.to_string(),
+                idea,
+                set_default: Some(set_default),
+            },
+        )
+        .await
+        .map_err(map_core_error)?;
 
-    let resp: serde_json::Value = client
-        .post::<serde_json::Value, _>("/v1/daemon/works/pool/inspiration/promote", &body)
-        .await?;
-
-    let work_id = resp.get("work_id").and_then(|v| v.as_str()).unwrap_or("?");
-    let pool_entry_id = resp
-        .get("pool_entry_id")
-        .and_then(|v| v.as_str())
-        .unwrap_or("?");
-    println!("Inspiration {item_id} promoted → Work {work_id} (pool entry {pool_entry_id})");
+    println!(
+        "Inspiration {item_id} promoted → Work {} (pool entry {})",
+        promoted.work_id, promoted.pool_entry_id
+    );
 
     if set_default {
-        let use_body = serde_json::json!({
-            "action": "set_pool_active",
-            "work_id": work_id,
-        });
-        let _use_resp: serde_json::Value = client
-            .post::<serde_json::Value, _>("/v1/daemon/works/pool", &use_body)
-            .await?;
+        // The atomic promotion already wrote the new Work as the pool `active`
+        // row; this is the retained `works use` selection on its own request.
+        core.select_work(principal, promoted.work_id.clone())
+            .await
+            .map_err(map_core_error)?;
         println!("Also set as CLI default work.");
     }
 
     Ok(())
 }
 
-async fn handle_inspiration_archive(client: &DaemonClient, item_id: &str) -> Result<()> {
-    let body = serde_json::json!({ "item_id": item_id });
-    let _resp: serde_json::Value = client
-        .post::<serde_json::Value, _>("/v1/daemon/works/pool/inspiration/archive", &body)
-        .await?;
+async fn handle_inspiration_archive(
+    core: &CoreService,
+    principal: &Principal,
+    item_id: &str,
+) -> Result<()> {
+    core.archive_work_inspiration(
+        principal,
+        ArchiveInspirationRequest {
+            item_id: item_id.to_string(),
+        },
+    )
+    .await
+    .map_err(map_core_error)?;
 
     println!("Inspiration item {item_id} archived.");
 
     Ok(())
+}
+
+/// Schema-owned pool-list element (`--json` only).
+type PoolListEntry =
+    nexus_contracts::generated::core::works::work_pool_list_response::WorkPoolEntry;
+
+/// Schema-owned inspiration-list element (`--json` only).
+type InspirationListItem =
+    nexus_contracts::generated::core::works::work_inspiration_list_response::WorkInspirationItem;
+
+/// Project a core pool entry onto the wire shape the pool list serves.
+///
+/// The stored `creator_id` never reaches the output (R-V141P1-11 — local-first,
+/// always the active creator), exactly as the retired daemon adapter and the
+/// native pool-list projection omit it.
+fn pool_entry_wire(entry: nexus_core::WorkPoolEntry) -> PoolListEntry {
+    PoolListEntry {
+        entry_id: entry.entry_id,
+        work_id: entry.work_id,
+        status: entry.status,
+        title: entry.title,
+        promoted_at: entry.promoted_at,
+        note: entry.note,
+    }
+}
+
+/// Project a core pool-inspiration item onto the wire shape the pool
+/// inspiration list serves (stored `creator_id` intentionally not serialized).
+fn inspiration_item_wire(item: nexus_core::WorkInspirationItem) -> InspirationListItem {
+    InspirationListItem {
+        item_id: item.item_id,
+        rel_path: item.rel_path,
+        title: item.title,
+        status: item.status,
+        promoted_work_id: item.promoted_work_id,
+        created_at: item.created_at,
+        promoted_at: item.promoted_at,
+    }
 }
 
 // ── Shared display helpers (V1.42 P-last R-V141P0-02 dedup) ───────────
