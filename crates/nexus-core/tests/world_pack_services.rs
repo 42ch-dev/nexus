@@ -737,6 +737,281 @@ async fn v1191_holder_pack_unknown_disclosure_stays_quarantined_when_mapped() {
     pool.close().await;
 }
 
+// ── MIGRATED (daemon `world_kb_pack.rs` retirement, v1.193 P2-T3) ─────────
+//
+// The retired HTTP fixture drove these through `POST .../kb/pack/{export,import}`.
+// The domain cases below are the ones `pack_import_skip_cross_world_and_reimport_is_idempotent`
+// and the `v1191_holder_pack_*` cases did not already cover: the `rename` /
+// `overwrite` conflict policies, the pack envelope's default title, the
+// owner-only review bound, and the stable `qrn_` / `pib_` identifier shapes.
+// The route-level 200/403 envelopes, `Axum` extractor rejections and
+// `holder_map`/`review_import` wire parsing stay retired with the host.
+
+/// A pack of `count` foreign-governed atoms — every one of them is held, so
+/// no KB row is written and the run yields one review batch.
+fn foreign_atoms_pack(count: usize) -> Value {
+    let entries: Vec<Value> = (0..count)
+        .map(|idx| {
+            json!({
+                "schema_version": 1,
+                "entry_id": format!("kb_gov_bulk_{idx:03}"),
+                "entry_type": "character",
+                "canonical_name": format!("Bulk Row {idx:03}"),
+                "status": "confirmed",
+                "body": { "summary": "bulk" },
+                "owner": "hld_foreign_peer",
+                "disclosure": DISCLOSURE_OWNER_PRIVATE,
+                "extensions": { "nexus": { "world_id": SOURCE } }
+            })
+        })
+        .collect();
+    json!({
+        "modules": { "pack": { "title": "Bulk", "version": "0.1.0", "creator": "packAuthor" } },
+        "entries": entries,
+        "relations": []
+    })
+}
+
+async fn provenance_of(pool: &SqlitePool, world_id: &str, name: &str) -> Option<String> {
+    sqlx::query_scalar(
+        "SELECT source_provenance_kind FROM kb_key_blocks WHERE world_id = ? AND canonical_name = ?",
+    )
+    .bind(world_id)
+    .bind(name)
+    .fetch_optional(pool)
+    .await
+    .unwrap()
+    .flatten()
+}
+
+/// The retained pack-import conflict policies and the bounded owner-only
+/// review. Migrated from `world_kb_pack.rs`
+/// (`pack_import_rename_creates_disambiguated_entry`,
+/// `pack_import_overwrite_replaces_body_preserves_status`,
+/// `pack_import_same_world_reimport_overwrite_updates_body`,
+/// `v1191_holder_pack_http_review_is_bounded`,
+/// `v1191_holder_pack_http_unmapped_and_colliding_holders_stay_quarantined`,
+/// `pack_export_owned_world_returns_pack_envelope`) — surviving variants only.
+#[tokio::test]
+async fn retained_pack_conflict_policies_and_review_bound() {
+    let (_tmp, pool, core) = pack_test_core().await;
+    let principal = core.active_principal().await.unwrap();
+
+    // ── Export envelope: the pack title defaults to the World title ───────
+    let export_request: PackExportRequest = serde_json::from_value(json!({})).unwrap();
+    let exported = core
+        .export_world_pack(&principal, SOURCE.to_string(), export_request, false)
+        .await
+        .unwrap();
+    let mut pack = serde_json::to_value(exported).unwrap();
+    assert_eq!(
+        pack["modules"]["pack"]["title"], "Pack World",
+        "a defaulted pack title is the World title: {pack}"
+    );
+    // The pristine envelope keeps the source World's own atom ids for the
+    // same-world re-import arm below.
+    let same_world_pack = pack.clone();
+    fresh_entry_ids_in_pack(&mut pack);
+
+    // ── rename: a canonical-name collision creates a disambiguated row and
+    //    the imported relation endpoints follow the renamed id ─────────────
+    sqlx::query("INSERT INTO kb_key_blocks (key_block_id, world_id, block_type, canonical_name, status, revision, body_json, created_at, updated_at) VALUES ('kb_target_kael', ?, 'character', 'Kael', 'confirmed', 0, ?, datetime('now'), datetime('now'))")
+        .bind(TARGET)
+        .bind(json!({"summary": "Pre-existing Kael"}).to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let renamed = core
+        .import_world_pack(
+            &principal,
+            TARGET.to_string(),
+            request(&pack, "rename"),
+            Vec::new(),
+        )
+        .await
+        .unwrap();
+    assert!(renamed.entries.renamed >= 1, "one collision renamed");
+    let names: Vec<String> = sqlx::query_scalar(
+        "SELECT canonical_name FROM kb_key_blocks WHERE world_id = ? ORDER BY canonical_name",
+    )
+    .bind(TARGET)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        names.len(),
+        4,
+        "Aria + Mira + pre-existing Kael + renamed Kael: {names:?}"
+    );
+    let renamed_name = names
+        .iter()
+        .find(|name| name.contains("imported"))
+        .expect("renamed member carries the disambiguating suffix")
+        .clone();
+    let renamed_id: String =
+        sqlx::query_scalar("SELECT key_block_id FROM kb_key_blocks WHERE world_id = ? AND canonical_name = ?")
+            .bind(TARGET)
+            .bind(&renamed_name)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let aria_id: String =
+        sqlx::query_scalar("SELECT key_block_id FROM kb_key_blocks WHERE world_id = ? AND canonical_name = 'Aria'")
+            .bind(TARGET)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let endpoints: (String, String) = sqlx::query_as(
+        "SELECT source_entity_id, target_entity_id FROM kb_relationships WHERE world_id = ? LIMIT 1",
+    )
+    .bind(TARGET)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        endpoints,
+        (aria_id, renamed_id),
+        "relation endpoints remap onto the imported ids"
+    );
+    assert_eq!(
+        provenance_of(&pool, TARGET, "Aria").await.as_deref(),
+        Some("pack_import")
+    );
+    assert_eq!(
+        provenance_of(&pool, TARGET, &renamed_name).await.as_deref(),
+        Some("pack_import")
+    );
+    assert_ne!(
+        provenance_of(&pool, TARGET, "Kael").await.as_deref(),
+        Some("pack_import"),
+        "the pre-existing collision row is never stamped"
+    );
+
+    // ── overwrite: the pack body replaces the target body but the target's
+    //    own status survives ───────────────────────────────────────────────
+    sqlx::query("UPDATE kb_key_blocks SET status = 'provisional' WHERE key_block_id = 'kb_target_kael'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let overwritten = core
+        .import_world_pack(
+            &principal,
+            TARGET.to_string(),
+            request(&pack, "overwrite"),
+            Vec::new(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        overwritten.entries.overwritten >= 1,
+        "the collision overwrites instead of skipping: {overwritten:?}"
+    );
+    let (status, body): (String, String) = sqlx::query_as(
+        "SELECT status, body_json FROM kb_key_blocks WHERE key_block_id = 'kb_target_kael'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(status, "provisional", "target status preserved");
+    assert!(
+        body.contains("Kael from pack"),
+        "target body replaced by the pack content, got {body}"
+    );
+
+    // ── same-world re-import: overwrite restores the pack body ───────────
+    sqlx::query("UPDATE kb_key_blocks SET body_json = ? WHERE key_block_id = 'kb_pack_b'")
+        .bind(json!({"summary": "Stale Kael body"}).to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+    let same_world: Value = same_world_pack;
+    let restored = core
+        .import_world_pack(
+            &principal,
+            SOURCE.to_string(),
+            request(&same_world, "overwrite"),
+            Vec::new(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        restored.entries.overwritten >= 1,
+        "same-world re-import overwrites rather than skips: {restored:?}"
+    );
+    let stale: String = sqlx::query_scalar(
+        "SELECT body_json FROM kb_key_blocks WHERE key_block_id = 'kb_pack_b'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(
+        stale.contains("Kael from pack"),
+        "overwrite restores the pack body, got {stale}"
+    );
+
+    // ── the owner-only review is bounded and carries stable id shapes ─────
+    let held = core
+        .import_world_pack(
+            &principal,
+            TARGET.to_string(),
+            request(&foreign_atoms_pack(101), "skip"),
+            Vec::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(held.entries.rejected, 101);
+    assert_eq!(held.quarantined.len(), 101);
+    let batch_id = held.quarantined[0].batch_id.clone();
+    assert!(
+        batch_id.starts_with("pib_"),
+        "one import batch id per run: {batch_id}"
+    );
+    assert!(
+        held.quarantined
+            .iter()
+            .all(|atom| atom.batch_id == batch_id),
+        "every held atom of one run shares its batch id"
+    );
+    let digest = held.quarantined[0]
+        .quarantine_id
+        .strip_prefix("qrn_")
+        .expect("quarantine ids carry the qrn_ prefix");
+    assert_eq!(digest.len(), 64, "32-byte atom digest: {digest}");
+    assert!(
+        digest
+            .chars()
+            .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)),
+        "the digest is lowercase hex: {digest}"
+    );
+
+    let review = core
+        .review_world_pack_import(&principal, TARGET.to_string(), batch_id.clone())
+        .await
+        .unwrap();
+    assert!(review.truncated, "a 101-atom batch exceeds the review cap");
+    assert_eq!(
+        review.atoms.len(),
+        100,
+        "the bounded review returns exactly its cap"
+    );
+
+    // ── export never reads through a World the caller does not own ────────
+    let denied = core
+        .export_world_pack(
+            &principal,
+            FOREIGN.to_string(),
+            serde_json::from_value(json!({})).unwrap(),
+            false,
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(denied, CoreError::WorldOwnerDenied { .. }));
+
+    core.close().await.unwrap();
+    pool.close().await;
+}
+
 /// The export reads through the exporting Creator's admitted selection:
 /// owned private material only under explicit author intent, governance
 /// preserved exactly.
