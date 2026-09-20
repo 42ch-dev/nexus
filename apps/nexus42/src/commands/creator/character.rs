@@ -1,4 +1,15 @@
-//! `creator character` — thin `DaemonClient` surface for Character identity and bindings.
+//! `creator character` — Character identity, bindings, knowledge, memory, ToM
+//! and the (retiring) Character-run entrance.
+//!
+//! Identity and binding authority (v1.193 P0-T9) authors through the shared
+//! direct-core seam ([`crate::core`]): one owner-scoped `CoreService` is
+//! opened, the typed core call is issued behind its stored-actor fences and
+//! explicit `--expected-revision` CAS, and the writer is released before
+//! anything is rendered. No `DaemonClient` is constructed for those arms.
+//!
+//! The knowledge (P0-T10) and memory/ToM/run (P0-T11) families still ride the
+//! daemon transport until their own tasks migrate them; those are the only
+//! arms that build an HTTP client.
 
 #[path = "character_run.rs"]
 mod character_run;
@@ -6,6 +17,7 @@ mod character_run;
 use crate::api::DaemonClient;
 use crate::commands::creator::work_utils::{query_path, read_file_bounded};
 use crate::config::CliConfig;
+use crate::core::{finish_direct, map_core_error, open_direct_core};
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
 use nexus_contracts::daemon_api::actor_knowledge::{
@@ -33,16 +45,16 @@ use nexus_contracts::daemon_api::characters::tom::record_character_tom_request::
 use nexus_contracts::daemon_api::characters::tom::record_character_tom_response::RecordCharacterTomResponse;
 use nexus_contracts::daemon_api::characters::{
     add_character_binding_request::AddCharacterBindingRequest,
-    add_character_binding_response::AddCharacterBindingResponse,
-    character_binding_detail::CharacterBindingDetail, character_detail::CharacterDetail,
-    character_lifecycle_request::CharacterLifecycleRequest,
+    character_binding_detail::CharacterBindingDetail,
+    character_detail::{CharacterDetail, NexusCharacter as DetailCharacter},
     create_character_request::CreateCharacterRequest,
-    create_character_response::CreateCharacterResponse,
-    list_character_bindings_response::ListCharacterBindingsResponse,
-    list_characters_response::ListCharactersResponse,
 };
+use nexus_contracts::generated::core::{
+    CoreCharacterTransitionRequest, CoreCharacterTransitionRequestTargetStatus,
+};
+use nexus_core::{CoreService, Principal};
 use nexus_knowledge::world_kb::knowledge_entry::LEGACY_CREATOR_ONLY_UNSUPPORTED;
-use nexus_local_db::ACTOR_KNOWLEDGE_SUMMARY_MAX_UTF8_BYTES;
+use nexus_local_db::{CharacterPatch, FieldPatch, ACTOR_KNOWLEDGE_SUMMARY_MAX_UTF8_BYTES};
 use std::path::PathBuf;
 
 /// `creator character` subcommands.
@@ -530,10 +542,61 @@ pub enum CharacterSoulCommand {
 ///
 /// # Errors
 ///
-/// Returns daemon/network errors from [`DaemonClient`].
-#[allow(clippy::too_many_lines)] // single CLI command dispatcher
+/// Returns the mapped core refusal for the migrated identity/binding arms
+/// (admission, CAS conflict, storage) plus any cleanup refusal from
+/// [`finish_direct`], and the daemon/network errors of [`DaemonClient`] for
+/// the families that still ride that transport.
 pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
-    let client = DaemonClient::from_config(config)?;
+    match cmd {
+        // Identity and binding authority authors through the direct core
+        // (v1.193 P0-T9): no HTTP client is built on this path.
+        cmd @ (CharacterCommand::Create { .. }
+        | CharacterCommand::List { .. }
+        | CharacterCommand::Show { .. }
+        | CharacterCommand::Binding { .. }
+        | CharacterCommand::Edit { .. }
+        | CharacterCommand::Archive { .. }
+        | CharacterCommand::Restore { .. }) => run_direct(cmd, config).await,
+        // Knowledge (P0-T10) and memory/ToM/run (P0-T11) still speak the daemon
+        // transport: they are the only arms that build a client.
+        cmd => run_daemon(cmd, config).await,
+    }
+}
+
+/// Run one identity/binding arm against the direct core.
+///
+/// The writer is released by [`finish_direct`] before any line is printed, so
+/// a command never reports an outcome its core could not settle — on success
+/// and on refusal alike.
+///
+/// # Errors
+///
+/// Returns the mapped core refusal (admission, CAS conflict, storage) and any
+/// cleanup refusal from [`finish_direct`].
+async fn run_direct(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        run_arm(&core, &principal, cmd).await
+    }
+    .await;
+    // `None` is a settled verb that prints nothing (`--json` on a remove).
+    if let Some(text) = finish_direct(&core, outcome).await? {
+        println!("{text}");
+    }
+    Ok(())
+}
+
+/// Dispatch one migrated arm.
+///
+/// Every mutation carries the caller's explicit `--expected-revision` into the
+/// core's CAS, and every lifecycle write goes through the core's exclusive
+/// per-Character transition lease — never a bare status write.
+async fn run_arm(
+    core: &CoreService,
+    principal: &Principal,
+    cmd: CharacterCommand,
+) -> Result<Option<String>> {
     match cmd {
         CharacterCommand::Create {
             display_name,
@@ -544,7 +607,8 @@ pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
             json,
         } => {
             create(
-                &client,
+                core,
+                principal,
                 display_name,
                 world_id,
                 image_uri,
@@ -558,26 +622,38 @@ pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
             limit,
             cursor,
             json,
-        } => list(&client, limit, cursor, json).await,
-        CharacterCommand::Show { character_id, json } => show(&client, &character_id, json).await,
+        } => list(core, principal, limit, cursor, json).await,
+        CharacterCommand::Show { character_id, json } => {
+            show(core, principal, &character_id, json).await
+        }
         CharacterCommand::Binding { command } => match command {
             BindingCommand::Add {
                 character_id,
                 world_id,
                 world_sheet_entry_id,
                 json,
-            } => add_binding(&client, &character_id, world_id, world_sheet_entry_id, json).await,
+            } => {
+                add_binding(
+                    core,
+                    principal,
+                    &character_id,
+                    world_id,
+                    world_sheet_entry_id,
+                    json,
+                )
+                .await
+            }
             BindingCommand::List {
                 character_id,
                 limit,
                 cursor,
                 json,
-            } => list_bindings(&client, &character_id, limit, cursor, json).await,
+            } => list_bindings(core, principal, &character_id, limit, cursor, json).await,
             BindingCommand::Show {
                 character_id,
                 binding_id,
                 json,
-            } => show_binding(&client, &character_id, &binding_id, json).await,
+            } => show_binding(core, principal, &character_id, &binding_id, json).await,
             BindingCommand::Edit {
                 character_id,
                 binding_id,
@@ -587,7 +663,8 @@ pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
                 json,
             } => {
                 edit_binding(
-                    &client,
+                    core,
+                    principal,
                     &character_id,
                     &binding_id,
                     expected_revision,
@@ -601,8 +678,62 @@ pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
                 character_id,
                 binding_id,
                 json,
-            } => remove_binding(&client, &character_id, &binding_id, json).await,
+            } => remove_binding(core, principal, &character_id, &binding_id, json).await,
         },
+        CharacterCommand::Edit {
+            character_id,
+            expected_revision,
+            display_name,
+            image_uri,
+            clear_image_uri,
+            persona,
+            clear_persona,
+            json,
+        } => {
+            edit_character(
+                core,
+                principal,
+                &character_id,
+                expected_revision,
+                display_name,
+                image_uri,
+                clear_image_uri,
+                persona,
+                clear_persona,
+                json,
+            )
+            .await
+        }
+        CharacterCommand::Archive {
+            character_id,
+            expected_revision,
+            json,
+        } => archive_character(core, principal, &character_id, expected_revision, json).await,
+        CharacterCommand::Restore {
+            character_id,
+            expected_revision,
+            json,
+        } => restore_character(core, principal, &character_id, expected_revision, json).await,
+        // `run` routes only the identity/binding arms into this dispatch.
+        _daemon @ (CharacterCommand::Knowledge { .. }
+        | CharacterCommand::Memory { .. }
+        | CharacterCommand::Soul { .. }
+        | CharacterCommand::Tom { .. }
+        | CharacterCommand::Run { .. }) => {
+            unreachable!("daemon-family arms are routed before the direct core opens")
+        }
+    }
+}
+
+/// Run one not-yet-migrated family over the daemon transport.
+///
+/// # Errors
+///
+/// Returns [`CliError`] when the client cannot be built from `config` and the
+/// daemon/network errors of the leaf that ran.
+async fn run_daemon(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
+    let client = DaemonClient::from_config(config)?;
+    match cmd {
         CharacterCommand::Knowledge { command } => match command {
             KnowledgeCommand::Add {
                 owner,
@@ -846,39 +977,6 @@ pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
                 .await
             }
         },
-        CharacterCommand::Edit {
-            character_id,
-            expected_revision,
-            display_name,
-            image_uri,
-            clear_image_uri,
-            persona,
-            clear_persona,
-            json,
-        } => {
-            edit_character(
-                &client,
-                &character_id,
-                expected_revision,
-                display_name,
-                image_uri,
-                clear_image_uri,
-                persona,
-                clear_persona,
-                json,
-            )
-            .await
-        }
-        CharacterCommand::Archive {
-            character_id,
-            expected_revision,
-            json,
-        } => archive_character(&client, &character_id, expected_revision, json).await,
-        CharacterCommand::Restore {
-            character_id,
-            expected_revision,
-            json,
-        } => restore_character(&client, &character_id, expected_revision, json).await,
         CharacterCommand::Run {
             character_id,
             world_id,
@@ -910,6 +1008,16 @@ pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
             )
             .await
         }
+        // `run` routes the identity/binding arms to the direct core.
+        _direct @ (CharacterCommand::Create { .. }
+        | CharacterCommand::List { .. }
+        | CharacterCommand::Show { .. }
+        | CharacterCommand::Binding { .. }
+        | CharacterCommand::Edit { .. }
+        | CharacterCommand::Archive { .. }
+        | CharacterCommand::Restore { .. }) => {
+            unreachable!("identity/binding arms author through the direct core")
+        }
     }
 }
 
@@ -924,109 +1032,199 @@ fn parse_persona(raw: Option<String>) -> Result<serde_json::Map<String, serde_js
         .ok_or_else(|| CliError::Other("--persona must be a JSON object".into()))
 }
 
+/// Default `--limit` page size for the Character/binding list leaves (the
+/// retired daemon adapter's page size).
+const DEFAULT_LIST_LIMIT: u32 = 50;
+/// Largest `--limit` the list leaves accept (the retired adapter's ceiling).
+const MAX_LIST_LIMIT: u32 = 100;
+
+/// Convert a CLI-supplied string into one generated request newtype, surfacing
+/// the generated constraint message as the command's own error.
+fn wire_field<T: TryFrom<String>>(value: String) -> Result<T>
+where
+    T::Error: std::fmt::Display,
+{
+    value.try_into().map_err(wire_error)
+}
+
+/// Surface a generated wire-conversion failure as a CLI input error.
+fn wire_error(err: impl std::fmt::Display) -> CliError {
+    CliError::Other(err.to_string())
+}
+
+/// Convert a CLI `--expected-revision` (`u64`) into the stored `i64` revision.
+///
+/// The flag is wider than the stored revision: a value the core's `i64` cannot
+/// represent is refused instead of wrapping into a negative revision, which
+/// would silently address a different row revision.
+fn revision_i64(raw: u64) -> Result<i64> {
+    i64::try_from(raw)
+        .map_err(|_| CliError::Other("expected_revision is out of range for i64".into()))
+}
+
+/// Resolve `--limit` into the core's page size.
+fn resolve_list_limit(raw: Option<i64>) -> Result<u32> {
+    let Some(limit) = raw else {
+        return Ok(DEFAULT_LIST_LIMIT);
+    };
+    u32::try_from(limit)
+        .ok()
+        .filter(|limit| (1..=MAX_LIST_LIMIT).contains(limit))
+        .ok_or_else(|| CliError::Other(format!("limit must be between 1 and {MAX_LIST_LIMIT}")))
+}
+
+/// Decode the opaque `v1:<offset>` cursor the list responses mint.
+///
+/// The token is client-facing and opaque: only the retained `v1:` encoding is
+/// understood, and anything else is refused rather than silently restarted
+/// from the first page.
+fn decode_list_cursor(cursor: Option<&str>) -> Result<u32> {
+    let Some(raw) = cursor else {
+        return Ok(0);
+    };
+    raw.strip_prefix("v1:")
+        .and_then(|offset| offset.parse::<u32>().ok())
+        .ok_or_else(|| {
+            CliError::Other(
+                "invalid pagination cursor; pass the `next_cursor` value returned by the previous \
+                 response unchanged"
+                    .to_string(),
+            )
+        })
+}
+
+/// Create a Character with its initial active World binding.
+///
+/// # Errors
+///
+/// Returns [`CliError`] when a supplied value fails its generated constraint
+/// (`--world-id` shape, display-name bounds, `--persona` shape) and the mapped
+/// core refusal otherwise (foreign/unknown World,
+/// `duplicate_character_display_name`, `invalid_world_sheet`).
 async fn create(
-    client: &DaemonClient,
+    core: &CoreService,
+    principal: &Principal,
     display_name: String,
     world_id: String,
     image_uri: Option<String>,
     persona: Option<String>,
     world_sheet_entry_id: Option<String>,
     json: bool,
-) -> Result<()> {
-    let mut body = serde_json::json!({
-        "display_name": display_name,
-        "world_id": world_id,
-        "persona": parse_persona(persona)?,
-    });
-    if let Some(uri) = image_uri {
-        body["image_uri"] = serde_json::Value::String(uri);
-    }
-    if let Some(sheet) = world_sheet_entry_id {
-        body["world_sheet_entry_id"] = serde_json::Value::String(sheet);
-    }
-    let req: CreateCharacterRequest = serde_json::from_value(body)?;
-    let resp: CreateCharacterResponse = client.post("/v1/daemon/characters", &req).await?;
+) -> Result<Option<String>> {
+    let request = CreateCharacterRequest {
+        display_name: wire_field(display_name)?,
+        image_uri: image_uri.map(wire_field).transpose()?,
+        persona: parse_persona(persona)?,
+        world_id: wire_field(world_id)?,
+        world_sheet_entry_id: world_sheet_entry_id.map(wire_field).transpose()?,
+    };
+    let resp = core
+        .create_character(principal, request)
+        .await
+        .map_err(map_core_error)?;
     if json {
-        println!("{}", serde_json::to_string_pretty(&resp)?);
-    } else {
-        println!("Character created:");
-        println!("  character_id: {}", *resp.character.character_id);
-        println!("  display_name:  {}", *resp.character.display_name);
-        println!("  binding_id:    {}", *resp.binding.binding_id);
-        println!("  world_id:       {}", *resp.binding.world_id);
+        return Ok(Some(serde_json::to_string_pretty(&resp)?));
     }
-    Ok(())
+    Ok(Some(format!(
+        "Character created:\n  character_id: {}\n  display_name:  {}\n  binding_id:    {}\n  world_id:       {}",
+        *resp.character.character_id,
+        *resp.character.display_name,
+        *resp.binding.binding_id,
+        *resp.binding.world_id
+    )))
 }
 
+/// List the active Creator's Characters, oldest first.
+///
+/// # Errors
+///
+/// Returns [`CliError`] for an out-of-range `--limit` or a malformed
+/// `--cursor`, and the mapped core refusal otherwise.
 async fn list(
-    client: &DaemonClient,
+    core: &CoreService,
+    principal: &Principal,
     limit: Option<i64>,
     cursor: Option<String>,
     json: bool,
-) -> Result<()> {
-    let mut pairs = Vec::new();
-    let limit_owned = limit.map(|n| n.to_string());
-    if let Some(ref n) = limit_owned {
-        pairs.push(("limit", n.as_str()));
-    }
-    if let Some(ref c) = cursor {
-        pairs.push(("cursor", c.as_str()));
-    }
-    let path = query_path("/v1/daemon/characters", &pairs);
-    let resp: ListCharactersResponse = client.get(&path).await?;
+) -> Result<Option<String>> {
+    let page = resolve_list_limit(limit)?;
+    let offset = decode_list_cursor(cursor.as_deref())?;
+    let resp = core
+        .list_characters(principal, page, offset)
+        .await
+        .map_err(map_core_error)?;
     if json {
-        println!("{}", serde_json::to_string_pretty(&resp)?);
-    } else if resp.items.is_empty() {
-        println!("No characters.");
-    } else {
-        for item in &resp.items {
-            println!(
+        return Ok(Some(serde_json::to_string_pretty(&resp)?));
+    }
+    if resp.items.is_empty() {
+        return Ok(Some("No characters.".to_string()));
+    }
+    let mut lines: Vec<String> = resp
+        .items
+        .iter()
+        .map(|item| {
+            format!(
                 "{}  {}  {}",
                 *item.character_id, *item.display_name, item.status
-            );
+            )
+        })
+        .collect();
+    if resp.pagination.has_more {
+        if let Some(next) = &resp.pagination.next_cursor {
+            lines.push(format!("next_cursor: {next}"));
         }
-        if resp.pagination.has_more {
-            if let Some(next) = &resp.pagination.next_cursor {
-                println!("next_cursor: {next}");
-            }
-        }
     }
-    Ok(())
+    Ok(Some(lines.join("\n")))
 }
 
-async fn show(client: &DaemonClient, character_id: &str, json: bool) -> Result<()> {
-    let resp: CharacterDetail = client
-        .get(&format!("/v1/daemon/characters/{character_id}"))
-        .await?;
+/// Show one owned Character.
+///
+/// # Errors
+///
+/// Returns the mapped core refusal (unknown/foreign id is `[not_found]`).
+async fn show(
+    core: &CoreService,
+    principal: &Principal,
+    character_id: &str,
+    json: bool,
+) -> Result<Option<String>> {
+    let resp = core
+        .character(principal, character_id.to_string())
+        .await
+        .map_err(map_core_error)?;
     if json {
-        println!("{}", serde_json::to_string_pretty(&resp)?);
-    } else {
-        let c = &resp.character;
-        println!("character_id: {}", *c.character_id);
-        println!("display_name: {}", *c.display_name);
-        println!("status:       {}", c.status);
-        println!("owner:        {}", *c.owner_creator_id);
+        return Ok(Some(serde_json::to_string_pretty(&resp)?));
     }
-    Ok(())
+    let c = &resp.character;
+    Ok(Some(format!(
+        "character_id: {}\ndisplay_name: {}\nstatus:       {}\nowner:        {}",
+        *c.character_id, *c.display_name, c.status, *c.owner_creator_id
+    )))
 }
 
-fn print_character_detail(resp: &CharacterDetail, json: bool) -> Result<()> {
+/// Render one Character detail as the `--json` DTO or the human block.
+fn render_character_detail(resp: &CharacterDetail, json: bool) -> Result<String> {
     if json {
-        println!("{}", serde_json::to_string_pretty(resp)?);
-    } else {
-        let c = &resp.character;
-        println!("character_id: {}", *c.character_id);
-        println!("display_name: {}", *c.display_name);
-        println!("status:       {}", c.status);
-        println!("revision:     {}", c.revision);
-        println!("owner:        {}", *c.owner_creator_id);
+        return Ok(serde_json::to_string_pretty(resp)?);
     }
-    Ok(())
+    let c = &resp.character;
+    Ok(format!(
+        "character_id: {}\ndisplay_name: {}\nstatus:       {}\nrevision:     {}\nowner:        {}",
+        *c.character_id, *c.display_name, c.status, c.revision, *c.owner_creator_id
+    ))
 }
 
+/// Edit Character identity metadata under the caller's explicit revision CAS.
+///
+/// # Errors
+///
+/// Returns [`CliError`] for a mutually exclusive flag pair, an empty patch or
+/// an unrepresentable `--expected-revision`, and the mapped core refusal
+/// otherwise (`character_revision_conflict`, `character_inactive`).
 #[allow(clippy::too_many_arguments)]
 async fn edit_character(
-    client: &DaemonClient,
+    core: &CoreService,
+    principal: &Principal,
     character_id: &str,
     expected_revision: u64,
     display_name: Option<String>,
@@ -1035,7 +1233,7 @@ async fn edit_character(
     persona: Option<String>,
     clear_persona: bool,
     json: bool,
-) -> Result<()> {
+) -> Result<Option<String>> {
     if clear_image_uri && image_uri.is_some() {
         return Err(CliError::Other(
             "use either --image-uri or --clear-image-uri, not both".into(),
@@ -1056,225 +1254,305 @@ async fn edit_character(
             "edit requires at least one mutable field (--display-name, --image-uri, --clear-image-uri, --persona, or --clear-persona)".into(),
         ));
     }
-    // Unlike archive/restore (generated `CharacterLifecycleRequest`), edit
-    // hand-rolls the PATCH body so explicit JSON null clears (`--clear-*`) are
-    // expressible; the generated `UpdateCharacterRequest` skips absent members.
-    let mut body = serde_json::json!({ "expected_revision": expected_revision });
-    if let Some(name) = display_name {
-        body["display_name"] = serde_json::Value::String(name);
-    }
-    if clear_image_uri {
-        body["image_uri"] = serde_json::Value::Null;
-    } else if let Some(uri) = image_uri {
-        body["image_uri"] = serde_json::Value::String(uri);
-    }
-    if clear_persona {
-        body["persona"] = serde_json::Value::Null;
-    } else if let Some(raw) = persona {
-        body["persona"] = serde_json::Value::Object(parse_persona(Some(raw))?);
-    }
-    let resp: CharacterDetail = client
-        .patch(&format!("/v1/daemon/characters/{character_id}"), &body)
-        .await?;
-    print_character_detail(&resp, json)
+    // The tri-state `FieldPatch` is the storage contract: an omitted member
+    // keeps the stored value, an explicit `--clear-*` clears it, and a supplied
+    // value sets it. Persona is stored as a JSON object string.
+    let persona_json = match persona {
+        Some(raw) => Some(serde_json::Value::Object(parse_persona(Some(raw))?).to_string()),
+        None => None,
+    };
+    let patch = CharacterPatch {
+        display_name: display_name.as_deref(),
+        image_uri: if clear_image_uri {
+            FieldPatch::Clear
+        } else if let Some(uri) = image_uri.as_deref() {
+            FieldPatch::Set(uri)
+        } else {
+            FieldPatch::Keep
+        },
+        persona_json: if clear_persona {
+            FieldPatch::Clear
+        } else if let Some(encoded) = persona_json.as_deref() {
+            FieldPatch::Set(encoded)
+        } else {
+            FieldPatch::Keep
+        },
+    };
+    let resp = core
+        .patch_character(
+            principal,
+            character_id.to_string(),
+            revision_i64(expected_revision)?,
+            patch,
+        )
+        .await
+        .map_err(map_core_error)?;
+    Ok(Some(render_character_detail(&resp, json)?))
 }
 
+/// Archive one owned Character through the core's lifecycle transition.
+///
+/// # Errors
+///
+/// As [`transition_character`].
 async fn archive_character(
-    client: &DaemonClient,
+    core: &CoreService,
+    principal: &Principal,
     character_id: &str,
     expected_revision: u64,
     json: bool,
-) -> Result<()> {
-    let req: CharacterLifecycleRequest = CharacterLifecycleRequest::builder()
-        .expected_revision(i64::try_from(expected_revision).map_err(|_| {
-            CliError::Other("expected_revision is out of range for i64".into())
-        })?)
-        .try_into()
-        .map_err(
-            |e: nexus_contracts::daemon_api::characters::character_lifecycle_request::error::ConversionError| {
-                CliError::Other(e.to_string())
-            },
-        )?;
-    let resp: CharacterDetail = client
-        .post(
-            &format!("/v1/daemon/characters/{character_id}/archive"),
-            &req,
-        )
-        .await?;
-    print_character_detail(&resp, json)
+) -> Result<Option<String>> {
+    transition_character(
+        core,
+        principal,
+        character_id,
+        expected_revision,
+        CoreCharacterTransitionRequestTargetStatus::Archived,
+        json,
+    )
+    .await
 }
 
+/// Restore one owned Character through the core's lifecycle transition.
+///
+/// # Errors
+///
+/// As [`transition_character`].
 async fn restore_character(
-    client: &DaemonClient,
+    core: &CoreService,
+    principal: &Principal,
     character_id: &str,
     expected_revision: u64,
     json: bool,
-) -> Result<()> {
-    let req: CharacterLifecycleRequest = CharacterLifecycleRequest::builder()
-        .expected_revision(i64::try_from(expected_revision).map_err(|_| {
-            CliError::Other("expected_revision is out of range for i64".into())
-        })?)
+) -> Result<Option<String>> {
+    transition_character(
+        core,
+        principal,
+        character_id,
+        expected_revision,
+        CoreCharacterTransitionRequestTargetStatus::Active,
+        json,
+    )
+    .await
+}
+
+/// Commit one Character lifecycle transition.
+///
+/// The one-call core transition takes the exclusive per-Character lease
+/// (busy refusal, ownership and pre-transition epoch re-read under the fence)
+/// **and** commits the revision-checked write, so this leaf can never bypass
+/// the stored lifecycle epoch the way a bare status patch would.
+///
+/// # Errors
+///
+/// Returns [`CliError`] for an unrepresentable `--expected-revision` and the
+/// mapped core refusal otherwise (`character_busy`, `character_revision_conflict`,
+/// `character_restore_requires_active_binding`, `holder_state_invalid`).
+async fn transition_character(
+    core: &CoreService,
+    principal: &Principal,
+    character_id: &str,
+    expected_revision: u64,
+    target_status: CoreCharacterTransitionRequestTargetStatus,
+    json: bool,
+) -> Result<Option<String>> {
+    let request: CoreCharacterTransitionRequest = CoreCharacterTransitionRequest::builder()
+        .character_id(character_id.to_string())
+        .expected_revision(revision_i64(expected_revision)?)
+        .target_status(target_status)
         .try_into()
-        .map_err(
-            |e: nexus_contracts::daemon_api::characters::character_lifecycle_request::error::ConversionError| {
-                CliError::Other(e.to_string())
-            },
-        )?;
-    let resp: CharacterDetail = client
-        .post(
-            &format!("/v1/daemon/characters/{character_id}/restore"),
-            &req,
-        )
-        .await?;
-    print_character_detail(&resp, json)
+        .map_err(wire_error)?;
+    let resp = core
+        .transition_character(principal, request)
+        .await
+        .map_err(map_core_error)?;
+    // The transition response carries the core's own Character wire; the
+    // detail envelope is the retained CLI projection of the same fields.
+    let character = serde_json::to_value(resp.character)?;
+    let detail = CharacterDetail {
+        character: serde_json::from_value::<DetailCharacter>(character)?,
+    };
+    Ok(Some(render_character_detail(&detail, json)?))
 }
 
-fn print_binding_detail(resp: &CharacterBindingDetail, json: bool) -> Result<()> {
+/// Render one binding detail as the `--json` DTO or the human line.
+fn render_binding_detail(resp: &CharacterBindingDetail, json: bool) -> Result<String> {
     if json {
-        println!("{}", serde_json::to_string_pretty(resp)?);
-    } else {
-        let b = &resp.binding;
-        println!(
-            "{}  {}  rev={}  sheet={}",
-            *b.binding_id,
-            *b.world_id,
-            b.revision,
-            b.world_sheet_entry_id
-                .as_ref()
-                .map_or("-", |id| id.as_str())
-        );
+        return Ok(serde_json::to_string_pretty(resp)?);
     }
-    Ok(())
+    let b = &resp.binding;
+    Ok(format!(
+        "{}  {}  rev={}  sheet={}",
+        *b.binding_id,
+        *b.world_id,
+        b.revision,
+        b.world_sheet_entry_id
+            .as_ref()
+            .map_or("-", |id| id.as_str())
+    ))
 }
 
+/// Show one owned binding (retained reads tolerate an archived Character).
+///
+/// # Errors
+///
+/// Returns the mapped core refusal (unknown/foreign binding is `[not_found]`).
 async fn show_binding(
-    client: &DaemonClient,
+    core: &CoreService,
+    principal: &Principal,
     character_id: &str,
     binding_id: &str,
     json: bool,
-) -> Result<()> {
-    let resp: CharacterBindingDetail = client
-        .get(&format!(
-            "/v1/daemon/characters/{character_id}/bindings/{binding_id}"
-        ))
-        .await?;
-    print_binding_detail(&resp, json)
+) -> Result<Option<String>> {
+    let resp = core
+        .binding(principal, character_id.to_string(), binding_id.to_string())
+        .await
+        .map_err(map_core_error)?;
+    Ok(Some(render_binding_detail(&resp, json)?))
 }
 
+/// Patch the optional WorldSheet link under the caller's explicit revision CAS.
+///
+/// # Errors
+///
+/// Returns [`CliError`] for a mutually exclusive flag pair, a missing patch
+/// value or an unrepresentable `--expected-revision`, and the mapped core
+/// refusal otherwise (`binding_revision_conflict`, `character_inactive`,
+/// `invalid_world_sheet`).
+#[allow(clippy::too_many_arguments)]
 async fn edit_binding(
-    client: &DaemonClient,
+    core: &CoreService,
+    principal: &Principal,
     character_id: &str,
     binding_id: &str,
     expected_revision: u64,
     world_sheet_entry_id: Option<String>,
     clear_world_sheet: bool,
     json: bool,
-) -> Result<()> {
+) -> Result<Option<String>> {
     if clear_world_sheet && world_sheet_entry_id.is_some() {
         return Err(CliError::Other(
             "use either --world-sheet-entry-id or --clear-world-sheet, not both".into(),
         ));
     }
-    if !clear_world_sheet && world_sheet_entry_id.is_none() {
-        return Err(CliError::Other(
-            "edit requires --world-sheet-entry-id or --clear-world-sheet".into(),
-        ));
-    }
-    let mut body = serde_json::json!({ "expected_revision": expected_revision });
-    if clear_world_sheet {
-        body["world_sheet_entry_id"] = serde_json::Value::Null;
-    } else if let Some(id) = world_sheet_entry_id {
-        body["world_sheet_entry_id"] = serde_json::Value::String(id);
-    }
-    let resp: CharacterBindingDetail = client
-        .patch(
-            &format!("/v1/daemon/characters/{character_id}/bindings/{binding_id}"),
-            &body,
+    // Tri-state `FieldPatch`: `--clear-world-sheet` clears the nullable link,
+    // a supplied entry id sets it, and an omitted member keeps it.
+    let sheet_patch = if clear_world_sheet {
+        FieldPatch::Clear
+    } else {
+        FieldPatch::Set(world_sheet_entry_id.as_deref().ok_or_else(|| {
+            CliError::Other("edit requires --world-sheet-entry-id or --clear-world-sheet".into())
+        })?)
+    };
+    let resp = core
+        .patch_binding(
+            principal,
+            character_id.to_string(),
+            binding_id.to_string(),
+            revision_i64(expected_revision)?,
+            sheet_patch,
         )
-        .await?;
-    print_binding_detail(&resp, json)
+        .await
+        .map_err(map_core_error)?;
+    Ok(Some(render_binding_detail(&resp, json)?))
 }
 
+/// Add one active World binding to an owned Character.
+///
+/// # Errors
+///
+/// Returns [`CliError`] when `--world-id` fails its generated shape constraint
+/// and the mapped core refusal otherwise (`duplicate_active_actor_world_binding`,
+/// `invalid_world_sheet`, foreign/unknown ids).
 async fn add_binding(
-    client: &DaemonClient,
+    core: &CoreService,
+    principal: &Principal,
     character_id: &str,
     world_id: String,
     world_sheet_entry_id: Option<String>,
     json: bool,
-) -> Result<()> {
-    let mut body = serde_json::json!({ "world_id": world_id });
-    if let Some(sheet) = world_sheet_entry_id {
-        body["world_sheet_entry_id"] = serde_json::Value::String(sheet);
-    }
-    let req: AddCharacterBindingRequest = serde_json::from_value(body)?;
-    let resp: AddCharacterBindingResponse = client
-        .post(
-            &format!("/v1/daemon/characters/{character_id}/bindings"),
-            &req,
+) -> Result<Option<String>> {
+    let request = AddCharacterBindingRequest {
+        world_id: wire_field(world_id)?,
+        world_sheet_entry_id: world_sheet_entry_id.map(wire_field).transpose()?,
+    };
+    let resp = core
+        .add_binding(
+            principal,
+            character_id.to_string(),
+            request.world_id.to_string(),
+            request
+                .world_sheet_entry_id
+                .as_ref()
+                .map(|id| id.as_str().to_string()),
         )
-        .await?;
+        .await
+        .map_err(map_core_error)?;
     if json {
-        println!("{}", serde_json::to_string_pretty(&resp)?);
-    } else {
-        println!("Binding added:");
-        println!("  binding_id: {}", *resp.binding.binding_id);
-        println!("  world_id:    {}", *resp.binding.world_id);
+        return Ok(Some(serde_json::to_string_pretty(&resp)?));
     }
-    Ok(())
+    Ok(Some(format!(
+        "Binding added:\n  binding_id: {}\n  world_id:    {}",
+        *resp.binding.binding_id, *resp.binding.world_id
+    )))
 }
 
+/// List one owned Character's bindings.
+///
+/// # Errors
+///
+/// Returns [`CliError`] for an out-of-range `--limit` or a malformed
+/// `--cursor`, and the mapped core refusal otherwise (foreign Character).
 async fn list_bindings(
-    client: &DaemonClient,
+    core: &CoreService,
+    principal: &Principal,
     character_id: &str,
     limit: Option<i64>,
     cursor: Option<String>,
     json: bool,
-) -> Result<()> {
-    let mut pairs = Vec::new();
-    let limit_owned = limit.map(|n| n.to_string());
-    if let Some(ref n) = limit_owned {
-        pairs.push(("limit", n.as_str()));
-    }
-    if let Some(ref c) = cursor {
-        pairs.push(("cursor", c.as_str()));
-    }
-    let path = query_path(
-        &format!("/v1/daemon/characters/{character_id}/bindings"),
-        &pairs,
-    );
-    let resp: ListCharacterBindingsResponse = client.get(&path).await?;
+) -> Result<Option<String>> {
+    let page = resolve_list_limit(limit)?;
+    let offset = decode_list_cursor(cursor.as_deref())?;
+    let resp = core
+        .list_bindings(principal, character_id.to_string(), page, offset)
+        .await
+        .map_err(map_core_error)?;
     if json {
-        println!("{}", serde_json::to_string_pretty(&resp)?);
-    } else if resp.items.is_empty() {
-        println!("No bindings.");
-    } else {
-        for item in &resp.items {
-            println!("{}  {}  {}", *item.binding_id, *item.world_id, item.status);
-        }
-        if resp.pagination.has_more {
-            if let Some(next) = &resp.pagination.next_cursor {
-                println!("next_cursor: {next}");
-            }
+        return Ok(Some(serde_json::to_string_pretty(&resp)?));
+    }
+    if resp.items.is_empty() {
+        return Ok(Some("No bindings.".to_string()));
+    }
+    let mut lines: Vec<String> = resp
+        .items
+        .iter()
+        .map(|item| format!("{}  {}  {}", *item.binding_id, *item.world_id, item.status))
+        .collect();
+    if resp.pagination.has_more {
+        if let Some(next) = &resp.pagination.next_cursor {
+            lines.push(format!("next_cursor: {next}"));
         }
     }
-    Ok(())
+    Ok(Some(lines.join("\n")))
 }
 
+/// Remove one active binding (the last active binding is a zero-mutation 409).
+///
+/// # Errors
+///
+/// Returns the mapped core refusal (`last_active_actor_world_binding`, a
+/// binding that still owns knowledge or local memory, foreign/unknown ids).
 async fn remove_binding(
-    client: &DaemonClient,
+    core: &CoreService,
+    principal: &Principal,
     character_id: &str,
     binding_id: &str,
     json: bool,
-) -> Result<()> {
-    client
-        .delete_no_content(&format!(
-            "/v1/daemon/characters/{character_id}/bindings/{binding_id}"
-        ))
-        .await?;
-    if json {
-        println!("{{}}");
-    }
-    Ok(())
+) -> Result<Option<String>> {
+    core.remove_binding(principal, character_id.to_string(), binding_id.to_string())
+        .await
+        .map_err(map_core_error)?;
+    Ok(json.then(|| "{}".to_string()))
 }
 
 fn load_bounded_summary_text(
