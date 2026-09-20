@@ -654,32 +654,30 @@ async fn internal_database_fault_carries_legacy_code() {
     core.close().await.unwrap();
 }
 
-/// Shape helper for the legacy 423 reason: the observable holder must be the
-/// `cli:http:<uuid>` label minted for the HTTP surface, never `cli:core:`.
-fn assert_http_holder_shape(reason: &str) {
-    let marker = "'cli:http:";
-    let start = reason
-        .find(marker)
-        .expect("legacy cli:http holder in reason");
-    let tail = &reason[start + marker.len()..];
-    let uuid = tail.split('\'').next().expect("closing quote");
-    assert_eq!(uuid.len(), 36, "holder uuid shape: {reason}");
-    assert_eq!(
-        uuid.chars().filter(|c| *c == '-').count(),
-        4,
-        "uuid dashes: {reason}"
+/// Wording-independent lock-conflict assertion (fix-round 1, finding 1): a
+/// refused mutation must report the `work_locked` class for this Work and name
+/// the holder that actually holds it. No holder spelling is a contract.
+fn assert_lock_conflict(resource: &str, work_id: &str, holder: &str) {
+    assert!(
+        resource.starts_with("work_locked:"),
+        "lock conflict class: {resource}"
     );
     assert!(
-        !reason.contains("cli:core:"),
-        "core label must not leak into the HTTP surface: {reason}"
+        resource.contains(work_id),
+        "lock conflict must name the Work: {resource}"
+    );
+    assert!(
+        resource.contains(holder),
+        "lock conflict must name the current holder: {resource}"
     );
 }
 
-/// Fix-round regression (QC2-F-001): Work lifecycle locks minted through the
-/// daemon-holder surface keep the legacy `cli:http:<uuid>` label in the
-/// observable 423 reason — the same shape regression the content routes carry.
+/// Fix-round regression (fix 1, finding 1): a Work held by a runtime lock
+/// refuses every lifecycle mutator as a lock conflict — whatever holder label
+/// the holder and the contender carry — and leaves the durable Work row
+/// untouched; releasing the holder restores writability.
 #[tokio::test]
-async fn work_lifecycle_locks_report_http_holder_shape() {
+async fn work_lifecycle_locks_refuse_conflicting_holder() {
     let temp = tempfile::tempdir().unwrap();
     let home = temp.path();
     std::fs::create_dir_all(home.join(".nexus42")).unwrap();
@@ -733,11 +731,12 @@ async fn work_lifecycle_locks_report_http_holder_shape() {
         serde_json::to_vec(&serde_json::json!({"local_root": home.join("creative")})).unwrap(),
     )
     .unwrap();
-    // Hold the Work with the legacy HTTP holder label, exactly as the daemon
-    // surface mints it.
+    // First lock attempt wins; a later attempt under a different holder label
+    // is refused as a lock conflict naming the holder that already owns the
+    // Work. Neither label is asserted — only the conflict class is.
     let lock_seed = init_guarded_pool(&db, "author").await.unwrap();
     let lock_pool = lock_seed.clone_pool();
-    let holder = nexus_local_db::cli_holder("http");
+    let holder = nexus_local_db::cli_holder("core");
     assert!(matches!(
         nexus_local_db::acquire_runtime_lock(
             &lock_pool,
@@ -751,6 +750,25 @@ async fn work_lifecycle_locks_report_http_holder_shape() {
         .unwrap(),
         nexus_local_db::AcquireResult::Acquired { .. }
     ));
+    let contender = nexus_local_db::cli_holder("http");
+    match nexus_local_db::acquire_runtime_lock(
+        &lock_pool,
+        principal.creator_id(),
+        &work_id,
+        &contender,
+        nexus_local_db::ttl_from_env(),
+        false,
+    )
+    .await
+    .unwrap()
+    {
+        nexus_local_db::AcquireResult::Locked {
+            holder: existing, ..
+        } => assert_eq!(existing, holder, "conflict must name the current holder"),
+        nexus_local_db::AcquireResult::Acquired { .. } => {
+            panic!("a second lock attempt must be refused as a lock conflict");
+        }
+    }
 
     let Err(CoreError::Forbidden { resource }) = core
         .patch_work(
@@ -763,7 +781,7 @@ async fn work_lifecycle_locks_report_http_holder_shape() {
     else {
         panic!("locked Work must reject patch");
     };
-    assert_http_holder_shape(&resource);
+    assert_lock_conflict(&resource, &work_id, &holder);
     let Err(CoreError::Forbidden { resource }) = core
         .append_work_inspiration(
             &principal,
@@ -777,13 +795,13 @@ async fn work_lifecycle_locks_report_http_holder_shape() {
     else {
         panic!("locked Work must reject inspiration append");
     };
-    assert_http_holder_shape(&resource);
+    assert_lock_conflict(&resource, &work_id, &holder);
     let Err(CoreError::Forbidden { resource }) =
         core.delete_work(&principal, work_id.clone(), "http").await
     else {
         panic!("locked Work must reject delete");
     };
-    assert_http_holder_shape(&resource);
+    assert_lock_conflict(&resource, &work_id, &holder);
     let Err(CoreError::Forbidden { resource }) = core
         .reconcile_work_chapters(
             &principal,
@@ -795,7 +813,50 @@ async fn work_lifecycle_locks_report_http_holder_shape() {
     else {
         panic!("locked Work must reject reconcile");
     };
-    assert_http_holder_shape(&resource);
+    assert_lock_conflict(&resource, &work_id, &holder);
+
+    // Refusals must leave the durable row consistent: the seeded fields
+    // survive and the holder is still the one that acquired the lock.
+    let unchanged = core.get_work(&principal, work_id.clone()).await.unwrap();
+    assert_eq!(unchanged.title, "Locked Work");
+    assert_eq!(unchanged.story_ref.as_deref(), Some("locked-work"));
+    assert!(unchanged.inspiration_log.is_empty());
+    assert_eq!(
+        unchanged.runtime_lock_holder.as_deref(),
+        Some(holder.as_str())
+    );
+
+    // Releasing the holder restores writability, and the mutator's own holder
+    // is gone once it returns.
+    assert!(nexus_local_db::release_runtime_lock(
+        &lock_pool,
+        principal.creator_id(),
+        &work_id,
+        &holder,
+    )
+    .await
+    .unwrap());
+    let unlocked = core
+        .patch_work(
+            &principal,
+            work_id.clone(),
+            "http",
+            WorkPatchRequest {
+                title: Some("Unlocked Work".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(unlocked.title, "Unlocked Work");
+    assert_eq!(
+        core.get_work(&principal, work_id.clone())
+            .await
+            .unwrap()
+            .runtime_lock_holder,
+        None,
+        "the mutator's own lock must be released"
+    );
 
     lock_pool.close().await;
     drop(lock_seed);
