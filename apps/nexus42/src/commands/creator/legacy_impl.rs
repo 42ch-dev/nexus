@@ -316,12 +316,16 @@ async fn init_workspace(
 }
 
 /// Print next steps after workspace initialization.
+///
+/// Every line must name a command the cutover retains (v1.193 P0-T2 fix 1):
+/// the retired daemon group is not advertised, and scheduling guidance points
+/// at the retained local `creator works cron` declaration leaf.
 fn print_next_steps() {
     println!();
     println!("Next steps:");
     println!("  nexus42 system preset list    — see available workflow presets");
-    println!("  nexus42 daemon schedule add --preset <id> --creator <id>");
-    println!("                                 — start a preset-driven workflow");
+    println!("  nexus42 creator works cron set <work-ref>");
+    println!("                                 — declare a per-Work cron schedule");
     println!("  nexus42 platform auth login   — authenticate with the platform");
     println!("  nexus42 creator register --name <name> [--local]  — create a Creator entity");
     println!();
@@ -602,7 +606,7 @@ pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
             handle,
             local,
         } => register_creator(config, name, source, handle, local).await,
-        CreatorCommand::Status { creator_id } => creator_status(config, creator_id).await,
+        CreatorCommand::Status { creator_id } => creator_status(config, creator_id),
         CreatorCommand::Use { creator_ref } => use_creator(config, creator_ref.as_str()),
         CreatorCommand::List { json } => list_creators(config, json).await,
         CreatorCommand::Pair { creator_id } => {
@@ -1136,9 +1140,20 @@ fn obtain_auth_token(auth_store: &auth::AuthStore) -> Result<String> {
 
 /// Show Creator status with three-layer identity model (V1.16).
 ///
-/// Tries the daemon API for active creator info first (T33: migration),
-/// falls back to local-only display on daemon failure.
-async fn creator_status(config: &CliConfig, creator_id: Option<String>) -> Result<()> {
+/// Local state only. The `retain-cloud` row keeps this leaf on the cloud
+/// identity bridge rather than a loopback transport: `creator_id`, the cached
+/// `handle`/`display_name` projection and the credential indicators are all
+/// read from local files (`config.toml`, `creator-identities.json`,
+/// `auth.json`), and the client that would refresh a cloud session
+/// (`PlatformClient`) exposes no creator-read endpoint — registration writes
+/// this local projection in the first place. The retired daemon probe is gone;
+/// its `active_creator` projection was the same identity-cache read (and a
+/// daemon that is being removed cannot be an identity source).
+///
+/// # Errors
+///
+/// Returns I/O or parse errors if the local auth store cannot be read.
+fn creator_status(config: &CliConfig, creator_id: Option<String>) -> Result<()> {
     let id = creator_id.unwrap_or_else(|| {
         config
             .active_creator_id
@@ -1152,46 +1167,6 @@ async fn creator_status(config: &CliConfig, creator_id: Option<String>) -> Resul
         return Ok(());
     }
 
-    // Try daemon API for enriched info when checking active creator
-    if config.active_creator_id.as_deref() == Some(id.as_str()) {
-        let client = crate::api::DaemonClient::from_config(config)?;
-        if client.health_check().await? {
-            match client.get_active_creator().await {
-                Ok(daemon_resp) => {
-                    // Still read local auth state for credential indicators
-                    let store = crate::auth::AuthStore::load()?;
-                    let has_creator_api_key =
-                        store.get_creator_api_key(&id).unwrap_or(None).is_some();
-                    let has_cached_token = store.is_creator_authenticated(&id);
-
-                    let creator_key_indicator = if has_creator_api_key {
-                        "✓ Creator API key"
-                    } else {
-                        "✗ No Creator API key"
-                    };
-                    let token_indicator = if has_cached_token {
-                        "✓ Token cached"
-                    } else {
-                        "✗ No cached token"
-                    };
-
-                    let handle_str = daemon_resp.handle.as_deref().unwrap_or("-");
-                    let display_name_str = daemon_resp.display_name.as_deref().unwrap_or("-");
-
-                    println!("Creator ID:    {id}");
-                    println!("Handle:        {handle_str}");
-                    println!("Display Name:  {display_name_str}");
-                    println!("Auth:          {creator_key_indicator} | {token_indicator}");
-                    return Ok(());
-                }
-                Err(e) => {
-                    eprintln!("nexus42: daemon creator status failed, falling back: {e}");
-                }
-            }
-        }
-    }
-
-    // Fallback: local-only status
     let store = crate::auth::AuthStore::load()?;
     let cache = creator_identity::load_creator_identity_cache();
     let entry = creator_identity::get_creator_identity(&cache, &id);

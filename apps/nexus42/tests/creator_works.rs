@@ -273,8 +273,8 @@ fn works_reconcile_chapters_help_yes_does_not_promise_inline_preview() {
 }
 
 // =============================================================================
-// `creator workspace` init/list/use + `creator demo-seed` — direct local path
-// (v1.193 P0-T2)
+// `creator workspace` init/list/use, `creator demo-seed` and `creator status`
+// — direct local path (v1.193 P0-T2)
 // =============================================================================
 
 /// Run the real `nexus42` binary against a hermetic `HOME` from a working
@@ -294,6 +294,19 @@ fn hermetic_cli(
         .expect("run nexus42")
 }
 
+/// Combined `stdout` + `stderr` of a child run.
+///
+/// Next-step instructions are printed on `stdout`, so an assertion on
+/// `stderr` alone cannot see a retired-command instruction
+/// (v1.193 P0-T2 fix 1).
+fn combined_output(output: &std::process::Output) -> String {
+    format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    )
+}
+
 /// NEW (v1.193 P0-T2): workspace initialization, selection and the demo seed
 /// are local core/filesystem work — no daemon is consulted.
 ///
@@ -302,8 +315,9 @@ fn hermetic_cli(
 /// retained `creator demo-seed` must stay real and idempotent without
 /// `force`), the committed selection must stay usable, and the removed
 /// workspace leaves must be unknown. The fixture points `daemon_url` at a port
-/// nothing listens on, so a reintroduced health probe would print its
-/// "falling back" warning on stderr and fail the `daemon` assertions.
+/// nothing listens on, and every command asserts on the combined
+/// `stdout`+`stderr` stream, so a reintroduced daemon instruction (or a health
+/// probe warning) fails the case on whichever stream it appears.
 #[allow(clippy::too_many_lines)] // single local-home lifecycle proof
 #[test]
 fn workspace_init_and_demo_seed_are_local_and_idempotent() {
@@ -332,9 +346,10 @@ fn workspace_init_and_demo_seed_are_local_and_idempotent() {
         "creator use must commit the selection locally: {select_creator_stdout}\n\
          {select_creator_stderr}"
     );
+    let select_creator_output = combined_output(&select_creator);
     assert!(
-        !select_creator_stderr.contains("daemon"),
-        "creator use must not consult a daemon: {select_creator_stderr}"
+        !select_creator_output.contains("daemon"),
+        "creator use must not consult a daemon (stdout+stderr): {select_creator_output}"
     );
 
     // --- 2. Init: local materialization + committed selection, no listener ---
@@ -357,9 +372,16 @@ fn workspace_init_and_demo_seed_are_local_and_idempotent() {
         init.status.success(),
         "workspace init must succeed without a daemon:\n{init_stdout}\n{init_stderr}"
     );
+    let init_output = combined_output(&init);
     assert!(
-        !init_stderr.contains("daemon"),
-        "workspace init must not consult a daemon: {init_stderr}"
+        !init_output.contains("daemon"),
+        "workspace init must not instruct or consult a daemon \
+         (stdout+stderr): {init_output}"
+    );
+    assert!(
+        init_stdout.contains("creator works cron"),
+        "workspace init next steps must point at the retained local scheduling \
+         leaf: {init_stdout}"
     );
     assert!(
         home.path()
@@ -389,9 +411,10 @@ fn workspace_init_and_demo_seed_are_local_and_idempotent() {
         list_stdout.contains("default (active)"),
         "workspace list must show the initialized workspace as active: {list_stdout}"
     );
+    let list_output = combined_output(&list);
     assert!(
-        !list_stderr.contains("daemon"),
-        "workspace list must not consult a daemon: {list_stderr}"
+        !list_output.contains("daemon"),
+        "workspace list must not consult a daemon (stdout+stderr): {list_output}"
     );
 
     let reselect = hermetic_cli(
@@ -399,14 +422,15 @@ fn workspace_init_and_demo_seed_are_local_and_idempotent() {
         cwd.path(),
         &["creator", "workspace", "use", "default"],
     );
-    let reselect_stderr = String::from_utf8_lossy(&reselect.stderr);
     assert!(
         reselect.status.success(),
-        "re-selecting the initialized workspace must succeed: {reselect_stderr}"
+        "re-selecting the initialized workspace must succeed: {}",
+        combined_output(&reselect)
     );
+    let reselect_output = combined_output(&reselect);
     assert!(
-        !reselect_stderr.contains("daemon"),
-        "workspace use must not consult a daemon: {reselect_stderr}"
+        !reselect_output.contains("daemon"),
+        "workspace use must not consult a daemon (stdout+stderr): {reselect_output}"
     );
 
     let missing = hermetic_cli(
@@ -427,9 +451,10 @@ fn workspace_init_and_demo_seed_are_local_and_idempotent() {
         seed.status.success(),
         "demo-seed must succeed: {seed_stdout}\n{seed_stderr}"
     );
+    let seed_output = combined_output(&seed);
     assert!(
-        !seed_stderr.contains("daemon"),
-        "demo-seed must not consult a daemon: {seed_stderr}"
+        !seed_output.contains("daemon"),
+        "demo-seed must not consult a daemon (stdout+stderr): {seed_output}"
     );
     let world_id = seed_stdout
         .lines()
@@ -458,15 +483,17 @@ fn workspace_init_and_demo_seed_are_local_and_idempotent() {
         !seeded_again_stdout.contains("✓ Demo world:"),
         "a repeated demo-seed must not create a second world: {seeded_again_stdout}"
     );
+    let seeded_again_output = combined_output(&seeded_again);
+    assert!(
+        !seeded_again_output.contains("daemon"),
+        "a repeated demo-seed must not consult a daemon (stdout+stderr): \
+         {seeded_again_output}"
+    );
 
     // --- 5. The removed workspace leaves are unknown ---
     for leaf in ["clone", "link", "unlink", "status"] {
         let output = hermetic_cli(home.path(), cwd.path(), &["creator", "workspace", leaf]);
-        let combined = format!(
-            "{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
+        let combined = combined_output(&output);
         assert!(
             !output.status.success(),
             "removed leaf `creator workspace {leaf}` must not exit 0: {combined}"
@@ -476,4 +503,107 @@ fn workspace_init_and_demo_seed_are_local_and_idempotent() {
             "removed leaf `creator workspace {leaf}` must be an unknown subcommand: {combined}"
         );
     }
+}
+
+/// NEW (v1.193 P0-T2 fix 1): `creator status` reads local identity and
+/// credential state and never mediates through the configured daemon URL.
+///
+/// Discriminating regression for the removed daemon transport: the fixture
+/// serves `daemon_url` with a counting loopback listener. The pre-fix leaf
+/// constructed `DaemonClient` and probed `/v1/daemon/runtime/health` before
+/// displaying anything, so the listener observed a connection and this case
+/// failed; the retargeted leaf must print the retained three-layer identity
+/// plus credential lines with **zero** connections.
+#[test]
+fn creator_status_is_local_and_never_probes_the_daemon() {
+    use std::io::ErrorKind;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    let home = tempfile::tempdir().expect("temp home");
+    let cwd = tempfile::tempdir().expect("temp cwd");
+
+    // Counting loopback listener standing in for the configured daemon URL.
+    // Accept-and-close: a probe is counted, never answered.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind probe listener");
+    listener
+        .set_nonblocking(true)
+        .expect("nonblocking listener");
+    let daemon_url = format!("http://{}", listener.local_addr().expect("probe addr"));
+    let probes = Arc::new(AtomicUsize::new(0));
+    let stop = Arc::new(AtomicBool::new(false));
+    let accept_loop = {
+        let probes = Arc::clone(&probes);
+        let stop = Arc::clone(&stop);
+        std::thread::spawn(move || {
+            while !stop.load(Ordering::SeqCst) {
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        probes.fetch_add(1, Ordering::SeqCst);
+                        drop(stream);
+                    }
+                    Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(_) => break,
+                }
+            }
+        })
+    };
+
+    let nexus_dir = home.path().join(".nexus42");
+    std::fs::create_dir_all(&nexus_dir).expect("create .nexus42");
+    std::fs::write(
+        nexus_dir.join("config.toml"),
+        format!("daemon_url = \"{daemon_url}\"\n"),
+    )
+    .expect("seed config.toml");
+
+    let select_creator = hermetic_cli(home.path(), cwd.path(), &["creator", "use", "local"]);
+    assert!(
+        select_creator.status.success(),
+        "creator use must commit the selection locally: {}",
+        combined_output(&select_creator)
+    );
+
+    // Attribute every observed connection to `creator status` alone.
+    probes.store(0, Ordering::SeqCst);
+    let status = hermetic_cli(home.path(), cwd.path(), &["creator", "status"]);
+    // Drain window: a connection the child opened is queued and accepted here.
+    std::thread::sleep(Duration::from_millis(100));
+    stop.store(true, Ordering::SeqCst);
+    accept_loop.join().expect("join probe listener");
+
+    let status_output = combined_output(&status);
+    let status_stdout = String::from_utf8_lossy(&status.stdout);
+    assert!(
+        status.status.success(),
+        "creator status must succeed without a daemon: {status_output}"
+    );
+    for label in ["Handle:", "Display Name:", "Auth:"] {
+        assert!(
+            status_stdout.contains(label),
+            "creator status must keep the `{label}` line: {status_stdout}"
+        );
+    }
+    let creator_id_line = status_stdout
+        .lines()
+        .find(|line| line.starts_with("Creator ID:"))
+        .unwrap_or_else(|| {
+            panic!("creator status must print the creator id line: {status_stdout}")
+        });
+    assert!(
+        creator_id_line.trim_end().ends_with("local"),
+        "creator status must report the locally selected creator: {creator_id_line}"
+    );
+    assert!(
+        !status_output.contains("daemon"),
+        "creator status must not mention a daemon (stdout+stderr): {status_output}"
+    );
+    assert_eq!(
+        probes.load(Ordering::SeqCst),
+        0,
+        "creator status must not open any connection to the configured daemon URL ({daemon_url})"
+    );
 }
