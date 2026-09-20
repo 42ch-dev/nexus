@@ -1,15 +1,16 @@
 //! `nexus42 preset` — canonical preset CLI group (PL-5, AR-24, AR-25).
 //!
 //! Top-level developer-facing surface for presets:
-//! `list|show|validate|scaffold|run|trigger`.
+//! `list|show|validate|scaffold|trigger|patch`.
 //!
-//! - `validate` reuses today's validator job — daemon-backed default
-//!   (`POST /v1/daemon/presets:validate`) + `--offline` in-process core
-//!   (`validate_preset_offline`, moved here from `system`; V1.153 P3).
+//! - `validate <path>` is the positional local validator
+//!   (`validate_preset_local`, moved here from `system`; V1.153 P3). It runs
+//!   entirely in process: the daemon leg and the `--offline` synonym it
+//!   shadowed were removed in v1.193 P1-T1.
 //! - `scaffold` reuses `POST /v1/daemon/presets` (`scaffold_preset`).
-//! - `run` reuses the same daemon-API path `creator run` drives
-//!   (`commands/creator/run.rs` `handle_run`) — no second orchestration
-//!   engine (PL-5).
+//! - `run` was removed in v1.193 P1-T1: it only forwarded into
+//!   `creator run`'s daemon-API path and had no complete direct core
+//!   operation of its own (PL-5).
 //! - `show <id>` fetches the AR-20 profile (daemon-backed) and prints lanes +
 //!   orchestration fields; declared signals are labeled **Declared, not
 //!   delivered** (AR-25, locked trigger-lane vocabulary).
@@ -57,18 +58,13 @@ pub enum PresetCommand {
         #[arg(long, default_value_t = false)]
         json: bool,
     },
-    /// Validate a preset YAML/bundle at a given path
+    /// Validate a preset YAML/bundle at a given path (local, in process)
     Validate {
         /// Path to preset.yaml (or bundle directory)
         path: String,
         /// Emit machine-readable JSON
         #[arg(long, default_value_t = false)]
         json: bool,
-        /// Validate in-process via the shared validator core — no daemon
-        /// required (V1.153 P3: `nexus-runtime` does not serve the daemon
-        /// HTTP router). Default: daemon-backed `POST /v1/daemon/presets:validate`.
-        #[arg(long, default_value_t = false)]
-        offline: bool,
     },
     /// Generate a strategy bundle from templates
     Scaffold {
@@ -77,11 +73,6 @@ pub enum PresetCommand {
         /// Emit machine-readable JSON
         #[arg(long, default_value_t = false)]
         json: bool,
-    },
-    /// Start a session for a world (same daemon-API path as `creator run`)
-    Run {
-        #[command(flatten)]
-        command: crate::commands::creator::run::RunCommand,
     },
     /// Print trigger-lane classification only (never cron authoring)
     Trigger {
@@ -116,15 +107,8 @@ pub async fn run(cmd: PresetCommand, config: &CliConfig) -> Result<()> {
     match cmd {
         PresetCommand::List { intent, json } => list_presets(config, intent.as_deref(), json).await,
         PresetCommand::Show { id, json } => show_preset(config, &id, json).await,
-        PresetCommand::Validate {
-            path,
-            json,
-            offline,
-        } => validate_preset(config, &path, json, offline).await,
+        PresetCommand::Validate { path, json } => validate_preset(&path, json),
         PresetCommand::Scaffold { name, json } => scaffold_preset(config, &name, json).await,
-        PresetCommand::Run { command } => {
-            crate::commands::creator::run::handle_run(command, config).await
-        }
         PresetCommand::Trigger { id, json } => trigger_preset(config, &id, json).await,
         PresetCommand::Patch { command } => patch::run(command, config).await,
     }
@@ -264,32 +248,18 @@ async fn scaffold_preset(config: &CliConfig, name: &str, json: bool) -> Result<(
 
 /// Validate a preset YAML/bundle at a given path.
 ///
-/// With `offline = false` (default) validation is delegated to the daemon
-/// (`POST /v1/daemon/presets:validate`). With `offline = true` the same
-/// checks run in-process via the shared orchestration validator core — no
-/// daemon required (V1.153 P3: `nexus-runtime` does not serve the daemon
-/// HTTP router, so integrators need a daemon-free path).
+/// Validation runs in process through [`validate_preset_local`] — the sole
+/// validator behind this command (v1.193 P1-T1). There is no daemon leg and
+/// no `--offline` switch: `--offline` was a silent synonym for the local
+/// path (D6) and the path is positional.
 ///
-/// An invalid preset produces a non-zero exit in both modes so scripts
-/// (e.g. `strategy-samples/validate.sh`) can rely on the exit code.
+/// An invalid preset produces a non-zero exit so scripts (e.g.
+/// `strategy-samples/validate.sh`) can rely on the exit code.
 ///
 /// Moved from `system preset validate` (V1.153) — the shared validator job,
 /// not re-implemented (AR-24).
-async fn validate_preset(
-    config: &CliConfig,
-    path: &str,
-    json_output: bool,
-    offline: bool,
-) -> Result<()> {
-    let resp: serde_json::Value = if offline {
-        validate_preset_offline(path)?
-    } else {
-        let client = crate::api::DaemonClient::from_config(config)?;
-        let body = serde_json::json!({ "path": path });
-        client
-            .post::<serde_json::Value, _>("/v1/daemon/presets:validate", &body)
-            .await?
-    };
+fn validate_preset(path: &str, json_output: bool) -> Result<()> {
+    let resp: serde_json::Value = validate_preset_local(path)?;
 
     let valid = resp
         .get("valid")
@@ -316,8 +286,8 @@ async fn validate_preset(
 }
 
 /// Print the human-readable verdict for a validate response
-/// (`{valid, id, version, state_count, errors, warnings}` — the daemon
-/// response shape; `validate_preset_offline` produces the same shape).
+/// (`{valid, id, version, state_count, errors, warnings}` — the shape
+/// [`validate_preset_local`] returns).
 fn print_validate_verdict(resp: &serde_json::Value) {
     let valid = resp
         .get("valid")
@@ -349,18 +319,20 @@ fn print_validate_verdict(resp: &serde_json::Value) {
     }
 }
 
-/// Run preset validation in-process, mirroring the daemon's
-/// `POST /v1/daemon/presets:validate` composition
+/// Run preset validation in process — the sole validator behind
+/// `nexus42 preset validate <path>` (v1.193 P1-T1).
+///
+/// The composition mirrors the retired daemon handler
+/// `POST /v1/daemon/presets:validate`
 /// (`loader_validate_manifest_compat` + `validate_path_safety` +
-/// `validate_preset_semantic` + `validate_assets_in_bundle`) so the
-/// offline verdict is identical to the daemon-backed one.
+/// `validate_preset_semantic` + `validate_assets_in_bundle`) and returns the
+/// same response shape, so verdicts recorded before the cutover stay
+/// comparable.
 ///
 /// The daemon handler — not `load_preset` — is deliberately the reference
 /// composition: it parses the manifest directly and treats every
 /// error-severity diagnostic as a failure, whereas `load_preset`
-/// downgrades capability-arg-drift errors to warnings. Mirroring the
-/// handler keeps `--offline` and daemon-backed validation answering the
-/// same question with the same answer (and the same response shape).
+/// downgrades capability-arg-drift errors to warnings.
 ///
 /// `path` may be a bundle directory (containing `preset.yaml`), a
 /// `preset.yaml` file (asset checks run against its parent), or a
@@ -369,7 +341,7 @@ fn print_validate_verdict(resp: &serde_json::Value) {
 ///
 /// Moved from `system` (V1.153 P3) — the shared validator core, not
 /// re-implemented (AR-24).
-fn validate_preset_offline(path: &str) -> Result<serde_json::Value> {
+fn validate_preset_local(path: &str) -> Result<serde_json::Value> {
     use nexus_orchestration::CapabilityRegistry;
     use nexus_preset::{
         loader_validate_manifest_compat, validate_assets_in_bundle, validate_path_safety,
@@ -680,13 +652,12 @@ mod tests {
     }
 
     #[test]
-    fn preset_six_subcommands_parse() {
+    fn preset_subcommands_parse() {
         for argv in [
             &["preset", "list"][..],
             &["preset", "show", "novel-writing"][..],
             &["preset", "validate", "some/path"][..],
             &["preset", "scaffold", "my-strategy"][..],
-            &["preset", "run", "novel-writing"][..],
             &["preset", "trigger", "novel-writing"][..],
         ] {
             PresetCli::try_parse_from(argv)
@@ -703,24 +674,6 @@ mod tests {
                 assert!(json);
             }
             other => panic!("expected show, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn preset_validate_offline_flag_parses() {
-        let cmd =
-            PresetCli::try_parse_from(["preset", "validate", "some/path", "--offline"]).unwrap();
-        match cmd.command {
-            PresetCommand::Validate {
-                path,
-                json,
-                offline,
-            } => {
-                assert_eq!(path, "some/path");
-                assert!(!json);
-                assert!(offline);
-            }
-            other => panic!("expected validate, got {other:?}"),
         }
     }
 
@@ -746,18 +699,6 @@ mod tests {
                 assert!(!json);
             }
             other => panic!("expected scaffold, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn preset_run_flattens_creator_run_command() {
-        let cmd = PresetCli::try_parse_from(["preset", "run", "novel-writing", "wrk_abc"]).unwrap();
-        match cmd.command {
-            PresetCommand::Run { command } => {
-                assert_eq!(command.preset_id, "novel-writing");
-                assert_eq!(command.work_id.as_deref(), Some("wrk_abc"));
-            }
-            other => panic!("expected run, got {other:?}"),
         }
     }
 
@@ -1056,7 +997,7 @@ mod tests {
     /// Minimal preset that passes the shared validation facade (semantic +
     /// assets + path safety). The bundle directory name must equal
     /// `preset.id` (`check_bundle_id_vs_directory`).
-    const OFFLINE_VALID_YAML: &str = r"
+    const LOCAL_VALID_YAML: &str = r"
 preset:
   id: tiny-valid
   version: 1
@@ -1078,7 +1019,7 @@ states:
 
     /// Broken copy: `initial` names a state that does not exist (structural
     /// error caught by `loader_validate_manifest_compat`).
-    const OFFLINE_BROKEN_YAML: &str = r"
+    const LOCAL_BROKEN_YAML: &str = r"
 preset:
   id: tiny-broken
   version: 1
@@ -1099,16 +1040,16 @@ states:
 ";
 
     #[test]
-    fn offline_validate_accepts_valid_bundle() {
+    fn local_validate_accepts_valid_bundle() {
         let tmp = tempfile::tempdir().unwrap();
         let bundle = tmp.path().join("tiny-valid");
         std::fs::create_dir_all(&bundle).unwrap();
-        std::fs::write(bundle.join("preset.yaml"), OFFLINE_VALID_YAML).unwrap();
+        std::fs::write(bundle.join("preset.yaml"), LOCAL_VALID_YAML).unwrap();
 
-        let resp = validate_preset_offline(bundle.to_str().unwrap()).unwrap();
+        let resp = validate_preset_local(bundle.to_str().unwrap()).unwrap();
         assert_eq!(
             resp["valid"], true,
-            "offline validation should accept a valid bundle: {resp}"
+            "local validation should accept a valid bundle: {resp}"
         );
         assert_eq!(resp["errors"].as_array().unwrap().len(), 0);
         assert_eq!(resp["id"], "tiny-valid");
@@ -1116,13 +1057,13 @@ states:
     }
 
     #[test]
-    fn offline_validate_rejects_broken_bundle() {
+    fn local_validate_rejects_broken_bundle() {
         let tmp = tempfile::tempdir().unwrap();
         let bundle = tmp.path().join("tiny-broken");
         std::fs::create_dir_all(&bundle).unwrap();
-        std::fs::write(bundle.join("preset.yaml"), OFFLINE_BROKEN_YAML).unwrap();
+        std::fs::write(bundle.join("preset.yaml"), LOCAL_BROKEN_YAML).unwrap();
 
-        let resp = validate_preset_offline(bundle.to_str().unwrap()).unwrap();
+        let resp = validate_preset_local(bundle.to_str().unwrap()).unwrap();
         assert_eq!(resp["valid"], false);
         let errors = resp["errors"].as_array().unwrap();
         assert!(!errors.is_empty());
@@ -1135,13 +1076,13 @@ states:
     }
 
     #[test]
-    fn offline_validate_accepts_standalone_yaml_file() {
+    fn local_validate_accepts_standalone_yaml_file() {
         // A standalone YAML file (not named preset.yaml) skips asset checks.
         let tmp = tempfile::tempdir().unwrap();
         let file = tmp.path().join("strategy.yaml");
-        std::fs::write(&file, OFFLINE_VALID_YAML).unwrap();
+        std::fs::write(&file, LOCAL_VALID_YAML).unwrap();
 
-        let resp = validate_preset_offline(file.to_str().unwrap()).unwrap();
+        let resp = validate_preset_local(file.to_str().unwrap()).unwrap();
         assert_eq!(
             resp["valid"], true,
             "standalone YAML file should validate: {resp}"
@@ -1149,8 +1090,8 @@ states:
     }
 
     #[test]
-    fn offline_validate_missing_path_errors() {
-        let err = validate_preset_offline("/nonexistent/definitely-missing").unwrap_err();
+    fn local_validate_missing_path_errors() {
+        let err = validate_preset_local("/nonexistent/definitely-missing").unwrap_err();
         assert!(
             err.to_string().contains("File not found"),
             "expected 'File not found' error, got: {err}"

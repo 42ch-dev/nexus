@@ -173,9 +173,9 @@ fn current_state_system_subcommands() {
 
     let help_text = String::from_utf8(output).unwrap();
 
-    // V1.16+ system: preset, version, doctor, completion, config, debug, db, identity, runtime-mode
+    // V1.16+ system: version, doctor, completion, config, debug, db, identity, runtime-mode
+    // (v1.193 P1-T1: `system preset` — the PL-6 forwarding alias — is removed)
     for subcmd in &[
-        "preset",
         "version",
         "doctor",
         "completion",
@@ -468,7 +468,6 @@ fn v2_target_system_subcommands() {
         "completion",
         "config",
         "debug",
-        "preset",
         "db",
         "identity",
         "runtime-mode",
@@ -746,49 +745,8 @@ fn v141_pool_inspiration_help_disambiguates_from_work_log() {
 // V1.45: `v133_creator_run_start_requires_idea`, `v133_creator_run_continue_requires_note`,
 // `v136_creator_run_start_has_init_preset_flag` removed — old subcommands replaced by generic dispatch.
 
-/// Verify `system preset --help` shows list and validate subcommands.
-#[test]
-fn v133_system_preset_subcommands() {
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .args(["system", "preset", "--help"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
-    for subcmd in &["list", "validate"] {
-        assert!(
-            help_text.contains(subcmd),
-            "V1.33 system preset: expected subcommand '{subcmd}'"
-        );
-    }
-}
-
-/// Verify `system preset list --help` includes --intent and --json flags.
-#[test]
-fn v133_system_preset_list_flags() {
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .args(["system", "preset", "list", "--help"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
-    assert!(
-        help_text.contains("--intent"),
-        "V1.33 system preset list: must have --intent flag"
-    );
-    assert!(
-        help_text.contains("--json"),
-        "V1.33 system preset list: must have --json flag"
-    );
-}
+// v1.193 P1-T1: `v133_system_preset_subcommands` and `v133_system_preset_list_flags`
+// removed with the PL-6 `system preset` forwarding alias.
 
 // =============================================================================
 // Part 7: V1.35 P2 — platform sync migration & deprecation contract tests
@@ -1064,4 +1022,114 @@ fn v145_creator_run_no_legacy_subcommands() {
             "V1.45: creator run --help must not list old subcommand '{old_subcmd}'"
         );
     }
+}
+
+// =============================================================================
+// v1.193 P1-T1: `preset validate` is local-only; removed surfaces are unknown
+// =============================================================================
+
+/// Invalid bundle fixture: `preset.initial` names a state that does not
+/// exist — the structural defect `loader_validate_manifest_compat` rejects.
+/// The directory name must equal `preset.id`.
+const INVALID_BUNDLE_YAML: &str = r"
+preset:
+  id: tiny-broken
+  version: 1
+  kind: creator
+  description: invalid fixture for the local-only validator
+  requires_capabilities: []
+  run_intents:
+    - work_init
+  initial: missing_state
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    terminal: true
+";
+
+/// v1.193 P1-T1 (AC1/AC2/AC5): `preset validate <path>` is the sole local
+/// validator. An invalid bundle is rejected with the retained validation
+/// failure — exit 1 and no local service — while the bundle is left
+/// untouched; the removed `preset run` subcommand and `--offline` switch are
+/// clap usage errors (exit 2), not silently accepted synonyms.
+#[test]
+fn preset_validation_rejects_invalid_bundle_without_daemon() {
+    let home = tempfile::tempdir().unwrap();
+    let bundle = home.path().join("tiny-broken");
+    std::fs::create_dir_all(&bundle).unwrap();
+    let manifest = bundle.join("preset.yaml");
+    std::fs::write(&manifest, INVALID_BUNDLE_YAML).unwrap();
+    let before = std::fs::read(&manifest).unwrap();
+
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .env("HOME", home.path())
+        .args(["preset", "validate", bundle.to_str().unwrap()])
+        .assert()
+        .code(1)
+        .get_output()
+        .clone();
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stdout.contains("Invalid preset"),
+        "v1.193 P1-T1: the local validator must report the invalid verdict, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("unknown state"),
+        "v1.193 P1-T1: the retained validation failure must survive the cutover, got: {stdout}"
+    );
+    assert!(
+        stderr.contains("preset validation failed"),
+        "v1.193 P1-T1: the failure must be the retained validation verdict, not a transport error, got: {stderr}"
+    );
+
+    // Read-only: validation does not rewrite or extend the bundle.
+    assert_eq!(
+        std::fs::read(&manifest).unwrap(),
+        before,
+        "v1.193 P1-T1: validation must not rewrite the bundle it inspects"
+    );
+    let entries: Vec<String> = std::fs::read_dir(&bundle)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(
+        entries,
+        vec!["preset.yaml".to_string()],
+        "v1.193 P1-T1: validation must not add files to the bundle"
+    );
+
+    // The removed runner is an unknown subcommand.
+    let run = Command::cargo_bin("nexus42")
+        .unwrap()
+        .env("HOME", home.path())
+        .args(["preset", "run", "--help"])
+        .assert()
+        .code(2)
+        .get_output()
+        .clone();
+    assert!(
+        String::from_utf8_lossy(&run.stderr).contains("unrecognized subcommand"),
+        "v1.193 P1-T1: `preset run` must be an unknown subcommand"
+    );
+
+    // `--offline` is rejected, never treated as a synonym for the local path.
+    let offline = Command::cargo_bin("nexus42")
+        .unwrap()
+        .env("HOME", home.path())
+        .args(["preset", "validate", bundle.to_str().unwrap(), "--offline"])
+        .assert()
+        .code(2)
+        .get_output()
+        .clone();
+    assert!(
+        String::from_utf8_lossy(&offline.stderr).contains("--offline"),
+        "v1.193 P1-T1: `--offline` must be an unexpected argument"
+    );
 }
