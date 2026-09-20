@@ -2171,6 +2171,33 @@ mod tests {
         (temp, ConnectPorts::new(pool, None))
     }
 
+    /// The seeded workspace DB reopened under the **engine** admission for the
+    /// compute fixtures.
+    ///
+    /// `compute_sessions` is engine-owned under the core writer protocol
+    /// (`guard_compute_sessions_*` admits only `migration`/`engine`), so a
+    /// direct pool is fenced (`WRITER_FENCED`) and the compute gates could not
+    /// even be staged — the same migration the spoke-adapter compute fixtures
+    /// took in v1.191 P1 T8. The golden rows are seeded through the direct
+    /// (cooperative) admission first — none of those tables is engine-owned —
+    /// then the fixture runs on one engine-owned pool; `init_engine_pool`
+    /// retains the engine guard for the process lifetime, so the returned
+    /// clone keeps the admission alive.
+    ///
+    /// Production is unaffected: [`crate::commands::connect::build_host_config`]
+    /// keeps opening its workspace DB through the direct (cooperative)
+    /// admission — the Connect host must never take the daemon's engine
+    /// ownership.
+    async fn test_engine_pool() -> (tempfile::TempDir, sqlx::SqlitePool) {
+        let (temp, seed_pool) = test_pool().await;
+        let db_path = temp.path().join("workspace").join("state.db");
+        seed_pool.close().await;
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
+            .await
+            .expect("engine-owned workspace DB initializes");
+        (temp, guarded.clone_pool())
+    }
+
     /// The operator allowlist JSON for `peer` — scopes plus the optional
     /// stored Actor grant (v1.191 P1 T14, durable §9), written through the
     /// on-disk allowlist shape (like the CLI boot). Every entry allowlists
@@ -2314,7 +2341,7 @@ mod tests {
     ) {
         let peer = fixed_keypair(17).public().to_peer_id();
         let scope = scoped_scope_for(peer, &["compute", "upsert"]);
-        let (temp, pool) = test_pool().await;
+        let (temp, pool) = test_engine_pool().await;
         // Host-local module store (spec §2.1): `<id>/<id>.wasm` +
         // `<id>/manifest.json` under a hermetic `~/.nexus42/modules/`.
         let modules_dir = tempfile::tempdir().expect("modules tempdir");

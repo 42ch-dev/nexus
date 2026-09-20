@@ -54,6 +54,30 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+/// The workspace pool the **compute** fixtures stage against: engine-owned.
+///
+/// `compute_sessions` is engine-owned under the core writer protocol
+/// (`guard_compute_sessions_*` admits only `migration`/`engine`), so a direct
+/// pool is fenced (`WRITER_FENCED`) and the compute gates could not be staged
+/// at all — the same migration the spoke-adapter compute fixtures took in
+/// v1.191 P1 T8. Engine mode satisfies every guarded table (it is a superset
+/// of the direct admission), so one pool both seeds and stages.
+/// `init_engine_pool` retains the guard for the process lifetime, so the
+/// returned clone keeps the admission alive.
+///
+/// Production is unaffected: `connect::build_host_config` keeps opening its
+/// workspace DB through the direct (cooperative) admission — the Connect host
+/// must never take the daemon's engine ownership.
+async fn compute_fixture_pool(db_path: &std::path::Path) -> sqlx::SqlitePool {
+    if let Some(parent) = db_path.parent() {
+        std::fs::create_dir_all(parent).expect("mkdir workspace db dir");
+    }
+    nexus_local_db::init_engine_pool(db_path)
+        .await
+        .expect("engine-owned workspace DB initializes")
+        .clone_pool()
+}
+
 /// Seed a `narrative_worlds` row (plus its `creators` FK row) so the
 /// workspace DB satisfies the WAL-adjacent FK constraints the production
 /// adapter's `put_*` ports hit (PRAGMA `foreign_keys` = ON).
@@ -2987,9 +3011,7 @@ async fn n_c2_peer_runs_compute_over_connect() {
     install_test_module(home, "basic-combat");
 
     let db_path = temp.path().join("workspace").join("state.db");
-    let pool = crate::db::Schema::init(&db_path)
-        .await
-        .expect("workspace DB initializes");
+    let pool = compute_fixture_pool(&db_path).await;
     seed_world(&pool, "ctr_test", WORLD_A).await;
 
     // The peer is scoped to WORLD_A with the full served-op set AND a
@@ -3136,9 +3158,7 @@ async fn n_c2_compute_wrong_world_missing_module_uninstalled_and_settle_denied()
     // NOTE: no module is installed in this home — the module-scope'd peer
     // still exists, so the not-installed denial is reachable.
     let db_path = temp.path().join("workspace").join("state.db");
-    let pool = crate::db::Schema::init(&db_path)
-        .await
-        .expect("workspace DB initializes");
+    let pool = compute_fixture_pool(&db_path).await;
     seed_world(&pool, "ctr_test", WORLD_A).await;
     seed_world(&pool, "ctr_test", WORLD_B).await;
 
@@ -3363,9 +3383,7 @@ async fn n_c2_compute_unscoped_module_denied() {
     let peer_peer = peer_key.public().to_peer_id();
 
     let db_path = temp.path().join("workspace").join("state.db");
-    let pool = crate::db::Schema::init(&db_path)
-        .await
-        .expect("workspace DB initializes");
+    let pool = compute_fixture_pool(&db_path).await;
     seed_world(&pool, "ctr_test", WORLD_A).await;
 
     // The allowlist entry deliberately omits `module_scope` (the V1.153 →
@@ -3496,9 +3514,7 @@ async fn n_c2_compute_request_module_override_denied() {
     install_test_module_as(home, "basic-combat-alt", "basic-combat");
 
     let db_path = temp.path().join("workspace").join("state.db");
-    let pool = crate::db::Schema::init(&db_path)
-        .await
-        .expect("workspace DB initializes");
+    let pool = compute_fixture_pool(&db_path).await;
     seed_world(&pool, "ctr_test", WORLD_A).await;
 
     // The peer's module_scope allowlists ONLY basic-combat.
