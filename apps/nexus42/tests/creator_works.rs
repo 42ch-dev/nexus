@@ -914,13 +914,11 @@ fn json_stdout(output: &std::process::Output) -> serde_json::Value {
 /// `daemon_url` is a counting loopback listener, so the whole sequence is also
 /// evidence that the Work read and the pool producers never consult the daemon
 /// (the retired leaves read the Work over HTTP). The `--json` status path is
-/// used for that claim: the retained findings/stale enrichment — still the
-/// daemon surface owned by the later governance task — makes no subcall for a
-/// non-novel Work like this one, while the human path would still issue its
-/// best-effort stale fetch.
+/// used for that claim: since v1.193 P0-T7 the findings/stale enrichment reads
+/// the typed core too, so a non-novel `--json` status makes neither read and
+/// the human path's stale banner comes from the same in-process read.
 ///
-/// What it does not establish: the completion-lock/reopen/reconcile and
-/// findings arms (their own tasks), pool pagination/filter edges beyond the
+/// What it does not establish: pool pagination/filter edges beyond the
 /// single promoted row, and any concurrency behavior. It also records, rather
 /// than repairs, the pre-existing divergence between the pool `active` row
 /// `works use` writes and the `works.status = "active"` selection an omitted
