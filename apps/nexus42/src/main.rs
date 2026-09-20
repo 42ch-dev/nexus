@@ -28,9 +28,9 @@ fn main() {
     }
 
     let cli = Cli::parse();
-    // The MCP stdio child's stdout is the JSON-RPC transport — logging must
-    // go to stderr there (AR-72), so the writer decision happens before
-    // the subscriber is initialized.
+    // Data-output commands (`ops inspect`) print machine-readable JSON on
+    // stdout — logging must go to stderr there, so the writer decision
+    // happens before the subscriber is initialized.
     init_logging(cli.verbose(), cli.is_data_output());
 
     // V1.101 Class B: enrich PATH *before* Tokio starts. GUI-launched desktop
@@ -115,14 +115,6 @@ async fn async_main(cli: Cli) -> Result<()> {
         #[cfg(all(feature = "legacy-cli", feature = "connect-host"))]
         Some(Commands::Connect { command }) => nexus42::commands::connect::run(command).await,
         #[cfg(feature = "legacy-cli")]
-        Some(Commands::Sync { command }) => {
-            eprintln!(
-                "Warning: `nexus42 sync` is deprecated. Use `nexus42 platform sync` instead. \
-                 The top-level `sync` alias will be removed in a future version."
-            );
-            nexus42::commands::sync::run(command, &config).await
-        }
-        #[cfg(feature = "legacy-cli")]
         Some(Commands::Acp { command }) => nexus42::commands::acp::run(command, &config).await,
         #[cfg(feature = "legacy-cli")]
         Some(Commands::Compute { command }) => {
@@ -134,8 +126,6 @@ async fn async_main(cli: Cli) -> Result<()> {
         }
         #[cfg(feature = "legacy-cli")]
         Some(Commands::DaemonRun(args)) => nexus42::commands::daemon_run::run(args).await,
-        #[cfg(all(feature = "legacy-cli", feature = "connect-client"))]
-        Some(Commands::Mcp { command }) => nexus42::commands::mcp::run(command, &config).await,
         #[cfg(feature = "legacy-cli")]
         Some(Commands::System { command }) => {
             nexus42::commands::system::run(command, &config).await
@@ -151,8 +141,6 @@ async fn async_main(cli: Cli) -> Result<()> {
             nexus42::commands::platform::run(command, &config, &output_format).await
         }
         #[cfg(feature = "legacy-cli")]
-        Some(Commands::HostCall(args)) => nexus42::commands::host_call::run(args, &config).await,
-        #[cfg(feature = "legacy-cli")]
         Some(Commands::Ops { command }) => nexus42::commands::ops::run(command, &config).await,
         None => {
             Cli::parse_from(["nexus42", "--help"]);
@@ -163,9 +151,9 @@ async fn async_main(cli: Cli) -> Result<()> {
 
 /// Initialize the tracing subscriber.
 ///
-/// `stderr_only` routes all tracing to stderr — REQUIRED for the MCP stdio
-/// bridge child (`nexus42 mcp serve`), whose stdout is the JSON-RPC
-/// transport (V1.174 P0 T5, AR-72: stdout must stay clean).
+/// `stderr_only` routes all tracing to stderr — REQUIRED for data-output
+/// commands (`ops inspect`), whose stdout is machine-readable and must stay
+/// free of diagnostics.
 fn init_logging(verbose: bool, stderr_only: bool) {
     let filter = if verbose {
         tracing_subscriber::EnvFilter::new("debug")

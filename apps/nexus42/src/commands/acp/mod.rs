@@ -1,8 +1,6 @@
 //! ACP Command — ACP capability plane management.
 //!
 //! Implements the `nexus42 acp` top-level command group with subcommands:
-//! - `status` — Show daemon and ACP agent status
-//! - `doctor` — Run ACP connectivity diagnostics
 //! - `probe` — Verify ACP connectivity (registry or agent handshake)
 //! - `registry list` — List available agents from the ACP registry
 //! - `registry inspect` — Show details for a specific agent
@@ -14,8 +12,6 @@
 //! ```text
 //! AcpCommand ──► acp::run()
 //!     │
-//!     ├─► status        ──► DaemonClient::get_runtime_status()
-//!     ├─► doctor        ──► DaemonClient + RegistryClient probe
 //!     ├─► probe         ──► RegistryClient / AgentSpawner
 //!     ├─► Registry(List)    ──► RegistryClient::get_registry()
 //!     ├─► Registry(Inspect) ──► RegistryClient::get_registry() + find_agent()
@@ -96,16 +92,6 @@ pub enum AgentSubcommand {
 
 #[derive(Debug, Subcommand)]
 pub enum AcpCommand {
-    /// Show daemon and ACP agent status
-    Status,
-
-    /// Run ACP connectivity diagnostics
-    Doctor {
-        /// Port the daemon is listening on (default: 8420)
-        #[arg(long, default_value_t = crate::config::DAEMON_PORT)]
-        port: u16,
-    },
-
     /// Verify ACP connectivity (registry or agent handshake)
     Probe {
         /// Probe registry connectivity (default when no --agent is given)
@@ -171,11 +157,8 @@ pub enum AcpCommand {
 /// Returns `CliError` if:
 /// - The ACP registry cannot be accessed
 /// - Agent lookup fails
-/// - The daemon is not reachable
 pub async fn run(cmd: AcpCommand, config: &CliConfig) -> Result<()> {
     match cmd {
-        AcpCommand::Status => cmd_status().await,
-        AcpCommand::Doctor { port } => cmd_doctor(port, config).await,
         AcpCommand::Probe { registry, agent } => cmd_probe(registry, agent).await,
         AcpCommand::Registry { command } => match command {
             RegistryCommand::List { format } => cmd_registry_list(&format).await,
@@ -202,139 +185,6 @@ pub async fn run(cmd: AcpCommand, config: &CliConfig) -> Result<()> {
             run_id,
         } => cmd_run(&agent_ref, message, cwd, run_id).await,
     }
-}
-
-// ── `acp status` ──────────────────────────────────────────────────
-
-/// Show daemon and ACP agent status.
-pub(super) async fn cmd_status() -> Result<()> {
-    let client =
-        crate::api::DaemonClient::new(&format!("http://127.0.0.1:{}", crate::config::DAEMON_PORT))?;
-
-    let status =
-        client
-            .get_runtime_status()
-            .await
-            .map_err(|e| crate::errors::CliError::Daemon {
-                message: format!("Failed to connect to daemon: {e}"),
-            })?;
-
-    // Daemon status
-    println!("Daemon Status");
-    println!("{}", "─".repeat(50));
-    println!("  Daemon:    Running");
-    println!("  Version:  {}", status.version);
-
-    let uptime = status.uptime_seconds;
-    if uptime < 60 {
-        println!("  Uptime:   {uptime}s");
-    } else if uptime < 3600 {
-        println!("  Uptime:   {}m {}s", uptime / 60, uptime % 60);
-    } else {
-        println!("  Uptime:   {}h {}m", uptime / 3600, (uptime % 3600) / 60);
-    }
-
-    println!(
-        "  Workspace: {}",
-        if status.workspace_initialized {
-            "Initialized"
-        } else {
-            "Not initialized"
-        }
-    );
-
-    // ACP status
-    println!();
-    println!("ACP Status");
-    println!("{}", "─".repeat(50));
-
-    let acp = &status.acp;
-    println!(
-        "  Tool execution: {}",
-        if acp.tool_execution_enabled {
-            "Enabled"
-        } else {
-            "Disabled"
-        }
-    );
-    println!("  Active sessions: {}", acp.active_sessions);
-    println!("  Tool executions: {}", acp.total_tool_executions);
-
-    Ok(())
-}
-
-// ── `acp doctor` ──────────────────────────────────────────────────
-
-/// Run ACP connectivity diagnostics.
-///
-/// Checks:
-/// 1. Daemon connectivity
-/// 2. ACP registry reachability
-/// 3. Reports overall health
-async fn cmd_doctor(port: u16, config: &CliConfig) -> Result<()> {
-    println!("ACP Doctor — Running diagnostics...");
-    println!();
-
-    let mut issues = 0u32;
-
-    // Check 1: Daemon connectivity
-    print!("  [1/3] Daemon connectivity... ");
-    let daemon_url = format!("http://127.0.0.1:{port}");
-    let client = crate::api::DaemonClient::new(&daemon_url)?;
-    match client.health_check().await {
-        Ok(true) => println!("✓ Running"),
-        Ok(false) => {
-            println!("✗ Not running");
-            issues += 1;
-        }
-        Err(e) => {
-            println!("✗ Error: {e}");
-            issues += 1;
-        }
-    }
-
-    // Check 2: ACP Registry reachability
-    print!("  [2/3] ACP Registry reachability... ");
-    match RegistryClient::new() {
-        Ok(reg_client) => match reg_client.get_registry().await {
-            Ok(registry) => {
-                println!(
-                    "✓ Reachable (v{}, {} agents)",
-                    registry.version,
-                    registry.agents.len()
-                );
-            }
-            Err(e) => {
-                println!("✗ Error: {e}");
-                issues += 1;
-            }
-        },
-        Err(e) => {
-            println!("✗ Error: {e}");
-            issues += 1;
-        }
-    }
-
-    // Check 3: Configuration sanity
-    print!("  [3/3] Configuration... ");
-    if config.daemon_url == daemon_url {
-        println!("✓ OK");
-    } else {
-        println!(
-            "⚠ Daemon URL mismatch (config: {}, expected: {daemon_url})",
-            config.daemon_url
-        );
-        issues += 1;
-    }
-
-    println!();
-    if issues == 0 {
-        println!("✓ All checks passed — ACP is healthy.");
-    } else {
-        println!("✗ {issues} issue(s) found. See above for details.");
-    }
-
-    Ok(())
 }
 
 // ── `acp probe` ──────────────────────────────────────────────────
@@ -1440,17 +1290,5 @@ mod tests {
         assert!(validate_agent_ref("bad`agent").is_err());
         // unicode
         assert!(validate_agent_ref("badαagent").is_err());
-    }
-
-    #[tokio::test]
-    async fn acp_status_non_running() {
-        // Probe an unused port so the test is independent of a live local daemon.
-        let client =
-            crate::api::DaemonClient::new("http://127.0.0.1:19999").expect("valid loopback URL");
-        let result = client.get_runtime_status().await;
-        assert!(
-            result.is_err(),
-            "runtime status should fail when no daemon listens on the port"
-        );
     }
 }

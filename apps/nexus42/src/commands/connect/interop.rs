@@ -54,6 +54,30 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+/// The workspace pool the **compute** fixtures stage against: engine-owned.
+///
+/// `compute_sessions` is engine-owned under the core writer protocol
+/// (`guard_compute_sessions_*` admits only `migration`/`engine`), so a direct
+/// pool is fenced (`WRITER_FENCED`) and the compute gates could not be staged
+/// at all — the same migration the spoke-adapter compute fixtures took in
+/// v1.191 P1 T8. Engine mode satisfies every guarded table (it is a superset
+/// of the direct admission), so one pool both seeds and stages.
+/// `init_engine_pool` retains the guard for the process lifetime, so the
+/// returned clone keeps the admission alive.
+///
+/// Production is unaffected: `connect::build_host_config` keeps opening its
+/// workspace DB through the direct (cooperative) admission — the Connect host
+/// must never take the daemon's engine ownership.
+async fn compute_fixture_pool(db_path: &std::path::Path) -> sqlx::SqlitePool {
+    if let Some(parent) = db_path.parent() {
+        std::fs::create_dir_all(parent).expect("mkdir workspace db dir");
+    }
+    nexus_local_db::init_engine_pool(db_path)
+        .await
+        .expect("engine-owned workspace DB initializes")
+        .clone_pool()
+}
+
 /// Seed a `narrative_worlds` row (plus its `creators` FK row) so the
 /// workspace DB satisfies the WAL-adjacent FK constraints the production
 /// adapter's `put_*` ports hit (PRAGMA `foreign_keys` = ON).
@@ -446,6 +470,7 @@ async fn allowlisted_peer_handshakes_and_reads_nexus_manifest() {
             "spoke-baseline",
             "l2-computable",
             "l5-fork",
+            "ke-ownership",
             "tools.nexus.list_observed_peers",
             "tools.nexus.list_modules"
         ])
@@ -482,13 +507,14 @@ async fn allowlisted_peer_handshakes_and_reads_nexus_manifest() {
     );
 
     // Negotiated capabilities: intersection of the two manifests (both built
-    // by the same builder → all five in local-manifest order).
+    // by the same builder → all six in local-manifest order).
     assert_eq!(
         session.negotiated_capabilities(),
         &[
             "spoke-baseline",
             "l2-computable",
             "l5-fork",
+            "ke-ownership",
             "tools.nexus.list_observed_peers",
             "tools.nexus.list_modules"
         ]
@@ -2081,9 +2107,7 @@ async fn n_c1_every_served_op_advertised_by_the_const_actually_routes() {
 
     // Hermetic workspace DB with the world seeded.
     let db_path = temp.path().join("workspace").join("state.db");
-    let pool = crate::db::Schema::init(&db_path)
-        .await
-        .expect("workspace DB initializes");
+    let pool = compute_fixture_pool(&db_path).await;
     seed_world(&pool, "ctr_test", WORLD_A).await;
 
     // The peer is scoped to exactly the op set the const advertises (the
@@ -2987,9 +3011,7 @@ async fn n_c2_peer_runs_compute_over_connect() {
     install_test_module(home, "basic-combat");
 
     let db_path = temp.path().join("workspace").join("state.db");
-    let pool = crate::db::Schema::init(&db_path)
-        .await
-        .expect("workspace DB initializes");
+    let pool = compute_fixture_pool(&db_path).await;
     seed_world(&pool, "ctr_test", WORLD_A).await;
 
     // The peer is scoped to WORLD_A with the full served-op set AND a
@@ -3115,12 +3137,15 @@ async fn n_c2_peer_runs_compute_over_connect() {
 }
 
 /// N-C2 (V1.154 P2) compute denial matrix — world + module gates (spec
-/// §2.1–§2.3): wrong-world ⇒ `op_unsupported` (the same fail-closed family
-/// as every other op); missing module name ⇒ defined `module_not_found`;
-/// module not installed under `~/.nexus42/modules/` ⇒ defined
-/// `module_not_found`; `settle: true` ⇒ defined `settle_not_enabled`
-/// (read-only compute lock, spec §5 / §6.5). All denials happen before any
-/// WASM execution with zero side effects, and the session stays usable.
+/// §2.1–§2.3): wrong-world ⇒ `invalid_input` (the target entry is read through
+/// the caller's admitted selection, so an unadmitted row is indistinguishable
+/// from an absent one — durable `holder-governance.md` §4.2 — and the denial is
+/// the same client-input family as a missing `entry_id`); missing module name ⇒
+/// defined `module_not_found`; module not installed under
+/// `~/.nexus42/modules/` ⇒ defined `module_not_found`; `settle: true` ⇒ defined
+/// `settle_not_enabled` (read-only compute lock, spec §5 / §6.5). All denials
+/// happen before any WASM execution with zero side effects, and the session
+/// stays usable.
 #[tokio::test(flavor = "multi_thread")]
 #[expect(clippy::too_many_lines)] // AR-102: linear fail-closed scenario steps by design; extraction refactors are out of scope for this plan
 async fn n_c2_compute_wrong_world_missing_module_uninstalled_and_settle_denied() {
@@ -3136,9 +3161,7 @@ async fn n_c2_compute_wrong_world_missing_module_uninstalled_and_settle_denied()
     // NOTE: no module is installed in this home — the module-scope'd peer
     // still exists, so the not-installed denial is reachable.
     let db_path = temp.path().join("workspace").join("state.db");
-    let pool = crate::db::Schema::init(&db_path)
-        .await
-        .expect("workspace DB initializes");
+    let pool = compute_fixture_pool(&db_path).await;
     seed_world(&pool, "ctr_test", WORLD_A).await;
     seed_world(&pool, "ctr_test", WORLD_B).await;
 
@@ -3199,8 +3222,12 @@ async fn n_c2_compute_wrong_world_missing_module_uninstalled_and_settle_denied()
         .expect("seed same-world combatant");
 
     // (b) Wrong-world: the target entry is stored in WORLD_B (seeded
-    // directly — the peer cannot write there), so the stored-world gate
-    // denies with the same op_unsupported family as every other op.
+    // directly — the peer cannot write there). The stored entry is read
+    // through the caller's admitted selection, and a row that selection does
+    // not admit is indistinguishable from an absent one (durable
+    // `holder-governance.md` §4.2), so the denial is the client-input family
+    // (`invalid_input`, the same code a missing `entry_id` produces) — never
+    // an id-existence oracle for a foreign world.
     seed_key_block(&pool, "kb_cmp_b", WORLD_B, "Banished", "confirmed", 1).await;
     nexus_local_db::compute_session::insert_compute_session(
         &pool,
@@ -3224,8 +3251,9 @@ async fn n_c2_compute_wrong_world_missing_module_uninstalled_and_settle_denied()
         .await
     {
         Err(InvokeError::Wire(envelope)) => assert_eq!(
-            envelope.code, "op_unsupported",
-            "wrong-world compute must be denied like every other op"
+            envelope.code, "invalid_input",
+            "wrong-world compute must be denied in the client-input family (an unadmitted row is \
+             indistinguishable from an absent one, durable `holder-governance.md` §4.2)"
         ),
         other => panic!("wrong-world compute must be denied, got {other:?}"),
     }
@@ -3363,9 +3391,7 @@ async fn n_c2_compute_unscoped_module_denied() {
     let peer_peer = peer_key.public().to_peer_id();
 
     let db_path = temp.path().join("workspace").join("state.db");
-    let pool = crate::db::Schema::init(&db_path)
-        .await
-        .expect("workspace DB initializes");
+    let pool = compute_fixture_pool(&db_path).await;
     seed_world(&pool, "ctr_test", WORLD_A).await;
 
     // The allowlist entry deliberately omits `module_scope` (the V1.153 →
@@ -3496,9 +3522,7 @@ async fn n_c2_compute_request_module_override_denied() {
     install_test_module_as(home, "basic-combat-alt", "basic-combat");
 
     let db_path = temp.path().join("workspace").join("state.db");
-    let pool = crate::db::Schema::init(&db_path)
-        .await
-        .expect("workspace DB initializes");
+    let pool = compute_fixture_pool(&db_path).await;
     seed_world(&pool, "ctr_test", WORLD_A).await;
 
     // The peer's module_scope allowlists ONLY basic-combat.
@@ -4398,7 +4422,7 @@ async fn served_tool_invoke_requires_peer_to_advertise_the_capability() {
         .expect("allowlisted peer handshake succeeds");
     assert_eq!(
         absent_session.negotiated_capabilities(),
-        &["spoke-baseline", "l2-computable", "l5-fork"]
+        &["spoke-baseline", "l2-computable", "l5-fork", "ke-ownership"]
             .map(ToString::to_string)
             .to_vec(),
         "negotiation is the intersection — the absent peer's hello lacks the tool ids"

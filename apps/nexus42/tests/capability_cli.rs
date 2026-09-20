@@ -2,9 +2,8 @@
 //!
 //! Hermetic daemon-free scenarios: hidden group surface, exit-code
 //! vocabulary (0 ok / 2 validation / 3 pairing), and the install trio into
-//! `~/.nexus42/capabilities/<name>/` (AR-35). `capability list` daemon
-//! scenarios are covered in-module with wiremock (`commands/capability.rs`
-//! tests).
+//! `~/.nexus42/capabilities/<name>/` (AR-35). The daemon-backed `list` leaf
+//! is retired (v1.193 P1) — its scenarios left with it.
 
 use assert_cmd::Command;
 use predicates::prelude::PredicateBooleanExt;
@@ -87,7 +86,7 @@ fn capability_group_is_hidden_from_root_help() {
 }
 
 #[test]
-fn capability_group_help_lists_only_validate_list_install() {
+fn capability_group_help_lists_only_validate_install() {
     let output = nexus42()
         .args(["capability", "--help"])
         .assert()
@@ -100,12 +99,16 @@ fn capability_group_help_lists_only_validate_list_install() {
         .split("Commands:")
         .nth(1)
         .expect("Commands: section present");
-    for sub in ["validate", "list", "install"] {
+    for sub in ["validate", "install"] {
         assert!(
             commands_section.contains(sub),
             "capability --help must list '{sub}'"
         );
     }
+    assert!(
+        !commands_section.contains("list"),
+        "no `list` subcommand — the daemon-backed leaf is retired (v1.193 P1)"
+    );
     assert!(
         !commands_section.contains("run"),
         "no `run` subcommand (PL-7)"

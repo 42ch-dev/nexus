@@ -54,14 +54,11 @@ name = "trpg_raw_bridge"
 path = "examples/trpg_raw_bridge.rs"
 required-features = ["connect-host"]
 
-# V1.174 P1 T4 (AR-77): three-process E2E harness (`tests/e2e_peer_mcp.rs`) —
-# real WS socket pair (spoke RemoteAdapter → daemon accept loop) + real axum
-# HTTP daemon + real spawned `nexus42 mcp serve` child. Feature-gated so the
-# default-feature CI never compiles it.
-[[test]]
-name = "e2e_peer_mcp"
-path = "tests/e2e_peer_mcp.rs"
-required-features = ["connect-client"]
+# V1.174 P1 T4 (AR-77): the three-process `e2e_peer_mcp.rs` harness was
+# removed with Model A (v1.193 P1-T6) — its explicit `[[test]]` stanza is
+# gone so the intermediate checkout is independently testable. The
+# `connect-client` feature below is kept as a temporary edge until
+# P2-T13 removes the old dependency selectors.
 
 # Creates one world in the standalone probe's disposable workspace through
 # Nexus' own schema and narrative-write API before the runtime starts.

@@ -1,19 +1,20 @@
-//! Hermetic CLI integration tests — `preset patch state|transition|prompt`
-//! (V1.175 P1 Task 2, group 1): CAS-guarded strategy canvas writes over the
-//! existing daemon routes, end-to-end against a live daemon fixture with
-//! hermetic `HOME` (AR-83 #6 / AR-84 group 1).
+//! Server-free CLI integration tests — `preset patch state|transition|prompt`
+//! (V1.175 P1 Task 2, group 1; direct-core retarget v1.193 P1-T2): CAS-guarded
+//! strategy canvas writes end-to-end against a hermetic direct-core `HOME` —
+//! no daemon, no Node child, no live provider (`common/direct.rs` precedent).
 //!
 //! Each test seeds a user preset bundle at `<HOME>/.nexus42/presets/<id>/`
-//! (the canonical layout the strategy patch handlers read/write), then
+//! (the canonical layout the core strategy patch seam reads/writes), then
 //! drives the REAL `nexus42` binary. Failure paths: one conflict path per
 //! leaf (stale `--base-revision` → 409 `strategy_conflict` rendering
 //! current revision + node + conflicting path + recovery hint), plus 404
-//! `not_found` and 400 `bad_request` (the daemon's public code for other
-//! 400s) surfaces.
+//! `not_found` and 400 `bad_request` (the public code a non-canonical
+//! rejection degrades to) surfaces.
 
-mod common;
+#[path = "common/direct.rs"]
+mod direct;
 
-use common::LiveDaemon;
+use direct::DirectFixture;
 use serde_json::Value;
 use std::path::Path;
 use std::process::{Output, Stdio};
@@ -47,6 +48,15 @@ states:
     bundle_dir
 }
 
+/// Run the real `nexus42` binary against the fixture's hermetic `HOME`.
+fn cli(fixture: &DirectFixture, args: &[&str]) -> Output {
+    fixture
+        .command()
+        .args(args)
+        .output()
+        .expect("spawn nexus42")
+}
+
 fn stdout(out: &Output) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
@@ -59,11 +69,12 @@ fn stderr(out: &Output) -> String {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn patch_state_renames_and_bumps_revision() {
-    let d = LiveDaemon::start().await;
+    let d = DirectFixture::new().await;
     let bundle_dir = seed_bundle(d.home.path(), "test-strategy");
 
-    let out = d
-        .cli(&[
+    let out = cli(
+        &d,
+        &[
             "preset",
             "patch",
             "state",
@@ -75,8 +86,8 @@ async fn patch_state_renames_and_bumps_revision() {
             "begin",
             "--description",
             "Renamed start state",
-        ])
-        .await;
+        ],
+    );
     assert!(out.status.success(), "patch state failed: {}", stderr(&out));
     let text = stdout(&out);
     assert!(text.contains("Patched state 'start'"), "{text}");
@@ -93,11 +104,12 @@ async fn patch_state_renames_and_bumps_revision() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn patch_state_json_emits_dto_verbatim() {
-    let d = LiveDaemon::start().await;
+    let d = DirectFixture::new().await;
     seed_bundle(d.home.path(), "test-strategy");
 
-    let out = d
-        .cli(&[
+    let out = cli(
+        &d,
+        &[
             "preset",
             "patch",
             "state",
@@ -108,8 +120,8 @@ async fn patch_state_json_emits_dto_verbatim() {
             "--description",
             "JSON description",
             "--json",
-        ])
-        .await;
+        ],
+    );
     assert!(
         out.status.success(),
         "patch state --json failed: {}",
@@ -123,12 +135,13 @@ async fn patch_state_json_emits_dto_verbatim() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn patch_state_stale_revision_surfaces_conflict() {
-    let d = LiveDaemon::start().await;
+    let d = DirectFixture::new().await;
     seed_bundle(d.home.path(), "test-strategy");
 
     // base_revision 0 vs current 1 → 409 strategy_conflict.
-    let out = d
-        .cli(&[
+    let out = cli(
+        &d,
+        &[
             "preset",
             "patch",
             "state",
@@ -138,8 +151,8 @@ async fn patch_state_stale_revision_surfaces_conflict() {
             "0",
             "--description",
             "stale",
-        ])
-        .await;
+        ],
+    );
     assert!(!out.status.success(), "stale revision must fail");
     let err = stderr(&out);
     assert!(err.contains("strategy_conflict"), "stderr: {err}");
@@ -155,10 +168,11 @@ async fn patch_state_stale_revision_surfaces_conflict() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn patch_state_unknown_strategy_surfaces_404() {
-    let d = LiveDaemon::start().await;
+    let d = DirectFixture::new().await;
 
-    let out = d
-        .cli(&[
+    let out = cli(
+        &d,
+        &[
             "preset",
             "patch",
             "state",
@@ -168,8 +182,8 @@ async fn patch_state_unknown_strategy_surfaces_404() {
             "1",
             "--description",
             "x",
-        ])
-        .await;
+        ],
+    );
     assert!(!out.status.success(), "unknown strategy must fail");
     let err = stderr(&out);
     assert!(
@@ -181,20 +195,21 @@ async fn patch_state_unknown_strategy_surfaces_404() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn patch_state_malformed_bundle_surfaces_bad_request() {
-    let d = LiveDaemon::start().await;
+    let d = DirectFixture::new().await;
     let bundle_dir = seed_bundle(d.home.path(), "test-strategy");
-    // Corrupt the bundle: drop the 'states' array so the daemon's patch
-    // handler rejects with a 400. The handler's internal code is
-    // `strategy_invalid`, which the public error_code() allowlist remaps
-    // to the coarse `bad_request` — the CLI must surface the real wire code.
+    // Corrupt the bundle: drop the 'states' array so the core seam rejects
+    // the patch. Its internal code (`strategy_invalid`) is outside the public
+    // code allowlist, so it degrades to the coarse `bad_request` — the CLI
+    // must surface the public code, not the internal classification.
     std::fs::write(
         bundle_dir.join("preset.yaml"),
         "revision: 1\npreset:\n  id: test-strategy\n",
     )
     .expect("write malformed preset.yaml");
 
-    let out = d
-        .cli(&[
+    let out = cli(
+        &d,
+        &[
             "preset",
             "patch",
             "state",
@@ -204,8 +219,8 @@ async fn patch_state_malformed_bundle_surfaces_bad_request() {
             "1",
             "--description",
             "x",
-        ])
-        .await;
+        ],
+    );
     assert!(!out.status.success(), "malformed bundle must fail");
     let err = stderr(&out);
     assert!(
@@ -217,11 +232,12 @@ async fn patch_state_malformed_bundle_surfaces_bad_request() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn patch_state_requires_set_flag() {
-    let d = LiveDaemon::start().await;
+    let d = DirectFixture::new().await;
     seed_bundle(d.home.path(), "test-strategy");
 
-    let out = d
-        .cli(&[
+    let out = cli(
+        &d,
+        &[
             "preset",
             "patch",
             "state",
@@ -229,8 +245,8 @@ async fn patch_state_requires_set_flag() {
             "start",
             "--base-revision",
             "1",
-        ])
-        .await;
+        ],
+    );
     assert!(!out.status.success(), "no set flag must fail");
     assert!(
         stderr(&out).contains("--label"),
@@ -243,13 +259,14 @@ async fn patch_state_requires_set_flag() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn patch_transition_update_rewires_target() {
-    let d = LiveDaemon::start().await;
+    let d = DirectFixture::new().await;
     let bundle_dir = seed_bundle(d.home.path(), "test-strategy");
 
     // Real rewire: start -> end becomes start -> draft. 'draft' has no
     // outgoing transition, so it is a valid (terminal-by-absence) target.
-    let out = d
-        .cli(&[
+    let out = cli(
+        &d,
+        &[
             "preset",
             "patch",
             "transition",
@@ -264,8 +281,8 @@ async fn patch_transition_update_rewires_target() {
             "end",
             "--new-target",
             "draft",
-        ])
-        .await;
+        ],
+    );
     assert!(
         out.status.success(),
         "patch transition update failed: {}",
@@ -282,13 +299,14 @@ async fn patch_transition_update_rewires_target() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn patch_transition_create_branch() {
-    let d = LiveDaemon::start().await;
+    let d = DirectFixture::new().await;
     let bundle_dir = seed_bundle(d.home.path(), "test-strategy");
 
     // 'draft' has no outgoing transition (and is not terminal), so a
     // branch create seeds a conditional map with a default target.
-    let out = d
-        .cli(&[
+    let out = cli(
+        &d,
+        &[
             "preset",
             "patch",
             "transition",
@@ -305,8 +323,8 @@ async fn patch_transition_create_branch() {
             "branch",
             "--condition",
             "_context._judge_result == true",
-        ])
-        .await;
+        ],
+    );
     assert!(
         out.status.success(),
         "patch transition create failed: {}",
@@ -323,11 +341,12 @@ async fn patch_transition_create_branch() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn patch_transition_stale_revision_surfaces_conflict() {
-    let d = LiveDaemon::start().await;
+    let d = DirectFixture::new().await;
     seed_bundle(d.home.path(), "test-strategy");
 
-    let out = d
-        .cli(&[
+    let out = cli(
+        &d,
+        &[
             "preset",
             "patch",
             "transition",
@@ -340,8 +359,8 @@ async fn patch_transition_stale_revision_surfaces_conflict() {
             "update",
             "--old-target",
             "end",
-        ])
-        .await;
+        ],
+    );
     assert!(!out.status.success(), "stale revision must fail");
     let err = stderr(&out);
     assert!(err.contains("strategy_conflict"), "stderr: {err}");
@@ -357,11 +376,12 @@ async fn patch_transition_stale_revision_surfaces_conflict() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn patch_transition_missing_old_target_fails_fast() {
-    let d = LiveDaemon::start().await;
+    let d = DirectFixture::new().await;
     seed_bundle(d.home.path(), "test-strategy");
 
-    let out = d
-        .cli(&[
+    let out = cli(
+        &d,
+        &[
             "preset",
             "patch",
             "transition",
@@ -372,8 +392,8 @@ async fn patch_transition_missing_old_target_fails_fast() {
             "start",
             "--op",
             "update",
-        ])
-        .await;
+        ],
+    );
     assert!(!out.status.success(), "missing --old-target must fail");
     assert!(
         stderr(&out).contains("--old-target"),
@@ -386,7 +406,7 @@ async fn patch_transition_missing_old_target_fails_fast() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn patch_prompt_writes_template_and_bumps_revision() {
-    let d = LiveDaemon::start().await;
+    let d = DirectFixture::new().await;
     let bundle_dir = seed_bundle(d.home.path(), "test-strategy");
 
     let template_path = bundle_dir.join("prompts/start.md");
@@ -394,13 +414,14 @@ async fn patch_prompt_writes_template_and_bumps_revision() {
     std::fs::write(&template_path, "# Hello\n").expect("write template");
 
     // Distinct source file with different contents — the body assertion
-    // below proves the daemon wrote the NEW bytes, not the pre-existing
+    // below proves the core wrote the NEW bytes, not the pre-existing
     // template (a skipped write would leave the old body in place).
     let source_path = bundle_dir.join("prompts/start.new.md");
     std::fs::write(&source_path, "# Hello, patched world\n").expect("write source");
 
-    let out = d
-        .cli(&[
+    let out = cli(
+        &d,
+        &[
             "preset",
             "patch",
             "prompt",
@@ -412,8 +433,8 @@ async fn patch_prompt_writes_template_and_bumps_revision() {
             "prompts/start.md",
             "--file",
             source_path.to_str().unwrap(),
-        ])
-        .await;
+        ],
+    );
     assert!(
         out.status.success(),
         "patch prompt failed: {}",
@@ -431,14 +452,15 @@ async fn patch_prompt_writes_template_and_bumps_revision() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn patch_prompt_stale_revision_surfaces_conflict() {
-    let d = LiveDaemon::start().await;
+    let d = DirectFixture::new().await;
     let bundle_dir = seed_bundle(d.home.path(), "test-strategy");
     let template_path = bundle_dir.join("prompts/start.md");
     std::fs::create_dir_all(template_path.parent().unwrap()).expect("create prompts dir");
     std::fs::write(&template_path, "# Hello\n").expect("write template");
 
-    let out = d
-        .cli(&[
+    let out = cli(
+        &d,
+        &[
             "preset",
             "patch",
             "prompt",
@@ -450,8 +472,8 @@ async fn patch_prompt_stale_revision_surfaces_conflict() {
             "prompts/start.md",
             "--file",
             template_path.to_str().unwrap(),
-        ])
-        .await;
+        ],
+    );
     assert!(!out.status.success(), "stale revision must fail");
     let err = stderr(&out);
     assert!(err.contains("strategy_conflict"), "stderr: {err}");
@@ -467,11 +489,12 @@ async fn patch_prompt_stale_revision_surfaces_conflict() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn patch_prompt_missing_file_fails_fast() {
-    let d = LiveDaemon::start().await;
+    let d = DirectFixture::new().await;
     seed_bundle(d.home.path(), "test-strategy");
 
-    let out = d
-        .cli(&[
+    let out = cli(
+        &d,
+        &[
             "preset",
             "patch",
             "prompt",
@@ -483,8 +506,8 @@ async fn patch_prompt_missing_file_fails_fast() {
             "prompts/start.md",
             "--file",
             "/nonexistent/prompt.md",
-        ])
-        .await;
+        ],
+    );
     assert!(!out.status.success(), "missing file must fail");
     assert!(
         stderr(&out).contains("--file"),
@@ -495,7 +518,7 @@ async fn patch_prompt_missing_file_fails_fast() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn patch_prompt_stdin_writes_template() {
-    let d = LiveDaemon::start().await;
+    let d = DirectFixture::new().await;
     let bundle_dir = seed_bundle(d.home.path(), "test-strategy");
     let template_path = bundle_dir.join("prompts/start.md");
     std::fs::create_dir_all(template_path.parent().unwrap()).expect("create prompts dir");
@@ -551,9 +574,9 @@ async fn patch_prompt_stdin_writes_template() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn patch_help_documents_base_revision_retry() {
-    let d = LiveDaemon::start().await;
+    let d = DirectFixture::new().await;
 
-    let out = d.cli(&["preset", "patch", "--help"]).await;
+    let out = cli(&d, &["preset", "patch", "--help"]);
     assert!(
         out.status.success(),
         "patch --help failed: {}",

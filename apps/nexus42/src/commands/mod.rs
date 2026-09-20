@@ -75,21 +75,7 @@ pub mod desktop;
     test,
     allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)
 )]
-pub mod host_call;
-#[cfg(feature = "legacy-cli")]
-#[deny(clippy::unwrap_used)]
-#[cfg_attr(
-    test,
-    allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)
-)]
 pub mod local_creator_bootstrap;
-#[cfg(all(feature = "legacy-cli", feature = "connect-client"))]
-#[deny(clippy::unwrap_used)]
-#[cfg_attr(
-    test,
-    allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)
-)]
-pub mod mcp;
 #[cfg(feature = "legacy-cli")]
 #[deny(clippy::unwrap_used)]
 #[cfg_attr(
