@@ -704,6 +704,96 @@ async fn v1191_knowledge_fence_stale_revision_retires_the_session() {
 }
 
 
+/// Migrated from the retired daemon `characters_api.rs`
+/// (`restore_same_state_cas_no_op_keeps_session_executable_without_shutdown`):
+/// a same-state lifecycle transition is a no-op — it moves neither the
+/// revision nor the stored `lifecycle_epoch`, so a session indexed under the
+/// current epoch stays reusable and its effect still reaches the provider.
+#[tokio::test]
+async fn retained_same_state_transition_no_op_keeps_the_indexed_session_reusable() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let port = CountingPort::new();
+    let handle: HostHandle = core.open_host(port.clone()).await.unwrap();
+
+    let ctx = admit_character(&core, &principal, &env).await;
+    let knowledge = admitted_knowledge(&core, &principal, &env).await.identity();
+    let key = registry_key(handle.actor_sessions(), &ctx, knowledge, &env.user_home);
+    let session_id = Uuid::new_v4();
+    handle.actor_sessions().insert_indexed_entry(
+        key,
+        ctx,
+        nexus_agent_host::HostSessionId(session_id),
+    );
+
+    let (revision, epoch) = {
+        let pool = plain_pool(&env).await;
+        let row: (i64, i64) = sqlx::query_as(
+            "SELECT revision, lifecycle_epoch FROM characters WHERE character_id = ?",
+        )
+        .bind(&env.character_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        pool.close().await;
+        row
+    };
+
+    // Restore-to-active on an already active Character: the retained no-op.
+    let request =
+        nexus_contracts::generated::core::CoreCharacterTransitionRequest::builder()
+            .character_id(env.character_id.clone())
+            .expected_revision(revision)
+            .target_status(
+                nexus_contracts::generated::core::CoreCharacterTransitionRequestTargetStatus::Active,
+            )
+            .try_into()
+            .expect("transition request is wire-valid");
+    let response = core
+        .transition_character(&principal, request)
+        .await
+        .expect("a same-state transition admits");
+    assert_eq!(response.character.status.to_string(), "active");
+    assert_eq!(
+        response.character.revision, revision,
+        "a no-op transition never bumps the revision"
+    );
+    let after_epoch: i64 = {
+        let pool = plain_pool(&env).await;
+        let value: i64 =
+            sqlx::query_scalar("SELECT lifecycle_epoch FROM characters WHERE character_id = ?")
+                .bind(&env.character_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        pool.close().await;
+        value
+    };
+    assert_eq!(
+        after_epoch, epoch,
+        "a no-op transition must not retire the current session generation"
+    );
+
+    // The indexed session is still live and its reuse key still admits: the
+    // epoch-guarded staleness path (proved by
+    // `stale_actor_and_journal_failure_never_redispatch`) can only fire once
+    // the stored epoch actually moves, so nothing fabricates a shutdown for a
+    // no-op.
+    let indexed = nexus_agent_host::HostSessionId(session_id);
+    assert!(
+        handle.actor_sessions().context_for(&indexed).is_some(),
+        "a no-op transition never retires the current session generation"
+    );
+    let reuse = handle
+        .actor_sessions()
+        .revalidate_knowledge(&indexed, &knowledge)
+        .expect("an indexed session revalidates");
+    assert!(
+        matches!(reuse, nexus_core::KnowledgeReuse::Reusable),
+        "a no-op transition leaves the reuse key usable, got {reuse:?}"
+    );
+}
+
 /// Remembered capture is a **durable writer** boundary at the core authority
 /// (v1.193 P0-T11): `remember` is admitted only for an indexed Character
 /// session — a legacy session's request is refused before any provider effect
