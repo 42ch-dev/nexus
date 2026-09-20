@@ -631,7 +631,8 @@ fn daemon_orchestrate_run_is_removed() {
 // =============================================================================
 
 // V1.45: `v133_creator_run_subcommands` removed — old subcommands (start, continue,
-// etc.) replaced by generic `creator run <preset_id>` dispatch.
+// etc.) replaced by generic `creator run <preset_id>` dispatch; v1.193 P2-T1 then
+// removed that runner too, so these leaves are simply gone.
 
 /// Verify `creator works` subcommands exist (DF-60 §6.2H, V1.41).
 #[test]
@@ -911,84 +912,6 @@ fn v135_creator_help_mentions_kb_namespaces() {
 // `v136_start_help_mentions_auto_completion`,
 // `v137_stage_advance_has_force_gates_flags`, `v137_run_start_has_force_gates_flags`
 // removed — old subcommands replaced by generic dispatch with --force-gates/--reason.
-
-// =============================================================================
-// Part V1.45: Generic `creator run <preset_id>` surface tests
-// =============================================================================
-
-/// V1.45: `creator run --help` shows `<PRESET_ID>` as a positional arg.
-#[test]
-fn v145_creator_run_shows_preset_id_positional() {
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .args(["creator", "run", "--help"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
-    assert!(
-        help_text.contains("PRESET_ID") || help_text.contains("preset_id"),
-        "V1.45: creator run --help must show PRESET_ID positional arg"
-    );
-}
-
-/// V1.45: `creator run --help` shows global flags (--json, --force-gates, --reason).
-#[test]
-fn v145_creator_run_has_global_flags() {
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .args(["creator", "run", "--help"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
-    assert!(
-        help_text.contains("--json"),
-        "V1.45: creator run --help must list --json flag"
-    );
-    assert!(
-        help_text.contains("--force-gates"),
-        "V1.45: creator run --help must list --force-gates flag"
-    );
-    assert!(
-        help_text.contains("--reason"),
-        "V1.45: creator run --help must list --reason flag"
-    );
-}
-
-/// V1.45: `creator run --help` does NOT show old subcommands (start, continue, etc.).
-#[test]
-fn v145_creator_run_no_legacy_subcommands() {
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .args(["creator", "run", "--help"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
-    for old_subcmd in &[
-        "start",
-        "continue",
-        "stage",
-        "resume",
-        "audit-chapter",
-        "review-master",
-    ] {
-        assert!(
-            !help_text.contains(&format!("\n  {old_subcmd} ")),
-            "V1.45: creator run --help must not list old subcommand '{old_subcmd}'"
-        );
-    }
-}
 
 // =============================================================================
 // v1.193 P1-T1: `preset validate` is local-only; removed surfaces are unknown
@@ -1420,4 +1343,130 @@ fn retired_operator_entrances_are_unknown() {
         .args(["ops", "inspect", "--help"])
         .assert()
         .success();
+}
+
+// =============================================================================
+// Part 12: v1.193 P2-T1 Creator runner / Work execution-entry removal
+// =============================================================================
+
+/// Subcommand names the `Commands:` block of a clap `--help` page advertises.
+///
+/// An entry line is `  <name>  <description>`; wrapped description text is
+/// indented past the name column, so only lines whose remainder after the name
+/// is empty or starts with the description gap count as entries.
+fn help_command_names(help: &str) -> Vec<String> {
+    help_commands_section(help)
+        .lines()
+        .filter_map(|line| {
+            let rest = line.strip_prefix("  ")?;
+            if rest.starts_with(' ') {
+                return None;
+            }
+            let name = rest.split_whitespace().next()?;
+            let after = &rest[name.len()..];
+            (after.is_empty() || after.starts_with("  ")).then(|| name.to_string())
+        })
+        .collect()
+}
+
+/// v1.193 P2-T1 (AC1/AC2/AC5): the incomplete Creator runner (`creator run`,
+/// `creator bootstrap`) and the Work execution entrances (`creator works
+/// intake`, `creator works resume-chain`, `creator works start`,
+/// `creator works create`) are unknown parser entries — not success-shaped
+/// stubs, not hidden variants that answer with guidance, and not help pages.
+///
+/// Discriminating regression: pre-cutover `creator run <preset> --help` exited
+/// 0 with the manifest-enriched help page (the deleted
+/// `creator_run_preset_help.rs` smoke test) and `creator works start` parsed
+/// into a hidden variant whose handler answered exit 1 with a "use bootstrap
+/// instead" message; post-cutover every listed invocation is clap's
+/// unrecognized-subcommand error (exit 2, empty stdout), while the retained
+/// `creator` / `creator works` leaves still parse.
+#[test]
+fn retired_creator_execution_is_unknown() {
+    let home = tempfile::tempdir().expect("temp home");
+
+    let removed: [&[&str]; 8] = [
+        &["creator", "run", "novel-writing"],
+        &["creator", "run", "--help"],
+        &["creator", "bootstrap", "--idea", "a new novel"],
+        &["creator", "bootstrap", "--help"],
+        &["creator", "works", "intake", "wrk_1"],
+        &["creator", "works", "resume-chain", "wrk_1"],
+        &["creator", "works", "start", "--idea", "x"],
+        &["creator", "works", "create"],
+    ];
+    for args in removed {
+        let output = Command::cargo_bin("nexus42")
+            .unwrap()
+            .env("HOME", home.path())
+            .env_remove("NEXUS_API_KEY")
+            .args(args)
+            .assert()
+            .code(2)
+            .get_output()
+            .clone();
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        assert!(
+            stderr.contains("unrecognized subcommand"),
+            "v1.193 P2-T1: `{}` must be an unknown subcommand: {stderr}",
+            args.join(" ")
+        );
+        assert!(
+            output.stdout.is_empty(),
+            "v1.193 P2-T1: `{}` must not answer with a success-shaped stub: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+
+    // The retained Creator group advertises only retained entries.
+    let creator = Command::cargo_bin("nexus42")
+        .unwrap()
+        .env("HOME", home.path())
+        .env_remove("NEXUS_API_KEY")
+        .args(["creator", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let creator_names = help_command_names(&String::from_utf8_lossy(&creator.stdout));
+    for leaf in ["run", "bootstrap"] {
+        let advertised = creator_names.iter().any(|name| name == leaf);
+        assert!(
+            !advertised,
+            "v1.193 P2-T1: `creator` must not advertise '{leaf}': {creator_names:?}"
+        );
+    }
+    for leaf in ["works", "register", "status", "list", "kb", "world"] {
+        assert!(
+            creator_names.iter().any(|name| name == leaf),
+            "v1.193 P2-T1: `creator` must keep '{leaf}': {creator_names:?}"
+        );
+    }
+
+    // The retained Work group advertises only retained entries.
+    let works = Command::cargo_bin("nexus42")
+        .unwrap()
+        .env("HOME", home.path())
+        .env_remove("NEXUS_API_KEY")
+        .args(["creator", "works", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let works_names = help_command_names(&String::from_utf8_lossy(&works.stdout));
+    for leaf in ["intake", "resume-chain", "start", "create"] {
+        let advertised = works_names.iter().any(|name| name == leaf);
+        assert!(
+            !advertised,
+            "v1.193 P2-T1: `creator works` must not advertise '{leaf}': {works_names:?}"
+        );
+    }
+    for leaf in ["list", "status", "use", "inspire", "reopen", "pool"] {
+        assert!(
+            works_names.iter().any(|name| name == leaf),
+            "v1.193 P2-T1: `creator works` must keep '{leaf}': {works_names:?}"
+        );
+    }
 }

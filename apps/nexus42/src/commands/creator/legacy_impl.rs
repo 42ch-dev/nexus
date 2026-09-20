@@ -3,16 +3,13 @@
 //! `creator` is the primary entry for agent identity, Work lifecycle, and local assets.
 //! Per cli-command-ia.md §3.1, subcommands are organized in tiers:
 //!
-//! - **Three-plane IA (V1.45)**:
-//!   - `bootstrap` — composite Work onboarding (create Work + schedule intake)
-//!   - `works` — atomic single-purpose ops (inspire, reopen, resume-chain, …)
-//!   - `run <preset_id>` — strategy / preset dispatch
+//! - **Work plane (DF-60/61)**: `works` — atomic single-purpose ops (inspire,
+//!   reopen, reconcile-chapters, completion-lock, pool, …)
 //! - **Primary**: `register`, `use`, `list`
 //! - **Assets**: `workspace`, `soul`, `memory`, `kb`, `knowledge`, `reference`, `world`
 //! - **Platform bridge**: `status`, `pair`, `unpair`, `credentials`
 //! - **Maintenance**: `demo-seed`, `logout`
 
-pub mod bootstrap;
 pub mod character;
 pub mod inspector;
 pub mod kb;
@@ -22,7 +19,6 @@ pub mod moment_directive;
 pub mod reading;
 pub mod reference;
 pub mod rules_runtime;
-pub mod run;
 pub mod soul;
 pub mod work_utils;
 pub mod works;
@@ -338,17 +334,6 @@ fn print_next_steps() {
 
 #[derive(Debug, Subcommand)]
 pub enum CreatorCommand {
-    // ── Three-plane IA (V1.45) ──────────────────────────────────────
-    /// Composite Work onboarding — create Work + schedule intake/production
-    ///
-    /// Creates a new Work and optionally schedules init preset, intake,
-    /// and production. The sole composite entry for new Work creation.
-    /// For atomic Work operations, use `creator works`.
-    /// For preset dispatch, use `creator run <preset_id>`.
-    ///
-    /// See the creator-run-preset-entry spec for the CLI workflow.
-    Bootstrap(bootstrap::BootstrapArgs),
-
     /// Work management and pool — atomic single-purpose ops (DF-60 §6.2H).
     ///
     /// List, inspect, and manage your Works and the selection pool.
@@ -358,18 +343,6 @@ pub enum CreatorCommand {
     Works {
         #[command(subcommand)]
         command: works::WorksCommand,
-    },
-
-    /// Preset dispatch — run a preset by id (V1.45 P0)
-    ///
-    /// Generic runner: `creator run <preset_id> [<work_id>]`.
-    /// Any resolvable preset id (embedded, user, or system) can be dispatched.
-    /// No CLI preset whitelist — adding a preset changes YAML, not Rust.
-    /// FL-E stage-advance presets (`research`, `novel-writing`,
-    /// `novel-chapter-review`, `kb-extract`) preserve stage-advance semantics.
-    Run {
-        #[command(flatten)]
-        command: run::RunCommand,
     },
 
     // ── Primary tier ────────────────────────────────────────────────
@@ -603,7 +576,6 @@ pub enum CredentialsAction {
 #[allow(clippy::future_not_send)]
 pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
     match cmd {
-        CreatorCommand::Bootstrap(args) => bootstrap::handle_bootstrap(args, config).await,
         CreatorCommand::Register {
             name,
             source,
@@ -637,7 +609,6 @@ pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
         CreatorCommand::Inspector { command } => inspector::run(command, config).await,
         CreatorCommand::Knowledge { command } => knowledge::run(command, config).await,
         CreatorCommand::MomentDirective { command } => moment_directive::run(command, config).await,
-        CreatorCommand::Run { command } => run::handle_run(command, config).await,
         CreatorCommand::Works { command } => works::handle_works(command, config).await,
         CreatorCommand::DemoSeed { force } => run_demo_seed(config, force).await,
         CreatorCommand::Logout => logout_creator(config),
