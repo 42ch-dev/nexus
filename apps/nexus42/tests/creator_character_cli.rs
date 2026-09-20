@@ -1,29 +1,21 @@
 //! `nexus42 creator character` CLI tests.
 //!
-//! Identity and binding arms (v1.193 P0-T9) drive the REAL binary against a
-//! hermetic direct-core home (`common/direct_actor.rs`): no daemon, no Node
-//! child, the core's stored actor fences and the caller's explicit
-//! `--expected-revision` CAS. The knowledge family still rides the live-daemon
-//! fixture (`common/mod.rs`) until P0-T10 migrates it, so the two fixtures
-//! coexist here while the Character surface is mid-migration.
-
-mod common;
+//! Identity, binding and knowledge arms (v1.193 P0-T9/T10) drive the REAL
+//! binary against a hermetic direct-core home (`common/direct_actor.rs`): no
+//! daemon, no Node child, the core's stored actor fences, the caller's
+//! explicit `--expected-revision` CAS and the core's own admitted
+//! holder-filtered knowledge view. The memory/ToM/run family keeps its own
+//! test crates until P0-T11 migrates it.
 
 #[path = "common/direct.rs"]
 mod direct;
 #[path = "common/direct_actor.rs"]
 mod direct_actor;
 
-use common::LiveDaemon;
 use direct_actor::DirectActor;
 use serde_json::Value;
 use std::process::Output;
 
-/// Creator the live-daemon knowledge fixture seeds.
-const OWNER: &str = "ctr_localabcdef123456";
-/// Worlds the live-daemon knowledge fixture seeds.
-const WORLD_A: &str = "wld_worldA";
-const WORLD_B: &str = "wld_worldB";
 /// WorldSheet `KeyBlock` ids the direct-core fixture seeds (stored `kb_<hex>`).
 const SHEET_A: &str = "kb_5ee70001";
 const SHEET_B: &str = "kb_5ee70002";
@@ -35,27 +27,6 @@ fn stdout(out: &Output) -> String {
 
 fn stderr(out: &Output) -> String {
     String::from_utf8_lossy(&out.stderr).into_owned()
-}
-
-async fn seed_owner_worlds(d: &LiveDaemon) {
-    nexus_local_db::ensure_creator_row(&d.pool, OWNER, "Owner")
-        .await
-        .unwrap();
-    for (world_id, slug) in [(WORLD_A, "world-a"), (WORLD_B, "world-b")] {
-        sqlx::query(
-            "INSERT INTO narrative_worlds \
-             (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
-              time_policy, metadata_json, created_at) \
-             VALUES (?, 'ws', ?, ?, ?, 'active', 'private', 'manual', '{}', datetime('now'))",
-        )
-        .bind(world_id)
-        .bind(OWNER)
-        .bind(world_id)
-        .bind(slug)
-        .execute(&d.pool)
-        .await
-        .unwrap();
-    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -287,84 +258,59 @@ async fn binding_list_human_and_json_paginate() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn knowledge_add_list_view_json_round_trip() {
-    let d = LiveDaemon::start_for_creator(OWNER, "default").await;
-    seed_owner_worlds(&d).await;
+    let actor = DirectActor::new().await;
+    let world_a = actor.create_world("Knowledge Round Trip World").await;
+    let seeded = actor.create_character("Ava", &world_a).await;
 
-    let created = d
-        .cli(&[
-            "creator",
-            "character",
-            "create",
-            "--display-name",
-            "Ava",
-            "--world-id",
-            WORLD_A,
-            "--json",
-        ])
-        .await;
-    assert!(created.status.success(), "create: {}", stderr(&created));
-    let body: Value = serde_json::from_str(&stdout(&created)).unwrap();
-    let chr = body["character"]["character_id"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    let bind = body["binding"]["binding_id"].as_str().unwrap().to_string();
-
-    let added = d
-        .cli(&[
-            "creator",
-            "character",
-            "knowledge",
-            "add",
-            "--owner",
-            "character",
-            "--character-id",
-            &chr,
-            "--block-type",
-            "item",
-            "--canonical-name",
-            "CharNote",
-            "--json",
-        ])
-        .await;
+    let added = actor.cli(&[
+        "creator",
+        "character",
+        "knowledge",
+        "add",
+        "--owner",
+        "character",
+        "--character-id",
+        &seeded.character_id,
+        "--block-type",
+        "item",
+        "--canonical-name",
+        "CharNote",
+        "--json",
+    ]);
     assert!(added.status.success(), "add: {}", stderr(&added));
     let added_body: Value = serde_json::from_str(&stdout(&added)).unwrap();
     assert_eq!(added_body["item"]["canonical_name"], "CharNote");
 
-    let listed = d
-        .cli(&[
-            "creator",
-            "character",
-            "knowledge",
-            "list",
-            "--character-id",
-            &chr,
-            "--json",
-        ])
-        .await;
+    let listed = actor.cli(&[
+        "creator",
+        "character",
+        "knowledge",
+        "list",
+        "--character-id",
+        &seeded.character_id,
+        "--json",
+    ]);
     assert!(listed.status.success(), "list: {}", stderr(&listed));
     let list_body: Value = serde_json::from_str(&stdout(&listed)).unwrap();
     assert_eq!(list_body["items"].as_array().unwrap().len(), 1);
 
-    let viewed = d
-        .cli(&[
-            "creator",
-            "character",
-            "knowledge",
-            "view",
-            "--actor",
-            "character",
-            "--character-id",
-            &chr,
-            "--world-id",
-            WORLD_A,
-            "--binding-id",
-            &bind,
-            "--json",
-        ])
-        .await;
+    let viewed = actor.cli(&[
+        "creator",
+        "character",
+        "knowledge",
+        "view",
+        "--actor",
+        "character",
+        "--character-id",
+        &seeded.character_id,
+        "--world-id",
+        &world_a,
+        "--binding-id",
+        &seeded.binding_id,
+        "--json",
+    ]);
     assert!(viewed.status.success(), "view: {}", stderr(&viewed));
     let view_body: Value = serde_json::from_str(&stdout(&viewed)).unwrap();
     assert_eq!(view_body["items"][0]["canonical_name"], "CharNote");
@@ -830,160 +776,136 @@ async fn binding_show_retained_after_archive() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[allow(clippy::too_many_lines)]
 async fn knowledge_show_edit_remove_summary_journey() {
-    let d = LiveDaemon::start_for_creator(OWNER, "default").await;
-    seed_owner_worlds(&d).await;
+    let actor = DirectActor::new().await;
+    let world_a = actor.create_world("Summary Journey World").await;
+    let seeded = actor.create_character("Ava", &world_a).await;
+    let chr = seeded.character_id.as_str();
 
-    let created = d
-        .cli(&[
-            "creator",
-            "character",
-            "create",
-            "--display-name",
-            "Ava",
-            "--world-id",
-            WORLD_A,
-            "--json",
-        ])
-        .await;
-    assert!(created.status.success(), "create: {}", stderr(&created));
-    let body: Value = serde_json::from_str(&stdout(&created)).unwrap();
-    let chr = body["character"]["character_id"]
-        .as_str()
-        .unwrap()
-        .to_string();
-
-    let added = d
-        .cli(&[
-            "creator",
-            "character",
-            "knowledge",
-            "add",
-            "--owner",
-            "character",
-            "--character-id",
-            &chr,
-            "--block-type",
-            "item",
-            "--canonical-name",
-            "CliFact",
-            "--summary",
-            "alpha summary",
-            "--json",
-        ])
-        .await;
+    let added = actor.cli(&[
+        "creator",
+        "character",
+        "knowledge",
+        "add",
+        "--owner",
+        "character",
+        "--character-id",
+        chr,
+        "--block-type",
+        "item",
+        "--canonical-name",
+        "CliFact",
+        "--summary",
+        "alpha summary",
+        "--json",
+    ]);
     assert!(added.status.success(), "add: {}", stderr(&added));
     let added_body: Value = serde_json::from_str(&stdout(&added)).unwrap();
     let entry_id = added_body["item"]["entry_id"].as_str().unwrap().to_string();
     let revision = added_body["item"]["revision"].as_u64().unwrap();
 
-    let shown = d
-        .cli(&[
-            "creator",
-            "character",
-            "knowledge",
-            "show",
-            "--character-id",
-            &chr,
-            "--entry-id",
-            &entry_id,
-            "--json",
-        ])
-        .await;
+    let shown = actor.cli(&[
+        "creator",
+        "character",
+        "knowledge",
+        "show",
+        "--character-id",
+        chr,
+        "--entry-id",
+        &entry_id,
+        "--json",
+    ]);
     assert!(shown.status.success(), "show: {}", stderr(&shown));
     let show_body: Value = serde_json::from_str(&stdout(&shown)).unwrap();
     assert_eq!(show_body["summary"], "alpha summary");
 
-    let edited = d
-        .cli(&[
-            "creator",
-            "character",
-            "knowledge",
-            "edit",
-            "--character-id",
-            &chr,
-            "--entry-id",
-            &entry_id,
-            "--expected-revision",
-            &revision.to_string(),
-            "--summary",
-            "beta summary",
-            "--json",
-        ])
-        .await;
+    let edited = actor.cli(&[
+        "creator",
+        "character",
+        "knowledge",
+        "edit",
+        "--character-id",
+        chr,
+        "--entry-id",
+        &entry_id,
+        "--expected-revision",
+        &revision.to_string(),
+        "--summary",
+        "beta summary",
+        "--json",
+    ]);
     assert!(edited.status.success(), "edit: {}", stderr(&edited));
     let edit_body: Value = serde_json::from_str(&stdout(&edited)).unwrap();
     assert_eq!(edit_body["summary"], "beta summary");
     let rev2 = edit_body["item"]["revision"].as_u64().unwrap();
 
-    let cleared = d
-        .cli(&[
-            "creator",
-            "character",
-            "knowledge",
-            "edit",
-            "--character-id",
-            &chr,
-            "--entry-id",
-            &entry_id,
-            "--expected-revision",
-            &rev2.to_string(),
-            "--clear-summary",
-            "--json",
-        ])
-        .await;
+    let cleared = actor.cli(&[
+        "creator",
+        "character",
+        "knowledge",
+        "edit",
+        "--character-id",
+        chr,
+        "--entry-id",
+        &entry_id,
+        "--expected-revision",
+        &rev2.to_string(),
+        "--clear-summary",
+        "--json",
+    ]);
     assert!(cleared.status.success(), "clear: {}", stderr(&cleared));
     let clear_body: Value = serde_json::from_str(&stdout(&cleared)).unwrap();
     assert!(clear_body["summary"].is_null());
     let rev3 = clear_body["item"]["revision"].as_u64().unwrap();
 
-    let removed = d
-        .cli(&[
-            "creator",
-            "character",
-            "knowledge",
-            "remove",
-            "--character-id",
-            &chr,
-            "--entry-id",
-            &entry_id,
-            "--expected-revision",
-            &rev3.to_string(),
-        ])
-        .await;
+    // The stored revision advanced with each write, so the pre-edit revision is
+    // now stale: the CAS must refuse it instead of deleting the row.
+    let stale = actor.cli(&[
+        "creator",
+        "character",
+        "knowledge",
+        "remove",
+        "--character-id",
+        chr,
+        "--entry-id",
+        &entry_id,
+        "--expected-revision",
+        &revision.to_string(),
+    ]);
+    assert!(!stale.status.success(), "stale remove must be refused");
+    assert!(
+        stderr(&stale).contains("knowledge_revision_conflict"),
+        "stderr={}",
+        stderr(&stale)
+    );
+
+    let removed = actor.cli(&[
+        "creator",
+        "character",
+        "knowledge",
+        "remove",
+        "--character-id",
+        chr,
+        "--entry-id",
+        &entry_id,
+        "--expected-revision",
+        &rev3.to_string(),
+    ]);
     assert!(removed.status.success(), "remove: {}", stderr(&removed));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn summary_file_over_byte_limit_rejects_via_metadata_precheck() {
     use nexus_local_db::ACTOR_KNOWLEDGE_SUMMARY_MAX_UTF8_BYTES;
     use std::io::Write;
 
-    let d = LiveDaemon::start_for_creator(OWNER, "default").await;
-    seed_owner_worlds(&d).await;
+    let actor = DirectActor::new().await;
+    let world_a = actor.create_world("Oversized Summary World").await;
+    let seeded = actor.create_character("Ava", &world_a).await;
 
-    let created = d
-        .cli(&[
-            "creator",
-            "character",
-            "create",
-            "--display-name",
-            "Ava",
-            "--world-id",
-            WORLD_A,
-            "--json",
-        ])
-        .await;
-    assert!(created.status.success(), "create: {}", stderr(&created));
-    let body: Value = serde_json::from_str(&stdout(&created)).unwrap();
-    let chr = body["character"]["character_id"]
-        .as_str()
-        .unwrap()
-        .to_string();
-
-    let oversized = d.home.path().join("oversized-summary.txt");
+    let oversized = actor.home().join("oversized-summary.txt");
     {
         let mut file = std::fs::File::create(&oversized).unwrap();
         file.write_all(b"x").unwrap();
@@ -991,33 +913,53 @@ async fn summary_file_over_byte_limit_rejects_via_metadata_precheck() {
             .unwrap();
     }
 
-    let started = std::time::Instant::now();
-    let out = d
-        .cli(&[
-            "creator",
-            "character",
-            "knowledge",
-            "add",
-            "--owner",
-            "character",
-            "--character-id",
-            &chr,
-            "--block-type",
-            "item",
-            "--canonical-name",
-            "OversizedSummary",
-            "--summary-file",
-            oversized.to_str().unwrap(),
-        ])
-        .await;
+    let out = actor.cli(&[
+        "creator",
+        "character",
+        "knowledge",
+        "add",
+        "--owner",
+        "character",
+        "--character-id",
+        &seeded.character_id,
+        "--block-type",
+        "item",
+        "--canonical-name",
+        "OversizedSummary",
+        "--summary-file",
+        oversized.to_str().unwrap(),
+    ]);
     assert!(!out.status.success(), "expected failure: {}", stderr(&out));
+    // The precheck wording is emitted **only** by the metadata precheck in
+    // `read_file_bounded` (`cannot read …` is the read failure), so naming the
+    // metadata size is direct evidence of the precheck path. The v1.193
+    // direct-core seam admits the writer before this leaf validates, so the
+    // refusal is no longer observable as a start-to-error elapsed time.
     let err = stderr(&out);
     assert!(
         err.contains("exceeding the 65536-byte limit"),
         "stderr={err}"
     );
     assert!(
-        started.elapsed() < std::time::Duration::from_secs(2),
-        "oversized summary-file must fail fast via metadata precheck"
+        err.contains("is 65537 bytes"),
+        "the refusal must name the metadata size, not a post-read length: {err}"
+    );
+
+    // The refusal is zero-mutation: nothing reached the stored rows.
+    let listed = actor.cli(&[
+        "creator",
+        "character",
+        "knowledge",
+        "list",
+        "--character-id",
+        &seeded.character_id,
+        "--json",
+    ]);
+    assert!(listed.status.success(), "list: {}", stderr(&listed));
+    let listed_body: Value = serde_json::from_str(&stdout(&listed)).unwrap();
+    assert_eq!(
+        listed_body["items"].as_array().unwrap().len(),
+        0,
+        "an oversized summary-file must not store a row"
     );
 }

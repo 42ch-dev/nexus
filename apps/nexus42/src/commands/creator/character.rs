@@ -1,15 +1,25 @@
 //! `creator character` — Character identity, bindings, knowledge, memory, ToM
 //! and the (retiring) Character-run entrance.
 //!
-//! Identity and binding authority (v1.193 P0-T9) authors through the shared
-//! direct-core seam ([`crate::core`]): one owner-scoped `CoreService` is
-//! opened, the typed core call is issued behind its stored-actor fences and
-//! explicit `--expected-revision` CAS, and the writer is released before
-//! anything is rendered. No `DaemonClient` is constructed for those arms.
+//! Identity, binding (v1.193 P0-T9) and knowledge (P0-T10) authority authors
+//! through the shared direct-core seam ([`crate::core`]): one owner-scoped
+//! `CoreService` is opened, the typed core call is issued behind its
+//! stored-actor fences and explicit `--expected-revision` CAS, and the writer
+//! is released before anything is rendered. No `DaemonClient` is constructed
+//! for those arms.
 //!
-//! The knowledge (P0-T10) and memory/ToM/run (P0-T11) families still ride the
-//! daemon transport until their own tasks migrate them; those are the only
-//! arms that build an HTTP client.
+//! The knowledge arms read and write the stored `KnowledgeEntryRecord` and
+//! project it onto the same generated DTO family the daemon adapter served
+//! ([`knowledge_item_from_record`]), so the authored nullable summary, the
+//! revision CAS and the native governance pair (`holder_entry_id` /
+//! `disclosure`) stay observable through the CLI. A Character viewpoint stays
+//! the core's holder-filtered admitted view; the Creator viewpoint stays the
+//! management review — this leaf never unions owners itself and never
+//! substitutes one for the other.
+//!
+//! The memory/ToM/run family (P0-T11) still rides the daemon transport until
+//! its own task migrates it; those are the only arms that build an HTTP
+//! client.
 
 #[path = "character_run.rs"]
 mod character_run;
@@ -23,9 +33,10 @@ use clap::Subcommand;
 use nexus_contracts::daemon_api::actor_knowledge::{
     add_knowledge_entry_request::AddKnowledgeEntryRequest,
     add_knowledge_entry_response::AddKnowledgeEntryResponse,
-    knowledge_entry_detail::KnowledgeEntryDetail,
-    list_character_knowledge_response::ListCharacterKnowledgeResponse, view_request::ViewRequest,
-    view_response::ViewResponse,
+    knowledge_entry_detail::KnowledgeEntryDetail, knowledge_view_item::KnowledgeViewItem,
+    list_character_knowledge_response::ListCharacterKnowledgeResponse,
+    update_knowledge_entry_request::UpdateKnowledgeEntryRequestAudience,
+    view_request::{NexusActorRef, ViewRequest}, view_response::ViewResponse,
 };
 use nexus_contracts::daemon_api::characters::memory::capture_character_pending_review_request::CaptureCharacterPendingReviewRequest;
 use nexus_contracts::daemon_api::characters::memory::capture_character_pending_review_response::CaptureCharacterPendingReviewResponse;
@@ -52,8 +63,12 @@ use nexus_contracts::daemon_api::characters::{
 use nexus_contracts::generated::core::{
     CoreCharacterTransitionRequest, CoreCharacterTransitionRequestTargetStatus,
 };
-use nexus_core::{CoreService, Principal};
-use nexus_knowledge::world_kb::knowledge_entry::LEGACY_CREATOR_ONLY_UNSUPPORTED;
+use nexus_core::{
+    ActorKnowledgePage, ActorKnowledgeViewQuery, AdmittedActor, CoreService, Principal,
+};
+use nexus_knowledge::world_kb::knowledge_entry::{
+    parse_stored_created_at, KnowledgeEntryRecord, LEGACY_CREATOR_ONLY_UNSUPPORTED,
+};
 use nexus_local_db::{CharacterPatch, FieldPatch, ACTOR_KNOWLEDGE_SUMMARY_MAX_UTF8_BYTES};
 use std::path::PathBuf;
 
@@ -542,28 +557,29 @@ pub enum CharacterSoulCommand {
 ///
 /// # Errors
 ///
-/// Returns the mapped core refusal for the migrated identity/binding arms
-/// (admission, CAS conflict, storage) plus any cleanup refusal from
+/// Returns the mapped core refusal for the migrated identity/binding/knowledge
+/// arms (admission, CAS conflict, storage) plus any cleanup refusal from
 /// [`finish_direct`], and the daemon/network errors of [`DaemonClient`] for
 /// the families that still ride that transport.
 pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
     match cmd {
-        // Identity and binding authority authors through the direct core
-        // (v1.193 P0-T9): no HTTP client is built on this path.
+        // Identity, binding and knowledge authority authors through the direct
+        // core (v1.193 P0-T9/T10): no HTTP client is built on this path.
         cmd @ (CharacterCommand::Create { .. }
         | CharacterCommand::List { .. }
         | CharacterCommand::Show { .. }
         | CharacterCommand::Binding { .. }
+        | CharacterCommand::Knowledge { .. }
         | CharacterCommand::Edit { .. }
         | CharacterCommand::Archive { .. }
         | CharacterCommand::Restore { .. }) => run_direct(cmd, config).await,
-        // Knowledge (P0-T10) and memory/ToM/run (P0-T11) still speak the daemon
-        // transport: they are the only arms that build a client.
+        // Memory/ToM/run (P0-T11) still speak the daemon transport: they are
+        // the only arms that build a client.
         cmd => run_daemon(cmd, config).await,
     }
 }
 
-/// Run one identity/binding arm against the direct core.
+/// Run one migrated arm against the direct core.
 ///
 /// The writer is released by [`finish_direct`] before any line is printed, so
 /// a command never reports an outcome its core could not settle — on success
@@ -680,6 +696,121 @@ async fn run_arm(
                 json,
             } => remove_binding(core, principal, &character_id, &binding_id, json).await,
         },
+        CharacterCommand::Knowledge { command } => match command {
+            KnowledgeCommand::Add {
+                owner,
+                world_id,
+                character_id,
+                binding_id,
+                audience,
+                audience_character,
+                creator_only,
+                block_type,
+                canonical_name,
+                summary,
+                summary_file,
+                json,
+            } => {
+                refuse_legacy_creator_only_flag(creator_only)?;
+                let audience = audience_wire(audience.as_deref(), audience_character.as_deref())?;
+                add_knowledge(
+                    core,
+                    principal,
+                    &owner,
+                    world_id,
+                    character_id,
+                    binding_id,
+                    audience,
+                    block_type,
+                    canonical_name,
+                    summary,
+                    summary_file,
+                    json,
+                )
+                .await
+            }
+            KnowledgeCommand::Show {
+                character_id,
+                entry_id,
+                json,
+            } => show_knowledge(core, principal, &character_id, &entry_id, json).await,
+            KnowledgeCommand::Edit {
+                character_id,
+                entry_id,
+                expected_revision,
+                canonical_name,
+                summary,
+                summary_file,
+                clear_summary,
+                audience,
+                audience_character,
+                creator_only,
+                json,
+            } => {
+                refuse_legacy_creator_only_flag(creator_only)?;
+                let audience = audience_wire(audience.as_deref(), audience_character.as_deref())?;
+                edit_knowledge(
+                    core,
+                    principal,
+                    &character_id,
+                    &entry_id,
+                    expected_revision,
+                    canonical_name,
+                    summary,
+                    summary_file,
+                    clear_summary,
+                    audience,
+                    json,
+                )
+                .await
+            }
+            KnowledgeCommand::Remove {
+                character_id,
+                entry_id,
+                expected_revision,
+                json,
+            } => {
+                remove_knowledge(
+                    core,
+                    principal,
+                    &character_id,
+                    &entry_id,
+                    expected_revision,
+                    json,
+                )
+                .await
+            }
+            KnowledgeCommand::List {
+                character_id,
+                limit,
+                cursor,
+                json,
+            } => list_knowledge(core, principal, &character_id, limit, cursor, json).await,
+            KnowledgeCommand::View {
+                actor,
+                creator_id,
+                character_id,
+                world_id,
+                binding_id,
+                limit,
+                cursor,
+                json,
+            } => {
+                view_knowledge(
+                    core,
+                    principal,
+                    &actor,
+                    creator_id,
+                    character_id,
+                    world_id,
+                    binding_id,
+                    limit,
+                    cursor,
+                    json,
+                )
+                .await
+            }
+        },
         CharacterCommand::Edit {
             character_id,
             expected_revision,
@@ -714,9 +845,8 @@ async fn run_arm(
             expected_revision,
             json,
         } => restore_character(core, principal, &character_id, expected_revision, json).await,
-        // `run` routes only the identity/binding arms into this dispatch.
-        _daemon @ (CharacterCommand::Knowledge { .. }
-        | CharacterCommand::Memory { .. }
+        // `run` routes only identity/binding/knowledge arms into this dispatch.
+        _daemon @ (CharacterCommand::Memory { .. }
         | CharacterCommand::Soul { .. }
         | CharacterCommand::Tom { .. }
         | CharacterCommand::Run { .. }) => {
@@ -734,108 +864,11 @@ async fn run_arm(
 async fn run_daemon(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
     let client = DaemonClient::from_config(config)?;
     match cmd {
-        CharacterCommand::Knowledge { command } => match command {
-            KnowledgeCommand::Add {
-                owner,
-                world_id,
-                character_id,
-                binding_id,
-                audience,
-                audience_character,
-                creator_only,
-                block_type,
-                canonical_name,
-                summary,
-                summary_file,
-                json,
-            } => {
-                refuse_legacy_creator_only_flag(creator_only)?;
-                let audience = audience_wire(audience.as_deref(), audience_character.as_deref())?;
-                add_knowledge(
-                    &client,
-                    &owner,
-                    world_id,
-                    character_id,
-                    binding_id,
-                    audience,
-                    block_type,
-                    canonical_name,
-                    summary,
-                    summary_file,
-                    json,
-                )
-                .await
-            }
-            KnowledgeCommand::Show {
-                character_id,
-                entry_id,
-                json,
-            } => show_knowledge(&client, &character_id, &entry_id, json).await,
-            KnowledgeCommand::Edit {
-                character_id,
-                entry_id,
-                expected_revision,
-                canonical_name,
-                summary,
-                summary_file,
-                clear_summary,
-                audience,
-                audience_character,
-                creator_only,
-                json,
-            } => {
-                refuse_legacy_creator_only_flag(creator_only)?;
-                let audience = audience_wire(audience.as_deref(), audience_character.as_deref())?;
-                edit_knowledge(
-                    &client,
-                    &character_id,
-                    &entry_id,
-                    expected_revision,
-                    canonical_name,
-                    summary,
-                    summary_file,
-                    clear_summary,
-                    audience,
-                    json,
-                )
-                .await
-            }
-            KnowledgeCommand::Remove {
-                character_id,
-                entry_id,
-                expected_revision,
-                json,
-            } => remove_knowledge(&client, &character_id, &entry_id, expected_revision, json).await,
-            KnowledgeCommand::List {
-                character_id,
-                limit,
-                cursor,
-                json,
-            } => list_knowledge(&client, &character_id, limit, cursor, json).await,
-            KnowledgeCommand::View {
-                actor,
-                creator_id,
-                character_id,
-                world_id,
-                binding_id,
-                limit,
-                cursor,
-                json,
-            } => {
-                view_knowledge(
-                    &client,
-                    &actor,
-                    creator_id,
-                    character_id,
-                    world_id,
-                    binding_id,
-                    limit,
-                    cursor,
-                    json,
-                )
-                .await
-            }
-        },
+        // `run` routes the knowledge arms to the direct core before this
+        // function is called.
+        CharacterCommand::Knowledge { .. } => {
+            unreachable!("knowledge arms are routed before the daemon client opens")
+        }
         CharacterCommand::Memory { command } => match command {
             CharacterMemoryCommand::Capture {
                 character_id,
@@ -1575,22 +1608,116 @@ fn load_bounded_summary_text(
     Ok(summary)
 }
 
-fn print_knowledge_detail(resp: &KnowledgeEntryDetail, json: bool) -> Result<()> {
-    if json {
-        println!("{}", serde_json::to_string_pretty(resp)?);
-    } else {
-        println!("entry_id: {}", *resp.item.entry_id);
-        println!("canonical_name: {}", *resp.item.canonical_name);
-        println!("revision: {}", resp.item.revision);
-        match resp.summary.as_ref() {
-            Some(text) => {
-                println!("summary:");
-                println!("{}", text.as_str());
-            }
-            None => println!("summary: (none)"),
-        }
+/// Round-trip one projected value into a generated response DTO.
+///
+/// The generated response families each own an inline item type with the same
+/// JSON shape, exactly like the daemon adapter's own handlers: the projection
+/// is built once ([`knowledge_item_from_record`]) and re-read into whichever
+/// response envelope the arm returns.
+fn wire_map<T: serde::de::DeserializeOwned>(value: impl serde::Serialize) -> Result<T> {
+    let value = serde_json::to_value(value)?;
+    Ok(serde_json::from_value(value)?)
+}
+
+/// The retained item projection of one stored knowledge record.
+///
+/// Mirrors the native bridge's `knowledge_item_from_record`
+/// (`crates/nexus-core-node/src/actors.rs`): the native governance pair
+/// (`holder_entry_id` / `disclosure`) is projected, the retired `creator_only`
+/// boolean is not, and `owner` stays the narrative owner container.
+fn knowledge_item_from_record(record: &KnowledgeEntryRecord) -> Result<KnowledgeViewItem> {
+    let created_at = parse_stored_created_at(&record.created_at).map_err(CliError::Other)?;
+    let mut value = serde_json::Map::new();
+    value.insert("entry_id".into(), serde_json::json!(record.entry_id));
+    value.insert(
+        "owner".into(),
+        serde_json::json!({ "kind": record.owner.kind(), "id": record.owner.id() }),
+    );
+    value.insert(
+        "block_type".into(),
+        serde_json::to_value(record.block_type)?,
+    );
+    value.insert(
+        "canonical_name".into(),
+        serde_json::json!(record.canonical_name),
+    );
+    value.insert("status".into(), serde_json::json!(record.status));
+    value.insert(
+        "revision".into(),
+        serde_json::json!(record.revision.unwrap_or(0)),
+    );
+    value.insert("created_at".into(), serde_json::json!(created_at));
+    if let Some(holder) = record.holder_entry_id.as_deref() {
+        value.insert("holder_entry_id".into(), serde_json::json!(holder));
     }
-    Ok(())
+    if let Some(disclosure) = record.disclosure.as_deref() {
+        value.insert("disclosure".into(), serde_json::json!(disclosure));
+    }
+    wire_map(serde_json::Value::Object(value))
+}
+
+/// The detail envelope's summary: the canonical authored body summary, `null`
+/// when the stored body carries no summary member.
+fn knowledge_summary_wire_value(record: &KnowledgeEntryRecord) -> Option<&str> {
+    record
+        .body
+        .as_ref()
+        .and_then(|body| body.summary.as_deref())
+}
+
+/// The retained detail projection of one stored knowledge record.
+fn knowledge_detail_from_record(record: &KnowledgeEntryRecord) -> Result<KnowledgeEntryDetail> {
+    let item = knowledge_item_from_record(record)?;
+    wire_map(serde_json::json!({
+        "item": item,
+        "summary": knowledge_summary_wire_value(record),
+    }))
+}
+
+/// The retained page projection of one core knowledge page.
+fn knowledge_page_wire_value(page: &ActorKnowledgePage) -> Result<serde_json::Value> {
+    let mut items = Vec::with_capacity(page.items.len());
+    for record in &page.items {
+        items.push(serde_json::to_value(knowledge_item_from_record(record)?)?);
+    }
+    Ok(serde_json::json!({
+        "items": items,
+        "pagination": {
+            "limit": i64::from(page.limit),
+            "has_more": page.has_more,
+            "next_cursor": page.next_cursor,
+        },
+    }))
+}
+
+/// Derive the opaque [`AdmittedActor`] token from the wire `actor_ref`.
+///
+/// Projection only: the core re-validates stored ownership inside the call, so
+/// a payload claim never widens the view, and the Creator arm never inherits
+/// the Character's holder-filtered selection.
+fn admitted_from_ref(actor_ref: &NexusActorRef) -> AdmittedActor {
+    match actor_ref {
+        NexusActorRef::CreatorActorRef { creator_id, .. } => AdmittedActor::Creator {
+            creator_id: creator_id.to_string(),
+        },
+        NexusActorRef::CharacterActorRef { character_id, .. } => AdmittedActor::Character {
+            character_id: character_id.to_string(),
+        },
+    }
+}
+
+fn render_knowledge_detail(resp: &KnowledgeEntryDetail, json: bool) -> Result<String> {
+    if json {
+        return Ok(serde_json::to_string_pretty(resp)?);
+    }
+    let summary = match resp.summary.as_ref() {
+        Some(text) => format!("summary:\n{}", text.as_str()),
+        None => "summary: (none)".to_string(),
+    };
+    Ok(format!(
+        "entry_id: {}\ncanonical_name: {}\nrevision: {}\n{summary}",
+        *resp.item.entry_id, *resp.item.canonical_name, resp.item.revision
+    ))
 }
 
 /// Durable §5: the retired World-only `--creator-only` flag is refused by
@@ -1660,7 +1787,8 @@ fn owner_kind_wire(owner: &str) -> Result<&'static str> {
 
 #[allow(clippy::too_many_arguments)] // CLI arg mapping
 async fn add_knowledge(
-    client: &DaemonClient,
+    core: &CoreService,
+    principal: &Principal,
     owner: &str,
     world_id: Option<String>,
     character_id: Option<String>,
@@ -1671,7 +1799,7 @@ async fn add_knowledge(
     summary: Option<String>,
     summary_file: Option<PathBuf>,
     json: bool,
-) -> Result<()> {
+) -> Result<Option<String>> {
     let mut body = serde_json::json!({
         "owner_kind": owner_kind_wire(owner)?,
         "block_type": block_type,
@@ -1692,37 +1820,49 @@ async fn add_knowledge(
     if let Some(text) = load_bounded_summary_text(summary, summary_file)? {
         body["summary"] = serde_json::Value::String(text);
     }
+    // The retained absent/null distinction is a request-shape concern owned by
+    // this leaf: the raw member presence drives the core's `summary_present`
+    // bit, so a World-owned create carrying the member is refused by the core
+    // exactly as the daemon adapter refused it.
+    let summary_present = body.get("summary").is_some();
     let req: AddKnowledgeEntryRequest = serde_json::from_value(body)?;
-    let resp: AddKnowledgeEntryResponse = client
-        .post("/v1/daemon/actor-knowledge/entries", &req)
-        .await?;
+    let stored = core
+        .add_actor_knowledge_entry(principal, req, summary_present)
+        .await
+        .map_err(map_core_error)?;
+    let resp: AddKnowledgeEntryResponse =
+        wire_map(serde_json::json!({ "item": knowledge_item_from_record(&stored)? }))?;
     if json {
-        println!("{}", serde_json::to_string_pretty(&resp)?);
-    } else {
-        println!("KnowledgeEntry added:");
-        println!("  entry_id: {}", *resp.item.entry_id);
-        println!("  owner:    {}", serde_json::to_string(&resp.item.owner)?);
+        return Ok(Some(serde_json::to_string_pretty(&resp)?));
     }
-    Ok(())
+    Ok(Some(format!(
+        "KnowledgeEntry added:\n  entry_id: {}\n  owner:    {}",
+        *resp.item.entry_id,
+        serde_json::to_string(&resp.item.owner)?
+    )))
 }
 
 async fn show_knowledge(
-    client: &DaemonClient,
+    core: &CoreService,
+    principal: &Principal,
     character_id: &str,
     entry_id: &str,
     json: bool,
-) -> Result<()> {
-    let resp: KnowledgeEntryDetail = client
-        .get(&format!(
-            "/v1/daemon/characters/{character_id}/knowledge/{entry_id}"
-        ))
-        .await?;
-    print_knowledge_detail(&resp, json)
+) -> Result<Option<String>> {
+    let stored = core
+        .actor_knowledge_entry(principal, character_id.to_string(), entry_id.to_string())
+        .await
+        .map_err(map_core_error)?;
+    Ok(Some(render_knowledge_detail(
+        &knowledge_detail_from_record(&stored)?,
+        json,
+    )?))
 }
 
 #[allow(clippy::too_many_arguments)] // CLI arg mapping
 async fn edit_knowledge(
-    client: &DaemonClient,
+    core: &CoreService,
+    principal: &Principal,
     character_id: &str,
     entry_id: &str,
     expected_revision: u64,
@@ -1732,7 +1872,7 @@ async fn edit_knowledge(
     clear_summary: bool,
     audience: Option<serde_json::Value>,
     json: bool,
-) -> Result<()> {
+) -> Result<Option<String>> {
     if clear_summary && (summary.is_some() || summary_file.is_some()) {
         return Err(CliError::Other(
             "use either --clear-summary or --summary/--summary-file, not both".into(),
@@ -1750,89 +1890,108 @@ async fn edit_knowledge(
                 .into(),
         ));
     }
-    let mut body = serde_json::json!({ "expected_revision": expected_revision });
-    if let Some(audience) = audience {
-        body["audience"] = audience;
-    }
-    if let Some(name) = canonical_name {
-        body["canonical_name"] = serde_json::Value::String(name);
-    }
-    if clear_summary {
-        body["summary"] = serde_json::Value::Null;
-    } else if let Some(text) = load_bounded_summary_text(summary, summary_file)? {
-        body["summary"] = serde_json::Value::String(text);
-    }
-    let resp: KnowledgeEntryDetail = client
-        .patch(
-            &format!("/v1/daemon/characters/{character_id}/knowledge/{entry_id}"),
-            &body,
+    // Tri-state `FieldPatch` is the storage contract: an omitted member keeps
+    // the stored summary, `--clear-summary` clears it, a supplied text sets it.
+    let summary_text = load_bounded_summary_text(summary, summary_file)?;
+    let summary_patch = if clear_summary {
+        FieldPatch::Clear
+    } else {
+        match summary_text.as_deref() {
+            Some(text) => FieldPatch::Set(text),
+            None => FieldPatch::Keep,
+        }
+    };
+    // The closed `--audience` pair is admitted from the wire member exactly
+    // like the native bridge: the CLI never supplies a holder id, and the core
+    // resolves the permitted identity against stored state under the CAS.
+    let audience_wire: Option<UpdateKnowledgeEntryRequestAudience> = audience
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|err| CliError::Other(err.to_string()))?;
+    let audience = nexus_core::authored_patch_audience(audience_wire.as_ref())
+        .map_err(map_core_error)?;
+    let stored = core
+        .patch_actor_knowledge_entry(
+            principal,
+            character_id.to_string(),
+            entry_id.to_string(),
+            revision_i64(expected_revision)?,
+            canonical_name.as_deref(),
+            summary_patch,
+            audience,
         )
-        .await?;
-    print_knowledge_detail(&resp, json)
+        .await
+        .map_err(map_core_error)?;
+    Ok(Some(render_knowledge_detail(
+        &knowledge_detail_from_record(&stored)?,
+        json,
+    )?))
 }
 
 async fn remove_knowledge(
-    client: &DaemonClient,
+    core: &CoreService,
+    principal: &Principal,
     character_id: &str,
     entry_id: &str,
     expected_revision: u64,
     json: bool,
-) -> Result<()> {
-    let path = format!(
-        "/v1/daemon/characters/{character_id}/knowledge/{entry_id}?expected_revision={expected_revision}"
-    );
-    client.delete_no_content(&path).await?;
-    if json {
-        println!("{{}}");
-    }
-    Ok(())
+) -> Result<Option<String>> {
+    core.delete_actor_knowledge_entry(
+        principal,
+        character_id.to_string(),
+        entry_id.to_string(),
+        revision_i64(expected_revision)?,
+    )
+    .await
+    .map_err(map_core_error)?;
+    Ok(json.then(|| "{}".to_string()))
 }
 
 async fn list_knowledge(
-    client: &DaemonClient,
+    core: &CoreService,
+    principal: &Principal,
     character_id: &str,
     limit: Option<i64>,
     cursor: Option<String>,
     json: bool,
-) -> Result<()> {
-    let mut pairs = Vec::new();
-    let limit_owned = limit.map(|n| n.to_string());
-    if let Some(ref n) = limit_owned {
-        pairs.push(("limit", n.as_str()));
-    }
-    if let Some(ref c) = cursor {
-        pairs.push(("cursor", c.as_str()));
-    }
-    let path = query_path(
-        &format!("/v1/daemon/characters/{character_id}/knowledge"),
-        &pairs,
-    );
-    let resp: ListCharacterKnowledgeResponse = client.get(&path).await?;
+) -> Result<Option<String>> {
+    let page = core
+        .list_character_knowledge(
+            principal,
+            character_id.to_string(),
+            resolve_list_limit(limit)?,
+            cursor,
+        )
+        .await
+        .map_err(map_core_error)?;
+    let resp: ListCharacterKnowledgeResponse = wire_map(knowledge_page_wire_value(&page)?)?;
     if json {
-        println!("{}", serde_json::to_string_pretty(&resp)?);
-    } else if resp.items.is_empty() {
-        println!("No knowledge entries.");
-    } else {
-        for item in &resp.items {
-            println!(
-                "{}  {}  {}",
-                *item.entry_id,
-                *item.canonical_name,
-                serde_json::to_string(&item.owner)?
-            );
-        }
-        if resp.pagination.has_more {
-            if let Some(next) = &resp.pagination.next_cursor {
-                println!("next_cursor: {next}");
-            }
+        return Ok(Some(serde_json::to_string_pretty(&resp)?));
+    }
+    if resp.items.is_empty() {
+        return Ok(Some("No knowledge entries.".to_string()));
+    }
+    let mut lines: Vec<String> = Vec::with_capacity(resp.items.len() + 1);
+    for item in &resp.items {
+        lines.push(format!(
+            "{}  {}  {}",
+            *item.entry_id,
+            *item.canonical_name,
+            serde_json::to_string(&item.owner)?
+        ));
+    }
+    if resp.pagination.has_more {
+        if let Some(next) = &resp.pagination.next_cursor {
+            lines.push(format!("next_cursor: {next}"));
         }
     }
-    Ok(())
+    Ok(Some(lines.join("\n")))
 }
 
 #[allow(clippy::too_many_arguments)] // CLI arg mapping
 async fn view_knowledge(
-    client: &DaemonClient,
+    core: &CoreService,
+    principal: &Principal,
     actor: &str,
     creator_id: Option<String>,
     character_id: Option<String>,
@@ -1841,7 +2000,7 @@ async fn view_knowledge(
     limit: Option<i64>,
     cursor: Option<String>,
     json: bool,
-) -> Result<()> {
+) -> Result<Option<String>> {
     let actor_ref = match actor {
         "creator" => {
             let creator_id = creator_id.ok_or_else(|| {
@@ -1868,48 +2027,60 @@ async fn view_knowledge(
     if let Some(id) = binding_id {
         body["binding_id"] = serde_json::Value::String(id);
     }
-    if let Some(n) = limit {
-        body["limit"] = serde_json::Value::Number(n.into());
-    }
     if let Some(c) = cursor {
         body["cursor"] = serde_json::Value::String(c);
     }
     let req: ViewRequest = serde_json::from_value(body)?;
-    let resp: ViewResponse = client.post("/v1/daemon/actor-knowledge/view", &req).await?;
+    // The read policy is chosen by the core from the admitted actor kind: a
+    // Creator viewpoint is the management review, a Character viewpoint stays
+    // the strict holder-filtered selection. This leaf selects neither.
+    let query = ActorKnowledgeViewQuery {
+        world_id: req.world_id.to_string(),
+        binding_id: req.binding_id.as_ref().map(|id| id.as_str().to_string()),
+        limit: resolve_list_limit(limit)?,
+        cursor: req.cursor.clone(),
+    };
+    let admitted = admitted_from_ref(&req.actor_ref);
+    let page = core
+        .actor_knowledge_view(principal, &admitted, query)
+        .await
+        .map_err(map_core_error)?;
+    let resp: ViewResponse = wire_map(knowledge_page_wire_value(&page)?)?;
     if json {
-        println!("{}", serde_json::to_string_pretty(&resp)?);
-    } else if resp.items.is_empty() {
-        println!("No knowledge entries.");
-    } else {
-        for item in &resp.items {
-            // Durable §7: the projection carries the native governance pair,
-            // never the retired `creator_only` boolean — shared is the
-            // *absence* of disclosure.
-            let governance = item
-                .disclosure
-                .as_ref()
-                .map_or_else(String::new, |disclosure| {
-                    format!(
-                        "  disclosure={disclosure} holder={}",
-                        item.holder_entry_id
-                            .as_deref()
-                            .map_or("(none)", std::ops::Deref::deref)
-                    )
-                });
-            println!(
-                "{}  {}  {}{governance}",
-                *item.entry_id,
-                *item.canonical_name,
-                serde_json::to_string(&item.owner)?
-            );
-        }
-        if resp.pagination.has_more {
-            if let Some(next) = &resp.pagination.next_cursor {
-                println!("next_cursor: {next}");
-            }
+        return Ok(Some(serde_json::to_string_pretty(&resp)?));
+    }
+    if resp.items.is_empty() {
+        return Ok(Some("No knowledge entries.".to_string()));
+    }
+    let mut lines: Vec<String> = Vec::with_capacity(resp.items.len() + 1);
+    for item in &resp.items {
+        // Durable §7: the projection carries the native governance pair, never
+        // the retired `creator_only` boolean — shared is the *absence* of
+        // disclosure.
+        let governance = item
+            .disclosure
+            .as_ref()
+            .map_or_else(String::new, |disclosure| {
+                format!(
+                    "  disclosure={disclosure} holder={}",
+                    item.holder_entry_id
+                        .as_deref()
+                        .map_or("(none)", std::ops::Deref::deref)
+                )
+            });
+        lines.push(format!(
+            "{}  {}  {}{governance}",
+            *item.entry_id,
+            *item.canonical_name,
+            serde_json::to_string(&item.owner)?
+        ));
+    }
+    if resp.pagination.has_more {
+        if let Some(next) = &resp.pagination.next_cursor {
+            lines.push(format!("next_cursor: {next}"));
         }
     }
-    Ok(())
+    Ok(Some(lines.join("\n")))
 }
 
 // ─── Character SOUL/Memory helpers (v1.184 P3) ─────────────────────────────

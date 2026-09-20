@@ -7,6 +7,11 @@
 //! [`DirectActor`] is that single fixture — include it next to the server-free
 //! [`crate::direct::DirectFixture`] it composes:
 //!
+//! The multi-World knowledge dogfood additionally needs a second binding and
+//! its own read of the rows the CLI just wrote, so the fixture also seeds
+//! bindings ([`DirectActor::add_binding`]) and exposes the released workspace
+//! DB path ([`DirectActor::state_db_path`]) for read-only assertions.
+//!
 //! ```ignore
 //! #[path = "common/direct.rs"]
 //! mod direct;
@@ -144,6 +149,34 @@ impl DirectActor {
             character_id: created.character.character_id.as_str().to_string(),
             binding_id: created.binding.binding_id.as_str().to_string(),
         }
+    }
+
+    /// Seed one additional active binding for `character_id` on `world_id` and
+    /// return the new binding id.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the seed core cannot be opened or the binding is refused
+    /// (a foreign/unknown Character or World, a duplicate active binding).
+    pub async fn add_binding(&self, character_id: &str, world_id: &str) -> String {
+        let (core, principal) = self.open_seed_core().await;
+        let created = core
+            .add_binding(
+                &principal,
+                character_id.to_string(),
+                world_id.to_string(),
+                None,
+            )
+            .await
+            .expect("seed character binding");
+        self.close_seed_core(core).await;
+        created.binding.binding_id.as_str().to_string()
+    }
+
+    /// The selected workspace `state.db` path — the read handle a test uses for
+    /// stored-row assertions once every seed writer has been released.
+    pub fn state_db_path(&self) -> PathBuf {
+        self.db_path()
     }
 
     /// Seed one World-owned `character` `KeyBlock` — the only shape a binding
