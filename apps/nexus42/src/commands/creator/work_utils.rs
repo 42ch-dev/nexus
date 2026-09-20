@@ -1,4 +1,4 @@
-//! Shared Work-resolution utility for `creator` subcommands.
+//! Bounded file readers shared by the retained `creator` authoring commands.
 //!
 //! v1.193 P2-T1: the daemon-transport helpers this module was extracted for
 //! (`resolve_active_work_id`, the `query_path` URL builder) went with the

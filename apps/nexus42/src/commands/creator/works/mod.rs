@@ -67,8 +67,10 @@ pub enum WorksCommand {
     },
     /// Set pool `active` row → CLI default `work_id` (DF-60 §1.1).
     ///
-    /// Does NOT pause other Works. Future `creator run` commands that
-    /// accept optional `--work-id` will default to this Work.
+    /// Does NOT pause other Works. Retained Work commands that take an
+    /// optional `work_id` — `status`, `inspire`, `reopen`,
+    /// `reconcile-chapters`, `findings list`, `rules reset` — fall back to
+    /// this Work when it is omitted.
     Use {
         /// Work ID (wrk_...) to set as active
         work_id: String,
