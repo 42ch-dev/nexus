@@ -307,6 +307,33 @@ fn combined_output(output: &std::process::Output) -> String {
     )
 }
 
+/// Display name seeded into the core-owned identity cache by
+/// [`patch_core_identity`].
+const CORE_OWNED_DISPLAY_NAME: &str = "Core Owned Author";
+
+/// Seed the core-owned identity projection through its production writer
+/// (v1.193 P0-T2 fix 2).
+///
+/// `CoreHomeService::patch_creator` is the writer the daemon PATCH route and
+/// the Node bridge call, so the status regression drives that same entry point
+/// instead of hand-writing cache bytes no production caller would create. The
+/// creator must already be selected with a materialized workspace state DB:
+/// the writer upserts that workspace's `creators` row on the way through.
+fn patch_core_identity(home: &std::path::Path, creator_id: &str, display_name: &str) {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime for the in-process core writer");
+    runtime.block_on(async {
+        let service = nexus_core::CoreHomeService::open(home.to_path_buf())
+            .expect("the core home entry opens on the raw home");
+        service
+            .patch_creator(creator_id, Some(display_name.to_string()))
+            .await
+            .expect("the production identity writer patches the core cache");
+    });
+}
+
 /// NEW (v1.193 P0-T2): workspace initialization, selection and the demo seed
 /// are local core/filesystem work — no daemon is consulted.
 ///
@@ -382,6 +409,15 @@ fn workspace_init_and_demo_seed_are_local_and_idempotent() {
         init_stdout.contains("creator works cron"),
         "workspace init next steps must point at the retained local scheduling \
          leaf: {init_stdout}"
+    );
+    assert!(
+        init_stdout.contains("nexus42 preset list"),
+        "workspace init next steps must name the canonical retained preset group: {init_stdout}"
+    );
+    assert!(
+        !init_stdout.contains("system preset list"),
+        "workspace init next steps must not advertise the removed `system preset` \
+         forwarding alias: {init_stdout}"
     );
     assert!(
         home.path()
@@ -605,5 +641,101 @@ fn creator_status_is_local_and_never_probes_the_daemon() {
         probes.load(Ordering::SeqCst),
         0,
         "creator status must not open any connection to the configured daemon URL ({daemon_url})"
+    );
+}
+
+/// NEW (v1.193 P0-T2 fix 2): `creator status` renders the identity the **core
+/// owner** holds, with no daemon.
+///
+/// The core cache (`creator_identity_cache.json`) is written by
+/// `CoreHomeService::patch_creator` and read by `active_creator`; the pre-fix
+/// leaf read only the CLI-private `creator-identities.json`, so a creator
+/// whose display name lives in the core cache rendered `Display Name:  -`.
+/// This case seeds the core cache through that production writer and requires
+/// the retained four-line status to project it, while the fixture points
+/// `daemon_url` at a port nothing listens on.
+///
+/// What it does not establish: precedence when both caches hold a value for
+/// the same creator (only the cloud registration bridge writes the CLI-local
+/// cache, so that would need a second mock-platform fixture), and no coverage
+/// of any other retained leaf.
+#[test]
+fn creator_status_renders_core_owned_identity() {
+    let home = tempfile::tempdir().expect("temp home");
+    let cwd = tempfile::tempdir().expect("temp cwd");
+    let creative_root = home.path().join("creative");
+
+    let nexus_dir = home.path().join(".nexus42");
+    std::fs::create_dir_all(&nexus_dir).expect("create .nexus42");
+    std::fs::write(
+        nexus_dir.join("config.toml"),
+        "daemon_url = \"http://127.0.0.1:1\"\n",
+    )
+    .expect("seed config.toml");
+
+    // A selected creator with a materialized workspace: the core writer
+    // upserts that workspace's `creators` row, so the state DB must exist.
+    let select = hermetic_cli(home.path(), cwd.path(), &["creator", "use", "local"]);
+    assert!(
+        select.status.success(),
+        "creator use must commit the selection locally: {}",
+        combined_output(&select)
+    );
+    let init = hermetic_cli(
+        home.path(),
+        cwd.path(),
+        &[
+            "creator",
+            "workspace",
+            "init",
+            "workspace",
+            "--creative-root",
+            creative_root.to_str().expect("utf-8 creative root"),
+        ],
+    );
+    assert!(
+        init.status.success(),
+        "workspace init must succeed without a daemon: {}",
+        combined_output(&init)
+    );
+
+    // The production writer the daemon PATCH route calls: the core owns the
+    // identity cache, not the CLI.
+    patch_core_identity(home.path(), "local", CORE_OWNED_DISPLAY_NAME);
+
+    let status = hermetic_cli(home.path(), cwd.path(), &["creator", "status"]);
+    let status_output = combined_output(&status);
+    let status_stdout = String::from_utf8_lossy(&status.stdout);
+    assert!(
+        status.status.success(),
+        "creator status must succeed without a daemon: {status_output}"
+    );
+    let display_line = status_stdout
+        .lines()
+        .find(|line| line.starts_with("Display Name:"))
+        .unwrap_or_else(|| {
+            panic!("creator status must keep the display-name line: {status_stdout}")
+        });
+    assert_eq!(
+        display_line.trim_end(),
+        format!("Display Name:  {CORE_OWNED_DISPLAY_NAME}"),
+        "creator status must project the display name the core owner holds: {status_stdout}"
+    );
+    let handle_line = status_stdout
+        .lines()
+        .find(|line| line.starts_with("Handle:"))
+        .unwrap_or_else(|| panic!("creator status must keep the handle line: {status_stdout}"));
+    assert_eq!(
+        handle_line.trim_end(),
+        "Handle:        -",
+        "a display-only core entry must not invent a handle: {status_stdout}"
+    );
+    assert!(
+        status_stdout.contains("Creator ID:    local"),
+        "creator status must still report the selected creator: {status_stdout}"
+    );
+    assert!(
+        !status_output.contains("daemon"),
+        "creator status must not mention a daemon (stdout+stderr): {status_output}"
     );
 }

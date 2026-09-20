@@ -32,8 +32,8 @@ use crate::auth;
 use crate::challenge::{solve_challenge_with_fallback, UnavailableLlmSolver};
 use crate::commands::local_creator_bootstrap::{global_db_path, open_global_db_read_only};
 use crate::config::{
-    find_workspace_root, nexus_home, workspace_config_path, workspace_nexus_dir, CliConfig,
-    DEFAULT_WORKSPACE_SLUG,
+    find_workspace_root, nexus_home, user_home_dir, workspace_config_path, workspace_nexus_dir,
+    CliConfig, DEFAULT_WORKSPACE_SLUG,
 };
 use crate::core::map_core_error;
 use crate::creator_identity::{self, CreatorIdentityEntry};
@@ -317,13 +317,16 @@ async fn init_workspace(
 
 /// Print next steps after workspace initialization.
 ///
-/// Every line must name a command the cutover retains (v1.193 P0-T2 fix 1):
-/// the retired daemon group is not advertised, and scheduling guidance points
-/// at the retained local `creator works cron` declaration leaf.
+/// Every line must name a command the cutover retains (v1.193 P0-T2 fix 1,
+/// retargeted in fix 2): the retired daemon group is not advertised, scheduling
+/// guidance points at the retained local `creator works cron` declaration
+/// leaf, and the preset line names the canonical `preset` group rather than
+/// the `system preset` forwarding alias the P1 cutover removes
+/// (`command-disposition-ledger.md` § Remove-cli (P1)).
 fn print_next_steps() {
     println!();
     println!("Next steps:");
-    println!("  nexus42 system preset list    — see available workflow presets");
+    println!("  nexus42 preset list           — see available workflow presets");
     println!("  nexus42 creator works cron set <work-ref>");
     println!("                                 — declare a per-Work cron schedule");
     println!("  nexus42 platform auth login   — authenticate with the platform");
@@ -1138,17 +1141,64 @@ fn obtain_auth_token(auth_store: &auth::AuthStore) -> Result<String> {
     Err(CliError::AuthenticationRequired)
 }
 
+/// Identity projection the core owner holds for one creator.
+///
+/// Both fields stay optional: the core cache stores what a writer gave it
+/// (`patch_creator` writes a display name and no handle), so "absent" is a
+/// value the leaf must be able to render, not an error.
+#[derive(Default)]
+struct CoreIdentity {
+    handle: Option<String>,
+    display_name: Option<String>,
+}
+
+/// Read the identity projection from the core owner.
+///
+/// `CoreHomeService` owns the retained identity cache
+/// (`<nexus_home>/creator_identity_cache.json`): `patch_creator` is its
+/// production writer and `active_creator` reads it back. The status leaf
+/// reports what that owner holds rather than treating a second, CLI-private
+/// cache as the identity source (v1.193 P0-T2 fix 2).
+///
+/// The home entry is the same direct-core path the sibling leaves open
+/// ([`CoreHomeService::open`] plus the seam's [`map_core_error`]): it assumes
+/// no selected workspace and writes nothing, so `creator status` keeps
+/// reporting before any workspace exists and never takes the writer lease.
+///
+/// # Errors
+///
+/// Returns [`CliError::Config`] when the home directory cannot be resolved and
+/// the mapped core error when the home entry refuses that path.
+fn core_owned_identity(creator_id: &str) -> Result<CoreIdentity> {
+    let user_home = user_home_dir().map_err(|e| CliError::Config(e.to_string()))?;
+    let home = CoreHomeService::open(user_home).map_err(map_core_error)?;
+    // `creator_detail`'s one refusal is the id itself (path-unsafe or
+    // verb-shaped). Such an id owns no core identity, and turning a display
+    // read into a hard failure would change what `creator status` exits with
+    // for it — the local projection stays the source there.
+    Ok(match home.creator_detail(creator_id) {
+        Ok(detail) => CoreIdentity {
+            handle: detail.handle,
+            display_name: detail.display_name,
+        },
+        Err(_) => CoreIdentity::default(),
+    })
+}
+
 /// Show Creator status with three-layer identity model (V1.16).
 ///
 /// Local state only. The `retain-cloud` row keeps this leaf on the cloud
-/// identity bridge rather than a loopback transport: `creator_id`, the cached
-/// `handle`/`display_name` projection and the credential indicators are all
-/// read from local files (`config.toml`, `creator-identities.json`,
-/// `auth.json`), and the client that would refresh a cloud session
+/// identity bridge rather than a loopback transport: the credential
+/// indicators are read from the local `auth.json` store (`config.toml` holds
+/// the selected id), and the client that would refresh a cloud session
 /// (`PlatformClient`) exposes no creator-read endpoint — registration writes
-/// this local projection in the first place. The retired daemon probe is gone;
-/// its `active_creator` projection was the same identity-cache read (and a
-/// daemon that is being removed cannot be an identity source).
+/// the local projection in the first place. The retired daemon probe is gone;
+/// it reached the same core-owned cache this leaf now reads directly.
+///
+/// The identity fields come from the **core owner** ([`core_owned_identity`]).
+/// The CLI-local `creator-identities.json` cache (written by the cloud
+/// registration bridge) stays a per-field **fallback** for entries the core
+/// does not hold; a CLI value never shadows a core value.
 ///
 /// # Errors
 ///
@@ -1168,11 +1218,20 @@ fn creator_status(config: &CliConfig, creator_id: Option<String>) -> Result<()> 
     }
 
     let store = crate::auth::AuthStore::load()?;
+    let core_identity = core_owned_identity(&id)?;
     let cache = creator_identity::load_creator_identity_cache();
     let entry = creator_identity::get_creator_identity(&cache, &id);
 
-    let handle_str = entry.and_then(|e| e.handle.as_deref()).unwrap_or("-");
-    let display_name_str = entry.and_then(|e| e.display_name.as_deref()).unwrap_or("-");
+    // Per field: the core owner's value wins whenever it holds one.
+    let handle = core_identity
+        .handle
+        .or_else(|| entry.and_then(|e| e.handle.clone()));
+    let display_name = core_identity
+        .display_name
+        .or_else(|| entry.and_then(|e| e.display_name.clone()));
+
+    let handle_str = handle.as_deref().unwrap_or("-");
+    let display_name_str = display_name.as_deref().unwrap_or("-");
 
     // Auth indicators
     let has_creator_api_key = store.get_creator_api_key(&id).unwrap_or(None).is_some();
