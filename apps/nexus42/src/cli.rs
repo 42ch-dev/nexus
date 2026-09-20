@@ -107,14 +107,19 @@ pub enum Commands {
         command: DaemonCommand,
     },
 
-    /// Connect Host (DF-72 N-C2 read half) — peer surface for third-party reasoners
+    /// Connect Host — peer surface for third-party reasoners (world-scoped ops,
+    /// gated compute, host-level reads)
     ///
     /// Runs a `spoke-connect` node in a separate OS process: signed-hello
     /// handshake + allowlist + honest `HostCapabilityManifest`; caller
     /// identity is the authenticated session peer (spoke-connect 0.9.2
     /// `InvokeHandlerV2`). Serves `upsert` / `promote` / `relate` /
-    /// `check` / `assemble` with fail-closed world scoping; `compute` /
-    /// `project` / unknown ops are refused. Compiled only
+    /// `check` / `assemble` world-scoped, `compute` under the stored
+    /// World/module/Actor gates over the host-local `~/.nexus42/modules/`
+    /// store, and the two host-level reads
+    /// `tools.nexus.list_observed_peers` / `tools.nexus.list_modules`
+    /// (`commands/connect/mod.rs`). Only `project` and unknown ops are
+    /// refused (`op_unsupported`). Compiled only
     /// when the `connect-host` feature is enabled.
     #[cfg(feature = "connect-host")]
     Connect {

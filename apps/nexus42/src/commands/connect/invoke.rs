@@ -92,9 +92,9 @@
 //! 2. **Stored-world gate:** the target entry's stored world must be in the
 //!    peer's `world_scope`. The entry is read through the caller's admitted
 //!    selection, so an entry outside that scope is indistinguishable from an
-//!    absent one (durable §4.2) and the denial is the client-input family
-//!    (`invalid_input`, the same code a missing `entry_id` produces) — never
-//!    an id-existence oracle for a foreign world.
+//!    absent one (durable `holder-governance.md` §4.2) and the denial is the
+//!    client-input family (`invalid_input`, the same code a missing `entry_id`
+//!    produces) — never an id-existence oracle for a foreign world.
 //! 3. **Module identity (locked precedence, spec §2.2):** session state
 //!    `module_id`, then entry `body.computable.module_id` — neither ⇒
 //!    defined `module_not_found` (missing module name).

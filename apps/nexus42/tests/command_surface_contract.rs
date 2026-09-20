@@ -298,9 +298,11 @@ fn v2_target_daemon_subcommands() {
 
 /// V2 Target: `acp` top-level command group exists.
 ///
-/// Expected subcommands: probe,
-///   registry (list, inspect), agent (use, list), session, policy, permission,
-///   run. v1.193 P1-T4 removed the `status`/`doctor` daemon-health leaves.
+/// Subcommands asserted here: probe,
+///   registry (list, inspect), agent (use, list), session, policy, run.
+///   `permission` is asserted separately by
+///   `cli_agent.rs::acp_command_group_shows_subcommands`. v1.193 P1-T4 removed
+///   the `status`/`doctor` daemon-health leaves.
 ///
 /// Un-ignored by Plan 2 (acp group created).
 #[test]
@@ -712,7 +714,7 @@ fn v135_platform_sync_subcommands() {
 /// (per cli-command-ia.md §2). The deprecated top-level `sync` alias was
 /// removed from the parser in v1.193 P1-T6.
 #[test]
-fn v135_root_help_shows_five_groups_with_sync_hidden() {
+fn v135_root_help_shows_five_groups_and_no_top_level_sync() {
     let output = Command::cargo_bin("nexus42")
         .unwrap()
         .arg("--help")
@@ -746,6 +748,61 @@ fn v135_root_help_shows_five_groups_with_sync_hidden() {
         !commands_section.contains("\n  sync"),
         "V1.35 root help: top-level 'sync' must be hidden (was visible in Commands list)"
     );
+}
+
+/// Plan 2026-09-20-v1.193-p1 (QC1 F-001): root help and `connect --help` must
+/// describe the served Connect surface — world-scoped ops, World/module/Actor-
+/// gated `compute`, and the two host-level reads — with only `project`/unknown
+/// refused. Red at BASE, whose `Commands::Connect` doc called the group a read
+/// half and claimed `compute` is refused.
+#[cfg(feature = "connect-host")]
+#[test]
+fn v1193_connect_help_describes_served_compute_surface() {
+    // clap wraps help text at the render width, so collapse whitespace (and
+    // case) before matching the pinned phrases.
+    fn flattened(args: &[&str]) -> String {
+        let output = Command::cargo_bin("nexus42")
+            .unwrap()
+            .args(args)
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        String::from_utf8(output)
+            .unwrap()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase()
+    }
+
+    let root = flattened(&["--help"]);
+    assert!(
+        !root.contains("read half"),
+        "root help: Connect must not be described as a read half (F-001)"
+    );
+    assert!(
+        root.contains(
+            "peer surface for third-party reasoners \
+             (world-scoped ops, gated compute, host-level reads)"
+        ),
+        "root help: Connect must describe the served set (F-001): {root}"
+    );
+
+    let connect = flattened(&["connect", "--help"]);
+    for phrase in [
+        "peer surface for third-party reasoners (world-scoped ops, gated compute, host-level reads)",
+        "`compute` under the stored world/module/actor gates",
+        "tools.nexus.list_observed_peers",
+        "tools.nexus.list_modules",
+        "only `project` and unknown ops are refused (`op_unsupported`)",
+    ] {
+        assert!(
+            connect.contains(phrase),
+            "connect help: expected served-surface phrase {phrase:?}: {connect}"
+        );
+    }
 }
 
 /// V1.35 P2: Root `--long-about` mentions `creator works status` and `workspace init`.
