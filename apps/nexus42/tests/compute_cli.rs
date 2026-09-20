@@ -2,8 +2,8 @@
 //!
 //! Hermetic daemon-free scenarios: exit-code vocabulary (0 ok / 2 validation
 //! / 3 pairing), install identity + absent-hash rejections, and the
-//! `--output text|json` clap constraint. `compute run` daemon scenarios are
-//! covered in-module with wiremock (`commands/compute/mod.rs` tests).
+//! `--output text|json` clap constraint. The daemon-backed `run` leaf is
+//! retired (v1.193 P1) — its scenarios left with it.
 
 use assert_cmd::Command;
 use predicates::prelude::*;
@@ -128,24 +128,6 @@ fn compute_validate_rejects_path_traversal_module_id() {
         .code(2)
         .stdout(predicate::str::contains("module_id"))
         .stdout(predicate::str::contains("path-safe"));
-}
-
-#[test]
-fn compute_run_missing_input_exits_one() {
-    // qc2 S-3 / qc3 F-004: a missing `--input` fixture is a LOCAL I/O error
-    // (exit 1), NOT a daemon failure (exit 4) — the run command must not
-    // suggest daemon troubleshooting for a fixture problem. The input read
-    // happens before any daemon call, so this is hermetic.
-    let dir = tempfile::tempdir().expect("tempdir");
-    let missing = dir.path().join("missing-input.json");
-
-    nexus42()
-        .env("HOME", dir.path())
-        .args(["compute", "run", "--world", "wld_test", "--input"])
-        .arg(&missing)
-        .assert()
-        .code(1)
-        .stderr(predicate::str::contains("failed to read --input"));
 }
 
 #[test]
