@@ -699,6 +699,36 @@ async fn storage_status_never_initializes_and_reports_faults_honestly() {
     );
 }
 
+/// A freshly registered creator reports an unprovisioned credential projection
+/// (`creators_route_api.rs::post_creators_creates_row_and_returns_201_with_creator_detail`).
+///
+/// The retired route's framework-404 / 405 / colon-verb-segment expectations and
+/// its daemon-only 256-char display-name cap were host-surface behavior; the
+/// retained registration validation above is the core-owned half.
+#[tokio::test]
+async fn registration_reports_unprovisioned_credential_projection() {
+    let (_tmp, svc) = home().await;
+    let detail = svc
+        .register_creator(CoreRegisterCreatorRequest {
+            display_name: Some("Fresh Author".parse().unwrap()),
+            platform_creator_id: None,
+        })
+        .await
+        .expect("register creator");
+    assert!(detail.creator_id.starts_with("ctr_local"));
+    assert_eq!(detail.display_name.as_deref(), Some("Fresh Author"));
+    assert!(
+        detail.handle.is_none(),
+        "a local creator has no cloud handle"
+    );
+    assert!(!detail.has_api_key, "no key is provisioned at registration");
+    assert!(
+        !detail.has_cached_token,
+        "no cached cloud token at registration"
+    );
+    assert!(detail.is_active);
+}
+
 /// `storage_status()` on an initialized store: real versions, real health,
 /// real tables.
 #[tokio::test]
