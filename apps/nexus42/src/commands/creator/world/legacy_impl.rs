@@ -1,9 +1,17 @@
 //! `creator world` subcommand — create worlds, add events, list/show worlds,
 //! manage World KB knowledge entries, and author structured check rules.
 //!
-//! Product write path for narrative worlds. Writes go through
-//! `nexus_local_db::narrative_write`, NOT through the `NarrativeGateway` trait.
-//! Read paths (list, show) use `NarrativeGateway` via `SqliteNarrativeGateway`.
+//! Lifecycle (`create` / `list` / `show` / `findings list`), the World-rule
+//! family and the fork family run on the direct `nexus-core` seam
+//! ([`crate::core`]): one typed `CoreService` call per leaf — no daemon HTTP,
+//! no `DaemonClient`, no second SQL owner. The core keeps the World
+//! ownership guards, so a foreign World is refused on the direct path exactly
+//! as it was over the removed route.
+//!
+//! `creator world event-add` keeps its existing guarded local narrative
+//! writer (`nexus_local_db::narrative_write`): the World event-append
+//! operation has no `CoreService` method, and inventing one is out of
+//! contract.
 //!
 //! World KB author surface (`creator world kb list/show/edit/delete`) lives in
 //! the [`kb`] submodule (V1.50 T-B P0).
@@ -15,33 +23,27 @@ pub mod fork;
 pub mod rule;
 
 use crate::config::CliConfig;
+use crate::core::{finish_direct, map_core_error, open_direct_core};
 use crate::errors::Result;
 use clap::Subcommand;
-use nexus_narrative::NarrativeGateway;
+use nexus_contracts::{CreateWorldRequest, CreateWorldRequestTitle};
 
 /// World subcommands.
 #[derive(Debug, Subcommand)]
 pub enum WorldCommand {
     /// Create a new narrative world
+    ///
+    /// The title is the whole input: the core World create seam validates it
+    /// (1-200 characters after trim), derives the slug from it and creates the
+    /// World `private` / `manual` — the lifecycle the removed daemon route
+    /// produced. The old `--name` compatibility spelling and the
+    /// `--slug`/`--visibility`/`--time-policy`/`--description` extras are
+    /// gone: the typed seam carries none of them, and accepting a flag no
+    /// owner honours would be a silent no-op.
     Create {
-        /// World title (spec: `--name`; `--title` is the canonical flag)
+        /// World title
         #[arg(long)]
         title: String,
-        /// Alias for `--title` (spec compatibility; mutually exclusive with `--title`)
-        #[arg(long, conflicts_with = "title")]
-        name: Option<String>,
-        /// URL-friendly slug (defaults to title-derived slug)
-        #[arg(long)]
-        slug: Option<String>,
-        /// Visibility: private (default) or public
-        #[arg(long, default_value = "private")]
-        visibility: String,
-        /// Time policy: `manual` (default) or `owner_driven`
-        #[arg(long, default_value = "manual")]
-        time_policy: String,
-        /// Optional world description
-        #[arg(long)]
-        description: Option<String>,
     },
 
     /// Add a timeline event to a world
@@ -148,25 +150,7 @@ pub enum FindingsCommand {
 /// not set, or any write/query operation fails.
 pub async fn run(cmd: WorldCommand, config: &CliConfig) -> Result<()> {
     match cmd {
-        WorldCommand::Create {
-            title,
-            name,
-            slug,
-            visibility,
-            time_policy,
-            description,
-        } => {
-            let effective_title = name.as_deref().unwrap_or(title.as_str());
-            run_create(
-                config,
-                effective_title,
-                slug.as_deref(),
-                &visibility,
-                &time_policy,
-                description.as_deref(),
-            )
-            .await
-        }
+        WorldCommand::Create { title } => run_create(config, &title).await,
         WorldCommand::EventAdd {
             world_id,
             branch_id,
@@ -201,24 +185,6 @@ pub async fn run(cmd: WorldCommand, config: &CliConfig) -> Result<()> {
     }
 }
 
-/// Derive a slug from a title: lowercase, spaces → hyphens, strip non-alphanumeric.
-fn slug_from_title(title: &str) -> String {
-    title
-        .to_lowercase()
-        .chars()
-        .map(|c| {
-            if c.is_whitespace() || c == '_' {
-                '-'
-            } else {
-                c
-            }
-        })
-        .filter(|c| c.is_alphanumeric() || *c == '-')
-        .collect::<String>()
-        .trim_matches('-')
-        .to_string()
-}
-
 /// Open a DB pool for the active workspace (initializing the schema).
 ///
 /// # Errors
@@ -242,33 +208,36 @@ pub fn active_creator_id(config: &CliConfig) -> Result<String> {
         .ok_or(crate::errors::CliError::CreatorNotSelected)
 }
 
-/// Run `creator world create`.
-async fn run_create(
-    config: &CliConfig,
-    title: &str,
-    slug: Option<&str>,
-    visibility: &str,
-    time_policy: &str,
-    description: Option<&str>,
-) -> Result<()> {
-    let creator_id = active_creator_id(config)?;
-    let pool = open_workspace_pool(config).await?;
+/// Run `creator world create` through the typed core World seam.
+///
+/// The core validates the title, derives the slug and owns the write; this
+/// leaf only renders the created World. The direct writer is closed on both
+/// paths by [`finish_direct`].
+///
+/// # Errors
+///
+/// Returns [`CliError`] when the direct-writer core cannot be opened, the
+/// active creator/workspace is unset, the title fails the core's 1-200
+/// character validation, or the close cannot be settled.
+async fn run_create(config: &CliConfig, title: &str) -> Result<()> {
+    let request = CreateWorldRequest {
+        title: CreateWorldRequestTitle::try_from(title).map_err(|e| {
+            crate::errors::CliError::Other(format!("invalid input (title): {e}"))
+        })?,
+    };
 
-    let slug = slug.map_or_else(|| slug_from_title(title), std::string::ToString::to_string);
-
-    let result =
-        nexus_local_db::create_world(&pool, &creator_id, title, &slug, visibility, time_policy)
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        core.create_world(&principal, request)
             .await
-            .map_err(|e| crate::errors::CliError::Other(format!("Failed to create world: {e}")))?;
-
-    println!("✓ World created: {}", result.world_id);
-    println!("  Title:     {title}");
-    println!("  Slug:      {slug}");
-    println!("  Branch:    {}", result.root_fork_branch_id);
-    if let Some(desc) = description {
-        println!("  Description: {desc}");
+            .map_err(map_core_error)
     }
-    println!("  Created:   {}", result.created_at);
+    .await;
+    let created = finish_direct(&core, outcome).await?;
+
+    println!("✓ World created: {}", created.world_id);
+    println!("  Status:    {}", created.status);
     Ok(())
 }
 
@@ -386,14 +355,20 @@ fn build_observation_modules(observers: &[String], access: Option<&str>) -> Resu
 }
 
 /// Run `creator world list`.
+///
+/// # Errors
+///
+/// Returns [`CliError`] when the direct-writer core cannot be opened, the
+/// active creator/workspace is unset, the core refuses the read, or the close
+/// cannot be settled.
 async fn run_list(config: &CliConfig) -> Result<()> {
-    let pool = open_workspace_pool(config).await?;
-    let gw = nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(pool);
-
-    let worlds = gw
-        .list_worlds()
-        .await
-        .map_err(|e| crate::errors::CliError::Other(format!("Failed to list worlds: {e}")))?;
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        core.list_worlds(&principal).await.map_err(map_core_error)
+    }
+    .await;
+    let worlds = finish_direct(&core, outcome).await?;
 
     if worlds.is_empty() {
         println!("No worlds found in the active workspace.");
@@ -415,22 +390,24 @@ async fn run_list(config: &CliConfig) -> Result<()> {
 
 /// Run `creator world show`.
 ///
-/// Reuses `SqliteNarrativeGateway::get_world_state` (same row shape as list).
-/// Prints full metadata for a single world or a clean not-found message.
+/// The core read returns the same `WorldState` projection the list arm
+/// renders; an unknown id is the core's `not_found` (404) family.
+///
+/// # Errors
+///
+/// Returns [`CliError`] when the direct-writer core cannot be opened, the
+/// active creator/workspace is unset, the World is unknown, or the close
+/// cannot be settled.
 async fn run_show(config: &CliConfig, world_id: &str) -> Result<()> {
-    let pool = open_workspace_pool(config).await?;
-    let gw = nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(pool);
-
-    let world = gw.get_world_state(world_id).await.map_err(|e| match e {
-        nexus_narrative::NarrativeError::ValidationError(msg) if msg.contains("not found") => {
-            crate::errors::CliError::Other(format!(
-                "World '{world_id}' not found.\n  \
-                     ↳ List existing worlds: nexus42 creator world list\n  \
-                     ↳ Create a new world:   nexus42 creator world create --title \"...\""
-            ))
-        }
-        _ => crate::errors::CliError::Other(format!("Failed to query world: {e}")),
-    })?;
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        core.get_world(&principal, world_id.to_string())
+            .await
+            .map_err(map_core_error)
+    }
+    .await;
+    let world = finish_direct(&core, outcome).await?;
 
     println!("WORLD_ID:     {}", world.world_id);
     println!("Title:        {}", world.title);
@@ -450,18 +427,25 @@ async fn run_show(config: &CliConfig, world_id: &str) -> Result<()> {
 }
 
 /// `creator world findings list --world-id <id> [--json]` — list
-/// world-attached check findings (`GET /v1/daemon/worlds/:world_id/findings`,
-/// V1.165 read surface — GET-only by design, AR-87 #1).
+/// world-attached check findings through the typed core read (V1.165 read
+/// surface — GET-only by design, AR-87 #1).
 ///
 /// # Errors
 ///
-/// Returns `CliError` for daemon / network failures (404 `not_found` for an
-/// unknown world, 403 foreign world).
+/// Returns [`CliError`] when the direct-writer core cannot be opened, the
+/// active creator/workspace is unset, the World is unknown (404), the caller
+/// does not own it (403), or the close cannot be settled.
 async fn world_findings_list(world_id: &str, json: bool, config: &CliConfig) -> Result<()> {
-    let client = crate::api::DaemonClient::from_config(config)?;
-    let path = format!("/v1/daemon/worlds/{world_id}/findings");
-    let resp: nexus_contracts::daemon_api::worlds::WorldFindingsListResponse =
-        client.get(&path).await?;
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        core.list_world_findings(&principal, world_id.to_string())
+            .await
+            .map_err(map_core_error)
+    }
+    .await;
+    let resp = finish_direct(&core, outcome).await?;
+
     if json {
         println!("{}", serde_json::to_string_pretty(&resp)?);
         return Ok(());
