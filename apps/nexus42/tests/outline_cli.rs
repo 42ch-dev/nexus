@@ -15,8 +15,6 @@
 //! revision and content left unchanged), the invalid-field path (bad slug →
 //! `outline_validation_failed`), and the not-found path for an unknown work.
 
-#![allow(clippy::unwrap_used)]
-
 #[path = "common/direct.rs"]
 mod direct;
 
@@ -262,6 +260,10 @@ async fn outline_show_unknown_work_surfaces_404() {
     let out = env.cli(&["creator", "works", "outline", "show", "wrk_does_not_exist"]);
     assert!(!out.status.success(), "unknown work must fail");
     let err = stderr(&out);
+    assert!(
+        err.contains("[not_found]"),
+        "stderr should name the code: {err}"
+    );
     assert!(err.contains("404"), "stderr should carry status 404: {err}");
     assert!(
         err.contains("wrk_does_not_exist"),
@@ -583,7 +585,7 @@ async fn chapter_patch_content_file_writes_outline_prose() {
     assert!(out.status.success(), "content patch failed: {}", stderr(&out));
     assert!(stdout(&out).contains("new_revision: 1"), "{}", stdout(&out));
 
-    let on_disk = std::fs::read_to_string(&chapter_outline).unwrap();
+    let on_disk = std::fs::read_to_string(&chapter_outline).expect("chapter outline on disk");
     assert!(
         on_disk.contains("## Scene beats"),
         "chapter outline should hold patched prose; got: {on_disk}"
@@ -718,14 +720,14 @@ async fn timeline_patch_missing_required_flag_fails_fast() {
 #[test]
 fn outline_help_documents_route_family_and_retry() {
     let output = Command::cargo_bin("nexus42")
-        .unwrap()
+        .expect("nexus42 binary")
         .args(["creator", "works", "outline", "--help"])
         .assert()
         .success()
         .get_output()
         .stdout
         .clone();
-    let text = String::from_utf8(output).unwrap();
+    let text = String::from_utf8(output).expect("help output is UTF-8");
     assert!(text.contains("show"), "{text}");
     assert!(text.contains("patch"), "{text}");
     assert!(text.contains("outline_conflict"), "{text}");
@@ -735,14 +737,14 @@ fn outline_help_documents_route_family_and_retry() {
 #[test]
 fn chapter_help_pins_outline_node_route_distinction() {
     let output = Command::cargo_bin("nexus42")
-        .unwrap()
+        .expect("nexus42 binary")
         .args(["creator", "works", "chapter", "patch", "--help"])
         .assert()
         .success()
         .get_output()
         .stdout
         .clone();
-    let text = String::from_utf8(output).unwrap();
+    let text = String::from_utf8(output).expect("help output is UTF-8");
     // The route-family guard: the leaf names the outline node patch and the
     // V1.65 chapter-content distinction (AR-84).
     assert!(text.contains("chapters/:n/patch"), "{text}");

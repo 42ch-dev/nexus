@@ -139,9 +139,15 @@ pub(crate) fn map_core_error(err: CoreError) -> CliError {
         // command family over the wire — one preset error must not read
         // differently depending on which transport reached it.
         CoreError::Preset(error) => map_preset_error(error),
+        // The daemon adapter renders this class as `[not_found] Not found:
+        // {resource}` at 404 (`NexusApiError::NotFound`), and
+        // `DaemonClient::parse_error_response` is what every HTTP caller read.
+        // A direct-core caller keeps the same named code and wording, so the
+        // deterministic error classification does not change with the
+        // transport that reached the same core failure.
         CoreError::NotFound { resource } => CliError::Api {
             status: 404,
-            message: resource,
+            message: format!("[not_found] Not found: {resource}"),
         },
         CoreError::InvalidInput { field, reason } => {
             CliError::Other(format!("invalid input ({field}): {reason}"))
