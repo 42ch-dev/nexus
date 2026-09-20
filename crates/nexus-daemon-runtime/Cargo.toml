@@ -15,7 +15,11 @@ nexus-home-layout = { path = "../nexus-home-layout" }
 # `compute` is required: the daemon's compute routes are thin delegations onto
 # nexus-core::execution::compute, so the WASM lane now lives in core and the
 # daemon must enable the edge that compiles it.
-nexus-core = { path = "../nexus-core", features = ["execution", "compute"] }
+# v1.193 P2-T2: `provider-host` is the temporary manifest edge that keeps the
+# moved production adapters reachable from the daemon — the Host prompt
+# executor (`nexus_core::execution::prompt_executor`) needs the Host facade.
+# The final cohort collapse (P2-T13) removes it with the rest of the daemon.
+nexus-core = { path = "../nexus-core", features = ["execution", "compute", "provider-host"] }
 nexus-contracts = { path = "../nexus-contracts" }
 nexus-creator = { path = "../nexus-creator" }
 nexus-local-db = { path = "../nexus-local-db" }

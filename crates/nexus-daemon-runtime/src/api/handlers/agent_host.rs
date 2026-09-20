@@ -1056,7 +1056,7 @@ pub async fn scan(
 
     // Probe against process PATH + login-shell-equivalent dirs without
     // mutating the process environment (safe on a live Tokio runtime).
-    let probe_dirs = crate::path_enrichment::probe_path_dirs();
+    let probe_dirs = nexus_agent_host::discovery::path_enrichment::probe_path_dirs();
     let installations =
         nexus_acp_host::registry::scan_local_installations_with_path(&registry, &probe_dirs).await;
     let by_binary: HashMap<String, nexus_acp_host::registry::LocalInstallation> = installations

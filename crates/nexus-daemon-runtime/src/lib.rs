@@ -30,8 +30,12 @@ pub mod execution_ports;
 pub mod execution_projection;
 pub mod lifecycle;
 pub mod pack_import;
-pub mod path_enrichment;
-pub mod prompt_executor;
+
+// v1.193 P2-T2: `path_enrichment` moved to
+// `nexus_agent_host::discovery::path_enrichment` and `prompt_executor` to
+// `nexus_core::execution::prompt_executor` (technical contracts §4); the
+// daemon no longer owns either adapter.
+
 // V1.153 P2 (DF-73): embedded `apps/web` SPA — compiled only when the
 // `web-embed` feature is ON (default). The slim `nexus-runtime` artifact
 // builds with `--no-default-features --features connect-host`, so the SPA

@@ -27,7 +27,7 @@ use nexus_agent_host::config::{AgentHostConfig, ProviderConfig, TimeoutConfig};
 use nexus_agent_host::core::manager::HostManager;
 use nexus_agent_host::providers::acp::AcpProvider;
 use nexus_agent_host::{HostFacade, LaunchStrategy};
-use nexus_daemon_runtime::prompt_executor::HostPromptExecutor;
+use nexus_core::execution::prompt_executor::HostPromptExecutor;
 use nexus_orchestration::capability::{
     CapabilityError, CapabilityRegistry, CapabilityRuntimeDeps, PromptExecutor, PromptRequest,
     ToolPolicy,

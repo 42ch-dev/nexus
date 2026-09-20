@@ -14,7 +14,6 @@
 #![allow(clippy::missing_errors_doc)]
 
 use crate::api::errors::NexusApiError;
-use crate::api::handlers::soul_narrative_synthesizer::AcpSoulNarrativeSynthesizer;
 use crate::api::handlers::world_kb_guards::resolve_core_principal;
 use crate::api::pagination::decode_offset_cursor;
 use crate::workspace::WorkspaceState;
@@ -36,6 +35,9 @@ use nexus_contracts::daemon_api::characters::memory::review_character_memory_req
 use nexus_contracts::daemon_api::characters::memory::review_character_memory_response::ReviewCharacterMemoryResponse;
 use nexus_contracts::daemon_api::characters::soul::character_soul_narrative_request::CharacterSoulNarrativeRequest;
 use nexus_contracts::daemon_api::characters::soul::character_soul_narrative_response::CharacterSoulNarrativeResponse;
+// v1.193 P2-T2: the production synthesis adapter moved to core execution
+// (technical contracts §4); this handler consumes that single owner.
+use nexus_core::execution::soul_narrative_synthesizer::AcpSoulNarrativeSynthesizer;
 use serde::de::DeserializeOwned;
 
 const DEFAULT_LIMIT: u32 = 50;

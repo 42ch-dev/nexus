@@ -562,12 +562,13 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         }
     };
 
-    // A1 (V1.186 P1 T2): the production prompt executor is the daemon-owned
-    // HostPromptExecutor over the existing HostFacade. It resolves trusted
-    // frozen run metadata, persists the durable PromptAttempt intent before
-    // the external Host effect, drains MessageDelta and accepts only
-    // EndTurn. When no creator DB is present (Tier-0 boot), the executor is
-    // absent and LLM-backed capabilities return WorkerUnavailable.
+    // A1 (V1.186 P1 T2): the production prompt executor is the core-owned
+    // `HostPromptExecutor` (v1.193 P2-T2) over the existing HostFacade. It
+    // resolves trusted frozen run metadata, persists the durable
+    // PromptAttempt intent before the external Host effect, drains
+    // MessageDelta and accepts only EndTurn. When no creator DB is present
+    // (Tier-0 boot), the executor is absent and LLM-backed capabilities
+    // return WorkerUnavailable.
     let session_cancels: std::sync::Arc<
         std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
     > = std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
@@ -579,7 +580,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         let host_config = state.agent_host_config();
         let executor: std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor> =
             std::sync::Arc::new(
-                crate::prompt_executor::HostPromptExecutor::new_with_run_event_sinks(
+                nexus_core::execution::prompt_executor::HostPromptExecutor::new_with_run_event_sinks(
                     agent_host_facade.clone(),
                     workflow_store,
                     host_config.timeouts.clone(),

@@ -798,14 +798,14 @@ impl WorkspaceState {
         let sqlite_storage = Arc::new(SqliteSessionStorage::new(pool_arc.clone()));
         let workflow_store: Arc<dyn WorkflowStateStore> = sqlite_storage.clone();
 
-        // Prompt executor: the daemon-owned HostPromptExecutor over the
+        // Prompt executor: the core-owned HostPromptExecutor over the
         // Host facade (A1). When no Host facade is wired (tests), the
         // executor is absent and LLM-backed capabilities fail closed.
         let prompt_executor: Option<Arc<dyn nexus_orchestration::capability::PromptExecutor>> =
             self.agent_host().map(|host| {
                 let host_config = self.agent_host_config();
                 let executor: Arc<dyn nexus_orchestration::capability::PromptExecutor> = Arc::new(
-                    crate::prompt_executor::HostPromptExecutor::new_with_run_event_sinks(
+                    nexus_core::execution::prompt_executor::HostPromptExecutor::new_with_run_event_sinks(
                         host,
                         workflow_store.clone(),
                         host_config.timeouts.clone(),

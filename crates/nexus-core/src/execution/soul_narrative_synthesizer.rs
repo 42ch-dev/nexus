@@ -1,7 +1,12 @@
 //! ACP-backed `SoulNarrativeSynthesizer` adapter (V1.81).
 //!
+//! v1.193 P2-T2 moved this production adapter out of the deleted daemon
+//! composition unchanged (technical contracts §4: core optional
+//! `execution`). It remains the ONE production owner; do not replace it
+//! with a fake fallback.
+//!
 //! Bridges the `SoulNarrativeSynthesizer` trait (in `nexus-creator-memory`)
-//! to the daemon's orchestration `CapabilityRegistry` → `acp.prompt` capability.
+//! to the orchestration `CapabilityRegistry` → `acp.prompt` capability.
 //! The adapter looks up the `acp.prompt` capability from the registry, builds
 //! a prompt from the capped input signal, dispatches it, and extracts `full_text`
 //! from the result.

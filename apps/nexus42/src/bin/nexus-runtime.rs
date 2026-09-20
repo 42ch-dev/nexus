@@ -90,7 +90,8 @@ fn main() {
 
     // PATH enrichment before Tokio starts (GUI-launched sidecars inherit a
     // minimal PATH; same Class-B rule as the nexus42 CLI main).
-    nexus_daemon_runtime::path_enrichment::apply_process_path_enrichment();
+    // v1.193 P2-T2: the helper lives with the provider-discovery owner.
+    nexus_agent_host::discovery::path_enrichment::apply_process_path_enrichment();
 
     let home = resolve_home(cli.home.as_deref());
 

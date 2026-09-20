@@ -48,20 +48,9 @@ pub mod compute;
     allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)
 )]
 pub mod connect;
-#[cfg(feature = "legacy-cli")]
-#[deny(clippy::unwrap_used)]
-#[cfg_attr(
-    test,
-    allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)
-)]
-pub mod daemon;
-#[cfg(feature = "legacy-cli")]
-#[deny(clippy::unwrap_used)]
-#[cfg_attr(
-    test,
-    allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)
-)]
-pub mod daemon_run;
+// v1.193 P2-T2: the `daemon` and `daemon_run` command modules (and their
+// parser routing) are deleted with the legacy daemon composition — Electron/
+// TS owns service lifecycle.
 #[cfg(feature = "legacy-cli")]
 #[deny(clippy::unwrap_used)]
 #[cfg_attr(

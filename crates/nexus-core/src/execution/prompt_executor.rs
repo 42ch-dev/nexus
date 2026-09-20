@@ -1,4 +1,9 @@
-//! Daemon-owned `HostPromptExecutor` — the production `PromptExecutor` (A1).
+//! `HostPromptExecutor` — the production `PromptExecutor` (A1).
+//!
+//! v1.193 P2-T2 moved this production adapter out of the deleted daemon
+//! composition unchanged (technical contracts §4: core optional
+//! `execution` + `provider-host`). It is the ONE owner of the Host-backed
+//! prompt seam; do not add a second definition.
 //!
 //! Bridges the orchestration prompt seam to the existing `HostFacade`:
 //!
@@ -64,11 +69,11 @@ struct CachedHostSession {
 
 /// Production prompt executor over the existing `HostFacade` (A1).
 ///
-/// Constructed once at daemon boot with the host facade, the durable
-/// workflow store, the session storage (for context identity), and the
-/// shared per-run cancellation tokens.
+/// Constructed once when the execution owner wires its Host plane, with the
+/// host facade, the durable workflow store, the session storage (for context
+/// identity), and the shared per-run cancellation tokens.
 pub struct HostPromptExecutor {
-    /// The daemon's single Host plane.
+    /// The execution owner's single Host plane.
     host: Arc<dyn HostFacade>,
     /// Durable run store (P0) — trusted descriptor + prompt-attempt intent.
     workflow_store: Arc<dyn WorkflowStateStore>,
@@ -90,7 +95,7 @@ pub struct HostPromptExecutor {
     /// request cannot race a successor's launch. The future P2 coordinator
     /// shares this mechanism as its per-run operation admission lock.
     op_locks: std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
-    run_event_sinks: Option<nexus_core::execution::run_events::RunEventSinkMap>,
+    run_event_sinks: Option<crate::execution::run_events::RunEventSinkMap>,
 }
 
 impl HostPromptExecutor {
@@ -109,7 +114,7 @@ impl HostPromptExecutor {
         host: Arc<dyn HostFacade>,
         workflow_store: Arc<dyn WorkflowStateStore>,
         timeouts: TimeoutConfig,
-        run_event_sinks: Option<nexus_core::execution::run_events::RunEventSinkMap>,
+        run_event_sinks: Option<crate::execution::run_events::RunEventSinkMap>,
     ) -> Self {
         Self {
             host,
@@ -259,7 +264,7 @@ impl HostPromptExecutor {
             host_session_id,
             operation_id,
             // Convert the Host's opaque fingerprint to the orchestration
-            // durable shape (identical fields; the daemon persists the
+            // durable shape (identical fields; this crate persists the
             // fingerprint without importing provider crates).
             process_identity: process_identity.map(|pi| {
                 nexus_orchestration::run_state::OwnedProcessIdentity {
@@ -725,7 +730,7 @@ impl PromptExecutor for HostPromptExecutor {
         // the driven ROOT run — resolve through the owning root so the
         // OpStarted/content/OpFinished lifecycle lands on that ring.
         let run_event_sink = if let Some(sinks) = &self.run_event_sinks {
-            nexus_core::execution::run_events::sink_for_run(sinks, &request.run_id).await
+            crate::execution::run_events::sink_for_run(sinks, &request.run_id).await
         } else {
             None
         };

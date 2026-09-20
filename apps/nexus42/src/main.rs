@@ -19,8 +19,9 @@ fn main() {
     // sidecars inherit a minimal macOS PATH; `setenv` must not race concurrent
     // `getenv` on a live multi-threaded runtime (Greptile P2 on run_daemon).
     // Logging is already initialized so join_paths failures surface as warnings.
+    // v1.193 P2-T2: the helper lives with the provider-discovery owner.
     #[cfg(feature = "legacy-cli")]
-    nexus_daemon_runtime::path_enrichment::apply_process_path_enrichment();
+    nexus_agent_host::discovery::path_enrichment::apply_process_path_enrichment();
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -90,10 +91,6 @@ async fn async_main(cli: Cli) -> Result<()> {
         Some(Commands::Creator { command }) => {
             nexus42::commands::creator::run(command, &config).await
         }
-        #[cfg(feature = "legacy-cli")]
-        Some(Commands::Daemon { command }) => {
-            nexus42::commands::daemon::run(command, &config).await
-        }
         #[cfg(all(feature = "legacy-cli", feature = "connect-host"))]
         Some(Commands::Connect { command }) => nexus42::commands::connect::run(command).await,
         #[cfg(feature = "legacy-cli")]
@@ -106,8 +103,6 @@ async fn async_main(cli: Cli) -> Result<()> {
         Some(Commands::Capability { command }) => {
             nexus42::commands::capability::run(command, &config, &output_format).await
         }
-        #[cfg(feature = "legacy-cli")]
-        Some(Commands::DaemonRun(args)) => nexus42::commands::daemon_run::run(args).await,
         #[cfg(feature = "legacy-cli")]
         Some(Commands::System { command }) => {
             nexus42::commands::system::run(command, &config).await

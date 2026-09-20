@@ -1,12 +1,17 @@
 //! Process PATH enrichment for agent CLI discovery.
 //!
+//! v1.193 P2-T2 moved this helper out of the daemon composition into the
+//! existing neutral provider-discovery owner (technical contracts §4): the
+//! CLI binaries and the Host mount probe share one implementation, and the
+//! daemon never gains a Host dependency or an app dependency.
+//!
 //! macOS GUI apps (including the Tauri desktop shell) often inherit a minimal
 //! PATH such as `/usr/bin:/bin:/usr/sbin:/sbin`. Homebrew and user-local agent
 //! CLIs under `/opt/homebrew/bin` or `~/.local/bin` are then invisible to
-//! `which::which` during `POST /v1/daemon/agent-host/scan`.
+//! `which::which` during a provider scan.
 //!
 //! This module merges a login-shell-equivalent set of common user bin dirs into
-//! the process PATH **once at daemon boot**, before any scan probe runs. No
+//! the process PATH **once at process start**, before any scan probe runs. No
 //! shell-out; no wire/schema change (V1.101 Class B).
 
 use std::collections::HashSet;
@@ -321,9 +326,10 @@ pub fn probe_path_dirs() -> Vec<PathBuf> {
 ///
 /// **Call before starting a Tokio multi-threaded runtime.** On POSIX,
 /// `setenv(3)` is not thread-safe against concurrent `getenv(3)`; the
-/// `nexus42` binary invokes this from sync `main` before
+/// `nexus42` / `nexus-runtime` binaries invoke this from sync `main` before
 /// `tokio::runtime::Runtime::new`. Do not call from inside an already-running
-/// async runtime (including [`crate::boot::run_daemon`]).
+/// async runtime — provider scans read PATH through [`probe_path_dirs`]
+/// instead.
 pub fn apply_process_path_enrichment() {
     let existing = env::var_os("PATH");
     let sources = login_equivalent_bin_dirs_with_sources();

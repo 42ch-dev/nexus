@@ -36,9 +36,9 @@ fn current_state_visible_command_groups() {
 
     let help_text = String::from_utf8(output).unwrap();
 
-    // User-visible commands after the v1.193 P1-T6 `sync`-alias removal
-    // (5 visible groups, more hidden).
-    let expected_commands = ["acp", "creator", "daemon", "platform", "system"];
+    // User-visible commands after the v1.193 P2-T2 daemon-group removal
+    // (v1.193 P1-T6 removed the `sync` alias; P2-T2 removed `daemon`).
+    let expected_commands = ["acp", "creator", "platform", "system"];
 
     for cmd in &expected_commands {
         assert!(
@@ -79,38 +79,12 @@ fn current_state_visible_command_groups() {
         );
     }
 
-    // Verify count: 5 user-visible commands
+    // Verify count: 4 user-visible commands
     let visible_count = expected_commands.len();
     assert_eq!(
-        visible_count, 5,
-        "Current-state snapshot: expected exactly 5 user-visible commands, found {visible_count}"
+        visible_count, 4,
+        "Current-state snapshot: expected exactly 4 user-visible commands, found {visible_count}"
     );
-}
-
-/// Snapshot: `daemon` command has expected subcommands in V1.15.
-#[test]
-fn current_state_daemon_subcommands() {
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("daemon")
-        .arg("--help")
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
-
-    // Current daemon surface: lifecycle commands plus schedule orchestration.
-    for subcmd in &[
-        "start", "stop", "restart", "status", "logs", "doctor", "schedule",
-    ] {
-        assert!(
-            help_text.contains(subcmd),
-            "Current-state daemon: expected subcommand '{subcmd}'"
-        );
-    }
 }
 
 /// Snapshot: `creator` command has expected subcommands in V1.15.
@@ -198,12 +172,13 @@ fn current_state_system_subcommands() {
 // =============================================================================
 
 /// V2 Target: the user-visible top-level command groups:
-/// `daemon`, `acp`, `creator`, `platform`, `system`
+/// `acp`, `creator`, `platform`, `system`
 ///
 /// Un-ignored by Plans 2-4 completing the CLI restructuring. v1.193 P1-T6
-/// removed the hidden top-level `sync` alias, leaving five visible groups.
+/// removed the hidden top-level `sync` alias and v1.193 P2-T2 removed the
+/// `daemon` group with the legacy daemon composition.
 #[test]
-fn v2_only_five_visible_command_groups() {
+fn v2_canonical_visible_command_groups() {
     let output = Command::cargo_bin("nexus42")
         .unwrap()
         .arg("--help")
@@ -215,7 +190,7 @@ fn v2_only_five_visible_command_groups() {
 
     let help_text = String::from_utf8(output).unwrap();
 
-    let v2_groups = ["daemon", "acp", "creator", "platform", "system"];
+    let v2_groups = ["acp", "creator", "platform", "system"];
 
     for group in &v2_groups {
         assert!(
@@ -259,41 +234,6 @@ fn v2_only_five_visible_command_groups() {
             "V2 target: legacy command '{legacy}' should not be a top-level command"
         );
     }
-}
-
-/// V2 Target: `daemon` command group subcommands.
-///
-/// Expected: start, stop, restart, status, logs, doctor,
-///           orchestrate (with list/run/pause/resume/cancel/inspect)
-///
-/// Un-ignored by Plan 2 (daemon restructuring implemented).
-#[test]
-fn v2_target_daemon_subcommands() {
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("daemon")
-        .arg("--help")
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
-
-    for subcmd in &[
-        "start", "stop", "restart", "status", "logs", "doctor", "schedule",
-    ] {
-        assert!(
-            help_text.contains(subcmd),
-            "V2 daemon: expected subcommand '{subcmd}'"
-        );
-    }
-
-    assert!(
-        !help_text.contains("orchestrate"),
-        "daemon help must not list removed orchestrate subcommand"
-    );
 }
 
 /// V2 Target: `acp` top-level command group exists.
@@ -616,16 +556,6 @@ fn acp_run_shows_run_id_flag() {
     );
 }
 
-/// Verify `daemon orchestrate run --help` is no longer a valid CLI surface.
-#[test]
-fn daemon_orchestrate_run_is_removed() {
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .args(["daemon", "orchestrate", "run", "--help"])
-        .assert()
-        .failure();
-}
-
 // =============================================================================
 // Part 6: V1.33 Work Experience Loop contract tests (must pass immediately)
 // =============================================================================
@@ -711,11 +641,12 @@ fn v135_platform_sync_subcommands() {
     }
 }
 
-/// V1.35 P2: Root `--help` lists exactly 5 user-visible command groups
+/// V1.35 P2: Root `--help` lists the canonical user-visible command groups
 /// (per cli-command-ia.md §2). The deprecated top-level `sync` alias was
-/// removed from the parser in v1.193 P1-T6.
+/// removed from the parser in v1.193 P1-T6, and the `daemon` group in
+/// v1.193 P2-T2.
 #[test]
-fn v135_root_help_shows_five_groups_and_no_top_level_sync() {
+fn v135_root_help_shows_canonical_groups_and_no_top_level_sync() {
     let output = Command::cargo_bin("nexus42")
         .unwrap()
         .arg("--help")
@@ -727,8 +658,8 @@ fn v135_root_help_shows_five_groups_and_no_top_level_sync() {
 
     let help_text = String::from_utf8(output).unwrap();
 
-    // The 5 canonical V1.35 top-level groups MUST all appear.
-    let expected = ["creator", "daemon", "acp", "platform", "system"];
+    // The canonical V1.35 top-level groups MUST all appear.
+    let expected = ["creator", "acp", "platform", "system"];
     for group in &expected {
         assert!(
             help_text.contains(group),
@@ -1468,5 +1399,105 @@ fn retired_creator_execution_is_unknown() {
             works_names.iter().any(|name| name == leaf),
             "v1.193 P2-T1: `creator works` must keep '{leaf}': {works_names:?}"
         );
+    }
+}
+
+// =============================================================================
+// Part 13: v1.193 P2-T2 daemon group / daemon-run router removal
+// =============================================================================
+
+/// v1.193 P2-T2 (AC1/AC4): the whole `daemon` command group (service
+/// lifecycle, `ui`/`web`, and the `schedule` orchestration leaves) and the
+/// hidden `daemon-run` self-spawn entry are gone from the parser — every
+/// invocation is clap's unrecognized-subcommand error (exit 2, empty stdout),
+/// never a success-shaped stub, a hidden alias, a replacement `nexus42
+/// service` launcher or an HTTP fallback. The retained `creator` / `acp` /
+/// `platform` groups still parse, and the root help neither advertises the
+/// group nor teaches `nexus42 daemon schedule`.
+///
+/// Discriminating regression: pre-cutover `daemon --help` printed the daemon
+/// group page (exit 0), `daemon status`/`logs`/`ui` reached the loopback
+/// daemon HTTP client, `daemon schedule …` parsed the orchestration leaves,
+/// `daemon-run [--port …]` booted the runtime in-process, and `nexus42 --help`
+/// carried the `nexus42 daemon schedule --preset <id>` long-about line.
+#[test]
+fn daemon_tree_is_unknown() {
+    let home = tempfile::tempdir().expect("temp home");
+
+    let removed: [&[&str]; 15] = [
+        &["daemon", "--help"],
+        &["daemon", "start"],
+        &["daemon", "stop"],
+        &["daemon", "restart"],
+        &["daemon", "status"],
+        &["daemon", "logs"],
+        &["daemon", "doctor"],
+        &["daemon", "ui"],
+        &["daemon", "web"],
+        &["daemon", "orchestrate", "run"],
+        &["daemon", "schedule", "list"],
+        &["daemon", "schedule", "start", "--preset", "novel-writing"],
+        &["daemon-run"],
+        &["daemon-run", "--help"],
+        &["daemon-run", "--port", "8420"],
+    ];
+    for args in removed {
+        let output = Command::cargo_bin("nexus42")
+            .unwrap()
+            .env("HOME", home.path())
+            .env_remove("NEXUS_API_KEY")
+            .args(args)
+            .assert()
+            .code(2)
+            .get_output()
+            .clone();
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        assert!(
+            stderr.contains("unrecognized subcommand"),
+            "v1.193 P2-T2: `{}` must be an unknown subcommand: {stderr}",
+            args.join(" ")
+        );
+        assert!(
+            output.stdout.is_empty(),
+            "v1.193 P2-T2: `{}` must not answer with a success-shaped stub: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+
+    // The root help no longer lists the group nor teaches the removed leaf.
+    let root = Command::cargo_bin("nexus42")
+        .unwrap()
+        .env("HOME", home.path())
+        .env_remove("NEXUS_API_KEY")
+        .arg("--help")
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let root_help = String::from_utf8_lossy(&root.stdout).into_owned();
+    let root_names = help_command_names(&root_help);
+    assert!(
+        !root_names.iter().any(|name| name == "daemon"),
+        "v1.193 P2-T2: root help must not advertise the 'daemon' group: {root_names:?}"
+    );
+    assert!(
+        !root_help.contains("daemon schedule"),
+        "v1.193 P2-T2: root help must not teach the removed daemon schedule leaf"
+    );
+
+    // The retained groups still parse (the cutover removes routing, not them).
+    for args in [
+        ["creator", "--help"],
+        ["acp", "--help"],
+        ["platform", "--help"],
+    ] {
+        Command::cargo_bin("nexus42")
+            .unwrap()
+            .env("HOME", home.path())
+            .env_remove("NEXUS_API_KEY")
+            .args(args)
+            .assert()
+            .success();
     }
 }

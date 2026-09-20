@@ -73,7 +73,8 @@ pub mod preset_management;
 pub mod reading;
 pub mod references;
 pub mod runtime;
-pub mod soul_narrative_synthesizer;
+// v1.193 P2-T2: `soul_narrative_synthesizer` moved to
+// `nexus_core::execution::soul_narrative_synthesizer` (technical contracts §4).
 pub mod strategy;
 pub mod timeline;
 pub mod timeline_events;

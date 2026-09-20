@@ -9,9 +9,9 @@ use crate::commands::connect::ConnectCommand;
 use crate::commands::creator::CreatorCommand;
 #[cfg(feature = "legacy-cli")]
 use crate::commands::{
-    acp::AcpCommand, capability::CapabilityCommand, compute::ComputeCommand, daemon::DaemonCommand,
-    daemon_run::DaemonRunArgs, desktop::DesktopCommand, ops::OpsCommand, platform::PlatformCommand,
-    preset::PresetCommand, system::SystemCommand,
+    acp::AcpCommand, capability::CapabilityCommand, compute::ComputeCommand,
+    desktop::DesktopCommand, ops::OpsCommand, platform::PlatformCommand, preset::PresetCommand,
+    system::SystemCommand,
 };
 use clap::{Parser, Subcommand};
 
@@ -27,9 +27,7 @@ use clap::{Parser, Subcommand};
           nexus42 creator works status      Show your active Work\n\n\
         Platform sync (requires login):\n\
           nexus42 platform sync pull        Pull bundles from platform\n\
-          nexus42 platform sync push        Push local changes to platform\n\n\
-        Advanced:\n\
-          nexus42 daemon schedule --preset <id>  Start a preset-driven workflow",
+          nexus42 platform sync push        Push local changes to platform",
     propagate_version = true
 )]
 pub struct Cli {
@@ -98,13 +96,6 @@ pub enum Commands {
     Creator {
         #[command(subcommand)]
         command: CreatorCommand,
-    },
-
-    /// Manage the daemon runtime
-    #[cfg(feature = "legacy-cli")]
-    Daemon {
-        #[command(subcommand)]
-        command: DaemonCommand,
     },
 
     /// Connect Host — peer surface for third-party reasoners (world-scoped ops,
@@ -200,11 +191,6 @@ pub enum Commands {
         #[command(subcommand)]
         command: PresetCommand,
     },
-
-    /// Hidden: Internal daemon-run entry point (self-spawned by daemon start)
-    #[command(hide = true)]
-    #[cfg(feature = "legacy-cli")]
-    DaemonRun(DaemonRunArgs),
 
     /// Hidden: operator daemon-free inspection (V1.182 P1 BL-04) — `ops inspect`
     /// reads the workspace checkpoint store read-only; the V1.35 cli-spec §6

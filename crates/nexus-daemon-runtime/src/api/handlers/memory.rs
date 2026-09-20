@@ -10,12 +10,14 @@
 #![allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
 
 use crate::api::errors::NexusApiError;
-use crate::api::handlers::soul_narrative_synthesizer::AcpSoulNarrativeSynthesizer;
 use crate::api::handlers::world_kb_guards::resolve_core_principal;
 use crate::config::read_active_creator_id;
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, Query, State};
 use axum::Json;
+// v1.193 P2-T2: the production synthesis adapter moved to core execution
+// (technical contracts §4); this handler consumes that single owner.
+use nexus_core::execution::soul_narrative_synthesizer::AcpSoulNarrativeSynthesizer;
 // Re-exported so the DTO-identity integration target can assert that each
 // handler response is the SAME generated type the contracts expose (no
 // parallel handwritten shape); the handler body still imports them by name.
