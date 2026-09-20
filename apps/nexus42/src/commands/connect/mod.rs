@@ -1,15 +1,20 @@
-//! Connect Host commands (DF-72 N-C0 → N-C2 read half) — opt-in feature
+//! Connect Host commands (DF-72 N-C0 → N-C2 compute half) — opt-in feature
 //! `connect-host`.
 //!
 //! `nexus42 connect start` runs a `spoke-connect` node in a **separate OS
 //! process** (architect lock Q7): signed-hello handshake, allowlist,
 //! honest `HostCapabilityManifest`, and — since V1.153 P1 (N-C1) — an
 //! inbound **invoke dispatcher** ([`invoke`]) backed by a per-process
-//! `NexusAdapter` over the active workspace DB. N-C2 (V1.154 P1) extends
-//! the served surface with the read half (`check` / `assemble`); every op
-//! the host does not serve (`compute` / `project` / unknown) is refused
-//! with `op_unsupported` (the N-C0 refusal contract extends);
-//! non-allowlisted peers never reach the handler (handshake).
+//! `NexusAdapter` over the active workspace DB. The served surface is
+//! [`invoke::SERVED_OPS`]: the N-C1 writes (`upsert` / `promote` /
+//! `relate`), the N-C2 read half (`check` / `assemble`), the N-C2 compute
+//! half (`compute` — stored World/module/Actor gates over the host-local
+//! `~/.nexus42/modules/` store and the process-wide compiled-module cache),
+//! and the V1.173 (DF-84) host-level reads
+//! (`tools.nexus.list_observed_peers` / `tools.nexus.list_modules`). Only
+//! `project` and unknown ops are refused with `op_unsupported` (the N-C0
+//! refusal contract extends); non-allowlisted peers never reach the
+//! handler (handshake).
 //!
 //! V1.155 P0 (N-C3 multi-host production): `connect dial <multiaddr>` is the
 //! production outbound dial surface — it dials a peer host and records the
@@ -68,9 +73,11 @@ const DEFAULT_LISTEN: &str = "/ip4/127.0.0.1/tcp/0";
 /// Connect Host subcommands.
 #[derive(Debug, Subcommand)]
 pub enum ConnectCommand {
-    /// Start the Connect Host node (N-C2 read half: handshake + manifest +
-    /// world-scoped upsert/promote/relate/check/assemble invoke dispatch;
-    /// compute/project/unknown ops refused)
+    /// Start the Connect Host node (handshake + manifest + the served
+    /// invoke surface: world-scoped upsert/promote/relate/check/assemble,
+    /// World/module/Actor-gated compute, and the host-level
+    /// tools.nexus.list_observed_peers / tools.nexus.list_modules reads;
+    /// project/unknown ops refused)
     Start {
         /// Peer IDs to allowlist for this run (repeatable; unioned with
         /// `~/.nexus42/connect/allowlist.json`).
@@ -269,8 +276,10 @@ fn normalize_last_seen(value: &str) -> String {
 /// ([`build_config`]) + the active-workspace DB open + the per-process
 /// `NexusAdapter` + the [`invoke::build_handler`] wiring — exactly the
 /// shared boot shape the P1 spec § Process model locks (shared with
-/// `nexus-runtime` in P2). Every inbound op that is not served is answered
-/// `op_unsupported` by the handler (N-C0 refusal contract extends).
+/// `nexus-runtime` in P2). The served set is [`invoke::SERVED_OPS`]
+/// (writes, reads, compute, host-level tool reads); every other op
+/// (`project` / unknown) is answered `op_unsupported` by the handler (N-C0
+/// refusal contract extends).
 async fn start(allow_peer: Vec<String>, listen: Vec<String>) -> Result<()> {
     // Raw home: the home-layout identity/allowlist helpers join `.nexus42`
     // themselves. The device-id resolution mirrors `host_manifest_port`
