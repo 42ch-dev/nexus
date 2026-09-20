@@ -453,7 +453,8 @@ pub enum CreatorCommand {
     /// User-scoped global knowledge entries (add, list, search)
     ///
     /// Stores unstructured knowledge entries scoped to the User (not Creator).
-    /// For Work-scope file index or World narrative KB, use `creator kb` instead.
+    /// For Work-scope file index use `creator kb`; for World narrative KB use
+    /// `creator world kb`.
     /// See entity-scope-model §5.3–§5.4 for the three KB namespaces.
     Knowledge {
         #[command(subcommand)]
@@ -482,7 +483,7 @@ pub enum CreatorCommand {
         #[command(subcommand)]
         command: world::WorldCommand,
     },
-    /// Character identity and World bindings (daemon-only)
+    /// Character identity and World bindings (direct core)
     Character {
         #[command(subcommand)]
         command: character::CharacterCommand,

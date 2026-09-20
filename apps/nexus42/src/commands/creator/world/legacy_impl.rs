@@ -23,7 +23,9 @@ pub mod fork;
 pub mod rule;
 
 use crate::config::CliConfig;
-use crate::core::{finish_direct, map_core_error, open_direct_core};
+use crate::core::{
+    finish_direct, map_core_error, open_direct_core, require_materialized_workspace,
+};
 use crate::errors::Result;
 use clap::Subcommand;
 use nexus_contracts::{CreateWorldRequest, CreateWorldRequestTitle};
@@ -188,10 +190,19 @@ pub async fn run(cmd: WorldCommand, config: &CliConfig) -> Result<()> {
 
 /// Open a DB pool for the active workspace (initializing the schema).
 ///
+/// The seam's admission pre-flight runs before the pool open: `Schema::init`
+/// migrates — and therefore creates — the selected workspace `state.db`, so a
+/// selection that names no materialized workspace must be refused instead of
+/// having one created for it. Every caller of this pool therefore owes (and now
+/// inherits) that refusal, including the retained local `world event-add`
+/// narrative writer and the `creator world kb` local leaves.
+///
 /// # Errors
 /// Returns [`CliError`] when the state DB path cannot be resolved from the
-/// config or schema initialization fails.
+/// config, the selection names no materialized workspace, or schema
+/// initialization fails.
 pub async fn open_workspace_pool(config: &CliConfig) -> Result<sqlx::SqlitePool> {
+    require_materialized_workspace(config)?;
     let db_path = crate::config::resolve_state_db_path(config)?;
     let pool = crate::db::Schema::init(&db_path).await?;
     Ok(pool)

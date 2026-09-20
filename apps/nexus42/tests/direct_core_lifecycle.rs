@@ -18,6 +18,13 @@
 //! to the whole `creator world kb` surface — the two direct-core leaves and the
 //! local leaves whose pool open used to migrate the workspace first.
 //!
+//! `anonymous_selection_is_refused_at_every_reference_entrance` and
+//! `anonymous_selection_is_refused_at_world_event_add` extend the same
+//! admission to the two retained local storage entrances the migration kept
+//! (`creator reference register|list|show` and `creator world event-add`), and
+//! pin that a refusal leaves the home byte-identical — no workspace directory
+//! and no `state.db`.
+//!
 //! `unreadable_workspace_db_is_not_reported_as_an_unset_selection` pins the
 //! other half of the same admission: a metadata failure on the selected
 //! `state.db` is a storage error, never the selection refusal.
@@ -496,5 +503,217 @@ async fn unreadable_workspace_db_is_not_reported_as_an_unset_selection() {
     assert!(
         failure.contains("database_error"),
         "the storage class the core's open path reports: {failure}"
+    );
+}
+
+/// One entry of a recursive hermetic-home snapshot.
+#[derive(Debug, PartialEq, Eq)]
+enum HomeEntry {
+    /// An empty-directory marker: the storage entropy here creates the
+    /// workspace directory before any file lands in it.
+    Dir,
+    /// A file and its bytes.
+    File(Vec<u8>),
+}
+
+/// Recursive `relative path → entry` snapshot of a hermetic home.
+///
+/// Directories are captured as well as files, because the refused entrances
+/// created the workspace *directory* before `Schema::init` wrote `state.db`
+/// into it: a file-only snapshot would miss the `create_dir_all` half of the
+/// mutation.
+fn home_tree(root: &Path) -> std::collections::BTreeMap<String, HomeEntry> {
+    let mut entries = std::collections::BTreeMap::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).expect("read home dir") {
+            let path = entry.expect("home dirent").path();
+            let relative = path
+                .strip_prefix(root)
+                .expect("entry under the hermetic home")
+                .to_string_lossy()
+                .into_owned();
+            if path.is_dir() {
+                entries.insert(relative, HomeEntry::Dir);
+                stack.push(path);
+            } else {
+                entries.insert(
+                    relative,
+                    HomeEntry::File(std::fs::read(&path).expect("read home file")),
+                );
+            }
+        }
+    }
+    entries
+}
+
+/// Create the anonymous (never-materialized) identity under `home` and return
+/// the minted creator id.
+fn anonymous_home(home: &Path) -> String {
+    let created = assert_cmd::Command::cargo_bin("nexus42")
+        .expect("nexus42 binary")
+        .args(["system", "identity", "create", "--kind", "anonymous"])
+        .env("HOME", home)
+        .env("RUST_LOG", "off")
+        .output()
+        .expect("spawn nexus42 identity create");
+    assert!(
+        created.status.success(),
+        "the anonymous identity must be created: {}",
+        stderr(&created)
+    );
+    anonymous_creator_id(&stdout(&created))
+}
+
+/// Run one direct-core leaf that the seam refuses in **both** the pre-fix and
+/// the fixed tree, so the CLI's incidental start-up writes (`.nexus42/device-id`)
+/// land before the snapshot and the comparison isolates what the refused
+/// entrance under test does.
+fn warm_home(home: &Path) {
+    let warm = assert_cmd::Command::cargo_bin("nexus42")
+        .expect("nexus42 binary")
+        .args(["creator", "world", "list"])
+        .env("HOME", home)
+        .env("RUST_LOG", "off")
+        .output()
+        .expect("spawn nexus42 warm-up");
+    assert!(
+        !warm.status.success(),
+        "the warm-up direct-core leaf is itself refused: {}",
+        stdout(&warm)
+    );
+}
+
+/// The retained `creator reference` registry opens the workspace pool itself
+/// (`create_dir_all` + `Schema::init`), so an anonymous selection must be
+/// refused by the same admission the KB entrances inherit — and must leave the
+/// home byte-identical.
+#[test]
+fn anonymous_selection_is_refused_at_every_reference_entrance() {
+    let home = tempfile::tempdir().expect("temp home");
+    let creator_id = anonymous_home(home.path());
+    warm_home(home.path());
+    let before = home_tree(home.path());
+
+    let entrances: [&[&str]; 3] = [
+        &[
+            "creator",
+            "reference",
+            "register",
+            "--source",
+            "https://example.invalid/anon",
+            "--source-type",
+            "url",
+            "--title",
+            "Anon reference",
+            "--body",
+            "An unmaterialized selection must not store this.",
+        ],
+        &["creator", "reference", "list"],
+        &["creator", "reference", "show", "ref_absent"],
+    ];
+
+    for args in entrances {
+        let refused = assert_cmd::Command::cargo_bin("nexus42")
+            .expect("nexus42 binary")
+            .args(args)
+            .env("HOME", home.path())
+            .env("RUST_LOG", "off")
+            .output()
+            .expect("spawn nexus42 reference leaf");
+        assert!(
+            !refused.status.success(),
+            "{args:?} must be refused: {}",
+            stdout(&refused)
+        );
+        assert_eq!(
+            refused.status.code(),
+            Some(1),
+            "{args:?}: {}",
+            stderr(&refused)
+        );
+        let refusal = stderr(&refused);
+        assert!(
+            refusal.contains("Creator not selected"),
+            "the declared selection refusal for {args:?}: {refusal}"
+        );
+        for leak in ["migration.lock", "database_error", "No such file or directory"] {
+            assert!(
+                !refusal.contains(leak),
+                "no raw storage I/O may leak through {args:?} ({leak}): {refusal}"
+            );
+        }
+    }
+
+    let workspace_db =
+        nexus_home_layout::workspace_state_db_path(home.path(), &creator_id, "default");
+    let workspace_dir = workspace_db.parent().expect("workspace dir");
+    assert!(
+        !workspace_dir.exists(),
+        "no reference entrance may materialize a workspace: {}",
+        workspace_dir.display()
+    );
+    assert_eq!(
+        before,
+        home_tree(home.path()),
+        "a refused reference entrance must leave the home byte-identical"
+    );
+}
+
+/// The retained `creator world event-add` narrative writer opens the same
+/// migrating workspace pool, so an anonymous selection must be refused there
+/// too — never materialized, never a raw migration error.
+#[test]
+fn anonymous_selection_is_refused_at_world_event_add() {
+    let home = tempfile::tempdir().expect("temp home");
+    let creator_id = anonymous_home(home.path());
+    warm_home(home.path());
+    let before = home_tree(home.path());
+
+    let refused = assert_cmd::Command::cargo_bin("nexus42")
+        .expect("nexus42 binary")
+        .args([
+            "creator",
+            "world",
+            "event-add",
+            "--world-id",
+            "wld_absent",
+            "--title",
+            "Anon event",
+        ])
+        .env("HOME", home.path())
+        .env("RUST_LOG", "off")
+        .output()
+        .expect("spawn nexus42 world event-add");
+    assert!(
+        !refused.status.success(),
+        "an unmaterialized selection must be refused: {}",
+        stdout(&refused)
+    );
+    assert_eq!(refused.status.code(), Some(1), "{}", stderr(&refused));
+    let refusal = stderr(&refused);
+    assert!(
+        refusal.contains("Creator not selected"),
+        "the declared selection refusal: {refusal}"
+    );
+    for leak in ["migration.lock", "database_error", "No such file or directory"] {
+        assert!(
+            !refusal.contains(leak),
+            "no raw storage I/O may leak ({leak}): {refusal}"
+        );
+    }
+
+    let workspace_db =
+        nexus_home_layout::workspace_state_db_path(home.path(), &creator_id, "default");
+    let workspace_dir = workspace_db.parent().expect("workspace dir");
+    assert!(
+        !workspace_dir.exists(),
+        "`world event-add` may not materialize a workspace: {}",
+        workspace_dir.display()
+    );
+    assert_eq!(
+        before,
+        home_tree(home.path()),
+        "a refused `world event-add` must leave the home byte-identical"
     );
 }

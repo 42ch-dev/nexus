@@ -9,8 +9,15 @@
 //! host-call endpoint and had no complete direct CLI operation. The library
 //! refresh helpers (the reference capability and the execution refresh
 //! schedule) remain the real owners.
+//!
+//! The registry stays on the local store, but its pool open is admitted at the
+//! seam ([`crate::core::require_materialized_workspace`]) first: `Schema::init`
+//! migrates — and therefore creates — the selected workspace, so a selection
+//! that names no materialized workspace is refused instead of having one
+//! created for it.
 
 use crate::config::CliConfig;
+use crate::core::require_materialized_workspace;
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
 use std::path::PathBuf;
@@ -107,7 +114,14 @@ struct RegisterInput {
 }
 
 /// Resolve state.db path and open a pool with migrations.
+///
+/// The seam's admission pre-flight runs before the pool open: this entrance
+/// creates the workspace directory itself and `Schema::init` migrates — and
+/// therefore creates — the selected workspace `state.db`, so a selection that
+/// names no materialized workspace must be refused instead of having one
+/// created for it.
 async fn open_workspace_pool(config: &CliConfig) -> Result<sqlx::SqlitePool> {
+    require_materialized_workspace(config)?;
     let db_path = crate::config::resolve_state_db_path(config)?;
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent)?;
