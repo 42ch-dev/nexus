@@ -19,6 +19,7 @@
 use crate::config::{user_home_dir, CliConfig};
 use crate::errors::{CliError, Result};
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService};
+use nexus_contracts::CoreCloseReport;
 
 /// Open the direct-writer core over the raw user home.
 ///
@@ -318,31 +319,335 @@ fn preset_rejected_code(code: &str) -> &str {
 /// Close `core` and resolve the caller's `outcome` against the close report.
 ///
 /// The close is awaited on BOTH paths: a failed admission or mutation is not a
-/// reason to keep the workspace writer admitted. Precedence:
+/// reason to keep the workspace writer admitted, and the release happens in
+/// this process before the caller can report anything.
 ///
-/// - the operation's own error stays primary — a cleanup failure is reported on
-///   stderr without replacing it;
-/// - success is refused when the close fails or does not confirm
-///   `cleanup_confirmed`, because a command may not report an outcome it could
-///   not settle.
+/// A cleanup that did not settle — a failed close, or a report that does not
+/// confirm `cleanup_confirmed` — is printed on stderr without replacing the
+/// operation's own error; a successful operation is refused instead, because a
+/// command may not report an outcome it could not settle. [`resolve_direct`]
+/// owns that precedence table.
 ///
 /// Callers render only after this returns, so nothing is printed ahead of a
 /// close that failed.
 pub(crate) async fn finish_direct<T>(core: &CoreService, outcome: Result<T>) -> Result<T> {
-    let closed = core.close().await.map_err(map_core_error);
+    let (result, warning) = resolve_direct(outcome, core.close().await.map_err(map_core_error));
+    if let Some(warning) = warning {
+        eprintln!("warning: {warning}");
+    }
+    result
+}
+
+/// Resolve an operation's `outcome` against the result of closing its core.
+///
+/// Returns the command result plus an optional cleanup warning for the caller
+/// to print. One precedence rule orders every combination: the operation's own
+/// error stays primary (cleanup is reported alongside it, never substituted for
+/// it), a close that fails is itself the outcome of a successful operation, and
+/// an incomplete close report never yields success.
+fn resolve_direct<T>(
+    outcome: Result<T>,
+    closed: Result<CoreCloseReport>,
+) -> (Result<T>, Option<String>) {
     match (outcome, closed) {
-        (Ok(value), Ok(report)) if report.cleanup_confirmed => Ok(value),
-        (Ok(_), Ok(report)) => Err(CliError::Other(format!(
-            "direct core close reported incomplete cleanup: pending operations {:?}",
-            report.pending_operations
-        ))),
+        (Ok(value), Ok(report)) if report.cleanup_confirmed => (Ok(value), None),
+        // Success is refused: the report says the core did not settle.
+        (Ok(_), Ok(report)) => (Err(CliError::Other(incomplete_cleanup(&report))), None),
         // A close that fails IS the command's outcome: it cannot claim success.
-        (Ok(_), Err(close_error)) => Err(close_error),
-        (Err(primary), Ok(_)) => Err(primary),
-        // The failed operation stays primary; cleanup failure is reported only.
-        (Err(primary), Err(close_error)) => {
-            eprintln!("warning: direct core cleanup failed: {close_error}");
-            Err(primary)
+        (Ok(_), Err(close_error)) => (Err(close_error), None),
+        (Err(primary), Ok(report)) if report.cleanup_confirmed => (Err(primary), None),
+        // The failed operation stays primary; incomplete cleanup is reported.
+        (Err(primary), Ok(report)) => (Err(primary), Some(incomplete_cleanup(&report))),
+        // Same precedence for a close that failed outright.
+        (Err(primary), Err(close_error)) => (
+            Err(primary),
+            Some(format!("direct core cleanup failed: {close_error}")),
+        ),
+    }
+}
+
+/// The one wording for an incomplete close report, shared by the refusal that
+/// replaces success and the warning that accompanies a failed operation.
+fn incomplete_cleanup(report: &CoreCloseReport) -> String {
+    format!(
+        "direct core close reported incomplete cleanup: pending operations {:?}",
+        report.pending_operations
+    )
+}
+
+/// The close/operation precedence table, without a database.
+#[cfg(test)]
+mod tests {
+    use super::resolve_direct;
+    use crate::errors::CliError;
+    use nexus_contracts::{CoreCloseReport, CoreCloseReportState};
+
+    /// A close report that does not confirm cleanup, naming one pending
+    /// operation so the report is actionable.
+    fn incomplete_report() -> CoreCloseReport {
+        CoreCloseReport {
+            state: CoreCloseReportState::Closed,
+            cleanup_confirmed: false,
+            pending_operations: vec!["flush_outbox".to_string()],
+            reason: None,
         }
+    }
+
+    /// A close report that settled.
+    fn confirmed_report() -> CoreCloseReport {
+        CoreCloseReport {
+            state: CoreCloseReportState::Closed,
+            cleanup_confirmed: true,
+            pending_operations: Vec::new(),
+            reason: None,
+        }
+    }
+
+    fn primary() -> CliError {
+        CliError::Other("primary operation failed".to_string())
+    }
+
+    /// A failed operation stays the primary error, and the cleanup it could not
+    /// settle is still reported (frozen contract §2).
+    #[test]
+    fn incomplete_cleanup_is_reported_without_replacing_the_primary_error() {
+        let (result, warning) = resolve_direct::<u32>(Err(primary()), Ok(incomplete_report()));
+
+        assert_eq!(
+            result
+                .expect_err("the operation error stays primary")
+                .to_string(),
+            "primary operation failed"
+        );
+        let warning = warning.expect("incomplete cleanup is reported");
+        assert!(
+            warning.contains("flush_outbox"),
+            "the report names the pending operation: {warning}"
+        );
+    }
+
+    /// The same precedence when the close itself failed.
+    #[test]
+    fn failed_cleanup_is_reported_without_replacing_the_primary_error() {
+        let (result, warning) = resolve_direct::<u32>(
+            Err(primary()),
+            Err(CliError::Other("pool close failed".to_string())),
+        );
+
+        assert_eq!(
+            result
+                .expect_err("the operation error stays primary")
+                .to_string(),
+            "primary operation failed"
+        );
+        let warning = warning.expect("the failed cleanup is reported");
+        assert!(warning.contains("pool close failed"), "{warning}");
+    }
+
+    /// A successful operation may not report success it could not settle; a
+    /// confirmed close returns the value untouched.
+    #[test]
+    fn an_unsettled_close_refuses_success_that_a_confirmed_close_returns() {
+        let (refused, warning) = resolve_direct(Ok(7_u32), Ok(incomplete_report()));
+        let refused = refused.expect_err("success over an unsettled close is refused");
+        assert!(
+            refused.to_string().contains("flush_outbox"),
+            "the refusal carries the report: {refused}"
+        );
+        assert!(warning.is_none(), "nothing is left to report: {warning:?}");
+
+        let (failed, warning) = resolve_direct::<u32>(
+            Ok(7),
+            Err(CliError::Other("pool close failed".to_string())),
+        );
+        assert_eq!(
+            failed
+                .expect_err("a failed close is the command's outcome")
+                .to_string(),
+            "pool close failed"
+        );
+        assert!(warning.is_none(), "nothing is left to report: {warning:?}");
+
+        let (value, warning) = resolve_direct(Ok(7_u32), Ok(confirmed_report()));
+        assert_eq!(value.expect("a confirmed close returns the value"), 7);
+        assert!(warning.is_none(), "nothing is left to report: {warning:?}");
+    }
+}
+
+/// The direct writer is released **in this process**, before the seam returns.
+///
+/// The CLI journey in `tests/direct_core_lifecycle.rs` observes reopen after a
+/// rejected mutation across process boundaries, where a leaked writer would be
+/// released by process exit anyway. This module closes that gap: it holds the
+/// seam in-process and then asks for the store's exclusive fence, which is
+/// grantable only when no writer this process admitted is still live.
+///
+/// Requires the `legacy-cli` cohort: the direct-writer store stack
+/// (`nexus-local-db`) is what those features link.
+#[cfg(all(test, feature = "legacy-cli"))]
+mod direct_writer_lifetime {
+    use super::{finish_direct, map_core_error};
+    use crate::errors::CliError;
+    use nexus_contracts::world_kb_patch_entity_request::{
+        NexusWorldKbEntityPatch, NexusWorldKbEntityPatchBlockType, NexusWorldKbEntityPatchTitle,
+    };
+    use nexus_contracts::{
+        CoreRegisterCreatorRequest, CreateWorldRequest, SetActiveWorkspaceRequest,
+        WorldKbPatchEntityRequest,
+    };
+    use nexus_core::{CoreAccess, CoreError, CoreHomeService, CoreOpenOptions, CoreService};
+    use nexus_home_layout::{operational_workspace_dir, workspace_state_db_path};
+    use nexus_local_db::writer_protocol::{
+        acquire_store_reset_fence, release_retained_writer_guards,
+    };
+    use std::path::{Path, PathBuf};
+
+    const WORKSPACE_SLUG: &str = "default";
+    const ENTITY_ID: &str = "kb_0f1e2d3c4b5a";
+    const SEEDED_TITLE: &str = "Seeded Hero";
+    const STALE_TITLE: &str = "Stale Overwrite";
+    const REOPENED_TITLE: &str = "Reopened Hero";
+
+    /// An isolated raw home with one selected creator/workspace and no writer
+    /// left in this process: selection retains its own guard, so the seed
+    /// writer is released explicitly rather than left to `Drop`.
+    async fn selected_home() -> (tempfile::TempDir, PathBuf) {
+        let home = tempfile::tempdir().expect("temp home");
+        let user_home = home.path().to_path_buf();
+        let selector = CoreHomeService::open(user_home.clone()).expect("home entry opens");
+
+        let creator = selector
+            .register_creator(CoreRegisterCreatorRequest {
+                display_name: Some("Direct Lifetime Author".parse().expect("valid display name")),
+                platform_creator_id: None,
+            })
+            .await
+            .expect("register creator");
+        let creator_id = creator.creator_id;
+        std::fs::create_dir_all(operational_workspace_dir(
+            &user_home,
+            &creator_id,
+            WORKSPACE_SLUG,
+        ))
+        .expect("materialize workspace dir");
+        selector
+            .select_workspace(SetActiveWorkspaceRequest {
+                creator_id: Some(creator_id.clone()),
+                workspace_slug: WORKSPACE_SLUG.to_string(),
+            })
+            .await
+            .expect("select workspace");
+
+        let db_path = workspace_state_db_path(&user_home, &creator_id, WORKSPACE_SLUG);
+        release_retained_writer_guards(&db_path);
+        (home, db_path)
+    }
+
+    async fn open_writer(user_home: &Path) -> CoreService {
+        CoreService::open(CoreOpenOptions {
+            user_home: user_home.to_path_buf(),
+            access: CoreAccess::DirectWriter,
+        })
+        .await
+        .expect("the direct writer opens on the seeded home")
+    }
+
+    fn patch(expected_version: u64, title: &str) -> WorldKbPatchEntityRequest {
+        WorldKbPatchEntityRequest {
+            entity_id: ENTITY_ID.to_string(),
+            expected_version,
+            patch: NexusWorldKbEntityPatch {
+                title: Some(
+                    NexusWorldKbEntityPatchTitle::try_from(title.to_string())
+                        .expect("valid canonical name"),
+                ),
+                block_type: Some(NexusWorldKbEntityPatchBlockType::Character),
+                ..NexusWorldKbEntityPatch::default()
+            },
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn rejected_mutation_releases_the_direct_writer_in_process() {
+        let (home, db_path) = selected_home().await;
+        let core = open_writer(home.path()).await;
+
+        // Positive control: the probe below observes a live writer, so its
+        // later success cannot be vacuous.
+        assert!(
+            acquire_store_reset_fence(&db_path).is_err(),
+            "a live direct writer refuses the store's exclusive fence"
+        );
+
+        let principal = core.active_principal().await.expect("active principal");
+        let world_id = core
+            .create_world(
+                &principal,
+                serde_json::from_value::<CreateWorldRequest>(
+                    serde_json::json!({ "title": "Direct Lifetime" }),
+                )
+                .expect("world request shape"),
+            )
+            .await
+            .expect("create world")
+            .world_id;
+        let seeded = core
+            .patch_world_kb_entity(&principal, world_id.clone(), patch(0, SEEDED_TITLE))
+            .await
+            .expect("seed entity");
+        assert!(seeded.version > 0, "a created entity settles at a revision");
+
+        // A stale CAS is rejected by the core; the seam must still close.
+        let outcome = core
+            .patch_world_kb_entity(
+                &principal,
+                world_id.clone(),
+                patch(seeded.version - 1, STALE_TITLE),
+            )
+            .await
+            .map_err(map_core_error);
+        let rejected = match finish_direct(&core, outcome).await {
+            Ok(_) => panic!("a stale expected_version is rejected"),
+            Err(error) => error,
+        };
+        assert!(
+            matches!(rejected, CliError::WorldKbConflict { .. }),
+            "the rejected operation stays the primary error: {rejected:?}"
+        );
+        assert!(
+            matches!(core.active_principal().await, Err(CoreError::Closing)),
+            "the core is closed when finish_direct returns"
+        );
+
+        // The observation this module exists for. `close` released the
+        // process-local writer, so dropping the closed service leaves no live
+        // admission on the store and the exclusive fence is granted. A rejected
+        // path that skipped the close would leave the guard retained and keep
+        // this refused — for the life of the process, not just this call.
+        drop(core);
+        let fence = acquire_store_reset_fence(&db_path)
+            .expect("finish_direct released the direct writer in this process");
+        drop(fence);
+
+        // Nothing changed on the rejected path: the next same-process writer
+        // commits the revision the seeded one left behind.
+        let reopened = open_writer(home.path()).await;
+        let principal = reopened.active_principal().await.expect("active principal");
+        let committed = reopened
+            .patch_world_kb_entity(
+                &principal,
+                world_id.clone(),
+                patch(seeded.version, REOPENED_TITLE),
+            )
+            .await
+            .expect("a writer reopens after a rejected mutation");
+        assert_eq!(
+            committed.version,
+            seeded.version + 1,
+            "the reopened writer commits the next revision"
+        );
+        finish_direct(&reopened, Ok(committed))
+            .await
+            .expect("the success path reports the committed outcome");
     }
 }

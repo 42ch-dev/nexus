@@ -8,6 +8,11 @@
 //! `finish_direct` lifetime: a rejected mutation must still close the direct
 //! writer, so the next CLI writer opens and commits instead of finding the
 //! workspace held or the entity half-written.
+//!
+//! Every mutation here runs in its own short-lived child, so process exit would
+//! release a writer the seam forgot to close. The in-process half of the same
+//! contract — the writer is released before `finish_direct` returns — lives in
+//! `src/core.rs` (`direct_writer_lifetime`).
 
 #[path = "common/direct.rs"]
 mod direct;
