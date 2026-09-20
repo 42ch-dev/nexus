@@ -6,6 +6,7 @@
 pub mod cli;
 pub mod commands;
 pub mod config;
+pub(crate) mod core;
 pub mod domain;
 pub mod errors;
 pub mod paths;
