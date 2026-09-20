@@ -209,12 +209,6 @@ pub enum CliError {
         message: String,
     },
 
-    /// v1.185 P3: `creator character run` exit-code contract (run vs capture).
-    CharacterRunExit {
-        code: i32,
-        message: String,
-    },
-
     Other(String),
 }
 
@@ -401,7 +395,7 @@ impl fmt::Display for CliError {
                 )
             }
             Self::Other(msg) => write!(f, "{msg}"),
-            Self::ComputeExit { message, .. } | Self::CharacterRunExit { message, .. } => write!(f, "{message}"),
+            Self::ComputeExit { message, .. } => write!(f, "{message}"),
         }
     }
 }

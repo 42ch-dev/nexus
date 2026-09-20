@@ -702,3 +702,105 @@ async fn v1191_knowledge_fence_stale_revision_retires_the_session() {
         "no provider effect for a retired Actor session"
     );
 }
+
+
+/// Remembered capture is a **durable writer** boundary at the core authority
+/// (v1.193 P0-T11): `remember` is admitted only for an indexed Character
+/// session — a legacy session's request is refused before any provider effect
+/// — and the reserved operation settles its **run** status while the
+/// **capture** half stays `pending` with no fabricated `run_…` id. The core
+/// never claims a capture it did not perform: only a separate durable capture
+/// writer settles that half.
+#[tokio::test]
+async fn remembered_capture_stays_reserved_for_the_durable_capture_writer() {
+    use nexus_contracts::generated::daemon_api::agent_host::character_operation_result::{
+        CharacterOperationResultFinishReason, CharacterOperationResultRunStatus,
+        NexusCharacterRunCaptureOutcomeStatus,
+    };
+
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let port = CountingPort::new();
+    let handle: HostHandle = core.open_host(port.clone()).await.unwrap();
+
+    // A never-indexed (legacy) session can never request a remembered capture,
+    // and the refusal lands before any provider effect.
+    let request = serde_json::from_value::<
+        nexus_contracts::generated::daemon_api::agent_host::ExecuteOperationRequest,
+    >(serde_json::json!({ "kind": "prompt", "content": "hello", "remember": true }))
+    .unwrap();
+    let err = handle
+        .execute(&principal, Uuid::new_v4().to_string(), request)
+        .await
+        .expect_err("remember on a non-Character session must be refused");
+    match &err {
+        CoreError::InvalidInput { field, .. } => assert_eq!(field, "remember"),
+        other => panic!("expected an invalid `remember` refusal, got {other:?}"),
+    }
+    assert_eq!(
+        port.call_count(),
+        0,
+        "the refusal lands before any provider effect"
+    );
+
+    // The reserved Character operation: `remember` reserves a `pending`
+    // capture, the opt-out reserves `disabled`, and the authority-owned drain
+    // settles the run half only — a reserved capture is never rewritten into a
+    // captured status nor given a fabricated pending id.
+    let ctx = admit_character(&core, &principal, &env).await;
+    for (remember, expected) in [
+        (true, NexusCharacterRunCaptureOutcomeStatus::Pending),
+        (false, NexusCharacterRunCaptureOutcomeStatus::Disabled),
+    ] {
+        let operation_id = nexus_agent_host::HostOperationId(Uuid::new_v4());
+        handle
+            .actor_sessions()
+            .reserve_character_operation(&nexus_core::CharacterOperationSnapshot {
+                owner_creator_id: principal.creator_id().to_string(),
+                ctx: ctx.clone(),
+                session_id: nexus_agent_host::HostSessionId(Uuid::new_v4()),
+                operation_id: operation_id.clone(),
+                remember,
+                raw_prompt: "hello".to_string(),
+            })
+            .expect("a Character operation reserves an outcome");
+
+        let running = handle
+            .actor_sessions()
+            .character_operation_result(principal.creator_id(), &operation_id)
+            .expect("the reserved outcome is owner-readable");
+        assert_eq!(
+            running.run_status,
+            CharacterOperationResultRunStatus::Running,
+            "a reserved operation is still running"
+        );
+        assert_eq!(
+            running.capture.status, expected,
+            "remember reserves a pending capture, the opt-out a disabled one"
+        );
+        assert!(
+            running.capture.pending_id.is_none(),
+            "a reserved capture never carries a fabricated pending id"
+        );
+
+        handle.actor_sessions().settle_operation_terminal(
+            &operation_id,
+            CharacterOperationResultRunStatus::Succeeded,
+            Some(CharacterOperationResultFinishReason::EndTurn),
+        );
+        let settled = handle
+            .actor_sessions()
+            .character_operation_result(principal.creator_id(), &operation_id)
+            .expect("the settled outcome stays owner-readable");
+        assert_eq!(
+            settled.run_status,
+            CharacterOperationResultRunStatus::Succeeded,
+            "the authority-owned drain settles the run status"
+        );
+        assert_eq!(
+            settled.capture.status, expected,
+            "the drain never settles the capture half"
+        );
+        assert!(settled.capture.pending_id.is_none());
+    }
+}

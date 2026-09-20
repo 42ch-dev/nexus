@@ -1,18 +1,33 @@
-//! Process-level `nexus42 creator character tom` against a live daemon (v1.184 P4 T3).
+//! Process-level `nexus42 creator character tom` against the direct-core actor
+//! fixture (v1.193 P0-T11).
+//!
+//! The whole journey runs the REAL `nexus42` binary against a hermetic
+//! direct-core home: no daemon fixture, no HTTP client. Worlds, Characters and
+//! their bindings are seeded through the fixture's authorized core writers, the
+//! carrier is authored through the shipped `creator character knowledge add`
+//! verb, and every belief is recorded/read back through the migrated core arms
+//! — carrier admission, the revision CAS and the reviewer's keyset order are
+//! the core's own.
 
-mod common;
+#[path = "common/direct.rs"]
+mod direct;
+#[path = "common/direct_actor.rs"]
+mod direct_actor;
 
-use common::rn_act4::{seed, stderr, stdout};
-use common::LiveDaemon;
-use nexus_contracts::BlockType;
-use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
-use nexus_knowledge::world_kb::store::KbStore;
-use nexus_local_db::kb_store::SqliteKbStore;
-use serde_json::{json, Value};
+use direct_actor::DirectActor;
+use serde_json::Value;
 use std::process::Output;
 
-async fn cli_ok(d: &LiveDaemon, args: &[&str]) -> Output {
-    let out = d.cli(args).await;
+fn stdout(out: &Output) -> String {
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+fn stderr(out: &Output) -> String {
+    String::from_utf8_lossy(&out.stderr).into_owned()
+}
+
+fn cli_ok(actor: &DirectActor, args: &[&str]) -> Output {
+    let out = actor.cli(args);
     assert!(out.status.success(), "cli {args:?}: {}", stderr(&out));
     out
 }
@@ -21,14 +36,31 @@ fn json_out(out: &Output) -> Value {
     serde_json::from_str(&stdout(out)).unwrap_or_else(|_| panic!("json: {}", stdout(out)))
 }
 
-async fn seed_tom_carrier(d: &LiveDaemon, character_id: &str) -> String {
-    let store = SqliteKbStore::new(d.pool.clone());
-    let mut kb =
-        KnowledgeEntryRecord::for_character(character_id, BlockType::Character, "TomCarrierCli");
-    kb.modules = Some(json!({ "belief": [] }));
-    let id = kb.entry_id.clone();
-    store.insert_knowledge_entry(kb).await.unwrap();
-    id
+/// Seed one `character`-owned carrier for `character_id` through the shipped
+/// `creator character knowledge add` authoring verb.
+fn seed_tom_carrier(actor: &DirectActor, character_id: &str) -> String {
+    let out = cli_ok(
+        actor,
+        &[
+            "creator",
+            "character",
+            "knowledge",
+            "add",
+            "--owner",
+            "character",
+            "--character-id",
+            character_id,
+            "--block-type",
+            "character",
+            "--canonical-name",
+            "TomCarrierCli",
+            "--json",
+        ],
+    );
+    json_out(&out)["item"]["entry_id"]
+        .as_str()
+        .expect("created carrier entry_id")
+        .to_string()
 }
 
 #[allow(clippy::too_many_arguments)] // CLI argv mapping
@@ -88,57 +120,60 @@ fn as_strs(v: &[String]) -> Vec<&str> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn character_tom_record_show_json_and_human_parity() {
-    let d = LiveDaemon::start_for_creator(common::rn_act4::FIXTURE_CREATOR, "default").await;
-    let g = seed(&d).await;
-    let carrier = seed_tom_carrier(&d, &g.character_a).await;
+    let actor = DirectActor::new().await;
+    let world_w1 = actor.create_world("RN-ACT-4 World One").await;
+    let character_a = actor.create_character("Ava", &world_w1).await;
+    let character_b = actor.create_character("Ben", &world_w1).await;
+    let carrier = seed_tom_carrier(&actor, &character_a.character_id);
 
+    // L1: the viewer Character's own belief, `--json`, first CAS step.
     let json_args = record_argv(
-        &g.character_a,
-        &g.world_w1,
-        &g.bind_a_w1,
+        &character_a.character_id,
+        &world_w1,
+        &character_a.binding_id,
         &carrier,
-        &g.character_a,
+        &character_a.character_id,
         1,
         0,
         true,
     );
-    let out = cli_ok(&d, &as_strs(&json_args)).await;
+    let out = cli_ok(&actor, &as_strs(&json_args));
     let payload = json_out(&out);
     assert_eq!(payload["revision"], 1);
     assert_eq!(payload["carrier_entry_id"], carrier);
 
+    // L2: a belief about another Character, human output, next CAS step.
     let human_args = record_argv(
-        &g.character_a,
-        &g.world_w1,
-        &g.bind_a_w1,
+        &character_a.character_id,
+        &world_w1,
+        &character_a.binding_id,
         &carrier,
-        &g.character_b,
+        &character_b.character_id,
         2,
         1,
         false,
     );
-    let out = cli_ok(&d, &as_strs(&human_args)).await;
+    let out = cli_ok(&actor, &as_strs(&human_args));
     let human = stdout(&out);
     assert!(human.contains("Recorded ToM belief"));
     assert!(!human.trim_start().starts_with('{'));
 
     let show_json = cli_ok(
-        &d,
+        &actor,
         &[
             "creator",
             "character",
             "tom",
             "show",
             "--character-id",
-            &g.character_a,
+            &character_a.character_id,
             "--world-id",
-            &g.world_w1,
+            &world_w1,
             "--binding-id",
-            &g.bind_a_w1,
+            &character_a.binding_id,
             "--json",
         ],
-    )
-    .await;
+    );
     let page = json_out(&show_json);
     let orders: Vec<i64> = page["items"]
         .as_array()
@@ -149,70 +184,76 @@ async fn character_tom_record_show_json_and_human_parity() {
     assert_eq!(orders, vec![1, 2]);
 
     let show_human = cli_ok(
-        &d,
+        &actor,
         &[
             "creator",
             "character",
             "tom",
             "show",
             "--character-id",
-            &g.character_a,
+            &character_a.character_id,
             "--world-id",
-            &g.world_w1,
+            &world_w1,
             "--binding-id",
-            &g.bind_a_w1,
+            &character_a.binding_id,
         ],
-    )
-    .await;
+    );
     let text = stdout(&show_human);
     assert!(text.contains("## Character ToM — L1"));
     assert!(text.contains("## Character ToM — L2"));
     assert!(text.contains("CLI belief proposition"));
 }
 
+/// Count the stored derivative `MindState` rows on the released workspace DB.
+async fn mind_state_count(actor: &DirectActor) -> i64 {
+    let pool = actor.read_only_pool().await;
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM mind_states")
+        .fetch_one(&pool)
+        .await
+        .expect("count mind_states");
+    pool.close().await;
+    count
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn character_tom_fail_closed_no_mutation() {
-    let d = LiveDaemon::start_for_creator(common::rn_act4::FIXTURE_CREATOR, "default").await;
-    let g = seed(&d).await;
-    let carrier = seed_tom_carrier(&d, &g.character_a).await;
+    let actor = DirectActor::new().await;
+    let world_w1 = actor.create_world("RN-ACT-4 World One").await;
+    let character_a = actor.create_character("Ava", &world_w1).await;
+    let character_b = actor.create_character("Ben", &world_w1).await;
+    let carrier = seed_tom_carrier(&actor, &character_a.character_id);
 
-    let before_ms: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM mind_states")
-        .fetch_one(&d.pool)
-        .await
-        .unwrap();
+    let before_ms = mind_state_count(&actor).await;
 
     let stale = record_argv(
-        &g.character_a,
-        &g.world_w1,
-        &g.bind_a_w1,
+        &character_a.character_id,
+        &world_w1,
+        &character_a.binding_id,
         &carrier,
-        &g.character_a,
+        &character_a.character_id,
         1,
         9,
         false,
     );
-    let out = d.cli(&as_strs(&stale)).await;
+    let out = actor.cli(&as_strs(&stale));
     assert!(!out.status.success(), "stale revision must fail");
 
     let foreign = record_argv(
-        &g.character_a,
-        &g.world_w1,
-        &g.bind_b_w1,
+        &character_a.character_id,
+        &world_w1,
+        &character_b.binding_id,
         &carrier,
-        &g.character_a,
+        &character_a.character_id,
         1,
         0,
         false,
     );
-    let out = d.cli(&as_strs(&foreign)).await;
+    let out = actor.cli(&as_strs(&foreign));
     assert!(!out.status.success(), "foreign binding must fail");
 
-    let after_ms: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM mind_states")
-        .fetch_one(&d.pool)
-        .await
-        .unwrap();
     assert_eq!(
-        before_ms.0, after_ms.0,
+        before_ms,
+        mind_state_count(&actor).await,
         "deny matrix must not insert MindState"
     );
 }

@@ -179,6 +179,22 @@ impl DirectActor {
         self.db_path()
     }
 
+    /// The released workspace `state.db`, opened read-only for stored-row
+    /// assertions.
+    ///
+    /// The handle is a plain read-only pool: a test takes it, asserts, and
+    /// closes it while no CLI child runs, so the next child still admits its
+    /// own writer.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the stored workspace DB cannot be opened read-only.
+    pub async fn read_only_pool(&self) -> sqlx::SqlitePool {
+        nexus_local_db::open_pool_read_only(&self.state_db_path())
+            .await
+            .expect("open fixture state db read-only")
+    }
+
     /// Seed one World-owned `character` `KeyBlock` — the only shape a binding
     /// may link as its WorldSheet (a shared, live, World-owned character
     /// entry) — through the core's own World-KB authoring path.
