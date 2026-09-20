@@ -1,36 +1,37 @@
 //! Structured-rule author surface — `creator world rule add|list|deactivate`
 //! (V1.166 PD-1 / AR-2 / AR-3, DR-64).
 //!
-//! The CLI is the **only** write path for `spoke_rules` rows and the
-//! **CLI-only validation gate** for the AR-2 constraint carrier (fail early:
-//! malformed carriers are rejected at `add` with a message naming the
-//! offending member; the daemon performs no check-time carrier validation).
+//! The leaves run on the typed core World-rule seam
+//! ([`crate::core`]): `create_world_rule` / `list_world_rules` /
+//! `update_world_rule`. The core owns World ownership, the closed four-family
+//! carrier grammar (member-aware `constraint.<member>` errors), the
+//! `rul_<uuid v4 simple>` id minting and the row assembly; this module maps
+//! the flags onto the generated request and renders the response.
 //!
-//! # Spoke vocabulary (verbatim — never nexus-coerced at rest)
+//! # Spoke vocabulary (core-validated)
 //!
-//! `kind` (core `rule` / `prohibition` / `style`), `status` (core `draft` /
-//! `active` / `deprecated`), `severity_hint` (core `info` / `warning` /
-//! `error`) are open strings stored verbatim. `statement` is the **human
-//! summary only** — it is never parsed by the evaluator (PD-1). Machine
-//! evaluation reads `extensions.nexus.constraint` (AR-2 carrier).
+//! `kind` (core `rule` / `prohibition` / `style`) and `severity_hint` (core
+//! `info` / `warning` / `error`) are open, non-empty strings stored verbatim.
+//! `status` is **not** one of them: it is the core's closed `draft` / `active`
+//! / `deprecated` grammar (AR-3), so any other value is refused by the core
+//! instead of being stored. `statement` is the **human summary only** — it is
+//! never parsed by the evaluator (PD-1). Machine evaluation reads
+//! `extensions.nexus.constraint` (AR-2 carrier).
 //!
 //! # Ownership
 //!
-//! Writes (`add` / `deactivate`) gate on `narrative_write::is_world_owned`
-//! (AR-3: the world-command write-guard precedent) — a foreign world is a
-//! named reject, never a silent no-op. `deactivate` adds the per-rule guard:
-//! `set_rule_status`'s `Ok(false)` (unknown id OR foreign rule) becomes a
-//! named reject naming the `rule_id` (PD-1). `deactivate` writes the spoke
-//! vocabulary `status = "deprecated"` — never `inactive`.
+//! `add` and `deactivate` gate on the core's shared world-owner guard: a
+//! foreign or missing World is a named 404/403 refusal, never a silent no-op.
+//! `deactivate` is the core's `status = deprecated` update (PD-1 recovery lock
+//! — no DELETE route, re-activation is a Non-Goal: authors add a new rule).
 
 use crate::config::CliConfig;
+use crate::core::{finish_direct, map_core_error, open_direct_core};
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
-use nexus_local_db::narrative_write::is_world_owned;
-use nexus_local_db::spoke_rules::{
-    insert_rule, list_rules_by_world, set_rule_status, SpokeRuleRow,
-};
-use sqlx::SqlitePool;
+use nexus_contracts::{WorldRuleCreateRequest, WorldRuleResponse, WorldRuleUpdateRequest};
+use nexus_core::{CoreService, Principal};
+use serde_json::{Map, Value};
 
 /// The spoke status written by `rule deactivate` (PD-1: spoke vocabulary —
 /// do **not** invent `inactive`).
@@ -62,11 +63,12 @@ pub enum RuleCommand {
         /// carry no `entry_type` — AR-2).
         #[arg(long)]
         entry_type: Vec<String>,
-        /// Rule status (open string; core: draft / active / deprecated)
+        /// Rule status (the core's closed grammar: `draft` / `active` /
+        /// `deprecated`; any other value is refused, never stored)
         #[arg(long, default_value = "active")]
         status: String,
         /// Structured constraint carrier as a JSON object string (AR-2:
-        /// six closed shapes; validated here, fail early)
+        /// closed shapes; validated member-aware by the core, fail early)
         #[arg(long)]
         constraint: String,
     },
@@ -96,84 +98,108 @@ pub enum RuleCommand {
 
 /// Run a `creator world rule` subcommand.
 ///
-/// Resolves the active workspace pool and creator, then delegates to the
-/// hermetic logic functions below.
+/// Opens the direct-writer core, resolves the admitted principal, and closes
+/// the writer before this command reports — on success and on failure.
 ///
 /// # Errors
 ///
-/// Returns `CliError` if the active creator is unset, the database is
-/// unavailable, the carrier fails AR-2 validation (add), or an ownership /
-/// per-rule guard rejects the write.
-// CLI entry-point runs on a single-threaded tokio runtime — Send not required.
-#[allow(clippy::future_not_send)]
+/// Returns `CliError` when the active creator/workspace is unset, the carrier
+/// fails the core's AR-2 validation (add), or the core refuses the write
+/// (ownership, missing rule, storage).
 pub async fn run(cmd: RuleCommand, config: &CliConfig) -> Result<()> {
-    let creator_id = super::active_creator_id(config)?;
-    let pool = super::open_workspace_pool(config).await?;
-    match cmd {
-        RuleCommand::Add {
-            world_id,
-            name,
-            kind,
-            statement,
-            severity,
-            entry_type,
-            status,
-            constraint,
-        } => {
-            rule_add(
-                &pool,
-                &creator_id,
-                &world_id,
-                &name,
-                &kind,
-                &statement,
-                &severity,
-                &entry_type,
-                &status,
-                &constraint,
-            )
-            .await?;
-            Ok(())
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        match cmd {
+            RuleCommand::Add {
+                world_id,
+                name,
+                kind,
+                statement,
+                severity,
+                entry_type,
+                status,
+                constraint,
+            } => {
+                let rule = rule_add(
+                    &core,
+                    &principal,
+                    &world_id,
+                    &name,
+                    &kind,
+                    &statement,
+                    &severity,
+                    &entry_type,
+                    &status,
+                    &constraint,
+                )
+                .await?;
+                Ok(Some(render_rule_add(&world_id, &rule)))
+            }
+            RuleCommand::List { world_id, json } => {
+                rule_list(&core, &principal, &world_id, json).await
+            }
+            RuleCommand::Deactivate { world_id, rule_id } => {
+                rule_deactivate(&core, &principal, &world_id, &rule_id).await
+            }
         }
-        RuleCommand::List { world_id, json } => rule_list(&pool, &world_id, json).await,
-        RuleCommand::Deactivate { world_id, rule_id } => {
-            rule_deactivate(&pool, &creator_id, &world_id, &rule_id).await
-        }
+    }
+    .await;
+    // The leaves return their report; nothing reaches stdout until the shared
+    // seam released the writer, so a refused or unsettleable write is never
+    // reported as an added/listed/deactivated rule.
+    if let Some(text) = finish_direct(&core, outcome).await? {
+        println!("{text}");
+    }
+    Ok(())
+}
+
+// ── Leaf logic ────────────────────────────────────────────────────────
+//
+// These take the open `&CoreService` plus its admitted `&Principal` so
+// integration tests can drive them against a hermetic direct-core home
+// without re-opening the writer (same seam as `world/kb/service.rs`).
+
+/// Parse the AR-2 `--constraint` argument into the wire carrier map.
+///
+/// Only the shape the generated request requires is checked here — a JSON
+/// **object**. The closed four-family carrier grammar stays owned by the
+/// spoke adapter behind the core seam, so a malformed carrier is still
+/// rejected member-aware (`constraint.<member>`), never by a second parser in
+/// the CLI.
+fn parse_constraint_object(constraint_json: &str) -> Result<Map<String, Value>> {
+    let value: Value = serde_json::from_str(constraint_json)
+        .map_err(|e| CliError::Other(format!("--constraint: invalid JSON: {e}")))?;
+    match value {
+        Value::Object(map) => Ok(map),
+        _ => Err(CliError::Other(
+            "--constraint: constraint must be a JSON object".to_string(),
+        )),
     }
 }
 
-// ── Hermetic logic functions ──────────────────────────────────────────
-//
-// These take an explicit `&SqlitePool` (+ `creator_id` where an owner gate is
-// needed) so integration tests can drive them against a fresh temp DB without
-// touching `$HOME`-resolved paths (same pattern as `world/kb/mod.rs`).
-
-/// `creator world rule add` — create a structured rule row.
+/// `creator world rule add` — create a structured rule through the core.
 ///
-/// Validates the AR-2 carrier (the CLI-only gate, fail early), mints the
-/// `rul_<32-hex>` id (uuid v4 simple) **before** the insert (AR-2), guards
-/// world ownership, and inserts the full row. `extensions_json` is written
-/// fresh as `{"nexus": {"constraint": <carrier verbatim>}}` (rules carry no
-/// other nexus keys today).
+/// The core validates the AR-2 carrier (member-aware, fail early), the
+/// `observer_cardinality` × `--entry-type` pair, the meta-field values and the
+/// AR-1 status set, mints the `rul_<32-hex>` id and inserts the full row.
 ///
-/// Returns the minted `rule_id`. Emits a soft stderr warning when `--status`
-/// is outside the documented core set (draft / active / deprecated) — the
-/// value is still stored verbatim (PD-1, no coercion at rest); the warning
-/// flags the auto-include footgun (S-002).
+/// Returns the created row (the core's own projection); [`render_rule_add`]
+/// renders it for the caller once the writer settled.
 ///
 /// # Errors
 ///
-/// Returns `CliError::Other` naming the offending member for a malformed
-/// `--constraint` (prefixed `--constraint: `), a named reject when the
-/// active creator does not own the world, a reject when `--entry-type` is
-/// combined with an `observer_cardinality` carrier, or a database error.
+/// Returns a named `CliError` for a malformed `--constraint` (invalid JSON or
+/// a non-object root), the core's `invalid input (constraint.<member>)` for a
+/// carrier outside the closed grammar, the core's World-ownership refusal
+/// (403) or a storage error.
 #[allow(clippy::too_many_arguments)]
-// ^ justification: mirrors run_event_add's flat field surface; grouping the
+// ^ justification: mirrors the flat `rule add` flag surface; grouping the
 // ten PD-1 flags into a struct would add indirection for the two callers
 // (CLI + tests).
 pub async fn rule_add(
-    pool: &SqlitePool,
-    creator_id: &str,
+    core: &CoreService,
+    principal: &Principal,
     world_id: &str,
     name: &str,
     kind: &str,
@@ -182,115 +208,91 @@ pub async fn rule_add(
     entry_types: &[String],
     status: &str,
     constraint_json: &str,
-) -> Result<String> {
-    require_owned_world(pool, creator_id, world_id).await?;
+) -> Result<WorldRuleResponse> {
+    let request = WorldRuleCreateRequest {
+        canonical_name: name.to_string(),
+        constraint: parse_constraint_object(constraint_json)?,
+        kind: Some(kind.to_string()),
+        severity_hint: Some(severity.to_string()),
+        statement: statement.to_string(),
+        status: Some(status.to_string()),
+        target_entry_types: entry_types.to_vec(),
+    };
 
-    // AR-2 CLI gate: --constraint must parse as JSON, then as a closed carrier.
-    let carrier: serde_json::Value = serde_json::from_str(constraint_json)
-        .map_err(|e| CliError::Other(format!("--constraint: invalid JSON: {e}")))?;
-    let constraint = nexus_spoke_adapter::constraint::parse_carrier_json(&carrier)
-        .map_err(|e| CliError::Other(format!("--constraint: {e}")))?;
+    core.create_world_rule(principal, world_id.to_string(), request)
+        .await
+        .map_err(map_core_error)
+}
 
-    // AR-2 targeting interplay: observer_cardinality applies to timeline
-    // events (no entry_type) — combining with --entry-type is rejected early,
-    // never silently ignored.
-    if matches!(
-        constraint,
-        nexus_spoke_adapter::constraint::Constraint::ObserverCardinality { .. }
-    ) && !entry_types.is_empty()
-    {
-        return Err(CliError::Other(
-            "--entry-type cannot be combined with an observer_cardinality constraint: \
-             observer_cardinality applies to timeline events, which carry no entry_type"
-                .to_string(),
+/// Render one created rule — the human report `run` prints once the writer
+/// settled.
+fn render_rule_add(world_id: &str, rule: &WorldRuleResponse) -> String {
+    let mut lines = vec![
+        format!("✓ Rule added: {}", rule.rule_id),
+        format!("  World:       {world_id}"),
+        format!("  Name:        {}", rule.canonical_name),
+        format!("  Kind:        {}", rule.kind),
+        format!("  Status:      {}", rule.status.as_deref().unwrap_or("-")),
+        format!(
+            "  Severity:    {}",
+            rule.severity_hint.as_deref().unwrap_or("-")
+        ),
+    ];
+    if !rule.target_entry_types.is_empty() {
+        lines.push(format!(
+            "  Entry types: {}",
+            rule.target_entry_types.join(", ")
         ));
     }
-
-    // AR-2 id minting: rul_ ++ uuid v4 simple (32 hex, no hyphens) — minted in
-    // the CLI before insert_rule (full-row insert).
-    let rule_id = format!("rul_{}", uuid::Uuid::new_v4().simple());
-    let now_epoch = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
-        .unwrap_or_default();
-
-    let row = SpokeRuleRow {
-        rule_id: rule_id.clone(),
-        world_id: world_id.to_string(),
-        schema_version: 1,
-        canonical_name: name.to_string(),
-        kind: kind.to_string(),
-        statement: Some(statement.to_string()),
-        description: None,
-        target_entry_types_json: serde_json::to_string(entry_types)?,
-        severity_hint: Some(severity.to_string()),
-        status: Some(status.to_string()),
-        source_anchor_json: None,
-        // AR-2 CLI row assembly: the namespace is written fresh at create.
-        extensions_json: serde_json::json!({ "nexus": { "constraint": carrier } }).to_string(),
-        created_at: Some(now_epoch),
-        updated_at: Some(now_epoch),
-    };
-    insert_rule(pool, &row)
-        .await
-        .map_err(|e| CliError::Other(format!("Failed to insert rule '{rule_id}': {e}")))?;
-
-    // S-002: `--status` is an open string stored verbatim (PD-1 — never
-    // coerced at rest), but the AR-1 auto-include filter matches exactly
-    // `status == "active"`. Warn when it's outside the documented core set
-    // so a typo'd status doesn't silently create a never-included rule.
-    if !matches!(status, "draft" | "active" | "deprecated") {
-        eprintln!(
-            "Warning: --status {status:?} is outside the documented core set \
-             (draft / active / deprecated) — stored verbatim (PD-1), but the rule \
-             will never auto-include (the AR-1 filter matches exactly 'active')."
-        );
-    }
-
-    println!("✓ Rule added: {rule_id}");
-    println!("  World:       {world_id}");
-    println!("  Name:        {name}");
-    println!("  Kind:        {kind}");
-    println!("  Status:      {status}");
-    println!("  Severity:    {severity}");
-    if !entry_types.is_empty() {
-        println!("  Entry types: {}", entry_types.join(", "));
-    }
-    println!("  Constraint:  {}", constraint.family());
-    Ok(rule_id)
+    lines.push(format!(
+        "  Constraint:  {}",
+        rule.constraint
+            .get("family")
+            .and_then(Value::as_str)
+            .unwrap_or("-")
+    ));
+    lines.join("\n")
 }
 
 /// `creator world rule list` — all rules of a world, **all statuses**
-/// (PD-1 list: `canonical_name ASC, rule_id ASC` at storage — AR-3).
+/// (PD-1 list: store order `canonical_name ASC, rule_id ASC` — AR-3).
 ///
-/// `--json` emits the machine-readable summary array (kb list precedent).
+/// `--json` emits the core's `WorldRulesListResponseRulesItem` array
+/// verbatim; the human table projects the same fields. Returns the report
+/// `run` prints once the writer settled.
 ///
 /// # Errors
 ///
-/// Returns `CliError::Other` if the storage list or JSON serialization fails.
-pub async fn rule_list(pool: &SqlitePool, world_id: &str, json: bool) -> Result<()> {
-    let rows = list_rules_by_world(pool, world_id)
+/// Returns the core's World-ownership refusal (403/404) or a storage error,
+/// or `CliError` if the JSON serialization fails.
+pub async fn rule_list(
+    core: &CoreService,
+    principal: &Principal,
+    world_id: &str,
+    json: bool,
+) -> Result<Option<String>> {
+    let response = core
+        .list_world_rules(principal, world_id.to_string())
         .await
-        .map_err(|e| CliError::Other(format!("Failed to list rules for world {world_id}: {e}")))?;
+        .map_err(map_core_error)?;
 
     if json {
-        let items: Vec<serde_json::Value> = rows.iter().map(rule_summary_json).collect();
-        println!("{}", serde_json::to_string_pretty(&items)?);
-        return Ok(());
+        return Ok(Some(serde_json::to_string_pretty(&response.rules)?));
     }
 
-    if rows.is_empty() {
-        println!("No rules in world {world_id}.");
-        return Ok(());
+    if response.rules.is_empty() {
+        return Ok(Some(format!("No rules in world {world_id}.")));
     }
 
-    println!("Rules in world {world_id}:");
-    println!(
-        "{:<24} {:<28} {:<12} {:<10} {:<10} STATEMENT",
-        "RULE_ID", "NAME", "KIND", "STATUS", "SEVERITY"
-    );
-    for row in &rows {
-        println!(
+    let mut lines = vec![
+        format!("Rules in world {world_id}:"),
+        format!(
+            "{:<24} {:<28} {:<12} {:<10} {:<10} STATEMENT",
+            "RULE_ID", "NAME", "KIND", "STATUS", "SEVERITY"
+        ),
+    ];
+    for row in &response.rules {
+        lines.push(format!(
             "{:<24} {:<28} {:<12} {:<10} {:<10} {}",
             row.rule_id,
             row.canonical_name,
@@ -298,87 +300,47 @@ pub async fn rule_list(pool: &SqlitePool, world_id: &str, json: bool) -> Result<
             row.status.as_deref().unwrap_or("-"),
             row.severity_hint.as_deref().unwrap_or("-"),
             row.statement.as_deref().unwrap_or(""),
-        );
+        ));
     }
-    Ok(())
+    if response.truncated {
+        lines.push("\n(truncated — more rules exist beyond the 500-row safety cap)".to_string());
+    }
+    Ok(Some(lines.join("\n")))
 }
 
 /// `creator world rule deactivate` — set a rule's status to `deprecated`
 /// (spoke vocabulary; PD-1).
 ///
-/// World-ownership is guarded first (`is_world_owned`); `set_rule_status`'s
-/// `Ok(false)` — unknown id OR foreign rule — becomes a **named reject
-/// naming the `rule_id`** (PD-1 foreign-world guard), never a silent no-op.
+/// This is the core's `status = deprecated` update: the World-ownership guard
+/// runs first and a `rule_id` that is unknown **or** belongs to another World
+/// is the core's 404 naming only the id (AR-6) — never a silent no-op.
+/// Returns the report `run` prints once the writer settled.
 ///
 /// # Errors
 ///
-/// Returns `CliError::Other` with a named message on a cross-author world or
-/// an unknown/foreign rule id, or a database error.
+/// Returns the core's named refusal on a cross-author World (403), an
+/// unknown/foreign rule id (404), or a storage error.
 pub async fn rule_deactivate(
-    pool: &SqlitePool,
-    creator_id: &str,
+    core: &CoreService,
+    principal: &Principal,
     world_id: &str,
     rule_id: &str,
-) -> Result<()> {
-    require_owned_world(pool, creator_id, world_id).await?;
+) -> Result<Option<String>> {
+    let request = WorldRuleUpdateRequest {
+        status: Some(DEPRECATED_STATUS.to_string()),
+        ..WorldRuleUpdateRequest::default()
+    };
 
-    let updated = set_rule_status(pool, world_id, rule_id, DEPRECATED_STATUS)
-        .await
-        .map_err(|e| CliError::Other(format!("Failed to deactivate rule '{rule_id}': {e}")))?;
-    if !updated {
-        return Err(CliError::Other(format!(
-            "Rule '{rule_id}' not found in world '{world_id}' \
-             (unknown or foreign rule id). \
-             List rules with: nexus42 creator world rule list --world-id {world_id}"
-        )));
-    }
+    core.update_world_rule(
+        principal,
+        world_id.to_string(),
+        rule_id.to_string(),
+        request,
+    )
+    .await
+    .map_err(map_core_error)?;
 
-    println!("✓ Rule deactivated: {rule_id} (status={DEPRECATED_STATUS})");
-    Ok(())
-}
-
-/// World-command write-guard: the active creator must own the world
-/// (AR-3 via `narrative_write::is_world_owned` — the V1.67 shared admission
-/// gate).
-///
-/// # Errors
-///
-/// Returns a named `CliError::Other` reject when `creator_id` does not own
-/// `world_id` (missing world OR cross-author — the storage gate does not
-/// distinguish; the message names both ids).
-async fn require_owned_world(pool: &SqlitePool, creator_id: &str, world_id: &str) -> Result<()> {
-    let owned = is_world_owned(pool, creator_id, world_id)
-        .await
-        .map_err(|e| CliError::Other(format!("World ownership check failed: {e}")))?;
-    if !owned {
-        return Err(CliError::Other(format!(
-            "Active creator '{creator_id}' does not own world '{world_id}'; \
-             rules can only be authored on worlds the active creator owns"
-        )));
-    }
-    Ok(())
-}
-
-/// Build the JSON summary object for `--json` list output (kb list
-/// precedent): carrier projected first-class, spoke vocabulary verbatim.
-#[must_use]
-pub fn rule_summary_json(row: &SpokeRuleRow) -> serde_json::Value {
-    let constraint = serde_json::from_str::<serde_json::Value>(&row.extensions_json)
-        .ok()
-        .and_then(|v| {
-            v.get("nexus")
-                .and_then(|nexus| nexus.get("constraint"))
-                .cloned()
-        });
-    serde_json::json!({
-        "rule_id": row.rule_id,
-        "canonical_name": row.canonical_name,
-        "kind": row.kind,
-        "status": row.status,
-        "severity_hint": row.severity_hint,
-        "statement": row.statement,
-        "target_entry_types": serde_json::from_str::<Vec<String>>(&row.target_entry_types_json)
-            .unwrap_or_default(),
-        "constraint": constraint,
-    })
+    Ok(Some(format!(
+        "✓ Rule deactivated: {rule_id} (status={DEPRECATED_STATUS})"
+    )))
 }

@@ -16,10 +16,33 @@ use clap::Subcommand;
 
 use crate::api::DaemonClient;
 use crate::config::CliConfig;
+// v1.193 P0-T7: every retained Work arm — selection, pool, inspiration,
+// governance and findings — runs on the typed core seam ([`crate::core`]). The
+// two P2-T1 execution entrances still sitting in this file (`works intake`,
+// `works resume-chain`) keep the daemon transport and construct their own
+// client, so no core-only arm pays for one.
+use crate::core::{finish_direct, map_core_error, open_direct_core};
 // V1.42 P-last (R-V141P0-06): completion-lock file path check
 use nexus_home_layout;
 // V1.49 P2 (R-V147P1-01): intake re-trigger schedules via AddScheduleRequest.
 use nexus_contracts::local::schedule::http::AddScheduleRequest;
+// Schema-owned wire shape for the stale enrichment of `works status --json`
+// (the core report is not a wire type).
+use nexus_contracts::daemon_api::findings::{
+    StaleFindingEntry as StaleFindingWire, StaleFindingsResponse as StaleFindingsWire,
+};
+// Schema-owned wire shapes for the `--json` output of the pool reads; the core
+// carriers are not wire types (they still hold the stored `creator_id`).
+use nexus_contracts::{
+    AppendInspirationRequest, ListWorksQuery, ReleaseCompletionLockRequest,
+    WorkInspirationAddResponse, WorkInspirationListResponse, WorkPoolListResponse,
+};
+use nexus_core::{
+    AddInspirationRequest, ArchiveInspirationRequest, ArchivePoolRequest, CoreService,
+    ListFindingsQuery, ListInspirationQuery, ListPoolQuery, Principal, PromoteInspirationRequest,
+    PromotePoolRequest, ReconcileDryRunQuery, StaleFindingsResponse as CoreStaleFindingsResponse,
+    WorkReconcileReport,
+};
 
 pub mod chronology;
 pub mod cron;
@@ -88,8 +111,11 @@ pub enum WorksCommand {
 
     /// Reopen a completed Work for further writing (V1.45 P2).
     ///
-    /// Patches `novel_completion_status` to `reopened` and clears the
-    /// completion lock. Requires an audited `--reason`.
+    /// Releases the Work's completion lock through the typed core: the DB
+    /// `completion_locked_at` is cleared (SSOT), `novel_completion_status`
+    /// becomes `reopened`, the derived `.completion-lock.json` is removed, and
+    /// the required `--reason` is recorded. A Work that is not
+    /// completion-locked is refused.
     /// Migrated from `creator run resume --reopen`.
     Reopen {
         /// Work ID (wrk_...). Omit to use pool active Work.
@@ -97,9 +123,6 @@ pub enum WorksCommand {
         /// Audit reason for reopening (required, audit-logged)
         #[arg(long)]
         reason: String,
-        /// Extend `total_planned_chapters` when reopening
-        #[arg(long)]
-        extend_chapters: Option<i32>,
         /// Emit machine-readable JSON instead of human text
         #[arg(long, default_value_t = false)]
         json: bool,
@@ -255,9 +278,12 @@ pub enum WorksCommand {
 /// Completion lock subcommands.
 #[derive(Debug, Subcommand)]
 pub enum CompletionLockCommand {
-    /// Release `.completion-lock.json` for a Work.
+    /// Release the Work's completion lock and reopen it for further writing.
     ///
-    /// After release, `creator works reopen --reason "..."` can be used on the Work.
+    /// One core operation: the DB lock is cleared (SSOT),
+    /// `novel_completion_status` becomes `reopened` and the derived
+    /// `.completion-lock.json` is removed. `creator works reopen --reason "…"`
+    /// runs the same release with an explicit audit reason.
     Release {
         /// Work ID (wrk_...) to release the completion lock for
         work_id: String,
@@ -512,44 +538,41 @@ pub enum InspirationAction {
 ///
 /// # Errors
 ///
-/// Returns an error if the daemon API call fails.
+/// Returns the typed core refusal for every retained arm, and the daemon API
+/// error for the two P2-T1 execution entrances (`intake`, `resume-chain`) that
+/// still ride that transport.
 pub async fn handle_works(cmd: WorksCommand, config: &CliConfig) -> Result<()> {
-    let client = crate::api::DaemonClient::from_config(config)?;
-
     match cmd {
-        WorksCommand::List { status, json } => handle_list(&client, status, json).await,
-        WorksCommand::Status { work_id, json } => handle_status(&client, work_id, json).await,
-        WorksCommand::Use { work_id } => handle_use(&client, &work_id).await,
-        WorksCommand::CompletionLock { command } => handle_completion_lock(&client, command).await,
-        WorksCommand::Pool { action } => handle_pool(&client, action).await,
+        WorksCommand::List { status, json } => handle_list(config, status, json).await,
+        WorksCommand::Status { work_id, json } => handle_status(config, work_id, json).await,
+        WorksCommand::Use { work_id } => handle_use(config, &work_id).await,
+        WorksCommand::CompletionLock { command } => handle_completion_lock(config, command).await,
+        WorksCommand::Pool { action } => handle_pool(config, action).await,
         WorksCommand::Inspire {
             work_id,
             note,
             json,
-        } => handle_inspire(&client, work_id, &note, json).await,
+        } => handle_inspire(config, work_id, &note, json).await,
         WorksCommand::Reopen {
             work_id,
             reason,
-            extend_chapters,
             json,
-        } => handle_reopen(&client, work_id, &reason, extend_chapters, json).await,
+        } => handle_reopen(config, work_id, &reason, json).await,
         WorksCommand::ResumeChain { work_id, json } => {
-            handle_resume_chain(&client, work_id, json).await
+            handle_resume_chain(config, work_id, json).await
         }
         WorksCommand::ReconcileChapters {
             work_id,
             dry_run,
             yes,
             json,
-        } => handle_reconcile_chapters(&client, work_id, dry_run, yes, json).await,
-        WorksCommand::Intake { work_id, json } => {
-            handle_intake(&client, config, work_id, json).await
-        }
+        } => handle_reconcile_chapters(config, work_id, dry_run, yes, json).await,
+        WorksCommand::Intake { work_id, json } => handle_intake(config, work_id, json).await,
         WorksCommand::Findings { command } => {
-            super::rules_runtime::handle_findings(&client, command).await
+            super::rules_runtime::handle_findings(config, command).await
         }
         WorksCommand::Rules { command } => {
-            super::rules_runtime::handle_rules(&client, command).await
+            super::rules_runtime::handle_rules(config, command).await
         }
         WorksCommand::Cron { command } => cron::handle_cron(command, config).await,
         WorksCommand::Chronology { command } => {
@@ -571,109 +594,151 @@ pub async fn handle_works(cmd: WorksCommand, config: &CliConfig) -> Result<()> {
     }
 }
 
-async fn handle_list(client: &DaemonClient, status: Option<String>, json: bool) -> Result<()> {
-    // Build query via url::Url to properly encode the status filter value.
-    let base = "/v1/daemon/works";
-    let path = status.as_ref().map_or_else(
-        || base.to_string(),
-        |s| {
-            let mut url = url::Url::parse("http://localhost").expect("valid base");
-            url.set_path(base);
-            url.query_pairs_mut().append_pair("status", s);
-            let q = url.query().unwrap_or("");
-            format!("{base}?{q}")
-        },
-    );
-
-    let resp: serde_json::Value = client.get::<serde_json::Value>(&path).await?;
+/// Handle `creator works list` — the active creator's Works page.
+///
+/// Reads the typed core producer ([`CoreService::list_works`]) with the
+/// retained query defaults: only the `--status` filter is set, so the core's
+/// own cursor/limit/default-sort policy applies unchanged.
+///
+/// # Errors
+///
+/// Returns the typed core refusal (no selected creator/workspace, malformed
+/// status filter, storage failure) and any cleanup refusal from
+/// [`finish_direct`].
+async fn handle_list(config: &CliConfig, status: Option<String>, json: bool) -> Result<()> {
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        core.list_works(
+            &principal,
+            ListWorksQuery {
+                status,
+                ..ListWorksQuery::default()
+            },
+        )
+        .await
+        .map_err(map_core_error)
+    }
+    .await;
+    let resp = finish_direct(&core, outcome).await?;
 
     if json {
         println!("{}", serde_json::to_string_pretty(&resp)?);
+    } else if resp.items.is_empty() {
+        println!("No works found.");
     } else {
-        let works = resp.get("works").and_then(|v| v.as_array());
-        match works {
-            Some(works) if works.is_empty() => {
-                println!("No works found.");
-            }
-            Some(works) => {
-                println!(
-                    "{:<36} {:30} {:12} {:12} LOCK UPDATED",
-                    "WORK_ID", "TITLE", "STATUS", "INTAKE"
-                );
-                for w in works {
-                    let id = w.get("work_id").and_then(|v| v.as_str()).unwrap_or("?");
-                    let title = w.get("title").and_then(|v| v.as_str()).unwrap_or("?");
-                    let ws = w.get("status").and_then(|v| v.as_str()).unwrap_or("?");
-                    let intake = w
-                        .get("intake_status")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("?");
-                    let updated = w.get("updated_at").and_then(|v| v.as_str()).unwrap_or("?");
-                    let locked = w
-                        .get("completion_locked_at")
-                        .and_then(|v| v.as_str())
-                        .is_some();
-                    let lock_icon = if locked { "🔒" } else { " " };
-                    let display_title = truncate_with_ellipsis(title, 28);
-                    println!(
-                        "{id:<36} {display_title:30} {ws:12} {intake:12} {lock_icon}   {updated}"
-                    );
-                }
-                println!("\n{} work(s)", works.len());
-            }
-            None => {
-                println!("No works found.");
-            }
+        println!(
+            "{:<36} {:30} {:12} {:12} LOCK UPDATED",
+            "WORK_ID", "TITLE", "STATUS", "INTAKE"
+        );
+        for w in &resp.items {
+            let id = w.work_id.as_str();
+            let title = w.title.as_str();
+            let ws = w.status.as_str();
+            let intake = w.intake_status.as_str();
+            let updated = w.updated_at.as_str();
+            let lock_icon = if w.completion_locked_at.is_some() {
+                "🔒"
+            } else {
+                " "
+            };
+            let display_title = truncate_with_ellipsis(title, 28);
+            println!("{id:<36} {display_title:30} {ws:12} {intake:12} {lock_icon}   {updated}");
         }
+        println!("\n{} work(s)", resp.items.len());
     }
 
     Ok(())
 }
 
-// Migrated from run.rs — preserved status display logic with DF-60 extensions.
-#[allow(clippy::too_many_lines)]
-async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: bool) -> Result<()> {
-    // Resolve work_id: if omitted, try to get the pool active Work.
-    let resolved_id = if let Some(id) = work_id {
-        id
-    } else {
-        // Try pool active Work endpoint.
-        let resp: serde_json::Value = client
-            .get::<serde_json::Value>("/v1/daemon/works?limit=1&status=active")
-            .await?;
-        resp.get("works")
-            .and_then(|v| v.as_array())
-            .and_then(|arr| arr.first())
-            .and_then(|w| w.get("work_id"))
-            .and_then(|v| v.as_str())
-            .map(String::from)
-            .ok_or_else(|| {
-                crate::errors::CliError::Config(
-                    "No active Work found. Specify <work_id> or run `nexus42 creator works use <work_id>`.".to_string(),
-                )
-            })?
-    };
+/// Resolve the pool `active` Work through the core.
+///
+/// Every arm that accepts an omitted `<work_id>` (status, inspire, reopen,
+/// reconcile-chapters, and the findings/rules leaves in
+/// [`super::rules_runtime`]) resolves it here instead of the daemon round trip
+/// ([`super::work_utils::resolve_active_work_id`], still used by the P2-T1
+/// execution entrances): the same `status=active, limit=1` selection over the
+/// same producer, with the same refusal text.
+///
+/// # Errors
+///
+/// Returns [`crate::errors::CliError::Config`] when the active creator has no
+/// pool `active` entry, and the mapped core error when the bounded query fails.
+pub(crate) async fn active_work_id_core(
+    core: &CoreService,
+    principal: &Principal,
+) -> Result<String> {
+    let page = core
+        .list_works(
+            principal,
+            ListWorksQuery {
+                status: Some("active".to_string()),
+                limit: Some(1),
+                ..ListWorksQuery::default()
+            },
+        )
+        .await
+        .map_err(map_core_error)?;
+    page.items
+        .first()
+        .map(|w| w.work_id.clone())
+        .ok_or_else(|| {
+            crate::errors::CliError::Config(
+                "No active Work found. Specify <work_id> or run \
+             `nexus42 creator works use <work_id>`."
+                    .to_string(),
+            )
+        })
+}
 
-    // R-V139P1-W-3: DaemonClient already enforces DEFAULT_REQUEST_TIMEOUT
-    // (30s) on every request; no unbounded wait is possible.
-    let resp: serde_json::Value = client
-        .get::<serde_json::Value>(&format!("/v1/daemon/works/{resolved_id}"))
-        .await?;
+// Migrated from run.rs — preserved status display logic with DF-60 extensions.
+//
+// v1.193 P0-T7: the Work *and* its findings/stale enrichment come from the
+// typed core (`get_work` plus the findings family, with the active-Work
+// selection resolved by `active_work_id_core`). Every read happens inside the
+// admitted writer, before [`finish_direct`] releases it, so nothing is printed
+// ahead of a settled close. A non-novel `--json` status makes neither read.
+#[allow(clippy::too_many_lines)]
+async fn handle_status(config: &CliConfig, work_id: Option<String>, json: bool) -> Result<()> {
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        let resolved = match work_id {
+            Some(id) => id,
+            None => active_work_id_core(&core, &principal).await?,
+        };
+        let work = core
+            .get_work(&principal, resolved)
+            .await
+            .map_err(map_core_error)?;
+        // Findings/stale enrichment is novel-only (Grill #6/#8; spec §4.1): a
+        // generic work stays findings-free, while the human path renders the
+        // creator-global stale banner for every profile.
+        let novel = work.work_profile.as_deref() == Some("novel");
+        let (open_findings, stale) =
+            fetch_status_enrichment(&core, &principal, &work.work_id, novel, !json).await;
+        Ok((work, open_findings, stale))
+    }
+    .await;
+    let (work, open_findings, stale) = finish_direct(&core, outcome).await?;
+
+    // `WorkDetails` derives `Serialize` as the retained tool/Work wire shape
+    // (it replaced the daemon's field-for-field copy), and every reader below
+    // treats an absent nullable key and an explicit `null` identically.
+    let resolved_id = work.work_id.clone();
+    let resp = serde_json::to_value(&work)?;
 
     if json {
         // V1.46 P0 (T1+T2): novel-only findings enrichment (Grill #6/#8; spec §4.1).
         // Generic / non-novel works stay findings-free (novel-only gate).
         let is_novel =
             resp.get("work_profile").and_then(serde_json::Value::as_str) == Some("novel");
-        let (findings_vec, stale) = if is_novel {
-            // qc3 F-001: run the two independent daemon subcalls (findings +
-            // stale) concurrently via tokio::join! to avoid stacking their
-            // worst-case latencies on the JSON hot path.
-            fetch_novel_findings_and_stale(client, &resolved_id).await
+        let findings = if is_novel {
+            open_findings.as_slice()
         } else {
-            (None, None)
+            None
         };
-        let mut output = enrich_status_json(resp, findings_vec.as_deref(), stale.as_ref());
+        let mut output = enrich_status_json(resp, findings, stale.as_ref());
 
         // V1.51 T-B P0: add lock_holder field (best-effort, reads from filesystem).
         if let Some(lock_holder) = read_lock_holder_json(&output) {
@@ -687,14 +752,11 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
         // V1.39 P4 T3: stale findings banner — best-effort, never
         // fails the status command.
         //
-        // R-V146P0-QC3-S3: route through `fetch_stale_findings` (the shared
-        // short-timeout helper, STALE_FETCH_TIMEOUT = 5s) instead of the raw
-        // `client.get(...)` which inherited the default 30s request timeout.
-        // This restores parity with the JSON status path (qc3 F-002) and
-        // bounds the stale-fetch latency on the human status hot path — the
-        // original qc3 S-003 concern that a degraded stale endpoint could
-        // stall the status command for the full default timeout.
-        if let Some(stale) = fetch_stale_findings(client).await {
+        // R-V146P0-QC3-S3: rendered from the enrichment read taken inside the
+        // admitted writer (`fetch_stale_findings`), so the banner never costs a
+        // second read and a degraded stale read still leaves the status output
+        // intact.
+        if let Some(stale) = stale.as_ref() {
             let stale_count = stale
                 .get("stale_count")
                 .and_then(serde_json::Value::as_u64)
@@ -747,11 +809,8 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
 
             let profile_tag = " (novel)".to_string();
 
-            // V1.43 P2 (T2): fetch open findings summary for spec §4 row 3.
-            // Best-effort — never fails the status command.
-            // Uses a shorter timeout (5s) to avoid blocking the hot path.
-            let open_findings = fetch_open_findings(client, &resolved_id).await;
-
+            // V1.43 P2 (T2): the open-findings summary for spec §4 row 3 comes
+            // from the enrichment read taken inside the admitted writer.
             if work_status == "completed" {
                 let updated_at = resp
                     .get("updated_at")
@@ -868,54 +927,88 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
     Ok(())
 }
 
-async fn handle_use(client: &DaemonClient, work_id: &str) -> Result<()> {
-    // Verify the work exists first.
-    let _work: serde_json::Value = client
-        .get::<serde_json::Value>(&format!("/v1/daemon/works/{work_id}"))
-        .await?;
+/// Handle `creator works use` — set the pool `active` row for a Work (DF-60 §1.1).
+///
+/// The Work is read first so an unknown id is refused before any write (the
+/// retired adapter's GET-then-POST order), then
+/// [`CoreService::select_work`] demotes the current `active` entry and
+/// promotes this one.
+///
+/// # Errors
+///
+/// Returns the typed core refusal (unknown Work, no selected creator/workspace,
+/// storage failure) and any cleanup refusal from [`finish_direct`].
+async fn handle_use(config: &CliConfig, work_id: &str) -> Result<()> {
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        let work = core
+            .get_work(&principal, work_id.to_string())
+            .await
+            .map_err(map_core_error)?;
+        core.select_work(&principal, work_id.to_string())
+            .await
+            .map_err(map_core_error)?;
+        Ok(work)
+    }
+    .await;
+    let work = finish_direct(&core, outcome).await?;
 
-    // Set pool active via the works API. The daemon handler will
-    // demote any current `active` entry and promote this one.
-    let body = serde_json::json!({
-        "action": "set_pool_active",
-        "work_id": work_id,
-    });
-    let resp: serde_json::Value = client
-        .post::<serde_json::Value, _>("/v1/daemon/works/pool", &body)
-        .await?;
-
-    println!(
-        "Active Work set to {work_id} ({})",
-        resp.get("title")
-            .and_then(|v| v.as_str())
-            .unwrap_or("(untitled)")
-    );
+    println!("Active Work set to {work_id} ({})", work.title);
 
     Ok(())
 }
 
 // ── V1.45 P2: atomic Work operations ──────────────────────────────────
 
-// resolve_active_work_id is shared via super::work_utils (QC1 W-3 dedup).
+// resolve_active_work_id is shared via super::work_utils (QC1 W-3 dedup) for the
+// two P2-T1 execution entrances still on the daemon transport; every retained
+// arm resolves through `active_work_id_core` above.
 
-/// Handle `creator works inspire` — POST inspiration note (V1.45 P2).
+/// Handle `creator works inspire` — append an inspiration note to the Work's
+/// own `inspiration_log` (V1.45 P2).
 ///
-/// Pure side-input: appends to the Work's `inspiration_log` without
-/// creating a schedule. Migrated from `creator run continue` (drops `--preset`).
+/// Pure side-input: [`CoreService::append_work_inspiration`] appends to the
+/// Work's `inspiration_log` without creating a schedule, and never touches the
+/// pool-level inspiration store (`works pool inspiration …`, DB SSOT in
+/// `inspiration_items`) — the two stores are distinct. Migrated from
+/// `creator run continue` (drops `--preset`).
+///
+/// # Errors
+///
+/// Returns the typed core refusal (unknown Work, an active auto-chain driver, a
+/// held runtime lock, no selected creator/workspace) and any cleanup refusal
+/// from [`finish_direct`].
 async fn handle_inspire(
-    client: &DaemonClient,
+    config: &CliConfig,
     work_id: Option<String>,
     note: &str,
     json: bool,
 ) -> Result<()> {
-    let resolved_id = super::work_utils::resolve_active_work_id(client, work_id).await?;
-    let body = serde_json::json!({ "note": note });
-    let resp: serde_json::Value = client
-        .post::<serde_json::Value, _>(
-            &format!("/v1/daemon/works/{resolved_id}/inspiration"),
-            &body,
-        )
-        .await?;
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        let resolved_id = match work_id {
+            Some(id) => id,
+            None => active_work_id_core(&core, &principal).await?,
+        };
+        let resp = core
+            .append_work_inspiration(
+                &principal,
+                resolved_id.clone(),
+                // `cli:<kind>:<uuid>` runtime-lock holder; the daemon adapter
+                // passed `http` for its own surface.
+                "inspire",
+                AppendInspirationRequest {
+                    note: note.to_string(),
+                },
+            )
+            .await
+            .map_err(map_core_error)?;
+        Ok((resolved_id, resp))
+    }
+    .await;
+    let (resolved_id, resp) = finish_direct(&core, outcome).await?;
 
     if json {
         println!("{}", serde_json::to_string_pretty(&resp)?);
@@ -928,14 +1021,30 @@ async fn handle_inspire(
 
 /// Handle `creator works reopen` — reopen a completed Work (V1.45 P2).
 ///
-/// Patches `novel_completion_status` to `reopened` and clears
-/// `completion_locked_at`. Requires an audited `--reason`.
+/// Runs the core's completion-lock release
+/// ([`CoreService::release_work_completion_lock`]): the DB
+/// `completion_locked_at` is cleared (SSOT), `novel_completion_status` becomes
+/// `reopened`, the derived `.completion-lock.json` is removed, and the required
+/// `--reason` is recorded. The core refuses a Work that is not
+/// completion-locked (`not_locked`) instead of accepting a no-op patch.
 /// Migrated from `creator run resume --reopen`.
+///
+/// The retired `--extend-chapters` flag is gone with the transport it rode: no
+/// retained request carries `total_planned_chapters` (neither the core
+/// [`WorkPatchRequest`] nor [`ReleaseCompletionLockRequest`]), and the daemon's
+/// own `PatchWorkRequest` had no such field, so the flag never reached a
+/// writer.
+///
+/// # Errors
+///
+/// Returns [`crate::errors::CliError::Config`] for an over-long or
+/// control-character `--reason`, and the typed core refusal (unknown Work, a
+/// Work that is not completion-locked, no selected creator/workspace, a held
+/// runtime lock).
 async fn handle_reopen(
-    client: &DaemonClient,
+    config: &CliConfig,
     work_id: Option<String>,
     reason: &str,
-    extend_chapters: Option<i32>,
     json: bool,
 ) -> Result<()> {
     // W-5: Cap and sanitize reason
@@ -951,35 +1060,32 @@ async fn handle_reopen(
         ));
     }
 
-    let resolved_id = super::work_utils::resolve_active_work_id(client, work_id).await?;
-
-    let mut patch = serde_json::json!({
-        "novel_completion_status": "reopened",
-        "completion_locked_at": null,
-    });
-    if let Some(ext) = extend_chapters {
-        if let Some(o) = patch.as_object_mut() {
-            o.insert(
-                "total_planned_chapters".to_string(),
-                serde_json::Value::Number(ext.into()),
-            );
-        }
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        let resolved_id = match work_id {
+            Some(id) => id,
+            None => active_work_id_core(&core, &principal).await?,
+        };
+        let work = core
+            .release_work_completion_lock(
+                &principal,
+                resolved_id.clone(),
+                ReleaseCompletionLockRequest {
+                    reason: reason.to_string(),
+                },
+            )
+            .await
+            .map_err(map_core_error)?;
+        Ok((resolved_id, work))
     }
-
-    let resp: serde_json::Value = client
-        .patch::<serde_json::Value, _>(&format!("/v1/daemon/works/{resolved_id}"), &patch)
-        .await?;
+    .await;
+    let (resolved_id, work) = finish_direct(&core, outcome).await?;
 
     if json {
-        println!("{}", serde_json::to_string_pretty(&resp)?);
+        println!("{}", serde_json::to_string_pretty(&work)?);
     } else {
-        let ext_msg = extend_chapters
-            .map(|n| format!(" (chapters extended to {n})"))
-            .unwrap_or_default();
-        println!(
-            "Work {resolved_id} reopened for further writing.{ext_msg}\n\
-             Reason: {reason}"
-        );
+        println!("Work {resolved_id} reopened for further writing.\nReason: {reason}");
     }
 
     Ok(())
@@ -989,12 +1095,17 @@ async fn handle_reopen(
 ///
 /// Clears `auto_chain_interrupted` so the daemon re-evaluates the next step.
 /// Migrated from `creator run resume` (no reopen).
+///
+/// P2-T1 removes this entrance with the rest of the Runner surface; until then
+/// it keeps the daemon transport and builds its own client, so the core-only
+/// arms above never pay for one.
 async fn handle_resume_chain(
-    client: &DaemonClient,
+    config: &CliConfig,
     work_id: Option<String>,
     json: bool,
 ) -> Result<()> {
-    let resolved_id = super::work_utils::resolve_active_work_id(client, work_id).await?;
+    let client = DaemonClient::from_config(config)?;
+    let resolved_id = super::work_utils::resolve_active_work_id(&client, work_id).await?;
 
     let patch = serde_json::json!({
         "auto_chain_interrupted": false,
@@ -1051,94 +1162,155 @@ async fn handle_resume_chain(
 ///   when stdin is not a TTY, require `--yes` (error otherwise) so scripted
 ///   use cannot accidentally mutate without consent.
 ///
-/// The daemon handler threads `dry_run` as a query parameter; the mutating
-/// path is unchanged when `--dry-run` is absent.
+/// The core takes `dry_run` in its own request and skips the runtime lock and
+/// every filesystem/DB write when it is set; the mutating path is unchanged
+/// when `--dry-run` is absent.
 ///
 /// # Errors
 ///
-/// Returns [`crate::errors::CliError`] on daemon API failure, work
+/// Returns [`crate::errors::CliError`] on the typed core refusal, work
 /// resolution failure, or non-interactive use without `--yes`.
 async fn handle_reconcile_chapters(
-    client: &DaemonClient,
+    config: &CliConfig,
     work_id: Option<String>,
     dry_run: bool,
     yes: bool,
     json: bool,
 ) -> Result<()> {
-    let resolved_id = super::work_utils::resolve_active_work_id(client, work_id).await?;
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        let resolved_id = match work_id {
+            Some(id) => id,
+            None => active_work_id_core(&core, &principal).await?,
+        };
 
-    // `--dry-run`: preview only, never write, never prompt.
-    if dry_run {
-        // Thread dry_run as a query param; the daemon skips the runtime lock
-        // and all filesystem/DB writes (overlay §8.2).
-        let path = format!("/v1/daemon/works/{resolved_id}/reconcile-chapters?dry_run=true");
-        let report: serde_json::Value = client.post(&path, &serde_json::json!({})).await?;
-        if json {
-            println!("{}", serde_json::to_string_pretty(&report)?);
-        } else {
-            print_reconcile_report(&resolved_id, &report, true);
+        // `--dry-run`: preview only, never write, never prompt. The core
+        // computes the report without the runtime lock and without any
+        // filesystem/DB write (overlay §8.2).
+        if dry_run {
+            let report = reconcile(&core, &principal, &resolved_id, true).await?;
+            return Ok((resolved_id, ReconcileOutcome::Reconciled(report, true)));
         }
-        return Ok(());
+
+        // Mutating path: confirm unless `--yes` (mirror `works rules reset`).
+        if !yes {
+            if json {
+                // Machine-readable mode cannot host an interactive prompt;
+                // report that confirmation is required and write nothing.
+                return Ok((
+                    resolved_id.clone(),
+                    ReconcileOutcome::ConfirmationRequired(serde_json::json!({
+                        "work_id": resolved_id,
+                        "reconciled": false,
+                        "confirmation_required": true,
+                        "hint": "pass --yes to proceed non-interactively, or --dry-run to preview",
+                    })),
+                ));
+            }
+            if !confirm_reconcile_interactive(&resolved_id)? {
+                return Ok((resolved_id, ReconcileOutcome::Declined));
+            }
+        }
+
+        let report = reconcile(&core, &principal, &resolved_id, false).await?;
+        Ok((resolved_id, ReconcileOutcome::Reconciled(report, false)))
     }
+    .await;
+    let (resolved_id, outcome) = finish_direct(&core, outcome).await?;
 
-    // Mutating path: confirm unless `--yes` (mirror `works rules reset`).
-    if !yes {
-        if json {
-            // Machine-readable mode cannot host an interactive prompt; report
-            // that confirmation is required and exit without writing.
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&serde_json::json!({
-                    "work_id": resolved_id,
-                    "reconciled": false,
-                    "confirmation_required": true,
-                    "hint": "pass --yes to proceed non-interactively, or --dry-run to preview",
-                }))
-                .unwrap_or_default()
-            );
-            return Ok(());
+    match outcome {
+        ReconcileOutcome::ConfirmationRequired(body) => {
+            println!("{}", serde_json::to_string_pretty(&body)?);
         }
-        if !confirm_reconcile_interactive(&resolved_id)? {
+        ReconcileOutcome::Declined => {
             println!("• Reconcile declined; work_chapters left unchanged.");
-            return Ok(());
         }
-    }
-
-    let report: serde_json::Value = client
-        .post(
-            &format!("/v1/daemon/works/{resolved_id}/reconcile-chapters"),
-            &serde_json::json!({}),
-        )
-        .await?;
-
-    if json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
-    } else {
-        print_reconcile_report(&resolved_id, &report, false);
+        ReconcileOutcome::Reconciled(report, is_dry_run) => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&reconcile_report_wire(&report))?
+                );
+            } else {
+                print_reconcile_report(&resolved_id, &report, is_dry_run);
+            }
+        }
     }
 
     Ok(())
 }
 
+/// What a `works reconcile-chapters` invocation decided, once its flags were
+/// read inside the admitted writer.
+///
+/// The CLI renders every arm **after** [`finish_direct`] settles the writer, so
+/// the decision travels out of the block instead of printing inside it.
+enum ReconcileOutcome {
+    /// `--json` without `--yes`: a machine consumer cannot confirm, so nothing
+    /// was written and the body reports that confirmation is required.
+    ConfirmationRequired(serde_json::Value),
+    /// The interactive prompt was declined: nothing was written.
+    Declined,
+    /// A reconcile was previewed (`--dry-run`) or applied; `true` labels the
+    /// human report as a dry run.
+    Reconciled(WorkReconcileReport, bool),
+}
+
+/// Run the core reconcile for one Work.
+///
+/// [`CoreService::reconcile_work_chapters`] owns the existence check, the
+/// runtime lock (mutating path only) and the report; `holder_kind` labels the
+/// minted `cli:<kind>:<uuid>` lock holder, exactly as the daemon adapter passed
+/// its own `http`.
+///
+/// # Errors
+///
+/// Returns the mapped core error (unknown Work, a held runtime lock, storage
+/// failure).
+async fn reconcile(
+    core: &CoreService,
+    principal: &Principal,
+    work_id: &str,
+    dry_run: bool,
+) -> Result<WorkReconcileReport> {
+    core.reconcile_work_chapters(
+        principal,
+        work_id.to_string(),
+        "reconcile",
+        ReconcileDryRunQuery {
+            dry_run: Some(dry_run),
+        },
+    )
+    .await
+    .map_err(map_core_error)
+}
+
+/// Project the core reconcile report onto the retained wire shape.
+///
+/// `nexus_local_db::work_chapters::ReconcileReport` is what the daemon route
+/// returned verbatim; the direct-core `--json` output keeps those field names
+/// and types.
+fn reconcile_report_wire(
+    report: &WorkReconcileReport,
+) -> nexus_local_db::work_chapters::ReconcileReport {
+    nexus_local_db::work_chapters::ReconcileReport {
+        created: report.created,
+        updated: report.updated,
+        resynced: report.resynced,
+        preserved: report.preserved,
+    }
+}
+
 /// Render a `ReconcileReport` (created / updated / resynced / preserved) for
 /// the human path. `is_dry_run` toggles the leading label.
-fn print_reconcile_report(resolved_id: &str, report: &serde_json::Value, is_dry_run: bool) {
-    let created = report
-        .get("created")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0);
-    let updated = report
-        .get("updated")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0);
-    let resynced = report
-        .get("resynced")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0);
-    let preserved = report
-        .get("preserved")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0);
+fn print_reconcile_report(resolved_id: &str, report: &WorkReconcileReport, is_dry_run: bool) {
+    let WorkReconcileReport {
+        created,
+        updated,
+        resynced,
+        preserved,
+    } = *report;
     let label = if is_dry_run {
         "Dry run — no files modified. Reconcile preview"
     } else {
@@ -1198,13 +1370,13 @@ fn confirm_reconcile_interactive(resolved_id: &str) -> Result<bool> {
 ///
 /// Returns [`crate::errors::CliError`] when no active creator is selected, the
 /// Work cannot be resolved, or the daemon schedule-add call fails.
-async fn handle_intake(
-    client: &DaemonClient,
-    config: &CliConfig,
-    work_id: Option<String>,
-    json: bool,
-) -> Result<()> {
-    let resolved_id = super::work_utils::resolve_active_work_id(client, work_id).await?;
+///
+/// P2-T1 removes this entrance with the rest of the Runner surface; until then
+/// it keeps the daemon transport and builds its own client, so the core-only
+/// arms above never pay for one.
+async fn handle_intake(config: &CliConfig, work_id: Option<String>, json: bool) -> Result<()> {
+    let client = DaemonClient::from_config(config)?;
+    let resolved_id = super::work_utils::resolve_active_work_id(&client, work_id).await?;
 
     // resolve_active_work_id passes an explicit id through without an existence
     // check; GET the Work so a nonexistent work_id surfaces a clear error
@@ -1261,28 +1433,50 @@ async fn handle_intake(
     Ok(())
 }
 
-async fn handle_completion_lock(client: &DaemonClient, cmd: CompletionLockCommand) -> Result<()> {
+/// Audit reason recorded when `completion-lock release` performs the release:
+/// the verb carries no `--reason` of its own, so the audit entry names the
+/// command that released the lock. `works reopen --reason "…"` runs the same
+/// producer with the caller's own text.
+const COMPLETION_LOCK_RELEASE_REASON: &str =
+    "released via `nexus42 creator works completion-lock release`";
+
+/// Handle `creator works completion-lock`.
+///
+/// `release` runs the core's completion-lock release
+/// ([`CoreService::release_work_completion_lock`]) — the single typed producer
+/// for this governance action. It clears the DB `completion_locked_at` (SSOT),
+/// sets `novel_completion_status = reopened` and deletes the derived
+/// `.completion-lock.json`, so the Work is immediately writable again; the
+/// core refuses a Work that is not completion-locked.
+///
+/// # Errors
+///
+/// Returns the typed core refusal (unknown Work, a Work that is not
+/// completion-locked, no selected creator/workspace, storage failure) and any
+/// cleanup refusal from [`finish_direct`].
+async fn handle_completion_lock(config: &CliConfig, cmd: CompletionLockCommand) -> Result<()> {
     match cmd {
         CompletionLockCommand::Release { work_id, json } => {
-            let body = serde_json::json!({
-                "action": "release_completion_lock",
-                "work_id": work_id,
-            });
-            let resp: serde_json::Value = client
-                .post::<serde_json::Value, _>(
-                    &format!("/v1/daemon/works/{work_id}/completion-lock/release"),
-                    &body,
+            let core = open_direct_core(config).await?;
+            let outcome = async {
+                let principal = core.active_principal().await.map_err(map_core_error)?;
+                core.release_work_completion_lock(
+                    &principal,
+                    work_id.clone(),
+                    ReleaseCompletionLockRequest {
+                        reason: COMPLETION_LOCK_RELEASE_REASON.to_string(),
+                    },
                 )
-                .await?;
+                .await
+                .map_err(map_core_error)
+            }
+            .await;
+            let work = finish_direct(&core, outcome).await?;
 
             if json {
-                println!("{}", serde_json::to_string_pretty(&resp)?);
+                println!("{}", serde_json::to_string_pretty(&work)?);
             } else {
                 println!("Completion lock released for Work {work_id}.");
-                // V1.45 P2: hint updated from `run resume --reopen` to `works reopen`.
-                println!(
-                    "You can now use `nexus42 creator works reopen {work_id} --reason \"...\"`"
-                );
             }
         }
     }
@@ -1292,355 +1486,523 @@ async fn handle_completion_lock(client: &DaemonClient, cmd: CompletionLockComman
 
 // ── Selection pool handlers (DF-61) ────────────────────────────────────
 
-async fn handle_pool(client: &DaemonClient, action: PoolAction) -> Result<()> {
-    match action {
-        PoolAction::List { status, json } => handle_pool_list(client, status, json).await,
-        PoolAction::Promote {
-            work_id,
-            set_default,
-        } => handle_pool_promote(client, &work_id, set_default).await,
-        PoolAction::Archive { entry_id } => handle_pool_archive(client, &entry_id).await,
-        PoolAction::Inspiration { action } => handle_inspiration(client, action).await,
-    }
-}
-
-async fn handle_pool_list(client: &DaemonClient, status: Option<String>, json: bool) -> Result<()> {
-    let base = "/v1/daemon/works/pool";
-    let path = status.as_ref().map_or_else(
-        || base.to_string(),
-        |s| {
-            let mut url = url::Url::parse("http://localhost").expect("valid base");
-            url.set_path(base);
-            url.query_pairs_mut().append_pair("status", s);
-            let q = url.query().unwrap_or("");
-            format!("{base}?{q}")
-        },
-    );
-
-    let resp: serde_json::Value = client.get::<serde_json::Value>(&path).await?;
-
-    if json {
-        println!("{}", serde_json::to_string_pretty(&resp)?);
-    } else {
-        let entries = resp.get("entries").and_then(|v| v.as_array());
-        match entries {
-            Some(entries) if entries.is_empty() => {
-                println!("No pool entries found.");
+/// Handle `creator works pool` — the selection pool and the pool-level
+/// inspiration store, each on its own typed core producer.
+///
+/// The four pool-inspiration methods
+/// ([`CoreService::add_work_inspiration`], `list_work_inspiration`,
+/// `promote_work_inspiration`, `archive_work_inspiration`) address the
+/// `inspiration_items` store and are distinct from the per-Work
+/// `works.inspiration_log` that [`handle_inspire`] appends to through
+/// [`CoreService::append_work_inspiration`]. The promotion itself stays the
+/// core's single atomic transaction (Work create + pool promote + item
+/// update) — this module never splits it into separate writes.
+///
+/// # Errors
+///
+/// Returns the typed core refusal (unknown Work/entry/item, an item that is
+/// not `idea`, a cross-creator item, no selected creator/workspace) and any
+/// cleanup refusal from [`finish_direct`].
+async fn handle_pool(config: &CliConfig, action: PoolAction) -> Result<()> {
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        match action {
+            PoolAction::List { status, json } => {
+                handle_pool_list(&core, &principal, status, json).await
             }
-            Some(entries) => {
-                println!(
-                    "{:<36} {:36} {:12} {:30} PROMOTED",
-                    "ENTRY_ID", "WORK_ID", "STATUS", "TITLE"
-                );
-                for e in entries {
-                    let eid = e.get("entry_id").and_then(|v| v.as_str()).unwrap_or("?");
-                    let wid = e
-                        .get("work_id")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("(none)");
-                    let st = e.get("status").and_then(|v| v.as_str()).unwrap_or("?");
-                    let title = e.get("title").and_then(|v| v.as_str()).unwrap_or("?");
-                    let promoted = e.get("promoted_at").and_then(|v| v.as_str()).unwrap_or("-");
-                    let display_title = truncate_with_ellipsis(title, 28);
-                    println!("{eid:<36} {wid:<36} {st:<12} {display_title:<30} {promoted}");
-                }
-                println!("\n{} pool entry/entries", entries.len());
+            PoolAction::Promote {
+                work_id,
+                set_default,
+            } => handle_pool_promote(&core, &principal, &work_id, set_default).await,
+            PoolAction::Archive { entry_id } => {
+                handle_pool_archive(&core, &principal, &entry_id).await
             }
-            None => {
-                println!("No pool entries found.");
+            PoolAction::Inspiration { action } => {
+                handle_inspiration(&core, &principal, action).await
             }
         }
     }
-
+    .await;
+    // The leaves return their report; nothing reaches stdout until the shared
+    // seam released the writer, so a promoted/archived entry is never reported
+    // ahead of a close that did not settle.
+    if let Some(text) = finish_direct(&core, outcome).await? {
+        println!("{text}");
+    }
     Ok(())
+}
+
+async fn handle_pool_list(
+    core: &CoreService,
+    principal: &Principal,
+    status: Option<String>,
+    json: bool,
+) -> Result<Option<String>> {
+    let resp = core
+        .list_work_pool(
+            principal,
+            ListPoolQuery {
+                status,
+                limit: None,
+                offset: None,
+            },
+        )
+        .await
+        .map_err(map_core_error)?;
+
+    if json {
+        let entries: Vec<PoolListEntry> = resp.entries.into_iter().map(pool_entry_wire).collect();
+        let wire = WorkPoolListResponse {
+            entries,
+            total: u64::from(resp.total),
+            limit: u64::from(resp.limit),
+            offset: u64::from(resp.offset),
+        };
+        return Ok(Some(serde_json::to_string_pretty(&wire)?));
+    }
+    if resp.entries.is_empty() {
+        return Ok(Some("No pool entries found.".to_string()));
+    }
+    let mut lines = vec![format!(
+        "{:<36} {:36} {:12} {:30} PROMOTED",
+        "ENTRY_ID", "WORK_ID", "STATUS", "TITLE"
+    )];
+    for e in &resp.entries {
+        let eid = e.entry_id.as_str();
+        let wid = if e.work_id.is_empty() {
+            "(none)"
+        } else {
+            e.work_id.as_str()
+        };
+        let st = e.status.as_str();
+        let title = e.title.as_str();
+        let promoted = e.promoted_at.as_str();
+        let display_title = truncate_with_ellipsis(title, 28);
+        lines.push(format!(
+            "{eid:<36} {wid:<36} {st:<12} {display_title:<30} {promoted}"
+        ));
+    }
+    lines.push(format!("\n{} pool entry/entries", resp.entries.len()));
+    Ok(Some(lines.join("\n")))
 }
 
 async fn handle_pool_promote(
-    client: &DaemonClient,
+    core: &CoreService,
+    principal: &Principal,
     work_id: &str,
     set_default: bool,
-) -> Result<()> {
-    let body = serde_json::json!({
-        "work_id": work_id,
-        "set_default": set_default,
-    });
-    let resp: serde_json::Value = client
-        .post::<serde_json::Value, _>("/v1/daemon/works/pool/promote", &body)
-        .await?;
+) -> Result<Option<String>> {
+    let entry = core
+        .promote_work_pool_entry(
+            principal,
+            PromotePoolRequest {
+                work_id: work_id.to_string(),
+                set_default: Some(set_default),
+            },
+        )
+        .await
+        .map_err(map_core_error)?;
 
-    let entry_id = resp.get("entry_id").and_then(|v| v.as_str()).unwrap_or("?");
-    println!("Promoted {work_id} to active (entry {entry_id})");
+    let mut lines = vec![format!(
+        "Promoted {work_id} to active (entry {})",
+        entry.entry_id
+    )];
 
     if set_default {
-        // T5: also wire as CLI default via `works use`
-        let use_body = serde_json::json!({
-            "action": "set_pool_active",
-            "work_id": work_id,
-        });
-        let _use_resp: serde_json::Value = client
-            .post::<serde_json::Value, _>("/v1/daemon/works/pool", &use_body)
-            .await?;
-        println!("Also set as CLI default work.");
+        // `works use` semantics: the pool `active` row is the CLI default. The
+        // retired adapter issued this selection as a second control request;
+        // the core promotes to `active` on both paths.
+        core.select_work(principal, work_id.to_string())
+            .await
+            .map_err(map_core_error)?;
+        lines.push("Also set as CLI default work.".to_string());
     }
 
-    Ok(())
+    Ok(Some(lines.join("\n")))
 }
 
-async fn handle_pool_archive(client: &DaemonClient, entry_id: &str) -> Result<()> {
-    let body = serde_json::json!({ "entry_id": entry_id });
-    let resp: serde_json::Value = client
-        .post::<serde_json::Value, _>("/v1/daemon/works/pool/archive", &body)
-        .await?;
+async fn handle_pool_archive(
+    core: &CoreService,
+    principal: &Principal,
+    entry_id: &str,
+) -> Result<Option<String>> {
+    let entry = core
+        .archive_work_pool_entry(
+            principal,
+            ArchivePoolRequest {
+                entry_id: entry_id.to_string(),
+            },
+        )
+        .await
+        .map_err(map_core_error)?;
 
-    let status = resp
-        .get("status")
-        .and_then(|v| v.as_str())
-        .unwrap_or("archived");
-    println!("Entry {entry_id} → {status}");
-
-    Ok(())
+    Ok(Some(format!("Entry {entry_id} → {}", entry.status)))
 }
 
 // ── Inspiration pool handlers (DF-61 §4) ───────────────────────────────
 
-async fn handle_inspiration(client: &DaemonClient, action: InspirationAction) -> Result<()> {
+async fn handle_inspiration(
+    core: &CoreService,
+    principal: &Principal,
+    action: InspirationAction,
+) -> Result<Option<String>> {
     match action {
         InspirationAction::Add { title, json } => {
-            handle_inspiration_add(client, &title, json).await
+            handle_inspiration_add(core, principal, &title, json).await
         }
         InspirationAction::List { status, json } => {
-            handle_inspiration_list(client, status, json).await
+            handle_inspiration_list(core, principal, status, json).await
         }
         InspirationAction::Promote {
             item_id,
             idea,
             set_default,
-        } => handle_inspiration_promote(client, &item_id, idea, set_default).await,
+        } => handle_inspiration_promote(core, principal, &item_id, idea, set_default).await,
         InspirationAction::Archive { item_id } => {
-            handle_inspiration_archive(client, &item_id).await
+            handle_inspiration_archive(core, principal, &item_id).await
         }
     }
 }
 
-async fn handle_inspiration_add(client: &DaemonClient, title: &str, json: bool) -> Result<()> {
-    let body = serde_json::json!({ "title": title });
-    let resp: serde_json::Value = client
-        .post::<serde_json::Value, _>("/v1/daemon/works/pool/inspiration", &body)
-        .await?;
+async fn handle_inspiration_add(
+    core: &CoreService,
+    principal: &Principal,
+    title: &str,
+    json: bool,
+) -> Result<Option<String>> {
+    let added = core
+        .add_work_inspiration(
+            principal,
+            AddInspirationRequest {
+                title: title.to_string(),
+            },
+        )
+        .await
+        .map_err(map_core_error)?;
 
-    if json {
-        println!("{}", serde_json::to_string_pretty(&resp)?);
+    Ok(Some(if json {
+        let wire = WorkInspirationAddResponse {
+            item_id: added.item_id,
+            rel_path: added.rel_path,
+        };
+        serde_json::to_string_pretty(&wire)?
     } else {
-        let item_id = resp.get("item_id").and_then(|v| v.as_str()).unwrap_or("?");
-        let rel_path = resp.get("rel_path").and_then(|v| v.as_str()).unwrap_or("?");
-        println!("Inspiration added: {item_id}");
-        println!("  scaffold: {rel_path}");
-    }
-
-    Ok(())
+        format!(
+            "Inspiration added: {}\n  scaffold: {}",
+            added.item_id, added.rel_path
+        )
+    }))
 }
 
 async fn handle_inspiration_list(
-    client: &DaemonClient,
+    core: &CoreService,
+    principal: &Principal,
     status: Option<String>,
     json: bool,
-) -> Result<()> {
-    let base = "/v1/daemon/works/pool/inspiration";
-    let path = status.as_ref().map_or_else(
-        || base.to_string(),
-        |s| {
-            let mut url = url::Url::parse("http://localhost").expect("valid base");
-            url.set_path(base);
-            url.query_pairs_mut().append_pair("status", s);
-            let q = url.query().unwrap_or("");
-            format!("{base}?{q}")
-        },
-    );
-
-    let resp: serde_json::Value = client.get::<serde_json::Value>(&path).await?;
+) -> Result<Option<String>> {
+    let resp = core
+        .list_work_inspiration(
+            principal,
+            ListInspirationQuery {
+                status,
+                limit: None,
+                offset: None,
+            },
+        )
+        .await
+        .map_err(map_core_error)?;
 
     if json {
-        println!("{}", serde_json::to_string_pretty(&resp)?);
-    } else {
-        let items = resp.get("items").and_then(|v| v.as_array());
-        match items {
-            Some(items) if items.is_empty() => {
-                println!("No inspiration items found.");
-            }
-            Some(items) => {
-                println!(
-                    "{:<36} {:40} {:12} {:30} CREATED",
-                    "ITEM_ID", "TITLE", "STATUS", "REL_PATH"
-                );
-                for i in items {
-                    let iid = i.get("item_id").and_then(|v| v.as_str()).unwrap_or("?");
-                    let title = i.get("title").and_then(|v| v.as_str()).unwrap_or("?");
-                    let st = i.get("status").and_then(|v| v.as_str()).unwrap_or("?");
-                    let rp = i.get("rel_path").and_then(|v| v.as_str()).unwrap_or("?");
-                    let created = i.get("created_at").and_then(|v| v.as_str()).unwrap_or("-");
-                    let display_title = truncate_with_ellipsis(title, 38);
-                    let display_rp = if rp.len() > 28 {
-                        format!("{}…", &rp[..28])
-                    } else {
-                        rp.to_string()
-                    };
-                    println!("{iid:<36} {display_title:40} {st:<12} {display_rp:<30} {created}");
-                }
-                println!("\n{} inspiration item(s)", items.len());
-            }
-            None => {
-                println!("No inspiration items found.");
-            }
-        }
+        let items: Vec<InspirationListItem> =
+            resp.items.into_iter().map(inspiration_item_wire).collect();
+        let wire = WorkInspirationListResponse {
+            items,
+            total: u64::from(resp.total),
+            limit: u64::from(resp.limit),
+            offset: u64::from(resp.offset),
+        };
+        return Ok(Some(serde_json::to_string_pretty(&wire)?));
     }
-
-    Ok(())
+    if resp.items.is_empty() {
+        return Ok(Some("No inspiration items found.".to_string()));
+    }
+    let mut lines = vec![format!(
+        "{:<36} {:40} {:12} {:30} CREATED",
+        "ITEM_ID", "TITLE", "STATUS", "REL_PATH"
+    )];
+    for i in &resp.items {
+        let iid = i.item_id.as_str();
+        let title = i.title.as_str();
+        let st = i.status.as_str();
+        let rp = i.rel_path.as_str();
+        let created = i.created_at.as_str();
+        let display_title = truncate_with_ellipsis(title, 38);
+        let display_rp = if rp.len() > 28 {
+            format!("{}…", &rp[..28])
+        } else {
+            rp.to_string()
+        };
+        lines.push(format!(
+            "{iid:<36} {display_title:40} {st:<12} {display_rp:<30} {created}"
+        ));
+    }
+    lines.push(format!("\n{} inspiration item(s)", resp.items.len()));
+    Ok(Some(lines.join("\n")))
 }
 
 async fn handle_inspiration_promote(
-    client: &DaemonClient,
+    core: &CoreService,
+    principal: &Principal,
     item_id: &str,
     idea: Option<String>,
     set_default: bool,
-) -> Result<()> {
-    let mut body = serde_json::json!({
-        "item_id": item_id,
-        "set_default": set_default,
-    });
-    if let Some(ref idea) = idea {
-        body["idea"] = serde_json::Value::String(idea.clone());
-    }
+) -> Result<Option<String>> {
+    let promoted = core
+        .promote_work_inspiration(
+            principal,
+            PromoteInspirationRequest {
+                item_id: item_id.to_string(),
+                idea,
+                set_default: Some(set_default),
+            },
+        )
+        .await
+        .map_err(map_core_error)?;
 
-    let resp: serde_json::Value = client
-        .post::<serde_json::Value, _>("/v1/daemon/works/pool/inspiration/promote", &body)
-        .await?;
-
-    let work_id = resp.get("work_id").and_then(|v| v.as_str()).unwrap_or("?");
-    let pool_entry_id = resp
-        .get("pool_entry_id")
-        .and_then(|v| v.as_str())
-        .unwrap_or("?");
-    println!("Inspiration {item_id} promoted → Work {work_id} (pool entry {pool_entry_id})");
+    let mut lines = vec![format!(
+        "Inspiration {item_id} promoted → Work {} (pool entry {})",
+        promoted.work_id, promoted.pool_entry_id
+    )];
 
     if set_default {
-        let use_body = serde_json::json!({
-            "action": "set_pool_active",
-            "work_id": work_id,
-        });
-        let _use_resp: serde_json::Value = client
-            .post::<serde_json::Value, _>("/v1/daemon/works/pool", &use_body)
-            .await?;
-        println!("Also set as CLI default work.");
+        // The atomic promotion already wrote the new Work as the pool `active`
+        // row; this is the retained `works use` selection on its own request.
+        core.select_work(principal, promoted.work_id.clone())
+            .await
+            .map_err(map_core_error)?;
+        lines.push("Also set as CLI default work.".to_string());
     }
 
-    Ok(())
+    Ok(Some(lines.join("\n")))
 }
 
-async fn handle_inspiration_archive(client: &DaemonClient, item_id: &str) -> Result<()> {
-    let body = serde_json::json!({ "item_id": item_id });
-    let _resp: serde_json::Value = client
-        .post::<serde_json::Value, _>("/v1/daemon/works/pool/inspiration/archive", &body)
-        .await?;
+async fn handle_inspiration_archive(
+    core: &CoreService,
+    principal: &Principal,
+    item_id: &str,
+) -> Result<Option<String>> {
+    core.archive_work_inspiration(
+        principal,
+        ArchiveInspirationRequest {
+            item_id: item_id.to_string(),
+        },
+    )
+    .await
+    .map_err(map_core_error)?;
 
-    println!("Inspiration item {item_id} archived.");
+    Ok(Some(format!("Inspiration item {item_id} archived.")))
+}
 
-    Ok(())
+/// Schema-owned pool-list element (`--json` only).
+type PoolListEntry =
+    nexus_contracts::generated::core::works::work_pool_list_response::WorkPoolEntry;
+
+/// Schema-owned inspiration-list element (`--json` only).
+type InspirationListItem =
+    nexus_contracts::generated::core::works::work_inspiration_list_response::WorkInspirationItem;
+
+/// Project a core pool entry onto the wire shape the pool list serves.
+///
+/// The stored `creator_id` never reaches the output (R-V141P1-11 — local-first,
+/// always the active creator), exactly as the retired daemon adapter and the
+/// native pool-list projection omit it.
+fn pool_entry_wire(entry: nexus_core::WorkPoolEntry) -> PoolListEntry {
+    PoolListEntry {
+        entry_id: entry.entry_id,
+        work_id: entry.work_id,
+        status: entry.status,
+        title: entry.title,
+        promoted_at: entry.promoted_at,
+        note: entry.note,
+    }
+}
+
+/// Project a core pool-inspiration item onto the wire shape the pool
+/// inspiration list serves (stored `creator_id` intentionally not serialized).
+fn inspiration_item_wire(item: nexus_core::WorkInspirationItem) -> InspirationListItem {
+    InspirationListItem {
+        item_id: item.item_id,
+        rel_path: item.rel_path,
+        title: item.title,
+        status: item.status,
+        promoted_work_id: item.promoted_work_id,
+        created_at: item.created_at,
+        promoted_at: item.promoted_at,
+    }
 }
 
 // ── Shared display helpers (V1.42 P-last R-V141P0-02 dedup) ───────────
 
-/// Findings subcall timeout — shorter than the default 30s to avoid
-/// blocking the status hot path when the findings endpoint is slow.
-const FINDINGS_FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
-
-/// Hard cap on the number of findings fetched from the daemon.
+/// Hard cap on the number of open findings the status enrichment reads.
+///
+/// The cap is also the truncation marker: exactly this many rows means more
+/// may exist beyond the read page.
 const FINDINGS_FETCH_LIMIT: usize = 50;
 
-/// Stale-fetch subcall timeout — mirrors `FINDINGS_FETCH_TIMEOUT` so the
-/// JSON-path `/v1/daemon/findings/stale` fetch cannot block the status hot
-/// path longer than the findings fetch (qc3 F-002; resolves the timeout
-/// asymmetry flagged in qc1 S-3). Previously the stale fetch inherited the
-/// default 30s `DEFAULT_REQUEST_TIMEOUT`, six times the findings cap.
-const STALE_FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
-
-/// Result of fetching open findings from the daemon.
+/// Stale-findings threshold for the status banner: 96h.
 ///
-/// Distinguishes "successfully fetched 0 findings" from "fetch failed",
-/// so the display layer can print distinct messages.
+/// The retired daemon adapter resolved this from
+/// `NEXUS_DAEMON_STALE_FINDINGS_THRESHOLD_SECS` (a daemon-runtime concern that
+/// stays there); the direct CLI reads the same default the old banner fallback
+/// used.
+const STALE_FINDINGS_THRESHOLD_SECS: i64 = 96 * 60 * 60;
+
+/// Result of reading a Work's open findings.
+///
+/// Distinguishes "successfully read 0 findings" from "read failed", so the
+/// display layer can print distinct messages.
 enum FindingsResult {
-    /// Findings were fetched successfully.
+    /// Findings were read successfully.
     Fetched(Vec<serde_json::Value>),
-    /// The daemon did not return findings (network error, timeout, etc.).
+    /// The read did not return findings (storage error, unknown Work, …).
     Unavailable,
 }
 
-/// Fetch open findings for a Work — best-effort, returns `Unavailable` on failure.
-///
-/// V1.43 P2 (T2): used by `handle_status` to satisfy spec §4 row 3
-/// ("Are there open findings? Count + severity summary").
-///
-/// Uses a shorter timeout (`FINDINGS_FETCH_TIMEOUT`) than the default
-/// 30s so a slow findings endpoint does not block the status command.
-async fn fetch_open_findings(client: &DaemonClient, work_id: &str) -> FindingsResult {
-    let path =
-        format!("/v1/daemon/works/{work_id}/findings?status=open&limit={FINDINGS_FETCH_LIMIT}");
-    // R-V146P0-QC3-S2: observe the silent degradation path — a failed/timeout
-    // findings fetch previously vanished into `Unavailable` with no trace.
-    let result = async {
-        let findings_client = DaemonClient::with_timeouts(
-            client.base_url(),
-            crate::api::daemon_client::DEFAULT_CONNECT_TIMEOUT,
-            FINDINGS_FETCH_TIMEOUT,
-        )?;
-        findings_client.get::<serde_json::Value>(&path).await
+impl FindingsResult {
+    /// The read slice, or `None` when the read failed (graceful degradation).
+    fn as_slice(&self) -> Option<&[serde_json::Value]> {
+        match self {
+            Self::Fetched(items) => Some(items),
+            Self::Unavailable => None,
+        }
     }
-    .await
-    .map_or(FindingsResult::Unavailable, |v| {
-        FindingsResult::Fetched(v.as_array().cloned().unwrap_or_default())
-    });
-    if matches!(result, FindingsResult::Unavailable) {
-        tracing::warn!(
-            work_id = %work_id,
-            path = %path,
-            "open findings fetch failed or timed out; degrading to Unavailable"
-        );
-    }
-    result
 }
 
-/// Fetch the creator-global stale-findings summary for the JSON status path —
-/// best-effort, returns `None` on any failure (parity with the human stale banner).
+/// Read the Work's open findings — best-effort, `Unavailable` on failure.
 ///
-/// Extracted so the JSON path can run this subcall **concurrently** with
-/// `fetch_open_findings` via `tokio::join!` (qc3 F-001), avoiding stacked
-/// worst-case latency on the status hot path.
+/// V1.43 P2 (T2): used by `handle_status` to satisfy spec §4 row 3
+/// ("Are there open findings? Count + severity summary"). The rows are the
+/// findings list-API element shape verbatim, so the `--json` status carries the
+/// same array the list leaf serves.
 ///
-/// qc3 F-002: uses a dedicated short-timeout client (`STALE_FETCH_TIMEOUT`,
-/// 5s) instead of the supplied client's default 30s, so a degraded stale
-/// endpoint cannot block the JSON status command longer than the findings
-/// fetch. Mirrors `fetch_open_findings`'s timeout policy.
-async fn fetch_stale_findings(client: &DaemonClient) -> Option<serde_json::Value> {
-    async {
-        let stale_client = DaemonClient::with_timeouts(
-            client.base_url(),
-            crate::api::daemon_client::DEFAULT_CONNECT_TIMEOUT,
-            STALE_FETCH_TIMEOUT,
-        )?;
-        stale_client
-            .get::<serde_json::Value>("/v1/daemon/findings/stale")
-            .await
+/// R-V146P0-QC3-S2: observe the silent degradation path — a failed read must
+/// not vanish into `Unavailable` without a trace.
+async fn fetch_open_findings(
+    core: &CoreService,
+    principal: &Principal,
+    work_id: &str,
+) -> FindingsResult {
+    let read = core
+        .list_findings(
+            principal,
+            work_id.to_string(),
+            ListFindingsQuery {
+                status: Some("open".to_string()),
+                limit: Some(u32::try_from(FINDINGS_FETCH_LIMIT).unwrap_or(u32::MAX)),
+                ..ListFindingsQuery::default()
+            },
+        )
+        .await;
+    match read {
+        Ok(resp) => match serde_json::to_value(&resp.items) {
+            Ok(serde_json::Value::Array(items)) => FindingsResult::Fetched(items),
+            // A serialization failure is the same class as a failed read: the
+            // status command degrades instead of reporting a findings list it
+            // cannot render.
+            _ => {
+                tracing::warn!(
+                    work_id = %work_id,
+                    "open findings read could not be rendered; degrading to Unavailable"
+                );
+                FindingsResult::Unavailable
+            }
+        },
+        Err(error) => {
+            tracing::warn!(
+                work_id = %work_id,
+                error = %error,
+                "open findings read failed; degrading to Unavailable"
+            );
+            FindingsResult::Unavailable
+        }
     }
-    .await
-    .map_err(|e| {
-        // R-V146P0-QC3-S2: observe the silent `.ok()` swallow — a failed
-        // stale fetch previously vanished into `None` with no trace.
-        tracing::warn!(
-            error = %e,
-            "stale findings fetch failed or timed out; degrading to None"
-        );
-        e
-    })
-    .ok()
+}
+
+/// Read the creator-global stale-findings summary — best-effort, `None` on
+/// failure (parity with the human stale banner).
+///
+/// The returned value is the wire shape `GET /v1/daemon/findings/stale`
+/// served, so the `--json` status keeps its key set.
+async fn fetch_stale_findings(
+    core: &CoreService,
+    principal: &Principal,
+) -> Option<serde_json::Value> {
+    let report = core
+        .list_stale_findings(principal, STALE_FINDINGS_THRESHOLD_SECS)
+        .await
+        .map_err(|error| {
+            // R-V146P0-QC3-S2: observe the silent swallow — a failed stale
+            // read must not vanish into `None` without a trace.
+            tracing::warn!(
+                error = %error,
+                "stale findings read failed; degrading to None"
+            );
+        })
+        .ok()?;
+    serde_json::to_value(stale_findings_wire(report)).ok()
+}
+
+/// Project the core stale report onto the wire shape the retired stale route
+/// served (same keys and types, so `findings_stale` is unchanged).
+fn stale_findings_wire(report: CoreStaleFindingsResponse) -> StaleFindingsWire {
+    StaleFindingsWire {
+        stale_count: report.stale_count,
+        threshold_seconds: report.threshold_seconds,
+        now_epoch: report.now_epoch,
+        findings: report
+            .findings
+            .into_iter()
+            .map(|entry| StaleFindingWire {
+                finding_id: entry.finding_id,
+                work_id: entry.work_id,
+                severity: entry.severity,
+                created_at: entry.created_at,
+                age_seconds: u64::try_from(entry.age_seconds).unwrap_or(0),
+            })
+            .collect(),
+    }
+}
+
+/// Read the findings/stale enrichment for `creator works status`.
+///
+/// `novel` gates both reads (Grill #6 — the enrichment is novel-only); `human`
+/// additionally gates the stale read, which the human path renders as a banner
+/// for every profile. Both reads are independent and overlap via
+/// `tokio::join!` (the retained qc3 F-001 policy that the status hot path must
+/// not stack the two reads' latencies), and each degrades on its own.
+async fn fetch_status_enrichment(
+    core: &CoreService,
+    principal: &Principal,
+    work_id: &str,
+    novel: bool,
+    human: bool,
+) -> (FindingsResult, Option<serde_json::Value>) {
+    let findings = async {
+        if novel {
+            fetch_open_findings(core, principal, work_id).await
+        } else {
+            FindingsResult::Fetched(Vec::new())
+        }
+    };
+    let stale = async {
+        if novel || human {
+            fetch_stale_findings(core, principal).await
+        } else {
+            None
+        }
+    };
+    tokio::join!(findings, stale)
 }
 
 /// Format the human-path stale-findings banner line (R-V146P0-QC3-S3).
@@ -1650,9 +2012,6 @@ async fn fetch_stale_findings(client: &DaemonClient) -> Option<serde_json::Value
 /// otherwise so the caller skips printing. Extracted from the inline banner
 /// block so the rendering + zero-suppression is hermetically unit-testable,
 /// and so both the threshold math and the spec citation live in one place.
-///
-/// `threshold_seconds` defaults to 96h (96 * 60 * 60) at the call site when
-/// the daemon omits it.
 fn format_stale_banner(stale_count: u64, threshold_seconds: i64) -> Option<String> {
     if stale_count == 0 {
         return None;
@@ -1667,31 +2026,7 @@ fn format_stale_banner(stale_count: u64, threshold_seconds: i64) -> Option<Strin
     ))
 }
 
-/// Fetch both the work-scoped open findings and the creator-global stale
-/// summary for a novel work's JSON status, running the two independent daemon
-/// subcalls **concurrently** via `tokio::join!` (qc3 F-001).
-///
-/// Avoids stacking the two worst-case latencies on the status hot path
-/// (was ~5 s findings + ~30 s stale sequential; now bounded by the slower of
-/// the two). Both subcalls are best-effort: a failed findings fetch yields
-/// `None` (graceful degradation, `findings` omitted downstream); a failed
-/// stale fetch yields `None` (`findings_stale` omitted downstream).
-async fn fetch_novel_findings_and_stale(
-    client: &DaemonClient,
-    work_id: &str,
-) -> (Option<Vec<serde_json::Value>>, Option<serde_json::Value>) {
-    let (findings_res, stale_opt) = tokio::join!(
-        fetch_open_findings(client, work_id),
-        fetch_stale_findings(client)
-    );
-    let findings = match findings_res {
-        FindingsResult::Fetched(v) => Some(v),
-        FindingsResult::Unavailable => None,
-    };
-    (findings, stale_opt)
-}
-
-/// V1.46 P0: enrich the daemon GET work payload with novel-only findings.
+/// V1.46 P0: enrich the Work payload with novel-only findings.
 ///
 /// For `work_profile=novel` only (Grill #6), inserts a root-level `findings`
 /// array matching the findings list-API element shape verbatim (spec §4.1),
@@ -1699,16 +2034,16 @@ async fn fetch_novel_findings_and_stale(
 /// banner would show (human parity). Generic / non-novel works are returned
 /// unchanged (novel-only gate).
 ///
-/// `findings`: `Some(slice)` when the findings fetch succeeded (possibly empty);
-///             `None` when the endpoint was unreachable — `findings` is then
-///             omitted for graceful degradation (mirrors the human "unavailable"
-///             path), since fabricating an empty array would mask a daemon fault.
+/// `findings`: `Some(slice)` when the findings read succeeded (possibly empty);
+///             `None` when it failed — `findings` is then omitted for graceful
+///             degradation (mirrors the human "unavailable" path), since
+///             fabricating an empty array would mask a storage fault.
 ///             When `slice.len() == FINDINGS_FETCH_LIMIT`, a `findings_truncated`
 ///             boolean is also inserted so JSON consumers can detect that more
-///             open findings may exist beyond the fetched page (qc3 F-003).
+///             open findings may exist beyond the read page (qc3 F-003).
 ///
-/// `stale`: the `/v1/daemon/findings/stale` payload; `findings_stale` is inserted
-///          only when its `stale_count` is greater than zero.
+/// `stale`: the stale-findings report; `findings_stale` is inserted only when
+///          its `stale_count` is greater than zero.
 fn enrich_status_json(
     mut resp: serde_json::Value,
     findings: Option<&[serde_json::Value]>,
@@ -2704,154 +3039,6 @@ mod tests {
         assert!(out.get("chapters").and_then(|v| v.as_array()).is_some());
     }
 
-    // ── V1.46 P0 qc-fix: concurrent findings+stale fetch (qc3 F-001) ──────
-
-    #[tokio::test]
-    async fn fetch_novel_findings_and_stale_runs_concurrently() {
-        // qc3 F-001: the two daemon subcalls must run concurrently, not
-        // sequentially. Both endpoints delay 400ms; if run sequentially the
-        // total is ~800ms, if concurrent (tokio::join!) it is ~400ms. Assert
-        // the elapsed wall-clock is well below the sequential sum.
-        use wiremock::matchers::{method, path};
-        use wiremock::{Mock, MockServer, ResponseTemplate};
-
-        let mock_server = MockServer::start().await;
-
-        let per_endpoint_delay = std::time::Duration::from_millis(400);
-
-        // Findings endpoint (path includes query string in the request, but the
-        // wiremock `path` matcher matches the path component only).
-        Mock::given(method("GET"))
-            .and(path("/v1/daemon/works/wrk_concurrent/findings"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(serde_json::json!([]))
-                    .set_delay(per_endpoint_delay),
-            )
-            .mount(&mock_server)
-            .await;
-
-        // Stale endpoint.
-        Mock::given(method("GET"))
-            .and(path("/v1/daemon/findings/stale"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(serde_json::json!({ "stale_count": 0 }))
-                    .set_delay(per_endpoint_delay),
-            )
-            .mount(&mock_server)
-            .await;
-
-        let client = DaemonClient::new(&mock_server.uri()).expect("valid mock URL");
-
-        let start = std::time::Instant::now();
-        let (findings, stale) = fetch_novel_findings_and_stale(&client, "wrk_concurrent").await;
-        let elapsed = start.elapsed();
-
-        assert!(
-            findings.is_some(),
-            "findings fetched successfully (concurrent path)"
-        );
-        assert!(
-            stale.is_some(),
-            "stale fetched successfully (concurrent path)"
-        );
-        // Concurrent: elapsed ≈ max(400ms, 400ms) = 400ms. Sequential would be
-        // ~800ms. Threshold 700ms gives slack for scheduling/CI while still
-        // proving the two fetches overlapped.
-        assert!(
-            elapsed < std::time::Duration::from_millis(700),
-            "fetches ran concurrently (elapsed {elapsed:?} < 700ms; \
-             sequential would be ~800ms)",
-        );
-    }
-
-    #[tokio::test]
-    async fn fetch_novel_findings_and_stale_degrades_when_findings_fail() {
-        // qc3 F-001/F-003: when the findings endpoint is unreachable the
-        // helper returns None for findings (graceful degradation) while the
-        // stale subcall still runs concurrently and may succeed.
-        use wiremock::matchers::{method, path};
-        use wiremock::{Mock, MockServer, ResponseTemplate};
-
-        let mock_server = MockServer::start().await;
-
-        // No findings mock mounted → wiremock returns 404 → get() errors →
-        // FindingsResult::Unavailable → None.
-        Mock::given(method("GET"))
-            .and(path("/v1/daemon/findings/stale"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "stale_count": 2 })),
-            )
-            .mount(&mock_server)
-            .await;
-
-        let client = DaemonClient::new(&mock_server.uri()).expect("valid mock URL");
-        let (findings, stale) = fetch_novel_findings_and_stale(&client, "wrk_none").await;
-
-        assert!(findings.is_none(), "findings None when endpoint 404s");
-        assert!(
-            stale.is_some(),
-            "stale still fetched even when findings fail (concurrent, independent)"
-        );
-        assert_eq!(
-            stale
-                .unwrap()
-                .get("stale_count")
-                .and_then(serde_json::Value::as_u64),
-            Some(2)
-        );
-    }
-
-    // ── V1.46 P0 qc-fix: stale fetch short timeout (qc3 F-002) ────────────
-
-    #[test]
-    fn stale_fetch_timeout_matches_findings_fetch_timeout() {
-        // qc3 F-002 (resolves qc1 S-3 timeout asymmetry): the JSON-path
-        // stale fetch must use a short timeout consistent with the findings
-        // fetch, NOT the default 30 s. Lock the policy here so the asymmetry
-        // cannot silently return. (The actual ~5 s bound is documented in
-        // spec §4.1; a wall-clock timeout test would needlessly add ~5 s to
-        // every test run, so the constant-parity guard is the chosen
-        // regression surface.)
-        assert_eq!(
-            STALE_FETCH_TIMEOUT, FINDINGS_FETCH_TIMEOUT,
-            "stale fetch timeout must match findings fetch timeout (no asymmetry)"
-        );
-        assert!(
-            STALE_FETCH_TIMEOUT < crate::api::daemon_client::DEFAULT_REQUEST_TIMEOUT,
-            "stale fetch timeout ({:?}) must be shorter than the default request timeout ({:?})",
-            STALE_FETCH_TIMEOUT,
-            crate::api::daemon_client::DEFAULT_REQUEST_TIMEOUT
-        );
-    }
-
-    #[tokio::test]
-    async fn fetch_stale_findings_returns_none_on_endpoint_error() {
-        // qc3 F-002 wiring: the dedicated short-timeout client must still
-        // follow the best-effort contract (None on any failure). A 500 from
-        // the stale endpoint yields None rather than propagating.
-        use wiremock::matchers::{method, path};
-        use wiremock::{Mock, MockServer, ResponseTemplate};
-
-        let mock_server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/v1/daemon/findings/stale"))
-            .respond_with(
-                ResponseTemplate::new(500)
-                    .set_body_json(serde_json::json!({ "error": "internal" })),
-            )
-            .mount(&mock_server)
-            .await;
-
-        let client = DaemonClient::new(&mock_server.uri()).expect("valid mock URL");
-        let stale = fetch_stale_findings(&client).await;
-        assert!(
-            stale.is_none(),
-            "stale fetch returns None on endpoint error (best-effort, short-timeout client)"
-        );
-    }
-
     // ── R-V146P0-QC3-S3: human-path stale banner rendering ──────────────
 
     #[test]
@@ -3050,40 +3237,32 @@ mod tests {
             WorksCommand::Reopen {
                 work_id,
                 reason,
-                extend_chapters,
                 json: _,
             } => {
                 assert_eq!(work_id.as_deref(), Some("wrk_test"));
                 assert_eq!(reason, "User requested more chapters");
-                assert!(extend_chapters.is_none());
             }
             _ => panic!("expected Reopen variant"),
         }
     }
 
     #[test]
-    fn works_reopen_parses_with_extend_chapters() {
-        let cli = WorksCli::try_parse_from([
+    fn works_reopen_rejects_removed_extend_chapters_flag() {
+        // The flag rode the retired daemon patch body; no retained request
+        // carries `total_planned_chapters`, so the parser must refuse it
+        // instead of silently dropping it.
+        let result = WorksCli::try_parse_from([
             "nexus42",
             "reopen",
             "--reason",
             "Extend story",
             "--extend-chapters",
             "30",
-        ])
-        .expect("works reopen --reason --extend-chapters should parse");
-        match cli.command {
-            WorksCommand::Reopen {
-                work_id,
-                reason: _,
-                extend_chapters,
-                json: _,
-            } => {
-                assert!(work_id.is_none(), "work_id should be optional");
-                assert_eq!(extend_chapters, Some(30));
-            }
-            _ => panic!("expected Reopen variant"),
-        }
+        ]);
+        assert!(
+            result.is_err(),
+            "works reopen --extend-chapters must no longer parse"
+        );
     }
 
     #[test]
@@ -3220,14 +3399,13 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = DaemonClient::new(&mock_server.uri()).expect("valid mock URL");
         let config = CliConfig {
             active_creator_id: Some("creator_test".to_string()),
             daemon_url: mock_server.uri(),
             ..Default::default()
         };
 
-        let result = handle_intake(&client, &config, Some(work_id.to_string()), false).await;
+        let result = handle_intake(&config, Some(work_id.to_string()), false).await;
         assert!(
             result.is_ok(),
             "intake scheduling should succeed: {result:?}"
@@ -3250,14 +3428,13 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = DaemonClient::new(&mock_server.uri()).expect("valid mock URL");
         let config = CliConfig {
             active_creator_id: Some("creator_test".to_string()),
             daemon_url: mock_server.uri(),
             ..Default::default()
         };
 
-        let err = handle_intake(&client, &config, Some(work_id.to_string()), false)
+        let err = handle_intake(&config, Some(work_id.to_string()), false)
             .await
             .expect_err("missing work should error");
         let msg = err.to_string();

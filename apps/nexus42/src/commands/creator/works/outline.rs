@@ -1,35 +1,38 @@
 //! Outline/chapter/timeline patch leaves — `creator works outline|chapter|timeline`
-//! (V1.175 P1 Task 3, group 2).
+//! (V1.175 P1 Task 3, group 2; direct-core retarget v1.193 P0-T6).
 //!
-//! Thin daemon-HTTP leaves over the **existing** V1.72 canvas outline+timeline
-//! routes (AR-83 #1 / AR-84 group 2, F-10):
-//! - `GET /v1/daemon/works/:work_id/outline`
-//! - `POST /v1/daemon/works/:work_id/outline/patch`
-//! - `POST /v1/daemon/works/:work_id/chapters/:n/patch` — the **outline node**
-//!   patch (chapter metadata exposed on the outline canvas)
-//! - `POST /v1/daemon/works/:work_id/timeline/patch`
+//! Thin leaves over the **typed** V1.72 canvas outline+timeline operations
+//! (AR-83 #1 / AR-84 group 2, F-10):
+//! - `CoreService::work_outline`
+//! - `CoreService::patch_outline_structure`
+//! - `CoreService::patch_outline_chapter` — the **outline node** patch
+//!   (chapter metadata exposed on the outline canvas)
+//! - `CoreService::patch_timeline_event`
 //!
 //! **Route-family guard (AR-84):** `chapter patch` rides the outline **node**
-//! route above — NOT the V1.65 chapter-**content** `PATCH
-//! /v1/daemon/works/:work_id/chapters/:n` (a different DTO family, not §5
-//! remainder). Leaf help names the distinction.
+//! patch above — NOT the V1.65 chapter-**content** patch (a different DTO
+//! family, not §5 remainder). Leaf help names the distinction.
 //!
 //! All writes are CAS-guarded: every request carries `--base-revision` (the
 //! `outline_revision` observed on the last canonical read, e.g. `outline
-//! show`). A stale revision returns 409 `outline_conflict`; the CLI error
-//! renders all four structured fields — `current_revision`, `node_id`,
-//! `conflicting_path`, and `recovery_hint` — via
-//! `DaemonClient::parse_error_response` (PL-5). `--help` documents the
-//! re-read retry guidance.
+//! show`). A stale revision is refused as the `outline_conflict` family; the
+//! CLI error renders all four structured fields — `current_revision`,
+//! `node_id`, `conflicting_path`, and `recovery_hint` — through the shared
+//! direct-core mapper (`crate::core::map_core_error`, PL-5). `--help`
+//! documents the re-read retry guidance.
 //!
-//! Conventions: human-readable default output, `--json` emits the daemon
-//! DTO verbatim (generated contract types only — AR-83 #2/#3); write bodies
+//! Every leaf opens the shared direct-writer core (`crate::core`) and awaits
+//! its close on success **and** failure, so a rejected patch never leaves the
+//! workspace writer admitted.
+//!
+//! Conventions: human-readable default output, `--json` emits the core DTO
+//! verbatim (generated contract types only — AR-83 #2/#3); write bodies
 //! are typed long flags; chapter outline prose comes from `--content` or
 //! `--content-file <path>`.
 
-use crate::api::DaemonClient;
 use crate::commands::creator::work_utils::read_file_bounded;
 use crate::config::CliConfig;
+use crate::core::{finish_direct, map_core_error, open_direct_core};
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
 use nexus_contracts::daemon_api::canvas::outline::{
@@ -41,9 +44,9 @@ use nexus_contracts::daemon_api::canvas::outline::{
 use std::num::NonZeroU64;
 
 /// Client-side cap for `--content-file` reads (qc3 S-002). Mirrors the
-/// daemon's `OUTLINE_FILE_MAX_BYTES` (`api/handlers/outline.rs`) so an
+/// core's `OUTLINE_FILE_MAX_BYTES` (`nexus-core/src/outline.rs`) so an
 /// accidentally oversized file is rejected before the full read instead of
-/// being materialized and then refused server-side.
+/// being materialized and then refused by the core.
 const CONTENT_FILE_MAX_BYTES: usize = 10 * 1024 * 1024;
 
 /// `creator works outline` verbs (V1.72 canvas read + structure patch).
@@ -56,7 +59,7 @@ pub enum OutlineCommand {
     /// verbatim. The revision printed here is the `--base-revision` to pass
     /// to the patch leaves.
     Show {
-        /// Work reference (wrk_...) — the daemon's canonical work id.
+        /// Work reference (wrk_...) — the Work's canonical id.
         work_ref: String,
         /// Emit machine-readable JSON (the `WorkOutline` DTO verbatim)
         /// instead of human text.
@@ -67,14 +70,14 @@ pub enum OutlineCommand {
     /// attach a chapter to a volume).
     ///
     /// CAS-guarded: `--base-revision` must match the outline revision from
-    /// `outline show`. On 409 `outline_conflict`, re-read the outline and
-    /// reapply with the new revision.
+    /// `outline show`. On an `outline_conflict` refusal, re-read the outline
+    /// and reapply with the new revision.
     Patch {
-        /// Work reference (wrk_...) — the daemon's canonical work id.
+        /// Work reference (wrk_...) — the Work's canonical id.
         work_ref: String,
-        /// Revision observed on the last canonical read (CAS). On a 409
-        /// `outline_conflict`, re-read the outline (`creator works outline
-        /// show`) and reapply with the new revision.
+        /// Revision observed on the last canonical read (CAS). On an
+        /// `outline_conflict` refusal, re-read the outline (`creator works
+        /// outline show`) and reapply with the new revision.
         #[arg(long, value_name = "N")]
         base_revision: u64,
         /// Structural operation: `move_chapter`, `link_event`, or
@@ -108,23 +111,23 @@ pub enum ChapterCommand {
     /// Patch a chapter's outline-node metadata (title, slug, word counts,
     /// volume, status, or outline prose).
     ///
-    /// **Route-family guard:** targets the outline **node** route
-    /// `POST /v1/daemon/works/:work_id/chapters/:n/patch` — NOT the V1.65
-    /// chapter-**content** `PATCH /v1/daemon/works/:work_id/chapters/:n`
-    /// (different DTO family, not covered here).
+    /// **Route-family guard:** targets the outline **node** patch — the
+    /// canvas chapter route `chapters/:n/patch` — NOT the V1.65
+    /// chapter-**content** `PATCH` on that same path (a different DTO family,
+    /// not covered here).
     ///
     /// CAS-guarded: `--base-revision` must match the outline revision from
-    /// `outline show`. On 409 `outline_conflict`, re-read the outline and
-    /// reapply with the new revision.
+    /// `outline show`. On an `outline_conflict` refusal, re-read the outline
+    /// and reapply with the new revision.
     Patch {
-        /// Work reference (wrk_...) — the daemon's canonical work id.
+        /// Work reference (wrk_...) — the Work's canonical id.
         work_ref: String,
         /// Chapter number (1-based) — the outline node to patch.
         #[arg(long, value_name = "N")]
         n: u64,
-        /// Revision observed on the last canonical read (CAS). On a 409
-        /// `outline_conflict`, re-read the outline (`creator works outline
-        /// show`) and reapply with the new revision.
+        /// Revision observed on the last canonical read (CAS). On an
+        /// `outline_conflict` refusal, re-read the outline (`creator works
+        /// outline show`) and reapply with the new revision.
         #[arg(long, value_name = "N")]
         base_revision: u64,
         /// Display title for the chapter (UI-facing; persisted in the work
@@ -169,14 +172,14 @@ pub enum TimelineCommand {
     /// Patch the work timeline (V1.72 canvas).
     ///
     /// CAS-guarded: `--base-revision` must match the outline revision from
-    /// `outline show`. On 409 `outline_conflict`, re-read the outline and
-    /// reapply with the new revision.
+    /// `outline show`. On an `outline_conflict` refusal, re-read the outline
+    /// and reapply with the new revision.
     Patch {
-        /// Work reference (wrk_...) — the daemon's canonical work id.
+        /// Work reference (wrk_...) — the Work's canonical id.
         work_ref: String,
-        /// Revision observed on the last canonical read (CAS). On a 409
-        /// `outline_conflict`, re-read the outline (`creator works outline
-        /// show`) and reapply with the new revision.
+        /// Revision observed on the last canonical read (CAS). On an
+        /// `outline_conflict` refusal, re-read the outline (`creator works
+        /// outline show`) and reapply with the new revision.
         #[arg(long, value_name = "N")]
         base_revision: u64,
         /// Timeline operation: `add_event`, `remove_event`,
@@ -307,13 +310,12 @@ impl ChapterStatusArg {
 ///
 /// Returns `CliError` on invalid input (missing required flags for the
 /// chosen `--op`, no chapter set fields, unreadable `--content-file`) or
-/// any daemon API / network failure (409 `outline_conflict`, 404
-/// `not_found`, 422 `outline_validation_failed`, 400 `bad_request` for
-/// other 400s — all named, non-zero exit).
+/// any direct-core refusal (the `outline_conflict` CAS family, an unknown
+/// Work, `outline_validation_failed` for a rejected patch — all named,
+/// non-zero exit), plus any cleanup refusal from [`finish_direct`].
 pub async fn run(cmd: OutlineCommand, config: &CliConfig) -> Result<()> {
-    let client = DaemonClient::from_config(config)?;
     match cmd {
-        OutlineCommand::Show { work_ref, json } => outline_show(&client, &work_ref, json).await,
+        OutlineCommand::Show { work_ref, json } => outline_show(config, &work_ref, json).await,
         OutlineCommand::Patch {
             work_ref,
             base_revision,
@@ -325,7 +327,7 @@ pub async fn run(cmd: OutlineCommand, config: &CliConfig) -> Result<()> {
             json,
         } => {
             outline_patch(
-                &client,
+                config,
                 &work_ref,
                 base_revision,
                 op,
@@ -345,11 +347,11 @@ pub async fn run(cmd: OutlineCommand, config: &CliConfig) -> Result<()> {
 /// # Errors
 ///
 /// Returns `CliError` on invalid input (no set fields, unreadable
-/// `--content-file`) or any daemon API / network failure (409
-/// `outline_conflict`, 404 `not_found`, 422 `outline_validation_failed`,
-/// 400 `bad_request` for other 400s — all named, non-zero exit).
+/// `--content-file`) or any direct-core refusal (the `outline_conflict` CAS
+/// family, an unknown Work or chapter, `outline_validation_failed` for a
+/// rejected patch — all named, non-zero exit), plus any cleanup refusal from
+/// [`finish_direct`].
 pub async fn run_chapter(cmd: ChapterCommand, config: &CliConfig) -> Result<()> {
-    let client = DaemonClient::from_config(config)?;
     match cmd {
         ChapterCommand::Patch {
             work_ref,
@@ -366,7 +368,7 @@ pub async fn run_chapter(cmd: ChapterCommand, config: &CliConfig) -> Result<()> 
             json,
         } => {
             chapter_patch(
-                &client,
+                config,
                 &work_ref,
                 n,
                 base_revision,
@@ -390,11 +392,11 @@ pub async fn run_chapter(cmd: ChapterCommand, config: &CliConfig) -> Result<()> 
 /// # Errors
 ///
 /// Returns `CliError` on invalid input (missing required flags for the
-/// chosen `--op`) or any daemon API / network failure (409
-/// `outline_conflict`, 404 `not_found`, 422 `outline_validation_failed`,
-/// 400 `bad_request` for other 400s — all named, non-zero exit).
+/// chosen `--op`) or any direct-core refusal (the `outline_conflict` CAS
+/// family, an unknown Work or event, `outline_validation_failed` for a
+/// rejected patch — all named, non-zero exit), plus any cleanup refusal from
+/// [`finish_direct`].
 pub async fn run_timeline(cmd: TimelineCommand, config: &CliConfig) -> Result<()> {
-    let client = DaemonClient::from_config(config)?;
     match cmd {
         TimelineCommand::Patch {
             work_ref,
@@ -409,7 +411,7 @@ pub async fn run_timeline(cmd: TimelineCommand, config: &CliConfig) -> Result<()
             json,
         } => {
             timeline_patch(
-                &client,
+                config,
                 &work_ref,
                 base_revision,
                 op,
@@ -426,27 +428,35 @@ pub async fn run_timeline(cmd: TimelineCommand, config: &CliConfig) -> Result<()
     }
 }
 
-/// Parse a 1-based chapter/volume number into the daemon's `NonZeroU64` key.
+/// Parse a 1-based chapter/volume number into the canvas `NonZeroU64` key.
 ///
 /// # Errors
 ///
-/// Returns a named `CliError::Other` when `n == 0` (the daemon contract
+/// Returns a named `CliError::Other` when `n == 0` (the canvas contract
 /// requires a positive number).
 fn parse_positive(n: u64, flag: &str) -> Result<NonZeroU64> {
     NonZeroU64::new(n).ok_or_else(|| CliError::Other(format!("{flag} must be >= 1")))
 }
 
 /// `creator works outline show <work_ref>` — read the canonical work outline
-/// + timeline (`GET /v1/daemon/works/:work_id/outline`).
+/// + timeline (`CoreService::work_outline`).
 ///
 /// # Errors
 ///
-/// Returns `CliError` for daemon / network failures (404 `not_found` for
-/// an unknown work, 400 `bad_request` for other 400s).
-async fn outline_show(client: &DaemonClient, work_ref: &str, json: bool) -> Result<()> {
-    let outline: WorkOutline = client
-        .get(&format!("/v1/daemon/works/{work_ref}/outline"))
-        .await?;
+/// Returns the mapped core refusal ([`map_core_error`]) for an unknown or
+/// foreign Work, an unset selection or a storage fault, plus any cleanup
+/// refusal from [`finish_direct`].
+async fn outline_show(config: &CliConfig, work_ref: &str, json: bool) -> Result<()> {
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        core.work_outline(&principal, work_ref.to_string())
+            .await
+            .map_err(map_core_error)
+    }
+    .await;
+    let outline = finish_direct(&core, outcome).await?;
+
     if json {
         println!("{}", serde_json::to_string_pretty(&outline)?);
     } else {
@@ -456,17 +466,17 @@ async fn outline_show(client: &DaemonClient, work_ref: &str, json: bool) -> Resu
 }
 
 /// `creator works outline patch <work_ref> --base-revision N --op <op> …` —
-/// patch the outline structure (`POST /v1/daemon/works/:work_id/outline/patch`).
+/// patch the outline structure (`CoreService::patch_outline_structure`).
 ///
 /// # Errors
 ///
 /// Returns a named `CliError::Other` when a required flag for the chosen
-/// `--op` is missing, or `CliError` for daemon / network failures (409
-/// `outline_conflict`, 404 `not_found`, 422 `outline_validation_failed`,
-/// 400 `bad_request` for other 400s).
+/// `--op` is missing, the mapped core refusal ([`map_core_error`]) for the
+/// `outline_conflict` CAS family, an unknown Work or a rejected patch, plus
+/// any cleanup refusal from [`finish_direct`].
 #[allow(clippy::too_many_arguments)] // CLI param plumbing — house pattern
 async fn outline_patch(
-    client: &DaemonClient,
+    config: &CliConfig,
     work_ref: &str,
     base_revision: u64,
     op: OutlineOpArg,
@@ -476,8 +486,8 @@ async fn outline_patch(
     target_chapter: Option<u64>,
     json: bool,
 ) -> Result<()> {
-    // CLI-side required-flag checks mirror the daemon's field errors so
-    // scripts fail fast with named messages (PL-5).
+    // CLI-side required-flag checks mirror the core's field errors so
+    // scripts fail fast with named messages before a writer is admitted (PL-5).
     match op {
         OutlineOpArg::MoveChapter => {
             if chapter.is_none() {
@@ -529,9 +539,24 @@ async fn outline_patch(
             .map(|n| parse_positive(n, "--target-chapter"))
             .transpose()?,
     };
-    let resp: OutlinePatchResponse = client
-        .post(&format!("/v1/daemon/works/{work_ref}/outline/patch"), &req)
-        .await?;
+    let resp: OutlinePatchResponse = {
+        let core = open_direct_core(config).await?;
+        let outcome = async {
+            let principal = core.active_principal().await.map_err(map_core_error)?;
+            core.patch_outline_structure(
+                &principal,
+                // `cli:<kind>:<uuid>` runtime-lock holder; the daemon adapter
+                // passed `http` for its own surface.
+                "outline",
+                work_ref.to_string(),
+                req,
+            )
+            .await
+            .map_err(map_core_error)
+        }
+        .await;
+        finish_direct(&core, outcome).await?
+    };
     if json {
         println!("{}", serde_json::to_string_pretty(&resp)?);
     } else {
@@ -543,18 +568,19 @@ async fn outline_patch(
 
 /// `creator works chapter patch <work_ref> --n <n> --base-revision N …` —
 /// patch a chapter's outline-node metadata
-/// (`POST /v1/daemon/works/:work_id/chapters/:n/patch` — the outline **node**
-/// route, NOT the V1.65 chapter-content PATCH).
+/// (`CoreService::patch_outline_chapter` — the outline **node** patch, NOT
+/// the V1.65 chapter-content patch).
 ///
 /// # Errors
 ///
 /// Returns a named `CliError::Other` when no set field is given or
-/// `--content-file` cannot be read, or `CliError` for daemon / network
-/// failures (409 `outline_conflict`, 404 `not_found`, 422
-/// `outline_validation_failed`, 400 `bad_request` for other 400s).
+/// `--content-file` cannot be read, the mapped core refusal
+/// ([`map_core_error`]) for the `outline_conflict` CAS family, an unknown
+/// Work or chapter, or a rejected patch, plus any cleanup refusal from
+/// [`finish_direct`].
 #[allow(clippy::too_many_arguments)] // CLI param plumbing — house pattern
 async fn chapter_patch(
-    client: &DaemonClient,
+    config: &CliConfig,
     work_ref: &str,
     n: u64,
     base_revision: u64,
@@ -613,12 +639,25 @@ async fn chapter_patch(
         base_revision,
         set,
     };
-    let resp: OutlinePatchResponse = client
-        .post(
-            &format!("/v1/daemon/works/{work_ref}/chapters/{n}/patch"),
-            &req,
-        )
-        .await?;
+    let resp: OutlinePatchResponse = {
+        let core = open_direct_core(config).await?;
+        let outcome = async {
+            let principal = core.active_principal().await.map_err(map_core_error)?;
+            core.patch_outline_chapter(
+                &principal,
+                // `cli:<kind>:<uuid>` runtime-lock holder; the daemon adapter
+                // passed `http` for its own surface.
+                "chapter",
+                work_ref.to_string(),
+                n.to_string(),
+                req,
+            )
+            .await
+            .map_err(map_core_error)
+        }
+        .await;
+        finish_direct(&core, outcome).await?
+    };
     if json {
         println!("{}", serde_json::to_string_pretty(&resp)?);
     } else {
@@ -629,17 +668,17 @@ async fn chapter_patch(
 }
 
 /// `creator works timeline patch <work_ref> --base-revision N --op <op> …` —
-/// patch the work timeline (`POST /v1/daemon/works/:work_id/timeline/patch`).
+/// patch the work timeline (`CoreService::patch_timeline_event`).
 ///
 /// # Errors
 ///
 /// Returns a named `CliError::Other` when a required flag for the chosen
-/// `--op` is missing, or `CliError` for daemon / network failures (409
-/// `outline_conflict`, 404 `not_found`, 422 `outline_validation_failed`,
-/// 400 `bad_request` for other 400s).
+/// `--op` is missing, the mapped core refusal ([`map_core_error`]) for the
+/// `outline_conflict` CAS family, an unknown Work or event, or a rejected
+/// patch, plus any cleanup refusal from [`finish_direct`].
 #[allow(clippy::too_many_arguments)] // CLI param plumbing — house pattern
 async fn timeline_patch(
-    client: &DaemonClient,
+    config: &CliConfig,
     work_ref: &str,
     base_revision: u64,
     op: TimelineOpArg,
@@ -651,8 +690,8 @@ async fn timeline_patch(
     foreshadows_event: Option<&str>,
     json: bool,
 ) -> Result<()> {
-    // CLI-side required-flag checks mirror the daemon's field errors so
-    // scripts fail fast with named messages (PL-5).
+    // CLI-side required-flag checks mirror the core's field errors so
+    // scripts fail fast with named messages before a writer is admitted (PL-5).
     match op {
         TimelineOpArg::AddEvent => {
             if title.is_none() {
@@ -720,9 +759,24 @@ async fn timeline_patch(
             .transpose()?,
         foreshadows_event_id: foreshadows_event.map(str::to_string),
     };
-    let resp: OutlinePatchResponse = client
-        .post(&format!("/v1/daemon/works/{work_ref}/timeline/patch"), &req)
-        .await?;
+    let resp: OutlinePatchResponse = {
+        let core = open_direct_core(config).await?;
+        let outcome = async {
+            let principal = core.active_principal().await.map_err(map_core_error)?;
+            core.patch_timeline_event(
+                &principal,
+                // `cli:<kind>:<uuid>` runtime-lock holder; the daemon adapter
+                // passed `http` for its own surface.
+                "timeline",
+                work_ref.to_string(),
+                req,
+            )
+            .await
+            .map_err(map_core_error)
+        }
+        .await;
+        finish_direct(&core, outcome).await?
+    };
     if json {
         println!("{}", serde_json::to_string_pretty(&resp)?);
     } else {

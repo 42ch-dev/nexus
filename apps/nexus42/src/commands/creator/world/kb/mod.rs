@@ -219,6 +219,14 @@ pub(crate) fn render_graph_response(
 // `legacy-cli` owns the full author surface (list/show/edit/delete/pending/…)
 // and reuses the shared graph/patch declarations above. `basic-cli` — the
 // daemon-free cohort — exposes ONLY those shared graph/patch declarations.
+//
+// Both cohorts route `entity patch` / `graph` through [`service`], whose
+// `open_direct_core` owns admission (`require_materialized_workspace`) and runs
+// it *before* `CoreService::open`. `legacy_impl::run` is the only place a local
+// KB leaf may open the legacy workspace pool, and the order there is
+// load-bearing: `open_workspace_pool` runs `Schema::init`, which migrates — and
+// therefore creates — the selected workspace, so the seam's pre-flight must have
+// admitted the selection first.
 
 #[cfg(feature = "legacy-cli")]
 #[path = "legacy_impl.rs"]
