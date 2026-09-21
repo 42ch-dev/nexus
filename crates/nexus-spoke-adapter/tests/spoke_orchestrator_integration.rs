@@ -32,17 +32,20 @@
 
 #![allow(clippy::unwrap_used)]
 
+use async_trait::async_trait;
 use nexus_contracts::BlockType;
 use nexus_knowledge::world_kb::{KnowledgeEntryBody, KnowledgeEntryRecord};
 use nexus_local_db::{open_pool, run_migrations};
 // V1.145 P1b — adapter rehomed to nexus-spoke-adapter (spec §7.4).
 use nexus_spoke_adapter::NexusAdapter;
 use nexus_spoke_adapter::{
-    orchestrate_promote, orchestrate_relate, orchestrate_upsert, PromoteRequest, PromoteResponse,
-    RelateRequest, SpokeRejectCode, SpokeResult, UpsertRequest, UpsertResponse,
+    orchestrate_promote, orchestrate_relate, orchestrate_upsert, FindingPort, HostManifestPort,
+    KnowledgeEntryPort, PromoteRequest, PromoteResponse, RelateRequest, RelationPort,
+    RuleQueryPort, ScopeQueryPort, SpokeRejectCode, SpokeResult, UpsertRequest, UpsertResponse,
 };
 use serde_json::json;
 use sqlx::Row;
+use std::sync::Mutex;
 
 const WORLD_ID: &str = "wld_1";
 
@@ -57,14 +60,28 @@ const WORLD_ID: &str = "wld_1";
 /// body.
 /// A KE-capable adapter whose selection authorizes the worlds these
 /// fixtures own (v1.191 P1 T8 — the check/relate paths read knowledge).
+///
+/// Both fixture worlds are admitted: the world-conflict regressions need the
+/// moved-to world to stay *inside* the request's selection, so the CAS
+/// classification (not the hidden-row rule) decides the outcome. The
+/// hidden/absent parity regressions build a narrower selection with
+/// [`scoped_worlds`].
 fn scoped(pool: sqlx::SqlitePool) -> NexusAdapter<'static> {
+    scoped_worlds(pool, &[WORLD_ID, "wld_2"])
+}
+
+/// A KE-capable adapter bound to an explicit world selection — the admission
+/// boundary under test (a row outside it is hidden, never observable).
+fn scoped_worlds(pool: sqlx::SqlitePool, worlds: &[&str]) -> NexusAdapter<'static> {
     NexusAdapter::new(
         pool,
         nexus_knowledge::world_kb::KnowledgeReadScope::creator_management(
-            vec![
-                nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef::world("wld_1"),
-                nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef::world("wld_2"),
-            ],
+            worlds
+                .iter()
+                .map(|world| {
+                    nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef::world(*world)
+                })
+                .collect(),
             Vec::new(),
         ),
     )
@@ -427,12 +444,35 @@ async fn orchestrate_assemble_scope_filtered() {
 // ── 6. R3 closure: world-aware CAS (spec §3) ────────────────────────────
 //
 // The N-C1 invoke gate's stored-world check is check-then-act. The durable
-// fix is the orchestrator/storage CAS carrying the stored `world_id`. These
-// tests reproduce the interleaved two-writer race at the orchestrator layer
-// (the atomic source of truth): writer 1's world-verified preimage is
-// invalidated by writer 2 moving the row to another world between the
-// gate-check and the CAS. The CAS must deny with the adapter's world-conflict
-// classification — never `REVISION_CONFLICT` / `STORED_REVISION_STALE`.
+// fix is the orchestrator/storage CAS carrying the stored `world_id`:
+// writer 1's world-verified preimage is invalidated by writer 2 moving the row
+// to another world between that read and the conditional write. The CAS must
+// deny with the adapter's world-conflict classification — never
+// `REVISION_CONFLICT` / `STORED_REVISION_STALE`.
+//
+// v1.194 P2-T4 splits the two transitions that used to share these fixtures:
+//
+// 1. **Initially hidden** — the row was moved outside the request's selection
+//    before it was read, so the request never admitted it. It must stay
+//    indistinguishable from an absent row: same refusal, no world-conflict
+//    classification, no foreign world id. See
+//    [`initially_hidden_entry_is_indistinguishable_from_absent`] and
+//    [`initially_hidden_relation_is_indistinguishable_from_absent`].
+//
+// 2. **Admitted, then moved by a second writer** — the request's read admitted
+//    the preimage and the second writer moved the row inside the admitted
+//    selection afterwards. Only this transition may classify `world_conflict`.
+//    Three regressions cover it, driven by [`SecondWriterBarrier`], which fires
+//    the second writer's move the instant the admission read returns — an
+//    explicit barrier, never a sleep or a timing assumption.
+//
+// The old fixtures moved the row *before* the read and asserted an untouched
+// revision. That is not reproducible: `bump_kb_key_blocks_revision` /
+// `bump_kb_relationships_revision` advance the revision on any update that
+// leaves it unchanged, so the move is visible to the pre-flight read as a
+// stale revision and the CAS classification is never reached. Those fixtures
+// measured `STORED_REVISION_STALE`, which is why the residual was misread as
+// production folding.
 
 /// Seed a second world row so a test can FK-move rows across worlds.
 async fn seed_second_world(pool: &sqlx::SqlitePool) {
@@ -529,9 +569,10 @@ fn expect_world_conflict_reject<T: std::fmt::Debug>(
     }
 }
 
-/// Move a `kb_key_blocks` row to another world WITHOUT bumping its revision —
-/// the interleaved "other writer" that the pre-fix (id + revision) CAS could
-/// not distinguish from a legitimate same-world update.
+/// Move a `kb_key_blocks` row to another world before the request reads it —
+/// the **initially hidden** fixture (§7): the row lives outside the request's
+/// selection from the first read on, so it must behave exactly like an absent
+/// one. Not a race: nothing here is interleaved.
 async fn move_key_block_to_world(pool: &sqlx::SqlitePool, entry_id: &str, world_id: &str) {
     // SAFETY: test-only static UPDATE against the post-migration schema.
     sqlx::query("UPDATE kb_key_blocks SET world_id = ? WHERE key_block_id = ?")
@@ -540,6 +581,267 @@ async fn move_key_block_to_world(pool: &sqlx::SqlitePool, entry_id: &str, world_
         .execute(pool)
         .await
         .unwrap();
+}
+
+/// INDEPENDENT direct sqlx read of a `kb_relationships` row:
+/// `(world_id, revision, relation_type, custom_label)`.
+async fn read_relation_row(
+    pool: &sqlx::SqlitePool,
+    relation_id: &str,
+) -> (String, i64, String, Option<String>) {
+    // SAFETY: test-only verification query against the post-migration
+    // kb_relationships schema.
+    let row = sqlx::query(
+        "SELECT world_id, revision, relation_type, custom_label \
+         FROM kb_relationships WHERE relationship_id = ?",
+    )
+    .bind(relation_id)
+    .fetch_one(pool)
+    .await
+    .unwrap_or_else(|e| panic!("read back relation {relation_id}: {e}"));
+    (row.get(0), row.get(1), row.get(2), row.get(3))
+}
+
+/// The `(world_id, revision)` a second writer left on a row — the preimage the
+/// denied conditional write must not disturb.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct WorldRevision {
+    world_id: String,
+    revision: i64,
+}
+
+/// The table a [`SecondWriterMove`] rewrites.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SecondWriterTable {
+    KeyBlocks,
+    Relations,
+}
+
+/// One world move by the interleaved "second writer" (a second Connect process
+/// / the daemon on the same workspace DB). It carries no revision: the move is
+/// a plain world write, and the store's revision-bump trigger advances the row
+/// exactly as a foreign writer's own CAS would.
+#[derive(Debug, Clone)]
+struct SecondWriterMove {
+    table: SecondWriterTable,
+    ids: Vec<String>,
+    world_id: String,
+}
+
+impl SecondWriterMove {
+    fn key_block(entry_id: &str, world_id: &str) -> Self {
+        Self {
+            table: SecondWriterTable::KeyBlocks,
+            ids: vec![entry_id.to_string()],
+            world_id: world_id.to_string(),
+        }
+    }
+
+    fn relation(relation_id: &str, world_id: &str) -> Self {
+        Self {
+            table: SecondWriterTable::Relations,
+            ids: vec![relation_id.to_string()],
+            world_id: world_id.to_string(),
+        }
+    }
+}
+
+/// Deterministic two-writer barrier at the orchestrator's admission read.
+///
+/// A pass-through wrapper over the production adapter that implements the six
+/// baseline port families (delegating every method) and fires one armed
+/// [`SecondWriterMove`] **the instant the admission read returns** — i.e.
+/// between the request's world-verified preimage read and its conditional
+/// write. There is no sleep and no thread-scheduling assumption: the second
+/// writer runs on the same task, immediately after the read that admitted the
+/// preimage, which is exactly the ordering the CAS has to survive.
+///
+/// The barrier also records the `(world_id, revision)` its move left behind, so
+/// a regression can prove the denied write changed nothing.
+struct SecondWriterBarrier<'a> {
+    adapter: &'a NexusAdapter<'static>,
+    pool: sqlx::SqlitePool,
+    pending: Mutex<Option<SecondWriterMove>>,
+    left: Mutex<Vec<(String, WorldRevision)>>,
+}
+
+impl<'a> SecondWriterBarrier<'a> {
+    fn new(
+        adapter: &'a NexusAdapter<'static>,
+        pool: sqlx::SqlitePool,
+        r#move: SecondWriterMove,
+    ) -> Self {
+        Self {
+            adapter,
+            pool,
+            pending: Mutex::new(Some(r#move)),
+            left: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// The `(world_id, revision)` this barrier's move left on `id`.
+    fn left(&self, id: &str) -> WorldRevision {
+        self.left
+            .lock()
+            .expect("barrier state lock")
+            .iter()
+            .find(|(row_id, _)| row_id == id)
+            .map(|(_, state)| state.clone())
+            .unwrap_or_else(|| panic!("the second writer never moved {id}"))
+    }
+
+    /// Run the armed move (once). A later admission read is a no-op, so the
+    /// second writer cannot fire twice.
+    async fn fire(&self) {
+        let Some(r#move) = self.pending.lock().expect("barrier state lock").take() else {
+            return;
+        };
+        for id in &r#move.ids {
+            let state = match r#move.table {
+                SecondWriterTable::KeyBlocks => {
+                    // SAFETY: test-only static UPDATE against the post-migration
+                    // schema; `revision` is deliberately untouched (the bump
+                    // trigger advances it, as any foreign writer's would).
+                    sqlx::query("UPDATE kb_key_blocks SET world_id = ? WHERE key_block_id = ?")
+                        .bind(&r#move.world_id)
+                        .bind(id)
+                        .execute(&self.pool)
+                        .await
+                        .expect("second writer moves the key block");
+                    let (world_id, revision): (String, i64) = sqlx::query_as(
+                        "SELECT world_id, COALESCE(revision, 0) FROM kb_key_blocks \
+                         WHERE key_block_id = ?",
+                    )
+                    .bind(id)
+                    .fetch_one(&self.pool)
+                    .await
+                    .expect("read the state the second writer left");
+                    WorldRevision { world_id, revision }
+                }
+                SecondWriterTable::Relations => {
+                    // SAFETY: test-only static UPDATE against the post-migration
+                    // schema; see the key-block arm above.
+                    sqlx::query(
+                        "UPDATE kb_relationships SET world_id = ? WHERE relationship_id = ?",
+                    )
+                    .bind(&r#move.world_id)
+                    .bind(id)
+                    .execute(&self.pool)
+                    .await
+                    .expect("second writer moves the relation");
+                    let (world_id, revision): (String, i64) = sqlx::query_as(
+                        "SELECT world_id, revision FROM kb_relationships WHERE relationship_id = ?",
+                    )
+                    .bind(id)
+                    .fetch_one(&self.pool)
+                    .await
+                    .expect("read the state the second writer left");
+                    WorldRevision { world_id, revision }
+                }
+            };
+            self.left
+                .lock()
+                .expect("barrier state lock")
+                .push((id.clone(), state));
+        }
+    }
+}
+
+#[async_trait]
+impl KnowledgeEntryPort for SecondWriterBarrier<'_> {
+    async fn get_knowledge_entry(
+        &self,
+        entry_id: &str,
+    ) -> SpokeResult<nexus_spoke_adapter::KnowledgeEntry> {
+        let read = self.adapter.get_knowledge_entry(entry_id).await;
+        if matches!(read, SpokeResult::Ok(_)) {
+            self.fire().await;
+        }
+        read
+    }
+
+    async fn put_knowledge_entry(
+        &self,
+        entry: nexus_spoke_adapter::KnowledgeEntry,
+        expected_base_revision: Option<u64>,
+    ) -> SpokeResult<nexus_spoke_adapter::KnowledgeEntry> {
+        self.adapter
+            .put_knowledge_entry(entry, expected_base_revision)
+            .await
+    }
+}
+
+#[async_trait]
+impl RelationPort for SecondWriterBarrier<'_> {
+    async fn get_relation(&self, relation_id: &str) -> SpokeResult<nexus_spoke_adapter::Relation> {
+        let read = self.adapter.get_relation(relation_id).await;
+        if matches!(read, SpokeResult::Ok(_)) {
+            self.fire().await;
+        }
+        read
+    }
+
+    async fn put_relation(
+        &self,
+        relation: nexus_spoke_adapter::Relation,
+        expected_base_revision: Option<u64>,
+    ) -> SpokeResult<nexus_spoke_adapter::Relation> {
+        self.adapter
+            .put_relation(relation, expected_base_revision)
+            .await
+    }
+}
+
+#[async_trait]
+impl ScopeQueryPort for SecondWriterBarrier<'_> {
+    async fn list_knowledge_entries(
+        &self,
+        scope: &nexus_spoke_adapter::Scope,
+    ) -> SpokeResult<Vec<nexus_spoke_adapter::KnowledgeEntry>> {
+        self.adapter.list_knowledge_entries(scope).await
+    }
+
+    async fn list_timeline_events(
+        &self,
+        scope: &nexus_spoke_adapter::Scope,
+    ) -> SpokeResult<Vec<nexus_spoke_adapter::TimelineEvent>> {
+        self.adapter.list_timeline_events(scope).await
+    }
+}
+
+#[async_trait]
+impl FindingPort for SecondWriterBarrier<'_> {
+    async fn put_findings(
+        &self,
+        findings: Vec<nexus_spoke_adapter::Finding>,
+    ) -> SpokeResult<Vec<nexus_spoke_adapter::Finding>> {
+        self.adapter.put_findings(findings).await
+    }
+}
+
+#[async_trait]
+impl RuleQueryPort for SecondWriterBarrier<'_> {
+    async fn list_rules(
+        &self,
+        rule_refs: &[String],
+    ) -> SpokeResult<Vec<nexus_spoke_adapter::Rule>> {
+        self.adapter.list_rules(rule_refs).await
+    }
+}
+
+#[async_trait]
+impl HostManifestPort for SecondWriterBarrier<'_> {
+    async fn get_host_capability_manifest(
+        &self,
+    ) -> SpokeResult<nexus_spoke_adapter::HostCapabilityManifest> {
+        self.adapter.get_host_capability_manifest().await
+    }
+
+    async fn list_peer_host_capability_manifests(
+        &self,
+    ) -> SpokeResult<Vec<nexus_spoke_adapter::HostCapabilityManifest>> {
+        self.adapter.list_peer_host_capability_manifests().await
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -556,32 +858,53 @@ async fn orchestrate_upsert_denies_row_moved_to_another_world_between_verificati
         matches!(create_result, SpokeResult::Ok(_)),
         "create must succeed first"
     );
-
-    // Gate check passes: the stored row is in the claimed world.
-    let (_, _, _, stored_world, _) = read_kb_row(&pool, entry_id).await;
     assert_eq!(
-        stored_world, WORLD_ID,
-        "gate-check precondition: row is in the claimed world"
+        read_kb_row(&pool, entry_id).await.3,
+        WORLD_ID,
+        "precondition: the created row is in the claimed world"
     );
 
-    // Writer 2 (a second Connect process / the daemon) moves the row to
-    // wld_2 between the gate-check and writer 1's CAS, revision untouched.
-    move_key_block_to_world(&pool, entry_id, "wld_2").await;
+    // Writer 2 is armed on the admission read: the orchestrator reads the
+    // world-A preimage (admitted by this request), writer 2 moves the row to
+    // wld_2 — still inside the admitted selection — and only then does writer 1
+    // attempt its conditional write.
+    let barrier = SecondWriterBarrier::new(
+        &adapter,
+        pool.clone(),
+        SecondWriterMove::key_block(entry_id, "wld_2"),
+    );
 
-    // Writer 1 replays its world-A preimage (revision 1 — still the stored
-    // revision, so the pre-fix id+revision CAS would have succeeded).
-    let candidate = spoke_entry(entry_id, "WorldCasUpsert", Some(1), "provisional");
-    let result = orchestrate_upsert(&adapter, upsert_request(&candidate)).await;
+    // The candidate carries a distinct payload, so any leaked write is visible
+    // in the post-state.
+    let candidate = spoke_entry(entry_id, "WorldCasUpsert Rewritten", Some(1), "provisional");
+    let result = orchestrate_upsert(&barrier, upsert_request(&candidate)).await;
     expect_world_conflict_reject(result, WORLD_ID, "wld_2");
 
-    // INDEPENDENT verification: the row was not rewritten — still in wld_2
-    // at revision 1 (the denied CAS must leave the row untouched).
-    let (_, _, rev, world, _) = read_kb_row(&pool, entry_id).await;
+    // INDEPENDENT verification: the denied CAS left the row exactly as the
+    // second writer left it — its world and revision, plus the pre-move
+    // canonical_name/body. A cross-world rewrite would show all four.
+    let left = barrier.left(entry_id);
     assert_eq!(
-        world, "wld_2",
+        left.world_id, "wld_2",
+        "precondition: the second writer moved the row"
+    );
+    let (name, _status, revision, world, body) = read_kb_row(&pool, entry_id).await;
+    assert_eq!(
+        world, left.world_id,
         "row stays in the world the interleaved writer set"
     );
-    assert_eq!(rev, 1, "denied CAS must not mutate the row");
+    assert_eq!(
+        revision, left.revision,
+        "denied CAS must not bump the revision the second writer left"
+    );
+    assert_eq!(
+        name, "WorldCasUpsert",
+        "denied CAS must not rewrite canonical_name"
+    );
+    assert!(
+        body.contains("WorldCasUpsert summary"),
+        "denied CAS must not rewrite the body: {body}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -599,15 +922,34 @@ async fn orchestrate_promote_denies_row_moved_to_another_world_between_verificat
         "create must succeed first"
     );
 
-    // Gate check passes for WORLD_ID; writer 2 then moves the row to wld_2.
-    let (_, _, _, stored_world, _) = read_kb_row(&pool, entry_id).await;
-    assert_eq!(stored_world, WORLD_ID);
-    move_key_block_to_world(&pool, entry_id, "wld_2").await;
+    // Armed on the admission read, exactly as in the upsert regression.
+    let barrier = SecondWriterBarrier::new(
+        &adapter,
+        pool.clone(),
+        SecondWriterMove::key_block(entry_id, "wld_2"),
+    );
 
-    // Writer 1 promotes its world-A preimage (revision 1).
+    // Writer 1 promotes its world-A preimage (revision 1); the orchestrator
+    // bases the accepted revision on that preimage (= stored + 1).
     let candidate = spoke_entry(entry_id, "WorldCasPromote", Some(1), "provisional");
-    let result = orchestrate_promote(&adapter, promote_request(&candidate)).await;
+    let result = orchestrate_promote(&barrier, promote_request(&candidate)).await;
     expect_world_conflict_reject(result, WORLD_ID, "wld_2");
+
+    // INDEPENDENT verification: neither the world/revision nor the promotion
+    // landed — the row is still provisional in the second writer's world.
+    let left = barrier.left(entry_id);
+    assert_eq!(left.world_id, "wld_2");
+    let (name, status, revision, world, _body) = read_kb_row(&pool, entry_id).await;
+    assert_eq!(world, left.world_id);
+    assert_eq!(revision, left.revision);
+    assert_eq!(
+        name, "WorldCasPromote",
+        "denied promote must not rewrite the row"
+    );
+    assert_eq!(
+        status, "provisional",
+        "denied promote must not flip status to confirmed"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -628,34 +970,251 @@ async fn orchestrate_relate_denies_row_moved_to_another_world_between_verificati
 
     // Writer 1 creates the relation in WORLD_ID → revision 1.
     let relation_id = "rel_wc";
-    let relation = relate_relation(relation_id, "kb_wc_src", "kb_wc_dst");
-    let create_result = orchestrate_relate(&adapter, relate_request(&relation)).await;
+    let created_relation = relate_relation(relation_id, "kb_wc_src", "kb_wc_dst");
+    let create_result = orchestrate_relate(&adapter, relate_request(&created_relation)).await;
     assert!(
         matches!(create_result, SpokeResult::Ok(_)),
         "relate create must succeed first"
     );
+    assert_eq!(
+        read_relation_row(&pool, relation_id).await.0,
+        WORLD_ID,
+        "precondition: the relation row is in the claimed world"
+    );
 
-    // Gate check passes: the stored row is in the claimed world.
-    let stored_world: String =
-        sqlx::query_scalar("SELECT world_id FROM kb_relationships WHERE relationship_id = ?")
-            .bind(relation_id)
-            .fetch_one(&pool)
-            .await
-            .expect("read persisted relation world");
-    assert_eq!(stored_world, WORLD_ID);
+    // Armed on the relation admission read.
+    let barrier = SecondWriterBarrier::new(
+        &adapter,
+        pool.clone(),
+        SecondWriterMove::relation(relation_id, "wld_2"),
+    );
 
-    // Writer 2 moves the relation row to wld_2, revision untouched.
-    // SAFETY: test-only static UPDATE against the post-migration schema.
-    sqlx::query("UPDATE kb_relationships SET world_id = ? WHERE relationship_id = ?")
-        .bind("wld_2")
-        .bind(relation_id)
-        .execute(&pool)
-        .await
-        .unwrap();
-
-    // Writer 1 replays its world-A preimage (revision 1).
-    let mut updated = relation;
-    updated.revision = Some(1);
-    let result = orchestrate_relate(&adapter, relate_request(&updated)).await;
+    // Writer 1 replays its world-A preimage with a distinct label, so a leaked
+    // write is visible in the post-state.
+    let mut candidate = relate_relation(relation_id, "kb_wc_src", "kb_wc_dst");
+    candidate.revision = Some(1);
+    candidate.label = Some("raced write".to_string());
+    let result = orchestrate_relate(&barrier, relate_request(&candidate)).await;
     expect_world_conflict_reject(result, WORLD_ID, "wld_2");
+
+    // INDEPENDENT verification: the relation row is untouched apart from the
+    // second writer's move.
+    let left = barrier.left(relation_id);
+    assert_eq!(left.world_id, "wld_2");
+    let (world, revision, relation_type, custom_label) =
+        read_relation_row(&pool, relation_id).await;
+    assert_eq!(
+        world, left.world_id,
+        "relation stays in the world the interleaved writer set"
+    );
+    assert_eq!(
+        revision, left.revision,
+        "denied CAS must not bump the revision the second writer left"
+    );
+    assert_eq!(
+        relation_type, "allied_with",
+        "denied CAS must not rewrite relation_type"
+    );
+    assert_eq!(
+        custom_label.as_deref(),
+        Some("test edge"),
+        "denied CAS must not rewrite the label"
+    );
+}
+
+// ── 7. Initially hidden rows stay indistinguishable from absent ─────────
+//
+// The other half of the classification: a row the request never admitted (it
+// was moved outside the selection before the read, or it is owned elsewhere)
+// must not be observable at all — the same refusal an absent id produces, no
+// world-conflict classification, and no world id in the outcome. These are
+// **not** races: the row is hidden from the very first read.
+//
+// Each parity regression runs the same request against two fresh stores that
+// differ only in whether the hidden row exists, and compares the full
+// observable outcome. Anything else is an existence oracle.
+
+/// The observable shape of a result — code, message and details; everything a
+/// caller can see.
+fn outcome<T: std::fmt::Debug>(result: &SpokeResult<T>) -> String {
+    match result {
+        SpokeResult::Ok(value) => format!("Ok({value:?})"),
+        SpokeResult::Reject(reject) => format!(
+            "Reject(code={:?}, message={}, details={:?})",
+            reject.code, reject.message, reject.details
+        ),
+    }
+}
+
+/// Whether a result carries the adapter's world-conflict classification (the
+/// marker Connect's `map_reject` remaps to the `world_conflict` wire code).
+fn carries_world_conflict<T: std::fmt::Debug>(result: &SpokeResult<T>) -> bool {
+    match result {
+        SpokeResult::Reject(reject) => nexus_spoke_adapter::is_world_conflict_reject(reject),
+        SpokeResult::Ok(_) => false,
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn initially_hidden_entry_is_indistinguishable_from_absent() {
+    let entry_id = "kb_hidden_parity";
+    let candidate = spoke_entry(entry_id, "HiddenParity", Some(1), "provisional");
+
+    // (A) the row exists, but a second writer moved it to wld_2 before the
+    // request read it; the probing selection admits only WORLD_ID.
+    let (hidden_pool, _hidden_dir) = fresh_pool().await;
+    seed_second_world(&hidden_pool).await;
+    let full = scoped(hidden_pool.clone());
+    let created = spoke_entry(entry_id, "HiddenParity", None, "provisional");
+    let create_result = orchestrate_upsert(&full, upsert_request(&created)).await;
+    assert!(
+        matches!(create_result, SpokeResult::Ok(_)),
+        "create must succeed first"
+    );
+    move_key_block_to_world(&hidden_pool, entry_id, "wld_2").await;
+    let hidden = scoped_worlds(hidden_pool.clone(), &[WORLD_ID]);
+
+    // (B) the same request against a store where the id never existed.
+    let (absent_pool, _absent_dir) = fresh_pool().await;
+    let absent = scoped_worlds(absent_pool.clone(), &[WORLD_ID]);
+
+    // Port level — the classification owner. Hidden and absent must produce the
+    // identical reject, and never the world-conflict marker.
+    let hidden_port = hidden.put_knowledge_entry(candidate.clone(), Some(1)).await;
+    let absent_port = absent.put_knowledge_entry(candidate.clone(), Some(1)).await;
+    assert_eq!(
+        outcome(&hidden_port),
+        outcome(&absent_port),
+        "a hidden row must be indistinguishable from an absent one at the port"
+    );
+    assert!(
+        !carries_world_conflict(&hidden_port),
+        "a row the request never admitted must not classify as a world conflict: {}",
+        outcome(&hidden_port)
+    );
+    assert!(
+        !outcome(&hidden_port).contains("wld_2"),
+        "no foreign world id may leave the adapter: {}",
+        outcome(&hidden_port)
+    );
+
+    // Orchestrator level — the request sees the same absent-shaped outcome.
+    let hidden_orch = orchestrate_upsert(&hidden, upsert_request(&candidate)).await;
+    let absent_orch = orchestrate_upsert(&absent, upsert_request(&candidate)).await;
+    assert_eq!(
+        outcome(&hidden_orch),
+        outcome(&absent_orch),
+        "the orchestrator must not observe the hidden row either"
+    );
+    assert!(
+        !carries_world_conflict(&hidden_orch),
+        "the orchestrator must not surface a world conflict for a hidden row"
+    );
+    assert!(
+        !outcome(&hidden_orch).contains("wld_2"),
+        "no foreign world id may leave the orchestrator: {}",
+        outcome(&hidden_orch)
+    );
+
+    // The probes never touched the hidden row.
+    let (_, _, _, world, _) = read_kb_row(&hidden_pool, entry_id).await;
+    assert_eq!(world, "wld_2", "the hidden row is left where it was moved");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn initially_hidden_relation_is_indistinguishable_from_absent() {
+    let relation_id = "rel_hidden_parity";
+    let endpoints = ["kb_hp_src", "kb_hp_dst"];
+
+    // (A) the relation exists, but its endpoints were moved to wld_2 before the
+    // request read it — relation visibility is endpoint-scoped (durable §4.2),
+    // so the probing selection (WORLD_ID only) cannot see either the endpoints
+    // or the relation.
+    let (hidden_pool, _hidden_dir) = fresh_pool().await;
+    seed_second_world(&hidden_pool).await;
+    let full = scoped(hidden_pool.clone());
+    for endpoint in endpoints {
+        let ep = spoke_entry(endpoint, endpoint, None, "confirmed");
+        let r = orchestrate_upsert(&full, upsert_request(&ep)).await;
+        assert!(
+            matches!(r, SpokeResult::Ok(_)),
+            "endpoint {endpoint} create must succeed"
+        );
+    }
+    let created_relation = relate_relation(relation_id, endpoints[0], endpoints[1]);
+    let create_result = orchestrate_relate(&full, relate_request(&created_relation)).await;
+    assert!(
+        matches!(create_result, SpokeResult::Ok(_)),
+        "relate create must succeed first"
+    );
+    for endpoint in endpoints {
+        move_key_block_to_world(&hidden_pool, endpoint, "wld_2").await;
+    }
+    let hidden = scoped_worlds(hidden_pool.clone(), &[WORLD_ID]);
+
+    // (B) the same request against a store where the relation never existed.
+    let (absent_pool, _absent_dir) = fresh_pool().await;
+    let absent = scoped_worlds(absent_pool.clone(), &[WORLD_ID]);
+
+    // Port level: the hidden relation is served the single not-found shape.
+    let hidden_get = hidden.get_relation(relation_id).await;
+    let absent_get = absent.get_relation(relation_id).await;
+    assert_eq!(
+        outcome(&hidden_get),
+        outcome(&absent_get),
+        "a hidden relation must read as absent"
+    );
+    assert!(
+        !outcome(&hidden_get).contains("wld_2"),
+        "the not-found shape must not disclose the endpoint world: {}",
+        outcome(&hidden_get)
+    );
+
+    let mut candidate = relate_relation(relation_id, endpoints[0], endpoints[1]);
+    candidate.revision = Some(1);
+    let hidden_put = hidden.put_relation(candidate.clone(), Some(1)).await;
+    let absent_put = absent.put_relation(candidate.clone(), Some(1)).await;
+    assert_eq!(
+        outcome(&hidden_put),
+        outcome(&absent_put),
+        "a hidden relation must be indistinguishable from an absent one on put"
+    );
+    assert!(
+        !carries_world_conflict(&hidden_put),
+        "a row the request never admitted must not classify as a world conflict: {}",
+        outcome(&hidden_put)
+    );
+    assert!(
+        !outcome(&hidden_put).contains("wld_2"),
+        "no foreign world id may leave the adapter: {}",
+        outcome(&hidden_put)
+    );
+
+    // Orchestrator level — same absent-shaped outcome for both stores.
+    let hidden_orch = orchestrate_relate(&hidden, relate_request(&candidate)).await;
+    let absent_orch = orchestrate_relate(&absent, relate_request(&candidate)).await;
+    assert_eq!(
+        outcome(&hidden_orch),
+        outcome(&absent_orch),
+        "the orchestrator must not observe the hidden relation either"
+    );
+    assert!(
+        !carries_world_conflict(&hidden_orch),
+        "the orchestrator must not surface a world conflict for a hidden relation"
+    );
+    assert!(
+        !outcome(&hidden_orch).contains("wld_2"),
+        "no foreign world id may leave the orchestrator: {}",
+        outcome(&hidden_orch)
+    );
+
+    // Both fixture rows are untouched by the probes.
+    for endpoint in endpoints {
+        let (_, _, _, world, _) = read_kb_row(&hidden_pool, endpoint).await;
+        assert_eq!(world, "wld_2");
+    }
+    assert_eq!(
+        read_relation_row(&hidden_pool, relation_id).await.0,
+        WORLD_ID
+    );
 }
