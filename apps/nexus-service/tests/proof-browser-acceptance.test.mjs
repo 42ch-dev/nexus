@@ -82,7 +82,19 @@ writeFileSync(
 );
 const lifecycle = await import(lifecycleModulePath);
 
-const workDirs = [derivationModulePath, lifecycleModulePath].map((p) => join(p, '..'));
+// ── Module 3: reversible-edit restore-gate outcome precedence ───────────────
+
+const restoreGateModulePath = join(mkdtempSync(join(tmpdir(), 'proof-browser-restore-gate-')), 'restore-gate.mjs');
+writeFileSync(
+  restoreGateModulePath,
+  [
+    sliceBetween(source, '// ── Reversible edit outcome precedence', '/** Byte-preserving tracked edit'),
+    'export { runWithRestoreGate };',
+  ].join('\n'),
+);
+const restoreGate = await import(restoreGateModulePath);
+
+const workDirs = [derivationModulePath, lifecycleModulePath, restoreGateModulePath].map((p) => join(p, '..'));
 after(() => {
   for (const dir of workDirs) rmSync(dir, { recursive: true, force: true });
 });
@@ -372,8 +384,11 @@ describe('proof-browser provenance completeness gate', () => {
       else if (section === 'dataset') provenance.dataset = patch;
       else provenance[section] = patch;
       const verdict = derivations.deriveProvenanceCompleteness(provenance);
-      assert.equal(verdict.complete, false, `${expectedMissing} must block acceptance`);
-      assert.ok(verdict.missing.includes(expectedMissing), `${expectedMissing} missing from ${JSON.stringify(verdict.missing)}`);
+      assert.equal(verdict.complete, false, `${JSON.stringify(expectedMissing)} must block acceptance`);
+      assert.ok(
+        verdict.missing.includes(expectedMissing),
+        `${JSON.stringify(expectedMissing)} missing from ${JSON.stringify(verdict.missing)}`,
+      );
     }
   });
 
@@ -444,5 +459,89 @@ setTimeout(() => process.exit(0), 100);
     // hits ESRCH on the dead leader, and the helper stays silent — a missing
     // group is a settled state, not an error.
     lifecycle.signalProcessGroup(child.pid, 'SIGKILL');
+  });
+});
+
+describe('proof-browser reversible-edit restore gate', () => {
+  test('a successful operation still runs the restore gate and returns its result', async () => {
+    const order = [];
+    const result = await restoreGate.runWithRestoreGate(
+      async () => {
+        order.push('operation');
+        return { surface: 'browser-shared-ui', pass: true };
+      },
+      async () => {
+        order.push('restore');
+      },
+    );
+    assert.deepEqual(result, { surface: 'browser-shared-ui', pass: true });
+    assert.deepEqual(order, ['operation', 'restore']);
+  });
+
+  test('a failed operation propagates its own error, after the restore gate ran', async () => {
+    const primary = new Error('route edit did not restart the service');
+    let restored = false;
+    await assert.rejects(
+      restoreGate.runWithRestoreGate(
+        async () => {
+          throw primary;
+        },
+        async () => {
+          restored = true;
+        },
+      ),
+      (err) => err === primary,
+    );
+    assert.equal(restored, true, 'the restore gate must run on a failed operation too');
+  });
+
+  test('a failed restore is the reported failure, never a success', async () => {
+    const restoreFailure = new Error('route file not restored: /tmp/world-kb.ts');
+    await assert.rejects(
+      restoreGate.runWithRestoreGate(
+        async () => ({ pass: true }),
+        async () => {
+          throw restoreFailure;
+        },
+      ),
+      (err) => err === restoreFailure,
+    );
+  });
+
+  test('a failed restore after a failed operation reports BOTH, primary first', async () => {
+    const primary = new Error('adapter package build failed (exit 1)');
+    const restoreFailure = new Error('adapter file not restored: /tmp/acp.ts');
+    await assert.rejects(
+      restoreGate.runWithRestoreGate(
+        async () => {
+          throw primary;
+        },
+        async () => {
+          throw restoreFailure;
+        },
+      ),
+      (err) => {
+        assert.ok(err instanceof AggregateError, 'the two failures must be reported together');
+        assert.equal(err.errors[0], primary, 'the primary operation error must be preserved');
+        assert.equal(err.errors[1], restoreFailure);
+        assert.equal(err.cause, primary);
+        assert.match(err.message, /adapter package build failed \(exit 1\)/);
+        assert.match(err.message, /adapter file not restored/);
+        return true;
+      },
+    );
+  });
+
+  test('a non-Error operation rejection is still reported, not swallowed', async () => {
+    const thrown = { code: 'ECONNRESET' };
+    await assert.rejects(
+      restoreGate.runWithRestoreGate(
+        async () => {
+          throw thrown;
+        },
+        async () => undefined,
+      ),
+      (err) => err === thrown,
+    );
   });
 });
