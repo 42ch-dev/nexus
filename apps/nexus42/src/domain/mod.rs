@@ -1,8 +1,10 @@
 //! Cloud-line domain modules (runtime mode, degradation, guard).
 //!
 //! These modules belong to the cloud line (CLI) per architecture spec §8:
-//! "`runtime_mode`, `degradation`, and platform health probing belong to
-//! the cloud line (CLI / cloud-stage builds), not the daemon hot path."
+//! `runtime_mode`, `degradation`, and platform health probing belong to the
+//! cloud line (CLI / cloud-stage builds), not the shared runtime request
+//! path (spec §8's "daemon hot path" wording predates the v1.193 P2 daemon
+//! retirement; the CLI/Connect boundary itself is unchanged).
 
 #[cfg(feature = "cli")]
 pub mod degradation;

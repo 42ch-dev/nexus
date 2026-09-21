@@ -23,10 +23,11 @@ path = "src/main.rs"
 required-features = ["cli"]
 
 # V1.153 P2 (DF-73): standalone headless Connect runtime — same crate's
-# config/home-layout/boot code, `run_daemon` never called. Requires
+# config/home-layout modules; no daemon runtime is linked and no embedded
+# SPA bytes exist in the graph (v1.193 P2-T13 deleted both). Requires
 # `connect-host` (the distributed artifact is built with
-# `--no-default-features --features connect-host`, web-embed OFF → no
-# embedded SPA bytes; see the P2 spec § Subsystem profile).
+# `--no-default-features --features connect-host`; see the P2 spec §
+# Subsystem profile).
 [[bin]]
 name = "nexus-runtime"
 path = "src/bin/nexus-runtime.rs"
@@ -61,8 +62,7 @@ required-features = ["connect-host"]
 # V1.174 P1 T4 (AR-77): the three-process `e2e_peer_mcp.rs` harness was
 # removed with Model A (v1.193 P1-T6) — its explicit `[[test]]` stanza is
 # gone so the intermediate checkout is independently testable. The
-# `connect-client` feature below is kept as a temporary edge until
-# P2-T13 removes the old dependency selectors.
+# `connect-client` marker feature it needed is gone too (v1.193 P2-T13).
 
 # Creates one world in the standalone probe's disposable workspace through
 # Nexus' own schema and narrative-write API before the runtime starts.
@@ -96,7 +96,7 @@ nexus-spoke-adapter = { path = "../../crates/nexus-spoke-adapter", default-featu
 nexus-module-manifest = { path = "../../modules/nexus-module-manifest", optional = true }
 # V1.148 P3 N-C0 (DF-72): Connect Host facade, opt-in via feature
 # `connect-host` below. spoke-connect pulls libp2p 0.56 transitively — the
-# default build (and `daemon start`) must stay libp2p-free, so this dep is
+# default build must stay libp2p-free, so this dep is
 # `optional` and only `connect start` links it. spoke-connect exposes no
 # `mdns` feature (removed upstream in 0.9.2); hickory/libp2p-mdns stay
 # lockfile-only via libp2p 0.56 optional deps, never compiled.
@@ -141,7 +141,9 @@ chrono-tz = { workspace = true, optional = true }
 # ACP SDK consumed via nexus-acp-host (worker-only linkage — see spec §11.3)
 # agent-client-protocol = "=0.10.4"  — REMOVED: consumed through nexus-acp-host
 # tokio-util, async-trait, async-broadcast — consumed through nexus-acp-host
-# nix — also used directly by daemon.rs for process management
+# nix was used directly by the deleted daemon.rs process management; no
+# direct caller remains since v1.193 P2-T13 (kept optional, unlinked by the
+# retained cohorts).
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.28", features = ["signal", "process"], optional = true }
 

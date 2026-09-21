@@ -185,13 +185,14 @@ pub enum CliError {
 
     /// V1.170 P0 (AR-9): `nexus42 compute` exit-code contract. The AR-9
     /// vocabulary does not fit the CLI-wide 1/75/76/78 mapping, so the compute
-    /// group returns this variant with its own code: 1 = build/toolchain
-    /// failure, 2 = manifest validation failure, 3 = `wasm_sha256` pairing
-    /// mismatch, 4 = daemon unreachable / run rejected.
+    /// group returns this variant with its own code: 1 = build/toolchain or
+    /// install I/O failure, 2 = manifest/descriptor validation failure,
+    /// 3 = `wasm_sha256` pairing mismatch. The code-4 daemon-unreachable arm
+    /// retired with the daemon client (v1.193 P2-T13).
     ComputeExit {
-        /// AR-9 exit code (1 | 2 | 3 | 4).
+        /// AR-9 exit code (1 | 2 | 3).
         code: i32,
-        /// User-facing message (daemon errors surfaced verbatim).
+        /// User-facing message (validation, pairing, and I/O failures verbatim).
         message: String,
     },
 
