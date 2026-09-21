@@ -885,7 +885,10 @@ states:
 /// validator. An invalid bundle is rejected with the retained validation
 /// failure — exit 1 and no local service — while the bundle is left
 /// untouched; the removed `preset run` subcommand and `--offline` switch are
-/// clap usage errors (exit 2), not silently accepted synonyms.
+/// clap usage errors (exit 2), not silently accepted synonyms — including the
+/// preset-id-bearing `--help` shape, which the deleted pre-parse interceptor
+/// used to answer with exit 0
+/// (`R-V1193-P1T1-PRESET-RUN-HELP-INTERCEPT`).
 #[test]
 fn preset_validation_rejects_invalid_bundle_without_daemon() {
     let home = tempfile::tempdir().unwrap();
@@ -935,19 +938,40 @@ fn preset_validation_rejects_invalid_bundle_without_daemon() {
         "v1.193 P1-T1: validation must not add files to the bundle"
     );
 
-    // The removed runner is an unknown subcommand.
-    let run = Command::cargo_bin("nexus42")
-        .unwrap()
-        .env("HOME", home.path())
-        .args(["preset", "run", "--help"])
-        .assert()
-        .code(2)
-        .get_output()
-        .clone();
-    assert!(
-        String::from_utf8_lossy(&run.stderr).contains("unrecognized subcommand"),
-        "v1.193 P1-T1: `preset run` must be an unknown subcommand"
-    );
+    // The removed runner is an unknown subcommand — both in the bare help shape
+    // and in the ID-bearing shape the deleted pre-parse interceptor used to
+    // match (R-V1193-P1T1-PRESET-RUN-HELP-INTERCEPT): `--help` after a preset id
+    // reached `extract_run_help_target`, which printed the manifest-enriched
+    // help for a `cli_args`-declaring preset and exited 0 before clap parsed
+    // anything. The second shape is the discriminating one —
+    // `novel-manuscript-audit-review` declares `cli_args`, so pre-fix it was
+    // answered from the interceptor (exit 0, custom help on stdout) instead of
+    // reaching the parser.
+    for args in [
+        &["preset", "run", "--help"][..],
+        &["preset", "run", "novel-manuscript-audit-review", "--help"][..],
+    ] {
+        let run = Command::cargo_bin("nexus42")
+            .unwrap()
+            .env("HOME", home.path())
+            .args(args)
+            .assert()
+            .code(2)
+            .get_output()
+            .clone();
+        let stderr = String::from_utf8_lossy(&run.stderr).into_owned();
+        assert!(
+            stderr.contains("unrecognized subcommand"),
+            "v1.193 P1-T1: `{}` must be an unknown subcommand: {stderr}",
+            args.join(" ")
+        );
+        assert!(
+            run.stdout.is_empty(),
+            "v1.193 P1-T1: `{}` must not render a pre-parse help page: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&run.stdout)
+        );
+    }
 
     // `--offline` is rejected, never treated as a synonym for the local path.
     let offline = Command::cargo_bin("nexus42")
