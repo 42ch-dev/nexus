@@ -3,8 +3,9 @@
 # `verify-graph-pins` and the `schema-consistency-check` step).
 #
 # Machine-checked, `--edges normal,build` only (dev-dependencies are excluded —
-# they never ship in the distributed graph). Every probe asserts a COUNTER
-# plus a VERSION match; nothing here is hand-inspected.
+# they never ship in the distributed graph). Every probe asserts graph STRUCTURE
+# (absence, single resolved version, resolved feature set) — never a version VALUE;
+# nothing here is hand-inspected.
 #
 # v1.193 P2-T13 collapsed the app feature lattice to two real product
 # selectors (`cli` default + independent `connect-host`) and deleted the
@@ -20,32 +21,32 @@
 #     libp2p          ABSENT
 #     rmcp            ABSENT   (the Model A rmcp/ACP bridge left with the
 #                               removed connect-client/embedded-mcp selectors)
-#     spoke-operations exactly one 0.13.1   (via nexus-spoke-adapter, prior art)
-#     agent-client-protocol exactly one 2.1.0  (via nexus-acp-host normal edge)
-#     graph-flow      exactly one 0.8.0, EMPTY feature set (no postgres/rig)
+#     spoke-operations exactly one version   (via nexus-spoke-adapter, prior art)
+#     agent-client-protocol exactly one version  (via nexus-acp-host normal edge)
+#     graph-flow      exactly one version, EMPTY feature set (no postgres/rig)
 #   -p nexus42 --no-default-features --features connect-host (Connect-only
 #   runtime; `connect-host` never implies `cli`):
-#     spoke-connect   exactly one 0.13.x
-#     libp2p          exactly one 0.56.x    (spoke-connect base dep)
-#     spoke-operations exactly one 0.13.1
+#     spoke-connect   exactly one version
+#     libp2p          exactly one version    (spoke-connect base dep)
+#     spoke-operations exactly one version
 #     rmcp            ABSENT
 #     agent-client-protocol ABSENT  (no ACP/agent-host edge in this cohort)
 #   -p nexus42 --features connect-host (optional CLI Connect):
-#     libp2p          exactly one 0.56.x
-#     spoke-connect   exactly one 0.13.x
-#     spoke-operations exactly one 0.13.1
-#     agent-client-protocol exactly one 2.1.0
+#     libp2p          exactly one version
+#     spoke-connect   exactly one version
+#     spoke-operations exactly one version
+#     agent-client-protocol exactly one version
 #     rmcp            ABSENT
 #   -p nexus-core --no-default-features (core domain):
 #     spoke-connect / libp2p / rmcp / graph-flow / nexus-wasm-host /
 #     nexus-agent-host / nexus-acp-host / nexus-orchestration  ABSENT
-#     spoke-operations exactly one 0.13.1
+#     spoke-operations exactly one version
 #   -p nexus-core --no-default-features --features connect-client (core
 #   MCP/peer library; the shipped app no longer selects it):
-#     rmcp            exactly one 3.3.0
-#     spoke-connect   exactly one 0.13.x
-#     libp2p          exactly one 0.56.x
-#     spoke-operations exactly one 0.13.1
+#     rmcp            exactly one version
+#     spoke-connect   exactly one version
+#     libp2p          exactly one version
+#     spoke-operations exactly one version
 #   -p nexus-core --no-default-features --features embedded-mcp (Model B
 #   in-process embedded server; implies connect-client):
 #     same pins as connect-client
@@ -53,7 +54,7 @@
 #     feats=[default,execution] — the node-owned selection is unchanged.
 #
 # Feature evidence (resolved feature set on the inverted probe row):
-#   graph-flow MUST resolve 0.8.0 with an EMPTY feature set everywhere.
+#   graph-flow MUST resolve with an EMPTY feature set everywhere.
 #   nexus-spoke-adapter MUST resolve feats=[compute,default] for the ordinary
 #     CLI and feats=[compute] (explicit, no defaults) for Connect-only — the
 #     Connect host keeps peer compute + shared WASM cache (AC3/D20).
@@ -111,12 +112,15 @@ assert_empty() {
   echo "ok: $pkg absent from $crate $feats"
 }
 
-# assert_exactly_one <crate> <features...> <package> <version-glob>
+# assert_exactly_one <crate> <features...> <package>
+# Asserts the package resolves to EXACTLY ONE version in the cohort (the
+# anti-version-split guard). No version value is asserted: requirements live
+# in the manifests (single source of truth) and dependency bumps must not
+# have to edit this script.
 assert_exactly_one() {
   local crate="$1"; shift
   local feats="$1"; shift
   local pkg="$1"
-  local want="$2"
   # QC-fix S-a: propagate the cargo-tree exit status (a failed invocation
   # must fail the pin loudly, not just yield an empty/one-line result).
   local out status=0
@@ -141,22 +145,18 @@ assert_exactly_one() {
   if [[ "$count" -ne 1 ]]; then
     fail "$pkg for $crate $feats: expected exactly one version, got $count ($versions)"
   fi
-  local got="$versions"
-  if [[ "$got" != $want ]]; then
-    fail "$pkg for $crate $feats: expected version matching '$want', got '$got'"
-  fi
-  echo "ok: $pkg == $got ($want) for $crate $feats"
+  echo "ok: $pkg single version ($versions) for $crate $feats"
 }
 
-# assert_features <crate> <features...> <package> <version-glob> <feature-list>
+# assert_features <crate> <features...> <package> <feature-list>
 # Resolves the package's ONE version/feature pair in the cohort and compares
-# both halves. Used for the selected-edge evidence the cohort table requires
-# (graph-flow featureless; spoke-adapter explicit `compute`).
+# the FEATURE half. Used for the selected-edge evidence the cohort table
+# requires (graph-flow featureless; spoke-adapter explicit `compute`). No
+# version value is asserted (see assert_exactly_one).
 assert_features() {
   local crate="$1"; shift
   local feats="$1"; shift
   local pkg="$1"; shift
-  local want_ver="$1"; shift
   local want_feats="$1"
   local out status=0
   out=$(cargo tree -p "$crate" $feats --edges normal,build -i "$pkg" -f "{p} feats=[{f}]" 2>&1) || status=$?
@@ -176,9 +176,6 @@ assert_features() {
   fi
   local got_ver="${pairs%% *}"
   local got_feats="${pairs#* }"
-  if [[ "$got_ver" != $want_ver ]]; then
-    fail "$pkg for $crate ${feats:-<default>}: expected version '$want_ver', got '$got_ver'"
-  fi
   if [[ "$got_feats" != "feats=[$want_feats]" ]]; then
     fail "$pkg for $crate ${feats:-<default>}: expected feats=[$want_feats], got '$got_feats'"
   fi
@@ -190,28 +187,28 @@ assert_features() {
 assert_empty nexus42 "" spoke-connect
 assert_empty nexus42 "" libp2p
 assert_empty nexus42 "" rmcp
-assert_exactly_one nexus42 "" spoke-operations "0.13.1"
-# ACP 2.1.0 rides the unconditional nexus-acp-host normal edge of the local
+assert_exactly_one nexus42 "" spoke-operations
+# ACP rides the unconditional nexus-acp-host normal edge of the local
 # ACP spawning the ordinary CLI keeps. Exactly one stable-v1 core.
-assert_exactly_one nexus42 "" agent-client-protocol "2.1.0"
-# graph-flow 0.8.0 exactly once (chronology/cron/ops library edges), with NO
+assert_exactly_one nexus42 "" agent-client-protocol
+# graph-flow exactly once (chronology/cron/ops library edges), with NO
 # default features (no `postgres`, no `rig`) — asserted below via feats=[].
-assert_exactly_one nexus42 "" graph-flow "0.8.0"
+assert_exactly_one nexus42 "" graph-flow
 
 # --- Connect-only runtime (connect-host, no defaults) -----------------------
 
-assert_exactly_one nexus42 "--no-default-features --features connect-host" spoke-connect "0.13.*"
-assert_exactly_one nexus42 "--no-default-features --features connect-host" libp2p "0.56.*"
-assert_exactly_one nexus42 "--no-default-features --features connect-host" spoke-operations "0.13.1"
+assert_exactly_one nexus42 "--no-default-features --features connect-host" spoke-connect
+assert_exactly_one nexus42 "--no-default-features --features connect-host" libp2p
+assert_exactly_one nexus42 "--no-default-features --features connect-host" spoke-operations
 assert_empty nexus42 "--no-default-features --features connect-host" rmcp
 assert_empty nexus42 "--no-default-features --features connect-host" agent-client-protocol
 
 # --- optional CLI Connect (cli + connect-host) ------------------------------
 
-assert_exactly_one nexus42 "--features connect-host" spoke-connect "0.13.*"
-assert_exactly_one nexus42 "--features connect-host" libp2p "0.56.*"
-assert_exactly_one nexus42 "--features connect-host" spoke-operations "0.13.1"
-assert_exactly_one nexus42 "--features connect-host" agent-client-protocol "2.1.0"
+assert_exactly_one nexus42 "--features connect-host" spoke-connect
+assert_exactly_one nexus42 "--features connect-host" libp2p
+assert_exactly_one nexus42 "--features connect-host" spoke-operations
+assert_exactly_one nexus42 "--features connect-host" agent-client-protocol
 assert_empty nexus42 "--features connect-host" rmcp
 
 # --- core domain (no defaults) ----------------------------------------------
@@ -224,28 +221,28 @@ assert_empty nexus-core "--no-default-features" nexus-wasm-host
 assert_empty nexus-core "--no-default-features" nexus-agent-host
 assert_empty nexus-core "--no-default-features" nexus-acp-host
 assert_empty nexus-core "--no-default-features" nexus-orchestration
-assert_exactly_one nexus-core "--no-default-features" spoke-operations "0.13.1"
+assert_exactly_one nexus-core "--no-default-features" spoke-operations
 
 # --- core MCP/peer library (app-only Model A selectors are gone) -------------
 
 for feats in "--no-default-features --features connect-client" "--no-default-features --features embedded-mcp"; do
-  assert_exactly_one nexus-core "$feats" rmcp "3.3.0"
-  assert_exactly_one nexus-core "$feats" spoke-connect "0.13.*"
-  assert_exactly_one nexus-core "$feats" libp2p "0.56.*"
-  assert_exactly_one nexus-core "$feats" spoke-operations "0.13.1"
+  assert_exactly_one nexus-core "$feats" rmcp
+  assert_exactly_one nexus-core "$feats" spoke-connect
+  assert_exactly_one nexus-core "$feats" libp2p
+  assert_exactly_one nexus-core "$feats" spoke-operations
 done
 
 # --- native/TS host (nexus-core-node) ---------------------------------------
 
-assert_features nexus-core-node "" nexus-core "*" "default,execution"
+assert_features nexus-core-node "" nexus-core "default,execution"
 
 # --- selected-edge feature evidence -----------------------------------------
 
 for crate in nexus-orchestration nexus42 nexus-core-node; do
-  assert_features "$crate" "" graph-flow "0.8.0" ""
+  assert_features "$crate" "" graph-flow ""
 done
 
-assert_features nexus42 "" nexus-spoke-adapter "*" "compute,default"
-assert_features nexus42 "--no-default-features --features connect-host" nexus-spoke-adapter "*" "compute"
+assert_features nexus42 "" nexus-spoke-adapter "compute,default"
+assert_features nexus42 "--no-default-features --features connect-host" nexus-spoke-adapter "compute"
 
 echo "graph pins OK"

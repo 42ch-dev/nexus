@@ -917,7 +917,7 @@ use nexus_core::connect::table::{mcp_catalog_admission, mcp_catalog_output_root_
 #[cfg(feature = "embedded-mcp")]
 use nexus_core::connect::VisibilityPolicy;
 #[cfg(feature = "embedded-mcp")]
-use rmcp::model::{CallToolRequestParams, ClientInfo, ErrorCode};
+use rmcp::model::{CallToolRequestParams, ClientConfig, ErrorCode};
 #[cfg(feature = "embedded-mcp")]
 use rmcp::{serve_client, ServiceError};
 
@@ -1001,16 +1001,16 @@ impl McpBackend for PeerRegistryBackend {
 #[cfg(feature = "embedded-mcp")]
 async fn establish_session(
     server: &EmbeddedMcpServer<PeerRegistryBackend>,
-) -> rmcp::service::RunningService<rmcp::RoleClient, ClientInfo> {
+) -> rmcp::service::RunningService<rmcp::RoleClient, ClientConfig> {
     let session = server.establish().expect("embedded session establish");
-    serve_client(ClientInfo::default(), session.transport)
+    serve_client(ClientConfig::default(), session.transport)
         .await
         .expect("initialize handshake completes")
 }
 
 #[cfg(feature = "embedded-mcp")]
 async fn listed_tools(
-    running: &rmcp::service::RunningService<rmcp::RoleClient, ClientInfo>,
+    running: &rmcp::service::RunningService<rmcp::RoleClient, ClientConfig>,
 ) -> Vec<String> {
     running
         .list_tools(None)

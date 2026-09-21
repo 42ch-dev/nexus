@@ -29,7 +29,8 @@ packages (`prost-derive`'s `itertools` 0.14.0 → 0.13.0, `tempfile`'s `getrando
   - `cargo metadata --locked` / `cargo check --locked` / `cargo test --locked` (these do
     not rewrite the lock),
   - `cargo tree --locked -i <pkg>@<ver>` for provenance proofs,
-  - `bash tooling/check-graph-pins.sh` for exact-pin honesty.
+  - `bash tooling/check-graph-pins.sh` for graph-structure honesty (absence,
+    single resolved version, resolved feature set — never a version value).
 - **Compare the lock, not the exit code**: after any checkpoint, diff the lock against the
   pre-checkpoint baseline and classify every delta as a recorded target, a recorded
   payload move, or an unexplained churn (rollback required).

@@ -95,7 +95,7 @@ futures-util = { workspace = true, optional = true }
 nexus-wasm-host = { path = "../nexus-wasm-host", optional = true }
 # `server` is the smallest role covering mcp_bridge's ServerHandler
 # surface (RoleServer/RequestContext); the client role is not needed.
-rmcp = { version = "=3.3.0", default-features = false, features = ["server", "client"], optional = true }
+rmcp = { version = "=3.4.0", default-features = false, features = ["server", "client"], optional = true }
 # async-trait is used ONLY by the execution cohort's port traits and the
 # module's test doubles. Nothing outside `execution` uses the macro (the
 # `#![allow(clippy::unused_async_trait_impl)]` in knowledge.rs is a lint name,

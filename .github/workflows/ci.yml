@@ -399,14 +399,15 @@ jobs:
       - name: Check wire schema drift
         run: bash tooling/check-wire-drift.sh
       # V1.174 P0 T6 (AR-74), retargeted for the v1.193 P2 product cohorts:
-      # dependency graph pins — the ordinary `cli` graph stays free of
-      # spoke-connect/libp2p/rmcp and the removed Model A selectors are gone;
-      # the Connect graphs resolve exactly one 0.13.1 spoke-operations /
-      # 0.56.x libp2p / 0.13.x spoke-connect; rmcp 3.3.0 survives only in the
-      # core connect-client/embedded-mcp library cohorts; the shipped CLI
-      # graphs pin exactly one agent-client-protocol 2.1.0 and one featureless
-      # graph-flow 0.8.0. `cargo tree` needs a Rust toolchain; setup-monorepo
-      # above provides it.
+      # dependency graph pins — structure only (absence, single resolved
+      # version, resolved feature set), never a version value: the ordinary
+      # `cli` graph stays free of spoke-connect/libp2p/rmcp and the removed
+      # Model A selectors are gone; the Connect graphs resolve a single
+      # spoke-operations / libp2p / spoke-connect each; rmcp survives only in
+      # the core connect-client/embedded-mcp library cohorts; the shipped CLI
+      # graphs resolve a single agent-client-protocol and one featureless
+      # graph-flow. `cargo tree` needs a Rust toolchain; setup-monorepo above
+      # provides it.
       - name: Check graph pins
         run: bash tooling/check-graph-pins.sh
 
