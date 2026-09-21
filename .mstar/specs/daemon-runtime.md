@@ -1035,6 +1035,8 @@ Implement **`require_active_creator`** (or equivalent) on Tier-2 route groups. T
 exposure) is locked in V1.174 (AR-66..77); this section is an ADDITIVE
 V1.179 P0 overlay — it does not rewrite the lock history.
 
+> **Local retirement note (v1.193 P2) — two CLI spellings below are not current instructions.** The Model A bridge `nexus42 mcp serve` (§18.1 item 2) and the enablement flag `nexus42 daemon start --embedded-mcp` (§18.1 item 3) are **deleted**: the whole `nexus42 daemon` group went with the obsolete Rust host, and Model A lost its CLI entry. Both invocations are clap's "unrecognized subcommand" error (exit 2) — asserted by `retired_operator_entrances_are_unknown` (`apps/nexus42/tests/command_surface_contract.rs`, which drives `mcp serve` and `mcp --help`) and recorded in [rust-core-service-boundary.md](rust-core-service-boundary.md) §7.2. The rest of this section is retained: the WS registration lane, the `PeerToolsConfig` keys and the core `embedded-mcp` **library** feature survive (only the app-only selector was deleted). Model B enablement is therefore the config key (`~/.nexus42/connect/daemon.json` key `embedded_mcp`, restart-scoped per §18.3) or the TS service's own `--embedded-mcp` argument (`apps/nexus-service/src/config.ts`) — never a `nexus42` operator leaf.
+
 ### 18.1 Serving & transport topology
 
 The peer-tools surface is served over three transports, all riding the
@@ -1051,7 +1053,8 @@ SAME catalog builder (`GET /v1/daemon/tools`):
 2. **Model A — stdio MCP child** (V1.174, AR-71): `nexus42 mcp serve`
    runs as a stateless stdio child that proxies the daemon loopback HTTP
    face. The child is the exposure path for external MCP hosts
-   (ACP/`--mcp-config`).
+   (ACP/`--mcp-config`). **Not a current instruction — the `nexus42 mcp serve`
+   spelling was deleted in v1.193 P2 (see the §18 note).**
 3. **Model B — embedded MCP server** (V1.179 P0, DF-88, feature-gated
    `embedded-mcp`): an in-process rmcp server over
    `transport::sink_stream` pairs (no sockets, no bind, no TLS — DF-87's
@@ -1063,7 +1066,9 @@ SAME catalog builder (`GET /v1/daemon/tools`):
    of the `PeerToolsConfig.embedded_mcp` key and the
    `nexus42 daemon start --embedded-mcp` flag (GC #9); the cargo feature
    is the hard gate (feature off + enablement requested ⇒ warn-and-skip,
-   never a boot abort).
+   never a boot abort). **Not a current instruction — the
+   `nexus42 daemon start --embedded-mcp` spelling was deleted in v1.193 P2
+   (see the §18 note).**
 
 ### 18.2 Duplicate tool-id collision policy (V1.179 P0, DF-91)
 

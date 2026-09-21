@@ -344,10 +344,14 @@ V2 命令面按以下顶层执行（pre-release 允许破坏性调整）。**V1.
 | `nexus42 creator workspace create <workspace_slug>` | 新建 workspace 登记与 operational 树 |
 | `nexus42 creator workspace use <workspace_slug>` | 切换活跃 workspace |
 | `nexus42 creator workspace init` | 在当前 `creator + workspace` 上下文登记创作根与 operational 元数据 |
-| `nexus42 creator workspace clone <world-ref>` | **Deprecated** — world cloning is platform-only; not available locally. Hidden from `--help` |
-| `nexus42 creator workspace link` | 绑定本地项目与平台 World |
-| `nexus42 creator workspace unlink` | 解绑本地项目与平台 World |
-| `nexus42 creator workspace status` | 当前 workspace 总览 |
+
+**Retired leaves (deleted in v1.193 P2) — not part of the current surface.** The group's parser surface is exactly the four rows above: `CreatorWorkspaceCommand` (`apps/nexus42/src/commands/creator/mod.rs`) declares `List` / `Create` / `Use` / `Init` only. The dormant leaves the table used to list are gone — invoking any of them is clap's "unrecognized subcommand" error (exit 2), never a hidden or deprecated stub:
+
+| Retired command | Purpose it had |
+| --- | --- |
+| `nexus42 creator workspace clone <world-ref>` | Hidden hard-deprecated World clone — World cloning was platform-only, so the leaf never had a local operation. `retired_creator_workspace_clone_is_unknown` (`apps/nexus42/tests/integration.rs`) asserts the leaf itself plus its `--help` / `--source` / `--dry-run` spellings as unknown, and pins `list` / `create` / `use` / `init` as the retained help surface |
+| `nexus42 creator workspace link` / `unlink` | 绑定/解绑本地项目与平台 World — a callable-but-incomplete leaf in the pre-v1.193 overlay that lost its CLI entry in v1.193 P2 ([rust-core-service-boundary.md](./rust-core-service-boundary.md) §7.4) |
+| `nexus42 creator workspace status` | 当前 workspace 总览 — a callable-but-incomplete leaf in the pre-v1.193 overlay that lost its CLI entry in v1.193 P2 |
 
 说明：
 
@@ -1123,8 +1127,10 @@ Normative: [novel-writing/multi-work-lifecycle.md](./novel-writing/multi-work-li
 
 **Omitted-`<work_id>` resolution (v1.194 P2-T1 — `R-V1193-P0T5-OMITTED-ID-POOL-ACTIVE`, settled).**
 Every retained arm that accepts an omitted `<work_id>` — `works status`,
-`works inspire`, `works reopen`, `works reconcile-chapters`, and the
-`works findings` / `works rules` leaves — resolves it through one helper
+`works inspire`, `works reopen`, `works reconcile-chapters`, the
+`works findings` / `works rules` leaves, and `creator moment-directive`
+(`set` / `show` / `clear` in Work scope, where `moment_directive.rs::resolve_work_id`
+delegates here) — resolves it through one helper
 (`apps/nexus42/src/commands/creator/works/mod.rs::active_work_id_core`): the
 bounded `status=active, limit=1, offset=0` query over the **selection pool**
 (`CoreService::list_work_pool` → the `novel_pool_entries` store that
