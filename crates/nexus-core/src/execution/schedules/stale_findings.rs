@@ -10,9 +10,10 @@
 //!   database errors are logged at `error!` level and never bubbled out.
 //! - Default cadence is 24h (one sweep per day) and the default threshold
 //!   is 96h, matching `.mstar/specs/novel-writing/quality-loop.md`. Both are
-//!   overridable via env vars so the hermetic integration test in
-//!   `crates/nexus-daemon-runtime/tests/master_decision_timeout.rs` can
-//!   drive a sub-second cadence with a tiny threshold.
+//!   overridable via env vars so the hermetic integration tests
+//!   (`crates/nexus-core/tests/retained_execution_contracts.rs`, the
+//!   `stale_finding_sweep_*` cases migrated from the retired daemon crate)
+//!   can drive a sub-second cadence with a tiny threshold.
 //! - T4 opt-in auto-enqueue: when a stale finding's Work has
 //!   `auto_review_master_on_timeout = true`, the watcher enqueues a
 //!   `novel-review-master` schedule via

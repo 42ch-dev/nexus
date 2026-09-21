@@ -22,8 +22,25 @@ const FOREIGN_WORLD: &str = "wld_foreign";
 
 struct Fixture {
     tmp: TempDir,
+    db_path: PathBuf,
     core: CoreService,
     principal: nexus_core::Principal,
+}
+
+/// A second guarded writer over the live engine pool, for test-only seeds that
+/// must land after the core opened (same writer id → no fencing).
+async fn live_write_pool(
+    fx: &Fixture,
+) -> (nexus_local_db::writer_protocol::GuardedPool, SqlitePool) {
+    let engine = nexus_local_db::writer_protocol::join_live_engine_pool(
+        &fx.db_path,
+        GuardedPoolOptions::default(),
+    )
+    .await
+    .unwrap()
+    .expect("live engine pool");
+    let pool = engine.clone_pool();
+    (engine, pool)
 }
 
 async fn seed_world(pool: &SqlitePool, world_id: &str, owner: &str) {
@@ -206,6 +223,7 @@ async fn setup() -> Fixture {
     let principal = core.active_principal().await.unwrap();
     Fixture {
         tmp,
+        db_path,
         core,
         principal,
     }
@@ -1189,4 +1207,509 @@ async fn v1191_world_sheet_governance_canvas_create_authors_the_audience() {
     .unwrap();
     assert_eq!(exists, 0, "a refused audience writes no row");
     pool.close().await;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MIGRATED (daemon `world_kb_patch.rs` retirement, v1.193 P2-T3)
+//
+// The retired fixture drove these through the `world_kb` HTTP handlers. The
+// surviving domain assertions live here; the `Axum` status codes, the daemon
+// `error_code()`/`error_details()` envelopes and the reserved-key/audience
+// assertions (already owned by `kb_owner_scope_migration.rs`,
+// `nexus-spoke-adapter`'s owner-conversion tests and this file's
+// `v1191_world_sheet_governance_*` cases) did not move.
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[allow(clippy::too_many_arguments)]
+async fn seed_kb_row(
+    pool: &SqlitePool,
+    key_block_id: &str,
+    world_id: &str,
+    block_type: &str,
+    canonical_name: &str,
+    status: &str,
+    revision: i64,
+    body_json: &str,
+    modules_json: Option<&str>,
+) {
+    sqlx::query(
+        "INSERT INTO kb_key_blocks (key_block_id, world_id, block_type, canonical_name, status, revision, body_json, modules_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
+    )
+    .bind(key_block_id)
+    .bind(world_id)
+    .bind(block_type)
+    .bind(canonical_name)
+    .bind(status)
+    .bind(revision)
+    .bind(body_json)
+    .bind(modules_json)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// Entity create/update conventions (migrated from `world_kb_patch.rs`):
+/// create-on-absent lands at revision 1 with the body round-tripped, an
+/// update shaped against an absent row conflicts at 0, a create shaped against
+/// an existing row conflicts at the stored revision, malformed ids and a
+/// missing required field are validation refusals, and a soft-deleted row is
+/// terminal — never a create.
+#[tokio::test]
+async fn retained_world_kb_entity_create_update_conventions() {
+    let fx = setup().await;
+    let (_guard, pool) = live_write_pool(&fx).await;
+    let pool_ro = read_only_pool(fx.tmp.path()).await;
+    let entity_id = "kb_9f8e7d6c5b4a39281726354453627180";
+
+    // Create-on-absent: revision 1, provisional status, era body verbatim.
+    let create: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
+        "entity_id": entity_id,
+        "expected_version": 0,
+        "patch": {
+            "title": "New Era",
+            "block_type": "era",
+            "body": {
+                "attributes": {
+                    "era_type": "kingdom",
+                    "world_summary": "The age of the three kingdoms.",
+                }
+            },
+        },
+    }))
+    .unwrap();
+    let created = fx
+        .core
+        .patch_world_kb_entity(&fx.principal, OWNED_WORLD.to_string(), create)
+        .await
+        .unwrap();
+    assert_eq!(created.version, 1, "create lands at revision 1");
+    assert_eq!(created.entity.key_block_id, entity_id);
+    assert_eq!(created.entity.block_type.to_string(), "era");
+    assert_eq!(created.entity.status, "provisional");
+    let wire = serde_json::to_value(&created.entity).unwrap();
+    assert_eq!(wire["body"]["attributes"]["era_type"], "kingdom");
+    assert_eq!(
+        wire["body"]["attributes"]["world_summary"],
+        "The age of the three kingdoms."
+    );
+    let store = SqliteKbStore::new(pool.clone());
+    let stored = store.get_knowledge_entry(entity_id).await.unwrap();
+    assert_eq!(stored.world_id(), Some(OWNED_WORLD));
+    assert_eq!(stored.revision, Some(1));
+    assert_eq!(stored.status, "provisional");
+
+    // Update-on-absent: client staleness is a conflict at version 0, never a
+    // silent create.
+    let update_absent: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
+        "entity_id": "kb_ghost",
+        "expected_version": 3,
+        "patch": {"title": "Ghost"},
+    }))
+    .unwrap();
+    let err = fx
+        .core
+        .patch_world_kb_entity(&fx.principal, OWNED_WORLD.to_string(), update_absent)
+        .await
+        .unwrap_err();
+    let CoreError::WorldKbConflict(details) = err else {
+        panic!("expected conflict, got {err:?}")
+    };
+    assert_eq!(details.current_version, 0);
+    assert_eq!(details.entity_id, "kb_ghost");
+
+    // Create shaped against an existing row: the same conflict, reporting the
+    // stored revision.
+    let create_existing: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
+        "entity_id": "kb_cas",
+        "expected_version": 0,
+        "patch": {"title": "Elder"},
+    }))
+    .unwrap();
+    let err = fx
+        .core
+        .patch_world_kb_entity(&fx.principal, OWNED_WORLD.to_string(), create_existing)
+        .await
+        .unwrap_err();
+    let CoreError::WorldKbConflict(details) = err else {
+        panic!("expected conflict, got {err:?}")
+    };
+    assert_eq!(details.current_version, 2, "kb_cas is stored at revision 2");
+    assert_eq!(details.entity_id, "kb_cas");
+
+    // Malformed client-minted ids never reach storage.
+    for malformed in [
+        "entity_123",
+        "kb_",
+        "kb_zzz",
+        "kb_9f8e7d6c5b4a39281726354453627180!",
+    ] {
+        let req: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
+            "entity_id": malformed,
+            "expected_version": 0,
+            "patch": {"title": "Valid Title", "block_type": "era"},
+        }))
+        .unwrap();
+        let err = fx
+            .core
+            .patch_world_kb_entity(&fx.principal, OWNED_WORLD.to_string(), req)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, CoreError::WorldKbValidation(_)),
+            "entity_id {malformed:?} must be refused, got {err:?}"
+        );
+    }
+    let written: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE key_block_id LIKE 'entity%'")
+            .fetch_one(&pool_ro)
+            .await
+            .unwrap();
+    assert_eq!(written, 0, "no malformed id wrote a row");
+
+    // Create required fields: a title and a block type are both mandatory.
+    for patch in [
+        serde_json::json!({"block_type": "era"}),
+        serde_json::json!({"title": "No Type"}),
+    ] {
+        let req: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
+            "entity_id": "kb_required_field_probe",
+            "expected_version": 0,
+            "patch": patch,
+        }))
+        .unwrap();
+        let err = fx
+            .core
+            .patch_world_kb_entity(&fx.principal, OWNED_WORLD.to_string(), req)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, CoreError::WorldKbValidation(_)),
+            "patch {patch} must be refused, got {err:?}"
+        );
+    }
+
+    // A foreign World is refused before any entity read, create intent
+    // included.
+    let foreign_create: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
+        "entity_id": "kb_other_new",
+        "expected_version": 0,
+        "patch": {"title": "New Thing", "block_type": "era"},
+    }))
+    .unwrap();
+    let err = fx
+        .core
+        .patch_world_kb_entity(&fx.principal, FOREIGN_WORLD.to_string(), foreign_create)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, CoreError::WorldOwnerDenied { .. }));
+
+    // A soft-deleted row is Found, not absent: a create-shaped request hits
+    // the terminal guard and writes nothing.
+    let deleted_create: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
+        "entity_id": "kb_dead",
+        "expected_version": 0,
+        "patch": {"title": "Ghost Reborn", "block_type": "character"},
+    }))
+    .unwrap();
+    let err = fx
+        .core
+        .patch_world_kb_entity(&fx.principal, OWNED_WORLD.to_string(), deleted_create)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, CoreError::WorldKbValidation(_)));
+    let dead = store.get_knowledge_entry("kb_dead").await.unwrap();
+    assert_eq!(dead.status, "deleted");
+    assert_eq!(dead.revision, Some(1));
+    assert_eq!(dead.canonical_name, "Dead");
+
+    // The authoring audience moves under the same CAS: an author-only patch
+    // authors the resolved pair, and an explicit shared patch clears it.
+    let holder = nexus_local_db::creator_holder_entry_id(CREATOR);
+    let private: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
+        "entity_id": entity_id,
+        "expected_version": created.version,
+        "patch": {"audience": {"kind": "author-only"}},
+    }))
+    .unwrap();
+    let authored = fx
+        .core
+        .patch_world_kb_entity(&fx.principal, OWNED_WORLD.to_string(), private)
+        .await
+        .unwrap();
+    assert_eq!(authored.version, 2);
+    let authored_wire = serde_json::to_value(&authored.entity).unwrap();
+    assert_eq!(authored_wire["holder_entry_id"], serde_json::json!(holder));
+    assert_eq!(
+        authored_wire["disclosure"],
+        serde_json::json!("owner-private")
+    );
+    // The governance half of the authoring transaction owns its own bump, so
+    // the next CAS base is the STORED revision, not the response's.
+    let stored_version: i64 =
+        sqlx::query_scalar("SELECT COALESCE(revision, 0) FROM kb_key_blocks WHERE key_block_id = ?")
+            .bind(entity_id)
+            .fetch_one(&pool_ro)
+            .await
+            .unwrap();
+    let shared: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
+        "entity_id": entity_id,
+        "expected_version": stored_version,
+        "patch": {"audience": {"kind": "shared"}},
+    }))
+    .unwrap();
+    let cleared = fx
+        .core
+        .patch_world_kb_entity(&fx.principal, OWNED_WORLD.to_string(), shared)
+        .await
+        .unwrap();
+    let cleared_wire = serde_json::to_value(&cleared.entity).unwrap();
+    assert!(
+        cleared_wire["holder_entry_id"].is_null() && cleared_wire["disclosure"].is_null(),
+        "an explicit shared audience clears the governance pair: {cleared_wire}"
+    );
+    let stored_pair: (Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT holder_entry_id, disclosure FROM kb_key_blocks WHERE key_block_id = ?",
+    )
+    .bind(entity_id)
+    .fetch_one(&pool_ro)
+    .await
+    .unwrap();
+    assert_eq!(stored_pair, (None, None), "the clear is durable");
+
+    // Body attributes outside spoke's typed value slot (null / array / object)
+    // survive a title-only patch exactly.
+    seed_kb_row(
+        &pool,
+        "kb_backpack",
+        OWNED_WORLD,
+        "item",
+        "Backpack",
+        "confirmed",
+        0,
+        r#"{"attributes":{"weight":5,"named":null,"contents":["sword","potion"],"metadata":{"rarity":"common"}}}"#,
+        None,
+    )
+    .await;
+    let title_only: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
+        "entity_id": "kb_backpack",
+        "expected_version": 0,
+        "patch": {"title": "Hero Backpack"},
+    }))
+    .unwrap();
+    let patched = fx
+        .core
+        .patch_world_kb_entity(&fx.principal, OWNED_WORLD.to_string(), title_only)
+        .await
+        .unwrap();
+    assert_eq!(patched.version, 1);
+    let wire = serde_json::to_value(&patched.entity).unwrap();
+    let attributes = &wire["body"]["attributes"];
+    assert_eq!(attributes["weight"], 5.0);
+    assert_eq!(attributes["named"], serde_json::json!(null));
+    assert_eq!(attributes["contents"], serde_json::json!(["sword", "potion"]));
+    assert_eq!(
+        attributes["metadata"],
+        serde_json::json!({"rarity": "common"})
+    );
+
+    let () = pool_ro.close().await;
+}
+
+/// Module-dialect semantics and the graph projection (migrated from
+/// `world_kb_patch.rs` `patch_entity_modules_*`,
+/// `patch_entity_*_round_trip_on_graph_read` and
+/// `get_graph_projects_modules_from_modules_json`): a provided first-level key
+/// replaces its whole value, omission and an empty object both preserve the
+/// stored dialects, unknown keys round-trip verbatim, and the graph carries
+/// the modules — omitting the key entirely for an entity that has none.
+#[tokio::test]
+async fn retained_world_kb_modules_semantics_and_graph_projection() {
+    let fx = setup().await;
+    let (_guard, pool) = live_write_pool(&fx).await;
+
+    seed_kb_row(
+        &pool,
+        "kb_modular",
+        OWNED_WORLD,
+        "character",
+        "Aria",
+        "confirmed",
+        0,
+        "{}",
+        Some(r#"{"mental":{"goals":["old goal"],"fear":"storms"},"belief":{"ref":"kb_beliefs"}}"#),
+    )
+    .await;
+
+    // A provided key replaces the WHOLE first-level value; siblings survive.
+    let upsert: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
+        "entity_id": "kb_modular",
+        "expected_version": 0,
+        "patch": {"modules": {"mental": {"goals": ["new goal"]}}},
+    }))
+    .unwrap();
+    let patched = fx
+        .core
+        .patch_world_kb_entity(&fx.principal, OWNED_WORLD.to_string(), upsert)
+        .await
+        .unwrap();
+    assert_eq!(
+        patched.entity.modules.get("mental"),
+        Some(&serde_json::json!({"goals": ["new goal"]})),
+        "the provided key replaces its whole value"
+    );
+    assert_eq!(
+        patched.entity.modules.get("belief"),
+        Some(&serde_json::json!({"ref": "kb_beliefs"})),
+        "an unspecified sibling key is preserved"
+    );
+
+    // Omission and `{}` are both no-ops for the stored dialects.
+    let mut current = patched.version;
+    for patch in [
+        serde_json::json!({"title": "Aria Stormwind"}),
+        serde_json::json!({"title": "Aria Stormwind", "modules": {}}),
+    ] {
+        let req: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
+            "entity_id": "kb_modular",
+            "expected_version": current,
+            "patch": patch,
+        }))
+        .unwrap();
+        let kept = fx
+            .core
+            .patch_world_kb_entity(&fx.principal, OWNED_WORLD.to_string(), req)
+            .await
+            .unwrap();
+        current = kept.version;
+        assert_eq!(
+            kept.entity.modules.get("mental"),
+            Some(&serde_json::json!({"goals": ["new goal"]})),
+            "patch {patch} must not wipe the stored dialects"
+        );
+        assert_eq!(
+            kept.entity.modules.get("belief"),
+            Some(&serde_json::json!({"ref": "kb_beliefs"}))
+        );
+    }
+
+    // Unknown keys and array-carried values round-trip verbatim; a
+    // modules-only patch is a valid edit.
+    let revision: i64 =
+        sqlx::query_scalar("SELECT revision FROM kb_key_blocks WHERE key_block_id = 'kb_modular'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let modules_only: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
+        "entity_id": "kb_modular",
+        "expected_version": revision,
+        "patch": {"modules": {
+            "custom_namespace": {"deep": {"x": [1, 2]}},
+            "placement": ["a", "b"],
+            "observation": {"observers": ["kb_ana"], "access": {"read": ["kb_ana"]}},
+        }},
+    }))
+    .unwrap();
+    let extended = fx
+        .core
+        .patch_world_kb_entity(&fx.principal, OWNED_WORLD.to_string(), modules_only)
+        .await
+        .unwrap();
+    assert_eq!(
+        extended.entity.modules.get("custom_namespace"),
+        Some(&serde_json::json!({"deep": {"x": [1, 2]}})),
+        "an unknown module key round-trips verbatim"
+    );
+    assert_eq!(
+        extended.entity.modules.get("placement"),
+        Some(&serde_json::json!(["a", "b"]))
+    );
+
+    // The graph read carries the same dialects, and an entity without modules
+    // omits the key entirely.
+    seed_kb_row(
+        &pool,
+        "kb_plain",
+        OWNED_WORLD,
+        "item",
+        "Plain Anchor",
+        "confirmed",
+        0,
+        "{}",
+        None,
+    )
+    .await;
+    seed_kb_row(
+        &pool,
+        "kb_gone",
+        OWNED_WORLD,
+        "item",
+        "Gone Anchor",
+        "deleted",
+        0,
+        "{}",
+        None,
+    )
+    .await;
+    let graph = fx
+        .core
+        .world_kb_graph(&fx.principal, OWNED_WORLD.to_string(), false)
+        .await
+        .unwrap();
+    let graph_wire = serde_json::to_value(&graph).unwrap();
+    let entities = graph_wire["entities"].as_array().expect("entities");
+    assert!(
+        entities
+            .iter()
+            .all(|entity| entity["key_block_id"] != "kb_gone"),
+        "deleted entities are excluded from the graph"
+    );
+    let modular = entities
+        .iter()
+        .find(|entity| entity["key_block_id"] == "kb_modular")
+        .expect("modular entity projected");
+    assert_eq!(
+        modular["modules"]["mental"]["goals"],
+        serde_json::json!(["new goal"]),
+        "the graph carries the persisted dialects verbatim"
+    );
+    assert_eq!(
+        modular["modules"]["observation"]["observers"],
+        serde_json::json!(["kb_ana"])
+    );
+    let plain = entities
+        .iter()
+        .find(|entity| entity["key_block_id"] == "kb_plain")
+        .expect("plain entity projected");
+    assert!(
+        plain.get("modules").is_none(),
+        "an entity without modules omits the key on the wire: {plain}"
+    );
+
+    // The DTO boundary is closed: malformed module keys and scalar values
+    // never deserialize.
+    for bad in [
+        serde_json::json!({"modules": {"Bad Key": {}}}),
+        serde_json::json!({"modules": {"mental": 5}}),
+        serde_json::json!({"modules": {"mental": null}}),
+        serde_json::json!({"modules": {"mental": "string"}}),
+        serde_json::json!({"modules": {"": {}}}),
+        serde_json::json!({"modules": {"9lives": {}}}),
+    ] {
+        assert!(
+            serde_json::from_value::<WorldKbPatchEntityRequest>(serde_json::json!({
+                "entity_id": "kb_modular",
+                "expected_version": 0,
+                "patch": bad,
+            }))
+            .is_err(),
+            "must reject {bad}"
+        );
+    }
+    let conforming = serde_json::from_value::<WorldKbPatchEntityRequest>(serde_json::json!({
+        "entity_id": "kb_modular",
+        "expected_version": 0,
+        "patch": {"modules": {"mental": {"goals": ["x"]}, "placement": ["a"]}},
+    }))
+    .expect("a conforming map parses");
+    assert_eq!(conforming.patch.modules.len(), 2);
 }

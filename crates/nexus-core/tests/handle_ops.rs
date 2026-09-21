@@ -106,14 +106,13 @@ async fn fixture() -> Fixture {
     let guarded = nexus_local_db::init_engine_pool(&db_path)
         .await
         .expect("engine pool init");
-    sqlx::query(
-        "INSERT OR IGNORE INTO creators (creator_id, display_name, status, \
-         cached_at, data) VALUES (?, 'Test', 'active', datetime('now'), '{}')",
-    )
-    .bind(CREATOR)
-    .execute(guarded.pool())
-    .await
-    .expect("seed the admitted creator row");
+    // The PRODUCTION creation path, so the Creator's holder registry row is
+    // materialized with it: the compute seam reads its module input through the
+    // admitted Creator `ActorView`, which resolves that stable holder
+    // (`require_creator_holder`, fail-closed) before any invocation runs.
+    nexus_local_db::ensure_creator_row(guarded.pool(), CREATOR, "Test")
+        .await
+        .expect("seed the admitted creator and its holder");
     guarded.pool().close().await;
     nexus_local_db::writer_protocol::release_retained_writer_guards(&db_path);
 
@@ -485,4 +484,326 @@ async fn closing_owner_fences_every_entry_point() {
         matches!(commit, CoreError::Closing),
         "commit_workspace must be fenced after close, got {commit:?}"
     );
+}
+
+/// 9. A gated preset with no Work is refused BEFORE any write.
+///
+/// MIGRATED from `crates/nexus-daemon-runtime/tests/fl_e_schedule_api.rs`
+/// `gated_preset_without_work_id_is_rejected` (the PR #50 fail-closed
+/// regression): the gate evaluator requires a `work_id`, so a gated preset
+/// requested without one must refuse rather than enqueue unchecked.
+#[tokio::test]
+#[serial_test::serial]
+async fn gated_preset_without_work_is_refused_before_any_write() {
+    let f = fixture().await;
+    let (core, handle) = open_handle(&f).await;
+    let principal = core.active_principal().await.unwrap();
+
+    // `research` declares gates; no `work_id` is supplied through input/seed.
+    let mut request = request_for(CREATOR, "research");
+    request.agent_bindings = Some(default_bindings());
+    let err = handle.add_schedule(&principal, request).await.unwrap_err();
+    assert!(
+        matches!(err, CoreError::Preset(_)),
+        "a gated preset without a Work must fail closed, got {err:?}"
+    );
+
+    let scheduled: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM creator_schedules WHERE creator_id = ?")
+            .bind(CREATOR)
+            .fetch_one(core.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        scheduled, 0,
+        "a refused gate evaluation must publish no schedule row"
+    );
+}
+
+/// 10. The `force_gates` audit reason refuses oversize text and control
+///     characters before anything is written.
+///
+/// MIGRATED from `crates/nexus-daemon-runtime/tests/fl_e_schedule_api.rs`
+/// `force_gates_with_long_reason_rejected` and
+/// `force_gates_with_ansi_in_reason_rejected`: the bypass reason is
+/// audit-logged, so an unbounded or terminal-control-bearing reason is a
+/// validation refusal, not a stored audit row.
+#[tokio::test]
+#[serial_test::serial]
+async fn force_gates_reason_rejects_oversize_and_control_characters() {
+    let f = fixture().await;
+    let (core, handle) = open_handle(&f).await;
+    let principal = core.active_principal().await.unwrap();
+
+    for reason in [
+        "x".repeat(600),
+        "ok \u{1b}[31mred\u{1b}[0m text".to_string(),
+    ] {
+        let mut request = request_for(CREATOR, "memory-augmented");
+        request.force_gates = true;
+        request.reason = Some(reason.clone());
+        request.agent_bindings = Some(default_bindings());
+        let err = handle.add_schedule(&principal, request).await.unwrap_err();
+        assert!(
+            matches!(err, CoreError::InvalidInput { .. }),
+            "reason {reason:?} must be a validation refusal, got {err:?}"
+        );
+    }
+
+    let audits = nexus_local_db::list_force_gates_audit(core.pool(), CREATOR)
+        .await
+        .expect("audit rows");
+    assert!(
+        audits.is_empty(),
+        "a refused reason must not be audited, got {audits:?}"
+    );
+    let scheduled: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM creator_schedules WHERE creator_id = ?")
+            .bind(CREATOR)
+            .fetch_one(core.pool())
+            .await
+            .unwrap();
+    assert_eq!(scheduled, 0, "a refused bypass must publish no row");
+}
+
+// ---------------------------------------------------------------------------
+// v1.193 P2-T9 — the compute seam on `ExecutionHandle`.
+//
+// MIGRATED from `nexus-daemon-runtime/tests/compute_runs_api.rs`: the daemon's
+// compute routes resolved an engine/cache/serializer from the HTTP state and
+// handed the request to this crate's compute lane. The retained production seam
+// is `ExecutionHandle::compute_run` / `accept_compute_run`, which resolve the
+// SAME three collaborators from the owner's own runtime deps and require the
+// caller's principal to belong to this service before any effect. It has no
+// `CoreService::run_compute` alias.
+// ---------------------------------------------------------------------------
+#[cfg(feature = "compute")]
+mod compute_seam {
+    use super::*;
+    use nexus_contracts::generated::daemon_api::compute::{
+        run_accept_request::RunAcceptRequest, run_request::RunRequest,
+    };
+    use nexus_wasm_host::{ModuleCache, WasmEngine};
+
+    const WORLD: &str = "wld_ops";
+    const MODULE: &str = "basic-combat";
+
+    /// Seed a world owned by the fixture creator plus the two computable
+    /// combatants the embedded module needs.
+    async fn seed_compute_world(pool: &sqlx::SqlitePool) {
+        sqlx::query(
+            "INSERT OR IGNORE INTO narrative_worlds \
+                (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
+                 time_policy, metadata_json, created_at) \
+               VALUES (?, 'ws', ?, 'Combat World', 'combat-world', \
+                 'active', 'private', 'manual', '{}', datetime('now'))",
+        )
+        .bind(WORLD)
+        .bind(CREATOR)
+        .execute(pool)
+        .await
+        .unwrap();
+        seed_character(pool, "kb_atk", "Striker", 20, 3, 100, 100).await;
+        seed_character(pool, "kb_def", "Guardian", 10, 5, 30, 50).await;
+    }
+
+    /// Seed one computable character entry.
+    async fn seed_character(
+        pool: &sqlx::SqlitePool,
+        entry_id: &str,
+        name: &str,
+        base_atk: i64,
+        base_def: i64,
+        current_hp: i64,
+        max_hp: i64,
+    ) {
+        use nexus_contracts::BlockType;
+        use nexus_knowledge::world_kb::knowledge_entry::{
+            KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeOwnerRef,
+        };
+        use nexus_knowledge::world_kb::KbStore;
+
+        let kb = KnowledgeEntryRecord {
+            entry_id: entry_id.to_string(),
+            owner: KnowledgeOwnerRef::world(WORLD),
+            block_type: BlockType::Character,
+            canonical_name: name.to_string(),
+            body: Some(KnowledgeEntryBody {
+                summary: Some(format!("{name} combatant")),
+                attributes: Some(serde_json::json!({
+                    "max_hp": max_hp,
+                    "base_atk": base_atk,
+                    "base_def": base_def,
+                })),
+                computable: Some(true),
+                state: Some(serde_json::json!({
+                    "character": { "current_hp": current_hp, "is_alive": true, "status_effects": [] }
+                })),
+                ..Default::default()
+            }),
+            ..KnowledgeEntryRecord::new(WORLD, BlockType::Character, name)
+        };
+        nexus_local_db::kb_store::SqliteKbStore::new(pool.clone())
+            .insert_knowledge_entry(kb)
+            .await
+            .unwrap();
+    }
+
+    /// The defender's `current_hp`.
+    async fn defender_hp(pool: &sqlx::SqlitePool) -> i64 {
+        let raw: Option<String> =
+            sqlx::query_scalar("SELECT body_json FROM kb_key_blocks WHERE key_block_id = ?")
+                .bind("kb_def")
+                .fetch_optional(pool)
+                .await
+                .unwrap()
+                .flatten();
+        let body: serde_json::Value =
+            serde_json::from_str(&raw.expect("body present")).unwrap();
+        body["state"]["character"]["current_hp"].as_i64().unwrap()
+    }
+
+    /// Open an engine-owner core whose handle carries a real WASM engine and the
+    /// embedded module warmed — the collaborators the retired daemon bundle
+    /// resolved from its own state.
+    async fn open_handle_with_compute(f: &Fixture) -> (CoreService, Arc<ExecutionHandle>) {
+        let core = CoreService::open(CoreOpenOptions {
+            user_home: f.tmp.path().to_path_buf(),
+            access: CoreAccess::EngineOwner,
+        })
+        .await
+        .expect("engine-owner core open");
+        let engine = Arc::new(WasmEngine::new().expect("wasm engine"));
+        let cache = Arc::new(ModuleCache::new());
+        cache.warm_embedded(&engine).expect("warm embedded module");
+        let deps = RunnerDeps {
+            prompt_executor: Some(Arc::new(NullPromptExecutor) as Arc<dyn PromptExecutor>),
+            workspace_root: Some(nexus_home_layout::operational_workspace_dir(
+                f.tmp.path(),
+                CREATOR,
+                SLUG,
+            )),
+            nexus_home: Some(f.tmp.path().join(".nexus42")),
+            compute_engine: Some(engine),
+            compute_cache: Some(cache),
+            ..RunnerDeps::default()
+        };
+        let handle = core
+            .start_execution(Arc::new(NullProvider) as Arc<dyn ProviderPort>, deps)
+            .await
+            .expect("execution owner starts");
+        (core, handle)
+    }
+
+    fn run_request() -> RunRequest {
+        serde_json::from_value(serde_json::json!({
+            "world_id": WORLD,
+            "module_id": MODULE,
+            "invocation_params": { "attacker_id": "kb_atk", "defender_id": "kb_def" },
+        }))
+        .unwrap()
+    }
+
+    fn accept_request() -> RunAcceptRequest {
+        serde_json::from_value(serde_json::json!({})).unwrap()
+    }
+
+    /// A principal minted by a DIFFERENT core over another creator.
+    async fn foreign_principal(f: &Fixture) -> nexus_core::Principal {
+        let other_home = f.tmp.path().join("other");
+        let other_nexus = other_home.join(".nexus42");
+        std::fs::create_dir_all(&other_nexus).unwrap();
+        std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
+            &other_home,
+            OTHER_CREATOR,
+            SLUG,
+        ))
+        .unwrap();
+        std::fs::write(
+            other_nexus.join("config.toml"),
+            format!(
+                "active_creator_id = \"{OTHER_CREATOR}\"\n[active_workspace_slug_by_creator]\n\"{OTHER_CREATOR}\" = \"{SLUG}\"\n"
+            ),
+        )
+        .unwrap();
+        let other_db =
+            nexus_home_layout::workspace_state_db_path(&other_home, OTHER_CREATOR, SLUG);
+        {
+            let guarded = nexus_local_db::init_engine_pool(&other_db).await.unwrap();
+            nexus_local_db::ensure_creator_row(guarded.pool(), OTHER_CREATOR, "Other")
+                .await
+                .unwrap();
+            guarded.pool().close().await;
+            nexus_local_db::writer_protocol::release_retained_writer_guards(&other_db);
+        }
+        let other_core = CoreService::open(CoreOpenOptions {
+            user_home: other_home,
+            access: CoreAccess::EngineOwner,
+        })
+        .await
+        .expect("second core opens");
+        other_core.active_principal().await.unwrap()
+    }
+
+    /// The handle's own engine/cache resolve a real run, and its accept applies
+    /// the proposals atomically.
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn compute_run_and_accept_flow_through_the_handle() {
+        let f = fixture().await;
+        let (core, handle) = open_handle_with_compute(&f).await;
+        seed_compute_world(core.pool()).await;
+        let principal = core.active_principal().await.unwrap();
+
+        let response = handle
+            .compute_run(&principal, run_request())
+            .await
+            .expect("the owner's compute run succeeds");
+        assert_eq!(response.status.to_string(), "succeeded");
+        assert_eq!(
+            serde_json::to_value(&response).unwrap()["module_id"],
+            MODULE
+        );
+
+        // Proposals alone changed nothing.
+        assert_eq!(defender_hp(core.pool()).await, 30);
+
+        let accepted = handle
+            .accept_compute_run(&principal, response.run_id.clone(), accept_request())
+            .await
+            .expect("accept succeeds through the handle");
+        assert_eq!(accepted.applied.state_delta_count, 1);
+        assert_eq!(accepted.applied.events_created, 1);
+        assert_eq!(accepted.timeline_event_ids.len(), 1);
+        // damage = max(0, 20 − 5) = 15.
+        assert_eq!(defender_hp(core.pool()).await, 15);
+    }
+
+    /// The handle proves the principal belongs to THIS service before building
+    /// a context or touching the store.
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn compute_run_refuses_a_foreign_principal_before_any_effect() {
+        let f = fixture().await;
+        let (core, handle) = open_handle_with_compute(&f).await;
+        seed_compute_world(core.pool()).await;
+        let foreign = foreign_principal(&f).await;
+
+        let err = handle
+            .compute_run(&foreign, run_request())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, CoreError::AuthRequired),
+            "a foreign principal must be refused as AuthRequired, got {err:?}"
+        );
+
+        let runs: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM compute_sessions WHERE run_id IS NOT NULL")
+                .fetch_one(core.pool())
+                .await
+                .unwrap();
+        assert_eq!(runs, 0, "a refused principal must leave no run row");
+        assert_eq!(defender_hp(core.pool()).await, 30);
+    }
 }

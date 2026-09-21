@@ -1,31 +1,23 @@
 //! `nexus42 creator works` — atomic Work operations (DF-60 §6.2H, DF-61).
 //!
-//! Three-plane IA (cli-command-ia.md V1.45):
-//! - **`creator bootstrap`** = composite (create Work + schedule intake)
-//! - **`creator works`** = atomic (one business function per subcommand)
-//! - **`creator run <preset_id>`** = strategy / preset dispatch
+//! `creator works` is the atomic plane: one business function per subcommand.
 //!
-//! V1.45 P2 migrated atomic ops from `creator run`:
-//! - `inspire` ← `run continue` (inspiration side-input only)
-//! - `reopen` ← `run resume --reopen` (reopen completed Work)
-//! - `resume-chain` ← `run resume` (resume interrupted auto-chain)
-//! - `reconcile-chapters` ← `run reconcile-chapters` (rebuild `work_chapters`)
+//! V1.45 P2 migrated the atomic ops off the old `creator run` runner
+//! (`inspire` ← `run continue`, `reopen` ← `run resume --reopen`,
+//! `reconcile-chapters` ← `run reconcile-chapters`). v1.193 P2-T1 then removed
+//! the remaining execution entrances — `works intake`, `works resume-chain` and
+//! the hard-reject `works start` / `works create` stubs — together with the
+//! incomplete Creator runner; every arm below is a retained atomic operation.
 
 use crate::errors::Result;
 use clap::Subcommand;
 
-use crate::api::DaemonClient;
 use crate::config::CliConfig;
 // v1.193 P0-T7: every retained Work arm — selection, pool, inspiration,
-// governance and findings — runs on the typed core seam ([`crate::core`]). The
-// two P2-T1 execution entrances still sitting in this file (`works intake`,
-// `works resume-chain`) keep the daemon transport and construct their own
-// client, so no core-only arm pays for one.
+// governance and findings — runs on the typed core seam ([`crate::core`]).
 use crate::core::{finish_direct, map_core_error, open_direct_core};
 // V1.42 P-last (R-V141P0-06): completion-lock file path check
 use nexus_home_layout;
-// V1.49 P2 (R-V147P1-01): intake re-trigger schedules via AddScheduleRequest.
-use nexus_contracts::local::schedule::http::AddScheduleRequest;
 // Schema-owned wire shape for the stale enrichment of `works status --json`
 // (the core report is not a wire type).
 use nexus_contracts::daemon_api::findings::{
@@ -75,8 +67,10 @@ pub enum WorksCommand {
     },
     /// Set pool `active` row → CLI default `work_id` (DF-60 §1.1).
     ///
-    /// Does NOT pause other Works. Future `creator run` commands that
-    /// accept optional `--work-id` will default to this Work.
+    /// Does NOT pause other Works. Retained Work commands that take an
+    /// optional `work_id` — `status`, `inspire`, `reopen`,
+    /// `reconcile-chapters`, `findings list`, `rules reset` — fall back to
+    /// this Work when it is omitted.
     Use {
         /// Work ID (wrk_...) to set as active
         work_id: String,
@@ -128,18 +122,6 @@ pub enum WorksCommand {
         json: bool,
     },
 
-    /// Resume an auto-chain Work whose driver was interrupted (V1.45 P2).
-    ///
-    /// Clears `auto_chain_interrupted` so the daemon re-evaluates the
-    /// next auto-chain step. Migrated from `creator run resume` (no reopen).
-    ResumeChain {
-        /// Work ID (wrk_...). Omit to use pool active Work.
-        work_id: Option<String>,
-        /// Emit machine-readable JSON instead of human text
-        #[arg(long, default_value_t = false)]
-        json: bool,
-    },
-
     /// Rebuild `work_chapters` from filesystem (V1.45 P2).
     ///
     /// Scans the Work's `Stories/` directory and creates or updates
@@ -167,22 +149,6 @@ pub enum WorksCommand {
         /// `apt-get -y` / `pacman --noconfirm`.
         #[arg(long = "yes", short = 'y', default_value_t = false)]
         yes: bool,
-        /// Emit machine-readable JSON instead of human text
-        #[arg(long, default_value_t = false)]
-        json: bool,
-    },
-
-    // ── V1.49 P2: intake re-trigger on existing Work (R-V147P1-01) ──────
-    /// Re-trigger the `creative-brief-intake` preset on an existing Work
-    /// (V1.49 P2).
-    ///
-    /// Schedules `creative-brief-intake` for the resolved Work **without**
-    /// creating a new Work row (unlike `creator bootstrap`, which is the sole
-    /// composite entry for new Works). Use this to re-run intake when a Work's
-    /// creative brief needs revision.
-    Intake {
-        /// Work ID (wrk_...). Omit to use pool active Work.
-        work_id: Option<String>,
         /// Emit machine-readable JSON instead of human text
         #[arg(long, default_value_t = false)]
         json: bool,
@@ -255,23 +221,6 @@ pub enum WorksCommand {
     Timeline {
         #[command(subcommand)]
         command: outline::TimelineCommand,
-    },
-
-    // ── Rejected subcommands (Grill #10/#11) ──────────────────────────
-    // `creator works start` and `creator works create` are NOT available.
-    // New Work creation is via `creator bootstrap` ONLY. These hidden
-    // variants catch the user before clap's generic "unrecognized" error.
-    /// Rejected — use `creator bootstrap` instead (Grill #10)
-    #[command(hide = true)]
-    Start {
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        _rest: Vec<String>,
-    },
-    /// Rejected — use `creator bootstrap` instead (Grill #11)
-    #[command(hide = true)]
-    Create {
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        _rest: Vec<String>,
     },
 }
 
@@ -538,9 +487,8 @@ pub enum InspirationAction {
 ///
 /// # Errors
 ///
-/// Returns the typed core refusal for every retained arm, and the daemon API
-/// error for the two P2-T1 execution entrances (`intake`, `resume-chain`) that
-/// still ride that transport.
+/// Returns the typed core refusal for every arm — the whole group runs the
+/// direct core seam, so no arm reports a daemon transport error.
 pub async fn handle_works(cmd: WorksCommand, config: &CliConfig) -> Result<()> {
     match cmd {
         WorksCommand::List { status, json } => handle_list(config, status, json).await,
@@ -558,16 +506,12 @@ pub async fn handle_works(cmd: WorksCommand, config: &CliConfig) -> Result<()> {
             reason,
             json,
         } => handle_reopen(config, work_id, &reason, json).await,
-        WorksCommand::ResumeChain { work_id, json } => {
-            handle_resume_chain(config, work_id, json).await
-        }
         WorksCommand::ReconcileChapters {
             work_id,
             dry_run,
             yes,
             json,
         } => handle_reconcile_chapters(config, work_id, dry_run, yes, json).await,
-        WorksCommand::Intake { work_id, json } => handle_intake(config, work_id, json).await,
         WorksCommand::Findings { command } => {
             super::rules_runtime::handle_findings(config, command).await
         }
@@ -581,16 +525,6 @@ pub async fn handle_works(cmd: WorksCommand, config: &CliConfig) -> Result<()> {
         WorksCommand::Outline { command } => outline::run(command, config).await,
         WorksCommand::Chapter { command } => outline::run_chapter(command, config).await,
         WorksCommand::Timeline { command } => outline::run_timeline(command, config).await,
-        WorksCommand::Start { .. } => Err(crate::errors::CliError::Other(
-            "`creator works start` is not available. \
-             To create a new Work, use `nexus42 creator bootstrap`."
-                .into(),
-        )),
-        WorksCommand::Create { .. } => Err(crate::errors::CliError::Other(
-            "`creator works create` is not available. \
-             To create a new Work, use `nexus42 creator bootstrap`."
-                .into(),
-        )),
     }
 }
 
@@ -655,10 +589,8 @@ async fn handle_list(config: &CliConfig, status: Option<String>, json: bool) -> 
 ///
 /// Every arm that accepts an omitted `<work_id>` (status, inspire, reopen,
 /// reconcile-chapters, and the findings/rules leaves in
-/// [`super::rules_runtime`]) resolves it here instead of the daemon round trip
-/// ([`super::work_utils::resolve_active_work_id`], still used by the P2-T1
-/// execution entrances): the same `status=active, limit=1` selection over the
-/// same producer, with the same refusal text.
+/// [`super::rules_runtime`]) resolves it here: the same `status=active,
+/// limit=1` selection over the same producer, with the same refusal text.
 ///
 /// # Errors
 ///
@@ -824,14 +756,9 @@ async fn handle_status(config: &CliConfig, work_id: Option<String>, json: bool) 
                 println!("  No further novel-writing schedules will be enqueued.");
                 println!();
                 // V1.43 P2: findings summary in completed view (spec §4 row 3).
-                print_findings_summary(&open_findings, &resolved_id);
+                print_findings_summary(&open_findings);
                 // V1.47 P1: normalize user-facing copy — spec name, not repo path.
                 println!("  This Work is complete; see novel-author-experience §3");
-                println!();
-                println!("  To start a new Work, run:");
-                // V1.45 P2: hint updated from `run start` to `creator bootstrap`.
-                println!("    nexus42 creator bootstrap \\");
-                println!("      --idea \"...\"");
                 println!("═══════════════════════════════════════════════════════");
             } else {
                 // Header
@@ -859,8 +786,10 @@ async fn handle_status(config: &CliConfig, work_id: Option<String>, json: bool) 
                 println!("auto_chain_enabled: {auto_chain}");
                 println!("driver_schedule_id: {driver}");
                 if interrupted {
-                    // V1.45 P2: hint updated from `run resume` to `works resume-chain`.
-                    println!("auto_chain_interrupted: true (use `creator works resume-chain`)");
+                    // v1.193 P2-T1: the `creator works resume-chain` entrance was
+                    // removed with the incomplete Creator runner; the flag stays
+                    // reported, but no CLI remediation command is advertised.
+                    println!("auto_chain_interrupted: true");
                 }
 
                 // V1.41: completion lock fields (DF-60 §6.2H)
@@ -880,7 +809,7 @@ async fn handle_status(config: &CliConfig, work_id: Option<String>, json: bool) 
                 }
 
                 // V1.43 P2: findings summary (spec §4 row 3).
-                print_findings_summary(&open_findings, &resolved_id);
+                print_findings_summary(&open_findings);
 
                 // Per-chapter table
                 // V1.46 P2 (Grill #9): pass work_id so on-disk path hints can
@@ -960,10 +889,6 @@ async fn handle_use(config: &CliConfig, work_id: &str) -> Result<()> {
 }
 
 // ── V1.45 P2: atomic Work operations ──────────────────────────────────
-
-// resolve_active_work_id is shared via super::work_utils (QC1 W-3 dedup) for the
-// two P2-T1 execution entrances still on the daemon transport; every retained
-// arm resolves through `active_work_id_core` above.
 
 /// Handle `creator works inspire` — append an inspiration note to the Work's
 /// own `inspiration_log` (V1.45 P2).
@@ -1086,61 +1011,6 @@ async fn handle_reopen(
         println!("{}", serde_json::to_string_pretty(&work)?);
     } else {
         println!("Work {resolved_id} reopened for further writing.\nReason: {reason}");
-    }
-
-    Ok(())
-}
-
-/// Handle `creator works resume-chain` — resume interrupted auto-chain (V1.45 P2).
-///
-/// Clears `auto_chain_interrupted` so the daemon re-evaluates the next step.
-/// Migrated from `creator run resume` (no reopen).
-///
-/// P2-T1 removes this entrance with the rest of the Runner surface; until then
-/// it keeps the daemon transport and builds its own client, so the core-only
-/// arms above never pay for one.
-async fn handle_resume_chain(
-    config: &CliConfig,
-    work_id: Option<String>,
-    json: bool,
-) -> Result<()> {
-    let client = DaemonClient::from_config(config)?;
-    let resolved_id = super::work_utils::resolve_active_work_id(&client, work_id).await?;
-
-    let patch = serde_json::json!({
-        "auto_chain_interrupted": false,
-    });
-    let resp: serde_json::Value = client
-        .patch::<serde_json::Value, _>(&format!("/v1/daemon/works/{resolved_id}"), &patch)
-        .await?;
-
-    if json {
-        println!("{}", serde_json::to_string_pretty(&resp)?);
-    } else {
-        let stage = resp
-            .get("current_stage")
-            .and_then(|v| v.as_str())
-            .unwrap_or("?");
-        let status = resp
-            .get("stage_status")
-            .and_then(|v| v.as_str())
-            .unwrap_or("?");
-        let auto_chain = resp
-            .get("auto_chain_enabled")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(true);
-
-        if auto_chain {
-            println!(
-                "Work {resolved_id} auto-chain resumed at stage '{stage}' ({status}). \
-                 The daemon will evaluate the next step automatically."
-            );
-        } else {
-            println!(
-                "Work {resolved_id} auto-chain is disabled. \
-                 Use `nexus42 creator run novel-writing {resolved_id}` to advance manually."
-            );
-        }
     }
 
     Ok(())
@@ -1351,86 +1221,6 @@ fn confirm_reconcile_interactive(resolved_id: &str) -> Result<bool> {
         .interact_opt()
         .map_err(|e| crate::errors::CliError::Other(format!("confirmation prompt failed: {e}")))?;
     Ok(confirmed == Some(true))
-}
-
-/// Handle `creator works intake [<work_id>]` — re-trigger creative-brief-intake
-/// on an existing Work (V1.49 P2, R-V147P1-01; overlay §8.1).
-///
-/// Schedules the `creative-brief-intake` preset for the resolved Work via the
-/// daemon schedule endpoint, **without** creating a new Work row. This is the
-/// first-class re-trigger path that `creator bootstrap` cannot serve (bootstrap
-/// is the sole composite entry for new Works).
-///
-/// The `creative-brief-intake` preset declares no gates, so the existing
-/// schedule-add handler accepts it on any existing Work bound via
-/// `input.work_id`. Must not cancel an active FL-E auto-chain driver (the
-/// schedule is enqueued independently).
-///
-/// # Errors
-///
-/// Returns [`crate::errors::CliError`] when no active creator is selected, the
-/// Work cannot be resolved, or the daemon schedule-add call fails.
-///
-/// P2-T1 removes this entrance with the rest of the Runner surface; until then
-/// it keeps the daemon transport and builds its own client, so the core-only
-/// arms above never pay for one.
-async fn handle_intake(config: &CliConfig, work_id: Option<String>, json: bool) -> Result<()> {
-    let client = DaemonClient::from_config(config)?;
-    let resolved_id = super::work_utils::resolve_active_work_id(&client, work_id).await?;
-
-    // resolve_active_work_id passes an explicit id through without an existence
-    // check; GET the Work so a nonexistent work_id surfaces a clear error
-    // (overlay §8.1 remediation: cite this command + `creator bootstrap`).
-    let _work: serde_json::Value = client
-        .get::<serde_json::Value>(&format!("/v1/daemon/works/{resolved_id}"))
-        .await
-        .map_err(|e| {
-            crate::errors::CliError::Config(format!(
-                "Work '{resolved_id}' could not be loaded: {e}.\n  \
-             ↳ Verify the work_id, or for a brand-new Work use \
-             `nexus42 creator bootstrap --idea \"...\"` (see author-experience §8.1)."
-            ))
-        })?;
-
-    let creator_id = config
-        .active_creator_id
-        .clone()
-        .ok_or(crate::errors::CliError::CreatorNotSelected)?;
-
-    // Bind the schedule to the existing Work via input.work_id. The
-    // creative-brief-intake preset reads work_id from preset.input.work_id.
-    let request = AddScheduleRequest {
-        creator_id,
-        preset_id: "creative-brief-intake".to_string(),
-        seed: None,
-        label: None,
-        depends_on: None,
-        concurrency: None,
-        scheduled_at: None,
-        input: Some(serde_json::json!({ "work_id": resolved_id })),
-        force_gates: false,
-        reason: None,
-        agent_bindings: None,
-    };
-
-    let resp: serde_json::Value = client
-        .post::<serde_json::Value, _>("/v1/daemon/orchestration/schedules", &request)
-        .await?;
-
-    let schedule_id = resp
-        .get("schedule_id")
-        .and_then(|v| v.as_str())
-        .unwrap_or("?");
-
-    if json {
-        println!("{}", serde_json::to_string_pretty(&resp)?);
-    } else {
-        println!("Intake scheduled for Work {resolved_id}");
-        println!("  preset:   creative-brief-intake");
-        println!("  schedule: {schedule_id}");
-    }
-
-    Ok(())
 }
 
 /// Audit reason recorded when `completion-lock release` performs the release:
@@ -2186,14 +1976,15 @@ impl FindingsSummary {
 /// Per spec §4 row 3: "Count + severity summary; link to review preset name."
 /// Per cli-spec §7.1: clear, non-jargon formatting.
 ///
-/// - `FindingsResult::Fetched(vec)` with empty vec → "findings: none open"
-///   + suggests `creator run novel-review-master` (V1.46 P0, Grill #7)
+/// - `FindingsResult::Fetched(vec)` with empty vec → one line: "none open"
+///   (v1.193 P2-T1: the `creator run novel-review-master` suggestion went with
+///   the removed runner — no CLI preset dispatch entrance is claimed)
 /// - `FindingsResult::Unavailable` → "findings: unavailable (daemon error)"
-fn print_findings_summary(result: &FindingsResult, work_id: &str) {
+fn print_findings_summary(result: &FindingsResult) {
     // R-V146P0-QC1-S2: formatting lives in the pure `format_findings_summary_lines`
     // helper so the test helper `capture_findings_output` cannot drift from
     // production. This wrapper only prints each rendered line.
-    for line in format_findings_summary_lines(result, work_id) {
+    for line in format_findings_summary_lines(result) {
         println!("{line}");
     }
 }
@@ -2206,9 +1997,9 @@ fn print_findings_summary(result: &FindingsResult, work_id: &str) {
 /// logic, risking silent drift).
 ///
 /// - `FindingsResult::Unavailable` → one-line `["findings: unavailable (daemon error)"]`
-/// - `FindingsResult::Fetched([])` → two lines: "none open" + review-master hint
+/// - `FindingsResult::Fetched([])` → one line: "none open"
 /// - `FindingsResult::Fetched([...])` → summary line + top findings (sanitized)
-fn format_findings_summary_lines(result: &FindingsResult, work_id: &str) -> Vec<String> {
+fn format_findings_summary_lines(result: &FindingsResult) -> Vec<String> {
     let findings = match result {
         FindingsResult::Unavailable => {
             return vec!["findings: unavailable (daemon error)".to_string()];
@@ -2219,12 +2010,10 @@ fn format_findings_summary_lines(result: &FindingsResult, work_id: &str) -> Vec<
     let is_truncated = findings.len() == FINDINGS_FETCH_LIMIT;
     let summary = FindingsSummary::from_findings_json(findings, is_truncated);
     if summary.open_count == 0 {
-        // V1.46 P0 (Grill #7): empty findings → suggest a master-decision pass.
-        let safe_work_id = sanitize_for_terminal(work_id);
-        return vec![
-            "findings: none open".to_string(),
-            format!("  Run: nexus42 creator run novel-review-master {safe_work_id}"),
-        ];
+        // V1.46 P0 (Grill #7) suggested a master-decision pass here; v1.193
+        // P2-T1 removed the `creator run` entrance it named, and no CLI preset
+        // dispatch replaced it, so the empty case reports the state alone.
+        return vec!["findings: none open".to_string()];
     }
 
     // Summary line: "findings: 3 open (1 blocker, 1 major, 1 info)"
@@ -2502,11 +2291,7 @@ fn truncate_with_ellipsis(s: &str, max_len: usize) -> String {
 /// Preserves printable ASCII, Unicode, `\n`, and `\t`. Strips:
 /// - ASCII control chars 0x00–0x1F (except `\n` 0x0A and `\t` 0x09) and 0x7F (DEL)
 /// - ANSI CSI sequences (`ESC [ ... letter`)
-//
-// `pub(crate)` so sibling modules (e.g. `creator::run`) can reuse the same
-// sanitizer for manifest description text (R-V146P2-QC2-W) instead of
-// duplicating the ANSI/control-char stripping logic.
-pub(crate) fn sanitize_for_terminal(s: &str) -> String {
+fn sanitize_for_terminal(s: &str) -> String {
     // Phase 1: strip ANSI CSI sequences (ESC [ <params> <letter>).
     let ansi_re = regex::Regex::new(r"\x1B\[[0-9;]*[a-zA-Z]").unwrap_or_else(|e| {
         // The pattern is a compile-time constant; panic is unreachable.
@@ -2632,22 +2417,21 @@ mod tests {
 
     // ── print_findings_summary display tests ─────────────────────────────
 
-    fn capture_findings_output(findings: &[serde_json::Value], work_id: &str) -> String {
+    fn capture_findings_output(findings: &[serde_json::Value]) -> String {
         // R-V146P0-QC1-S2: delegate to the shared production formatter so the
         // test helper cannot drift from `print_findings_summary`. The slice is
         // wrapped into `FindingsResult::Fetched`; the `Unavailable` branch is
         // covered directly by `format_findings_summary_lines` unit tests.
         let result = FindingsResult::Fetched(findings.to_vec());
-        format_findings_summary_lines(&result, work_id).join("\n")
+        format_findings_summary_lines(&result).join("\n")
     }
 
     #[test]
     fn display_no_open_findings() {
-        let output = capture_findings_output(&[], "wrk_test");
+        let output = capture_findings_output(&[]);
         assert!(output.contains("findings: none open"));
-        // V1.46 P0 (Grill #7): empty → suggest review-master.
-        assert!(output.contains("novel-review-master"));
-        assert!(output.contains("wrk_test"));
+        // v1.193 P2-T1: the removed `creator run` runner is not advertised.
+        assert!(!output.contains("creator run"));
         assert!(!output.contains("highest"));
     }
 
@@ -2661,7 +2445,7 @@ mod tests {
         // Unavailable branch (previously only reachable via the production
         // `print_findings_summary`, never via the test helper). Pins the
         // one-line degradation output.
-        let lines = format_findings_summary_lines(&FindingsResult::Unavailable, "wrk_x");
+        let lines = format_findings_summary_lines(&FindingsResult::Unavailable);
         assert_eq!(lines.len(), 1, "Unavailable renders exactly one line");
         assert_eq!(lines[0], "findings: unavailable (daemon error)");
     }
@@ -2677,9 +2461,9 @@ mod tests {
             finding_json("major", "Plot hole", "→ brainstorm"),
             finding_json("minor", "Typo", "→ none"),
         ];
-        let via_helper = capture_findings_output(&findings, "wrk_parity");
+        let via_helper = capture_findings_output(&findings);
         let result = FindingsResult::Fetched(findings);
-        let via_shared = format_findings_summary_lines(&result, "wrk_parity").join("\n");
+        let via_shared = format_findings_summary_lines(&result).join("\n");
         assert_eq!(
             via_helper, via_shared,
             "helper must delegate to shared formatter"
@@ -2696,7 +2480,7 @@ mod tests {
             finding_json("blocker", "Continuity error", "→ write"),
             finding_json("minor", "Style issue", "→ none"),
         ];
-        let output = capture_findings_output(&findings, "wrk_abc123");
+        let output = capture_findings_output(&findings);
         assert!(output.contains("findings: 2 open"));
         assert!(output.contains("1 blocker"));
         assert!(output.contains("1 minor"));
@@ -2719,7 +2503,7 @@ mod tests {
         // Verify that the findings summary format works for the completed
         // path too — same formatting, just inserted before the "complete" message.
         let findings = vec![finding_json("info", "Nice-to-have", "→ none")];
-        let output = capture_findings_output(&findings, "wrk_done");
+        let output = capture_findings_output(&findings);
         assert!(output.contains("findings: 1 open"));
         assert!(output.contains("1 info"));
         assert!(output.contains("highest: info"));
@@ -2737,7 +2521,7 @@ mod tests {
             finding_json("major", "Pacing drag", "→ outline"),
             finding_json("minor", "Typo", "→ copyedit"),
         ];
-        let output = capture_findings_output(&findings, "wrk_regression");
+        let output = capture_findings_output(&findings);
         // Each per-finding hint appears verbatim in the output.
         assert!(
             output.contains("→ write"),
@@ -2763,9 +2547,9 @@ mod tests {
     #[test]
     fn completion_shows_zero_open_findings() {
         // When no findings exist, the summary line should say "none open".
-        let output = capture_findings_output(&[], "wrk_completed");
+        let output = capture_findings_output(&[]);
         assert!(output.contains("findings: none open"));
-        assert!(output.contains("novel-review-master"));
+        assert!(!output.contains("creator run"));
     }
 
     // ── Truncation tests ─────────────────────────────────────────────────
@@ -2787,7 +2571,7 @@ mod tests {
         let findings: Vec<serde_json::Value> = (0..FINDINGS_FETCH_LIMIT)
             .map(|i| finding_json("info", &format!("Finding {i}"), "→ none"))
             .collect();
-        let output = capture_findings_output(&findings, "wrk_many");
+        let output = capture_findings_output(&findings);
         assert!(
             output.contains(&format!("findings: {FINDINGS_FETCH_LIMIT}+ open")),
             "expected '50+ open' indicator in output: {output}"
@@ -3272,30 +3056,6 @@ mod tests {
     }
 
     #[test]
-    fn works_resume_chain_parses() {
-        let cli = WorksCli::try_parse_from(["nexus42", "resume-chain"])
-            .expect("works resume-chain should parse");
-        match cli.command {
-            WorksCommand::ResumeChain { work_id, json: _ } => {
-                assert!(work_id.is_none(), "work_id should be optional");
-            }
-            _ => panic!("expected ResumeChain variant"),
-        }
-    }
-
-    #[test]
-    fn works_resume_chain_parses_with_work_id() {
-        let cli = WorksCli::try_parse_from(["nexus42", "resume-chain", "wrk_xyz"])
-            .expect("works resume-chain <work_id> should parse");
-        match cli.command {
-            WorksCommand::ResumeChain { work_id, json: _ } => {
-                assert_eq!(work_id.as_deref(), Some("wrk_xyz"));
-            }
-            _ => panic!("expected ResumeChain variant"),
-        }
-    }
-
-    #[test]
     fn works_reconcile_chapters_parses() {
         let cli = WorksCli::try_parse_from(["nexus42", "reconcile-chapters"])
             .expect("works reconcile-chapters should parse");
@@ -3360,147 +3120,6 @@ mod tests {
             }
             _ => panic!("expected ReconcileChapters variant"),
         }
-    }
-
-    // ── V1.49 P2 (R-V147P1-01): intake re-trigger request shape ──────────
-
-    /// `handle_intake` schedules `creative-brief-intake` bound to the existing
-    /// Work via `input.work_id`, without creating a new Work row. Verifies the
-    /// full request contract against a wiremock daemon (overlay §8.1).
-    #[tokio::test]
-    async fn handle_intake_schedules_creative_brief_intake_on_existing_work() {
-        use wiremock::matchers::{body_string_contains, method, path};
-        use wiremock::{Mock, MockServer, ResponseTemplate};
-
-        let mock_server = MockServer::start().await;
-        let work_id = "wrk_intake_test";
-
-        // GET the Work to verify existence → 200.
-        Mock::given(method("GET"))
-            .and(path(format!("/v1/daemon/works/{work_id}")))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "work_id": work_id,
-                "title": "Intake Test",
-                "intake_status": "complete",
-            })))
-            .mount(&mock_server)
-            .await;
-
-        // POST schedule — assert the body binds preset_id + work_id.
-        Mock::given(method("POST"))
-            .and(path("/v1/daemon/orchestration/schedules"))
-            .and(body_string_contains("\"creative-brief-intake\""))
-            .and(body_string_contains(work_id))
-            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
-                "schedule_id": "SCH_intake_001",
-                "status": "pending",
-                "core_context_version": 0,
-            })))
-            .mount(&mock_server)
-            .await;
-
-        let config = CliConfig {
-            active_creator_id: Some("creator_test".to_string()),
-            daemon_url: mock_server.uri(),
-            ..Default::default()
-        };
-
-        let result = handle_intake(&config, Some(work_id.to_string()), false).await;
-        assert!(
-            result.is_ok(),
-            "intake scheduling should succeed: {result:?}"
-        );
-    }
-
-    /// `handle_intake` surfaces a clear error when the Work does not exist
-    /// (overlay §8.1 remediation: cite §8.1 + `creator bootstrap`).
-    #[tokio::test]
-    async fn handle_intake_errors_clearly_when_work_missing() {
-        use wiremock::matchers::{method, path};
-        use wiremock::{Mock, MockServer, ResponseTemplate};
-
-        let mock_server = MockServer::start().await;
-        let work_id = "wrk_does_not_exist";
-
-        Mock::given(method("GET"))
-            .and(path(format!("/v1/daemon/works/{work_id}")))
-            .respond_with(ResponseTemplate::new(404).set_body_string("not found"))
-            .mount(&mock_server)
-            .await;
-
-        let config = CliConfig {
-            active_creator_id: Some("creator_test".to_string()),
-            daemon_url: mock_server.uri(),
-            ..Default::default()
-        };
-
-        let err = handle_intake(&config, Some(work_id.to_string()), false)
-            .await
-            .expect_err("missing work should error");
-        let msg = err.to_string();
-        assert!(
-            msg.contains(work_id),
-            "error should name the missing work_id: {msg}"
-        );
-        assert!(
-            msg.contains("creator bootstrap"),
-            "error should cite the bootstrap remediation path: {msg}"
-        );
-    }
-
-    // ── Rejected subcommand tests (Grill #10/#11) ───────────────────────
-
-    #[test]
-    fn works_start_is_intercepted() {
-        // `creator works start` should parse as the hidden Start variant
-        // (not fail with "unrecognized subcommand"), so the handler can
-        // produce a clear error directing the user to `creator bootstrap`.
-        let cli = WorksCli::try_parse_from(["nexus42", "start", "--idea", "foo"])
-            .expect("start should be intercepted by hidden variant");
-        match cli.command {
-            WorksCommand::Start { .. } => { /* expected */ }
-            _ => panic!("expected Start variant"),
-        }
-    }
-
-    #[test]
-    fn works_create_is_intercepted() {
-        let cli = WorksCli::try_parse_from(["nexus42", "create"])
-            .expect("create should be intercepted by hidden variant");
-        match cli.command {
-            WorksCommand::Create { .. } => { /* expected */ }
-            _ => panic!("expected Create variant"),
-        }
-    }
-
-    #[test]
-    fn works_start_handler_returns_clear_error() {
-        // The handler should return an error that tells the user to use
-        // `creator bootstrap` instead.
-        let result = async {
-            handle_works(
-                WorksCommand::Start {
-                    _rest: vec!["--idea".into(), "test".into()],
-                },
-                &crate::config::CliConfig::default(),
-            )
-            .await
-        };
-        // We can't easily run async here without a runtime, but we can
-        // verify the error message content by checking the error path
-        // synchronously. Since the handler immediately returns an error
-        // before any async work, we can check the error message.
-        //
-        // Instead, verify the error message text directly.
-        let expected_msg = "`creator works start` is not available";
-        let actual = "`creator works start` is not available. \
-             To create a new Work, use `nexus42 creator bootstrap`.";
-        assert!(
-            actual.contains(expected_msg),
-            "error should mention creator bootstrap"
-        );
-        // Suppress unused variable warning (result is a dropped, un-awaited future)
-        drop(result);
     }
 
     // ── V1.46 P2 (Grill #9): on-disk chapter path hint tests ──────────────

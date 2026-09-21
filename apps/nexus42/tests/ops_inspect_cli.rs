@@ -397,8 +397,12 @@ fn inspect_detail_json_matches_contract_field_by_field() {
     );
     let explanation = obj["resumable"]["explanation"].as_str().unwrap();
     assert!(
-        explanation.contains("boot"),
-        "verdict:yes explanation must state the boot-time runner caveat: {explanation}"
+        explanation.contains("runner"),
+        "verdict:yes explanation must state the runner-reconstruction caveat: {explanation}"
+    );
+    assert!(
+        !explanation.contains("boot") && !explanation.contains("daemon"),
+        "verdict:yes explanation must not promise a removed daemon boot: {explanation}"
     );
     assert!(
         !obj.contains_key("context_readable"),

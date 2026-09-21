@@ -10,9 +10,9 @@ This repository ships everything you use together:
 
 | Piece | Where | What it is |
 |---|---|---|
-| Headless runtime | `nexus-runtime` binary (see [Install and boot the runtime](#1-install-and-boot-the-runtime)) | A Connect-only daemon serving the full N-C2 invoke surface (`upsert` / `promote` / `relate` / `check` / `assemble` / `compute`, world- and module-scoped) against your World KB. No creator UI, no daemon HTTP router. |
+| Headless runtime | `nexus-runtime` binary (see [Install and boot the runtime](#1-install-and-boot-the-runtime)) | A Connect-only host serving the full N-C2 invoke surface (`upsert` / `promote` / `relate` / `check` / `assemble` / `compute`, world- and module-scoped) against your World KB. No creator UI, no HTTP router. |
 | Strategy samples | [`game-narrative/`](./game-narrative/) and [`react-trpg-turn/`](./react-trpg-turn/) | Forkable strategy bundles: capability routing + prompt templates for lore import lanes (game-narrative) and for a TRPG turn loop (react-trpg-turn). Nothing here is compiled into any binary. |
-| Validator | [`validate.sh`](./validate.sh) | One command, daemon-free: runs the real validator core on any strategy directory. |
+| Validator | [`validate.sh`](./validate.sh) | One command, service-host-free: runs the real validator core on any strategy directory. |
 | WASM compute modules | `~/.nexus42/modules/<id>/` (see [Compute](#5-compute-basic-combat-n-c2-compute-half)) | Operator-installed, host-local compute modules (e.g. `modules/basic-combat`) the runtime invokes over Connect. Bytes are never peer-supplied. |
 | Connect SDK | `@42ch/spoke-connect` (npm, **the pinned upstream lockstep release**) | Your backend's connection + invoke surface to the runtime (and to any SPOKE connect host). |
 
@@ -121,9 +121,9 @@ nexus-runtime: Connect Host (N-C2 E2) ready
 The runtime shares `~/.nexus42` with the creator-facing `nexus42` app
 (`config.toml`, workspace SQLite, presets, modules). It **fails closed without
 an active workspace** — prepare the home first, either with the creator app's
-first-run setup, or with `nexus42 creator workspace init` (with no creator
-daemon running, its FS fallback writes the `config.toml` keys the runtime
-resolves: `active_creator_id=local`, the workspace slug, and `state.db`).
+first-run setup, or with `nexus42 creator workspace init` (the local FS
+fallback writes the `config.toml` keys the runtime resolves:
+`active_creator_id=local`, the workspace slug, and `state.db`).
 `nexus42 creator register` is optional and platform-only (auth token +
 network, writes `auth.json`) — it is not needed for a local run.
 
@@ -153,7 +153,7 @@ nexus42 creator world create --title "E2 demo world"       # creates a world; no
 | `connect/allowlist.json` | Peer allowlist + per-peer world/op/module scope (see [Link the Connect SDK](#2-connect-with-the-sdk)) |
 | `modules/<id>/` | Operator-installed WASM compute modules (see [Compute](#5-compute-basic-combat-n-c2-compute-half)) |
 | `presets/<id>/` | User-installed presets (3-tier resolution: user overrides embedded) |
-| `creators/<creator_id>/workspaces/<slug>/state.db` | Workspace SQLite (WAL mode; coexistence with the creator daemon is WAL-governed) |
+| `creators/<creator_id>/workspaces/<slug>/state.db` | Workspace SQLite (WAL mode; coexistence with the creator app is WAL-governed) |
 
 ---
 
@@ -700,7 +700,7 @@ flow — is [`docs/strategy-authoring.md`](../docs/strategy-authoring.md).
 ### Validate
 
 The validator runs the **real validator core** (semantic + assets + path
-safety) with no daemon required:
+safety) with no service host required:
 
 ```bash
 ./strategy-samples/validate.sh                             # validates the bundled game-narrative sample
@@ -713,23 +713,29 @@ Requires the `nexus42` CLI on `PATH` (build it once from the repo root:
 clean, non-zero otherwise — the script is `set -euo pipefail` and delegates to:
 
 ```bash
-nexus42 system preset validate --offline my-strategy
+nexus42 preset validate my-strategy
 ```
 
-`--offline` runs the daemon's exact validation composition in-process (no
-daemon — `nexus-runtime` does not serve the daemon HTTP router, so you can
-validate on any machine that has the CLI). The path may be a bundle directory,
-a `preset.yaml` file, or a standalone YAML file (standalone skips asset
-checks). Machine-readable output:
+That leaf runs the validator core in-process (no service host —
+`nexus-runtime` serves no HTTP router, so you can validate on any machine that
+has the CLI). The path may be a bundle directory, a `preset.yaml` file, or a
+standalone YAML file (standalone skips asset checks). Machine-readable output:
 
 ```bash
-nexus42 system preset validate --offline --json strategy-samples/react-trpg-turn
-# {"errors":[],"id":"react-trpg-turn","state_count":5,"valid":true,"version":1}
+nexus42 preset validate --json strategy-samples/react-trpg-turn
+# pretty-printed JSON on stdout:
+# {
+#   "valid": true,
+#   "id": "react-trpg-turn",
+#   "version": 1,
+#   "state_count": 5,
+#   "errors": []
+# }
 ```
 
-Without `--offline`, the command delegates to the creator daemon
-(`POST /v1/daemon/presets:validate`) — for that mode a running `nexus42`
-daemon is required. See [Validation behavior notes](#validation-behavior-notes)
+The pre-v1.193 spelling `nexus42 system preset validate --offline` is deleted
+and `preset validate` is local-only — there is no service-backed validate mode
+to delegate to. See [Validation behavior notes](#validation-behavior-notes)
 for the differences.
 
 **What the validator proves and what it does not.** The preset/loader
@@ -756,7 +762,7 @@ idempotency ledger.
 - Module authoring guide (ABI at a glance, `manifest.json` incl. `wasm_sha256`, `module_scope`, operator install, read-only compute): [`../docs/module-authoring.md`](../docs/module-authoring.md)
 - Module authoring walkthrough: [`../modules/README.md`](../modules/README.md)
 - Reference module: [`../modules/basic-combat/`](../modules/basic-combat/)
-- Headless runtime spec: [`../.mstar/specs/daemon-runtime.md`](../.mstar/specs/daemon-runtime.md) §4.6
+- Headless runtime boundary spec: [`../.mstar/specs/rust-core-service-boundary.md`](../.mstar/specs/rust-core-service-boundary.md) §4.2 (the retired `daemon-runtime.md` documented the deleted Rust host, not this runtime)
 - Connect invoke surface (N-C2 E2): `apps/nexus42/src/commands/connect/invoke.rs`
 - Connect SDK + wire family: `@42ch/spoke-connect` on npm (the pinned upstream lockstep release)
 - SPOKE connect-demo (runnable mock host + third-party RemoteAdapter client):
@@ -779,32 +785,32 @@ idempotency ledger.
 
 ## Validation behavior notes
 
-Two known differences between the daemon-free (`--offline`) path and the
-daemon-backed path — neither affects `validate.sh` (which always passes
-`--offline`):
+`preset validate` is the only validation path and it is local:
 
-- **Directory argument.** `--offline` accepts a bundle *directory* (it
-  resolves `<dir>` → `<dir>/preset.yaml`), but the daemon-backed mode cannot:
-  the daemon's bundle-root inference only fires for files literally named
-  `preset.yaml`, and a directory arg without `--offline` fails with
-  `FILE_READ_ERROR`. Pass the `preset.yaml` file path (or use `--offline`)
-  when the creator daemon is the validation backend.
+- **Argument forms.** A bundle *directory* (resolved `<dir>` → `<dir>/preset.yaml`),
+  a `preset.yaml` file, or a standalone YAML file (standalone skips asset
+  checks).
 - **`--json` on hard failures.** On oversize / YAML parse / depth failures the
-  offline path exits 1 with **no JSON body** (the error is printed to stderr),
-  whereas the daemon-backed endpoint returns a `valid: false` JSON body for
-  the oversize case. Treat a non-zero exit as "could not validate", and prefer
-  the offline path for scripted validation.
+  leaf exits 1 with **no JSON body** (the error is printed to stderr). Treat a
+  non-zero exit as "could not validate", and prefer `--json` for scripted
+  validation of the success shape.
+
+The pre-v1.193 `--offline` flag and the service-backed
+(`POST /v1/daemon/presets:validate`) mode it switched away from are both
+deleted, so there is no second behavior to compare against.
 
 ---
 
 ## Where the strategy runs
 
-The preset lanes execute on the creator-facing daemon's orchestration engine
-via its schedule API — `nexus-runtime` intentionally ships without the daemon
-HTTP router and without schedule supervision. In the E2 loop your backend
+The preset lanes execute on the creator-facing **service host's** orchestration
+engine via its schedule API (`POST /v1/daemon/orchestration/schedules`, served
+by the Electron/TS service) — `nexus-runtime` intentionally ships with no HTTP
+router and no schedule supervision (the Rust host was deleted in v1.193 P2).
+In the E2 loop your backend
 drives the strategy side (its own timer/event loop + LLM step using the
 templates) and writes results into the World over Connect; see the run-payload
 contract in `game-narrative/preset.yaml` for the schedule shape when you do
-use the daemon API. The TRPG turn sample shows the same division for a turn
+use the service API. The TRPG turn sample shows the same division for a turn
 loop: the backend orchestrates, the host-local module settles, the AI
 narrates confirmed receipts only.

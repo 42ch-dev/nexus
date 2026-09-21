@@ -169,7 +169,7 @@ async fn handle_findings_accept(
     let work_ref = work.work_ref.as_deref().ok_or_else(|| {
         CliError::Config(format!(
             "Work {} has no `work_ref`; cannot locate `AGENTS.md`. \
-             Re-run `nexus42 creator bootstrap` or set work_ref.",
+             Set the Work's work_ref before retrying.",
             finding.work_id
         ))
     })?;

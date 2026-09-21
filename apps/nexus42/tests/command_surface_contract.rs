@@ -8,10 +8,11 @@
 //!    as a regression anchor. Subsequent refactoring plans must NOT accidentally
 //!    lose existing commands without explicit migration.
 //!
-//! 2. **V2 target contract** — defines the expected V2 command topology (6 groups).
-//!    These tests are `#[ignore]`d because the CLI has not been restructured yet.
-//!    As Plans 2–9 implement the restructuring, each test should be un-ignored
-//!    and must pass before the plan can be marked Done.
+//! 2. **V2 target contract** — defines the expected V2 command topology (the
+//!    visible four-group lock plus the canonical subcommand shapes). Every test
+//!    in this file is an active `#[test]` — there are no `#[ignore]`s: the
+//!    restructuring landed (v1.193 P2 retired the daemon group, so the target
+//!    contract now runs for real rather than as a to-be-un-ignored list).
 
 use assert_cmd::Command;
 
@@ -36,9 +37,9 @@ fn current_state_visible_command_groups() {
 
     let help_text = String::from_utf8(output).unwrap();
 
-    // User-visible commands after the v1.193 P1-T6 `sync`-alias removal
-    // (5 visible groups, more hidden).
-    let expected_commands = ["acp", "creator", "daemon", "platform", "system"];
+    // User-visible commands after the v1.193 P2-T2 daemon-group removal
+    // (v1.193 P1-T6 removed the `sync` alias; P2-T2 removed `daemon`).
+    let expected_commands = ["acp", "creator", "platform", "system"];
 
     for cmd in &expected_commands {
         assert!(
@@ -79,38 +80,12 @@ fn current_state_visible_command_groups() {
         );
     }
 
-    // Verify count: 5 user-visible commands
+    // Verify count: 4 user-visible commands
     let visible_count = expected_commands.len();
     assert_eq!(
-        visible_count, 5,
-        "Current-state snapshot: expected exactly 5 user-visible commands, found {visible_count}"
+        visible_count, 4,
+        "Current-state snapshot: expected exactly 4 user-visible commands, found {visible_count}"
     );
-}
-
-/// Snapshot: `daemon` command has expected subcommands in V1.15.
-#[test]
-fn current_state_daemon_subcommands() {
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("daemon")
-        .arg("--help")
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
-
-    // Current daemon surface: lifecycle commands plus schedule orchestration.
-    for subcmd in &[
-        "start", "stop", "restart", "status", "logs", "doctor", "schedule",
-    ] {
-        assert!(
-            help_text.contains(subcmd),
-            "Current-state daemon: expected subcommand '{subcmd}'"
-        );
-    }
 }
 
 /// Snapshot: `creator` command has expected subcommands in V1.15.
@@ -182,28 +157,28 @@ fn current_state_system_subcommands() {
 }
 
 // =============================================================================
-// Part 2: V2 target contract tests (#[ignore] — future plans must un-ignore)
+// Part 2: V2 target contract tests (all active — no #[ignore] remains)
 //
-// These define the V2 command surface. Each test asserts that a V2 top-level
-// group exists with its expected subcommands. They are #[ignore]d because the
-// CLI has not been restructured yet.
-//
-// Migration plan:
-//   - Plan 2 (daemon/acp): un-ignore `v2_target_daemon_subcommands`
-//     and `v2_target_acp_exists`
-//   - Plan 3 (system/platform): un-ignore `v2_target_system_subcommands`
+// These define the V2 command surface. Each test asserts that a canonical
+// top-level group exists with its expected subcommands. They were `#[ignore]`d
+// while the CLI restructuring was pending; every one is now an active `#[test]`
+// and the migration list below is kept only as history:
+//   - Plan 2 (daemon/acp): `v2_target_daemon_subcommands` (daemon group retired
+//     in v1.193 P2) and `v2_target_acp_exists`
+//   - Plan 3 (system/platform): `v2_target_system_subcommands`
 //     and `v2_target_platform_exists`
-//   - Plan 4 (creator/knowledge): un-ignore `v2_target_creator_subcommands`
-//   - Plan 2–4 together: un-ignore `v2_only_five_visible_command_groups`
+//   - Plan 4 (creator/knowledge): `v2_target_creator_subcommands`
+//   - Plan 2–4 together: `v2_only_five_visible_command_groups`
 // =============================================================================
 
 /// V2 Target: the user-visible top-level command groups:
-/// `daemon`, `acp`, `creator`, `platform`, `system`
+/// `acp`, `creator`, `platform`, `system`
 ///
-/// Un-ignored by Plans 2-4 completing the CLI restructuring. v1.193 P1-T6
-/// removed the hidden top-level `sync` alias, leaving five visible groups.
+/// Active since Plans 2-4 completed the CLI restructuring. v1.193 P1-T6
+/// removed the hidden top-level `sync` alias and v1.193 P2-T2 removed the
+/// `daemon` group with the legacy daemon composition.
 #[test]
-fn v2_only_five_visible_command_groups() {
+fn v2_canonical_visible_command_groups() {
     let output = Command::cargo_bin("nexus42")
         .unwrap()
         .arg("--help")
@@ -215,7 +190,7 @@ fn v2_only_five_visible_command_groups() {
 
     let help_text = String::from_utf8(output).unwrap();
 
-    let v2_groups = ["daemon", "acp", "creator", "platform", "system"];
+    let v2_groups = ["acp", "creator", "platform", "system"];
 
     for group in &v2_groups {
         assert!(
@@ -261,41 +236,6 @@ fn v2_only_five_visible_command_groups() {
     }
 }
 
-/// V2 Target: `daemon` command group subcommands.
-///
-/// Expected: start, stop, restart, status, logs, doctor,
-///           orchestrate (with list/run/pause/resume/cancel/inspect)
-///
-/// Un-ignored by Plan 2 (daemon restructuring implemented).
-#[test]
-fn v2_target_daemon_subcommands() {
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("daemon")
-        .arg("--help")
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
-
-    for subcmd in &[
-        "start", "stop", "restart", "status", "logs", "doctor", "schedule",
-    ] {
-        assert!(
-            help_text.contains(subcmd),
-            "V2 daemon: expected subcommand '{subcmd}'"
-        );
-    }
-
-    assert!(
-        !help_text.contains("orchestrate"),
-        "daemon help must not list removed orchestrate subcommand"
-    );
-}
-
 /// V2 Target: `acp` top-level command group exists.
 ///
 /// Subcommands asserted here: probe,
@@ -304,7 +244,7 @@ fn v2_target_daemon_subcommands() {
 ///   `cli_agent.rs::acp_command_group_shows_subcommands`. v1.193 P1-T4 removed
 ///   the `status`/`doctor` daemon-health leaves.
 ///
-/// Un-ignored by Plan 2 (acp group created).
+/// Active since Plan 2 created the `acp` group.
 #[test]
 fn v2_target_acp_subcommands() {
     let output = Command::cargo_bin("nexus42")
@@ -333,7 +273,7 @@ fn v2_target_acp_subcommands() {
 ///   credentials (rotate), workspace (list/create/use/init/clone/link/unlink/status),
 ///   soul, memory, kb
 ///
-/// Un-ignored by Plan 4.
+/// Active since Plan 4 landed the creator/knowledge surface.
 #[test]
 fn v2_target_creator_subcommands() {
     let output = Command::cargo_bin("nexus42")
@@ -374,7 +314,7 @@ fn v2_target_creator_subcommands() {
 /// Expected subcommands: auth (login/logout/status), context (assemble-moment),
 ///   sync (push/pull/status/resolve/world/retry).
 ///
-/// Un-ignored by Plan 3 (platform group created). v1.193 P1-T5 removed the
+/// Active since Plan 3 created the `platform` group. v1.193 P1-T5 removed the
 /// deferred `explore` and `publish` leaves along with the `context assemble`
 /// guidance leaf, so those names must no longer be advertised.
 #[test]
@@ -404,7 +344,7 @@ fn v2_target_platform_subcommands() {
 /// Expected: version, doctor, completion,
 ///   config (get/set/unset/path), debug (dump-workspace)
 ///
-/// Un-ignore after Plan 3 extends the `system` group.
+/// Active since Plan 3 extended the `system` group.
 #[test]
 fn v2_target_system_subcommands() {
     let output = Command::cargo_bin("nexus42")
@@ -440,30 +380,40 @@ fn v2_target_system_subcommands() {
 // Part 3: Plan 5 KB scope contract tests (must pass immediately)
 // =============================================================================
 
-/// Verify `creator kb list --help` contains `--scope` flag.
+/// v1.193 P2-T12: the Plan-5 `creator kb list --scope` selector was removed in
+/// P0-T13, so the retained local `kb list` leaf accepts no scope option —
+/// `--scope` is clap's unexpected-argument error (exit 2) and the help page
+/// must not advertise it.
+///
+/// Discriminating regression: pre-retirement `creator kb list --scope work`
+/// parsed and selected the scope; post-retirement only the advertised
+/// `-o/--output` option remains on the leaf.
 #[test]
-fn v2_target_kb_scope_flag() {
-    let output = Command::cargo_bin("nexus42")
+fn retired_kb_scope_flag_is_rejected() {
+    let rejected = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "kb", "list", "--scope", "work"])
+        .assert()
+        .code(2)
+        .get_output()
+        .clone();
+    let stderr = String::from_utf8_lossy(&rejected.stderr).into_owned();
+    assert!(
+        stderr.contains("unexpected argument") && stderr.contains("--scope"),
+        "v1.193 P2-T12: `creator kb list --scope` must be an unknown argument: {stderr}"
+    );
+
+    let help = Command::cargo_bin("nexus42")
         .unwrap()
         .args(["creator", "kb", "list", "--help"])
         .assert()
         .success()
         .get_output()
-        .stdout
         .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
+    let help_text = String::from_utf8_lossy(&help.stdout).into_owned();
     assert!(
-        help_text.contains("--scope"),
-        "kb list --help must contain --scope flag"
-    );
-    assert!(
-        help_text.contains("work"),
-        "kb list --help must list 'work' scope option"
-    );
-    assert!(
-        help_text.contains("world"),
-        "kb list --help must list 'world' scope option"
+        !help_text.contains("--scope"),
+        "v1.193 P2-T12: `creator kb list --help` must not advertise the removed flag: {help_text}"
     );
 }
 
@@ -616,22 +566,13 @@ fn acp_run_shows_run_id_flag() {
     );
 }
 
-/// Verify `daemon orchestrate run --help` is no longer a valid CLI surface.
-#[test]
-fn daemon_orchestrate_run_is_removed() {
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .args(["daemon", "orchestrate", "run", "--help"])
-        .assert()
-        .failure();
-}
-
 // =============================================================================
 // Part 6: V1.33 Work Experience Loop contract tests (must pass immediately)
 // =============================================================================
 
 // V1.45: `v133_creator_run_subcommands` removed — old subcommands (start, continue,
-// etc.) replaced by generic `creator run <preset_id>` dispatch.
+// etc.) replaced by generic `creator run <preset_id>` dispatch; v1.193 P2-T1 then
+// removed that runner too, so these leaves are simply gone.
 
 /// Verify `creator works` subcommands exist (DF-60 §6.2H, V1.41).
 #[test]
@@ -710,11 +651,12 @@ fn v135_platform_sync_subcommands() {
     }
 }
 
-/// V1.35 P2: Root `--help` lists exactly 5 user-visible command groups
+/// V1.35 P2: Root `--help` lists the canonical user-visible command groups
 /// (per cli-command-ia.md §2). The deprecated top-level `sync` alias was
-/// removed from the parser in v1.193 P1-T6.
+/// removed from the parser in v1.193 P1-T6, and the `daemon` group in
+/// v1.193 P2-T2.
 #[test]
-fn v135_root_help_shows_five_groups_and_no_top_level_sync() {
+fn v135_root_help_shows_canonical_groups_and_no_top_level_sync() {
     let output = Command::cargo_bin("nexus42")
         .unwrap()
         .arg("--help")
@@ -726,8 +668,8 @@ fn v135_root_help_shows_five_groups_and_no_top_level_sync() {
 
     let help_text = String::from_utf8(output).unwrap();
 
-    // The 5 canonical V1.35 top-level groups MUST all appear.
-    let expected = ["creator", "daemon", "acp", "platform", "system"];
+    // The canonical V1.35 top-level groups MUST all appear.
+    let expected = ["creator", "acp", "platform", "system"];
     for group in &expected {
         assert!(
             help_text.contains(group),
@@ -911,84 +853,6 @@ fn v135_creator_help_mentions_kb_namespaces() {
 // `v136_start_help_mentions_auto_completion`,
 // `v137_stage_advance_has_force_gates_flags`, `v137_run_start_has_force_gates_flags`
 // removed — old subcommands replaced by generic dispatch with --force-gates/--reason.
-
-// =============================================================================
-// Part V1.45: Generic `creator run <preset_id>` surface tests
-// =============================================================================
-
-/// V1.45: `creator run --help` shows `<PRESET_ID>` as a positional arg.
-#[test]
-fn v145_creator_run_shows_preset_id_positional() {
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .args(["creator", "run", "--help"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
-    assert!(
-        help_text.contains("PRESET_ID") || help_text.contains("preset_id"),
-        "V1.45: creator run --help must show PRESET_ID positional arg"
-    );
-}
-
-/// V1.45: `creator run --help` shows global flags (--json, --force-gates, --reason).
-#[test]
-fn v145_creator_run_has_global_flags() {
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .args(["creator", "run", "--help"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
-    assert!(
-        help_text.contains("--json"),
-        "V1.45: creator run --help must list --json flag"
-    );
-    assert!(
-        help_text.contains("--force-gates"),
-        "V1.45: creator run --help must list --force-gates flag"
-    );
-    assert!(
-        help_text.contains("--reason"),
-        "V1.45: creator run --help must list --reason flag"
-    );
-}
-
-/// V1.45: `creator run --help` does NOT show old subcommands (start, continue, etc.).
-#[test]
-fn v145_creator_run_no_legacy_subcommands() {
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .args(["creator", "run", "--help"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
-    for old_subcmd in &[
-        "start",
-        "continue",
-        "stage",
-        "resume",
-        "audit-chapter",
-        "review-master",
-    ] {
-        assert!(
-            !help_text.contains(&format!("\n  {old_subcmd} ")),
-            "V1.45: creator run --help must not list old subcommand '{old_subcmd}'"
-        );
-    }
-}
 
 // =============================================================================
 // v1.193 P1-T1: `preset validate` is local-only; removed surfaces are unknown
@@ -1420,4 +1284,230 @@ fn retired_operator_entrances_are_unknown() {
         .args(["ops", "inspect", "--help"])
         .assert()
         .success();
+}
+
+// =============================================================================
+// Part 12: v1.193 P2-T1 Creator runner / Work execution-entry removal
+// =============================================================================
+
+/// Subcommand names the `Commands:` block of a clap `--help` page advertises.
+///
+/// An entry line is `  <name>  <description>`; wrapped description text is
+/// indented past the name column, so only lines whose remainder after the name
+/// is empty or starts with the description gap count as entries.
+fn help_command_names(help: &str) -> Vec<String> {
+    help_commands_section(help)
+        .lines()
+        .filter_map(|line| {
+            let rest = line.strip_prefix("  ")?;
+            if rest.starts_with(' ') {
+                return None;
+            }
+            let name = rest.split_whitespace().next()?;
+            let after = &rest[name.len()..];
+            (after.is_empty() || after.starts_with("  ")).then(|| name.to_string())
+        })
+        .collect()
+}
+
+/// v1.193 P2-T1 (AC1/AC2/AC5): the incomplete Creator runner (`creator run`,
+/// `creator bootstrap`) and the Work execution entrances (`creator works
+/// intake`, `creator works resume-chain`, `creator works start`,
+/// `creator works create`) are unknown parser entries — not success-shaped
+/// stubs, not hidden variants that answer with guidance, and not help pages.
+///
+/// Discriminating regression: pre-cutover `creator run <preset> --help` exited
+/// 0 with the manifest-enriched help page (the deleted
+/// `creator_run_preset_help.rs` smoke test) and `creator works start` parsed
+/// into a hidden variant whose handler answered exit 1 with a "use bootstrap
+/// instead" message; post-cutover every listed invocation is clap's
+/// unrecognized-subcommand error (exit 2, empty stdout), while the retained
+/// `creator` / `creator works` leaves still parse.
+#[test]
+fn retired_creator_execution_is_unknown() {
+    let home = tempfile::tempdir().expect("temp home");
+
+    let removed: [&[&str]; 8] = [
+        &["creator", "run", "novel-writing"],
+        &["creator", "run", "--help"],
+        &["creator", "bootstrap", "--idea", "a new novel"],
+        &["creator", "bootstrap", "--help"],
+        &["creator", "works", "intake", "wrk_1"],
+        &["creator", "works", "resume-chain", "wrk_1"],
+        &["creator", "works", "start", "--idea", "x"],
+        &["creator", "works", "create"],
+    ];
+    for args in removed {
+        let output = Command::cargo_bin("nexus42")
+            .unwrap()
+            .env("HOME", home.path())
+            .env_remove("NEXUS_API_KEY")
+            .args(args)
+            .assert()
+            .code(2)
+            .get_output()
+            .clone();
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        assert!(
+            stderr.contains("unrecognized subcommand"),
+            "v1.193 P2-T1: `{}` must be an unknown subcommand: {stderr}",
+            args.join(" ")
+        );
+        assert!(
+            output.stdout.is_empty(),
+            "v1.193 P2-T1: `{}` must not answer with a success-shaped stub: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+
+    // The retained Creator group advertises only retained entries.
+    let creator = Command::cargo_bin("nexus42")
+        .unwrap()
+        .env("HOME", home.path())
+        .env_remove("NEXUS_API_KEY")
+        .args(["creator", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let creator_names = help_command_names(&String::from_utf8_lossy(&creator.stdout));
+    for leaf in ["run", "bootstrap"] {
+        let advertised = creator_names.iter().any(|name| name == leaf);
+        assert!(
+            !advertised,
+            "v1.193 P2-T1: `creator` must not advertise '{leaf}': {creator_names:?}"
+        );
+    }
+    for leaf in ["works", "register", "status", "list", "kb", "world"] {
+        assert!(
+            creator_names.iter().any(|name| name == leaf),
+            "v1.193 P2-T1: `creator` must keep '{leaf}': {creator_names:?}"
+        );
+    }
+
+    // The retained Work group advertises only retained entries.
+    let works = Command::cargo_bin("nexus42")
+        .unwrap()
+        .env("HOME", home.path())
+        .env_remove("NEXUS_API_KEY")
+        .args(["creator", "works", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let works_names = help_command_names(&String::from_utf8_lossy(&works.stdout));
+    for leaf in ["intake", "resume-chain", "start", "create"] {
+        let advertised = works_names.iter().any(|name| name == leaf);
+        assert!(
+            !advertised,
+            "v1.193 P2-T1: `creator works` must not advertise '{leaf}': {works_names:?}"
+        );
+    }
+    for leaf in ["list", "status", "use", "inspire", "reopen", "pool"] {
+        assert!(
+            works_names.iter().any(|name| name == leaf),
+            "v1.193 P2-T1: `creator works` must keep '{leaf}': {works_names:?}"
+        );
+    }
+}
+
+// =============================================================================
+// Part 13: v1.193 P2-T2 daemon group / daemon-run router removal
+// =============================================================================
+
+/// v1.193 P2-T2 (AC1/AC4): the whole `daemon` command group (service
+/// lifecycle, `ui`/`web`, and the `schedule` orchestration leaves) and the
+/// hidden `daemon-run` self-spawn entry are gone from the parser — every
+/// invocation is clap's unrecognized-subcommand error (exit 2, empty stdout),
+/// never a success-shaped stub, a hidden alias, a replacement `nexus42
+/// service` launcher or an HTTP fallback. The retained `creator` / `acp` /
+/// `platform` groups still parse, and the root help neither advertises the
+/// group nor teaches `nexus42 daemon schedule`.
+///
+/// Discriminating regression: pre-cutover `daemon --help` printed the daemon
+/// group page (exit 0), `daemon status`/`logs`/`ui` reached the loopback
+/// daemon HTTP client, `daemon schedule …` parsed the orchestration leaves,
+/// `daemon-run [--port …]` booted the runtime in-process, and `nexus42 --help`
+/// carried the `nexus42 daemon schedule --preset <id>` long-about line.
+#[test]
+fn daemon_tree_is_unknown() {
+    let home = tempfile::tempdir().expect("temp home");
+
+    let removed: [&[&str]; 15] = [
+        &["daemon", "--help"],
+        &["daemon", "start"],
+        &["daemon", "stop"],
+        &["daemon", "restart"],
+        &["daemon", "status"],
+        &["daemon", "logs"],
+        &["daemon", "doctor"],
+        &["daemon", "ui"],
+        &["daemon", "web"],
+        &["daemon", "orchestrate", "run"],
+        &["daemon", "schedule", "list"],
+        &["daemon", "schedule", "start", "--preset", "novel-writing"],
+        &["daemon-run"],
+        &["daemon-run", "--help"],
+        &["daemon-run", "--port", "8420"],
+    ];
+    for args in removed {
+        let output = Command::cargo_bin("nexus42")
+            .unwrap()
+            .env("HOME", home.path())
+            .env_remove("NEXUS_API_KEY")
+            .args(args)
+            .assert()
+            .code(2)
+            .get_output()
+            .clone();
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        assert!(
+            stderr.contains("unrecognized subcommand"),
+            "v1.193 P2-T2: `{}` must be an unknown subcommand: {stderr}",
+            args.join(" ")
+        );
+        assert!(
+            output.stdout.is_empty(),
+            "v1.193 P2-T2: `{}` must not answer with a success-shaped stub: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+
+    // The root help no longer lists the group nor teaches the removed leaf.
+    let root = Command::cargo_bin("nexus42")
+        .unwrap()
+        .env("HOME", home.path())
+        .env_remove("NEXUS_API_KEY")
+        .arg("--help")
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let root_help = String::from_utf8_lossy(&root.stdout).into_owned();
+    let root_names = help_command_names(&root_help);
+    assert!(
+        !root_names.iter().any(|name| name == "daemon"),
+        "v1.193 P2-T2: root help must not advertise the 'daemon' group: {root_names:?}"
+    );
+    assert!(
+        !root_help.contains("daemon schedule"),
+        "v1.193 P2-T2: root help must not teach the removed daemon schedule leaf"
+    );
+
+    // The retained groups still parse (the cutover removes routing, not them).
+    for args in [
+        ["creator", "--help"],
+        ["acp", "--help"],
+        ["platform", "--help"],
+    ] {
+        Command::cargo_bin("nexus42")
+            .unwrap()
+            .env("HOME", home.path())
+            .env_remove("NEXUS_API_KEY")
+            .args(args)
+            .assert()
+            .success();
+    }
 }

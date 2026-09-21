@@ -17,12 +17,17 @@ path = "src/lib.rs"
 [[bin]]
 name = "nexus42"
 path = "src/main.rs"
+# v1.193 P2-T13: the ordinary product is the `cli` cohort (the crate
+# default). The Connect-only `nexus-runtime` bin below stays independent —
+# `connect-host` never implies `cli`.
+required-features = ["cli"]
 
 # V1.153 P2 (DF-73): standalone headless Connect runtime — same crate's
-# config/home-layout/boot code, `run_daemon` never called. Requires
+# config/home-layout modules; no daemon runtime is linked and no embedded
+# SPA bytes exist in the graph (v1.193 P2-T13 deleted both). Requires
 # `connect-host` (the distributed artifact is built with
-# `--no-default-features --features connect-host`, web-embed OFF → no
-# embedded SPA bytes; see the P2 spec § Subsystem profile).
+# `--no-default-features --features connect-host`; see the P2 spec §
+# Subsystem profile).
 [[bin]]
 name = "nexus-runtime"
 path = "src/bin/nexus-runtime.rs"
@@ -57,8 +62,7 @@ required-features = ["connect-host"]
 # V1.174 P1 T4 (AR-77): the three-process `e2e_peer_mcp.rs` harness was
 # removed with Model A (v1.193 P1-T6) — its explicit `[[test]]` stanza is
 # gone so the intermediate checkout is independently testable. The
-# `connect-client` feature below is kept as a temporary edge until
-# P2-T13 removes the old dependency selectors.
+# `connect-client` marker feature it needed is gone too (v1.193 P2-T13).
 
 # Creates one world in the standalone probe's disposable workspace through
 # Nexus' own schema and narrative-write API before the runtime starts.
@@ -82,14 +86,17 @@ nexus-cloud-sync = { path = "../../crates/nexus-cloud-sync", optional = true, fe
 nexus-local-db = { path = "../../crates/nexus-local-db", optional = true }
 nexus-acp-host = { path = "../../crates/nexus-acp-host", optional = true }
 nexus-agent-host = { path = "../../crates/nexus-agent-host", optional = true }
-nexus-daemon-runtime = { path = "../../crates/nexus-daemon-runtime", default-features = false, optional = true }
 nexus-narrative = { path = "../../crates/nexus-narrative", optional = true }
 nexus-knowledge = { path = "../../crates/nexus-knowledge", optional = true }
-nexus-spoke-adapter = { path = "../../crates/nexus-spoke-adapter", optional = true }
+# v1.193 P2-T13 (technical contracts §3): the adapter's `compute` edge is
+# NOT a default of the ordinary CLI cohort — `connect-host` enables
+# `nexus-spoke-adapter/compute` explicitly (the peer compute op + shared
+# WASM cache are retained Connect behavior).
+nexus-spoke-adapter = { path = "../../crates/nexus-spoke-adapter", default-features = false, optional = true }
 nexus-module-manifest = { path = "../../modules/nexus-module-manifest", optional = true }
 # V1.148 P3 N-C0 (DF-72): Connect Host facade, opt-in via feature
 # `connect-host` below. spoke-connect pulls libp2p 0.56 transitively — the
-# default build (and `daemon start`) must stay libp2p-free, so this dep is
+# default build must stay libp2p-free, so this dep is
 # `optional` and only `connect start` links it. spoke-connect exposes no
 # `mdns` feature (removed upstream in 0.9.2); hickory/libp2p-mdns stay
 # lockfile-only via libp2p 0.56 optional deps, never compiled.
@@ -105,17 +112,6 @@ spoke-schemas = { workspace = true, optional = true }
 # 0.56 pin as spoke-connect's transport; optional + feature-gated with
 # `connect-host` so the default graph stays libp2p-free.
 libp2p = { workspace = true, optional = true }
-# V1.174 P0 T5 (AR-70): MCP server via rmcp — `nexus42 mcp serve`
-# is a stateless stdio bridge child (AR-71 Model A). Pinned exactly
-# `=3.3.0` with `default-features = false` and ONLY `server` +
-# `transport-io` (no client / streamable-HTTP / child-process features in
-# the shipped graph). The crate hosting the rmcp server module is a direct
-# optional dep behind `connect-client`. 2026-09-10 dependency sweep
-# (#280+#281): 1.8.0 → 3.2.0; ACP 2.1.0 core no longer depends on rmcp, so
-# feature-off `rmcp` is now legitimately ABSENT from the default normal
-# graph and feature-on keeps exactly one 3.3.0 (see
-# tooling/check-graph-pins.sh matrix).
-rmcp = { version = "=3.3.0", default-features = false, features = ["server", "transport-io"], optional = true }
 clap = { workspace = true }
 clap_complete = { workspace = true, optional = true }
 tokio = { workspace = true }
@@ -145,7 +141,9 @@ chrono-tz = { workspace = true, optional = true }
 # ACP SDK consumed via nexus-acp-host (worker-only linkage — see spec §11.3)
 # agent-client-protocol = "=0.10.4"  — REMOVED: consumed through nexus-acp-host
 # tokio-util, async-trait, async-broadcast — consumed through nexus-acp-host
-# nix — also used directly by daemon.rs for process management
+# nix was used directly by the deleted daemon.rs process management; no
+# direct caller remains since v1.193 P2-T13 (kept optional, unlinked by the
+# retained cohorts).
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.28", features = ["signal", "process"], optional = true }
 
@@ -153,16 +151,6 @@ nix = { version = "0.28", features = ["signal", "process"], optional = true }
 assert_cmd = "2.0"
 predicates = "3.1"
 wiremock = "0.6"
-# V1.180 P2 T1 (DR-06 ops E2E): the shared LiveDaemon fixture wires a real
-# orchestration engine (graph_flow::SessionStorage) and the preset-run e2e
-# inspects persisted session context — graph-flow is already in the
-# lockfile via nexus-orchestration; dev-dep only (tests/common + tests/).
-# default-features = false matches the production declarations so dev
-# feature unification cannot enable upstream's `postgres` default.
-graph-flow = { version = "=0.8.0", default-features = false }
-# V1.180 P2 T2 (BL-04 resume E2E): the counting
-# DaemonToolDispatch impl needs the async-trait macro (dev-only, tests-only).
-async-trait = "0.1"
 # `serial_test` serializes tests that mutate process-global state (env vars).
 # Without it, the summary_config_from_env_* tests race on NEXUS_CONTEXT_MAX_FILE_SIZE
 # under cargo's default parallel runner and intermittently fail on CI.
@@ -175,16 +163,10 @@ tokio = { workspace = true }
 tempfile = "3"
 # V1.154 P2 T1: the Connect compute interop tests install the embedded
 # `basic-combat` module into the hermetic home's `~/.nexus42/modules/`
-# store (spec §2.1 — host-local module resolution). nexus-wasm-host is
-# already in the default graph via nexus-spoke-adapter; the dev-dep makes
-# its embedded-module registry callable from the tests.
+# store (spec §2.1 — host-local module resolution). The Connect cohort
+# reaches it through `nexus-spoke-adapter/compute`; this direct dev-dep
+# makes its embedded-module registry callable from the in-crate tests.
 nexus-wasm-host = { path = "../../crates/nexus-wasm-host" }
-# V1.174 P0 T6 (AR-74): E2E MCP harness (`tests/mcp_serve_e2e.rs`) — rmcp
-# CLIENT (dev-only, tests-only) + the async-rw transport for the stdio
-# tuple. Feature-on shipped graph keeps exactly one rmcp 3.3.0 (`server` +
-# `transport-io` via the optional `connect-client` dep); the `--edges
-# normal` graph pins in tooling/check-graph-pins.sh never count dev-deps.
-rmcp = { version = "=3.3.0", default-features = false, features = ["client", "transport-async-rw"] }
 # V1.174 P1 T0 (AR-75 C-1): scripted in-process ACP agent probe
 # (`tests/mcp_acp_probe.rs`) — the SDK's Agent/Client roles + Channel
 # duplex run the full newSession.mcp_servers round trip without a live
@@ -192,36 +174,22 @@ rmcp = { version = "=3.3.0", default-features = false, features = ["client", "tr
 # (stable v1 API only; no unstable protocol features); dev-only,
 # tests-only (graph pins use --edges normal, dev-deps excluded).
 agent-client-protocol = "=2.1.0"
-# V1.174 P1 T4 (AR-77): three-process E2E harness (`tests/e2e_peer_mcp.rs`) —
-# the integrator leg (spoke `RemoteAdapter` over a REAL tokio-tungstenite WS
-# pair), the daemon leg (in-process accept loop + real axum HTTP listener),
-# and the spawned `nexus42 mcp serve` child. Every crate is already in the
-# lockfile via nexus-daemon-runtime's `connect-client` feature; dev-deps are
-# tests-only and the `--edges normal` graph pins in
-# tooling/check-graph-pins.sh never count them.
-axum = { workspace = true }
-ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
-futures-util = { workspace = true }
-spoke-connect = { workspace = true, features = ["remote-adapter"] }
-spoke-operations = { workspace = true }
-spoke-schemas = { workspace = true }
-tokio-tungstenite = { workspace = true }
 
-# V1.148 P3 N-C0 (DF-72): opt-in Connect Host surface. Feature OFF by default
-# — the default daemon graph stays libp2p-free (`cargo tree -p nexus42 -i
-# libp2p` empty). With the feature ON, `spoke-connect` links into the binary,
-# but only `nexus42 connect start` opens a Connect listener; `daemon start`
-# never does. spoke-connect 0.9.2 exposes no `mdns` feature (removed
-# upstream); hickory/libp2p-mdns stay lockfile-only via libp2p 0.56 optional
-# deps, never compiled.
-[features]
-# v1.189 P1-T3 (RFT-01 §2.1): daemon-free graph/patch cohort — same binary/parser.
+# v1.193 P2-T13: the final feature lattice is the two real product
+# cohorts from technical contracts §3. `cli` is the ordinary one-shot
+# authoring/operator/cloud product (the crate default); `connect-host` is
+# the independent Connect cohort — it enables only the shared
+# config/errors/home/local-db/Connect modules, NEVER implies `cli`, and
+# carries the explicit `nexus-spoke-adapter/compute` edge (peer compute +
+# shared WASM cache are retained production behavior; dropping compute for
+# a smaller graph is prohibited). `cli,connect-host` is the optional CLI
+# Connect build: the same parser plus the `connect` group.
 #
-# EXACT empty declaration per the locked contract: the feature selects the
-# cohort via `cfg`, it does not switch dependencies on. `nexus-core` is a
-# normal dependency (basic allowlist) and `chrono` is legacy-only.
-basic-cli = []
-legacy-cli = [
+# The retired lattice (`basic-cli`, `legacy-cli`, `web-embed`,
+# `connect-client`, `embedded-mcp`) is gone with the daemon composition.
+[features]
+default = ["cli"]
+cli = [
   "dep:nexus-orchestration",
   "dep:nexus-moment-context-assembly",
   "dep:nexus-creator-memory",
@@ -230,7 +198,6 @@ legacy-cli = [
   "dep:nexus-local-db",
   "dep:nexus-acp-host",
   "dep:nexus-agent-host",
-  "dep:nexus-daemon-runtime",
   "dep:nexus-narrative",
   "dep:nexus-knowledge",
   "dep:nexus-spoke-adapter",
@@ -251,8 +218,14 @@ legacy-cli = [
   "dep:chrono-tz",
   "dep:nix",
 ]
-connect-host = ["legacy-cli", "dep:spoke-connect", "dep:spoke-schemas", "dep:libp2p"]
-connect-client = ["legacy-cli", "nexus-daemon-runtime/connect-client", "nexus-acp-host/connect-client", "dep:rmcp"]
-embedded-mcp = ["connect-client", "nexus-daemon-runtime/embedded-mcp"]
-web-embed = ["legacy-cli", "nexus-daemon-runtime/web-embed"]
-default = ["legacy-cli", "web-embed"]
+connect-host = [
+  "dep:chrono",
+  "dep:nexus-knowledge",
+  "dep:nexus-local-db",
+  "dep:nexus-spoke-adapter",
+  "nexus-spoke-adapter/compute",
+  "dep:sqlx",
+  "dep:spoke-connect",
+  "dep:spoke-schemas",
+  "dep:libp2p",
+]

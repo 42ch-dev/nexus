@@ -14,14 +14,14 @@ test('callable identity keeps full path, feature set and alias relation without 
 
 test('clap completion walks transitions without confusing kebab commands, hidden paths or aliases', () => {
   const source = `
-    nexus42,daemon)\n cmd="nexus42__subcmd__daemon"
-    nexus42,daemon-run)\n cmd="nexus42__subcmd__daemon__subcmd__run"
-    nexus42__subcmd__daemon,ui)\n cmd="nexus42__subcmd__daemon__subcmd__ui"
-    nexus42__subcmd__daemon,web)\n cmd="nexus42__subcmd__daemon__subcmd__ui"
+    nexus42,platform)\n cmd="nexus42__subcmd__platform"
+    nexus42,platform-sync)\n cmd="nexus42__subcmd__platform__subcmd__sync"
+    nexus42__subcmd__platform,pull)\n cmd="nexus42__subcmd__platform__subcmd__sync"
+    nexus42__subcmd__platform,push)\n cmd="nexus42__subcmd__platform__subcmd__sync"
     nexus42,help)\n cmd="nexus42__subcmd__help"
-    nexus42__subcmd__help,daemon)\n cmd="nexus42__subcmd__help__subcmd__daemon"
+    nexus42__subcmd__help,platform)\n cmd="nexus42__subcmd__help__subcmd__platform"
   `;
-  assert.deepEqual(completionPaths(source).filter(item => item.leaf).map(item => item.path.join(' ')), ['nexus42 daemon ui', 'nexus42 daemon web', 'nexus42 daemon-run']);
+  assert.deepEqual(completionPaths(source).filter(item => item.leaf).map(item => item.path.join(' ')), ['nexus42 platform pull', 'nexus42 platform push', 'nexus42 platform-sync']);
   assert.throws(() => completionPaths('different generator format'), /format not recognized/);
 });
 
@@ -110,10 +110,10 @@ test('compound test cfg and manifest comments cannot masquerade as production fe
   const declarations = rustTokens(alternations).filter(token => !token.string).map(token => token.value);
   for (const name of ['test_hooks', 'helper', 'hook_only']) assert.ok(!declarations.includes(name), name);
   for (const name of ['live_connect', 'live_alternative', 'live_without_hooks', 'live_without_connect', 'live']) assert.ok(declarations.includes(name), name);
-  assert.deepEqual(manifestFeatures('# Forwarding (see [features])\n[dependencies]\none = "1"\n[features]\nconnect-host = ["dep:spoke"]\nweb-embed = []\ndefault = ["web-embed"]\n'), [
+  assert.deepEqual(manifestFeatures('# Forwarding (see [features])\n[dependencies]\none = "1"\n[features]\nconnect-host = ["dep:spoke"]\ncompute-host = []\ndefault = ["compute-host"]\n'), [
     { name: 'connect-host', definition: '["dep:spoke"]' },
-    { name: 'web-embed', definition: '[]' },
-    { name: 'default', definition: '["web-embed"]' },
+    { name: 'compute-host', definition: '[]' },
+    { name: 'default', definition: '["compute-host"]' },
   ]);
 });
 
@@ -125,7 +125,6 @@ test('storage classifications distinguish authoring, engine, protocol, migration
   assert.equal(classifyTable('workspace_meta'), 'system');
   assert.equal(classifyTable('new_unreviewed_table'), null);
   assert.equal(classifyWriter('crates/nexus-local-db/src/lib.rs', 'open_pool_read_only'), 'read-only');
-  assert.equal(classifyWriter('crates/nexus-daemon-runtime/src/db/pool.rs', 'new'), 'guarded');
   assert.equal(classifyWriter('crates/nexus-cloud-sync/src/pool.rs', 'new'), 'guarded');
   assert.equal(classifyWriter('crates/unreviewed/src/lib.rs', 'new'), null);
 });

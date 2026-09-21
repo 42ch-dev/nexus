@@ -390,6 +390,18 @@ async fn monitor_session(
         return;
     };
 
+    // The registry takes the protocol-neutral port, so the wire responder is
+    // wrapped EXACTLY ONCE per session. The SAME wrapper must be used for the
+    // admission below and for the close-observation eviction in Phase 3:
+    // `PeerToolRegistry::evict_peer` guards with `Arc::ptr_eq` against the
+    // wrapper the admission stored, so a second wrapper never matches and the
+    // peer's rows would survive a disconnect (AR-68 #8 honesty break).
+    let port: Arc<dyn crate::execution::peer_tools::PeerResponder> =
+        Arc::new(crate::connect::table::ConnectResponderAdapter::new(
+            Arc::clone(&responder),
+            peer_id.clone(),
+        ));
+
     // Phase 2: admit. T3 (AR-68): the authenticated manifest's tool ids run
     // the full admission chain inside the process-global PeerToolTable
     // (whole-manifest validation → grammar → reserved-ns → negotiated →
@@ -411,13 +423,6 @@ async fn monitor_session(
             // the shared holder at admission time — hot-reloaded user-cap
             // names stay reserved against peer admission.
             let reserved = live_reserved_tool_ids(options.capability_registry.as_ref());
-            // The core registry takes the protocol-neutral port, so the wire
-            // responder is wrapped once per admission.
-            let port: Arc<dyn crate::execution::peer_tools::PeerResponder> =
-                Arc::new(crate::connect::table::ConnectResponderAdapter::new(
-                    Arc::clone(&responder),
-                    peer_id.clone(),
-                ));
             match crate::connect::peer_tool_table().admit_and_register(
                 &peer_id,
                 &manifest,
@@ -459,12 +464,10 @@ async fn monitor_session(
     let evicted = sessions.evict(&peer_id, Some(&responder));
     if evicted {
         // AR-68 #8: same tick as close observation — the PeerToolTable rows
-        // for this peer disappear from the spine + catalog.
-        let port: Arc<dyn crate::execution::peer_tools::PeerResponder> =
-            Arc::new(crate::connect::table::ConnectResponderAdapter::new(
-                Arc::clone(&responder),
-                peer_id.clone(),
-            ));
+        // for this peer disappear from the spine + catalog. The wrapper
+        // hoisted above (the one the admission stored) is what the registry's
+        // expected-responder guard compares against, so the eviction actually
+        // lands.
         crate::connect::peer_tool_table().evict_peer(&peer_id, Some(&port));
         tracing::info!(%peer_id, "peer session evicted after close observation");
     }

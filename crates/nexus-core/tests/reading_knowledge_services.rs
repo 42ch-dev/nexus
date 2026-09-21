@@ -1,7 +1,7 @@
 //! Reading, findings and knowledge services on guarded storage (AC-P1-T3).
 //!
-//! Ports the named legacy daemon behaviors (`reading_api.rs` annotation round
-//! trip and the null-note boundary) onto the core service and protects the
+//! Ports the named retired daemon reading fixture's annotation round trip and
+//! the null-note boundary onto the core service and protects the
 //! scope/isolation, cursor-pagination and explicit nullable-update invariants
 //! through the extraction.
 #![allow(clippy::too_many_lines)] // one end-to-end scenario per test
@@ -80,9 +80,10 @@ fn annotation_request(work_id: &str) -> ReadingAnnotationCreateRequest {
     .unwrap()
 }
 
-/// Port of the legacy daemon `reading_api.rs` `annotation_create_list_patch_delete_round_trip`
-/// (create at :195, null-note boundary exercised separately below): create,
-/// list, patch and delete one annotation through the core service.
+/// Port of the retired daemon reading fixture's
+/// `annotation_create_list_patch_delete_round_trip` (create at :195, null-note
+/// boundary exercised separately below): create, list, patch and delete one
+/// annotation through the core service.
 #[tokio::test]
 async fn annotation_create_list_patch_delete_round_trip() {
     let temp = tempfile::tempdir().unwrap();
@@ -143,8 +144,8 @@ async fn annotation_create_list_patch_delete_round_trip() {
     core.close().await.unwrap();
 }
 
-/// Port of the legacy `reading_api.rs:261` null-note boundary: an empty note
-/// string clears the stored note, an absent field keeps it, and the scope
+/// Port of the retired daemon reading fixture's null-note boundary: an empty
+/// note string clears the stored note, an absent field keeps it, and the scope
 /// isolation (unknown Work → `NotFound`, foreign-creator row → Forbidden)
 /// survives the extraction.
 #[tokio::test]
@@ -783,6 +784,117 @@ async fn get_work_finding_binds_row_to_path_work() {
     assert!(matches!(
         core.get_work_finding(&principal, work_b.clone(), finding.finding_id.clone()).await,
         Err(CoreError::NotFound { resource }) if resource == format!("finding {}", finding.finding_id)
+    ));
+    core.close().await.unwrap();
+}
+
+// ─── Reading progress + annotation bounds: retained domain assertions migrated
+// from the retired daemon runtime `reading_api.rs` fixture. ─────────────────
+
+/// Reading progress defaults to zero with a fresh timestamp, round-trips an
+/// upsert (the read serves the stored timestamp), and a delete returns the
+/// chapter to the default; annotation offsets are validated before any write
+/// and a foreign-creator row cannot be deleted either.
+#[tokio::test]
+async fn retained_reading_progress_defaults_delete_and_annotation_bounds() {
+    let temp = tempfile::tempdir().unwrap();
+    let (core, principal, work_id) = core_with_work(temp.path()).await;
+    let query = |work_id: String| ReadingProgressQuery {
+        work_id,
+        chapter: 1.try_into().unwrap(),
+    };
+
+    // Default: zero progress with a fresh timestamp.
+    let default = core
+        .get_reading_progress(&principal, query(work_id.clone()))
+        .await
+        .unwrap();
+    assert_eq!(default.scroll_progress, 0);
+    assert_eq!(default.work_id, work_id);
+    assert!(
+        !default.updated_at.is_empty(),
+        "the default carries a timestamp"
+    );
+
+    // Upsert round trip; `updated_at` is the stored value on both surfaces.
+    let put = core
+        .put_reading_progress(
+            &principal,
+            work_id.clone(),
+            ReadingProgressRequest {
+                chapter: 1.try_into().unwrap(),
+                scroll_progress: 7500,
+                work_id: work_id.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(put.scroll_progress, 7500);
+    let read = core
+        .get_reading_progress(&principal, query(work_id.clone()))
+        .await
+        .unwrap();
+    assert_eq!(read.scroll_progress, 7500);
+    assert_eq!(
+        read.updated_at, put.updated_at,
+        "the read serves the stored timestamp"
+    );
+
+    // Delete clears the row → the next read is the default again.
+    core.delete_reading_progress(&principal, query(work_id.clone()))
+        .await
+        .unwrap();
+    let after = core
+        .get_reading_progress(&principal, query(work_id.clone()))
+        .await
+        .unwrap();
+    assert_eq!(after.scroll_progress, 0, "delete clears stored progress");
+
+    // Offsets: an end at or before the start is refused before any write.
+    let mut request = annotation_request(&work_id);
+    request.start_offset = 10;
+    request.end_offset = 5;
+    let err = core
+        .create_annotation(&principal, request)
+        .await
+        .expect_err("an end before the start must be refused");
+    assert!(matches!(err, CoreError::InvalidInput { .. }), "{err:?}");
+    let list = core
+        .list_annotations(
+            &principal,
+            ReadingAnnotationListQuery {
+                work_id: work_id.clone(),
+                chapter: 1.try_into().unwrap(),
+            },
+        )
+        .await
+        .unwrap();
+    assert!(list.items.is_empty(), "the refused create wrote nothing");
+
+    // A foreign-creator annotation row is Forbidden on delete too.
+    let created = core
+        .create_annotation(&principal, annotation_request(&work_id))
+        .await
+        .unwrap();
+    let tamper = nexus_local_db::open_pool(&nexus_home_layout::workspace_state_db_path(
+        temp.path(),
+        "author",
+        "default",
+    ))
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE reading_annotations SET creator_id = 'other_creator' WHERE annotation_id = ?1",
+    )
+    .bind(&created.annotation_id)
+    .execute(&tamper)
+    .await
+    .unwrap();
+    tamper.close().await;
+    assert!(matches!(
+        core.delete_annotation(&principal, created.annotation_id.clone()).await,
+        Err(CoreError::Forbidden { resource })
+            if resource.starts_with("annotation_owner:annotation ")
     ));
     core.close().await.unwrap();
 }

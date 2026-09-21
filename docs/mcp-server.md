@@ -1,39 +1,51 @@
-# Nexus MCP Server
+# Nexus MCP Server (retired in v1.193 P2)
 
-`nexus42 mcp serve` is a **tools-only** Model Context Protocol (MCP)
+> **Historical record — nothing below is a current setup instruction.** The
+> Model A `nexus42 mcp serve` stdio bridge, its
+> `nexus-acp-host::mcp::nexus_mcp_stdio_server()` ACP factory (v1.193 P1-T6)
+> and the whole `nexus-daemon-runtime` host composition (v1.193 P2-T13) were
+> deleted. No `nexus42` command spawns an MCP server any more. The retained
+> MCP/peer surface is the transport-neutral core library
+> (`nexus_core::connect` behind the `connect-client` / `embedded-mcp`
+> features: peer tool registry, shared rmcp bridge core, embedded Model B
+> server, `VisibilityPolicy`, peer-control lane), composed by the native/TS
+> consumers. See
+> [`.mstar/specs/rust-core-service-boundary.md`](../.mstar/specs/rust-core-service-boundary.md)
+> §3–§4 and [`ARCHITECTURE.md`](ARCHITECTURE.md).
+
+`nexus42 mcp serve` **was** a **tools-only** Model Context Protocol (MCP)
 server over stdio (V1.174 P0-5 / P1, AR-70/71/72). An MCP client — Claude
-Code, Codex, or a hosted ACP agent — spawns it as its **own stateless
-child** (AR-71 Model A): the child keeps no registry, no allowlist, no
-policy, no cache. Every `tools/list` is a live
+Code, Codex, or a hosted ACP agent — spawned it as its **own stateless
+child** (AR-71 Model A): the child kept no registry, no allowlist, no
+policy, no cache. Every `tools/list` was a live
 `GET /v1/daemon/tools` and every `tools/call` a live
 `POST /v1/daemon/agent-host/internal/tool-executions` over the daemon's
 loopback HTTP (config `daemon_url`, default `http://127.0.0.1:8420`).
 
-The catalog mirrors the daemon's live tool registry as **one catalog**:
+The catalog mirrored the daemon's live tool registry as **one catalog**:
 builtin `nexus.*` host tools, admitted user capabilities, and (with the
-`connect-client` feature) admitted peer tools.
+deleted app `connect-client` selector) admitted peer tools.
 
-## Prerequisites
+> **Historical prerequisites (no longer applicable).** The bridge required
+> the `nexus42 daemon` host running and reachable at `daemon_url` (the
+> stateless child failed bounded with `INTERNAL_ERROR` when it was down),
+> and a `nexus42` binary built with the app `connect-client` feature that
+> gated the `mcp` subcommand. Both that command group and that app selector
+> are deleted.
 
-- The daemon must be running (`nexus42 daemon`) and reachable at
-  `daemon_url`. The bridge is a stateless child — it has no data of its
-  own and fails bounded (`INTERNAL_ERROR`) when the daemon is down.
-- The `nexus42` binary must be built with the `connect-client` feature:
-  the `mcp` subcommand is feature-gated
-  (`#[cfg(feature = "connect-client")]`), same as the ACP client stack.
+## Claude Code (command-line config — retired entry)
 
-## Claude Code (command-line config)
-
-Claude Code accepts a user-side `--mcp-config` JSON flag:
+Claude Code accepts a user-side `--mcp-config` JSON flag. The Nexus side of
+this example is historical (the command no longer exists):
 
 ```sh
 claude --mcp-config '{"mcpServers":{"nexus":{"command":"nexus42","args":["mcp","serve"]}}}'
 ```
 
-## Codex (settings config)
+## Codex (settings config — retired entry)
 
 Codex has **no** `--mcp-config` CLI flag. Add the same
-`mcpServers` entry to its settings:
+`mcpServers` entry to its settings (historical Nexus side, as above):
 
 ```json
 {
@@ -63,20 +75,28 @@ AC-V174-1 miss: AC-V174-1 closes on the **wired ACP path** below, not on
 native CLI configuration (PL-10). No `structured_tool_calls` descriptor
 flips were made on this surface.
 
-## Wired consumption path for hosted ACP agents
+## Wired consumption path for hosted ACP agents (retired)
 
-The shipped construction path for the ACP stdio surface is the T1 helper
-`nexus-acp-host::mcp::nexus_mcp_stdio_server()`, which produces
+**Retired in v1.193 P1-T6:** the T1 helper
+`nexus-acp-host::mcp::nexus_mcp_stdio_server()` and the app `connect-client`
+selector it needed were deleted with the Model A bridge. Historically it
+produced
 `McpServer::Stdio { name: "nexus", command: "<nexus42>", args: ["mcp", "serve"] }`
 carried on `NewSessionRequest.mcp_servers` when the `connect-client`
-feature is enabled (S-b / QC1 S-2: no hosted-session caller constructs the
-option directly yet — the helper is the single safe constructor, and the
-Nexus→SDK mapping now carries `args` for hand-built Stdio descriptors as
-well). This is the AC-closing journey — a scripted ACP agent spawns the
-real `nexus42 mcp serve` child and calls an integrator-registered peer
-tool through its own MCP client.
+feature was enabled, and the AC-closing journey was a scripted ACP agent
+spawning the real `nexus42 mcp serve` child and calling an
+integrator-registered peer tool through its own MCP client. Generic ACP
+`mcp_servers` descriptors remain supported; the deleted factory is not the
+way to build one.
 
 ## Integrator & operator duties (V1.174 P1, AC-V174-4)
+
+> **Retained contract.** The peer-admission rules in this section are still
+> enforced by the transport-neutral core library
+> (`nexus_core::connect::config` / `watch` / `visibility`); only their
+> historical Model A host (the daemon composition and the `nexus42 mcp serve`
+> child) is gone. Read "daemon" below as "the process hosting the Connect
+> runtime".
 
 ### Both sides name the same exact tool id
 
@@ -106,7 +126,7 @@ side is never admitted. The MCP catalog mirrors what the daemon spine can
 actually dispatch — a never-admitted id is absent from `tools/list` and
 refused on `tools/call` (`METHOD_NOT_FOUND`).
 
-### Allowlist edits apply on daemon restart
+### Allowlist edits apply on (host) restart
 
 `~/.nexus42/connect/daemon.json` is read **once** at daemon boot (V1.174
 P0, AR-67/AR-69). Edits to `tool_allowlist`, `peer_ids`, `peer_keys.json`,
@@ -168,28 +188,29 @@ subsequent `tools/list` is still a live daemon round trip.
 
 ### Tools-only vocabulary boundary (PL-7/PL-9)
 
-`nexus42 mcp serve` is a **tools-only** MCP surface: it implements only
-the tools family (`tools/list`, `tools/call`) plus server info;
-`prompts/list` / `resources/list` return empty lists and the unroutable
-`prompts/get` / `resources/read` return `METHOD_NOT_FOUND`. This is not a
-general-purpose MCP product and there is no marketplace reopening. The
-origin vocabulary stays honest: builtin / user / peer rows are labeled
-with their provenance on the catalog (PL-9); tools are never re-labeled
-or re-scoped to fit the MCP lane.
+The retired `nexus42 mcp serve` child was a **tools-only** MCP surface: it
+implemented only the tools family (`tools/list`, `tools/call`) plus server
+info; `prompts/list` / `resources/list` returned empty lists and the
+unroutable `prompts/get` / `resources/read` returned `METHOD_NOT_FOUND`.
+This is not a general-purpose MCP product and there is no marketplace
+reopening. The origin vocabulary stays honest: builtin / user / peer rows
+are labeled with their provenance on the catalog (PL-9); tools are never
+re-labeled or re-scoped to fit the MCP lane.
 
 ### Native CLI config JSON (per T0 verdict)
 
 The native CLI `--mcp-config` story is **documented-only** (PL-10) — see
-[Claude Code (command-line config)](#claude-code-command-line-config) and
-[Codex (settings config)](#codex-settings-config) above for the exact
-user-side JSON; nexus does not own native CLI spawn configuration. A
-document-only native face is **not** an AC-V174-1 miss: the acceptance
-journey closes on the wired ACP path above.
+[Claude Code (command-line config — retired entry)](#claude-code-command-line-config--retired-entry)
+and [Codex (settings config — retired entry)](#codex-settings-config--retired-entry)
+above for the exact user-side JSON; nexus does not own native CLI spawn
+configuration. A document-only native face is **not** an AC-V174-1 miss: the
+acceptance journey closed on the (now retired) wired ACP path above.
 
-## Implementation ownership (v1.190 P4-T3)
+## Implementation ownership (v1.190 P4-T3; host composition retired in v1.193 P2)
 
 The MCP/peer serving implementation moved behind transport-neutral ownership
-in `nexus-core`; the daemon keeps only host compositions. Current facts:
+in `nexus-core`; the former daemon host kept only compositions and was
+deleted in v1.193 P2. Current facts:
 
 - **Peer tool registry.** The process-level registry of admitted peer tools
   is `nexus_core::execution::peer_tools::peer_tool_registry()` (P3). The
@@ -199,16 +220,14 @@ in `nexus-core`; the daemon keeps only host compositions. Current facts:
   (`WsTransport`, tokio-tungstenite, bounded envelope), the accept loop +
   `PeerSessionManager`, the config snapshot/watcher chain, peer identity
   loading, and the shared rmcp bridge core live in
-  `nexus_core::connect` behind the `connect-client` feature. The daemon
-  modules under `crates/nexus-daemon-runtime/src/connect/` are retirement
-  shims that re-export the core surface.
+  `nexus_core::connect` behind the `connect-client` feature. The old
+  `crates/nexus-daemon-runtime/src/connect/` re-export shims went away with
+  the crate.
 - **Embedded MCP server (Model B).** The generic shell (process-global
   session budget `EMBEDDED_MCP_MAX_SESSIONS`, server-side budget-slot
   lifetime, watch-based shutdown gate) is
   `nexus_core::connect::mcp_embedded` behind the nested `embedded-mcp`
-  feature; the daemon's `WorkspaceState`-backed backend (the same catalog
-  builder and tool dispatch path the HTTP routes use) is a thin adapter in
-  the daemon. The fail-closed invalid-`mcp_visibility` construction refusal
+  feature. The fail-closed invalid-`mcp_visibility` construction refusal
   is unchanged.
 - **Visibility policy.** `VisibilityPolicy` (V1.180 P1, RN-OGA-2) is
   evaluated at the shared MCP serving seam before `tools/list` filtering and
@@ -218,5 +237,6 @@ in `nexus-core`; the daemon keeps only host compositions. Current facts:
 - **Peer control.** The execution owner admits one peer-control lane
   (`ExecutionHandle::start_peer_control` / `peer_control`): explicit
   enablement plus a named operation allowlist; operations off the allowlist
-  are refused before any effect. Child stdio CLI composition remains the
-  operator surface (P6-T2).
+  are refused before any effect. The Model A child stdio CLI composition
+  that used to expose this lane (v1.190 P6-T2) was deleted in v1.193 P1-T6;
+  the lane is composed by the native/TS consumers that host the runtime.

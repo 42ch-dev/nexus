@@ -403,7 +403,10 @@ fn build_schema_map() -> Vec<SchemaEntry> {
         // oneOf-root (directive row | empty `{}`) with no top-level
         // `properties`. Non-empty arms are field-checked; empty arms are
         // skipped. Wire exactness is also enforced by
-        // nexus-daemon-runtime/tests/directive_api.rs.
+        // nexus-core/tests/context_services.rs
+        // (`retained_moment_directive_set_show_clear_and_scope_ownership`,
+        // migrated from the deleted nexus-daemon-runtime directive_api.rs
+        // fixture in v1.193 P2-T5).
         entry!(
             "schemas/daemon-api/inspector/moment-directive-response.schema.json",
             Strict,

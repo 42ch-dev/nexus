@@ -1,19 +1,19 @@
 # Rust Core Service Boundary
 
-**Status:** Accepted target — locked 2026-09-13; **v1.193 target overlay 2026-09-20** (Prepare, not yet exercised). The **M1 subset is exercised** (v1.189 PR #306, merge `71e01cf9`, 2026-09-15). **v1.192** delivered the Electron desktop cutover and retired Tauri. **Current main still ships** `legacy-cli` + `web-embed`, integrated `nexus42 daemon`, and DaemonClient CLI leaves. **v1.193 target:** delete the entire `nexus42 daemon` group with no TS-launcher alias; retarget remaining CLI leaves to existing core or remove the CLI entry; keep core/TS capabilities; no permanent legacy-cli/web-embed fallback. This document is normative for that boundary and is self-contained; the per-leaf command inventory for the iteration is process material, not a tracked contract. Do **not** describe current main as already retired.
+**Status:** Accepted target — locked 2026-09-13; **v1.193 overlay delivered (P2 complete 2026-09-21).** The **M1 subset is exercised** (v1.189 PR #306, merge `71e01cf9`, 2026-09-15). **v1.192** delivered the Electron desktop cutover and retired Tauri. **v1.193 P2 delivered the remaining cutover:** the whole `nexus42 daemon` group, hidden `daemon-run`, Model A `mcp serve`/`host-call`, the app-only `legacy-cli` / `basic-cli` / `web-embed` / `connect-client` / `embedded-mcp` selectors, the `nexus-daemon-runtime` crate and the DaemonClient CLI leaves are **deleted** — retained leaves call core/cloud/Connect directly, with no TS-launcher alias and no permanent legacy fallback. This document is normative for that boundary and is self-contained; the per-leaf command inventory for the iteration is process material, not a tracked contract. Do **not** describe the `Current:` records below as the shipped state — they are the pre-cutover migration record.
 **Document class:** Master
 **Pillar (V1.122):** Cross-cutting — Harness, Canvas, and Computable consumption ends keep their product identities; this spec only locks the service-boundary target those pillars run on.
-**Coordinates with:** [local-runtime-boundary.md](local-runtime-boundary.md), [daemon-runtime.md](daemon-runtime.md), [cli-spec.md](cli-spec.md), [desktop-shell.md](desktop-shell.md), [web-ui.md](web-ui.md), [agent-host.md](agent-host.md), [concurrency.md](concurrency.md), [world-kb-runtime-architecture.md](world-kb-runtime-architecture.md), [local-cloud-crate-architecture.md](local-cloud-crate-architecture.md), [daemon-api-surface-conventions.md](daemon-api-surface-conventions.md), [schemas-directory-layout.md](schemas-directory-layout.md)
+**Coordinates with:** [local-runtime-boundary.md](local-runtime-boundary.md), [daemon-runtime.md](daemon-runtime.md) (historical host spec — its crate was deleted in v1.193 P2), [cli-spec.md](cli-spec.md), [desktop-shell.md](desktop-shell.md), [web-ui.md](web-ui.md), [agent-host.md](agent-host.md), [concurrency.md](concurrency.md), [world-kb-runtime-architecture.md](world-kb-runtime-architecture.md), [local-cloud-crate-architecture.md](local-cloud-crate-architecture.md), [daemon-api-surface-conventions.md](daemon-api-surface-conventions.md), [schemas-directory-layout.md](schemas-directory-layout.md)
 
 ## 0. Authority
 
 | Layer | Authority | Honest claim |
 | --- | --- | --- |
-| **Shipped current policy** | Shipped Masters above (`local-runtime-boundary`, `daemon-runtime`, `cli-spec`, `desktop-shell`, `agent-host`, `concurrency`) | Unmigrated families still use the integrated `nexus42` daemon, Daemon API HTTP, and CLI `DaemonClient`; since the v1.192 cutover the shipped desktop is the Electron host and no Tauri sidecar shell is part of it |
+| **Shipped current policy** | Shipped Masters above (`local-runtime-boundary`, `daemon-runtime`, `cli-spec`, `desktop-shell`, `agent-host`, `concurrency`) | The retired integrated `nexus42` daemon and the CLI `DaemonClient` leaves are deleted (v1.193 P2): retained families call the Rust authority directly, or through the standalone TS service for browser/Electron. Since the v1.192 cutover the shipped desktop is the Electron host and no Tauri sidecar shell is part of it. `daemon-runtime` stays listed only as the historical host Master |
 | **Exercised M1 subset** | This document + merged v1.189 on `main` (`71e01cf9`) | World KB graph/patch, candidates read-only projection, napi/provider ACP vertical, standalone TS M1 routes, Cargo-free stable-interface DX, Electron development GO. Not full API/CLI cutover |
 | **Accepted target** | This document | Transport-neutral Rust authority for every retained family, independent Rust CLI/runtime, complete TS service composition, proof-gated Electron desktop |
 | **Wire DTOs** | `schemas/` → generated Rust + `@42ch/nexus-contracts` | Unchanged by this lock |
-| **Product names** | Root `AGENTS.md` | `Nexus`, `nexus42`, integrated daemon runtime, `nexus-runtime`, `@42ch` |
+| **Product names** | Root `AGENTS.md` | `Nexus`, `nexus42`, `nexus-runtime`, `@42ch` — the retired integrated daemon runtime is no longer a product name |
 
 **Activation rule:** a family uses the target topology only after the extracted Rust service is the single effect owner **and** the old mixed-handler path for that family has an explicit deletion owner and proof. The M1 World KB graph/patch + native ACP + TS M1 vertical families have fired that gate. Until other families fire it, shipped Masters remain the implementable SSOT for those families. Do not describe unmigrated code as already on the target, and do not describe the M1 subset as the complete program.
 
@@ -37,8 +37,8 @@ These names and roles stay. The refactor does not invent a second CLI, a second 
 | Identity | Role that stays |
 | --- | --- |
 | **Nexus** | Product |
-| **`nexus42`** | User-facing CLI executable. **Current:** ordinary default still embeds `legacy-cli` + `web-embed` and can start the integrated daemon. **v1.193 target:** retained leaves call Rust/cloud/Connect directly; there is no operator CLI that launches or statuses the TS service and no internal legacy-cli mode. The shipped desktop remains the Electron host. |
-| **Daemon runtime** | **Current:** integrated host for unmigrated families; public `nexus42 daemon …` names still exist. **v1.193 target:** those CLI names are deleted (no `nexus42d`, no `nexus42 service` alias). The TS service remains the HTTP host for browser/Electron; it is not a CLI destination. |
+| **`nexus42`** | User-facing CLI executable. **Delivered (v1.193 P2):** the ordinary default is the direct-core + cloud + optional Connect `cli` cohort; there is no operator CLI that launches or statuses the TS service and no internal `legacy-cli` mode. The shipped desktop remains the Electron host. |
+| **Daemon runtime** | **Retired in v1.193 P2.** The integrated local host and the public `nexus42 daemon …` names are deleted (no `nexus42d`, no `nexus42 service` alias). The standalone TS service remains the HTTP host for browser/Electron; it is not a CLI destination. |
 | **`nexus-runtime`** | Headless integrator executable. Connect-only profile. Must not boot a hidden full scheduler/Host/SPA. |
 | **`@42ch/nexus-contracts`** | Published TypeScript contracts package |
 | **`nexus-contracts` crate** | Monorepo-internal generated Rust types |
@@ -47,19 +47,26 @@ These names and roles stay. The refactor does not invent a second CLI, a second 
 
 | End | Surface | Target change |
 | --- | --- | --- |
-| Developers | `nexus42` CLI + local HTTP/API | M1: graph/patch basic-cli slice is daemon-free. **v1.193 target:** remaining retained authoring/storage (including Works list/status/use) calls Rust directly with no Node/daemon; operator HTTP stays a TS composition for Electron/browser only — not a `nexus42 daemon` or CLI launcher. |
+| Developers | `nexus42` CLI + local HTTP/API | **Delivered (v1.193 P2):** retained authoring/storage (including Works list/status/use) calls Rust directly with no Node/daemon; operator HTTP stays a TS composition for Electron/browser only — there is no `nexus42 daemon` group or CLI launcher. The M1 graph/patch slice that pioneered the direct path is now part of the ordinary `cli` cohort. |
 | Content creators | `apps/web` + desktop shell wrapping the same SPA | No visual redesign. Browser uses generated `NexusClient`. The desktop host cut over to Electron in v1.192 (RFT-09 accepted) and stays exactly one desktop host. |
 | Third-party users | `nexus-runtime` + Connect | Keep the existing Connect-only served-op profile. No first-party player. |
 
-## 3. Currently shipped topology (honest mix; not the complete target)
+## 3. Topology before the v1.193 cutover (migration record)
 
-Do not rewrite **unmigrated** families as if they had already moved. Do not hide the M1 subset that **has** moved.
+**Historical record.** The numbered items below describe the mixed shipped
+topology *before* v1.193 P2 finished the cutover; they are kept so the
+migration is auditable, not as the current state. Delivered form: the
+ordinary `nexus42` default is the `cli` cohort (no embedded `apps/web`, no
+`legacy-cli`/`web-embed`, no daemon launch), and every retained CLI leaf
+calls the Rust authority directly.
 
-1. **`nexus42`** default graph still embeds `apps/web` and can start `nexus_daemon_runtime::boot::run_daemon` (foreground or hidden `daemon-run`). Ordinary default **development/runtime entry cutover** to standalone TS + daemon-free basic CLI is an M2 product decision (RFT-07/RFT-08), not M3.
+Kept as the record of the mix at lock time; nothing below is a supported instruction any more.
+
+1. **`nexus42`** ordinary default is the `cli` cohort: direct core/cloud/Connect, with **no** embedded `apps/web`, **no** `nexus_daemon_runtime::boot::run_daemon` and **no** hidden `daemon-run` (all deleted in v1.193 P2). The **development/runtime entry cutover** to standalone TS + daemon-free CLI (RFT-07/RFT-08) landed with that deletion, not in M3.
 2. **Daemon API** remains loopback HTTP under `/v1/daemon/*` for unmigrated families, with unguarded health/status/cert routes, API-key Tier-1, and API-key + active-Creator Tier-2. The M1 World KB graph/patch/candidates-read and provider-session slice also exist on standalone `apps/nexus-service`. Completing M2 requires every retained family on that TS service with a real Rust owner — not a 501, sample, or old-daemon proxy.
-3. **Most creator workflow/control CLI leaves** still call `DaemonClient`. Several world/KB/memory/SOUL/cron/chronology/directive paths still own local SQLite/filesystem directly. The M1 **basic-cli** cohort already calls Rust for World KB graph/patch without Node/daemon. Remaining basic authoring/storage, including Works `list|status|use`, stays assigned to RFT-08.
+3. **Creator workflow/control CLI leaves** now call Rust (core/cloud/Connect) directly; the `DaemonClient` and the app-only cohort selectors are deleted (v1.193 P2). Several world/KB/memory/SOUL/cron/chronology/directive paths already owned local SQLite/filesystem directly and keep doing so. The M1 World KB graph/patch slice that pioneered the direct path is part of the ordinary `cli` cohort (RFT-08 complete, including Works `list|status|use`).
 4. **World KB graph + entity patch** now have one Rust owner (`nexus-core`) with old HTTP translation **and** daemon-free CLI. They remain distinct from local-DB `creator world kb edit` (direct SQLite, no OCC). Candidate **promotion/merge/relationship writes**, packs, forks, rules, findings, and remaining World/Work families are **not** in the M1 subset.
-5. **`nexus-runtime`** parses `--listen` / `--allow-peer` / `--home`, starts Connect, and **never** calls `run_daemon`. M2 must drop `legacy-cli` coupling while staying Connect-only and Node-free. Do not fold full Host/scheduler/SPA into this binary.
+5. **`nexus-runtime`** parses `--listen` / `--allow-peer` / `--home`, starts Connect, and **never** calls `run_daemon`. It is built `--no-default-features --features connect-host` — Connect-only and Node-free, with the `legacy-cli` coupling gone with that cohort (v1.193 P2). Do not fold full Host/scheduler/SPA into this binary.
 6. **Desktop** ships as the Electron host (`apps/desktop-electron`) wrapping `apps/web/dist` with an app-managed TS service over the Rust authority. Support floor: macOS arm64 and x86_64. v1.192 delivered the formal switch (RFT-09) and the unsigned `.app`/`.dmg` half of RFT-10, and retired the Tauri v2 composition (`apps/desktop` plus its target-suffixed `nexus42` sidecar); that delivery supersedes the M1 Electron **development** GO as the desktop's product basis. Production signing (RFT-10) and dual-architecture GUI qualification remain open.
 7. **Design Studio** is a daemon-free Vite gallery on port 5174. `pnpm run dev:web` / `dev:design-studio` already exist as direct entries.
 8. **Providers:** Rust ACP/Claude/Codex/DSH remain. TS currently exposes the M1 ACP vertical; M2 must keep **all four** families available in the TS service through stable ports. DSH stays `cancellation:false` and is never the cancel proof. Independent Rust consumers must not require Node.
@@ -103,11 +110,11 @@ Rules:
 - `nexus-spoke-adapter` keeps one conversion/upsert seam; default-on `compute` owns WASM/module-cache capability. Core disables that feature rather than importing orchestration for helpers.
 - `crates/nexus-storage-guard` is the narrow audited SQLite FFI connection-function boundary; all business/domain crates retain unsafe-code prohibition.
 - Products stay in `apps`: standalone `apps/nexus-service`, existing `apps/nexus42`, and the desktop host `apps/desktop-electron` (`apps/desktop` was retired with the Tauri composition in v1.192). Exactly one desktop host — no second desktop or competing desktop app.
-- Same `nexus42` binary/parser. **Current:** `legacy-cli` + `web-embed` are still the default. **v1.193 target:** the ordinary default is the direct-core + cloud + optional Connect cohort; `legacy-cli` / `web-embed` are deleted, not kept as an internal mode. A new helper CLI or second product name is prohibited.
+- Same `nexus42` binary/parser. **Delivered (v1.193 P2):** the ordinary default is the direct-core + cloud + optional Connect `cli` cohort; `legacy-cli` / `web-embed` are deleted, not kept as an internal mode. A new helper CLI or second product name is prohibited.
 
 ### 4.2 Selective authority graph
 
-These are target dependency cohorts, not claims that the current graph already satisfies them:
+These are the shipped dependency cohorts (v1.193 P2 delivered them), kept as the regression contract: an edge listed under "forbidden" must not reappear. `daemon-runtime` names the crate deleted in v1.193 P2.
 
 | Cohort | Selected edges | Forbidden accidental edges |
 | --- | --- | --- |
@@ -123,7 +130,7 @@ These are target dependency cohorts, not claims that the current graph already s
 
 The existing pure `nexus-preset` closure and default-disabled MCA/core spoke edges are retained. The app's spoke dependency also disables defaults; only `connect-host` explicitly enables its real compute feature. Current Connect invoke code already serves compute with stored holder/module scope and a shared cache; removing WASM to satisfy a graph slogan would delete supported functionality. The ordinary CLI may retain orchestration **library** edges for chronology/cron/ops without starting an engine. Core domain closure remains engine/Host/WASM-free.
 
-Final app cohorts are proposed `default = ["cli"]`, independent `connect-host`, and `nexus42` binary `required-features = ["cli"]`. Delete `basic-cli`, `legacy-cli`, `web-embed` and app-only `connect-client`/`embedded-mcp` selectors after Model A/Rust-host removal. Preserve core `connect-client`/`embedded-mcp` library features. Delete the ACP factory that prescribes `nexus42 mcp serve`, not generic ACP MCP descriptors. No second CLI, renamed legacy mode or no-op compatibility feature is introduced.
+**Delivered (v1.193 P2).** The app cohorts are `default = ["cli"]`, independent `connect-host`, and `nexus42` binary `required-features = ["cli"]`. `basic-cli`, `legacy-cli`, `web-embed` and the app-only `connect-client`/`embedded-mcp` selectors are deleted; the core `connect-client`/`embedded-mcp` **library** features remain. The ACP factory that prescribed `nexus42 mcp serve` is deleted; generic ACP MCP descriptors remain. No second CLI, renamed legacy mode or no-op compatibility feature was introduced.
 
 `CoreService::start_execution(&self, _providers: Arc<dyn ProviderPort>, mut deps: RunnerDeps) -> Result<Arc<ExecutionHandle>, ExecutionOpenError>` requires EngineOwner and preserves typed ownership/closing errors. Production prompt/tool/workspace dependencies must be supplied; default dependencies are not execution parity. Domain open starts no scheduler or Host. CoreService remains bound to the selected Creator/workspace generation; selection changes require reopen. Direct CLI adapters obtain a stored Principal, call typed family methods, and await close on success and failure without pool escape hatches or JSON dispatch.
 
@@ -141,10 +148,10 @@ Host owns one session/operation/tombstone registry and consumes core admission/l
 
 | Host | Product job | Lifetime | M1 (shipped) | M2 product obligation |
 | --- | --- | --- | --- | --- |
-| Integrated `nexus42` daemon + Daemon API | **Current** shipped operator/HTTP host for unmigrated families | Process owned by `daemon start` | May translate M1's extracted family to the one Rust service | **v1.193 target:** delete the CLI group and the obsolete Rust host/SPA composition. Do not retarget `nexus42 daemon` at the TS service. TS/Electron remain the HTTP host |
+| Integrated `nexus42` daemon + Daemon API | **Retired in v1.193 P2** (was the shipped operator/HTTP host for unmigrated families) | Was owned by the deleted `daemon start` | Deleted, not translated | The CLI group and the obsolete Rust host/SPA composition are gone. It was **not** retargeted at the TS service. TS/Electron remain the HTTP host |
 | Standalone Node TS service | Independent daemon/API for browser and the desktop utility | Process owned by the service; no Electron import | RFT-04 M1 vertical shipped | Every retained M2 HTTP/middleware/stream family and generated client uses the real Rust owner. No old-daemon proxy, no 501 on a supported migrated family, no Electron import |
 | `nexus42` basic CLI | Local authoring/storage | Process owned by the CLI | Graph/patch slice shipped Node/daemon/engine-free | Remaining retained basic leaves, including Works `list\|status\|use`, call Rust with the same constraint. Default authoring entry is this cohort, not an experimental extra binary |
-| `nexus-runtime` | Integrator Connect host | Connect node lifetime; Ctrl-C shutdown | Connect-only preserved | Stay Node-free Connect-only; lose `legacy-cli` coupling; no hidden Host/scheduler/SPA |
+| `nexus-runtime` | Integrator Connect host | Connect node lifetime; Ctrl-C shutdown | Connect-only preserved | Node-free Connect-only; the `legacy-cli` coupling is gone (v1.193 P2); no hidden Host/scheduler/SPA |
 | Electron utility (shipped desktop host) | App-managed TS-service + native host | Stops with the app | RFT-03 development GO; v1.192 cutover delivered | Shipped desktop host since the v1.192 cutover (RFT-09 accepted). Durable-after-exit work still attaches to the independent service |
 | Independent service/daemon | Durable-after-app-exit attach target | Independent of the GUI | Stopping the app must not kill an unowned service | Unchanged |
 | Tauri sidecar (retired in v1.192) | Historical record: desktop packaging before the cutover | Sidecar child of the retired Tauri app | Retired with the accepted RFT-09 cutover and unsigned packaging | No product obligation. Retirement was explicit in v1.192, not a silent M2 deletion, and no second desktop UI was introduced |
@@ -188,9 +195,9 @@ Do **not** claim that all basic commands already work as direct library calls. S
 
 ### 7.2 Operator / service lifecycle
 
-**Current:** public `nexus42 daemon …` names, hidden `daemon-run`, `host-call`, and Model A `mcp serve` still exist and talk to the integrated daemon.
+**Delivered (v1.193 P2):** those public `nexus42 daemon …` names, the hidden `daemon-run`, `host-call`, and Model A `mcp serve` are **deleted** — the whole CLI group went with the obsolete Rust host/SPA composition, and no replacement launcher was introduced.
 
-**v1.193 target:** those CLI names are deleted. Electron owns the desktop/Web host and the TS service process. There is no `nexus42` start/stop/status/ui/web/schedule alias and no new CLI HTTP client to `apps/nexus-service`. Missing local HTTP is not a CLI concern. Hosted schedules stay in TS/Electron; the only retained scheduling surface is `creator works cron` declaration editing — the `creator run` runner is removed with the other incomplete execution entrances (§4.2). `host-call` and `mcp serve` lose their CLI entries; the TS tool-execution route, Connect peer commands and embedded/TS MCP remain.
+**Delivered (v1.193 P2):** those CLI names are deleted. Electron owns the desktop/Web host and the TS service process. There is no `nexus42` start/stop/status/ui/web/schedule alias and no new CLI HTTP client to `apps/nexus-service`. Missing local HTTP is not a CLI concern. Hosted schedules stay in TS/Electron; the only retained scheduling surface is `creator works cron` declaration editing — the `creator run` runner is removed with the other incomplete execution entrances (§4.2). `host-call` and `mcp serve` lose their CLI entries; the TS tool-execution route, Connect peer commands and embedded/TS MCP remain.
 
 ### 7.3 Headless / Connect
 
@@ -205,7 +212,7 @@ Callable but incomplete rows remain inventory rows until a named plan owns them:
 - platform-only `explore browse|search`, deferred `platform context assemble`, coming-soon `publish`
 - visible deprecated `system preset` forwarding alias; hidden but callable top-level `sync`/`preset`/`capability`
 
-**v1.193 target:** these dormant rows lose their CLI entries. They are not domain capabilities, and the removal is explicit in this overlay rather than a quiet cleanup.
+**Delivered (v1.193 P2):** these dormant rows lost their CLI entries. They are not domain capabilities, and the removal was explicit in the v1.193 overlay rather than a quiet cleanup.
 
 ### 7.5 Family destinations (program keys, not extra iterations)
 
@@ -224,7 +231,7 @@ RFT-00–04 shipped together as milestone **RFT-M1** (v1.189). RFT-05–08 are o
 | RFT-08 | Complete independent Rust CLI + headless product cutover (default authoring entry; Connect-only runtime). **v1.193 target:** no CLI operator control surface for the TS service | M2 / not started; the v1.193 iteration executes this cutover |
 | RFT-09 | Formal desktop cutover (Electron host after the M1 development GO; reuse web/Studio; no visual redesign) | M3 / **delivered in v1.192** (accepted) |
 | RFT-10 | Production distribution / Developer ID signing / notarization / stapling | M3. **v1.192 delivers the unsigned half** (`.app` and `.dmg`, both macOS architectures, no Apple credentials required); that delivery is not dual-architecture GUI qualification. Signing remains the durable destination and is a Non-Goal until explicit release authorization |
-| RFT-11 | Obsolete-host retirement **and** retained v1.188 P5 public first-run / Quick Start / live request | **v1.192** retired Tauri. **v1.193 target:** retire the remaining daemon/SPA/`legacy-cli` composition and the dormant CLI rows listed in §7.4, in this iteration. P5 first-run/live request stays out. Current main has not exercised this overlay yet |
+| RFT-11 | Obsolete-host retirement **and** retained v1.188 P5 public first-run / Quick Start / live request | **v1.192** retired Tauri. **v1.193 P2 delivered:** the remaining daemon/SPA/`legacy-cli` composition and the dormant CLI rows listed in §7.4 were retired in that iteration. P5 first-run/live request stays out |
 
 ## 8. Concurrent writes (user-locked)
 
@@ -249,7 +256,7 @@ Publish `<user_home>/.nexus42/run/service.json` atomically under a stable servic
 
 Authenticated status must match instance/home/endpoint before attach. Stop requires the expected instance ID and engine epoch; mismatches conflict without stopping. PID alone grants no ownership. A service removes discovery only if it still owns that instance record; unconfirmed close retains resources and diagnostic state. Preserve current port/home/logs/cert/TLS, Unix transport, remote-bind and opt-in peer-control behavior. Ordinary service/development startup switches to the TS host in M2; stable-interface TS/UI edits do not invoke Cargo.
 
-**v1.193 target:** the CLI launcher/attach half of this contract is **not** a CLI obligation. `nexus42` neither launches nor statuses the TS service — that service and its lifecycle belong to Electron/TS. The service-side contract above stays: discovery record, readiness ordering, atomic publication, ownership-matched removal and the retained close discipline. The explicit legacy mode is deleted, so no retained startup path selects one.
+**Delivered (v1.193 P2):** the CLI launcher/attach half of this contract is **not** a CLI obligation. `nexus42` neither launches nor statuses the TS service — that service and its lifecycle belong to Electron/TS. The service-side contract above stays: discovery record, readiness ordering, atomic publication, ownership-matched removal and the retained close discipline. The explicit legacy mode is deleted, so no retained startup path selects one.
 
 ## 9. Native embedding and interruption (user-locked)
 
@@ -268,7 +275,7 @@ Current LocalSet Drop join (~5s then detach) is implementation evidence, not a s
 - Preserve schema/storage compatibility. No destructive reset, wipe, or dual-generation rollback in M1.
 - Future rollback **stops the current owner first**, then selects a known-compatible whole release with validated backup/restore.
 - If any required step needs data loss, **stop and escalate** — this spec does not authorize it.
-- Each migrated family owns deletion of its old mixed-handler path. RFT-11 owns the remaining obsolete daemon/SPA composition **after** accepted replacements; the Tauri composition was retired in v1.192. P5 first-run remains RFT-11. A thin current-desktop adapter may call migrated services in M2/M3 without a duplicate business engine; that adapter is not permission to defer M2 families.
+- Each migrated family owns deletion of its old mixed-handler path; that work completed with the v1.193 P2 cutover (the obsolete daemon/SPA composition and its crate are deleted) and the Tauri composition was retired in v1.192. P5 first-run remains RFT-11. A thin current-desktop adapter may call migrated services without a duplicate business engine; that adapter is not permission to defer any M2 family.
 
 ## 11. Platforms and support (product cohorts)
 
@@ -293,7 +300,7 @@ Electron is the **shipped** desktop host — v1.192 delivered the cutover and un
 
 - Reuse `apps/web`, Design Studio, and `packages/nexus-ui`. No visual redesign and no second desktop UI.
 - P3 was feasibility, not production distribution (RFT-10) and not Tauri retirement (RFT-11); v1.192 delivered the RFT-09 cutover and retired the Tauri composition.
-- **No-go does not complete M1.** M1 recorded a **development GO**, authorized by the v1.189 compass and native matrix run `34881345823`, not shipped desktop migration or production signing; v1.192 then delivered the RFT-09 product switch with unsigned app+DMG only, superseding that GO as the desktop's product basis. The historical decision JSON remains blocked (13 pass / 0 fail / 22 missing-or-unobserved, including x64 GUI rows); the CI matrix does not prove those rows passed. RFT-11 retired the replaced Tauri family after host/packaging acceptance; verified still-consumed daemon/SPA and callable dormant CLI rows stay. Product does not silently choose an alternative desktop. **v1.193 target:** the still-retained daemon/SPA composition and the dormant CLI rows are retired in this iteration (§7.2, §7.4); the desktop half stays as delivered.
+- **No-go does not complete M1.** M1 recorded a **development GO**, authorized by the v1.189 compass and native matrix run `34881345823`, not shipped desktop migration or production signing; v1.192 then delivered the RFT-09 product switch with unsigned app+DMG only, superseding that GO as the desktop's product basis. The historical decision JSON remains blocked (13 pass / 0 fail / 22 missing-or-unobserved, including x64 GUI rows); the CI matrix does not prove those rows passed. RFT-11 retired the replaced Tauri family after host/packaging acceptance; verified still-consumed daemon/SPA and callable dormant CLI rows stay. Product does not silently choose an alternative desktop. **Delivered (v1.193 P2):** the still-retained daemon/SPA composition and the dormant CLI rows are retired in that iteration (§7.2, §7.4); the desktop half stays as delivered.
 - Tauri sidecar/IPC/path-guard behavior is retired with the composition; the shipped host's IPC/path/credential contract is owned by [desktop-shell.md](desktop-shell.md). Dual-architecture GUI and installed-deployment rows remain **[UNVERIFIED]** there.
 
 ## 13. Frontend DX (hard product goal)

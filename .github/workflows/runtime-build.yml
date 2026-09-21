@@ -7,9 +7,10 @@ name: Runtime Build
 #   windows-x64 → windows-latest / x86_64-pc-windows-msvc
 #   macos-arm64 → macos-latest   / aarch64-apple-darwin
 #   linux-x64   → ubuntu-latest  / x86_64-unknown-linux-gnu
-# with `--no-default-features --features connect-host` (web-embed OFF → no
-# `apps/web/dist` bytes; connect-host ON → the N-C2 read-half invoke
-# surface), then packages `nexus-runtime-<os>-<arch>.zip` + `.sha256`,
+# with `--no-default-features --features connect-host` (no embedded `apps/web`
+# bytes exist in the graph — the `web-embed` feature was retired with the
+# daemon composition in v1.193 P2; `connect-host` ON → the N-C2 read-half
+# invoke surface), then packages `nexus-runtime-<os>-<arch>.zip` + `.sha256`,
 # uploads them, and smoke-tests `--version` on the runner itself.
 #
 # Trigger set (locked by Clarify #3): `workflow_dispatch` + tag
@@ -69,8 +70,8 @@ jobs:
         with:
           # wasm32-unknown-unknown: nexus-wasm-host's build.rs compiles the
           # embedded modules from source (modules/basic-combat) — it is in the
-          # slim runtime graph too (via nexus-orchestration / -daemon-runtime /
-          # -spoke-adapter). The host triple is installed by default; the
+          # Connect runtime graph too (via nexus-orchestration /
+          # nexus-spoke-adapter). The host triple is installed by default; the
           # explicit `--target` below keeps the locked triple load-bearing.
           targets: wasm32-unknown-unknown
 

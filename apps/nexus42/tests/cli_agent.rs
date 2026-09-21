@@ -358,23 +358,21 @@ fn acp_daemon_health_leaves_are_unknown_and_retained_groups_parse() {
     }
 }
 
-/// Test `nexus42 daemon --help` shows new subcommands.
+/// v1.193 P2-T12 (AC1/AC5): the `daemon` command group (`start`/`stop`/
+/// `restart`/`status`/`logs`/`doctor`/`schedule`) and the hidden `daemon-run`
+/// self-spawn entry are gone from the parser — `daemon --help` is clap's
+/// unrecognized-subcommand error, never a group page.
 #[test]
-fn daemon_shows_new_subcommands() {
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("daemon")
-        .arg("--help")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("start"))
-        .stdout(predicate::str::contains("stop"))
-        .stdout(predicate::str::contains("restart"))
-        .stdout(predicate::str::contains("status"))
-        .stdout(predicate::str::contains("logs"))
-        .stdout(predicate::str::contains("doctor"))
-        .stdout(predicate::str::contains("schedule"))
-        .stdout(predicate::str::contains("orchestrate").not());
+fn daemon_group_is_unknown() {
+    for args in [["daemon", "--help"], ["daemon", "status"]] {
+        Command::cargo_bin("nexus42")
+            .unwrap()
+            .args(args)
+            .assert()
+            .code(2)
+            .stdout(predicate::str::is_empty())
+            .stderr(predicate::str::contains("unrecognized subcommand"));
+    }
 }
 
 /// Test `nexus42 --help` no longer shows agent/session/policy/permission as top-level.

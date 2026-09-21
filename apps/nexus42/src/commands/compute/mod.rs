@@ -14,7 +14,7 @@
 //! | 2    | manifest validation failure (field list; `--json` machine-readable) |
 //! | 3    | `wasm_sha256` pairing mismatch (`validate --wasm`, `install`) |
 //!
-//! The group carries no `connect-host` feature dependency — the default daemon
+//! The group carries no `connect-host` feature dependency — the default CLI
 //! graph stays libp2p-free.
 
 use clap::Subcommand;
@@ -72,7 +72,8 @@ pub enum ComputeCommand {
     },
     /// Re-verify pairing and install a compiled pair into
     /// `~/.nexus42/modules/<id>/` (`<id>/<id>.wasm` + `<id>/manifest.json` —
-    /// the daemon's `warm_dir` scan contract).
+    /// the layout `nexus-wasm-host`'s module cache warms via
+    /// `ModuleCache::warm_dir`).
     Install {
         /// Module id (must match the manifest's `module_id`).
         #[arg(long)]
@@ -440,8 +441,8 @@ fn field_error(message: String) -> FieldError {
 /// Exit vocabulary (I1): 2 = validation failure (bad module id, unreadable/
 /// unparseable manifest, `--module-id`/manifest identity mismatch), 3 =
 /// `wasm_sha256` pairing failure (absent or mismatched hash), 1 = install
-/// I/O/home failure (generic CLI failure — AR-9 reserves 2/3/4 for
-/// validation, pairing, and daemon failures).
+/// I/O/home failure (generic CLI failure — AR-9 reserves 2/3 for
+/// validation and pairing failures).
 fn cmd_install(
     module_id: &str,
     manifest_path: &Path,
@@ -467,7 +468,7 @@ fn cmd_install(
 
     // The advertised module-id/manifest identity must match (I2): staging a
     // manifest under a directory keyed by a different id would create an
-    // invalid/ambiguous store pair the daemon loader cannot repair.
+    // invalid/ambiguous store pair no runtime loader can repair.
     if manifest.module_id != module_id {
         return Err(compute_exit(
             exit::VALIDATION,
@@ -523,7 +524,7 @@ fn cmd_install(
         );
     } else {
         println!(
-            "installed module `{module_id}` → {} (daemon picks the pair up on next boot)",
+            "installed module `{module_id}` → {} (one-shot local install; the Connect host serves it at runtime under its own admission gates)",
             dir.display()
         );
     }

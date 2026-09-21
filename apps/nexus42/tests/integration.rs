@@ -4,8 +4,17 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use tempfile::TempDir;
 
+/// `system debug dump-workspace` is a local-only dump (v1.193 P2-T12): the
+/// retired daemon probe contributes no `daemon_status` block, so the dump
+/// reports the config snapshot verbatim — including a `daemon_url` the retired
+/// client would have rejected — plus the resolved home.
+///
+/// Discriminating regression: pre-retirement this exact configuration produced
+/// a `daemon_status.error` block; post-retirement the key is absent because the
+/// CLI holds no daemon client to report on. Both output formats are pinned so
+/// the TOML projection (null-stripping) cannot reintroduce the block.
 #[test]
-fn debug_dump_reports_invalid_daemon_configuration() {
+fn debug_dump_reports_local_state_without_daemon_status() {
     let home = TempDir::new().unwrap();
     let nexus_home = home.path().join(".nexus42");
     std::fs::create_dir_all(&nexus_home).unwrap();
@@ -32,13 +41,26 @@ fn debug_dump_reports_invalid_daemon_configuration() {
             _ => unreachable!(),
         };
         assert!(
-            snapshot["daemon_status"]["error"].is_string(),
-            "debug output must report the configuration failure: {snapshot}"
+            snapshot.get("daemon_status").is_none(),
+            "the retired daemon probe must not report a daemon_status block: {snapshot}"
+        );
+        assert_eq!(
+            snapshot["config"]["daemon_url"], "",
+            "the dump reports the configured daemon_url verbatim: {snapshot}"
+        );
+        assert_eq!(
+            snapshot["config"]["runtime_mode"], "local_only",
+            "the local-only default is reported: {snapshot}"
+        );
+        assert!(
+            snapshot["nexus_home"].is_string(),
+            "the resolved home is reported: {snapshot}"
         );
     }
 }
 
-/// Test that CLI shows help
+/// Test that CLI shows help — the root parser advertises only the retained
+/// groups (v1.193 P2-T12: the `daemon` group is no longer a top-level command).
 #[test]
 fn cli_shows_help() {
     Command::cargo_bin("nexus42")
@@ -48,7 +70,8 @@ fn cli_shows_help() {
         .success()
         .stdout(predicate::str::contains("nexus42"))
         .stdout(predicate::str::contains("creator"))
-        .stdout(predicate::str::contains("daemon"));
+        .stdout(predicate::str::contains("platform"))
+        .stdout(predicate::str::contains("daemon").not());
 }
 
 /// Test that CLI shows version
@@ -238,25 +261,35 @@ fn creator_list_empty() {
         .success();
 }
 
-/// Test daemon status (daemon not running)
+/// v1.193 P2-T12: the `daemon` service group is no longer a parser entrance —
+/// the local CLI holds no daemon client. Both shapes the retired test drove
+/// (`daemon status --port <p>` and the group help) are clap's
+/// unrecognized-subcommand error.
 #[test]
-fn daemon_status_not_running() {
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("daemon")
-        .arg("status")
-        .arg("--port")
-        .arg("19999")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("Not running"));
+fn daemon_group_is_unknown() {
+    let removed: [&[&str]; 2] = [
+        &["daemon", "status", "--port", "19999"],
+        &["daemon", "--help"],
+    ];
+    for args in removed {
+        Command::cargo_bin("nexus42")
+            .unwrap()
+            .args(args)
+            .assert()
+            .code(2)
+            .stdout(predicate::str::is_empty())
+            .stderr(predicate::str::contains("unrecognized subcommand"));
+    }
 }
 
-/// Test sync status works without daemon — now queries local outbox directly
+/// Test sync status works without a daemon — the retained `platform sync`
+/// leaf queries the local outbox directly (v1.193 P2-T12: the hidden top-level
+/// `sync` alias is gone; `platform sync` is the surviving entrance).
 #[test]
 fn sync_status_without_daemon() {
     Command::cargo_bin("nexus42")
         .unwrap()
+        .arg("platform")
         .arg("sync")
         .arg("status")
         .assert()
@@ -272,6 +305,7 @@ fn sync_push_blocked_in_local_only() {
 
     Command::cargo_bin("nexus42")
         .unwrap()
+        .arg("platform")
         .arg("sync")
         .arg("push")
         .env("HOME", home)
@@ -280,32 +314,25 @@ fn sync_push_blocked_in_local_only() {
         .stderr(predicate::str::contains("not available in local_only mode"));
 }
 
-/// Test context assemble command validates --world-id requirement
+/// v1.193 P2-T12: the exit-2 `platform context assemble` guidance leaf was
+/// removed in P1-T5, so both invocations the retired tests drove (bare, and
+/// with `--world-id`) are now clap's unrecognized-subcommand error on the real
+/// binary. Parser only — `assemble-moment` remains the local SSOT.
 #[test]
-fn context_assemble_requires_world_id() {
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("platform")
-        .arg("context")
-        .arg("assemble")
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("--world-id"));
-}
-
-/// Test context assemble command returns "not yet available" in V1.10
-#[test]
-fn context_assemble_with_world_id_connects_daemon() {
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("platform")
-        .arg("context")
-        .arg("assemble")
-        .arg("--world-id")
-        .arg("wld_test123")
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("not yet available"));
+fn retired_platform_context_assemble_is_unknown() {
+    let removed: [&[&str]; 2] = [
+        &["platform", "context", "assemble"],
+        &["platform", "context", "assemble", "--world-id", "wld_test123"],
+    ];
+    for args in removed {
+        Command::cargo_bin("nexus42")
+            .unwrap()
+            .args(args)
+            .assert()
+            .code(2)
+            .stdout(predicate::str::is_empty())
+            .stderr(predicate::str::contains("unrecognized subcommand"));
+    }
 }
 
 /// Test soul command group help (now under `creator soul`)
@@ -358,148 +385,89 @@ fn soul_validate_requires_active_creator() {
 // E8: Integration tests for CLI commands (clone, config, debug, doctor)
 // =============================================================================
 
-/// Test clone command shows help (now under `creator clone`)
+/// v1.193 P2-T12: the hard-deprecated `creator workspace clone` leaf is gone
+/// from the parser — every invocation shape the six retired clone tests drove
+/// (help, a missing `WORLD_REF`, each `--source` variant under `--dry-run`, and
+/// a malformed `wld_` ref) is clap's unrecognized-subcommand error, never a
+/// "not available locally" placeholder and never a help page.
+///
+/// Discriminating regression: pre-retirement `--help` exited 0 with the
+/// `WORLD_REF`/`--source`/`--dry-run`/`--yes` page and the deprecated leaves
+/// exited 1 naming the removed transport; the retained `creator workspace`
+/// leaves (`list`, `create`, `use`, `init`) still parse.
 #[test]
-fn clone_help() {
-    Command::cargo_bin("nexus42")
+fn retired_creator_workspace_clone_is_unknown() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path();
+
+    let removed: [&[&str]; 6] = [
+        &["creator", "workspace", "clone", "--help"],
+        &["creator", "workspace", "clone"],
+        &["creator", "workspace", "clone", "wld_test123", "--dry-run"],
+        &[
+            "creator",
+            "workspace",
+            "clone",
+            "wld_test123",
+            "--source",
+            "platform",
+            "--dry-run",
+        ],
+        &[
+            "creator",
+            "workspace",
+            "clone",
+            "wld_test123",
+            "--source",
+            "local",
+            "--dry-run",
+        ],
+        &["creator", "workspace", "clone", "wld_", "--dry-run"],
+    ];
+    for args in removed {
+        let output = Command::cargo_bin("nexus42")
+            .unwrap()
+            .env("HOME", home)
+            .args(args)
+            .assert()
+            .code(2)
+            .get_output()
+            .clone();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("unrecognized subcommand"),
+            "`{}` must be an unknown subcommand: {stderr}",
+            args.join(" ")
+        );
+        assert!(
+            output.stdout.is_empty(),
+            "`{}` must not answer with a help page or a stub: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+
+    // The retained `creator workspace` group still parses and does not
+    // advertise the removed leaf.
+    let help = Command::cargo_bin("nexus42")
         .unwrap()
-        .arg("creator")
-        .arg("workspace")
-        .arg("clone")
-        .arg("--help")
+        .env("HOME", home)
+        .args(["creator", "workspace", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("WORLD_REF"))
-        .stdout(predicate::str::contains("--source"))
-        .stdout(predicate::str::contains("--dry-run"))
-        .stdout(predicate::str::contains("--yes"));
-}
-
-/// Test clone requires `world_ref` argument
-#[test]
-fn clone_requires_world_ref() {
-    let tmp = TempDir::new().unwrap();
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("creator")
-        .arg("workspace")
-        .arg("clone")
-        .env("HOME", tmp.path())
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("WORLD_REF"));
-}
-
-/// Test clone is hard-deprecated (V1.27 H1) — always returns error.
-#[test]
-fn clone_dry_run_no_daemon() {
-    let tmp = TempDir::new().unwrap();
-    // Create a persistent identity first (creator commands require active creator)
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("system")
-        .arg("identity")
-        .arg("create")
-        .arg("--kind")
-        .arg("persistent")
-        .arg("--name")
-        .arg("CloneTestUser")
-        .env("HOME", tmp.path())
-        .assert()
-        .success();
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("creator")
-        .arg("workspace")
-        .arg("clone")
-        .arg("wld_test123")
-        .arg("--source")
-        .arg("local")
-        .arg("--dry-run")
-        .env("HOME", tmp.path())
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("not available locally"));
-}
-
-/// Test clone with --source platform is hard-deprecated (V1.27 H1) — always returns error.
-#[test]
-fn clone_dry_run_source_platform_blocked_in_local_only() {
-    let tmp = TempDir::new().unwrap();
-    // Create a persistent identity first (creator commands require active creator)
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("system")
-        .arg("identity")
-        .arg("create")
-        .arg("--kind")
-        .arg("persistent")
-        .arg("--name")
-        .arg("ClonePlatformTest")
-        .env("HOME", tmp.path())
-        .assert()
-        .success();
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("creator")
-        .arg("workspace")
-        .arg("clone")
-        .arg("wld_test123")
-        .arg("--source")
-        .arg("platform")
-        .arg("--dry-run")
-        .env("HOME", tmp.path())
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("not available locally"));
-}
-
-/// Test clone with --source local is hard-deprecated (V1.27 H1) — always returns error.
-#[test]
-fn clone_dry_run_source_local() {
-    let tmp = TempDir::new().unwrap();
-    // Create a persistent identity first (creator commands require active creator)
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("system")
-        .arg("identity")
-        .arg("create")
-        .arg("--kind")
-        .arg("persistent")
-        .arg("--name")
-        .arg("CloneLocalTest")
-        .env("HOME", tmp.path())
-        .assert()
-        .success();
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("creator")
-        .arg("workspace")
-        .arg("clone")
-        .arg("wld_test123")
-        .arg("--source")
-        .arg("local")
-        .arg("--dry-run")
-        .env("HOME", tmp.path())
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("not available locally"));
-}
-
-/// Test clone rejects invalid `world_ref` format
-#[test]
-fn clone_rejects_invalid_world_ref() {
-    let tmp = TempDir::new().unwrap();
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("creator")
-        .arg("workspace")
-        .arg("clone")
-        .arg("wld_") // Too short - invalid
-        .arg("--dry-run")
-        .env("HOME", tmp.path())
-        .assert()
-        .failure();
+        .get_output()
+        .clone();
+    let help_text = String::from_utf8_lossy(&help.stdout);
+    for retained in ["list", "create", "use", "init"] {
+        assert!(
+            help_text.contains(retained),
+            "`creator workspace` must keep '{retained}': {help_text}"
+        );
+    }
+    assert!(
+        !help_text.contains("clone"),
+        "`creator workspace` must not advertise the removed clone leaf: {help_text}"
+    );
 }
 
 /// Test config command shows help (now under `system config`)
@@ -629,7 +597,9 @@ fn config_path_shows_location() {
         .stdout(predicate::str::contains("config.toml"));
 }
 
-/// Test debug command shows help (now under `system debug`)
+/// Test debug command shows help (now under `system debug`). v1.193 P2-T12:
+/// only the local `dump-workspace` leaf survives — the daemon-backed
+/// `replay-delta` leaf is gone, so help must not advertise it.
 #[test]
 fn debug_help() {
     Command::cargo_bin("nexus42")
@@ -640,7 +610,7 @@ fn debug_help() {
         .assert()
         .success()
         .stdout(predicate::str::contains("dump-workspace"))
-        .stdout(predicate::str::contains("replay-delta"));
+        .stdout(predicate::str::contains("replay-delta").not());
 }
 
 /// Test debug dump-workspace runs without error (daemon may not be running)
@@ -691,35 +661,26 @@ fn debug_dump_workspace_toml_format() {
         .stdout(predicate::str::contains("config"));
 }
 
-/// Test debug replay-delta requires `delta_id`
+/// v1.193 P2-T12: the daemon-backed `system debug replay-delta` leaf was
+/// removed in P1-T4 — both invocations the retired tests drove (missing
+/// `DELTA_ID`, and a nonexistent delta id) are now clap's
+/// unrecognized-subcommand error, never a "Daemon not running" refusal.
 #[test]
-fn debug_replay_delta_requires_id() {
+fn retired_debug_replay_delta_is_unknown() {
     let tmp = TempDir::new().unwrap();
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("system")
-        .arg("debug")
-        .arg("replay-delta")
-        .env("HOME", tmp.path())
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("DELTA_ID"));
-}
-
-/// Test debug replay-delta with nonexistent delta (daemon not running)
-#[test]
-fn debug_replay_delta_nonexistent() {
-    let tmp = TempDir::new().unwrap();
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("system")
-        .arg("debug")
-        .arg("replay-delta")
-        .arg("delta-nonexistent-123")
-        .env("HOME", tmp.path())
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("Daemon not running"));
+    for args in [
+        vec!["system", "debug", "replay-delta"],
+        vec!["system", "debug", "replay-delta", "delta-nonexistent-123"],
+    ] {
+        Command::cargo_bin("nexus42")
+            .unwrap()
+            .env("HOME", tmp.path())
+            .args(&args)
+            .assert()
+            .code(2)
+            .stdout(predicate::str::is_empty())
+            .stderr(predicate::str::contains("unrecognized subcommand"));
+    }
 }
 
 /// Test doctor command shows help (now under `system doctor`)
@@ -749,18 +710,45 @@ fn doctor_check_no_panic() {
         .stdout(predicate::str::contains("system doctor"));
 }
 
-/// Test doctor shows daemon connectivity check
+/// v1.193 P2-T12: the daemon-connectivity probe was removed from
+/// `system doctor` (P1-T4), so the command reports exactly the two local
+/// checks — ACP registry reachability and the `~/.nexus42` home — and closes
+/// with a verdict summary.
+///
+/// Discriminating regression: the retired doctor printed a `Daemon
+/// connectivity` line and, with no daemon listening, always counted an issue —
+/// which is exactly what the retired "issue(s) found" assertions depended on.
+/// The summary is asserted by shape (either verdict), because registry
+/// reachability is environment-dependent.
 #[test]
-fn doctor_check_shows_daemon_status() {
+fn doctor_check_reports_only_local_checks() {
     let tmp = TempDir::new().unwrap();
-    Command::cargo_bin("nexus42")
+    let output = Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
         .arg("doctor")
         .env("HOME", tmp.path())
         .assert()
         .success()
-        .stdout(predicate::str::contains("Daemon connectivity"));
+        .get_output()
+        .clone();
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    assert!(
+        stdout.contains("[1/2] ACP registry reachability"),
+        "the local ACP registry check must survive: {stdout}"
+    );
+    assert!(
+        stdout.contains("[2/2] Home directory (~/.nexus42/)"),
+        "the local home check must survive: {stdout}"
+    );
+    assert!(
+        !stdout.contains("Daemon connectivity") && !stdout.contains("[3/3]"),
+        "the retired daemon-connectivity probe must not return: {stdout}"
+    );
+    assert!(
+        stdout.contains("All checks passed") || stdout.contains("issue(s) found"),
+        "doctor must close with a verdict summary: {stdout}"
+    );
 }
 
 /// Test doctor shows home directory check
@@ -791,20 +779,6 @@ fn doctor_check_shows_database_status() {
         .stdout(predicate::str::contains("diagnostics"));
 }
 
-/// Test doctor shows issue summary
-#[test]
-fn doctor_check_shows_workspace_status() {
-    let tmp = TempDir::new().unwrap();
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("system")
-        .arg("doctor")
-        .env("HOME", tmp.path())
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("issue"));
-}
-
 /// Test doctor shows ACP registry check
 #[test]
 fn doctor_check_shows_version_compatibility() {
@@ -817,20 +791,6 @@ fn doctor_check_shows_version_compatibility() {
         .assert()
         .success()
         .stdout(predicate::str::contains("ACP registry"));
-}
-
-/// Test doctor shows issue count summary
-#[test]
-fn doctor_check_shows_summary() {
-    let tmp = TempDir::new().unwrap();
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("system")
-        .arg("doctor")
-        .env("HOME", tmp.path())
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("issue(s) found"));
 }
 
 /// Test identity command shows help (now under `system identity`)
@@ -1216,8 +1176,10 @@ fn persistent_identity_create_nameless_converges_active() {
 }
 
 /// `--anonymous` must NOT materialize a workspace row (AR-88 #5): the
-/// ephemeral identity is active, but `creator world create` still fails its
-/// FK precheck.
+/// ephemeral identity is active, but the workspace-scoped writer still refuses
+/// the selection with the declared `Creator not selected.` class, which the
+/// core reports for a selection that names no materialized workspace — never a
+/// raw storage / missing-foreign-row error.
 #[test]
 fn anonymous_identity_does_not_materialize_workspace_row() {
     let tmp = TempDir::new().unwrap();
@@ -1236,7 +1198,7 @@ fn anonymous_identity_does_not_materialize_workspace_row() {
         .stdout(predicate::str::contains("Created anonymous identity"));
 
     // No workspace `creators` row exists for the anonymous identity — the
-    // world-create FK precheck must fail (referenced creator not found).
+    // workspace-scoped writer must refuse it with the selection class.
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("creator")
@@ -1247,7 +1209,8 @@ fn anonymous_identity_does_not_materialize_workspace_row() {
         .env("HOME", home)
         .assert()
         .failure()
-        .stderr(predicate::str::contains("referenced creator"));
+        .stderr(predicate::str::contains("Creator not selected"))
+        .stderr(predicate::str::contains("referenced creator").not());
 }
 
 // =============================================================================

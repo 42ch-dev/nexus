@@ -10,19 +10,15 @@
 //! the CLI reuses the exact validator instead of hand-rolling a second
 //! copy); the manifest + `wasm_sha256` pairing reuses `nexus-module-manifest`
 //! (AR-39 — the single content-hash path). The CLI deliberately does NOT
-//! know the builtin name list (AR-41): collision is daemon-side admission
-//! only, re-checked within the reload bound (AR-93).
+//! know the builtin name list (AR-41): builtin-collision admission happens
+//! in the runtime that loads the capability, not here.
 //!
-//! Hot reload (V1.176 P1, RN-2, AR-91..96): the daemon polls
-//! `~/.nexus42/capabilities/` every 1 s and re-admits changes on the
-//! SAME scan path as boot — no daemon restart. Within ~2 s of a complete,
-//! admissible trio, the daemon's capability catalog reflects the change; a
-//! live MCP session receives `listChanged` within ~4 s worst case (1 s daemon
-//! watch incl. the hot-rebuild + 2 s child watch, both legs named —
-//! AR-93). Deleting `<name>/` removes the row within the same bound
-//! (AR-94). A trio that fails admission hot-reloads as skipped-with-reason
-//! (boot vocabulary); the previous good admission for the name keeps
-//! serving (last-good-wins, PL-9).
+//! Install is a one-shot local authoring step: it verifies the trio and
+//! writes it under `~/.nexus42/capabilities/`. The Connect host serves
+//! installed capabilities at runtime under its own admission gates, and any
+//! live-reload UX belongs to the TS/Electron service — the V1.176 P1 daemon
+//! poll-and-hot-reload watch (AR-91..96) retired with the daemon (v1.193
+//! P2-T13), so a fresh install no longer waits on a boot scanner.
 //!
 //! Exit-code contract (AR-41, mirrors the AR-9 table of `compute`):
 //!
@@ -34,7 +30,7 @@
 //! | 3    | `wasm_sha256` pairing mismatch |
 //!
 //! The group carries no `connect-host` feature dependency — the default
-//! daemon graph stays libp2p-free.
+//! CLI graph stays libp2p-free.
 
 use clap::Subcommand;
 use nexus_module_manifest::ModuleManifest;
@@ -68,9 +64,9 @@ pub enum CapabilityCommand {
     ///
     /// Exit codes (AR-41): 0 valid, 2 descriptor/manifest validation
     /// failure (field list, `--json` machine-readable), 3 `wasm_sha256`
-    /// pairing mismatch. Collision with a builtin is daemon-side admission
-    /// — re-checked within the reload bound (~2 s, AR-93); the CLI does not
-    /// know the builtin name list.
+    /// pairing mismatch. Collision with a builtin is admission-time in the
+    /// runtime that loads the capability; the CLI does not know the builtin
+    /// name list (AR-41).
     Validate {
         /// Path to the capability descriptor (`capability.json`).
         #[arg(long)]
@@ -88,10 +84,9 @@ pub enum CapabilityCommand {
     /// `capability.json` + `manifest.json` + `<module-id>.wasm`).
     ///
     /// Daemon-free. Re-verifies descriptor + manifest + wasm pairing
-    /// (AR-34/39) before copying. Collision with a builtin is daemon-side
-    /// admission — re-checked within the reload bound (~2 s, AR-93); the
-    /// CLI does not know the builtin name list (AR-41). No `run`, no
-    /// `scaffold` (PL-7).
+    /// (AR-34/39) before copying. Collision with a builtin is admission-time
+    /// in the runtime that loads the capability; the CLI does not know the
+    /// builtin name list (AR-41). No `run`, no `scaffold` (PL-7).
     ///
     /// Exit codes (AR-41): 2 = validation, 3 = pairing, 1 = I/O/home.
     Install {
@@ -170,9 +165,9 @@ fn cmd_validate(
             descriptor_path.display()
         );
         println!(
-            "  Collision with a builtin is daemon-side admission only (the CLI does not \
-             know the builtin list, AR-41); it is re-checked within ~2 s of the daemon's \
-             hot reload — no restart needed."
+            "  Builtin-collision admission happens in the runtime that loads the \
+             capability (the CLI does not know the builtin list, AR-41); the Connect \
+             host applies its own gates when it serves installed capabilities."
         );
     }
     Ok(())
@@ -186,8 +181,9 @@ fn cmd_validate(
 /// Install-path semantics (S-2, QC2): an existing `<name>/` dir is
 /// **overwritten** — re-running install re-verifies the new trio first
 /// (fail-closed) and then replaces the three files; install never skips an
-/// existing dir. A hand-placed duplicate `<name>/` dir is resolved by the
-/// daemon scan at boot — first-in-scan-order wins (AR-36).
+/// existing dir. A hand-placed duplicate `<name>/` dir is resolved
+/// first-in-scan-order by whichever runtime loads the capabilities dir
+/// (AR-36).
 ///
 /// Atomic-trio guarantee (S-2, QC3): verification runs before any write,
 /// and the trio is copied into a sibling staging dir first; the final move
@@ -200,7 +196,7 @@ fn cmd_validate(
 /// Exit vocabulary (AR-41): 2 = descriptor/manifest validation failure
 /// (incl. the F1 `module_id` identity mismatch), 3 = `wasm_sha256` pairing
 /// mismatch, 1 = install I/O/home failure (generic CLI failure — the
-/// codebase reserves 2/3/4 for validation, pairing, and daemon failures).
+/// codebase reserves 2/3 for validation and pairing failures).
 fn cmd_install(
     descriptor_path: &Path,
     wasm_path: &Path,
@@ -291,7 +287,7 @@ fn cmd_install(
         );
     } else {
         println!(
-            "installed capability `{}` → {} (daemon hot-reloads it within ~2 s — no restart; a failed admission keeps the previous good version serving)",
+            "installed capability `{}` → {} (one-shot local install; the Connect host serves it at runtime under its own admission gates)",
             descriptor.name,
             dir.display()
         );
@@ -441,8 +437,8 @@ fn read_descriptor(descriptor_path: &Path, json_output: bool) -> Result<UserCapa
 /// identity cross-check (F1) — the manifest's `module_id` equals the
 /// descriptor's `wasm.moduleId`. The descriptor `wasm.moduleId` names the
 /// stored `<module-id>.wasm` (AR-35); a manifest declaring a different id
-/// would install a silently dead trio (skipped at daemon boot, missing
-/// `<manifest-module-id>.wasm`).
+/// would install a silently dead trio (unloadable when a runtime serves it,
+/// missing `<manifest-module-id>.wasm`).
 ///
 /// Exit 2 on descriptor/manifest validation failures (including the F1
 /// identity mismatch); exit 3 on pairing failures (absent hash,
@@ -498,7 +494,7 @@ fn verify_pairing(
     // descriptor's `wasm.moduleId` and the manifest's `module_id` are the
     // SAME contract — the `<module-id>.wasm` store name (AR-35). A trio
     // whose manifest declares a different id (hashes otherwise consistent)
-    // would install with exit 0 and be skipped silently at daemon boot
+    // would install with exit 0 and fail to load when a runtime serves it
     // (missing `<manifestModuleId>.wasm`). Fail closed at exit 2, before
     // any copy, mirroring the `compute install` gate (I2,
     // compute/mod.rs L518-525). Field is the descriptor's `wasm.moduleId`;

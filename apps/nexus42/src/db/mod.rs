@@ -1,6 +1,7 @@
-//! CLI Database Operations
+//! Database Operations (shared by both cohorts)
 //!
-//! Provides database access for CLI commands.
+//! Provides the workspace `state.db` initializer for CLI commands **and** the
+//! headless Connect runtime (`commands::connect::open_workspace_pool`).
 //! Schema initialization is delegated to `nexus-local-db` module.
 //!
 //! **No duplicated DDL** - all shared table definitions are in `nexus-local-db`.

@@ -10,9 +10,10 @@
 //! The `set/show/list` handlers read and write `works.schedule_json` directly
 //! via `nexus-local-db` (the CLI already depends on it; precedent:
 //! `commands/creator/soul::open_global_db`). This keeps the foundation within
-//! the plan's code-touch list — no daemon handler changes — while making the
-//! command functional at runtime. The daemon's cron *firing* (T-A P1) will
-//! read the same `works.schedule_json` column.
+//! the plan's code-touch list — no runtime handler changes — while making the
+//! command functional at runtime. The retained cron *firing* layer (T-A P1,
+//! `nexus_orchestration::schedule::cron_supervisor`) reads the same
+//! `works.schedule_json` column.
 
 use std::fmt::Write as _;
 use std::str::FromStr;
@@ -26,8 +27,9 @@ use crate::errors::{CliError, Result};
 //
 // The per-Work cron model, defaults, normalizer, validators, and stable error
 // code constants now live in `nexus-orchestration::schedule::work_schedule`
-// (the daemon cannot depend on the CLI crate; the HTTP surface and the CLI
-// must share one validation core). Re-export here so existing call sites —
+// (`nexus-orchestration` cannot depend on the CLI crate; the retained runtime
+// surfaces and the CLI must share one validation core). Re-export here so
+// existing call sites —
 // including this module's own handlers and tests — keep resolving the same
 // names.
 pub use nexus_orchestration::schedule::work_schedule::{
@@ -64,10 +66,10 @@ impl From<nexus_orchestration::schedule::work_schedule::CronValidationError> for
 ///
 /// Thin CLI-side wrapper over the shared core
 /// [`WorkSchedule::resolve`](nexus_orchestration::schedule::work_schedule::WorkSchedule::resolve)
-/// (F-006: the daemon HTTP surface and the CLI now share one resolver).
+/// (F-006: the retained runtime surface and the CLI share one resolver).
 /// Empty/NULL/absent/unparseable → all defaults (spec §2.3). A partial blob
 /// is not merged field-by-field: malformed JSON falls back to defaults so the
-/// daemon never fires from a corrupt schedule.
+/// runtime never fires from a corrupt schedule.
 ///
 /// # Errors
 ///
@@ -313,7 +315,7 @@ fn local_time_display(cron_expr: &str) -> String {
 /// R-V150P0-W3).
 ///
 /// Interprets the expression in UTC (P0 approximation; the spec's full
-/// author-TZ → UTC conversion lands with the daemon evaluator in T-A P1).
+/// author-TZ → UTC conversion lands with the cron evaluator in T-A P1).
 /// Returns `None` only when the expression cannot be parsed or has no upcoming
 /// fire, which should not happen for a previously-validated 5-field expression.
 fn next_fire_utc(cron_expr: &str) -> Option<String> {
@@ -473,8 +475,9 @@ pub enum CronCommand {
 
 /// Dispatch `creator works cron` subcommands.
 ///
-/// Opens the local `state.db` directly (foundation slice — no daemon endpoint
-/// changes; the daemon firing layer arrives in T-A P1).
+/// Opens the local `state.db` directly (foundation slice — no runtime
+/// endpoint changes; the retained cron firing layer is
+/// `nexus_orchestration::schedule::cron_supervisor`).
 ///
 /// # Errors
 ///
@@ -583,8 +586,9 @@ async fn handle_set(
 
     // R-V150P0-W5 (resolved in T-A P1): transactional compare-and-swap write.
     // The previous path (`get → apply → set`) was an unconditional
-    // read-modify-write with a TOCTOU window. The daemon-side cron evaluator
-    // (T-A P1) is the racing party. Both writers now go through the CAS-guarded
+    // read-modify-write with a TOCTOU window. The retained cron evaluator
+    // (T-A P1 — `nexus_orchestration::schedule::cron_supervisor`) is the
+    // racing party. Both writers now go through the CAS-guarded
     // `set_schedule_json_tx`: the CLI reads `stored`, computes the new blob,
     // then writes only if the row still holds `stored`. A CAS mismatch means
     // another writer raced ahead — surface a clear retry error instead of a
@@ -637,7 +641,7 @@ async fn handle_set(
     .await
     .map_err(|e| CliError::Other(format!("schedule_json CAS write failed: {e}")))?;
     if !applied {
-        // CAS mismatch — another writer (daemon cron evaluator, or a concurrent
+        // CAS mismatch — another writer (the cron evaluator, or a concurrent
         // CLI) raced ahead. Roll back and surface a retry hint.
         let _ = tx.rollback().await;
         return Err(CliError::Config(
@@ -650,12 +654,13 @@ async fn handle_set(
         .await
         .map_err(|e| CliError::Other(format!("schedule_json transaction commit failed: {e}")))?;
 
-    // R-V150P1CRONBW-03 (qc3 W-001): the daemon-side cron evaluator memoises
-    // parsed `cron::Schedule`s per `(work_id, role)` keyed on the raw cron
-    // string. The cache self-heals on content drift, but a successful
+    // R-V150P1CRONBW-03 (qc3 W-001): the retained cron evaluator
+    // (`nexus_orchestration::schedule::cron_supervisor`) memoises parsed
+    // `cron::Schedule`s per `(work_id, role)` keyed on the raw cron string.
+    // The cache self-heals on content drift, but a successful
     // `schedule_json` write is the authoritative moment to drop every stale
     // entry (e.g. a role config removed entirely) so no cached parse lingers
-    // across the user-visible config change. The daemon is read-only on
+    // across the user-visible config change. The evaluator is read-only on
     // `schedule_json`, so this CLI write site is the only invalidation hook.
     nexus_orchestration::schedule::cron_supervisor::invalidate_cron_schedule_cache();
 

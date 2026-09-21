@@ -33,14 +33,16 @@ nexus_entry!(my_compute);
 ```
 
 The [`nexus42` CLI `compute` group](../apps/nexus42/) turns the authoring loop
-into commands: `build` / `validate` / `install` are **daemon-free** (the
-author loop needs no runtime); `run` is the one daemon-backed command.
+into commands: `build` / `validate` / `install` are **service-host-free** (the
+author loop needs no runtime). The `run` leaf was retired in v1.193 P2 with the
+rest of the daemon-mediated execution entrances — see “Three invoke paths”
+below for the lanes that still execute a module.
 
 > **Guided authoring:** use the `compute-module-author` skill from the
 > [`42ch-dev/agent-toolkit`](https://github.com/42ch-dev/agent-toolkit)
 > repository (external — **no** agent skill ships in this repo).
 
-## Quick start (scaffold → build → validate → install → run)
+## Quick start (scaffold → build → validate → install)
 
 1. **Scaffold** — copy the template module (`modules/_template/`, an SDK
    hello-world "dice tick") and rename it:
@@ -57,7 +59,7 @@ author loop needs no runtime); `run` is the one daemon-backed command.
      after the crate (e.g. crate `my-mod` → `my_mod.wasm`).
    - `src/lib.rs` — replace the demo logic with yours.
 
-2. **Build** (daemon-free) — compiles the wasm, stages the pair under
+2. **Build** (service-host-free) — compiles the wasm, stages the pair under
    `<module-dir>/dist/<module_id>/`, and injects `wasm_sha256` into the staged
    manifest (the source manifest is never mutated):
 
@@ -65,7 +67,7 @@ author loop needs no runtime); `run` is the one daemon-backed command.
    nexus42 compute build --manifest modules/my-mod/manifest.json --release
    ```
 
-3. **Validate** (daemon-free) — exit 0 on a valid manifest; add `--wasm` to
+3. **Validate** (service-host-free) — exit 0 on a valid manifest; add `--wasm` to
    also verify the `wasm_sha256` pairing against the compiled bytes:
 
    ```bash
@@ -74,9 +76,9 @@ author loop needs no runtime); `run` is the one daemon-backed command.
      --wasm modules/my-mod/dist/my-mod/my-mod.wasm
    ```
 
-4. **Install** (daemon-free) — re-verifies pairing, then copies the pair into
-   `~/.nexus42/modules/<id>/` (`<id>/<id>.wasm` + `<id>/manifest.json` — the
-   exact pair the daemon's module cache scans at boot):
+4. **Install** (service-host-free) — re-verifies pairing, then copies the pair
+   into `~/.nexus42/modules/<id>/` (`<id>/<id>.wasm` + `<id>/manifest.json` —
+   the exact pair a Connect host's module cache scans at boot):
 
    ```bash
    nexus42 compute install --module-id my-mod \
@@ -84,22 +86,23 @@ author loop needs no runtime); `run` is the one daemon-backed command.
      --wasm modules/my-mod/dist/my-mod/my-mod.wasm
    ```
 
-5. **Run** (daemon-backed) — thin client over
-   `POST /v1/daemon/compute/run`; `--accept` additionally posts
-   `/v1/daemon/compute/runs/:run_id/accept` to apply the run's proposals:
+5. **Run** — there is **no CLI run client** since v1.193 P2 (`nexus42 compute
+   run`, `capability list` and `host-call` were deleted with the daemon
+   composition). Module execution happens in a host:
+   - the Connect host's `compute` op, invoked by an admitted peer that names
+     the host-local module id (the read-only lane — "Three invoke paths" §2);
+   - a preset lane hosting the built-in compute capability (same section §1);
+   - a composing host using the core library seam
+     `ExecutionHandle::compute_run` (one-shot; not a CLI entrance).
 
-   ```bash
-   nexus42 compute run --world <world-id> --input input.json \
-     --module-id my-mod [--accept]
-   ```
-
-   The input is a `ComputeInput` envelope (its `invocation` field is sent) or
-   a raw `invocation_params` object. Requires a running `nexus42` daemon.
-   Output format follows the CLI-wide `--output text|json` flag.
+   The Control Room's compute-run route (`POST /v1/daemon/compute/run`) is not
+   migrated to the TS service (`apps/nexus-service/src/execution.ts` returns
+   route-not-migrated), so no shipped UI substitutes for the removed leaf.
 
 The CLI exit-code vocabulary (AR-9): `0` success · `1` build/toolchain or
 install I/O failure · `2` manifest validation failure · `3` `wasm_sha256`
-pairing mismatch · `4` daemon unreachable / run rejected.
+pairing mismatch (code `4` — daemon unreachable / run rejected — retired with
+the daemon client in v1.193 P2).
 
 ## The SDK at a glance
 
@@ -191,8 +194,8 @@ never peer-supplied bytes. Full allowlist mechanics:
 
 A module you install is reachable through three lanes:
 
-1. **Preset `narrative.compute`** — the daemon's built-in compute capability,
-   invoked by name from a strategy preset lane (input
+1. **Preset `narrative.compute`** — the orchestration host's built-in compute
+   capability, invoked by name from a strategy preset lane (input
    `{world_id, creator_id, module_id, invocation_params}`). The preset stages
    the compute session, the host bundles key blocks per the module manifest,
    runs the wasm, and **applies** the result inline (state deltas, timeline
@@ -203,11 +206,15 @@ A module you install is reachable through three lanes:
    (`settle: true` is rejected). The confirmed receipt comes back to the
    caller, who commits it through the write path (world-aware CAS, never a
    forced overwrite) and narrates confirmed receipts only.
-3. **Control Room run + accept + discard** — `POST /v1/daemon/compute/run`
-   stages a run with proposals; `POST /v1/daemon/compute/runs/:run_id/accept`
-   applies them atomically; `.../discard` discards them; the `GET` routes list
-   and inspect runs. `nexus42 compute run [--accept]` is the CLI client for
-   this lane.
+3. **Control Room run + accept + discard** — the schema-declared compute-run
+   routes (`POST /v1/daemon/compute/run` and
+   `POST /v1/daemon/compute/runs/:run_id/accept|discard`, plus the `GET`
+   list/inspect routes) describe this lane, but the local HTTP host is the
+   Electron/TS service and its compute-run route is **route-not-migrated**
+   (`apps/nexus-service/src/execution.ts`). The former CLI client
+   (`nexus42 compute run [--accept]`) was deleted in v1.193 P2: today the
+   executable lanes are §1 and §2 plus the core library seam
+   `ExecutionHandle::compute_run`.
 
 ## The reference module: `basic-combat`
 

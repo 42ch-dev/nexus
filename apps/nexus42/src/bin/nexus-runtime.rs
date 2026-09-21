@@ -6,21 +6,25 @@
 //! `compute` over the host-local `~/.nexus42/modules/` store and the
 //! process-wide compiled-module cache, and the host-level
 //! `tools.nexus.list_observed_peers` / `tools.nexus.list_modules` reads)
-//! for the partner/integrator channel. Boots:
-//! PATH enrichment, the shared `~/.nexus42` home layout, config load,
-//! active-workspace `SQLite` open (`DbPool`, WAL), ONE per-process
-//! `NexusAdapter`, and the Connect host with the full invoke dispatch
-//! handler — then blocks on SIGINT. Liveness = **stdout readiness only**
-//! (no HTTP health endpoint).
+//! for the partner/integrator channel. Boots: the shared `~/.nexus42` home
+//! layout, config load, active-workspace `SQLite` open (`DbPool`, WAL), ONE
+//! per-process `NexusAdapter`, and the Connect host with the full invoke
+//! dispatch handler — then blocks on SIGINT. Liveness = **stdout readiness
+//! only** (no HTTP health endpoint).
 //!
-//! `nexus_daemon_runtime::boot::run_daemon` is **never called**: the daemon
-//! HTTP data router, embedded `apps/web` SPA, Setup/Canvas/Control Room
-//! routes, ACP/agent-host subsystem, and schedule/worker supervision never
-//! boot in this process (P2 spec § Subsystem profile). The embedded SPA
-//! bytes are additionally excluded at COMPILE time: the distributed
-//! artifact is built with
+//! No PATH enrichment here (v1.193 P2-T2): this cohort boots no
+//! ACP/agent-host subsystem and never resolves external agent binaries, so
+//! the login-equivalent PATH helper stays with the creator-facing `nexus42`
+//! CLI main, which shells out during agent discovery.
+//!
+//! No daemon runtime is linked at all (v1.193 P2-T13 deleted the
+//! `nexus-daemon-runtime` crate): the daemon HTTP data router, the
+//! embedded `apps/web` SPA, Setup/Canvas/Control Room routes, the
+//! ACP/agent-host subsystem and schedule/worker supervision do not exist
+//! in this crate's graph. The cohort is built with
 //! `cargo build --release --bin nexus-runtime --no-default-features
-//! --features connect-host` (the `web-embed` feature is OFF).
+//! --features connect-host` — no `legacy-cli`/`web-embed` feature exists
+//! any more.
 //!
 //! Final-graph module requirements (P2-T13 cohort collapse): `connect-host`
 //! MUST keep the spoke-adapter **`compute`** feature
@@ -88,10 +92,6 @@ struct RuntimeCli {
 fn main() {
     let cli = RuntimeCli::parse();
 
-    // PATH enrichment before Tokio starts (GUI-launched sidecars inherit a
-    // minimal PATH; same Class-B rule as the nexus42 CLI main).
-    nexus_daemon_runtime::path_enrichment::apply_process_path_enrichment();
-
     let home = resolve_home(cli.home.as_deref());
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -125,8 +125,8 @@ fn resolve_home(cli_home: Option<&Path>) -> PathBuf {
             // BEFORE any downstream read — the same mechanism
             // `testutil::isolated_home` uses in-process. Safe here because
             // `main` runs single-threaded before the Tokio runtime starts
-            // (same pre-runtime env discipline as
-            // `apply_process_path_enrichment`).
+            // (the same pre-runtime env discipline the `nexus42` CLI main
+            // applies for its PATH enrichment).
             let home = if home.is_absolute() {
                 home
             } else {
