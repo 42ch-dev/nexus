@@ -562,9 +562,10 @@ mod tests {
 /// seam in-process and then asks for the store's exclusive fence, which is
 /// grantable only when no writer this process admitted is still live.
 ///
-/// Requires the `legacy-cli` cohort: the direct-writer store stack
-/// (`nexus-local-db`) is what those features link.
-#[cfg(all(test, feature = "legacy-cli"))]
+/// In-crate test module of the `cli` cohort (this module is compiled for that
+/// cohort only): the direct-writer store stack (`nexus-local-db`) is what the
+/// cohort's features link.
+#[cfg(test)]
 mod direct_writer_lifetime {
     use super::{finish_direct, map_core_error};
     use crate::errors::CliError;

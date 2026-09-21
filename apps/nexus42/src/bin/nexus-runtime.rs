@@ -17,14 +17,14 @@
 //! the login-equivalent PATH helper stays with the creator-facing `nexus42`
 //! CLI main, which shells out during agent discovery.
 //!
-//! `nexus_daemon_runtime::boot::run_daemon` is **never called**: the daemon
-//! HTTP data router, embedded `apps/web` SPA, Setup/Canvas/Control Room
-//! routes, ACP/agent-host subsystem, and schedule/worker supervision never
-//! boot in this process (P2 spec § Subsystem profile). The embedded SPA
-//! bytes are additionally excluded at COMPILE time: the distributed
-//! artifact is built with
+//! No daemon runtime is linked at all (v1.193 P2-T13 deleted the
+//! `nexus-daemon-runtime` crate): the daemon HTTP data router, the
+//! embedded `apps/web` SPA, Setup/Canvas/Control Room routes, the
+//! ACP/agent-host subsystem and schedule/worker supervision do not exist
+//! in this crate's graph. The cohort is built with
 //! `cargo build --release --bin nexus-runtime --no-default-features
-//! --features connect-host` (the `web-embed` feature is OFF).
+//! --features connect-host` — no `legacy-cli`/`web-embed` feature exists
+//! any more.
 //!
 //! Final-graph module requirements (P2-T13 cohort collapse): `connect-host`
 //! MUST keep the spoke-adapter **`compute`** feature

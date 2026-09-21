@@ -12,9 +12,9 @@
 //!    reads the advertised manifest (`extensions.nexus.served_ops` =
 //!    upsert/promote/relate/check/assemble/compute — the invoke surface,
 //!    honest by the machine-check);
-//! 3. **no HTTP/SPA listener** — the daemon HTTP port refuses connections
-//!    (the daemon router never boots; in release the SPA fallback is
-//!    additionally compiled out by `web-embed` OFF).
+//! 3. **no HTTP/SPA listener** — no HTTP port is bound at all: the daemon
+//!    router and the embedded SPA are not even in this cohort's graph
+//!    (v1.193 P2-T13 deleted the daemon-runtime crate).
 //!
 //! Compiled only with `--features connect-host` (same gate as the bin);
 //! the test itself only spawns processes, so the default test graph stays

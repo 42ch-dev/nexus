@@ -3,11 +3,14 @@
 //! This module contains the `Cli` struct and `Commands` enum so they can be
 //! accessed from both the binary entry point (`main.rs`) and library modules
 //! (e.g. `system::print_completion` for shell completion generation).
+//!
+//! Compiled only for the `cli` cohort (the `nexus42` bin's required feature).
+//! The optional `connect-host` feature adds the `connect` group to this same
+//! parser — it never replaces it.
 
 #[cfg(feature = "connect-host")]
 use crate::commands::connect::ConnectCommand;
 use crate::commands::creator::CreatorCommand;
-#[cfg(feature = "legacy-cli")]
 use crate::commands::{
     acp::AcpCommand, capability::CapabilityCommand, compute::ComputeCommand,
     desktop::DesktopCommand, ops::OpsCommand, platform::PlatformCommand, preset::PresetCommand,
@@ -72,20 +75,13 @@ impl Cli {
     pub fn into_command(self) -> Option<Commands> {
         self.command
     }
+
     /// Commands whose stdout is machine-readable data (`ops inspect --output
     /// json`): tracing must be routed to stderr so diagnostics never corrupt
     /// the data stream.
     #[must_use]
     pub const fn is_data_output(&self) -> bool {
-        #[cfg(feature = "legacy-cli")]
-        {
-            matches!(&self.command, Some(Commands::Ops { .. }))
-        }
-        #[cfg(not(feature = "legacy-cli"))]
-        {
-            // The `basic-cli` cohort carries no data-output command.
-            false
-        }
+        matches!(&self.command, Some(Commands::Ops { .. }))
     }
 }
 
@@ -119,7 +115,6 @@ pub enum Commands {
     },
 
     /// ACP capability plane (agents, registry, connectivity)
-    #[cfg(feature = "legacy-cli")]
     Acp {
         #[command(subcommand)]
         command: AcpCommand,
@@ -130,8 +125,7 @@ pub enum Commands {
     ///
     /// `build`, `validate`, and `install` are daemon-free (the author loop
     /// needs no runtime). The group carries no `connect-host` feature
-    /// dependency — the default daemon graph stays libp2p-free.
-    #[cfg(feature = "legacy-cli")]
+    /// dependency — the default graph stays libp2p-free.
     Compute {
         #[command(subcommand)]
         command: ComputeCommand,
@@ -150,28 +144,24 @@ pub enum Commands {
     /// was retired by v1.193 P2-T2) — same posture as `preset` (V1.35 lock
     /// resolution, AR-41).
     #[command(hide = true)]
-    #[cfg(feature = "legacy-cli")]
     Capability {
         #[command(subcommand)]
         command: CapabilityCommand,
     },
 
     /// Manage the Electron desktop bundle (unsigned macOS packaging)
-    #[cfg(feature = "legacy-cli")]
     Desktop {
         #[command(subcommand)]
         command: DesktopCommand,
     },
 
     /// Platform interaction (auth, context, **sync**)
-    #[cfg(feature = "legacy-cli")]
     Platform {
         #[command(subcommand)]
         command: PlatformCommand,
     },
 
     /// System management (diagnostics, config, identity, completion, etc.)
-    #[cfg(feature = "legacy-cli")]
     System {
         #[command(subcommand)]
         command: SystemCommand,
@@ -188,7 +178,6 @@ pub enum Commands {
     /// a deliberate resolution of AR-24 (new canonical group) vs that lock:
     /// callable but not yet advertised.
     #[command(hide = true)]
-    #[cfg(feature = "legacy-cli")]
     Preset {
         #[command(subcommand)]
         command: PresetCommand,
@@ -198,7 +187,6 @@ pub enum Commands {
     /// reads the workspace checkpoint store read-only; the V1.35 cli-spec §6
     /// visible-group lock forces hiding (same posture as `preset`).
     #[command(hide = true)]
-    #[cfg(feature = "legacy-cli")]
     Ops {
         #[command(subcommand)]
         command: OpsCommand,

@@ -1787,8 +1787,8 @@ pub async fn enqueue_review_master_schedule(
     // R-V147P0-05 (hotfix H-1): append a per-process monotonic counter suffix
     // (mirrors `ACH_COUNTER` / R-V139P0-W-B) so two enqueues in the same
     // millisecond produce distinct PKs. Without this, the
-    // `master_decision_timeout::repeated_sweeps_remain_stable` test flakes
-    // when both sweeps land in the same `%Y%m%d%H%M%S%3f` granule.
+    // `retained_execution_contracts::stale_finding_sweep_repeats_without_panicking`
+    // test flakes when both sweeps land in the same `%Y%m%d%H%M%S%3f` granule.
     let counter = RVM_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let schedule_id = format!(
         "RVM{}{:06x}",
@@ -2354,7 +2354,7 @@ mod tests {
     /// landing in the same `%Y%m%d%H%M%S%3f` millisecond granule MUST produce
     /// distinct `schedule_id` PKs. Before the fix, the second INSERT collided
     /// on the PK and surfaced as a flake in
-    /// `master_decision_timeout::repeated_sweeps_remain_stable`.
+    /// `retained_execution_contracts::stale_finding_sweep_repeats_without_panicking`.
     ///
     /// The per-process `RVM_COUNTER` provides the unique suffix without adding
     /// a new crate dependency (mirrors the `ACH_COUNTER` fix, R-V139P0-W-B).
