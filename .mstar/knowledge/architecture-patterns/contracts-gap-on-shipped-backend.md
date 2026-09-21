@@ -45,11 +45,11 @@ When you discover (or are asked to consume) a shipped Local API handler whose re
 
 ## Examples
 
-- **V1.78 memory surface** (this doc's source): `handlers/memory.rs` had 14 hand-written structs (V1.33). V1.78 authored `schemas/local-api/memory/*.schema.json` (14 files), ran codegen (`@42ch/nexus-contracts` 0.12.0 → 0.13.0), normalized the handler to `pub use nexus_contracts::{...}`, hit Trap A (the `PendingReviewInfo` `query_as!`→`query!`+map bridge via `fetch_pending_reviews_by_creator` / `fetch_pending_reviews_page`) and Trap B (the generator `ambiguous_glob_reexports` allow). Round-trip test: `crates/nexus-daemon-runtime/tests/memory_dto_roundtrip.rs` (7 cases).
+- **V1.78 memory surface** (this doc's source): `handlers/memory.rs` had 14 hand-written structs (V1.33). V1.78 authored `schemas/local-api/memory/*.schema.json` (14 files), ran codegen (`@42ch/nexus-contracts` 0.12.0 → 0.13.0), normalized the handler to `pub use nexus_contracts::{...}`, hit Trap A (the `PendingReviewInfo` `query_as!`→`query!`+map bridge via `fetch_pending_reviews_by_creator` / `fetch_pending_reviews_page`) and Trap B (the generator `ambiguous_glob_reexports` allow). Round-trip test: `crates/nexus-daemon-runtime/tests/memory_dto_roundtrip.rs` (7 cases) **at the time — that fixture and its crate were deleted in v1.193 P2**; its generated-DTO identity proof retired with the host handler module, and the retained projection assertions now live in `crates/nexus-core/tests/memory_services.rs`.
 - **Contrast — the findings surface (V1.49/V1.77)** did it the other way: schemas were authored **with** the handler, so V1.77's findings-remediation UI consumed already-generated types (no gap, no normalization). The gap pattern is specifically about surfaces that shipped before their schemas.
 
 ## See Also
 
 - [schemas-external-consumer-boundary.md](../../specs/schemas-external-consumer-boundary.md) — wire vs local-only contract types (external consumer side).
 - [crate-selection-best-practices.md](../crate-selection-best-practices.md) — Rust workspace dependency conventions.
-- `crates/nexus-daemon-runtime/AGENTS.md` — the no-hand-written-DTO invariant.
+- [`AGENTS.md`](../../../AGENTS.md) — the single-truth-source-for-DTOs invariant (`crates/nexus-daemon-runtime/AGENTS.md`, which restated it, was deleted with the crate in v1.193 P2).

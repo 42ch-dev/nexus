@@ -361,22 +361,23 @@ jobs:
       - name: Typecheck nexus-ui package
         run: pnpm --filter @42ch/nexus-ui run typecheck
 
-  verify-no-acp-in-daemon:
-    name: Verify nexus-daemon-runtime linkage matrix
+  verify-graph-pins:
+    name: Verify product dependency graph pins
     runs-on: ubuntu-latest
     needs: changes
     if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.rust == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-      # Truthful daemon linkage matrix. The previous step grepped this
-      # crate's manifest for `nexus-acp-host` / `agent-client-protocol` and
-      # failed if either appeared; `nexus-acp-host` has been an unconditional
-      # normal dependency since V1.94 (7c61c033), so that assertion described
-      # a linkage the daemon never had and failed the job on every run.
-      # tooling/check-graph-pins.sh is the existing, machine-checked matrix
-      # (exactly one agent-client-protocol 2.1.0 core in both shipped graphs;
-      # libp2p/rmcp absent from the default graph) — reuse it instead of a
-      # second bespoke pin list. `cargo tree` requires a Rust toolchain.
+      # Truthful product graph matrix. The previous bespoke step grepped the
+      # (since deleted) nexus-daemon-runtime manifest for `nexus-acp-host` /
+      # `agent-client-protocol` and failed if either appeared; `nexus-acp-host`
+      # has been an unconditional normal dependency of the CLI since V1.94
+      # (7c61c033), so that assertion described a linkage the daemon never had
+      # and failed the job on every run. v1.193 P2 deleted that composition
+      # entirely; this job now runs the machine-checked matrix over the
+      # products that exist (ordinary `cli` CLI, Connect-only runtime,
+      # optional CLI Connect, core domain, core MCP/peer library, native host).
+      # `cargo tree` requires a Rust toolchain.
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
       - name: Check graph pins
         run: bash tooling/check-graph-pins.sh
@@ -397,12 +398,15 @@ jobs:
         run: bash tooling/check-schema-drift.sh
       - name: Check wire schema drift
         run: bash tooling/check-wire-drift.sh
-      # V1.174 P0 T6 (AR-74), updated 2026-09 dependency sweep: dependency
-      # graph pins — default graph stays free of spoke-connect/libp2p/rmcp;
-      # feature-on graphs resolve exactly one 0.11.1 spoke-operations /
-      # 0.56.x libp2p / 3.2.0 rmcp; both shipped graphs pin exactly one
-      # agent-client-protocol 2.1.0 and one featureless graph-flow 0.8.0.
-      # `cargo tree` needs a Rust toolchain; setup-monorepo above provides it.
+      # V1.174 P0 T6 (AR-74), retargeted for the v1.193 P2 product cohorts:
+      # dependency graph pins — the ordinary `cli` graph stays free of
+      # spoke-connect/libp2p/rmcp and the removed Model A selectors are gone;
+      # the Connect graphs resolve exactly one 0.13.1 spoke-operations /
+      # 0.56.x libp2p / 0.13.x spoke-connect; rmcp 3.3.0 survives only in the
+      # core connect-client/embedded-mcp library cohorts; the shipped CLI
+      # graphs pin exactly one agent-client-protocol 2.1.0 and one featureless
+      # graph-flow 0.8.0. `cargo tree` needs a Rust toolchain; setup-monorepo
+      # above provides it.
       - name: Check graph pins
         run: bash tooling/check-graph-pins.sh
 
@@ -544,9 +548,6 @@ jobs:
               -p nexus-narrative
               -p nexus-moment-context-assembly
               -p nexus-wasm-host
-          - group: daemon
-            packages: >-
-              -p nexus-daemon-runtime
           - group: cli-hosts
             packages: >-
               -p nexus42
@@ -586,3 +587,56 @@ jobs:
           pnpm --filter @42ch/nexus-provider-acp build
       - name: Run tests
         run: cargo test ${{ matrix.packages }}
+
+  # R-V1193-P1T7-CI-CONNECT-HOST-TESTS (v1.193 P2-T14). The retirement left
+  # exactly two shipped app cohorts: the ordinary `cli` default (covered by
+  # the `cli-hosts` rust-tests group above) and the independent
+  # `connect-host` selector, which never implies `cli`. This leg exercises the
+  # Connect half in its supported verification shape: the Connect-only
+  # runtime bin check (no default features) plus the named headless-runtime
+  # smoke test in the cli+connect-host cohort. It is deliberately NOT a
+  # `--no-default-features --features connect-host --all-targets` row: six
+  # cli-cohort integration test targets import cli-gated modules, so that
+  # combination does not build (P2-T13 C1). Separate leg rather than a
+  # rust-tests matrix row because the command shape differs (bin check +
+  # named test) and a second, differently-feature-unified dep graph must not
+  # share the matrix group's cache key.
+  rust-connect-host:
+    name: Rust connect-host runtime
+    runs-on: ubuntu-latest
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.rust == 'true'
+    env:
+      SQLX_OFFLINE: "true"
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: ./.github/actions/free-disk-space
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+        with:
+          # nexus-wasm-host's build.rs compiles the embedded modules from
+          # source; the Connect cohort keeps the explicit spoke compute edge
+          # (and its shared module cache) by design.
+          targets: wasm32-unknown-unknown
+      - name: Read workspace version for cargo cache key
+        id: workspace-version
+        run: |
+          v=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['workspace']['package']['version'])")
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae  # v2
+        with:
+          # Distinct suffix: this cohort's feature unification differs from
+          # rust-tests' groups and rust-clippy-connect-host (same-key
+          # concurrent writers would race — same precedent as -sqlx/-module-dx).
+          shared-key: nexus-rust-${{ steps.workspace-version.outputs.version }}-connect-host-runtime
+          workspaces: .
+          cache-all-crates: false
+          cache-on-failure: false
+      - name: Check the Connect-only runtime bin
+        run: cargo check -p nexus42 --no-default-features --features connect-host --bin nexus-runtime
+      - name: Build the runtime smoke probe example
+        # The smoke test spawns target/debug/examples/runtime_smoke_probe; the
+        # test target alone does not build example targets.
+        run: cargo build -p nexus42 --features connect-host --example runtime_smoke_probe
+      - name: Run the headless runtime smoke test
+        run: cargo test -p nexus42 --features connect-host --test nexus_runtime_smoke headless_runtime_prints_readiness_serves_connect_and_has_no_http_listener -- --exact

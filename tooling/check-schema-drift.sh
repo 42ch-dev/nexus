@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Schema / ownership consistency checks for nexus-local-db vs CLI/daemon.
-# Mirrors `.github/workflows/ci.yml` job `schema-consistency-check`.
+# Schema / ownership consistency checks for nexus-local-db vs the nexus42 app
+# (ordinary `cli` binary + the Connect-only `nexus-runtime` binary — one
+# manifest, one workspace-DB owner). Mirrors `.github/workflows/ci.yml` job
+# `schema-consistency-check`.
 # Usage (from repository root): bash tooling/check-schema-drift.sh
 
 set -eu
@@ -8,30 +10,21 @@ set -eu
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-echo "==> Checking CLI and runtime both depend on nexus-local-db..."
+echo "==> Checking the app depends on nexus-local-db..."
 if ! grep -q 'nexus-local-db' apps/nexus42/Cargo.toml; then
-  echo "❌ CLI does not depend on nexus-local-db"
+  echo "❌ nexus42 does not depend on nexus-local-db"
   exit 1
 fi
-if ! grep -q 'nexus-local-db' crates/nexus-daemon-runtime/Cargo.toml; then
-  echo "❌ Daemon runtime does not depend on nexus-local-db"
-  exit 1
-fi
-echo "✅ Both CLI and daemon runtime depend on nexus-local-db"
+echo "✅ nexus42 depends on nexus-local-db"
 
 echo "==> Checking DB_SCHEMA_VERSION location (single ownership)..."
 if ! grep -q 'pub const DB_SCHEMA_VERSION: u32' crates/nexus-local-db/src/version.rs; then
   echo "❌ DB_SCHEMA_VERSION not found in nexus-local-db/src/version.rs"
   exit 1
 fi
-CLI_HAS_CONST=$(grep -E 'pub const DB_SCHEMA_VERSION: u32 = [0-9]+' apps/nexus42/src/db/mod.rs 2>/dev/null | wc -l | tr -d ' ')
-DAEMON_HAS_CONST=$(grep -E 'pub const DB_SCHEMA_VERSION: u32 = [0-9]+' crates/nexus-daemon-runtime/src/db/schema.rs 2>/dev/null | wc -l | tr -d ' ')
-if [ "$CLI_HAS_CONST" != "0" ]; then
-  echo "❌ CLI has duplicated DB_SCHEMA_VERSION constant (should import from nexus-local-db)"
-  exit 1
-fi
-if [ "$DAEMON_HAS_CONST" != "0" ]; then
-  echo "❌ Daemon has duplicated DB_SCHEMA_VERSION constant (should import from nexus-local-db)"
+APP_HAS_CONST=$(grep -E 'pub const DB_SCHEMA_VERSION: u32 = [0-9]+' apps/nexus42/src/db/mod.rs 2>/dev/null | wc -l | tr -d ' ')
+if [ "$APP_HAS_CONST" != "0" ]; then
+  echo "❌ nexus42 has duplicated DB_SCHEMA_VERSION constant (should import from nexus-local-db)"
   exit 1
 fi
 echo "✅ DB_SCHEMA_VERSION is defined only in nexus-local-db"
@@ -62,15 +55,10 @@ echo "✅ LATEST_SCHEMA_VERSION matches between Rust (u32) and TypeScript (numbe
 
 echo "==> Checking no duplicated shared table DDL..."
 for table in workspace_meta creators reference_sources; do
-  CLI_DDL=$(grep -r "CREATE TABLE IF NOT EXISTS $table" apps/nexus42/src/db/ 2>/dev/null | grep -v test | wc -l | tr -d ' ')
-  DAEMON_DDL=$(grep -r "CREATE TABLE IF NOT EXISTS $table" crates/nexus-daemon-runtime/src/db/ 2>/dev/null | grep -v test | wc -l | tr -d ' ')
+  APP_DDL=$(grep -r "CREATE TABLE IF NOT EXISTS $table" apps/nexus42/src/db/ 2>/dev/null | grep -v test | wc -l | tr -d ' ')
   LOCALDB_DDL=$(grep -r "CREATE TABLE IF NOT EXISTS $table" crates/nexus-local-db/migrations/ 2>/dev/null | wc -l | tr -d ' ')
-  if [ "$CLI_DDL" != "0" ]; then
-    echo "❌ CLI has duplicated DDL for $table table (should use nexus-local-db)"
-    exit 1
-  fi
-  if [ "$DAEMON_DDL" != "0" ]; then
-    echo "❌ Daemon has duplicated DDL for $table table (should use nexus-local-db)"
+  if [ "$APP_DDL" != "0" ]; then
+    echo "❌ nexus42 has duplicated DDL for $table table (should use nexus-local-db)"
     exit 1
   fi
   if [ "$LOCALDB_DDL" == "0" ]; then
@@ -81,15 +69,10 @@ done
 echo "✅ No duplicated DDL - shared tables defined only in nexus-local-db"
 
 echo "==> Checking no deprecated WIRE_SCHEMA_VERSION..."
-WIRE_IN_CLI=$(grep -r "WIRE_SCHEMA_VERSION" apps/nexus42/src/ 2>/dev/null | wc -l | tr -d ' ')
-WIRE_IN_DAEMON=$(grep -r "WIRE_SCHEMA_VERSION" crates/nexus-daemon-runtime/src/ 2>/dev/null | wc -l | tr -d ' ')
+WIRE_IN_APP=$(grep -r "WIRE_SCHEMA_VERSION" apps/nexus42/src/ 2>/dev/null | wc -l | tr -d ' ')
 WIRE_IN_LOCALDB=$(grep -r "WIRE_SCHEMA_VERSION" crates/nexus-local-db/src/ 2>/dev/null | wc -l | tr -d ' ')
-if [ "$WIRE_IN_CLI" != "0" ]; then
-  echo "❌ Deprecated WIRE_SCHEMA_VERSION found in CLI (should use schema_version)"
-  exit 1
-fi
-if [ "$WIRE_IN_DAEMON" != "0" ]; then
-  echo "❌ Deprecated WIRE_SCHEMA_VERSION found in daemon (should use schema_version)"
+if [ "$WIRE_IN_APP" != "0" ]; then
+  echo "❌ Deprecated WIRE_SCHEMA_VERSION found in nexus42 (should use schema_version)"
   exit 1
 fi
 if [ "$WIRE_IN_LOCALDB" != "0" ]; then
@@ -98,15 +81,11 @@ if [ "$WIRE_IN_LOCALDB" != "0" ]; then
 fi
 echo "✅ No deprecated WIRE_SCHEMA_VERSION - using schema_version instead"
 
-echo "==> Checking CLI/daemon use nexus-local-db API..."
+echo "==> Checking the CLI uses the nexus-local-db API..."
 if ! grep -q 'use nexus_local_db::' apps/nexus42/src/db/mod.rs; then
-  echo "❌ CLI does not import from nexus_local_db"
+  echo "❌ nexus42 does not import from nexus_local_db"
   exit 1
 fi
-if ! grep -rq 'use nexus_local_db::' crates/nexus-daemon-runtime/src/db/; then
-  echo "❌ Daemon runtime does not import from nexus_local_db"
-  exit 1
-fi
-echo "✅ Both CLI and daemon use nexus-local-db API"
+echo "✅ nexus42 uses the nexus-local-db API"
 
 echo "✅ All schema consistency checks passed."
