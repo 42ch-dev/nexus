@@ -14,7 +14,12 @@
 import { createReadStream, existsSync, lstatSync, realpathSync, statSync } from 'node:fs';
 import { join, normalize, sep } from 'node:path';
 import { Readable } from 'node:stream';
-import { DESKTOP_HOST, DESKTOP_SCHEME, isDesktopAppOrigin } from './desktop-contract.js';
+import {
+  DESKTOP_HOST,
+  DESKTOP_SCHEME,
+  connectionEndpointOrigin,
+  isDesktopAppOrigin,
+} from './desktop-contract.js';
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -54,15 +59,6 @@ export function assertDistPresent(distRoot: string): void {
 function contentType(filePath: string): string {
   const ext = filePath.slice(filePath.lastIndexOf('.')).toLowerCase();
   return MIME[ext] ?? 'application/octet-stream';
-}
-
-/** NUL, C0 controls and DEL are rejected in URLs/origins. */
-function hasControlChars(value: string): boolean {
-  for (let i = 0; i < value.length; i += 1) {
-    const code = value.charCodeAt(i);
-    if (code < 0x20 || code === 0x7f) return true;
-  }
-  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -111,39 +107,15 @@ const DEV_CSP_ORIGINS = ['http://localhost:5173', 'http://127.0.0.1:5173'];
 const DEV_CSP_WS_ORIGINS = ['ws://localhost:5173', 'ws://127.0.0.1:5173'];
 
 /**
- * Validate an exact http(s) origin: scheme http/https, nonempty host, no
- * userinfo, no path/query/hash beyond '/', no wildcard, no control chars.
+ * Validate an exact http(s) service origin for the CSP: scheme http/https,
+ * concrete (non-wildcard) host, no userinfo, no path/query/hash beyond '/',
+ * no control/padded/backslash-bearing input. The grammar itself is the ONE
+ * shared root-service primitive (`connectionEndpointOrigin` in
+ * desktop-contract.ts) — the store, IPC and CSP boundaries must not drift
+ * apart, so this is a delegation, not a second implementation.
  */
 export function assertDesktopServiceOrigin(origin: unknown): string {
-  if (typeof origin !== 'string' || origin.length === 0) {
-    throw new Error('CSP origin must be a non-empty string');
-  }
-  if (hasControlChars(origin) || origin !== origin.trim()) {
-    throw new Error('CSP origin must not contain control characters or padding');
-  }
-  let parsed: URL;
-  try {
-    parsed = new URL(origin);
-  } catch {
-    throw new Error(`CSP origin is not a valid URL: ${origin}`);
-  }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw new Error(`CSP origin must be http(s): ${origin}`);
-  }
-  if (!parsed.hostname || parsed.hostname.includes('*')) {
-    throw new Error(`CSP origin must have a concrete host: ${origin}`);
-  }
-  if (parsed.username !== '' || parsed.password !== '') {
-    throw new Error(`CSP origin must not carry credentials: ${origin}`);
-  }
-  if (parsed.search !== '' || parsed.hash !== '') {
-    throw new Error(`CSP origin must not carry query or fragment: ${origin}`);
-  }
-  const path = parsed.pathname;
-  if (path !== '' && path !== '/') {
-    throw new Error(`CSP origin must not carry a path: ${origin}`);
-  }
-  return parsed.origin;
+  return connectionEndpointOrigin(origin);
 }
 
 /**

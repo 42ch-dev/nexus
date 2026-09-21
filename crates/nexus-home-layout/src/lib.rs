@@ -724,15 +724,20 @@ pub fn validate_run_id_safe(id: &str) -> std::result::Result<(), String> {
     Ok(())
 }
 
-/// Validate that a user-supplied `entry_id` is safe to use in a file path.
+/// Sanitize a user-supplied `entry_id` for use in a file path.
 ///
 /// Rejects path separators (`/`, `\`), traversal sequences (`..`), and control characters.
 /// This prevents path-traversal attacks in KB entry operations.
 ///
+/// On success the original borrow is returned unchanged — no normalization and no
+/// allocation. Callers must consume the returned borrow for every path or location
+/// query, so the value that reaches `Path::join` is the sanitized one rather than the
+/// raw argument.
+///
 /// # Errors
 ///
 /// Returns `Err` if the ID is empty, contains `/`, `\`, `..`, or control characters.
-pub fn validate_entry_id_safe(id: &str) -> std::result::Result<(), String> {
+pub fn sanitize_entry_id(id: &str) -> std::result::Result<&str, String> {
     if id.is_empty() {
         return Err("entry_id must not be empty".to_string());
     }
@@ -753,7 +758,7 @@ pub fn validate_entry_id_safe(id: &str) -> std::result::Result<(), String> {
             "entry_id contains control characters: {id:?} — rejected for safety"
         ));
     }
-    Ok(())
+    Ok(id)
 }
 
 /// Non-panicking path-traversal validation for `reference_id`.
@@ -1020,40 +1025,44 @@ mod tests {
         assert!(err.contains("control characters"));
     }
 
-    // ── validate_entry_id_safe tests ──────────────────────────
+    // ── sanitize_entry_id tests ──────────────────────────
 
     #[test]
-    fn validate_entry_id_safe_accepts_valid() {
-        assert!(validate_entry_id_safe("kb_a1b2c3d4").is_ok());
+    fn sanitize_entry_id_returns_valid_borrow() {
+        assert_eq!(
+            sanitize_entry_id("kb_a1b2c3d4").unwrap(),
+            "kb_a1b2c3d4",
+            "sanitizer must carry the original id through unchanged"
+        );
     }
 
     #[test]
-    fn validate_entry_id_safe_rejects_empty() {
-        let err = validate_entry_id_safe("").unwrap_err();
+    fn sanitize_entry_id_rejects_empty() {
+        let err = sanitize_entry_id("").unwrap_err();
         assert!(err.contains("must not be empty"));
     }
 
     #[test]
-    fn validate_entry_id_safe_rejects_dotdot() {
-        let err = validate_entry_id_safe("kb_.._secret").unwrap_err();
+    fn sanitize_entry_id_rejects_dotdot() {
+        let err = sanitize_entry_id("kb_.._secret").unwrap_err();
         assert!(err.contains("'..'"));
     }
 
     #[test]
-    fn validate_entry_id_safe_rejects_forward_slash() {
-        let err = validate_entry_id_safe("kb_foo/bar").unwrap_err();
+    fn sanitize_entry_id_rejects_forward_slash() {
+        let err = sanitize_entry_id("kb_foo/bar").unwrap_err();
         assert!(err.contains("path separator"));
     }
 
     #[test]
-    fn validate_entry_id_safe_rejects_backslash() {
-        let err = validate_entry_id_safe("kb_foo\\bar").unwrap_err();
+    fn sanitize_entry_id_rejects_backslash() {
+        let err = sanitize_entry_id("kb_foo\\bar").unwrap_err();
         assert!(err.contains("path separator"));
     }
 
     #[test]
-    fn validate_entry_id_safe_rejects_control_chars() {
-        let err = validate_entry_id_safe("kb_\x01ctrl").unwrap_err();
+    fn sanitize_entry_id_rejects_control_chars() {
+        let err = sanitize_entry_id("kb_\x01ctrl").unwrap_err();
         assert!(err.contains("control characters"));
     }
 
