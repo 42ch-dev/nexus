@@ -380,30 +380,40 @@ fn v2_target_system_subcommands() {
 // Part 3: Plan 5 KB scope contract tests (must pass immediately)
 // =============================================================================
 
-/// Verify `creator kb list --help` contains `--scope` flag.
+/// v1.193 P2-T12: the Plan-5 `creator kb list --scope` selector was removed in
+/// P0-T13, so the retained local `kb list` leaf accepts no scope option —
+/// `--scope` is clap's unexpected-argument error (exit 2) and the help page
+/// must not advertise it.
+///
+/// Discriminating regression: pre-retirement `creator kb list --scope work`
+/// parsed and selected the scope; post-retirement only the advertised
+/// `-o/--output` option remains on the leaf.
 #[test]
-fn v2_target_kb_scope_flag() {
-    let output = Command::cargo_bin("nexus42")
+fn retired_kb_scope_flag_is_rejected() {
+    let rejected = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "kb", "list", "--scope", "work"])
+        .assert()
+        .code(2)
+        .get_output()
+        .clone();
+    let stderr = String::from_utf8_lossy(&rejected.stderr).into_owned();
+    assert!(
+        stderr.contains("unexpected argument") && stderr.contains("--scope"),
+        "v1.193 P2-T12: `creator kb list --scope` must be an unknown argument: {stderr}"
+    );
+
+    let help = Command::cargo_bin("nexus42")
         .unwrap()
         .args(["creator", "kb", "list", "--help"])
         .assert()
         .success()
         .get_output()
-        .stdout
         .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
+    let help_text = String::from_utf8_lossy(&help.stdout).into_owned();
     assert!(
-        help_text.contains("--scope"),
-        "kb list --help must contain --scope flag"
-    );
-    assert!(
-        help_text.contains("work"),
-        "kb list --help must list 'work' scope option"
-    );
-    assert!(
-        help_text.contains("world"),
-        "kb list --help must list 'world' scope option"
+        !help_text.contains("--scope"),
+        "v1.193 P2-T12: `creator kb list --help` must not advertise the removed flag: {help_text}"
     );
 }
 
