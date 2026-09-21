@@ -23,7 +23,7 @@
     "@42ch/nexus-contracts": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^26.5.1"
+    "@types/node": "^26.6.1"
   },
   "optionalDependencies": {
     "@42ch/nexus-native-darwin-arm64": "0.1.0",
