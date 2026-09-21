@@ -28,7 +28,9 @@
 //! - `crates/nexus-daemon-runtime/tests/runtime_lock.rs` →
 //!   the three `reconcile_*` lock-window cases
 //! - `crates/nexus-daemon-runtime/tests/workflow_prompt_execution.rs` →
-//!   [`prompt_executor_single_flights_one_session_and_refuses_before_effect`]
+//!   [`prompt_executor_single_flights_one_session_and_refuses_before_effect`],
+//!   [`prompt_executor_types_eof_after_initialize_as_a_launch_failure`],
+//!   [`graph_prompt_context_serializes_output_without_host_handles`]
 //!   (the executor's moved module keeps its own cancel/cleanup cases)
 //!
 //! No case here talks HTTP, boots a router, or launches a provider process:
@@ -57,7 +59,7 @@ use nexus_contracts::{
 use nexus_core::execution::prompt_executor::HostPromptExecutor;
 use nexus_core::execution::schedules::chronology::{
     parse_interval_secs, run_one_tick as chronology_run_one_tick, AutoChronologyConfig,
-    DEFAULT_AUTO_CHRONOLOGY_INTERVAL_SECS,
+    DEFAULT_AUTO_CHRONOLOGY_INTERVAL_SECS, ENV_AUTO_CHRONOLOGY_INTERVAL_MIN,
 };
 use nexus_core::execution::schedules::cron;
 use nexus_core::execution::schedules::stale_findings::run_one_sweep;
@@ -144,6 +146,13 @@ struct ParkedHost {
     /// executor's typed-failure path (never partial-output success) is
     /// exercised deterministically.
     non_end_turn: AtomicBool,
+    /// When set, every session launch (`create_session`) fails with the typed
+    /// launch error an agent process that exits right after the `initialize`
+    /// handshake produces.
+    launch_fails: AtomicBool,
+    /// When set, a prompt's event stream closes (EOF) after its deltas
+    /// without ever emitting a terminal event.
+    stream_eof: AtomicBool,
 }
 
 impl ParkedHost {
@@ -155,12 +164,27 @@ impl ParkedHost {
             prompts: AtomicUsize::new(0),
             creates: AtomicUsize::new(0),
             non_end_turn: AtomicBool::new(false),
+            launch_fails: AtomicBool::new(false),
+            stream_eof: AtomicBool::new(false),
         })
     }
 
     /// Make every subsequent prompt finish with a non-`EndTurn` stop.
     fn stop_without_end_turn(&self) {
         self.non_end_turn.store(true, Ordering::SeqCst);
+    }
+
+    /// Make every subsequent session launch fail: the agent process exits
+    /// right after the `initialize` handshake, so no session is ever handed
+    /// out.
+    fn fail_launch_after_initialize(&self) {
+        self.launch_fails.store(true, Ordering::SeqCst);
+    }
+
+    /// Make every subsequent prompt stream close after its deltas without a
+    /// terminal event.
+    fn close_stream_after_deltas(&self) {
+        self.stream_eof.store(true, Ordering::SeqCst);
     }
 
     fn prompt_count(&self) -> usize {
@@ -189,6 +213,13 @@ impl HostFacade for ParkedHost {
 
     async fn create_session(&self, request: CreateSessionRequest) -> HostResult<HostSession> {
         self.creates.fetch_add(1, Ordering::SeqCst);
+        if self.launch_fails.load(Ordering::SeqCst) {
+            return Err(HostError::launch_failed(
+                request.provider_id.clone(),
+                "agent process exited after initialize (EOF)",
+                None,
+            ));
+        }
         let session = HostSession {
             id: HostSessionId::new(),
             provider_id: request.provider_id,
@@ -230,6 +261,14 @@ impl HostFacade for ParkedHost {
             op_id: op_id.clone(),
             text: "transformed:parked-output".to_string(),
         });
+        // EOF after the deltas: the stream closes without any terminal event
+        // (the "the process stopped talking" analogue of the launch EOF).
+        if self.stream_eof.load(Ordering::SeqCst) {
+            return Ok(Box::pin(futures_util::stream::iter(vec![
+                Ok(started),
+                Ok(delta),
+            ])));
+        }
         let reason = if self.non_end_turn.load(Ordering::SeqCst) {
             FinishReason::Cancelled
         } else {
@@ -1321,12 +1360,19 @@ fn auto_chronology_interval_parsing_is_total() {
         "a zero interval (busy loop) falls back to the default"
     );
 
+    // The constructor stays wired to the pure parser: whatever the ambient
+    // override is (unset, valid, or invalid), `from_env` must agree with
+    // `parse_interval_secs` applied to that SAME value — an invalid ambient
+    // setting therefore resolves to the default instead of being accepted
+    // unchecked. The process-global variable is deliberately NOT mutated here
+    // (the module documents env mutation as unsafe under parallel test
+    // execution).
+    let ambient = std::env::var(ENV_AUTO_CHRONOLOGY_INTERVAL_MIN).ok();
     let config = AutoChronologyConfig::from_env();
-    assert!(
-        config.interval.as_secs() == DEFAULT_AUTO_CHRONOLOGY_INTERVAL_SECS
-            || std::env::var("NEXUS_AUTO_CHRONOLOGY_INTERVAL_MIN").is_ok(),
-        "from_env must resolve through parse_interval_secs (got {}s)",
-        config.interval.as_secs()
+    assert_eq!(
+        config.interval.as_secs(),
+        parse_interval_secs(ambient.as_deref()),
+        "from_env must resolve through parse_interval_secs (ambient {ambient:?})"
     );
 }
 
@@ -1972,6 +2018,23 @@ async fn prompt_executor_single_flights_one_session_and_refuses_before_effect() 
     );
     assert_eq!(host.prompt_count(), 2, "both prompts must reach the Host");
 
+    // MIGRATED from the same source case's durable cleanup assertion: a
+    // successfully completed prompt must not leave its durable `in_flight`
+    // attempt marker behind.
+    let state = store
+        .load_run(&nexus_orchestration::SessionId(
+            "retained:single-flight".to_string(),
+        ))
+        .await
+        .expect("load run")
+        .expect("record")
+        .state
+        .expect("v1 state");
+    assert!(
+        state.in_flight.is_none(),
+        "a successfully completed prompt must not leave a durable in_flight marker"
+    );
+
     // A frozen run without a binding for the role refuses before any effect.
     let refused = executor
         .execute(request("retained:unbound", "three"))
@@ -2023,5 +2086,201 @@ async fn prompt_executor_single_flights_one_session_and_refuses_before_effect() 
         host.prompt_count(),
         3,
         "the stopped prompt did reach the Host"
+    );
+}
+
+/// MIGRATED from `crates/nexus-daemon-runtime/tests/workflow_prompt_execution.rs`
+/// `eof_after_initialize_is_typed_failure`.
+///
+/// A Host whose agent process exits right after the `initialize` handshake
+/// never completes its launch: the production executor must surface the typed
+/// `TransientExternal` launch failure — never a fake success — and a prompt
+/// stream that closes after its deltas without a terminal event is the same
+/// typed refusal, never partial-output success.
+#[tokio::test]
+async fn prompt_executor_types_eof_after_initialize_as_a_launch_failure() {
+    use nexus_orchestration::capability::{PromptExecutor, PromptRequest, ToolPolicy};
+    use nexus_orchestration::run_state::AgentBinding;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let guarded = nexus_local_db::init_engine_pool(&tmp.path().join("state.db"))
+        .await
+        .expect("engine pool");
+    let pool = Arc::new(guarded.clone_pool());
+    let store = Arc::new(SqliteSessionStorage::new(pool));
+    let bindings = || {
+        let mut bindings = HashMap::new();
+        bindings.insert(
+            "default".to_string(),
+            AgentBinding {
+                provider_id: PROVIDER.to_string(),
+                model: None,
+            },
+        );
+        bindings
+    };
+    let request = |run_id: &str| PromptRequest {
+        run_id: run_id.to_string(),
+        task_id: "recall".to_string(),
+        agent_ref: Some("default".to_string()),
+        prompt: "hello".to_string(),
+        tool_policy: ToolPolicy::AutoGrantAll,
+        cancellation: tokio_util::sync::CancellationToken::new(),
+    };
+
+    // The launch itself fails (the process EOFs right after initialize).
+    let host = ParkedHost::new();
+    host.fail_launch_after_initialize();
+    let executor = HostPromptExecutor::new(host.clone(), store.clone(), TimeoutConfig::default());
+    seed_prompt_run(store.as_ref(), "retained:eof-launch", bindings()).await;
+
+    let refused = executor
+        .execute(request("retained:eof-launch"))
+        .await
+        .expect_err("an EOF after initialize must fail the launch");
+    match &refused {
+        CapabilityError::TransientExternal(msg) => {
+            assert!(
+                msg.contains("host session creation failed"),
+                "typed launch failure: {msg}"
+            );
+            assert!(
+                msg.contains("launch failed"),
+                "the refusal must carry the launch-failure class: {msg}"
+            );
+        }
+        other => panic!("expected TransientExternal, got: {other:?}"),
+    }
+    assert_eq!(
+        host.prompt_count(),
+        0,
+        "a failed launch must produce no prompt effect"
+    );
+    let state = store
+        .load_run(&nexus_orchestration::SessionId(
+            "retained:eof-launch".to_string(),
+        ))
+        .await
+        .expect("load run")
+        .expect("record")
+        .state
+        .expect("v1 state");
+    assert!(
+        state.in_flight.is_none(),
+        "a refused launch must drop its durable attempt ownership"
+    );
+
+    // The deltas arrive but the stream then EOFs with no terminal event.
+    let host = ParkedHost::new();
+    host.release_all();
+    host.close_stream_after_deltas();
+    let executor = HostPromptExecutor::new(host.clone(), store.clone(), TimeoutConfig::default());
+    seed_prompt_run(store.as_ref(), "retained:eof-stream", bindings()).await;
+
+    let refused = executor
+        .execute(request("retained:eof-stream"))
+        .await
+        .expect_err("an EOF without a terminal event must refuse");
+    assert!(
+        matches!(&refused, CapabilityError::TransientExternal(msg)
+            if msg.contains("closed without a terminal event")),
+        "an EOF after the deltas must be a typed failure, got {refused:?}"
+    );
+    assert_eq!(host.prompt_count(), 1, "the EOF prompt did reach the Host");
+}
+
+/// MIGRATED from `crates/nexus-daemon-runtime/tests/workflow_prompt_execution.rs`
+/// `all_five_consumers_observe_non_echo_agent_output` (its durable
+/// post-prompt assertions).
+///
+/// A prompt driven through the production graph node stores the agent's TEXT
+/// in the graph context — never a live Host/ACP handle: the serialized
+/// context carries the output and no provider adapter or managed process —
+/// and the completed prompt leaves no durable `in_flight` marker behind.
+#[tokio::test]
+async fn graph_prompt_context_serializes_output_without_host_handles() {
+    use graph_flow::Task as _;
+    use nexus_orchestration::capability::{PromptExecutor, ToolPolicy};
+    use nexus_orchestration::run_state::AgentBinding;
+    use nexus_orchestration::tasks::InnerGraphNodeTask;
+    use std::sync::RwLock;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let guarded = nexus_local_db::init_engine_pool(&tmp.path().join("state.db"))
+        .await
+        .expect("engine pool");
+    let pool = Arc::new(guarded.clone_pool());
+    let store = Arc::new(SqliteSessionStorage::new(pool));
+    let host = ParkedHost::new();
+    host.release_all();
+    let executor: Arc<dyn PromptExecutor> = Arc::new(HostPromptExecutor::new(
+        host.clone(),
+        store.clone(),
+        TimeoutConfig::default(),
+    ));
+
+    let mut bindings = HashMap::new();
+    bindings.insert(
+        "default".to_string(),
+        AgentBinding {
+            provider_id: PROVIDER.to_string(),
+            model: None,
+        },
+    );
+    let run_id = "retained:graph-context";
+    seed_prompt_run(store.as_ref(), run_id, bindings).await;
+
+    let mut cancels = HashMap::new();
+    cancels.insert(
+        run_id.to_string(),
+        tokio_util::sync::CancellationToken::new(),
+    );
+    let task = InnerGraphNodeTask::new("n1")
+        .with_template("graph prompt {{core_context.version}}")
+        .with_tool_policy(ToolPolicy::DenyAll)
+        .with_prompt_executor(Some(executor))
+        .with_session_cancels(Arc::new(RwLock::new(cancels)));
+
+    let ctx = graph_flow::Context::new();
+    ctx.set("_session_id", run_id.to_string()).unwrap();
+    ctx.set("core_context.version", "7").unwrap();
+    let result = task.run(ctx.clone()).await.expect("graph prompt succeeds");
+    assert_eq!(
+        result.response.as_deref(),
+        Some("transformed:parked-output"),
+        "the graph node must return the agent output, not the prompt"
+    );
+    assert_eq!(
+        ctx.get::<String>("state.n1.output").as_deref(),
+        Some("transformed:parked-output"),
+        "the node must store the agent output in the graph context"
+    );
+
+    // Durable cleanup: the completed prompt owns no `in_flight` attempt.
+    let state = store
+        .load_run(&nexus_orchestration::SessionId(run_id.to_string()))
+        .await
+        .expect("load run")
+        .expect("record")
+        .state
+        .expect("v1 state");
+    assert!(
+        state.in_flight.is_none(),
+        "a successfully completed prompt must not leave a durable in_flight marker"
+    );
+
+    // Serialization: the context carries text only — no live Host/ACP handle.
+    let serialized = serde_json::to_string(&ctx).expect("context serializes");
+    assert!(
+        serialized.contains("transformed:parked-output"),
+        "the serialized context must carry the agent output: {serialized}"
+    );
+    assert!(
+        !serialized.contains("AcpSdkAdapter"),
+        "no SDK handle in context: {serialized}"
+    );
+    assert!(
+        !serialized.contains("ManagedAcpProcess"),
+        "no process handle in context: {serialized}"
     );
 }
