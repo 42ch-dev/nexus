@@ -169,14 +169,6 @@ rmcp = { version = "=3.3.0", default-features = false, features = ["client"] }
 name = "dispatch_latency"
 harness = false
 
-# V1.179 P0 T1 (DF-88): embedded MCP e2e — in-process rmcp client over
-# sink/stream against the embedded server (Model B). Feature-gated so the
-# default-feature CI never compiles it.
-[[test]]
-name = "embedded_mcp_e2e"
-path = "tests/embedded_mcp_e2e.rs"
-required-features = ["connect-client", "embedded-mcp"]
-
 [features]
 # v1.190 P3-T2: the workspace-commit crash/race/owner seams now live in
 # nexus-core's `execution` cohort behind ITS `test-hooks` feature (see
