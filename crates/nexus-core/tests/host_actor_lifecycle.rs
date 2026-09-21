@@ -2,6 +2,23 @@
 //! before any provider effect, a journal failure after a committed effect
 //! refuses success and settles `interrupted` on restart without re-executing
 //! provider work, and an unconfirmed authority close keeps its guards.
+//!
+//! v1.193 P2-T11 disposition of the retired daemon boot fixtures
+//! (`boot_native_providers.rs`, `daemon_boot_llm_wiring.rs`): those cases
+//! asserted provider REGISTRATION and prompt-executor wiring inside
+//! `run_daemon`, observed through the daemon's HTTP `/agent-host/providers`
+//! route — a boot composition that retires with the host. The retained
+//! provider-effect assertions are already owned here: the admitted port is
+//! the only effect path, so a denied authority and a restart settlement both
+//! register ZERO provider calls
+//! ([`stale_actor_and_journal_failure_never_redispatch`]), and the host stays
+//! a single owned slot ([`second_open_host_is_typed_rejected_until_confirmed_close`]).
+//! Provider discovery/catalog semantics are owned by the `nexus-agent-host`
+//! discovery units (`discovery::path_scan`, `discovery::catalog`); the LLM
+//! capability's executor behaviour is owned by
+//! `nexus-orchestration::capability::builtins::llm_extract` and the migrated
+//! executor-failure case in `capability_compute.rs`. No daemon boot
+//! expectation is re-pinned here.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};

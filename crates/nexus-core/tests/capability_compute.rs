@@ -32,6 +32,7 @@ use nexus_core::execution::compute::{
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService, WorkPatchRequest};
 use nexus_wasm_host::{CachedModule, ModuleCache, ModuleManifest, SandboxConfig, WasmEngine};
 use serde_json::json;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
@@ -414,6 +415,57 @@ async fn unknown_tool_is_refused_with_zero_domain_effect() {
     );
 }
 
+/// Stage an admitted user-capability trio (AR-35 layout) at
+/// `<scan_root>/<name>/`: a hash-consistent `capability.json` +
+/// `manifest.json` + `<module-id>.wasm` bundle so the AR-43 admission gates
+/// pass inside the scan — the ONLY user-capability admission path. The bytes
+/// are not real wasm, so an engine-less registry serves the AR-44
+/// `WorkerUnavailable` stub for the name.
+fn write_user_capability_trio(scan_root: &Path, name: &str, input_schema: &str) {
+    let dir = scan_root.join(name);
+    std::fs::create_dir_all(&dir).unwrap();
+    let wasm = b"fake module bytes";
+    let sha = {
+        use sha2::{Digest, Sha256};
+        use std::fmt::Write as _;
+        let mut hex = String::with_capacity(64);
+        for b in Sha256::digest(wasm) {
+            let _ = write!(hex, "{b:02x}");
+        }
+        hex
+    };
+    std::fs::write(
+        dir.join("capability.json"),
+        format!(
+            r#"{{
+                "name": "{name}",
+                "inputSchema": {input_schema},
+                "outputSchema": "{{\"type\":\"object\"}}",
+                "wasm": {{ "moduleId": "basic-combat", "wasmSha256": "{sha}" }}
+            }}"#,
+            input_schema = serde_json::to_string(input_schema).unwrap(),
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("manifest.json"),
+        format!(
+            r#"{{
+                "module_id": "basic-combat",
+                "name": "Basic Combat",
+                "version": "1.0.0",
+                "nexus_abi_version": 1,
+                "required_key_block_types": [],
+                "compute_export": "compute",
+                "init_export": "",
+                "wasm_sha256": "{sha}"
+            }}"#
+        ),
+    )
+    .unwrap();
+    std::fs::write(dir.join("basic-combat.wasm"), wasm).unwrap();
+}
+
 /// A user capability's declared schema gates its arguments: a call missing a
 /// required property is refused BEFORE the capability runs.
 ///
@@ -437,47 +489,11 @@ async fn schema_invalid_arguments_never_reach_the_capability() {
     // directly under it — an extra `capabilities/` level makes the scanner
     // look for `<root>/<name>/capability.json` and find nothing.
     let scan_root = f.tmp.path().join("usercaps");
-    let dir = scan_root.join("t3.requires.thing");
-    std::fs::create_dir_all(&dir).unwrap();
-    let wasm = b"fake module bytes";
-    let sha = {
-        use sha2::{Digest, Sha256};
-        use std::fmt::Write as _;
-        let mut hex = String::with_capacity(64);
-        for b in Sha256::digest(wasm) {
-            let _ = write!(hex, "{b:02x}");
-        }
-        hex
-    };
-    std::fs::write(
-        dir.join("capability.json"),
-        format!(
-            r#"{{
-                "name": "t3.requires.thing",
-                "inputSchema": "{{\"type\":\"object\",\"required\":[\"thing\"],\"properties\":{{\"thing\":{{\"type\":\"string\"}}}}}}",
-                "outputSchema": "{{\"type\":\"object\"}}",
-                "wasm": {{ "moduleId": "basic-combat", "wasmSha256": "{sha}" }}
-            }}"#
-        ),
-    )
-    .unwrap();
-    std::fs::write(
-        dir.join("manifest.json"),
-        format!(
-            r#"{{
-                "module_id": "basic-combat",
-                "name": "Basic Combat",
-                "version": "1.0.0",
-                "nexus_abi_version": 1,
-                "required_key_block_types": [],
-                "compute_export": "compute",
-                "init_export": "",
-                "wasm_sha256": "{sha}"
-            }}"#
-        ),
-    )
-    .unwrap();
-    std::fs::write(dir.join("basic-combat.wasm"), wasm).unwrap();
+    write_user_capability_trio(
+        &scan_root,
+        "t3.requires.thing",
+        r#"{"type":"object","required":["thing"],"properties":{"thing":{"type":"string"}}}"#,
+    );
 
     let deps = CapabilityRuntimeDeps {
         pool: Some(f.core.pool().clone()),
@@ -522,6 +538,189 @@ async fn schema_invalid_arguments_never_reach_the_capability() {
         matches!(err, nexus_core::CoreError::Coded { ref code, .. } if code == "invalid_input"),
         "a schema-invalid call must be an invalid_input refusal, got {err:?}"
     );
+}
+
+/// The dispatch spine resolves through the LIVE published registry: after a
+/// hot reload drops a capability from the holder, the next dispatch of that
+/// name is refused exactly like an unknown id (the retained `not_supported`
+/// code) with zero domain effect, while its admitted sibling keeps
+/// dispatching on the same context.
+///
+/// MIGRATED (v1.193 P2-T11) from
+/// `crates/nexus-daemon-runtime/tests/capability_hot_reload_journey.rs`
+/// `catalog_routes_reflect_add_and_remove_within_bounded_interval` — the
+/// core-observable half of the retired journey. The old case drove the two
+/// daemon HTTP catalog routes over a `WorkspaceState`; the routes and the
+/// daemon-owned holder retire with the host, and the watcher's merge/removal
+/// rules stay in `nexus-orchestration::capability::watch`
+/// (`deleted_scan_dir_drops_user_cap_names`,
+/// `merge_carries_last_good_on_skipped_and_drops_absent`) — not duplicated
+/// here. What is asserted is the consumer contract that made the journey
+/// observable: `ToolContext::user_capabilities()` re-reads the holder on
+/// EVERY dispatch, so a removal is honored by the very next call and a fresh
+/// dispatch is refused on the spine-refusal basis.
+#[tokio::test]
+#[serial_test::serial]
+async fn hot_removed_user_capability_is_refused_with_zero_domain_effect() {
+    use nexus_orchestration::capability::{CapabilityRegistry, CapabilityRuntimeDeps};
+    use nexus_orchestration::CapabilityRegistryHolder;
+
+    let f = fixture().await;
+    let scan_root = f.tmp.path().join("hotcaps");
+    write_user_capability_trio(&scan_root, "hot.kept", r#"{"type":"object"}"#);
+    write_user_capability_trio(&scan_root, "hot.removed", r#"{"type":"object"}"#);
+
+    let deps = CapabilityRuntimeDeps {
+        pool: Some(f.core.pool().clone()),
+        prompt_executor: None,
+        session_cancels: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+        daemon_tool_dispatch: None,
+        cdn_config: None,
+        workspace_executor: None,
+    };
+    let (registry, outcome) =
+        CapabilityRegistry::with_runtime_deps_and_user_caps(&deps, &scan_root);
+    assert!(outcome.skipped.is_empty(), "no skips: {:?}", outcome.skipped);
+    assert_eq!(outcome.admitted.len(), 2, "both trio dirs are admitted");
+
+    let holder = CapabilityRegistryHolder::with_registry(Arc::new(registry));
+    let mut context = f.context.clone();
+    context.set_user_capabilities(Some(holder.clone()));
+
+    let before = timeline_event_count(f.core.pool()).await;
+
+    // Both admitted names resolve through the published holder: the
+    // engine-less stub reports its honest no-executor failure, never the
+    // unknown-id `not_supported`.
+    for name in ["hot.kept", "hot.removed"] {
+        let err = execute_tool(&context, &tool_request(name, json!({})))
+            .await
+            .unwrap_err();
+        assert!(
+            !matches!(&err, CoreError::Coded { code, .. } if code == "not_supported"),
+            "{name} is admitted, so it must resolve before the reload, got {err:?}"
+        );
+    }
+
+    // The hot reload itself: the directory is deleted and a fresh registry
+    // generation is swapped into the SAME holder — what the retired watcher
+    // did on a changed digest.
+    std::fs::remove_dir_all(scan_root.join("hot.removed")).unwrap();
+    let (rebuilt, rebuilt_outcome) =
+        CapabilityRegistry::with_runtime_deps_and_user_caps(&deps, &scan_root);
+    assert!(
+        rebuilt_outcome.skipped.is_empty(),
+        "no skips: {:?}",
+        rebuilt_outcome.skipped
+    );
+    assert_eq!(
+        rebuilt_outcome.admitted.len(),
+        1,
+        "only the surviving trio is admitted after the reload"
+    );
+    holder.swap(Arc::new(rebuilt));
+
+    // The removed name is refused like any unknown id, with the retained code
+    // and zero domain effect…
+    let err = execute_tool(&context, &tool_request("hot.removed", json!({})))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, CoreError::Coded { code, .. } if code == "not_supported"),
+        "a hot-removed capability must be refused as not_supported, got {err:?}"
+    );
+    // …while the admitted sibling keeps dispatching through the same context.
+    let sibling = execute_tool(&context, &tool_request("hot.kept", json!({})))
+        .await
+        .unwrap_err();
+    assert!(
+        !matches!(&sibling, CoreError::Coded { code, .. } if code == "not_supported"),
+        "the admitted sibling must keep resolving after the swap, got {sibling:?}"
+    );
+
+    assert_eq!(
+        timeline_event_count(f.core.pool()).await,
+        before,
+        "a refused dispatch must have zero domain effect"
+    );
+}
+
+/// A capability never fabricates success when its prompt executor fails: the
+/// executor's typed error is surfaced out of `run()` verbatim.
+///
+/// MIGRATED (v1.193 P2-T11) from
+/// `crates/nexus-daemon-runtime/tests/daemon_boot_llm_wiring.rs`
+/// `executor_failure_stays_typed_failure` — the one retained real-failure
+/// assertion of that retired boot-wiring fixture. Its siblings pinned the
+/// boot composition shape (`CapabilityRuntimeDeps.prompt_executor` →
+/// `CapabilityRegistry::with_runtime_deps`), whose no-executor and mock-success
+/// halves are already owned by
+/// `nexus-orchestration::capability::builtins::llm_extract`
+/// (`llm_extract_standalone_returns_unavailable`,
+/// `llm_extract_with_mock_executor_returns_candidates`). The production
+/// consumer of the preserved contract is `quality_loop::run_llm_extract`,
+/// which turns any non-`WorkerUnavailable` capability failure into a refusal
+/// rather than standing in with heuristic candidates.
+#[tokio::test]
+async fn failing_prompt_executor_is_a_typed_failure_not_a_fabricated_success() {
+    use nexus_orchestration::capability::{
+        CapabilityError, CapabilityRegistry, CapabilityRuntimeDeps, PromptExecutor, PromptRequest,
+        PromptResult,
+    };
+
+    struct FailingExecutor;
+
+    #[async_trait::async_trait]
+    impl PromptExecutor for FailingExecutor {
+        async fn execute(&self, _request: PromptRequest) -> Result<PromptResult, CapabilityError> {
+            Err(CapabilityError::TransientExternal(
+                "agent refused the request".to_string(),
+            ))
+        }
+    }
+
+    // The run identity must have a registered coordinator token (the
+    // fail-closed contract); a fresh token would be uncancellable.
+    let session_cancels = Arc::new(std::sync::RwLock::new(std::collections::HashMap::from([(
+        "extract-run".to_string(),
+        tokio_util::sync::CancellationToken::new(),
+    )])));
+    let deps = CapabilityRuntimeDeps {
+        pool: None,
+        prompt_executor: Some(Arc::new(FailingExecutor) as Arc<dyn PromptExecutor>),
+        session_cancels,
+        daemon_tool_dispatch: None,
+        cdn_config: None,
+        workspace_executor: None,
+    };
+    let registry = CapabilityRegistry::with_runtime_deps(&deps);
+    let cap = registry
+        .get("nexus.llm.extract")
+        .expect("nexus.llm.extract is a builtin");
+
+    let err = cap
+        .run(json!({
+            "prompt": "extract entities",
+            "chapter_prose": "Lin Xia drew her blade.",
+            "_creator_id": "test_creator",
+            "_session_id": "extract-run",
+            // The trusted target/source the orchestration caller resolves
+            // from stored state before the model runs.
+            "_extract_target": {
+                "world_id": "wld_wiring",
+                "holder_entry_id": null,
+                "disclosure": null,
+            },
+            "_extract_source_id": "ch02",
+        }))
+        .await
+        .unwrap_err();
+    match err {
+        CapabilityError::TransientExternal(msg) => {
+            assert!(msg.contains("refused"), "the executor error is kept: {msg}");
+        }
+        other => panic!("a failing executor must stay a typed failure, got: {other:?}"),
+    }
 }
 
 /// An engine-less compute context reports a real error, never a fabricated
