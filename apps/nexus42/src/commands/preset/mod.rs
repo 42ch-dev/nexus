@@ -1,28 +1,36 @@
 //! `nexus42 preset` — canonical preset CLI group (PL-5, AR-24, AR-25).
 //!
 //! Top-level developer-facing surface for presets:
-//! `list|show|validate|scaffold|run|trigger`.
+//! `list|show|validate|scaffold|trigger|patch`.
 //!
-//! - `validate` reuses today's validator job — daemon-backed default
-//!   (`POST /v1/daemon/presets:validate`) + `--offline` in-process core
-//!   (`validate_preset_offline`, moved here from `system`; V1.153 P3).
-//! - `scaffold` reuses `POST /v1/daemon/presets` (`scaffold_preset`).
-//! - `run` reuses the same daemon-API path `creator run` drives
-//!   (`commands/creator/run.rs` `handle_run`) — no second orchestration
-//!   engine (PL-5).
-//! - `show <id>` fetches the AR-20 profile (daemon-backed) and prints lanes +
-//!   orchestration fields; declared signals are labeled **Declared, not
-//!   delivered** (AR-25, locked trigger-lane vocabulary).
+//! - `validate <path>` is the positional local validator
+//!   (`validate_preset_local`, moved here from `system`; V1.153 P3). It runs
+//!   entirely in process: the daemon leg and the `--offline` synonym it
+//!   shadowed were removed in v1.193 P1-T1.
+//! - `list|show|scaffold` and `trigger` are typed `nexus-core` reads/writes
+//!   (v1.193 P1-T2) — no daemon route and no HTTP client.
+//! - `scaffold` authors a user preset bundle through
+//!   `CoreService::scaffold_preset`.
+//! - `run` was removed in v1.193 P1-T1: it only forwarded into
+//!   `creator run`'s daemon-API path and had no complete direct core
+//!   operation of its own (PL-5).
+//! - `show <id>` prints the AR-20 profile (`CoreService::get_preset_profile`)
+//!   with lanes + orchestration fields; declared signals are labeled
+//!   **Declared, not delivered** (AR-25, locked trigger-lane vocabulary).
 //! - `trigger <id>` prints trigger-lane classification only — never cron
-//!   authoring (cron authoring stays `creator works cron` until P2 owns the
-//!   UI; PL-5 / PL-18).
-//! - `--json` = daemon DTO verbatim (camelCase); no CLI-local renaming
+//!   authoring, never a runner (cron authoring stays `creator works cron`
+//!   until P2 owns the UI; PL-5 / PL-18).
+//! - `--json` = the core DTO verbatim (camelCase); no CLI-local renaming
 //!   (AR-25).
+//!
+//! The read/authoring leaves open the direct-writer core and await
+//! `finish_direct` **before** printing, so no row is reported ahead of a
+//! close that did not settle.
 
 #![allow(clippy::print_literal)]
 
-use crate::api::models::ScaffoldPresetRequest;
 use crate::config::CliConfig;
+use crate::core::{finish_direct, map_core_error, open_direct_core};
 use crate::errors::Result;
 use crate::CliError;
 use clap::Subcommand;
@@ -33,8 +41,12 @@ use clap::Subcommand;
 use nexus_contracts::generated::core::orchestration_presets::preset_profile_response::{
     PresetProfileExitWhen, PresetProfileLanes, PresetProfileNext, PresetProfileResponse,
 };
-
-const ORCHESTRATION_BASE: &str = "/v1/daemon/orchestration";
+// Same family note as above, for the grouped listing: the core returns the
+// generated `preset_management` response (its `source` enum displays the real
+// `embedded` / `system` / `user` label), so the CLI reads that type directly
+// instead of the retired daemon client's private copy.
+use nexus_contracts::generated::daemon_api::preset_management::list_presets_response::ListPresetsResponse;
+use nexus_contracts::ScaffoldPresetRequest;
 
 pub mod patch;
 
@@ -57,18 +69,13 @@ pub enum PresetCommand {
         #[arg(long, default_value_t = false)]
         json: bool,
     },
-    /// Validate a preset YAML/bundle at a given path
+    /// Validate a preset YAML/bundle at a given path (local, in process)
     Validate {
         /// Path to preset.yaml (or bundle directory)
         path: String,
         /// Emit machine-readable JSON
         #[arg(long, default_value_t = false)]
         json: bool,
-        /// Validate in-process via the shared validator core — no daemon
-        /// required (V1.153 P3: `nexus-runtime` does not serve the daemon
-        /// HTTP router). Default: daemon-backed `POST /v1/daemon/presets:validate`.
-        #[arg(long, default_value_t = false)]
-        offline: bool,
     },
     /// Generate a strategy bundle from templates
     Scaffold {
@@ -77,11 +84,6 @@ pub enum PresetCommand {
         /// Emit machine-readable JSON
         #[arg(long, default_value_t = false)]
         json: bool,
-    },
-    /// Start a session for a world (same daemon-API path as `creator run`)
-    Run {
-        #[command(flatten)]
-        command: crate::commands::creator::run::RunCommand,
     },
     /// Print trigger-lane classification only (never cron authoring)
     Trigger {
@@ -93,7 +95,7 @@ pub enum PresetCommand {
     },
     /// Patch a strategy canvas node (state, transition, or prompt template)
     ///
-    /// CAS-guarded writes over the existing strategy patch routes
+    /// CAS-guarded direct-core writes over the strategy canvas seam
     /// (V1.175 P1 Task 2, group 1). Every leaf takes `--base-revision`;
     /// a stale revision returns 409 `strategy_conflict` (current revision,
     /// node, conflicting path, recovery hint). Re-read the Strategy and
@@ -116,15 +118,8 @@ pub async fn run(cmd: PresetCommand, config: &CliConfig) -> Result<()> {
     match cmd {
         PresetCommand::List { intent, json } => list_presets(config, intent.as_deref(), json).await,
         PresetCommand::Show { id, json } => show_preset(config, &id, json).await,
-        PresetCommand::Validate {
-            path,
-            json,
-            offline,
-        } => validate_preset(config, &path, json, offline).await,
+        PresetCommand::Validate { path, json } => validate_preset(&path, json),
         PresetCommand::Scaffold { name, json } => scaffold_preset(config, &name, json).await,
-        PresetCommand::Run { command } => {
-            crate::commands::creator::run::handle_run(command, config).await
-        }
         PresetCommand::Trigger { id, json } => trigger_preset(config, &id, json).await,
         PresetCommand::Patch { command } => patch::run(command, config).await,
     }
@@ -135,8 +130,8 @@ pub async fn run(cmd: PresetCommand, config: &CliConfig) -> Result<()> {
 /// Moved from `system preset list` (V1.153) — the shared listing job, not
 /// re-implemented (AR-24).
 ///
-/// The display list is built from the grouped management endpoint
-/// (`GET /v1/daemon/presets` — embedded + system + user groups,
+/// The display list is built from the typed core listing
+/// (`CoreService::list_presets` — embedded + system + user groups,
 /// W-002/F-001), so user presets appear and each row is labeled by its real
 /// source. `--intent` filtering runs across all groups.
 async fn list_presets(
@@ -144,14 +139,19 @@ async fn list_presets(
     intent_filter: Option<&str>,
     json_output: bool,
 ) -> Result<()> {
-    let client = crate::api::DaemonClient::from_config(config)?;
-
-    // Grouped management endpoint: embedded + system + user (W-002/F-001).
-    // A failure here is a real daemon error — surface it instead of silently
-    // degrading the list to no presets (F-001 reliability nit).
-    let mgmt_resp: crate::api::models::ListPresetsGroupedResponse = client.list_presets().await?;
-
-    let presets: Vec<(String, String, Vec<String>)> = build_preset_rows(&mgmt_resp, intent_filter);
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        // A failure here is a real core refusal — surface it instead of
+        // silently degrading the list to no presets (F-001 reliability nit).
+        let response = core
+            .list_presets(&principal)
+            .await
+            .map_err(map_core_error)?;
+        Ok(build_preset_rows(&response, intent_filter))
+    }
+    .await;
+    let presets = finish_direct(&core, outcome).await?;
 
     if json_output {
         let output: Vec<serde_json::Value> = presets
@@ -186,11 +186,11 @@ async fn list_presets(
     Ok(())
 }
 
-/// Flatten the grouped management response into display rows
+/// Flatten the grouped core listing into display rows
 /// `(id, source, run_intents)`, optionally filtered by `run_intent`
-/// (W-002/F-001). Pure over the daemon DTO — hermetically testable.
+/// (W-002/F-001). Pure over the core DTO — hermetically testable.
 fn build_preset_rows(
-    resp: &crate::api::models::ListPresetsGroupedResponse,
+    resp: &ListPresetsResponse,
     intent_filter: Option<&str>,
 ) -> Vec<(String, String, Vec<String>)> {
     let mut presets: Vec<(String, String, Vec<String>)> = Vec::new();
@@ -199,7 +199,7 @@ fn build_preset_rows(
         for summary in group {
             presets.push((
                 summary.id.clone(),
-                summary.source.clone(),
+                summary.source.to_string(),
                 summary.run_intents.clone(),
             ));
         }
@@ -212,16 +212,21 @@ fn build_preset_rows(
     presets
 }
 
-/// Print the AR-20 profile for a preset (daemon-backed).
+/// Print the AR-20 profile for a preset (`CoreService::get_preset_profile`).
 ///
-/// `--json` serializes the daemon DTO verbatim (camelCase, AR-25). Text
+/// `--json` serializes the core DTO verbatim (camelCase, AR-25). Text
 /// output names lanes + orchestration fields; declared signals are labeled
 /// **Declared, not delivered**.
 async fn show_preset(config: &CliConfig, id: &str, json: bool) -> Result<()> {
-    let client = crate::api::DaemonClient::from_config(config)?;
-    let profile: PresetProfileResponse = client
-        .get(&format!("{ORCHESTRATION_BASE}/presets/{id}/profile"))
-        .await?;
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        core.get_preset_profile(&principal, id.to_string())
+            .await
+            .map_err(map_core_error)
+    }
+    .await;
+    let profile: PresetProfileResponse = finish_direct(&core, outcome).await?;
 
     if json {
         println!("{}", serde_json::to_string_pretty(&profile)?);
@@ -231,12 +236,18 @@ async fn show_preset(config: &CliConfig, id: &str, json: bool) -> Result<()> {
     Ok(())
 }
 
-/// Print trigger-lane classification only (AR-25) — never cron authoring.
+/// Print trigger-lane classification only (AR-25) — never cron authoring,
+/// never a runner.
 async fn trigger_preset(config: &CliConfig, id: &str, json: bool) -> Result<()> {
-    let client = crate::api::DaemonClient::from_config(config)?;
-    let profile: PresetProfileResponse = client
-        .get(&format!("{ORCHESTRATION_BASE}/presets/{id}/profile"))
-        .await?;
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        core.get_preset_profile(&principal, id.to_string())
+            .await
+            .map_err(map_core_error)
+    }
+    .await;
+    let profile: PresetProfileResponse = finish_direct(&core, outcome).await?;
 
     if json {
         println!("{}", serde_json::to_string_pretty(&profile.lanes)?);
@@ -246,14 +257,24 @@ async fn trigger_preset(config: &CliConfig, id: &str, json: bool) -> Result<()> 
     Ok(())
 }
 
-/// Scaffold a user preset bundle from templates (`POST /v1/daemon/presets`).
+/// Scaffold a user preset bundle from templates
+/// (`CoreService::scaffold_preset`).
 async fn scaffold_preset(config: &CliConfig, name: &str, json: bool) -> Result<()> {
-    let client = crate::api::DaemonClient::from_config(config)?;
-    let resp = client
-        .scaffold_preset(&ScaffoldPresetRequest {
-            name: name.to_string(),
-        })
-        .await?;
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        core.scaffold_preset(
+            &principal,
+            ScaffoldPresetRequest {
+                name: name.to_string(),
+            },
+        )
+        .await
+        .map_err(map_core_error)
+    }
+    .await;
+    let resp = finish_direct(&core, outcome).await?;
+
     if json {
         println!("{}", serde_json::to_string_pretty(&resp)?);
     } else {
@@ -264,32 +285,18 @@ async fn scaffold_preset(config: &CliConfig, name: &str, json: bool) -> Result<(
 
 /// Validate a preset YAML/bundle at a given path.
 ///
-/// With `offline = false` (default) validation is delegated to the daemon
-/// (`POST /v1/daemon/presets:validate`). With `offline = true` the same
-/// checks run in-process via the shared orchestration validator core — no
-/// daemon required (V1.153 P3: `nexus-runtime` does not serve the daemon
-/// HTTP router, so integrators need a daemon-free path).
+/// Validation runs in process through [`validate_preset_local`] — the sole
+/// validator behind this command (v1.193 P1-T1). There is no daemon leg and
+/// no `--offline` switch: `--offline` was a silent synonym for the local
+/// path (D6) and the path is positional.
 ///
-/// An invalid preset produces a non-zero exit in both modes so scripts
-/// (e.g. `strategy-samples/validate.sh`) can rely on the exit code.
+/// An invalid preset produces a non-zero exit so scripts (e.g.
+/// `strategy-samples/validate.sh`) can rely on the exit code.
 ///
 /// Moved from `system preset validate` (V1.153) — the shared validator job,
 /// not re-implemented (AR-24).
-async fn validate_preset(
-    config: &CliConfig,
-    path: &str,
-    json_output: bool,
-    offline: bool,
-) -> Result<()> {
-    let resp: serde_json::Value = if offline {
-        validate_preset_offline(path)?
-    } else {
-        let client = crate::api::DaemonClient::from_config(config)?;
-        let body = serde_json::json!({ "path": path });
-        client
-            .post::<serde_json::Value, _>("/v1/daemon/presets:validate", &body)
-            .await?
-    };
+fn validate_preset(path: &str, json_output: bool) -> Result<()> {
+    let resp: serde_json::Value = validate_preset_local(path)?;
 
     let valid = resp
         .get("valid")
@@ -316,8 +323,8 @@ async fn validate_preset(
 }
 
 /// Print the human-readable verdict for a validate response
-/// (`{valid, id, version, state_count, errors, warnings}` — the daemon
-/// response shape; `validate_preset_offline` produces the same shape).
+/// (`{valid, id, version, state_count, errors, warnings}` — the shape
+/// [`validate_preset_local`] returns).
 fn print_validate_verdict(resp: &serde_json::Value) {
     let valid = resp
         .get("valid")
@@ -349,18 +356,20 @@ fn print_validate_verdict(resp: &serde_json::Value) {
     }
 }
 
-/// Run preset validation in-process, mirroring the daemon's
-/// `POST /v1/daemon/presets:validate` composition
+/// Run preset validation in process — the sole validator behind
+/// `nexus42 preset validate <path>` (v1.193 P1-T1).
+///
+/// The composition mirrors the retired daemon handler
+/// `POST /v1/daemon/presets:validate`
 /// (`loader_validate_manifest_compat` + `validate_path_safety` +
-/// `validate_preset_semantic` + `validate_assets_in_bundle`) so the
-/// offline verdict is identical to the daemon-backed one.
+/// `validate_preset_semantic` + `validate_assets_in_bundle`) and returns the
+/// same response shape, so verdicts recorded before the cutover stay
+/// comparable.
 ///
 /// The daemon handler — not `load_preset` — is deliberately the reference
 /// composition: it parses the manifest directly and treats every
 /// error-severity diagnostic as a failure, whereas `load_preset`
-/// downgrades capability-arg-drift errors to warnings. Mirroring the
-/// handler keeps `--offline` and daemon-backed validation answering the
-/// same question with the same answer (and the same response shape).
+/// downgrades capability-arg-drift errors to warnings.
 ///
 /// `path` may be a bundle directory (containing `preset.yaml`), a
 /// `preset.yaml` file (asset checks run against its parent), or a
@@ -369,7 +378,7 @@ fn print_validate_verdict(resp: &serde_json::Value) {
 ///
 /// Moved from `system` (V1.153 P3) — the shared validator core, not
 /// re-implemented (AR-24).
-fn validate_preset_offline(path: &str) -> Result<serde_json::Value> {
+fn validate_preset_local(path: &str) -> Result<serde_json::Value> {
     use nexus_orchestration::CapabilityRegistry;
     use nexus_preset::{
         loader_validate_manifest_compat, validate_assets_in_bundle, validate_path_safety,
@@ -680,13 +689,12 @@ mod tests {
     }
 
     #[test]
-    fn preset_six_subcommands_parse() {
+    fn preset_subcommands_parse() {
         for argv in [
             &["preset", "list"][..],
             &["preset", "show", "novel-writing"][..],
             &["preset", "validate", "some/path"][..],
             &["preset", "scaffold", "my-strategy"][..],
-            &["preset", "run", "novel-writing"][..],
             &["preset", "trigger", "novel-writing"][..],
         ] {
             PresetCli::try_parse_from(argv)
@@ -703,24 +711,6 @@ mod tests {
                 assert!(json);
             }
             other => panic!("expected show, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn preset_validate_offline_flag_parses() {
-        let cmd =
-            PresetCli::try_parse_from(["preset", "validate", "some/path", "--offline"]).unwrap();
-        match cmd.command {
-            PresetCommand::Validate {
-                path,
-                json,
-                offline,
-            } => {
-                assert_eq!(path, "some/path");
-                assert!(!json);
-                assert!(offline);
-            }
-            other => panic!("expected validate, got {other:?}"),
         }
     }
 
@@ -746,18 +736,6 @@ mod tests {
                 assert!(!json);
             }
             other => panic!("expected scaffold, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn preset_run_flattens_creator_run_command() {
-        let cmd = PresetCli::try_parse_from(["preset", "run", "novel-writing", "wrk_abc"]).unwrap();
-        match cmd.command {
-            PresetCommand::Run { command } => {
-                assert_eq!(command.preset_id, "novel-writing");
-                assert_eq!(command.work_id.as_deref(), Some("wrk_abc"));
-            }
-            other => panic!("expected run, got {other:?}"),
         }
     }
 
@@ -901,26 +879,42 @@ mod tests {
         }
     }
 
-    // ── W-002/F-001: list rows from the grouped endpoint ─────────────────
+    // ── W-002/F-001: list rows from the grouped core listing ────────────
 
-    /// Grouped response fixture with all three sources.
-    fn grouped_fixture() -> crate::api::models::ListPresetsGroupedResponse {
-        crate::api::models::ListPresetsGroupedResponse {
-            embedded: vec![crate::api::models::PresetSummary {
-                id: "novel-writing".to_string(),
-                source: "embedded".to_string(),
-                run_intents: vec!["work_init".to_string()],
-            }],
-            system: vec![crate::api::models::PresetSummary {
-                id: "_system.maintenance".to_string(),
-                source: "system".to_string(),
-                run_intents: vec![],
-            }],
-            user: vec![crate::api::models::PresetSummary {
-                id: "my-strategy".to_string(),
-                source: "user".to_string(),
-                run_intents: vec!["work_continue".to_string()],
-            }],
+    /// Grouped core-listing fixture with all three sources.
+    fn grouped_fixture() -> ListPresetsResponse {
+        use nexus_contracts::generated::daemon_api::preset_management::list_presets_response::{
+            NexusPresetSummary, NexusPresetSummarySource,
+        };
+
+        fn summary(
+            id: &str,
+            source: NexusPresetSummarySource,
+            run_intents: &[&str],
+        ) -> NexusPresetSummary {
+            NexusPresetSummary {
+                id: id.to_string(),
+                source,
+                run_intents: run_intents.iter().map(|i| (*i).to_string()).collect(),
+            }
+        }
+
+        ListPresetsResponse {
+            embedded: vec![summary(
+                "novel-writing",
+                NexusPresetSummarySource::Embedded,
+                &["work_init"],
+            )],
+            system: vec![summary(
+                "_system.maintenance",
+                NexusPresetSummarySource::System,
+                &[],
+            )],
+            user: vec![summary(
+                "my-strategy",
+                NexusPresetSummarySource::User,
+                &["work_continue"],
+            )],
         }
     }
 
@@ -1056,7 +1050,7 @@ mod tests {
     /// Minimal preset that passes the shared validation facade (semantic +
     /// assets + path safety). The bundle directory name must equal
     /// `preset.id` (`check_bundle_id_vs_directory`).
-    const OFFLINE_VALID_YAML: &str = r"
+    const LOCAL_VALID_YAML: &str = r"
 preset:
   id: tiny-valid
   version: 1
@@ -1078,7 +1072,7 @@ states:
 
     /// Broken copy: `initial` names a state that does not exist (structural
     /// error caught by `loader_validate_manifest_compat`).
-    const OFFLINE_BROKEN_YAML: &str = r"
+    const LOCAL_BROKEN_YAML: &str = r"
 preset:
   id: tiny-broken
   version: 1
@@ -1099,16 +1093,16 @@ states:
 ";
 
     #[test]
-    fn offline_validate_accepts_valid_bundle() {
+    fn local_validate_accepts_valid_bundle() {
         let tmp = tempfile::tempdir().unwrap();
         let bundle = tmp.path().join("tiny-valid");
         std::fs::create_dir_all(&bundle).unwrap();
-        std::fs::write(bundle.join("preset.yaml"), OFFLINE_VALID_YAML).unwrap();
+        std::fs::write(bundle.join("preset.yaml"), LOCAL_VALID_YAML).unwrap();
 
-        let resp = validate_preset_offline(bundle.to_str().unwrap()).unwrap();
+        let resp = validate_preset_local(bundle.to_str().unwrap()).unwrap();
         assert_eq!(
             resp["valid"], true,
-            "offline validation should accept a valid bundle: {resp}"
+            "local validation should accept a valid bundle: {resp}"
         );
         assert_eq!(resp["errors"].as_array().unwrap().len(), 0);
         assert_eq!(resp["id"], "tiny-valid");
@@ -1116,13 +1110,13 @@ states:
     }
 
     #[test]
-    fn offline_validate_rejects_broken_bundle() {
+    fn local_validate_rejects_broken_bundle() {
         let tmp = tempfile::tempdir().unwrap();
         let bundle = tmp.path().join("tiny-broken");
         std::fs::create_dir_all(&bundle).unwrap();
-        std::fs::write(bundle.join("preset.yaml"), OFFLINE_BROKEN_YAML).unwrap();
+        std::fs::write(bundle.join("preset.yaml"), LOCAL_BROKEN_YAML).unwrap();
 
-        let resp = validate_preset_offline(bundle.to_str().unwrap()).unwrap();
+        let resp = validate_preset_local(bundle.to_str().unwrap()).unwrap();
         assert_eq!(resp["valid"], false);
         let errors = resp["errors"].as_array().unwrap();
         assert!(!errors.is_empty());
@@ -1135,13 +1129,13 @@ states:
     }
 
     #[test]
-    fn offline_validate_accepts_standalone_yaml_file() {
+    fn local_validate_accepts_standalone_yaml_file() {
         // A standalone YAML file (not named preset.yaml) skips asset checks.
         let tmp = tempfile::tempdir().unwrap();
         let file = tmp.path().join("strategy.yaml");
-        std::fs::write(&file, OFFLINE_VALID_YAML).unwrap();
+        std::fs::write(&file, LOCAL_VALID_YAML).unwrap();
 
-        let resp = validate_preset_offline(file.to_str().unwrap()).unwrap();
+        let resp = validate_preset_local(file.to_str().unwrap()).unwrap();
         assert_eq!(
             resp["valid"], true,
             "standalone YAML file should validate: {resp}"
@@ -1149,8 +1143,8 @@ states:
     }
 
     #[test]
-    fn offline_validate_missing_path_errors() {
-        let err = validate_preset_offline("/nonexistent/definitely-missing").unwrap_err();
+    fn local_validate_missing_path_errors() {
+        let err = validate_preset_local("/nonexistent/definitely-missing").unwrap_err();
         assert!(
             err.to_string().contains("File not found"),
             "expected 'File not found' error, got: {err}"

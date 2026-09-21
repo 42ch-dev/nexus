@@ -5,7 +5,7 @@ Domain-specific rules live in subdirectory AGENTS.md files listed below.
 
 ## Repository Identity
 
-This is the **public open-source monorepo** containing `nexus42` CLI (Rust, with integrated daemon runtime), JSON Schema wire contracts (truth source for TypeScript/Rust codegen), and published package `@42ch/nexus-contracts` (npm). Rust `nexus-contracts` crate is monorepo-internal only.
+This is the **public open-source monorepo** containing the `nexus42` CLI and the headless `nexus-runtime` Connect host (both Rust), JSON Schema wire contracts (truth source for TypeScript/Rust codegen), and published package `@42ch/nexus-contracts` (npm). Rust `nexus-contracts` crate is monorepo-internal only.
 
 - `STRATEGY.md` — project vision, guiding principles, technology direction
 - `CONCEPTS.md` — core domain vocabulary for Nexus OSS
@@ -28,7 +28,7 @@ This repo is a **consumer** of Morning Star, not the harness maintenance repo.
 
 ## Tech Stack & Protocol Decisions
 
-- **CLI/daemon:** Rust-first (aligns with ACP official SDK availability)
+- **CLI/runtime:** Rust-first (aligns with ACP official SDK availability)
 - **Protocol:** ACP-first, skills-second — CLI is an ACP client, not an ACP agent/server
 - **Wire format:** JSON Schema as truth source — generates both TypeScript and Rust types
 
@@ -36,7 +36,7 @@ This repo is a **consumer** of Morning Star, not the harness maintenance repo.
 
 - Product: **Nexus**
 - CLI executable: **nexus42**
-- Daemon runtime: integrated into **`nexus42`** binary (`nexus42 daemon start` → `nexus-daemon-runtime`; no separate `nexus42d` product binary)
+- Headless runtime: **`nexus-runtime`** (Connect-only binary of the same crate as the CLI). The integrated `nexus42 daemon` group and the `nexus-daemon-runtime` composition were retired in v1.193 P2 — no `nexus42d`, no `nexus42 service` alias, no CLI service launcher
 - npm scope: **@42ch**
 - Contracts package: **@42ch/nexus-contracts**
 
@@ -50,13 +50,12 @@ See linked AGENTS.md files for per-directory decision rules and invariants:
 | `tooling/` | Codegen pipeline & CI | [`tooling/AGENTS.md`](tooling/AGENTS.md) |
 | `tooling/design-tokens/` | Shared `@nexus/design-tokens` Tailwind preset + tokens.css | [`tooling/design-tokens/AGENTS.md`](tooling/design-tokens/AGENTS.md) |
 | `apps/nexus42/` | CLI executable (polyglot product-surfaces dir) | [`apps/nexus42/AGENTS.md`](apps/nexus42/AGENTS.md) |
-| `apps/web/` | Web SPA — Control Room + canvas (daemon-served React) | [`apps/web/AGENTS.md`](apps/web/AGENTS.md) |
+| `apps/web/` | Web SPA — Control Room + canvas (React; served by the Electron/TS host) | [`apps/web/AGENTS.md`](apps/web/AGENTS.md) |
 | `apps/desktop-electron/` | Electron desktop host (unsigned macOS arm64 + x64) wrapping `apps/web` | [`apps/desktop-electron/AGENTS.md`](apps/desktop-electron/AGENTS.md) |
 | `apps/design-studio/` | Design-system gallery (daemon-independent Vite SPA) | [`apps/design-studio/AGENTS.md`](apps/design-studio/AGENTS.md) |
 | `crates/nexus-acp-host/` | ACP client adapter | [`crates/nexus-acp-host/AGENTS.md`](crates/nexus-acp-host/AGENTS.md) |
 | `crates/nexus-agent-host/` | Agent host adapter | [`crates/nexus-agent-host/AGENTS.md`](crates/nexus-agent-host/AGENTS.md) |
 | `crates/nexus-contracts/` | Generated Rust wire types | [`crates/nexus-contracts/AGENTS.md`](crates/nexus-contracts/AGENTS.md) |
-| `crates/nexus-daemon-runtime/` | Daemon runtime (local-only) | [`crates/nexus-daemon-runtime/AGENTS.md`](crates/nexus-daemon-runtime/AGENTS.md) |
 | `crates/nexus-embedding/` | Embedding readiness contract (RN-OGA-3) — provider trait seam, identity tuple, fail-closed derived-index protocol; no OSS execution | [`crates/nexus-embedding/AGENTS.md`](crates/nexus-embedding/AGENTS.md) |
 | `crates/nexus-home-layout/` | `~/.nexus42/` path layout | [`crates/nexus-home-layout/AGENTS.md`](crates/nexus-home-layout/AGENTS.md) |
 | `crates/nexus-local-db/` | Local database layer | [`crates/nexus-local-db/AGENTS.md`](crates/nexus-local-db/AGENTS.md) |
@@ -238,7 +237,7 @@ If `.git` exceeds ~100 MiB or clone slows again: consider `git filter-repo` or a
 ## Versioning Policy
 
 - Schema contracts use `schema_version` field aligned with bundle envelope
-- CLI / daemon SemVer must reflect breaking wire changes
+- CLI / runtime SemVer must reflect breaking wire changes
 - `@42ch/nexus-contracts` major bump → coordinated update across CLI + platform API + npm package
 - npm and Rust workspace versions may differ; `schema_version` is the cross-language lock
 
@@ -248,7 +247,7 @@ Breaking changes are expected and allowed — API shapes, CLI flags, on-disk pat
 
 ## Constraints & Pitfalls
 
-- **Do not treat the daemon runtime as an ACP Agent/Server** — it's a local supervisor, client-only
+- **Do not treat the Electron-owned TS service as an ACP Agent/Server** — it is the local HTTP host for browser/desktop and hosts the provider adapters; Nexus' own surfaces are ACP clients (the retired `nexus42 daemon` group is not an ACP server either)
 - **Do not sync full manuscript text by default** — only structured deltas/bundles
 - **World history is immutable** — changes go through Fork, not in-place mutation
 - **Wire contracts must match schemas** — no drift between `schemas/` and generated types

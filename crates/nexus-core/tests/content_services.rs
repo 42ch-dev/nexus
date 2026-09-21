@@ -860,14 +860,35 @@ async fn outline_frontmatter_delimiter_edges() {
     fx.core.close().await.unwrap();
 }
 
-/// Fix-round regression (lock-holder label): a lock acquired through the
-/// daemon-holder content route reports the legacy `cli:http:<uuid>` holder
-/// verbatim in the observable 423 `Locked.reason` (`work … is locked by
-/// 'cli:http:…'`).
+/// Wording-independent lock-conflict assertion (PM addition): a refused
+/// mutation must report the `work_locked` class for this Work and name the
+/// holder that actually holds it. No holder spelling is a contract.
+fn assert_lock_conflict(resource: &str, work_id: &str, holder: &str) {
+    assert!(
+        resource.starts_with("work_locked:"),
+        "lock conflict class: {resource}"
+    );
+    assert!(
+        resource.contains(work_id),
+        "lock conflict must name the Work: {resource}"
+    );
+    assert!(
+        resource.contains(holder),
+        "lock conflict must name the current holder: {resource}"
+    );
+}
+
+/// A Work held by a runtime lock refuses the content mutation as a lock
+/// conflict — whatever holder label the holder and the contender carry — and
+/// leaves the durable chapter row untouched; releasing the holder restores
+/// writability and the mutator's own holder is gone once it returns.
 #[tokio::test]
-async fn locked_work_reports_http_holder_in_reason() {
+async fn locked_work_refuses_conflicting_holder() {
     let fx = setup().await;
-    let holder = nexus_local_db::cli_holder("http");
+    // First lock attempt wins; a later attempt under a different holder label is
+    // refused as a lock conflict naming the holder that already owns the Work.
+    // Neither label is asserted — only the conflict class is.
+    let holder = nexus_local_db::cli_holder("core");
     let acquired = nexus_local_db::acquire_runtime_lock(
         &fx.pool,
         fx.principal.creator_id(),
@@ -882,6 +903,25 @@ async fn locked_work_reports_http_holder_in_reason() {
         acquired,
         nexus_local_db::AcquireResult::Acquired { .. }
     ));
+    let contender = nexus_local_db::cli_holder("http");
+    match nexus_local_db::acquire_runtime_lock(
+        &fx.pool,
+        fx.principal.creator_id(),
+        &fx.work_id,
+        &contender,
+        nexus_local_db::ttl_from_env(),
+        false,
+    )
+    .await
+    .unwrap()
+    {
+        nexus_local_db::AcquireResult::Locked {
+            holder: existing, ..
+        } => assert_eq!(existing, holder, "conflict must name the current holder"),
+        nexus_local_db::AcquireResult::Acquired { .. } => {
+            panic!("a second lock attempt must be refused as a lock conflict");
+        }
+    }
 
     let err = fx
         .core
@@ -898,35 +938,63 @@ async fn locked_work_reports_http_holder_in_reason() {
     let CoreError::Forbidden { resource } = err else {
         panic!("expected locked carrier, got {err:?}");
     };
-    let reason = resource
-        .strip_prefix("work_locked:")
-        .expect("locked resource prefix");
-    let marker = "'cli:http:";
-    let start = reason
-        .find(marker)
-        .expect("legacy cli:http holder in reason");
-    let holder_tail = &reason[start + marker.len()..];
-    let uuid = holder_tail.split('\'').next().expect("closing quote");
-    assert_eq!(uuid.len(), 36, "holder uuid shape: {reason}");
-    assert!(
-        uuid.chars().filter(|c| *c == '-').count() == 4,
-        "uuid dashes"
-    );
-    assert!(
-        !reason.contains("cli:core:"),
-        "core label must not leak into the HTTP surface: {reason}"
+    assert_lock_conflict(&resource, &fx.work_id, &holder);
+
+    // Refusals leave the durable row consistent: the seeded slug survives and
+    // the holder is still the one that acquired the lock.
+    let unchanged = fx
+        .core
+        .chapter_detail(
+            &fx.principal,
+            fx.work_id.clone(),
+            "1".into(),
+            content_query(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unchanged.slug.as_deref(), Some("ch01"), "slug untouched");
+    assert_eq!(
+        fx.core
+            .get_work(&fx.principal, fx.work_id.clone())
+            .await
+            .unwrap()
+            .runtime_lock_holder
+            .as_deref(),
+        Some(holder.as_str())
     );
 
-    // The route's own holder also releases cleanly (label round-trips).
-    let released = nexus_local_db::release_runtime_lock(
+    // Releasing the holder restores writability, and the mutator's own holder
+    // is gone once it returns.
+    assert!(nexus_local_db::release_runtime_lock(
         &fx.pool,
         fx.principal.creator_id(),
         &fx.work_id,
         &holder,
     )
     .await
-    .unwrap();
-    assert!(released);
+    .unwrap());
+    let unlocked = fx
+        .core
+        .patch_chapter(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            "1".into(),
+            content_query(),
+            patch_request(serde_json::json!({"slug": "unlocked-slug"})),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unlocked.slug.as_deref(), Some("unlocked-slug"));
+    assert_eq!(
+        fx.core
+            .get_work(&fx.principal, fx.work_id.clone())
+            .await
+            .unwrap()
+            .runtime_lock_holder,
+        None,
+        "the mutator's own lock must be released"
+    );
     fx.pool.close().await;
     fx.core.close().await.unwrap();
 }
@@ -1005,6 +1073,686 @@ async fn work_chronology_projects_flag_by_ref_or_id() {
         panic!("expected NotFound, got {err:?}");
     };
     assert_eq!(resource, "work no-such-work");
+    fx.pool.close().await;
+    fx.core.close().await.unwrap();
+}
+
+// ─── Outline canvas + chapter content: retained domain assertions migrated
+// from the retired daemon runtime fixtures (`outline_api.rs`,
+// `outline_patch.rs`, `chapters_api.rs`). ───────────────────────────────────
+
+/// Current work-level outline revision (the OCC base of every canvas patch).
+async fn outline_revision(fx: &Fixture) -> u64 {
+    fx.core
+        .work_outline(&fx.principal, fx.work_id.clone())
+        .await
+        .expect("outline read")
+        .outline_revision
+}
+
+/// The `event_id` of the projected timeline event carrying `title`.
+async fn event_id_by_title(fx: &Fixture, title: &str) -> String {
+    fx.core
+        .work_outline(&fx.principal, fx.work_id.clone())
+        .await
+        .expect("outline read")
+        .timeline_events
+        .iter()
+        .find(|event| event.title == title)
+        .unwrap_or_else(|| panic!("timeline event '{title}'"))
+        .event_id
+        .clone()
+}
+
+/// The structured outline-validation refusal must name the broken rule (a
+/// bare variant match would also pass on an unrelated validation failure).
+fn assert_outline_validation<T: std::fmt::Debug>(
+    context: &str,
+    result: Result<T, CoreError>,
+    needle: &str,
+) {
+    match result {
+        Err(CoreError::OutlineValidation(error)) => assert!(
+            error.errors.iter().any(|message| message.contains(needle)),
+            "{context}: the refusal must name '{needle}': {:?}",
+            error.errors
+        ),
+        other => panic!("{context}: expected an outline-validation refusal, got {other:?}"),
+    }
+}
+
+/// Outline read: an unpatched Work derives its frontmatter from the chapter
+/// SSOT — revision 0, one default volume holding every seeded chapter and no
+/// timeline / foreshadow / title entries yet.
+#[tokio::test]
+async fn retained_outline_read_derives_default_frontmatter_from_chapters() {
+    let fx = setup().await;
+
+    let outline = fx
+        .core
+        .work_outline(&fx.principal, fx.work_id.clone())
+        .await
+        .expect("outline read");
+    assert_eq!(
+        outline.outline_revision, 0,
+        "unpatched outline is revision 0"
+    );
+    assert_eq!(outline.volumes.len(), 1, "default derivation: one volume");
+    assert_eq!(outline.volumes[0].volume_id, NonZeroU64::new(1).unwrap());
+    assert_eq!(
+        outline.volumes[0].chapter_ids,
+        vec![
+            NonZeroU64::new(1).unwrap(),
+            NonZeroU64::new(2).unwrap(),
+            NonZeroU64::new(3).unwrap()
+        ],
+        "every seeded chapter lands in the default volume"
+    );
+    assert!(outline.timeline_events.is_empty());
+    assert!(outline.foreshadows.is_empty());
+    assert!(outline.chapter_titles.is_empty());
+    fx.pool.close().await;
+    fx.core.close().await.unwrap();
+}
+
+/// Canvas authoring round trip: `move_chapter` re-binds the chapter's volume
+/// and bumps the revision, and a chapter `set {title, status}` patch lands in
+/// the frontmatter / chapter projection the next read serves.
+#[tokio::test]
+async fn retained_outline_structure_and_chapter_patch_round_trip() {
+    let fx = setup().await;
+
+    let moved = fx
+        .core
+        .patch_outline_structure(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            structure_request(serde_json::json!({
+                "work_id": fx.work_id, "base_revision": 0,
+                "operation": "move_chapter", "chapter_id": 1, "volume_id": 2
+            })),
+        )
+        .await
+        .expect("move chapter");
+    assert_eq!(moved.new_revision, NonZeroU64::new(1).unwrap());
+
+    let outline = fx
+        .core
+        .work_outline(&fx.principal, fx.work_id.clone())
+        .await
+        .unwrap();
+    assert_eq!(outline.outline_revision, 1);
+    let target = outline
+        .volumes
+        .iter()
+        .find(|volume| volume.volume_id == NonZeroU64::new(2).unwrap())
+        .expect("created Volume 2");
+    assert_eq!(target.chapter_ids, vec![NonZeroU64::new(1).unwrap()]);
+    // The chapter moved out of Volume 1; its siblings stayed.
+    let source = outline
+        .volumes
+        .iter()
+        .find(|volume| volume.volume_id == NonZeroU64::new(1).unwrap())
+        .expect("Volume 1 kept for the remaining chapters");
+    assert_eq!(
+        source.chapter_ids,
+        vec![NonZeroU64::new(2).unwrap(), NonZeroU64::new(3).unwrap()]
+    );
+
+    let patched = fx
+        .core
+        .patch_outline_chapter(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            "2".into(),
+            chapter_patch_request(serde_json::json!({
+                "work_id": fx.work_id, "base_revision": 1, "chapter_id": 2,
+                "set": {"title": "Second Scene", "status": "outlined"}
+            })),
+        )
+        .await
+        .expect("chapter patch");
+    assert_eq!(patched.new_revision, NonZeroU64::new(2).unwrap());
+
+    let outline = fx
+        .core
+        .work_outline(&fx.principal, fx.work_id.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        outline.chapter_titles.get("2").map(String::as_str),
+        Some("Second Scene")
+    );
+    let detail = fx
+        .core
+        .chapter_detail(
+            &fx.principal,
+            fx.work_id.clone(),
+            "2".into(),
+            content_query(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(detail.status).unwrap(),
+        serde_json::json!("outlined")
+    );
+    fx.pool.close().await;
+    fx.core.close().await.unwrap();
+}
+
+/// Slug rules (B1): a kebab slug passes, an uppercase / spaced / over-long
+/// slug and a Work-wide duplicate are the structured `OutlineValidation`
+/// refusal, re-asserting a chapter's own slug is not a collision, and a
+/// refusal never advances the outline revision.
+#[tokio::test]
+async fn retained_outline_slug_validation_rules() {
+    let fx = setup().await;
+    let long_slug = "a".repeat(81);
+
+    for (label, slug, needle) in [
+        ("uppercase", "Opening-Scene".to_string(), "kebab-case"),
+        ("spaces", "opening scene".to_string(), "kebab-case"),
+        ("too long", long_slug, "must be 1..="),
+    ] {
+        let result = fx
+            .core
+            .patch_outline_chapter(
+                &fx.principal,
+                "http",
+                fx.work_id.clone(),
+                "1".into(),
+                chapter_patch_request(serde_json::json!({
+                    "work_id": fx.work_id, "base_revision": 0, "chapter_id": 1,
+                    "set": {"slug": slug}
+                })),
+            )
+            .await;
+        assert_outline_validation(label, result, needle);
+    }
+
+    // Work-wide uniqueness: chapter 2 cannot take chapter 1's slug.
+    let duplicate = fx
+        .core
+        .patch_outline_chapter(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            "2".into(),
+            chapter_patch_request(serde_json::json!({
+                "work_id": fx.work_id, "base_revision": 0, "chapter_id": 2,
+                "set": {"slug": "ch01"}
+            })),
+        )
+        .await;
+    assert_outline_validation(
+        "duplicate slug",
+        duplicate,
+        "already used by another chapter",
+    );
+    assert_eq!(outline_revision(&fx).await, 0, "refusals never advance");
+
+    // Re-asserting the chapter's own slug passes (not a collision with itself).
+    let unchanged = fx
+        .core
+        .patch_outline_chapter(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            "1".into(),
+            chapter_patch_request(serde_json::json!({
+                "work_id": fx.work_id, "base_revision": 0, "chapter_id": 1,
+                "set": {"slug": "ch01"}
+            })),
+        )
+        .await
+        .expect("re-asserting the same chapter's slug");
+    assert_eq!(unchanged.new_revision, NonZeroU64::new(1).unwrap());
+    fx.pool.close().await;
+    fx.core.close().await.unwrap();
+}
+
+/// Volume rules (B2) and the published-chapter structural guard (B4): an
+/// existing volume and the immediate next sequential volume are legal move
+/// targets, an arbitrary out-of-range volume is refused on both the structure
+/// and the chapter patch path, a published chapter cannot move while a draft
+/// chapter can, and every refusal leaves the revision untouched.
+#[tokio::test]
+async fn retained_outline_volume_targets_and_published_structure_guard() {
+    let fx = setup().await;
+
+    let out_of_range = fx
+        .core
+        .patch_outline_structure(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            structure_request(serde_json::json!({
+                "work_id": fx.work_id, "base_revision": 0,
+                "operation": "attach_to_volume", "chapter_id": 1, "volume_id": 999
+            })),
+        )
+        .await;
+    assert_outline_validation(
+        "arbitrary structure volume",
+        out_of_range,
+        "next sequential volume",
+    );
+
+    let out_of_range_chapter = fx
+        .core
+        .patch_outline_chapter(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            "1".into(),
+            chapter_patch_request(serde_json::json!({
+                "work_id": fx.work_id, "base_revision": 0, "chapter_id": 1,
+                "set": {"volume": 999}
+            })),
+        )
+        .await;
+    assert_outline_validation(
+        "arbitrary chapter volume",
+        out_of_range_chapter,
+        "next sequential volume",
+    );
+    assert_eq!(outline_revision(&fx).await, 0, "refusals never advance");
+
+    // An existing volume is a legal target.
+    let existing = fx
+        .core
+        .patch_outline_structure(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            structure_request(serde_json::json!({
+                "work_id": fx.work_id, "base_revision": 0,
+                "operation": "attach_to_volume", "chapter_id": 1, "volume_id": 1
+            })),
+        )
+        .await
+        .expect("attach to the existing volume");
+    assert_eq!(existing.new_revision, NonZeroU64::new(1).unwrap());
+
+    // The immediate next sequential volume is the legitimate "create N+1" flow.
+    let sequential = fx
+        .core
+        .patch_outline_structure(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            structure_request(serde_json::json!({
+                "work_id": fx.work_id, "base_revision": 1,
+                "operation": "move_chapter", "chapter_id": 1, "volume_id": 2
+            })),
+        )
+        .await
+        .expect("move to the next sequential volume");
+    assert_eq!(sequential.new_revision, NonZeroU64::new(2).unwrap());
+
+    // A published chapter is frozen for structural moves …
+    sqlx::query("UPDATE work_chapters SET status = 'published' WHERE work_id = ? AND chapter = 2")
+        .bind(&fx.work_id)
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+    let blocked = fx
+        .core
+        .patch_outline_structure(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            structure_request(serde_json::json!({
+                "work_id": fx.work_id, "base_revision": 2,
+                "operation": "move_chapter", "chapter_id": 2, "volume_id": 3
+            })),
+        )
+        .await;
+    assert_outline_validation("published chapter move", blocked, "published chapter 2");
+    assert_eq!(
+        outline_revision(&fx).await,
+        2,
+        "the refusal left the revision untouched"
+    );
+
+    // … while a draft chapter (no published release yet) still moves.
+    sqlx::query("UPDATE work_chapters SET status = 'draft' WHERE work_id = ? AND chapter = 3")
+        .bind(&fx.work_id)
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+    let draft = fx
+        .core
+        .patch_outline_structure(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            structure_request(serde_json::json!({
+                "work_id": fx.work_id, "base_revision": 2,
+                "operation": "move_chapter", "chapter_id": 3, "volume_id": 3
+            })),
+        )
+        .await
+        .expect("a draft chapter moves");
+    assert_eq!(draft.new_revision, NonZeroU64::new(3).unwrap());
+    fx.pool.close().await;
+    fx.core.close().await.unwrap();
+}
+
+/// Foreshadow temporal order (B3): a source realizing an earlier chapter links,
+/// a source realizing a later chapter is refused, and a source with no
+/// realization at all cannot be ordered — each refusal is the structured
+/// `OutlineValidation` and leaves the revision untouched.
+#[tokio::test]
+async fn retained_foreshadow_temporal_order_guards() {
+    let fx = setup().await;
+    let patch = |base_revision: u64, value: serde_json::Value| {
+        let mut value = value;
+        value["work_id"] = serde_json::json!(fx.work_id.clone());
+        value["base_revision"] = serde_json::json!(base_revision);
+        timeline_request(value)
+    };
+
+    fx.core
+        .patch_timeline_event(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            patch(
+                0,
+                serde_json::json!({"operation": "add_event", "title": "Plant", "realizes_chapter_id": 1}),
+            ),
+        )
+        .await
+        .expect("plant event");
+    fx.core
+        .patch_timeline_event(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            patch(
+                1,
+                serde_json::json!({"operation": "add_event", "title": "Payoff", "realizes_chapter_id": 3}),
+            ),
+        )
+        .await
+        .expect("payoff event");
+
+    // 1 ≤ 3: the edge is orderable and links.
+    fx.core
+        .patch_timeline_event(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            patch(
+                2,
+                serde_json::json!({
+                    "operation": "link_foreshadow",
+                    "event_id": event_id_by_title(&fx, "Plant").await,
+                    "foreshadows_event_id": event_id_by_title(&fx, "Payoff").await
+                }),
+            ),
+        )
+        .await
+        .expect("source-before-target foreshadow links");
+    assert_eq!(outline_revision(&fx).await, 3);
+
+    // A source realizing a LATER chapter than its target is a violation.
+    fx.core
+        .patch_timeline_event(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            patch(3, serde_json::json!({"operation": "add_event", "title": "Late", "realizes_chapter_id": 3})),
+        )
+        .await
+        .expect("late event");
+    fx.core
+        .patch_timeline_event(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            patch(4, serde_json::json!({"operation": "add_event", "title": "Early", "realizes_chapter_id": 1})),
+        )
+        .await
+        .expect("early event");
+    let backwards = fx
+        .core
+        .patch_timeline_event(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            patch(
+                5,
+                serde_json::json!({
+                    "operation": "link_foreshadow",
+                    "event_id": event_id_by_title(&fx, "Late").await,
+                    "foreshadows_event_id": event_id_by_title(&fx, "Early").await
+                }),
+            ),
+        )
+        .await;
+    assert_outline_validation("source after target", backwards, "which is after");
+    assert_eq!(outline_revision(&fx).await, 5, "the refusal never advances");
+
+    // An unscheduled source has no realization to order against.
+    fx.core
+        .patch_timeline_event(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            patch(
+                5,
+                serde_json::json!({"operation": "add_event", "title": "Unscheduled"}),
+            ),
+        )
+        .await
+        .expect("unscheduled event");
+    let unordered = fx
+        .core
+        .patch_timeline_event(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            patch(
+                6,
+                serde_json::json!({
+                    "operation": "link_foreshadow",
+                    "event_id": event_id_by_title(&fx, "Unscheduled").await,
+                    "foreshadows_event_id": event_id_by_title(&fx, "Early").await
+                }),
+            ),
+        )
+        .await;
+    assert_outline_validation(
+        "unrealized source",
+        unordered,
+        "requires both source and target events",
+    );
+    assert_eq!(outline_revision(&fx).await, 6);
+    fx.pool.close().await;
+    fx.core.close().await.unwrap();
+}
+
+/// Outline-prose content patch (V1.75 A2): the per-chapter prose file is
+/// replaced, the work-level `outline_revision` CAS bump rides the same write,
+/// and the chapter `body_path` column plus the body file bytes stay
+/// byte-identical (body ownership is never touched by an outline patch).
+#[tokio::test]
+async fn retained_outline_content_patch_revision_and_body_ownership() {
+    let fx = setup().await;
+    let rel_outline = "Works/test-novel/Outlines/chapters/ch01-outline.md";
+    let rel_body = "Works/test-novel/Stories/ch01-ch01.md";
+    let outline_abs = fx.creative_root.join(rel_outline);
+    std::fs::create_dir_all(outline_abs.parent().unwrap()).unwrap();
+    std::fs::write(&outline_abs, "# Old outline\n").unwrap();
+    let body_abs = fx.creative_root.join(rel_body);
+    fx.write_body(
+        1,
+        "# Chapter body\n\nThe AI owns this prose. It must not change.\n",
+    );
+    let body_bytes_before = std::fs::read(&body_abs).unwrap();
+
+    let patched = fx
+        .core
+        .patch_outline_chapter(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            "1".into(),
+            chapter_patch_request(serde_json::json!({
+                "work_id": fx.work_id, "base_revision": 0, "chapter_id": 1,
+                "set": {"content": "## Scene beats\n\n- Open on the harbor"}
+            })),
+        )
+        .await
+        .expect("content patch");
+    assert_eq!(patched.new_revision, NonZeroU64::new(1).unwrap());
+    assert_eq!(outline_revision(&fx).await, 1);
+
+    let on_disk = std::fs::read_to_string(&outline_abs).unwrap();
+    assert!(
+        on_disk.contains("## Scene beats"),
+        "the patched prose is durable: {on_disk}"
+    );
+    assert!(
+        !on_disk.contains("Old outline"),
+        "stale prose must be replaced: {on_disk}"
+    );
+
+    // Body ownership: the column and the file bytes are untouched.
+    let stored_body_path: Option<String> =
+        sqlx::query_scalar("SELECT body_path FROM work_chapters WHERE work_id = ? AND chapter = 1")
+            .bind(&fx.work_id)
+            .fetch_one(&fx.pool)
+            .await
+            .unwrap();
+    assert_eq!(stored_body_path.as_deref(), Some(rel_body));
+    assert_eq!(
+        std::fs::read(&body_abs).unwrap(),
+        body_bytes_before,
+        "the body file must be byte-identical after an outline content patch"
+    );
+    fx.pool.close().await;
+    fx.core.close().await.unwrap();
+}
+
+/// Chapter protection + lookup: the body projection reports its stored
+/// relative path and read-only flag, an unknown chapter / unknown Work keeps
+/// the typed not-found, and a finalized chapter needs the explicit structural
+/// confirmation before a metadata edit lands.
+#[tokio::test]
+async fn retained_chapter_protection_lookup_and_body_projection() {
+    let fx = setup().await;
+
+    fx.write_body(1, "chapter one body");
+    let body = fx
+        .core
+        .chapter_body(
+            &fx.principal,
+            fx.work_id.clone(),
+            "1".into(),
+            content_query(),
+        )
+        .await
+        .expect("body read");
+    assert_eq!(body.body_path, "Works/test-novel/Stories/ch01-ch01.md");
+    assert_eq!(body.content, "chapter one body");
+    assert!(body.read_only, "the body surface is read-only");
+
+    let err = fx
+        .core
+        .chapter_body(
+            &fx.principal,
+            fx.work_id.clone(),
+            "99".into(),
+            content_query(),
+        )
+        .await
+        .expect_err("unknown chapter");
+    assert!(matches!(err, CoreError::NotFound { .. }), "{err:?}");
+
+    let err = fx
+        .core
+        .list_chapters(
+            &fx.principal,
+            "wrk_unknown".into(),
+            chapters_query(serde_json::json!({})),
+        )
+        .await
+        .expect_err("unknown work");
+    assert!(matches!(err, CoreError::NotFound { .. }), "{err:?}");
+
+    // The V1.65 transition grammar is one-way: outlined → not_started is refused.
+    fx.core
+        .patch_chapter(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            "2".into(),
+            content_query(),
+            patch_request(serde_json::json!({"status": "outlined"})),
+        )
+        .await
+        .expect("not_started → outlined");
+    let reverse = fx
+        .core
+        .patch_chapter(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            "2".into(),
+            content_query(),
+            patch_request(serde_json::json!({"status": "not_started"})),
+        )
+        .await
+        .expect_err("outlined → not_started must be refused");
+    let CoreError::InvalidInput { field, .. } = reverse else {
+        panic!("expected the transition carrier, got {reverse:?}");
+    };
+    assert_eq!(field, "chapter_status_transition_invalid");
+
+    // Finalized chapters are protected until the structural edit is confirmed.
+    sqlx::query("UPDATE work_chapters SET status = 'finalized' WHERE work_id = ? AND chapter = 1")
+        .bind(&fx.work_id)
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+    let err = fx
+        .core
+        .patch_chapter(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            "1".into(),
+            content_query(),
+            patch_request(serde_json::json!({"slug": "new-slug"})),
+        )
+        .await
+        .expect_err("finalized edit without confirmation");
+    let CoreError::InvalidInput { field, .. } = err else {
+        panic!("expected the confirmation carrier, got {err:?}");
+    };
+    assert_eq!(field, "chapter_structure_confirmation_required");
+
+    let confirmed = fx
+        .core
+        .patch_chapter(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            "1".into(),
+            content_query(),
+            patch_request(serde_json::json!({
+                "slug": "new-slug", "confirm_structural_edit": true
+            })),
+        )
+        .await
+        .expect("confirmed finalized edit");
+    assert_eq!(confirmed.slug.as_deref(), Some("new-slug"));
     fx.pool.close().await;
     fx.core.close().await.unwrap();
 }

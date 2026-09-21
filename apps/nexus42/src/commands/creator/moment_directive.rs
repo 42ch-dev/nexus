@@ -1,5 +1,5 @@
 //! Moment Directive author surface (V1.150 P1, DF-75) — `creator
-//! moment-directive set|show|clear`.
+//! moment-directive set|show|clear` (direct-core retarget v1.193 P0-T8).
 //!
 //! CLI-only author surface per the Q3 lock (spec `fl-l-w5-prompt-control-plane.md`
 //! §1.2 / §3): a short author-written instruction injected by MCA into the
@@ -7,12 +7,13 @@
 //! Persistence is `nexus-local-db` (`moment_directives` table); observation
 //! is the existing `platform context assemble-moment` output.
 //!
-//! The [`LocalDirectiveStore`] composition-root [`DirectiveStore`] adapter
-//! (relocated V1.151 P0, DF-76) lives in `nexus-daemon-runtime`
-//! (`directive_store`), shared by this CLI surface and the daemon directive
-//! route. It cannot live in `nexus-local-db` (that would create a
-//! `nexus-local-db` → MCA dependency cycle), and `nexus42` already depends
-//! on `nexus-daemon-runtime`.
+//! Every verb runs on the typed core seam ([`CoreService::moment_directive`],
+//! `context.rs`) through the shared direct-call helper ([`crate::core`]): the
+//! core owns scope ownership (403 for a foreign Work/World — a foreign scope
+//! never leaks directive state), the validation, the Work-wins / World-
+//! override inheritance and the soft clear. This module owns only the CLI
+//! half — mapping flags onto the typed request, resolving the implicit Work
+//! scope, and rendering the settled row after the writer is released.
 //!
 //! # Product-local only (AC-I3)
 //!
@@ -21,16 +22,21 @@
 //! `activation_trace[]`, never in any pack export/import path.
 
 use clap::{Args, Subcommand};
-use sqlx::SqlitePool;
 
+use crate::commands::creator::works::active_work_id_core;
 use crate::config::CliConfig;
+use crate::core::{finish_direct, map_core_error, open_direct_core};
 use crate::errors::{CliError, Result};
-use nexus_local_db::moment_directive::{
-    clear, get_active_for_work, get_active_for_world, replace_active, scope_kind, set_active,
-    MomentDirectiveRow, NewMomentDirective,
+use nexus_contracts::daemon_api::inspector::moment_directive_request::{
+    MomentDirectiveRequest, MomentDirectiveRequestAction, MomentDirectiveRequestInsertDepth,
+    MomentDirectiveRequestScope, MomentDirectiveRequestScopeKind, MomentDirectiveRequestTtlKind,
 };
-use nexus_local_db::{get_work, list_works, WorkListFilters};
-use nexus_moment_context_assembly::directive::DirectiveDepth;
+use nexus_contracts::daemon_api::inspector::moment_directive_response::{
+    MomentDirectiveResponse, NexusDaemonMomentDirectiveResponseDirectiveScopeKind,
+};
+use nexus_core::{CoreService, Principal};
+use std::fmt::Write as _;
+use std::num::NonZeroU64;
 
 /// `creator moment-directive` subcommands (V1.150 P1, DF-75).
 #[derive(Debug, Subcommand)]
@@ -62,7 +68,7 @@ pub struct MomentDirectiveSetArgs {
     /// Insert depth within the directive region: `head` (nearest system),
     /// `mid`, `tail` (nearest lore)
     #[arg(long, value_parser = parse_depth)]
-    pub depth: DirectiveDepth,
+    pub depth: MomentDirectiveRequestInsertDepth,
 
     /// TTL in generations — count-down by 1 on every injecting assemble.
     /// Exactly one TTL kind is required.
@@ -108,288 +114,847 @@ pub struct MomentDirectiveScopeArgs {
     pub world: Option<String>,
 }
 
-/// Parse `--depth` into a [`DirectiveDepth`].
-fn parse_depth(value: &str) -> std::result::Result<DirectiveDepth, String> {
-    DirectiveDepth::parse(value)
-        .ok_or_else(|| format!("unknown insert depth {value:?} (expected head | mid | tail)"))
+/// Parse `--depth` into the typed insert-depth enum.
+fn parse_depth(value: &str) -> std::result::Result<MomentDirectiveRequestInsertDepth, String> {
+    value
+        .parse()
+        .map_err(|_| format!("unknown insert depth {value:?} (expected head | mid | tail)"))
 }
 
-/// Run the `creator moment-directive` command against the local `state.db`.
+/// Run the `creator moment-directive` command against the selected workspace.
+///
+/// The writer is released by [`finish_direct`] before any line is printed, so
+/// the author never reads a reported outcome the core could not settle.
 ///
 /// # Errors
 ///
-/// Returns `CliError` if no creator is active, the DB cannot be opened, or a
-/// validation / persistence error occurs.
+/// Returns [`CliError`] when no creator/workspace is selected, a flag is
+/// invalid, the resolved Work has no bound World for `--world`, or the mapped
+/// core refusal (403 for a foreign scope, 409 for a `set` over an active
+/// directive without `--replace`, storage failure), plus any cleanup refusal
+/// from [`finish_direct`].
 pub async fn run(command: MomentDirectiveCommand, config: &CliConfig) -> Result<()> {
-    let creator_id = config
-        .active_creator_id
-        .as_deref()
-        .ok_or(CliError::CreatorNotSelected)?;
-    let db_path = crate::config::resolve_state_db_path(config)?;
-    let pool = crate::db::Schema::init(&db_path).await?;
-    let workspace_slug = config.workspace_slug_for_creator(creator_id);
-    match command {
-        MomentDirectiveCommand::Set(args) => {
-            handle_set(&pool, creator_id, workspace_slug, &args).await
-        }
-        MomentDirectiveCommand::Show(args) => {
-            handle_show(&pool, creator_id, workspace_slug, &args).await
-        }
-        MomentDirectiveCommand::Clear(args) => {
-            handle_clear(&pool, creator_id, workspace_slug, &args).await
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        match command {
+            MomentDirectiveCommand::Set(args) => handle_set(&core, &principal, &args).await,
+            MomentDirectiveCommand::Show(args) => handle_show(&core, &principal, &args).await,
+            MomentDirectiveCommand::Clear(args) => handle_clear(&core, &principal, &args).await,
         }
     }
+    .await;
+    println!("{}", finish_direct(&core, outcome).await?);
+    Ok(())
 }
 
 /// `creator moment-directive set` handler (spec §3.1 / §3.3).
+///
+/// # Errors
+///
+/// Returns a named [`CliError::Config`] for an empty `--body`, a missing /
+/// non-positive TTL, or a World scope on a Work with no bound World; the
+/// mapped core refusal otherwise.
 async fn handle_set(
-    pool: &SqlitePool,
-    creator_id: &str,
-    workspace_slug: &str,
+    core: &CoreService,
+    principal: &Principal,
     args: &MomentDirectiveSetArgs,
-) -> Result<()> {
-    // ── Validation (spec §3.1 / §3.3 "Write") ──────────────────────────
+) -> Result<String> {
+    // ── Flag mapping (spec §3.1 / §3.3 "Write") ─────────────────────────
     let body = args.body.trim();
     if body.is_empty() {
         return Err(CliError::Config(
             "--body must be non-empty (after trimming whitespace)".to_string(),
         ));
     }
-    let (ttl_kind, ttl_remaining) = match (args.ttl_generations, args.ttl_chapters) {
-        (None, None) => {
-            return Err(CliError::Config(
-                "exactly one of --ttl-generations / --ttl-chapters is required".to_string(),
-            ));
-        }
-        (Some(_), Some(_)) => {
-            return Err(CliError::Config(
-                "--ttl-generations and --ttl-chapters are mutually exclusive".to_string(),
-            ));
-        }
-        (Some(n), None) if n >= 1 => ("generations", n),
-        (None, Some(n)) if n >= 1 => ("chapters", n),
-        _ => {
-            return Err(CliError::Config(
-                "TTL count must be a positive integer (>= 1)".to_string(),
-            ));
-        }
-    };
+    let (ttl_kind, ttl_remaining) = map_ttl(args)?;
+    let (scope_kind, scope_id, scope_label) = resolve_set_scope(core, principal, args).await?;
 
-    // ── Scope resolution (spec §3.2) ───────────────────────────────────
-    // Both branches resolve the Work first (explicit `--work` or active):
-    // the Work-scoped directive targets the Work itself, the World override
-    // targets the Work's bound World.
-    let work = resolve_work(pool, creator_id, workspace_slug, args.work.as_deref()).await?;
-    let (scope_kind, scope_id, scope_label) = if args.world {
-        let world_id = work.world_id.clone().ok_or_else(|| {
-            CliError::Config(format!(
-                "Work {} is not bound to a World; a World-scoped Moment Directive needs a World. \
-                 Set a Work-scoped directive instead.",
-                work.work_id
-            ))
-        })?;
-        let scope_label = format!("world {world_id}");
-        (scope_kind::WORLD, world_id, scope_label)
-    } else {
-        (
-            scope_kind::WORK,
-            work.work_id.clone(),
-            format!("work {}", work.work_id),
+    let response = core
+        .moment_directive(
+            principal,
+            MomentDirectiveRequest {
+                action: MomentDirectiveRequestAction::Set,
+                body: Some(body.to_string()),
+                clear_on_scene_change: Some(args.clear_on_scene_change),
+                insert_depth: Some(args.depth),
+                replace: Some(args.replace),
+                ttl_kind: Some(ttl_kind),
+                ttl_remaining: Some(ttl_remaining),
+                scope: MomentDirectiveRequestScope {
+                    id: scope_id,
+                    kind: scope_kind,
+                },
+            },
         )
-    };
+        .await
+        .map_err(map_core_error)?;
 
-    let new = NewMomentDirective {
-        directive_id: &generate_directive_id(),
-        creator_id,
-        scope_kind,
-        scope_id: &scope_id,
-        body,
-        insert_depth: args.depth.as_str(),
+    // `set` writes a row, so the core answers the `Directive` branch; the
+    // empty branch would mean the settled row could not be decoded.
+    let MomentDirectiveResponse::Directive {
+        directive_id,
+        insert_depth,
         ttl_kind,
         ttl_remaining,
-        clear_on_scene_change: args.clear_on_scene_change,
-        now: now_ms(),
+        clear_on_scene_change,
+        ..
+    } = response
+    else {
+        return Err(CliError::Other(
+            "core returned no directive for a set operation".to_string(),
+        ));
     };
 
-    let inserted = if args.replace {
-        replace_active(pool, &new).await?
-    } else {
-        match set_active(pool, &new).await {
-            Ok(row) => row,
-            Err(nexus_local_db::LocalDbError::Sqlx(sqlx::Error::Database(db_err)))
-                if db_err.is_unique_violation() =>
-            {
-                return Err(CliError::Config(
-                    "A Moment Directive is already active for this scope. \
-                     Pass --replace to supersede it (the old directive is retained with \
-                     `replaced_by` set to the new id)."
-                        .to_string(),
-                ));
-            }
-            Err(e) => return Err(e.into()),
-        }
-    };
-
-    println!("✓ Moment Directive set for {scope_label}");
-    println!("  id: {}", inserted.directive_id);
-    println!("  depth: {}", inserted.insert_depth);
-    println!("  ttl: {} {}", inserted.ttl_remaining, inserted.ttl_kind);
-    if inserted.clear_on_scene_change {
-        println!("  clear_on_scene_change: yes");
+    let mut out = String::new();
+    let _ = writeln!(out, "✓ Moment Directive set for {scope_label}");
+    let _ = writeln!(out, "  id: {directive_id}");
+    let _ = writeln!(out, "  depth: {insert_depth}");
+    let _ = writeln!(out, "  ttl: {ttl_remaining} {ttl_kind}");
+    if clear_on_scene_change {
+        let _ = writeln!(out, "  clear_on_scene_change: yes");
     }
-    Ok(())
+    Ok(out)
 }
 
 /// `creator moment-directive show` handler — displays the **effective**
 /// directive for the requested scope (spec §3.2, QC2-F8): for a Work the
 /// author sees the directive that actually injects (the Work's own, or the
-/// inherited World override), with the source scope called out explicitly.
+/// inherited World override, which the settled row's scope names), with the
+/// source scope called out explicitly.
+///
+/// # Errors
+///
+/// Returns the mapped core refusal (403 for a foreign scope, storage
+/// failure).
 async fn handle_show(
-    pool: &SqlitePool,
-    creator_id: &str,
-    workspace_slug: &str,
+    core: &CoreService,
+    principal: &Principal,
     args: &MomentDirectiveScopeArgs,
-) -> Result<()> {
-    let Some((row, effective_for)) =
-        resolve_effective_for_show(pool, creator_id, workspace_slug, args).await?
+) -> Result<String> {
+    let (scope_kind, scope_id) = resolve_scope(core, principal, args).await?;
+    let response = core
+        .moment_directive(
+            principal,
+            scoped_request(MomentDirectiveRequestAction::Show, scope_kind, &scope_id),
+        )
+        .await
+        .map_err(map_core_error)?;
+
+    let MomentDirectiveResponse::Directive {
+        body,
+        clear_on_scene_change,
+        directive_id,
+        insert_depth,
+        scope_id: settled_scope_id,
+        scope_kind: settled_scope_kind,
+        ttl_kind,
+        ttl_remaining,
+        ..
+    } = response
     else {
-        println!("No active Moment Directive for this scope.");
-        return Ok(());
+        return Ok("No active Moment Directive for this scope.".to_string());
     };
-    println!("Directive: {}", row.directive_id);
-    println!("Scope: {} {}", row.scope_kind, row.scope_id);
-    println!("Effective for: {effective_for}");
-    println!("Depth: {}", row.insert_depth);
-    println!("TTL: {} remaining ({})", row.ttl_remaining, row.ttl_kind);
-    if row.clear_on_scene_change {
-        println!("Clear on scene change: yes");
+
+    let effective_for =
+        effective_label(scope_kind, &scope_id, settled_scope_kind, &settled_scope_id);
+    let mut out = String::new();
+    let _ = writeln!(out, "Directive: {directive_id}");
+    let _ = writeln!(out, "Scope: {settled_scope_kind} {settled_scope_id}");
+    let _ = writeln!(out, "Effective for: {effective_for}");
+    let _ = writeln!(out, "Depth: {insert_depth}");
+    let _ = writeln!(out, "TTL: {ttl_remaining} remaining ({ttl_kind})");
+    if clear_on_scene_change {
+        let _ = writeln!(out, "Clear on scene change: yes");
     }
-    println!("Body:");
-    println!("{}", row.body);
-    Ok(())
+    let _ = writeln!(out, "Body:");
+    let _ = write!(out, "{body}");
+    Ok(out)
 }
 
 /// `creator moment-directive clear` handler — soft-delete the active row.
+///
+/// The core's `clear` answer is the empty branch (no row body), so the
+/// retired CLI distinction between an expired row and an already-empty scope
+/// is no longer observable from one response — and it never was reliable,
+/// because a Work scope inherits a World override. The message therefore
+/// names the soft-delete the command performed.
+///
+/// # Errors
+///
+/// Returns the mapped core refusal (403 for a foreign scope, storage
+/// failure).
 async fn handle_clear(
-    pool: &SqlitePool,
-    creator_id: &str,
-    workspace_slug: &str,
+    core: &CoreService,
+    principal: &Principal,
     args: &MomentDirectiveScopeArgs,
-) -> Result<()> {
-    let (scope_kind, scope_id) = resolve_scope_ids(pool, creator_id, workspace_slug, args).await?;
-    let cleared = clear(pool, creator_id, scope_kind, &scope_id, now_ms()).await?;
-    if cleared {
-        println!("✓ Moment Directive cleared (soft-deleted) for {scope_kind} {scope_id}.");
-    } else {
-        println!("No active Moment Directive to clear for {scope_kind} {scope_id}.");
-    }
-    Ok(())
+) -> Result<String> {
+    let (scope_kind, scope_id) = resolve_scope(core, principal, args).await?;
+    core.moment_directive(
+        principal,
+        scoped_request(MomentDirectiveRequestAction::Clear, scope_kind, &scope_id),
+    )
+    .await
+    .map_err(map_core_error)?;
+    Ok(format!(
+        "✓ Moment Directive cleared (soft-deleted) for {scope_kind} {scope_id}."
+    ))
 }
 
-/// Resolve the **effective** directive for `show` (spec §3.2, Work-wins /
-/// World-override, QC2-F8) together with a human label of the scope it came
-/// from:
+/// A request with no optional field set — the `show` / `clear` shape.
+fn scoped_request(
+    action: MomentDirectiveRequestAction,
+    scope_kind: MomentDirectiveRequestScopeKind,
+    scope_id: &str,
+) -> MomentDirectiveRequest {
+    MomentDirectiveRequest {
+        action,
+        body: None,
+        clear_on_scene_change: None,
+        insert_depth: None,
+        replace: None,
+        scope: MomentDirectiveRequestScope {
+            id: scope_id.to_string(),
+            kind: scope_kind,
+        },
+        ttl_kind: None,
+        ttl_remaining: None,
+    }
+}
+
+/// Map `--ttl-generations` / `--ttl-chapters` onto the typed TTL pair.
 ///
-/// - `--world <id>`: the World override itself (it is what a raw world
-///   assembly would inject).
-/// - Work selection: the Work's own directive wins; otherwise the bound
-///   World's override is inherited (reported as such). No directive when the
-///   Work is worldless/unbound and has no own directive.
-async fn resolve_effective_for_show(
-    pool: &SqlitePool,
-    creator_id: &str,
-    workspace_slug: &str,
-    args: &MomentDirectiveScopeArgs,
-) -> Result<Option<(MomentDirectiveRow, String)>> {
-    if let Some(world_id) = args.world.as_deref() {
-        let row = get_active_for_world(pool, creator_id, world_id).await?;
-        return Ok(row.map(|r| (r, format!("world {world_id}"))));
+/// The flag pair is mutually exclusive in clap, and the wire carries one
+/// kind plus a `NonZeroU64` count, so the CLI owns the two flag-vocabulary
+/// refusals before the core re-validates the pair on its own authority.
+///
+/// # Errors
+///
+/// Returns [`CliError::Config`] when neither kind is given, both are given
+/// (unreachable through clap, kept for direct callers), or the count is not
+/// a positive integer.
+fn map_ttl(args: &MomentDirectiveSetArgs) -> Result<(MomentDirectiveRequestTtlKind, NonZeroU64)> {
+    match (args.ttl_generations, args.ttl_chapters) {
+        (Some(count), None) => Ok((
+            MomentDirectiveRequestTtlKind::Generations,
+            positive_ttl(count, "--ttl-generations")?,
+        )),
+        (None, Some(count)) => Ok((
+            MomentDirectiveRequestTtlKind::Chapters,
+            positive_ttl(count, "--ttl-chapters")?,
+        )),
+        (None, None) => Err(CliError::Config(
+            "exactly one of --ttl-generations / --ttl-chapters is required".to_string(),
+        )),
+        (Some(_), Some(_)) => Err(CliError::Config(
+            "--ttl-generations and --ttl-chapters are mutually exclusive".to_string(),
+        )),
     }
-    let work = resolve_work(pool, creator_id, workspace_slug, args.work.as_deref()).await?;
-    if let Some(row) = get_active_for_work(pool, creator_id, &work.work_id).await? {
-        return Ok(Some((
-            row,
-            format!("work {} (own directive)", work.work_id),
-        )));
+}
+
+/// Parse a TTL count into the wire's positive count.
+///
+/// # Errors
+///
+/// Returns [`CliError::Config`] naming `flag` when the count is zero or
+/// negative.
+fn positive_ttl(count: i64, flag: &str) -> Result<NonZeroU64> {
+    u64::try_from(count)
+        .ok()
+        .and_then(NonZeroU64::new)
+        .ok_or_else(|| {
+            CliError::Config(format!(
+                "{flag} must be a positive integer (>= 1), got {count}"
+            ))
+        })
+}
+
+/// Resolve the `set` scope (spec §3.2): both branches resolve the Work first
+/// (explicit `--work` or active) — the Work-scoped directive targets the Work
+/// itself, the World override targets the Work's bound World — and return the
+/// scope plus its human label.
+///
+/// # Errors
+///
+/// Returns [`CliError::Config`] when no Work resolves, the Work read fails, or
+/// `--world` is passed on a Work with no bound World.
+async fn resolve_set_scope(
+    core: &CoreService,
+    principal: &Principal,
+    args: &MomentDirectiveSetArgs,
+) -> Result<(MomentDirectiveRequestScopeKind, String, String)> {
+    let work_id = resolve_work_id(core, principal, args.work.as_deref()).await?;
+    if !args.world {
+        return Ok((
+            MomentDirectiveRequestScopeKind::Work,
+            work_id.clone(),
+            format!("work {work_id}"),
+        ));
     }
-    if let Some(world_id) = work.world_id {
-        if let Some(row) = get_active_for_world(pool, creator_id, &world_id).await? {
-            return Ok(Some((
-                row,
-                format!("work {} (inherited from world {world_id})", work.work_id),
-            )));
-        }
-    }
-    Ok(None)
+    let work = core
+        .get_work(principal, work_id.clone())
+        .await
+        .map_err(map_core_error)?;
+    let world_id = work.world_id.ok_or_else(|| {
+        CliError::Config(format!(
+            "Work {work_id} is not bound to a World; a World-scoped Moment Directive needs a World. \
+             Set a Work-scoped directive instead."
+        ))
+    })?;
+    let label = format!("world {world_id}");
+    Ok((MomentDirectiveRequestScopeKind::World, world_id, label))
 }
 
 /// Resolve the `(scope_kind, scope_id)` for a `show`/`clear` selection:
 /// `--world <id>` selects the World scope directly; otherwise the Work scope
 /// (explicit `--work <id>` or the active Work).
-async fn resolve_scope_ids(
-    pool: &SqlitePool,
-    creator_id: &str,
-    workspace_slug: &str,
+///
+/// # Errors
+///
+/// Returns [`CliError::Config`] when the implicit Work selection finds no
+/// active Work and the mapped core refusal when the bounded Work query fails.
+async fn resolve_scope(
+    core: &CoreService,
+    principal: &Principal,
     args: &MomentDirectiveScopeArgs,
-) -> Result<(&'static str, String)> {
+) -> Result<(MomentDirectiveRequestScopeKind, String)> {
     if let Some(world_id) = args.world.as_deref() {
-        return Ok((scope_kind::WORLD, world_id.to_string()));
+        return Ok((MomentDirectiveRequestScopeKind::World, world_id.to_string()));
     }
-    let work = resolve_work(pool, creator_id, workspace_slug, args.work.as_deref()).await?;
-    Ok((scope_kind::WORK, work.work_id))
+    let work_id = resolve_work_id(core, principal, args.work.as_deref()).await?;
+    Ok((MomentDirectiveRequestScopeKind::Work, work_id))
 }
 
-/// Resolve a Work: explicit `--work <id>` (verified against the DB) or the
-/// active Work (most recently updated `status='active'` row, mirroring the
-/// daemon's `works?limit=1&status=active` resolution).
-async fn resolve_work(
-    pool: &SqlitePool,
-    creator_id: &str,
-    workspace_slug: &str,
+/// Resolve a Work: explicit `--work <id>` (the core's ownership gate verifies
+/// it) or the active Work through the same bounded core selection every other
+/// Work leaf uses ([`active_work_id_core`]).
+///
+/// # Errors
+///
+/// Returns [`CliError::Config`] when no active Work exists and the mapped core
+/// error when the bounded query fails.
+async fn resolve_work_id(
+    core: &CoreService,
+    principal: &Principal,
     explicit: Option<&str>,
-) -> Result<nexus_local_db::WorkRecord> {
-    let work_id = if let Some(id) = explicit {
-        id.to_string()
-    } else {
-        let filters = WorkListFilters {
-            status: Some("active".to_string()),
-            limit: Some(1),
-            ..WorkListFilters::default()
-        };
-        // `list_works` returns most-recently-updated first.
-        let works = list_works(pool, creator_id, workspace_slug, &filters).await?;
-        works.first().map(|w| w.work_id.clone()).ok_or_else(|| {
-            CliError::Config(
-                "No active Work found. Pass --work <id> or activate a Work first \
-                     (`nexus42 creator works use <work_id>`)."
-                    .to_string(),
-            )
-        })?
-    };
-    get_work(pool, creator_id, &work_id).await?.ok_or_else(|| {
-        CliError::Config(format!(
-            "Work {work_id} not found for creator {creator_id}."
-        ))
-    })
+) -> Result<String> {
+    match explicit {
+        Some(work_id) => Ok(work_id.to_string()),
+        None => active_work_id_core(core, principal).await,
+    }
 }
 
-/// Generate a stable directive id (`dir_<uuid v4>`).
-fn generate_directive_id() -> String {
-    format!("dir_{}", uuid::Uuid::new_v4())
-}
-
-/// Unix epoch milliseconds.
-fn now_ms() -> i64 {
-    chrono::Utc::now().timestamp_millis()
+/// The scope label `show` reports for the settled row: a World request is the
+/// override itself; a Work request is the Work's own directive or the bound
+/// World's inherited override (spec §3.2, Work-wins / World-override).
+fn effective_label(
+    requested: MomentDirectiveRequestScopeKind,
+    requested_id: &str,
+    settled: NexusDaemonMomentDirectiveResponseDirectiveScopeKind,
+    settled_id: &str,
+) -> String {
+    match (requested, settled) {
+        (MomentDirectiveRequestScopeKind::World, _) => format!("world {settled_id}"),
+        (
+            MomentDirectiveRequestScopeKind::Work,
+            NexusDaemonMomentDirectiveResponseDirectiveScopeKind::Work,
+        ) => format!("work {requested_id} (own directive)"),
+        (
+            MomentDirectiveRequestScopeKind::Work,
+            NexusDaemonMomentDirectiveResponseDirectiveScopeKind::World,
+        ) => format!("work {requested_id} (inherited from world {settled_id})"),
+    }
 }
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use nexus_daemon_runtime::directive_store::LocalDirectiveStore;
-    use nexus_local_db::moment_directive::get_by_id;
-    use nexus_local_db::{create_work, open_pool, run_migrations, seed_versions, WorkRecord};
+    use nexus_contracts::{
+        CoreRegisterCreatorRequest, CreateWorkRequest, SetActiveWorkspaceRequest,
+    };
+    use nexus_core::{CoreAccess, CoreHomeService, CoreOpenOptions, LocalDirectiveStore};
+    use nexus_home_layout::{operational_workspace_dir, workspace_state_db_path};
+    use nexus_local_db::moment_directive::{
+        get_active_for_work, get_by_id, scope_kind, set_active,
+    };
+    use nexus_local_db::writer_protocol::release_retained_writer_guards;
+    use nexus_local_db::{
+        create_work, ensure_creator_row, open_pool, run_migrations, seed_versions, WorkRecord,
+    };
+    use sqlx::SqlitePool;
+    use std::path::PathBuf;
+
+    /// The creator the module fixture registers (a persistent local identity).
+    const CREATOR_NAME: &str = "Directive Fixture Author";
+    /// Workspace the fixture materializes and selects.
+    const WORKSPACE_SLUG: &str = "default";
+    /// Work title the bound Work is created under.
+    const BOUND_WORK_TITLE: &str = "Directive Bound Novel";
+    /// Deterministic `story_ref` for the bound Work.
+    const BOUND_STORY_REF: &str = "directive-bound-novel";
+
+    /// A direct-core fixture: one home, one creator/workspace, one owned World
+    /// with one Work bound to it, plus one stored Work that predates the World
+    /// requirement the core enforces on creation.
+    struct Env {
+        _home: tempfile::TempDir,
+        db_path: PathBuf,
+        creator_id: String,
+        core: CoreService,
+        principal: Principal,
+        world_id: String,
+        work_id: String,
+        /// A `works` row carrying no `world_id` — reachable from the CLI (a
+        /// `--world` scope then has no World to target) but not from
+        /// [`CoreService::create_work`], which requires a World binding
+        /// (V1.40+), so it is seeded at the local-db layer.
+        worldless_work_id: String,
+    }
+
+    impl Env {
+        #[allow(clippy::too_many_lines)] // one hermetic CLI env seeded in a single place
+        async fn new() -> Self {
+            let home = tempfile::tempdir().unwrap();
+            let user_home = home.path().to_path_buf();
+            let selector = CoreHomeService::open(user_home.clone()).unwrap();
+            let creator = selector
+                .register_creator(CoreRegisterCreatorRequest {
+                    display_name: Some(CREATOR_NAME.parse().unwrap()),
+                    platform_creator_id: None,
+                })
+                .await
+                .unwrap();
+            let creator_id = creator.creator_id;
+            std::fs::create_dir_all(operational_workspace_dir(
+                &user_home,
+                &creator_id,
+                WORKSPACE_SLUG,
+            ))
+            .unwrap();
+            selector
+                .select_workspace(SetActiveWorkspaceRequest {
+                    creator_id: Some(creator_id.clone()),
+                    workspace_slug: WORKSPACE_SLUG.to_string(),
+                })
+                .await
+                .unwrap();
+
+            let db_path = workspace_state_db_path(&user_home, &creator_id, WORKSPACE_SLUG);
+            release_retained_writer_guards(&db_path);
+
+            // A `works` row with no bound World: the core refuses to *create*
+            // one (V1.40+), but stored rows from that path still exist, and the
+            // `--world` scope must refuse them rather than write a directive no
+            // assembly could inject.
+            let worldless_work_id = "wrk_stored_worldless".to_string();
+            {
+                let pool = nexus_local_db::init_engine_pool(&db_path)
+                    .await
+                    .unwrap()
+                    .clone_pool();
+                let mut record = work_record(&worldless_work_id, None, Some("essay"));
+                record.creator_id = creator_id.clone();
+                record.workspace_slug = WORKSPACE_SLUG.to_string();
+                create_work(&pool, &record).await.unwrap();
+                pool.close().await;
+            }
+            release_retained_writer_guards(&db_path);
+
+            // The core resolves workspace files against the operational
+            // `meta.json` `local_root` (the same key the workspace
+            // registration writes); the Work directory needs it.
+            let creative_root = user_home.join("creative");
+            std::fs::create_dir_all(&creative_root).unwrap();
+            std::fs::write(
+                operational_workspace_dir(&user_home, &creator_id, WORKSPACE_SLUG)
+                    .join("meta.json"),
+                serde_json::to_string(&serde_json::json!({
+                    "schema_version": 1,
+                    "creator_id": creator_id,
+                    "workspace_slug": WORKSPACE_SLUG,
+                    "local_root": creative_root,
+                    "created_at": "2020-01-01T00:00:00Z"
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+
+            let core = CoreService::open(CoreOpenOptions {
+                user_home,
+                access: CoreAccess::DirectWriter,
+            })
+            .await
+            .unwrap();
+            let principal = core.active_principal().await.unwrap();
+            let world_id = core
+                .create_world(
+                    &principal,
+                    serde_json::from_value(serde_json::json!({
+                        "title": "Directive Test World"
+                    }))
+                    .unwrap(),
+                )
+                .await
+                .unwrap()
+                .world_id;
+            let work_id = core
+                .create_work(
+                    &principal,
+                    CreateWorkRequest {
+                        client_request_id: None,
+                        initial_idea: "An idea.".to_string(),
+                        lineage_from_work_id: None,
+                        long_term_goal: "Keep the prose terse.".to_string(),
+                        primary_preset_id: None,
+                        set_pool_active: None,
+                        story_ref: Some(BOUND_STORY_REF.to_string()),
+                        title: BOUND_WORK_TITLE.to_string(),
+                        work_profile: Some("novel".to_string()),
+                        world_id: Some(world_id.clone()),
+                    },
+                )
+                .await
+                .unwrap()
+                .work_id;
+
+            Self {
+                _home: home,
+                db_path,
+                creator_id,
+                core,
+                principal,
+                world_id,
+                work_id,
+                worldless_work_id,
+            }
+        }
+
+        /// A read-only pool over the fixture's `state.db`.
+        async fn pool(&self) -> SqlitePool {
+            open_pool(&self.db_path).await.unwrap()
+        }
+    }
+
+    fn set_args(
+        body: &str,
+        depth: MomentDirectiveRequestInsertDepth,
+        ttl_generations: Option<i64>,
+        ttl_chapters: Option<i64>,
+    ) -> MomentDirectiveSetArgs {
+        MomentDirectiveSetArgs {
+            body: body.to_string(),
+            depth,
+            ttl_generations,
+            ttl_chapters,
+            clear_on_scene_change: false,
+            work: None,
+            world: false,
+            replace: false,
+        }
+    }
+
+    fn scope_args(work: Option<&str>, world: Option<&str>) -> MomentDirectiveScopeArgs {
+        MomentDirectiveScopeArgs {
+            work: work.map(str::to_string),
+            world: world.map(str::to_string),
+        }
+    }
+
+    // ── Handler round trip: set → show → clear → show ─────────────────
+
+    /// The three verbs map onto the three typed actions: `set` writes the
+    /// trimmed body for the resolved (implicit) Work scope, `show` reads the
+    /// effective row, and `clear` soft-deletes it — the next `show` reports
+    /// none while the expired row stays for inspection.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn set_show_clear_map_onto_the_typed_actions() {
+        let env = Env::new().await;
+        let mut args = set_args(
+            "  Keep the prose terse.  ",
+            MomentDirectiveRequestInsertDepth::Head,
+            Some(5),
+            None,
+        );
+        args.clear_on_scene_change = true;
+
+        // set — no --work: the active Work resolves implicitly.
+        let set = handle_set(&env.core, &env.principal, &args).await.unwrap();
+        assert!(
+            set.contains(&format!("✓ Moment Directive set for work {}", env.work_id)),
+            "set must name the resolved Work scope: {set}"
+        );
+        assert!(set.contains("depth: head"), "{set}");
+        assert!(set.contains("ttl: 5 generations"), "{set}");
+        assert!(set.contains("clear_on_scene_change: yes"), "{set}");
+
+        // show — the Work's own row is the effective directive.
+        let show = handle_show(&env.core, &env.principal, &scope_args(None, None))
+            .await
+            .unwrap();
+        assert!(show.contains("Scope: work "), "{show}");
+        assert!(
+            show.contains(&format!(
+                "Effective for: work {} (own directive)",
+                env.work_id
+            )),
+            "{show}"
+        );
+        assert!(show.contains("TTL: 5 remaining (generations)"), "{show}");
+        assert!(
+            show.contains("Keep the prose terse."),
+            "the body must be author-visible on show: {show}"
+        );
+        assert!(
+            !show.contains("  Keep"),
+            "the body is trimmed at write: {show}"
+        );
+
+        // clear — soft-delete, then show reports none.
+        let clear = handle_clear(&env.core, &env.principal, &scope_args(None, None))
+            .await
+            .unwrap();
+        assert!(
+            clear.contains("cleared (soft-deleted)"),
+            "clear must report the soft-delete: {clear}"
+        );
+        let after = handle_show(&env.core, &env.principal, &scope_args(None, None))
+            .await
+            .unwrap();
+        assert_eq!(after, "No active Moment Directive for this scope.");
+
+        // … and the cleared row is retained, not hard-deleted.
+        let pool = env.pool().await;
+        let row = get_active_for_work(&pool, &env.creator_id, &env.work_id)
+            .await
+            .unwrap();
+        assert!(row.is_none(), "no active row remains");
+        let expired: Vec<(String, String)> = sqlx::query_as(
+            "SELECT directive_id, status FROM moment_directives WHERE scope_kind = 'work'",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(expired.len(), 1, "the row is retained: {expired:?}");
+        assert_eq!(expired[0].1, "expired");
+        pool.close().await;
+    }
+
+    /// A Work with no own directive inherits the bound World's override, and
+    /// `show` names that inherited source (spec §3.2 Work-wins /
+    /// World-override).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn show_names_the_inherited_world_override() {
+        let env = Env::new().await;
+        let mut args = set_args(
+            "British spelling always.",
+            MomentDirectiveRequestInsertDepth::Tail,
+            None,
+            Some(4),
+        );
+        args.world = true;
+        args.work = Some(env.work_id.clone());
+        let set = handle_set(&env.core, &env.principal, &args).await.unwrap();
+        assert!(
+            set.contains(&format!(
+                "✓ Moment Directive set for world {}",
+                env.world_id
+            )),
+            "the World override names the bound World: {set}"
+        );
+
+        let show = handle_show(
+            &env.core,
+            &env.principal,
+            &scope_args(Some(&env.work_id), None),
+        )
+        .await
+        .unwrap();
+        assert!(
+            show.contains(&format!("Scope: world {}", env.world_id)),
+            "{show}"
+        );
+        assert!(
+            show.contains(&format!(
+                "Effective for: work {} (inherited from world {})",
+                env.work_id, env.world_id
+            )),
+            "{show}"
+        );
+        assert!(show.contains("TTL: 4 remaining (chapters)"), "{show}");
+        assert!(show.contains("British spelling always."), "{show}");
+
+        // The World scope itself is what `--world` selects, no Work needed.
+        let direct = handle_show(
+            &env.core,
+            &env.principal,
+            &scope_args(None, Some(&env.world_id)),
+        )
+        .await
+        .unwrap();
+        assert!(
+            direct.contains(&format!("Effective for: world {}", env.world_id)),
+            "{direct}"
+        );
+    }
+
+    /// `--world` on a Work with no bound World refuses instead of writing a
+    /// directive no assembly could inject.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn set_world_scope_requires_a_world_bound_work() {
+        let env = Env::new().await;
+        let mut args = set_args(
+            "Body.",
+            MomentDirectiveRequestInsertDepth::Mid,
+            Some(3),
+            None,
+        );
+        args.world = true;
+        args.work = Some(env.worldless_work_id.clone());
+        let err = handle_set(&env.core, &env.principal, &args)
+            .await
+            .unwrap_err();
+        assert!(
+            format!("{err}").contains("not bound to a World"),
+            "a World override needs a bound World, got: {err}"
+        );
+
+        // The Work scope itself still writes for that stored row.
+        args.world = false;
+        let set = handle_set(&env.core, &env.principal, &args).await.unwrap();
+        assert!(
+            set.contains(&format!(
+                "✓ Moment Directive set for work {}",
+                env.worldless_work_id
+            )),
+            "{set}"
+        );
+    }
+
+    /// An already-active directive in the same scope needs `--replace`: the
+    /// core answers 409 and the superseded row is retained with `replaced_by`
+    /// pointing at the new one.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn set_requires_replace_and_retains_the_superseded_row() {
+        let env = Env::new().await;
+        let mut first = set_args(
+            "First directive.",
+            MomentDirectiveRequestInsertDepth::Mid,
+            Some(3),
+            None,
+        );
+        first.work = Some(env.work_id.clone());
+        handle_set(&env.core, &env.principal, &first).await.unwrap();
+        let first_id = {
+            let pool = env.pool().await;
+            let row = get_active_for_work(&pool, &env.creator_id, &env.work_id)
+                .await
+                .unwrap()
+                .expect("the first directive is active");
+            pool.close().await;
+            row.directive_id
+        };
+
+        let err = handle_set(&env.core, &env.principal, &first)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, CliError::Api { status: 409, .. }),
+            "a second active directive is a 409 conflict, got: {err}"
+        );
+        assert!(format!("{err}").contains("already active"), "{err}");
+
+        let mut replacement = set_args(
+            "Second directive.",
+            MomentDirectiveRequestInsertDepth::Tail,
+            Some(7),
+            None,
+        );
+        replacement.work = Some(env.work_id.clone());
+        replacement.replace = true;
+        handle_set(&env.core, &env.principal, &replacement)
+            .await
+            .unwrap();
+
+        let pool = env.pool().await;
+        let active = get_active_for_work(&pool, &env.creator_id, &env.work_id)
+            .await
+            .unwrap()
+            .expect("the replacement is active");
+        assert_eq!(active.body, "Second directive.");
+        assert_eq!(active.ttl_remaining, 7);
+        let superseded = get_by_id(&pool, &first_id)
+            .await
+            .unwrap()
+            .expect("the superseded row is retained");
+        assert_eq!(superseded.status, "expired");
+        assert_eq!(superseded.body, "First directive.");
+        assert_eq!(
+            superseded.replaced_by.as_deref(),
+            Some(active.directive_id.as_str()),
+            "the superseded row points at its replacement"
+        );
+        assert!(superseded.expires_at.is_some());
+        pool.close().await;
+    }
+
+    /// Flag-vocabulary refusals stay CLI-owned: an empty body, a missing TTL
+    /// kind, a non-positive count, and a World scope on a worldless Work.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn set_rejects_bad_flags() {
+        let env = Env::new().await;
+
+        let err = handle_set(
+            &env.core,
+            &env.principal,
+            &set_args("   ", MomentDirectiveRequestInsertDepth::Mid, Some(1), None),
+        )
+        .await
+        .unwrap_err();
+        assert!(format!("{err}").contains("--body"), "{err}");
+
+        let err = handle_set(
+            &env.core,
+            &env.principal,
+            &set_args("Body.", MomentDirectiveRequestInsertDepth::Mid, None, None),
+        )
+        .await
+        .unwrap_err();
+        assert!(format!("{err}").contains("exactly one"), "{err}");
+
+        let err = handle_set(
+            &env.core,
+            &env.principal,
+            &set_args(
+                "Body.",
+                MomentDirectiveRequestInsertDepth::Mid,
+                Some(0),
+                None,
+            ),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            format!("{err}").contains("positive"),
+            "a zero count is refused: {err}"
+        );
+
+        let err = handle_set(
+            &env.core,
+            &env.principal,
+            &set_args(
+                "Body.",
+                MomentDirectiveRequestInsertDepth::Mid,
+                Some(1),
+                Some(1),
+            ),
+        )
+        .await
+        .unwrap_err();
+        assert!(format!("{err}").contains("mutually exclusive"), "{err}");
+    }
+
+    // ── MCA injection journey through the core-owned directive store ───
 
     async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
@@ -401,14 +966,7 @@ mod tests {
     }
 
     async fn seed_creator(pool: &SqlitePool) {
-        // SAFETY: test-only static INSERT with bind params against known schema.
-        sqlx::query(
-            "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
-             VALUES ('ctr_test', 'Test', 'active', datetime('now'), '{}')",
-        )
-        .execute(pool)
-        .await
-        .unwrap();
+        ensure_creator_row(pool, "ctr_test", "Test").await.unwrap();
     }
 
     async fn seed_world(pool: &SqlitePool, world_id: &str) {
@@ -473,8 +1031,8 @@ mod tests {
         scope_id: &'a str,
         ttl_kind: &'a str,
         ttl_remaining: i64,
-    ) -> NewMomentDirective<'a> {
-        NewMomentDirective {
+    ) -> nexus_local_db::moment_directive::NewMomentDirective<'a> {
+        nexus_local_db::moment_directive::NewMomentDirective {
             directive_id,
             creator_id: "ctr_test",
             scope_kind,
@@ -487,325 +1045,6 @@ mod tests {
             now: 1_780_000_000_000,
         }
     }
-
-    fn set_args(
-        body: &str,
-        depth: DirectiveDepth,
-        ttl_generations: Option<i64>,
-        ttl_chapters: Option<i64>,
-    ) -> MomentDirectiveSetArgs {
-        MomentDirectiveSetArgs {
-            body: body.to_string(),
-            depth,
-            ttl_generations,
-            ttl_chapters,
-            clear_on_scene_change: false,
-            work: None,
-            world: false,
-            replace: false,
-        }
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn cli_show_work_displays_effective_inherited_world_override() {
-        let (pool, _dir) = fresh_pool().await;
-        seed_creator(&pool).await;
-        seed_world(&pool, "wld_1").await;
-        seed_work(&pool, &work_record("wrk_1", Some("wld_1"), Some("novel"))).await;
-        set_active(
-            &pool,
-            &new_params("dir_world", scope_kind::WORLD, "wld_1", "generations", 3),
-        )
-        .await
-        .unwrap();
-
-        let scope = MomentDirectiveScopeArgs {
-            work: Some("wrk_1".to_string()),
-            world: None,
-        };
-        let (shown, source) = resolve_effective_for_show(&pool, "ctr_test", "wrk_novel", &scope)
-            .await
-            .unwrap()
-            .expect("effective directive resolves through the World override");
-        assert_eq!(shown.directive_id, "dir_world");
-        assert_eq!(shown.scope_kind, "world");
-        assert!(
-            source.contains("inherited from world wld_1"),
-            "show must name the inherited source scope, got: {source}"
-        );
-    }
-
-    // ── T5: CLI author surface (set/show/clear) ───────────────────────
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn cli_round_trip_set_show_clear_show() {
-        let (pool, _dir) = fresh_pool().await;
-        seed_creator(&pool).await;
-        seed_world(&pool, "wld_1").await;
-        seed_work(&pool, &work_record("wrk_1", Some("wld_1"), Some("novel"))).await;
-
-        // set
-        let args = MomentDirectiveSetArgs {
-            body: "  Keep the prose terse.  ".to_string(),
-            depth: DirectiveDepth::Head,
-            ttl_generations: Some(5),
-            ttl_chapters: None,
-            clear_on_scene_change: true,
-            work: Some("wrk_1".to_string()),
-            world: false,
-            replace: false,
-        };
-        handle_set(&pool, "ctr_test", "wrk_novel", &args)
-            .await
-            .unwrap();
-
-        // show — the effective directive for the Work is its own row.
-        let scope = MomentDirectiveScopeArgs {
-            work: Some("wrk_1".to_string()),
-            world: None,
-        };
-        let (shown, source) = resolve_effective_for_show(&pool, "ctr_test", "wrk_novel", &scope)
-            .await
-            .unwrap()
-            .expect("show finds the active directive");
-        assert_eq!(shown.body, "Keep the prose terse.", "body trimmed at write");
-        assert_eq!(shown.insert_depth, "head");
-        assert_eq!(shown.ttl_kind, "generations");
-        assert_eq!(shown.ttl_remaining, 5);
-        assert!(shown.clear_on_scene_change);
-        assert!(
-            source.contains("own directive"),
-            "the Work's own directive is the effective source, got: {source}"
-        );
-
-        // clear
-        handle_clear(&pool, "ctr_test", "wrk_novel", &scope)
-            .await
-            .unwrap();
-        assert!(
-            resolve_effective_for_show(&pool, "ctr_test", "wrk_novel", &scope)
-                .await
-                .unwrap()
-                .is_none()
-        );
-
-        // show again → no active directive
-        handle_show(&pool, "ctr_test", "wrk_novel", &scope)
-            .await
-            .unwrap();
-        assert!(
-            resolve_effective_for_show(&pool, "ctr_test", "wrk_novel", &scope)
-                .await
-                .unwrap()
-                .is_none()
-        );
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn cli_set_requires_replace_when_active() {
-        let (pool, _dir) = fresh_pool().await;
-        seed_creator(&pool).await;
-        seed_world(&pool, "wld_1").await;
-        seed_work(&pool, &work_record("wrk_1", Some("wld_1"), Some("novel"))).await;
-
-        let args = set_args("First directive.", DirectiveDepth::Mid, Some(3), None);
-        handle_set(&pool, "ctr_test", "wrk_novel", &args)
-            .await
-            .unwrap();
-
-        let err = handle_set(&pool, "ctr_test", "wrk_novel", &args)
-            .await
-            .unwrap_err();
-        assert!(
-            format!("{err}").contains("--replace"),
-            "an active directive must require --replace, got: {err}"
-        );
-
-        let mut replace_args = set_args("Second directive.", DirectiveDepth::Tail, Some(7), None);
-        replace_args.replace = true;
-        handle_set(&pool, "ctr_test", "wrk_novel", &replace_args)
-            .await
-            .unwrap();
-
-        let active = get_active_for_work(&pool, "ctr_test", "wrk_1")
-            .await
-            .unwrap()
-            .expect("new directive active");
-        assert_eq!(active.body, "Second directive.");
-        assert_eq!(active.ttl_remaining, 7);
-        // The superseded row is retained with `replaced_by` (audit chain).
-        // SAFETY: test-only SELECT with bind params against known schema.
-        let old_rows: Vec<MomentDirectiveRow> = sqlx::query_as::<_, MomentDirectiveRow>(
-            "SELECT directive_id, creator_id, scope_kind, scope_id, body, insert_depth,
-                    ttl_kind, ttl_remaining, clear_on_scene_change, status,
-                    last_focused_event_id, created_at, updated_at,
-                    expires_at, replaced_by
-             FROM moment_directives WHERE status = 'expired' AND scope_kind = 'work' AND scope_id = 'wrk_1'",
-        )
-        .fetch_all(&pool)
-        .await
-        .unwrap();
-        assert_eq!(old_rows.len(), 1);
-        assert_eq!(old_rows[0].body, "First directive.");
-        assert_eq!(
-            old_rows[0].replaced_by.as_deref(),
-            Some(active.directive_id.as_str())
-        );
-        assert!(old_rows[0].expires_at.is_some());
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn cli_set_validation_rejects_bad_input() {
-        let (pool, _dir) = fresh_pool().await;
-        seed_creator(&pool).await;
-        seed_world(&pool, "wld_1").await;
-        seed_work(&pool, &work_record("wrk_1", Some("wld_1"), Some("novel"))).await;
-
-        // Empty body (after trim).
-        let err = handle_set(
-            &pool,
-            "ctr_test",
-            "wrk_novel",
-            &set_args("   ", DirectiveDepth::Mid, Some(1), None),
-        )
-        .await
-        .unwrap_err();
-        assert!(
-            format!("{err}").contains("--body"),
-            "empty body rejected: {err}"
-        );
-
-        // Missing TTL kind.
-        let err = handle_set(
-            &pool,
-            "ctr_test",
-            "wrk_novel",
-            &set_args("Body.", DirectiveDepth::Mid, None, None),
-        )
-        .await
-        .unwrap_err();
-        assert!(
-            format!("{err}").contains("exactly one"),
-            "missing TTL rejected: {err}"
-        );
-
-        // Non-positive TTL.
-        let err = handle_set(
-            &pool,
-            "ctr_test",
-            "wrk_novel",
-            &set_args("Body.", DirectiveDepth::Mid, Some(0), None),
-        )
-        .await
-        .unwrap_err();
-        assert!(
-            format!("{err}").contains("positive"),
-            "zero TTL rejected: {err}"
-        );
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn cli_set_world_requires_world_bound_work() {
-        let (pool, _dir) = fresh_pool().await;
-        seed_creator(&pool).await;
-        seed_work(&pool, &work_record("wrk_1", None, Some("essay"))).await;
-
-        let mut args = set_args("Body.", DirectiveDepth::Mid, Some(3), None);
-        args.world = true;
-        let err = handle_set(&pool, "ctr_test", "wrk_novel", &args)
-            .await
-            .unwrap_err();
-        assert!(
-            format!("{err}").contains("not bound to a World"),
-            "world override on a worldless Work must error, got: {err}"
-        );
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn cli_world_scope_set_and_show() {
-        let (pool, _dir) = fresh_pool().await;
-        seed_creator(&pool).await;
-        seed_world(&pool, "wld_1").await;
-        seed_work(&pool, &work_record("wrk_1", Some("wld_1"), Some("novel"))).await;
-
-        let mut args = set_args(
-            "British spelling always.",
-            DirectiveDepth::Tail,
-            None,
-            Some(4),
-        );
-        args.world = true;
-        handle_set(&pool, "ctr_test", "wrk_novel", &args)
-            .await
-            .unwrap();
-
-        let scope = MomentDirectiveScopeArgs {
-            work: None,
-            world: Some("wld_1".to_string()),
-        };
-        let (shown, source) = resolve_effective_for_show(&pool, "ctr_test", "wrk_novel", &scope)
-            .await
-            .unwrap()
-            .expect("world override visible");
-        assert_eq!(shown.scope_kind, "world");
-        assert_eq!(shown.ttl_kind, "chapters");
-        assert_eq!(shown.ttl_remaining, 4);
-        assert_eq!(source, "world wld_1");
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn cli_show_and_clear_world_scope_work_independent() {
-        // R-007 matrix coverage: `show --world <id>` / `clear --world <id>`
-        // select the World scope directly — no Work resolution required
-        // (deliberately no Work seeded here).
-        let (pool, _dir) = fresh_pool().await;
-        seed_creator(&pool).await;
-        seed_world(&pool, "wld_1").await;
-        set_active(
-            &pool,
-            &new_params("dir_world", scope_kind::WORLD, "wld_1", "generations", 3),
-        )
-        .await
-        .unwrap();
-
-        // show --world: the World override row itself, no Work in play.
-        let scope = MomentDirectiveScopeArgs {
-            work: None,
-            world: Some("wld_1".to_string()),
-        };
-        handle_show(&pool, "ctr_test", "wrk_novel", &scope)
-            .await
-            .unwrap();
-        let (shown, source) = resolve_effective_for_show(&pool, "ctr_test", "wrk_novel", &scope)
-            .await
-            .unwrap()
-            .expect("world directive shown");
-        assert_eq!(shown.directive_id, "dir_world");
-        assert_eq!(shown.scope_kind, "world");
-        assert_eq!(source, "world wld_1");
-
-        // clear --world: soft-deletes the World row; a second show reports none.
-        handle_clear(&pool, "ctr_test", "wrk_novel", &scope)
-            .await
-            .unwrap();
-        let row = get_by_id(&pool, "dir_world")
-            .await
-            .unwrap()
-            .expect("row retained for inspection");
-        assert_eq!(
-            row.status, "expired",
-            "clear --world must soft-delete the World-scoped row"
-        );
-        assert!(
-            resolve_effective_for_show(&pool, "ctr_test", "wrk_novel", &scope)
-                .await
-                .unwrap()
-                .is_none(),
-            "show --world after clear reports no active directive"
-        );
-    }
-
-    // ── T6/T7: end-to-end injection through `assemble_moment_with_directive`
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn assemble_renders_then_expires_directive() {

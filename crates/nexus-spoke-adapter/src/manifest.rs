@@ -95,19 +95,22 @@ pub const LOCAL_TOOL_OPS: [&str; 2] = [
 /// no-compute, so the local manifest must not advertise a compute role, the
 /// `l2-computable` capability, or the `compute` served op: a host without an
 /// engine that claims them lies to its peers.
-#[cfg(feature = "compute")]
 const COMPUTE_OWNED_NAMES: [&str; 3] = ["l2-computable", "computable-engine", "compute"];
-#[cfg(not(feature = "compute"))]
-const COMPUTE_OWNED_NAMES: [&str; 0] = [];
 
 /// Whether `name` is advertised by this build.
+///
+/// A compute-owned name is advertised **exactly when** the `compute` feature
+/// is compiled in: the gate is a property of the build, so it is evaluated
+/// with `cfg!` rather than by an emptied list (an empty list with the feature
+/// off would advertise the very names a no-compute build must withhold).
 #[must_use]
 fn advertised(name: &str) -> bool {
-    COMPUTE_OWNED_NAMES.iter().all(|owned| owned != &name)
+    cfg!(feature = "compute") || !COMPUTE_OWNED_NAMES.contains(&name)
 }
 
-/// Whether `name` is owned by the `compute` feature (the inverse lens of
-/// [`advertised`], for callers that keep the unfiltered locked list).
+/// Whether `name` must be withheld from this build's manifest because it
+/// needs the `compute` feature (the inverse lens of [`advertised`], for
+/// callers that keep the unfiltered locked list).
 #[must_use]
 pub fn compute_owned_name(name: &str) -> bool {
     !advertised(name)

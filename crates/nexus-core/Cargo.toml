@@ -164,6 +164,17 @@ parking_lot = "0.12"
 nexus-wasm-host = { path = "../nexus-wasm-host" }
 nexus-orchestration = { path = "../nexus-orchestration" }
 nexus-knowledge = { path = "../nexus-knowledge" }
+# The WAT compiler named above: the capability/compute target compiles the
+# runaway module its sandbox-limit cases trap on (the same way
+# `nexus-wasm-host`'s own sandbox tests build their loop fixture).
+wat = "1"
+# v1.193 P2-T10: the peer-transport and Model B retained contract target
+# builds fixed-seed Ed25519 keypairs (dialer identity + the `peer_keys.json`
+# public-key map the accept loop's hello verification reads) — the same
+# derivation path spoke-connect's own core uses, and the dev-dep the retired
+# daemon-runtime peer fixtures carried. Dev-only: the shipped graph is
+# untouched (the crate is already in the lockfile via spoke-connect).
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 chrono.workspace = true
 serde_json.workspace = true
 async-trait.workspace = true

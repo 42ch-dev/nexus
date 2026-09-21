@@ -24,6 +24,11 @@
 //! - [`run_events`] — the bounded per-run event rings the SSE transport
 //!   replays from; the ring is payload-neutral so the daemon keeps the
 //!   `HostEvent` vocabulary.
+//! - `prompt_executor` and [`soul_narrative_synthesizer`] — the production
+//!   prompt executor over the Host facade and the ACP-backed soul-narrative
+//!   synthesizer, moved here from the deleted daemon composition (v1.193
+//!   P2-T2, technical contracts §4). Each stays the single owner of its
+//!   adapter.
 //!
 //! The handle is the ONE owner of the task set, engine epoch and cleanup:
 //! duplicate `start_execution` refuses or returns the same established owner
@@ -42,11 +47,20 @@ pub mod executor;
 pub mod handle_ops;
 pub mod lifecycle;
 pub mod peer_tools;
+// v1.193 P2-T2: the production `PromptExecutor` over the existing Host plane
+// moved here from the deleted daemon composition (technical contracts §4).
+// It needs the Host facade edge, so it compiles only with `provider-host`.
+#[cfg(feature = "provider-host")]
+pub mod prompt_executor;
 pub mod run_events;
 pub mod schedules;
 pub mod scope;
 pub mod session;
 pub mod session_commit;
+// v1.193 P2-T2: the production ACP-backed `SoulNarrativeSynthesizer` moved
+// here from the deleted daemon composition (technical contracts §4). It
+// consumes the orchestration `CapabilityRegistry`, so it rides `execution`.
+pub mod soul_narrative_synthesizer;
 pub mod state_provider;
 // Test-only crash/rendezvous seams. Compiled only for this package's tests or
 // with the `test-hooks` feature, exactly as in the daemon before the move.

@@ -1,41 +1,47 @@
 //! Strategy patch leaves — `preset patch state|transition|prompt`
-//! (V1.175 P1 Task 2, group 1).
+//! (V1.175 P1 Task 2, group 1; direct-core retarget v1.193 P1-T2).
 //!
-//! Thin daemon-HTTP leaves over the existing strategy canvas write routes
-//! (AR-83 #1 / AR-84 group 1, F-9):
-//! - `POST /v1/daemon/strategies/:strategy_id/states/:state_id/patch`
-//! - `POST /v1/daemon/strategies/:strategy_id/transitions/patch`
-//! - `POST /v1/daemon/strategies/:strategy_id/states/:state_id/prompt/patch`
+//! Typed `nexus-core` leaves over the strategy canvas write seam
+//! (AR-83 #1 / AR-84 group 1, F-9) — no daemon route and no HTTP client:
+//! - `CoreService::patch_strategy_state`
+//! - `CoreService::patch_strategy_transition`
+//! - `CoreService::patch_strategy_prompt_template`
 //!
 //! All writes are CAS-guarded: every request carries `--base-revision`
 //! (the revision observed on the last canonical read). A stale revision
-//! returns 409 `strategy_conflict`; the CLI error renders all four
-//! structured fields — `current_revision`, `node_id`, `conflicting_path`,
-//! and `recovery_hint` — via `DaemonClient::parse_error_response`
-//! (PL-5). Flock contention between writers rides the same 409 family.
-//! `--help` documents the re-read retry guidance.
+//! raises the core's structured `PresetError::StrategyConflict`, which the
+//! shared direct-core mapper (`crate::core::map_core_error`) renders as 409
+//! with all four fields — `current_revision`, `node_id`, `conflicting_path`,
+//! and `recovery_hint` (PL-5). Flock contention between writers rides the
+//! same 409 family. `--help` documents the re-read retry guidance.
 //!
-//! Conventions: human-readable default output, `--json` emits the daemon
-//! `StrategyPatchResponse` DTO verbatim (generated contract types only —
+//! Conventions: human-readable default output, `--json` emits the
+//! `CoreStrategyPatchResponse` DTO verbatim (generated contract types only —
 //! AR-83 #2/#3); write bodies are typed long flags; prompt bodies come
 //! from `--file <path>` or `-` for stdin.
+//!
+//! Every leaf opens the shared direct-writer core ([`crate::core`]) and the
+//! command awaits [`finish_direct`] **before** printing, so a command never
+//! reports an outcome its core could not settle — on success and on refusal
+//! alike.
 
-use crate::api::DaemonClient;
 use crate::commands::creator::work_utils::read_file_bounded;
 use crate::config::CliConfig;
+use crate::core::{finish_direct, map_core_error, open_direct_core};
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
-use nexus_contracts::daemon_api::canvas::strategy::{
-    StrategyPatchPromptTemplateRequest, StrategyPatchPromptTemplateRequestSet,
-    StrategyPatchResponse, StrategyPatchStateRequest, StrategyPatchStateRequestSet,
+use nexus_contracts::{
+    CoreStrategyPatchResponse, StrategyPatchPromptTemplateRequest,
+    StrategyPatchPromptTemplateRequestSet, StrategyPatchStateRequest, StrategyPatchStateRequestSet,
     StrategyPatchTransitionRequest, StrategyPatchTransitionRequestOp,
     StrategyPatchTransitionRequestTransitionKind,
 };
+use nexus_core::{CoreService, Principal};
 
 /// Client-side cap for `--file` prompt reads (qc3 S-002). Mirrors the
-/// daemon's preset YAML size cap (`PRESET_MAX_YAML_SIZE`, 1 MiB in
-/// `api/handlers/strategy.rs`) so an accidentally oversized template file is
-/// rejected before the unbounded read.
+/// preset YAML size cap (`PRESET_MAX_YAML_SIZE`, 1 MiB in the core strategy
+/// seam) so an accidentally oversized template file is rejected before the
+/// unbounded read.
 const PROMPT_FILE_MAX_BYTES: usize = 1024 * 1024;
 
 /// `preset patch` subcommands.
@@ -63,7 +69,7 @@ pub enum PatchCommand {
         /// New state description.
         #[arg(long)]
         description: Option<String>,
-        /// Emit machine-readable JSON (the `StrategyPatchResponse` DTO
+        /// Emit machine-readable JSON (the `CoreStrategyPatchResponse` DTO
         /// verbatim) instead of human text.
         #[arg(long, default_value_t = false)]
         json: bool,
@@ -100,7 +106,7 @@ pub enum PatchCommand {
         /// `default` (conditional default target).
         #[arg(long, value_enum)]
         transition_kind: Option<TransitionKindArg>,
-        /// Emit machine-readable JSON (the `StrategyPatchResponse` DTO
+        /// Emit machine-readable JSON (the `CoreStrategyPatchResponse` DTO
         /// verbatim) instead of human text.
         #[arg(long, default_value_t = false)]
         json: bool,
@@ -126,7 +132,7 @@ pub enum PatchCommand {
         /// Template body source: a file path, or `-` to read stdin.
         #[arg(long, value_name = "PATH")]
         file: String,
-        /// Emit machine-readable JSON (the `StrategyPatchResponse` DTO
+        /// Emit machine-readable JSON (the `CoreStrategyPatchResponse` DTO
         /// verbatim) instead of human text.
         #[arg(long, default_value_t = false)]
         json: bool,
@@ -172,108 +178,122 @@ impl TransitionKindArg {
     }
 }
 
-/// Run a `preset patch` subcommand.
+/// Run a `preset patch` subcommand over the direct-writer core.
+///
+/// The leaf returns its rendered text; the command prints it only after
+/// [`finish_direct`] released the writer.
 ///
 /// # Errors
 ///
-/// Returns `CliError` on invalid input (missing required flags) or any
-/// daemon API / network failure (409 `strategy_conflict`, 404 `not_found`,
-/// 422 `strategy_validation_failed`, 400 `bad_request` for other 400s —
-/// all named, non-zero exit).
+/// Returns `CliError` on invalid input (missing required flags) or the mapped
+/// core refusal (409 `strategy_conflict`, 404 `not_found`, 422
+/// `strategy_validation_failed`, 400 `bad_request` for other 400s — all
+/// named, non-zero exit).
 pub async fn run(cmd: PatchCommand, config: &CliConfig) -> Result<()> {
-    let client = DaemonClient::from_config(config)?;
-    match cmd {
-        PatchCommand::State {
-            strategy_id,
-            state_id,
-            base_revision,
-            label,
-            description,
-            json,
-        } => {
-            patch_state(
-                &client,
-                &strategy_id,
-                &state_id,
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        match cmd {
+            PatchCommand::State {
+                strategy_id,
+                state_id,
                 base_revision,
-                label.as_deref(),
-                description.as_deref(),
+                label,
+                description,
                 json,
-            )
-            .await
-        }
-        PatchCommand::Transition {
-            strategy_id,
-            base_revision,
-            source_state,
-            op,
-            old_target,
-            new_target,
-            condition,
-            transition_kind,
-            json,
-        } => {
-            patch_transition(
-                &client,
-                &strategy_id,
+            } => {
+                patch_state(
+                    &core,
+                    &principal,
+                    &strategy_id,
+                    &state_id,
+                    base_revision,
+                    label.as_deref(),
+                    description.as_deref(),
+                    json,
+                )
+                .await
+            }
+            PatchCommand::Transition {
+                strategy_id,
                 base_revision,
-                &source_state,
+                source_state,
                 op,
-                old_target.as_deref(),
-                new_target.as_deref(),
-                condition.as_deref(),
+                old_target,
+                new_target,
+                condition,
                 transition_kind,
                 json,
-            )
-            .await
-        }
-        PatchCommand::Prompt {
-            strategy_id,
-            state_id,
-            base_revision,
-            template_ref,
-            file,
-            json,
-        } => {
-            patch_prompt(
-                &client,
-                &strategy_id,
-                &state_id,
+            } => {
+                patch_transition(
+                    &core,
+                    &principal,
+                    &strategy_id,
+                    base_revision,
+                    &source_state,
+                    op,
+                    old_target.as_deref(),
+                    new_target.as_deref(),
+                    condition.as_deref(),
+                    transition_kind,
+                    json,
+                )
+                .await
+            }
+            PatchCommand::Prompt {
+                strategy_id,
+                state_id,
                 base_revision,
-                &template_ref,
-                &file,
+                template_ref,
+                file,
                 json,
-            )
-            .await
+            } => {
+                patch_prompt(
+                    &core,
+                    &principal,
+                    &strategy_id,
+                    &state_id,
+                    base_revision,
+                    &template_ref,
+                    &file,
+                    json,
+                )
+                .await
+            }
         }
     }
+    .await;
+    println!("{}", finish_direct(&core, outcome).await?);
+    Ok(())
 }
 
 /// `preset patch state <strategy_id> <state_id> --base-revision N
 /// [--label <id>] [--description <text>]` — patch a state node
-/// (`POST /v1/daemon/strategies/:strategy_id/states/:state_id/patch`).
+/// (`CoreService::patch_strategy_state`).
 ///
 /// # Errors
 ///
 /// Returns a named `CliError::Other` when neither `--label` nor
-/// `--description` is given, or `CliError` for daemon / network failures
-/// (409 `strategy_conflict`, 404 `not_found`, 422 `strategy_validation_failed`,
+/// `--description` is given, or the mapped core refusal (409
+/// `strategy_conflict`, 404 `not_found`, 422 `strategy_validation_failed`,
 /// 400 `bad_request` for other 400s).
+#[allow(clippy::too_many_arguments)] // CLI param plumbing — house pattern
 async fn patch_state(
-    client: &DaemonClient,
+    core: &CoreService,
+    principal: &Principal,
     strategy_id: &str,
     state_id: &str,
     base_revision: u64,
     label: Option<&str>,
     description: Option<&str>,
     json: bool,
-) -> Result<()> {
+) -> Result<String> {
     if label.is_none() && description.is_none() {
         return Err(CliError::Other(
             "provide at least one of --label or --description".to_string(),
         ));
     }
-    let req = StrategyPatchStateRequest {
+    let request = StrategyPatchStateRequest {
         strategy_id: strategy_id.to_string(),
         state_id: state_id.to_string(),
         base_revision,
@@ -282,35 +302,39 @@ async fn patch_state(
             description: description.map(str::to_string),
         },
     };
-    let resp: StrategyPatchResponse = client
-        .post(
-            &format!("/v1/daemon/strategies/{strategy_id}/states/{state_id}/patch"),
-            &req,
+    let resp = core
+        .patch_strategy_state(
+            principal,
+            strategy_id.to_string(),
+            state_id.to_string(),
+            request,
         )
-        .await?;
+        .await
+        .map_err(map_core_error)?;
     if json {
-        println!("{}", serde_json::to_string_pretty(&resp)?);
-    } else {
-        println!("Patched state '{state_id}' in Strategy '{strategy_id}'.");
-        render_patch_response(&resp);
+        return Ok(serde_json::to_string_pretty(&resp)?);
     }
-    Ok(())
+    Ok(format!(
+        "Patched state '{state_id}' in Strategy '{strategy_id}'.\n{}",
+        render_patch_response(&resp)
+    ))
 }
 
 /// `preset patch transition <strategy_id> --base-revision N --source-state
 /// <id> [--op create|update] [--old-target <id>] [--new-target <id>]
 /// [--condition <expr>] [--transition-kind next|branch|default]` — rewire
-/// a transition (`POST /v1/daemon/strategies/:strategy_id/transitions/patch`).
+/// a transition (`CoreService::patch_strategy_transition`).
 ///
 /// # Errors
 ///
 /// Returns a named `CliError::Other` when a required flag for the chosen
-/// `--op` is missing, or `CliError` for daemon / network failures (409
-/// `strategy_conflict`, 404 `not_found`, 422 `strategy_validation_failed`,
-/// 400 `bad_request` for other 400s).
+/// `--op` is missing, or the mapped core refusal (409 `strategy_conflict`,
+/// 404 `not_found`, 422 `strategy_validation_failed`, 400 `bad_request` for
+/// other 400s).
 #[allow(clippy::too_many_arguments)] // CLI param plumbing — house pattern
 async fn patch_transition(
-    client: &DaemonClient,
+    core: &CoreService,
+    principal: &Principal,
     strategy_id: &str,
     base_revision: u64,
     source_state: &str,
@@ -320,8 +344,8 @@ async fn patch_transition(
     condition: Option<&str>,
     transition_kind: Option<TransitionKindArg>,
     json: bool,
-) -> Result<()> {
-    // CLI-side required-flag checks mirror the daemon's field errors so
+) -> Result<String> {
+    // CLI-side required-flag checks mirror the core seam's field errors so
     // scripts fail fast with named messages (PL-5).
     match op {
         TransitionOpArg::Create => {
@@ -339,7 +363,7 @@ async fn patch_transition(
             }
         }
     }
-    let req = StrategyPatchTransitionRequest {
+    let request = StrategyPatchTransitionRequest {
         strategy_id: strategy_id.to_string(),
         base_revision,
         source_state_id: source_state.to_string(),
@@ -349,40 +373,39 @@ async fn patch_transition(
         transition_kind: transition_kind.map(TransitionKindArg::to_generated),
         op: op.to_generated(),
     };
-    let resp: StrategyPatchResponse = client
-        .post(
-            &format!("/v1/daemon/strategies/{strategy_id}/transitions/patch"),
-            &req,
-        )
-        .await?;
+    let resp = core
+        .patch_strategy_transition(principal, strategy_id.to_string(), request)
+        .await
+        .map_err(map_core_error)?;
     if json {
-        println!("{}", serde_json::to_string_pretty(&resp)?);
-    } else {
-        println!("Patched transition from '{source_state}' in Strategy '{strategy_id}'.");
-        render_patch_response(&resp);
+        return Ok(serde_json::to_string_pretty(&resp)?);
     }
-    Ok(())
+    Ok(format!(
+        "Patched transition from '{source_state}' in Strategy '{strategy_id}'.\n{}",
+        render_patch_response(&resp)
+    ))
 }
 
 /// `preset patch prompt <strategy_id> <state_id> --base-revision N
 /// --template-ref <path> --file <path>|'-'` — patch a state's prompt
-/// template (`POST /v1/daemon/strategies/:strategy_id/states/:state_id/prompt/patch`).
+/// template (`CoreService::patch_strategy_prompt_template`).
 ///
 /// # Errors
 ///
-/// Returns a named `CliError::Other` when `--file` cannot be read, or
-/// `CliError` for daemon / network failures (409 `strategy_conflict`, 404
-/// `not_found`, 422 `strategy_validation_failed`, 400 `bad_request` for
-/// other 400s).
+/// Returns a named `CliError::Other` when `--file` cannot be read, or the
+/// mapped core refusal (409 `strategy_conflict`, 404 `not_found`, 422
+/// `strategy_validation_failed`, 400 `bad_request` for other 400s).
+#[allow(clippy::too_many_arguments)] // CLI param plumbing — house pattern
 async fn patch_prompt(
-    client: &DaemonClient,
+    core: &CoreService,
+    principal: &Principal,
     strategy_id: &str,
     state_id: &str,
     base_revision: u64,
     template_ref: &str,
     file: &str,
     json: bool,
-) -> Result<()> {
+) -> Result<String> {
     let body = if file == "-" {
         use std::io::Read;
         let mut buf = String::new();
@@ -391,41 +414,45 @@ async fn patch_prompt(
     } else {
         read_file_bounded(file, PROMPT_FILE_MAX_BYTES, "--file")?
     };
-    let req = StrategyPatchPromptTemplateRequest {
+    let request = StrategyPatchPromptTemplateRequest {
         strategy_id: strategy_id.to_string(),
         state_id: state_id.to_string(),
         base_revision,
         template_ref: template_ref.to_string(),
         set: StrategyPatchPromptTemplateRequestSet { body },
     };
-    let resp: StrategyPatchResponse = client
-        .post(
-            &format!("/v1/daemon/strategies/{strategy_id}/states/{state_id}/prompt/patch"),
-            &req,
+    let resp = core
+        .patch_strategy_prompt_template(
+            principal,
+            strategy_id.to_string(),
+            state_id.to_string(),
+            request,
         )
-        .await?;
+        .await
+        .map_err(map_core_error)?;
     if json {
-        println!("{}", serde_json::to_string_pretty(&resp)?);
-    } else {
-        println!(
-            "Patched prompt template '{template_ref}' for state '{state_id}' in \
-             Strategy '{strategy_id}'."
-        );
-        render_patch_response(&resp);
+        return Ok(serde_json::to_string_pretty(&resp)?);
     }
-    Ok(())
+    Ok(format!(
+        "Patched prompt template '{template_ref}' for state '{state_id}' in \
+         Strategy '{strategy_id}'.\n{}",
+        render_patch_response(&resp)
+    ))
 }
 
-/// Render a `StrategyPatchResponse` for human output.
-fn render_patch_response(resp: &StrategyPatchResponse) {
-    println!("  new_revision: {}", resp.new_revision);
-    for effect in &resp.side_effects {
-        println!("  {effect}");
-    }
+/// Render a `CoreStrategyPatchResponse` for human output (trailing newline
+/// excluded — the caller's `println!` supplies it).
+fn render_patch_response(resp: &CoreStrategyPatchResponse) -> String {
+    let mut lines = vec![format!("  new_revision: {}", resp.new_revision)];
+    lines.extend(resp.side_effects.iter().map(|effect| format!("  {effect}")));
     if !resp.validation_summary.warnings.is_empty() {
-        println!("  warnings:");
-        for warning in &resp.validation_summary.warnings {
-            println!("    - {warning}");
-        }
+        lines.push("  warnings:".to_string());
+        lines.extend(
+            resp.validation_summary
+                .warnings
+                .iter()
+                .map(|warning| format!("    - {warning}")),
+        );
     }
+    lines.join("\n")
 }

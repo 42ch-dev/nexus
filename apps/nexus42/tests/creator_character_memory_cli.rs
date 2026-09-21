@@ -1,197 +1,47 @@
-//! Process-level `nexus42 creator character memory|soul` and the P3
-//! SOUL/Memory slot projection through `creator character run` (v1.184 P3 T3).
+//! Process-level `nexus42 creator character memory` against the direct-core
+//! actor fixture (v1.193 P0-T11).
 //!
-//! Uses the live daemon router + deterministic mock host. Asserts:
-//! - deterministic human output and `--json` DTO parity for the full
-//!   capture → review → promote → reflect lifecycle;
+//! The whole lifecycle runs the REAL `nexus42` binary against a hermetic
+//! direct-core home: no daemon fixture, no HTTP client, no mock host. Worlds
+//! and Characters are seeded through the fixture's authorized core writers and
+//! every memory verb is the migrated core bearer operation. Asserts:
+//! - deterministic human output and `--json` DTO parity for the
+//!   capture → pending → review → fragments → promote lifecycle;
 //! - fail-closed denial (foreign/missing/inactive Character, foreign binding)
-//!   with zero memory mutation and zero host launches;
-//! - `character run` fills only the admitted Character SOUL/Memory slots with
-//!   the executing Character's bounded data (shared + selected binding scope).
+//!   with zero memory mutation;
+//! - the retired `creator character run` / `soul reflect` entrances are
+//!   unknown commands while core capture/synthesis behavior stays in place.
 
-mod common;
+#[path = "common/direct.rs"]
+mod direct;
+#[path = "common/direct_actor.rs"]
+mod direct_actor;
 
-use common::rn_act4::{seed, stderr, stdout};
-use common::LiveDaemon;
-use nexus_agent_host::capability::model::{
-    FinishReason, HostContentBlock, HostEvent, HostEventStream, HostHealth, HostOperation,
-    HostStartConfig, OperationFinishedEvent, OperationStartedEvent, TextDeltaEvent,
-};
-use nexus_agent_host::{
-    HostError, HostFacade, HostOperationId, HostResult, HostSession, HostSessionId,
-    ProviderCatalog, SessionState,
-};
+use direct_actor::DirectActor;
 use serde_json::Value;
-use std::collections::HashMap;
 use std::process::Output;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
-
-const MOCK_RESULT: &str = "mock-host-result";
 
 /// Deterministic marker strings seeded through public operations only.
-const SOUL_MARKER: &str = "AVASOULMARKER keeps a ledger of every debt owed to the river.";
 const SHARED_MEMORY_MARKER: &str =
     "SHAREDMEMORYMARKER the harbor accord holds because Ava keeps it";
 const LOCAL_MEMORY_MARKER: &str = "LOCALMEMORYMARKER only W1 saw the lantern signal at dusk";
 
-struct MockHost {
-    sessions: Mutex<HashMap<HostSessionId, HostSession>>,
-    prompts: Mutex<Vec<String>>,
-    create_sessions: AtomicU64,
-    execs: AtomicU64,
-    events: tokio::sync::broadcast::Sender<HostEvent>,
+fn stdout(out: &Output) -> String {
+    String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
-impl MockHost {
-    fn new() -> Arc<Self> {
-        let (events, _) = tokio::sync::broadcast::channel(64);
-        Arc::new(Self {
-            sessions: Mutex::new(HashMap::new()),
-            prompts: Mutex::new(Vec::new()),
-            create_sessions: AtomicU64::new(0),
-            execs: AtomicU64::new(0),
-            events,
-        })
-    }
-
-    fn last_prompt(&self) -> String {
-        self.prompts
-            .lock()
-            .expect("prompts")
-            .last()
-            .cloned()
-            .unwrap_or_default()
-    }
+fn stderr(out: &Output) -> String {
+    String::from_utf8_lossy(&out.stderr).into_owned()
 }
 
-#[async_trait::async_trait]
-impl HostFacade for MockHost {
-    async fn start(&self, _config: HostStartConfig) -> HostResult<()> {
-        Ok(())
-    }
-
-    async fn create_session(
-        &self,
-        request: nexus_agent_host::capability::CreateSessionRequest,
-    ) -> HostResult<HostSession> {
-        self.create_sessions.fetch_add(1, Ordering::SeqCst);
-        let session = HostSession {
-            id: HostSessionId::new(),
-            provider_id: request.provider_id,
-            state: SessionState::Ready,
-            created_at: chrono::Utc::now(),
-            active_op_id: None,
-            negotiated_capabilities:
-                nexus_agent_host::capability::model::CapabilityDescriptor::native_cli_limited(),
-            owner: request.owner,
-            process_identity: None,
-        };
-        self.sessions
-            .lock()
-            .expect("sessions")
-            .insert(session.id.clone(), session.clone());
-        Ok(session)
-    }
-
-    async fn exec(
-        &self,
-        session_id: HostSessionId,
-        op: HostOperation,
-    ) -> HostResult<HostEventStream> {
-        self.execs.fetch_add(1, Ordering::SeqCst);
-        let op_id = match op {
-            HostOperation::Prompt { op_id, content, .. } => {
-                let text = match content.as_slice() {
-                    [HostContentBlock::Text { text }] => text.clone(),
-                    other => format!("unexpected content {other:?}"),
-                };
-                self.prompts.lock().expect("prompts").push(text);
-                op_id
-            }
-            HostOperation::SetModel { .. } | HostOperation::SetMode { .. } => {
-                HostOperationId::new()
-            }
-        };
-        let started = HostEvent::OpStarted(OperationStartedEvent {
-            op_id: op_id.clone(),
-            session_id: session_id.clone(),
-        });
-        let delta = HostEvent::MessageDelta(TextDeltaEvent {
-            session_id: session_id.clone(),
-            op_id: op_id.clone(),
-            text: MOCK_RESULT.to_string(),
-        });
-        let finished = HostEvent::OpFinished(OperationFinishedEvent {
-            session_id,
-            op_id,
-            reason: FinishReason::EndTurn,
-        });
-        let _ = self.events.send(started.clone());
-        let _ = self.events.send(delta.clone());
-        let _ = self.events.send(finished.clone());
-        Ok(Box::pin(futures_util::stream::iter(vec![
-            Ok(started),
-            Ok(delta),
-            Ok(finished),
-        ])))
-    }
-
-    async fn cancel(&self, _op_id: HostOperationId) -> HostResult<()> {
-        Ok(())
-    }
-
-    async fn health(&self) -> HostResult<HostHealth> {
-        Ok(HostHealth {
-            running: true,
-            active_sessions: self.sessions.lock().expect("sessions").len(),
-            active_operations: 0,
-        })
-    }
-
-    async fn shutdown(&self) -> HostResult<()> {
-        Ok(())
-    }
-
-    async fn shutdown_session(&self, session_id: HostSessionId) -> HostResult<()> {
-        self.sessions
-            .lock()
-            .expect("sessions")
-            .remove(&session_id)
-            .ok_or_else(|| HostError::internal("session"))?;
-        Ok(())
-    }
-
-    async fn list_sessions(&self) -> HostResult<Vec<HostSession>> {
-        Ok(self
-            .sessions
-            .lock()
-            .expect("sessions")
-            .values()
-            .cloned()
-            .collect())
-    }
-
-    async fn provider_catalog(&self) -> HostResult<ProviderCatalog> {
-        Ok(ProviderCatalog::new())
-    }
-
-    fn subscribe_events(
-        &self,
-        _session_id: HostSessionId,
-    ) -> tokio::sync::broadcast::Receiver<HostEvent> {
-        self.events.subscribe()
-    }
+fn cli_ok(actor: &DirectActor, args: &[&str]) -> Output {
+    let out = actor.cli(args);
+    assert!(out.status.success(), "cli {args:?}: {}", stderr(&out));
+    out
 }
 
 fn json_out(out: &Output) -> Value {
     serde_json::from_str(&stdout(out)).unwrap_or_else(|_| panic!("json: {}", stdout(out)))
-}
-
-async fn cli_ok(d: &LiveDaemon, args: &[&str]) -> Output {
-    let out = d.cli(args).await;
-    assert!(out.status.success(), "cli {args:?}: {}", stderr(&out));
-    out
 }
 
 /// >= 50 chars with research task kind → FragmentOnly.
@@ -199,16 +49,29 @@ fn fragment_digest(marker: &str) -> String {
     format!("{marker} — researched background detail for texture and continuity.")
 }
 
+/// Count the stored pending-review rows on the released workspace DB.
+async fn pending_row_count(actor: &DirectActor) -> i64 {
+    let pool = actor.read_only_pool().await;
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM character_memory_pending_review")
+        .fetch_one(&pool)
+        .await
+        .expect("count character_memory_pending_review");
+    pool.close().await;
+    count
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[allow(clippy::too_many_lines)] // single lifecycle parity proof
 async fn character_memory_lifecycle_json_and_human_parity() {
-    let d = LiveDaemon::start_for_creator(common::rn_act4::FIXTURE_CREATOR, "default").await;
-    let g = seed(&d).await;
-    let chr = g.character_a.as_str();
+    let actor = DirectActor::new().await;
+    let world_w1 = actor.create_world("Memory World One").await;
+    let seeded = actor.create_character("Ava", &world_w1).await;
+    let chr = seeded.character_id.as_str();
+    let binding = seeded.binding_id.as_str();
 
     // capture (json): returns the generated response DTO.
     let out = cli_ok(
-        &d,
+        &actor,
         &[
             "creator",
             "character",
@@ -226,15 +89,14 @@ async fn character_memory_lifecycle_json_and_human_parity() {
             &fragment_digest(SHARED_MEMORY_MARKER),
             "--json",
         ],
-    )
-    .await;
+    );
     let payload = json_out(&out);
     assert_eq!(payload["success"], true);
     assert_eq!(payload["pending_id"], "pend_cli_1");
 
     // capture (human): deterministic labeled lines, not JSON.
     let out = cli_ok(
-        &d,
+        &actor,
         &[
             "creator",
             "character",
@@ -247,21 +109,20 @@ async fn character_memory_lifecycle_json_and_human_parity() {
             "--session-id",
             "sess_cli_2",
             "--binding-id",
-            &g.bind_a_w1,
+            binding,
             "--task-kind",
             "research",
             "--digest",
             &fragment_digest(LOCAL_MEMORY_MARKER),
         ],
-    )
-    .await;
+    );
     let human = stdout(&out);
     assert!(human.contains("pend_cli_2"));
     assert!(!human.trim_start().starts_with('{'));
 
     // pending-count, both scopes, both output modes.
     let out = cli_ok(
-        &d,
+        &actor,
         &[
             "creator",
             "character",
@@ -271,11 +132,10 @@ async fn character_memory_lifecycle_json_and_human_parity() {
             chr,
             "--json",
         ],
-    )
-    .await;
+    );
     assert_eq!(json_out(&out)["count"], 1);
     let out = cli_ok(
-        &d,
+        &actor,
         &[
             "creator",
             "character",
@@ -284,11 +144,10 @@ async fn character_memory_lifecycle_json_and_human_parity() {
             "--character-id",
             chr,
         ],
-    )
-    .await;
+    );
     assert!(stdout(&out).contains('1'));
     let out = cli_ok(
-        &d,
+        &actor,
         &[
             "creator",
             "character",
@@ -297,16 +156,15 @@ async fn character_memory_lifecycle_json_and_human_parity() {
             "--character-id",
             chr,
             "--binding-id",
-            &g.bind_a_w1,
+            binding,
             "--json",
         ],
-    )
-    .await;
+    );
     assert_eq!(json_out(&out)["count"], 1);
 
     // pending-list: shared scope shows pend_cli_1 only.
     let out = cli_ok(
-        &d,
+        &actor,
         &[
             "creator",
             "character",
@@ -316,17 +174,16 @@ async fn character_memory_lifecycle_json_and_human_parity() {
             chr,
             "--json",
         ],
-    )
-    .await;
+    );
     let payload = json_out(&out);
     let items = payload["items"].as_array().unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["pending_id"], "pend_cli_1");
 
-    // review (json): drains both scopes' rows when unscoped? No — unscoped
-    // drains the shared scope only; the binding scope is drained explicitly.
+    // review (json): the unscoped drain empties the shared scope only; the
+    // binding scope is drained explicitly afterwards.
     let out = cli_ok(
-        &d,
+        &actor,
         &[
             "creator",
             "character",
@@ -336,14 +193,13 @@ async fn character_memory_lifecycle_json_and_human_parity() {
             chr,
             "--json",
         ],
-    )
-    .await;
+    );
     let payload = json_out(&out);
     assert_eq!(payload["fragmented"], 1);
     assert_eq!(payload["has_more"], false);
 
     let out = cli_ok(
-        &d,
+        &actor,
         &[
             "creator",
             "character",
@@ -352,15 +208,14 @@ async fn character_memory_lifecycle_json_and_human_parity() {
             "--character-id",
             chr,
             "--binding-id",
-            &g.bind_a_w1,
+            binding,
         ],
-    )
-    .await;
+    );
     assert!(stdout(&out).contains("fragmented=1"));
 
-    // fragments: binding-local row carries revision 0 and the marker.
+    // fragments: the binding-local row carries revision 0 and the marker.
     let out = cli_ok(
-        &d,
+        &actor,
         &[
             "creator",
             "character",
@@ -369,11 +224,10 @@ async fn character_memory_lifecycle_json_and_human_parity() {
             "--character-id",
             chr,
             "--binding-id",
-            &g.bind_a_w1,
+            binding,
             "--json",
         ],
-    )
-    .await;
+    );
     let payload = json_out(&out);
     let fragments = payload["fragments"].as_array().unwrap();
     assert_eq!(fragments.len(), 1);
@@ -385,20 +239,18 @@ async fn character_memory_lifecycle_json_and_human_parity() {
     let fragment_id = fragments[0]["fragment_id"].as_str().unwrap().to_string();
 
     // promote: stale revision is a stable failure with no mutation.
-    let out = d
-        .cli(&[
-            "creator",
-            "character",
-            "memory",
-            "promote",
-            "--character-id",
-            chr,
-            "--fragment-id",
-            &fragment_id,
-            "--expected-revision",
-            "9",
-        ])
-        .await;
+    let out = actor.cli(&[
+        "creator",
+        "character",
+        "memory",
+        "promote",
+        "--character-id",
+        chr,
+        "--fragment-id",
+        &fragment_id,
+        "--expected-revision",
+        "9",
+    ]);
     assert!(!out.status.success(), "stale promote: {}", stdout(&out));
     assert!(
         stderr(&out).contains("version_mismatch"),
@@ -408,7 +260,7 @@ async fn character_memory_lifecycle_json_and_human_parity() {
 
     // promote: correct revision clears provenance (shared scope gains it).
     let out = cli_ok(
-        &d,
+        &actor,
         &[
             "creator",
             "character",
@@ -422,51 +274,19 @@ async fn character_memory_lifecycle_json_and_human_parity() {
             "0",
             "--json",
         ],
-    )
-    .await;
+    );
     let payload = json_out(&out);
     assert_eq!(payload["fragment"]["fragment_id"], fragment_id);
     assert_eq!(payload["fragment"]["revision"], 1);
-
-    // soul reflect: deterministic states in both output modes.
-    let out = cli_ok(
-        &d,
-        &[
-            "creator",
-            "character",
-            "soul",
-            "reflect",
-            "--character-id",
-            chr,
-            "--json",
-        ],
-    )
-    .await;
-    let payload = json_out(&out);
-    assert_eq!(payload["character_id"], chr);
-    assert_eq!(payload["state"], "insufficient_data");
-    let out = cli_ok(
-        &d,
-        &[
-            "creator",
-            "character",
-            "soul",
-            "reflect",
-            "--character-id",
-            chr,
-        ],
-    )
-    .await;
-    let human = stdout(&out);
-    assert!(human.contains("insufficient_data"));
-    assert!(!human.trim_start().starts_with('{'));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[allow(clippy::too_many_lines)] // fail-closed proof
 async fn character_memory_fail_closed_no_mutation() {
-    let d = LiveDaemon::start_for_creator(common::rn_act4::FIXTURE_CREATOR, "default").await;
-    let g = seed(&d).await;
+    let actor = DirectActor::new().await;
+    let world_w1 = actor.create_world("Memory World One").await;
+    let character_a = actor.create_character("Ava", &world_w1).await;
+    let character_b = actor.create_character("Ben", &world_w1).await;
 
     // Foreign (missing) character id: every memory verb fails.
     let missing = "chr_ffffffffffffffffffffffffffffffff";
@@ -504,13 +324,23 @@ async fn character_memory_fail_closed_no_mutation() {
         vec![
             "creator",
             "character",
-            "soul",
-            "reflect",
+            "memory",
+            "fragments",
             "--character-id",
             missing,
         ],
+        vec![
+            "creator",
+            "character",
+            "memory",
+            "pending-dismiss",
+            "--character-id",
+            missing,
+            "--pending-id",
+            "pend_x",
+        ],
     ] {
-        let out = d.cli(&args).await;
+        let out = actor.cli(&args);
         assert!(
             !out.status.success(),
             "{args:?} must fail: {}",
@@ -519,418 +349,115 @@ async fn character_memory_fail_closed_no_mutation() {
     }
 
     // Cross-character binding: A's memory verbs must not accept B's binding.
-    let out = d
-        .cli(&[
-            "creator",
-            "character",
-            "memory",
-            "capture",
-            "--character-id",
-            &g.character_a,
-            "--pending-id",
-            "pend_xb",
-            "--session-id",
-            "sess_xb",
-            "--binding-id",
-            &g.bind_b_w1,
-            "--digest",
-            "irrelevant digest text that is long enough to matter",
-        ])
-        .await;
+    let out = actor.cli(&[
+        "creator",
+        "character",
+        "memory",
+        "capture",
+        "--character-id",
+        &character_a.character_id,
+        "--pending-id",
+        "pend_xb",
+        "--session-id",
+        "sess_xb",
+        "--binding-id",
+        &character_b.binding_id,
+        "--digest",
+        "irrelevant digest text that is long enough to matter",
+    ]);
     assert!(!out.status.success(), "cross-character binding accepted");
 
-    // Inactive character: archive B, then write verbs deny (reads may retain).
-    sqlx::query("UPDATE characters SET status = 'archived' WHERE character_id = ?")
-        .bind(&g.character_b)
-        .execute(&d.pool)
-        .await
-        .unwrap();
-    let out = d
-        .cli(&[
+    // Inactive character: archive B through the core's own lifecycle
+    // transition, then its write verbs deny (reads may retain).
+    cli_ok(
+        &actor,
+        &[
             "creator",
             "character",
-            "memory",
-            "capture",
-            "--character-id",
-            &g.character_b,
-            "--pending-id",
-            "pend_archived",
-            "--session-id",
-            "sess_archived",
-            "--digest",
-            "irrelevant digest text that is long enough to matter",
-        ])
-        .await;
+            "archive",
+            &character_b.character_id,
+            "--expected-revision",
+            "0",
+        ],
+    );
+    let out = actor.cli(&[
+        "creator",
+        "character",
+        "memory",
+        "capture",
+        "--character-id",
+        &character_b.character_id,
+        "--pending-id",
+        "pend_archived",
+        "--session-id",
+        "sess_archived",
+        "--digest",
+        "irrelevant digest text that is long enough to matter",
+    ]);
     assert!(!out.status.success(), "inactive character write must deny");
 
-    // Zero mutation proof: A's queues stay empty, B has no rows at all.
+    // Zero mutation proof: A's queues stay empty, and no pending row exists.
     let out = cli_ok(
-        &d,
+        &actor,
         &[
             "creator",
             "character",
             "memory",
             "pending-count",
             "--character-id",
-            &g.character_a,
+            &character_a.character_id,
             "--json",
         ],
-    )
-    .await;
+    );
     assert_eq!(json_out(&out)["count"], 0);
-    let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM character_memory_pending_review")
-        .fetch_one(&d.pool)
-        .await
-        .unwrap();
-    assert_eq!(count.0, 0, "deny matrix must not write pending rows");
+    assert_eq!(
+        pending_row_count(&actor).await,
+        0,
+        "deny matrix must not write pending rows"
+    );
 }
 
+/// The retired entrances stay retired: `creator character run` (daemon-stream
+/// plus durable owner-outcome observation) and `creator character soul
+/// reflect` (registry-backed forced synthesis) have no complete direct CLI
+/// closure, so both are unknown commands while core host capture/session and
+/// soul synthesis behavior remain library/core operations.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[allow(clippy::too_many_lines)] // single admitted-projection proof
-async fn character_run_projects_only_admitted_soul_and_memory() {
-    let host = MockHost::new();
-    let d = LiveDaemon::start_for_creator_with_agent_host(
-        common::rn_act4::FIXTURE_CREATOR,
-        "default",
-        host.clone(),
-    )
-    .await;
-    let g = seed(&d).await;
-    let chr = g.character_a.as_str();
-
-    // Seed SOUL.md at the canonical Character path inside the hermetic home.
-    // The daemon passes `state.nexus_home()` (= `<raw home>/.nexus42`) to the
-    // bearer layout helpers, which also join `.nexus42` — so the SOUL.md the
-    // daemon reads lives under `<raw home>/.nexus42/.nexus42/creators/...`.
-    let soul_dir = d
-        .home
-        .path()
-        .join(".nexus42")
-        .join(".nexus42")
-        .join("creators")
-        .join(&g.creator_id)
-        .join("characters")
-        .join(chr);
-    std::fs::create_dir_all(&soul_dir).unwrap();
-    std::fs::write(
-        soul_dir.join("SOUL.md"),
-        format!("# Ava\n\n{SOUL_MARKER}\n"),
-    )
-    .unwrap();
-
-    // One shared fragment and one W1-binding-local fragment via public CLI.
-    for (pending, binding, marker) in [
-        ("pend_shared", None, SHARED_MEMORY_MARKER),
-        (
-            "pend_local",
-            Some(g.bind_a_w1.as_str()),
-            LOCAL_MEMORY_MARKER,
-        ),
+async fn retired_character_run_and_reflect_entrances_are_unknown_commands() {
+    let actor = DirectActor::new().await;
+    for args in [
+        vec![
+            "creator",
+            "character",
+            "run",
+            "--character-id",
+            "chr_x",
+            "--world-id",
+            "wld_x",
+            "--binding-id",
+            "awb_x",
+            "--prompt",
+            "Act now.",
+        ],
+        vec![
+            "creator",
+            "character",
+            "soul",
+            "reflect",
+            "--character-id",
+            "chr_x",
+            "--force",
+        ],
     ] {
-        let session_id = format!("sess_{pending}");
-        let digest = fragment_digest(marker);
-        let mut args = vec![
-            "creator",
-            "character",
-            "memory",
-            "capture",
-            "--character-id",
-            chr,
-            "--pending-id",
-            pending,
-            "--session-id",
-            &session_id,
-            "--task-kind",
-            "research",
-            "--digest",
-            &digest,
-        ];
-        if let Some(b) = binding {
-            args.push("--binding-id");
-            args.push(b);
-        }
-        cli_ok(&d, &args).await;
+        let out = actor.cli(&args);
+        let combined = format!("{}{}", stdout(&out), stderr(&out));
+        assert!(
+            !out.status.success(),
+            "{args:?} must not be a command: {combined}"
+        );
+        assert!(
+            combined.contains("unrecognized subcommand"),
+            "retired leaf `{args:?}` must be an unknown subcommand: {combined}"
+        );
     }
-    cli_ok(
-        &d,
-        &[
-            "creator",
-            "character",
-            "memory",
-            "review",
-            "--character-id",
-            chr,
-        ],
-    )
-    .await;
-    cli_ok(
-        &d,
-        &[
-            "creator",
-            "character",
-            "memory",
-            "review",
-            "--character-id",
-            chr,
-            "--binding-id",
-            &g.bind_a_w1,
-        ],
-    )
-    .await;
-
-    // Run A in W1: SOUL + shared + W1-local memory fill the slots.
-    let out = cli_ok(
-        &d,
-        &[
-            "creator",
-            "character",
-            "run",
-            "--character-id",
-            chr,
-            "--world-id",
-            &g.world_w1,
-            "--binding-id",
-            &g.bind_a_w1,
-            "--prompt",
-            "Act now.",
-        ],
-    )
-    .await;
-    assert!(stdout(&out).contains(MOCK_RESULT));
-    let prompt = host.last_prompt();
-    assert!(prompt.contains("## Character SOUL"), "{prompt}");
-    assert!(prompt.contains(SOUL_MARKER), "soul slot: {prompt}");
-    assert!(prompt.contains("## Character Memory"), "{prompt}");
-    assert!(prompt.contains(SHARED_MEMORY_MARKER), "shared: {prompt}");
-    assert!(prompt.contains(LOCAL_MEMORY_MARKER), "w1 local: {prompt}");
-    assert!(prompt.contains("## Character ToM — L1"));
-    assert!(prompt.contains("## Character ToM — L2"));
-
-    // Run A in W2: shared memory visible, W1-local memory absent.
-    let out = cli_ok(
-        &d,
-        &[
-            "creator",
-            "character",
-            "run",
-            "--character-id",
-            chr,
-            "--world-id",
-            &g.world_w2,
-            "--binding-id",
-            &g.bind_a_w2,
-            "--prompt",
-            "Act now.",
-        ],
-    )
-    .await;
-    assert!(out.status.success(), "w2 run: {}", stderr(&out));
-    let prompt = host.last_prompt();
-    assert!(prompt.contains(SOUL_MARKER), "soul persists: {prompt}");
-    assert!(prompt.contains(SHARED_MEMORY_MARKER), "shared: {prompt}");
-    assert!(
-        !prompt.contains(LOCAL_MEMORY_MARKER),
-        "w1-local must not leak into w2 run: {prompt}"
-    );
-
-    // No Creator/B data bleeds into the Character slots.
-    assert!(!prompt.contains("## Personality"));
-
-    // Inactive Character run: rejected before any launch/mutation.
-    sqlx::query("UPDATE characters SET status = 'archived' WHERE character_id = ?")
-        .bind(&g.character_b)
-        .execute(&d.pool)
-        .await
-        .unwrap();
-    let before_create = host.create_sessions.load(Ordering::SeqCst);
-    let before_exec = host.execs.load(Ordering::SeqCst);
-    let out = d
-        .cli(&[
-            "creator",
-            "character",
-            "run",
-            "--character-id",
-            &g.character_b,
-            "--world-id",
-            &g.world_w1,
-            "--binding-id",
-            &g.bind_b_w1,
-            "--prompt",
-            "Act now.",
-        ])
-        .await;
-    assert!(!out.status.success(), "inactive run must fail");
-    assert_eq!(host.create_sessions.load(Ordering::SeqCst), before_create);
-    assert_eq!(host.execs.load(Ordering::SeqCst), before_exec);
-}
-
-// ─── v1.185 P3 run capture → review → promote journey ───────────────────────
-
-async fn run_remember_json(d: &LiveDaemon, g: &common::rn_act4::RnAct4Graph, chr: &str) -> Value {
-    let out = tokio::process::Command::new(env!("CARGO_BIN_EXE_nexus42"))
-        .args([
-            "creator",
-            "character",
-            "run",
-            "--character-id",
-            chr,
-            "--world-id",
-            &g.world_w1,
-            "--binding-id",
-            &g.bind_a_w1,
-            "--prompt",
-            "Remember this harbor detail.",
-            "--remember",
-            "--json",
-        ])
-        .env("HOME", d.home.path())
-        .env("RUST_LOG", "off")
-        .output()
-        .await
-        .expect("spawn");
-    assert!(out.status.success(), "run: {}", stderr(&out));
-    json_out(&out)
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[allow(clippy::too_many_lines)]
-async fn character_run_remember_review_promote_journey() {
-    let host = MockHost::new();
-    let d = LiveDaemon::start_for_creator_with_agent_host(
-        common::rn_act4::FIXTURE_CREATOR,
-        "default",
-        host.clone(),
-    )
-    .await;
-    let g = seed(&d).await;
-    let chr = g.character_a.as_str();
-
-    let first = run_remember_json(&d, &g, chr).await;
-    let second = run_remember_json(&d, &g, chr).await;
-    assert_eq!(first["outcome"]["capture"]["status"], "captured");
-    assert_eq!(second["outcome"]["capture"]["status"], "captured");
-    let pid1 = first["outcome"]["capture"]["pending_id"].as_str().unwrap();
-    let pid2 = second["outcome"]["capture"]["pending_id"].as_str().unwrap();
-    assert_ne!(pid1, pid2);
-    assert!(pid1.starts_with("run_"));
-    assert!(pid2.starts_with("run_"));
-
-    let pending = cli_ok(
-        &d,
-        &[
-            "creator",
-            "character",
-            "memory",
-            "pending-list",
-            "--character-id",
-            chr,
-            "--binding-id",
-            &g.bind_a_w1,
-            "--json",
-        ],
-    )
-    .await;
-    let pending_json = json_out(&pending);
-    let items = pending_json["items"].as_array().unwrap();
-    assert!(items.iter().any(|row| row["pending_id"] == pid1));
-    assert!(items.iter().any(|row| row["pending_id"] == pid2));
-
-    let review = cli_ok(
-        &d,
-        &[
-            "creator",
-            "character",
-            "memory",
-            "review",
-            "--character-id",
-            chr,
-            "--binding-id",
-            &g.bind_a_w1,
-            "--json",
-        ],
-    )
-    .await;
-    let review_json = json_out(&review);
-    assert!(
-        review_json["fragmented"].as_u64().unwrap_or(0) >= 1,
-        "review should fragment local pending rows: {review_json}"
-    );
-
-    let fragments_out = cli_ok(
-        &d,
-        &[
-            "creator",
-            "character",
-            "memory",
-            "fragments",
-            "--character-id",
-            chr,
-            "--binding-id",
-            &g.bind_a_w1,
-            "--json",
-        ],
-    )
-    .await;
-    let fragments_json = json_out(&fragments_out);
-    let fragments = fragments_json["fragments"].as_array().unwrap();
-    assert!(
-        !fragments.is_empty(),
-        "fragments list should include local rows"
-    );
-    let fragment_id = fragments[0]["fragment_id"].as_str().unwrap();
-
-    let promote = cli_ok(
-        &d,
-        &[
-            "creator",
-            "character",
-            "memory",
-            "promote",
-            "--character-id",
-            chr,
-            "--fragment-id",
-            fragment_id,
-            "--expected-revision",
-            "0",
-            "--json",
-        ],
-    )
-    .await;
-    assert_eq!(json_out(&promote)["fragment"]["fragment_id"], fragment_id);
-
-    let third = cli_ok(
-        &d,
-        &[
-            "creator",
-            "character",
-            "run",
-            "--character-id",
-            chr,
-            "--world-id",
-            &g.world_w1,
-            "--binding-id",
-            &g.bind_a_w1,
-            "--prompt",
-            "Act after promote.",
-        ],
-    )
-    .await;
-    assert!(
-        third.status.success(),
-        "post-promote run: {}",
-        stderr(&third)
-    );
-    let prompt = host.last_prompt();
-    assert!(prompt.contains("## Character Memory"), "{prompt}");
-    assert!(
-        prompt.contains(MOCK_RESULT) || prompt.contains("harbor detail"),
-        "promoted run capture should project into admitted mind: {prompt}"
-    );
-
-    // Creator memory tables remain untouched (no run capture writes there).
-    let creator_pending: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM memory_pending_review")
-        .fetch_one(&d.pool)
-        .await
-        .unwrap();
-    assert_eq!(creator_pending.0, 0);
 }

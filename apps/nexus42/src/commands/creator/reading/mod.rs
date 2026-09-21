@@ -1,35 +1,44 @@
-//! Reading-depth data CRUD — `creator reading` (V1.175 P1 Task 1, group 3).
+//! Reading-depth data CRUD — `creator reading` (V1.175 P1 Task 1, group 3;
+//! direct-core retarget v1.193 P0-T8).
 //!
-//! Thin daemon-HTTP leaves over the existing V1.89 reading routes
-//! (AR-83 #1 / AR-84 group 3): `progress get|set|clear` +
+//! Direct-core leaves over the retained typed reading family
+//! ([`CoreService::get_reading_progress`], `put_reading_progress`,
+//! `delete_reading_progress`, `list_annotations`, `create_annotation`,
+//! `patch_annotation`, `delete_annotation`): `progress get|set|clear` +
 //! `annotation list|add|patch|remove`. **Data CRUD only** (PL-7) — this is
 //! not a manuscript reader / TUI pager; the V1.79 reading surface stays
 //! web. Agents and scripts export, reset, and write annotations here.
 //!
-//! Routes consumed (unchanged, daemon `api/` untouched):
-//! `GET/PUT/DELETE /v1/daemon/reading/progress`,
-//! `GET/POST /v1/daemon/reading/annotations`,
-//! `PATCH/DELETE /v1/daemon/reading/annotations/:annotation_id`.
+//! Every leaf runs on the shared direct-call seam ([`crate::core`]): one
+//! owner-scoped `CoreService` is opened, the typed request is issued, and the
+//! writer is released before anything is rendered. Reading persists in the
+//! selected workspace `state.db` — the same storage the retired
+//! `GET/PUT/DELETE /v1/daemon/reading/progress` and
+//! `GET/POST /v1/daemon/reading/annotations` routes wrote.
 //!
-//! Conventions: human-readable default output, `--json` emits the daemon
-//! DTO verbatim (generated contract types only — AR-83 #2/#3); write
-//! bodies are typed long flags; daemon error envelopes surface via
-//! `DaemonClient::parse_error_response` (named `[code]`, non-zero exit).
+//! Conventions: human-readable default output, `--json` emits the typed DTO
+//! verbatim (generated contract types only — AR-83 #2/#3); write bodies are
+//! typed long flags; core refusals surface through the shared mapper (named
+//! `[code]`, non-zero exit). Flag-vocabulary validation (chapter >= 1, scroll
+//! bounds, closed color enum, non-empty selected text, `--end > --start`)
+//! stays here because it names the flags; the core re-checks the same
+//! invariants on its own authority.
 
-use crate::api::DaemonClient;
-use crate::commands::creator::work_utils::query_path;
 use crate::config::CliConfig;
+use crate::core::{finish_direct, map_core_error, open_direct_core};
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
 use nexus_contracts::daemon_api::reading::{
     ReadingAnnotation, ReadingAnnotationCreateRequest, ReadingAnnotationCreateRequestColor,
-    ReadingAnnotationCreateRequestSelectedText, ReadingAnnotationListResponse,
-    ReadingAnnotationPatchRequest, ReadingAnnotationPatchRequestColor, ReadingProgressRequest,
-    ReadingProgressResponse,
+    ReadingAnnotationCreateRequestSelectedText, ReadingAnnotationListQuery,
+    ReadingAnnotationPatchRequest, ReadingAnnotationPatchRequestColor, ReadingProgressQuery,
+    ReadingProgressRequest, ReadingProgressResponse,
 };
+use nexus_core::{CoreService, Principal};
+use std::fmt::Write as _;
 use std::num::NonZeroU64;
 
-/// Valid annotation highlight colors (V1.89 closed enum, daemon-validated).
+/// Valid annotation highlight colors (V1.89 closed enum, core-validated).
 const VALID_ANNOTATION_COLORS: [&str; 4] = ["yellow", "blue", "green", "pink"];
 /// Scroll-progress unit ceiling: thousandths (0–10000).
 const SCROLL_PROGRESS_MAX: i64 = 10_000;
@@ -54,7 +63,7 @@ pub enum ReadingCommand {
 pub enum ProgressCommand {
     /// Get persisted scroll progress for a work + chapter.
     Get {
-        /// Work ID (wrk_...) — the daemon's canonical work reference.
+        /// Work ID (wrk_...) — the core's canonical work reference.
         work_id: String,
         /// Chapter number (1-based).
         #[arg(long)]
@@ -65,7 +74,7 @@ pub enum ProgressCommand {
     },
     /// Upsert persisted scroll progress for a work + chapter.
     Set {
-        /// Work ID (wrk_...) — the daemon's canonical work reference.
+        /// Work ID (wrk_...) — the core's canonical work reference.
         work_id: String,
         /// Chapter number (1-based).
         #[arg(long)]
@@ -79,7 +88,7 @@ pub enum ProgressCommand {
     },
     /// Clear persisted scroll progress for a work + chapter.
     Clear {
-        /// Work ID (wrk_...) — the daemon's canonical work reference.
+        /// Work ID (wrk_...) — the core's canonical work reference.
         work_id: String,
         /// Chapter number (1-based).
         #[arg(long)]
@@ -95,7 +104,7 @@ pub enum ProgressCommand {
 pub enum AnnotationCommand {
     /// List annotations for a work + chapter.
     List {
-        /// Work ID (wrk_...) — the daemon's canonical work reference.
+        /// Work ID (wrk_...) — the core's canonical work reference.
         work_id: String,
         /// Chapter number (1-based).
         #[arg(long)]
@@ -107,7 +116,7 @@ pub enum AnnotationCommand {
 
     /// Add an annotation to a work + chapter.
     Add {
-        /// Work ID (wrk_...) — the daemon's canonical work reference.
+        /// Work ID (wrk_...) — the core's canonical work reference.
         work_id: String,
         /// Chapter number (1-based).
         #[arg(long)]
@@ -162,46 +171,70 @@ pub enum AnnotationCommand {
 
 /// Run a `creator reading` subcommand.
 ///
+/// The writer is released by [`finish_direct`] before any line is printed, so
+/// a command never reports an outcome its core could not settle.
+///
 /// # Errors
 ///
 /// Returns `CliError` on invalid input (chapter < 1, scroll out of range,
-/// invalid color, empty selected text) or any daemon API / network failure.
+/// invalid color, empty selected text) or the mapped core refusal (unknown or
+/// foreign work/annotation, storage failure), plus any cleanup refusal from
+/// [`finish_direct`].
 pub async fn run(cmd: ReadingCommand, config: &CliConfig) -> Result<()> {
-    let client = DaemonClient::from_config(config)?;
-    match cmd {
-        ReadingCommand::Progress { command } => run_progress(&client, command).await,
-        ReadingCommand::Annotation { command } => run_annotation(&client, command).await,
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        match cmd {
+            ReadingCommand::Progress { command } => run_progress(&core, &principal, command).await,
+            ReadingCommand::Annotation { command } => {
+                run_annotation(&core, &principal, command).await
+            }
+        }
     }
+    .await;
+    // `None` is a settled verb that prints nothing (`--json` on a delete).
+    if let Some(text) = finish_direct(&core, outcome).await? {
+        println!("{text}");
+    }
+    Ok(())
 }
 
-async fn run_progress(client: &DaemonClient, cmd: ProgressCommand) -> Result<()> {
+async fn run_progress(
+    core: &CoreService,
+    principal: &Principal,
+    cmd: ProgressCommand,
+) -> Result<Option<String>> {
     match cmd {
         ProgressCommand::Get {
             work_id,
             chapter,
             json,
-        } => progress_get(client, &work_id, chapter, json).await,
+        } => progress_get(core, principal, &work_id, chapter, json).await,
         ProgressCommand::Set {
             work_id,
             chapter,
             scroll,
             json,
-        } => progress_set(client, &work_id, chapter, scroll, json).await,
+        } => progress_set(core, principal, &work_id, chapter, scroll, json).await,
         ProgressCommand::Clear {
             work_id,
             chapter,
             json,
-        } => progress_clear(client, &work_id, chapter, json).await,
+        } => progress_clear(core, principal, &work_id, chapter, json).await,
     }
 }
 
-async fn run_annotation(client: &DaemonClient, cmd: AnnotationCommand) -> Result<()> {
+async fn run_annotation(
+    core: &CoreService,
+    principal: &Principal,
+    cmd: AnnotationCommand,
+) -> Result<Option<String>> {
     match cmd {
         AnnotationCommand::List {
             work_id,
             chapter,
             json,
-        } => annotation_list(client, &work_id, chapter, json).await,
+        } => annotation_list(core, principal, &work_id, chapter, json).await,
         AnnotationCommand::Add {
             work_id,
             chapter,
@@ -213,7 +246,8 @@ async fn run_annotation(client: &DaemonClient, cmd: AnnotationCommand) -> Result
             json,
         } => {
             annotation_add(
-                client,
+                core,
+                principal,
                 &work_id,
                 chapter,
                 start,
@@ -232,7 +266,8 @@ async fn run_annotation(client: &DaemonClient, cmd: AnnotationCommand) -> Result
             json,
         } => {
             annotation_patch(
-                client,
+                core,
+                principal,
                 &annotation_id,
                 color.as_deref(),
                 note.as_deref(),
@@ -243,17 +278,17 @@ async fn run_annotation(client: &DaemonClient, cmd: AnnotationCommand) -> Result
         AnnotationCommand::Remove {
             annotation_id,
             json,
-        } => annotation_remove(client, &annotation_id, json).await,
+        } => annotation_remove(core, principal, &annotation_id, json).await,
     }
 }
 
 // ── Shared helpers ────────────────────────────────────────────────────────
 
-/// Parse a 1-based chapter number into the daemon's `NonZeroU64` key.
+/// Parse a 1-based chapter number into the typed `NonZeroU64` key.
 ///
 /// # Errors
 ///
-/// Returns a named `CliError::Other` when `chapter == 0` (the daemon
+/// Returns a named `CliError::Other` when `chapter == 0` (the reading
 /// contract requires a positive chapter).
 fn parse_chapter(chapter: u64) -> Result<NonZeroU64> {
     NonZeroU64::new(chapter).ok_or_else(|| CliError::Other("--chapter must be >= 1".to_string()))
@@ -279,8 +314,8 @@ fn validate_scroll(scroll: i64) -> Result<()> {
 /// # Errors
 ///
 /// Returns a named `CliError::Other` naming the valid set when `color` is
-/// not one of `yellow|blue|green|pink` (same vocabulary as the daemon's
-/// `invalid_input` validation).
+/// not one of `yellow|blue|green|pink` (the same vocabulary the core
+/// validates).
 fn parse_create_color(color: &str) -> Result<ReadingAnnotationCreateRequestColor> {
     match color {
         "yellow" => Ok(ReadingAnnotationCreateRequestColor::Yellow),
@@ -314,13 +349,20 @@ fn parse_patch_color(color: &str) -> Result<ReadingAnnotationPatchRequestColor> 
 }
 
 /// Render a progress DTO row for human output.
-fn render_progress(resp: &ReadingProgressResponse) {
-    println!(
+fn render_progress(resp: &ReadingProgressResponse) -> String {
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
         "Reading progress — {} chapter {}",
         resp.work_id, resp.chapter
     );
-    println!("  scroll: {}/{}", resp.scroll_progress, SCROLL_PROGRESS_MAX);
-    println!("  updated: {}", resp.updated_at);
+    let _ = writeln!(
+        out,
+        "  scroll: {}/{}",
+        resp.scroll_progress, SCROLL_PROGRESS_MAX
+    );
+    let _ = write!(out, "  updated: {}", resp.updated_at);
+    out
 }
 
 // ── Progress leaves ───────────────────────────────────────────────────────
@@ -329,26 +371,30 @@ fn render_progress(resp: &ReadingProgressResponse) {
 ///
 /// # Errors
 ///
-/// Returns `CliError` if the daemon rejects the request (404 unknown
-/// work, field-level 400s, …) or the network fails.
-pub async fn progress_get(
-    client: &DaemonClient,
+/// Returns the mapped core refusal (404 `not_found` for an unknown or foreign
+/// work) or a storage failure.
+async fn progress_get(
+    core: &CoreService,
+    principal: &Principal,
     work_id: &str,
     chapter: u64,
     json: bool,
-) -> Result<()> {
+) -> Result<Option<String>> {
     let chapter = parse_chapter(chapter)?;
-    let path = query_path(
-        "/v1/daemon/reading/progress",
-        &[("work_id", work_id), ("chapter", &chapter.to_string())],
-    );
-    let resp: ReadingProgressResponse = client.get(&path).await?;
+    let resp = core
+        .get_reading_progress(
+            principal,
+            ReadingProgressQuery {
+                work_id: work_id.to_string(),
+                chapter,
+            },
+        )
+        .await
+        .map_err(map_core_error)?;
     if json {
-        println!("{}", serde_json::to_string_pretty(&resp)?);
-    } else {
-        render_progress(&resp);
+        return Ok(Some(serde_json::to_string_pretty(&resp)?));
     }
-    Ok(())
+    Ok(Some(render_progress(&resp)))
 }
 
 /// `creator reading progress set <work_id> --chapter <n> --scroll <p>` —
@@ -357,53 +403,68 @@ pub async fn progress_get(
 /// # Errors
 ///
 /// Returns a named `CliError::Other` when `scroll` is outside 0–10000 or
-/// `chapter` is 0, or `CliError` for daemon / network failures.
+/// `chapter` is 0, and the mapped core refusal (unknown/foreign work,
+/// read-only access, storage failure) otherwise.
 async fn progress_set(
-    client: &DaemonClient,
+    core: &CoreService,
+    principal: &Principal,
     work_id: &str,
     chapter: u64,
     scroll: i64,
     json: bool,
-) -> Result<()> {
+) -> Result<Option<String>> {
     let chapter = parse_chapter(chapter)?;
     validate_scroll(scroll)?;
-    let req = ReadingProgressRequest {
-        work_id: work_id.to_string(),
-        chapter,
-        scroll_progress: scroll,
-    };
-    let resp: ReadingProgressResponse = client.put("/v1/daemon/reading/progress", &req).await?;
+    let resp = core
+        .put_reading_progress(
+            principal,
+            work_id.to_string(),
+            ReadingProgressRequest {
+                work_id: work_id.to_string(),
+                chapter,
+                scroll_progress: scroll,
+            },
+        )
+        .await
+        .map_err(map_core_error)?;
     if json {
-        println!("{}", serde_json::to_string_pretty(&resp)?);
-    } else {
-        println!("Saved reading progress.");
-        render_progress(&resp);
+        return Ok(Some(serde_json::to_string_pretty(&resp)?));
     }
-    Ok(())
+    Ok(Some(format!(
+        "Saved reading progress.\n{}",
+        render_progress(&resp)
+    )))
 }
 
-/// `creator reading progress clear` — delete persisted scroll progress
-/// (daemon returns 204 No Content).
+/// `creator reading progress clear` — delete persisted scroll progress.
 ///
 /// # Errors
 ///
-/// Returns `CliError` for the daemon / network failures.
+/// Returns the mapped core refusal (unknown/foreign work, read-only access,
+/// storage failure).
 async fn progress_clear(
-    client: &DaemonClient,
+    core: &CoreService,
+    principal: &Principal,
     work_id: &str,
     chapter: u64,
     json: bool,
-) -> Result<()> {
+) -> Result<Option<String>> {
     let chapter = parse_chapter(chapter)?;
-    let path = query_path(
-        "/v1/daemon/reading/progress",
-        &[("work_id", work_id), ("chapter", &chapter.to_string())],
-    );
-    client.delete_no_content(&path).await?;
-    if !json {
-        println!("Cleared reading progress for {work_id} chapter {chapter}.");
+    core.delete_reading_progress(
+        principal,
+        ReadingProgressQuery {
+            work_id: work_id.to_string(),
+            chapter,
+        },
+    )
+    .await
+    .map_err(map_core_error)?;
+    if json {
+        return Ok(None);
     }
-    Ok(())
+    Ok(Some(format!(
+        "Cleared reading progress for {work_id} chapter {chapter}."
+    )))
 }
 
 // ── Annotation leaves ─────────────────────────────────────────────────────
@@ -412,42 +473,49 @@ async fn progress_clear(
 ///
 /// # Errors
 ///
-/// Returns `CliError` for the daemon / network failures.
+/// Returns the mapped core refusal (unknown/foreign work, storage failure).
 async fn annotation_list(
-    client: &DaemonClient,
+    core: &CoreService,
+    principal: &Principal,
     work_id: &str,
     chapter: u64,
     json: bool,
-) -> Result<()> {
+) -> Result<Option<String>> {
     let chapter = parse_chapter(chapter)?;
-    let path = query_path(
-        "/v1/daemon/reading/annotations",
-        &[("work_id", work_id), ("chapter", &chapter.to_string())],
-    );
-    let resp: ReadingAnnotationListResponse = client.get(&path).await?;
+    let resp = core
+        .list_annotations(
+            principal,
+            ReadingAnnotationListQuery {
+                work_id: work_id.to_string(),
+                chapter,
+            },
+        )
+        .await
+        .map_err(map_core_error)?;
     if json {
-        println!("{}", serde_json::to_string_pretty(&resp)?);
-    } else if resp.items.is_empty() {
-        println!("No annotations for {work_id} chapter {chapter}.");
-    } else {
-        println!("Annotations for {work_id} chapter {chapter}:");
-        println!(
-            "{:<38} {:<7} {:>6} {:>6}  SELECTED",
-            "ANNOTATION_ID", "COLOR", "START", "END"
-        );
-        for item in &resp.items {
-            println!(
-                "{:<38} {:<7} {:>6} {:>6}  {}",
-                item.annotation_id,
-                item.color,
-                item.start_offset,
-                item.end_offset,
-                *item.selected_text
-            );
-        }
-        println!("\n{} annotation(s)", resp.items.len());
+        return Ok(Some(serde_json::to_string_pretty(&resp)?));
     }
-    Ok(())
+    if resp.items.is_empty() {
+        return Ok(Some(format!(
+            "No annotations for {work_id} chapter {chapter}."
+        )));
+    }
+    let mut out = String::new();
+    let _ = writeln!(out, "Annotations for {work_id} chapter {chapter}:");
+    let _ = writeln!(
+        out,
+        "{:<38} {:<7} {:>6} {:>6}  SELECTED",
+        "ANNOTATION_ID", "COLOR", "START", "END"
+    );
+    for item in &resp.items {
+        let _ = writeln!(
+            out,
+            "{:<38} {:<7} {:>6} {:>6}  {}",
+            item.annotation_id, item.color, item.start_offset, item.end_offset, *item.selected_text
+        );
+    }
+    let _ = write!(out, "\n{} annotation(s)", resp.items.len());
+    Ok(Some(out))
 }
 
 /// `creator reading annotation add` — create an annotation.
@@ -455,11 +523,13 @@ async fn annotation_list(
 /// # Errors
 ///
 /// Returns a named `CliError::Other` for a zero chapter, an invalid color,
-/// empty `--selected-text`, or `--end <= --start`; otherwise daemon /
-/// network failures surface as `CliError`.
+/// empty `--selected-text`, or `--end <= --start`; the mapped core refusal
+/// (unknown/foreign work, read-only access, offset/storage validation)
+/// otherwise.
 #[allow(clippy::too_many_arguments)]
 async fn annotation_add(
-    client: &DaemonClient,
+    core: &CoreService,
+    principal: &Principal,
     work_id: &str,
     chapter: u64,
     start: u64,
@@ -468,7 +538,7 @@ async fn annotation_add(
     color: &str,
     note: Option<&str>,
     json: bool,
-) -> Result<()> {
+) -> Result<Option<String>> {
     let chapter = parse_chapter(chapter)?;
     let color = parse_create_color(color)?;
     let selected_text: ReadingAnnotationCreateRequestSelectedText = selected_text
@@ -479,66 +549,80 @@ async fn annotation_add(
             "--end ({end}) must be strictly greater than --start ({start})"
         )));
     }
-    let req = ReadingAnnotationCreateRequest {
-        work_id: work_id.to_string(),
-        chapter,
-        color,
-        start_offset: start,
-        end_offset: end,
-        selected_text,
-        note: note.map(str::to_string),
-    };
-    let resp: ReadingAnnotation = client.post("/v1/daemon/reading/annotations", &req).await?;
+    let resp = core
+        .create_annotation(
+            principal,
+            ReadingAnnotationCreateRequest {
+                work_id: work_id.to_string(),
+                chapter,
+                color,
+                start_offset: start,
+                end_offset: end,
+                selected_text,
+                note: note.map(str::to_string),
+            },
+        )
+        .await
+        .map_err(map_core_error)?;
     if json {
-        println!("{}", serde_json::to_string_pretty(&resp)?);
-    } else {
-        println!(
-            "Created annotation {} ({} {}-{})",
-            resp.annotation_id, resp.color, resp.start_offset, resp.end_offset
-        );
+        return Ok(Some(serde_json::to_string_pretty(&resp)?));
     }
-    Ok(())
+    Ok(Some(format!(
+        "Created annotation {} ({} {}-{})",
+        resp.annotation_id, resp.color, resp.start_offset, resp.end_offset
+    )))
 }
 
 /// `creator reading annotation patch` — edit an annotation's color / note.
 ///
 /// # Errors
 ///
-/// Returns a named `CliError::Other` for an invalid `--color`; daemon /
-/// network failures (including 404 unknown annotation) surface as
-/// `CliError`.
+/// Returns a named `CliError::Other` for an invalid `--color`; the mapped core
+/// refusal (404 `not_found` for an unknown annotation, 403 for a foreign one,
+/// storage failure) otherwise.
 async fn annotation_patch(
-    client: &DaemonClient,
+    core: &CoreService,
+    principal: &Principal,
     annotation_id: &str,
     color: Option<&str>,
     note: Option<&str>,
     json: bool,
-) -> Result<()> {
+) -> Result<Option<String>> {
     let color = color.map(parse_patch_color).transpose()?;
-    let req = ReadingAnnotationPatchRequest {
-        color,
-        note: note.map(str::to_string),
-    };
-    let path = format!("/v1/daemon/reading/annotations/{annotation_id}");
-    let resp: ReadingAnnotation = client.patch(&path, &req).await?;
+    let resp: ReadingAnnotation = core
+        .patch_annotation(
+            principal,
+            annotation_id.to_string(),
+            ReadingAnnotationPatchRequest {
+                color,
+                note: note.map(str::to_string),
+            },
+        )
+        .await
+        .map_err(map_core_error)?;
     if json {
-        println!("{}", serde_json::to_string_pretty(&resp)?);
-    } else {
-        println!("Updated annotation {annotation_id}.");
+        return Ok(Some(serde_json::to_string_pretty(&resp)?));
     }
-    Ok(())
+    Ok(Some(format!("Updated annotation {annotation_id}.")))
 }
 
-/// `creator reading annotation remove` — delete an annotation (204).
+/// `creator reading annotation remove` — delete an annotation.
 ///
 /// # Errors
 ///
-/// Returns `CliError` for the daemon / network failures.
-async fn annotation_remove(client: &DaemonClient, annotation_id: &str, json: bool) -> Result<()> {
-    let path = format!("/v1/daemon/reading/annotations/{annotation_id}");
-    client.delete_no_content(&path).await?;
-    if !json {
-        println!("Removed annotation {annotation_id}.");
+/// Returns the mapped core refusal (unknown/foreign annotation, read-only
+/// access, storage failure).
+async fn annotation_remove(
+    core: &CoreService,
+    principal: &Principal,
+    annotation_id: &str,
+    json: bool,
+) -> Result<Option<String>> {
+    core.delete_annotation(principal, annotation_id.to_string())
+        .await
+        .map_err(map_core_error)?;
+    if json {
+        return Ok(None);
     }
-    Ok(())
+    Ok(Some(format!("Removed annotation {annotation_id}.")))
 }

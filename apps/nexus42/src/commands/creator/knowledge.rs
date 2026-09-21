@@ -1,27 +1,33 @@
 //! `creator knowledge` subcommand — User-scoped global knowledge entries.
 //!
 //! Manages unstructured knowledge entries scoped to the User (not Creator).
-//! For Work-scope file index or World narrative KB knowledge entries, use `creator kb`.
-//! See entity-scope-model §5.3–5.4 for the three KB namespaces.
+//! For the Work-scope file index, use `creator kb`; for World narrative KB
+//! entries, use `creator world kb`. See entity-scope-model §5.3–5.4 for the
+//! three KB namespaces.
 //!
-//! Product write path for User knowledge. Writes go through
-//! `nexus_local_db::SqliteKnowledgeStore` which implements
-//! `nexus_knowledge::KnowledgeStore`.
+//! All three leaves run on the shared direct-call seam (`crate::core`): one
+//! owner-scoped `CoreService` is opened, the typed call is issued
+//! (`add_user_knowledge`, `list_user_knowledge`, `search_user_knowledge`), and
+//! the writer is released before anything is rendered. The core's own
+//! work-write admission and store validation are the authority, so the CLI
+//! holds no second `SqliteKnowledgeStore` caller and never probes (or falls
+//! back to) the daemon.
 //!
-//! Default `user_id` is `"user_default"` until platform `usr_*` mapping is available.
+//! Entries are stored under the core's default local user identity
+//! (`user_default` until the platform `usr_*` mapping exists), which is why
+//! these leaves carry no `--user-id`: the typed seam has no such parameter, and
+//! a flag no owner honours would be a silent no-op.
 
 use crate::config::CliConfig;
+use crate::core::{finish_direct, map_core_error, open_direct_core};
 use crate::errors::Result;
 use clap::Subcommand;
-use nexus_knowledge::{KnowledgeQuery, KnowledgeStore, KnowledgeTag, UserKnowledgeEntry};
-
-/// Default user ID for local CLI usage (until platform usr_* mapping).
-const DEFAULT_USER_ID: &str = "user_default";
+use nexus_knowledge::{KnowledgeResult, KnowledgeTag, UserKnowledgeEntry};
 
 /// Knowledge subcommands (User-scoped global knowledge; NOT Work-scope or World KB).
 ///
-/// For Work-scope file index, use `creator kb`.
-/// For World narrative knowledge entries, use `creator kb --scope world`.
+/// For the Work-scope file index, use `creator kb`.
+/// For World narrative knowledge entries, use `creator world kb`.
 #[derive(Debug, Subcommand)]
 pub enum KnowledgeCommand {
     /// Add a new User-scoped knowledge entry
@@ -31,16 +37,10 @@ pub enum KnowledgeCommand {
         /// Comma-separated tags (e.g. "rust,tutorial")
         #[arg(long, value_delimiter = ',')]
         tags: Option<Vec<String>>,
-        /// User ID (default: `user_default`)
-        #[arg(long, default_value = DEFAULT_USER_ID)]
-        user_id: String,
     },
 
-    /// List knowledge entries for a user
+    /// List knowledge entries
     List {
-        /// User ID (default: `user_default`)
-        #[arg(long, default_value = DEFAULT_USER_ID)]
-        user_id: String,
         /// Filter by comma-separated tags
         #[arg(long, value_delimiter = ',')]
         tags: Option<Vec<String>>,
@@ -56,9 +56,6 @@ pub enum KnowledgeCommand {
     Search {
         /// Search query text
         query: String,
-        /// User ID (default: `user_default`)
-        #[arg(long, default_value = DEFAULT_USER_ID)]
-        user_id: String,
         /// Filter by comma-separated tags
         #[arg(long, value_delimiter = ',')]
         tags: Option<Vec<String>>,
@@ -71,177 +68,122 @@ pub enum KnowledgeCommand {
     },
 }
 
-/// Open a DB pool and create a knowledge store.
-async fn open_knowledge_store(config: &CliConfig) -> Result<nexus_local_db::SqliteKnowledgeStore> {
-    let db_path = crate::config::resolve_state_db_path(config)?;
-    let pool = crate::db::Schema::init(&db_path).await?;
-    Ok(nexus_local_db::SqliteKnowledgeStore::new(pool))
-}
-
 /// Run a knowledge subcommand.
 ///
 /// # Errors
 ///
-/// Returns `CliError` if the database is unavailable or any operation fails.
+/// Returns `CliError` when the seam cannot be opened (including a selection
+/// that names no materialized workspace), the core refuses the operation
+/// (admission, store validation), or the writer release did not settle.
 pub async fn run(cmd: KnowledgeCommand, config: &CliConfig) -> Result<()> {
-    let store = open_knowledge_store(config).await?;
-    match cmd {
-        KnowledgeCommand::Add {
-            content,
-            tags,
-            user_id,
-        } => run_add(&store, &content, tags, &user_id).await,
-        KnowledgeCommand::List {
-            user_id,
-            tags,
-            limit,
-            offset,
-        } => run_list(&store, &user_id, tags, limit, offset).await,
-        KnowledgeCommand::Search {
-            query,
-            user_id,
-            tags,
-            limit,
-            offset,
-        } => run_search(&store, &query, &user_id, tags, limit, offset).await,
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        match cmd {
+            KnowledgeCommand::Add { content, tags } => {
+                let entry = core
+                    .add_user_knowledge(&principal, content, tags)
+                    .await
+                    .map_err(map_core_error)?;
+                Ok(render_added(&entry))
+            }
+            KnowledgeCommand::List {
+                tags,
+                limit,
+                offset,
+            } => {
+                let result = core
+                    .list_user_knowledge(&principal, tags, limit, offset)
+                    .await
+                    .map_err(map_core_error)?;
+                Ok(render_list(&result))
+            }
+            KnowledgeCommand::Search {
+                query,
+                tags,
+                limit,
+                offset,
+            } => {
+                let result = core
+                    .search_user_knowledge(&principal, &query, tags, limit, offset)
+                    .await
+                    .map_err(map_core_error)?;
+                Ok(render_search(&query, &result))
+            }
+        }
     }
-}
+    .await;
 
-async fn run_add(
-    store: &dyn KnowledgeStore,
-    content: &str,
-    tags: Option<Vec<String>>,
-    user_id: &str,
-) -> Result<()> {
-    let tag_list = tags
-        .unwrap_or_default()
-        .into_iter()
-        .map(|s| KnowledgeTag::new(&s))
-        .collect();
-    let entry = UserKnowledgeEntry::new(user_id, tag_list, content);
-    let id = entry.id.clone();
-
-    let stored = store.store(entry).await.map_err(|e| {
-        crate::errors::CliError::Other(format!("Failed to add knowledge entry: {e}"))
-    })?;
-
-    println!("✓ Knowledge entry added: {id}");
-    println!("  User:    {}", stored.user_id);
-    println!(
-        "  Tags:    {}",
-        stored
-            .tags
-            .iter()
-            .map(KnowledgeTag::as_str)
-            .collect::<Vec<_>>()
-            .join(", ")
-    );
-    println!("  Content: {}", truncate(&stored.content, 80));
+    let text = finish_direct(&core, outcome).await?;
+    println!("{text}");
     Ok(())
 }
 
-async fn run_list(
-    store: &dyn KnowledgeStore,
-    user_id: &str,
-    tags: Option<Vec<String>>,
-    limit: u32,
-    offset: u32,
-) -> Result<()> {
-    let mut query = KnowledgeQuery::for_user(user_id)
-        .with_limit(limit)
-        .with_offset(offset);
-    if let Some(tag_strs) = tags {
-        let tag_list: Vec<KnowledgeTag> = tag_strs
-            .into_iter()
-            .map(|s| KnowledgeTag::new(&s))
-            .collect();
-        query = query.with_tags(tag_list);
-    }
+/// Render the `knowledge add` confirmation.
+fn render_added(entry: &UserKnowledgeEntry) -> String {
+    [
+        format!("✓ Knowledge entry added: {}", entry.id),
+        format!("  User:    {}", entry.user_id),
+        format!("  Tags:    {}", join_tags(&entry.tags)),
+        format!("  Content: {}", truncate(&entry.content, 80)),
+    ]
+    .join("\n")
+}
 
-    let result = store.list(&query).await.map_err(|e| {
-        crate::errors::CliError::Other(format!("Failed to list knowledge entries: {e}"))
-    })?;
-
+/// Render the `knowledge list` page.
+fn render_list(result: &KnowledgeResult) -> String {
     if result.entries.is_empty() {
-        println!("No knowledge entries for user '{user_id}'.");
-        return Ok(());
+        return "No knowledge entries.".to_string();
     }
-
-    println!(
-        "Knowledge entries for user '{user_id}' ({} total, showing {}):",
+    let mut lines = vec![format!(
+        "Knowledge entries ({} total, showing {}):",
         result.total_count,
         result.entries.len()
-    );
-    println!(
-        "{:<40} {:<30} {:<20} TAGS",
-        "ENTRY_ID", "CONTENT", "CREATED_AT"
-    );
-    for entry in &result.entries {
-        let tag_str = entry
-            .tags
-            .iter()
-            .map(KnowledgeTag::as_str)
-            .collect::<Vec<_>>()
-            .join(",");
-        println!(
-            "{:<40} {:<30} {:<20} {}",
-            entry.id,
-            truncate(&entry.content, 30),
-            &entry.created_at[..19.min(entry.created_at.len())],
-            tag_str
-        );
-    }
-    Ok(())
+    )];
+    lines.push(entry_header());
+    lines.extend(result.entries.iter().map(entry_row));
+    lines.join("\n")
 }
 
-async fn run_search(
-    store: &dyn KnowledgeStore,
-    query_text: &str,
-    user_id: &str,
-    tags: Option<Vec<String>>,
-    limit: u32,
-    offset: u32,
-) -> Result<()> {
-    let tag_refs: Option<Vec<KnowledgeTag>> =
-        tags.map(|ts| ts.into_iter().map(|s| KnowledgeTag::new(&s)).collect());
-    let tag_slice = tag_refs.as_deref();
-
-    let result = store
-        .search(user_id, query_text, tag_slice, limit, offset)
-        .await
-        .map_err(|e| {
-            crate::errors::CliError::Other(format!("Failed to search knowledge entries: {e}"))
-        })?;
-
+/// Render the `knowledge search` page.
+fn render_search(query: &str, result: &KnowledgeResult) -> String {
     if result.entries.is_empty() {
-        println!("No knowledge entries matching \"{query_text}\" for user '{user_id}'.");
-        return Ok(());
+        return format!("No knowledge entries matching \"{query}\".");
     }
-
-    println!(
-        "Entries matching \"{query_text}\" for user '{user_id}' ({} total):",
+    let mut lines = vec![format!(
+        "Entries matching \"{query}\" ({} total):",
         result.total_count
-    );
-    println!(
+    )];
+    lines.push(entry_header());
+    lines.extend(result.entries.iter().map(entry_row));
+    lines.join("\n")
+}
+
+/// The shared table header for the two read leaves.
+fn entry_header() -> String {
+    format!(
         "{:<40} {:<30} {:<20} TAGS",
         "ENTRY_ID", "CONTENT", "CREATED_AT"
-    );
-    for entry in &result.entries {
-        let tag_str = entry
-            .tags
-            .iter()
-            .map(KnowledgeTag::as_str)
-            .collect::<Vec<_>>()
-            .join(",");
-        println!(
-            "{:<40} {:<30} {:<20} {}",
-            entry.id,
-            truncate(&entry.content, 30),
-            &entry.created_at[..19.min(entry.created_at.len())],
-            tag_str
-        );
-    }
-    Ok(())
+    )
+}
+
+/// One table row for the two read leaves.
+fn entry_row(entry: &UserKnowledgeEntry) -> String {
+    format!(
+        "{:<40} {:<30} {:<20} {}",
+        entry.id,
+        truncate(&entry.content, 30),
+        &entry.created_at[..19.min(entry.created_at.len())],
+        join_tags(&entry.tags)
+    )
+}
+
+/// Comma-join the tag labels.
+fn join_tags(tags: &[KnowledgeTag]) -> String {
+    tags.iter()
+        .map(KnowledgeTag::as_str)
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 /// Truncate a string to `max_len` with ellipsis if needed.

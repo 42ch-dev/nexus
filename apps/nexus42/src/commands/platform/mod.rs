@@ -2,14 +2,16 @@
 //!
 //! Implements the `nexus42 platform` top-level command with subcommands:
 //! - `auth` — User authentication (login/logout/status)
-//! - `explore` — Browse and search platform content (platform-only, not proxied)
-//! - `context` — Context assembly
-//! - `publish` — Publish content (stub, coming soon)
+//! - `context` — Context assembly (`assemble-moment` is the local SSOT)
 //! - `sync` — Synchronize workspace with platform (V1.35 canonical location)
+//!
+//! v1.193 P1-T5: the deferred `explore` and `publish` leaves were removed —
+//! neither ever performed work (the first always returned `CliError::Config`,
+//! the second printed a coming-soon notice and returned `Ok`). Platform content
+//! browsing is served by the platform HTTP API directly, not by a local leaf.
 
 pub mod auth;
 pub mod context;
-pub mod explore;
 pub mod sync;
 
 use crate::commands::sync::SyncCommand;
@@ -25,12 +27,6 @@ pub enum PlatformCommand {
         command: auth::AuthCommand,
     },
 
-    /// Explore browse and search (platform-only, not proxied through local daemon)
-    Explore {
-        #[command(subcommand)]
-        command: explore::ExploreCommand,
-    },
-
     /// Context assembly
     Context {
         // ContextCommand is large (many `Option<String>` flags, incl. `--stage`);
@@ -44,9 +40,6 @@ pub enum PlatformCommand {
         #[command(subcommand)]
         command: SyncCommand,
     },
-
-    /// Publish content (coming soon)
-    Publish,
 }
 
 /// Run platform command.
@@ -57,13 +50,7 @@ pub enum PlatformCommand {
 pub async fn run(cmd: PlatformCommand, config: &CliConfig, _output_format: &str) -> Result<()> {
     match cmd {
         PlatformCommand::Auth { command } => auth::run(command, config).await,
-        PlatformCommand::Explore { command } => explore::run(command).await,
         PlatformCommand::Context { command } => context::run(*command, config).await,
         PlatformCommand::Sync { command } => sync::run(command, config).await,
-        PlatformCommand::Publish => {
-            println!("publish command coming soon");
-            println!("  This feature will be implemented in a follow-up plan.");
-            Ok(())
-        }
     }
 }

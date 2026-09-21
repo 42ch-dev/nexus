@@ -821,3 +821,413 @@ async fn v1191_holder_context_inspect_reads_actor_view_and_retires_a_stale_snaps
         "another holder's private World row stays excluded: {names:?}"
     );
 }
+
+// ─── Moment Directive + inspector packet: retained domain assertions migrated
+// from the retired daemon runtime fixtures (`directive_api.rs`,
+// `inspector_api.rs`). ──────────────────────────────────────────────────────
+
+/// Directive lifecycle at its core owner: `show` with nothing active renders
+/// the empty response, `set` returns the whole durable row, a second `set`
+/// without `replace` is the conflict refusal that leaves the active row
+/// untouched, `replace` supersedes it through the `replaced_by` chain, `clear`
+/// soft-deletes the row (retained, `status: "expired"`, `expires_at` stamped)
+/// and the scope falls back to "no active directive"; an empty body and a Work
+/// owned by another creator are refused before any write.
+#[allow(clippy::too_many_lines)] // one directive-lifecycle journey asserted end to end
+#[tokio::test]
+async fn retained_moment_directive_set_show_clear_and_scope_ownership() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let pool = plain_pool(&env).await;
+
+    // Nothing active yet → the empty `{}` response.
+    let shown = core
+        .moment_directive(
+            &principal,
+            directive_request("show", "work", WORK_IN_B, None),
+        )
+        .await
+        .expect("show without an active directive");
+    assert_eq!(
+        serde_json::to_value(&shown).unwrap(),
+        serde_json::json!({}),
+        "no active directive renders empty"
+    );
+
+    // set → the whole stored row (status/scope/body/insert depth/TTL triple).
+    let set = core
+        .moment_directive(
+            &principal,
+            directive_request("set", "work", WORK_IN_B, Some(WORK_DIRECTIVE_BODY)),
+        )
+        .await
+        .expect("work directive set");
+    let set = serde_json::to_value(&set).unwrap();
+    assert_eq!(
+        set.as_object().map(serde_json::Map::len),
+        Some(15),
+        "the directive row carries exactly its stored fields: {set}"
+    );
+    assert_eq!(set["status"], "active", "{set}");
+    assert_eq!(set["scope_kind"], "work", "{set}");
+    assert_eq!(set["scope_id"], WORK_IN_B, "{set}");
+    assert_eq!(set["body"], WORK_DIRECTIVE_BODY, "{set}");
+    assert_eq!(set["insert_depth"], "head", "{set}");
+    assert_eq!(set["ttl_kind"], "generations", "{set}");
+    assert_eq!(set["ttl_remaining"], 3, "{set}");
+    assert_eq!(set["creator_id"], CREATOR, "{set}");
+    assert_eq!(
+        set["last_focused_event_id"],
+        serde_json::Value::Null,
+        "{set}"
+    );
+    assert_eq!(set["expires_at"], serde_json::Value::Null, "{set}");
+    assert_eq!(set["replaced_by"], serde_json::Value::Null, "{set}");
+    assert!(
+        set["created_at"].is_i64() && set["updated_at"].is_i64(),
+        "{set}"
+    );
+    assert!(set["clear_on_scene_change"].is_boolean(), "{set}");
+    let first_id = set["directive_id"]
+        .as_str()
+        .expect("directive_id")
+        .to_string();
+
+    // show → the same row incl. the body (the author surface).
+    let shown = core
+        .moment_directive(
+            &principal,
+            directive_request("show", "work", WORK_IN_B, None),
+        )
+        .await
+        .expect("show work scope");
+    let shown = serde_json::to_value(&shown).unwrap();
+    assert_eq!(shown["directive_id"], first_id.as_str(), "{shown}");
+    assert_eq!(shown["body"], WORK_DIRECTIVE_BODY, "{shown}");
+
+    // A second `set` without `replace` is refused and changes nothing.
+    let refused = core
+        .moment_directive(
+            &principal,
+            dto(serde_json::json!({
+                "action": "set",
+                "scope": { "kind": "work", "id": WORK_IN_B },
+                "body": "Second directive.",
+                "insert_depth": "head",
+                "ttl_kind": "generations",
+                "ttl_remaining": 3,
+                "replace": false,
+            })),
+        )
+        .await
+        .expect_err("an active directive must refuse a set without replace");
+    let CoreError::Conflict(message) = refused else {
+        panic!("expected the conflict carrier, got {refused:?}");
+    };
+    assert!(
+        message.contains("replace"),
+        "the refusal must point at the replace option: {message}"
+    );
+    let untouched = nexus_local_db::moment_directive::get_by_id(&pool, &first_id)
+        .await
+        .expect("row read")
+        .expect("the active row is retained");
+    assert_eq!(untouched.status, "active", "no silent overwrite");
+    assert!(
+        untouched.replaced_by.is_none(),
+        "no replaced_by without replace"
+    );
+
+    // `replace: true` supersedes: the old row is soft-deleted and chained.
+    let second = core
+        .moment_directive(
+            &principal,
+            dto(serde_json::json!({
+                "action": "set",
+                "scope": { "kind": "work", "id": WORK_IN_B },
+                "body": "Second directive.",
+                "insert_depth": "head",
+                "ttl_kind": "generations",
+                "ttl_remaining": 3,
+                "replace": true,
+            })),
+        )
+        .await
+        .expect("replace set");
+    let second_id = serde_json::to_value(&second).unwrap()["directive_id"]
+        .as_str()
+        .expect("directive_id")
+        .to_string();
+    assert_ne!(second_id, first_id, "a replacement mints a new id");
+    let replaced = nexus_local_db::moment_directive::get_by_id(&pool, &first_id)
+        .await
+        .expect("row read")
+        .expect("the superseded row is retained");
+    assert_eq!(
+        replaced.status, "expired",
+        "the superseded row is soft-deleted"
+    );
+    assert_eq!(
+        replaced.replaced_by.as_deref(),
+        Some(second_id.as_str()),
+        "replaced_by chains to the successor"
+    );
+    let shown = core
+        .moment_directive(
+            &principal,
+            directive_request("show", "work", WORK_IN_B, None),
+        )
+        .await
+        .expect("show after replace");
+    assert_eq!(
+        serde_json::to_value(&shown).unwrap()["directive_id"],
+        second_id.as_str(),
+        "show reflects the replacement"
+    );
+
+    // World-scope round trip (an override lives on the World, not a Work).
+    let world_set = core
+        .moment_directive(
+            &principal,
+            dto(serde_json::json!({
+                "action": "set",
+                "scope": { "kind": "world", "id": WORLD_A },
+                "body": WORLD_DIRECTIVE_BODY,
+                "insert_depth": "head",
+                "ttl_kind": "chapters",
+                "ttl_remaining": 5,
+                "replace": true,
+            })),
+        )
+        .await
+        .expect("world directive set");
+    let world_set = serde_json::to_value(&world_set).unwrap();
+    assert_eq!(world_set["scope_kind"], "world", "{world_set}");
+    assert_eq!(world_set["scope_id"], WORLD_A, "{world_set}");
+    assert_eq!(world_set["ttl_kind"], "chapters", "{world_set}");
+    assert_eq!(world_set["ttl_remaining"], 5, "{world_set}");
+    let world_shown = core
+        .moment_directive(
+            &principal,
+            directive_request("show", "world", WORLD_A, None),
+        )
+        .await
+        .expect("show world scope");
+    let world_shown = serde_json::to_value(&world_shown).unwrap();
+    assert_eq!(world_shown["body"], WORLD_DIRECTIVE_BODY, "{world_shown}");
+    assert_eq!(world_shown["ttl_kind"], "chapters", "{world_shown}");
+
+    // clear → the empty response; the row is retained soft-deleted.
+    let cleared = core
+        .moment_directive(
+            &principal,
+            directive_request("clear", "work", WORK_IN_B, None),
+        )
+        .await
+        .expect("clear work directive");
+    assert_eq!(
+        serde_json::to_value(&cleared).unwrap(),
+        serde_json::json!({})
+    );
+    let expired = nexus_local_db::moment_directive::get_by_id(&pool, &second_id)
+        .await
+        .expect("row read")
+        .expect("clear retains the row");
+    assert_eq!(expired.status, "expired", "clear soft-deletes (retention)");
+    assert!(expired.expires_at.is_some(), "clear stamps expires_at");
+
+    // The Work's own directive is gone and WORLD_B carries no override.
+    let after = core
+        .moment_directive(
+            &principal,
+            directive_request("show", "work", WORK_IN_B, None),
+        )
+        .await
+        .expect("show after clear");
+    assert_eq!(
+        serde_json::to_value(&after).unwrap(),
+        serde_json::json!({}),
+        "show after clear renders empty"
+    );
+
+    // Validation: an empty/whitespace-only body is refused before any write.
+    let invalid = core
+        .moment_directive(
+            &principal,
+            directive_request("set", "work", WORK_IN_B, Some("   ")),
+        )
+        .await
+        .expect_err("a whitespace-only body must be refused");
+    let CoreError::InvalidInput { field, reason } = invalid else {
+        panic!("expected the validation carrier, got {invalid:?}");
+    };
+    assert_eq!(field, "body");
+    assert!(reason.contains("non-empty"), "reason: {reason}");
+
+    // A Work owned by another creator is a 403 scope — never a state leak.
+    sqlx::query("UPDATE works SET creator_id = ? WHERE work_id = ?")
+        .bind(OTHER)
+        .bind(WORK_IN_B)
+        .execute(&pool)
+        .await
+        .expect("reassign the Work to a foreign creator");
+    let foreign = core
+        .moment_directive(
+            &principal,
+            directive_request("show", "work", WORK_IN_B, None),
+        )
+        .await
+        .expect_err("a foreign Work scope must be refused");
+    match foreign {
+        CoreError::ForbiddenReason { resource, reason } => {
+            assert_eq!(resource, format!("work {WORK_IN_B}"));
+            assert_eq!(reason, "you do not own this scope");
+        }
+        other => panic!("expected ForbiddenReason, got {other:?}"),
+    }
+
+    pool.close().await;
+    core.close().await.unwrap();
+}
+
+/// Seed the World with one constant activation seed and one keyed-but-never-
+/// matching neighbour reachable only through a confirmed relation edge — the
+/// relation-hop fixture the retired daemon inspector fixture used.
+async fn seed_activation_fixture(env: &Env) {
+    let guarded = init_engine_pool(&env.db_path, CREATOR, GuardedPoolOptions::default())
+        .await
+        .unwrap();
+    let pool = guarded.clone_pool();
+    for (entry_id, name, modules) in [
+        (
+            "kb_act_seed",
+            "Harbor Master",
+            r#"{"activation":{"keys":[],"constant":true}}"#,
+        ),
+        (
+            "kb_act_hop",
+            "Dockhand Apprentice",
+            r#"{"activation":{"keys":["dragon"],"logic":"and_any"}}"#,
+        ),
+    ] {
+        sqlx::query(
+            "INSERT INTO kb_key_blocks \
+             (key_block_id, world_id, block_type, canonical_name, status, created_at, modules_json) \
+             VALUES (?, ?, 'character', ?, 'confirmed', datetime('now'), ?)",
+        )
+        .bind(entry_id)
+        .bind(WORLD_A)
+        .bind(name)
+        .bind(modules)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    sqlx::query(
+        "INSERT INTO kb_relationships \
+         (relationship_id, world_id, source_entity_id, target_entity_id, relation_type, \
+          symmetric, confidence, source_anchor_ids, metadata, created_at, updated_at, \
+          revision, needs_review, source) \
+         VALUES ('rel_act_hop', ?, 'kb_act_seed', 'kb_act_hop', 'mentors', 0, 1.0, '[]', '{}', \
+          datetime('now'), datetime('now'), 0, 0, 'manual')",
+    )
+    .bind(WORLD_A)
+    .execute(&pool)
+    .await
+    .unwrap();
+    // Release the engine writer before the core opens.
+    drop(pool);
+    drop(guarded);
+}
+
+/// Inspector packet at its core owner: the constant activation seed is placed
+/// with its fire reason and routed to the `default` slot, the budget reports
+/// the activation-token accounting, a confirmed relation edge pulls its
+/// key-only neighbour in as a depth-1 relation hop (non-zero hop estimate and
+/// the hop reason), and the directive section stays status-only — the body is
+/// never on the wire (AC-I3).
+#[tokio::test]
+async fn retained_inspect_moment_places_activation_seeds_and_expands_confirmed_hops() {
+    let env = seed_env().await;
+    seed_activation_fixture(&env).await;
+    let (core, principal) = open_core(&env).await;
+
+    let packet = serde_json::to_value(
+        core.inspect_moment(&principal, dto(serde_json::json!({ "world_id": WORLD_A })))
+            .await
+            .expect("owned world inspect"),
+    )
+    .unwrap();
+
+    // The constant seed is placed; its activation trace row is accepted with the
+    // constant-band reason.
+    let placement = packet["modules"]["placement"]
+        .as_array()
+        .expect("modules.placement array");
+    assert!(
+        placement.iter().any(|row| row["entry_id"] == "kb_act_seed"),
+        "the constant seed must be placed: {packet}"
+    );
+    let trace = packet["modules"]["activation_trace"]
+        .as_array()
+        .expect("modules.activation_trace array");
+    let seed_trace = trace
+        .iter()
+        .find(|row| row["entry_id"] == "kb_act_seed")
+        .expect("the constant seed has a trace row");
+    assert_eq!(
+        seed_trace["accepted"], true,
+        "the constant seed fires: {packet}"
+    );
+    assert!(
+        seed_trace["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("constant seed")),
+        "the fire reason names the constant band: {packet}"
+    );
+
+    // The confirmed relation edge pulls the key-only neighbour in at depth 1.
+    let hop = placement
+        .iter()
+        .find(|row| row["entry_id"] == "kb_act_hop")
+        .unwrap_or_else(|| panic!("the hopped neighbour must be placed: {packet}"));
+    assert!(
+        hop["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.starts_with("relation hop")),
+        "the hop reason names the relation hop: {packet}"
+    );
+
+    // Both entries route to the `default` slot (neither carries a position hint).
+    let mut slots = std::collections::HashMap::new();
+    for row in packet["slot_map"].as_array().expect("slot_map array") {
+        slots.insert(
+            row["entry_id"].as_str().expect("slot entry id"),
+            row["slot"].as_str().expect("slot id"),
+        );
+    }
+    assert_eq!(slots.get("kb_act_seed"), Some(&"default"), "{packet}");
+    assert_eq!(slots.get("kb_act_hop"), Some(&"default"), "{packet}");
+
+    // Budget: the activation-token accounting, with the hop pass having run.
+    let budget = packet["budget"].as_object().expect("budget object");
+    for key in ["primary_tokens_est", "hop_tokens_est", "cap", "remaining"] {
+        assert!(
+            budget.contains_key(key),
+            "budget must carry {key}: {packet}"
+        );
+    }
+    assert!(
+        budget["hop_tokens_est"].as_u64().unwrap_or(0) > 0,
+        "the relation hop must spend hop budget: {packet}"
+    );
+
+    // The directive section is status/metadata only (AC-I3).
+    assert_eq!(packet["moment_directive"]["status"], "none", "{packet}");
+    assert!(
+        packet["moment_directive"].get("body").is_none(),
+        "the directive body must never appear on the wire: {packet}"
+    );
+
+    core.close().await.unwrap();
+}

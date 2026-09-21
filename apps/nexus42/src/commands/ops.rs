@@ -8,12 +8,14 @@
 //! (`nexus_orchestration::resume_rules::classify_recovery` — terminal /
 //! unreadable / interrupted / `human_wait` / `converge_merge` / `safe_boundary` /
 //! `legacy_unverified`) into a resumable verdict via the shared
-//! `nexus_orchestration::resume_rules` module; the daemon's boot-time
-//! in-memory half (`engine.has_runner`, runner reconstruction) is carried as
-//! the separate `runner_check` caveat — never folded into the verdict. v0
-//! rows fall back to the conservative four-rule legacy cascade
+//! `nexus_orchestration::resume_rules` module; the in-memory half
+//! (`engine.has_runner`, runner reconstruction — the caller's job, e.g. the
+//! retained `nexus_core::execution::resume_driven_sessions` driver) is
+//! carried as the separate `runner_check` caveat, never folded into the
+//! verdict. v0 rows fall back to the conservative four-rule legacy cascade
 //! (`classify_resumability`) — terminal status, context readability, typed
-//! failure, chain class — which the daemon applies to v0/no-store rows only.
+//! failure, chain class — which the retained resume driver applies to
+//! v0/no-store rows only.
 //!
 //! Contract: `.mstar/sdd/2026-09-03-v1.182-p1-bl04-checkpoint-resume-ux/inspect-contract.md`.
 //!
@@ -43,7 +45,8 @@
 //! - The checkpoint stores POSITION ONLY — there is no completed-stages
 //!   ledger, so the output never claims one.
 //! - Slice boundary: read-only inspect; the CLI never implies resume can be
-//!   triggered from here (re-drive happens on next daemon boot).
+//!   triggered from here (re-drive is driven from the persisted session state
+//!   by the retained resume caller, not by a boot scanner).
 
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
@@ -83,9 +86,9 @@ struct InspectDto {
     execution_version: i64,
     /// State revision (CAS anchor; `0` on v0 rows).
     state_revision: i64,
-    /// Canonical A7 recovery class (v1.186 P0, Task 2) — shared with daemon
-    /// boot/resume; always present (`unreadable` covers corrupt/unsupported
-    /// rows, `legacy_unverified` covers v0 rows).
+    /// Canonical A7 recovery class (v1.186 P0, Task 2) — shared with the
+    /// retained resume driver; always present (`unreadable` covers
+    /// corrupt/unsupported rows, `legacy_unverified` covers v0 rows).
     recovery_class: RecoveryClass,
     /// Durable human-wait token (A4) for v1 `waiting_for_input` rows.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -119,8 +122,9 @@ struct RunFailure {
 }
 
 /// Resumable projection (contract §4): verdict carries rules 1–4; the
-/// boot-time runner reconstruction requirement is the separate
-/// `runner_check` caveat, never part of the verdict.
+/// runner-reconstruction requirement (in-memory runtime state, not derivable
+/// from persisted rows) is the separate `runner_check` caveat, never part of
+/// the verdict.
 #[derive(Debug, Clone, Serialize)]
 struct ResumableVerdict {
     verdict: Verdict,
@@ -167,7 +171,7 @@ enum ResumeRule {
     ChainClassNoFailure,
     /// A7: interrupted/uncertain in-flight work; never auto-retried.
     Interrupted,
-    /// A7: human wait; token preserved, never stepped at boot.
+    /// A7: human wait; token preserved, never stepped automatically.
     HumanWait,
     /// A7: fully committed step boundary; may reconstruct, not auto-driven.
     SafeBoundary,
@@ -185,8 +189,10 @@ impl From<ResumeClass> for ResumeRule {
     }
 }
 
-/// Boot-time runner availability — NEVER part of the verdict (rule 4 is
-/// in-memory daemon state, not derivable from persisted rows).
+/// Runner availability — NEVER part of the verdict (it is in-memory runtime
+/// state, not derivable from persisted rows; `boot_time` is the frozen
+/// inspect-contract serialized token for "runner status is a runtime
+/// concern").
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 enum RunnerCheck {
@@ -460,7 +466,7 @@ fn project(row: &CheckpointRow) -> InspectDto {
 /// evaluated the legacy resume-rule predicates in SQL (no `context_json`
 /// loaded) for the v0 verdict, and projects the v1 durable state RAW
 /// (`run_state_json`). The canonical A7 recovery class is computed by the
-/// SAME shared function as detail mode and the daemon
+/// SAME shared function as detail mode and the retained resume driver
 /// ([`recovery_class_for`] → [`resume_rules::classify_recovery`]) — list
 /// and detail must never drift: both structurally deserialize `RunStateV1`
 /// and both enforce the exact execution-version 0/1 contract, so
@@ -596,7 +602,7 @@ fn verdict_for_recovery(class: RecoveryClass, row_status: &str) -> ResumableVerd
             rule: ResumeRule::HumanWait,
             runner_check: RunnerCheck::NotApplicable,
             explanation:
-                "human wait (A4) — wait token preserved; never stepped or approved at boot"
+                "human wait (A4) — wait token preserved; never stepped or approved automatically"
                     .to_string(),
         },
         RecoveryClass::SafeBoundary => ResumableVerdict {
@@ -604,7 +610,7 @@ fn verdict_for_recovery(class: RecoveryClass, row_status: &str) -> ResumableVerd
             rule: ResumeRule::SafeBoundary,
             runner_check: RunnerCheck::NotApplicable,
             explanation: "fully committed step boundary with no in-flight work — reconstructable, \
-                          but boot does not auto-drive outside the converge/merge chain class"
+                          but resume does not auto-drive outside the converge/merge chain class"
                 .to_string(),
         },
         RecoveryClass::LegacyUnverified => {
@@ -629,9 +635,7 @@ fn verdict_for(
             verdict: Verdict::No,
             rule: ResumeRule::TerminalStatus,
             runner_check: RunnerCheck::NotApplicable,
-            explanation: format!(
-                "terminal status '{row_status}' — boot never re-drives non-running sessions"
-            ),
+            explanation: format!("terminal status '{row_status}' — never re-driven"),
         },
         ResumeClass::ContextUnreadable => ResumableVerdict {
             verdict: Verdict::Unknown,
@@ -653,14 +657,14 @@ fn verdict_for(
             verdict: Verdict::No,
             rule: ResumeRule::TypedFailure,
             runner_check: RunnerCheck::NotApplicable,
-            explanation: "typed failure record present; boot re-drive skips typed-failed sessions"
+            explanation: "typed failure record present; resume skips typed-failed sessions"
                 .to_string(),
         },
         ResumeClass::NotConvergeMergeClass => ResumableVerdict {
             verdict: Verdict::No,
             rule: ResumeRule::NotConvergeMergeClass,
             runner_check: RunnerCheck::NotApplicable,
-            explanation: "no live converge/merge join state; boot re-drive skips \
+            explanation: "no live converge/merge join state; resume skips \
                           sessions outside the converge/merge chain class"
                 .to_string(),
         },
@@ -668,10 +672,11 @@ fn verdict_for(
             verdict: Verdict::Yes,
             rule: ResumeRule::ChainClassNoFailure,
             runner_check: RunnerCheck::BootTime,
-            explanation: "candidate for re-drive on next boot (converge/merge chain, \
-                          no failure record); re-drive also requires the daemon to \
-                          reconstruct a runner at boot (embedded presets only); \
-                          user-preset sessions that fail reconstruction stay \
+            explanation: "candidate for resume from the persisted session state \
+                          (converge/merge chain, no failure record); the checkpoint \
+                          stores position only, so driving the resume requires the \
+                          caller to reconstruct a runner first (embedded presets \
+                          only); user-preset sessions that fail reconstruction stay \
                           tracked-but-not-driven"
                 .to_string(),
         },
@@ -758,8 +763,8 @@ const fn recovery_class_str(class: RecoveryClass) -> &'static str {
     }
 }
 
-/// Legal operator actions for the canonical recovery class — the same
-/// mapping the daemon projection uses (A2; tri-QC P1-B).
+/// Legal operator actions for the canonical recovery class — the same A2
+/// projection mapping (tri-QC P1-B).
 fn allowed_actions_for(class: RecoveryClass, source_reconstructable: bool) -> Vec<String> {
     let actions: &[&str] = match class {
         RecoveryClass::Terminal => &["new_run"],
@@ -826,13 +831,13 @@ fn render_detail(dto: &InspectDto) -> String {
     }
 
     let verdict_line = match dto.resumable.rule {
-        ResumeRule::ChainClassNoFailure => "yes — candidate for re-drive on next boot (converge/merge chain, no failure record; runner reconstruction is boot-time — see runner_check)".to_string(),
-        ResumeRule::TypedFailure => "no — typed failure record present (boot never re-drives; see caveat)".to_string(),
-        ResumeRule::NotConvergeMergeClass => "no — no live converge/merge join state (boot skips: not in chain class)".to_string(),
-        ResumeRule::TerminalStatus => "no — terminal status (boot never re-drives; see caveat)".to_string(),
+        ResumeRule::ChainClassNoFailure => "yes — resume candidate from the persisted state (converge/merge chain, no failure record; a runner must be reconstructed before it can be driven — see runner_check)".to_string(),
+        ResumeRule::TypedFailure => "no — typed failure record present (never re-driven; see caveat)".to_string(),
+        ResumeRule::NotConvergeMergeClass => "no — no live converge/merge join state (resume skips: not in chain class)".to_string(),
+        ResumeRule::TerminalStatus => "no — terminal status (never re-driven; see caveat)".to_string(),
         ResumeRule::Interrupted => "no — interrupted/uncertain in-flight work (never auto-retried; cancel after ownership-safe cleanup)".to_string(),
-        ResumeRule::HumanWait => "no — human wait (A4) token preserved; never stepped or approved at boot".to_string(),
-        ResumeRule::SafeBoundary => "no — fully committed boundary with no in-flight work; boot does not auto-drive outside the chain class".to_string(),
+        ResumeRule::HumanWait => "no — human wait (A4) token preserved; never stepped or approved automatically".to_string(),
+        ResumeRule::SafeBoundary => "no — fully committed boundary with no in-flight work (resume does not auto-drive outside the chain class)".to_string(),
         // A7 unreadable metadata (round-2): explicit non-replayable reason —
         // distinct from a corrupt/unshaped session context. Contract §5
         // wording split (qc3 S1): corrupt bytes vs parseable-but-unexpected
@@ -898,7 +903,7 @@ mod tests {
     }
 
     #[test]
-    fn chain_class_with_no_failure_is_yes_with_boot_time_caveat() {
+    fn chain_class_with_no_failure_is_yes_with_runner_caveat() {
         let ctx = serde_json::json!({"data": {
             "_converge_arrivals_j1": ["a"],
             "_join_wait_start_j1": 1
@@ -908,7 +913,8 @@ mod tests {
         assert_eq!(dto.resumable.verdict, Verdict::Yes);
         assert_eq!(dto.resumable.rule, ResumeRule::ChainClassNoFailure);
         assert_eq!(dto.resumable.runner_check, RunnerCheck::BootTime);
-        assert!(dto.resumable.explanation.contains("boot"));
+        assert!(dto.resumable.explanation.contains("reconstruct"));
+        assert!(!dto.resumable.explanation.contains("boot"));
         assert_eq!(
             dto.live_join_keys,
             ["_converge_arrivals_j1", "_join_wait_start_j1"]

@@ -93,7 +93,7 @@ Explicit mechanical action (attack, cast, shield block, check shortcut) —
 Natural-language action ("I cast phase bolt at the guard"):
 
 **Caller-injected intermediate inputs.** The lane's inner graph is not an
-atomic daemon run: the caller sequences the ACP steps and injects
+atomic host run: the caller sequences the ACP steps and injects
 `preset.input.parsed_intent` (the `intent_parse` step's output, bound before
 `op_request` runs) and `preset.input.receipt` (the confirmed module receipt,
 bound after the Connect `compute` op settles) between them — the same binding
@@ -236,5 +236,6 @@ applies, but the fallback path is not modeled in this preset.
 ```
 
 Run from the nexus repository root — the bundle path is repo-root-relative.
-Runs the real offline validator core (`nexus42 system preset validate
---offline`) — no daemon needed. Exit 0 = clean.
+Runs the real local validator core (`nexus42 preset validate <path>`; the
+pre-v1.193 `system preset validate --offline` spelling is deleted) — no service
+host needed. Exit 0 = clean.

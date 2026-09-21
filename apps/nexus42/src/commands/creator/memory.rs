@@ -3,12 +3,13 @@
 //! CRUD operations for long-term memories, review pipeline,
 //! and fragment management.
 
-use crate::api::daemon_client::DaemonClient;
 use crate::config;
 use crate::config::CliConfig;
+use crate::core::{finish_direct, map_core_error, open_direct_core};
 use crate::errors::Result;
 use clap::Subcommand;
-use nexus_contracts::daemon_api::memory::ReviewResponse;
+use nexus_contracts::daemon_api::memory::{ReviewRequest, ReviewResponse};
+use nexus_core::{CoreService, Principal};
 use nexus_creator_memory::long_term_memory::LongTermMemory;
 use nexus_creator_memory::memory_io;
 use nexus_creator_memory::MemoryBearerRef;
@@ -57,7 +58,7 @@ pub enum MemoryCommand {
         json: bool,
     },
 
-    /// List memory fragments (requires daemon)
+    /// List memory fragments
     Fragments {
         /// Emit machine-readable JSON (the `ListMemoryFragmentsResponse`
         /// DTO verbatim) instead of human text.
@@ -65,7 +66,7 @@ pub enum MemoryCommand {
         json: bool,
     },
 
-    /// List pending review entries for current creator (requires daemon)
+    /// List pending review entries for current creator
     PendingList {
         /// Emit machine-readable JSON (the `ListPendingReviewsResponse`
         /// DTO verbatim) instead of human text.
@@ -73,13 +74,13 @@ pub enum MemoryCommand {
         json: bool,
     },
 
-    /// Pending-review queue operations (requires daemon)
+    /// Pending-review queue operations
     Pending {
         #[command(subcommand)]
         command: PendingCommand,
     },
 
-    /// Show details of a pending review entry (requires daemon)
+    /// Show details of a pending review entry
     PendingShow {
         /// Pending review ID to show
         pending_id: String,
@@ -89,7 +90,7 @@ pub enum MemoryCommand {
         json: bool,
     },
 
-    /// Dismiss a pending review entry without promoting (requires daemon)
+    /// Dismiss a pending review entry without promoting
     PendingDismiss {
         /// Pending review ID to dismiss
         pending_id: String,
@@ -103,7 +104,7 @@ pub enum MemoryCommand {
 /// `creator memory pending` subcommands (AR-86).
 #[derive(Debug, Subcommand)]
 pub enum PendingCommand {
-    /// Count pending review entries for current creator (requires daemon)
+    /// Count pending review entries for current creator
     Count {
         /// Emit machine-readable JSON (the `CountPendingReviewsResponse`
         /// DTO verbatim) instead of human text.
@@ -113,6 +114,10 @@ pub enum PendingCommand {
 }
 
 /// Run memory command.
+///
+/// The local CRUD leaves author through the guarded local memory library and
+/// never open the core; the review family runs on the shared direct-core seam
+/// in [`run_direct`].
 ///
 /// # Errors
 ///
@@ -137,19 +142,56 @@ pub async fn run(command: MemoryCommand, config: &CliConfig) -> Result<()> {
         MemoryCommand::Show { slug } => show(config, creator_id, &slug),
         MemoryCommand::Edit { slug } => edit(config, creator_id, &slug),
         MemoryCommand::Delete { slug, force } => delete(config, creator_id, &slug, force),
-        MemoryCommand::Review { json } => review(config, creator_id, json).await,
-        MemoryCommand::Fragments { json } => fragments(config, creator_id, json).await,
-        MemoryCommand::PendingList { json } => pending_list(config, creator_id, json).await,
-        MemoryCommand::Pending { command } => match command {
-            PendingCommand::Count { json } => pending_count(config, creator_id, json).await,
-        },
-        MemoryCommand::PendingShow { pending_id, json } => {
-            pending_show(config, creator_id, &pending_id, json).await
-        }
-        MemoryCommand::PendingDismiss { pending_id, json } => {
-            pending_dismiss(config, creator_id, &pending_id, json).await
+        // The review family is admitted on the direct core, not this local leaf.
+        direct => run_direct(direct, config, creator_id).await,
+    }
+}
+
+/// Run one review-family leaf on the shared direct-core seam.
+///
+/// One `CoreService` call per leaf over the raw user home; the writer is
+/// released by [`finish_direct`] before a line is printed, so no command
+/// reports an outcome its core could not settle — on success and on refusal
+/// alike.
+///
+/// # Errors
+///
+/// Returns the mapped core refusal (admission, `[not_found]` / `[forbidden]`,
+/// storage) and any cleanup refusal from [`finish_direct`].
+async fn run_direct(command: MemoryCommand, config: &CliConfig, creator_id: &str) -> Result<()> {
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        match command {
+            MemoryCommand::Review { json } => review(&core, &principal, creator_id, json).await,
+            MemoryCommand::Fragments { json } => fragments(&core, &principal, json).await,
+            MemoryCommand::PendingList { json } => {
+                pending_list(&core, &principal, creator_id, json).await
+            }
+            MemoryCommand::Pending { command } => match command {
+                PendingCommand::Count { json } => {
+                    pending_count(&core, &principal, creator_id, json).await
+                }
+            },
+            MemoryCommand::PendingShow { pending_id, json } => {
+                pending_show(&core, &principal, creator_id, &pending_id, json).await
+            }
+            MemoryCommand::PendingDismiss { pending_id, json } => {
+                pending_dismiss(&core, &principal, &pending_id, json).await
+            }
+            // `run` routes the local CRUD leaves before this seam is opened.
+            MemoryCommand::List
+            | MemoryCommand::Create { .. }
+            | MemoryCommand::Show { .. }
+            | MemoryCommand::Edit { .. }
+            | MemoryCommand::Delete { .. } => {
+                unreachable!("local memory leaves are routed before the direct core opens")
+            }
         }
     }
+    .await;
+    println!("{}", finish_direct(&core, outcome).await?);
+    Ok(())
 }
 
 fn list(_config: &CliConfig, creator_id: &str) -> Result<()> {
@@ -297,8 +339,16 @@ fn delete(_config: &CliConfig, creator_id: &str, slug: &str, force: bool) -> Res
     Ok(())
 }
 
-/// Hard cap on `POST /memory/review` drain iterations (AR-86 — matches the
-/// web drain contract's bounded loop; the server processes ≤50 rows per call).
+/// Page size for the memory list/pending reads.
+///
+/// The daemon adapter's `DEFAULT_QUERY_LIMIT` (`resolve_query_limit` on an
+/// omitted wire `limit`) used to be the owner; the typed core takes the page
+/// size from its caller instead, so the CLI — now its only caller — keeps the
+/// same 50-row page.
+const MEMORY_PAGE_LIMIT: usize = 50;
+
+/// Hard cap on the review drain iterations (AR-86 — matches the
+/// web drain contract's bounded loop; a review call processes ≤50 rows).
 const REVIEW_DRAIN_MAX_CALLS: u32 = 100;
 
 /// Cumulative drain outcome of [`drain_review_queue`].
@@ -309,7 +359,7 @@ struct DrainOutcome {
     dropped: i64,
     processed: i64,
     has_more: bool,
-    /// True when the loop stopped on a zero-progress call (server inspected
+    /// True when the loop stopped on a zero-progress call (the core inspected
     /// no rows but still reported `has_more`) rather than finishing the
     /// queue or exhausting the call cap.
     stopped_zero_progress: bool,
@@ -343,13 +393,17 @@ fn fold_review_response(outcome: &mut DrainOutcome, result: &ReviewResponse, cal
 
 /// Drain the pending-review queue.
 ///
-/// Loops `fetch` while the daemon reports `has_more == true`, accumulating a
-/// cumulative `promoted/fragmented/dropped` report (AR-86 / F-16 — matches
-/// the web `useReviewMemory` drain contract). Bounded by
-/// [`REVIEW_DRAIN_MAX_CALLS`]; a zero-progress call (server inspected no
+/// Loops the core's bounded review call while it reports `has_more == true`,
+/// accumulating a cumulative `promoted/fragmented/dropped` report (AR-86 /
+/// F-16 — matches the web `useReviewMemory` drain contract). Bounded by
+/// [`REVIEW_DRAIN_MAX_CALLS`]; a zero-progress call (the core inspected no
 /// rows but still reports `has_more`) breaks the loop so an unprocessable
 /// head row cannot spin forever.
-async fn drain_review_queue(client: &DaemonClient, creator_id: &str) -> Result<DrainOutcome> {
+async fn drain_review_queue(
+    core: &CoreService,
+    principal: &Principal,
+    creator_id: &str,
+) -> Result<DrainOutcome> {
     let mut outcome = DrainOutcome {
         promoted: 0,
         fragmented: 0,
@@ -360,7 +414,18 @@ async fn drain_review_queue(client: &DaemonClient, creator_id: &str) -> Result<D
         cap_exhausted: false,
     };
     for call in 0..REVIEW_DRAIN_MAX_CALLS {
-        let result = client.review_pending_memories(creator_id).await?;
+        // The request's `creator_id` is the CLI's active creator, exactly the
+        // value the daemon adapter sent; the core re-checks it against the
+        // admitted principal and refuses a mismatch.
+        let result = core
+            .review_memory(
+                principal,
+                ReviewRequest {
+                    creator_id: creator_id.to_string(),
+                },
+            )
+            .await
+            .map_err(map_core_error)?;
         if !fold_review_response(&mut outcome, &result, call) {
             break;
         }
@@ -403,7 +468,7 @@ fn review_human_lines(outcome: &DrainOutcome) -> Vec<String> {
     )];
     if outcome.stopped_zero_progress {
         lines.push(
-            "Note: a review call made zero progress but the daemon still reported \
+            "Note: a review call made zero progress but the core still reported \
              `has_more`; the queue may contain an unprocessable head row. Re-run \
              `creator memory review` to retry."
                 .to_string(),
@@ -420,67 +485,76 @@ fn review_human_lines(outcome: &DrainOutcome) -> Vec<String> {
 /// `creator memory review [--json]` — drain the pending-review queue.
 ///
 /// See [`drain_review_queue`] for the drain contract.
-async fn review(config: &CliConfig, creator_id: &str, json: bool) -> Result<()> {
-    let client = DaemonClient::from_config(config)?;
-    let outcome = drain_review_queue(&client, creator_id).await?;
+async fn review(
+    core: &CoreService,
+    principal: &Principal,
+    creator_id: &str,
+    json: bool,
+) -> Result<String> {
+    let outcome = drain_review_queue(core, principal, creator_id).await?;
     if json {
-        println!("{}", serde_json::to_string_pretty(&review_json(outcome))?);
-        return Ok(());
+        return Ok(serde_json::to_string_pretty(&review_json(outcome))?);
     }
-    for line in review_human_lines(&outcome) {
-        println!("{line}");
-    }
-    Ok(())
+    Ok(review_human_lines(&outcome).join("\n"))
 }
 
-async fn fragments(config: &CliConfig, creator_id: &str, json: bool) -> Result<()> {
-    let client = DaemonClient::from_config(config)?;
-    let result = client.list_memory_fragments(creator_id).await?;
+async fn fragments(core: &CoreService, principal: &Principal, json: bool) -> Result<String> {
+    let result = core
+        .list_memory_fragments(principal, None, None, MEMORY_PAGE_LIMIT)
+        .await
+        .map_err(map_core_error)?;
 
     if json {
-        println!("{}", serde_json::to_string_pretty(&result)?);
-        return Ok(());
+        return Ok(serde_json::to_string_pretty(&result)?);
     }
 
     let rows = &result.fragments;
 
     if rows.is_empty() {
-        println!("No memory fragments found.");
-        return Ok(());
+        return Ok("No memory fragments found.".to_string());
     }
 
-    println!("Memory fragments:\n");
-    println!("{:<30} {:<20} SUMMARY", "FRAGMENT_ID", "");
-    println!("{}", "-".repeat(80));
+    let mut lines = vec![
+        "Memory fragments:\n".to_string(),
+        format!("{:<30} {:<20} SUMMARY", "FRAGMENT_ID", ""),
+        "-".repeat(80),
+    ];
 
     for f in rows {
-        println!("{:<30} {}", f.fragment_id, f.summary);
+        lines.push(format!("{:<30} {}", f.fragment_id, f.summary));
     }
 
-    println!("\n{} fragments", rows.len());
-    Ok(())
+    lines.push(format!("\n{} fragments", rows.len()));
+    Ok(lines.join("\n"))
 }
 
-async fn pending_list(config: &CliConfig, creator_id: &str, json: bool) -> Result<()> {
-    let client = DaemonClient::from_config(config)?;
-    let result = client.list_pending_reviews(creator_id, None).await?;
+async fn pending_list(
+    core: &CoreService,
+    principal: &Principal,
+    creator_id: &str,
+    json: bool,
+) -> Result<String> {
+    let result = core
+        .list_pending_reviews(principal, None, MEMORY_PAGE_LIMIT)
+        .await
+        .map_err(map_core_error)?;
 
     if json {
-        println!("{}", serde_json::to_string_pretty(&result)?);
-        return Ok(());
+        return Ok(serde_json::to_string_pretty(&result)?);
     }
 
     if result.items.is_empty() {
-        println!("No pending reviews for creator '{creator_id}'.");
-        return Ok(());
+        return Ok(format!("No pending reviews for creator '{creator_id}'."));
     }
 
-    println!("Pending reviews for creator '{creator_id}':\n");
-    println!(
-        "{:<30} {:<15} {:<15} CREATED_AT",
-        "PENDING_ID", "TASK_KIND", "SESSION_ID"
-    );
-    println!("{}", "-".repeat(100));
+    let mut lines = vec![
+        format!("Pending reviews for creator '{creator_id}':\n"),
+        format!(
+            "{:<30} {:<15} {:<15} CREATED_AT",
+            "PENDING_ID", "TASK_KIND", "SESSION_ID"
+        ),
+        "-".repeat(100),
+    ];
 
     for r in &result.items {
         // Truncate long IDs for display
@@ -494,48 +568,54 @@ async fn pending_list(config: &CliConfig, creator_id: &str, json: bool) -> Resul
         } else {
             r.session_id.clone()
         };
-        println!(
+        lines.push(format!(
             "{:<30} {:<15} {:<15} {}",
             pending_short, r.task_kind, session_short, r.created_at
-        );
+        ));
     }
 
-    println!("\n{} pending reviews", result.items.len());
-    Ok(())
+    lines.push(format!("\n{} pending reviews", result.items.len()));
+    Ok(lines.join("\n"))
 }
 
 /// `creator memory pending count [--json]` — count pending review entries
-/// (`GET /v1/daemon/memory/pending-review/count`, AR-86).
-async fn pending_count(config: &CliConfig, creator_id: &str, json: bool) -> Result<()> {
-    let client = DaemonClient::from_config(config)?;
-    let result = client.count_pending_reviews(creator_id).await?;
+/// (`CoreService::count_pending_reviews`, AR-86).
+async fn pending_count(
+    core: &CoreService,
+    principal: &Principal,
+    creator_id: &str,
+    json: bool,
+) -> Result<String> {
+    let result = core
+        .count_pending_reviews(principal)
+        .await
+        .map_err(map_core_error)?;
     if json {
-        println!("{}", serde_json::to_string_pretty(&result)?);
-    } else {
-        println!(
-            "{} pending review(s) for creator '{creator_id}'.",
-            result.count
-        );
+        return Ok(serde_json::to_string_pretty(&result)?);
     }
-    Ok(())
+    Ok(format!(
+        "{} pending review(s) for creator '{creator_id}'.",
+        result.count
+    ))
 }
 
 async fn pending_show(
-    config: &CliConfig,
+    core: &CoreService,
+    principal: &Principal,
     creator_id: &str,
     pending_id: &str,
     json: bool,
-) -> Result<()> {
-    let client = DaemonClient::from_config(config)?;
-    // The list endpoint is cursor-paginated at 50 rows/page; a creator with
-    // more pending reviews can bury the requested ID past page 1. Walk
-    // `pagination.next_cursor` until the ID is found or the pages are
+) -> Result<String> {
+    // The list read is cursor-paginated at [`MEMORY_PAGE_LIMIT`] rows/page; a
+    // creator with more pending reviews can bury the requested ID past page 1.
+    // Walk `pagination.next_cursor` until the ID is found or the pages are
     // exhausted (bounded loop — same cap convention as the review drain).
     let mut cursor: Option<String> = None;
     let entry = loop {
-        let result = client
-            .list_pending_reviews(creator_id, cursor.as_deref())
-            .await?;
+        let result = core
+            .list_pending_reviews(principal, cursor.clone(), MEMORY_PAGE_LIMIT)
+            .await
+            .map_err(map_core_error)?;
         if let Some(entry) = result
             .items
             .into_iter()
@@ -556,46 +636,45 @@ async fn pending_show(
     };
 
     if json {
-        println!("{}", serde_json::to_string_pretty(&entry)?);
-        return Ok(());
+        return Ok(serde_json::to_string_pretty(&entry)?);
     }
 
-    println!("pending_id: {}", entry.pending_id);
-    println!("session_id: {}", entry.session_id);
-    println!("creator_id: {}", entry.creator_id);
+    let mut lines = vec![
+        format!("pending_id: {}", entry.pending_id),
+        format!("session_id: {}", entry.session_id),
+        format!("creator_id: {}", entry.creator_id),
+    ];
     if let Some(wid) = &entry.world_id {
-        println!("world_id: {wid}");
+        lines.push(format!("world_id: {wid}"));
     }
-    println!("task_kind: {}", entry.task_kind);
-    println!("created_at: {}", entry.created_at);
-    println!();
-    println!("raw_digest:");
-    println!("{}", entry.raw_digest);
-    Ok(())
+    lines.push(format!("task_kind: {}", entry.task_kind));
+    lines.push(format!("created_at: {}", entry.created_at));
+    lines.push(String::new());
+    lines.push("raw_digest:".to_string());
+    lines.push(entry.raw_digest);
+    Ok(lines.join("\n"))
 }
 
 async fn pending_dismiss(
-    config: &CliConfig,
-    creator_id: &str,
+    core: &CoreService,
+    principal: &Principal,
     pending_id: &str,
     json: bool,
-) -> Result<()> {
-    let client = DaemonClient::from_config(config)?;
-    let result = client
-        .dismiss_pending_review(pending_id, creator_id)
-        .await?;
+) -> Result<String> {
+    let result = core
+        .delete_pending_review(principal, pending_id.to_string())
+        .await
+        .map_err(map_core_error)?;
 
     if json {
-        println!("{}", serde_json::to_string_pretty(&result)?);
-        return Ok(());
+        return Ok(serde_json::to_string_pretty(&result)?);
     }
 
     if result.success {
-        println!("Pending review '{pending_id}' dismissed.");
+        Ok(format!("Pending review '{pending_id}' dismissed."))
     } else {
-        println!("Dismiss did not succeed for '{pending_id}'.");
+        Ok(format!("Dismiss did not succeed for '{pending_id}'."))
     }
-    Ok(())
 }
 
 /// Open a temporary file in the user's $EDITOR, return the edited content.

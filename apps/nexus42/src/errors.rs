@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-#[cfg(feature = "legacy-cli")]
+#[cfg(feature = "cli")]
 use nexus_acp_host::AcpError;
 
 /// Nexus CLI result type
@@ -15,29 +15,15 @@ pub enum CliError {
     #[allow(dead_code)]
     WorkspaceNotInitialized,
 
-    DaemonNotRunning,
-
-    /// Daemon not reachable with suggestion
-    DaemonNotReachable {
-        /// User-friendly error message
-        message: String,
-        /// Suggested fix
-        suggestion: String,
-    },
-
-    Daemon {
-        message: String,
-    },
-
     #[allow(dead_code)]
     AuthenticationRequired,
 
     CreatorNotSelected,
 
-    #[cfg(feature = "legacy-cli")]
+    #[cfg(feature = "cli")]
     Network(reqwest::Error),
 
-    #[cfg(feature = "legacy-cli")]
+    #[cfg(feature = "cli")]
     Database(sqlx::Error),
 
     Io(std::io::Error),
@@ -51,7 +37,7 @@ pub enum CliError {
         message: String,
     },
 
-    #[cfg(feature = "legacy-cli")]
+    #[cfg(feature = "cli")]
     Acp(AcpError),
 
     /// Operation requires platform connectivity but current mode prohibits it.
@@ -199,19 +185,14 @@ pub enum CliError {
 
     /// V1.170 P0 (AR-9): `nexus42 compute` exit-code contract. The AR-9
     /// vocabulary does not fit the CLI-wide 1/75/76/78 mapping, so the compute
-    /// group returns this variant with its own code: 1 = build/toolchain
-    /// failure, 2 = manifest validation failure, 3 = `wasm_sha256` pairing
-    /// mismatch, 4 = daemon unreachable / run rejected.
+    /// group returns this variant with its own code: 1 = build/toolchain or
+    /// install I/O failure, 2 = manifest/descriptor validation failure,
+    /// 3 = `wasm_sha256` pairing mismatch. The code-4 daemon-unreachable arm
+    /// retired with the daemon client (v1.193 P2-T13).
     ComputeExit {
-        /// AR-9 exit code (1 | 2 | 3 | 4).
+        /// AR-9 exit code (1 | 2 | 3).
         code: i32,
-        /// User-facing message (daemon errors surfaced verbatim).
-        message: String,
-    },
-
-    /// v1.185 P3: `creator character run` exit-code contract (run vs capture).
-    CharacterRunExit {
-        code: i32,
+        /// User-facing message (validation, pairing, and I/O failures verbatim).
         message: String,
     },
 
@@ -222,13 +203,13 @@ pub enum CliError {
 impl std::error::Error for CliError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            #[cfg(feature = "legacy-cli")]
+            #[cfg(feature = "cli")]
             Self::Network(err) => Some(err),
-            #[cfg(feature = "legacy-cli")]
+            #[cfg(feature = "cli")]
             Self::Database(err) => Some(err),
             Self::Io(err) | Self::LockIo(err) => Some(err),
             Self::Json(err) => Some(err),
-            #[cfg(feature = "legacy-cli")]
+            #[cfg(feature = "cli")]
             Self::Acp(err) => Some(err),
             _ => None,
         }
@@ -245,7 +226,6 @@ impl fmt::Display for CliError {
         match self {
             // Use default #[error] messages for simple variants
             Self::WorkspaceNotInitialized => write!(f, "Workspace not initialized.\n\n  Suggestion: Run `nexus42 creator workspace init workspace` first."),
-            Self::DaemonNotRunning => write!(f, "Daemon not running.\n\n  Suggestion: Start it with `nexus42 daemon start`."),
             Self::AuthenticationRequired => write!(f, "Authentication required.\n\n  Suggestion: Run `nexus42 platform auth login` first."),
             Self::CreatorNotSelected => write!(f, "Creator not selected.\n\n  Suggestion: Run `nexus42 creator use <creator-ref>` first."),
 
@@ -293,8 +273,7 @@ impl fmt::Display for CliError {
                      and contain only lowercase letters, digits, dots, hyphens, and underscores."
                 )
             }
-            Self::DaemonNotReachable { message, suggestion }
-            | Self::AgentNotFound { message, suggestion, .. }
+            Self::AgentNotFound { message, suggestion, .. }
             | Self::SessionExpired { message, suggestion, .. }
             | Self::PermissionDenied { message, suggestion, .. } => {
                 write!(f, "{message}\n\n  Suggestion: {suggestion}")
@@ -381,16 +360,15 @@ impl fmt::Display for CliError {
             }
 
             // Use #[error] messages for other variants
-            Self::Daemon { message } => write!(f, "Daemon error: {message}"),
-            #[cfg(feature = "legacy-cli")]
+            #[cfg(feature = "cli")]
             Self::Network(err) => write!(f, "Network error: {err}"),
-            #[cfg(feature = "legacy-cli")]
+            #[cfg(feature = "cli")]
             Self::Database(err) => write!(f, "Database error: {err}"),
             Self::Io(err) => write!(f, "IO error: {err}"),
             Self::Json(err) => write!(f, "JSON error: {err}"),
             Self::Config(msg) => write!(f, "Configuration error: {msg}"),
             Self::Api { status, message } => write!(f, "API error: {status} — {message}"),
-            #[cfg(feature = "legacy-cli")]
+            #[cfg(feature = "cli")]
             Self::Acp(err) => write!(f, "ACP error: {err}"),
             Self::PlatformOperationProhibited { mode, operation } => {
                 write!(
@@ -401,43 +379,13 @@ impl fmt::Display for CliError {
                 )
             }
             Self::Other(msg) => write!(f, "{msg}"),
-            Self::ComputeExit { message, .. } | Self::CharacterRunExit { message, .. } => write!(f, "{message}"),
+            Self::ComputeExit { message, .. } => write!(f, "{message}"),
         }
     }
 }
 
 // Helper constructors for enhanced error variants
 impl CliError {
-    /// Create a `DaemonNotReachable` error with suggestion.
-    ///
-    /// V1.43 (P1 §3 remediation table — daemon not reachable): the default
-    /// suggestion cites quickstart Part I §1 step 5.
-    #[allow(dead_code)]
-    pub fn daemon_not_reachable(suggestion: impl Into<String>) -> Self {
-        Self::DaemonNotReachable {
-            message: "The nexus42 daemon is not reachable.".to_string(),
-            suggestion: suggestion.into(),
-        }
-    }
-
-    /// Create a `DaemonNotReachable` error with the canonical remediation
-    /// suggestion (start daemon + spec pointer).
-    ///
-    /// Renamed from `daemon_not_reachable_quickstart` (R-V146P1-QC1-S2): the
-    /// suggestion no longer cites the deleted quickstart, so the stale suffix
-    /// was misleading.
-    #[must_use]
-    pub fn daemon_not_reachable_with_remediation() -> Self {
-        Self::DaemonNotReachable {
-            message: "The nexus42 daemon is not reachable.".to_string(),
-            // V1.47 P1: normalize user-facing copy — spec name, not repo path.
-            // V1.46 P1 (spec hygiene): cite spec, not deleted quickstart.
-            suggestion: "Start the daemon with `nexus42 daemon start`; \
-                see the creator-run-preset-entry spec"
-                .to_string(),
-        }
-    }
-
     /// Create an `AgentNotFound` error with agent ID
     #[allow(dead_code)]
     pub fn agent_not_found(agent_id: impl Into<String>) -> Self {
@@ -481,7 +429,7 @@ impl From<anyhow::Error> for CliError {
     }
 }
 
-#[cfg(feature = "legacy-cli")]
+#[cfg(feature = "cli")]
 impl From<chrono::ParseError> for CliError {
     fn from(err: chrono::ParseError) -> Self {
         Self::Other(format!("Date parse error: {err}"))
@@ -499,26 +447,25 @@ impl From<crate::domain::DomainError> for CliError {
     }
 }
 
-#[cfg(feature = "legacy-cli")]
+#[cfg(feature = "cli")]
 impl From<nexus_creator_memory::errors::MemoryError> for CliError {
     fn from(err: nexus_creator_memory::errors::MemoryError) -> Self {
         Self::Other(format!("Memory error: {err}"))
     }
 }
 
-#[cfg(feature = "legacy-cli")]
+#[cfg(feature = "cli")]
 impl From<reqwest::Error> for CliError {
     fn from(err: reqwest::Error) -> Self {
-        // R-V133P1-06: connection-refused / timeout → DaemonNotRunning
-        // for better UX ("Start it with `nexus42 daemon start`").
-        if err.is_connect() || err.is_timeout() {
-            return Self::DaemonNotRunning;
-        }
+        // v1.193 P2-T13: the reqwest connect/timeout → `DaemonNotRunning`
+        // fold retired with the daemon client. Remaining reqwest callers are
+        // platform/cloud clients, whose connection failures are ordinary
+        // network errors — never daemon-start guidance.
         Self::Network(err)
     }
 }
 
-#[cfg(feature = "legacy-cli")]
+#[cfg(feature = "cli")]
 impl From<sqlx::Error> for CliError {
     fn from(err: sqlx::Error) -> Self {
         Self::Database(err)
@@ -537,21 +484,21 @@ impl From<serde_json::Error> for CliError {
     }
 }
 
-#[cfg(feature = "legacy-cli")]
+#[cfg(feature = "cli")]
 impl From<AcpError> for CliError {
     fn from(err: AcpError) -> Self {
         Self::Acp(err)
     }
 }
 
-#[cfg(feature = "legacy-cli")]
+#[cfg(feature = "cli")]
 impl From<nexus_local_db::LocalDbError> for CliError {
     fn from(err: nexus_local_db::LocalDbError) -> Self {
         Self::Other(format!("local database error: {err}"))
     }
 }
 
-#[cfg(feature = "legacy-cli")]
+#[cfg(feature = "cli")]
 impl From<nexus_cloud_sync::errors::SyncError> for CliError {
     fn from(err: nexus_cloud_sync::errors::SyncError) -> Self {
         match err {
@@ -568,7 +515,7 @@ impl From<nexus_cloud_sync::errors::SyncError> for CliError {
     }
 }
 
-#[cfg(feature = "legacy-cli")]
+#[cfg(feature = "cli")]
 impl CliError {
     /// Convert a [`SyncError`] into a `CreatorVerificationFailed` error.
     ///
@@ -591,7 +538,7 @@ impl CliError {
     }
 }
 
-#[cfg(all(test, feature = "legacy-cli"))]
+#[cfg(all(test, feature = "cli"))]
 mod tests {
     use super::*;
 
@@ -627,16 +574,6 @@ mod tests {
         let message = cli_err.to_string();
         assert!(message.contains("not installed"));
         assert!(message.contains("claude-acp"));
-    }
-
-    #[test]
-    fn daemon_not_reachable_error_with_suggestion() {
-        let err = CliError::daemon_not_reachable("Check if the daemon process is running");
-        let display = format!("{err}");
-
-        assert!(display.contains("daemon is not reachable"));
-        assert!(display.contains("Suggestion:"));
-        assert!(display.contains("Check if the daemon process is running"));
     }
 
     #[test]
@@ -677,16 +614,6 @@ mod tests {
         assert!(display.contains("Workspace not initialized"));
         assert!(display.contains("Suggestion:"));
         assert!(display.contains("nexus42 creator workspace init"));
-    }
-
-    #[test]
-    fn daemon_not_running_with_suggestion() {
-        let err = CliError::DaemonNotRunning;
-        let display = format!("{err}");
-
-        assert!(display.contains("Daemon not running"));
-        assert!(display.contains("Suggestion:"));
-        assert!(display.contains("nexus42 daemon start"));
     }
 
     #[test]
@@ -774,40 +701,5 @@ mod tests {
         );
         let cli_err = CliError::verify_creator_error(sync_err);
         assert!(matches!(cli_err, CliError::Config(_)));
-    }
-
-    // R-V133P1-06: verify DaemonNotRunning display includes helpful suggestion
-    #[test]
-    fn daemon_not_running_display_includes_suggestion() {
-        let err = CliError::DaemonNotRunning;
-        let msg = format!("{err}");
-        assert!(
-            msg.contains("daemon start"),
-            "DaemonNotRunning message should suggest 'daemon start': {msg}"
-        );
-    }
-
-    // V1.43 (P1 §3 remediation — daemon not reachable): spec citation
-    #[test]
-    fn daemon_not_reachable_with_remediation_cites_spec() {
-        let err = CliError::daemon_not_reachable_with_remediation();
-        let msg = format!("{err}");
-        assert!(
-            msg.contains("daemon is not reachable"),
-            "should contain core message: {msg}"
-        );
-        assert!(
-            msg.contains("nexus42 daemon start"),
-            "should suggest starting daemon: {msg}"
-        );
-        assert!(
-            msg.contains("creator-run-preset-entry"),
-            "should cite the preset-entry spec: {msg}"
-        );
-        // R-V146P1-QC3-S4: no raw .mstar/ paths in user-facing copy.
-        assert!(
-            !msg.contains(".mstar/"),
-            "daemon-not-reachable remediation must not cite raw .mstar/ paths: {msg}"
-        );
     }
 }

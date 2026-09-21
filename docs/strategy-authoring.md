@@ -29,11 +29,13 @@ for the end-to-end loop; this doc is the authoring reference.
 >    (the E2 loop in the
 >    [integrator walkthrough](../strategy-samples/README.md)). The runtime has
 >    no daemon HTTP router and no schedule supervision.
-> 2. **Creator-daemon path (optional)** — install the bundle under
->    `~/.nexus42/presets/<id>/` and drive it through the daemon's schedule
->    API; preset lanes then execute on the creator-facing daemon's
->    orchestration engine. Snippets marked *daemon path* below apply only
->    there.
+> 2. **Creator-host path (optional)** — install the bundle under
+>    `~/.nexus42/presets/<id>/` and drive it through the local service host's
+>    schedule API (`POST /v1/daemon/orchestration/schedules`, served by the
+>    Electron/TS service — the CLI has had no `daemon`/schedule group since
+>    v1.193 P2); preset lanes then execute on the retained orchestration
+>    engine. Snippets marked *daemon path* below name that service API, not a
+>    CLI command.
 
 Two forkable bundles ship as worked examples (details in
 [Worked examples](#worked-examples)):
@@ -134,10 +136,12 @@ POST /v1/daemon/orchestration/schedules
   "input": { ... run payload ... } }
 ```
 
-The `input` field maps to `preset.input.*` at schedule start. On the daemon
-path, the CLI's `nexus42 daemon schedule add --preset <id> --creator <id>
---seed <text>` only stores seed text as `core_context` v0 — it does **not**
-populate `preset.input.*`.
+The `input` field maps to `preset.input.*` at schedule start. The retired CLI
+schedule leaf (`nexus42 daemon schedule add --preset <id> --creator <id>
+--seed <text>`, deleted with the whole `daemon` group in v1.193 P2) only
+stored seed text as `core_context` v0 — it did **not** populate
+`preset.input.*`, and it has no replacement CLI entry: drive schedules through
+the service API above.
 
 **Template rendering vs expression resolution.** Prompt templates render
 dotted keys — `{{preset.input.mode}}` works inside a template. The expression
@@ -226,7 +230,8 @@ needs from `preset.input` rather than relying on shared session context.
 ## Validator
 
 `strategy-samples/validate.sh` runs the **real validator core** in-process
-with no daemon required:
+through the retained local `nexus42 preset validate <path>` leaf — no service
+host required:
 
 ```bash
 bash strategy-samples/validate.sh                        # bundled game-narrative sample
@@ -238,14 +243,17 @@ Requires the `nexus42` CLI on `PATH` (build it once from the repo root:
 `cargo build --bin nexus42`). Exit status: `0` when the strategy validates
 clean, non-zero otherwise (`127` when the CLI is missing).
 
-The script delegates to `nexus42 system preset validate --offline <path>`.
-`--offline` mirrors the daemon's `POST /v1/daemon/presets:validate`
-composition in-process: `loader_validate_manifest_compat` +
+The script delegates to the retained local leaf
+`nexus42 preset validate <path>` (the pre-v1.193 spelling
+`nexus42 system preset validate --offline` is deleted, and with the local leaf
+becoming the only implementation the `--offline` switch is gone). It mirrors
+the service's `POST /v1/daemon/presets:validate` composition in-process:
+`loader_validate_manifest_compat` +
 `validate_path_safety` + `validate_preset_semantic` +
 `validate_assets_in_bundle`. `--json` prints the machine-readable verdict:
 
 ```bash
-nexus42 system preset validate --offline --json strategy-samples/react-trpg-turn
+nexus42 preset validate --json strategy-samples/react-trpg-turn
 # pretty-printed JSON on stdout:
 # {
 #   "errors": [],
@@ -256,9 +264,9 @@ nexus42 system preset validate --offline --json strategy-samples/react-trpg-turn
 # }
 ```
 
-Without `--offline` the command delegates to a running creator daemon; the
-daemon-backed mode cannot take a directory argument (pass the `preset.yaml`
-file path there). `validate.sh` always uses `--offline`.
+The CLI no longer has a service-backed validate mode: `preset validate` is
+local-only and takes the bundle directory or `preset.yaml` path directly.
+`validate.sh` uses that leaf as-is.
 
 ### What the validator proves
 
@@ -313,16 +321,17 @@ idempotency ledger.
    shape intact.
 4. Validate: `bash strategy-samples/validate.sh my-strategy`.
 
-Strategies can also be installed for daemon-side runs via the 3-tier preset
+Strategies can also be installed for host-side runs via the 3-tier preset
 resolution: `~/.nexus42/presets/<id>/` overrides embedded presets with the
 same id.
 
 ## Editing an installed strategy (`preset patch`)
 
 Once a strategy is installed under `~/.nexus42/presets/<id>/`, the **write
-path is the daemon's strategy canvas API** via the CLI leaves
-(`nexus42 preset patch state|transition|prompt`, V1.175 P1 — see
-[cli-spec §6.2G.4](../.mstar/specs/cli-spec.md)):
+path is the local service host's strategy canvas API**
+(`POST /v1/daemon/strategies/…`, served by the Electron/TS service) through the
+retained CLI leaves (`nexus42 preset patch state|transition|prompt`, V1.175 P1
+— see [cli-spec §6.2G.4](../.mstar/specs/cli-spec.md)):
 
 ```bash
 # Patch a state node (rename via --label, or update --description).
@@ -343,7 +352,7 @@ my-strategy`). A stale revision returns 409 `strategy_conflict` naming the
 current revision, the conflicting path, and a recovery hint — re-read the
 Strategy and reapply with the new revision. Embedded/system presets are
 read-only; only user bundles under `~/.nexus42/presets/<id>/` are patchable
-(the daemon surfaces the rejection as a 400 `bad_request` — its public
+(the service surfaces the rejection as a 400 `bad_request` — its public
 `error_code()` allowlist does not passthrough the internal
 `strategy_update_forbidden` code).
 
@@ -366,10 +375,11 @@ read-only; only user bundles under `~/.nexus42/presets/<id>/` are patchable
 ## Where the strategy runs
 
 On the **daemon path** (optional — see the *Execution surfaces* callout at
-the top of this doc), preset lanes execute on the
-creator-facing daemon's orchestration engine via its schedule API;
-`nexus-runtime` intentionally ships without the daemon HTTP router and
-without schedule supervision. On the **integrator path**, your backend
+the top of this doc), preset lanes execute on the creator-facing service
+host's retained orchestration engine via its schedule API;
+`nexus-runtime` intentionally ships without any HTTP router and without
+schedule supervision (the Rust host composition was deleted in v1.193 P2).
+On the **integrator path**, your backend
 drives the strategy side (its own timer/event loop + LLM step using the
 templates) and writes results into the World over Connect — see
 [`nexus-runtime.md`](nexus-runtime.md) for the runtime surface and the

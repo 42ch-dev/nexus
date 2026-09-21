@@ -1,7 +1,6 @@
 //! `nexus42 system` — System management command group.
 //!
 //! Implements the `nexus42 system` top-level command with subcommands:
-//! - `preset` — Show registered system presets
 //! - `version` — Print CLI version info
 //! - `doctor` — Diagnostic health checks
 //! - `completion` — Shell completion generation
@@ -26,12 +25,6 @@ use clap_complete::Shell;
 
 #[derive(Debug, Subcommand)]
 pub enum SystemCommand {
-    /// Show registered system presets
-    Preset {
-        #[command(subcommand)]
-        command: SystemPresetSubcommand,
-    },
-
     /// Print CLI version info
     Version,
 
@@ -75,72 +68,6 @@ pub enum SystemCommand {
     },
 }
 
-#[derive(Debug, Subcommand)]
-pub enum SystemPresetSubcommand {
-    /// List all discoverable presets (embedded + user + system)
-    List {
-        /// Filter by `run_intent` (e.g. `work_init`, `knowledge_ingest`)
-        #[arg(long)]
-        intent: Option<String>,
-        /// Emit machine-readable JSON
-        #[arg(long, default_value_t = false)]
-        json: bool,
-    },
-    /// Validate a preset YAML/bundle at a given path
-    Validate {
-        /// Path to preset.yaml (or bundle directory)
-        path: String,
-        /// Emit machine-readable JSON
-        #[arg(long, default_value_t = false)]
-        json: bool,
-        /// Validate in-process via the shared validator core — no daemon
-        /// required (V1.153 P3: `nexus-runtime` does not serve the daemon
-        /// HTTP router). Default: daemon-backed `POST /v1/daemon/presets:validate`.
-        #[arg(long, default_value_t = false)]
-        offline: bool,
-    },
-}
-
-/// PL-6 alias bridge: `system preset <sub>` forwards into the canonical
-/// `nexus42 preset` group (AR-24). The alias keeps the same subcommand
-/// surface (`list|validate`) for the one-release compatibility window.
-impl From<SystemPresetSubcommand> for crate::commands::preset::PresetCommand {
-    fn from(cmd: SystemPresetSubcommand) -> Self {
-        match cmd {
-            SystemPresetSubcommand::List { intent, json } => Self::List { intent, json },
-            SystemPresetSubcommand::Validate {
-                path,
-                json,
-                offline,
-            } => Self::Validate {
-                path,
-                json,
-                offline,
-            },
-        }
-    }
-}
-
-#[cfg(test)]
-/// Legacy `SystemPresetCommand` used in tests for CLI parsing verification.
-#[derive(Debug, Subcommand)]
-enum SystemPresetCommand {
-    /// Show registered system presets
-    Preset {
-        #[command(subcommand)]
-        command: SystemPresetSubcommand,
-    },
-}
-
-#[cfg(test)]
-/// Wrapper for parsing `SystemPresetCommand` in tests.
-#[derive(Debug, clap::Parser)]
-#[command(subcommand_required = true, name = "system")]
-struct SystemPresetCli {
-    #[command(subcommand)]
-    command: SystemPresetCommand,
-}
-
 /// Run the system command (extended).
 ///
 /// # Errors
@@ -148,24 +75,14 @@ struct SystemPresetCli {
 /// Returns an error if the delegated command fails.
 pub async fn run(cmd: SystemCommand, config: &CliConfig) -> Result<()> {
     match cmd {
-        SystemCommand::Preset { command } => {
-            // PL-6: `system preset` is a working compatibility alias for one
-            // release (deactivate-not-delete, V1.169). Forward into the
-            // canonical `nexus42 preset` group with a deprecation notice.
-            eprintln!(
-                "Warning: `nexus42 system preset` is deprecated. Use `nexus42 preset` instead. \
-                 The `system preset` alias will be removed in a future version."
-            );
-            crate::commands::preset::run(command.into(), config).await
-        }
         SystemCommand::Version => {
             println!("nexus42 {}", env!("CARGO_PKG_VERSION"));
             Ok(())
         }
-        SystemCommand::Doctor => run_combined_doctor(config).await,
+        SystemCommand::Doctor => run_combined_doctor().await,
         SystemCommand::Completion { shell } => print_completion(&shell),
         SystemCommand::Config { command } => config::run(command, config),
-        SystemCommand::Debug { command } => debug::run(command, config).await,
+        SystemCommand::Debug { command } => debug::run(command, config),
         SystemCommand::Db { command } => db::run(command, config).await,
         SystemCommand::Identity { command } => identity::run(command, config).await,
         SystemCommand::RuntimeMode { command } => runtime_mode::run(command, config),
@@ -194,33 +111,19 @@ fn print_completion(shell_str: &str) -> Result<()> {
     Ok(())
 }
 
-/// Run combined diagnostics: daemon connectivity + ACP registry + home directory.
+/// Run combined diagnostics: ACP registry + home directory.
 ///
 /// This is the `nexus42 system doctor` implementation — a unified diagnostic
-/// that combines infrastructure checks in a single pass.
-async fn run_combined_doctor(config: &CliConfig) -> Result<()> {
+/// that combines infrastructure checks in a single pass. Both checks are local
+/// or registry-backed; a stopped local HTTP service is not a doctor failure.
+async fn run_combined_doctor() -> Result<()> {
     println!("nexus42 system doctor — combined diagnostics");
     println!();
 
     let mut issues = 0u32;
 
-    // Check 1: Daemon connectivity
-    print!("  [1/3] Daemon connectivity... ");
-    let client = crate::api::DaemonClient::from_config(config)?;
-    match client.health_check().await {
-        Ok(true) => println!("✓ Running"),
-        Ok(false) => {
-            println!("✗ Not responding at {}", config.daemon_url);
-            issues += 1;
-        }
-        Err(e) => {
-            println!("✗ Error: {e}");
-            issues += 1;
-        }
-    }
-
-    // Check 2: ACP registry reachability
-    print!("  [2/3] ACP registry reachability... ");
+    // Check 1: ACP registry reachability
+    print!("  [1/2] ACP registry reachability... ");
     match nexus_acp_host::registry::RegistryClient::new() {
         Ok(reg_client) => match reg_client.get_registry().await {
             Ok(registry) => {
@@ -241,8 +144,8 @@ async fn run_combined_doctor(config: &CliConfig) -> Result<()> {
         }
     }
 
-    // Check 3: Home directory health
-    print!("  [3/3] Home directory (~/.nexus42/)... ");
+    // Check 2: Home directory health
+    print!("  [2/2] Home directory (~/.nexus42/)... ");
     match crate::config::nexus_home() {
         Ok(home) => {
             if home.exists() && home.is_dir() {
@@ -276,57 +179,6 @@ async fn run_combined_doctor(config: &CliConfig) -> Result<()> {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use clap::Parser;
-
-    #[test]
-    // Empty arms are deliberate compile-time shape checks of the clap variants.
-    #[allow(clippy::match_same_arms)]
-    fn system_preset_list_parses() {
-        let cmd = SystemPresetCli::try_parse_from(["system", "preset", "list"]).unwrap();
-
-        match cmd.command {
-            SystemPresetCommand::Preset { command } => match command {
-                SystemPresetSubcommand::List { intent: _, json: _ } => {} // expected
-                SystemPresetSubcommand::Validate {
-                    path: _,
-                    json: _,
-                    offline: _,
-                } => {} // expected
-            },
-        }
-    }
-
-    #[test]
-    fn system_preset_subcommand_required() {
-        let result = SystemPresetCli::try_parse_from(["system"]);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn system_preset_validate_offline_flag_parses() {
-        let cmd = SystemPresetCli::try_parse_from([
-            "system",
-            "preset",
-            "validate",
-            "some/path",
-            "--offline",
-        ])
-        .unwrap();
-        match cmd.command {
-            SystemPresetCommand::Preset { command } => match command {
-                SystemPresetSubcommand::Validate {
-                    path,
-                    json,
-                    offline,
-                } => {
-                    assert_eq!(path, "some/path");
-                    assert!(!json);
-                    assert!(offline);
-                }
-                SystemPresetSubcommand::List { .. } => panic!("expected validate"),
-            },
-        }
-    }
 
     #[test]
     fn print_completion_valid_shell_bash() {

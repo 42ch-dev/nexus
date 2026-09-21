@@ -1,7 +1,7 @@
 //! Debug Command — Internal debugging utilities
 //!
-//! Provides commands for dumping workspace state and replaying deltas
-//! for troubleshooting sync behavior.
+//! Provides local commands for dumping workspace state to troubleshoot
+//! local configuration, storage and workspace resolution.
 
 use crate::config::CliConfig;
 use crate::errors::Result;
@@ -15,25 +15,17 @@ pub enum DebugCommand {
         #[arg(long, default_value = "json")]
         format: String,
     },
-
-    /// Replay a specific delta for debugging sync behavior
-    ReplayDelta {
-        /// Delta ID to replay
-        delta_id: String,
-    },
 }
 
 /// Run debug command
 ///
 /// # Errors
 ///
-/// Returns `CliError` if:
-/// - Workspace state cannot be dumped (I/O errors, serialization failures)
-/// - Delta replay fails
-pub async fn run(cmd: DebugCommand, config: &CliConfig) -> Result<()> {
+/// Returns `CliError` if workspace state cannot be dumped (I/O errors,
+/// serialization failures).
+pub fn run(cmd: DebugCommand, config: &CliConfig) -> Result<()> {
     match cmd {
-        DebugCommand::DumpWorkspace { format } => dump_workspace(config, &format).await,
-        DebugCommand::ReplayDelta { delta_id } => replay_delta(config, &delta_id).await,
+        DebugCommand::DumpWorkspace { format } => dump_workspace(config, &format),
     }
 }
 
@@ -56,7 +48,7 @@ fn strip_nulls(value: &serde_json::Value) -> serde_json::Value {
 }
 
 /// Serialize workspace state to JSON or TOML for debugging.
-async fn dump_workspace(config: &CliConfig, format: &str) -> Result<()> {
+fn dump_workspace(config: &CliConfig, format: &str) -> Result<()> {
     let mut state = serde_json::Map::new();
 
     // --- Config snapshot ---
@@ -84,26 +76,6 @@ async fn dump_workspace(config: &CliConfig, format: &str) -> Result<()> {
             serde_json::Value::String(root.display().to_string()),
         );
     }
-
-    // --- Daemon status (non-blocking, with short timeout) ---
-    let daemon_status = async {
-        let client = crate::api::DaemonClient::with_timeouts(
-            &config.daemon_url,
-            std::time::Duration::from_secs(2),
-            std::time::Duration::from_secs(5),
-        )?;
-        if !client.health_check().await? {
-            return Ok(serde_json::json!({"running": false}));
-        }
-        client
-            .get::<serde_json::Value>("/v1/daemon/runtime/status")
-            .await
-    }
-    .await;
-    state.insert(
-        "daemon_status".to_string(),
-        daemon_status.unwrap_or_else(|error| serde_json::json!({"error": error.to_string()})),
-    );
 
     // --- Database state (best-effort) ---
     match crate::config::resolve_state_db_path(config) {
@@ -152,46 +124,6 @@ async fn dump_workspace(config: &CliConfig, format: &str) -> Result<()> {
     Ok(())
 }
 
-/// Replay a specific delta for debugging sync behavior.
-///
-/// MVP: prints delta metadata retrieved from the daemon. Does not
-/// perform actual state mutation.
-async fn replay_delta(config: &CliConfig, delta_id: &str) -> Result<()> {
-    let client = crate::api::DaemonClient::from_config(config)?;
-
-    // Check daemon availability
-    if !client.health_check().await? {
-        return Err(crate::errors::CliError::DaemonNotRunning);
-    }
-
-    println!("Replaying delta: {delta_id}");
-    println!();
-
-    // Attempt to fetch delta info from daemon
-    match client
-        .get::<serde_json::Value>(&format!("/v1/daemon/delta/{delta_id}"))
-        .await
-    {
-        Ok(delta) => {
-            println!("Delta metadata:");
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&delta).unwrap_or_else(|_| delta.to_string())
-            );
-        }
-        Err(e) => {
-            println!("Could not fetch delta from daemon: {e}");
-            println!();
-            println!("This may mean:");
-            println!("  - The delta ID does not exist");
-            println!("  - The daemon does not support delta replay yet");
-            println!("  - Check available deltas with the sync command");
-        }
-    }
-
-    Ok(())
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -235,35 +167,5 @@ mod tests {
             }
             _ => panic!("Expected DumpWorkspace"),
         }
-    }
-
-    #[test]
-    fn debug_command_clap_parsing_replay_delta() {
-        use clap::Parser;
-
-        #[derive(Parser)]
-        struct App {
-            #[command(subcommand)]
-            cmd: Option<DebugCommand>,
-        }
-
-        let app = App::try_parse_from(["test", "replay-delta", "delta-123"]);
-        assert!(app.is_ok());
-        match app.unwrap().cmd {
-            Some(DebugCommand::ReplayDelta { delta_id }) => {
-                assert_eq!(delta_id, "delta-123");
-            }
-            _ => panic!("Expected ReplayDelta"),
-        }
-    }
-
-    #[tokio::test]
-    async fn replay_delta_rejects_invalid_daemon_configuration() {
-        let config = CliConfig {
-            daemon_url: String::new(),
-            ..CliConfig::default()
-        };
-        let result = replay_delta(&config, "nonexistent").await;
-        assert!(matches!(result, Err(crate::errors::CliError::Config(_))));
     }
 }

@@ -36,16 +36,16 @@
 #                    partner's backend — see the note in
 #                    templates/scheduled-sweep.md)
 #
-# Example schedule creation (daemon API — the runtime ships without the
-# daemon HTTP router, so the partner's backend typically drives Connect and
-# their own timer instead):
+# Example schedule creation (local service host API — the Connect runtime
+# ships without any HTTP router, so the partner's backend typically drives
+# Connect and their own timer instead):
 #   POST /v1/daemon/orchestration/schedules
 #   { "creator_id": "<creator-id>", "preset_id": "game-narrative",
 #     "input": { "mode": "trigger", "world_id": "...", "documents": {...} } }
 # The `input` field is the run payload the engine maps to `preset.input.*`
-# at schedule start. The CLI's `daemon schedule add --seed <text>` only
-# stores seed text as core_context v0 — it does NOT populate
-# `preset.input.*`.
+# at schedule start. The retired CLI schedule leaf (`daemon schedule add
+# --seed <text>`, deleted with the daemon group in v1.193 P2) only stored seed
+# text as core_context v0 — it did NOT populate `preset.input.*`.
 
 preset:
   id: game-narrative
@@ -72,7 +72,7 @@ preset:
 # forward. A game event can jump straight into the trigger lane.
 # NOTE: the manifest `signals:` section is schema-valid and parsed by the
 # loader, but no runtime component delivers declared signals yet — the
-# daemon's `/schedules/{id}/signal` endpoint handles only the lifecycle
+# service host's `/schedules/{id}/signal` endpoint handles only the lifecycle
 # signals start|pause|resume|cancel|advance and REJECTS preset-declared
 # signal names. Treat signal delivery as a customization point for the host;
 # the schedule-input path (mode selector) is the primary lane entry.

@@ -927,15 +927,29 @@ impl ComputablePort for NexusAdapter<'_> {
         }
 
         // ── 9. Atomic commit: entry settles + session state ───────────────
-        // Session state is only advanced when compute succeeded and every
-        // settle CAS (if any) is ready. One TX → no partial entry writes and
-        // no session advance without successful settles.
-        let updated_state_json =
-            serde_json::to_string(&merged_state).unwrap_or_else(|_| "{}".to_string());
+        // Session state advances ONLY on the settle path (the caller asked for
+        // the computed state to be persisted): a non-settle `compute` is a
+        // read-only projection — it returns the merged state in the response
+        // and leaves the staged session row untouched. This is also what lets
+        // the Connect host serve `compute` at all: its workspace pool is the
+        // cooperative DIRECT admission (the host must never take the daemon's
+        // engine ownership), and `compute_sessions` is engine-owned under the
+        // core writer protocol (`guard_compute_sessions_*`) — while `settle:
+        // true` is rejected on that surface (`settle_not_enabled`, spec §5 /
+        // §6.5), so no session write is ever attempted there. Entry settles
+        // and the session update still share ONE transaction whenever there is
+        // something to commit.
+        let session_update = if settle {
+            let updated_state_json =
+                serde_json::to_string(&merged_state).unwrap_or_else(|_| "{}".to_string());
+            Some((session_id.clone(), updated_state_json))
+        } else {
+            None
+        };
         match super::knowledge_entry_port::commit_compute_settlement(
             self,
             pending_entry_updates,
-            Some((session_id.clone(), updated_state_json)),
+            session_update,
         )
         .await
         {

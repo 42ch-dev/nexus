@@ -141,7 +141,10 @@ fn acp_probe_registry() {
         .expect("Failed to execute command");
 }
 
-/// Test `nexus42 acp` command group shows all subcommands.
+/// Test `nexus42 acp` command group shows the retained subcommands.
+///
+/// v1.193 P1-T4: the daemon-health leaves `status` and `doctor` are removed
+/// from the group; the local ACP parser groups survive.
 #[test]
 fn acp_command_group_shows_subcommands() {
     Command::cargo_bin("nexus42")
@@ -150,11 +153,13 @@ fn acp_command_group_shows_subcommands() {
         .arg("--help")
         .assert()
         .success()
-        .stdout(predicate::str::contains("status"))
-        .stdout(predicate::str::contains("doctor"))
         .stdout(predicate::str::contains("probe"))
         .stdout(predicate::str::contains("registry"))
-        .stdout(predicate::str::contains("agent"));
+        .stdout(predicate::str::contains("agent"))
+        .stdout(predicate::str::contains("session"))
+        .stdout(predicate::str::contains("policy"))
+        .stdout(predicate::str::contains("permission"))
+        .stdout(predicate::str::contains("run"));
 }
 
 /// Test invalid format argument produces error.
@@ -330,37 +335,44 @@ ctr_persist = "default"
     assert!(!content_after.contains("my-test-agent"));
 }
 
-/// Test `nexus42 acp doctor --help` shows usage.
+/// v1.193 P1-T4 (AC2/AC5): the daemon-health leaves `acp status` and
+/// `acp doctor` (loopback `DaemonClient` probes) are removed — unknown, not
+/// hidden — while the retained ACP parser groups keep their own options.
 #[test]
-fn acp_doctor_shows_help() {
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("acp")
-        .arg("doctor")
-        .arg("--help")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("doctor"))
-        .stdout(predicate::str::contains("--port"));
+fn acp_daemon_health_leaves_are_unknown_and_retained_groups_parse() {
+    for leaf in ["status", "doctor"] {
+        Command::cargo_bin("nexus42")
+            .unwrap()
+            .args(["acp", leaf])
+            .assert()
+            .code(2)
+            .stderr(predicate::str::contains("unrecognized subcommand"));
+    }
+
+    for args in [["acp", "session", "--help"], ["acp", "policy", "--help"]] {
+        Command::cargo_bin("nexus42")
+            .unwrap()
+            .args(args)
+            .assert()
+            .success();
+    }
 }
 
-/// Test `nexus42 daemon --help` shows new subcommands.
+/// v1.193 P2-T12 (AC1/AC5): the `daemon` command group (`start`/`stop`/
+/// `restart`/`status`/`logs`/`doctor`/`schedule`) and the hidden `daemon-run`
+/// self-spawn entry are gone from the parser — `daemon --help` is clap's
+/// unrecognized-subcommand error, never a group page.
 #[test]
-fn daemon_shows_new_subcommands() {
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("daemon")
-        .arg("--help")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("start"))
-        .stdout(predicate::str::contains("stop"))
-        .stdout(predicate::str::contains("restart"))
-        .stdout(predicate::str::contains("status"))
-        .stdout(predicate::str::contains("logs"))
-        .stdout(predicate::str::contains("doctor"))
-        .stdout(predicate::str::contains("schedule"))
-        .stdout(predicate::str::contains("orchestrate").not());
+fn daemon_group_is_unknown() {
+    for args in [["daemon", "--help"], ["daemon", "status"]] {
+        Command::cargo_bin("nexus42")
+            .unwrap()
+            .args(args)
+            .assert()
+            .code(2)
+            .stdout(predicate::str::is_empty())
+            .stderr(predicate::str::contains("unrecognized subcommand"));
+    }
 }
 
 /// Test `nexus42 --help` no longer shows agent/session/policy/permission as top-level.

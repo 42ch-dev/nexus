@@ -143,12 +143,15 @@ impl WorkRescanReport {
 /// `creator kb rescan <work_ref>/<chapter>` CLI entrypoint.
 ///
 /// Resolves the active creator, workspace pool, and workspace dir from
-/// `CliConfig`, then delegates to [`kb_rescan_hermetic`].
+/// `CliConfig`, then delegates to [`kb_rescan_hermetic`]. The seam's admission
+/// pre-flight runs before the pool open, so a selection that names no
+/// materialized workspace is refused instead of having one created.
 ///
 /// # Errors
 ///
-/// Returns [`CliError::CreatorNotSelected`] if no active creator is set, and
-/// other [`CliError`] variants for DB init or hermetic-logic failures.
+/// Returns [`CliError::CreatorNotSelected`] if no active creator is set or the
+/// selected workspace was never materialized, and other [`CliError`] variants
+/// for DB init or hermetic-logic failures.
 // CLI entry-point runs on a single-threaded tokio runtime — Send not required.
 #[allow(clippy::future_not_send)]
 pub async fn kb_rescan(config: &CliConfig, target: &str, dry_run: bool, json: bool) -> Result<()> {
@@ -157,6 +160,11 @@ pub async fn kb_rescan(config: &CliConfig, target: &str, dry_run: bool, json: bo
         .as_deref()
         .ok_or(CliError::CreatorNotSelected)?
         .to_string();
+    // The seam's admission pre-flight runs before the pool open: `Schema::init`
+    // migrates — and therefore creates — the selected workspace, so a selection
+    // that names no materialized workspace must be refused instead of having one
+    // created for it.
+    crate::core::require_materialized_workspace(config)?;
     let db_path = crate::config::resolve_state_db_path(config)?;
     let pool = crate::db::Schema::init(&db_path).await?;
     let workspace_dir = crate::config::find_workspace_root();
@@ -282,12 +290,15 @@ pub async fn kb_rescan_hermetic(
 /// `creator kb rescan --work <work_ref>` CLI entrypoint.
 ///
 /// Resolves the active creator, workspace pool, and workspace dir from
-/// `CliConfig`, then delegates to [`kb_rescan_work_hermetic`].
+/// `CliConfig`, then delegates to [`kb_rescan_work_hermetic`]. The seam's
+/// admission pre-flight runs before the pool open, so a selection that names no
+/// materialized workspace is refused instead of having one created.
 ///
 /// # Errors
 ///
-/// Returns [`CliError::CreatorNotSelected`] if no active creator is set, and
-/// other [`CliError`] variants for DB init or hermetic-logic failures.
+/// Returns [`CliError::CreatorNotSelected`] if no active creator is set or the
+/// selected workspace was never materialized, and other [`CliError`] variants
+/// for DB init or hermetic-logic failures.
 // CLI entry-point runs on a single-threaded tokio runtime — Send not required.
 #[allow(clippy::future_not_send)]
 pub async fn kb_rescan_work(
@@ -301,6 +312,11 @@ pub async fn kb_rescan_work(
         .as_deref()
         .ok_or(CliError::CreatorNotSelected)?
         .to_string();
+    // The seam's admission pre-flight runs before the pool open: `Schema::init`
+    // migrates — and therefore creates — the selected workspace, so a selection
+    // that names no materialized workspace must be refused instead of having one
+    // created for it.
+    crate::core::require_materialized_workspace(config)?;
     let db_path = crate::config::resolve_state_db_path(config)?;
     let pool = crate::db::Schema::init(&db_path).await?;
     let workspace_dir = crate::config::find_workspace_root();

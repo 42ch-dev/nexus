@@ -1,7 +1,7 @@
 //! P0-T3 `timeline` read projection contract tests (core service
-//! semantics). Ports the named `timeline_events_api.rs:378` keyset-cursor
-//! behavior plus its malformed-cursor / foreign-world sibling regressions,
-//! the W-1 `limit=0` invariant, branch-default resolution, the
+//! semantics). Ports the named retired daemon timeline-events fixture's
+//! keyset-cursor behavior plus its malformed-cursor / foreign-world sibling
+//! regressions, the W-1 `limit=0` invariant, branch-default resolution, the
 //! modules/extensions row mapping, and the overview projection contract
 //! (counts, `last_event_at`, pagination, cursor validation) migrated from
 //! the retired daemon handler tests.
@@ -189,9 +189,10 @@ async fn overview(
         .expect("timeline_overview")
 }
 
-/// Port of `timeline_events_api.rs:378`: keyset cursor pages on
-/// (`branch_id`, `sequence_no`) come back in deterministic ascending order
-/// with no overlap, and re-requesting a cursor reproduces the same page.
+/// Port of the retired daemon timeline-events fixture's keyset-cursor case:
+/// cursor pages on (`branch_id`, `sequence_no`) come back in deterministic
+/// ascending order with no overlap, and re-requesting a cursor reproduces the
+/// same page.
 #[tokio::test]
 async fn cursor_pagination() {
     let f = fixture().await;

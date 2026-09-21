@@ -1,27 +1,24 @@
 //! `nexus42 capability` — capability authoring surface (V1.172 P2, AR-41).
 //!
 //! Subcommands: `validate` and `install` are **daemon-free** (the author
-//! loop needs no runtime); `list` is a thin HTTP client over
-//! `GET /v1/daemon/orchestration/capabilities`.
+//! loop needs no runtime). The daemon-backed `list` leaf was retired with
+//! the local HTTP engine (v1.193 P1); the core capability catalog it
+//! fronted remains (see `nexus-orchestration`).
 //!
 //! The descriptor contract is the shared `UserCapabilityDescriptor` from
 //! `nexus-orchestration` (AR-34 — nexus42 already depends on the crate, so
 //! the CLI reuses the exact validator instead of hand-rolling a second
 //! copy); the manifest + `wasm_sha256` pairing reuses `nexus-module-manifest`
 //! (AR-39 — the single content-hash path). The CLI deliberately does NOT
-//! know the builtin name list (AR-41): collision is daemon-side admission
-//! only, re-checked within the reload bound (AR-93).
+//! know the builtin name list (AR-41): builtin-collision admission happens
+//! in the runtime that loads the capability, not here.
 //!
-//! Hot reload (V1.176 P1, RN-2, AR-91..96): the daemon polls
-//! `~/.nexus42/capabilities/` every 1 s and re-admits changes on the
-//! SAME scan path as boot — no daemon restart. Within ~2 s of a complete,
-//! admissible trio, `capability list` reflects the change; a live MCP
-//! session receives `listChanged` within ~4 s worst case (1 s daemon
-//! watch incl. the hot-rebuild + 2 s child watch, both legs named —
-//! AR-93). Deleting `<name>/` removes the row within the same bound
-//! (AR-94). A trio that fails admission hot-reloads as skipped-with-reason
-//! (boot vocabulary); the previous good admission for the name keeps
-//! serving (last-good-wins, PL-9).
+//! Install is a one-shot local authoring step: it verifies the trio and
+//! writes it under `~/.nexus42/capabilities/`. The Connect host serves
+//! installed capabilities at runtime under its own admission gates, and any
+//! live-reload UX belongs to the TS/Electron service — the V1.176 P1 daemon
+//! poll-and-hot-reload watch (AR-91..96) retired with the daemon (v1.193
+//! P2-T13), so a fresh install no longer waits on a boot scanner.
 //!
 //! Exit-code contract (AR-41, mirrors the AR-9 table of `compute`):
 //!
@@ -31,10 +28,9 @@
 //! | 1    | install I/O/home failures (generic CLI failure) |
 //! | 2    | descriptor/manifest validation failure (field list; `--json` machine-readable) |
 //! | 3    | `wasm_sha256` pairing mismatch |
-//! | 4    | daemon unreachable (`list`) |
 //!
 //! The group carries no `connect-host` feature dependency — the default
-//! daemon graph stays libp2p-free.
+//! CLI graph stays libp2p-free.
 
 use clap::Subcommand;
 use nexus_module_manifest::ModuleManifest;
@@ -42,10 +38,8 @@ use nexus_orchestration::capability::user_capability::{
     CapabilityDescriptorError, UserCapabilityDescriptor,
 };
 use serde_json::Value;
-use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
-use crate::api::DaemonClient;
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
 
@@ -57,8 +51,6 @@ mod exit {
     pub const VALIDATION: i32 = 2;
     /// `wasm_sha256` pairing mismatch.
     pub const PAIRING: i32 = 3;
-    /// Daemon unreachable (`list`).
-    pub const DAEMON: i32 = 4;
 }
 
 /// Capability subcommands (AR-41 table).
@@ -72,9 +64,9 @@ pub enum CapabilityCommand {
     ///
     /// Exit codes (AR-41): 0 valid, 2 descriptor/manifest validation
     /// failure (field list, `--json` machine-readable), 3 `wasm_sha256`
-    /// pairing mismatch. Collision with a builtin is daemon-side admission
-    /// — re-checked within the reload bound (~2 s, AR-93); the CLI does not
-    /// know the builtin name list.
+    /// pairing mismatch. Collision with a builtin is admission-time in the
+    /// runtime that loads the capability; the CLI does not know the builtin
+    /// name list (AR-41).
     Validate {
         /// Path to the capability descriptor (`capability.json`).
         #[arg(long)]
@@ -87,21 +79,14 @@ pub enum CapabilityCommand {
         #[arg(long)]
         json: bool,
     },
-    /// List registered capabilities (daemon-backed).
-    ///
-    /// Thin client over `GET /v1/daemon/orchestration/capabilities` (AR-41).
-    /// Every row shows its `origin` (`builtin` or `user`) — no silent
-    /// omission (AR-40). Exit 4 = daemon unreachable.
-    List,
     /// Verify a descriptor + module trio and install it into
     /// `~/.nexus42/capabilities/<name>/` (AR-35 layout:
     /// `capability.json` + `manifest.json` + `<module-id>.wasm`).
     ///
     /// Daemon-free. Re-verifies descriptor + manifest + wasm pairing
-    /// (AR-34/39) before copying. Collision with a builtin is daemon-side
-    /// admission — re-checked within the reload bound (~2 s, AR-93); the
-    /// CLI does not know the builtin name list (AR-41). No `run`, no
-    /// `scaffold` (PL-7).
+    /// (AR-34/39) before copying. Collision with a builtin is admission-time
+    /// in the runtime that loads the capability; the CLI does not know the
+    /// builtin name list (AR-41). No `run`, no `scaffold` (PL-7).
     ///
     /// Exit codes (AR-41): 2 = validation, 3 = pairing, 1 = I/O/home.
     Install {
@@ -125,15 +110,14 @@ pub enum CapabilityCommand {
 /// # Errors
 ///
 /// Returns [`CliError::ComputeExit`] with the AR-41 exit code on failure
-/// (the shared AR-9 exit-code plumbing maps 1/2/3/4 in `main.rs`).
-pub async fn run(cmd: CapabilityCommand, config: &CliConfig, output_format: &str) -> Result<()> {
+/// (the shared AR-9 exit-code plumbing maps 1/2/3 in `main.rs`).
+pub fn run(cmd: CapabilityCommand, _config: &CliConfig, _output_format: &str) -> Result<()> {
     match cmd {
         CapabilityCommand::Validate {
             descriptor,
             module,
             json,
         } => cmd_validate(&descriptor, module.as_deref(), json),
-        CapabilityCommand::List => cmd_list(config, output_format).await,
         CapabilityCommand::Install {
             descriptor,
             wasm,
@@ -181,9 +165,9 @@ fn cmd_validate(
             descriptor_path.display()
         );
         println!(
-            "  Collision with a builtin is daemon-side admission only (the CLI does not \
-             know the builtin list, AR-41); it is re-checked within ~2 s of the daemon's \
-             hot reload — no restart needed."
+            "  Builtin-collision admission happens in the runtime that loads the \
+             capability (the CLI does not know the builtin list, AR-41); the Connect \
+             host applies its own gates when it serves installed capabilities."
         );
     }
     Ok(())
@@ -197,8 +181,9 @@ fn cmd_validate(
 /// Install-path semantics (S-2, QC2): an existing `<name>/` dir is
 /// **overwritten** — re-running install re-verifies the new trio first
 /// (fail-closed) and then replaces the three files; install never skips an
-/// existing dir. A hand-placed duplicate `<name>/` dir is resolved by the
-/// daemon scan at boot — first-in-scan-order wins (AR-36).
+/// existing dir. A hand-placed duplicate `<name>/` dir is resolved
+/// first-in-scan-order by whichever runtime loads the capabilities dir
+/// (AR-36).
 ///
 /// Atomic-trio guarantee (S-2, QC3): verification runs before any write,
 /// and the trio is copied into a sibling staging dir first; the final move
@@ -211,7 +196,7 @@ fn cmd_validate(
 /// Exit vocabulary (AR-41): 2 = descriptor/manifest validation failure
 /// (incl. the F1 `module_id` identity mismatch), 3 = `wasm_sha256` pairing
 /// mismatch, 1 = install I/O/home failure (generic CLI failure — the
-/// codebase reserves 2/3/4 for validation, pairing, and daemon failures).
+/// codebase reserves 2/3 for validation and pairing failures).
 fn cmd_install(
     descriptor_path: &Path,
     wasm_path: &Path,
@@ -302,60 +287,12 @@ fn cmd_install(
         );
     } else {
         println!(
-            "installed capability `{}` → {} (daemon hot-reloads it within ~2 s — no restart; a failed admission keeps the previous good version serving)",
+            "installed capability `{}` → {} (one-shot local install; the Connect host serves it at runtime under its own admission gates)",
             descriptor.name,
             dir.display()
         );
     }
     Ok(())
-}
-
-// ─── capability list ──────────────────────────────────────────────────────
-
-/// Thin HTTP client over `GET /v1/daemon/orchestration/capabilities`.
-///
-/// Exit 4 = daemon unreachable (AR-41). Every row carries its `origin` —
-/// a `user` capability MUST show it, builtins show `builtin` (no silent
-/// omission, AR-40).
-async fn cmd_list(config: &CliConfig, output_format: &str) -> Result<()> {
-    let client = DaemonClient::from_config(config)?;
-    let resp: crate::api::models::CapabilityListResponse = client
-        .get("/v1/daemon/orchestration/capabilities")
-        .await
-        .map_err(|e| {
-            let hint = if matches!(e, CliError::Network(_)) {
-                "\n  Hint: `capability list` is daemon-backed — start the daemon with \
-                 `nexus42 daemon start`"
-            } else {
-                ""
-            };
-            capability_exit(exit::DAEMON, format!("capability list failed: {e}{hint}"))
-        })?;
-
-    if output_format == "json" {
-        println!("{}", render_list_json(&resp.items));
-    } else {
-        print!("{}", render_list_text(&resp.items));
-    }
-    Ok(())
-}
-
-/// Text rendering (pure so tests pin the origin column without stdout).
-fn render_list_text(items: &[crate::api::models::CapabilityRow]) -> String {
-    if items.is_empty() {
-        return "No capabilities registered.\n".to_string();
-    }
-    let mut out = String::from("Capabilities:\n");
-    for row in items {
-        let _ = writeln!(out, "  {} [{}]", row.name, row.origin);
-    }
-    let _ = writeln!(out, "\n{} capability(s)", items.len());
-    out
-}
-
-/// JSON rendering (one document on stdout — AR-9 wire discipline).
-fn render_list_json(items: &[crate::api::models::CapabilityRow]) -> String {
-    serde_json::to_string_pretty(items).expect("json serialization cannot fail")
 }
 
 // ─── shared helpers ───────────────────────────────────────────────────────
@@ -500,8 +437,8 @@ fn read_descriptor(descriptor_path: &Path, json_output: bool) -> Result<UserCapa
 /// identity cross-check (F1) — the manifest's `module_id` equals the
 /// descriptor's `wasm.moduleId`. The descriptor `wasm.moduleId` names the
 /// stored `<module-id>.wasm` (AR-35); a manifest declaring a different id
-/// would install a silently dead trio (skipped at daemon boot, missing
-/// `<manifest-module-id>.wasm`).
+/// would install a silently dead trio (unloadable when a runtime serves it,
+/// missing `<manifest-module-id>.wasm`).
 ///
 /// Exit 2 on descriptor/manifest validation failures (including the F1
 /// identity mismatch); exit 3 on pairing failures (absent hash,
@@ -557,7 +494,7 @@ fn verify_pairing(
     // descriptor's `wasm.moduleId` and the manifest's `module_id` are the
     // SAME contract — the `<module-id>.wasm` store name (AR-35). A trio
     // whose manifest declares a different id (hashes otherwise consistent)
-    // would install with exit 0 and be skipped silently at daemon boot
+    // would install with exit 0 and fail to load when a runtime serves it
     // (missing `<manifestModuleId>.wasm`). Fail closed at exit 2, before
     // any copy, mirroring the `compute install` gate (I2,
     // compute/mod.rs L518-525). Field is the descriptor's `wasm.moduleId`;
@@ -642,8 +579,8 @@ fn verify_pairing(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
     use sha2::{Digest, Sha256};
+    use std::fmt::Write as _;
 
     fn sha256_hex(bytes: &[u8]) -> String {
         let digest = Sha256::digest(bytes);
@@ -722,10 +659,10 @@ mod tests {
         descriptor
     }
 
-    // ── group surface (AR-41: hidden, validate|list|install only) ─────────
+    // ── group surface (AR-41: hidden, validate|install only) ──────────────
 
     #[test]
-    fn capability_group_is_hidden_without_run_or_scaffold() {
+    fn capability_group_is_hidden_without_list_run_or_scaffold() {
         let command = crate::cli::build_command();
         let cap = command
             .find_subcommand("capability")
@@ -735,9 +672,13 @@ mod tests {
             "capability must be hidden (V1.35 lock posture, AR-41)"
         );
         let names: Vec<&str> = cap.get_subcommands().map(clap::Command::get_name).collect();
-        for expected in ["validate", "list", "install"] {
+        for expected in ["validate", "install"] {
             assert!(names.contains(&expected), "capability must have {expected}");
         }
+        assert!(
+            !names.contains(&"list"),
+            "no list subcommand — the daemon-backed leaf is retired (v1.193 P1)"
+        );
         assert!(!names.contains(&"run"), "no run subcommand (PL-7)");
         assert!(
             !names.contains(&"scaffold"),
@@ -1214,130 +1155,5 @@ mod tests {
             matches!(err, CliError::ComputeExit { code: 1, .. }),
             "install I/O failure must exit 1, got {err}"
         );
-    }
-
-    // ── list ───────────────────────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn list_daemon_unreachable_exits_four() {
-        let config = CliConfig {
-            daemon_url: "http://127.0.0.1:1".to_string(),
-            ..Default::default()
-        };
-        let err = cmd_list(&config, "text")
-            .await
-            .expect_err("unreachable daemon must fail");
-        assert!(
-            matches!(err, CliError::ComputeExit { code: 4, .. }),
-            "daemon unreachable must exit 4, got {err}"
-        );
-    }
-
-    #[tokio::test]
-    async fn list_renders_user_origin_from_wire() {
-        use wiremock::matchers::{method, path};
-        use wiremock::{Mock, MockServer, ResponseTemplate};
-
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/v1/daemon/orchestration/capabilities"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "items": [
-                    {
-                        "name": "demo.pull",
-                        "inputSchema": "{\"type\":\"object\"}",
-                        "outputSchema": "{\"type\":\"object\"}",
-                        "origin": "user"
-                    },
-                    {
-                        "name": "narrative.compute",
-                        "inputSchema": "{\"type\":\"object\"}",
-                        "outputSchema": "{\"type\":\"object\"}",
-                        "origin": "builtin"
-                    }
-                ],
-                "pagination": { "limit": 100, "has_more": false }
-            })))
-            .expect(1)
-            .mount(&server)
-            .await;
-
-        let config = CliConfig {
-            daemon_url: server.uri(),
-            ..Default::default()
-        };
-        // Render the text path via the parsed model (pure row rendering is
-        // covered by the shape assertions below).
-        let client = DaemonClient::from_config(&config).expect("valid mock configuration");
-        let resp: crate::api::models::CapabilityListResponse = client
-            .get("/v1/daemon/orchestration/capabilities")
-            .await
-            .expect("wire mock returns the list");
-        assert_eq!(resp.items.len(), 2);
-        let user = resp
-            .items
-            .iter()
-            .find(|r| r.name == "demo.pull")
-            .expect("user row");
-        assert_eq!(user.origin, "user", "user capability carries origin=user");
-        let builtin = resp
-            .items
-            .iter()
-            .find(|r| r.name == "narrative.compute")
-            .expect("builtin row");
-        assert_eq!(builtin.origin, "builtin", "builtin carries origin=builtin");
-        assert_eq!(
-            builtin.input_schema, "{\"type\":\"object\"}",
-            "camelCase inputSchema decoded"
-        );
-    }
-
-    #[test]
-    fn capability_row_origin_defaults_to_builtin() {
-        // Pre-AR-40 daemons omit `origin`; the model must tolerate that
-        // (schema default "builtin", AR-40 back-compat).
-        let json = json!({
-            "name": "sync.pull",
-            "inputSchema": "{}",
-            "outputSchema": "{}",
-        });
-        let row: crate::api::models::CapabilityRow =
-            serde_json::from_value(json).expect("parses without origin");
-        assert_eq!(row.origin, "builtin");
-    }
-
-    #[test]
-    fn render_text_shows_origin_for_user_and_builtin() {
-        // AR-40/PL-8: a user capability MUST show its origin; builtins show
-        // `builtin` — no silent omission.
-        let items = vec![
-            crate::api::models::CapabilityRow {
-                name: "demo.pull".to_string(),
-                input_schema: "{}".to_string(),
-                output_schema: "{}".to_string(),
-                origin: "user".to_string(),
-            },
-            crate::api::models::CapabilityRow {
-                name: "sync.pull".to_string(),
-                input_schema: "{}".to_string(),
-                output_schema: "{}".to_string(),
-                origin: "builtin".to_string(),
-            },
-        ];
-        let text = render_list_text(&items);
-        assert!(
-            text.contains("demo.pull [user]"),
-            "user origin shown: {text}"
-        );
-        assert!(
-            text.contains("sync.pull [builtin]"),
-            "builtin origin shown: {text}"
-        );
-        assert!(text.contains("2 capability(s)"));
-    }
-
-    #[test]
-    fn render_text_empty_list() {
-        assert_eq!(render_list_text(&[]), "No capabilities registered.\n");
     }
 }

@@ -1,22 +1,44 @@
 //! `nexus-runtime` — headless Connect runtime (V1.153 P2, DF-73).
 //!
-//! Standalone binary serving ONLY the spoke-connect surface (the N-C2
-//! read-half invoke surface: `upsert` / `promote` / `relate` / `check` /
-//! `assemble`, world-scoped) for the partner/integrator channel. Boots:
-//! PATH enrichment, the shared `~/.nexus42` home layout, config load,
-//! active-workspace `SQLite` open (`DbPool`, WAL), ONE per-process
-//! `NexusAdapter`, and the Connect host with the N-C2 read-half invoke
-//! handler — then blocks on SIGINT. Liveness = **stdout readiness only**
-//! (no HTTP health endpoint).
+//! Standalone binary serving ONLY the Connect Host invoke surface — the
+//! same served set as `nexus42 connect start` (world-scoped `upsert` /
+//! `promote` / `relate` / `check` / `assemble`, World/module/Actor-gated
+//! `compute` over the host-local `~/.nexus42/modules/` store and the
+//! process-wide compiled-module cache, and the host-level
+//! `tools.nexus.list_observed_peers` / `tools.nexus.list_modules` reads)
+//! for the partner/integrator channel. Boots: the shared `~/.nexus42` home
+//! layout, config load, active-workspace `SQLite` open (`DbPool`, WAL), ONE
+//! per-process `NexusAdapter`, and the Connect host with the full invoke
+//! dispatch handler — then blocks on SIGINT. Liveness = **stdout readiness
+//! only** (no HTTP health endpoint).
 //!
-//! `nexus_daemon_runtime::boot::run_daemon` is **never called**: the daemon
-//! HTTP data router, embedded `apps/web` SPA, Setup/Canvas/Control Room
-//! routes, ACP/agent-host subsystem, and schedule/worker supervision never
-//! boot in this process (P2 spec § Subsystem profile). The embedded SPA
-//! bytes are additionally excluded at COMPILE time: the distributed
-//! artifact is built with
+//! No PATH enrichment here (v1.193 P2-T2): this cohort boots no
+//! ACP/agent-host subsystem and never resolves external agent binaries, so
+//! the login-equivalent PATH helper stays with the creator-facing `nexus42`
+//! CLI main, which shells out during agent discovery.
+//!
+//! No daemon runtime is linked at all (v1.193 P2-T13 deleted the
+//! `nexus-daemon-runtime` crate): the daemon HTTP data router, the
+//! embedded `apps/web` SPA, Setup/Canvas/Control Room routes, the
+//! ACP/agent-host subsystem and schedule/worker supervision do not exist
+//! in this crate's graph. The cohort is built with
 //! `cargo build --release --bin nexus-runtime --no-default-features
-//! --features connect-host` (the `web-embed` feature is OFF).
+//! --features connect-host` — no `legacy-cli`/`web-embed` feature exists
+//! any more.
+//!
+//! Final-graph module requirements (P2-T13 cohort collapse): `connect-host`
+//! MUST keep the spoke-adapter **`compute`** feature
+//! (`nexus-spoke-adapter/compute` → `nexus-wasm-host`, which compiles the
+//! embedded modules and pulls `nexus-module-manifest`), the adapter's own
+//! `nexus-knowledge` / `nexus-local-db` / `nexus-home-layout` edges, and
+//! the Connect transport (`spoke-connect` / `spoke-schemas` / `libp2p`).
+//! The peer `compute` op, the host-local `~/.nexus42/modules/` module store
+//! and the process-wide compiled-module cache are retained production
+//! behavior: dropping compute (or its feature) to obtain a smaller graph is
+//! prohibited. That graph requires the `wasm32-unknown-unknown` target —
+//! `nexus-wasm-host`'s build script compiles the embedded modules from
+//! source, and `apps/nexus42/build.rs` probes the target for the
+//! embedded-module compute interop tests.
 //!
 //! Home resolution: `--home` > `$NEXUS42_HOME` > the user home. The home
 //! value is the HOME DIR itself — the PARENT of the `.nexus42` layout dir
@@ -40,12 +62,14 @@ const DEFAULT_LISTEN: &str = "/ip4/127.0.0.1/tcp/0";
 #[command(
     name = "nexus-runtime",
     version,
-    about = "Nexus headless Connect runtime (N-C2 read-half invoke surface)",
-    long_about = "Headless Connect runtime: serves the N-C2 read-half \
-                  invoke surface (upsert/promote/relate/\
-                  check/assemble, world-scoped) over spoke-connect against \
-                  the shared ~/.nexus42 home. No daemon HTTP router, no \
-                  embedded Web UI, no Setup/Canvas/Control Room."
+    about = "Nexus headless Connect runtime (Connect Host invoke surface)",
+    long_about = "Headless Connect runtime: serves the Connect Host invoke \
+                  surface (upsert/promote/relate/\
+                  check/assemble/compute, plus the host-level \
+                  tools.nexus.list_observed_peers and \
+                  tools.nexus.list_modules reads) over spoke-connect \
+                  against the shared ~/.nexus42 home. No daemon HTTP \
+                  router, no embedded Web UI, no Setup/Canvas/Control Room."
 )]
 struct RuntimeCli {
     /// Listen multiaddr (repeatable; default `/ip4/127.0.0.1/tcp/0`).
@@ -67,10 +91,6 @@ struct RuntimeCli {
 
 fn main() {
     let cli = RuntimeCli::parse();
-
-    // PATH enrichment before Tokio starts (GUI-launched sidecars inherit a
-    // minimal PATH; same Class-B rule as the nexus42 CLI main).
-    nexus_daemon_runtime::path_enrichment::apply_process_path_enrichment();
 
     let home = resolve_home(cli.home.as_deref());
 
@@ -105,8 +125,8 @@ fn resolve_home(cli_home: Option<&Path>) -> PathBuf {
             // BEFORE any downstream read — the same mechanism
             // `testutil::isolated_home` uses in-process. Safe here because
             // `main` runs single-threaded before the Tokio runtime starts
-            // (same pre-runtime env discipline as
-            // `apply_process_path_enrichment`).
+            // (the same pre-runtime env discipline the `nexus42` CLI main
+            // applies for its PATH enrichment).
             let home = if home.is_absolute() {
                 home
             } else {
@@ -123,9 +143,10 @@ fn resolve_home(cli_home: Option<&Path>) -> PathBuf {
     )
 }
 
-/// The headless boot: shared home layout + the exact `connect start` N-C2
-/// read-half assembly ([`connect::build_host_config`]) + node start +
-/// stdout readiness. `run_daemon` is never called.
+/// The headless boot: shared home layout + the exact `connect start` host
+/// assembly ([`connect::build_host_config`] — the full invoke dispatch
+/// handler, compute included) + node start + stdout readiness. `run_daemon`
+/// is never called.
 ///
 /// # Errors
 /// [`CliError`] on layout/identity/allowlist/workspace-DB/node failures.
@@ -134,10 +155,11 @@ async fn boot(home: &Path, allow_peer: &[String], listen: &[String]) -> Result<(
     let nexus_home = nexus_home_layout::nexus_root_from_home(home);
     nexus_home_layout::ensure_system_layout(&nexus_home).map_err(nexus42::errors::CliError::Io)?;
 
-    // The full N-C2 host boot shared with `nexus42 connect start`:
+    // The full host boot shared with `nexus42 connect start`:
     // persisted identity + device-id host_id + allowlist (fail-closed) +
     // honest manifest + active-workspace WAL pool + per-process
-    // NexusAdapter + the N-C2 read-half invoke dispatch handler.
+    // NexusAdapter + the invoke dispatch handler (writes, reads, compute,
+    // host-level tool reads).
     let (config, host_id, allowlist_len, _adapter) =
         connect::build_host_config(home, allow_peer, listen, None).await?;
 
@@ -159,7 +181,8 @@ async fn boot(home: &Path, allow_peer: &[String], listen: &[String]) -> Result<(
         "  allowlisted peers: {allowlist_len} (fail-closed; add via allowlist.json or --allow-peer)"
     );
     println!(
-        "  invokes: upsert/promote/relate/check/assemble/compute served (world+module scoped); \
+        "  invokes: upsert/promote/relate/check/assemble/compute served (world+module scoped) \
+         plus tools.nexus.list_observed_peers / tools.nexus.list_modules (host-level reads); \
          project/unknown refused (op_unsupported)"
     );
     println!("  press Ctrl-C to stop");

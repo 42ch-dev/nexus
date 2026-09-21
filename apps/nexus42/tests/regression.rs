@@ -48,9 +48,11 @@ fn r1_anonymous_identity_e2e() {
         .success()
         .stdout(predicate::str::contains("local_only"));
 
-    // Verify sync push is blocked in local_only mode
+    // Verify sync push is blocked in local_only mode (v1.193 P2-T12:
+    // `platform sync` is the parser entrance; the top-level alias is gone)
     Command::cargo_bin("nexus42")
         .unwrap()
+        .arg("platform")
         .arg("sync")
         .arg("push")
         .env("HOME", home)
@@ -447,9 +449,11 @@ fn r5_platform_guard_blocks_sync_push() {
         .assert()
         .success();
 
-    // Verify sync push blocked
+    // Verify sync push blocked (v1.193 P2-T12: `platform sync` is the parser
+    // entrance; the hidden top-level `sync` alias is gone)
     Command::cargo_bin("nexus42")
         .unwrap()
+        .arg("platform")
         .arg("sync")
         .arg("push")
         .env("HOME", home)
@@ -458,9 +462,12 @@ fn r5_platform_guard_blocks_sync_push() {
         .stderr(predicate::str::contains("not available in local_only mode"));
 }
 
-/// Regression R5: Platform explore help works in `local_only` mode
+/// Regression R5 (v1.193 P2-T12): the deferred `platform explore` leaf was
+/// removed in P1-T5, so no `local_only` guard question survives for it — the
+/// parser rejects before any runtime-mode branch, and every invocation is
+/// clap's unrecognized-subcommand error rather than a help page.
 #[test]
-fn r5_platform_guard_explore_help() {
+fn r5_platform_guard_explore_is_unknown() {
     let tmp = TempDir::new().unwrap();
     let home = tmp.path();
 
@@ -475,15 +482,19 @@ fn r5_platform_guard_explore_help() {
         .assert()
         .success();
 
-    // Explore help should still work
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("platform")
-        .arg("explore")
-        .arg("--help")
-        .env("HOME", home)
-        .assert()
-        .success();
+    for args in [
+        ["platform", "explore", "--help"],
+        ["platform", "explore", "browse"],
+    ] {
+        Command::cargo_bin("nexus42")
+            .unwrap()
+            .env("HOME", home)
+            .args(args)
+            .assert()
+            .code(2)
+            .stdout(predicate::str::is_empty())
+            .stderr(predicate::str::contains("unrecognized subcommand"));
+    }
 }
 
 /// Regression R5: local sync status works in `local_only` mode
@@ -507,6 +518,7 @@ fn r5_platform_guard_sync_status_works() {
     // With no active creator configured, it should still respond gracefully.
     Command::cargo_bin("nexus42")
         .unwrap()
+        .arg("platform")
         .arg("sync")
         .arg("status")
         .env("HOME", home)

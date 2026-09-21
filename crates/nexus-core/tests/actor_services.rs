@@ -10,10 +10,14 @@ use nexus_contracts::generated::core::{
     CoreCharacterTransitionRequest, CoreCharacterTransitionRequestTargetStatus,
 };
 use nexus_contracts::generated::daemon_api::actor_knowledge::add_knowledge_entry_request::AddKnowledgeEntryRequest;
+use nexus_contracts::generated::daemon_api::characters::create_character_request::CreateCharacterRequest;
+use nexus_contracts::generated::daemon_api::characters::tom::list_character_tom_query::ListCharacterTomQuery;
+use nexus_contracts::generated::daemon_api::characters::tom::list_character_tom_response::ListCharacterTomResponse;
+use nexus_contracts::generated::daemon_api::characters::tom::record_character_tom_request::RecordCharacterTomRequest;
 use nexus_contracts::BlockType;
 use nexus_core::{
-    classify_pair, ActorFenceKind, ActorKnowledgeViewQuery, ActorViewpoint, AdmittedActor,
-    CoreAccess, CoreActorAdmission, CoreError, CoreOpenOptions, CoreService,
+    classify_pair, ActorFenceKind, ActorKnowledgePage, ActorKnowledgeViewQuery, ActorViewpoint,
+    AdmittedActor, CoreAccess, CoreActorAdmission, CoreError, CoreOpenOptions, CoreService,
 };
 use nexus_knowledge::world_kb::knowledge_entry::{
     KnowledgeAudience, KnowledgeEntryRecord, KnowledgeOwnerRef, DISCLOSURE_OWNER_PRIVATE,
@@ -21,7 +25,7 @@ use nexus_knowledge::world_kb::knowledge_entry::{
 use nexus_knowledge::world_kb::store::{KbStore, KnowledgeReadPolicy, KnowledgeReadScope};
 use nexus_local_db::kb_store::SqliteKbStore;
 use nexus_local_db::writer_protocol::{init_engine_pool, GuardedPoolOptions};
-use nexus_local_db::{ensure_creator_row, CreateCharacterParams};
+use nexus_local_db::{ensure_creator_row, CharacterPatch, CreateCharacterParams, FieldPatch};
 use sqlx::SqlitePool;
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -2709,4 +2713,2604 @@ async fn v1191_audience_cas_governed_create_takes_the_exclusive_fence() {
     .expect("a shared create keeps the shared fence");
     drop(activity);
     pool.close().await;
+}
+
+// ── P2-T6 — Actor admission and operation observation ─────────────────────
+//
+// Migrated from the retired daemon fixtures `characters_api.rs`,
+// `actor_knowledge_api.rs` and `character_tom_api.rs`. HTTP envelopes, router
+// and boot wiring, API-key middleware tiers and daemon-identity plumbing stay
+// retired with the host; only retained core domain behavior is asserted here.
+// The matching assertion-level receipt lives in the task report.
+
+fn create_character_request(
+    name: &str,
+    world_id: &str,
+    sheet: Option<&str>,
+) -> CreateCharacterRequest {
+    let mut value = serde_json::json!({ "display_name": name, "world_id": world_id });
+    if let Some(sheet) = sheet {
+        value["world_sheet_entry_id"] = serde_json::json!(sheet);
+    }
+    serde_json::from_value(value).expect("create request is wire-valid")
+}
+
+const fn character_patch<'a>(
+    display_name: Option<&'a str>,
+    image_uri: FieldPatch<&'a str>,
+    persona_json: FieldPatch<&'a str>,
+) -> CharacterPatch<'a> {
+    CharacterPatch {
+        display_name,
+        image_uri,
+        persona_json,
+    }
+}
+
+fn assert_actor_conflict(err: &CoreError) {
+    assert!(
+        matches!(err, CoreError::ActorConflict { .. }),
+        "expected an ActorConflict, got {err:?}"
+    );
+}
+
+async fn character_epoch(env: &Env, character_id: &str) -> i64 {
+    let pool = plain_pool(env).await;
+    let epoch: i64 =
+        sqlx::query_scalar("SELECT lifecycle_epoch FROM characters WHERE character_id = ?")
+            .bind(character_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    pool.close().await;
+    epoch
+}
+
+async fn character_count(env: &Env) -> i64 {
+    let pool = plain_pool(env).await;
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM characters")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+    count
+}
+
+async fn binding_count(env: &Env, character_id: &str) -> i64 {
+    let pool = plain_pool(env).await;
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM actor_world_bindings WHERE character_id = ? AND status = 'active'",
+    )
+    .bind(character_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+    count
+}
+
+async fn set_world_status(env: &Env, world_id: &str, status: &str) {
+    let pool = plain_pool(env).await;
+    sqlx::query("UPDATE narrative_worlds SET status = ? WHERE world_id = ?")
+        .bind(status)
+        .bind(world_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+}
+
+async fn set_character_status(env: &Env, character_id: &str, status: &str) {
+    let pool = plain_pool(env).await;
+    sqlx::query("UPDATE characters SET status = ? WHERE character_id = ?")
+        .bind(status)
+        .bind(character_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+}
+
+/// One World-owned `character` `KeyBlock`: the only shape eligible as a
+/// `WorldSheet` link (live, same World, shared).
+async fn seed_sheet(env: &Env, name: &str, world_id: &str, block_type: BlockType) -> String {
+    let pool = plain_pool(env).await;
+    let store = SqliteKbStore::new(pool.clone());
+    let row = KnowledgeEntryRecord::new(world_id, block_type, name);
+    let entry_id = row.entry_id.clone();
+    store.insert_knowledge_entry(row).await.unwrap();
+    pool.close().await;
+    entry_id
+}
+
+/// Migrated `characters_api::create_character_returns_201_with_character_and_binding`,
+/// `::create_rejects_unowned_world_as_not_found`,
+/// `::create_rejects_invalid_world_sheet_with_stable_409`,
+/// `::create_character_rejects_paused_world_with_404_zero_mutation`,
+/// `::duplicate_display_name_is_stable_409` and
+/// `::show_and_list_are_active_creator_scoped`.
+#[tokio::test]
+async fn retained_character_create_rules_and_owner_scoping() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+
+    let created = core
+        .create_character(&principal, create_character_request("Ava", WORLD, None))
+        .await
+        .expect("create admits on an owned active World");
+    assert!(created.character.character_id.starts_with("chr_"));
+    assert_eq!(
+        String::from(created.character.owner_creator_id.clone()),
+        CREATOR
+    );
+    assert_eq!(String::from(created.character.display_name.clone()), "Ava");
+    assert_eq!(created.character.status.to_string(), "active");
+    assert!(created.binding.binding_id.starts_with("awb_"));
+    assert_eq!(String::from(created.binding.world_id.clone()), WORLD);
+    assert_eq!(created.binding.status.to_string(), "active");
+
+    // A duplicate display name is a stable conflict with zero second row.
+    let before = character_count(&env).await;
+    let dup = core
+        .create_character(&principal, create_character_request("Ava", WORLD_B, None))
+        .await
+        .unwrap_err();
+    assert_conflict(dup, "duplicate_character_display_name");
+    assert_eq!(character_count(&env).await, before);
+
+    // A non-eligible WorldSheet link is refused at create time too.
+    let wrong_sheet = seed_sheet(&env, "sheet_wrong_create", WORLD, BlockType::Item).await;
+    let sheeted = core
+        .create_character(
+            &principal,
+            create_character_request("Sheeted", WORLD, Some(&wrong_sheet)),
+        )
+        .await
+        .unwrap_err();
+    assert_conflict(sheeted, "invalid_world_sheet");
+    assert_eq!(character_count(&env).await, before);
+
+    // A foreign World is indistinguishable from a missing one, with no write.
+    let foreign = core
+        .create_character(
+            &principal,
+            create_character_request("Ghost", FOREIGN_WORLD, None),
+        )
+        .await
+        .unwrap_err();
+    assert_not_found(&foreign);
+
+    // An owned but inactive World is not an active owner either.
+    set_world_status(&env, WORLD, "paused").await;
+    let paused = core
+        .create_character(&principal, create_character_request("Paused", WORLD, None))
+        .await
+        .unwrap_err();
+    assert_not_found(&paused);
+    assert_eq!(character_count(&env).await, before);
+    set_world_status(&env, WORLD, "active").await;
+
+    // Show/list stay scoped to the selected creator: the other creator's
+    // Character is neither listed nor readable, so nothing leaks.
+    let listed = core.list_characters(&principal, 50, 0).await.expect("list");
+    let ids: Vec<String> = listed
+        .items
+        .iter()
+        .map(|item| String::from(item.character_id.clone()))
+        .collect();
+    assert!(ids.contains(&env.character_id));
+    assert!(!ids.contains(&env.foreign_character_id));
+    let shown = core
+        .character(&principal, env.character_id.clone())
+        .await
+        .expect("owned detail");
+    assert_eq!(
+        String::from(shown.character.character_id.clone()),
+        env.character_id
+    );
+    let hidden = core
+        .character(&principal, env.foreign_character_id.clone())
+        .await
+        .unwrap_err();
+    assert_not_found(&hidden);
+}
+
+/// Migrated `characters_api::list_paginates_with_opaque_cursor` and
+/// `::list_paginates_large_fixture_with_sql_bounds`: the retained offset page
+/// walks every owned Character exactly once and terminates.
+#[tokio::test]
+async fn retained_character_list_offset_pagination_bounds() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let mut expected = vec![env.character_id.clone()];
+    for i in 0..25 {
+        let created = core
+            .create_character(
+                &principal,
+                create_character_request(&format!("Page{i:02}"), WORLD, None),
+            )
+            .await
+            .expect("create");
+        expected.push(String::from(created.character.character_id.clone()));
+    }
+    expected.sort();
+
+    let mut seen = Vec::new();
+    let mut offset = 0u32;
+    loop {
+        let page = core
+            .list_characters(&principal, 10, offset)
+            .await
+            .expect("page");
+        assert!(page.items.len() <= 10, "limit is a hard bound");
+        for item in &page.items {
+            seen.push(String::from(item.character_id.clone()));
+        }
+        if !page.pagination.has_more {
+            assert!(
+                page.pagination.next_cursor.is_none(),
+                "a terminal page carries no cursor"
+            );
+            break;
+        }
+        assert!(page.pagination.next_cursor.is_some());
+        offset += 10;
+        assert!(offset < 100, "the walk must terminate");
+    }
+    seen.sort();
+    assert_eq!(seen.len(), expected.len(), "no duplicate page entry");
+    assert_eq!(seen, expected, "no skipped owned Character");
+}
+
+/// Migrated `characters_api::patch_character_cas_updates_revision_and_selected_fields`,
+/// `::patch_stale_revision_is_character_revision_conflict`,
+/// `::patch_omit_vs_clear_members`, `::patch_no_op_leaves_revision_unchanged`
+/// and `::patch_rename_collision_is_duplicate_character_display_name`.
+#[allow(clippy::too_many_lines)] // one patch/CAS journey asserted end to end
+#[tokio::test]
+async fn retained_character_patch_cas_omit_clear_and_rename_collision() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let (_, revision, _) = character_row(&env, &env.character_id).await;
+
+    let patched = core
+        .patch_character(
+            &principal,
+            env.character_id.clone(),
+            revision,
+            character_patch(
+                Some("Ada Renamed"),
+                FieldPatch::Set("https://example.test/ada.png"),
+                FieldPatch::Set("{\"role\":\"scout\"}"),
+            ),
+        )
+        .await
+        .expect("patch admits");
+    assert_eq!(
+        String::from(patched.character.display_name.clone()),
+        "Ada Renamed"
+    );
+    assert_eq!(patched.character.revision, revision + 1);
+    assert_eq!(
+        patched
+            .character
+            .image_uri
+            .clone()
+            .map(String::from)
+            .as_deref(),
+        Some("https://example.test/ada.png")
+    );
+    assert_eq!(patched.character.persona["role"], "scout");
+
+    // A stale revision is a conflict carrying the retained code.
+    let stale = core
+        .patch_character(
+            &principal,
+            env.character_id.clone(),
+            revision,
+            character_patch(Some("Stale"), FieldPatch::Keep, FieldPatch::Keep),
+        )
+        .await
+        .unwrap_err();
+    assert_conflict(stale, "character_revision_conflict");
+
+    // Omission keeps the stored member; an explicit clear removes it.
+    let omitted = core
+        .patch_character(
+            &principal,
+            env.character_id.clone(),
+            revision + 1,
+            character_patch(
+                Some("Ada Renamed The Second"),
+                FieldPatch::Keep,
+                FieldPatch::Keep,
+            ),
+        )
+        .await
+        .expect("omitted members are preserved");
+    assert_eq!(
+        omitted
+            .character
+            .image_uri
+            .clone()
+            .map(String::from)
+            .as_deref(),
+        Some("https://example.test/ada.png")
+    );
+    assert_eq!(omitted.character.persona["role"], "scout");
+    let cleared = core
+        .patch_character(
+            &principal,
+            env.character_id.clone(),
+            revision + 2,
+            character_patch(None, FieldPatch::Clear, FieldPatch::Clear),
+        )
+        .await
+        .expect("clear admits");
+    assert!(cleared.character.image_uri.is_none());
+    assert!(cleared.character.persona.is_empty());
+    assert_eq!(cleared.character.revision, revision + 3);
+
+    // A no-op (same values, same revision) leaves the revision untouched.
+    let no_op = core
+        .patch_character(
+            &principal,
+            env.character_id.clone(),
+            revision + 3,
+            character_patch(
+                Some("Ada Renamed The Second"),
+                FieldPatch::Clear,
+                FieldPatch::Clear,
+            ),
+        )
+        .await
+        .expect("no-op admits");
+    assert_eq!(no_op.character.revision, revision + 3);
+
+    // A rename onto another owned Character's name is refused with zero
+    // mutation of the target row.
+    let second = core
+        .create_character(&principal, create_character_request("Bea", WORLD_B, None))
+        .await
+        .expect("second create");
+    let second_id = String::from(second.character.character_id.clone());
+    let collision = core
+        .patch_character(
+            &principal,
+            second_id.clone(),
+            second.character.revision,
+            character_patch(
+                Some("Ada Renamed The Second"),
+                FieldPatch::Keep,
+                FieldPatch::Keep,
+            ),
+        )
+        .await
+        .unwrap_err();
+    assert_conflict(collision, "duplicate_character_display_name");
+    let (status, name, revision_after) = {
+        let pool = plain_pool(&env).await;
+        let row: (String, String, i64) = sqlx::query_as(
+            "SELECT status, display_name, revision FROM characters WHERE character_id = ?",
+        )
+        .bind(&second_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        pool.close().await;
+        row
+    };
+    assert_eq!(name, "Bea");
+    assert_eq!(status, "active");
+    assert_eq!(revision_after, second.character.revision);
+}
+
+/// Migrated `characters_api::archive_restore_round_trip_and_list_includes_archived`,
+/// `::archive_same_state_cas_no_op_keeps_revision`,
+/// `::restore_requires_active_owned_world_binding` and
+/// `::restore_name_collision_is_duplicate_character_display_name`.
+#[allow(clippy::too_many_lines)] // one archive/restore lifecycle asserted end to end
+#[tokio::test]
+async fn retained_character_archive_restore_lifecycle_and_guards() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let (_, revision, epoch) = character_row(&env, &env.character_id).await;
+
+    let archived = core
+        .transition_character(
+            &principal,
+            transition_request(
+                &env.character_id,
+                revision,
+                CoreCharacterTransitionRequestTargetStatus::Archived,
+            ),
+        )
+        .await
+        .expect("archive commits");
+    assert_eq!(archived.character.status.to_string(), "archived");
+    assert_eq!(archived.character.revision, revision + 1);
+    let (status, archived_revision, archived_epoch) = character_row(&env, &env.character_id).await;
+    assert_eq!(status, "archived");
+    assert_eq!(
+        archived_epoch,
+        epoch + 1,
+        "a material transition moves the epoch"
+    );
+
+    // The listing still carries archived rows (retained management read).
+    let listed = core.list_characters(&principal, 50, 0).await.expect("list");
+    assert!(listed
+        .items
+        .iter()
+        .any(
+            |item| String::from(item.character_id.clone()) == env.character_id
+                && item.status.to_string() == "archived"
+        ));
+
+    // Writing an archived Character is refused, and the same-state archive is
+    // a no-op that moves neither the revision nor the lifecycle epoch.
+    let denied = core
+        .patch_character(
+            &principal,
+            env.character_id.clone(),
+            archived_revision,
+            character_patch(Some("Nope"), FieldPatch::Keep, FieldPatch::Keep),
+        )
+        .await
+        .unwrap_err();
+    assert_conflict(denied, "character_inactive");
+    let again = core
+        .transition_character(
+            &principal,
+            transition_request(
+                &env.character_id,
+                archived_revision,
+                CoreCharacterTransitionRequestTargetStatus::Archived,
+            ),
+        )
+        .await
+        .expect("same-state archive admits");
+    assert_eq!(again.character.revision, archived_revision);
+    assert_eq!(
+        character_epoch(&env, &env.character_id).await,
+        archived_epoch
+    );
+
+    let restored = core
+        .transition_character(
+            &principal,
+            transition_request(
+                &env.character_id,
+                archived_revision,
+                CoreCharacterTransitionRequestTargetStatus::Active,
+            ),
+        )
+        .await
+        .expect("restore commits");
+    assert_eq!(restored.character.status.to_string(), "active");
+    assert_eq!(
+        String::from(restored.character.character_id.clone()),
+        env.character_id
+    );
+
+    // Restore needs a live owned World binding.
+    let (_, revision, _) = character_row(&env, &env.character_id).await;
+    core.transition_character(
+        &principal,
+        transition_request(
+            &env.character_id,
+            revision,
+            CoreCharacterTransitionRequestTargetStatus::Archived,
+        ),
+    )
+    .await
+    .expect("archive again");
+    set_world_status(&env, WORLD, "paused").await;
+    let (_, archived_revision, _) = character_row(&env, &env.character_id).await;
+    let no_binding = core
+        .transition_character(
+            &principal,
+            transition_request(
+                &env.character_id,
+                archived_revision,
+                CoreCharacterTransitionRequestTargetStatus::Active,
+            ),
+        )
+        .await
+        .unwrap_err();
+    assert_conflict(no_binding, "character_restore_requires_active_binding");
+    set_world_status(&env, WORLD, "active").await;
+
+    // Restore colliding with a live display name is refused.
+    let collision = core
+        .create_character(&principal, create_character_request("Ada", WORLD_B, None))
+        .await
+        .expect("colliding name while archived");
+    let _ = collision;
+    let (_, archived_revision, _) = character_row(&env, &env.character_id).await;
+    let collided = core
+        .transition_character(
+            &principal,
+            transition_request(
+                &env.character_id,
+                archived_revision,
+                CoreCharacterTransitionRequestTargetStatus::Active,
+            ),
+        )
+        .await
+        .unwrap_err();
+    assert_conflict(collided, "duplicate_character_display_name");
+}
+
+/// Migrated `characters_api::binding_detail_link_relink_clear_and_cas_errors`,
+/// `::patch_binding_rejects_invalid_world_sheet`,
+/// `::patch_binding_rejects_overlength_world_sheet_bytes_at_api`,
+/// `::binding_detail_retained_read_survives_archive` and
+/// `::add_binding_rejects_paused_world_with_404_zero_mutation`.
+#[allow(clippy::too_many_lines)] // one binding/WorldSheet CAS journey asserted end to end
+#[tokio::test]
+async fn retained_binding_world_sheet_cas_and_retained_read() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let sheet_a = seed_sheet(&env, "sheet_a", WORLD, BlockType::Character).await;
+    let sheet_b = seed_sheet(&env, "sheet_b", WORLD, BlockType::Character).await;
+    let wrong_type = seed_sheet(&env, "sheet_wrong", WORLD, BlockType::Item).await;
+
+    let shown = core
+        .binding(&principal, env.character_id.clone(), env.binding_id.clone())
+        .await
+        .expect("binding detail");
+    assert_eq!(shown.binding.revision, 0);
+
+    let linked = core
+        .patch_binding(
+            &principal,
+            env.character_id.clone(),
+            env.binding_id.clone(),
+            0,
+            FieldPatch::Set(sheet_a.as_str()),
+        )
+        .await
+        .expect("link admits");
+    assert_eq!(linked.binding.revision, 1);
+    assert_eq!(
+        linked
+            .binding
+            .world_sheet_entry_id
+            .clone()
+            .map(String::from)
+            .as_deref(),
+        Some(sheet_a.as_str())
+    );
+
+    // Relink, clear, then a same-state no-op that keeps the revision.
+    let relinked = core
+        .patch_binding(
+            &principal,
+            env.character_id.clone(),
+            env.binding_id.clone(),
+            1,
+            FieldPatch::Set(sheet_b.as_str()),
+        )
+        .await
+        .expect("relink admits");
+    assert_eq!(relinked.binding.revision, 2);
+    let cleared = core
+        .patch_binding(
+            &principal,
+            env.character_id.clone(),
+            env.binding_id.clone(),
+            2,
+            FieldPatch::Clear,
+        )
+        .await
+        .expect("clear admits");
+    assert_eq!(cleared.binding.revision, 3);
+    assert!(cleared.binding.world_sheet_entry_id.is_none());
+    let untouched = core
+        .patch_binding(
+            &principal,
+            env.character_id.clone(),
+            env.binding_id.clone(),
+            3,
+            FieldPatch::Clear,
+        )
+        .await
+        .expect("no-op admits");
+    assert_eq!(untouched.binding.revision, 3);
+
+    // A stale revision conflicts.
+    let stale = core
+        .patch_binding(
+            &principal,
+            env.character_id.clone(),
+            env.binding_id.clone(),
+            2,
+            FieldPatch::Clear,
+        )
+        .await
+        .unwrap_err();
+    assert_conflict(stale, "binding_revision_conflict");
+
+    // Wrong-type sheet: refused as `invalid_world_sheet` with an explanation,
+    // never the bare code as its own message.
+    let wrong = core
+        .patch_binding(
+            &principal,
+            env.character_id.clone(),
+            env.binding_id.clone(),
+            3,
+            FieldPatch::Set(wrong_type.as_str()),
+        )
+        .await
+        .unwrap_err();
+    match &wrong {
+        CoreError::ActorConflict { code, message } => {
+            assert_eq!(code, "invalid_world_sheet");
+            assert_ne!(message, "invalid_world_sheet");
+        }
+        other => panic!("expected invalid_world_sheet, got {other:?}"),
+    }
+
+    // 128 Unicode scalars but 131 bytes: the storage byte bound, not the wire
+    // scalar bound, decides.
+    let overlength = format!("kb_{}{}", "a".repeat(124), "\u{1f3ad}");
+    assert_eq!(overlength.chars().count(), 128);
+    assert!(overlength.len() > 128);
+    let bytes = core
+        .patch_binding(
+            &principal,
+            env.character_id.clone(),
+            env.binding_id.clone(),
+            3,
+            FieldPatch::Set(overlength.as_str()),
+        )
+        .await
+        .unwrap_err();
+    assert_conflict(bytes, "invalid_world_sheet");
+
+    // Link a live sheet again, archive the Character, and prove the retained
+    // read still answers while every write is refused.
+    core.patch_binding(
+        &principal,
+        env.character_id.clone(),
+        env.binding_id.clone(),
+        3,
+        FieldPatch::Set(sheet_a.as_str()),
+    )
+    .await
+    .expect("relink");
+    let (_, revision, _) = character_row(&env, &env.character_id).await;
+    core.transition_character(
+        &principal,
+        transition_request(
+            &env.character_id,
+            revision,
+            CoreCharacterTransitionRequestTargetStatus::Archived,
+        ),
+    )
+    .await
+    .expect("archive");
+    let retained = core
+        .binding(&principal, env.character_id.clone(), env.binding_id.clone())
+        .await
+        .expect("retained read after archive");
+    assert_eq!(
+        retained
+            .binding
+            .world_sheet_entry_id
+            .clone()
+            .map(String::from)
+            .as_deref(),
+        Some(sheet_a.as_str())
+    );
+    let write_denied = core
+        .patch_binding(
+            &principal,
+            env.character_id.clone(),
+            env.binding_id.clone(),
+            4,
+            FieldPatch::Clear,
+        )
+        .await
+        .unwrap_err();
+    assert_conflict(write_denied, "character_inactive");
+
+    set_character_status(&env, &env.character_id, "active").await;
+    set_world_status(&env, WORLD_B, "paused").await;
+    let before = binding_count(&env, &env.character_id).await;
+    let paused = core
+        .add_binding(
+            &principal,
+            env.character_id.clone(),
+            WORLD_B.to_string(),
+            None,
+        )
+        .await
+        .unwrap_err();
+    assert_not_found(&paused);
+    assert_eq!(
+        binding_count(&env, &env.character_id).await,
+        before,
+        "a refused add writes no binding"
+    );
+}
+
+// ── Actor KnowledgeView / detail family ───────────────────────────────────
+
+fn view_query(world_id: &str, binding_id: Option<&str>, limit: u32) -> ActorKnowledgeViewQuery {
+    ActorKnowledgeViewQuery {
+        world_id: world_id.to_string(),
+        binding_id: binding_id.map(str::to_string),
+        limit,
+        cursor: None,
+    }
+}
+
+fn character_actor(character_id: &str) -> AdmittedActor {
+    AdmittedActor::Character {
+        character_id: character_id.to_string(),
+    }
+}
+
+async fn insert_legacy_world_row(pool: &SqlitePool, entry_id: &str, world_id: &str, name: &str) {
+    sqlx::query(
+        "INSERT INTO kb_key_blocks \
+         (key_block_id, owner_kind, world_id, block_type, canonical_name, status) \
+         VALUES (?, 'world', ?, 'item', ?, 'confirmed')",
+    )
+    .bind(entry_id)
+    .bind(world_id)
+    .bind(name)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+async fn insert_world_row_at(
+    pool: &SqlitePool,
+    entry_id: &str,
+    world_id: &str,
+    name: &str,
+    created_at: &str,
+) {
+    sqlx::query(
+        "INSERT INTO kb_key_blocks \
+         (key_block_id, owner_kind, world_id, block_type, canonical_name, status, created_at) \
+         VALUES (?, 'world', ?, 'item', ?, 'confirmed', ?)",
+    )
+    .bind(entry_id)
+    .bind(world_id)
+    .bind(name)
+    .bind(created_at)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+fn page_ids(page: &ActorKnowledgePage) -> Vec<String> {
+    let mut ids: Vec<String> = page.items.iter().map(|row| row.entry_id.clone()).collect();
+    ids.sort();
+    ids
+}
+
+/// Migrated `actor_knowledge_api::invalid_and_unbound_owners_are_404`,
+/// `::character_view_without_binding_id_is_422_not_creator_page` and
+/// `::character_view_and_binding_add_require_owned_target_world`.
+#[tokio::test]
+async fn retained_knowledge_view_admission_and_binding_requirement() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+
+    // A missing/foreign World and a foreign Character are indistinguishable
+    // from missing rows on the view.
+    let missing_world = core
+        .actor_knowledge_view(
+            &principal,
+            &character_actor(&env.character_id),
+            view_query("wld_missing", Some(&env.binding_id), 50),
+        )
+        .await
+        .unwrap_err();
+    assert_not_found(&missing_world);
+    let missing_character = core
+        .actor_knowledge_view(
+            &principal,
+            &character_actor("chr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+            view_query(WORLD, Some(&env.binding_id), 50),
+        )
+        .await
+        .unwrap_err();
+    assert_not_found(&missing_character);
+
+    // A Character actor_ref without its binding never degrades into the
+    // Creator management review.
+    let unbounded = core
+        .actor_knowledge_view(
+            &principal,
+            &character_actor(&env.character_id),
+            view_query(WORLD, None, 50),
+        )
+        .await
+        .unwrap_err();
+    assert_invalid_input(&unbounded);
+
+    // Authoring for a foreign owner is refused and writes nothing.
+    let before = {
+        let pool = plain_pool(&env).await;
+        let rows = knowledge_row_count(&pool).await;
+        pool.close().await;
+        rows
+    };
+    let add_foreign = core
+        .add_actor_knowledge_entry(
+            &principal,
+            create_request(
+                "character",
+                None,
+                Some("chr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+                None,
+                "Nope",
+                None,
+            ),
+            false,
+        )
+        .await
+        .unwrap_err();
+    assert_not_found(&add_foreign);
+
+    // A binding that targets a foreign World is outside the owned scope.
+    let foreign_binding = "awb_cccccccccccccccccccccccccccccccc";
+    {
+        let pool = plain_pool(&env).await;
+        sqlx::query(
+            "INSERT INTO actor_world_bindings \
+             (binding_id, character_id, world_id, status, created_at, updated_at) \
+             VALUES (?, ?, ?, 'active', datetime('now'), datetime('now'))",
+        )
+        .bind(foreign_binding)
+        .bind(&env.character_id)
+        .bind(FOREIGN_WORLD)
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool.close().await;
+    }
+    let foreign_view = core
+        .actor_knowledge_view(
+            &principal,
+            &character_actor(&env.character_id),
+            view_query(FOREIGN_WORLD, Some(foreign_binding), 50),
+        )
+        .await
+        .unwrap_err();
+    assert_not_found(&foreign_view);
+    let foreign_add = core
+        .add_actor_knowledge_entry(
+            &principal,
+            create_request(
+                "actor_world_binding",
+                Some(FOREIGN_WORLD),
+                Some(&env.character_id),
+                Some(foreign_binding),
+                "ShouldNotInsert",
+                None,
+            ),
+            false,
+        )
+        .await
+        .unwrap_err();
+    assert_not_found(&foreign_add);
+    let after = {
+        let pool = plain_pool(&env).await;
+        let rows = knowledge_row_count(&pool).await;
+        pool.close().await;
+        rows
+    };
+    assert_eq!(after, before, "refused admissions author no row");
+}
+
+/// Migrated `actor_knowledge_api::non_last_binding_with_owned_knowledge_is_stable_409`
+/// and `::last_binding_409_wins_even_with_owned_knowledge`.
+#[tokio::test]
+async fn retained_binding_removal_blocked_by_owned_knowledge() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let second = core
+        .add_binding(
+            &principal,
+            env.character_id.clone(),
+            WORLD_B.to_string(),
+            None,
+        )
+        .await
+        .expect("second binding");
+    let second_id = String::from(second.binding.binding_id.clone());
+    core.add_actor_knowledge_entry(
+        &principal,
+        create_request(
+            "actor_world_binding",
+            Some(WORLD),
+            Some(&env.character_id),
+            Some(&env.binding_id),
+            "LocalA",
+            None,
+        ),
+        false,
+    )
+    .await
+    .expect("binding-local entry");
+
+    let before_bindings = binding_count(&env, &env.character_id).await;
+    let before_rows = {
+        let pool = plain_pool(&env).await;
+        let rows: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM kb_key_blocks WHERE actor_world_binding_id = ?",
+        )
+        .bind(&env.binding_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        pool.close().await;
+        rows
+    };
+    let refused = core
+        .remove_binding(&principal, env.character_id.clone(), env.binding_id.clone())
+        .await
+        .unwrap_err();
+    assert_conflict(refused, "binding_has_owned_knowledge");
+    assert_eq!(
+        binding_count(&env, &env.character_id).await,
+        before_bindings,
+        "a refused removal deletes no binding"
+    );
+    let after_rows = {
+        let pool = plain_pool(&env).await;
+        let rows: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM kb_key_blocks WHERE actor_world_binding_id = ?",
+        )
+        .bind(&env.binding_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        pool.close().await;
+        rows
+    };
+    assert_eq!(after_rows, before_rows, "the owned entry survives");
+
+    // The last-binding conflict wins over the owned-knowledge conflict.
+    core.remove_binding(&principal, env.character_id.clone(), second_id)
+        .await
+        .expect("the non-last binding removes");
+    let last = core
+        .remove_binding(&principal, env.character_id.clone(), env.binding_id.clone())
+        .await
+        .unwrap_err();
+    assert_conflict(last, "last_active_actor_world_binding");
+    assert_eq!(binding_count(&env, &env.character_id).await, 1);
+}
+
+/// Migrated `actor_knowledge_api::view_projects_legacy_sqlite_datetime_without_rewriting_bytes`
+/// (the stored-bytes half; the daemon's RFC3339 wire canonicalization was a
+/// handler projection that retires with the host) and
+/// `::view_paginates_same_millisecond_reverse_ids_without_skip_or_duplicate`.
+#[allow(clippy::too_many_lines)] // one knowledge view journey asserted end to end
+#[tokio::test]
+async fn retained_knowledge_view_stored_bytes_and_keyset_tie_break() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+
+    // A pre-cutover World row carries SQLite `datetime('now')` bytes; the wire
+    // projection canonicalizes them and never rewrites the stored value.
+    let pool = plain_pool(&env).await;
+    insert_legacy_world_row(
+        &pool,
+        "kb_legacy0000000000000000000000001",
+        WORLD,
+        "LegacyRow",
+    )
+    .await;
+    let stored: String = sqlx::query_scalar(
+        "SELECT created_at FROM kb_key_blocks WHERE key_block_id = 'kb_legacy0000000000000000000000001'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(
+        stored.contains(' ') && !stored.contains('T'),
+        "legacy bytes stay SQLite datetime: {stored}"
+    );
+
+    // Two rows sharing one millisecond: the keyset must tie-break
+    // deterministically and never skip or duplicate around the tie.
+    insert_world_row_at(
+        &pool,
+        "kb_m",
+        WORLD,
+        "TieLateId",
+        "2026-01-01T10:00:00.123200Z",
+    )
+    .await;
+    insert_world_row_at(
+        &pool,
+        "kb_a",
+        WORLD,
+        "TieEarlyId",
+        "2026-01-01T10:00:00.123200Z",
+    )
+    .await;
+    pool.close().await;
+
+    let full = core
+        .actor_knowledge_view(
+            &principal,
+            &character_actor(&env.character_id),
+            view_query(WORLD, Some(&env.binding_id), 50),
+        )
+        .await
+        .expect("full page");
+    let legacy = full
+        .items
+        .iter()
+        .find(|row| row.entry_id == "kb_legacy0000000000000000000000001")
+        .expect("legacy row is visible");
+    assert_eq!(
+        legacy.created_at, stored,
+        "the read never rewrites the stored timestamp bytes"
+    );
+    let stored_after: String = {
+        let pool = plain_pool(&env).await;
+        let value = sqlx::query_scalar(
+            "SELECT created_at FROM kb_key_blocks WHERE key_block_id = 'kb_legacy0000000000000000000000001'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        pool.close().await;
+        value
+    };
+    assert_eq!(stored_after, stored, "the view never rewrites the row");
+
+    let mut expected = page_ids(&full);
+    expected.retain(|id| id == "kb_a" || id == "kb_m");
+    assert_eq!(expected.len(), 2, "both tied rows are on the full page");
+
+    let mut seen = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let page = core
+            .actor_knowledge_view(
+                &principal,
+                &character_actor(&env.character_id),
+                ActorKnowledgeViewQuery {
+                    world_id: WORLD.to_string(),
+                    binding_id: Some(env.binding_id.clone()),
+                    limit: 1,
+                    cursor,
+                },
+            )
+            .await
+            .expect("single-row page");
+        for row in &page.items {
+            if row.entry_id == "kb_a" || row.entry_id == "kb_m" {
+                seen.push(row.entry_id.clone());
+            }
+        }
+        if !page.has_more {
+            break;
+        }
+        cursor = page.next_cursor.clone();
+        assert!(cursor.is_some(), "a continuing page carries a cursor");
+        assert!(seen.len() <= 4, "the walk must terminate");
+    }
+    seen.sort();
+    seen.dedup();
+    assert_eq!(
+        seen, expected,
+        "paging around the tie skips and duplicates nothing"
+    );
+
+    // A malformed keyset token is refused before any query runs.
+    let bad_cursor = core
+        .actor_knowledge_view(
+            &principal,
+            &character_actor(&env.character_id),
+            ActorKnowledgeViewQuery {
+                world_id: WORLD.to_string(),
+                binding_id: Some(env.binding_id.clone()),
+                limit: 50,
+                cursor: Some("v1:12".to_string()),
+            },
+        )
+        .await
+        .unwrap_err();
+    assert_invalid_input(&bad_cursor);
+}
+
+/// Migrated `actor_knowledge_api::inactive_world_and_character_fail_closed_on_view_and_add`,
+/// `::knowledge_archived_character_detail_read_write_split` and
+/// `::knowledge_detail_wrong_scope_is_404_without_revision_leak`.
+#[allow(clippy::too_many_lines)] // one inactive-knowledge scope journey asserted end to end
+#[tokio::test]
+async fn retained_knowledge_inactive_read_write_split_and_detail_scope() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let created = core
+        .add_actor_knowledge_entry(
+            &principal,
+            create_request(
+                "character",
+                None,
+                Some(&env.character_id),
+                None,
+                "Keystone",
+                None,
+            ),
+            false,
+        )
+        .await
+        .expect("create admits");
+    let entry_id = created.entry_id.clone();
+
+    // Detail reads hide a foreign scope and never leak a revision.
+    let foreign_character = core
+        .actor_knowledge_entry(
+            &principal,
+            "chr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string(),
+            entry_id.clone(),
+        )
+        .await
+        .unwrap_err();
+    assert_not_found(&foreign_character);
+    assert!(
+        !foreign_character.to_string().contains("revision"),
+        "a hidden detail leaks no revision: {foreign_character}"
+    );
+    let foreign_entry = core
+        .actor_knowledge_entry(
+            &principal,
+            env.character_id.clone(),
+            "kb_missingentry".to_string(),
+        )
+        .await
+        .unwrap_err();
+    assert_not_found(&foreign_entry);
+
+    // An archived Character keeps its retained reads and refuses writes.
+    set_character_status(&env, &env.character_id, "archived").await;
+    let retained_view = core
+        .actor_knowledge_view(
+            &principal,
+            &character_actor(&env.character_id),
+            view_query(WORLD, Some(&env.binding_id), 50),
+        )
+        .await
+        .expect("an archived Character view is a retained read");
+    assert!(retained_view
+        .items
+        .iter()
+        .any(|row| row.entry_id == entry_id));
+    let retained_detail = core
+        .actor_knowledge_entry(&principal, env.character_id.clone(), entry_id.clone())
+        .await
+        .expect("an archived Character detail is a retained read");
+    assert_eq!(retained_detail.entry_id, entry_id);
+
+    let inactive_add = core
+        .add_actor_knowledge_entry(
+            &principal,
+            create_request(
+                "character",
+                None,
+                Some(&env.character_id),
+                None,
+                "Nope",
+                None,
+            ),
+            false,
+        )
+        .await
+        .unwrap_err();
+    assert_conflict(inactive_add, "character_inactive");
+    let inactive_revision =
+        i64::try_from(retained_detail.revision.unwrap_or(0)).expect("stored revision fits i64");
+    let inactive_patch = core
+        .patch_actor_knowledge_entry(
+            &principal,
+            env.character_id.clone(),
+            entry_id.clone(),
+            inactive_revision,
+            None,
+            FieldPatch::Set("nope"),
+            None,
+        )
+        .await
+        .unwrap_err();
+    assert_conflict(inactive_patch, "character_inactive");
+    set_character_status(&env, &env.character_id, "active").await;
+
+    // An archived owned World keeps its retained review and refuses the
+    // World-owned write.
+    set_world_status(&env, WORLD, "archived").await;
+    core.actor_knowledge_view(
+        &principal,
+        &AdmittedActor::Creator {
+            creator_id: CREATOR.to_string(),
+        },
+        view_query(WORLD, None, 50),
+    )
+    .await
+    .expect("an archived World Creator review is a retained read");
+    let world_inactive = core
+        .add_actor_knowledge_entry(
+            &principal,
+            create_request("world", Some(WORLD), None, None, "Nope", None),
+            false,
+        )
+        .await
+        .unwrap_err();
+    assert_conflict(world_inactive, "world_inactive");
+    set_world_status(&env, WORLD, "active").await;
+}
+
+/// Migrated `actor_knowledge_api::knowledge_detail_summary_lifecycle_and_preserves_body_keys`,
+/// `::knowledge_patch_omitted_summary_preserves_value`,
+/// `::knowledge_stale_revision_and_in_use_delete_errors`,
+/// `::knowledge_empty_patch_is_invalid_input` and
+/// `::knowledge_delete_malformed_expected_revision_is_invalid_input`.
+#[allow(clippy::too_many_lines)] // one knowledge summary/CAS journey asserted end to end
+#[tokio::test]
+async fn retained_knowledge_detail_summary_lifecycle_and_cas_guards() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let mut create = serde_json::json!({
+        "owner_kind": "character",
+        "character_id": &env.character_id,
+        "block_type": "item",
+        "canonical_name": "Fact",
+        "summary": "initial summary",
+    });
+    let created = core
+        .add_actor_knowledge_entry(
+            &principal,
+            serde_json::from_value(create.clone()).unwrap(),
+            true,
+        )
+        .await
+        .expect("create admits");
+    create["canonical_name"] = serde_json::json!("unused");
+    let entry_id = created.entry_id.clone();
+
+    // An unknown sibling body member survives every summary edit.
+    {
+        let pool = plain_pool(&env).await;
+        sqlx::query("UPDATE kb_key_blocks SET body_json = ? WHERE key_block_id = ?")
+            .bind(r#"{"summary":"initial summary","custom_flag":true}"#)
+            .bind(&entry_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+    }
+
+    let detail = core
+        .actor_knowledge_entry(&principal, env.character_id.clone(), entry_id.clone())
+        .await
+        .expect("detail");
+    assert_eq!(
+        detail
+            .body
+            .as_ref()
+            .and_then(|body| body.summary.as_deref()),
+        Some("initial summary")
+    );
+    let revision = i64::try_from(detail.revision.unwrap_or(0)).expect("stored revision fits i64");
+
+    let patched = core
+        .patch_actor_knowledge_entry(
+            &principal,
+            env.character_id.clone(),
+            entry_id.clone(),
+            revision,
+            None,
+            FieldPatch::Set("edited summary"),
+            None,
+        )
+        .await
+        .expect("summary patch admits");
+    assert_eq!(
+        patched
+            .body
+            .as_ref()
+            .and_then(|body| body.summary.as_deref()),
+        Some("edited summary")
+    );
+    assert_eq!(patched.revision, Some(u64::try_from(revision + 1).unwrap()));
+
+    // A rename-only patch preserves the summary.
+    let renamed = core
+        .patch_actor_knowledge_entry(
+            &principal,
+            env.character_id.clone(),
+            entry_id.clone(),
+            revision + 1,
+            Some("FactRenamed"),
+            FieldPatch::Keep,
+            None,
+        )
+        .await
+        .expect("rename admits");
+    assert_eq!(renamed.canonical_name, "FactRenamed");
+    assert_eq!(
+        renamed
+            .body
+            .as_ref()
+            .and_then(|body| body.summary.as_deref()),
+        Some("edited summary")
+    );
+    assert_eq!(renamed.revision, Some(u64::try_from(revision + 2).unwrap()));
+
+    // A null summary clears it; an empty patch is refused; a stale revision
+    // conflicts.
+    let cleared = core
+        .patch_actor_knowledge_entry(
+            &principal,
+            env.character_id.clone(),
+            entry_id.clone(),
+            revision + 2,
+            None,
+            FieldPatch::Clear,
+            None,
+        )
+        .await
+        .expect("clear admits");
+    assert!(cleared
+        .body
+        .as_ref()
+        .and_then(|body| body.summary.as_ref())
+        .is_none());
+    let stale = core
+        .patch_actor_knowledge_entry(
+            &principal,
+            env.character_id.clone(),
+            entry_id.clone(),
+            revision,
+            None,
+            FieldPatch::Set("late"),
+            None,
+        )
+        .await
+        .unwrap_err();
+    assert_conflict(stale, "knowledge_revision_conflict");
+
+    let body_json: String = {
+        let pool = plain_pool(&env).await;
+        let value =
+            sqlx::query_scalar("SELECT body_json FROM kb_key_blocks WHERE key_block_id = ?")
+                .bind(&entry_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        pool.close().await;
+        value
+    };
+    assert!(
+        body_json.contains("custom_flag"),
+        "an unknown body member is never dropped: {body_json}"
+    );
+
+    // An anchored entry cannot be deleted; a stale revision conflicts.
+    {
+        let pool = plain_pool(&env).await;
+        sqlx::query(
+            "INSERT INTO kb_source_anchors (key_block_id, anchor_ordinal, source_anchor_json) VALUES (?, 0, '{}')",
+        )
+        .bind(&entry_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool.close().await;
+    }
+    let in_use = core
+        .delete_actor_knowledge_entry(
+            &principal,
+            env.character_id.clone(),
+            entry_id.clone(),
+            revision + 3,
+        )
+        .await
+        .unwrap_err();
+    assert_conflict(in_use, "knowledge_entry_in_use");
+
+    // An unrepresentable revision is refused by the CAS domain, never
+    // truncated into a different row revision.
+    let overflow = core
+        .delete_actor_knowledge_entry(
+            &principal,
+            env.character_id.clone(),
+            entry_id.clone(),
+            i64::MAX,
+        )
+        .await
+        .unwrap_err();
+    assert_invalid_input(&overflow);
+
+    {
+        let pool = plain_pool(&env).await;
+        sqlx::query("DELETE FROM kb_source_anchors WHERE key_block_id = ?")
+            .bind(&entry_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+    }
+
+    let deleted = core
+        .delete_actor_knowledge_entry(
+            &principal,
+            env.character_id.clone(),
+            entry_id.clone(),
+            revision + 3,
+        )
+        .await;
+    assert!(
+        deleted.is_ok(),
+        "delete admits without anchors: {deleted:?}"
+    );
+    let missing = core
+        .actor_knowledge_entry(&principal, env.character_id.clone(), entry_id.clone())
+        .await
+        .unwrap_err();
+    assert_not_found(&missing);
+}
+
+/// Migrated `actor_knowledge_api::world_create_with_summary_is_invalid_input`
+/// and `::character_create_oversize_multibyte_summary_is_invalid_input`.
+#[tokio::test]
+async fn retained_knowledge_authoring_shape_guards() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+
+    let world_summary = core
+        .add_actor_knowledge_entry(
+            &principal,
+            serde_json::from_value(serde_json::json!({
+                "owner_kind": "world",
+                "world_id": WORLD,
+                "block_type": "item",
+                "canonical_name": "Nope",
+                "summary": "forbidden",
+            }))
+            .unwrap(),
+            true,
+        )
+        .await
+        .unwrap_err();
+    assert_invalid_input(&world_summary);
+
+    // 65536 bytes of summary is the bound; one byte more is refused.
+    let at_limit = format!("{}a", "字".repeat(21845));
+    assert_eq!(at_limit.len(), 65536);
+    let over = format!("{at_limit}b");
+    for (summary, label) in [(at_limit, "at limit"), (over, "over limit")] {
+        let result = core
+            .add_actor_knowledge_entry(
+                &principal,
+                serde_json::from_value(serde_json::json!({
+                    "owner_kind": "character",
+                    "character_id": &env.character_id,
+                    "block_type": "item",
+                    "canonical_name": format!("Summary{label}"),
+                    "summary": summary,
+                }))
+                .unwrap(),
+                true,
+            )
+            .await;
+        if label == "at limit" {
+            assert!(result.is_ok(), "the byte bound admits exactly: {result:?}");
+        } else {
+            assert_invalid_input(&result.unwrap_err());
+        }
+    }
+}
+
+// ── Character ToM (theory of mind) record/list family ─────────────────────
+
+fn tom_request(
+    world_id: &str,
+    binding_id: &str,
+    carrier_entry_id: &str,
+    expected_revision: u64,
+    holder: &str,
+    proposition: &str,
+    order: u64,
+) -> RecordCharacterTomRequest {
+    serde_json::from_value(serde_json::json!({
+        "world_id": world_id,
+        "binding_id": binding_id,
+        "carrier_entry_id": carrier_entry_id,
+        "expected_revision": expected_revision,
+        "holder": holder,
+        "proposition": proposition,
+        "order": order,
+        "truth": "True",
+        "access": "Private",
+        "representation": "Explicit",
+        "content_type": "Location",
+        "source": "Perception",
+        "context": "Neutral"
+    }))
+    .expect("ToM record request is wire-valid")
+}
+
+fn tom_query(
+    world_id: &str,
+    binding_id: &str,
+    limit: Option<i64>,
+    cursor: Option<&str>,
+) -> ListCharacterTomQuery {
+    let mut value = serde_json::json!({ "world_id": world_id, "binding_id": binding_id });
+    if let Some(limit) = limit {
+        value["limit"] = serde_json::json!(limit);
+    }
+    if let Some(cursor) = cursor {
+        value["cursor"] = serde_json::json!(cursor);
+    }
+    serde_json::from_value(value).expect("ToM list query is wire-valid")
+}
+
+/// One Character-owned `ToM` carrier with the given `modules` payload.
+async fn seed_carrier(
+    env: &Env,
+    character_id: &str,
+    name: &str,
+    modules: serde_json::Value,
+) -> String {
+    let pool = plain_pool(env).await;
+    let store = SqliteKbStore::new(pool.clone());
+    let mut row = KnowledgeEntryRecord::for_character(character_id, BlockType::Character, name);
+    row.modules = Some(modules);
+    let entry_id = row.entry_id.clone();
+    store.insert_knowledge_entry(row).await.unwrap();
+    pool.close().await;
+    entry_id
+}
+
+/// One binding-owned `ToM` carrier (the unselected-binding shape).
+async fn seed_binding_carrier(
+    env: &Env,
+    binding_id: &str,
+    name: &str,
+    modules: serde_json::Value,
+) -> String {
+    let pool = plain_pool(env).await;
+    let store = SqliteKbStore::new(pool.clone());
+    let mut row = KnowledgeEntryRecord::for_binding(binding_id, BlockType::Character, name);
+    row.modules = Some(modules);
+    let entry_id = row.entry_id.clone();
+    store.insert_knowledge_entry(row).await.unwrap();
+    pool.close().await;
+    entry_id
+}
+
+async fn mind_state_count(env: &Env) -> i64 {
+    let pool = plain_pool(env).await;
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM mind_states")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+    count
+}
+
+async fn carrier_modules_json(env: &Env, carrier_id: &str) -> String {
+    let pool = plain_pool(env).await;
+    let text: String =
+        sqlx::query_scalar("SELECT modules_json FROM kb_key_blocks WHERE key_block_id = ?")
+            .bind(carrier_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    pool.close().await;
+    text
+}
+
+async fn carrier_revision(env: &Env, carrier_id: &str) -> i64 {
+    let pool = plain_pool(env).await;
+    let revision: Option<i64> =
+        sqlx::query_scalar("SELECT revision FROM kb_key_blocks WHERE key_block_id = ?")
+            .bind(carrier_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    pool.close().await;
+    revision.unwrap_or(0)
+}
+
+async fn set_carrier_modules_text(env: &Env, carrier_id: &str, raw: &str) {
+    let pool = plain_pool(env).await;
+    sqlx::query("UPDATE kb_key_blocks SET modules_json = ? WHERE key_block_id = ?")
+        .bind(raw)
+        .bind(carrier_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+}
+
+async fn set_carrier_status(env: &Env, carrier_id: &str, status: &str) {
+    let pool = plain_pool(env).await;
+    sqlx::query("UPDATE kb_key_blocks SET status = ? WHERE key_block_id = ?")
+        .bind(status)
+        .bind(carrier_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+}
+
+async fn insert_derivative(env: &Env, mind_state_id: &str, carrier_id: &str, occurred_at: &str) {
+    let pool = plain_pool(env).await;
+    sqlx::query(
+        "INSERT INTO mind_states \
+         (mind_state_id, schema_version, holder_entry_id, canonical_name, occurred_at, \
+          sort_key, snapshot_json, deltas_json, source_anchor_json, created_at, updated_at, \
+          extensions_json) \
+         VALUES (?, 1, ?, 'derivative', ?, '0001', '{}', '[]', NULL, ?, ?, '{\"nexus\":{}}')",
+    )
+    .bind(mind_state_id)
+    .bind(carrier_id)
+    .bind(occurred_at)
+    .bind(occurred_at)
+    .bind(occurred_at)
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+}
+
+fn orders(page: &ListCharacterTomResponse) -> Vec<i64> {
+    page.items.iter().map(|row| row.order).collect()
+}
+
+fn ordinals(page: &ListCharacterTomResponse) -> Vec<u64> {
+    page.items.iter().map(|row| row.row_ordinal).collect()
+}
+
+fn carrier_ids(page: &ListCharacterTomResponse) -> Vec<String> {
+    page.items
+        .iter()
+        .map(|row| row.carrier_entry_id.clone())
+        .collect()
+}
+
+/// Migrated `character_tom_api::record_l1_list_l1_before_l2_and_l2_subject_rules`
+/// and `::record_and_list_succeed_without_agent_host`.
+#[allow(clippy::too_many_lines)] // one ToM L1/L2 ordering journey asserted end to end
+#[tokio::test]
+async fn retained_tom_l1_l2_order_and_subject_rules() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let carrier = seed_carrier(
+        &env,
+        &env.character_id,
+        "TomCarrier",
+        serde_json::json!({"belief": []}),
+    )
+    .await;
+    let subject = core
+        .create_character(&principal, create_character_request("Ben", WORLD, None))
+        .await
+        .expect("subject Character");
+    let subject_id = String::from(subject.character.character_id.clone());
+
+    let l1 = core
+        .record_character_tom(
+            &principal,
+            env.character_id.clone(),
+            tom_request(
+                WORLD,
+                &env.binding_id,
+                &carrier,
+                0,
+                &env.character_id,
+                "I know the dock",
+                1,
+            ),
+        )
+        .await
+        .expect("L1 records without any agent host");
+    assert_eq!(l1.revision.get(), 1);
+
+    let l2 = core
+        .record_character_tom(
+            &principal,
+            env.character_id.clone(),
+            tom_request(
+                WORLD,
+                &env.binding_id,
+                &carrier,
+                1,
+                &subject_id,
+                "Ben is cautious",
+                2,
+            ),
+        )
+        .await
+        .expect("L2 about another active owned Character records");
+    assert_eq!(l2.revision.get(), 2);
+
+    let page = core
+        .list_character_tom(
+            &principal,
+            env.character_id.clone(),
+            tom_query(WORLD, &env.binding_id, None, None),
+        )
+        .await
+        .expect("list");
+    assert_eq!(orders(&page), vec![1, 2]);
+
+    // An L1 belief must be the viewer's own.
+    let l1_foreign = core
+        .record_character_tom(
+            &principal,
+            env.character_id.clone(),
+            tom_request(WORLD, &env.binding_id, &carrier, 2, &subject_id, "bad", 1),
+        )
+        .await
+        .unwrap_err();
+    assert_invalid_input(&l1_foreign);
+
+    // An L2 belief must name a different Character than the viewer.
+    let l2_self = core
+        .record_character_tom(
+            &principal,
+            env.character_id.clone(),
+            tom_request(
+                WORLD,
+                &env.binding_id,
+                &carrier,
+                2,
+                &env.character_id,
+                "bad",
+                2,
+            ),
+        )
+        .await
+        .unwrap_err();
+    assert_invalid_input(&l2_self);
+
+    // An L2 subject outside the owned active scope is a not-found.
+    let l2_unbound = core
+        .record_character_tom(
+            &principal,
+            env.character_id.clone(),
+            tom_request(
+                WORLD,
+                &env.binding_id,
+                &carrier,
+                2,
+                "chr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "foreign",
+                2,
+            ),
+        )
+        .await
+        .unwrap_err();
+    assert_not_found(&l2_unbound);
+    assert_eq!(
+        carrier_revision(&env, &carrier).await,
+        2,
+        "refusals never bump the CAS"
+    );
+}
+
+/// Migrated `character_tom_api::foreign_carrier_alias_and_stale_revision_fail_closed`
+/// and `::inactive_viewer_world_and_subject_fail_closed`.
+#[allow(clippy::too_many_lines)] // one ToM carrier liveness journey asserted end to end
+#[tokio::test]
+async fn retained_tom_carrier_and_liveness_fail_closed() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let carrier = seed_carrier(
+        &env,
+        &env.character_id,
+        "TomCarrier",
+        serde_json::json!({"belief": []}),
+    )
+    .await;
+    let world_carrier = {
+        let pool = plain_pool(&env).await;
+        let store = SqliteKbStore::new(pool.clone());
+        let mut row = KnowledgeEntryRecord::new(WORLD, BlockType::Character, "WorldOwned");
+        row.modules = Some(serde_json::json!({ "belief": [] }));
+        let entry_id = row.entry_id.clone();
+        store.insert_knowledge_entry(row).await.unwrap();
+        pool.close().await;
+        entry_id
+    };
+
+    let before = mind_state_count(&env).await;
+    // A World-owned entry can never be a Character ToM carrier.
+    let world_owned = core
+        .record_character_tom(
+            &principal,
+            env.character_id.clone(),
+            tom_request(
+                WORLD,
+                &env.binding_id,
+                &world_carrier,
+                0,
+                &env.character_id,
+                "x",
+                1,
+            ),
+        )
+        .await
+        .unwrap_err();
+    assert_invalid_input(&world_owned);
+    assert_eq!(
+        mind_state_count(&env).await,
+        before,
+        "no derivative is written"
+    );
+
+    // A carrier owned by another Character is a not-found.
+    let foreign_carrier = seed_carrier(
+        &env,
+        &env.foreign_character_id,
+        "ForeignCarrier",
+        serde_json::json!({"belief": []}),
+    )
+    .await;
+    let foreign = core
+        .record_character_tom(
+            &principal,
+            env.character_id.clone(),
+            tom_request(
+                WORLD,
+                &env.binding_id,
+                &foreign_carrier,
+                0,
+                &env.character_id,
+                "x",
+                1,
+            ),
+        )
+        .await
+        .unwrap_err();
+    assert_not_found(&foreign);
+
+    // A stale revision conflicts and leaves the CAS where it was.
+    core.record_character_tom(
+        &principal,
+        env.character_id.clone(),
+        tom_request(
+            WORLD,
+            &env.binding_id,
+            &carrier,
+            0,
+            &env.character_id,
+            "ok",
+            1,
+        ),
+    )
+    .await
+    .expect("first record");
+    let stale = core
+        .record_character_tom(
+            &principal,
+            env.character_id.clone(),
+            tom_request(
+                WORLD,
+                &env.binding_id,
+                &carrier,
+                0,
+                &env.character_id,
+                "stale",
+                1,
+            ),
+        )
+        .await
+        .unwrap_err();
+    assert_actor_conflict(&stale);
+    assert_eq!(mind_state_count(&env).await, before + 1);
+
+    // An archived viewer refuses the write but keeps the retained list read.
+    set_character_status(&env, &env.character_id, "archived").await;
+    let archived_viewer = core
+        .record_character_tom(
+            &principal,
+            env.character_id.clone(),
+            tom_request(
+                WORLD,
+                &env.binding_id,
+                &carrier,
+                1,
+                &env.character_id,
+                "x",
+                1,
+            ),
+        )
+        .await
+        .unwrap_err();
+    assert_conflict(archived_viewer, "character_inactive");
+    let retained = core
+        .list_character_tom(
+            &principal,
+            env.character_id.clone(),
+            tom_query(WORLD, &env.binding_id, None, None),
+        )
+        .await
+        .expect("an archived viewer still reads its history");
+    assert_eq!(orders(&retained), vec![1]);
+    set_character_status(&env, &env.character_id, "active").await;
+
+    // A paused World refuses the write.
+    set_world_status(&env, WORLD, "paused").await;
+    let paused = core
+        .record_character_tom(
+            &principal,
+            env.character_id.clone(),
+            tom_request(
+                WORLD,
+                &env.binding_id,
+                &carrier,
+                1,
+                &env.character_id,
+                "x",
+                1,
+            ),
+        )
+        .await
+        .unwrap_err();
+    assert_conflict(paused, "world_inactive");
+    set_world_status(&env, WORLD, "active").await;
+    assert_eq!(mind_state_count(&env).await, before + 1);
+}
+
+/// Migrated `character_tom_api::malformed_modules_reject_without_rewrite_and_unknown_keys_survive`,
+/// `::absent_belief_is_zero_rows_and_legacy_modules_round_trip`,
+/// `::invalid_json_modules_fails_closed_and_never_overwritten` and
+/// `::order_outside_closed_space_and_invalid_labels_reject`.
+#[allow(clippy::too_many_lines)] // one ToM module-shape journey asserted end to end
+#[tokio::test]
+async fn retained_tom_module_shape_and_absent_belief() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+
+    // Order outside the closed space is refused (labels are enum-typed on the
+    // wire and covered by the nexus-knowledge validation unit cases).
+    let order3 = seed_carrier(
+        &env,
+        &env.character_id,
+        "OrderCarrier",
+        serde_json::json!({"belief": []}),
+    )
+    .await;
+    let before = mind_state_count(&env).await;
+    let refused_order = core
+        .record_character_tom(
+            &principal,
+            env.character_id.clone(),
+            tom_request(
+                WORLD,
+                &env.binding_id,
+                &order3,
+                0,
+                &env.character_id,
+                "x",
+                3,
+            ),
+        )
+        .await
+        .unwrap_err();
+    assert_invalid_input(&refused_order);
+    assert_eq!(mind_state_count(&env).await, before);
+    assert_eq!(carrier_revision(&env, &order3).await, 0);
+
+    // A non-object `modules` and a non-array `belief` reject without rewrite.
+    let array_modules = seed_carrier(
+        &env,
+        &env.character_id,
+        "ArrModules",
+        serde_json::json!([1, 2, 3]),
+    )
+    .await;
+    let refused = core
+        .record_character_tom(
+            &principal,
+            env.character_id.clone(),
+            tom_request(
+                WORLD,
+                &env.binding_id,
+                &array_modules,
+                0,
+                &env.character_id,
+                "x",
+                1,
+            ),
+        )
+        .await
+        .unwrap_err();
+    assert_actor_conflict(&refused);
+    assert_eq!(
+        carrier_modules_json(&env, &array_modules).await,
+        "[1,2,3]",
+        "a malformed carrier is never rewritten"
+    );
+
+    let object_belief = seed_carrier(
+        &env,
+        &env.character_id,
+        "ObjBelief",
+        serde_json::json!({"belief": {"legacy": true}}),
+    )
+    .await;
+    let refused = core
+        .record_character_tom(
+            &principal,
+            env.character_id.clone(),
+            tom_request(
+                WORLD,
+                &env.binding_id,
+                &object_belief,
+                0,
+                &env.character_id,
+                "x",
+                1,
+            ),
+        )
+        .await
+        .unwrap_err();
+    assert_actor_conflict(&refused);
+    assert_eq!(
+        carrier_modules_json(&env, &object_belief).await,
+        "{\"belief\":{\"legacy\":true}}",
+        "a non-array belief member is never replaced with an empty array"
+    );
+
+    // Invalid persisted JSON is a distinguishable refusal that never
+    // overwrites the bytes, on both record and list.
+    let invalid = seed_carrier(
+        &env,
+        &env.character_id,
+        "InvalidJson",
+        serde_json::json!({"belief": []}),
+    )
+    .await;
+    set_carrier_modules_text(&env, &invalid, "{\"belief\": [").await;
+    let refused = core
+        .record_character_tom(
+            &principal,
+            env.character_id.clone(),
+            tom_request(
+                WORLD,
+                &env.binding_id,
+                &invalid,
+                0,
+                &env.character_id,
+                "x",
+                1,
+            ),
+        )
+        .await
+        .unwrap_err();
+    assert_conflict(refused, "carrier_modules_invalid_json");
+    let listed = core
+        .list_character_tom(
+            &principal,
+            env.character_id.clone(),
+            tom_query(WORLD, &env.binding_id, None, None),
+        )
+        .await
+        .unwrap_err();
+    assert_conflict(listed, "carrier_modules_invalid_json");
+    {
+        let pool = plain_pool(&env).await;
+        let text: String =
+            sqlx::query_scalar("SELECT modules_json FROM kb_key_blocks WHERE key_block_id = ?")
+                .bind(&invalid)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        pool.close().await;
+        assert_eq!(text, "{\"belief\": [", "invalid bytes are preserved");
+    }
+
+    // An absent `belief` member is zero rows, and unknown sibling module keys
+    // round-trip verbatim through the CAS.
+    let absent = seed_carrier(&env, &env.character_id, "NoBelief", serde_json::json!({})).await;
+    core.record_character_tom(
+        &principal,
+        env.character_id.clone(),
+        tom_request(
+            WORLD,
+            &env.binding_id,
+            &absent,
+            0,
+            &env.character_id,
+            "empty ok",
+            1,
+        ),
+    )
+    .await
+    .expect("an absent belief member admits");
+
+    let mixed = seed_carrier(
+        &env,
+        &env.character_id,
+        "MixedModules",
+        serde_json::json!({
+            "belief": [],
+            "mental": {"identity": {"role": "harbor_master"}},
+            "x_custom": {"n": 1}
+        }),
+    )
+    .await;
+    core.record_character_tom(
+        &principal,
+        env.character_id.clone(),
+        tom_request(
+            WORLD,
+            &env.binding_id,
+            &mixed,
+            0,
+            &env.character_id,
+            "mixed",
+            1,
+        ),
+    )
+    .await
+    .expect("unknown sibling keys do not block a record");
+    let stored: serde_json::Value = {
+        let pool = plain_pool(&env).await;
+        let text: String =
+            sqlx::query_scalar("SELECT modules_json FROM kb_key_blocks WHERE key_block_id = ?")
+                .bind(&mixed)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        pool.close().await;
+        serde_json::from_str(&text).unwrap()
+    };
+    assert_eq!(
+        stored["mental"],
+        serde_json::json!({"identity": {"role": "harbor_master"}})
+    );
+    assert_eq!(stored["x_custom"], serde_json::json!({"n": 1}));
+    assert_eq!(stored["belief"].as_array().unwrap().len(), 1);
+}
+
+/// Migrated `character_tom_api::physical_row_ordinal_survives_malformed_elements_and_cursor_pages`,
+/// `::corpus_and_row_caps_fail_closed_before_materialization`,
+/// `::oversize_belief_array_rejects_via_db_probe_without_panic` and
+/// `::record_rejects_201st_belief_row_without_mutation`.
+#[allow(clippy::too_many_lines)] // one ToM ordinal/corpus cap journey asserted end to end
+#[tokio::test]
+async fn retained_tom_physical_ordinal_and_corpus_caps() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+
+    let valid = |text: &str| {
+        serde_json::json!({
+            "holder": &env.character_id,
+            "proposition": text,
+            "order": 1,
+            "truth": "True",
+            "access": "Private",
+            "representation": "Explicit",
+            "content_type": "Location",
+            "source": "Perception",
+            "context": "Neutral"
+        })
+    };
+    let carrier = seed_carrier(
+        &env,
+        &env.character_id,
+        "OrdinalCarrier",
+        serde_json::json!({"belief": [valid("first"), 42, valid("third")]}),
+    )
+    .await;
+
+    let page1 = core
+        .list_character_tom(
+            &principal,
+            env.character_id.clone(),
+            tom_query(WORLD, &env.binding_id, Some(1), None),
+        )
+        .await
+        .expect("first page");
+    assert_eq!(ordinals(&page1), vec![0], "the physical ordinal is kept");
+    assert!(page1.pagination.has_more);
+    let cursor = page1.pagination.next_cursor.clone().expect("cursor");
+    let page2 = core
+        .list_character_tom(
+            &principal,
+            env.character_id.clone(),
+            tom_query(WORLD, &env.binding_id, Some(1), Some(&cursor)),
+        )
+        .await
+        .expect("second page");
+    assert_eq!(
+        ordinals(&page2),
+        vec![2],
+        "a malformed element does not renumber the next row"
+    );
+    assert_eq!(carrier_ids(&page2), vec![carrier.clone()]);
+    assert!(!page2.pagination.has_more);
+
+    // Corpus cap: more carriers than the fixed per-scope bound.
+    let store = {
+        let pool = plain_pool(&env).await;
+        (SqliteKbStore::new(pool.clone()), pool)
+    };
+    for i in 0..=201 {
+        let mut row = KnowledgeEntryRecord::for_character(
+            &env.character_id,
+            BlockType::Character,
+            &format!("Bulk{i}"),
+        );
+        row.modules = Some(serde_json::json!({"belief": []}));
+        store.0.insert_knowledge_entry(row).await.unwrap();
+    }
+    store.1.close().await;
+    let capped = core
+        .list_character_tom(
+            &principal,
+            env.character_id.clone(),
+            tom_query(WORLD, &env.binding_id, None, None),
+        )
+        .await
+        .unwrap_err();
+    assert_conflict(capped, "view_incomplete");
+
+    // Per-carrier row cap: a carrier already at the cap refuses the next
+    // belief with zero mutation and stays listable.
+    let env2 = seed_env().await;
+    let (core2, principal2) = open_core(&env2).await;
+    let rows: Vec<serde_json::Value> = (0..200)
+        .map(|i| {
+            serde_json::json!({
+                "holder": &env2.character_id,
+                "proposition": format!("seeded belief {i}"),
+                "order": 1,
+                "truth": "True",
+                "access": "Private",
+                "representation": "Explicit",
+                "content_type": "Location",
+                "source": "Perception",
+                "context": "Neutral"
+            })
+        })
+        .collect();
+    let full = seed_carrier(
+        &env2,
+        &env2.character_id,
+        "FullCarrier",
+        serde_json::json!({ "belief": rows }),
+    )
+    .await;
+    let before = mind_state_count(&env2).await;
+    let refused = core2
+        .record_character_tom(
+            &principal2,
+            env2.character_id.clone(),
+            tom_request(
+                WORLD,
+                &env2.binding_id,
+                &full,
+                0,
+                &env2.character_id,
+                "201st",
+                1,
+            ),
+        )
+        .await
+        .unwrap_err();
+    assert_conflict(refused, "view_incomplete");
+    assert_eq!(
+        mind_state_count(&env2).await,
+        before,
+        "a refused record inserts no MindState"
+    );
+    let still_200: i64 = {
+        let pool = plain_pool(&env2).await;
+        let len: i64 = sqlx::query_scalar(
+            "SELECT json_array_length(modules_json, '$.belief') FROM kb_key_blocks WHERE key_block_id = ?",
+        )
+        .bind(&full)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        pool.close().await;
+        len
+    };
+    assert_eq!(still_200, 200, "a refused record appends nothing");
+    let listed = core2
+        .list_character_tom(
+            &principal2,
+            env2.character_id.clone(),
+            tom_query(WORLD, &env2.binding_id, Some(100), None),
+        )
+        .await
+        .expect("the capped corpus stays listable");
+    assert_eq!(listed.items.len(), 100);
+    assert!(listed.pagination.has_more);
+}
+
+/// Migrated `character_tom_api::derivative_history_uses_one_grouped_row_per_carrier`,
+/// `::stale_deleted_carrier_histories_do_not_surface_or_error` and
+/// `::timestamp_lookup_is_scoped_to_selected_binding_admitted_ids`.
+#[tokio::test]
+async fn retained_tom_derivative_history_and_binding_scoped_timestamps() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let alive = seed_carrier(
+        &env,
+        &env.character_id,
+        "AliveCarrier",
+        serde_json::json!({"belief": []}),
+    )
+    .await;
+    core.record_character_tom(
+        &principal,
+        env.character_id.clone(),
+        tom_request(
+            WORLD,
+            &env.binding_id,
+            &alive,
+            0,
+            &env.character_id,
+            "one",
+            1,
+        ),
+    )
+    .await
+    .expect("record");
+
+    // Several derivative rows: only the latest `occurred_at` surfaces.
+    insert_derivative(&env, "ms_old", &alive, "2099-01-01T00:00:00Z").await;
+    insert_derivative(&env, "ms_latest", &alive, "2099-01-03T00:00:00Z").await;
+
+    // A deleted carrier's large history never surfaces.
+    let deleted = seed_carrier(
+        &env,
+        &env.character_id,
+        "StaleCarrier",
+        serde_json::json!({"belief": []}),
+    )
+    .await;
+    for i in 0..50 {
+        insert_derivative(
+            &env,
+            &format!("ms_stale_{i}"),
+            &deleted,
+            &format!("2098-01-{:02}T00:00:00Z", (i % 28) + 1),
+        )
+        .await;
+    }
+    set_carrier_status(&env, &deleted, "deleted").await;
+
+    // A second, unselected binding of the same Character carries its own
+    // history and must stay outside the selected snapshot.
+    let second = core
+        .add_binding(
+            &principal,
+            env.character_id.clone(),
+            WORLD_B.to_string(),
+            None,
+        )
+        .await
+        .expect("second binding");
+    let second_binding = String::from(second.binding.binding_id.clone());
+    let unselected = seed_binding_carrier(
+        &env,
+        &second_binding,
+        "UnselectedCarrier",
+        serde_json::json!({"belief": []}),
+    )
+    .await;
+    for i in 0..40 {
+        insert_derivative(
+            &env,
+            &format!("ms_unsel_{i}"),
+            &unselected,
+            &format!("2097-01-{:02}T00:00:00Z", (i % 28) + 1),
+        )
+        .await;
+    }
+
+    let page = core
+        .list_character_tom(
+            &principal,
+            env.character_id.clone(),
+            tom_query(WORLD, &env.binding_id, None, None),
+        )
+        .await
+        .expect("list");
+    assert_eq!(carrier_ids(&page), vec![alive.clone()]);
+    assert_eq!(page.items.len(), 1, "one grouped row per alive carrier");
+    let recorded_at = page.items[0]
+        .carrier_recorded_at
+        .expect("the latest derivative timestamp surfaces");
+    assert!(
+        recorded_at.to_rfc3339().starts_with("2099-01-03T00:00:00"),
+        "only the latest derivative is projected: {recorded_at}"
+    );
+}
+
+/// Migrated `character_tom_api::extreme_expected_revision_rejects_without_panic_or_mutation`,
+/// `::storage_failure_is_internal_not_not_found`,
+/// `::summary_patch_does_not_clobber_tom_modules_on_carrier` and
+/// `::tom_cas_bumps_revision_blocking_stale_summary_patch`.
+#[allow(clippy::too_many_lines)] // one ToM revision-domain journey asserted end to end
+#[tokio::test]
+async fn retained_tom_revision_domain_storage_error_and_summary_interaction() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let carrier = seed_carrier(
+        &env,
+        &env.character_id,
+        "TomCarrier",
+        serde_json::json!({"belief": []}),
+    )
+    .await;
+    {
+        let pool = plain_pool(&env).await;
+        sqlx::query("UPDATE kb_key_blocks SET body_json = ? WHERE key_block_id = ?")
+            .bind(r#"{"summary":"carrier summary"}"#)
+            .bind(&carrier)
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+    }
+
+    // The u64 revision domain is refused, never truncated; i64::MAX is
+    // refused by the CAS increment guard; i64::MAX - 1 cas-misses normally.
+    for extreme in [u64::MAX, i64::MAX as u64] {
+        let refused = core
+            .record_character_tom(
+                &principal,
+                env.character_id.clone(),
+                tom_request(
+                    WORLD,
+                    &env.binding_id,
+                    &carrier,
+                    extreme,
+                    &env.character_id,
+                    "x",
+                    1,
+                ),
+            )
+            .await
+            .unwrap_err();
+        assert_invalid_input(&refused);
+    }
+    let near_max = core
+        .record_character_tom(
+            &principal,
+            env.character_id.clone(),
+            tom_request(
+                WORLD,
+                &env.binding_id,
+                &carrier,
+                (i64::MAX - 1) as u64,
+                &env.character_id,
+                "x",
+                1,
+            ),
+        )
+        .await
+        .unwrap_err();
+    assert_actor_conflict(&near_max);
+    assert_eq!(mind_state_count(&env).await, 0);
+    assert_eq!(carrier_revision(&env, &carrier).await, 0);
+
+    // A storage failure is an internal error, never a not-found.
+    {
+        let pool = plain_pool(&env).await;
+        sqlx::query("DROP TABLE kb_key_blocks")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+    }
+    let storage = core
+        .record_character_tom(
+            &principal,
+            env.character_id.clone(),
+            tom_request(
+                WORLD,
+                &env.binding_id,
+                &carrier,
+                0,
+                &env.character_id,
+                "x",
+                1,
+            ),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(storage, CoreError::Internal { .. }),
+        "a storage failure must not masquerade as not-found, got {storage:?}"
+    );
+
+    // A summary edit never clobbers the ToM modules, and the ToM CAS bump
+    // blocks a stale summary patch.
+    let env2 = seed_env().await;
+    let (core2, principal2) = open_core(&env2).await;
+    let carrier2 = seed_carrier(
+        &env2,
+        &env2.character_id,
+        "TomCarrier2",
+        serde_json::json!({"belief": []}),
+    )
+    .await;
+    core2
+        .record_character_tom(
+            &principal2,
+            env2.character_id.clone(),
+            tom_request(
+                WORLD,
+                &env2.binding_id,
+                &carrier2,
+                0,
+                &env2.character_id,
+                "one",
+                1,
+            ),
+        )
+        .await
+        .expect("record");
+    let patched = core2
+        .patch_actor_knowledge_entry(
+            &principal2,
+            env2.character_id.clone(),
+            carrier2.clone(),
+            1,
+            None,
+            FieldPatch::Set("updated carrier summary"),
+            None,
+        )
+        .await
+        .expect("summary patch admits");
+    assert_eq!(
+        patched
+            .body
+            .as_ref()
+            .and_then(|body| body.summary.as_deref()),
+        Some("updated carrier summary")
+    );
+    assert_eq!(patched.revision, Some(2));
+    let listed = core2
+        .list_character_tom(
+            &principal2,
+            env2.character_id.clone(),
+            tom_query(WORLD, &env2.binding_id, None, None),
+        )
+        .await
+        .expect("list after summary edit");
+    assert_eq!(
+        listed.items.len(),
+        1,
+        "the belief row survives a summary edit"
+    );
+
+    let stale = core2
+        .patch_actor_knowledge_entry(
+            &principal2,
+            env2.character_id.clone(),
+            carrier2.clone(),
+            0,
+            None,
+            FieldPatch::Set("late"),
+            None,
+        )
+        .await
+        .unwrap_err();
+    assert_conflict(stale, "knowledge_revision_conflict");
 }
