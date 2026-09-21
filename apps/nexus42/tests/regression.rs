@@ -325,9 +325,18 @@ fn r3_context_assemble_moment_executes_without_placeholder_skip() {
         .success();
 
     // v1.191 P1 T9: the admitted knowledge view is World-scoped — a worldless
-    // assemble-moment is refused with a `pass --world-id` hint (asserted by
-    // `integration.rs::context_assemble_requires_world_id`), so the R3 chain
-    // materializes a World and names it.
+    // `assemble-moment` fails closed in `creator_view_scope` ("an admitted
+    // knowledge view requires a World: pass `--world-id wld_...`"; re-smoked on
+    // the real binary in v1.194 P2-T2), so the R3 chain materializes a World and
+    // names it.
+    //
+    // That refusal is retained but currently unasserted: the pre-retirement pin
+    // for the *removed* `platform context assemble` guidance leaf was re-pointed
+    // by v1.193 P2-T12 to assert that leaf's removal
+    // (`integration.rs::retired_platform_context_assemble_is_unknown`), so no
+    // assertion covers this path. Tracked as a coverage gap on
+    // `apps/nexus42/src/commands/platform/context.rs:562` — v1.194 P2-T2
+    // finding F-T2-1; not covered here.
     let world_out = Command::cargo_bin("nexus42")
         .unwrap()
         .arg("creator")
