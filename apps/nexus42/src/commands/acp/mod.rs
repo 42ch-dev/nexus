@@ -552,10 +552,12 @@ fn cmd_agent_use(agent_ref: &str, config: &CliConfig) -> Result<()> {
         .get(creator_id)
         .map_or(crate::config::DEFAULT_WORKSPACE_SLUG, |s| s.as_str());
 
-    // Validate path components (defense-in-depth via nexus-home-layout)
+    // Sanitize path components (defense-in-depth via nexus-home-layout). The
+    // returned borrow shadows workspace_slug so only the sanitized value reaches
+    // operational_workspace_dir.
     nexus_home_layout::validate_creator_id_safe(creator_id)
         .map_err(crate::errors::CliError::Other)?;
-    nexus_home_layout::validate_entry_id_safe(workspace_slug)
+    let workspace_slug = nexus_home_layout::sanitize_entry_id(workspace_slug)
         .map_err(crate::errors::CliError::Other)?;
 
     let home = dirs::home_dir().ok_or_else(|| {
@@ -595,9 +597,9 @@ pub(crate) fn default_agent_ref(config: &CliConfig) -> Option<String> {
         .get(creator_id)
         .map_or(crate::config::DEFAULT_WORKSPACE_SLUG, |s| s.as_str());
 
-    // Non-panicking path validation
+    // Non-panicking path validation; the returned borrow replaces the raw slug.
     nexus_home_layout::validate_creator_id_safe(creator_id).ok()?;
-    nexus_home_layout::validate_entry_id_safe(workspace_slug).ok()?;
+    let workspace_slug = nexus_home_layout::sanitize_entry_id(workspace_slug).ok()?;
 
     let home = dirs::home_dir()?;
     let config_path =
