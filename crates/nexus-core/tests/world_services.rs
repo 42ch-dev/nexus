@@ -728,7 +728,11 @@ async fn key_block_state_read_guards() {
 // Each migrated case is labelled with the retired selector it came from.
 // ═══════════════════════════════════════════════════════════════════════════
 
-fn fork_request(parent_branch_id: &str, forked_from_event_id: &str, label: Option<&str>) -> CreateForkRequest {
+fn fork_request(
+    parent_branch_id: &str,
+    forked_from_event_id: &str,
+    label: Option<&str>,
+) -> CreateForkRequest {
     let mut body = json!({
         "parent_branch_id": parent_branch_id,
         "forked_from_event_id": forked_from_event_id,
@@ -739,7 +743,13 @@ fn fork_request(parent_branch_id: &str, forked_from_event_id: &str, label: Optio
     serde_json::from_value(body).unwrap()
 }
 
-async fn seed_timeline_event(pool: &SqlitePool, event_id: &str, world_id: &str, branch_id: &str, sequence_no: i64) {
+async fn seed_timeline_event(
+    pool: &SqlitePool,
+    event_id: &str,
+    world_id: &str,
+    branch_id: &str,
+    sequence_no: i64,
+) {
     sqlx::query(
         "INSERT INTO narrative_timeline_events (timeline_event_id, world_id, branch_id, event_type, status, sequence_no, title, summary, metadata_json, created_at) VALUES (?, ?, ?, 'story_advance', 'canon', ?, 'Parent', 'Parent event', '{}', datetime('now'))",
     )
@@ -776,11 +786,12 @@ async fn retained_fork_create_guards_and_lineage() {
         .await
         .unwrap_err();
     assert!(matches!(denied, CoreError::WorldOwnerDenied { .. }));
-    let markers: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM narrative_timeline_events WHERE event_type = 'fork_created'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let markers: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM narrative_timeline_events WHERE event_type = 'fork_created'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(markers, 0, "a denied fork writes no marker");
 
     // An unknown event, and a real event quoted against the wrong branch, are
@@ -812,7 +823,10 @@ async fn retained_fork_create_guards_and_lineage() {
     let CoreError::InvalidInput { field, .. } = err else {
         panic!("expected invalid input, got {err:?}")
     };
-    assert_eq!(field, "fork_point", "the fork point must sit on the stated branch");
+    assert_eq!(
+        field, "fork_point",
+        "the fork point must sit on the stated branch"
+    );
 
     // Happy path: a fresh branch id, the echoed parent + fork point, and the
     // label carried into the lineage marker.
@@ -843,7 +857,11 @@ async fn retained_fork_create_guards_and_lineage() {
         .list_timeline_events(&fx.principal, OWNED_WORLD.to_string(), query)
         .await
         .unwrap();
-    assert_eq!(events.items.len(), 1, "exactly one canon fork marker: {events:?}");
+    assert_eq!(
+        events.items.len(),
+        1,
+        "exactly one canon fork marker: {events:?}"
+    );
     let lineage: String = sqlx::query_scalar(
         "SELECT extensions_nexus_json FROM narrative_timeline_events WHERE world_id = ? AND branch_id = ? AND event_type = 'fork_created'",
     )
@@ -992,6 +1010,7 @@ fn rule_update(body: Value) -> WorldRuleUpdateRequest {
     serde_json::from_value(body).unwrap()
 }
 
+#[allow(clippy::too_many_arguments)] // seed helper: the row's columns are the fixture surface
 async fn seed_world_rule(
     pool: &SqlitePool,
     rule_id: &str,
@@ -1262,7 +1281,10 @@ async fn retained_world_rules_write_surface_and_read_guards() {
         wire["constraint"],
         json!({ "family": "module_absence", "module_key": "lore" })
     );
-    assert_eq!(updated.created_at, created.created_at, "created_at never moves");
+    assert_eq!(
+        updated.created_at, created.created_at,
+        "created_at never moves"
+    );
 
     // Whole-carrier replacement: only `extensions.nexus.constraint` is
     // overwritten — sibling nexus keys and every other namespace survive.
@@ -1284,7 +1306,9 @@ async fn retained_world_rules_write_surface_and_read_guards() {
             &fx.principal,
             world.to_string(),
             "rul_bag".to_string(),
-            rule_update(json!({ "constraint": { "family": "required_field", "field": "body.tags" } })),
+            rule_update(
+                json!({ "constraint": { "family": "required_field", "field": "body.tags" } }),
+            ),
         )
         .await
         .unwrap();
@@ -1362,11 +1386,12 @@ async fn retained_world_rules_write_surface_and_read_guards() {
         resource.contains("rul_other_world") && !resource.contains("SecretOtherWorldRule"),
         "a cross-world rule is indistinguishable from an unknown id: {resource}"
     );
-    let untouched: String =
-        sqlx::query_scalar("SELECT canonical_name FROM spoke_rules WHERE rule_id = 'rul_other_world'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let untouched: String = sqlx::query_scalar(
+        "SELECT canonical_name FROM spoke_rules WHERE rule_id = 'rul_other_world'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(untouched, "SecretOtherWorldRule");
 
     // The pair rule judges the effective pair, and an explicit empty target
@@ -1441,10 +1466,11 @@ async fn retained_world_rules_write_surface_and_read_guards() {
 
     // Every rejected PATCH returned before any write: the stored row of the
     // last untouched seed still carries its original timestamp.
-    let frozen: i64 = sqlx::query_scalar("SELECT updated_at FROM spoke_rules WHERE rule_id = 'rul_other_world'")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let frozen: i64 =
+        sqlx::query_scalar("SELECT updated_at FROM spoke_rules WHERE rule_id = 'rul_other_world'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(frozen, 1_700_000_100);
 
     // Read projection: store order (canonical_name ASC, rule_id ASC) with the
@@ -1588,7 +1614,9 @@ async fn retained_world_rules_patch_failure_modes_and_axis_semantics() {
             &fx.principal,
             world.to_string(),
             "rul_corrupt".to_string(),
-            rule_update(json!({ "constraint": { "family": "module_presence", "module_key": "m" } })),
+            rule_update(
+                json!({ "constraint": { "family": "module_presence", "module_key": "m" } }),
+            ),
         )
         .await
         .unwrap_err();
@@ -1602,8 +1630,14 @@ async fn retained_world_rules_patch_failure_modes_and_axis_semantics() {
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(bag, "{not valid json", "the corrupt row stays byte-identical");
-    assert_eq!(stamp, 1_700_000_100, "a failed patch never refreshes the row");
+    assert_eq!(
+        bag, "{not valid json",
+        "the corrupt row stays byte-identical"
+    );
+    assert_eq!(
+        stamp, 1_700_000_100,
+        "a failed patch never refreshes the row"
+    );
 
     // Meta-field value checks mirror create and leave the row untouched.
     seed_world_rule(
@@ -1623,7 +1657,10 @@ async fn retained_world_rules_patch_failure_modes_and_axis_semantics() {
         (json!({ "statement": "" }), "statement"),
         (json!({ "severity_hint": " " }), "severity_hint"),
         (json!({ "kind": "" }), "kind"),
-        (json!({ "constraint": { "family": "tone" } }), "constraint.family"),
+        (
+            json!({ "constraint": { "family": "tone" } }),
+            "constraint.family",
+        ),
         (json!({ "target_entry_types": [""] }), "target_entry_types"),
     ];
     for (body, field) in rejections {
@@ -1648,7 +1685,10 @@ async fn retained_world_rules_patch_failure_modes_and_axis_semantics() {
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!((name.as_str(), status.as_str(), stamp), ("Meta", "active", 1_700_000_100));
+    assert_eq!(
+        (name.as_str(), status.as_str(), stamp),
+        ("Meta", "active", 1_700_000_100)
+    );
 
     // An empty PATCH is refused and never refreshes the row.
     let err = fx
@@ -1700,7 +1740,10 @@ async fn retained_world_rules_patch_failure_modes_and_axis_semantics() {
             panic!("{rule_id} must be not-found before the payload is judged, got {err:?}")
         };
         assert!(resource.contains(rule_id));
-        assert!(!resource.contains("Elsewhere"), "no existence leak: {resource}");
+        assert!(
+            !resource.contains("Elsewhere"),
+            "no existence leak: {resource}"
+        );
     }
 
     // The write guards cover PATCH as well as create.
@@ -1736,7 +1779,8 @@ async fn retained_world_rules_patch_failure_modes_and_axis_semantics() {
         "an absent axis is not a clear"
     );
 
-    let null_axis = rule_update(json!({ "target_entry_types": null, "statement": "null is absent" }));
+    let null_axis =
+        rule_update(json!({ "target_entry_types": null, "statement": "null is absent" }));
     assert!(
         null_axis.target_entry_types.is_none(),
         "a JSON null axis is the absent member"
@@ -1758,12 +1802,11 @@ async fn retained_world_rules_patch_failure_modes_and_axis_semantics() {
     );
 
     // A matched patch refreshes `updated_at` and never touches `created_at`.
-    let (created_at, updated_at): (i64, i64) = sqlx::query_as(
-        "SELECT created_at, updated_at FROM spoke_rules WHERE rule_id = 'rul_meta'",
-    )
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let (created_at, updated_at): (i64, i64) =
+        sqlx::query_as("SELECT created_at, updated_at FROM spoke_rules WHERE rule_id = 'rul_meta'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(created_at, 1_700_000_000, "created_at never moves");
     assert!(
         updated_at > 1_700_000_100,
@@ -1800,6 +1843,7 @@ fn relate_input(source: &str, target: &str, relation_type: &str) -> Value {
     })
 }
 
+#[allow(clippy::too_many_arguments)] // seed helper: the row's columns are the fixture surface
 async fn seed_relationship(
     pool: &SqlitePool,
     relationship_id: &str,
@@ -1839,8 +1883,28 @@ async fn retained_relationship_patch_validation_and_projection() {
     let other_world = "wld_rel_other";
     seed_world(&pool, world, CREATOR).await;
     seed_world(&pool, other_world, CREATOR).await;
-    seed_kb(&pool, "kb_rel_a", world, "Aria", "confirmed", Some(0), None, None).await;
-    seed_kb(&pool, "kb_rel_b", world, "Kael", "confirmed", Some(0), None, None).await;
+    seed_kb(
+        &pool,
+        "kb_rel_a",
+        world,
+        "Aria",
+        "confirmed",
+        Some(0),
+        None,
+        None,
+    )
+    .await;
+    seed_kb(
+        &pool,
+        "kb_rel_b",
+        world,
+        "Kael",
+        "confirmed",
+        Some(0),
+        None,
+        None,
+    )
+    .await;
     seed_kb(
         &pool,
         "kb_rel_source",
@@ -1925,7 +1989,12 @@ async fn retained_relationship_patch_validation_and_projection() {
         .patch_world_kb_relationship(
             &fx.principal,
             world.to_string(),
-            relate("add", None, Some(0), Some(relate_input("kb_rel_a", "kb_rel_b", "rival_of"))),
+            relate(
+                "add",
+                None,
+                Some(0),
+                Some(relate_input("kb_rel_a", "kb_rel_b", "rival_of")),
+            ),
         )
         .await
         .unwrap();
@@ -1957,14 +2026,39 @@ async fn retained_relationship_patch_validation_and_projection() {
 
     // A relationship owned by another World of the same creator is refused as
     // cross-world access.
-    seed_kb(&pool, "kb_other_a", other_world, "Other A", "confirmed", Some(0), None, None).await;
-    seed_kb(&pool, "kb_other_b", other_world, "Other B", "confirmed", Some(0), None, None).await;
+    seed_kb(
+        &pool,
+        "kb_other_a",
+        other_world,
+        "Other A",
+        "confirmed",
+        Some(0),
+        None,
+        None,
+    )
+    .await;
+    seed_kb(
+        &pool,
+        "kb_other_b",
+        other_world,
+        "Other B",
+        "confirmed",
+        Some(0),
+        None,
+        None,
+    )
+    .await;
     let foreign_rel = fx
         .core
         .patch_world_kb_relationship(
             &fx.principal,
             other_world.to_string(),
-            relate("add", None, Some(0), Some(relate_input("kb_other_a", "kb_other_b", "allied_with"))),
+            relate(
+                "add",
+                None,
+                Some(0),
+                Some(relate_input("kb_other_a", "kb_other_b", "allied_with")),
+            ),
         )
         .await
         .unwrap();
@@ -2051,9 +2145,39 @@ async fn retained_relationship_review_gate_and_extension_preservation() {
     let (_guard, pool) = live_write_pool(&fx).await;
     let world = "wld_rel_gate";
     seed_world(&pool, world, CREATOR).await;
-    seed_kb(&pool, "kb_gate_a", world, "Aria", "confirmed", Some(0), None, None).await;
-    seed_kb(&pool, "kb_gate_b", world, "Kael", "confirmed", Some(0), None, None).await;
-    seed_kb(&pool, "kb_gate_c", world, "Mira", "confirmed", Some(0), None, None).await;
+    seed_kb(
+        &pool,
+        "kb_gate_a",
+        world,
+        "Aria",
+        "confirmed",
+        Some(0),
+        None,
+        None,
+    )
+    .await;
+    seed_kb(
+        &pool,
+        "kb_gate_b",
+        world,
+        "Kael",
+        "confirmed",
+        Some(0),
+        None,
+        None,
+    )
+    .await;
+    seed_kb(
+        &pool,
+        "kb_gate_c",
+        world,
+        "Mira",
+        "confirmed",
+        Some(0),
+        None,
+        None,
+    )
+    .await;
 
     // One confirmed manual row plus one extraction suggestion.
     let confirmed = fx
@@ -2178,8 +2302,28 @@ async fn retained_relationship_review_gate_and_extension_preservation() {
     // write through.
     let ext_world = "wld_rel_ext";
     seed_world(&pool, ext_world, CREATOR).await;
-    seed_kb(&pool, "kb_ext_a", ext_world, "Ext A", "confirmed", Some(0), None, None).await;
-    seed_kb(&pool, "kb_ext_b", ext_world, "Ext B", "confirmed", Some(0), None, None).await;
+    seed_kb(
+        &pool,
+        "kb_ext_a",
+        ext_world,
+        "Ext A",
+        "confirmed",
+        Some(0),
+        None,
+        None,
+    )
+    .await;
+    seed_kb(
+        &pool,
+        "kb_ext_b",
+        ext_world,
+        "Ext B",
+        "confirmed",
+        Some(0),
+        None,
+        None,
+    )
+    .await;
     let ext_row = fx
         .core
         .patch_world_kb_relationship(
@@ -2253,10 +2397,35 @@ async fn retained_relationship_review_gate_and_extension_preservation() {
     // cap, dropping the oldest.
     let capped_world = "wld_rel_cap";
     seed_world(&pool, capped_world, CREATOR).await;
-    seed_kb(&pool, "kb_cap_a", capped_world, "Cap A", "confirmed", Some(0), None, None).await;
-    seed_kb(&pool, "kb_cap_b", capped_world, "Cap B", "confirmed", Some(0), None, None).await;
+    seed_kb(
+        &pool,
+        "kb_cap_a",
+        capped_world,
+        "Cap A",
+        "confirmed",
+        Some(0),
+        None,
+        None,
+    )
+    .await;
+    seed_kb(
+        &pool,
+        "kb_cap_b",
+        capped_world,
+        "Cap B",
+        "confirmed",
+        Some(0),
+        None,
+        None,
+    )
+    .await;
     for i in 0..1002 {
-        let stamp = format!("2026-06-30T{:02}:{:02}:{:02}.000Z", i / 3600, (i % 3600) / 60, i % 60);
+        let stamp = format!(
+            "2026-06-30T{:02}:{:02}:{:02}.000Z",
+            i / 3600,
+            (i % 3600) / 60,
+            i % 60
+        );
         seed_relationship(
             &pool,
             &format!("rel_cap_{i:04}"),
@@ -2367,11 +2536,12 @@ async fn retained_promote_merge_target_cas_miss_marks_the_target() {
         body.contains("A brave hero"),
         "the candidate payload is unchanged"
     );
-    let target: String =
-        sqlx::query_scalar("SELECT body_json FROM kb_key_blocks WHERE key_block_id = 'kb_merge_target'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let target: String = sqlx::query_scalar(
+        "SELECT body_json FROM kb_key_blocks WHERE key_block_id = 'kb_merge_target'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(target, r#"{"summary":"Original"}"#, "no partial fold");
 }
 
@@ -2410,7 +2580,14 @@ async fn retained_promote_rollback_and_collision_recovery() {
 
     // (a) The job flip rejects the adopt after the entry insert — the entry
     //     must not survive, and the candidate must stay adoptable.
-    seed_pending(&pool, "xj_rollback", world, "CompensateMe", "2020-01-01T00:00:01Z").await;
+    seed_pending(
+        &pool,
+        "xj_rollback",
+        world,
+        "CompensateMe",
+        "2020-01-01T00:00:01Z",
+    )
+    .await;
     sqlx::query(
         "CREATE TRIGGER trg_reject_flip AFTER INSERT ON kb_key_blocks WHEN NEW.canonical_name = 'CompensateMe' BEGIN UPDATE kb_extract_jobs SET promotion_status = 'rejected', version = version + 1 WHERE job_id = 'xj_rollback' AND promotion_status = 'pending'; END",
     )
@@ -2454,7 +2631,14 @@ async fn retained_promote_rollback_and_collision_recovery() {
     assert_eq!(retried.job.status, "confirmed");
 
     // (b) A storage fault during the flip also rolls the entry back.
-    seed_pending(&pool, "xj_cas_fault", world, "CasFailMe", "2020-01-01T00:00:02Z").await;
+    seed_pending(
+        &pool,
+        "xj_cas_fault",
+        world,
+        "CasFailMe",
+        "2020-01-01T00:00:02Z",
+    )
+    .await;
     sqlx::query(
         "CREATE TRIGGER trg_abort_flip BEFORE UPDATE ON kb_extract_jobs WHEN OLD.job_id = 'xj_cas_fault' AND NEW.promotion_status = 'confirmed' BEGIN SELECT RAISE(ABORT, 'simulated flip CAS failure'); END",
     )
@@ -2489,8 +2673,22 @@ async fn retained_promote_rollback_and_collision_recovery() {
 
     // (c) A live entry stamped with the same job while it is still pending is
     //     never deleted by a retry.
-    seed_attributed_key_block(&pool, "kb_orphan_prior", world, "OrphanRetry", "xj_orphan_retry").await;
-    seed_pending(&pool, "xj_orphan_retry", world, "OrphanRetry", "2020-01-01T00:00:03Z").await;
+    seed_attributed_key_block(
+        &pool,
+        "kb_orphan_prior",
+        world,
+        "OrphanRetry",
+        "xj_orphan_retry",
+    )
+    .await;
+    seed_pending(
+        &pool,
+        "xj_orphan_retry",
+        world,
+        "OrphanRetry",
+        "2020-01-01T00:00:03Z",
+    )
+    .await;
     let err = fx
         .core
         .promote_world_kb_candidate(
@@ -2566,7 +2764,14 @@ async fn retained_promote_rollback_and_collision_recovery() {
 
     // (e) A confirmed job whose entry is attributed recovers idempotently.
     seed_attributed_key_block(&pool, "kb_recovered", world, "RetryRecover", "xj_recovered").await;
-    seed_pending(&pool, "xj_recovered", world, "RetryRecover", "2020-01-01T00:00:05Z").await;
+    seed_pending(
+        &pool,
+        "xj_recovered",
+        world,
+        "RetryRecover",
+        "2020-01-01T00:00:05Z",
+    )
+    .await;
     sqlx::query("UPDATE kb_extract_jobs SET promotion_status = 'confirmed', version = 1 WHERE job_id = 'xj_recovered'")
         .execute(&pool)
         .await

@@ -1039,7 +1039,7 @@ async fn fresh_world(core: &CoreService, principal: &nexus_core::Principal) -> S
     .world_id
 }
 
-fn pool_query() -> nexus_core::ListPoolQuery {
+const fn pool_query() -> nexus_core::ListPoolQuery {
     nexus_core::ListPoolQuery {
         status: None,
         limit: None,
@@ -1069,8 +1069,8 @@ fn status_set(status: &str) -> nexus_core::UpdateFindingRequest {
 /// Bulk PATCH body, built through the generated contract type (the wire shape
 /// the retired daemon route accepted).
 fn batch_request(
-    finding_ids: Vec<String>,
-    patch: serde_json::Value,
+    finding_ids: &[String],
+    patch: &serde_json::Value,
 ) -> nexus_contracts::BatchUpdateFindingsRequest {
     serde_json::from_value(serde_json::json!({
         "finding_ids": finding_ids,
@@ -1102,7 +1102,10 @@ async fn retained_work_create_replay_and_lineage_validation() {
         .create_work(&principal, new_work(&world, "Alpha", Some("crid_replay")))
         .await
         .unwrap();
-    assert_eq!(replay.work_id, first.work_id, "replay returns the same Work");
+    assert_eq!(
+        replay.work_id, first.work_id,
+        "replay returns the same Work"
+    );
     assert_eq!(
         core.list_works(&principal, query(serde_json::json!({})))
             .await
@@ -1312,7 +1315,13 @@ async fn retained_work_lazy_completion_promotion_is_idempotent_and_writer_only()
             .unwrap();
         for chapter in 1..=2 {
             nexus_local_db::work_chapters::update_status(
-                &pool, &work_id, chapter, 1, "finalized", Some(4_000), now,
+                &pool,
+                &work_id,
+                chapter,
+                1,
+                "finalized",
+                Some(4_000),
+                now,
             )
             .await
             .unwrap();
@@ -1605,7 +1614,11 @@ async fn retained_pool_promotion_exclusivity_idempotence_and_archive() {
     let again = promoted(beta.clone()).await;
     assert_eq!(again.status, "active");
     let listed = core.list_work_pool(&principal, pool_query()).await.unwrap();
-    assert_eq!(listed.entries.len(), 2, "re-promotion must not insert a row");
+    assert_eq!(
+        listed.entries.len(),
+        2,
+        "re-promotion must not insert a row"
+    );
 
     let archived = core
         .archive_work_pool_entry(
@@ -1618,7 +1631,10 @@ async fn retained_pool_promotion_exclusivity_idempotence_and_archive() {
         .unwrap();
     assert_eq!(archived.status, "archived");
     let listed = core.list_work_pool(&principal, pool_query()).await.unwrap();
-    assert!(listed.entries.iter().any(|entry| entry.status == "archived"));
+    assert!(listed
+        .entries
+        .iter()
+        .any(|entry| entry.status == "archived"));
     core.close().await.unwrap();
 }
 
@@ -1650,7 +1666,10 @@ async fn retained_inspiration_collision_suffixes_and_promote_atomicity() {
     let second = add("Dup Idea").await;
     assert!(first.item_id.starts_with("npi_"));
     assert_ne!(first.item_id, second.item_id);
-    assert_ne!(first.rel_path, second.rel_path, "collision must not clobber");
+    assert_ne!(
+        first.rel_path, second.rel_path,
+        "collision must not clobber"
+    );
     assert!(workspace.join(&first.rel_path).is_file());
     assert!(workspace.join(&second.rel_path).is_file());
 
@@ -1750,10 +1769,11 @@ async fn retained_completion_demotes_active_pool_entry() {
         .await
         .unwrap();
 
-    let entry = nexus_local_db::novel_pool_entries::get_pool_entry_by_work(&pool, "author", &work_id)
-        .await
-        .unwrap()
-        .expect("pool row survives completion");
+    let entry =
+        nexus_local_db::novel_pool_entries::get_pool_entry_by_work(&pool, "author", &work_id)
+            .await
+            .unwrap()
+            .expect("pool row survives completion");
     assert_eq!(entry.status, "completed");
     assert!(
         nexus_local_db::novel_pool_entries::get_active_pool_entry(&pool, "author")
@@ -1803,7 +1823,10 @@ async fn retained_pool_addressing_and_creator_binding_guards() {
         )
         .await
         .unwrap_err();
-    assert!(matches!(&error, CoreError::Forbidden { .. }), "got {error:?}");
+    assert!(
+        matches!(&error, CoreError::Forbidden { .. }),
+        "got {error:?}"
+    );
     let db = nexus_home_layout::workspace_state_db_path(home, "author", "default");
     let seed = init_guarded_pool(&db, "author").await.unwrap();
     let pool = seed.clone_pool();
@@ -1938,7 +1961,11 @@ async fn retained_findings_crud_filters_and_creator_scope() {
     }
 
     let minor = core
-        .create_finding(&principal, work_id.clone(), finding_request("minor", "Minor"))
+        .create_finding(
+            &principal,
+            work_id.clone(),
+            finding_request("minor", "Minor"),
+        )
         .await
         .unwrap();
     let blocker = core
@@ -2084,8 +2111,12 @@ async fn retained_findings_crud_filters_and_creator_scope() {
         .await
         .unwrap();
     assert!(matches!(
-        core.list_findings(&principal, work_id.clone(), nexus_core::ListFindingsQuery::default())
-            .await,
+        core.list_findings(
+            &principal,
+            work_id.clone(),
+            nexus_core::ListFindingsQuery::default()
+        )
+        .await,
         Err(CoreError::NotFound { .. })
     ));
     assert!(matches!(
@@ -2102,7 +2133,11 @@ async fn retained_findings_crud_filters_and_creator_scope() {
     // Creator-scoped row ownership: a finding row belonging to another creator
     // is unreachable by ID, and the author's own row still updates.
     let foreign_row = core
-        .create_finding(&principal, work_id.clone(), finding_request("info", "foreign row"))
+        .create_finding(
+            &principal,
+            work_id.clone(),
+            finding_request("info", "foreign row"),
+        )
         .await
         .unwrap();
     sqlx::query("UPDATE findings SET creator_id = 'other' WHERE finding_id = ?")
@@ -2121,10 +2156,14 @@ async fn retained_findings_crud_filters_and_creator_scope() {
         Err(CoreError::NotFound { .. })
     ));
     assert_eq!(
-        core.update_finding(&principal, blocker.finding_id.clone(), status_set("triaged"))
-            .await
-            .unwrap()
-            .status,
+        core.update_finding(
+            &principal,
+            blocker.finding_id.clone(),
+            status_set("triaged")
+        )
+        .await
+        .unwrap()
+        .status,
         "triaged"
     );
     sqlx::query("DELETE FROM findings WHERE creator_id = 'other'")
@@ -2156,7 +2195,11 @@ async fn retained_findings_lifecycle_and_batch_update_contracts() {
     let work_id = create(&core, &principal, &world, "Lifecycle").await;
 
     let walk = core
-        .create_finding(&principal, work_id.clone(), finding_request("major", "walk"))
+        .create_finding(
+            &principal,
+            work_id.clone(),
+            finding_request("major", "walk"),
+        )
         .await
         .unwrap();
     for status in ["triaged", "in_review", "resolved"] {
@@ -2222,7 +2265,10 @@ async fn retained_findings_lifecycle_and_batch_update_contracts() {
             assert_eq!(field, "invalid_input");
             assert!(reason.contains("status"), "{reason}");
             assert!(reason.contains("closed"), "{reason}");
-            assert!(reason.contains("open") && reason.contains("resolved"), "{reason}");
+            assert!(
+                reason.contains("open") && reason.contains("resolved"),
+                "{reason}"
+            );
         }
         other => panic!("expected InvalidInput, got {other:?}"),
     }
@@ -2236,14 +2282,18 @@ async fn retained_findings_lifecycle_and_batch_update_contracts() {
 
     // Batch: partial success collects unknown IDs, illegal transitions conflict.
     let second = core
-        .create_finding(&principal, work_id.clone(), finding_request("minor", "second"))
+        .create_finding(
+            &principal,
+            work_id.clone(),
+            finding_request("minor", "second"),
+        )
         .await
         .unwrap();
     let batch = |ids: Vec<String>, patch: serde_json::Value| {
         let core = &core;
         let principal = &principal;
         async move {
-            core.batch_update_findings(principal, batch_request(ids, patch))
+            core.batch_update_findings(principal, batch_request(&ids, &patch))
                 .await
         }
     };
@@ -2366,7 +2416,7 @@ async fn retained_findings_batch_dao_failure_preserves_prior_updates() {
     let error = core
         .batch_update_findings(
             &principal,
-            batch_request(ids.clone(), serde_json::json!({"status": "triaged"})),
+            batch_request(&ids, &serde_json::json!({"status": "triaged"})),
         )
         .await
         .unwrap_err();
@@ -2408,11 +2458,19 @@ async fn retained_findings_prune_dry_run_and_delete() {
     let work_id = create(&core, &principal, &world, "Prune").await;
 
     let aged = core
-        .create_finding(&principal, work_id.clone(), finding_request("major", "aged"))
+        .create_finding(
+            &principal,
+            work_id.clone(),
+            finding_request("major", "aged"),
+        )
         .await
         .unwrap();
     let recent = core
-        .create_finding(&principal, work_id.clone(), finding_request("minor", "recent"))
+        .create_finding(
+            &principal,
+            work_id.clone(),
+            finding_request("minor", "recent"),
+        )
         .await
         .unwrap();
 

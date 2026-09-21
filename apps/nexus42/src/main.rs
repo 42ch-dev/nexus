@@ -97,10 +97,10 @@ async fn async_main(cli: Cli) -> Result<()> {
         Some(Commands::Connect { command }) => nexus42::commands::connect::run(command).await,
         Some(Commands::Acp { command }) => nexus42::commands::acp::run(command, &config).await,
         Some(Commands::Compute { command }) => {
-            nexus42::commands::compute::run(command, &config, &output_format).await
+            nexus42::commands::compute::run(command, &config, &output_format)
         }
         Some(Commands::Capability { command }) => {
-            nexus42::commands::capability::run(command, &config, &output_format).await
+            nexus42::commands::capability::run(command, &config, &output_format)
         }
         Some(Commands::System { command }) => {
             nexus42::commands::system::run(command, &config).await

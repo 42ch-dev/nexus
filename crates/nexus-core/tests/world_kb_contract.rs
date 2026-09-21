@@ -1254,6 +1254,7 @@ async fn seed_kb_row(
 /// an existing row conflicts at the stored revision, malformed ids and a
 /// missing required field are validation refusals, and a soft-deleted row is
 /// terminal — never a create.
+#[allow(clippy::too_many_lines)] // one entity create/update convention matrix
 #[tokio::test]
 async fn retained_world_kb_entity_create_update_conventions() {
     let fx = setup().await;
@@ -1445,12 +1446,13 @@ async fn retained_world_kb_entity_create_update_conventions() {
     );
     // The governance half of the authoring transaction owns its own bump, so
     // the next CAS base is the STORED revision, not the response's.
-    let stored_version: i64 =
-        sqlx::query_scalar("SELECT COALESCE(revision, 0) FROM kb_key_blocks WHERE key_block_id = ?")
-            .bind(entity_id)
-            .fetch_one(&pool_ro)
-            .await
-            .unwrap();
+    let stored_version: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(revision, 0) FROM kb_key_blocks WHERE key_block_id = ?",
+    )
+    .bind(entity_id)
+    .fetch_one(&pool_ro)
+    .await
+    .unwrap();
     let shared: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
         "entity_id": entity_id,
         "expected_version": stored_version,
@@ -1506,7 +1508,10 @@ async fn retained_world_kb_entity_create_update_conventions() {
     let attributes = &wire["body"]["attributes"];
     assert_eq!(attributes["weight"], 5.0);
     assert_eq!(attributes["named"], serde_json::json!(null));
-    assert_eq!(attributes["contents"], serde_json::json!(["sword", "potion"]));
+    assert_eq!(
+        attributes["contents"],
+        serde_json::json!(["sword", "potion"])
+    );
     assert_eq!(
         attributes["metadata"],
         serde_json::json!({"rarity": "common"})
@@ -1522,6 +1527,7 @@ async fn retained_world_kb_entity_create_update_conventions() {
 /// replaces its whole value, omission and an empty object both preserve the
 /// stored dialects, unknown keys round-trip verbatim, and the graph carries
 /// the modules — omitting the key entirely for an entity that has none.
+#[allow(clippy::too_many_lines)] // one modules/graph projection journey
 #[tokio::test]
 async fn retained_world_kb_modules_semantics_and_graph_projection() {
     let fx = setup().await;

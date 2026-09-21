@@ -95,7 +95,7 @@ pub enum ComputeCommand {
 /// # Errors
 ///
 /// Returns [`CliError::ComputeExit`] with the AR-9 exit code on failure.
-pub async fn run(cmd: ComputeCommand, _config: &CliConfig, _output_format: &str) -> Result<()> {
+pub fn run(cmd: ComputeCommand, _config: &CliConfig, _output_format: &str) -> Result<()> {
     match cmd {
         ComputeCommand::Build { manifest, release } => cmd_build(&manifest, release),
         ComputeCommand::Validate {

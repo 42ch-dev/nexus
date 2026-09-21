@@ -111,7 +111,7 @@ pub enum CapabilityCommand {
 ///
 /// Returns [`CliError::ComputeExit`] with the AR-41 exit code on failure
 /// (the shared AR-9 exit-code plumbing maps 1/2/3 in `main.rs`).
-pub async fn run(cmd: CapabilityCommand, _config: &CliConfig, _output_format: &str) -> Result<()> {
+pub fn run(cmd: CapabilityCommand, _config: &CliConfig, _output_format: &str) -> Result<()> {
     match cmd {
         CapabilityCommand::Validate {
             descriptor,

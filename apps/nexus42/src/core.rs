@@ -25,8 +25,8 @@ use std::path::Path;
 
 use crate::config::{user_home_dir, CliConfig};
 use crate::errors::{CliError, Result};
-use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService};
 use nexus_contracts::CoreCloseReport;
+use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService};
 
 /// Open the direct-writer core over the raw user home.
 ///
@@ -36,7 +36,7 @@ use nexus_contracts::CoreCloseReport;
 /// the mapped core error ([`map_core_error`]) when no creator/workspace is
 /// selected, the selected workspace was never materialized, its path cannot be
 /// probed, or the writer pool cannot be admitted.
-pub(crate) async fn open_direct_core(config: &CliConfig) -> Result<CoreService> {
+pub async fn open_direct_core(config: &CliConfig) -> Result<CoreService> {
     let user_home = user_home_dir().map_err(|e| CliError::Config(e.to_string()))?;
     require_materialized_workspace_from_home(config, &user_home)?;
     CoreService::open(CoreOpenOptions {
@@ -61,7 +61,7 @@ pub(crate) async fn open_direct_core(config: &CliConfig) -> Result<CoreService> 
 /// Returns [`CliError::Config`] when the home directory cannot be resolved and
 /// the mapped core error when no creator is selected, the selected workspace
 /// was never materialized, or its metadata cannot be read.
-pub(crate) fn require_materialized_workspace(config: &CliConfig) -> Result<()> {
+pub fn require_materialized_workspace(config: &CliConfig) -> Result<()> {
     let user_home = user_home_dir().map_err(|e| CliError::Config(e.to_string()))?;
     require_materialized_workspace_from_home(config, &user_home)
 }
@@ -117,7 +117,7 @@ fn require_materialized_workspace_from_home(config: &CliConfig, user_home: &Path
 /// `WorldKbConflict` is deliberately NOT handled here: it needs the caller's
 /// `expected_version`, which only the patch leaf knows — that leaf keeps its
 /// own `map_patch_error` wrapper around this mapper.
-pub(crate) fn map_core_error(err: CoreError) -> CliError {
+pub fn map_core_error(err: CoreError) -> CliError {
     match err {
         CoreError::Uninitialized | CoreError::AuthRequired => CliError::CreatorNotSelected,
         CoreError::Forbidden { resource } => CliError::Api {
@@ -410,7 +410,7 @@ fn preset_rejected_code(code: &str) -> &str {
 ///
 /// Callers render only after this returns, so nothing is printed ahead of a
 /// close that failed.
-pub(crate) async fn finish_direct<T>(core: &CoreService, outcome: Result<T>) -> Result<T> {
+pub async fn finish_direct<T>(core: &CoreService, outcome: Result<T>) -> Result<T> {
     let (result, warning) = resolve_direct(outcome, core.close().await.map_err(map_core_error));
     if let Some(warning) = warning {
         eprintln!("warning: {warning}");
@@ -536,10 +536,8 @@ mod tests {
         );
         assert!(warning.is_none(), "nothing is left to report: {warning:?}");
 
-        let (failed, warning) = resolve_direct::<u32>(
-            Ok(7),
-            Err(CliError::Other("pool close failed".to_string())),
-        );
+        let (failed, warning) =
+            resolve_direct::<u32>(Ok(7), Err(CliError::Other("pool close failed".to_string())));
         assert_eq!(
             failed
                 .expect_err("a failed close is the command's outcome")
@@ -599,7 +597,11 @@ mod direct_writer_lifetime {
 
         let creator = selector
             .register_creator(CoreRegisterCreatorRequest {
-                display_name: Some("Direct Lifetime Author".parse().expect("valid display name")),
+                display_name: Some(
+                    "Direct Lifetime Author"
+                        .parse()
+                        .expect("valid display name"),
+                ),
                 platform_creator_id: None,
             })
             .await
@@ -687,9 +689,8 @@ mod direct_writer_lifetime {
             )
             .await
             .map_err(map_core_error);
-        let rejected = match finish_direct(&core, outcome).await {
-            Ok(_) => panic!("a stale expected_version is rejected"),
-            Err(error) => error,
+        let Err(rejected) = finish_direct(&core, outcome).await else {
+            panic!("a stale expected_version is rejected");
         };
         assert!(
             matches!(rejected, CliError::WorldKbConflict { .. }),

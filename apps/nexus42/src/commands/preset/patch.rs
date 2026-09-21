@@ -277,6 +277,7 @@ pub async fn run(cmd: PatchCommand, config: &CliConfig) -> Result<()> {
 /// `--description` is given, or the mapped core refusal (409
 /// `strategy_conflict`, 404 `not_found`, 422 `strategy_validation_failed`,
 /// 400 `bad_request` for other 400s).
+#[allow(clippy::too_many_arguments)] // CLI param plumbing — house pattern
 async fn patch_state(
     core: &CoreService,
     principal: &Principal,
@@ -394,6 +395,7 @@ async fn patch_transition(
 /// Returns a named `CliError::Other` when `--file` cannot be read, or the
 /// mapped core refusal (409 `strategy_conflict`, 404 `not_found`, 422
 /// `strategy_validation_failed`, 400 `bad_request` for other 400s).
+#[allow(clippy::too_many_arguments)] // CLI param plumbing — house pattern
 async fn patch_prompt(
     core: &CoreService,
     principal: &Principal,

@@ -41,11 +41,14 @@ fn generic_descriptors() -> Vec<McpServer> {
     ]
 }
 
+/// `(name, command, args, env pairs)` lifted off a `Stdio` descriptor.
+type StdioEvidence = (String, PathBuf, Vec<String>, Vec<(String, String)>);
+
 /// Descriptors observed by the scripted agent's `session/new` handler.
 #[derive(Debug)]
 struct DescriptorEvidence {
     count: usize,
-    stdio: Option<(String, PathBuf, Vec<String>, Vec<(String, String)>)>,
+    stdio: Option<StdioEvidence>,
     http: Option<(String, String)>,
     sse: Option<(String, String)>,
 }
@@ -146,8 +149,14 @@ async fn acp_session_delivers_generic_mcp_server_descriptors() {
     );
 
     let (name, url) = evidence.http.expect("http descriptor delivered");
-    assert_eq!((name.as_str(), url.as_str()), ("probe-http", "https://mcp.example/mcp"));
+    assert_eq!(
+        (name.as_str(), url.as_str()),
+        ("probe-http", "https://mcp.example/mcp")
+    );
 
     let (name, url) = evidence.sse.expect("sse descriptor delivered");
-    assert_eq!((name.as_str(), url.as_str()), ("probe-sse", "https://mcp.example/sse"));
+    assert_eq!(
+        (name.as_str(), url.as_str()),
+        ("probe-sse", "https://mcp.example/sse")
+    );
 }

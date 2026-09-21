@@ -36,7 +36,10 @@ fn stderr(out: &Output) -> String {
 fn labelled(out: &str, label: &str) -> String {
     out.lines()
         .find_map(|line| line.split_once(label).map(|(_, rest)| rest.trim()))
-        .map_or_else(|| panic!("no '{label}' line in output:\n{out}"), str::to_string)
+        .map_or_else(
+            || panic!("no '{label}' line in output:\n{out}"),
+            str::to_string,
+        )
 }
 
 /// The fixture home holds exactly one creator; its id is the directory name
@@ -70,13 +73,7 @@ fn fixture_state_db(fixture: &DirectFixture) -> PathBuf {
 fn seed_world_with_fork_point(fixture: &DirectFixture) -> (String, String, String) {
     let create = fixture
         .command()
-        .args([
-            "creator",
-            "world",
-            "create",
-            "--title",
-            "Fork CLI Test",
-        ])
+        .args(["creator", "world", "create", "--title", "Fork CLI Test"])
         .output()
         .expect("spawn nexus42 world create");
     assert!(
@@ -102,11 +99,7 @@ fn seed_world_with_fork_point(fixture: &DirectFixture) -> (String, String, Strin
         ])
         .output()
         .expect("spawn nexus42 event-add");
-    assert!(
-        add.status.success(),
-        "event-add failed: {}",
-        stderr(&add)
-    );
+    assert!(add.status.success(), "event-add failed: {}", stderr(&add));
     let text = stdout(&add);
     let fork_point = labelled(&text, "Event added:");
     let parent_branch = labelled(&text, "Branch:");

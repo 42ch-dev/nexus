@@ -1133,7 +1133,10 @@ async fn retained_outline_read_derives_default_frontmatter_from_chapters() {
         .work_outline(&fx.principal, fx.work_id.clone())
         .await
         .expect("outline read");
-    assert_eq!(outline.outline_revision, 0, "unpatched outline is revision 0");
+    assert_eq!(
+        outline.outline_revision, 0,
+        "unpatched outline is revision 0"
+    );
     assert_eq!(outline.volumes.len(), 1, "default derivation: one volume");
     assert_eq!(outline.volumes[0].volume_id, NonZeroU64::new(1).unwrap());
     assert_eq!(
@@ -1194,10 +1197,7 @@ async fn retained_outline_structure_and_chapter_patch_round_trip() {
         .expect("Volume 1 kept for the remaining chapters");
     assert_eq!(
         source.chapter_ids,
-        vec![
-            NonZeroU64::new(2).unwrap(),
-            NonZeroU64::new(3).unwrap()
-        ]
+        vec![NonZeroU64::new(2).unwrap(), NonZeroU64::new(3).unwrap()]
     );
 
     let patched = fx
@@ -1411,11 +1411,7 @@ async fn retained_outline_volume_targets_and_published_structure_guard() {
             })),
         )
         .await;
-    assert_outline_validation(
-        "published chapter move",
-        blocked,
-        "published chapter 2",
-    );
+    assert_outline_validation("published chapter move", blocked, "published chapter 2");
     assert_eq!(
         outline_revision(&fx).await,
         2,
@@ -1548,7 +1544,10 @@ async fn retained_foreshadow_temporal_order_guards() {
             &fx.principal,
             "http",
             fx.work_id.clone(),
-            patch(5, serde_json::json!({"operation": "add_event", "title": "Unscheduled"})),
+            patch(
+                5,
+                serde_json::json!({"operation": "add_event", "title": "Unscheduled"}),
+            ),
         )
         .await
         .expect("unscheduled event");
@@ -1591,7 +1590,10 @@ async fn retained_outline_content_patch_revision_and_body_ownership() {
     std::fs::create_dir_all(outline_abs.parent().unwrap()).unwrap();
     std::fs::write(&outline_abs, "# Old outline\n").unwrap();
     let body_abs = fx.creative_root.join(rel_body);
-    fx.write_body(1, "# Chapter body\n\nThe AI owns this prose. It must not change.\n");
+    fx.write_body(
+        1,
+        "# Chapter body\n\nThe AI owns this prose. It must not change.\n",
+    );
     let body_bytes_before = std::fs::read(&body_abs).unwrap();
 
     let patched = fx
@@ -1622,13 +1624,12 @@ async fn retained_outline_content_patch_revision_and_body_ownership() {
     );
 
     // Body ownership: the column and the file bytes are untouched.
-    let stored_body_path: Option<String> = sqlx::query_scalar(
-        "SELECT body_path FROM work_chapters WHERE work_id = ? AND chapter = 1",
-    )
-    .bind(&fx.work_id)
-    .fetch_one(&fx.pool)
-    .await
-    .unwrap();
+    let stored_body_path: Option<String> =
+        sqlx::query_scalar("SELECT body_path FROM work_chapters WHERE work_id = ? AND chapter = 1")
+            .bind(&fx.work_id)
+            .fetch_one(&fx.pool)
+            .await
+            .unwrap();
     assert_eq!(stored_body_path.as_deref(), Some(rel_body));
     assert_eq!(
         std::fs::read(&body_abs).unwrap(),

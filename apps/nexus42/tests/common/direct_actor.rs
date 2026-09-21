@@ -3,7 +3,7 @@
 //! The identity/binding (P0-T9), knowledge (P0-T10) and memory/ToM (P0-T11)
 //! tasks all need the same preconditions: a hermetic raw `HOME` with one active
 //! creator/workspace, owned Worlds, Characters with their initial binding, and
-//! a World-owned `character` `KeyBlock` when a WorldSheet link is exercised.
+//! a World-owned `character` `KeyBlock` when a `WorldSheet` link is exercised.
 //! [`DirectActor`] is that single fixture — include it next to the server-free
 //! [`crate::direct::DirectFixture`] it composes:
 //!
@@ -20,7 +20,7 @@
 //! ```
 //!
 //! Every seed runs through an **authorized** writer — Worlds, Characters and
-//! WorldSheets through the direct core seam (`CoreService`), exactly the
+//! `WorldSheets` through the direct core seam (`CoreService`), exactly the
 //! producers the product paths use — and never through a foreign-actor
 //! surrogate: no principal, ownership row or holder is fabricated by hand.
 //!
@@ -196,7 +196,7 @@ impl DirectActor {
     }
 
     /// Seed one World-owned `character` `KeyBlock` — the only shape a binding
-    /// may link as its WorldSheet (a shared, live, World-owned character
+    /// may link as its `WorldSheet` (a shared, live, World-owned character
     /// entry) — through the core's own World-KB authoring path.
     ///
     /// `key_block_id` must follow the stored `kb_<hex>` convention.

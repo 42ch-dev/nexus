@@ -45,9 +45,7 @@ use nexus_contracts::generated::core::orchestration_presets::preset_profile_resp
 // generated `preset_management` response (its `source` enum displays the real
 // `embedded` / `system` / `user` label), so the CLI reads that type directly
 // instead of the retired daemon client's private copy.
-use nexus_contracts::generated::daemon_api::preset_management::list_presets_response::{
-    ListPresetsResponse,
-};
+use nexus_contracts::generated::daemon_api::preset_management::list_presets_response::ListPresetsResponse;
 use nexus_contracts::ScaffoldPresetRequest;
 
 pub mod patch;
@@ -146,7 +144,10 @@ async fn list_presets(
         let principal = core.active_principal().await.map_err(map_core_error)?;
         // A failure here is a real core refusal — surface it instead of
         // silently degrading the list to no presets (F-001 reliability nit).
-        let response = core.list_presets(&principal).await.map_err(map_core_error)?;
+        let response = core
+            .list_presets(&principal)
+            .await
+            .map_err(map_core_error)?;
         Ok(build_preset_rows(&response, intent_filter))
     }
     .await;

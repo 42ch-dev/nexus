@@ -34,10 +34,12 @@ use clap::Subcommand;
 use nexus_contracts::daemon_api::actor_knowledge::{
     add_knowledge_entry_request::AddKnowledgeEntryRequest,
     add_knowledge_entry_response::AddKnowledgeEntryResponse,
-    knowledge_entry_detail::KnowledgeEntryDetail, knowledge_view_item::KnowledgeViewItem,
+    knowledge_entry_detail::KnowledgeEntryDetail,
+    knowledge_view_item::KnowledgeViewItem,
     list_character_knowledge_response::ListCharacterKnowledgeResponse,
     update_knowledge_entry_request::UpdateKnowledgeEntryRequestAudience,
-    view_request::{NexusActorRef, ViewRequest}, view_response::ViewResponse,
+    view_request::{NexusActorRef, ViewRequest},
+    view_response::ViewResponse,
 };
 use nexus_contracts::daemon_api::characters::memory::capture_character_pending_review_request::CaptureCharacterPendingReviewRequest;
 use nexus_contracts::daemon_api::characters::memory::capture_character_pending_review_response::CaptureCharacterPendingReviewResponse;
@@ -523,6 +525,7 @@ pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
 /// Every mutation carries the caller's explicit `--expected-revision` into the
 /// core's CAS, and every lifecycle write goes through the core's exclusive
 /// per-Character transition lease — never a bare status write.
+#[allow(clippy::too_many_lines)] // single CLI command dispatcher
 async fn run_arm(
     core: &CoreService,
     principal: &Principal,
@@ -791,7 +794,18 @@ async fn run_arm(
                 limit,
                 cursor,
                 json,
-            } => memory_pending_list(core, principal, &character_id, binding_id, limit, cursor, json).await,
+            } => {
+                memory_pending_list(
+                    core,
+                    principal,
+                    &character_id,
+                    binding_id,
+                    limit,
+                    cursor,
+                    json,
+                )
+                .await
+            }
             CharacterMemoryCommand::PendingCount {
                 character_id,
                 binding_id,
@@ -801,9 +815,7 @@ async fn run_arm(
                 character_id,
                 pending_id,
                 json,
-            } => {
-                memory_pending_dismiss(core, principal, &character_id, &pending_id, json).await
-            }
+            } => memory_pending_dismiss(core, principal, &character_id, &pending_id, json).await,
             CharacterMemoryCommand::Review {
                 character_id,
                 binding_id,
@@ -815,7 +827,18 @@ async fn run_arm(
                 limit,
                 cursor,
                 json,
-            } => memory_fragments(core, principal, &character_id, binding_id, limit, cursor, json).await,
+            } => {
+                memory_fragments(
+                    core,
+                    principal,
+                    &character_id,
+                    binding_id,
+                    limit,
+                    cursor,
+                    json,
+                )
+                .await
+            }
             CharacterMemoryCommand::Promote {
                 character_id,
                 fragment_id,
@@ -982,6 +1005,7 @@ fn decode_list_cursor(cursor: Option<&str>) -> Result<u32> {
 /// (`--world-id` shape, display-name bounds, `--persona` shape) and the mapped
 /// core refusal otherwise (foreign/unknown World,
 /// `duplicate_character_display_name`, `invalid_world_sheet`).
+#[allow(clippy::too_many_arguments)] // CLI arg mapping
 async fn create(
     core: &CoreService,
     principal: &Principal,
@@ -1292,7 +1316,7 @@ async fn show_binding(
     Ok(Some(render_binding_detail(&resp, json)?))
 }
 
-/// Patch the optional WorldSheet link under the caller's explicit revision CAS.
+/// Patch the optional `WorldSheet` link under the caller's explicit revision CAS.
 ///
 /// # Errors
 ///
@@ -1558,10 +1582,10 @@ fn render_knowledge_detail(resp: &KnowledgeEntryDetail, json: bool) -> Result<St
     if json {
         return Ok(serde_json::to_string_pretty(resp)?);
     }
-    let summary = match resp.summary.as_ref() {
-        Some(text) => format!("summary:\n{}", text.as_str()),
-        None => "summary: (none)".to_string(),
-    };
+    let summary = resp.summary.as_ref().map_or_else(
+        || "summary: (none)".to_string(),
+        |text| format!("summary:\n{}", text.as_str()),
+    );
     Ok(format!(
         "entry_id: {}\ncanonical_name: {}\nrevision: {}\n{summary}",
         *resp.item.entry_id, *resp.item.canonical_name, resp.item.revision
@@ -1744,10 +1768,9 @@ async fn edit_knowledge(
     let summary_patch = if clear_summary {
         FieldPatch::Clear
     } else {
-        match summary_text.as_deref() {
-            Some(text) => FieldPatch::Set(text),
-            None => FieldPatch::Keep,
-        }
+        summary_text
+            .as_deref()
+            .map_or(FieldPatch::Keep, FieldPatch::Set)
     };
     // The closed `--audience` pair is admitted from the wire member exactly
     // like the native bridge: the CLI never supplies a holder id, and the core
@@ -1756,8 +1779,8 @@ async fn edit_knowledge(
         .map(serde_json::from_value)
         .transpose()
         .map_err(|err| CliError::Other(err.to_string()))?;
-    let audience = nexus_core::authored_patch_audience(audience_wire.as_ref())
-        .map_err(map_core_error)?;
+    let audience =
+        nexus_core::authored_patch_audience(audience_wire.as_ref()).map_err(map_core_error)?;
     let stored = core
         .patch_actor_knowledge_entry(
             principal,
@@ -2017,7 +2040,10 @@ async fn memory_pending_list(
     let mut lines: Vec<String> = Vec::with_capacity(resp.items.len() + 1);
     for r in &resp.items {
         if let Some(b) = r.binding_id.as_deref() {
-            lines.push(format!("{}  {}  binding={}", *r.pending_id, *r.task_kind, b));
+            lines.push(format!(
+                "{}  {}  binding={}",
+                *r.pending_id, *r.task_kind, b
+            ));
         } else {
             lines.push(format!("{}  {}  shared", *r.pending_id, *r.task_kind));
         }
@@ -2287,6 +2313,7 @@ async fn tom_record(
     Ok(Some(render_tom_record(&resp, json)?))
 }
 
+#[allow(clippy::too_many_arguments)] // CLI arg mapping
 async fn tom_show(
     core: &CoreService,
     principal: &Principal,

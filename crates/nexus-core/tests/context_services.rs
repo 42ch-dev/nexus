@@ -833,6 +833,7 @@ async fn v1191_holder_context_inspect_reads_actor_view_and_retires_a_stale_snaps
 /// soft-deletes the row (retained, `status: "expired"`, `expires_at` stamped)
 /// and the scope falls back to "no active directive"; an empty body and a Work
 /// owned by another creator are refused before any write.
+#[allow(clippy::too_many_lines)] // one directive-lifecycle journey asserted end to end
 #[tokio::test]
 async fn retained_moment_directive_set_show_clear_and_scope_ownership() {
     let env = seed_env().await;
@@ -875,7 +876,11 @@ async fn retained_moment_directive_set_show_clear_and_scope_ownership() {
     assert_eq!(set["ttl_kind"], "generations", "{set}");
     assert_eq!(set["ttl_remaining"], 3, "{set}");
     assert_eq!(set["creator_id"], CREATOR, "{set}");
-    assert_eq!(set["last_focused_event_id"], serde_json::Value::Null, "{set}");
+    assert_eq!(
+        set["last_focused_event_id"],
+        serde_json::Value::Null,
+        "{set}"
+    );
     assert_eq!(set["expires_at"], serde_json::Value::Null, "{set}");
     assert_eq!(set["replaced_by"], serde_json::Value::Null, "{set}");
     assert!(
@@ -928,7 +933,10 @@ async fn retained_moment_directive_set_show_clear_and_scope_ownership() {
         .expect("row read")
         .expect("the active row is retained");
     assert_eq!(untouched.status, "active", "no silent overwrite");
-    assert!(untouched.replaced_by.is_none(), "no replaced_by without replace");
+    assert!(
+        untouched.replaced_by.is_none(),
+        "no replaced_by without replace"
+    );
 
     // `replace: true` supersedes: the old row is soft-deleted and chained.
     let second = core
@@ -955,7 +963,10 @@ async fn retained_moment_directive_set_show_clear_and_scope_ownership() {
         .await
         .expect("row read")
         .expect("the superseded row is retained");
-    assert_eq!(replaced.status, "expired", "the superseded row is soft-deleted");
+    assert_eq!(
+        replaced.status, "expired",
+        "the superseded row is soft-deleted"
+    );
     assert_eq!(
         replaced.replaced_by.as_deref(),
         Some(second_id.as_str()),
@@ -1014,7 +1025,10 @@ async fn retained_moment_directive_set_show_clear_and_scope_ownership() {
         )
         .await
         .expect("clear work directive");
-    assert_eq!(serde_json::to_value(&cleared).unwrap(), serde_json::json!({}));
+    assert_eq!(
+        serde_json::to_value(&cleared).unwrap(),
+        serde_json::json!({})
+    );
     let expired = nexus_local_db::moment_directive::get_by_id(&pool, &second_id)
         .await
         .expect("row read")
@@ -1151,9 +1165,7 @@ async fn retained_inspect_moment_places_activation_seeds_and_expands_confirmed_h
         .as_array()
         .expect("modules.placement array");
     assert!(
-        placement
-            .iter()
-            .any(|row| row["entry_id"] == "kb_act_seed"),
+        placement.iter().any(|row| row["entry_id"] == "kb_act_seed"),
         "the constant seed must be placed: {packet}"
     );
     let trace = packet["modules"]["activation_trace"]
@@ -1163,7 +1175,10 @@ async fn retained_inspect_moment_places_activation_seeds_and_expands_confirmed_h
         .iter()
         .find(|row| row["entry_id"] == "kb_act_seed")
         .expect("the constant seed has a trace row");
-    assert_eq!(seed_trace["accepted"], true, "the constant seed fires: {packet}");
+    assert_eq!(
+        seed_trace["accepted"], true,
+        "the constant seed fires: {packet}"
+    );
     assert!(
         seed_trace["reason"]
             .as_str()
@@ -1197,7 +1212,10 @@ async fn retained_inspect_moment_places_activation_seeds_and_expands_confirmed_h
     // Budget: the activation-token accounting, with the hop pass having run.
     let budget = packet["budget"].as_object().expect("budget object");
     for key in ["primary_tokens_est", "hop_tokens_est", "cap", "remaining"] {
-        assert!(budget.contains_key(key), "budget must carry {key}: {packet}");
+        assert!(
+            budget.contains_key(key),
+            "budget must carry {key}: {packet}"
+        );
     }
     assert!(
         budget["hop_tokens_est"].as_u64().unwrap_or(0) > 0,

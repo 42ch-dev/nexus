@@ -83,9 +83,7 @@ impl DirectFixture {
     /// The real `nexus42` binary, pointed at this fixture's hermetic `HOME`.
     pub fn command(&self) -> assert_cmd::Command {
         let mut command = assert_cmd::Command::cargo_bin("nexus42").expect("nexus42 binary");
-        command
-            .env("HOME", self.home.path())
-            .env("RUST_LOG", "off");
+        command.env("HOME", self.home.path()).env("RUST_LOG", "off");
         command
     }
 }

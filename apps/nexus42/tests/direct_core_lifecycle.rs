@@ -48,9 +48,7 @@ use direct::DirectFixture;
 use nexus_contracts::world_kb_patch_entity_request::{
     NexusWorldKbEntityPatch, NexusWorldKbEntityPatchBlockType, NexusWorldKbEntityPatchTitle,
 };
-use nexus_contracts::{
-    CreateWorldRequest, WorldKbPatchEntityRequest, WorldKbPatchEntityResponse,
-};
+use nexus_contracts::{CreateWorldRequest, WorldKbPatchEntityRequest, WorldKbPatchEntityResponse};
 use nexus_core::{CoreAccess, CoreOpenOptions, CoreService};
 use std::path::Path;
 use std::process::Output;
@@ -83,8 +81,10 @@ async fn seed_world_and_entity(home: &Path) -> (String, u64) {
     let world_id = core
         .create_world(
             &principal,
-            serde_json::from_value::<CreateWorldRequest>(serde_json::json!({ "title": WORLD_TITLE }))
-                .expect("world request shape"),
+            serde_json::from_value::<CreateWorldRequest>(
+                serde_json::json!({ "title": WORLD_TITLE }),
+            )
+            .expect("world request shape"),
         )
         .await
         .expect("create world")
@@ -429,7 +429,11 @@ fn anonymous_selection_is_refused_before_any_storage_write() {
         refusal.contains("Creator not selected"),
         "the declared selection refusal: {refusal}"
     );
-    for leak in ["migration.lock", "database_error", "No such file or directory"] {
+    for leak in [
+        "migration.lock",
+        "database_error",
+        "No such file or directory",
+    ] {
         assert!(
             !refusal.contains(leak),
             "no raw storage I/O may leak ({leak}): {refusal}"
@@ -546,7 +550,11 @@ fn anonymous_selection_is_refused_at_every_kb_entrance() {
             refusal.contains("Creator not selected"),
             "the declared selection refusal for {args:?}: {refusal}"
         );
-        for leak in ["migration.lock", "database_error", "No such file or directory"] {
+        for leak in [
+            "migration.lock",
+            "database_error",
+            "No such file or directory",
+        ] {
             assert!(
                 !refusal.contains(leak),
                 "no raw storage I/O may leak through {args:?} ({leak}): {refusal}"
@@ -767,7 +775,11 @@ fn anonymous_selection_is_refused_at_every_reference_entrance() {
             refusal.contains("Creator not selected"),
             "the declared selection refusal for {args:?}: {refusal}"
         );
-        for leak in ["migration.lock", "database_error", "No such file or directory"] {
+        for leak in [
+            "migration.lock",
+            "database_error",
+            "No such file or directory",
+        ] {
             assert!(
                 !refusal.contains(leak),
                 "no raw storage I/O may leak through {args:?} ({leak}): {refusal}"
@@ -826,7 +838,11 @@ fn anonymous_selection_is_refused_at_world_event_add() {
         refusal.contains("Creator not selected"),
         "the declared selection refusal: {refusal}"
     );
-    for leak in ["migration.lock", "database_error", "No such file or directory"] {
+    for leak in [
+        "migration.lock",
+        "database_error",
+        "No such file or directory",
+    ] {
         assert!(
             !refusal.contains(leak),
             "no raw storage I/O may leak ({leak}): {refusal}"

@@ -652,7 +652,10 @@ async fn reflect_states_follow_the_gate_cache_and_provider_presence() {
         .await
         .unwrap();
     assert_eq!(stale.state.to_string(), "stale");
-    assert!(stale.stale, "the stale flag follows the divergent fingerprint");
+    assert!(
+        stale.stale,
+        "the stale flag follows the divergent fingerprint"
+    );
     assert_eq!(stale.current_fragment_count, 13);
     assert!(
         stale.narrative.is_some(),
@@ -862,12 +865,18 @@ async fn retained_pending_cursor_walk_has_no_gaps_or_overlap() {
         "page one must return exactly the page size, not the whole dataset"
     );
     assert_eq!(first.pagination.limit, i64::try_from(PAGE_SIZE).unwrap());
-    assert!(first.pagination.has_more, "has_more must be true while rows remain");
+    assert!(
+        first.pagination.has_more,
+        "has_more must be true while rows remain"
+    );
     assert!(
         first.pagination.next_cursor.is_some(),
         "has_more without next_cursor"
     );
-    assert_eq!(first.items[0].pending_id, "pending_bounded_059", "newest first");
+    assert_eq!(
+        first.items[0].pending_id, "pending_bounded_059",
+        "newest first"
+    );
     // A NULL `world_id` is omitted from the item projection (optional field).
     let item_wire = serde_json::to_value(&first.items[0]).unwrap();
     assert!(!item_wire.as_object().unwrap().contains_key("world_id"));
@@ -933,7 +942,10 @@ async fn retained_pending_cursor_walk_has_no_gaps_or_overlap() {
     // Pending-show beyond page one: the oldest row is not on page one, and the
     // walk only reaches it on the final page.
     assert!(
-        !first.items.iter().any(|item| item.pending_id == "pending_bounded_000"),
+        !first
+            .items
+            .iter()
+            .any(|item| item.pending_id == "pending_bounded_000"),
         "the oldest row must not be on page one"
     );
     assert_eq!(
@@ -991,7 +1003,10 @@ async fn retained_creator_review_drain_is_bounded_and_keeps_remaining_rows() {
         )
         .await
         .expect_err("a foreign creator_id must be refused");
-    assert!(matches!(err, CoreError::ForbiddenReason { .. }), "got {err:?}");
+    assert!(
+        matches!(err, CoreError::ForbiddenReason { .. }),
+        "got {err:?}"
+    );
     let pool = plain_pool(&env).await;
     assert_eq!(
         count_where(&pool, "SELECT COUNT(*) FROM memory_pending_review").await,
@@ -1006,21 +1021,38 @@ async fn retained_creator_review_drain_is_bounded_and_keeps_remaining_rows() {
     pool.close().await;
 
     // One bounded call: at most the batch limit, and more rows signalled.
-    let first = core.review_memory(&principal, creator_review_request()).await.unwrap();
-    assert_eq!(first.processed, Some(50), "one call processes the batch bound");
-    assert_eq!(first.has_more, Some(true), "remaining rows must be signalled");
+    let first = core
+        .review_memory(&principal, creator_review_request())
+        .await
+        .unwrap();
+    assert_eq!(
+        first.processed,
+        Some(50),
+        "one call processes the batch bound"
+    );
+    assert_eq!(
+        first.has_more,
+        Some(true),
+        "remaining rows must be signalled"
+    );
     assert_eq!(first.fragmented, 50);
     assert_eq!(first.promoted, 0);
     assert_eq!(first.dropped, 0);
 
     // The remainder drains and the drain reports completion.
-    let second = core.review_memory(&principal, creator_review_request()).await.unwrap();
+    let second = core
+        .review_memory(&principal, creator_review_request())
+        .await
+        .unwrap();
     assert_eq!(second.processed, Some(5), "the second call drains the tail");
     assert_eq!(second.has_more, Some(false));
     assert_eq!(second.fragmented, 5);
 
     // A call on the empty queue reports zero work and completion.
-    let third = core.review_memory(&principal, creator_review_request()).await.unwrap();
+    let third = core
+        .review_memory(&principal, creator_review_request())
+        .await
+        .unwrap();
     assert_eq!(third.processed, Some(0));
     assert_eq!(third.has_more, Some(false));
     assert_eq!(third.promoted + third.fragmented + third.dropped, 0);
@@ -1059,8 +1091,15 @@ async fn retained_creator_review_row_failure_keeps_has_more_true() {
     pool.close().await;
 
     for call in 1..=3 {
-        let out = core.review_memory(&principal, creator_review_request()).await.unwrap();
-        assert_eq!(out.processed, Some(1), "call {call}: the row is re-inspected");
+        let out = core
+            .review_memory(&principal, creator_review_request())
+            .await
+            .unwrap();
+        assert_eq!(
+            out.processed,
+            Some(1),
+            "call {call}: the row is re-inspected"
+        );
         assert_eq!(
             out.has_more,
             Some(true),
@@ -1096,7 +1135,10 @@ async fn retained_creator_review_row_failure_keeps_has_more_true() {
     block_fragment_creation(&pool, "pending_blocked_000").await;
     pool.close().await;
 
-    let out = core.review_memory(&principal, creator_review_request()).await.unwrap();
+    let out = core
+        .review_memory(&principal, creator_review_request())
+        .await
+        .unwrap();
     assert_eq!(out.processed, Some(4), "all four rows were inspected");
     assert_eq!(out.fragmented, 3, "only the blocked row failed");
     assert_eq!(
@@ -1149,7 +1191,10 @@ async fn retained_creator_fragment_list_is_bounded_and_projects_public_fields() 
         PAGE_SIZE,
         "the dataset is {SEED_COUNT} rows but the page bound is {PAGE_SIZE}"
     );
-    assert_eq!(page.fragments[0].fragment_id, "frag_seeded_059", "newest first");
+    assert_eq!(
+        page.fragments[0].fragment_id, "frag_seeded_059",
+        "newest first"
+    );
     assert_eq!(page.fragments[0].keywords, vec!["kw_59".to_string()]);
     assert_eq!(
         page.fragments[0].created_at.as_deref(),
@@ -1187,13 +1232,19 @@ async fn retained_creator_review_propagates_world_id_and_filters_exactly() {
     seed_creator_pending_row(&env, "pend_world_none", None, "2026-01-01T00:00:02Z").await;
 
     // The pending read already carries the provenance (and omits NULL).
-    let listed = core.list_pending_reviews(&principal, None, PAGE_SIZE).await.unwrap();
+    let listed = core
+        .list_pending_reviews(&principal, None, PAGE_SIZE)
+        .await
+        .unwrap();
     assert_eq!(listed.items.len(), 2);
     assert_eq!(listed.items[0].pending_id, "pend_world_none");
     assert!(listed.items[0].world_id.is_none());
     assert_eq!(listed.items[1].world_id.as_deref(), Some("wld_x"));
 
-    let out = core.review_memory(&principal, creator_review_request()).await.unwrap();
+    let out = core
+        .review_memory(&principal, creator_review_request())
+        .await
+        .unwrap();
     assert_eq!(out.fragmented, 2, "both rows are FragmentOnly");
 
     let scoped = core
@@ -1231,11 +1282,7 @@ async fn retained_creator_review_propagates_world_id_and_filters_exactly() {
 // ── Character pending-review lifecycle and drains (P2-T7) ─────────────────
 
 /// Capture request body for one Character scope (`binding_id: None` = shared).
-fn json_capture(
-    pending_id: &str,
-    binding_id: Option<&str>,
-    created_at: &str,
-) -> serde_json::Value {
+fn json_capture(pending_id: &str, binding_id: Option<&str>, created_at: &str) -> serde_json::Value {
     let mut body = serde_json::json!({
         "pending_id": pending_id,
         "session_id": format!("sess_{pending_id}"),
@@ -1285,7 +1332,11 @@ async fn retained_character_pending_lifecycle_scope_delete_and_offset_pages() {
         .capture_character_pending_review(
             &principal,
             chr.clone(),
-            dto(json_capture("pend_local_1", Some(&bind1), "2026-01-01T00:00:02Z")),
+            dto(json_capture(
+                "pend_local_1",
+                Some(&bind1),
+                "2026-01-01T00:00:02Z",
+            )),
         )
         .await
         .expect("binding-local capture");
@@ -1391,7 +1442,11 @@ async fn retained_character_pending_lifecycle_scope_delete_and_offset_pages() {
             .unwrap();
         pages += 1;
         assert_eq!(page.pagination.limit, 2_i64);
-        walked.extend(page.items.iter().map(|item| item.pending_id.as_str().to_string()));
+        walked.extend(
+            page.items
+                .iter()
+                .map(|item| item.pending_id.as_str().to_string()),
+        );
         if !page.pagination.has_more {
             assert!(
                 page.pagination.next_cursor.is_none(),
@@ -1469,8 +1524,16 @@ async fn retained_character_review_batch_is_bounded_and_reports_remaining() {
         )
         .await
         .unwrap();
-    assert_eq!(first.processed, Some(50), "one call processes the batch bound");
-    assert_eq!(first.has_more, Some(true), "remaining rows must be signalled");
+    assert_eq!(
+        first.processed,
+        Some(50),
+        "one call processes the batch bound"
+    );
+    assert_eq!(
+        first.has_more,
+        Some(true),
+        "remaining rows must be signalled"
+    );
     assert_eq!(first.dropped, 50);
 
     let second = core
@@ -1497,7 +1560,11 @@ async fn retained_character_review_batch_is_bounded_and_reports_remaining() {
 
     let pool = plain_pool(&env).await;
     assert_eq!(
-        count_where(&pool, "SELECT COUNT(*) FROM character_memory_pending_review").await,
+        count_where(
+            &pool,
+            "SELECT COUNT(*) FROM character_memory_pending_review"
+        )
+        .await,
         0,
         "the queue is fully drained"
     );
@@ -1525,7 +1592,11 @@ async fn retained_character_memory_writes_hold_the_activity_fence() {
     core.capture_character_pending_review(
         &principal,
         chr.clone(),
-        dto(json_capture("pend_busy", Some(&bind1), "2026-01-01T00:00:01Z")),
+        dto(json_capture(
+            "pend_busy",
+            Some(&bind1),
+            "2026-01-01T00:00:01Z",
+        )),
     )
     .await
     .expect("binding-local capture");
@@ -1541,7 +1612,11 @@ async fn retained_character_memory_writes_hold_the_activity_fence() {
     let busy = core
         .transition_character(
             &principal,
-            transition_request(&chr, 0, CoreCharacterTransitionRequestTargetStatus::Archived),
+            transition_request(
+                &chr,
+                0,
+                CoreCharacterTransitionRequestTargetStatus::Archived,
+            ),
         )
         .await
         .expect_err("archive must refuse while memory activity is outstanding");
@@ -1557,7 +1632,11 @@ async fn retained_character_memory_writes_hold_the_activity_fence() {
     core.capture_character_pending_review(
         &principal,
         chr.clone(),
-        dto(json_capture("pend_promote", Some(&bind1), "2026-01-01T00:00:02Z")),
+        dto(json_capture(
+            "pend_promote",
+            Some(&bind1),
+            "2026-01-01T00:00:02Z",
+        )),
     )
     .await
     .expect("binding-local capture");
@@ -1589,7 +1668,11 @@ async fn retained_character_memory_writes_hold_the_activity_fence() {
     let busy = core
         .transition_character(
             &principal,
-            transition_request(&chr, 0, CoreCharacterTransitionRequestTargetStatus::Archived),
+            transition_request(
+                &chr,
+                0,
+                CoreCharacterTransitionRequestTargetStatus::Archived,
+            ),
         )
         .await
         .expect_err("archive must refuse while promotion activity is outstanding");

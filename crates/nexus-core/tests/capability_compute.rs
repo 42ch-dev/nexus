@@ -60,10 +60,10 @@ fn engine_with(
     extra: &[(&str, ModuleManifest, Vec<u8>)],
     sandbox: Option<SandboxConfig>,
 ) -> (Arc<WasmEngine>, Arc<ModuleCache>) {
-    let engine = Arc::new(match sandbox {
-        Some(config) => WasmEngine::with_config(config).expect("wasm engine"),
-        None => WasmEngine::new().expect("wasm engine"),
-    });
+    let engine = Arc::new(sandbox.map_or_else(
+        || WasmEngine::new().expect("wasm engine"),
+        |config| WasmEngine::with_config(config).expect("wasm engine"),
+    ));
     let cache = Arc::new(ModuleCache::new());
     cache.warm_embedded(&engine).expect("warm embedded module");
     for (id, manifest, bytes) in extra {
@@ -202,10 +202,21 @@ async fn seed_foreign_world(pool: &sqlx::SqlitePool) {
         .await
         .unwrap();
     seed_world(pool, FOREIGN_WORLD, "intruder").await;
-    seed_character(pool, FOREIGN_WORLD, "kb_foreign", "Stranger", 99, 99, 777, 777).await;
+    seed_character(
+        pool,
+        FOREIGN_WORLD,
+        "kb_foreign",
+        "Stranger",
+        99,
+        99,
+        777,
+        777,
+    )
+    .await;
 }
 
 /// Seed one computable character entry in `world_id`.
+#[allow(clippy::too_many_arguments)] // fixture helper: the four combat stats mirror the seeded schema columns
 async fn seed_character(
     pool: &sqlx::SqlitePool,
     world_id: &str,
@@ -580,7 +591,11 @@ async fn hot_removed_user_capability_is_refused_with_zero_domain_effect() {
     };
     let (registry, outcome) =
         CapabilityRegistry::with_runtime_deps_and_user_caps(&deps, &scan_root);
-    assert!(outcome.skipped.is_empty(), "no skips: {:?}", outcome.skipped);
+    assert!(
+        outcome.skipped.is_empty(),
+        "no skips: {:?}",
+        outcome.skipped
+    );
     assert_eq!(outcome.admitted.len(), 2, "both trio dirs are admitted");
 
     let holder = CapabilityRegistryHolder::with_registry(Arc::new(registry));
@@ -1154,8 +1169,7 @@ async fn nexus_work_get_is_creator_scoped() {
         "an unknown work must be forbidden, got {missing:?}"
     );
 
-    let unparametrized =
-        execute_tool(&f.context, &tool_request("nexus.work.get", json!({}))).await;
+    let unparametrized = execute_tool(&f.context, &tool_request("nexus.work.get", json!({}))).await;
     assert!(
         matches!(unparametrized, Err(CoreError::InvalidInput { .. })),
         "a missing work_id must be invalid_input, got {unparametrized:?}"
@@ -1277,7 +1291,10 @@ async fn nexus_schedule_status_reads_a_completion_locked_work() {
 
     let status = execute_tool(
         &f.context,
-        &tool_request("nexus.orchestration.schedule_status", json!({ "work_id": work_id })),
+        &tool_request(
+            "nexus.orchestration.schedule_status",
+            json!({ "work_id": work_id }),
+        ),
     )
     .await
     .expect("a read-only tool still runs while the work is completion-locked");
@@ -1314,7 +1331,10 @@ async fn nexus_context_assemble_is_policy_blocked_in_local_only_mode() {
 
     let err = execute_tool(
         &f.context,
-        &tool_request("nexus.context.assemble", json!({ "requires_platform": true })),
+        &tool_request(
+            "nexus.context.assemble",
+            json!({ "requires_platform": true }),
+        ),
     )
     .await
     .unwrap_err();
@@ -1351,11 +1371,13 @@ async fn tool_dispatch_audits_success_and_every_refusal() {
     execute_tool(&f.context, &tool_request("nexus.context.whoami", json!({})))
         .await
         .expect("whoami succeeds");
-    assert_eq!(audit_outcomes(f.core.pool(), "nexus.context.whoami").await, ["success"]);
+    assert_eq!(
+        audit_outcomes(f.core.pool(), "nexus.context.whoami").await,
+        ["success"]
+    );
 
     // Unknown tool → `not_supported`, audited with that code.
-    let unknown =
-        execute_tool(&f.context, &tool_request("nexus.unknown.tool", json!({}))).await;
+    let unknown = execute_tool(&f.context, &tool_request("nexus.unknown.tool", json!({}))).await;
     assert!(
         matches!(unknown, Err(CoreError::Coded { ref code, .. }) if code == "not_supported"),
         "an unknown tool must report not_supported, got {unknown:?}"
@@ -1386,7 +1408,10 @@ async fn tool_dispatch_audits_success_and_every_refusal() {
     // Policy refusal → `policy_blocked`.
     let _ = execute_tool(
         &f.context,
-        &tool_request("nexus.context.assemble", json!({ "requires_platform": true })),
+        &tool_request(
+            "nexus.context.assemble",
+            json!({ "requires_platform": true }),
+        ),
     )
     .await
     .unwrap_err();
@@ -1531,7 +1556,7 @@ async fn craft_succeeded_run(pool: &sqlx::SqlitePool, proposals: serde_json::Val
 /// Craft a `ComputeOutput` envelope with the given state deltas and event
 /// titles; `affected_ids`, when `Some`, is stamped onto every event.
 fn crafted_proposals(
-    state_delta: Vec<serde_json::Value>,
+    state_delta: &[serde_json::Value],
     event_titles: &[&str],
     affected_ids: Option<&[&str]>,
 ) -> serde_json::Value {
@@ -1631,13 +1656,9 @@ async fn compute_run_refusals_are_typed_and_leave_no_state() {
     seed_foreign_world(f.core.pool()).await;
     seed_world(f.core.pool(), "wld_empty", CREATOR).await;
 
-    let foreign = compute_run(
-        &f.core,
-        &f.compute,
-        run_request(FOREIGN_WORLD, MODULE),
-    )
-    .await
-    .unwrap_err();
+    let foreign = compute_run(&f.core, &f.compute, run_request(FOREIGN_WORLD, MODULE))
+        .await
+        .unwrap_err();
     assert!(
         matches!(foreign, CoreError::WorldOwnerDenied { .. }),
         "a foreign world must be an ownership denial, got {foreign:?}"
@@ -1706,8 +1727,7 @@ async fn compute_run_wall_time_exceeded_is_persisted_as_a_failed_run() {
         max_memory_bytes: 64 * 1024 * 1024,
         wall_time: Duration::from_millis(300),
     };
-    let f =
-        fixture_with_compute(&[("loop", loop_manifest(), loop_wasm())], Some(config)).await;
+    let f = fixture_with_compute(&[("loop", loop_manifest(), loop_wasm())], Some(config)).await;
 
     let err = compute_run(&f.core, &f.compute, run_request(WORLD, "loop")).await;
     assert!(
@@ -1736,7 +1756,7 @@ async fn compute_run_wall_time_exceeded_is_persisted_as_a_failed_run() {
 async fn concurrent_compute_runs_serialize_on_the_engine() {
     let manifests = staggered_loop_manifests();
     let config = SandboxConfig {
-        fuel: 100_000_000_000,             // the loops cannot exhaust fuel
+        fuel: 100_000_000_000, // the loops cannot exhaust fuel
         max_memory_bytes: 64 * 1024 * 1024,
         wall_time: Duration::from_secs(5), // host ceiling above both manifests
     };
@@ -1756,9 +1776,8 @@ async fn concurrent_compute_runs_serialize_on_the_engine() {
     let elapsed = started.elapsed();
 
     for (label, result) in [("long", long_result), ("short", short_result)] {
-        let err = match result {
-            Err(err) => err,
-            Ok(_) => panic!("the {label} loop run must trap on wall time"),
+        let Err(err) = result else {
+            panic!("the {label} loop run must trap on wall time");
         };
         assert!(
             matches!(err, CoreError::Coded { ref code, .. } if code == "compute_wall_time_exceeded"),
@@ -1811,7 +1830,10 @@ async fn compute_run_reports_per_entry_detail_for_an_invalid_entry() {
     assert!(!entries.is_empty(), "details={details}");
     assert_eq!(entries[0]["entry_id"], "kb_broken");
     let reason = entries[0]["reason"].as_str().expect("per-entry reason");
-    assert!(reason.contains("current_hp"), "reason names the field: {reason}");
+    assert!(
+        reason.contains("current_hp"),
+        "reason names the field: {reason}"
+    );
     assert!(
         reason.contains("expected type integer"),
         "reason explains the violation: {reason}"
@@ -1823,7 +1845,10 @@ async fn compute_run_reports_per_entry_detail_for_an_invalid_entry() {
     let error: serde_json::Value =
         serde_json::from_str(error_json.as_deref().expect("failed rows carry error_json")).unwrap();
     assert_eq!(error["code"], "invalid_input");
-    assert_eq!(error["details"]["invalid_entries"][0]["entry_id"], "kb_broken");
+    assert_eq!(
+        error["details"]["invalid_entries"][0]["entry_id"],
+        "kb_broken"
+    );
     assert!(timeline_rows(f.core.pool()).await.is_empty());
 
     // The detail read must serve this failed run (a top-level `invalid_entries`
@@ -1834,7 +1859,10 @@ async fn compute_run_reports_per_entry_detail_for_an_invalid_entry() {
     let detail = serde_json::to_value(&detail).expect("detail serializes");
     assert_eq!(detail["status"], "failed");
     assert_eq!(detail["error"]["code"], "invalid_input");
-    assert_eq!(detail["error"]["details"]["invalid_entries"][0]["entry_id"], "kb_broken");
+    assert_eq!(
+        detail["error"]["details"]["invalid_entries"][0]["entry_id"],
+        "kb_broken"
+    );
 }
 
 /// Accept persists the proposals' `affected_key_block_ids` onto the appended
@@ -1851,7 +1879,7 @@ async fn accept_persists_affected_key_block_ids() {
     let run_id = craft_succeeded_run(
         f.core.pool(),
         crafted_proposals(
-            vec![json!({
+            &[json!({
                 "op": "sub",
                 "path": "character.current_hp",
                 "target_key_block_id": "kb_def",
@@ -1870,7 +1898,8 @@ async fn accept_persists_affected_key_block_ids() {
     let rows = timeline_rows(f.core.pool()).await;
     assert_eq!(rows.len(), 1);
     let affected: Vec<String> = serde_json::from_str(
-        rows[0].4
+        rows[0]
+            .4
             .as_deref()
             .expect("affected ids must be persisted"),
     )
@@ -2208,7 +2237,7 @@ async fn accept_rolls_back_when_a_delta_targets_another_world() {
     let run_id = craft_succeeded_run(
         f.core.pool(),
         crafted_proposals(
-            vec![
+            &[
                 // 1st delta: valid, applies inside the TX (def 30 → 15).
                 json!({
                     "op": "sub",
@@ -2353,7 +2382,7 @@ async fn accept_subsets_events_and_treats_explicit_null_as_all() {
     // Subset: only `evt_0` is appended, the state delta still applies.
     let subset = craft_succeeded_run(
         f.core.pool(),
-        crafted_proposals(delta(), &["First", "Second"], None),
+        crafted_proposals(&delta(), &["First", "Second"], None),
     )
     .await;
     let response = accept_compute_run(
@@ -2371,11 +2400,8 @@ async fn accept_subsets_events_and_treats_explicit_null_as_all() {
     assert_eq!(defender_hp(f.core.pool(), "kb_def").await, 15);
 
     // Unknown id: the whole accept is refused BEFORE any write.
-    let unknown = craft_succeeded_run(
-        f.core.pool(),
-        crafted_proposals(delta(), &["Only"], None),
-    )
-    .await;
+    let unknown =
+        craft_succeeded_run(f.core.pool(), crafted_proposals(&delta(), &["Only"], None)).await;
     let err = accept_compute_run(
         &f.core,
         &principal,
@@ -2397,7 +2423,7 @@ async fn accept_subsets_events_and_treats_explicit_null_as_all() {
     // Explicit null behaves exactly like an absent field: accept all.
     let all = craft_succeeded_run(
         f.core.pool(),
-        crafted_proposals(delta(), &["First", "Second"], None),
+        crafted_proposals(&delta(), &["First", "Second"], None),
     )
     .await;
     let before_null_accept = timeline_rows(f.core.pool()).await.len();

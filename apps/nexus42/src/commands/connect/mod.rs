@@ -77,7 +77,7 @@ pub enum ConnectCommand {
     /// Start the Connect Host node (handshake + manifest + the served
     /// invoke surface: world-scoped upsert/promote/relate/check/assemble,
     /// World/module/Actor-gated compute, and the host-level
-    /// tools.nexus.list_observed_peers / tools.nexus.list_modules reads;
+    /// `tools.nexus.list_observed_peers` / `tools.nexus.list_modules` reads;
     /// project/unknown ops refused)
     Start {
         /// Peer IDs to allowlist for this run (repeatable; unioned with

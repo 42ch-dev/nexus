@@ -849,19 +849,21 @@ async fn retained_pack_conflict_policies_and_review_bound() {
         .find(|name| name.contains("imported"))
         .expect("renamed member carries the disambiguating suffix")
         .clone();
-    let renamed_id: String =
-        sqlx::query_scalar("SELECT key_block_id FROM kb_key_blocks WHERE world_id = ? AND canonical_name = ?")
-            .bind(TARGET)
-            .bind(&renamed_name)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-    let aria_id: String =
-        sqlx::query_scalar("SELECT key_block_id FROM kb_key_blocks WHERE world_id = ? AND canonical_name = 'Aria'")
-            .bind(TARGET)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let renamed_id: String = sqlx::query_scalar(
+        "SELECT key_block_id FROM kb_key_blocks WHERE world_id = ? AND canonical_name = ?",
+    )
+    .bind(TARGET)
+    .bind(&renamed_name)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let aria_id: String = sqlx::query_scalar(
+        "SELECT key_block_id FROM kb_key_blocks WHERE world_id = ? AND canonical_name = 'Aria'",
+    )
+    .bind(TARGET)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     let endpoints: (String, String) = sqlx::query_as(
         "SELECT source_entity_id, target_entity_id FROM kb_relationships WHERE world_id = ? LIMIT 1",
     )
@@ -890,10 +892,12 @@ async fn retained_pack_conflict_policies_and_review_bound() {
 
     // ── overwrite: the pack body replaces the target body but the target's
     //    own status survives ───────────────────────────────────────────────
-    sqlx::query("UPDATE kb_key_blocks SET status = 'provisional' WHERE key_block_id = 'kb_target_kael'")
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        "UPDATE kb_key_blocks SET status = 'provisional' WHERE key_block_id = 'kb_target_kael'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     let overwritten = core
         .import_world_pack(
             &principal,
@@ -939,12 +943,11 @@ async fn retained_pack_conflict_policies_and_review_bound() {
         restored.entries.overwritten >= 1,
         "same-world re-import overwrites rather than skips: {restored:?}"
     );
-    let stale: String = sqlx::query_scalar(
-        "SELECT body_json FROM kb_key_blocks WHERE key_block_id = 'kb_pack_b'",
-    )
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let stale: String =
+        sqlx::query_scalar("SELECT body_json FROM kb_key_blocks WHERE key_block_id = 'kb_pack_b'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert!(
         stale.contains("Kael from pack"),
         "overwrite restores the pack body, got {stale}"

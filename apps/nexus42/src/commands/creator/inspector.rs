@@ -84,7 +84,17 @@ pub async fn run(cmd: InspectorCommand, config: &CliConfig) -> Result<()> {
                 work,
                 stage,
                 json,
-            } => moment(&core, &principal, &world_id, work.as_deref(), stage.as_deref(), json).await,
+            } => {
+                moment(
+                    &core,
+                    &principal,
+                    &world_id,
+                    work.as_deref(),
+                    stage.as_deref(),
+                    json,
+                )
+                .await
+            }
         }
     }
     .await;

@@ -322,7 +322,13 @@ fn sync_push_blocked_in_local_only() {
 fn retired_platform_context_assemble_is_unknown() {
     let removed: [&[&str]; 2] = [
         &["platform", "context", "assemble"],
-        &["platform", "context", "assemble", "--world-id", "wld_test123"],
+        &[
+            "platform",
+            "context",
+            "assemble",
+            "--world-id",
+            "wld_test123",
+        ],
     ];
     for args in removed {
         Command::cargo_bin("nexus42")

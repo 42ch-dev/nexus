@@ -236,11 +236,7 @@ async fn handle_show(
     let response = core
         .moment_directive(
             principal,
-            scoped_request(
-                MomentDirectiveRequestAction::Show,
-                scope_kind,
-                &scope_id,
-            ),
+            scoped_request(MomentDirectiveRequestAction::Show, scope_kind, &scope_id),
         )
         .await
         .map_err(map_core_error)?;
@@ -260,12 +256,8 @@ async fn handle_show(
         return Ok("No active Moment Directive for this scope.".to_string());
     };
 
-    let effective_for = effective_label(
-        scope_kind,
-        &scope_id,
-        settled_scope_kind,
-        &settled_scope_id,
-    );
+    let effective_for =
+        effective_label(scope_kind, &scope_id, settled_scope_kind, &settled_scope_id);
     let mut out = String::new();
     let _ = writeln!(out, "Directive: {directive_id}");
     let _ = writeln!(out, "Scope: {settled_scope_kind} {settled_scope_id}");
@@ -300,11 +292,7 @@ async fn handle_clear(
     let (scope_kind, scope_id) = resolve_scope(core, principal, args).await?;
     core.moment_directive(
         principal,
-        scoped_request(
-            MomentDirectiveRequestAction::Clear,
-            scope_kind,
-            &scope_id,
-        ),
+        scoped_request(MomentDirectiveRequestAction::Clear, scope_kind, &scope_id),
     )
     .await
     .map_err(map_core_error)?;
@@ -345,9 +333,7 @@ fn scoped_request(
 /// Returns [`CliError::Config`] when neither kind is given, both are given
 /// (unreachable through clap, kept for direct callers), or the count is not
 /// a positive integer.
-fn map_ttl(
-    args: &MomentDirectiveSetArgs,
-) -> Result<(MomentDirectiveRequestTtlKind, NonZeroU64)> {
+fn map_ttl(args: &MomentDirectiveSetArgs) -> Result<(MomentDirectiveRequestTtlKind, NonZeroU64)> {
     match (args.ttl_generations, args.ttl_chapters) {
         (Some(count), None) => Ok((
             MomentDirectiveRequestTtlKind::Generations,
@@ -433,10 +419,7 @@ async fn resolve_scope(
     args: &MomentDirectiveScopeArgs,
 ) -> Result<(MomentDirectiveRequestScopeKind, String)> {
     if let Some(world_id) = args.world.as_deref() {
-        return Ok((
-            MomentDirectiveRequestScopeKind::World,
-            world_id.to_string(),
-        ));
+        return Ok((MomentDirectiveRequestScopeKind::World, world_id.to_string()));
     }
     let work_id = resolve_work_id(core, principal, args.work.as_deref()).await?;
     Ok((MomentDirectiveRequestScopeKind::Work, work_id))
@@ -492,10 +475,12 @@ mod tests {
     };
     use nexus_core::{CoreAccess, CoreHomeService, CoreOpenOptions, LocalDirectiveStore};
     use nexus_home_layout::{operational_workspace_dir, workspace_state_db_path};
-    use nexus_local_db::moment_directive::{get_active_for_work, get_by_id, scope_kind, set_active};
+    use nexus_local_db::moment_directive::{
+        get_active_for_work, get_by_id, scope_kind, set_active,
+    };
     use nexus_local_db::writer_protocol::release_retained_writer_guards;
     use nexus_local_db::{
-        WorkRecord, create_work, ensure_creator_row, open_pool, run_migrations, seed_versions,
+        create_work, ensure_creator_row, open_pool, run_migrations, seed_versions, WorkRecord,
     };
     use sqlx::SqlitePool;
     use std::path::PathBuf;
@@ -528,6 +513,7 @@ mod tests {
     }
 
     impl Env {
+        #[allow(clippy::too_many_lines)] // one hermetic CLI env seeded in a single place
         async fn new() -> Self {
             let home = tempfile::tempdir().unwrap();
             let user_home = home.path().to_path_buf();
@@ -693,9 +679,7 @@ mod tests {
         args.clear_on_scene_change = true;
 
         // set — no --work: the active Work resolves implicitly.
-        let set = handle_set(&env.core, &env.principal, &args)
-            .await
-            .unwrap();
+        let set = handle_set(&env.core, &env.principal, &args).await.unwrap();
         assert!(
             set.contains(&format!("✓ Moment Directive set for work {}", env.work_id)),
             "set must name the resolved Work scope: {set}"
@@ -710,7 +694,10 @@ mod tests {
             .unwrap();
         assert!(show.contains("Scope: work "), "{show}");
         assert!(
-            show.contains(&format!("Effective for: work {} (own directive)", env.work_id)),
+            show.contains(&format!(
+                "Effective for: work {} (own directive)",
+                env.work_id
+            )),
             "{show}"
         );
         assert!(show.contains("TTL: 5 remaining (generations)"), "{show}");
@@ -718,7 +705,10 @@ mod tests {
             show.contains("Keep the prose terse."),
             "the body must be author-visible on show: {show}"
         );
-        assert!(!show.contains("  Keep"), "the body is trimmed at write: {show}");
+        assert!(
+            !show.contains("  Keep"),
+            "the body is trimmed at write: {show}"
+        );
 
         // clear — soft-delete, then show reports none.
         let clear = handle_clear(&env.core, &env.principal, &scope_args(None, None))
@@ -764,18 +754,26 @@ mod tests {
         );
         args.world = true;
         args.work = Some(env.work_id.clone());
-        let set = handle_set(&env.core, &env.principal, &args)
-            .await
-            .unwrap();
+        let set = handle_set(&env.core, &env.principal, &args).await.unwrap();
         assert!(
-            set.contains(&format!("✓ Moment Directive set for world {}", env.world_id)),
+            set.contains(&format!(
+                "✓ Moment Directive set for world {}",
+                env.world_id
+            )),
             "the World override names the bound World: {set}"
         );
 
-        let show = handle_show(&env.core, &env.principal, &scope_args(Some(&env.work_id), None))
-            .await
-            .unwrap();
-        assert!(show.contains(&format!("Scope: world {}", env.world_id)), "{show}");
+        let show = handle_show(
+            &env.core,
+            &env.principal,
+            &scope_args(Some(&env.work_id), None),
+        )
+        .await
+        .unwrap();
+        assert!(
+            show.contains(&format!("Scope: world {}", env.world_id)),
+            "{show}"
+        );
         assert!(
             show.contains(&format!(
                 "Effective for: work {} (inherited from world {})",
@@ -787,9 +785,13 @@ mod tests {
         assert!(show.contains("British spelling always."), "{show}");
 
         // The World scope itself is what `--world` selects, no Work needed.
-        let direct = handle_show(&env.core, &env.principal, &scope_args(None, Some(&env.world_id)))
-            .await
-            .unwrap();
+        let direct = handle_show(
+            &env.core,
+            &env.principal,
+            &scope_args(None, Some(&env.world_id)),
+        )
+        .await
+        .unwrap();
         assert!(
             direct.contains(&format!("Effective for: world {}", env.world_id)),
             "{direct}"
@@ -819,9 +821,7 @@ mod tests {
 
         // The Work scope itself still writes for that stored row.
         args.world = false;
-        let set = handle_set(&env.core, &env.principal, &args)
-            .await
-            .unwrap();
+        let set = handle_set(&env.core, &env.principal, &args).await.unwrap();
         assert!(
             set.contains(&format!(
                 "✓ Moment Directive set for work {}",
@@ -837,7 +837,12 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn set_requires_replace_and_retains_the_superseded_row() {
         let env = Env::new().await;
-        let mut first = set_args("First directive.", MomentDirectiveRequestInsertDepth::Mid, Some(3), None);
+        let mut first = set_args(
+            "First directive.",
+            MomentDirectiveRequestInsertDepth::Mid,
+            Some(3),
+            None,
+        );
         first.work = Some(env.work_id.clone());
         handle_set(&env.core, &env.principal, &first).await.unwrap();
         let first_id = {
@@ -920,7 +925,12 @@ mod tests {
         let err = handle_set(
             &env.core,
             &env.principal,
-            &set_args("Body.", MomentDirectiveRequestInsertDepth::Mid, Some(0), None),
+            &set_args(
+                "Body.",
+                MomentDirectiveRequestInsertDepth::Mid,
+                Some(0),
+                None,
+            ),
         )
         .await
         .unwrap_err();
@@ -932,7 +942,12 @@ mod tests {
         let err = handle_set(
             &env.core,
             &env.principal,
-            &set_args("Body.", MomentDirectiveRequestInsertDepth::Mid, Some(1), Some(1)),
+            &set_args(
+                "Body.",
+                MomentDirectiveRequestInsertDepth::Mid,
+                Some(1),
+                Some(1),
+            ),
         )
         .await
         .unwrap_err();

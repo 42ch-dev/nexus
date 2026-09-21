@@ -22,9 +22,7 @@ use assert_cmd::Command;
 use direct::DirectFixture;
 use nexus_contracts::{CreateWorkRequest, CreateWorldRequest};
 use nexus_core::{CoreAccess, CoreOpenOptions, CoreService};
-use nexus_home_layout::{
-    nexus_root_from_home, operational_workspace_dir, workspace_state_db_path,
-};
+use nexus_home_layout::{nexus_root_from_home, operational_workspace_dir, workspace_state_db_path};
 use nexus_local_db::work_chapters::{self, InsertChapterParams};
 use nexus_local_db::writer_protocol::release_retained_writer_guards;
 use serde_json::Value;
@@ -69,8 +67,9 @@ impl OutlineEnv {
 
     /// The per-chapter outline prose path the core derives for chapter 1.
     fn chapter_outline_path(&self) -> PathBuf {
-        self.creative_root
-            .join(format!("Works/{WORK_REF}/Outlines/chapters/ch01-outline.md"))
+        self.creative_root.join(format!(
+            "Works/{WORK_REF}/Outlines/chapters/ch01-outline.md"
+        ))
     }
 
     /// The stored work-level outline file (the durable storage truth).
@@ -292,7 +291,11 @@ async fn outline_patch_move_chapter_bumps_revision() {
         "--volume",
         "2",
     ]);
-    assert!(out.status.success(), "move_chapter failed: {}", stderr(&out));
+    assert!(
+        out.status.success(),
+        "move_chapter failed: {}",
+        stderr(&out)
+    );
     let text = stdout(&out);
     assert!(text.contains("new_revision: 1"), "{text}");
 
@@ -425,7 +428,11 @@ async fn chapter_patch_updates_metadata_and_bumps_revision() {
         "--status",
         "outlined",
     ]);
-    assert!(out.status.success(), "chapter patch failed: {}", stderr(&out));
+    assert!(
+        out.status.success(),
+        "chapter patch failed: {}",
+        stderr(&out)
+    );
     let text = stdout(&out);
     assert!(text.contains("new_revision: 1"), "{text}");
 
@@ -582,7 +589,11 @@ async fn chapter_patch_content_file_writes_outline_prose() {
         "--content-file",
         content_file.to_str().expect("content file path"),
     ]);
-    assert!(out.status.success(), "content patch failed: {}", stderr(&out));
+    assert!(
+        out.status.success(),
+        "content patch failed: {}",
+        stderr(&out)
+    );
     assert!(stdout(&out).contains("new_revision: 1"), "{}", stdout(&out));
 
     let on_disk = std::fs::read_to_string(&chapter_outline).expect("chapter outline on disk");
