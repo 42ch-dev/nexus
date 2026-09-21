@@ -19,6 +19,7 @@ import {
   MAX_PATH_BYTES,
   MAX_REQUEST_BYTES,
   MAX_URL_BYTES,
+  connectionEndpointOrigin,
   desktopErr,
   desktopError,
   desktopOk,
@@ -273,6 +274,95 @@ test('runtime metadata is nonsecret and http(s)-only', () => {
   });
   expectCode(() => parseDesktopRuntimeMetadata({ localEndpoint: 'file:///etc/passwd' }), 'invalid_input');
   expectCode(() => parseDesktopRuntimeMetadata({ localEndpoint: 'http://x', apiKey: 'k' }), 'invalid_input');
+});
+
+// ---------------------------------------------------------------------------
+// Remote service endpoint grammar (v1.194 P1-T2): ONE strict root-service
+// http(s) endpoint grammar shared by the IPC validator, the connection store
+// and the CSP origin boundary.
+// ---------------------------------------------------------------------------
+
+test('endpoint grammar accepts concrete root http(s) services and returns the exact origin', () => {
+  assert.equal(
+    connectionEndpointOrigin('https://daemon.example.com:8443'),
+    'https://daemon.example.com:8443',
+  );
+  assert.equal(connectionEndpointOrigin('http://127.0.0.1:8420'), 'http://127.0.0.1:8420');
+  // Bracketed IPv6 literal host and explicit port stay supported.
+  assert.equal(connectionEndpointOrigin('http://[::1]:8420'), 'http://[::1]:8420');
+  assert.equal(connectionEndpointOrigin('https://[2001:db8::1]:9000'), 'https://[2001:db8::1]:9000');
+  // A root trailing slash is the same endpoint; the caller keeps its string.
+  assert.equal(connectionEndpointOrigin('https://daemon.example.com/'), 'https://daemon.example.com');
+});
+
+test('endpoint grammar rejects opaque/null origins, wildcard host, userinfo, padding, path, query and fragment', () => {
+  for (const endpointUrl of [
+    'null', // opaque origin
+    'about:blank',
+    'data:text/plain,x',
+    'file:///etc/passwd',
+    'nexus://app',
+    '',
+    '   ',
+    'http://',
+    'https://*/',
+    'https://*.example.com',
+    'http://user:pass@daemon.example.com:8443',
+    'http://user@daemon.example.com',
+    'https://daemon.example.com:8443/v1/daemon',
+    'https://daemon.example.com:8443/path',
+    'https://daemon.example.com:8443?token=1',
+    'https://daemon.example.com:8443#frag',
+    'http://daemon.example.com\x00',
+    'http://daemon.example.com\n',
+    '\thttp://daemon.example.com',
+    ' http://daemon.example.com',
+    'http://daemon.example.com ',
+    'http://daemon\\@evil.example.com',
+    'http://daemon example.com',
+  ]) {
+    expectCode(() => connectionEndpointOrigin(endpointUrl), 'invalid_input');
+  }
+});
+
+test('endpoint rejection is enforced at both the IPC and CSP boundaries', () => {
+  const rejected = [
+    'null',
+    'about:blank',
+    'https://*.example.com',
+    'https://daemon.example.com:8443/v1/daemon',
+    'http://user:pass@daemon.example.com:8443',
+  ];
+  for (const endpointUrl of rejected) {
+    expectCode(
+      () =>
+        parseDesktopRequest({
+          version: 1,
+          request_id: 'r1',
+          operation: 'set_connection_config',
+          payload: {
+            config: { endpointUrl, hasApiKey: true, active: true },
+            credential: { action: 'keep' },
+          },
+        }),
+      'invalid_input',
+    );
+    assert.throws(() => assertDesktopServiceOrigin(endpointUrl), endpointUrl);
+  }
+  // A supported endpoint passes both boundaries and is stored verbatim.
+  const endpointUrl = 'https://daemon.example.com:8443/';
+  const req = parseDesktopRequest({
+    version: 1,
+    request_id: 'r1',
+    operation: 'set_connection_config',
+    payload: {
+      config: { endpointUrl, hasApiKey: true, active: true },
+      credential: { action: 'keep' },
+    },
+  });
+  assert.equal(req.payload.config.endpointUrl, endpointUrl, 'stored identity is never normalized');
+  assert.equal(connectionEndpointOrigin(endpointUrl), 'https://daemon.example.com:8443');
+  assert.equal(assertDesktopServiceOrigin(endpointUrl), 'https://daemon.example.com:8443');
 });
 
 // ---------------------------------------------------------------------------
@@ -581,6 +671,11 @@ test('CSP rejects wildcard, credentialed, or path-carrying origins', () => {
   assert.throws(() => assertDesktopServiceOrigin('https://example.com/path'));
   assert.throws(() => assertDesktopServiceOrigin('nexus://app'));
   assert.throws(() => assertDesktopServiceOrigin('not a url'));
+  assert.throws(() => assertDesktopServiceOrigin('null')); // opaque origin, not an http(s) service
+  assert.throws(() => assertDesktopServiceOrigin('about:blank'));
+  assert.throws(() => assertDesktopServiceOrigin('https://example.com?token=1'));
+  // Concrete IPv6 remotes stay supported at the CSP boundary too.
+  assert.equal(assertDesktopServiceOrigin('http://[::1]:8420'), 'http://[::1]:8420');
   assert.equal(assertDesktopServiceOrigin('https://example.com/'), 'https://example.com');
 });
 

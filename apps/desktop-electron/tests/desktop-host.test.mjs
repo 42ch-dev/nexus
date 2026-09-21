@@ -246,6 +246,7 @@ const product = loadProductIdentity(RESOURCES_DIR);
 async function makeHost(overrides = {}) {
   const electron = makeFakeElectron();
   const dir = mkdtempSync(join(root, 'case-'));
+  const { adapters: adapterOverrides = {}, paths: pathsOverride = {}, ...hostOverrides } = overrides;
   const paths = {
     resourcesDir: RESOURCES_DIR,
     distRoot: dir,
@@ -255,6 +256,7 @@ async function makeHost(overrides = {}) {
     userDataDir: join(dir, 'userData'),
     home: join(dir, 'home'),
     documentsPath: join(dir, 'documents'),
+    ...pathsOverride,
   };
   mkdirSync(paths.home, { recursive: true });
   mkdirSync(paths.documentsPath, { recursive: true });
@@ -267,7 +269,6 @@ async function makeHost(overrides = {}) {
   // before any window is created (scheme privilege is bootstrap-only,
   // pre-ready — composeDesktopHost has no registerSchemes seam at all).
   electron.lifecycleEvents = [];
-  const { adapters: adapterOverrides = {}, ...hostOverrides } = overrides;
   const { BrowserWindow: FakeBrowserWindow } = electron;
   electron.BrowserWindow = class extends FakeBrowserWindow {
     constructor(options) {
@@ -424,7 +425,10 @@ test('production window policy and protocol registration', async () => {
   assert.equal(electron.app.name, 'Nexus');
 
   // Full typed handler map — exactly the frozen operation union.
-  assert.deepEqual(Object.keys(host.handlers).sort(), [...DESKTOP_OPERATIONS].sort());
+  assert.deepEqual(
+    Object.keys(host.handlers).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)),
+    [...DESKTOP_OPERATIONS].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)),
+  );
 
   // Protocol registered with the local service origin, BEFORE the first
   // window was created. Scheme privilege is registered exactly once,
@@ -795,6 +799,122 @@ test('CSP is refreshed per response with the active connection origin only', asy
   const remote = await respond({});
   const remoteCsp = remote.responseHeaders['Content-Security-Policy'][0];
   assert.match(remoteCsp, /connect-src 'self' https:\/\/remote\.example:9000 https:\/\/remote\.example:9000/);
+  host.dispose();
+});
+
+test('set_connection_config refuses unsupported endpoint values without replacing the stored config', async () => {
+  const { host, networkHooks } = await makeHost();
+  await host.handlers.set_connection_config({
+    config: { endpointUrl: 'https://remote.example:9000', active: true, hasApiKey: true },
+    credential: { action: 'replace', value: 'sk-keep' },
+  });
+
+  for (const endpointUrl of [
+    'null',
+    'about:blank',
+    'file:///etc/passwd',
+    'https://*.example.com',
+    'http://user:pass@remote.example:9000',
+    'https://remote.example:9000/v1/daemon',
+    'https://remote.example:9000?token=1',
+  ]) {
+    await assert.rejects(
+      () =>
+        host.handlers.set_connection_config({
+          config: { endpointUrl, active: true, hasApiKey: true },
+          credential: { action: 'replace', value: 'sk-bad' },
+        }),
+      (err) => errorCode(err) === 'invalid_input',
+      `endpoint must be refused: ${endpointUrl}`,
+    );
+  }
+
+  // The stored config and the live auth authority are exactly what they were.
+  assert.deepEqual(await host.handlers.get_connection_config(), {
+    endpointUrl: 'https://remote.example:9000',
+    active: true,
+    hasApiKey: true,
+  });
+  assert.deepEqual(networkHooks[0].getActiveAuth(), {
+    endpointOrigin: 'https://remote.example:9000',
+    apiKey: 'sk-keep',
+  });
+  host.dispose();
+});
+
+test('a valid remote connection config projects its exact origin, auth and CSP, IPv6 included', async () => {
+  const { host, networkHooks, sessionHooks } = await makeHost();
+  const listener = sessionHooks.headersReceivedCalls[0][1];
+  const cspFor = (responseHeaders = {}) =>
+    new Promise((resolve) => {
+      listener({ url: 'nexus://app/index.html', responseHeaders }, (result) =>
+        resolve(result.responseHeaders['Content-Security-Policy'][0]),
+      );
+    });
+
+  await host.handlers.set_connection_config({
+    config: { endpointUrl: 'https://remote.example:9000/', active: true, hasApiKey: true },
+    credential: { action: 'replace', value: 'sk-remote' },
+  });
+  // A root trailing slash is not part of the origin; auth pins the exact one.
+  assert.deepEqual(networkHooks[0].getActiveAuth(), {
+    endpointOrigin: 'https://remote.example:9000',
+    apiKey: 'sk-remote',
+  });
+  // Stored identity is preserved verbatim — never rewritten to normalize.
+  assert.equal(
+    (await host.handlers.get_connection_config()).endpointUrl,
+    'https://remote.example:9000/',
+  );
+  assert.match(
+    await cspFor(),
+    /connect-src 'self' https:\/\/remote\.example:9000 https:\/\/remote\.example:9000/,
+  );
+
+  // Bracketed IPv6 literal remotes stay exact.
+  await host.handlers.set_connection_config({
+    config: { endpointUrl: 'http://[::1]:8420', active: true, hasApiKey: false },
+    credential: { action: 'keep' },
+  });
+  assert.match(await cspFor(), /connect-src 'self' http:\/\/\[::1\]:8420 http:\/\/\[::1\]:8420/);
+  host.dispose();
+});
+
+test('an invalid stored connection config can never omit the CSP', async () => {
+  const userDataDir = mkdtempSync(join(root, 'corrupt-user-data-'));
+  const storePath = join(userDataDir, 'connection-config.enc');
+  // An opaque stored endpoint: the old derivation `new URL(value).origin`
+  // returned the literal "null" for it, and the CSP builder then threw inside
+  // the header listener — leaving the response without any policy.
+  writeFileSync(
+    storePath,
+    JSON.stringify({ version: 1, config: { endpointUrl: 'about:blank', active: true, hasApiKey: true } }),
+  );
+  const { host, networkHooks, sessionHooks } = await makeHost({ paths: { userDataDir } });
+
+  // Not activated and no credential authority...
+  assert.equal(await host.handlers.get_connection_config(), null);
+  assert.equal(networkHooks[0].getActiveAuth(), null);
+
+  // ...and the header listener always ANSWERS (it never throws out of the
+  // Electron callback) with the restrictive local-origin policy.
+  const listener = sessionHooks.headersReceivedCalls[0][1];
+  let response = null;
+  listener(
+    { url: 'nexus://app/index.html', responseHeaders: { 'content-security-policy': ['default-src *'] } },
+    (result) => {
+      response = result;
+    },
+  );
+  assert.ok(response, 'every response must receive a policy');
+  const csp = response.responseHeaders['Content-Security-Policy'][0];
+  assert.equal(csp.includes('null'), false, 'the opaque origin must never reach the CSP');
+  assert.equal(csp.includes('*'), false, 'no wildcard anywhere in the CSP');
+  assert.equal(csp.includes('default-src *'), false, 'the upstream policy is replaced, never merged');
+  assert.match(csp, /connect-src 'self' http:\/\/127\.0\.0\.1:8420 http:\/\/127\.0\.0\.1:8420/);
+
+  // The invalid bytes stay on disk for recovery.
+  assert.ok(readFileSync(storePath, 'utf8').includes('about:blank'));
   host.dispose();
 });
 

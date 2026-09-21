@@ -22,7 +22,7 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { ConnectionCredentialUpdate, PublicConnectionConfig } from './desktop-contract.js';
-import { desktopError } from './desktop-contract.js';
+import { connectionEndpointOrigin, desktopError } from './desktop-contract.js';
 
 /** Subset of Electron `safeStorage` this store relies on. */
 export interface SecureStorageAdapter {
@@ -98,16 +98,19 @@ export class ConnectionStore {
    * one-time import: legacy JSON is validated and encrypted BEFORE the new
    * store is written; originals are left untouched. A failed/unavailable
    * encryption aborts the import without writing anything in the clear.
+   *
+   * An EXISTING store that is invalid or unreadable is never activated and —
+   * unlike an absent file (ENOENT) — never falls back to the legacy import:
+   * its bytes stay on disk for the user to recover by saving over them.
    */
   static async open(deps: ConnectionStoreDeps): Promise<ConnectionStore> {
     let state: StoredFile | null = null;
     try {
       state = ConnectionStore.readFile(deps);
-    } catch (err) {
-      // A corrupt/undecryptable store is treated as absent so the user can
-      // re-save; the file itself is never auto-rewritten here.
-      void err;
-      state = null;
+    } catch {
+      // Invalid/corrupt/unreadable existing store: not activated, not
+      // rewritten, and never replaced by the legacy material.
+      return new ConnectionStore(deps, null);
     }
     let cleared = false;
     try {
@@ -129,21 +132,47 @@ export class ConnectionStore {
     return new ConnectionStore(deps, state);
   }
 
+  /**
+   * Read + validate the store file. ENOENT is the ONLY "absent store" signal;
+   * every other read failure is an existing-but-unreadable store and is kept
+   * distinct so it can never be mistaken for a fresh install. A stored
+   * endpoint must satisfy the shared root-service grammar before it is
+   * activated.
+   */
   private static readFile(deps: ConnectionStoreDeps): StoredFile | null {
     let raw: string;
     try {
       raw = readFileSync(deps.filePath, 'utf8');
-    } catch {
-      return null; // absent store
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException | null)?.code === 'ENOENT') return null; // absent store
+      const code = (err as NodeJS.ErrnoException | null)?.code ?? 'unknown error';
+      throw desktopError('secure_store_unreadable', `connection store file could not be read (${code})`);
     }
-    const parsed = JSON.parse(raw) as StoredFile;
+    let parsed: StoredFile;
+    try {
+      parsed = JSON.parse(raw) as StoredFile;
+    } catch {
+      throw desktopError('secure_store_corrupt', 'connection store file is not valid JSON');
+    }
     if (parsed?.version !== 1 || typeof parsed.config?.endpointUrl !== 'string') {
       throw desktopError('secure_store_corrupt', 'connection store file is not a valid v1 store');
     }
+    try {
+      connectionEndpointOrigin(parsed.config.endpointUrl);
+    } catch {
+      throw desktopError(
+        'secure_store_corrupt',
+        'connection store endpoint is not a supported root service URL',
+      );
+    }
     if (parsed.credential !== undefined) {
       // Fail fast (before any effect) when the stored credential cannot be
-      // decrypted — treat like an absent store rather than half-loaded.
-      deps.storage.decryptString(decodeCredential(parsed.credential));
+      // decrypted — the store stays recoverable rather than half-loaded.
+      try {
+        deps.storage.decryptString(decodeCredential(parsed.credential));
+      } catch {
+        throw desktopError('secure_store_corrupt', 'connection store credential is not decryptable');
+      }
     }
     return { version: 1, config: parsed.config, credential: parsed.credential };
   }
@@ -158,6 +187,12 @@ export class ConnectionStore {
     if (!parsed || typeof parsed !== 'object') return null;
     const body = parsed as Record<string, unknown>;
     if (typeof body.endpointUrl !== 'string' || body.endpointUrl.length === 0) return null;
+    // An unsupported legacy endpoint is never persisted (or encrypted).
+    try {
+      connectionEndpointOrigin(body.endpointUrl);
+    } catch {
+      return null;
+    }
     const config: PublicConnectionConfig = {
       endpointUrl: body.endpointUrl,
       hasApiKey: typeof body.apiKey === 'string' && body.apiKey.length > 0,
@@ -220,9 +255,9 @@ export class ConnectionStore {
     }
     let origin: string;
     try {
-      origin = new URL(state.config.endpointUrl).origin;
+      origin = connectionEndpointOrigin(state.config.endpointUrl);
     } catch {
-      return null;
+      return null; // fail closed: an unsupported stored endpoint carries no auth
     }
     return { endpointOrigin: origin, apiKey };
   }
@@ -230,6 +265,8 @@ export class ConnectionStore {
   /**
    * Apply a public config update plus the explicit credential update.
    *
+   * - an unsupported endpoint is refused BEFORE any effect: nothing is
+   *   encrypted, nothing is written and the previous state survives;
    * - `replace` sets the key (empty string explicitly clears it);
    * - `keep` retains the stored key ONLY when the endpoint is unchanged —
    *   an endpoint change never carries the old endpoint's credential;
@@ -240,6 +277,7 @@ export class ConnectionStore {
     config: PublicConnectionConfig,
     credential: ConnectionCredentialUpdate,
   ): Promise<PublicConnectionConfig> {
+    connectionEndpointOrigin(config.endpointUrl);
     const previous = this.state;
     let nextCredential: string | undefined;
     if (credential.action === 'replace') {

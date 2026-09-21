@@ -50,6 +50,7 @@ import {
   DESKTOP_HOST,
   DESKTOP_RUNTIME_CHANNEL,
   DESKTOP_SCHEME,
+  connectionEndpointOrigin,
   errorMessage,
   isAllowedDesktopExternalUrl,
 } from './desktop-contract.js';
@@ -367,6 +368,10 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
 
   const resolvedPort = resolveDesktopServicePort(undefined, input.env);
   const localEndpoint = `http://${DESKTOP_SERVICE_HOST}:${resolvedPort}`;
+  // The app-managed local origin is validated through the same strict grammar
+  // as every remote endpoint, so the CSP fallback below can never be the
+  // reason a response is emitted without a policy.
+  const localServiceOrigin = connectionEndpointOrigin(localEndpoint);
   const navigationOptions = { dev };
 
   // ── identity ──────────────────────────────────────────────────────────
@@ -402,15 +407,18 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
 
   // Exact-origin CSP, refreshed per response with the ACTIVE connection
   // origin (frozen contract: main validates and inserts exact origins only).
+  // The origin is derived ONLY through the shared endpoint grammar; a stored
+  // config that fails it (or an unreadable store) falls back to the validated
+  // app-managed local origin, so no response is ever sent without a policy.
   const activeServiceOrigin = (): string => {
     if (activeConfig?.active === true) {
       try {
-        return new URL(activeConfig.endpointUrl).origin;
+        return connectionEndpointOrigin(activeConfig.endpointUrl);
       } catch {
         // fall through to the app-managed local endpoint
       }
     }
-    return localEndpoint;
+    return localServiceOrigin;
   };
   if (typeof e.session.webRequest.onHeadersReceived === 'function') {
     e.session.webRequest.onHeadersReceived(
@@ -689,8 +697,8 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
   // composition never registers schemes again. The protocol handler must be
   // installed before the first `loadURL('nexus://app/index.html')`.
   await registerProtocol(input.paths.distRoot, {
-    serviceOrigin: localEndpoint,
-    fingerprintProbeOrigin: localEndpoint,
+    serviceOrigin: localServiceOrigin,
+    fingerprintProbeOrigin: localServiceOrigin,
     dev,
   });
 

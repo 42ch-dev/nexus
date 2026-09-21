@@ -15,6 +15,7 @@
 import assert from 'node:assert/strict';
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -273,6 +274,114 @@ test('encryption unavailable aborts legacy import with structured error and no p
     (err) => errorCode(err) === 'secure_storage_unavailable',
   );
   assert.equal(existsSync(deps.filePath), false, 'legacy secret must never be written in the clear');
+});
+
+// ---------------------------------------------------------------------------
+// Endpoint admission (v1.194 P1-T2): ONE strict root-service grammar at the
+// direct-set, persisted and legacy boundaries
+// ---------------------------------------------------------------------------
+
+test('rejected endpoint values never write or replace the stored connection config', async (t) => {
+  const deps = makeDeps(t);
+  const store = await ConnectionStore.open(deps);
+  await store.set({ ...BASE_CONFIG }, { action: 'replace', value: 'sk-keep' });
+  const before = readFileSync(deps.filePath, 'utf8');
+
+  for (const endpointUrl of [
+    'null',
+    'about:blank',
+    'file:///etc/passwd',
+    'https://*.example.com',
+    'http://user:pass@daemon.example.com:8443',
+    'https://daemon.example.com:8443/v1/daemon',
+    'https://daemon.example.com:8443?token=1',
+  ]) {
+    await assert.rejects(
+      () => store.set({ endpointUrl, hasApiKey: true, active: true }, { action: 'replace', value: 'sk-bad' }),
+      (err) => errorCode(err) === 'invalid_input',
+      `endpoint must be refused: ${endpointUrl}`,
+    );
+  }
+
+  assert.equal(readFileSync(deps.filePath, 'utf8'), before, 'a rejected endpoint must not rewrite the store');
+  assert.deepEqual(await store.get(), { endpointUrl: ENDPOINT, hasApiKey: true, active: true });
+  assert.equal(store.getAuth()?.apiKey, 'sk-keep', 'the previous credential survives');
+});
+
+test('an invalid stored endpoint is not activated and never triggers the legacy import', async (t) => {
+  const deps = makeDeps(t);
+  writeFileSync(
+    deps.filePath,
+    JSON.stringify({ version: 1, config: { endpointUrl: 'null', hasApiKey: false } }),
+  );
+  let legacyReads = 0;
+  const store = await ConnectionStore.open({
+    ...deps,
+    readLegacy: async () => {
+      legacyReads += 1;
+      return JSON.stringify({ endpointUrl: ENDPOINT, apiKey: 'sk-legacy' });
+    },
+  });
+
+  assert.equal(legacyReads, 0, 'an existing-but-invalid store must not be replaced by legacy material');
+  assert.equal(await store.get(), null);
+  assert.equal(store.getAuth(), null);
+  assert.ok(
+    readFileSync(deps.filePath, 'utf8').includes('"null"'),
+    'the invalid bytes stay on disk for recovery',
+  );
+
+  // Recovery is the user saving a valid config over the invalid one.
+  await store.set({ ...BASE_CONFIG }, { action: 'replace', value: 'sk-new' });
+  assert.equal((await ConnectionStore.open(deps)).getAuth()?.apiKey, 'sk-new');
+});
+
+test('an unreadable existing store differs from an absent one: no legacy import, bytes preserved', async (t) => {
+  const deps = makeDeps(t);
+  mkdirSync(deps.filePath); // reading a directory fails with a non-ENOENT error
+  let legacyReads = 0;
+  const unreadable = await ConnectionStore.open({
+    ...deps,
+    readLegacy: async () => {
+      legacyReads += 1;
+      return JSON.stringify({ endpointUrl: ENDPOINT, apiKey: 'sk-legacy' });
+    },
+  });
+  assert.equal(legacyReads, 0, 'only ENOENT counts as absent: an unreadable store never imports legacy');
+  assert.equal(await unreadable.get(), null);
+  assert.equal(statSync(deps.filePath).isDirectory(), true, 'the unreadable bytes are preserved');
+
+  // Counterpart: the same deps with no file at all (ENOENT) DO import once.
+  const absentDeps = makeDeps(t);
+  let absentReads = 0;
+  const imported = await ConnectionStore.open({
+    ...absentDeps,
+    readLegacy: async () => {
+      absentReads += 1;
+      return JSON.stringify({ endpointUrl: ENDPOINT, apiKey: 'sk-legacy', active: true });
+    },
+  });
+  assert.equal(absentReads, 1, 'an absent store is the one-time legacy import trigger');
+  assert.equal(imported.getAuth()?.apiKey, 'sk-legacy');
+});
+
+test('a legacy import with an unsupported endpoint persists nothing and keeps the original bytes', async (t) => {
+  const deps = makeDeps(t);
+  const legacyPath = join(deps.filePath, '..', 'connection_config.json');
+  writeFileSync(legacyPath, JSON.stringify({ endpointUrl: 'nexus://app', apiKey: 'sk-legacy' }));
+  const store = await ConnectionStore.open({
+    ...deps,
+    readLegacy: async () => readFileSync(legacyPath, 'utf8'),
+  });
+
+  assert.equal(await store.get(), null);
+  assert.equal(store.getAuth(), null);
+  assert.equal(
+    existsSync(deps.filePath),
+    false,
+    'no store may be created from an unsupported legacy endpoint',
+  );
+  assert.ok(readFileSync(legacyPath, 'utf8').includes('sk-legacy'), 'legacy recovery bytes stay untouched');
 });
 
 // ---------------------------------------------------------------------------

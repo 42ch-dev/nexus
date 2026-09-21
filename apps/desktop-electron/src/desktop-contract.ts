@@ -425,8 +425,11 @@ function validatePublicConnectionConfig(raw: unknown): PublicConnectionConfig {
   if (typeof body.hasApiKey !== 'boolean') {
     throw desktopError('invalid_input', 'hasApiKey must be a boolean');
   }
+  const endpointUrl = boundedString(body, 'endpointUrl', MAX_URL_BYTES, 'endpointUrl');
+  // Unsupported endpoints are refused at the IPC boundary, before any effect.
+  connectionEndpointOrigin(endpointUrl);
   const config: PublicConnectionConfig = {
-    endpointUrl: boundedString(body, 'endpointUrl', MAX_URL_BYTES, 'endpointUrl'),
+    endpointUrl,
     hasApiKey: body.hasApiKey,
   };
   const label = optionalBoundedString(body, 'label', 256, 'label');
@@ -651,6 +654,65 @@ export function parseDesktopRuntimeMetadata(raw: unknown): DesktopRuntimeMetadat
     throw desktopError('invalid_input', 'localEndpoint must be an http(s) URL with a host');
   }
   return { localEndpoint };
+}
+
+// ---------------------------------------------------------------------------
+// Remote service endpoint grammar (v1.194 P1-T2) — the ONE strict
+// root-service http(s) endpoint grammar, shared by the IPC payload
+// validator, `ConnectionStore` (direct set, persisted and legacy input) and
+// the CSP origin boundary. This is the remote Nexus service endpoint, NOT
+// the provider/model API URL field: callers append `/v1/daemon/...` and
+// desktop auth pins the exact origin, so only a concrete root service URL is
+// supported. Checked on the RAW string before any parsing — WHATWG URL
+// normalization strips/remaps some C0 controls and maps `\` to `/`, so a
+// post-parse check alone would accept control/backslash-bearing input.
+// ---------------------------------------------------------------------------
+
+/**
+ * Validate a remote service endpoint and return its parsed exact origin.
+ * Rejects opaque/null origins, a missing or wildcard host, userinfo,
+ * control/padded/backslash-bearing input, a non-root path, a query and a
+ * fragment. Valid concrete remote http(s) origins, explicit ports and
+ * bracketed IPv6 hosts stay supported. The caller keeps the ORIGINAL string
+ * as the stored identity — this never normalizes saved config.
+ */
+export function connectionEndpointOrigin(endpointUrl: unknown): string {
+  if (typeof endpointUrl !== 'string' || endpointUrl.length === 0) {
+    throw desktopError('invalid_input', 'endpointUrl must be a non-empty string');
+  }
+  assertNoControlChars(endpointUrl, 'endpointUrl');
+  if (endpointUrl.includes('\\')) {
+    throw desktopError('invalid_input', 'endpointUrl must not contain backslashes');
+  }
+  if (endpointUrl !== endpointUrl.trim()) {
+    throw desktopError('invalid_input', 'endpointUrl must not contain padding whitespace');
+  }
+  assertByteLength(endpointUrl, MAX_URL_BYTES, 'endpointUrl');
+  let parsed: URL;
+  try {
+    parsed = new URL(endpointUrl);
+  } catch {
+    throw desktopError('invalid_input', 'endpointUrl must be an absolute service URL');
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw desktopError('invalid_input', 'endpointUrl must be an http(s) URL');
+  }
+  if (parsed.origin === 'null' || parsed.hostname.length === 0) {
+    throw desktopError('invalid_input', 'endpointUrl must have a concrete host');
+  }
+  if (parsed.hostname.includes('*')) {
+    throw desktopError('invalid_input', 'endpointUrl must not use a wildcard host');
+  }
+  if (parsed.username !== '' || parsed.password !== '') {
+    throw desktopError('invalid_input', 'endpointUrl must not carry credentials');
+  }
+  if (parsed.search !== '' || parsed.hash !== '') {
+    throw desktopError('invalid_input', 'endpointUrl must not carry a query or fragment');
+  }
+  if (parsed.pathname !== '' && parsed.pathname !== '/') {
+    throw desktopError('invalid_input', 'endpointUrl must be a root service URL');
+  }
+  return parsed.origin;
 }
 
 // ---------------------------------------------------------------------------
