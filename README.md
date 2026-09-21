@@ -110,8 +110,8 @@ pnpm run clean    # remove dist/ in contracts, nexus-ui, and codegen packages
 
 | Directory | Contents |
 |-----------|----------|
-| `apps/` | Product surfaces — `nexus42` (Rust CLI + daemon), `desktop-electron` (Electron desktop host), `web` (browser SPA) |
-| `crates/` | Reusable Rust libraries (daemon runtime, orchestration, local DB, contracts, etc.) |
+| `apps/` | Product surfaces — `nexus42` (Rust CLI: ordinary `cli` + Connect-only `nexus-runtime`), `desktop-electron` (Electron desktop host), `web` (browser SPA) |
+| `crates/` | Reusable Rust libraries (core authority, orchestration, local DB, contracts, etc.) |
 | `packages/` | npm packages — `@42ch/nexus-contracts` generated from `schemas/` |
 | `modules/` | Domain content (embedded presets, WASM modules, reference data) |
 | `tooling/` | Codegen pipeline and CI helpers |

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# One-command daemon-free preset validation for a strategy bundle.
+# One-command service-host-free preset validation for a strategy bundle.
 #
 # Usage:
 #   ./validate.sh [STRATEGY_DIR]
 #
 # Defaults to the bundled game-narrative sample. Runs the REAL validator
-# core in-process via `nexus42 system preset validate --offline` — no
-# daemon needed (the `nexus-runtime` artifact does not serve the daemon
-# HTTP router, so the partner can validate on any machine with the CLI).
+# core in-process via the retained local `nexus42 preset validate <path>` leaf
+# — no service host needed (the `nexus-runtime` artifact serves no HTTP
+# router), so the partner can validate on any machine with the CLI.
 #
 # Exit status: 0 when the strategy validates clean, non-zero otherwise.
 set -euo pipefail
@@ -22,4 +22,4 @@ if ! command -v nexus42 >/dev/null 2>&1; then
 fi
 
 echo "==> Validating strategy: $TARGET"
-nexus42 system preset validate --offline "$TARGET"
+nexus42 preset validate "$TARGET"
