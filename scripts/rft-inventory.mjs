@@ -399,7 +399,6 @@ export function classifyTable(name) {
 export function classifyWriter(path, symbol) {
   if (['open_pool_read_only', 'open_workspace_pool_read_only', 'preflight_existing_workspace'].includes(symbol)) return 'read-only';
   if (path === 'crates/nexus-local-db/src/lib.rs' && ['open_pool', 'init_pool', 'run_migrations', 'apply_pending_migrations', 'apply_fk_suspension_migration', 'apply_fk_suspension_tx'].includes(symbol)) return 'guarded';
-  if (path === 'crates/nexus-daemon-runtime/src/db/pool.rs' && symbol === 'new') return 'guarded';
   if (path === 'crates/nexus-cloud-sync/src/pool.rs' && symbol === 'new') return 'guarded';
   return null;
 }
@@ -429,7 +428,6 @@ function destination(kind, path, symbol) {
 function callableAlias(symbol, alias) {
   if (alias) return alias;
   if (/^nexus42 sync(?: |$)/.test(symbol)) return symbol.replace('nexus42 sync', 'nexus42 platform sync');
-  if (/^nexus42 system preset(?: |$)/.test(symbol)) return symbol.replace('system preset', 'preset');
   return null;
 }
 
@@ -607,65 +605,21 @@ export async function collectInventory({ baseline, inventoriesDir }) {
   add(row('callable', 'apps/nexus42/src/bin/nexus-runtime.rs', 'nexus-runtime', { feature_condition: 'connect-host', callers: ['headless-integrators'], support_state: 'feature-gated', parity_scenario: 'Preserve --listen/--allow-peer/--home, stdout readiness and Connect-only SIGINT shutdown; no HTTP/SPA/Host' }));
   add(row('feature', 'apps/nexus42/src/commands/creator/run.rs', 'creator run <preset_id>: runtime-resolved preset manifest', { destination_rft: 'RFT-07', support_state: 'dynamic-registry', retirement_gate: 'Keep embedded/user/system manifest resolution and dynamic args; never invent a finite preset allowlist' }));
   note('creator-identity-count', 'Scout labels six but lists eight identity actions; declarations retain register/use/list/status/pair/unpair/credentials rotate/logout. demo-seed is a separate maintenance leaf.');
-  note('schedule-count', `Schedule source/prose says 13; actual declarations contain ${declarations.filter(item => item.leaf && item.path.slice(0, 3).join(' ') === 'nexus42 daemon schedule').length} leaves. Exact paths, not 252/247 totals, determine coverage.`);
+  note('schedule-count', `The 13-leaf schedule prose described the retired nexus42 daemon group; that group and its declarations were deleted in v1.193 P2 (current declarations: ${declarations.filter(item => item.leaf && item.path.slice(0, 3).join(' ') === 'nexus42 daemon schedule').length}). Exact paths, not 252/247 totals, determine coverage.`);
   note('wrappers-and-presets', 'Args wrappers and unregistered KbDaemonCommand do not add public paths; cfg(test) parser wrappers are excluded. creator run is one dynamic manifest entry, not a hardcoded preset tree.');
   note('historical-destinations', 'Scouts assign contradictory historical RFT keys. All current rows use rust-core-service-boundary §7.5; Works list/status/use remain RFT-08 basic reads.');
 
-  const apiPath = 'crates/nexus-daemon-runtime/src/api/mod.rs';
-  const routes = routerRegistrations(sources.get(apiPath));
-  expected.push(...routes.map(entry => identity({ kind: 'route', symbol_or_route: `${entry.method} ${entry.path}` })));
-  const schemaSources = new Map();
-  for (const path of await filesUnder(join(root, 'schemas/daemon-api'), '.schema.json')) schemaSources.set(relative(root, path), JSON.parse(await text(path)));
-  const schemasFor = (handlerSource, route) => sorted([...schemaSources].filter(([, schema]) => {
-    const name = schema.title?.replace(/^Nexus\s+/, '').replaceAll(' ', '');
-    return Boolean(name && handlerSource.includes(name)) || schema.description?.includes(route);
-  }).map(([path]) => path));
-  const handlerSources = new Map();
-  for (const entry of routes) {
-    const parts = entry.handler.replace(/^handlers::/, '').split('::');
-    const handler = parts.pop();
-    const base = `crates/nexus-daemon-runtime/src/api/handlers/${parts.join('/')}`;
-    const handlerPath = sources.has(`${base}.rs`) ? `${base}.rs` : `${base}/mod.rs`;
-    const handlerSource = sources.get(handlerPath);
-    if (!handlerSource) throw new Error(`Unresolved mounted handler ${entry.handler}`);
-    const fn = functions(handlerSource).find(item => item.name === handler);
-    if (!fn) throw new Error(`Missing mounted function ${handlerPath}:${handler}`);
-    handlerSources.set(`${entry.method} ${entry.path}`, handlerPath);
-    const m1 = /\/kb\/(?:graph|patch-entity|candidates)$/.test(entry.path);
-    const schema_refs = schemasFor(handlerSource, entry.path);
-    const verifiedOwnerGuard = /require_creator\s*\(/.test(fn.body) && /require_world_owner\s*\(/.test(fn.body);
-    const auth = `${entry.auth}; allowed-origin+CORS+request-id${m1 && verifiedOwnerGuard ? '; world_kb_guards stored creator/world ownership' : ''}`;
-    const gap = m1 && (!schema_refs.length || !verifiedOwnerGuard || entry.auth !== 'api-key+active-creator') ? 'M1 schema or stored creator/world authorization unresolved' : null;
-    // These are the locked M1 DAO/adapter dependencies, not just SQL written
-    // inline in the HTTP handler. No new schema or command is invented here.
-    const m1Tables = entry.path.endsWith('/graph')
-      ? ['narrative_worlds', 'kb_key_blocks', 'kb_relationships', 'kb_source_anchors']
-      : entry.path.endsWith('/candidates') ? ['narrative_worlds', 'kb_extract_jobs'] : ['narrative_worlds', 'kb_key_blocks'];
-    const storage_tables = m1 ? m1Tables : sqlTables(fn.body);
-    add(row('route', handlerPath, `${entry.method} ${entry.path}`, { callers: [`${apiPath}:${entry.caller}`, `${handlerPath}:${handler}`], schema_refs, storage_tables, auth, m1, gap, registration_owner: entry.caller }));
-    const cliPath = entry.path.endsWith('/graph') ? 'nexus42 creator world kb graph' : entry.path.endsWith('/patch-entity') ? 'nexus42 creator world kb entity patch' : null;
-    if (m1 && cliPath) {
-      const cli = rows.find(value => value.kind === 'callable' && value.symbol_or_route === cliPath);
-      if (!cli) throw new Error(`Missing M1 CLI consumer ${cliPath}`);
-      Object.assign(cli, { schema_refs, storage_tables, auth, m1, gap, effect_owner: `${handlerPath}:${handler}` });
-    }
-    if (entry.path.endsWith('/events')) add(row('stream', handlerPath, `${handler}: ${entry.path}`, { callers: [entry.handler], schema_refs, parity_scenario: entry.path.includes('/orchestration/') ? 'Preserve durable owner authorization, Last-Event-ID/gap/retention and Interrupted truth' : 'Preserve legacy Host broadcast filtering; no fabricated durable replay guarantee' }));
-  }
-  for (const symbol of ['require_api_key', 'require_active_creator', 'require_allowed_origin', 'attach_request_id']) {
-    add(row('middleware', apiPath, symbol, { callers: ['create_router'], auth: symbol }));
-  }
-  add(row('dormant-route', 'crates/nexus-daemon-runtime/src/api/middleware.rs', 'require_workspace', { support_state: 'not-mounted', retirement_gate: 'Not mounted by create_router; test subrouters do not establish production authorization. Retain explicit World KB owner guard.' }));
-  add(row('dormant-route', 'crates/nexus-daemon-runtime/src/api/handlers/acp.rs', 'POST /v1/daemon/acp/tool/execute', { support_state: 'comment-only-not-mounted', callers: ['POST /v1/daemon/agent-host/internal/tool-executions'], retirement_gate: 'Legacy comment is not a mounted alias; RFT-11 must resolve external callers before removal' }));
-  add(row('external-consumer', 'packages/nexus-contracts/package.json', 'external-consumer-unknown', { support_state: 'external-consumer-unknown', retirement_gate: 'RFT-11 deletion BLOCKED until third-party Daemon API/SDK consumers are identified and replacement parity is accepted; retain current HTTP during extraction' }));
-  for (const [schemaPath, schema] of schemaSources) {
-    const declaredRoutes = [...JSON.stringify(schema).matchAll(/\b(GET|POST|PUT|PATCH|DELETE) (\/v1\/daemon\/[^\s"\\)`,]+)[.,]?/g)];
-    for (const match of declaredRoutes) {
-      const declaration = `${match[1]} ${match[2].replace(/[.,]$/, '')}`;
-      const mounted = handlerSources.has(declaration);
-      if (!mounted) note(`schema-route:${schemaPath}:${declaration}`, `${declaration} is described by ${schemaPath} but not mounted; actual create_router remains authoritative. This is a schema documentation parity blocker for its destination family, not permission to add/delete a route.`);
-      add(row('schema-operation', schemaPath, declaration, { destination_rft: destination('route', schemaPath, declaration), support_state: mounted ? 'mounted-schema-reference' : 'unmounted-schema-description', schema_refs: [schemaPath], callers: mounted ? [handlerSources.get(declaration)] : [], retirement_gate: mounted ? 'Keep schema and mounted method/path parity' : 'Resolve stale schema route description from create_router before destination-family cutover; no invented alias' }));
-    }
-  }
+  // v1.193 P2 retired the entire Rust daemon composition: the
+  // `nexus-daemon-runtime` crate (its `create_router` route table, handlers,
+  // middleware, capability registry and boot tasks), the app-only
+  // `basic-cli` / `legacy-cli` / `web-embed` / `connect-client` /
+  // `embedded-mcp` selectors and the `nexus42 daemon` command group. Those
+  // rows can no longer be collected from this tree; the retained surfaces are
+  // the direct-core CLI, the Connect-only `nexus-runtime` and the core
+  // library MCP/peer features. Historical route/handler rows stay in the
+  // baseline inventories' evidence.
+  note('daemon-surface-retired', 'Rust daemon route/handler/middleware/capability/boot rows were removed with the nexus-daemon-runtime crate in v1.193 P2; the executable clap cohorts and the retained schema declarations are the current boundary SSOT.');
+  add(row('external-consumer', 'packages/nexus-contracts/package.json', 'external-consumer-unknown', { support_state: 'external-consumer-unknown', retirement_gate: 'Third-party consumers of @42ch/nexus-contracts must be identified before any wire/semver break; the local HTTP host has been the Electron/TS service since v1.193 P2' }));
 
   const migrations = await filesUnder(join(root, 'crates/nexus-local-db/migrations'), '.sql');
   const tables = new Map();
@@ -682,12 +636,6 @@ export async function collectInventory({ baseline, inventoriesDir }) {
   const tableCallers = new Map([...tables].map(([name]) => [name, []]));
   const constructors = [];
   for (const [path, source] of sources) {
-    // This public module is explicitly documented in lib.rs as integration-test
-    // support. Keep the declaration as evidence; do not activate test DBs.
-    if (path === 'crates/nexus-daemon-runtime/src/test_utils.rs') {
-      note('exported-test-support', `${path} is a public test-helper module, not daemon bootstrap or a registered business writer.`);
-      continue;
-    }
     const fns = functions(source);
     for (const fn of fns) {
       for (const name of sqlTables(fn.body)) if (tableCallers.has(name)) tableCallers.get(name).push(`${path}:${fn.symbol}`);
@@ -725,10 +673,6 @@ export async function collectInventory({ baseline, inventoriesDir }) {
   note('migration-rebuild-tables', `Historical rebuild names are not persistent final tables: ${[...historical.keys()].filter(name => !tables.has(name)).sort().join(', ')}. Applied CREATE/DROP/RENAME order, not a CREATE count.`);
   note('writer-guard-status', 'guarded is the required P1 admission classification, NOT a claim guards already exist. open_pool and DbPool::new are raw today; read-only constructors stay read-only. No production writer may be exempted on P1 activation.');
 
-  const capPath = 'crates/nexus-daemon-runtime/src/capability_registry.rs';
-  const capSource = functions(sources.get(capPath)).find(fn => fn.name === 'build_registry')?.body;
-  if (!capSource) throw new Error('Missing build_registry');
-  for (const match of capSource.matchAll(/id:\s*"([^"]+)"[\s\S]*?handler:\s*([\w:]+)/g)) add(row('capability', capPath, match[1], { callers: [`${capPath}:build_registry`, match[2]], schema_refs: [`${capPath}:CatalogDescriptor`], effect_owner: 'CapabilityRegistry admission + registered handler' }));
   const builtinPath = 'crates/nexus-orchestration/src/capability/mod.rs';
   const builtinSource = functions(sources.get(builtinPath)).find(fn => fn.name === 'with_builtins')?.body;
   if (!builtinSource) throw new Error('Missing with_builtins');
@@ -736,16 +680,9 @@ export async function collectInventory({ baseline, inventoriesDir }) {
   const providerPath = 'crates/nexus-agent-host/src/providers/mod.rs';
   const providerSource = sources.get(providerPath);
   for (const name of sorted([...providerSource.matchAll(/"(dsh-native|codex-native|claude-native|acp)"/g)].map(match => match[1]))) add(row('provider', providerPath, name, { callers: ['adapter_from_catalog_entry'], effect_owner: 'HostManager + selected ProviderAdapter', parity_scenario: name === 'dsh-native' ? 'Complete-message streaming; cancellation:false; retained cleanup, no fabricated cancel support' : 'Actual provider streaming/cancel/terminal/close parity with no paid calls' }));
-  const bootPath = 'crates/nexus-daemon-runtime/src/boot.rs';
-  add(row('boot', bootPath, 'run_daemon', { callers: ['nexus42 daemon start --foreground', 'nexus42 daemon-run'], storage_tables: [...tables.keys()].sort(), effect_owner: 'WorkspaceState RuntimeBundle and one coordinator' }));
-  for (const fn of functions(sources.get(bootPath))) {
-    for (const [index, call] of [...fn.body.matchAll(/\b(spawn(?:_blocking)?|spawn_\w+)\s*\(/g)].entries()) {
-      add(row('task', bootPath, `${fn.symbol}:${call[1]}#${index + 1}`, { callers: [`${bootPath}:${fn.symbol}`], effect_owner: 'daemon shutdown gate / retained task owner', evidence_class: 'source-task-callsite', parity_scenario: 'Preserve startup/recovery ordering, shutdown notification and retained cleanup before owner release' }));
-    }
-  }
   const manifestPath = 'apps/nexus42/Cargo.toml';
   const manifest = await text(join(root, manifestPath));
-  for (const feature of manifestFeatures(manifest)) add(row('feature', manifestPath, feature.name, { feature_condition: feature.name, definition: feature.definition, support_state: 'retained-feature-cohort', parity_scenario: 'Preserve additive feature implications and default web-embed; Connect-only runtime does not imply full daemon boot' }));
+  for (const feature of manifestFeatures(manifest)) add(row('feature', manifestPath, feature.name, { feature_condition: feature.name, definition: feature.definition, support_state: 'retained-feature-cohort', parity_scenario: 'Preserve additive feature implications of the final `cli`/`connect-host` cohorts; Connect-only runtime does not imply `cli` or any host composition' }));
 
   const unique = new Map();
   for (const value of rows) {

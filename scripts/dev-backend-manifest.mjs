@@ -617,7 +617,8 @@ export async function verifyRunningDaemonIdentity({
 export function formatRunningDaemonRefusal({ baseUrl, port, reason }) {
   return (
     `Incompatible daemon already running at ${baseUrl}: ${reason} ` +
-    `Stop it with: nexus42 daemon stop --port ${port}. ` +
+    `Stop that process — it is the listener on port ${port} ` +
+    `(lsof -nP -iTCP:${port} -sTCP:LISTEN -t prints its PID). ` +
     `Then refresh the backend if needed (${REMEDIATION_COMMAND}) and restart dev.`
   );
 }

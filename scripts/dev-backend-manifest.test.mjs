@@ -316,7 +316,8 @@ test('assertCompatibleRunningDaemon refuses incompatible running daemon with act
       }),
     err => {
       assert.ok(err instanceof RunningDaemonCompatibilityError);
-      assert.match(err.message, /Stop it with: nexus42 daemon stop --port 19999/);
+      assert.match(err.message, /the listener on port 19999/);
+      assert.doesNotMatch(err.message, /nexus42 daemon/);
       assert.match(err.message, new RegExp(REMEDIATION_COMMAND.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
       return true;
     },
@@ -326,9 +327,7 @@ test('assertCompatibleRunningDaemon refuses incompatible running daemon with act
 test('isDaemonCliStatusRunning treats successful not-running status as not running', () => {
   const output = `Daemon Status:
   URL: http://127.0.0.1:8420
-  Status: ✗ Not running
-
-Start with: nexus42 daemon start`;
+  Status: ✗ Not running`;
   assert.equal(isDaemonCliStatusRunning(output), false);
 });
 
@@ -393,7 +392,8 @@ test('assertCompatibleRunningDaemon refuses same-version stale contract identity
     err => {
       assert.ok(err instanceof RunningDaemonCompatibilityError);
       assert.match(err.message, /contractHash/);
-      assert.match(err.message, /Stop it with: nexus42 daemon stop --port 18888/);
+      assert.match(err.message, /the listener on port 18888/);
+      assert.doesNotMatch(err.message, /nexus42 daemon/);
       assert.doesNotMatch(err.message, /must not inspect or kill foreign daemon process/);
       return true;
     },

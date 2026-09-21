@@ -24,8 +24,10 @@ feature:
 cargo build --release --bin nexus-runtime --no-default-features --features connect-host
 ```
 
-`--no-default-features` turns the `web-embed` feature off, so the artifact
-carries no embedded SPA bytes. The `connect-host` feature links spoke-connect
+`--no-default-features` keeps the artifact on the Connect-only cohort, so it
+carries no SPA bytes at all: the app-only `web-embed` selector (and the Rust
+daemon host it embedded) was deleted in v1.193 P2, and the ordinary `cli`
+cohort is the default. The `connect-host` feature links spoke-connect
 (libp2p); the default build stays libp2p-free and does not produce the
 binary (`required-features = ["connect-host"]`).
 
@@ -102,9 +104,10 @@ tools.nexus.list_observed_peers  tools.nexus.list_modules
 - Bounded bridge: 8 concurrent invokes per process, 30 s per-invoke
   deadline, 500 collection entries / 2 MiB request / 2 MiB response.
 
-The daemon HTTP router, embedded SPA, Setup/Canvas/Control Room, ACP, and
-schedule/worker supervision never boot in this process (`run_daemon` is
-never called).
+The retired Rust daemon host is not linked into this binary at all (v1.193 P2
+deleted the crate): its HTTP router, embedded SPA, Setup/Canvas/Control Room,
+ACP surfaces and schedule/worker supervision do not exist in this graph.
+`nexus-runtime` boots Connect and nothing else.
 
 ## Connect tools (DF-84)
 
@@ -138,7 +141,7 @@ A peer that meets both can invoke the tool through the ordinary
 `invoke()` path; a peer that does not is refused `op_unsupported` at the
 spoke gate (capability missing) or by the host scope gate (op not in
 `op_scope`), before any host handler runs. Tools are host-level reads:
-they skip the world-scope gate, and they never require a daemon — the
+they skip the world-scope gate, and they never require a service host — the
 `connect start` process serves them alone.
 
 ## Home layout
@@ -147,7 +150,7 @@ All state lives under `~/.nexus42/` (path helpers in `nexus-home-layout`):
 
 | Path | Purpose |
 |------|---------|
-| `config.toml` | CLI/daemon config; active workspace (`active_creator_id` + `active_workspace_slug_by_creator`) |
+| `config.toml` | CLI config; active workspace (`active_creator_id` + `active_workspace_slug_by_creator`) |
 | `device-id` | Machine identifier (UUID v4); the Connect `host_id` |
 | `connect/identity.key` | Connect node Ed25519 identity key (libp2p protobuf; created once, 0600) |
 | `connect/allowlist.json` | Peer allowlist + scopes (below) |
@@ -163,9 +166,9 @@ The runtime boots against the active workspace selected in `config.toml`;
 
 `nexus-runtime` and the creator-facing `nexus42` app share the home and the
 workspace DB. Concurrency is governed by SQLite WAL (1 writer + N readers,
-`DbPool` busy timeout); the per-work `runtime_lock` is daemon-internal and
-the Connect invoke path never acquires it. The daemon may run while the
-runtime serves invokes.
+`DbPool` busy timeout); the per-work `runtime_lock` belonged to the retired
+Rust host (v1.193 P2) and the Connect invoke path never acquires it. The
+Electron/TS service may run while the runtime serves invokes.
 
 ## Allowlist and module scope
 
