@@ -42,7 +42,7 @@
 #     spoke-operations exactly one 0.13.1
 #   -p nexus-core --no-default-features --features connect-client (core
 #   MCP/peer library; the shipped app no longer selects it):
-#     rmcp            exactly one 3.3.0
+#     rmcp            exactly one 3.4.0
 #     spoke-connect   exactly one 0.13.x
 #     libp2p          exactly one 0.56.x
 #     spoke-operations exactly one 0.13.1
@@ -229,7 +229,7 @@ assert_exactly_one nexus-core "--no-default-features" spoke-operations "0.13.1"
 # --- core MCP/peer library (app-only Model A selectors are gone) -------------
 
 for feats in "--no-default-features --features connect-client" "--no-default-features --features embedded-mcp"; do
-  assert_exactly_one nexus-core "$feats" rmcp "3.3.0"
+  assert_exactly_one nexus-core "$feats" rmcp "3.4.0"
   assert_exactly_one nexus-core "$feats" spoke-connect "0.13.*"
   assert_exactly_one nexus-core "$feats" libp2p "0.56.*"
   assert_exactly_one nexus-core "$feats" spoke-operations "0.13.1"

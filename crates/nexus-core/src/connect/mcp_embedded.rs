@@ -140,7 +140,7 @@ pub struct EmbeddedMcpServer<B: McpBackend> {
 /// `serve_client`.
 ///
 /// The consumer completes the handshake with
-/// `rmcp::serve_client(ClientInfo::default(), session.transport)`. The
+/// `rmcp::serve_client(ClientConfig::default(), session.transport)`. The
 /// session-budget slot is NOT carried on this handle: it lives in the
 /// session's server-side serve task (see
 /// [`EmbeddedMcpServer::establish`]), so consuming the transport never
@@ -232,7 +232,7 @@ impl<B: McpBackend + Clone + 'static> EmbeddedMcpServer<B> {
     /// Establish one embedded MCP session: spawns the in-process rmcp
     /// server over a fresh sink/stream pair and returns the client-side
     /// transport. The consumer completes the handshake with
-    /// `rmcp::serve_client(ClientInfo::default(), session.transport)`.
+    /// `rmcp::serve_client(ClientConfig::default(), session.transport)`.
     ///
     /// Refused with [`EmbeddedMcpError::Shutdown`] once the shutdown signal
     /// is set, and with [`EmbeddedMcpError::SessionLimit`] when the budget

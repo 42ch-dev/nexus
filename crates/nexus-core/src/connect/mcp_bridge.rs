@@ -50,7 +50,8 @@ use std::sync::Arc;
 use crate::connect::visibility::VisibilityPolicy;
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ErrorCode,
-    Implementation, ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerInfo, Tool,
+    Implementation, ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerConfig,
+    Tool,
 };
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler};
@@ -145,7 +146,7 @@ pub struct McpBridgeHandler<B> {
 }
 
 impl<B: McpBackend> ServerHandler for McpBridgeHandler<B> {
-    fn get_info(&self) -> ServerInfo {
+    fn get_info(&self) -> ServerConfig {
         let mut capabilities = ServerCapabilities::builder().enable_tools();
         if self.backend.advertise_tool_list_changed() {
             // AR-79 #4 (F-6): order matters — `enable_tools()` must precede
@@ -153,7 +154,7 @@ impl<B: McpBackend> ServerHandler for McpBridgeHandler<B> {
             // existing `tools` capability).
             capabilities = capabilities.enable_tool_list_changed();
         }
-        ServerInfo::new(capabilities.build())
+        ServerConfig::new(capabilities.build())
             .with_server_info(Implementation::new("nexus42", env!("CARGO_PKG_VERSION")))
     }
 
@@ -296,7 +297,7 @@ fn executed_error_text(code: &str, message: &str, wire_code: Option<&str>) -> St
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rmcp::model::ClientInfo;
+    use rmcp::model::ClientConfig;
     use rmcp::{serve_client, serve_server, ServiceError};
 
     #[test]
@@ -433,7 +434,7 @@ mod tests {
             Some(true),
             "watcher backend advertises tools.listChanged (AR-79 #4)"
         );
-        let wire = serde_json::to_value(&info).expect("ServerInfo serializes");
+        let wire = serde_json::to_value(&info).expect("ServerConfig serializes");
         assert_eq!(
             wire["capabilities"]["tools"]["listChanged"],
             serde_json::json!(true),
@@ -454,7 +455,7 @@ mod tests {
             tools.list_changed, None,
             "embedded backend must not advertise a listChanged it never delivers"
         );
-        let wire = serde_json::to_value(&info).expect("ServerInfo serializes");
+        let wire = serde_json::to_value(&info).expect("ServerConfig serializes");
         assert_eq!(
             wire["capabilities"]["tools"]["listChanged"],
             serde_json::Value::Null,
@@ -512,13 +513,13 @@ mod tests {
     /// wire path (no direct handler calls, no fabricated contexts).
     async fn serve_handler<B: McpBackend>(
         handler: McpBridgeHandler<B>,
-    ) -> rmcp::service::RunningService<rmcp::RoleClient, ClientInfo> {
+    ) -> rmcp::service::RunningService<rmcp::RoleClient, ClientConfig> {
         let (client_io, server_io) = tokio::io::duplex(4096);
         tokio::spawn(async move {
             let service = serve_server(handler, server_io).await.expect("server init");
             let _ = service.waiting().await;
         });
-        serve_client(ClientInfo::default(), client_io)
+        serve_client(ClientConfig::default(), client_io)
             .await
             .expect("client init")
     }
