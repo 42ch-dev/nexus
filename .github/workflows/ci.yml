@@ -33,9 +33,9 @@ jobs:
           predicate-quantifier: 'some-with-excludes'
           filters: |
             typescript:
-              - '**/*.ts'
+              - '**/*.{ts,mts,cts}'
               - '**/*.tsx'
-              - '**/*.js'
+              - '**/*.{js,mjs,cjs}'
               - '**/*.jsx'
               - '**/*.css'
               - '**/package.json'
@@ -46,13 +46,19 @@ jobs:
               - 'packages/nexus-ui/assets/**'
               - 'apps/web/**'
               - 'apps/design-studio/**'
+              - 'apps/desktop-electron/**'
+              - 'apps/nexus-service/**'
               - 'packages/**'
               - 'tooling/codegen/**'
               - 'tooling/design-tokens/**'
               - 'tooling/validation/**'
               - 'strategy-samples/**'
+              - 'scripts/**'
               - '.github/workflows/ci.yml'
               - '.github/actions/**'
+              - '.oxlintrc.json'
+              - '**/tsconfig.json'
+              - '**/tsconfig.*.json'
               - '!**/*.md'
             rust:
               - '**/*.rs'
@@ -318,6 +324,21 @@ jobs:
         run: pnpm --filter @42ch/nexus-contracts run build
       - name: Typecheck
         run: pnpm run typecheck
+      # oxlint's type-aware pass (options.typeAware) resolves the linted apps'
+      # workspace imports through each package's `types` field
+      # (dist/index.d.ts). Without those declarations @42ch/nexus-service
+      # imports resolve to error types and
+      # apps/desktop-electron/src/utility-host.ts:41 collapses its union into
+      # `typescript/no-redundant-type-constituents`. Build the dependency
+      # chain in order — native and provider-acp are nexus-service's
+      # prerequisites (`tsc` fails on TS2307 without either) — so the linted
+      # program sees real declarations. Root-cause repair: no rule and no file
+      # is disabled for it.
+      - name: Build workspace type dependencies
+        run: |
+          pnpm --filter @42ch/nexus-native run build
+          pnpm --filter @42ch/nexus-provider-acp run build
+          pnpm --filter @42ch/nexus-service run build
       - name: Lint
         run: pnpm run lint
 

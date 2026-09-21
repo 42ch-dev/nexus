@@ -282,7 +282,7 @@ describe('facade wire validation', () => {
     assert.throws(
       () =>
         stringifyWire(
-          { entity_id: 'kb_abc123', expected_version: 0, patch: { body: { revision: 9007199254740993 } } },
+          { entity_id: 'kb_abc123', expected_version: 0, patch: { body: { revision: Number.MAX_SAFE_INTEGER + 1 } } },
           WORLD_KB_PATCH_ENTITY_SHAPE,
           'request',
         ),

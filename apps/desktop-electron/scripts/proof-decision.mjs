@@ -171,7 +171,7 @@ function deriveRow({ id, row, evidence, schema, target, sourceSha = source.sourc
     if (structural) {
       state = 'stale';
     } else {
-      const { required = [], failures = [], notes = [], measuredFailure = null } = predicates(doc) ?? {};
+      const { required, failures, notes, measuredFailure = null } = predicates(doc);
       const missing = required.filter(
         (name) => !(doc?.checks ?? []).some((check) => check?.name === name),
       );
@@ -355,6 +355,7 @@ for (const arch of ARCHES) {
       }
       if (doc.compatibility?.manifest?.target_triple !== arch.target) failed.push('compatibility target mismatch');
       return {
+        required: [],
         failures: failed,
         notes: [],
         measuredFailure: failed.filter((f) => f.startsWith('compatibility') || f.startsWith('platform tarball')),
@@ -383,6 +384,7 @@ for (const arch of ARCHES) {
       }
       if ((doc.checks ?? []).length === 0) failed.push('no inspection checks recorded');
       return {
+        required: [],
         failures: failed,
         notes: [],
         measuredFailure: failed.filter((f) => f.startsWith('inspection check') || f.startsWith('artifact sha256')),
@@ -418,10 +420,11 @@ for (const arch of ARCHES) {
     target: arch.target,
     predicates: (doc) => {
       const platform = (doc.packages ?? []).find((p) => p.name.includes('native-') && p.name !== '@42ch/nexus-native');
-      if (!platform) return { failures: ['no platform tarball recorded'], notes: [] };
+      if (!platform) return { required: [], failures: ['no platform tarball recorded'], notes: [] };
       const mib = platform.tarball_bytes / 1048576;
       const over = mib <= NATIVE_PAYLOAD_LIMIT_MIB ? [] : [`platform tarball ${mib.toFixed(1)} MiB exceeds ${NATIVE_PAYLOAD_LIMIT_MIB} MiB`];
       return {
+        required: [],
         failures: over,
         notes: [`${mib.toFixed(1)} MiB of ${NATIVE_PAYLOAD_LIMIT_MIB} MiB`],
         measuredFailure: over,
@@ -508,6 +511,7 @@ for (const arch of GUI_ARCHES) {
         if (check.ok !== true) failed.push(`size check ${check.id} not passing`);
       }
       return {
+        required: [],
         failures: failed,
         notes:
           doc.sizes?.zip_mib != null
@@ -941,7 +945,7 @@ deriveRow({
     if (doc.packaged_electron_version !== doc.target_electron_version) {
       measured.push('packaged Electron version does not match the target');
     }
-    return { failures: failed, notes: [], measuredFailure: measured };
+    return { required: [], failures: failed, notes: [], measuredFailure: measured };
   },
   describe: (doc) =>
     doc
