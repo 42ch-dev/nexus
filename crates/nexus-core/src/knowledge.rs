@@ -20,7 +20,7 @@ use nexus_contracts::daemon_api::kb::{
     KbEntrySummary, ListKbEntriesQuery, ListKbEntriesResponse,
 };
 use nexus_contracts::PaginationInfo;
-use nexus_home_layout::validate_entry_id_safe;
+use nexus_home_layout::sanitize_entry_id;
 use nexus_knowledge::knowledge::{
     KnowledgeQuery, KnowledgeResult, KnowledgeTag, UserKnowledgeEntry,
 };
@@ -639,12 +639,15 @@ impl CoreService {
         entry_id: String,
     ) -> CoreResult<GetKbEntryResponse> {
         self.verify_principal(principal)?;
-        validate_entry_id_safe(&entry_id).map_err(|reason| invalid_input("entry_id", reason))?;
+        let safe_entry_id =
+            sanitize_entry_id(&entry_id).map_err(|reason| invalid_input("entry_id", reason))?;
 
         let nexus_root = self.inner.nexus_home.clone();
 
         // Try index lookup first (O(1)), fall back to filesystem scan.
-        if let Some((creator_id, workspace_slug)) = lookup_entry_location(&entry_id, &nexus_root) {
+        if let Some((creator_id, workspace_slug)) =
+            lookup_entry_location(safe_entry_id, &nexus_root)
+        {
             if creator_id != principal.creator_id() {
                 return Err(
                     KnowledgeFault::ForeignEntry(format!("kb_owner:KB entry {entry_id}")).into(),
@@ -653,7 +656,7 @@ impl CoreService {
             // Fast path: read entry from known location.
             let (_, entries_dir) =
                 resolve_kb_paths(&nexus_root, &creator_id, Some(&workspace_slug));
-            let candidate = entries_dir.join(format!("{entry_id}.md"));
+            let candidate = entries_dir.join(format!("{safe_entry_id}.md"));
             if candidate.exists() {
                 let content =
                     std::fs::read_to_string(&candidate).map_err(|e| KnowledgeFault::Internal {
@@ -664,7 +667,7 @@ impl CoreService {
                 let (kb_dir, _) = resolve_kb_paths(&nexus_root, &creator_id, Some(&workspace_slug));
                 let index_path = kb_dir.join("index.json");
                 let index = read_kb_index(&index_path);
-                let index_entry = index.entries.iter().find(|e| e.entry_id == entry_id);
+                let index_entry = index.entries.iter().find(|e| e.entry_id == safe_entry_id);
 
                 let (title, created_at) = index_entry.map_or_else(
                     || (entry_id.clone(), String::new()),
@@ -688,7 +691,7 @@ impl CoreService {
             return Err(KnowledgeFault::NotFound(format!("KB entry {entry_id} not found")).into());
         }
 
-        let entry_file = format!("{entry_id}.md");
+        let entry_file = format!("{safe_entry_id}.md");
 
         // Ownership is classified deterministically, independent of index
         // temperature: the creator's own copy wins; an entry that exists only
@@ -705,7 +708,7 @@ impl CoreService {
             // Read index for metadata
             let index_path = ws_root.join("kb").join("index.json");
             let index = read_kb_index(&index_path);
-            let index_entry = index.entries.iter().find(|e| e.entry_id == entry_id);
+            let index_entry = index.entries.iter().find(|e| e.entry_id == safe_entry_id);
 
             let (title, created_at) = index_entry.map_or_else(
                 || (entry_id.clone(), String::new()),
@@ -742,12 +745,15 @@ impl CoreService {
     ) -> CoreResult<DeleteKbEntryResponse> {
         self.verify_principal(principal)?;
         self.require_work_write()?;
-        validate_entry_id_safe(&entry_id).map_err(|reason| invalid_input("entry_id", reason))?;
+        let safe_entry_id =
+            sanitize_entry_id(&entry_id).map_err(|reason| invalid_input("entry_id", reason))?;
 
         let nexus_root = self.inner.nexus_home.clone();
 
         // Try index lookup first (O(1)).
-        if let Some((creator_id, workspace_slug)) = lookup_entry_location(&entry_id, &nexus_root) {
+        if let Some((creator_id, workspace_slug)) =
+            lookup_entry_location(safe_entry_id, &nexus_root)
+        {
             if creator_id != principal.creator_id() {
                 return Err(
                     KnowledgeFault::ForeignEntry(format!("kb_owner:KB entry {entry_id}")).into(),
@@ -755,7 +761,7 @@ impl CoreService {
             }
             let (_, entries_dir) =
                 resolve_kb_paths(&nexus_root, &creator_id, Some(&workspace_slug));
-            let candidate = entries_dir.join(format!("{entry_id}.md"));
+            let candidate = entries_dir.join(format!("{safe_entry_id}.md"));
             if candidate.exists() {
                 std::fs::remove_file(&candidate).map_err(|e| KnowledgeFault::Internal {
                     code: "FILE_DELETE_ERROR".into(),
@@ -765,14 +771,14 @@ impl CoreService {
                 let (kb_dir, _) = resolve_kb_paths(&nexus_root, &creator_id, Some(&workspace_slug));
                 let index_path = kb_dir.join("index.json");
                 let mut index = read_kb_index(&index_path);
-                index.entries.retain(|e| e.entry_id != entry_id);
+                index.entries.retain(|e| e.entry_id != safe_entry_id);
                 if index.entries.is_empty() {
                     let _ = std::fs::remove_file(&index_path);
                 } else {
                     write_kb_index(&index_path, &index)?;
                 }
 
-                remove_from_kb_entry_index(&entry_id);
+                remove_from_kb_entry_index(safe_entry_id);
 
                 self.verify_principal(principal)?;
                 return Ok(DeleteKbEntryResponse {
@@ -790,7 +796,7 @@ impl CoreService {
             return Err(KnowledgeFault::NotFound(format!("KB entry {entry_id} not found")).into());
         }
 
-        let entry_file = format!("{entry_id}.md");
+        let entry_file = format!("{safe_entry_id}.md");
 
         // Ownership is classified deterministically, independent of index
         // temperature: the creator's own copy is deleted; an entry that exists
@@ -807,7 +813,7 @@ impl CoreService {
             // Update index
             let index_path = ws_root.join("kb").join("index.json");
             let mut index = read_kb_index(&index_path);
-            index.entries.retain(|e| e.entry_id != entry_id);
+            index.entries.retain(|e| e.entry_id != safe_entry_id);
             if index.entries.is_empty() {
                 // Clean up empty index
                 let _ = std::fs::remove_file(&index_path);
@@ -815,7 +821,7 @@ impl CoreService {
                 write_kb_index(&index_path, &index)?;
             }
 
-            remove_from_kb_entry_index(&entry_id);
+            remove_from_kb_entry_index(safe_entry_id);
 
             self.verify_principal(principal)?;
             return Ok(DeleteKbEntryResponse {

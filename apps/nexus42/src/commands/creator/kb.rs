@@ -385,8 +385,10 @@ async fn kb_queue_extract(
         .to_string();
     let slug = config.workspace_slug_for_creator(&creator_id).to_string();
 
-    // Validate entry_id format to prevent path traversal.
-    paths::validate_entry_id_safe(work_entry_id).map_err(CliError::Other)?;
+    // Sanitize entry_id before it reaches any path or artifact-locator sink. The
+    // returned borrow shadows the raw argument so the validated value is the only
+    // one that flows on.
+    let work_entry_id = paths::sanitize_entry_id(work_entry_id).map_err(CliError::Other)?;
 
     // The seam's admission pre-flight runs before the pool open: `Schema::init`
     // migrates — and therefore creates — the selected workspace, so a selection

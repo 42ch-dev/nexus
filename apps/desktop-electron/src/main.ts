@@ -11,7 +11,8 @@
  *    with the active connection origin;
  *  - typed desktop IPC (P0-T1) with the mandatory live `getCurrentGeneration`
  *    source, config handlers (P0-T2), guarded OS actions (P0-T3), connection
- *    store + exact-origin network hooks (P0-T5), the serialized service
+ *    store + exact-origin network hooks (P0-T5) with the paired legacy
+ *    credential read/cleanup adapter (P1-T3), the serialized service
  *    controller (P0-T4) with status events on `nexus:desktop:status-changed`,
  *    and the three-choice quit gate (P0-T6) wired into `before-quit`;
  *  - standard edit/quit menu roles only (plan menu decision — no native
@@ -29,7 +30,7 @@
  * report says so explicitly for what remains `[UNVERIFIED]`.
  */
 import { execFile } from 'node:child_process';
-import { accessSync, constants, existsSync, readFileSync, statSync } from 'node:fs';
+import { accessSync, constants, existsSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -50,6 +51,7 @@ import {
   DESKTOP_HOST,
   DESKTOP_RUNTIME_CHANNEL,
   DESKTOP_SCHEME,
+  connectionEndpointOrigin,
   errorMessage,
   isAllowedDesktopExternalUrl,
 } from './desktop-contract.js';
@@ -284,6 +286,11 @@ export interface ComposeDesktopHostOptions {
       session: SessionLike,
       getActiveAuth: () => ActiveConnectionAuth | null,
     ) => void;
+    /**
+     * Legacy plaintext credential source (test seam); defaults to the paired
+     * macOS-keychain/app-data adapter over `app.getPath('appData')`.
+     */
+    legacyCredentials?: LegacyCredentialAdapter;
   };
 }
 
@@ -316,37 +323,103 @@ function quitDetail(status: DaemonStatus): string {
   return status.detail ? `${base} ${status.detail}` : base;
 }
 
+/** Retired Tauri-era keychain identity of the legacy connection credential. */
+const LEGACY_KEYCHAIN_SERVICE = 'nexus42';
+const LEGACY_KEYCHAIN_ACCOUNT = 'connection_config';
+/** `security` exit status for errSecItemNotFound: the item is already gone. */
+const SECURITY_ITEM_NOT_FOUND = 44;
+
 /**
- * One-time legacy connection import (frozen secure-store contract): the old
- * macOS keychain entry (`nexus42` / `connection_config`) via
- * `/usr/bin/security` — no shell, the secret is never logged or returned
- * anywhere else — otherwise the old app-data `connection_config.json`.
+ * The retired plaintext credential source (D-18): the macOS keychain item
+ * `nexus42` / `connection_config` and the app-data fallback
+ * `<appData>/io.nexus42.desktop/connection_config.json`.
+ *
+ * Read and removal are one unit, so the store can never import without the
+ * cleanup that removes the plaintext originals. Both members are idempotent:
+ * an absent item (keychain errSecItemNotFound, JSON ENOENT) is success, any
+ * other failure is not. The secret is never logged, returned or embedded in
+ * an error message.
  */
-function createLegacyConnectionReader(appDataDir: string): () => Promise<string | null> {
-  async function keychainSecret(): Promise<string | null> {
-    try {
-      const { stdout } = await execFileAsync(
-        '/usr/bin/security',
-        ['find-generic-password', '-s', 'nexus42', '-a', 'connection_config', '-w'],
-        { timeout: 5_000 },
-      );
-      const trimmed = String(stdout).trim();
-      return trimmed.length > 0 ? trimmed : null;
-    } catch {
-      return null;
-    }
-  }
-  return async () => {
-    if (process.platform === 'darwin') {
-      const secret = await keychainSecret();
-      if (secret !== null) return secret;
-    }
-    const fallback = join(appDataDir, 'io.nexus42.desktop', 'connection_config.json');
-    try {
-      return readFileSync(fallback, 'utf8');
-    } catch {
-      return null;
-    }
+export interface LegacyCredentialAdapter {
+  /** Legacy JSON, or null when no legacy source exists. */
+  read(): Promise<string | null>;
+  /** Removes both legacy sources; an already-absent source counts as removed. */
+  cleanup(): Promise<void>;
+}
+
+export interface LegacyCredentialAdapterDeps {
+  /**
+   * `/usr/bin/security` invocation (no shell). Injected by tests so the exact
+   * argv is asserted WITHOUT reading or writing the user's keychain; the
+   * default runs the real CLI with a bounded timeout.
+   */
+  runSecurity?: (args: string[]) => Promise<{ stdout: string }>;
+  /** Filesystem removal primitive (defaults to `rmSync`). */
+  removeFile?: (filePath: string) => void;
+  /** Platform gate for the keychain step (defaults to `process.platform`). */
+  platform?: NodeJS.Platform;
+}
+
+export function createLegacyCredentialAdapter(
+  appDataDir: string,
+  overrides: LegacyCredentialAdapterDeps = {},
+): LegacyCredentialAdapter {
+  const runSecurity =
+    overrides.runSecurity ??
+    (async (args: string[]) => {
+      const { stdout } = await execFileAsync('/usr/bin/security', args, { timeout: 5_000 });
+      return { stdout: String(stdout) };
+    });
+  const remove = overrides.removeFile ?? rmSync;
+  const platform = overrides.platform ?? process.platform;
+  const jsonPath = join(appDataDir, 'io.nexus42.desktop', 'connection_config.json');
+
+  return {
+    async read(): Promise<string | null> {
+      if (platform === 'darwin') {
+        try {
+          const { stdout } = await runSecurity([
+            'find-generic-password',
+            '-s',
+            LEGACY_KEYCHAIN_SERVICE,
+            '-a',
+            LEGACY_KEYCHAIN_ACCOUNT,
+            '-w',
+          ]);
+          const secret = stdout.trim();
+          if (secret.length > 0) return secret;
+        } catch {
+          // No such item (or no usable keychain): fall through to app-data.
+        }
+      }
+      try {
+        return readFileSync(jsonPath, 'utf8');
+      } catch {
+        return null;
+      }
+    },
+    async cleanup(): Promise<void> {
+      if (platform === 'darwin') {
+        try {
+          await runSecurity([
+            'delete-generic-password',
+            '-s',
+            LEGACY_KEYCHAIN_SERVICE,
+            '-a',
+            LEGACY_KEYCHAIN_ACCOUNT,
+          ]);
+        } catch (err) {
+          // An already-absent item is the idempotent success case; every other
+          // failure (locked keychain, denied access, …) must surface.
+          if (Number((err as { code?: unknown } | null)?.code) !== SECURITY_ITEM_NOT_FOUND) throw err;
+        }
+      }
+      try {
+        remove(jsonPath);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException | null)?.code !== 'ENOENT') throw err;
+      }
+    },
   };
 }
 
@@ -367,6 +440,10 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
 
   const resolvedPort = resolveDesktopServicePort(undefined, input.env);
   const localEndpoint = `http://${DESKTOP_SERVICE_HOST}:${resolvedPort}`;
+  // The app-managed local origin is validated through the same strict grammar
+  // as every remote endpoint, so the CSP fallback below can never be the
+  // reason a response is emitted without a policy.
+  const localServiceOrigin = connectionEndpointOrigin(localEndpoint);
   const navigationOptions = { dev };
 
   // ── identity ──────────────────────────────────────────────────────────
@@ -386,12 +463,17 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
   const config = createDesktopConfig(input.paths.home, input.paths.documentsPath);
   const { resolveWorkspaceRoot, ...configHandlers } = config;
 
+  // One paired adapter: the store imports only when the same unit also
+  // carries the removal of both plaintext originals.
+  const legacyCredentials =
+    adapters.legacyCredentials ?? createLegacyCredentialAdapter(e.app.getPath('appData'));
   const connectionStore =
     input.connectionStore ??
     (await ConnectionStore.open({
       filePath: join(input.paths.userDataDir, 'connection-config.enc'),
       storage: e.safeStorage,
-      readLegacy: createLegacyConnectionReader(e.app.getPath('appData')),
+      readLegacy: () => legacyCredentials.read(),
+      cleanupLegacy: () => legacyCredentials.cleanup(),
     }));
   let activeConfig: PublicConnectionConfig | null = await connectionStore.get();
   const refreshActiveConfig = async (): Promise<void> => {
@@ -402,15 +484,18 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
 
   // Exact-origin CSP, refreshed per response with the ACTIVE connection
   // origin (frozen contract: main validates and inserts exact origins only).
+  // The origin is derived ONLY through the shared endpoint grammar; a stored
+  // config that fails it (or an unreadable store) falls back to the validated
+  // app-managed local origin, so no response is ever sent without a policy.
   const activeServiceOrigin = (): string => {
     if (activeConfig?.active === true) {
       try {
-        return new URL(activeConfig.endpointUrl).origin;
+        return connectionEndpointOrigin(activeConfig.endpointUrl);
       } catch {
         // fall through to the app-managed local endpoint
       }
     }
-    return localEndpoint;
+    return localServiceOrigin;
   };
   if (typeof e.session.webRequest.onHeadersReceived === 'function') {
     e.session.webRequest.onHeadersReceived(
@@ -689,8 +774,8 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
   // composition never registers schemes again. The protocol handler must be
   // installed before the first `loadURL('nexus://app/index.html')`.
   await registerProtocol(input.paths.distRoot, {
-    serviceOrigin: localEndpoint,
-    fingerprintProbeOrigin: localEndpoint,
+    serviceOrigin: localServiceOrigin,
+    fingerprintProbeOrigin: localServiceOrigin,
     dev,
   });
 
@@ -856,7 +941,7 @@ async function bootstrap(): Promise<void> {
     throw new Error(`${errorMessage(err)}. ${nativeRefreshHint()}`);
   }
 
-  await composeDesktopHost({
+  const host = await composeDesktopHost({
     electron: {
       app,
       BrowserWindow: electron.BrowserWindow,
@@ -888,6 +973,13 @@ async function bootstrap(): Promise<void> {
     devUrl,
     nodeExecutable,
   });
+
+  // A refused legacy cleanup is reported on the existing main-process
+  // diagnostic channel and the app keeps running: the encrypted store is
+  // authoritative and the plaintext source is retried by the next launch.
+  if (host.connectionStore.legacyCleanupFailure !== null) {
+    process.stderr.write(`[desktop] ${errorMessage(host.connectionStore.legacyCleanupFailure)}\n`);
+  }
 }
 
 // Auto-run only inside the real Electron main process; plain-node test
