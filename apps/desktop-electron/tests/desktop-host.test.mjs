@@ -1054,6 +1054,7 @@ test('host migration removes the legacy sources only after the encrypted store i
     },
   });
   assert.deepEqual(observed, [{ plaintextOnDisk: false, decrypted: 'sk-legacy' }]);
+  assert.equal(host.connectionStore.legacyCleanupFailure, null, 'a clean migration claims no failure');
   assert.deepEqual(await host.handlers.get_connection_config(), {
     endpointUrl: 'https://remote.example:9000',
     active: true,
@@ -1090,7 +1091,7 @@ test('host migration removes the legacy sources only after the encrypted store i
   reopened.dispose();
 });
 
-test('a refused legacy cleanup fails host startup without leaking the secret or command output', async () => {
+test('a refused legacy cleanup does not fail host startup and surfaces only the sanitized failure', async () => {
   const dir = mkdtempSync(join(root, 'legacy-refused-'));
   const userDataDir = join(dir, 'userData');
   const storePath = join(userDataDir, 'connection-config.enc');
@@ -1099,37 +1100,43 @@ test('a refused legacy cleanup fails host startup without leaking the secret or 
     stderr: 'security: could not delete sk-legacy\n',
   });
 
-  let failure = null;
-  await assert.rejects(
-    () =>
-      makeHost({
-        paths: { userDataDir },
-        adapters: {
-          legacyCredentials: {
-            read: async () =>
-              JSON.stringify({ endpointUrl: 'https://remote.example:9000', apiKey: 'sk-legacy', active: true }),
-            cleanup: async () => {
-              throw refusal;
-            },
-          },
+  const { host, networkHooks } = await makeHost({
+    paths: { userDataDir },
+    adapters: {
+      legacyCredentials: {
+        read: async () =>
+          JSON.stringify({ endpointUrl: 'https://remote.example:9000', apiKey: 'sk-legacy', active: true }),
+        cleanup: async () => {
+          throw refusal;
         },
-      }),
-    (err) => {
-      failure = err;
-      return errorCode(err) === 'legacy_credential_cleanup_failed';
+      },
     },
-  );
+  });
+
+  // The app boots and the migrated session works: cleanup is not a startup gate.
+  assert.deepEqual(networkHooks[0].getActiveAuth(), {
+    endpointOrigin: 'https://remote.example:9000',
+    apiKey: 'sk-legacy',
+  });
+  assert.deepEqual(await host.handlers.get_connection_config(), {
+    endpointUrl: 'https://remote.example:9000',
+    active: true,
+    hasApiKey: true,
+  });
+
+  // The sanitized signal is observable on the composed host, and the
+  // migration is NOT reported as clean while the plaintext source remains.
+  const failure = host.connectionStore.legacyCleanupFailure;
+  assert.ok(failure !== null, 'the refused cleanup is observable');
+  assert.equal(errorCode(failure), 'legacy_credential_cleanup_failed');
   for (const surfaced of [errorMessage(failure), String(failure.stack ?? '')]) {
     assert.ok(!surfaced.includes('sk-legacy'), 'no secret may surface');
     assert.ok(!surfaced.includes('SecKeychainItemDelete'), 'no command output may surface');
   }
   assert.ok(errorMessage(failure).includes('(51)'), 'the exit status stays available for diagnosis');
-  assert.equal(
-    existsSync(storePath),
-    true,
-    'the readable encrypted store survives, so the next launch can retry and still authenticate',
-  );
+  assert.equal(existsSync(storePath), true, 'the readable encrypted store survives');
   assert.ok(!readFileSync(storePath, 'utf8').includes('sk-legacy'), 'recovery bytes stay ciphertext');
+  host.dispose();
 });
 
 // ---------------------------------------------------------------------------

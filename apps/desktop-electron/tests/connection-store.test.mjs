@@ -289,6 +289,7 @@ test('legacy migration removes both sources only after the encrypted store is pe
     { plaintextOnDisk: false, decrypted: 'sk-legacy', legacyStillPresent: true },
   ]);
   assert.equal(existsSync(legacyPath), false, 'the legacy plaintext source is gone after migration');
+  assert.equal(store.legacyCleanupFailure, null, 'a clean migration claims no cleanup failure');
   const projection = await store.get();
   assert.equal(projection?.hasApiKey, true);
   assert.ok(!projection || !('apiKey' in projection), 'the projection stays redacted');
@@ -336,7 +337,7 @@ test('legacy migration removes nothing when encryption or the encrypted write is
   assert.equal(existsSync(unreadable.filePath), false, 'no unreadable store was published');
 });
 
-test('a refused legacy cleanup preserves the readable encrypted store and the recovery bytes', async (t) => {
+test('a refused legacy cleanup still activates the encrypted store and keeps the sanitized failure observable', async (t) => {
   const deps = makeDeps(t);
   const legacyPath = join(deps.filePath, '..', 'connection_config.json');
   writeFileSync(legacyPath, JSON.stringify({ endpointUrl: ENDPOINT, apiKey: 'sk-legacy', active: true }));
@@ -347,21 +348,22 @@ test('a refused legacy cleanup preserves the readable encrypted store and the re
     code: 1,
     stderr: 'security: SecKeychainItemDelete: sk-legacy\n',
   });
-  let failure = null;
-  await assert.rejects(
-    () =>
-      ConnectionStore.open({
-        ...deps,
-        readLegacy: async () => readFileSync(legacyPath, 'utf8'),
-        cleanupLegacy: async () => {
-          throw refusal;
-        },
-      }),
-    (err) => {
-      failure = err;
-      return errorCode(err) === 'legacy_credential_cleanup_failed';
+  const store = await ConnectionStore.open({
+    ...deps,
+    readLegacy: async () => readFileSync(legacyPath, 'utf8'),
+    cleanupLegacy: async () => {
+      throw refusal;
     },
-  );
+  });
+
+  // A refusal never blocks activation: the encrypted store is authoritative.
+  assert.equal(store.getAuth()?.apiKey, 'sk-legacy', 'the working encrypted session survives the refusal');
+  assert.deepEqual(await store.get(), { endpointUrl: ENDPOINT, hasApiKey: true, active: true });
+
+  // ...but the migration is never reported as clean while the plaintext stays.
+  const failure = store.legacyCleanupFailure;
+  assert.ok(failure !== null, 'the refused cleanup is observable, not swallowed');
+  assert.equal(errorCode(failure), 'legacy_credential_cleanup_failed');
   for (const surfaced of [errorMessage(failure), String(failure.stack ?? '')]) {
     assert.ok(!surfaced.includes('sk-legacy'), 'no secret may surface');
     assert.ok(!surfaced.includes('SecKeychainItemDelete'), 'no command output may surface');
@@ -372,22 +374,8 @@ test('a refused legacy cleanup preserves the readable encrypted store and the re
   );
 
   assert.equal(existsSync(legacyPath), true, 'the plaintext source survives a refused cleanup');
-  assert.equal(existsSync(deps.filePath), true, 'the encrypted store is preserved for recovery');
-  assert.ok(!readFileSync(deps.filePath, 'utf8').includes('sk-legacy'), 'recovery bytes stay ciphertext');
-
-  // The readable encrypted store is authoritative: the next open never reads
-  // the legacy source again, and the failed cleanup is completed.
-  const reopened = await ConnectionStore.open({
-    ...deps,
-    readLegacy: async () => {
-      throw new Error('an authoritative encrypted store must never re-read the legacy source');
-    },
-    cleanupLegacy: async () => {
-      rmSync(legacyPath, { force: true });
-    },
-  });
-  assert.equal(reopened.getAuth()?.apiKey, 'sk-legacy', 'encrypted auth works after the recovery open');
-  assert.equal(existsSync(legacyPath), false, 'the interrupted cleanup completed');
+  assert.equal(existsSync(deps.filePath), true, 'the encrypted store is preserved');
+  assert.ok(!readFileSync(deps.filePath, 'utf8').includes('sk-legacy'), 'the ciphertext stays plaintext-free');
 });
 
 test('a normal reopen finishes an interrupted legacy cleanup idempotently', async (t) => {
@@ -395,34 +383,39 @@ test('a normal reopen finishes an interrupted legacy cleanup idempotently', asyn
   const legacyPath = join(deps.filePath, '..', 'connection_config.json');
   writeFileSync(legacyPath, JSON.stringify({ endpointUrl: ENDPOINT, apiKey: 'sk-legacy', active: true }));
 
-  await assert.rejects(
-    () =>
-      ConnectionStore.open({
-        ...deps,
-        readLegacy: async () => readFileSync(legacyPath, 'utf8'),
-        cleanupLegacy: async () => {
-          throw Object.assign(new Error('cleanup refused'), { code: 'EPERM' });
-        },
-      }),
-    (err) => errorCode(err) === 'legacy_credential_cleanup_failed',
-  );
+  // Interrupted migration: the authorized store lands, the removal is refused.
+  const refused = await ConnectionStore.open({
+    ...deps,
+    readLegacy: async () => readFileSync(legacyPath, 'utf8'),
+    cleanupLegacy: async () => {
+      throw Object.assign(new Error('cleanup refused'), { code: 'EPERM' });
+    },
+  });
+  assert.equal(refused.getAuth()?.apiKey, 'sk-legacy');
+  assert.equal(errorCode(refused.legacyCleanupFailure), 'legacy_credential_cleanup_failed');
 
+  // The ordinary reopen never reads the legacy source: the encrypted store is
+  // authoritative — and it completes the cleanup the first open could not.
   const cleanups = [];
   const reopenDeps = {
     ...deps,
-    readLegacy: async () => null,
+    readLegacy: async () => {
+      throw new Error('an authoritative encrypted store must never re-read the legacy source');
+    },
     cleanupLegacy: async () => {
       cleanups.push('cleanup');
       rmSync(legacyPath, { force: true }); // already-absent targets are success
     },
   };
   const first = await ConnectionStore.open(reopenDeps);
-  assert.equal(first.getAuth()?.apiKey, 'sk-legacy', 'encrypted auth is restored on the recovery open');
+  assert.equal(first.getAuth()?.apiKey, 'sk-legacy', 'encrypted auth on the recovery open');
   assert.equal(existsSync(legacyPath), false, 'the interrupted cleanup is finished');
+  assert.equal(first.legacyCleanupFailure, null, 'a completed cleanup leaves no failure behind');
 
   // Reopening again re-runs the now-no-op cleanup: idempotent, same store.
   const second = await ConnectionStore.open(reopenDeps);
   assert.deepEqual(cleanups, ['cleanup', 'cleanup'], 'every open of the store re-runs the cleanup');
+  assert.equal(second.legacyCleanupFailure, null);
   assert.equal(second.getAuth()?.apiKey, 'sk-legacy');
   assert.deepEqual(await second.get(), await first.get());
 });

@@ -941,7 +941,7 @@ async function bootstrap(): Promise<void> {
     throw new Error(`${errorMessage(err)}. ${nativeRefreshHint()}`);
   }
 
-  await composeDesktopHost({
+  const host = await composeDesktopHost({
     electron: {
       app,
       BrowserWindow: electron.BrowserWindow,
@@ -973,6 +973,13 @@ async function bootstrap(): Promise<void> {
     devUrl,
     nodeExecutable,
   });
+
+  // A refused legacy cleanup is reported on the existing main-process
+  // diagnostic channel and the app keeps running: the encrypted store is
+  // authoritative and the plaintext source is retried by the next launch.
+  if (host.connectionStore.legacyCleanupFailure !== null) {
+    process.stderr.write(`[desktop] ${errorMessage(host.connectionStore.legacyCleanupFailure)}\n`);
+  }
 }
 
 // Auto-run only inside the real Electron main process; plain-node test

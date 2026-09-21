@@ -11,9 +11,9 @@
  * - One-time legacy import reads the old keychain/app-data config, encrypts
  *   and persists it, and only then removes both plaintext originals; an
  *   interrupted cleanup is finished by the next open of the encrypted store.
- * - A cleanup failure preserves the readable encrypted store and the
- *   remaining legacy source and surfaces the sanitized structured
- *   `legacy_credential_cleanup_failed` error — never a false migration.
+ * - Cleanup is best-effort after that point: a refusal preserves the readable
+ *   encrypted store and the remaining legacy source, never blocks activation,
+ *   and is reported as the sanitized `legacy_credential_cleanup_failed`.
  * - Clear writes a durable tombstone marker: a later open sees the marker
  *   and never re-imports the legacy material (D-18).
  * - Writes are atomic (temp file + rename); a failed encrypt leaves the
@@ -55,9 +55,11 @@ export interface ConnectionStoreDeps {
    * app-data JSON); an already-absent source counts as removed. Injected by
    * the host so this module keeps no keychain/platform knowledge.
    *
-   * Called only after the encrypted store is persisted and readable, and
-   * again on every open of an authoritative encrypted store, so an
-   * interrupted cleanup is finished by the ordinary reopen.
+   * Best-effort: it is called only after the encrypted store is persisted and
+   * readable, and again on every open of an authoritative encrypted store, so
+   * an interrupted cleanup is finished by the ordinary reopen. A refusal is
+   * reported through {@link ConnectionStore.legacyCleanupFailure} and never
+   * blocks activation or rolls the store back.
    */
   cleanupLegacy?: () => Promise<void>;
   /**
@@ -107,6 +109,17 @@ export class ConnectionStore {
   private constructor(
     private readonly deps: ConnectionStoreDeps,
     private state: StoredFile | null,
+    /**
+     * Sanitized `legacy_credential_cleanup_failed` error of the last legacy
+     * cleanup attempt, or null when there was nothing to remove or the
+     * removal succeeded — i.e. non-null means this open did NOT end with the
+     * legacy plaintext sources removed.
+     *
+     * Cleanup is best-effort by contract: the encrypted store is already
+     * authoritative, so a refusal is reported here instead of failing the
+     * open, and the next open retries it.
+     */
+    readonly legacyCleanupFailure: Error | null = null,
   ) {}
 
   /**
@@ -115,6 +128,11 @@ export class ConnectionStore {
    * performs the one-time import in one order: validate → encrypt → persist
    * → remove both legacy originals → publish. A parse/URL/encrypt/persist
    * failure removes nothing, so the plaintext sources stay recoverable.
+   *
+   * The removal itself is best-effort: a refusal never fails the open (the
+   * encrypted store is already persisted and readable), preserves both the
+   * ciphertext and the remaining legacy source, and is reported as
+   * {@link ConnectionStore.legacyCleanupFailure}.
    *
    * Opening an authoritative encrypted store re-runs the same idempotent
    * cleanup, which finishes a previously interrupted one without a second
@@ -141,6 +159,7 @@ export class ConnectionStore {
     } catch {
       cleared = false;
     }
+    let cleanupFailure: Error | null = null;
     if (state === null && deps.readLegacy && deps.cleanupLegacy && !cleared) {
       const legacy = await deps.readLegacy();
       if (legacy !== null) {
@@ -149,14 +168,14 @@ export class ConnectionStore {
           // Nothing is removed before the encrypted bytes are on disk and
           // readable; no failure above can have removed either original.
           ConnectionStore.persist(deps, imported);
-          await ConnectionStore.removeLegacy(deps);
+          cleanupFailure = await ConnectionStore.removeLegacy(deps);
           state = imported;
         }
       }
     } else if (state !== null) {
-      await ConnectionStore.removeLegacy(deps);
+      cleanupFailure = await ConnectionStore.removeLegacy(deps);
     }
-    return new ConnectionStore(deps, state);
+    return new ConnectionStore(deps, state, cleanupFailure);
   }
 
   /**
@@ -259,18 +278,23 @@ export class ConnectionStore {
   }
 
   /**
-   * Run the injected idempotent legacy cleanup. It is reached ONLY once the
-   * encrypted store is persisted and readable (or was already authoritative),
-   * so a failure never rolls the store back and never writes plaintext.
+   * Run the injected idempotent legacy cleanup and convert a refusal into the
+   * sanitized structured `legacy_credential_cleanup_failed` error. It is
+   * reached ONLY once the encrypted store is persisted and readable (or was
+   * already authoritative), so a refusal never rolls the store back, never
+   * fails the open and never writes plaintext.
    *
-   * The adapter's own error is replaced by the structured
-   * `legacy_credential_cleanup_failed`: it may carry command output or the
-   * secret itself, and neither may surface. Only an errno-shaped token or an
-   * exit status is kept for diagnosis.
+   * The returned error is the caller-visible signal that this open did not
+   * end with the plaintext originals removed — so a migration with a refused
+   * cleanup is never reported as clean — and the next open retries.
+   *
+   * The adapter's own error is NOT propagated: it may carry command output or
+   * the secret itself. Only an errno-shaped token or an exit status is kept.
    */
-  private static async removeLegacy(deps: ConnectionStoreDeps): Promise<void> {
+  private static async removeLegacy(deps: ConnectionStoreDeps): Promise<Error | null> {
     try {
       await deps.cleanupLegacy?.();
+      return null;
     } catch (err) {
       // Only an integer exit status or an errno token is repeated here; the
       // adapter's own message may carry command output or the secret.
@@ -281,10 +305,10 @@ export class ConnectionStore {
           : typeof code === 'string' && /^[A-Z][A-Z0-9_]{0,31}$/.test(code)
             ? code
             : null;
-      throw desktopError(
+      return desktopError(
         'legacy_credential_cleanup_failed',
         `legacy plaintext credentials could not be removed${detail === null ? '' : ` (${detail})`}; ` +
-          'the encrypted store is kept and the cleanup is retried on the next open',
+          'the encrypted store is used and the cleanup is retried on the next open',
       );
     }
   }
