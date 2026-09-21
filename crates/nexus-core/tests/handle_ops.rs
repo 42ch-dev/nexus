@@ -486,3 +486,83 @@ async fn closing_owner_fences_every_entry_point() {
         "commit_workspace must be fenced after close, got {commit:?}"
     );
 }
+
+/// 9. A gated preset with no Work is refused BEFORE any write.
+///
+/// MIGRATED from `crates/nexus-daemon-runtime/tests/fl_e_schedule_api.rs`
+/// `gated_preset_without_work_id_is_rejected` (the PR #50 fail-closed
+/// regression): the gate evaluator requires a `work_id`, so a gated preset
+/// requested without one must refuse rather than enqueue unchecked.
+#[tokio::test]
+#[serial_test::serial]
+async fn gated_preset_without_work_is_refused_before_any_write() {
+    let f = fixture().await;
+    let (core, handle) = open_handle(&f).await;
+    let principal = core.active_principal().await.unwrap();
+
+    // `research` declares gates; no `work_id` is supplied through input/seed.
+    let mut request = request_for(CREATOR, "research");
+    request.agent_bindings = Some(default_bindings());
+    let err = handle.add_schedule(&principal, request).await.unwrap_err();
+    assert!(
+        matches!(err, CoreError::Preset(_)),
+        "a gated preset without a Work must fail closed, got {err:?}"
+    );
+
+    let scheduled: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM creator_schedules WHERE creator_id = ?")
+            .bind(CREATOR)
+            .fetch_one(core.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        scheduled, 0,
+        "a refused gate evaluation must publish no schedule row"
+    );
+}
+
+/// 10. The `force_gates` audit reason refuses oversize text and control
+///     characters before anything is written.
+///
+/// MIGRATED from `crates/nexus-daemon-runtime/tests/fl_e_schedule_api.rs`
+/// `force_gates_with_long_reason_rejected` and
+/// `force_gates_with_ansi_in_reason_rejected`: the bypass reason is
+/// audit-logged, so an unbounded or terminal-control-bearing reason is a
+/// validation refusal, not a stored audit row.
+#[tokio::test]
+#[serial_test::serial]
+async fn force_gates_reason_rejects_oversize_and_control_characters() {
+    let f = fixture().await;
+    let (core, handle) = open_handle(&f).await;
+    let principal = core.active_principal().await.unwrap();
+
+    for reason in [
+        "x".repeat(600),
+        "ok \u{1b}[31mred\u{1b}[0m text".to_string(),
+    ] {
+        let mut request = request_for(CREATOR, "memory-augmented");
+        request.force_gates = true;
+        request.reason = Some(reason.clone());
+        request.agent_bindings = Some(default_bindings());
+        let err = handle.add_schedule(&principal, request).await.unwrap_err();
+        assert!(
+            matches!(err, CoreError::InvalidInput { .. }),
+            "reason {reason:?} must be a validation refusal, got {err:?}"
+        );
+    }
+
+    let audits = nexus_local_db::list_force_gates_audit(core.pool(), CREATOR)
+        .await
+        .expect("audit rows");
+    assert!(
+        audits.is_empty(),
+        "a refused reason must not be audited, got {audits:?}"
+    );
+    let scheduled: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM creator_schedules WHERE creator_id = ?")
+            .bind(CREATOR)
+            .fetch_one(core.pool())
+            .await
+            .unwrap();
+    assert_eq!(scheduled, 0, "a refused bypass must publish no row");
+}
