@@ -660,6 +660,12 @@ True concurrent safety requires the CAS check to be atomic with the write. The V
 
 On create, the adapter seeds `revision = 1` (spoke convention), not `0` (nexus V1.74 legacy). The spoke `Relation.revision` field is `Option<u64>`, so consumers already handle optionality — no wire break.
 
+**World-aware CAS precedence (settled — v1.194 P2-T4).** The conditional-write predicate carries the stored `world_id` alongside the row identity and revision (`kb_key_blocks`: `key_block_id` + `COALESCE(revision, 0)` + `world_id`; `kb_relationships`: `relationship_id` + `revision` + `world_id`), and the store disambiguates a zero-row CAS by that stored world. Precedence, in the order the racing request can observe it:
+
+1. **Never admitted by this request** (hidden rows, foreign Worlds): the refusal stays **indistinguishable from absent** — same code, message and details, no world-conflict marker, no foreign World id. A hidden row must never become an existence oracle.
+2. **Admitted by this request, then moved by a second writer before the conditional mutation**: the write is denied and the adapter's world-conflict carrier survives every mapping layer to the Connect wire code `world_conflict` (`is_world_conflict_reject` → the Connect host's reject mapping). It is **never** collapsed into `REVISION_CONFLICT` / `STORED_REVISION_STALE`, which remain the same-World stale-revision outcomes of the tables above.
+3. **Moved before this request's own admission read**: the moved row has a bumped stored revision, so the pinned spoke-operations pre-flight classifies the request as a stale revision *before* the adapter CAS is reached. That is a legitimately different refusal, not a world-conflict carrier — a pre-read move must not be re-labelled as a world conflict, and the revision bucket must not be weakened to make it one.
+
 `RelationPort::get_relation` reads from `kb_relationships` via the existing `KbRelationshipRow` → spoke `Relation` conversion. On not-found it returns `SpokeRejectCode::RelationNotFound` (available in spoke 0.5.0; verified in `result.rs` line 28). The conversion mapping is identical to the `put_relation` path (see `relation_port.rs` header table, verified for 0.5.0 field names).
 
 #### Scope-pushdown contract — Nexus query filters alongside `Scope` (V1.145 P2)

@@ -27,8 +27,9 @@ Parent rules: [`../../AGENTS.md`](../../AGENTS.md) (repo),
   on `fetch`/`window.nexusDesktop` directly — the client factory selects
   `BrowserClient` or `DesktopClient` (web-ui.md §5; desktop-shell.md §5), which
   keeps a host change a one-impl swap rather than a rewrite. The HTTP path
-  prefix for the daemon surface is `/v1/daemon/*`; the SPA reaches the daemon
-  at `http://127.0.0.1:<port>/v1/daemon/*`.
+  prefix is the frozen `/v1/daemon/*`; the SPA reaches the local service (the
+  standalone TypeScript service, or the Electron-owned one) at
+  `http://127.0.0.1:<port>/v1/daemon/*`.
 
 ## Contracts status (post Wave-1 merge)
 
@@ -74,9 +75,13 @@ and consumed by the screens. Remaining gaps the UI adapts around:
   buttons/CTAs (single Title Case verb — `Save`, `Create`, `Delete`); name the
   changed object in the dialog title / surrounding copy when screen readers need
   it. Avoid protocol jargon (`ACP`, `cursor token`) in the UI surface.
-- **Daemon port**: default HTTP transport `127.0.0.1:8420`
-  (`crates/nexus-daemon-runtime/src/boot.rs`); override via `NEXUS_DAEMON_PORT`
-  or `VITE_DAEMON_URL` (dev proxy).
+- **Local service port**: the desktop host resolves its local port as explicit
+  launch value → valid `NEXUS_DAEMON_PORT` → `8420`
+  (`apps/desktop-electron/src/env.ts`); the standalone service's own default is
+  `8421` (`apps/nexus-service/src/config.ts`). The Vite dev/preview proxy
+  forwards `/v1/daemon/*` to that endpoint via `VITE_DAEMON_URL`
+  (`vite.config.ts`). The service is owned by the Electron host or started
+  standalone — never launched by `nexus42`.
 - **i18n (V1.112+):** see the [i18n conventions](#i18n) section below.
 
 ## i18n
@@ -110,4 +115,5 @@ and consumed by the screens. Remaining gaps the UI adapts around:
   locale catalogs. Exclude developer-auxiliary surfaces (`apps/design-studio`),
   test fixtures, and manuscript body text.
 - **Normative spec:**
-  [`.mstar/iterations/v1.112/specs/i18n-foundation.md`](../../.mstar/iterations/v1.112/specs/i18n-foundation.md).
+  [`web-ui.md` §29.16](../../.mstar/specs/web-ui.md) (V1.112 frontend i18n amendments, shipped); the distilled pattern note lives at
+  [`.mstar/knowledge/architecture-patterns/web-i18n-pattern.md`](../../.mstar/knowledge/architecture-patterns/web-i18n-pattern.md).
