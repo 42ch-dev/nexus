@@ -824,6 +824,14 @@ test('set_connection_config refuses unsupported endpoint values without replacin
     'file:///etc/passwd',
     'https://*.example.com',
     'http://user:pass@remote.example:9000',
+    // Empty delimiters / dot-segment paths that WHATWG normalizes away.
+    'https://remote.example:9000?',
+    'https://remote.example:9000#',
+    'http://@remote.example:9000',
+    'http://:@remote.example:9000',
+    'https://remote.example:9000/.',
+    'https://remote.example:9000/..',
+    'https://remote.example:9000:',
     'https://remote.example:9000/v1/daemon',
     'https://remote.example:9000?token=1',
   ]) {

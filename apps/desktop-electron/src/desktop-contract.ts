@@ -712,6 +712,33 @@ export function connectionEndpointOrigin(endpointUrl: unknown): string {
   if (parsed.pathname !== '' && parsed.pathname !== '/') {
     throw desktopError('invalid_input', 'endpointUrl must be a root service URL');
   }
+  // The normalized fields above cannot see the forms WHATWG collapses into
+  // the root origin before they are assigned: the EMPTY `?` / `#` / `@` / `:@`
+  // delimiters, an empty `:port`, and dot-segment paths (`/.`, `/..`) all
+  // leave `.search`/`.hash`/`.username`/`.pathname` at their root values.
+  // Require the RAW form itself to be `scheme://authority` with nothing but
+  // an optional single trailing slash after it. Only the delimiters and the
+  // path are compared — never the normalized host bytes — so host case, an
+  // explicit default port and IDN hosts stay supported.
+  if (endpointUrl.includes('?') || endpointUrl.includes('#') || endpointUrl.includes('@')) {
+    throw desktopError(
+      'invalid_input',
+      'endpointUrl must not carry query, fragment or userinfo delimiters',
+    );
+  }
+  const authorityStart = endpointUrl.indexOf('://');
+  if (authorityStart === -1) {
+    throw desktopError('invalid_input', 'endpointUrl must be an absolute http(s) URL with an authority');
+  }
+  const pathStart = endpointUrl.indexOf('/', authorityStart + 3);
+  const authority = endpointUrl.slice(authorityStart + 3, pathStart === -1 ? undefined : pathStart);
+  if (authority.endsWith(':')) {
+    throw desktopError('invalid_input', 'endpointUrl must not carry an empty port');
+  }
+  const rawPath = pathStart === -1 ? '' : endpointUrl.slice(pathStart);
+  if (rawPath !== '' && rawPath !== '/') {
+    throw desktopError('invalid_input', 'endpointUrl must be a root service URL');
+  }
   return parsed.origin;
 }
 

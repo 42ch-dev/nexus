@@ -293,6 +293,13 @@ test('endpoint grammar accepts concrete root http(s) services and returns the ex
   assert.equal(connectionEndpointOrigin('https://[2001:db8::1]:9000'), 'https://[2001:db8::1]:9000');
   // A root trailing slash is the same endpoint; the caller keeps its string.
   assert.equal(connectionEndpointOrigin('https://daemon.example.com/'), 'https://daemon.example.com');
+  // The raw check compares delimiters and path only, never normalized host
+  // bytes, so host case and an explicit DEFAULT port stay supported.
+  assert.equal(
+    connectionEndpointOrigin('https://Daemon.Example.com:8443'),
+    'https://daemon.example.com:8443',
+  );
+  assert.equal(connectionEndpointOrigin('https://daemon.example.com:443'), 'https://daemon.example.com');
 });
 
 test('endpoint grammar rejects opaque/null origins, wildcard host, userinfo, padding, path, query and fragment', () => {
@@ -309,6 +316,17 @@ test('endpoint grammar rejects opaque/null origins, wildcard host, userinfo, pad
     'https://*.example.com',
     'http://user:pass@daemon.example.com:8443',
     'http://user@daemon.example.com',
+    // Empty delimiters and dot-segment paths normalize away before the
+    // query/fragment/userinfo/path fields can see them (L2 fix 1).
+    'https://daemon.example.com?',
+    'https://daemon.example.com#',
+    'http://@daemon.example.com',
+    'http://:@daemon.example.com',
+    'https://daemon.example.com/.',
+    'https://daemon.example.com/..',
+    'https://daemon.example.com:',
+    'http://daemon.example.com/../',
+    'https://daemon.example.com/%2e',
     'https://daemon.example.com:8443/v1/daemon',
     'https://daemon.example.com:8443/path',
     'https://daemon.example.com:8443?token=1',
@@ -332,6 +350,13 @@ test('endpoint rejection is enforced at both the IPC and CSP boundaries', () => 
     'https://*.example.com',
     'https://daemon.example.com:8443/v1/daemon',
     'http://user:pass@daemon.example.com:8443',
+    // The raw-form holes must be refused at every boundary, not just one.
+    'https://daemon.example.com?',
+    'https://daemon.example.com#',
+    'http://@daemon.example.com',
+    'http://:@daemon.example.com',
+    'https://daemon.example.com/.',
+    'https://daemon.example.com/..',
   ];
   for (const endpointUrl of rejected) {
     expectCode(

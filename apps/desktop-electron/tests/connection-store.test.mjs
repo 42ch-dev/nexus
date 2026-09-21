@@ -492,6 +492,14 @@ test('rejected endpoint values never write or replace the stored connection conf
     'file:///etc/passwd',
     'https://*.example.com',
     'http://user:pass@daemon.example.com:8443',
+    // Empty delimiters / dot-segment paths that WHATWG normalizes away.
+    'https://daemon.example.com?',
+    'https://daemon.example.com#',
+    'http://@daemon.example.com',
+    'http://:@daemon.example.com',
+    'https://daemon.example.com/.',
+    'https://daemon.example.com/..',
+    'https://daemon.example.com:',
     'https://daemon.example.com:8443/v1/daemon',
     'https://daemon.example.com:8443?token=1',
   ]) {
@@ -505,6 +513,58 @@ test('rejected endpoint values never write or replace the stored connection conf
   assert.equal(readFileSync(deps.filePath, 'utf8'), before, 'a rejected endpoint must not rewrite the store');
   assert.deepEqual(await store.get(), { endpointUrl: ENDPOINT, hasApiKey: true, active: true });
   assert.equal(store.getAuth()?.apiKey, 'sk-keep', 'the previous credential survives');
+});
+
+test('raw-form endpoints are refused on the persisted load path and never re-imported', async (t) => {
+  for (const endpointUrl of [
+    'https://daemon.example.com?',
+    'https://daemon.example.com#',
+    'http://@daemon.example.com',
+    'http://:@daemon.example.com',
+    'https://daemon.example.com/.',
+    'https://daemon.example.com/..',
+    'https://daemon.example.com:',
+  ]) {
+    const deps = makeDeps(t);
+    const contents = JSON.stringify({
+      version: 1,
+      config: { endpointUrl, active: true, hasApiKey: true },
+    });
+    writeFileSync(deps.filePath, contents);
+    let legacyReads = 0;
+    const store = await ConnectionStore.open({
+      ...deps,
+      readLegacy: async () => {
+        legacyReads += 1;
+        return JSON.stringify({ endpointUrl: ENDPOINT, apiKey: 'sk-legacy', active: true });
+      },
+    });
+
+    assert.equal(await store.get(), null, `not activated: ${endpointUrl}`);
+    assert.equal(store.getAuth(), null, `no auth authority: ${endpointUrl}`);
+    assert.equal(legacyReads, 0, `never replaced by legacy material: ${endpointUrl}`);
+    assert.equal(readFileSync(deps.filePath, 'utf8'), contents, `bytes untouched: ${endpointUrl}`);
+  }
+});
+
+test('a persisted remote endpoint with a trailing slash reloads verbatim with its exact auth origin', async (t) => {
+  const deps = makeDeps(t);
+  const stored = `${ENDPOINT}/`;
+  const store = await ConnectionStore.open(deps);
+  await store.set(
+    { endpointUrl: stored, hasApiKey: true, active: true },
+    { action: 'replace', value: 'sk-remote' },
+  );
+
+  // Reopen through readFile: the success path keeps the saved string and
+  // projects the exact origin that desktop auth pins.
+  const reopened = await ConnectionStore.open(deps);
+  assert.deepEqual(await reopened.get(), { endpointUrl: stored, hasApiKey: true, active: true });
+  assert.deepEqual(reopened.getAuth(), { endpointOrigin: ENDPOINT, apiKey: 'sk-remote' });
+  assert.ok(
+    readFileSync(deps.filePath, 'utf8').includes(stored),
+    'stored bytes keep the verbatim endpoint identity',
+  );
 });
 
 test('an invalid stored endpoint is not activated and never triggers the legacy import', async (t) => {
