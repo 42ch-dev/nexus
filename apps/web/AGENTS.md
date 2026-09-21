@@ -1,7 +1,11 @@
 # apps/web — AGENTS.md
 
-The local-first **Control Room + Setup** Web UI. Daemon-served React SPA that
-also runs inside the Electron desktop host. Parent rules: [`../../AGENTS.md`](../../AGENTS.md) (repo),
+The local-first **Control Room + Setup** Web UI. React SPA served by the
+first-party hosts — the standalone TypeScript service (`apps/nexus-service`),
+which is the local HTTP host for browser and Electron and owns the
+`/v1/daemon/*` surface since the v1.193 P2 retirement of the integrated
+daemon — and loaded inside the Electron desktop host (`apps/desktop-electron`).
+Parent rules: [`../../AGENTS.md`](../../AGENTS.md) (repo),
 [`../../.mstar/AGENTS.md`](../../.mstar/AGENTS.md) (harness).
 
 ## Identity & placement

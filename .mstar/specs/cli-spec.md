@@ -4,21 +4,22 @@
 **Document class**: Master  
 **V1.35 shipped supplements:** [cli-command-ia.md](cli-command-ia.md) (§6 IA rationale), [creator-centric-entry-model.md](creator-centric-entry-model.md) (§7 entry paths)
 **V1.40 Shipped amendments:** §6.2G `nexus42 creator world create --title`/`list`/`show` (mandatory world binding; `--name` is alias); §6.x `nexus42 creator kb queue-extract --chapter N` sugar for novel profile (N ≥ 1).  
-**V1.41 Shipped amendments:** §6.2H `creator works` (list/status/use/pool); completion-lock + runtime lock (DF-60/61). Lineage via `--from-work` migrated to `creator works use` + `creator run <preset>` in V1.45.
-**V1.44 Shipped amendments:** §6.2D `creator run audit-chapter` (DF-69): dual-mode review/extract, embedded `novel-manuscript-audit` preset, `--mode`/`--chapter`/`--volume`/`--json` flags; does NOT enter FL-E auto-chain driver.  
-**V1.45 Shipped amendments:** §6.2D generic `creator run <preset_id>` — see [creator-run-preset-entry.md](creator-run-preset-entry.md) (**Shipped Master**); legacy subcommand enum removed from clap surface.  
+**V1.41 Shipped amendments:** §6.2H `creator works` (list/status/use/pool); completion-lock + runtime lock (DF-60/61). Lineage via `--from-work` migrated to `creator works use` + `creator run <preset>` in V1.45 (`creator run` was removed in v1.193 P2 — §6.2D is historical).
+**V1.44 Shipped amendments:** §6.2D `creator run audit-chapter` (DF-69): dual-mode review/extract, embedded `novel-manuscript-audit` preset, `--mode`/`--chapter`/`--volume`/`--json` flags; does NOT enter FL-E auto-chain driver (**the runner itself was removed in v1.193 P2**).  
+**V1.45 Shipped amendments:** §6.2D generic `creator run <preset_id>` — see [creator-run-preset-entry.md](creator-run-preset-entry.md) (**Shipped Master**); legacy subcommand enum removed from clap surface (**the runner lost its CLI entry in v1.193 P2; the Master is the version history of that pre-retirement surface**).  
 **V1.46 Shipped amendment:** §6.2E FL-E stage subcommand block deleted (superseded by V1.45 generic preset runner — see changelog). Normative CLI IA: [creator-run-preset-entry.md](creator-run-preset-entry.md).  
 **V1.51 Shipped amendments:** §6.2K `creator world kb adopt` LLM metadata surfaces; `creator kb rescan --work <work_ref>` cross-chapter reconciliation; `creator world kb pending --missing-only` (T-A P0/P1/P2).
 **V1.52 Shipped amendments:** §6.2G.1 `creator world kb adopt --auto` + §6.2G.2 Legacy `creator kb --scope world` alias + deprecation for World KB CLI surface consolidation (closes R-V150KBED-01); both sections promoted to Normative (V1.158).
 **V1.54 P0 Draft overlay:** §6.2M ACP host write-tool CLI mappings — 6 new mutation-capable `nexus.*` host tools map to `creator world kb edit/adopt`, `creator world configure`, `creator works cron set`, `creator findings resolve`, and `creator pool` entry management (DF-46).
 **V1.64 P3 Draft overlay (retired in v1.193 P2):** §6.3 daemon Web UI serving — `daemon start` logged the Web UI URL; the `daemon ui`/`daemon web` convenience command and the §7.1 first-run step are deleted. See also [web-ui.md](./web-ui.md) §11 and [daemon-runtime.md](./daemon-runtime.md) §4.4 (historical host spec — its crate was deleted in v1.193 P2).
 **V1.65 Prepare amendment:** outline and chapter-structure editing becomes UI-first through the bundled Web UI chapter-content Daemon API. CLI parity for existing creator/run/chapter workflows is retained; no shipped CLI command is removed or renamed by this UI-first slice.
-**V1.175 P1 amendment:** §6.2G.3-6 — reading / fork / inspector leaves (groups 3, 5, 6), strategy patch leaves (group 1), outline/timeline/chapter leaves (group 2), KB entity patch + memory closure + findings triage (groups 4, 7, 8). Thin daemon-HTTP leaves over existing routes (AR-83); no daemon route changes.
+**V1.175 P1 amendment:** §6.2G.3-6 — reading / fork / inspector leaves (groups 3, 5, 6), strategy patch leaves (group 1), outline/timeline/chapter leaves (group 2), KB entity patch + memory closure + findings triage (groups 4, 7, 8). Thin daemon-HTTP leaves over existing routes (AR-83); no daemon route changes. **Retargeted in v1.193 P2:** the leaves survive as direct-core calls — see the delivered notes in §6.2G.3–G.6.
 **V1.182 P1 amendment:** §6.3B — hidden `nexus42 ops inspect [SESSION_ID] [--json]` operator group (BL-04): daemon-free read-only checkpoint projection with shared `resume_rules`; never triggers resume.
 **V1.185 P0 amendment:** §6.2I — `nexus42 creator character edit|archive|restore` identity lifecycle (explicit revision CAS; thin daemon-HTTP leaves).
 **V1.185 P1 amendment:** §6.2I — `nexus42 creator character binding show|edit` WorldSheet maintenance (binding revision CAS; thin daemon-HTTP leaves).
 **V1.185 P3 amendment:** §6.2I.3 — `nexus42 creator character run --remember` + owner outcome observation (thin daemon-HTTP leaves).
 **V1.185 P2 amendment:** §6.2I.2 — `nexus42 creator character knowledge show|edit|remove` authored-content maintenance (knowledge revision CAS; thin daemon-HTTP leaves; `--summary`/`--summary-file` on add/edit).
+**Retargeted in v1.193 P2 (V1.185 amendments above):** the Character identity/binding/knowledge leaves survive as direct-core calls (§6.2I–§6.2I.2); `creator character run` and `creator character soul reflect` lost their CLI entries (§6.2I.3).
 **V1.189 P1 amendment (both cohorts retired in v1.193 P2):** §6.2G.7 — `basic-cli` / `legacy-cli` feature cohorts on the same `nexus42` binary/parser; `creator world kb graph` + `entity patch` called `nexus-core` directly (no daemon HTTP) in both cohorts. That direct path is now the ordinary `cli` cohort; the cohort selectors themselves are deleted.
 **V1.193 delivered (P2 complete 2026-09-21):** the daemon group, `web-embed`, and the thin DaemonClient leaves are gone. Every `daemon` descendant (including schedule and ui/web), hidden `daemon-run`, Model A `mcp serve`, raw `host-call`, and the compatibility aliases were deleted with no replacement service launcher. Complete direct Rust-library operations, legitimate cloud transport and Connect are retained; the app cohorts are `cli` (default) and independent `connect-host`. **Every daemon/runner instruction below is a historical record of the old shipped system, not a current setup step.**
 
@@ -42,7 +43,7 @@ Ordinary CLI uses the proposed real `cli` default cohort; optional `connect-host
 
 - CLI 的目标与非目标
 - 命令体系
-- daemon / local runtime 生命周期
+- daemon / local runtime 生命周期（**历史记录** — 该宿主与整组 `nexus42 daemon` 已在 v1.193 P2 删除，见 §10）
 - ACP-first 的能力面
 - skills-second 的兼容路径
 - 平台登录与会话模型
@@ -60,8 +61,8 @@ Ordinary CLI uses the proposed real `cli` default cohort; optional `connect-host
 ### 0.1 品牌、CLI 名称与版本节奏
 
 - **产品名**：对外统一为 **Nexus**。
-- **CLI 可执行名**：**`nexus42`**（与 **42ch / Creative Hub** 品牌同源；下文命令示例一律使用 `nexus42`）。**Retired (v1.193 P2):** 本地 daemon 的 single-binary runtime mode（`nexus42 daemon start` → hidden `daemon-run`）已删除；不引入第二个产品二进制；Electron/TS 持有长期运行的服务进程。
-- **`v1-notes/ideas/` 与 `v1-notes/` 的扩展需求**：视为路线图输入。CLI 必须保证：**协议与 schema 的可扩展字段**、Daemon API / ACP 能力面的**演进位**、以及已写入合同的能力（如 **`research.*` 等 ACP 能力名**、context assembly、`manuscript_phase` 等）的**最小可用实现或安全默认（no-op）**，避免把后续实现空间钉死。
+- **CLI 可执行名**：**`nexus42`**（与 **42ch / Creative Hub** 品牌同源；下文命令示例一律使用 `nexus42`）。**Retired (v1.193 P2):** 本地 daemon 的 single-binary runtime mode（`nexus42 daemon start` → hidden `daemon-run`）已删除；不引入第二个 CLI 产品二进制（`nexus-runtime` 仍是同一 `nexus42` crate 的独立 Connect-host 二进制，见 [daemon-runtime.md](./daemon-runtime.md) §4.6）；Electron/TS 持有长期运行的服务进程。
+- **`v1-notes/ideas/` 与 `v1-notes/` 的扩展需求**：视为路线图输入。CLI 必须保证：**协议与 schema 的可扩展字段**、保留的 `/v1/daemon/*` wire 家族（由 TS 服务提供，见 §6.7）/ ACP 能力面的**演进位**、以及已写入合同的能力（如 **`research.*` 等 ACP 能力名**、context assembly、`manuscript_phase` 等）的**最小可用实现或安全默认（no-op）**，避免把后续实现空间钉死。
 
 ### 0.2 V2 重定位（pre-release）
 
@@ -144,7 +145,7 @@ v1 中，CLI 不负责以下事情：
 
 - 自己熟悉的本地 agent
 - 本地文件与草稿
-- 一个持续运行的 Nexus helper
+- 一个持续运行的 Nexus 本地 host —— **Delivered (v1.193 P2):** 该长期运行进程不是 CLI 进程，而是 Electron 应用内的 TS 服务（`apps/nexus-service`，Electron 持有其生命周期）；`nexus42` 保持 one-shot / 直连 core
 
 而不是“在 CLI 里重新对话一次”。
 
@@ -700,11 +701,20 @@ Rules:
 
 ### 6.2G.3 V1.175 P1 amendment — reading, fork, and inspector leaves (RN-1 §5 groups 3, 5, 6)
 
-Thin daemon-HTTP leaves over **existing** routes (AR-83 #1; no daemon route
-changes, no DTO redesign). All leaves: human-readable default output,
-`--json` emits the daemon DTO / projection verbatim (AR-83 #3), typed long
-flags, daemon error envelopes surfaced via `DaemonClient::parse_error_response`
-(named `[code]`, non-zero exit — PL-5).
+**Delivered (v1.193 P2): every leaf below is a direct-core leaf.** These were
+shipped in V1.175 P1 as thin daemon-HTTP leaves over the then-existing routes
+(AR-83 #1; no daemon route change, no DTO redesign). The daemon group and its
+`DaemonClient` were deleted in v1.193 P2, and each retained leaf now issues the
+same typed call through `nexus-core`
+(`apps/nexus42/src/commands/creator/{reading/mod.rs,world/fork.rs,inspector.rs}`).
+The retained contract is otherwise unchanged: human-readable default output,
+`--json` emits the same DTO / projection verbatim (AR-83 #3), typed long
+flags, and core refusals surfaced through the shared direct-core mapper
+(`apps/nexus42/src/core.rs::map_core_error`) as the same named `[code]`
+envelope, same status family, non-zero exit (PL-5). The `/v1/daemon/*` route
+names kept in the Purpose column are the **retained wire family** — served
+today by the standalone TS service for browser/Electron
+(`apps/nexus-service/src/knowledge.ts`) — not the CLI leaf's transport.
 
 | Command | Purpose |
 | --- | --- |
@@ -723,29 +733,39 @@ Rules:
 
 - **Data CRUD only (PL-7).** Reading leaves are not a manuscript reader /
   TUI pager; the V1.79 reading surface stays web.
-- **`<work_id>` is the daemon's canonical work reference** (`wrk_...`) —
-  the reading routes key on `work_id` (same convention as `creator works`).
+- **`<work_id>` is the core's canonical work reference** (`wrk_...`) —
+  the reading family keys on `work_id` (same convention as `creator works`).
 - **Error honesty (PL-5).** CLI-side validation (chapter ≥ 1, scroll range,
   color enum, `--end > --start`, stage enum) fails fast with named messages;
-  daemon-side errors (404 unknown work/annotation, 403 foreign world, 422
-  bad fork-point) surface via the standard `[code]` envelope with non-zero
-  exit.
+  core-side errors (404 unknown work/annotation, 403 foreign world, 422
+  bad fork-point) surface via the same standard `[code]` envelope with
+  non-zero exit the deleted HTTP transport rendered.
 - **Fork lineage is branch-scoped** (V1.162 carrier B, "point-lookup lineage
   per branch, not list-all-forks"): a fork branch carries exactly one canon
   `fork_created` marker; the root branch carries none. `fork list` reads one
   branch (current by default, `--branch` to target a fork branch).
-- **204 deletes** (`progress clear`, `annotation remove`) print empty stdout
-  under `--json` — the daemon returns 204 No Content, so there is no DTO to
-  emit (AR-83 #3: `--json` emits the daemon DTO verbatim; a 204 has none).
+- **Delete leaves print empty stdout** (`progress clear`, `annotation
+  remove`). The retained HTTP family answers those deletes with 204 No
+  Content (the TS service keeps that contract); the CLI's direct-core delete is
+  a settled verb that renders nothing — under `--json` there is likewise no
+  DTO to emit (AR-83 #3).
 
 ### 6.2G.4 V1.175 P1 amendment — strategy patch leaves (RN-1 §5 group 1)
 
-Thin daemon-HTTP leaves over the **existing** strategy canvas write routes
-(AR-83 #1 / AR-84 group 1, F-9; no daemon route changes, no DTO redesign).
-All leaves: human-readable default output, `--json` emits the daemon
-`StrategyPatchResponse` DTO verbatim (AR-83 #3), typed long flags, daemon
-error envelopes surfaced via `DaemonClient::parse_error_response` (named
-`[code]`, non-zero exit — PL-5).
+**Delivered (v1.193 P2): every leaf below is a direct-core leaf.** V1.175 P1
+shipped them as thin daemon-HTTP leaves over the then-existing strategy canvas
+write routes (AR-83 #1 / AR-84 group 1, F-9; no daemon route change, no DTO
+redesign). The daemon group and its `DaemonClient` were deleted in v1.193 P2 and
+each retained leaf now issues the same typed call through `nexus-core`
+(`apps/nexus42/src/commands/preset/patch.rs` — `CoreService::patch_strategy_state`,
+`patch_strategy_transition`, `patch_strategy_prompt_template`). Retained
+contract: human-readable default output, `--json` emits the same
+`StrategyPatchResponse` DTO verbatim (AR-83 #3), typed long flags, and core
+refusals surfaced through the shared direct-core mapper
+(`apps/nexus42/src/core.rs::map_preset_error`) with the same named `[code]`
+envelope and the same status table (PL-5). The `/v1/daemon/strategies/*` paths
+below are the **retained wire family** served by the standalone TS service for
+browser/Electron, not the CLI leaf's transport.
 
 | Command | Purpose |
 | --- | --- |
@@ -762,33 +782,37 @@ Rules:
   `conflicting_path`, and `recovery_hint` — and `--help` documents the
   retry guidance: re-read the Strategy and reapply with the new revision.
   Flock contention between concurrent writers rides the same 409 family.
-- **Named error surface.** The daemon's public `error_code()` allowlist
-  passthroughs only a closed set of strategy codes; the CLI surfaces exactly
-  those wire codes via the standard `[code]` envelope with non-zero exit —
-  never a generic "request failed":
+- **Named error surface.** The core's `PresetError` vocabulary is a closed set;
+  the shared direct-core mapper surfaces exactly those codes via the standard
+  `[code]` envelope with non-zero exit — never a generic "request failed":
   - 409 `strategy_conflict` (stale `--base-revision`; renders
     `current_revision` + `node_id` + `conflicting_path` + `recovery_hint`),
   - 404 `not_found` (unknown strategy / state),
   - 422 `strategy_validation_failed`,
   - 422 `strategy_self_loop` / `strategy_transition_duplicate` (passthrough
-    allowlist; HTTP 422 per `status_code()`), and
-  - 400 `bad_request` for all other 400s (the daemon remaps internal codes
-    such as `strategy_invalid`, `strategy_update_forbidden`,
-    `strategy_transition_missing_old_target`, `strategy_transition_not_found`
-    to the coarse public `bad_request`).
+    allowlist; HTTP-422-equivalent status per the same table), and
+  - 400 `bad_request` for all other 400-class preset refusals (the mapper keeps
+    the same coarse public code for internal classifications such as
+    `strategy_invalid`, `strategy_update_forbidden`,
+    `strategy_transition_missing_old_target`, `strategy_transition_not_found`).
 - **Write bodies are typed long flags** (AR-83 #4); prompt bodies come from
   `--file` or stdin (`-`), matching the `creator soul` stdin convention.
-- **User presets only.** The daemon rejects embedded/system presets
-  (read-only); the CLI surfaces the resulting 400 as `bad_request`.
+- **User presets only.** The core rejects embedded/system presets
+  (read-only); the CLI surfaces the resulting refusal as `bad_request`.
 
 ### 6.2G.5 V1.175 P1 amendment — outline/chapter/timeline patch leaves (RN-1 §5 group 2)
 
-Thin daemon-HTTP leaves over the **existing** V1.72 canvas outline+timeline
-routes (AR-83 #1 / AR-84 group 2, F-10; no daemon route changes, no DTO
-redesign). All leaves: human-readable default output, `--json` emits the
-daemon DTO verbatim (AR-83 #3), typed long flags, daemon error envelopes
-surfaced via `DaemonClient::parse_error_response` (named `[code]`, non-zero
-exit — PL-5).
+**Delivered (v1.193 P2): every leaf below is a direct-core leaf.** V1.175 P1
+shipped them as thin daemon-HTTP leaves over the then-existing V1.72 canvas
+outline+timeline routes (AR-83 #1 / AR-84 group 2, F-10; no daemon route
+change, no DTO redesign). The daemon group and its `DaemonClient` were deleted
+in v1.193 P2 and each retained leaf now issues the same typed call through
+`nexus-core` (`apps/nexus42/src/commands/creator/works/outline.rs`). Retained
+contract: human-readable default output, `--json` emits the same DTO verbatim
+(AR-83 #3), typed long flags, and core refusals surfaced through the shared
+direct-core mapper (named `[code]`, non-zero exit — PL-5). The
+`/v1/daemon/works/*` paths below are the **retained wire family** served by the
+standalone TS service for browser/Electron, not the CLI leaf's transport.
 
 | Command | Purpose |
 | --- | --- |
@@ -809,19 +833,19 @@ Rules:
   all four structured fields — `current_revision`, `node_id`,
   `conflicting_path`, and `recovery_hint` — and `--help` documents the
   retry guidance: re-read the outline and reapply with the new revision.
-- **Named error surface.** The daemon's public `error_code()` allowlist
-  surfaces the outline family verbatim via the standard `[code]` envelope
-  with non-zero exit — never a generic "request failed":
+- **Named error surface.** The core's outline/Work error vocabulary is
+  surfaced by the shared direct-core mapper via the standard `[code]`
+  envelope with non-zero exit — never a generic "request failed":
   - 409 `outline_conflict` (stale `--base-revision`; renders
     `current_revision` + `node_id` + `conflicting_path` + `recovery_hint`),
   - 404 `not_found` (unknown work / chapter / event),
   - 422 `outline_validation_failed` (domain rules — slug format/uniqueness,
     volume existence, foreshadow temporal order, published-chapter guard;
     the CLI renders each `validation_summary.errors` entry), and
-  - 400 `bad_request` for all other 400s (the daemon remaps internal codes
-    such as `work_id_mismatch`, `chapter_id_mismatch`,
-    `invalid_chapter_number`, `missing_event_title`, `missing_event_id`,
-    `self_foreshadow_forbidden` to the coarse public `bad_request`).
+  - 400 `bad_request` for all other 400-class refusals (the mapper keeps the
+    same coarse public code for internal classifications such as
+    `work_id_mismatch`, `chapter_id_mismatch`, `invalid_chapter_number`,
+    `missing_event_title`, `missing_event_id`, `self_foreshadow_forbidden`).
 - **Write bodies are typed long flags** (AR-83 #4); chapter outline prose
   comes from `--content` or `--content-file <path>`.
 - **No TUI / no second editor.** Leaves are single-shot commands
@@ -829,11 +853,18 @@ Rules:
 
 ### 6.2G.6 V1.175 P1 amendment — KB entity patch + memory closure + findings triage (RN-1 §5 groups 4, 7, 8)
 
-Thin daemon-HTTP leaves over **existing** routes (AR-83 #1 / AR-85..87; no
-daemon route changes, no DTO redesign). All leaves: human-readable default
-output, `--json` emits the daemon DTO verbatim (AR-83 #3), typed long flags,
-daemon error envelopes surfaced via `DaemonClient::parse_error_response`
-(named `[code]`, non-zero exit — PL-5).
+**Delivered (v1.193 P2): every leaf below is a direct-core leaf.** V1.175 P1
+shipped them as thin daemon-HTTP leaves over the then-existing routes
+(AR-83 #1 / AR-85..87; no daemon route change, no DTO redesign). The daemon
+group and its `DaemonClient` were deleted in v1.193 P2 and each retained leaf
+now issues the same typed call through `nexus-core`
+(`apps/nexus42/src/commands/creator/{world/kb*,memory.rs,works/rules_runtime.rs}`);
+`creator world kb graph` / `entity patch` pioneered that direct path in V1.189
+(§6.2G.7). Retained contract: human-readable default output, `--json` emits the
+same DTO verbatim (AR-83 #3), typed long flags, and core refusals surfaced
+through the shared direct-core mapper (named `[code]`, non-zero exit — PL-5).
+The `/v1/daemon/*` paths below are the **retained wire family** served by the
+standalone TS service for browser/Electron, not the CLI leaf's transport.
 
 | Command | Purpose |
 | --- | --- |
@@ -852,11 +883,13 @@ daemon error envelopes surfaced via `DaemonClient::parse_error_response`
 Rules:
 
 - **Dual-write guard (AR-85 #3).** `kb entity patch` writes through the
-  **daemon** OCC route (per-row version CAS on `kb_key_blocks.revision`);
+  **core** OCC path (per-row version CAS on `kb_key_blocks.revision`; the
+  retained wire family exposes the same operation as
+  `POST /v1/daemon/worlds/:world_id/kb/patch-entity`), while
   `creator world kb edit` writes the **local DB** directly (SQLite, no OCC,
-  different code path). Two write paths exist by product decision; only the
-  daemon path is OCC-guarded. `kb entity patch` is a NEW verb — never an
-  overload of `edit` (no `edit --daemon`).
+  different code path). Two write paths exist by product decision; the OCC
+  guard belongs to `entity patch`, not to `edit`. `kb entity patch` is a NEW
+  verb — never an overload of `edit` (no `edit --daemon`).
 - **OCC error surface (PL-5).** A stale `--expected-version` returns **409
   `world_kb_conflict`** echoing the stale version as `current_version` +
   `entity_id` (rendered by the CLI error envelope); `--help` documents the
@@ -865,7 +898,7 @@ Rules:
   400 `bad_request` (other 400s) surface named, non-zero exit.
 - **Memory closure (AR-86).** `review` drains while `has_more == true`
   (server batch ≤ 50 rows/call; CLI cap 100 calls + zero-progress guard —
-  matches the web drain contract). `--json` on all daemon-backed memory
+  matches the web drain contract). `--json` on all core-backed memory
   verbs (`review`, `fragments`, `pending-list`, `pending-show`,
   `pending-dismiss`, `pending count`). Local-file verbs
   (`list/create/show/edit/delete`) are untouched. No leaf for
@@ -930,13 +963,17 @@ cohort, modeled on `nexus42 ops inspect` (§6.3B).
 
 Normative: [actor-product-model.md](./actor-product-model.md) §11 (developer maintenance contract).
 
-Thin daemon-HTTP leaves over generated DTOs (`UpdateCharacterRequest`,
-`CharacterLifecycleRequest`, `CharacterDetail`). All mutations require an
-explicit `--expected-revision`; the CLI never performs a hidden GET-and-retry
-overwrite. `--json` emits the daemon DTO verbatim; human output prints the
-returned revision and status. Owner-wide `list`/`show` include archived
-Characters; run and identity writes on archived rows return **409
-`character_inactive`**.
+**Delivered (v1.193 P2): these are direct-core leaves.** V1.185 P0 shipped them
+as thin daemon-HTTP leaves over generated DTOs (`UpdateCharacterRequest`,
+`CharacterLifecycleRequest`, `CharacterDetail`); the daemon group and its
+`DaemonClient` were deleted and each leaf now authors through the shared
+direct-core seam (`apps/nexus42/src/commands/creator/character.rs`), projecting
+the stored `KnowledgeEntryRecord`/identity row onto the same generated DTO
+family. Retained contract: all mutations require an explicit
+`--expected-revision`; the CLI never performs a hidden GET-and-retry overwrite.
+`--json` emits the same DTO verbatim; human output prints the returned revision
+and status. Owner-wide `list`/`show` include archived Characters; run and
+identity writes on archived rows return **409 `character_inactive`**.
 
 | Command | Purpose |
 | --- | --- |
@@ -953,17 +990,20 @@ Rules:
   in flight returns **409 `character_busy`**.
 - **No CLI-side lifecycle logic.** The CLI maps flags to generated request
   bodies and prints responses; fences, epoch retirement, and Host cleanup run
-  only in the daemon handlers.
+  only in the core authority, never in the CLI.
 
 ### 6.2I.1 V1.185 P1 amendment — `nexus42 creator character binding` WorldSheet maintenance (Normative)
 
 Normative: [actor-product-model.md](./actor-product-model.md) §11.4.
 
-Thin daemon-HTTP leaves over generated `CharacterBindingDetail` and
-`UpdateCharacterBindingRequest`. Only `world_sheet_entry_id` is mutable via
-`binding edit`; `--clear-world-sheet` maps to JSON `null`. The CLI never
-performs a hidden GET-and-retry overwrite. `binding show` and successful edits
-support `--json` for verbatim DTO output.
+**Delivered (v1.193 P2): these are direct-core leaves.** V1.185 P1 shipped them
+as thin daemon-HTTP leaves over generated `CharacterBindingDetail` and
+`UpdateCharacterBindingRequest`; the daemon transport was deleted and the leaves
+now issue the same typed calls through `nexus-core`
+(`apps/nexus42/src/commands/creator/character.rs`). Retained contract: only
+`world_sheet_entry_id` is mutable via `binding edit`; `--clear-world-sheet` maps
+to JSON `null`. The CLI never performs a hidden GET-and-retry overwrite.
+`binding show` and successful edits support `--json` for verbatim DTO output.
 
 | Command | Purpose |
 | --- | --- |
@@ -985,11 +1025,14 @@ Rules:
 
 Normative: [actor-product-model.md](./actor-product-model.md) §11.5.
 
-Thin daemon-HTTP leaves over generated `KnowledgeEntryDetail`,
-`UpdateKnowledgeEntryRequest`, and `DeleteKnowledgeEntryQuery`. Character-scoped
-`show`/`edit`/`remove` pin `--character-id` and `--entry-id`; mutations require
-`--expected-revision`. Summary is the existing `body.summary` contract surface
-only — no second content field or owner rewrite in the CLI.
+**Delivered (v1.193 P2): these are direct-core leaves.** V1.185 P2 shipped them
+as thin daemon-HTTP leaves over generated `KnowledgeEntryDetail`,
+`UpdateKnowledgeEntryRequest`, and `DeleteKnowledgeEntryQuery`; the daemon
+transport was deleted and the leaves now issue the same typed calls through
+`nexus-core`. Character-scoped `show`/`edit`/`remove` pin `--character-id` and
+`--entry-id`; mutations require `--expected-revision`. Summary is the existing
+`body.summary` contract surface only — no second content field or owner rewrite
+in the CLI.
 
 | Command | Purpose |
 | --- | --- |
@@ -1010,10 +1053,18 @@ Rules:
   returns **409 `character_inactive`**; retained `knowledge show` still succeeds.
 - **No CLI-side storage logic.** The CLI maps flags to generated request bodies
   and prints responses; CAS, referent inventory, and activity guards run only in
-  daemon handlers / local-db.
+  the core authority / local-db.
 
 
-### 6.2I.3 V1.185 P3 amendment — `nexus42 creator character run` observation + `--remember` (Normative)
+### 6.2I.3 V1.185 P3 amendment — `nexus42 creator character run` observation + `--remember` (**entrance removed in v1.193 P2** — historical)
+
+> **Historical record — removed in v1.193 P2.** `creator character run` and
+> `creator character soul reflect` are gone from the clap surface together with
+> the daemon transport they needed; the CLI exposes no run/observation entrance
+> for Character sessions. Core host capture, session and soul-synthesis behavior
+> remain library/core operations. Nothing below is a current setup step.
+> Retained Character surface: `create|list|show|edit|archive|restore`,
+> `binding`, `knowledge`, `memory`, `tom` (see §6.2I–§6.2I.2).
 
 Normative: [actor-product-model.md](./actor-product-model.md) §11.6.
 
@@ -1060,13 +1111,25 @@ Normative: [novel-writing/multi-work-lifecycle.md](./novel-writing/multi-work-li
 | `nexus42 creator works list` | List Works in active workspace (**migrated from** `creator run list`) |
 | `nexus42 creator works status [<work_id>]` | Work status, intake, schedules, world, auto-chain, findings (**migrated from** `creator run status`) |
 | `nexus42 creator works use <work_id>` | Set pool `active` row → CLI default `work_id` (does **not** pause other Works) |
-| `nexus42 creator works completion-lock release <work_id>` | Release `.completion-lock.json`; enables `run resume` on same Work |
+| `nexus42 creator works completion-lock release <work_id>` | Release a Work's completion lock: DB `completion_locked_at` is cleared (SSOT), `novel_completion_status` becomes `reopened`, and the derived `.completion-lock.json` is removed |
 | `nexus42 creator works pool list` | List selection pool entries (DB SSOT) |
 | `nexus42 creator works pool promote <entry_id> [--set-default]` | `queued` → scaffold/bind Work; optional `--set-default` → `works use` |
 | `nexus42 creator works pool archive <entry_id>` | Mark pool entry `completed` |
 | `nexus42 creator works pool inspiration add --title "<text>"` | Create `{workspace}/Pool/Ideas/<slug>.md` + DB row |
 | `nexus42 creator works pool inspiration list` | List inspiration items |
-| `nexus42 creator works pool inspiration promote <item_id> [--set-default]` | Read MD → `run start --idea`; pool `queued` row; item → `promoted` |
+| `nexus42 creator works pool inspiration promote <item_id> [--set-default]` | Promote an inspiration item through `CoreService::promote_work_inspiration`: Work + pool entry created, item → `promoted`; `--set-default` additionally selects it as the pool `active` Work (the retained `works use` selection) |
+
+**Omitted-`<work_id>` resolution (v1.194 P2-T1 — `R-V1193-P0T5-OMITTED-ID-POOL-ACTIVE`, settled).**
+Every retained arm that accepts an omitted `<work_id>` — `works status`,
+`works inspire`, `works reopen`, `works reconcile-chapters`, and the
+`works findings` / `works rules` leaves — resolves it through one helper
+(`apps/nexus42/src/commands/creator/works/mod.rs::active_work_id_core`): the
+bounded `status=active, limit=1, offset=0` query over the **selection pool**
+(`CoreService::list_work_pool` → the `novel_pool_entries` store that
+`works use` and every pool promotion write), returning that entry's `work_id`.
+It never queries the Works table's own `status` column, and no second resolver
+exists. An explicit `<work_id>` always wins; with no pool `active` entry the
+command refuses with remediation to `creator works use <work_id>`.
 
 **`creator works status` extensions (novel + auto-chain — migrated from V1.39 `creator run status`):**
 
@@ -1179,9 +1242,14 @@ Implementation authorities: `apps/nexus42/src/commands/ops.rs`,
 
 失败语义：`recommended_skills[]` 缺失、越权或不可读时，session 初始化必须返回可操作错误，不得静默降级。
 
-### 6.5 `nexus42 sync`（结构化同步命令组）
+### 6.5 `nexus42 sync`（结构化同步 — **顶层 alias 已在 v1.193 P2 删除**）
 
-- `nexus42 sync pull|push|status|retry|resolve`
+> **Delivered (v1.193 P2):** there is no top-level `sync` group in the parser. The
+> canonical surface is `nexus42 platform sync pull|push|status` (§6.6); the
+> implementation module `apps/nexus42/src/commands/sync/` is reached only through
+> that group. The 顶层 `nexus42 sync ...` 拼写已随兼容 alias 一起删除，不保留 no-op alias。
+
+曾提供的顶层拼写（历史）：`nexus42 sync pull|push|status|retry|resolve`。
 
 默认策略：
 
@@ -1195,6 +1263,7 @@ Implementation authorities: `apps/nexus42/src/commands/ops.rs`,
 ### 6.6 `nexus42 platform`（平台能力命令组）
 
 - `nexus42 platform auth login|logout|status|profiles`
+- `nexus42 platform sync pull|push|status|resolve`（**canonical sync surface** — 顶层 `nexus42 sync` alias 已在 v1.193 P2 删除，见 §6.5）
 - `nexus42 platform context assemble` (**Deferred** — future direct platform cloud assembly)
 - `nexus42 platform context assemble-moment` (**Shipped (local)** — single four-domain Moment assembly SSOT; frozen flags: `--max-tokens`, `--no-fragments`, `--hint`, `--kb-limit`, `--kb-search`, `--kb-type`, `--knowledge-limit`)
 
@@ -1204,7 +1273,7 @@ Implementation authorities: `apps/nexus42/src/commands/ops.rs`,
 
 - `platform context assemble` is **Deferred** in V1.26. Direct platform cloud assembly is not yet available; the command returns clear guidance to use `assemble-moment` instead. It must not call the retired daemon context-assemble Daemon API.
 - `platform context assemble-moment` is the **single local assembly SSOT** (shipped V1.26, hardened V1.27+). It is a four-domain Moment assembly command that calls `assemble_moment` in-process. Narrative and World KB slices read from persistent local stores; User knowledge reads from SQLite (V1.27+). It is distinct from the deferred platform cloud `assemble` path.
-- `publish.*` 表示内容跨平台边界动作，不与 `sync push` 混用。
+- `publish.*` 表示内容跨平台边界动作，不与 `platform sync push` 混用。
 - `manuscript.*` / `publish.*` / `research.*` 作为 ACP 或 preset contract 保留，不再作为独立顶层命令组。
 
 ### 6.7 V2 CLI / ACP / Preset 边界总结
@@ -1305,8 +1374,8 @@ profile 至少包含：
 - `auth login`
 - `doctor`
 - `config`
-- `sync pull`
-- `sync push`
+- `platform sync pull`
+- `platform sync push`
 
 特点：
 
@@ -1544,13 +1613,13 @@ V1.54 game-bible 布局（`works_profile: game_bible`）：`Works/<work_ref>/Des
 
 **Outputs**：
 
-- Default `sync push` 输出既有 **Bundle / Delta**：world/key-block/timeline/reference/manuscript metadata、source anchors、idempotency key、canonical hash、audit command metadata。
+- Default `platform sync push` 输出既有 **Bundle / Delta**：world/key-block/timeline/reference/manuscript metadata、source anchors、idempotency key、canonical hash、audit command metadata。
 - Local packaging 可生成 preset manifest / staging records，但这些是本地实现细节；跨平台 wire 仍引用 `cli-spec` §14、`shared/domain/data-model-v1.md` 与 schema codegen 生成合同。
-- `sync pull` 只回填平台结构化状态与冲突 / cursor；不得把平台内容静默覆盖到 `Works/<work_ref>/Stories/` 正文。
+- `platform sync pull` 只回填平台结构化状态与冲突 / cursor；不得把平台内容静默覆盖到 `Works/<work_ref>/Stories/` 正文。
 
 **Publish boundary**：
 
-- **Default `nexus42 sync push` is not content publication.** 它只同步结构化 delta、摘要与引用锚点（§5.3、§14.2）。
+- **Default `nexus42 platform sync push` is not content publication.** 它只同步结构化 delta、摘要与引用锚点（§5.3、§14.2）。
 - 完整章节 / 故事正文跨越平台边界，只能由 **`publish.*` ACP capability** 或 preset `sync.publish_*` 等等价**显式发布动作**触发，并遵循 §16 confirmation / `--yes` 规则。
 - `output_manuscript=false` 时，preset sync module 仍可同步结构化状态，但不得默认读取或上传正文文件。
 
@@ -1675,15 +1744,15 @@ SQLite 是本地 working state，不是平台 graph 的替代品。
 
 ### 14.2 默认模式
 
-- `sync pull` 拉取平台结构化状态
-- `sync push` 推送本地结构化变更
-- **完整正文**只有在 **`publish.*`（ACP）** 或 **preset `sync` 子模块** 定义的显式发布路径下才跨越平台边界；**不与** `sync push` 的默认结构化 delta 混为一谈
+- `platform sync pull` 拉取平台结构化状态
+- `platform sync push` 推送本地结构化变更
+- **完整正文**只有在 **`publish.*`（ACP）** 或 **preset `sync` 子模块** 定义的显式发布路径下才跨越平台边界；**不与** `platform sync push` 的默认结构化 delta 混为一谈
 
 ### 14.3 冲突处理
 
 v1 建议先采用显式冲突暴露：
 
-- `nexus42 sync status` 报告冲突
+- `nexus42 platform sync status` 报告冲突（顶层 `nexus42 sync` alias 已删除 — §6.5）
 - 不在后台静默覆盖
 - Timeline 冲突优先转向 Fork
 - `partial` bundle 必须显示 `delta_results[]`，并仅重建剩余变更
@@ -1710,8 +1779,8 @@ v1 建议先采用显式冲突暴露：
 ### 15.2 恢复命令
 
 - `nexus42 system doctor`
-- `nexus42 sync status`
-- `nexus42 sync retry`
+- `nexus42 platform sync status`（canonical；顶层 `nexus42 sync` alias 已在 v1.193 P2 删除，见 §6.5）
+- ~~`nexus42 sync retry`~~（随顶层 `sync` 组一起删除；保留的同步入口是 `platform sync`，其 `retry` 走 `platform sync` 组）
 - ~~`nexus42 daemon restart`~~ (deleted in v1.193 P2 — service restart belongs to Electron/TS, not the CLI)
 - `nexus42 system debug dump-workspace`
 
@@ -1759,7 +1828,7 @@ v1 至少应保证：
 
 - ACP 最终线协议与本地认证方式
 - ACP Registry manifest 拉取与缓存策略
-- Nexus local API 是否需要独立暴露，以及与 ACP Client-only 拓扑的边界
+- ~~Nexus local API 是否需要独立暴露，以及与 ACP Client-only 拓扑的边界~~。**Closed (v1.193 P2):** 不再由 CLI 暴露本地 API；`/v1/daemon/*` 由独立的 TypeScript 服务为 browser/Electron 提供，CLI 保持直连 core/cloud/Connect。
 - ~~workspace 是否支持多 world 共存~~。**Closed（C2）**：支持；以 `world_id` 显式参数隔离并发；单运行时 **一个活跃 `creator_id`（`creator use`）** + 在该 Creator 下 **一个活跃 `workspace_slug`（`creator workspace use`，默认 `default`）**（见 §6.2C C2、nexus-platform `v1-spec/shared/domain/data-model-v1.md` §5.14、nexus-platform `v1-spec/adr/adr-014-local-fs-creator-workspace-layout-v1.md`）。
 - `sync` 是否允许默认后台定时拉取
 
@@ -1850,15 +1919,16 @@ content hash, and updates the DB row (`last_refreshed_at`, `content_hash`,
 - No daemon call; no mutation.
 - Output format: `[DRY RUN] Would refresh N reference source(s):` followed by one line per source.
 
-**Wiring**: `nexus42 creator reference refresh` → `DaemonClient::post` →
+**Wiring (historical — the daemon and `DaemonClient` were deleted in v1.193 P2)**: `nexus42 creator reference refresh` → `DaemonClient::post` →
 daemon `POST /v1/daemon/agent-host/internal/tool-executions` →
 `HostToolExecutor::execute()` → `admission_pipeline()` →
 `CapabilityRegistry::dispatch("nexus.reference.refresh", {"reference_source_id":"..."})` →
 `ReferenceRefresh::run()` → fetch URL → hash → update DB → write body.md.
 
-**IPC timeout**: Uses `DaemonClient` default timeout (30 s per request).
-The daemon-side capability handler enforces a 30 s HTTP fetch timeout and
-100 MiB body size limit.
+**IPC timeout (historical)**: used the `DaemonClient` default timeout (30 s per request).
+The daemon-side capability handler enforced a 30 s HTTP fetch timeout and
+100 MiB body size limit. The retained surface has no such call — `creator
+reference` is `register|list|show` only.
 
 **Atomic body file write** (V1.58 P3): When the capability handler detects
 `content_changed = true` and `creator_home` is set, it writes the body
