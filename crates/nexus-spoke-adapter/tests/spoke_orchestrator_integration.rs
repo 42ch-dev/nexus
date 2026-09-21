@@ -682,7 +682,7 @@ struct SecondWriterBarrier<'a> {
 }
 
 impl<'a> SecondWriterBarrier<'a> {
-    fn new(
+    const fn new(
         adapter: &'a NexusAdapter<'static>,
         pool: sqlx::SqlitePool,
         r#move: SecondWriterMove,
@@ -702,8 +702,10 @@ impl<'a> SecondWriterBarrier<'a> {
             .expect("barrier state lock")
             .iter()
             .find(|(row_id, _)| row_id == id)
-            .map(|(_, state)| state.clone())
-            .unwrap_or_else(|| panic!("the second writer never moved {id}"))
+            .map_or_else(
+                || panic!("the second writer never moved {id}"),
+                |(_, state)| state.clone(),
+            )
     }
 
     /// Run the armed move (once). A later admission read is a no-op, so the
