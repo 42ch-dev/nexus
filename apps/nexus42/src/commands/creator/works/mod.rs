@@ -585,29 +585,34 @@ async fn handle_list(config: &CliConfig, status: Option<String>, json: bool) -> 
     Ok(())
 }
 
-/// Resolve the pool `active` Work through the core.
+/// Resolve the omitted Work through a two-step selection over the core.
 ///
 /// Every arm that accepts an omitted `<work_id>` (status, inspire, reopen,
 /// reconcile-chapters, and the findings/rules leaves in
-/// [`super::rules_runtime`]) resolves it here: the same bounded
-/// `status=active, limit=1, offset=0` query over the selection pool
-/// ([`CoreService::list_work_pool`]), with the same refusal text.
+/// [`super::rules_runtime`]) resolves it here, against both stores the
+/// explicit entrances write:
 ///
-/// The resolution reads `novel_pool_entries` — the store `works use` and every
-/// pool promotion write `active` — never the Work's own `works.status` column.
-/// The two domains are independent: a promoted Work keeps `works.status =
-/// 'draft'`, so a `works.status` selection never finds the pool `active` entry
-/// (R-V1193-P0T5-OMITTED-ID-POOL-ACTIVE).
+/// 1. the selection pool `active` entry — `novel_pool_entries`, the store
+///    `works use` and every pool promotion write. A promoted Work keeps
+///    `works.status = 'draft'`, so this step is the only one that finds it
+///    (R-V1193-P0T5-OMITTED-ID-POOL-ACTIVE);
+/// 2. the `works.status = active` selection, for a Work that is active in
+///    `works` without a pool `active` entry. The two domains are independent,
+///    so an empty pool page does not mean "no active Work".
+///
+/// Each step is the same bounded `limit = 1` read of the same producer family
+/// ([`CoreService::list_work_pool`], then [`CoreService::list_works`]), and
+/// both end in the same refusal text.
 ///
 /// # Errors
 ///
-/// Returns [`crate::errors::CliError::Config`] when the active creator has no
-/// pool `active` entry, and the mapped core error when the bounded query fails.
+/// Returns [`crate::errors::CliError::Config`] when neither step resolves a
+/// Work, and the mapped core error when a bounded query fails.
 pub(crate) async fn active_work_id_core(
     core: &CoreService,
     principal: &Principal,
 ) -> Result<String> {
-    let page = core
+    let pool_page = core
         .list_work_pool(
             principal,
             ListPoolQuery {
@@ -618,9 +623,24 @@ pub(crate) async fn active_work_id_core(
         )
         .await
         .map_err(map_core_error)?;
-    page.entries
+    if let Some(entry) = pool_page.entries.first() {
+        return Ok(entry.work_id.clone());
+    }
+    let works_page = core
+        .list_works(
+            principal,
+            ListWorksQuery {
+                status: Some("active".to_string()),
+                limit: Some(1),
+                ..ListWorksQuery::default()
+            },
+        )
+        .await
+        .map_err(map_core_error)?;
+    works_page
+        .items
         .first()
-        .map(|entry| entry.work_id.clone())
+        .map(|w| w.work_id.clone())
         .ok_or_else(|| {
             crate::errors::CliError::Config(
                 "No active Work found. Specify <work_id> or run \

@@ -1296,7 +1296,15 @@ fn promote_pool_idea(home: &std::path::Path, cwd: &std::path::Path, title: &str)
     let add = hermetic_cli(
         home,
         cwd,
-        &["creator", "works", "pool", "inspiration", "add", title, "--json"],
+        &[
+            "creator",
+            "works",
+            "pool",
+            "inspiration",
+            "add",
+            title,
+            "--json",
+        ],
     );
     assert!(
         add.status.success(),
@@ -1369,7 +1377,11 @@ fn work_status_json(
     cwd: &std::path::Path,
     work_id: &str,
 ) -> serde_json::Value {
-    let output = hermetic_cli(home, cwd, &["creator", "works", "status", work_id, "--json"]);
+    let output = hermetic_cli(
+        home,
+        cwd,
+        &["creator", "works", "status", work_id, "--json"],
+    );
     assert!(
         output.status.success(),
         "works status {work_id} must succeed on the direct core: {}",
@@ -1508,13 +1520,17 @@ fn omitted_work_id_uses_pool_active_entry() {
         "both pool entries stay listed: {pool_after_archive}"
     );
     assert_eq!(
-        entries_after_archive[0].get("entry_id").and_then(|v| v.as_str()),
+        entries_after_archive[0]
+            .get("entry_id")
+            .and_then(|v| v.as_str()),
         Some(alpha_entry_id.as_str()),
         "fixture premise: the archived, non-active entry must be the pool listing's first row \
          (`ORDER BY updated_at DESC`): {pool_after_archive}"
     );
     assert_eq!(
-        entries_after_archive[0].get("status").and_then(|v| v.as_str()),
+        entries_after_archive[0]
+            .get("status")
+            .and_then(|v| v.as_str()),
         Some("archived"),
         "the first pool row is the archived entry: {pool_after_archive}"
     );
