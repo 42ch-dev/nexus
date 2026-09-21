@@ -8,8 +8,12 @@
  *   the renderer only ever receives the redacted public projection.
  * - NO plaintext write fallback: when encryption is unavailable the
  *   operation fails with a structured error and nothing is written.
- * - One-time legacy import reads the old keychain/app-data config and
- *   encrypts it before the new store becomes authoritative.
+ * - One-time legacy import reads the old keychain/app-data config, encrypts
+ *   and persists it, and only then removes both plaintext originals; an
+ *   interrupted cleanup is finished by the next open of the encrypted store.
+ * - A cleanup failure preserves the readable encrypted store and the
+ *   remaining legacy source and surfaces the sanitized structured
+ *   `legacy_credential_cleanup_failed` error — never a false migration.
  * - Clear writes a durable tombstone marker: a later open sees the marker
  *   and never re-imports the legacy material (D-18).
  * - Writes are atomic (temp file + rename); a failed encrypt leaves the
@@ -40,9 +44,22 @@ export interface ConnectionStoreDeps {
    * One-time legacy import source: reads the old macOS keychain entry
    * (`nexus42` / `connection_config`) or the old app-data
    * `connection_config.json` and returns the raw legacy JSON string. Must
-   * never log or return the secret anywhere else. Absent ⇒ no import.
+   * never log or return the secret anywhere else.
+   *
+   * The import runs only when {@link cleanupLegacy} is supplied too: a
+   * migration that cannot remove the plaintext originals is never performed.
    */
   readLegacy?: () => Promise<string | null>;
+  /**
+   * Idempotent removal of BOTH legacy plaintext sources (keychain item and
+   * app-data JSON); an already-absent source counts as removed. Injected by
+   * the host so this module keeps no keychain/platform knowledge.
+   *
+   * Called only after the encrypted store is persisted and readable, and
+   * again on every open of an authoritative encrypted store, so an
+   * interrupted cleanup is finished by the ordinary reopen.
+   */
+  cleanupLegacy?: () => Promise<void>;
   /**
    * Filesystem removal primitive (defaults to `rmSync`). Injectable so a
    * removal failure is observable in tests; any failure other than a
@@ -94,14 +111,19 @@ export class ConnectionStore {
 
   /**
    * Open (or create) the store. When no store file exists, no cleared
-   * tombstone is present, and a legacy source is configured, performs the
-   * one-time import: legacy JSON is validated and encrypted BEFORE the new
-   * store is written; originals are left untouched. A failed/unavailable
-   * encryption aborts the import without writing anything in the clear.
+   * tombstone is present, and the paired legacy source is configured,
+   * performs the one-time import in one order: validate → encrypt → persist
+   * → remove both legacy originals → publish. A parse/URL/encrypt/persist
+   * failure removes nothing, so the plaintext sources stay recoverable.
+   *
+   * Opening an authoritative encrypted store re-runs the same idempotent
+   * cleanup, which finishes a previously interrupted one without a second
+   * state format, retry service or pending marker.
    *
    * An EXISTING store that is invalid or unreadable is never activated and —
-   * unlike an absent file (ENOENT) — never falls back to the legacy import:
-   * its bytes stay on disk for the user to recover by saving over them.
+   * unlike an absent file (ENOENT) — never falls back to the legacy import
+   * and never triggers legacy cleanup: its bytes stay on disk for the user to
+   * recover by saving over them.
    */
   static async open(deps: ConnectionStoreDeps): Promise<ConnectionStore> {
     let state: StoredFile | null = null;
@@ -119,15 +141,20 @@ export class ConnectionStore {
     } catch {
       cleared = false;
     }
-    if (state === null && deps.readLegacy && !cleared) {
+    if (state === null && deps.readLegacy && deps.cleanupLegacy && !cleared) {
       const legacy = await deps.readLegacy();
       if (legacy !== null) {
         const imported = ConnectionStore.importLegacy(deps, legacy);
         if (imported !== null) {
+          // Nothing is removed before the encrypted bytes are on disk and
+          // readable; no failure above can have removed either original.
           ConnectionStore.persist(deps, imported);
+          await ConnectionStore.removeLegacy(deps);
           state = imported;
         }
       }
+    } else if (state !== null) {
+      await ConnectionStore.removeLegacy(deps);
     }
     return new ConnectionStore(deps, state);
   }
@@ -229,6 +256,37 @@ export class ConnectionStore {
       deps.storage.decryptString(decodeCredential(state.credential));
     }
     atomicWrite(deps.filePath, serialized);
+  }
+
+  /**
+   * Run the injected idempotent legacy cleanup. It is reached ONLY once the
+   * encrypted store is persisted and readable (or was already authoritative),
+   * so a failure never rolls the store back and never writes plaintext.
+   *
+   * The adapter's own error is replaced by the structured
+   * `legacy_credential_cleanup_failed`: it may carry command output or the
+   * secret itself, and neither may surface. Only an errno-shaped token or an
+   * exit status is kept for diagnosis.
+   */
+  private static async removeLegacy(deps: ConnectionStoreDeps): Promise<void> {
+    try {
+      await deps.cleanupLegacy?.();
+    } catch (err) {
+      // Only an integer exit status or an errno token is repeated here; the
+      // adapter's own message may carry command output or the secret.
+      const code = (err as { code?: unknown } | null)?.code;
+      const detail =
+        typeof code === 'number' && Number.isInteger(code)
+          ? String(code)
+          : typeof code === 'string' && /^[A-Z][A-Z0-9_]{0,31}$/.test(code)
+            ? code
+            : null;
+      throw desktopError(
+        'legacy_credential_cleanup_failed',
+        `legacy plaintext credentials could not be removed${detail === null ? '' : ` (${detail})`}; ` +
+          'the encrypted store is kept and the cleanup is retried on the next open',
+      );
+    }
   }
 
   /** Redacted public projection; the API key is NEVER included. */

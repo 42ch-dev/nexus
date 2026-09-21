@@ -22,6 +22,7 @@ import { fileURLToPath } from 'node:url';
 import {
   applyProductIdentity,
   composeDesktopHost,
+  createLegacyCredentialAdapter,
   loadProductIdentity,
   resolveDesktopDistRoot,
   resolveDevUrl,
@@ -31,6 +32,7 @@ import {
   DESKTOP_OPERATIONS,
   DESKTOP_RUNTIME_CHANNEL,
   errorCode,
+  errorMessage,
 } from '../dist/desktop-contract.js';
 import { assertDesktopEventSender } from '../dist/desktop-ipc.js';
 
@@ -299,6 +301,13 @@ async function makeHost(overrides = {}) {
       },
       attachNetworkHooks: (sessionArg, getActiveAuth) => {
         networkHooks.push({ session: sessionArg, getActiveAuth });
+      },
+      // No test may touch the real OS keychain or the user's app-data: the
+      // default legacy adapter has neither a source nor anything to remove.
+      // Tests that own the migration pass their own adapter.
+      legacyCredentials: {
+        read: async () => null,
+        cleanup: async () => {},
       },
       ...adapterOverrides,
     },
@@ -916,6 +925,211 @@ test('an invalid stored connection config can never omit the CSP', async () => {
   // The invalid bytes stay on disk for recovery.
   assert.ok(readFileSync(storePath, 'utf8').includes('about:blank'));
   host.dispose();
+});
+
+// ---------------------------------------------------------------------------
+// Legacy credential removal (v1.194 P1-T3): the production targets, the
+// ordered host migration and the sanitized failure
+// ---------------------------------------------------------------------------
+
+test('legacy credential cleanup adapter targets exactly the old keychain item and app-data JSON, idempotently', async () => {
+  const appData = mkdtempSync(join(root, 'legacy-appdata-'));
+  const legacyDir = join(appData, 'io.nexus42.desktop');
+  const jsonPath = join(legacyDir, 'connection_config.json');
+  mkdirSync(legacyDir, { recursive: true });
+  writeFileSync(jsonPath, JSON.stringify({ endpointUrl: 'https://legacy.example:8443', apiKey: 'sk-legacy' }));
+  const neighbour = join(legacyDir, 'unrelated.json');
+  writeFileSync(neighbour, '{"keep":true}');
+
+  const commands = [];
+  // A capturing runner: the exact argv is asserted WITHOUT invoking the user's
+  // keychain. `delete` reports the documented errSecItemNotFound (exit 44).
+  const adapter = createLegacyCredentialAdapter(appData, {
+    platform: 'darwin',
+    runSecurity: async (args) => {
+      commands.push(args);
+      if (args[0] === 'delete-generic-password') {
+        throw Object.assign(new Error('could not be found in the keychain'), { code: 44 });
+      }
+      return { stdout: '{"endpointUrl":"https://legacy.example:8443","apiKey":"sk-legacy"}\n' };
+    },
+  });
+
+  assert.equal(
+    await adapter.read(),
+    '{"endpointUrl":"https://legacy.example:8443","apiKey":"sk-legacy"}',
+    'the legacy secret is read through `find-generic-password -w`',
+  );
+  await adapter.cleanup();
+  await adapter.cleanup(); // second run: both targets are already gone
+
+  assert.deepEqual(
+    commands,
+    [
+      ['find-generic-password', '-s', 'nexus42', '-a', 'connection_config', '-w'],
+      ['delete-generic-password', '-s', 'nexus42', '-a', 'connection_config'],
+      ['delete-generic-password', '-s', 'nexus42', '-a', 'connection_config'],
+    ],
+    'exact argv identity: /usr/bin/security, no shell, only service nexus42 / account connection_config',
+  );
+  assert.equal(existsSync(jsonPath), false, 'the app-data plaintext JSON is removed');
+  assert.equal(existsSync(neighbour), true, 'only the legacy JSON is removed, nothing else in the directory');
+});
+
+test('legacy credential cleanup adapter keeps only item-not-found and ENOENT as success', async () => {
+  const appData = mkdtempSync(join(root, 'legacy-refusals-'));
+  const legacyDir = join(appData, 'io.nexus42.desktop');
+  const jsonPath = join(legacyDir, 'connection_config.json');
+  mkdirSync(legacyDir, { recursive: true });
+  writeFileSync(jsonPath, '{"apiKey":"sk-legacy"}');
+
+  // An unrelated keychain failure is NOT success.
+  const denied = createLegacyCredentialAdapter(appData, {
+    platform: 'darwin',
+    runSecurity: async () => {
+      throw Object.assign(new Error('security: SecKeychainItemDelete: could not delete'), { code: 51 });
+    },
+  });
+  await assert.rejects(() => denied.cleanup(), (err) => err.code === 51);
+
+  // An already-absent item (exit 44) and an already-absent JSON (ENOENT) are.
+  const gone = createLegacyCredentialAdapter(appData, {
+    platform: 'darwin',
+    runSecurity: async () => {
+      throw Object.assign(new Error('could not be found in the keychain'), { code: 44 });
+    },
+    removeFile: () => {
+      throw Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' });
+    },
+  });
+  await gone.cleanup();
+
+  // A JSON removal failure that is not ENOENT is NOT success.
+  const undeletable = createLegacyCredentialAdapter(appData, {
+    platform: 'linux',
+    removeFile: () => {
+      throw Object.assign(new Error('EPERM: operation not permitted'), { code: 'EPERM' });
+    },
+  });
+  await assert.rejects(() => undeletable.cleanup(), (err) => err.code === 'EPERM');
+
+  // Off darwin the macOS keychain item is never targeted.
+  const commands = [];
+  const elsewhere = createLegacyCredentialAdapter(appData, {
+    platform: 'linux',
+    runSecurity: async (args) => {
+      commands.push(args);
+      return { stdout: '' };
+    },
+  });
+  await elsewhere.cleanup();
+  assert.deepEqual(commands, [], '`security` is never invoked off darwin');
+  assert.equal(existsSync(jsonPath), false, 'the app-data JSON is still removed');
+});
+
+test('host migration removes the legacy sources only after the encrypted store is readable, and reopens idempotently', async () => {
+  const dir = mkdtempSync(join(root, 'legacy-migration-'));
+  const userDataDir = join(dir, 'userData');
+  const storePath = join(userDataDir, 'connection-config.enc');
+  const observed = [];
+  const { host, networkHooks } = await makeHost({
+    paths: { userDataDir },
+    adapters: {
+      legacyCredentials: {
+        read: async () =>
+          JSON.stringify({ endpointUrl: 'https://remote.example:9000', apiKey: 'sk-legacy', active: true }),
+        cleanup: async () => {
+          // Observed from inside the removal: the encrypted bytes are already
+          // on disk, carry no plaintext, and decrypt again.
+          const onDisk = readFileSync(storePath, 'utf8');
+          observed.push({
+            plaintextOnDisk: onDisk.includes('sk-legacy'),
+            // The fixture safeStorage prefixes its ciphertext with `enc:`.
+            decrypted: new TextDecoder()
+              .decode(Buffer.from(JSON.parse(onDisk).credential, 'base64'))
+              .slice(4),
+          });
+        },
+      },
+    },
+  });
+  assert.deepEqual(observed, [{ plaintextOnDisk: false, decrypted: 'sk-legacy' }]);
+  assert.deepEqual(await host.handlers.get_connection_config(), {
+    endpointUrl: 'https://remote.example:9000',
+    active: true,
+    hasApiKey: true,
+  });
+  assert.deepEqual(networkHooks[0].getActiveAuth(), {
+    endpointOrigin: 'https://remote.example:9000',
+    apiKey: 'sk-legacy',
+  });
+  host.dispose();
+
+  // The next launch opens the authoritative encrypted store — never the legacy
+  // source — and re-runs the idempotent removal.
+  const cleanups = [];
+  const { host: reopened } = await makeHost({
+    paths: { userDataDir },
+    adapters: {
+      legacyCredentials: {
+        read: async () => {
+          throw new Error('an authoritative encrypted store must never re-read the legacy source');
+        },
+        cleanup: async () => {
+          cleanups.push('cleanup');
+        },
+      },
+    },
+  });
+  assert.deepEqual(cleanups, ['cleanup'], 'the ordinary reopen finishes the legacy cleanup');
+  assert.deepEqual(await reopened.handlers.get_connection_config(), {
+    endpointUrl: 'https://remote.example:9000',
+    active: true,
+    hasApiKey: true,
+  });
+  reopened.dispose();
+});
+
+test('a refused legacy cleanup fails host startup without leaking the secret or command output', async () => {
+  const dir = mkdtempSync(join(root, 'legacy-refused-'));
+  const userDataDir = join(dir, 'userData');
+  const storePath = join(userDataDir, 'connection-config.enc');
+  const refusal = Object.assign(new Error('security: SecKeychainItemDelete: sk-legacy could not be removed'), {
+    code: 51,
+    stderr: 'security: could not delete sk-legacy\n',
+  });
+
+  let failure = null;
+  await assert.rejects(
+    () =>
+      makeHost({
+        paths: { userDataDir },
+        adapters: {
+          legacyCredentials: {
+            read: async () =>
+              JSON.stringify({ endpointUrl: 'https://remote.example:9000', apiKey: 'sk-legacy', active: true }),
+            cleanup: async () => {
+              throw refusal;
+            },
+          },
+        },
+      }),
+    (err) => {
+      failure = err;
+      return errorCode(err) === 'legacy_credential_cleanup_failed';
+    },
+  );
+  for (const surfaced of [errorMessage(failure), String(failure.stack ?? '')]) {
+    assert.ok(!surfaced.includes('sk-legacy'), 'no secret may surface');
+    assert.ok(!surfaced.includes('SecKeychainItemDelete'), 'no command output may surface');
+  }
+  assert.ok(errorMessage(failure).includes('(51)'), 'the exit status stays available for diagnosis');
+  assert.equal(
+    existsSync(storePath),
+    true,
+    'the readable encrypted store survives, so the next launch can retry and still authenticate',
+  );
+  assert.ok(!readFileSync(storePath, 'utf8').includes('sk-legacy'), 'recovery bytes stay ciphertext');
 });
 
 // ---------------------------------------------------------------------------
