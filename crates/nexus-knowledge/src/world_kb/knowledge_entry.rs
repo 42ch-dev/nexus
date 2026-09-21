@@ -285,9 +285,11 @@ pub fn parse_stored_created_at(raw: &str) -> Result<chrono::DateTime<chrono::Utc
 
 /// Millisecond unix timestamp for Actor `KnowledgeView` / SQL keyset order.
 ///
-/// Matches SQLite `strftime('%s') * 1000 + substr(strftime('%f'), 4)` so SQL
-/// predicates and the Rust merge compare the same total-order key. Sub-ms
-/// fractions collapse; ties break on `key_block_id`.
+/// The SQL keyset builds the same key: `strftime('%s') * 1000` plus the stored
+/// fraction truncated at the third digit. It must **not** read
+/// `strftime('%f')`, which rounds — a rounded key sat one millisecond ahead of
+/// this one (`timestamp_millis` truncates) and the paginated `ActorView` walk
+/// then skipped rows. Sub-ms fractions collapse; ties break on `key_block_id`.
 ///
 /// # Errors
 ///

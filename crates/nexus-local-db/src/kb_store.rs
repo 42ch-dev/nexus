@@ -2650,7 +2650,9 @@ impl SqliteKbStore {
     ///
     /// Each component is bounded to `limit` rows (`limit` is already `page
     /// size + 1` at the call site). Chronological order uses millisecond unix
-    /// time (`strftime('%s')` plus `%f` millis) matching
+    /// time — `strftime('%s')` seconds plus the stored fraction truncated at
+    /// the third digit (see `fraction_millis`) — so `WHERE`, `ORDER BY` and
+    /// the cursor compare the same total-order key as
     /// `stored_created_at_order_millis`. Stored `created_at` bytes are not rewritten.
     ///
     /// v1.191 P1 T6 (durable §4.2): the admitted read selection supplies the
@@ -2679,15 +2681,19 @@ impl SqliteKbStore {
             KnowledgeOwnerRef::Character(_) => "character_id",
             KnowledgeOwnerRef::ActorWorldBinding(_) => "actor_world_binding_id",
         };
-        let created_key = "(CAST(strftime('%s', created_at) AS INTEGER) * 1000 + CAST(substr(strftime('%f', created_at), 4) AS INTEGER))";
-        let cursor_millis = "(CAST(strftime('%s', ?) AS INTEGER) * 1000 + CAST(substr(strftime('%f', ?), 4) AS INTEGER))";
+        let created_key = format!(
+            "(CAST(strftime('%s', created_at) AS INTEGER) * 1000 + {})",
+            fraction_millis("created_at")
+        );
+        let cursor_key = format!(
+            "(CAST(strftime('%s', ?) AS INTEGER) * 1000 + {})",
+            fraction_millis("?")
+        );
         let (visibility, holders) = selection_visibility_conjunct(selection);
         let cursor_sql = if after.is_some() {
-            format!(
-                " AND ({created_key} > {cursor_millis} \
-                   OR ({created_key} = {cursor_millis} \
-                       AND key_block_id > ?))"
-            )
+            // Row-value comparison: `(key, id) > (cursor_key, cursor_id)` is the
+            // `>`/`=`/`>` expansion without repeating the cursor key.
+            format!(" AND ({created_key}, key_block_id) > ({cursor_key}, ?)")
         } else {
             String::new()
         };
@@ -2733,6 +2739,26 @@ impl SqliteKbStore {
         let rows = query.fetch_all(&*self.pool).await.map_err(|e| db_err(&e))?;
         rows.iter().map(KeyBlockRow::to_record).collect()
     }
+}
+
+/// Milliseconds of a stored `created_at`'s sub-second fraction, **truncated** at
+/// the third digit.
+///
+/// `strftime('%f')` rounds that fraction, while `stored_created_at_order_millis`
+/// (`chrono`'s `timestamp_millis`) truncates it. Reading `%f` therefore moved a
+/// row whose stored fraction was at least half a millisecond — e.g.
+/// `...:00.000900000` — one millisecond ahead of the Rust merge's key: the
+/// keyset cursor skipped rows the merge had not passed yet and the `ActorView`
+/// walk ended with rows missing. Taking the digits off the stored bytes keeps
+/// one total-order key on both sides.
+///
+/// `expr` is a column name or a `?` placeholder. A value without a `.` — the
+/// `datetime('now')` form — has no fraction.
+fn fraction_millis(expr: &str) -> String {
+    format!(
+        "(CASE WHEN instr({expr}, '.') = 0 THEN 0 \
+         ELSE CAST(substr(substr({expr}, instr({expr}, '.') + 1) || '000', 1, 3) AS INTEGER) END)"
+    )
 }
 
 // ── V1.73 Canvas World KB: per-row OCC CAS entity edit ──────────────────────

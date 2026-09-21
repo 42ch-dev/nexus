@@ -589,8 +589,15 @@ async fn handle_list(config: &CliConfig, status: Option<String>, json: bool) -> 
 ///
 /// Every arm that accepts an omitted `<work_id>` (status, inspire, reopen,
 /// reconcile-chapters, and the findings/rules leaves in
-/// [`super::rules_runtime`]) resolves it here: the same `status=active,
-/// limit=1` selection over the same producer, with the same refusal text.
+/// [`super::rules_runtime`]) resolves it here: the same bounded
+/// `status=active, limit=1, offset=0` query over the selection pool
+/// ([`CoreService::list_work_pool`]), with the same refusal text.
+///
+/// The resolution reads `novel_pool_entries` — the store `works use` and every
+/// pool promotion write `active` — never the Work's own `works.status` column.
+/// The two domains are independent: a promoted Work keeps `works.status =
+/// 'draft'`, so a `works.status` selection never finds the pool `active` entry
+/// (R-V1193-P0T5-OMITTED-ID-POOL-ACTIVE).
 ///
 /// # Errors
 ///
@@ -601,19 +608,19 @@ pub(crate) async fn active_work_id_core(
     principal: &Principal,
 ) -> Result<String> {
     let page = core
-        .list_works(
+        .list_work_pool(
             principal,
-            ListWorksQuery {
+            ListPoolQuery {
                 status: Some("active".to_string()),
                 limit: Some(1),
-                ..ListWorksQuery::default()
+                offset: Some(0),
             },
         )
         .await
         .map_err(map_core_error)?;
-    page.items
+    page.entries
         .first()
-        .map(|w| w.work_id.clone())
+        .map(|entry| entry.work_id.clone())
         .ok_or_else(|| {
             crate::errors::CliError::Config(
                 "No active Work found. Specify <work_id> or run \
