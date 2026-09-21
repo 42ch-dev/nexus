@@ -5,11 +5,12 @@
 # Gates:
 #   1. Spoke version conformance — the lockstep spoke pin (spoke-adapter-
 #      architecture spec §1.1/§5.2) is honored in the Rust workspace
-#      Cargo.toml (1a), the root npm package.json (1b), and the integrator
-#      docs `strategy-samples/README.md` (1c, V1.170 P0 AR-13), for ALL spoke
-#      packages (spoke-schemas + spoke-operations + spoke-connect crates;
-#      @42ch/spoke-schemas + @42ch/spoke-operations npm; @42ch/spoke-connect
-#      docs). All pins must match.
+#      Cargo.toml (1a: the sibling crates match the canonical
+#      `spoke-operations` entry), the root npm package.json (1b), and the
+#      integrator docs `strategy-samples/README.md` (1c, V1.170 P0 AR-13), for
+#      ALL spoke packages (spoke-schemas + spoke-operations + spoke-connect
+#      crates; @42ch/spoke-schemas + @42ch/spoke-operations npm;
+#      @42ch/spoke-connect docs). All pins must match.
 #   2. Schema drift detection — the integration test that validates JSON Schema
 #      wire contracts match their corresponding Rust struct definitions.
 #
@@ -22,9 +23,25 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Lockstep spoke pin (spoke-adapter-architecture spec §1.1). Bump this in
-# lockstep across Cargo.toml + package.json when adopting a new spoke release.
-SPOKE_PIN="0.13.1"
+# Lockstep spoke pin. The workspace Cargo.toml `spoke-operations` entry is the
+# canonical source: every other declaration (the sibling crates, the root
+# package.json, the integrator docs) MUST match it. A dependency bump updates
+# the manifest; this gate then catches a bump that missed a copy. Never
+# hardcode the version here — that turns every minor/patch bump into a red CI
+# run and forces a hand edit that merely restates the manifest.
+CARGO_TOML="${PROJECT_ROOT}/Cargo.toml"
+
+cargo_pin_of() {
+  local crate="$1" raw
+  raw=$(grep -E "^[[:space:]]*${crate}[[:space:]]*=" "$CARGO_TOML" | head -1 || true)
+  printf '%s' "$raw" | sed -E 's/.*"=?([^"]*)".*/\1/'
+}
+
+SPOKE_PIN="$(cargo_pin_of spoke-operations)"
+if [ -z "$SPOKE_PIN" ]; then
+  echo "FAIL: canonical spoke-operations pin not found in ${CARGO_TOML}"
+  exit 1
+fi
 
 echo "=== Spoke Version Conformance ==="
 echo "Expected lockstep pin: ${SPOKE_PIN}"
@@ -32,15 +49,13 @@ echo ""
 
 # ── Gate 1a: Rust crate pins (workspace Cargo.toml) ─────────────────────────
 # The workspace [workspace.dependencies] declares exact pins for all three
-# crates:
-#   spoke-schemas    = "=0.13.1"
-#   spoke-operations = "=0.13.1"
-#   spoke-connect    = "=0.13.1"   (opt-in behind feature `connect-host`)
-CARGO_TOML="${PROJECT_ROOT}/Cargo.toml"
-for crate in spoke-schemas spoke-operations spoke-connect; do
-  cargo_spoke_raw=$(grep -E "^[[:space:]]*${crate}[[:space:]]*=" "$CARGO_TOML" | head -1)
-  # Strip to the version token inside the quotes, dropping the leading `=` (exact pin).
-  cargo_spoke=$(printf '%s' "$cargo_spoke_raw" | sed -E 's/.*"=?([^"]*)".*/\1/')
+# crates; `spoke-operations` is the canonical source, so the other two are
+# asserted against it:
+#   spoke-schemas    = "<pin>"
+#   spoke-operations = "<pin>"     (canonical)
+#   spoke-connect    = "<pin>"     (opt-in behind feature `connect-host`)
+for crate in spoke-schemas spoke-connect; do
+  cargo_spoke=$(cargo_pin_of "$crate")
 
   if [ -z "$cargo_spoke" ]; then
     echo "FAIL: ${crate} not found in ${CARGO_TOML}"

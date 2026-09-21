@@ -36,17 +36,18 @@ produced **two false claims in one iteration** (V1.174):
 Both were corrected with machine-verified `cargo tree` evidence, and the
 probe script `tooling/check-graph-pins.sh` pins the honest form.
 
-**Current state (2026-09 dependency sweep):** ACP 2.1.0 core dropped its
+**Current state (2026-09 dependency sweep):** ACP core dropped its
 rmcp dependency, so the default graph's rmcp obligation flipped from
-"exactly one 1.8.0" to **ABSENT** (verified by `cargo tree -i rmcp`);
+"exactly one" to **ABSENT** (verified by `cargo tree -i rmcp`);
 feature-on graphs (`connect-client`, `embedded-mcp`,
-`connect-client,connect-host`) pin exactly one `rmcp 3.2.0`. ACP itself is
+`connect-client,connect-host`) resolve exactly one `rmcp`. ACP itself is
 **not** absent from either shipped graph: it rides the unconditional
-`nexus-acp-host` normal edge, so both daemon and nexus42 pin exactly one
-`agent-client-protocol 2.1.0` in every probed combination. graph-flow is
-pinned exactly one `0.8.0` with an **empty resolved feature set**
+`nexus-acp-host` normal edge, so nexus42 resolves exactly one
+`agent-client-protocol` in every probed combination. graph-flow resolves
+exactly one version with an **empty resolved feature set**
 (`default-features = false` on every declaration; no `postgres`, no `rig`),
 proven by a `-f "{p} feats=[{f}]"` probe, not by lockfile inspection.
+Version values are asserted nowhere — see Guidance §5.
 
 ## Guidance
 
@@ -95,14 +96,29 @@ round 1 can be false by round 2 (V1.174's two corrections both came from
 re-verification). Re-run the inverse queries whenever the claim is
 load-bearing for a feature-gate obligation.
 
+### 5. Assert graph structure, never a version value
+
+A pin asserts *structure* — absence, a single resolved version, a resolved
+feature set — and never a version string. A hardcoded `"3.4.0"` in the probe
+turns every minor/patch bump into a red CI run and forces a hand edit of the
+script merely to restate what the manifest already declares: the manifest is
+the single source of truth (workspace members pin exact versions with
+`=x.y.z`), and the Dependabot PR updates manifest and lock together. Keep the
+single-resolved-version check — it catches genuine version splits — and drop
+the value comparison: `assert_exactly_one <crate> <features> <package>`,
+`assert_features <crate> <features> <package> <feature-list>`. Version drift
+is a manifest-review concern, not a probe concern.
+
 ## Why This Matters
 
 Feature gates exist so the default build stays lean; their proof is the graph
-pin. A false "absent" claim erodes trust in the gate itself, and a probe that
+pin. A false "absent" claim erodes trust in the gate itself, a probe that
 false-greens when `cargo tree` fails is worse than no probe — it certifies a
-broken toolchain. The honest formulations (delta obligations, exactly-one
-lockstep, per-combination matrices, exit-status propagation) turn the pin
-into a real regression net for the next iteration that touches the graph.
+broken toolchain — and a probe that red-flags a legal dependency bump trains
+the team to edit the gate instead of reading it. The honest formulations
+(delta obligations, exactly-one lockstep, per-combination matrices,
+exit-status propagation, structure-not-value assertions) turn the pin into a
+real regression net for the next iteration that touches the graph.
 
 ## When to Apply
 
@@ -118,10 +134,11 @@ into a real regression net for the next iteration that touches the graph.
 ## Examples
 
 - `tooling/check-graph-pins.sh` — default graphs free of
-  `spoke-connect`/`libp2p`/`rmcp`; exactly one `spoke-operations 0.11.1`,
-  one `agent-client-protocol 2.1.0`, and one featureless `graph-flow 0.8.0`
-  in the default graphs; exactly one `rmcp 3.2.0` in every feature-on
-  combination; `-F connect-client` libp2p 0.56.x single-version.
+  `spoke-connect`/`libp2p`/`rmcp`; exactly one `spoke-operations`, one
+  `agent-client-protocol`, and one featureless `graph-flow` in the default
+  graphs; exactly one `rmcp` in every feature-on combination;
+  `-F connect-client` single-version libp2p. No probe asserts a version
+  value (Guidance §5).
 - V1.174 corrections: `spoke-operations` prior art (§9.2 of
   `.mstar/iterations/v1.174/specs/v1.174-peer-tools-lock.md`), rmcp default-graph
   reality (same spec, corrections list #1).
