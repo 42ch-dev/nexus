@@ -8,7 +8,7 @@ import { homedir, tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 
 const exec = promisify(execFile);
-const sorted = values => [...new Set(values)].sort();
+const sorted = values => [...new Set(values)].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 const hash = value => createHash('sha256').update(value).digest('hex');
 const text = path => readFile(path, 'utf8');
 
@@ -43,7 +43,7 @@ async function filesUnder(directory, extension) {
     if (item.isDirectory()) files.push(...await filesUnder(path, extension));
     else if (path.endsWith(extension)) files.push(path);
   }
-  return files.sort();
+  return files.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 }
 
 /** Small lexical reader: balanced Rust groups, comments and raw strings are not regex-delimited blocks. */
@@ -644,7 +644,7 @@ export async function collectInventory({ baseline, inventoriesDir }) {
       const rawFactory = /SqlitePoolOptions\s*::\s*new|SqliteConnection\s*::\s*(?:connect|connect_with)|SqlitePool\s*::\s*(?:connect|connect_with)/.test(code);
       const factoryCalls = [...code.matchAll(/\b(open_pool_read_only|open_pool|init_pool|run_migrations|(?:Schema\s*::\s*init)|(?:DbPool\s*::\s*(?:new|with_defaults))|(?:OutboxPool\s*::\s*new))\s*\(/g)].map(match => match[1].replace(/\s*::\s*/g, '::'));
       if (rawFactory) constructors.push({ path, fn });
-      if (factoryCalls.length) add(row('migration', path, fn.symbol, { calls: factoryCalls, callers: [`${path}:${fn.symbol}`], storage_tables: [...tables.keys()].sort(), evidence_class: 'source-connection-and-migration-callsite', writer_class: factoryCalls.every(name => name === 'open_pool_read_only') ? 'read-only' : 'guarded', parity_scenario: 'P1 registers this existing connection/migration path; global nonworkspace DB is distinct from canonical workspace activation' }));
+      if (factoryCalls.length) add(row('migration', path, fn.symbol, { calls: factoryCalls, callers: [`${path}:${fn.symbol}`], storage_tables: [...tables.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)), evidence_class: 'source-connection-and-migration-callsite', writer_class: factoryCalls.every(name => name === 'open_pool_read_only') ? 'read-only' : 'guarded', parity_scenario: 'P1 registers this existing connection/migration path; global nonworkspace DB is distinct from canonical workspace activation' }));
       for (const token of tokens.filter(item => item.string)) {
         for (const match of token.value.matchAll(/\bCREATE\s+(?:VIRTUAL\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["`]?(\w+)/gi)) {
           if (!tables.has(match[1])) {
@@ -660,7 +660,7 @@ export async function collectInventory({ baseline, inventoriesDir }) {
   for (const { path, fn } of constructors) {
     const writer_class = classifyWriter(path, fn.name);
     const callers = rows.filter(value => value.kind === 'migration' && value.calls?.includes(fn.symbol)).map(value => `${value.source_path}:${value.symbol_or_route}`);
-    add(row('writer', path, fn.symbol, { writer_class, support_state: writer_class === 'read-only' ? 'read-only' : 'current-raw-connection', storage_tables: [...tables.keys()].sort(), callers: sorted(callers), evidence_class: 'source-constructor', parity_scenario: writer_class === 'read-only' ? 'Read-only open performs no migration or registration upgrade' : 'P1 must install common guards on this existing raw pool factory, not only new core callers', gap: writer_class ? null : 'Unclassified production connection constructor' }));
+    add(row('writer', path, fn.symbol, { writer_class, support_state: writer_class === 'read-only' ? 'read-only' : 'current-raw-connection', storage_tables: [...tables.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)), callers: sorted(callers), evidence_class: 'source-constructor', parity_scenario: writer_class === 'read-only' ? 'Read-only open performs no migration or registration upgrade' : 'P1 must install common guards on this existing raw pool factory, not only new core callers', gap: writer_class ? null : 'Unclassified production connection constructor' }));
     if (!writer_class) note(`writer:${path}:${fn.symbol}`, 'Activated writer cannot be classified; P1 activation must STOP', 'STOP');
   }
   for (const [name, path] of tables) {
@@ -670,7 +670,7 @@ export async function collectInventory({ baseline, inventoriesDir }) {
   }
   add(row('table', 'crates/nexus-local-db/src/lib.rs', '_sqlx_migrations', { table_class: 'migration', storage_tables: ['_sqlx_migrations'], callers: ['apply_pending_migrations:ensure_migrations_table'], evidence_class: 'sqlx-migration-protocol', effect_owner: 'exclusive migration owner' }));
   note('cloud-outbox-writer', 'Dependency closure reveals nexus-cloud-sync::OutboxPool::new (pool.rs), called by Outbox::init_pool_with_schema (outbox.rs). It accepts a caller-selected DB and runs shared local-db migrations; classify guarded/workspace-capable, never exempt as automatically nonworkspace.');
-  note('migration-rebuild-tables', `Historical rebuild names are not persistent final tables: ${[...historical.keys()].filter(name => !tables.has(name)).sort().join(', ')}. Applied CREATE/DROP/RENAME order, not a CREATE count.`);
+  note('migration-rebuild-tables', `Historical rebuild names are not persistent final tables: ${[...historical.keys()].filter(name => !tables.has(name)).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).join(', ')}. Applied CREATE/DROP/RENAME order, not a CREATE count.`);
   note('writer-guard-status', 'guarded is the required P1 admission classification, NOT a claim guards already exist. open_pool and DbPool::new are raw today; read-only constructors stay read-only. No production writer may be exempted on P1 activation.');
 
   const builtinPath = 'crates/nexus-orchestration/src/capability/mod.rs';
@@ -698,7 +698,7 @@ export async function collectInventory({ baseline, inventoriesDir }) {
   summary.counts = Object.fromEntries(sorted(finalRows.map(value => value.kind)).map(kind => [kind, finalRows.filter(value => value.kind === kind).length]));
   summary.source_sha256 = hash([...sources].sort(([a], [b]) => a.localeCompare(b)).map(([path, source]) => `${path}\0${hash(source)}`).join('\n'));
   summary.registered_identity_sha256 = hash(sorted(expected).join('\n'));
-  summary.local_dependency_closure = [...dependencyClosure.keys()].sort();
+  summary.local_dependency_closure = [...dependencyClosure.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   summary.provenance = provenance;
   return { rows: finalRows, discrepancies: discrepancies.sort((a, b) => a.id.localeCompare(b.id)), summary };
 }

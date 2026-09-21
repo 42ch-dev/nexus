@@ -2,7 +2,8 @@
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "plugins": ["typescript"],
   "options": {
-    "typeAware": true
+    "typeAware": true,
+    "denyWarnings": true
   },
   "rules": {
     "no-unused-vars": "off",
@@ -61,6 +62,27 @@
       ],
       "rules": {
         "typescript/no-redundant-type-constituents": "off"
+      }
+    },
+    {
+      "files": [
+        "apps/desktop-electron/scripts/compose-app-icon.mjs",
+        "apps/desktop-electron/scripts/package.mjs",
+        "apps/desktop-electron/scripts/proof-contract-fixtures.mjs",
+        "apps/desktop-electron/scripts/proof-decision.mjs",
+        "apps/desktop-electron/scripts/proof-maintenance.mjs",
+        "apps/desktop-electron/scripts/proof-runtime.mjs",
+        "apps/desktop-electron/scripts/verify-package.mjs",
+        "apps/desktop-electron/src/native-smoke.mjs",
+        "packages/nexus-native/scripts/build.mjs",
+        "packages/nexus-native/scripts/proof-core.mjs",
+        "packages/nexus-native/scripts/proof-provider.mjs",
+        "scripts/proof-rft-dx.mjs",
+        "scripts/refresh-dev-backend.mjs",
+        "scripts/rft-inventory.mjs"
+      ],
+      "rules": {
+        "no-console": "off"
       }
     }
   ],

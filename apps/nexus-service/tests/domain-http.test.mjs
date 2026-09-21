@@ -157,7 +157,7 @@ describe('domain-http (P5-T1)', () => {
     for (const [method, path] of required) {
       assert.ok(
         mounted.has(`${method} ${path}`),
-        `missing mounted identity: ${method} ${path}\nmounted:\n${[...mounted].sort().join('\n')}`,
+        `missing mounted identity: ${method} ${path}\nmounted:\n${[...mounted].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).join('\n')}`,
       );
     }
     // Tier parity (daemon mod.rs authority): the Creator home family is

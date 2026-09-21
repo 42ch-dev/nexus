@@ -509,7 +509,7 @@ function resolveChromium() {
     for (const dir of entries
       .filter((e) => e.isDirectory())
       .map((e) => e.name)
-      .sort()
+      .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
       .reverse()) {
       for (const layout of macLayouts) {
         puppeteerCandidates.push(
@@ -543,7 +543,7 @@ function resolveChromium() {
     for (const dir of entries
       .filter((e) => e.isDirectory() && e.name.startsWith('chromium-'))
       .map((e) => e.name)
-      .sort()
+      .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
       .reverse()) {
       for (const layout of macLayouts) {
         chromiumCandidates.push(
@@ -1554,6 +1554,55 @@ async function traceDuringEdit(resolveRootPids, work, { intervalMs = 50 } = {}) 
   }
 }
 
+// ── Reversible edit outcome precedence ──────────────────────────────────────
+
+/**
+ * Run one reversible-edit operation together with its restore gate, and decide
+ * the outcome so neither failure can replace the other:
+ *
+ * - the restore gate ALWAYS runs, on success and on failure;
+ * - a gate failure is never swallowed and never reports the sample as a
+ *   success;
+ * - a gate failure after a SUCCESSFUL operation is the reported failure;
+ * - a gate failure after a FAILED operation is reported NEXT TO the primary
+ *   error, never instead of it: the thrown `AggregateError` carries the primary
+ *   error as `errors[0]` and as `cause`.
+ *
+ * Used by the three reversible edit samples (web marker, TS route, TS adapter).
+ * Deliberately not a cleanup framework: one operation, one gate.
+ */
+async function runWithRestoreGate(work, restore) {
+  let result;
+  let primaryError;
+  let operationFailed = false;
+  try {
+    result = await work();
+  } catch (err) {
+    operationFailed = true;
+    primaryError = err;
+  }
+  let restoreError;
+  let restoreFailed = false;
+  try {
+    await restore();
+  } catch (err) {
+    restoreFailed = true;
+    restoreError = err;
+  }
+  if (!operationFailed) {
+    if (restoreFailed) throw restoreError;
+    return result;
+  }
+  if (!restoreFailed) throw primaryError;
+  const primaryText = primaryError instanceof Error ? primaryError.message : String(primaryError);
+  const restoreText = restoreError instanceof Error ? restoreError.message : String(restoreError);
+  throw new AggregateError(
+    [primaryError, restoreError],
+    `edit operation failed and its restore gate also failed: primary=${primaryText}; restore=${restoreText}`,
+    { cause: primaryError },
+  );
+}
+
 /** Byte-preserving tracked edit that restores the file even on failure. */
 class TrackedEdit {
   constructor(absPath) {
@@ -1590,42 +1639,45 @@ async function runWebEditSample(ctx, sampleIndex) {
   const edit = new TrackedEdit(markerPath).capture();
   const value = `sample-${sampleIndex}`;
   const source = `/**\n * P4-T3 development-only proof marker (RFT-M1 browser vertical).\n *\n * Runner-mutated for the DX-2 edit sample; restored byte-identically.\n */\nexport const RFT_NATIVE_PROOF_MARKER = ${JSON.stringify(value)};\n`;
-  try {
-    const rootPids = [ctx.vite.child.pid];
-    const started = Date.now();
-    const { cargoSamples } = await traceDuringEdit(rootPids, async () => {
-      edit.write(source);
-      await waitForPageFunction(
+  return runWithRestoreGate(
+    async () => {
+      const rootPids = [ctx.vite.child.pid];
+      const started = Date.now();
+      const { cargoSamples } = await traceDuringEdit(rootPids, async () => {
+        edit.write(source);
+        await waitForPageFunction(
+          client,
+          `(value) => (document.querySelector('[data-testid="rft-native-proof-marker"]')?.textContent ?? '').includes(value)`,
+          [value],
+          { timeoutMs: 5_000 },
+        );
+      });
+      return {
+        surface: 'browser-shared-ui',
+        file: markerPath,
+        visibleMs: Date.now() - started,
+        cargoTraceCount: cargoSamples.reduce((a, b) => Math.max(a, b), 0),
+      };
+    },
+    async () => {
+      edit.restore();
+      if (!edit.isRestored()) throw new Error(`marker file not restored: ${markerPath}`);
+      // A successful restore must be observable: BOTH the baseline marker text in
+      // the DOM AND the proof handle back at ready. A failed restore is NOT
+      // swallowed — it fails the run, because the next sample would otherwise run
+      // against a stale/frozen handle.
+      await waitForPageCondition(
         client,
-        `(value) => (document.querySelector('[data-testid="rft-native-proof-marker"]')?.textContent ?? '').includes(value)`,
-        [value],
-        { timeoutMs: 5_000 },
+        `(document.querySelector('[data-testid="rft-native-proof-marker"]')?.textContent ?? '').includes('baseline')`,
+        { timeoutMs: 10_000 },
       );
-    });
-    return {
-      surface: 'browser-shared-ui',
-      file: markerPath,
-      visibleMs: Date.now() - started,
-      cargoTraceCount: cargoSamples.reduce((a, b) => Math.max(a, b), 0),
-    };
-  } finally {
-    edit.restore();
-    if (!edit.isRestored()) throw new Error(`marker file not restored: ${markerPath}`);
-    // A successful restore must be observable: BOTH the baseline marker text in
-    // the DOM AND the proof handle back at ready. A failed restore is NOT
-    // swallowed — it fails the run, because the next sample would otherwise run
-    // against a stale/frozen handle.
-    await waitForPageCondition(
-      client,
-      `(document.querySelector('[data-testid="rft-native-proof-marker"]')?.textContent ?? '').includes('baseline')`,
-      { timeoutMs: 10_000 },
-    );
-    await waitForPageCondition(
-      client,
-      'Boolean(window.__RFT_NATIVE_PROOF__ && window.__RFT_NATIVE_PROOF__.ready)',
-      { timeoutMs: 30_000 },
-    );
-  }
+      await waitForPageCondition(
+        client,
+        'Boolean(window.__RFT_NATIVE_PROOF__ && window.__RFT_NATIVE_PROOF__.ready)',
+        { timeoutMs: 30_000 },
+      );
+    },
+  );
 }
 
 /**
@@ -1651,47 +1703,50 @@ async function runRouteEditSample(ctx) {
   if (editedSource === originalSource) {
     throw new Error('route edit anchor not found in world-kb.ts');
   }
-  try {
-    edit.write(editedSource);
-    let restartMs = null;
-    const { cargoSamples } = await traceDuringEdit(() => liveServiceRootPids(ctx), async () => {
-      const restarted = await restartServiceFromEdit(ctx);
-      restartMs = restarted.readyMs;
-    });
-    await waitForHttpOk(`${ctx.serviceUrl}/v1/daemon/runtime/health`, { timeoutMs: 30_000 });
-    const candidates = await jsonRequest(
-      `${ctx.serviceUrl}/v1/daemon/worlds/${WORLD_ID}/kb/candidates`,
-    );
-    const observedLimit = candidates.payload?.pagination?.limit ?? null;
-    const observedCount = candidates.payload?.items?.length ?? null;
-    return {
-      surface: 'ts-route-transformation',
-      file: targetPath,
-      restartMs,
-      servedStatus: candidates.status,
-      observedLimit,
-      observedCount,
-      expectedLimit: 1,
-      expectedCount: 1,
-      editObserved: observedLimit === 1 && observedCount === 1,
-      cargoTraceCount: cargoSamples.reduce((a, b) => Math.max(a, b), 0),
-    };
-  } finally {
-    edit.restore();
-    if (!edit.isRestored()) throw new Error(`route file not restored: ${targetPath}`);
-    await restartServiceFromEdit(ctx);
-    // Confirm the restored baseline behavior is back (limit 50, two items).
-    const restored = await jsonRequest(
-      `${ctx.serviceUrl}/v1/daemon/worlds/${WORLD_ID}/kb/candidates`,
-    );
-    const restoredLimit = restored.payload?.pagination?.limit;
-    const restoredCount = restored.payload?.items?.length;
-    if (restoredLimit !== 50 || restoredCount !== 2) {
-      throw new Error(
-        `route edit did not restore baseline behavior: limit=${restoredLimit} count=${restoredCount}`,
+  return runWithRestoreGate(
+    async () => {
+      edit.write(editedSource);
+      let restartMs = null;
+      const { cargoSamples } = await traceDuringEdit(() => liveServiceRootPids(ctx), async () => {
+        const restarted = await restartServiceFromEdit(ctx);
+        restartMs = restarted.readyMs;
+      });
+      await waitForHttpOk(`${ctx.serviceUrl}/v1/daemon/runtime/health`, { timeoutMs: 30_000 });
+      const candidates = await jsonRequest(
+        `${ctx.serviceUrl}/v1/daemon/worlds/${WORLD_ID}/kb/candidates`,
       );
-    }
-  }
+      const observedLimit = candidates.payload?.pagination?.limit ?? null;
+      const observedCount = candidates.payload?.items?.length ?? null;
+      return {
+        surface: 'ts-route-transformation',
+        file: targetPath,
+        restartMs,
+        servedStatus: candidates.status,
+        observedLimit,
+        observedCount,
+        expectedLimit: 1,
+        expectedCount: 1,
+        editObserved: observedLimit === 1 && observedCount === 1,
+        cargoTraceCount: cargoSamples.reduce((a, b) => Math.max(a, b), 0),
+      };
+    },
+    async () => {
+      edit.restore();
+      if (!edit.isRestored()) throw new Error(`route file not restored: ${targetPath}`);
+      await restartServiceFromEdit(ctx);
+      // Confirm the restored baseline behavior is back (limit 50, two items).
+      const restored = await jsonRequest(
+        `${ctx.serviceUrl}/v1/daemon/worlds/${WORLD_ID}/kb/candidates`,
+      );
+      const restoredLimit = restored.payload?.pagination?.limit;
+      const restoredCount = restored.payload?.items?.length;
+      if (restoredLimit !== 50 || restoredCount !== 2) {
+        throw new Error(
+          `route edit did not restore baseline behavior: limit=${restoredLimit} count=${restoredCount}`,
+        );
+      }
+    },
+  );
 }
 
 /**
@@ -1797,104 +1852,107 @@ async function runAdapterEditSample(ctx, sampleIndex) {
   if (editedSource === originalSource) {
     throw new Error('adapter edit anchor not found in acp.ts');
   }
-  try {
-    edit.write(editedSource);
-    let restartMs = null;
-    const { cargoSamples } = await traceDuringEdit(() => liveServiceRootPids(ctx), async () => {
-      // Rebuild the adapter package from the edited source with its own build
-      // script (tsup is a TS build, never a Cargo/native one). The build runs
-      // as a tracked async child: a synchronous build would block this event
-      // loop and blind the sampler for the whole build window.
-      const build = spawnLogged(
-        'pnpm',
-        ['-F', '@42ch/nexus-provider-acp', 'run', 'build'],
-        { cwd: repoRoot, label: `adapter-build-${sampleIndex}` },
-      );
-      // A failed spawn never emits `exit`; racing the settled lifecycle
-      // (which settles on `error`) keeps a build-launch failure bounded and
-      // reportable instead of hanging the sample forever.
-      let buildTimer;
-      const buildTimeout = new Promise((resolveTimeout) => {
-        buildTimer = setTimeout(() => resolveTimeout('timeout'), 60_000);
+  return runWithRestoreGate(
+    async () => {
+      edit.write(editedSource);
+      let restartMs = null;
+      const { cargoSamples } = await traceDuringEdit(() => liveServiceRootPids(ctx), async () => {
+        // Rebuild the adapter package from the edited source with its own build
+        // script (tsup is a TS build, never a Cargo/native one). The build runs
+        // as a tracked async child: a synchronous build would block this event
+        // loop and blind the sampler for the whole build window.
+        const build = spawnLogged(
+          'pnpm',
+          ['-F', '@42ch/nexus-provider-acp', 'run', 'build'],
+          { cwd: repoRoot, label: `adapter-build-${sampleIndex}` },
+        );
+        // A failed spawn never emits `exit`; racing the settled lifecycle
+        // (which settles on `error`) keeps a build-launch failure bounded and
+        // reportable instead of hanging the sample forever.
+        let buildTimer;
+        const buildTimeout = new Promise((resolveTimeout) => {
+          buildTimer = setTimeout(() => resolveTimeout('timeout'), 60_000);
+        });
+        let exitCode;
+        try {
+          exitCode = await Promise.race([
+            new Promise((resolveExit) => {
+              if (build.exitCode !== null || build.signalCode !== null) {
+                resolveExit(build.exitCode);
+                return;
+              }
+              build.once('exit', resolveExit);
+            }),
+            build.__closed.then(() => build.exitCode),
+            buildTimeout,
+          ]);
+        } finally {
+          clearTimeout(buildTimer);
+        }
+        if (exitCode === 'timeout') {
+          await stopChild(build, { graceMs: 0, killMs: 2_000, closeMs: 2_000 });
+          throw new Error(
+            `adapter package build timed out after 60000ms: ${build.output().slice(-MAX_EVIDENCE_TAIL_CHARS)}`,
+          );
+        }
+        if (exitCode !== 0) {
+          throw new Error(
+            `adapter package build failed (exit ${exitCode}${build.__error ? `: ${build.__error.message}` : ''}): ${build.output().slice(-MAX_EVIDENCE_TAIL_CHARS)}`,
+          );
+        }
+        const restarted = await restartServiceFromEdit(ctx);
+        restartMs = restarted.readyMs;
       });
-      let exitCode;
-      try {
-        exitCode = await Promise.race([
-          new Promise((resolveExit) => {
-            if (build.exitCode !== null || build.signalCode !== null) {
-              resolveExit(build.exitCode);
-              return;
-            }
-            build.once('exit', resolveExit);
-          }),
-          build.__closed.then(() => build.exitCode),
-          buildTimeout,
-        ]);
-      } finally {
-        clearTimeout(buildTimer);
-      }
-      if (exitCode === 'timeout') {
-        await stopChild(build, { graceMs: 0, killMs: 2_000, closeMs: 2_000 });
-        throw new Error(
-          `adapter package build timed out after 60000ms: ${build.output().slice(-MAX_EVIDENCE_TAIL_CHARS)}`,
-        );
-      }
-      if (exitCode !== 0) {
-        throw new Error(
-          `adapter package build failed (exit ${exitCode}${build.__error ? `: ${build.__error.message}` : ''}): ${build.output().slice(-MAX_EVIDENCE_TAIL_CHARS)}`,
-        );
-      }
-      const restarted = await restartServiceFromEdit(ctx);
-      restartMs = restarted.readyMs;
-    });
-    await waitForHttpOk(`${ctx.serviceUrl}/v1/daemon/runtime/health`, { timeoutMs: 30_000 });
-    // The service restart can leave the page briefly without a live handle;
-    // wait explicitly before the adapter evaluation so the failure is a real
-    // adapter defect, not a missing handle.
-    await waitForPageCondition(
-      ctx.client,
-      'Boolean(window.__RFT_NATIVE_PROOF__ && window.__RFT_NATIVE_PROOF__.ready)',
-      { timeoutMs: 60_000 },
-    );
-    // Re-run a real provider session in the page and assert the transformed
-    // adapter output is what actually streamed. The CDP send timeout must
-    // exceed the inner bounded drain (30 s) so a slow-but-bounded drain can
-    // resolve/report rather than being cut off by the transport.
-    let stream;
-    try {
-      stream = await evaluate(ctx.client, ADAPTER_SESSION_SCRIPT, { timeoutMs: 45_000 });
-    } catch (err) {
-      const pageState = await evaluate(
+      await waitForHttpOk(`${ctx.serviceUrl}/v1/daemon/runtime/health`, { timeoutMs: 30_000 });
+      // The service restart can leave the page briefly without a live handle;
+      // wait explicitly before the adapter evaluation so the failure is a real
+      // adapter defect, not a missing handle.
+      await waitForPageCondition(
         ctx.client,
-        `({ handle: Boolean(window.__RFT_NATIVE_PROOF__), ready: Boolean(window.__RFT_NATIVE_PROOF__ && window.__RFT_NATIVE_PROOF__.ready), location: location.href })`,
-        { awaitPromise: false },
-      ).catch((e) => ({ error: String(e?.message ?? e) }));
-      throw new Error(
-        `adapter provider evaluation failed: ${err instanceof Error ? err.message : String(err)}; pageState=${JSON.stringify(pageState)}; serviceOutput=${JSON.stringify(redactChildOutput((ctx.service?.child?.output?.() ?? '').slice(-MAX_EVIDENCE_TAIL_CHARS), ctx.home))}`,
+        'Boolean(window.__RFT_NATIVE_PROOF__ && window.__RFT_NATIVE_PROOF__.ready)',
+        { timeoutMs: 60_000 },
       );
-    }
-    return {
-      surface: 'ts-sdk-adapter',
-      file: targetPath,
-      restartMs,
-      adapterMarker: marker,
-      streamedText: stream.text.slice(0, 200),
-      editObserved: typeof stream.text === 'string' && stream.text.includes(marker),
-      terminal: stream.terminal,
-      cargoTraceCount: cargoSamples.reduce((a, b) => Math.max(a, b), 0),
-    };
-  } finally {
-    edit.restore();
-    if (!edit.isRestored()) throw new Error(`adapter file not restored: ${targetPath}`);
-    // Restore gates, in order: the rebuild must SUCCEED before anything is
-    // restarted (a failed rebuild leaves the edited dist serving), then the
-    // restored adapter must observably serve the BASELINE (no edit marker)
-    // before this sample can report success. A restore failure therefore
-    // fails the proof before any PASS can be recorded.
-    requireRestoredAdapterBuild();
-    await restartServiceFromEdit(ctx);
-    await assertRestoredAdapterBaseline(ctx, marker);
-  }
+      // Re-run a real provider session in the page and assert the transformed
+      // adapter output is what actually streamed. The CDP send timeout must
+      // exceed the inner bounded drain (30 s) so a slow-but-bounded drain can
+      // resolve/report rather than being cut off by the transport.
+      let stream;
+      try {
+        stream = await evaluate(ctx.client, ADAPTER_SESSION_SCRIPT, { timeoutMs: 45_000 });
+      } catch (err) {
+        const pageState = await evaluate(
+          ctx.client,
+          `({ handle: Boolean(window.__RFT_NATIVE_PROOF__), ready: Boolean(window.__RFT_NATIVE_PROOF__ && window.__RFT_NATIVE_PROOF__.ready), location: location.href })`,
+          { awaitPromise: false },
+        ).catch((e) => ({ error: String(e?.message ?? e) }));
+        throw new Error(
+          `adapter provider evaluation failed: ${err instanceof Error ? err.message : String(err)}; pageState=${JSON.stringify(pageState)}; serviceOutput=${JSON.stringify(redactChildOutput((ctx.service?.child?.output?.() ?? '').slice(-MAX_EVIDENCE_TAIL_CHARS), ctx.home))}`,
+        );
+      }
+      return {
+        surface: 'ts-sdk-adapter',
+        file: targetPath,
+        restartMs,
+        adapterMarker: marker,
+        streamedText: stream.text.slice(0, 200),
+        editObserved: typeof stream.text === 'string' && stream.text.includes(marker),
+        terminal: stream.terminal,
+        cargoTraceCount: cargoSamples.reduce((a, b) => Math.max(a, b), 0),
+      };
+    },
+    async () => {
+      edit.restore();
+      if (!edit.isRestored()) throw new Error(`adapter file not restored: ${targetPath}`);
+      // Restore gates, in order: the rebuild must SUCCEED before anything is
+      // restarted (a failed rebuild leaves the edited dist serving), then the
+      // restored adapter must observably serve the BASELINE (no edit marker)
+      // before this sample can report success. A restore failure therefore
+      // fails the proof before any PASS can be recorded.
+      requireRestoredAdapterBuild();
+      await restartServiceFromEdit(ctx);
+      await assertRestoredAdapterBaseline(ctx, marker);
+    },
+  );
 }
 
 // ── Acceptance derivations (pure; extracted verbatim by focused tests) ──────
@@ -2513,7 +2571,7 @@ function schemaTreeHash() {
   };
   walk(schemasDir);
   const hash = createHash('sha256');
-  for (const file of files.sort()) {
+  for (const file of files.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))) {
     hash.update(file.slice(schemasDir.length));
     hash.update(readFileSync(file));
   }
