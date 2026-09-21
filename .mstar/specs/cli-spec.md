@@ -27,7 +27,7 @@ The target removes `creator run`, `creator bootstrap`, `creator works intake|res
 
 Retain real local `creator demo-seed`, `creator world event-add`, chronology `set|show|advance`, Work/pool inspiration, holder-governed Character CRUD/bindings/knowledge/memory/ToM, reading and directives. Remove deprecated `creator kb --scope world`, World create `--name`, `system preset`, hidden top-level `sync`, and obsolete `preset validate --offline`; use canonical World KB, `--title`, `preset`, `platform sync`, and positional `preset validate <path>`. No silent no-op aliases are retained. Graph/entity patch keeps its existing `--expected-version`; Character edits keep explicit revision CAS.
 
-Ordinary CLI uses the proposed real `cli` default cohort; optional `connect-host` is independent. The existing Connect runtime explicitly retains scoped compute/WASM with its shared module cache but no ACP/agent-host, scheduler startup, HTTP/SPA or Node. Core Model B/MCP libraries remain; the removed Model A child descriptor is not replaced with a TS launcher. See [rust-core-service-boundary.md](rust-core-service-boundary.md) §4.2 for the dependency and lifetime contract.
+Ordinary CLI uses the shipped `cli` default cohort; optional `connect-host` is independent. The existing Connect runtime explicitly retains scoped compute/WASM with its shared module cache but no ACP/agent-host, scheduler startup, HTTP/SPA or Node. Core Model B/MCP libraries remain; the removed Model A child descriptor is not replaced with a TS launcher. See [rust-core-service-boundary.md](rust-core-service-boundary.md) §4.2 for the dependency and lifetime contract.
 
 ## 0. 文档定位
 
