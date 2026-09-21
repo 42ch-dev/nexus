@@ -261,7 +261,7 @@ export function evaluateRuntimeEvidence(doc, expectations = {}) {
   }
 
   // --- completeness: exact phase set, exact check ID set, raw observations ----
-  const phases = Array.isArray(doc.phases_executed) ? [...doc.phases_executed].sort() : [];
+  const phases = Array.isArray(doc.phases_executed) ? [...doc.phases_executed].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)) : [];
   const expectedPhases = [...REQUIRED_PHASES].sort();
   if (phases.join(',') !== expectedPhases.join(',')) {
     reasons.push(`phases_executed=[${phases.join(',')}] expected=[${expectedPhases.join(',')}]`);
@@ -466,7 +466,7 @@ export function walkFiles(root) {
 export function digestAppBundle(appPath) {
   const walked = walkFiles(appPath);
   const hash = createHash('sha256');
-  for (const path of walked.files.map((p) => p.replace(appPath, '')).sort()) {
+  for (const path of walked.files.map((p) => p.replace(appPath, '')).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))) {
     hash.update(path).update('\0');
     hash.update(sha256File(join(appPath, path.replace(/^\//, ''))));
   }

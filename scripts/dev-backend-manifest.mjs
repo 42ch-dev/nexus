@@ -67,7 +67,7 @@ async function filesUnder(directory, extension) {
       files.push(path);
     }
   }
-  return files.sort();
+  return files.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 }
 
 export async function sha256File(filePath) {
@@ -84,7 +84,7 @@ export async function computeContractHash(repoRoot = getRepoRoot()) {
   const inputs = [
     ...(await filesUnder(join(repoRoot, 'schemas'), '.json')),
     ...(await filesUnder(join(repoRoot, 'crates', 'nexus-local-db', 'migrations'), '.sql')),
-  ].sort();
+  ].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   const parts = [];
   for (const file of inputs) {
     const rel = relative(repoRoot, file);
@@ -95,7 +95,7 @@ export async function computeContractHash(repoRoot = getRepoRoot()) {
 }
 
 export function computeDbSchemaRangeFromNames(names) {
-  const sorted = [...names].sort();
+  const sorted = [...names].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   if (!sorted.length) {
     throw new Error('No local-db migrations found for dbSchemaRange');
   }
