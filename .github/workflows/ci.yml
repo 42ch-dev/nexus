@@ -640,3 +640,71 @@ jobs:
         run: cargo build -p nexus42 --features connect-host --example runtime_smoke_probe
       - name: Run the headless runtime smoke test
         run: cargo test -p nexus42 --features connect-host --test nexus_runtime_smoke headless_runtime_prints_readiness_serves_connect_and_has_no_http_listener -- --exact
+
+  # QC3 W-001 / QC2 F-001 (v1.193 P2-T14). Retiring the Rust daemon crate moved
+  # its domain coverage into `crates/nexus-core/tests/` (the `retained_*` owners
+  # plus the extended core owners). The deleted `daemon` rust-tests group was the
+  # only CI row executing that graph, and `nexus-core` was never in the matrix,
+  # so those migrated assertions were enforced only by local runs. This leg runs
+  # them with the feature set each target needs — the crate-level `#![cfg]` gates
+  # mean a wrong feature set silently selects ZERO tests, which is not proof:
+  #   * no optional features: the migrated domain owners (world/KB/pack,
+  #     work/home/preset, reading/context/content/timeline, memory)
+  #   * execution,compute,provider-host (Host/execution owners):
+  #     retained_execution_contracts, execution_lifecycle, handle_ops,
+  #     workspace_commit, capability_compute, host_actor_lifecycle, actor_services
+  #   * connect-client,embedded-mcp (core MCP/peer library owners):
+  #     retained_peer_contracts, peer_control
+  # Deliberately no `--all-targets` and no connect-host/other-cohort row
+  # (P2-T13 C1). `--test-threads=2` matches the P2 verification rounds and keeps
+  # the still-open R-V1193-P2T6-ACTOR-VIEW-PAGING-FLAKE (PM owns the scheduling
+  # decision) out of the default-parallelism path.
+  rust-core-domain:
+    name: Rust core domain coverage
+    runs-on: ubuntu-latest
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.rust == 'true'
+    env:
+      SQLX_OFFLINE: "true"
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: ./.github/actions/free-disk-space
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+        with:
+          # nexus-wasm-host's build.rs compiles the embedded modules from
+          # source; the `compute` feature edge puts it in this graph.
+          targets: wasm32-unknown-unknown
+      - name: Read workspace version for cargo cache key
+        id: workspace-version
+        run: |
+          v=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['workspace']['package']['version'])")
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae  # v2
+        with:
+          # Distinct suffix: three feature-unified graphs in one job, none of
+          # which matches another leg's key (same-key concurrent writers race —
+          # same precedent as -sqlx/-module-dx).
+          shared-key: nexus-rust-${{ steps.workspace-version.outputs.version }}-core-domain
+          workspaces: .
+          cache-all-crates: false
+          cache-on-failure: false
+      - name: Core domain owners (no optional features)
+        run: >-
+          cargo test -p nexus-core
+          --test world_services --test world_kb_contract --test world_pack_services
+          --test work_services --test home_services --test preset_services
+          --test reading_knowledge_services --test context_services
+          --test content_services --test timeline_services --test memory_services
+          -- --test-threads=2
+      - name: Execution, Host and compute owners
+        run: >-
+          cargo test -p nexus-core --features provider-host,compute
+          --test retained_execution_contracts --test execution_lifecycle
+          --test handle_ops --test workspace_commit --test capability_compute
+          --test host_actor_lifecycle --test actor_services
+          -- --test-threads=2
+      - name: Core MCP/peer library owners
+        run: >-
+          cargo test -p nexus-core --features connect-client,embedded-mcp
+          --test retained_peer_contracts --test peer_control

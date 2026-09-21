@@ -8,10 +8,11 @@
 //!    as a regression anchor. Subsequent refactoring plans must NOT accidentally
 //!    lose existing commands without explicit migration.
 //!
-//! 2. **V2 target contract** — defines the expected V2 command topology (6 groups).
-//!    These tests are `#[ignore]`d because the CLI has not been restructured yet.
-//!    As Plans 2–9 implement the restructuring, each test should be un-ignored
-//!    and must pass before the plan can be marked Done.
+//! 2. **V2 target contract** — defines the expected V2 command topology (the
+//!    visible four-group lock plus the canonical subcommand shapes). Every test
+//!    in this file is an active `#[test]` — there are no `#[ignore]`s: the
+//!    restructuring landed (v1.193 P2 retired the daemon group, so the target
+//!    contract now runs for real rather than as a to-be-un-ignored list).
 
 use assert_cmd::Command;
 
@@ -156,25 +157,24 @@ fn current_state_system_subcommands() {
 }
 
 // =============================================================================
-// Part 2: V2 target contract tests (#[ignore] — future plans must un-ignore)
+// Part 2: V2 target contract tests (all active — no #[ignore] remains)
 //
-// These define the V2 command surface. Each test asserts that a V2 top-level
-// group exists with its expected subcommands. They are #[ignore]d because the
-// CLI has not been restructured yet.
-//
-// Migration plan:
-//   - Plan 2 (daemon/acp): un-ignore `v2_target_daemon_subcommands`
-//     and `v2_target_acp_exists`
-//   - Plan 3 (system/platform): un-ignore `v2_target_system_subcommands`
+// These define the V2 command surface. Each test asserts that a canonical
+// top-level group exists with its expected subcommands. They were `#[ignore]`d
+// while the CLI restructuring was pending; every one is now an active `#[test]`
+// and the migration list below is kept only as history:
+//   - Plan 2 (daemon/acp): `v2_target_daemon_subcommands` (daemon group retired
+//     in v1.193 P2) and `v2_target_acp_exists`
+//   - Plan 3 (system/platform): `v2_target_system_subcommands`
 //     and `v2_target_platform_exists`
-//   - Plan 4 (creator/knowledge): un-ignore `v2_target_creator_subcommands`
-//   - Plan 2–4 together: un-ignore `v2_only_five_visible_command_groups`
+//   - Plan 4 (creator/knowledge): `v2_target_creator_subcommands`
+//   - Plan 2–4 together: `v2_only_five_visible_command_groups`
 // =============================================================================
 
 /// V2 Target: the user-visible top-level command groups:
 /// `acp`, `creator`, `platform`, `system`
 ///
-/// Un-ignored by Plans 2-4 completing the CLI restructuring. v1.193 P1-T6
+/// Active since Plans 2-4 completed the CLI restructuring. v1.193 P1-T6
 /// removed the hidden top-level `sync` alias and v1.193 P2-T2 removed the
 /// `daemon` group with the legacy daemon composition.
 #[test]
@@ -244,7 +244,7 @@ fn v2_canonical_visible_command_groups() {
 ///   `cli_agent.rs::acp_command_group_shows_subcommands`. v1.193 P1-T4 removed
 ///   the `status`/`doctor` daemon-health leaves.
 ///
-/// Un-ignored by Plan 2 (acp group created).
+/// Active since Plan 2 created the `acp` group.
 #[test]
 fn v2_target_acp_subcommands() {
     let output = Command::cargo_bin("nexus42")
@@ -273,7 +273,7 @@ fn v2_target_acp_subcommands() {
 ///   credentials (rotate), workspace (list/create/use/init/clone/link/unlink/status),
 ///   soul, memory, kb
 ///
-/// Un-ignored by Plan 4.
+/// Active since Plan 4 landed the creator/knowledge surface.
 #[test]
 fn v2_target_creator_subcommands() {
     let output = Command::cargo_bin("nexus42")
@@ -314,7 +314,7 @@ fn v2_target_creator_subcommands() {
 /// Expected subcommands: auth (login/logout/status), context (assemble-moment),
 ///   sync (push/pull/status/resolve/world/retry).
 ///
-/// Un-ignored by Plan 3 (platform group created). v1.193 P1-T5 removed the
+/// Active since Plan 3 created the `platform` group. v1.193 P1-T5 removed the
 /// deferred `explore` and `publish` leaves along with the `context assemble`
 /// guidance leaf, so those names must no longer be advertised.
 #[test]
@@ -344,7 +344,7 @@ fn v2_target_platform_subcommands() {
 /// Expected: version, doctor, completion,
 ///   config (get/set/unset/path), debug (dump-workspace)
 ///
-/// Un-ignore after Plan 3 extends the `system` group.
+/// Active since Plan 3 extended the `system` group.
 #[test]
 fn v2_target_system_subcommands() {
     let output = Command::cargo_bin("nexus42")
