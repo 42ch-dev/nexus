@@ -13,18 +13,18 @@
 //! is opened, so no `creator world kb` entrance can migrate — and therefore
 //! create — a workspace the selection never had.
 
-pub mod service;
 pub mod pack;
+pub mod service;
 
+use crate::commands::creator::world::{active_creator_id, open_workspace_pool};
 use crate::config::CliConfig;
+use crate::core::require_materialized_workspace;
+use crate::errors::{CliError, Result};
 use clap::{Args, Subcommand};
 use nexus_contracts::{
     world_kb_patch_entity_request::NexusWorldKbEntityPatchBlockType, WorldKbGraphResponse,
     WorldKbPatchEntityResponse,
 };
-use crate::commands::creator::world::{active_creator_id, open_workspace_pool};
-use crate::core::require_materialized_workspace;
-use crate::errors::{CliError, Result};
 use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
 use nexus_knowledge::world_kb::store::KbStoreError;
 use nexus_knowledge::world_kb::validation::ValidationMode;
@@ -233,7 +233,6 @@ pub(crate) fn render_graph_response(
     }
     Ok(())
 }
-
 
 /// Stable error code embedded in cross-author `403` messages.
 pub const WORLD_KB_FORBIDDEN_CODE: &str = "WORLD_KB_FORBIDDEN";

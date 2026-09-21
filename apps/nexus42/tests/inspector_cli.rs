@@ -177,8 +177,7 @@ fn write_workspace_meta(home: &Path, creator_id: &str) {
 async fn inspector_moment_prints_human_packet() {
     let env = fresh_env().await;
 
-    let out = env
-        .cli(&["creator", "inspector", "moment", &env.world_id]);
+    let out = env.cli(&["creator", "inspector", "moment", &env.world_id]);
     assert!(
         out.status.success(),
         "inspector moment failed: {}",
@@ -194,8 +193,7 @@ async fn inspector_moment_prints_human_packet() {
 async fn inspector_moment_json_emits_dto() {
     let env = fresh_env().await;
 
-    let out = env
-        .cli(&["creator", "inspector", "moment", &env.world_id, "--json"]);
+    let out = env.cli(&["creator", "inspector", "moment", &env.world_id, "--json"]);
     assert!(
         out.status.success(),
         "inspector moment --json failed: {}",
@@ -214,18 +212,17 @@ async fn inspector_moment_supports_work_and_stage_flags() {
     let env = fresh_env().await;
     let work_id = seed_bound_work(&env).await;
 
-    let out = env
-        .cli(&[
-            "creator",
-            "inspector",
-            "moment",
-            &env.world_id,
-            "--work",
-            &work_id,
-            "--stage",
-            "produce",
-            "--json",
-        ]);
+    let out = env.cli(&[
+        "creator",
+        "inspector",
+        "moment",
+        &env.world_id,
+        "--work",
+        &work_id,
+        "--stage",
+        "produce",
+        "--json",
+    ]);
     assert!(
         out.status.success(),
         "inspector with --work/--stage failed: {}",
@@ -243,15 +240,14 @@ async fn inspector_moment_supports_work_and_stage_flags() {
 async fn inspector_invalid_stage_rejected() {
     let env = fresh_env().await;
 
-    let out = env
-        .cli(&[
-            "creator",
-            "inspector",
-            "moment",
-            &env.world_id,
-            "--stage",
-            "bogus",
-        ]);
+    let out = env.cli(&[
+        "creator",
+        "inspector",
+        "moment",
+        &env.world_id,
+        "--stage",
+        "bogus",
+    ]);
     assert!(!out.status.success(), "invalid --stage must fail");
     assert!(
         stderr(&out).contains("--stage"),
@@ -291,8 +287,7 @@ async fn inspector_foreign_world_rejected_403() {
     .expect("seed foreign world");
     pool.close().await;
 
-    let out = env
-        .cli(&["creator", "inspector", "moment", "wld_foreign"]);
+    let out = env.cli(&["creator", "inspector", "moment", "wld_foreign"]);
     assert!(!out.status.success(), "foreign world must fail");
     let err = stderr(&out);
     assert!(

@@ -82,7 +82,7 @@ pub async fn run(cmd: SystemCommand, config: &CliConfig) -> Result<()> {
         SystemCommand::Doctor => run_combined_doctor().await,
         SystemCommand::Completion { shell } => print_completion(&shell),
         SystemCommand::Config { command } => config::run(command, config),
-        SystemCommand::Debug { command } => debug::run(command, config).await,
+        SystemCommand::Debug { command } => debug::run(command, config),
         SystemCommand::Db { command } => db::run(command, config).await,
         SystemCommand::Identity { command } => identity::run(command, config).await,
         SystemCommand::RuntimeMode { command } => runtime_mode::run(command, config),

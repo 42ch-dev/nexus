@@ -872,6 +872,7 @@ fn json_stdout(output: &std::process::Output) -> serde_json::Value {
 /// `works use` writes and the `works.status = "active"` selection an omitted
 /// `<work_id>` reads: this task preserves both, and the omitted-id refusal
 /// below is that retained filter observed through the core.
+#[allow(clippy::too_many_lines)] // one cross-write negative proof over a single local home
 #[test]
 fn work_pool_and_work_inspiration_do_not_cross_write() {
     use std::io::ErrorKind;
@@ -1119,7 +1120,9 @@ fn work_pool_and_work_inspiration_do_not_cross_write() {
         "the append DTO must name the Work it appended to: {appended}"
     );
     assert_eq!(
-        appended.get("inspiration_count").and_then(|v| v.as_i64()),
+        appended
+            .get("inspiration_count")
+            .and_then(serde_json::Value::as_i64),
         Some(1),
         "the append DTO must report the Work's own note count: {appended}"
     );

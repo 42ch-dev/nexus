@@ -23,9 +23,9 @@ pub enum DebugCommand {
 ///
 /// Returns `CliError` if workspace state cannot be dumped (I/O errors,
 /// serialization failures).
-pub async fn run(cmd: DebugCommand, config: &CliConfig) -> Result<()> {
+pub fn run(cmd: DebugCommand, config: &CliConfig) -> Result<()> {
     match cmd {
-        DebugCommand::DumpWorkspace { format } => dump_workspace(config, &format).await,
+        DebugCommand::DumpWorkspace { format } => dump_workspace(config, &format),
     }
 }
 
@@ -48,7 +48,7 @@ fn strip_nulls(value: &serde_json::Value) -> serde_json::Value {
 }
 
 /// Serialize workspace state to JSON or TOML for debugging.
-async fn dump_workspace(config: &CliConfig, format: &str) -> Result<()> {
+fn dump_workspace(config: &CliConfig, format: &str) -> Result<()> {
     let mut state = serde_json::Map::new();
 
     // --- Config snapshot ---

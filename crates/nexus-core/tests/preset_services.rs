@@ -622,7 +622,10 @@ async fn retained_preset_catalog_scaffold_and_unknown_lookup() {
 
     let listed = fixture.core.list_presets(&fixture.principal).await.unwrap();
     assert!(
-        listed.embedded.iter().any(|preset| preset.id == "novel-writing"),
+        listed
+            .embedded
+            .iter()
+            .any(|preset| preset.id == "novel-writing"),
         "embedded catalog lists builtins"
     );
 
@@ -635,7 +638,10 @@ async fn retained_preset_catalog_scaffold_and_unknown_lookup() {
         embedded.source,
         nexus_contracts::GetPresetResponseSource::Embedded
     );
-    assert!(embedded.yaml.contains("preset"), "raw preset.yaml is read back");
+    assert!(
+        embedded.yaml.contains("preset"),
+        "raw preset.yaml is read back"
+    );
     assert!(embedded.path.is_none(), "embedded presets have no path");
 
     assert!(matches!(

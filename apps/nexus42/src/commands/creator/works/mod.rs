@@ -1161,7 +1161,7 @@ async fn reconcile(
 /// `nexus_local_db::work_chapters::ReconcileReport` is what the daemon route
 /// returned verbatim; the direct-core `--json` output keeps those field names
 /// and types.
-fn reconcile_report_wire(
+const fn reconcile_report_wire(
     report: &WorkReconcileReport,
 ) -> nexus_local_db::work_chapters::ReconcileReport {
     nexus_local_db::work_chapters::ReconcileReport {
@@ -1695,19 +1695,20 @@ async fn fetch_open_findings(
         )
         .await;
     match read {
-        Ok(resp) => match serde_json::to_value(&resp.items) {
-            Ok(serde_json::Value::Array(items)) => FindingsResult::Fetched(items),
-            // A serialization failure is the same class as a failed read: the
-            // status command degrades instead of reporting a findings list it
-            // cannot render.
-            _ => {
+        Ok(resp) => {
+            if let Ok(serde_json::Value::Array(items)) = serde_json::to_value(&resp.items) {
+                FindingsResult::Fetched(items)
+            } else {
+                // A serialization failure is the same class as a failed read: the
+                // status command degrades instead of reporting a findings list it
+                // cannot render.
                 tracing::warn!(
                     work_id = %work_id,
                     "open findings read could not be rendered; degrading to Unavailable"
                 );
                 FindingsResult::Unavailable
             }
-        },
+        }
         Err(error) => {
             tracing::warn!(
                 work_id = %work_id,

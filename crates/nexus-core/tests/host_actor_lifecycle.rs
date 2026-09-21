@@ -758,15 +758,14 @@ async fn retained_same_state_transition_no_op_keeps_the_indexed_session_reusable
     };
 
     // Restore-to-active on an already active Character: the retained no-op.
-    let request =
-        nexus_contracts::generated::core::CoreCharacterTransitionRequest::builder()
-            .character_id(env.character_id.clone())
-            .expected_revision(revision)
-            .target_status(
-                nexus_contracts::generated::core::CoreCharacterTransitionRequestTargetStatus::Active,
-            )
-            .try_into()
-            .expect("transition request is wire-valid");
+    let request = nexus_contracts::generated::core::CoreCharacterTransitionRequest::builder()
+        .character_id(env.character_id.clone())
+        .expected_revision(revision)
+        .target_status(
+            nexus_contracts::generated::core::CoreCharacterTransitionRequestTargetStatus::Active,
+        )
+        .try_into()
+        .expect("transition request is wire-valid");
     let response = core
         .transition_character(&principal, request)
         .await
@@ -903,10 +902,11 @@ async fn remembered_capture_stays_reserved_for_the_durable_capture_writer() {
 
     // A never-indexed (legacy) session can never request a remembered capture,
     // and the refusal lands before any provider effect.
-    let request = serde_json::from_value::<
-        nexus_contracts::generated::daemon_api::agent_host::ExecuteOperationRequest,
-    >(serde_json::json!({ "kind": "prompt", "content": "hello", "remember": true }))
-    .unwrap();
+    let request =
+        serde_json::from_value::<
+            nexus_contracts::generated::daemon_api::agent_host::ExecuteOperationRequest,
+        >(serde_json::json!({ "kind": "prompt", "content": "hello", "remember": true }))
+        .unwrap();
     let err = handle
         .execute(&principal, Uuid::new_v4().to_string(), request)
         .await

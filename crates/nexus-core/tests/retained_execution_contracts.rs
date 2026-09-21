@@ -42,6 +42,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use async_trait::async_trait;
+use futures_util::StreamExt;
 use nexus_agent_host::capability::model::{
     CapabilityDescriptor, CreateSessionRequest, FinishReason, HostEvent, HostEventStream,
     HostHealth, HostOperation, HostStartConfig, OperationFinishedEvent, OperationStartedEvent,
@@ -49,8 +50,8 @@ use nexus_agent_host::capability::model::{
 };
 use nexus_agent_host::config::TimeoutConfig;
 use nexus_agent_host::{
-    HostError, HostFacade, HostOperationId, HostResult, HostSession, HostSessionId, ProviderCatalog,
-    SessionState,
+    HostError, HostFacade, HostOperationId, HostResult, HostSession, HostSessionId,
+    ProviderCatalog, SessionState,
 };
 use nexus_contracts::local::schedule::http::{AddScheduleRequest, AgentBindingDto};
 use nexus_contracts::{
@@ -72,7 +73,6 @@ use nexus_core::{CoreAccess, CoreOpenOptions, CoreService};
 use nexus_local_db::findings::{create_finding, Finding};
 use nexus_local_db::works::{create_work_atomic, WorkRecord};
 use nexus_local_db::writer_protocol::init_guarded_pool;
-use futures_util::StreamExt;
 use nexus_orchestration::capability::{CapabilityError, DaemonToolDispatch};
 use nexus_orchestration::engine::{
     GraphFlowEngine, OrchestrationEngine, SessionStatus, SessionSummary,
@@ -215,7 +215,7 @@ impl HostFacade for ParkedHost {
         self.creates.fetch_add(1, Ordering::SeqCst);
         if self.launch_fails.load(Ordering::SeqCst) {
             return Err(HostError::launch_failed(
-                request.provider_id.clone(),
+                request.provider_id,
                 "agent process exited after initialize (EOF)",
                 None,
             ));
@@ -421,7 +421,9 @@ async fn owner_fixture() -> OwnerFixture {
         TimeoutConfig::default(),
     ));
     let deps = RunnerDeps {
-        prompt_executor: Some(executor.clone() as Arc<dyn nexus_orchestration::capability::PromptExecutor>),
+        prompt_executor: Some(
+            executor.clone() as Arc<dyn nexus_orchestration::capability::PromptExecutor>
+        ),
         workspace_root: Some(nexus_home_layout::operational_workspace_dir(
             home, CREATOR, SLUG,
         )),
@@ -541,7 +543,14 @@ async fn admission_distinct_serial_rows_race_one_owned() {
         fixture.executor.clone() as Arc<dyn nexus_orchestration::capability::PromptExecutor>;
 
     let (a, b) = tokio::join!(
-        coordinator.admit_schedule(&first, pool.as_ref(), &home, &caps, None, Some(executor.clone())),
+        coordinator.admit_schedule(
+            &first,
+            pool.as_ref(),
+            &home,
+            &caps,
+            None,
+            Some(executor.clone())
+        ),
         coordinator.admit_schedule(&second, pool.as_ref(), &home, &caps, None, Some(executor)),
     );
 
@@ -550,7 +559,11 @@ async fn admission_distinct_serial_rows_race_one_owned() {
         wins, 1,
         "exactly one of the two racing admissions must succeed: {a:?} / {b:?}"
     );
-    let loser = if a.is_ok() { b.unwrap_err() } else { a.unwrap_err() };
+    let loser = if a.is_ok() {
+        b.unwrap_err()
+    } else {
+        a.unwrap_err()
+    };
     assert!(
         matches!(loser, RunControlError::NotEligible(..)),
         "the serial loser must be refused as not eligible, got {loser:?}"
@@ -754,7 +767,10 @@ async fn hanging_upstream_with_timeout_reroutes_via_on_timeout() {
         note.contains("rerouting to 'fallback'"),
         "note names the reroute target: {note}"
     );
-    assert!(note.contains("gate=converge"), "note names the gate: {note}");
+    assert!(
+        note.contains("gate=converge"),
+        "note names the gate: {note}"
+    );
     let elapsed = elapsed_ms_from_note(&note);
     assert!(
         elapsed >= JOIN_TIMEOUT_MS,
@@ -1072,7 +1088,13 @@ fn every_minute_cron() -> String {
 #[serial_test::serial]
 async fn cron_tick_enqueues_and_admits_a_due_role() {
     let (pool, _dir) = work_pool().await;
-    let work = work_record("wrk_cron_due", "cron-due", "novel-writing", "intake", "complete");
+    let work = work_record(
+        "wrk_cron_due",
+        "cron-due",
+        "novel-writing",
+        "intake",
+        "complete",
+    );
     nexus_local_db::works::create_work(pool.as_ref(), &work)
         .await
         .unwrap();
@@ -1085,17 +1107,10 @@ async fn cron_tick_enqueues_and_admits_a_due_role() {
     .await
     .unwrap();
 
-    let supervisor = Arc::new(
-        nexus_orchestration::schedule::supervisor::ScheduleSupervisor::new(pool.clone()),
-    );
+    let supervisor =
+        Arc::new(nexus_orchestration::schedule::supervisor::ScheduleSupervisor::new(pool.clone()));
     let workspace = tempfile::tempdir().unwrap();
-    cron::run_one_tick(
-        pool.as_ref(),
-        workspace.path(),
-        &supervisor,
-        Some(PROVIDER),
-    )
-    .await;
+    cron::run_one_tick(pool.as_ref(), workspace.path(), &supervisor, Some(PROVIDER)).await;
 
     let status: String = sqlx::query_scalar(
         "SELECT status FROM creator_schedules \
@@ -1147,17 +1162,10 @@ async fn cron_tick_with_no_due_role_is_a_no_op() {
     .await
     .unwrap();
 
-    let supervisor = Arc::new(
-        nexus_orchestration::schedule::supervisor::ScheduleSupervisor::new(pool.clone()),
-    );
+    let supervisor =
+        Arc::new(nexus_orchestration::schedule::supervisor::ScheduleSupervisor::new(pool.clone()));
     let workspace = tempfile::tempdir().unwrap();
-    cron::run_one_tick(
-        pool.as_ref(),
-        workspace.path(),
-        &supervisor,
-        Some(PROVIDER),
-    )
-    .await;
+    cron::run_one_tick(pool.as_ref(), workspace.path(), &supervisor, Some(PROVIDER)).await;
 
     let count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM creator_schedules WHERE work_id = 'wrk_cron_idle'",
@@ -1184,7 +1192,10 @@ async fn cron_fire_is_gated_while_the_works_file_lock_is_held() {
     let (pool, _dir) = work_pool().await;
     // Two distinct Works: each role fires at most once per active schedule
     // (the idempotency guard), so the lock case needs its own Work.
-    for (work_id, work_ref) in [("wrk_cron_open", "cron-open"), ("wrk_cron_held", "cron-held")] {
+    for (work_id, work_ref) in [
+        ("wrk_cron_open", "cron-open"),
+        ("wrk_cron_held", "cron-held"),
+    ] {
         let work = work_record(work_id, work_ref, "novel-writing", "intake", "complete");
         nexus_local_db::works::create_work(pool.as_ref(), &work)
             .await
@@ -1437,8 +1448,20 @@ async fn stale_finding_sweep_is_a_no_op_without_findings() {
 #[serial_test::serial]
 async fn stale_finding_sweep_enqueues_only_for_an_opted_in_work() {
     let (pool, _dir) = work_pool().await;
-    let opted_in = work_record("wrk_sweep_yes", "sweep-yes", "novel-writing", "research", "active");
-    let mut default_off = work_record("wrk_sweep_no", "sweep-no", "novel-writing", "research", "active");
+    let opted_in = work_record(
+        "wrk_sweep_yes",
+        "sweep-yes",
+        "novel-writing",
+        "research",
+        "active",
+    );
+    let mut default_off = work_record(
+        "wrk_sweep_no",
+        "sweep-no",
+        "novel-writing",
+        "research",
+        "active",
+    );
     default_off.auto_review_master_on_timeout = false;
     let mut opted_in = opted_in;
     opted_in.auto_review_master_on_timeout = true;
@@ -1448,12 +1471,18 @@ async fn stale_finding_sweep_enqueues_only_for_an_opted_in_work() {
     let _ = create_work_atomic(pool.as_ref(), &default_off, None)
         .await
         .unwrap();
-    create_finding(pool.as_ref(), &finding("fnd_sweep_yes", "wrk_sweep_yes", 7200))
-        .await
-        .unwrap();
-    create_finding(pool.as_ref(), &finding("fnd_sweep_no", "wrk_sweep_no", 7200))
-        .await
-        .unwrap();
+    create_finding(
+        pool.as_ref(),
+        &finding("fnd_sweep_yes", "wrk_sweep_yes", 7200),
+    )
+    .await
+    .unwrap();
+    create_finding(
+        pool.as_ref(),
+        &finding("fnd_sweep_no", "wrk_sweep_no", 7200),
+    )
+    .await
+    .unwrap();
 
     run_one_sweep(pool.as_ref(), 60, Some(PROVIDER), None).await;
 
@@ -1500,7 +1529,9 @@ async fn stale_finding_sweep_ignores_fresh_and_resolved_findings() {
         "active",
     );
     work.auto_review_master_on_timeout = true;
-    let _ = create_work_atomic(pool.as_ref(), &work, None).await.unwrap();
+    let _ = create_work_atomic(pool.as_ref(), &work, None)
+        .await
+        .unwrap();
 
     // Fresh (5s against a 60s threshold).
     create_finding(
@@ -1553,7 +1584,9 @@ async fn stale_finding_sweep_repeats_without_panicking() {
         "active",
     );
     work.auto_review_master_on_timeout = true;
-    let _ = create_work_atomic(pool.as_ref(), &work, None).await.unwrap();
+    let _ = create_work_atomic(pool.as_ref(), &work, None)
+        .await
+        .unwrap();
     create_finding(
         pool.as_ref(),
         &finding("fnd_sweep_repeat", "wrk_sweep_repeat", 7200),
@@ -1578,9 +1611,7 @@ async fn stale_finding_sweep_repeats_without_panicking() {
 fn select_creator(home: &Path) {
     std::fs::write(
         home.join(".nexus42/config.toml"),
-        format!(
-            "active_creator_id = \"author\"\n[active_workspace_slug_by_creator]\n\"author\" = \"default\"\n"
-        ),
+        "active_creator_id = \"author\"\n[active_workspace_slug_by_creator]\n\"author\" = \"default\"\n",
     )
     .unwrap();
 }
@@ -1825,13 +1856,11 @@ async fn reconcile_dry_run_mutates_nothing_and_takes_no_lock() {
     let original = "---\nchapter: 1\nstatus: finalized\nword_count: 1234\n---\nBody";
     write_chapter_file(&chapter_path, original);
 
-    let before_rows = nexus_local_db::work_chapters::list_chapters(
-        fixture.core.pool(),
-        &fixture.work_id,
-    )
-    .await
-    .unwrap()
-    .len();
+    let before_rows =
+        nexus_local_db::work_chapters::list_chapters(fixture.core.pool(), &fixture.work_id)
+            .await
+            .unwrap()
+            .len();
     assert_eq!(before_rows, 0, "no chapter rows exist before the dry run");
 
     let report = fixture
@@ -1840,7 +1869,9 @@ async fn reconcile_dry_run_mutates_nothing_and_takes_no_lock() {
             &fixture.principal,
             fixture.work_id.clone(),
             "core",
-            nexus_core::ReconcileDryRunQuery { dry_run: Some(true) },
+            nexus_core::ReconcileDryRunQuery {
+                dry_run: Some(true),
+            },
         )
         .await
         .expect("the dry run must succeed");
@@ -1853,13 +1884,11 @@ async fn reconcile_dry_run_mutates_nothing_and_takes_no_lock() {
         original,
         "the dry run must not modify the chapter file"
     );
-    let after_rows = nexus_local_db::work_chapters::list_chapters(
-        fixture.core.pool(),
-        &fixture.work_id,
-    )
-    .await
-    .unwrap()
-    .len();
+    let after_rows =
+        nexus_local_db::work_chapters::list_chapters(fixture.core.pool(), &fixture.work_id)
+            .await
+            .unwrap()
+            .len();
     assert_eq!(after_rows, 0, "the dry run must not insert a chapter row");
     assert_eq!(
         fixture.lock_holder().await,
@@ -1878,13 +1907,11 @@ async fn reconcile_dry_run_mutates_nothing_and_takes_no_lock() {
         .await
         .expect("the mutating reconcile must succeed");
     assert_eq!(mutated.created, 1, "the mutating path applies the report");
-    let mutated_rows = nexus_local_db::work_chapters::list_chapters(
-        fixture.core.pool(),
-        &fixture.work_id,
-    )
-    .await
-    .unwrap()
-    .len();
+    let mutated_rows =
+        nexus_local_db::work_chapters::list_chapters(fixture.core.pool(), &fixture.work_id)
+            .await
+            .unwrap()
+            .len();
     assert_eq!(mutated_rows, 1, "the mutating path inserts exactly one row");
     assert_eq!(
         fixture.lock_holder().await,
@@ -1953,6 +1980,7 @@ async fn seed_prompt_run(
 /// owned Host session per `(run, role)`: a second prompt for the same key
 /// reuses it (never a second subprocess), and a prompt whose frozen run has no
 /// binding for the role is refused BEFORE any Host effect.
+#[allow(clippy::too_many_lines)] // one prompt-executor journey asserted end to end
 #[tokio::test]
 async fn prompt_executor_single_flights_one_session_and_refuses_before_effect() {
     use nexus_orchestration::capability::{PromptExecutor, PromptRequest, ToolPolicy};
@@ -1995,12 +2023,20 @@ async fn prompt_executor_single_flights_one_session_and_refuses_before_effect() 
     // in flight (the executor serializes same-run operations).
     let first = {
         let executor = Arc::clone(&executor);
-        tokio::spawn(async move { executor.execute(request("retained:single-flight", "one")).await })
+        tokio::spawn(async move {
+            executor
+                .execute(request("retained:single-flight", "one"))
+                .await
+        })
     };
     wait_for_prompt(&host).await;
     let second = {
         let executor = Arc::clone(&executor);
-        tokio::spawn(async move { executor.execute(request("retained:single-flight", "two")).await })
+        tokio::spawn(async move {
+            executor
+                .execute(request("retained:single-flight", "two"))
+                .await
+        })
     };
     host.release_all();
 

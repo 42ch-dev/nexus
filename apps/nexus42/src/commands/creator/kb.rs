@@ -21,7 +21,9 @@
 //! `creator knowledge`.
 
 use crate::config::CliConfig;
-use crate::core::{finish_direct, map_core_error, open_direct_core, require_materialized_workspace};
+use crate::core::{
+    finish_direct, map_core_error, open_direct_core, require_materialized_workspace,
+};
 use crate::errors::{CliError, Result};
 use crate::paths;
 use nexus_contracts::{
@@ -542,4 +544,3 @@ fn truncate_str(s: &str, max_len: usize) -> String {
         format!("{}…", &s[..max_len - 1])
     }
 }
-

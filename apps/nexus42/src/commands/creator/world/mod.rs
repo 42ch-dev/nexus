@@ -109,7 +109,7 @@ pub enum WorldCommand {
     },
 
     /// Timeline fork surface — `create` (one `CoreService::create_fork` call)
-    /// + `list` (projection of the core timeline-events read) — V1.175 P1
+    /// plus `list` (projection of the core timeline-events read) — V1.175 P1
     /// group 5.
     Fork {
         #[command(subcommand)]
@@ -237,9 +237,8 @@ pub fn active_creator_id(config: &CliConfig) -> Result<String> {
 /// character validation, or the close cannot be settled.
 async fn run_create(config: &CliConfig, title: &str) -> Result<()> {
     let request = CreateWorldRequest {
-        title: CreateWorldRequestTitle::try_from(title).map_err(|e| {
-            crate::errors::CliError::Other(format!("invalid input (title): {e}"))
-        })?,
+        title: CreateWorldRequestTitle::try_from(title)
+            .map_err(|e| crate::errors::CliError::Other(format!("invalid input (title): {e}")))?,
     };
 
     let core = open_direct_core(config).await?;

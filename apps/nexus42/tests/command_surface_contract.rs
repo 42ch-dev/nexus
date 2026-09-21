@@ -1118,6 +1118,7 @@ fn help_commands_section(help: &str) -> String {
 /// afterwards each is an unknown subcommand on the real binary. Parser only —
 /// the retained groups are exercised through `--help`, so no network call and no
 /// credential is involved.
+#[allow(clippy::too_many_lines)] // one parser-surface sweep asserted in place
 #[test]
 fn platform_retains_cloud_groups_without_local_launcher() {
     let home = tempfile::tempdir().expect("temp home");

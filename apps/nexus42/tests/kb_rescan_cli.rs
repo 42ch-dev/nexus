@@ -29,10 +29,10 @@
 mod direct;
 
 use direct::DirectFixture;
-use nexus_home_layout::{creator_kb_dir, nexus_root_from_home};
 use nexus42::commands::creator::kb::rescan::{kb_rescan_hermetic, WORLD_KB_FORBIDDEN_CODE};
 use nexus42::commands::creator::world::kb::kb_adopt;
 use nexus42::errors::CliError;
+use nexus_home_layout::{creator_kb_dir, nexus_root_from_home};
 use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody;
 use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_extract_job::{insert_pending, list_pending_for_world};
@@ -445,7 +445,13 @@ async fn work_kb_scope_rejects_legacy_world_without_mutation() {
     let output = fixture
         .command()
         .args([
-            "creator", "kb", "list", "--scope", "world", "--world-id", "wld_legacy",
+            "creator",
+            "kb",
+            "list",
+            "--scope",
+            "world",
+            "--world-id",
+            "wld_legacy",
         ])
         .output()
         .expect("spawn the real nexus42 binary");
@@ -667,7 +673,13 @@ async fn work_kb_index_leaves_round_trip_without_a_daemon() {
     let add = fixture
         .command()
         .args([
-            "creator", "kb", "add", "--file", source_path, "--title", "Retained note",
+            "creator",
+            "kb",
+            "add",
+            "--file",
+            source_path,
+            "--title",
+            "Retained note",
         ])
         .output()
         .expect("spawn the real nexus42 binary");
@@ -729,7 +741,8 @@ async fn work_kb_index_leaves_round_trip_without_a_daemon() {
         String::from_utf8_lossy(&show.stderr)
     );
     assert!(
-        String::from_utf8_lossy(&show.stdout).contains("Chapter notes for the retained work index."),
+        String::from_utf8_lossy(&show.stdout)
+            .contains("Chapter notes for the retained work index."),
         "`kb show` must render the stored entry body"
     );
 
@@ -790,7 +803,8 @@ async fn corrupt_work_index_is_reported_as_empty_not_an_error() {
         String::from_utf8_lossy(&list.stderr)
     );
     assert!(
-        String::from_utf8_lossy(&list.stdout).contains("No local work entries in workspace default"),
+        String::from_utf8_lossy(&list.stdout)
+            .contains("No local work entries in workspace default"),
         "a corrupt index must read as empty, got:\n{}",
         String::from_utf8_lossy(&list.stdout)
     );

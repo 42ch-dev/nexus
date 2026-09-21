@@ -2735,7 +2735,7 @@ fn create_character_request(
     serde_json::from_value(value).expect("create request is wire-valid")
 }
 
-fn character_patch<'a>(
+const fn character_patch<'a>(
     display_name: Option<&'a str>,
     image_uri: FieldPatch<&'a str>,
     persona_json: FieldPatch<&'a str>,
@@ -2747,7 +2747,7 @@ fn character_patch<'a>(
     }
 }
 
-fn assert_actor_conflict(err: CoreError) {
+fn assert_actor_conflict(err: &CoreError) {
     assert!(
         matches!(err, CoreError::ActorConflict { .. }),
         "expected an ActorConflict, got {err:?}"
@@ -2756,11 +2756,12 @@ fn assert_actor_conflict(err: CoreError) {
 
 async fn character_epoch(env: &Env, character_id: &str) -> i64 {
     let pool = plain_pool(env).await;
-    let epoch: i64 = sqlx::query_scalar("SELECT lifecycle_epoch FROM characters WHERE character_id = ?")
-        .bind(character_id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let epoch: i64 =
+        sqlx::query_scalar("SELECT lifecycle_epoch FROM characters WHERE character_id = ?")
+            .bind(character_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     pool.close().await;
     epoch
 }
@@ -2965,6 +2966,7 @@ async fn retained_character_list_offset_pagination_bounds() {
 /// `::patch_stale_revision_is_character_revision_conflict`,
 /// `::patch_omit_vs_clear_members`, `::patch_no_op_leaves_revision_unchanged`
 /// and `::patch_rename_collision_is_duplicate_character_display_name`.
+#[allow(clippy::too_many_lines)] // one patch/CAS journey asserted end to end
 #[tokio::test]
 async fn retained_character_patch_cas_omit_clear_and_rename_collision() {
     let env = seed_env().await;
@@ -3018,7 +3020,11 @@ async fn retained_character_patch_cas_omit_clear_and_rename_collision() {
             &principal,
             env.character_id.clone(),
             revision + 1,
-            character_patch(Some("Ada Renamed The Second"), FieldPatch::Keep, FieldPatch::Keep),
+            character_patch(
+                Some("Ada Renamed The Second"),
+                FieldPatch::Keep,
+                FieldPatch::Keep,
+            ),
         )
         .await
         .expect("omitted members are preserved");
@@ -3103,6 +3109,7 @@ async fn retained_character_patch_cas_omit_clear_and_rename_collision() {
 /// `::archive_same_state_cas_no_op_keeps_revision`,
 /// `::restore_requires_active_owned_world_binding` and
 /// `::restore_name_collision_is_duplicate_character_display_name`.
+#[allow(clippy::too_many_lines)] // one archive/restore lifecycle asserted end to end
 #[tokio::test]
 async fn retained_character_archive_restore_lifecycle_and_guards() {
     let env = seed_env().await;
@@ -3124,15 +3131,21 @@ async fn retained_character_archive_restore_lifecycle_and_guards() {
     assert_eq!(archived.character.revision, revision + 1);
     let (status, archived_revision, archived_epoch) = character_row(&env, &env.character_id).await;
     assert_eq!(status, "archived");
-    assert_eq!(archived_epoch, epoch + 1, "a material transition moves the epoch");
+    assert_eq!(
+        archived_epoch,
+        epoch + 1,
+        "a material transition moves the epoch"
+    );
 
     // The listing still carries archived rows (retained management read).
     let listed = core.list_characters(&principal, 50, 0).await.expect("list");
     assert!(listed
         .items
         .iter()
-        .any(|item| String::from(item.character_id.clone()) == env.character_id
-            && item.status.to_string() == "archived"));
+        .any(
+            |item| String::from(item.character_id.clone()) == env.character_id
+                && item.status.to_string() == "archived"
+        ));
 
     // Writing an archived Character is refused, and the same-state archive is
     // a no-op that moves neither the revision nor the lifecycle epoch.
@@ -3158,7 +3171,10 @@ async fn retained_character_archive_restore_lifecycle_and_guards() {
         .await
         .expect("same-state archive admits");
     assert_eq!(again.character.revision, archived_revision);
-    assert_eq!(character_epoch(&env, &env.character_id).await, archived_epoch);
+    assert_eq!(
+        character_epoch(&env, &env.character_id).await,
+        archived_epoch
+    );
 
     let restored = core
         .transition_character(
@@ -3231,6 +3247,7 @@ async fn retained_character_archive_restore_lifecycle_and_guards() {
 /// `::patch_binding_rejects_overlength_world_sheet_bytes_at_api`,
 /// `::binding_detail_retained_read_survives_archive` and
 /// `::add_binding_rejects_paused_world_with_404_zero_mutation`.
+#[allow(clippy::too_many_lines)] // one binding/WorldSheet CAS journey asserted end to end
 #[tokio::test]
 async fn retained_binding_world_sheet_cas_and_retained_read() {
     let env = seed_env().await;
@@ -3240,11 +3257,7 @@ async fn retained_binding_world_sheet_cas_and_retained_read() {
     let wrong_type = seed_sheet(&env, "sheet_wrong", WORLD, BlockType::Item).await;
 
     let shown = core
-        .binding(
-            &principal,
-            env.character_id.clone(),
-            env.binding_id.clone(),
-        )
+        .binding(&principal, env.character_id.clone(), env.binding_id.clone())
         .await
         .expect("binding detail");
     assert_eq!(shown.binding.revision, 0);
@@ -3379,11 +3392,7 @@ async fn retained_binding_world_sheet_cas_and_retained_read() {
     .await
     .expect("archive");
     let retained = core
-        .binding(
-            &principal,
-            env.character_id.clone(),
-            env.binding_id.clone(),
-        )
+        .binding(&principal, env.character_id.clone(), env.binding_id.clone())
         .await
         .expect("retained read after archive");
     assert_eq!(
@@ -3635,12 +3644,13 @@ async fn retained_binding_removal_blocked_by_owned_knowledge() {
     let before_bindings = binding_count(&env, &env.character_id).await;
     let before_rows = {
         let pool = plain_pool(&env).await;
-        let rows: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE actor_world_binding_id = ?")
-                .bind(&env.binding_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let rows: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM kb_key_blocks WHERE actor_world_binding_id = ?",
+        )
+        .bind(&env.binding_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         pool.close().await;
         rows
     };
@@ -3656,12 +3666,13 @@ async fn retained_binding_removal_blocked_by_owned_knowledge() {
     );
     let after_rows = {
         let pool = plain_pool(&env).await;
-        let rows: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE actor_world_binding_id = ?")
-                .bind(&env.binding_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let rows: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM kb_key_blocks WHERE actor_world_binding_id = ?",
+        )
+        .bind(&env.binding_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         pool.close().await;
         rows
     };
@@ -3683,6 +3694,7 @@ async fn retained_binding_removal_blocked_by_owned_knowledge() {
 /// (the stored-bytes half; the daemon's RFC3339 wire canonicalization was a
 /// handler projection that retires with the host) and
 /// `::view_paginates_same_millisecond_reverse_ids_without_skip_or_duplicate`.
+#[allow(clippy::too_many_lines)] // one knowledge view journey asserted end to end
 #[tokio::test]
 async fn retained_knowledge_view_stored_bytes_and_keyset_tie_break() {
     let env = seed_env().await;
@@ -3691,7 +3703,13 @@ async fn retained_knowledge_view_stored_bytes_and_keyset_tie_break() {
     // A pre-cutover World row carries SQLite `datetime('now')` bytes; the wire
     // projection canonicalizes them and never rewrites the stored value.
     let pool = plain_pool(&env).await;
-    insert_legacy_world_row(&pool, "kb_legacy0000000000000000000000001", WORLD, "LegacyRow").await;
+    insert_legacy_world_row(
+        &pool,
+        "kb_legacy0000000000000000000000001",
+        WORLD,
+        "LegacyRow",
+    )
+    .await;
     let stored: String = sqlx::query_scalar(
         "SELECT created_at FROM kb_key_blocks WHERE key_block_id = 'kb_legacy0000000000000000000000001'",
     )
@@ -3787,7 +3805,10 @@ async fn retained_knowledge_view_stored_bytes_and_keyset_tie_break() {
     }
     seen.sort();
     seen.dedup();
-    assert_eq!(seen, expected, "paging around the tie skips and duplicates nothing");
+    assert_eq!(
+        seen, expected,
+        "paging around the tie skips and duplicates nothing"
+    );
 
     // A malformed keyset token is refused before any query runs.
     let bad_cursor = core
@@ -3809,6 +3830,7 @@ async fn retained_knowledge_view_stored_bytes_and_keyset_tie_break() {
 /// Migrated `actor_knowledge_api::inactive_world_and_character_fail_closed_on_view_and_add`,
 /// `::knowledge_archived_character_detail_read_write_split` and
 /// `::knowledge_detail_wrong_scope_is_404_without_revision_leak`.
+#[allow(clippy::too_many_lines)] // one inactive-knowledge scope journey asserted end to end
 #[tokio::test]
 async fn retained_knowledge_inactive_read_write_split_and_detail_scope() {
     let env = seed_env().await;
@@ -3936,6 +3958,7 @@ async fn retained_knowledge_inactive_read_write_split_and_detail_scope() {
 /// `::knowledge_stale_revision_and_in_use_delete_errors`,
 /// `::knowledge_empty_patch_is_invalid_input` and
 /// `::knowledge_delete_malformed_expected_revision_is_invalid_input`.
+#[allow(clippy::too_many_lines)] // one knowledge summary/CAS journey asserted end to end
 #[tokio::test]
 async fn retained_knowledge_detail_summary_lifecycle_and_cas_guards() {
     let env = seed_env().await;
@@ -3975,7 +3998,10 @@ async fn retained_knowledge_detail_summary_lifecycle_and_cas_guards() {
         .await
         .expect("detail");
     assert_eq!(
-        detail.body.as_ref().and_then(|body| body.summary.as_deref()),
+        detail
+            .body
+            .as_ref()
+            .and_then(|body| body.summary.as_deref()),
         Some("initial summary")
     );
     let revision = i64::try_from(detail.revision.unwrap_or(0)).expect("stored revision fits i64");
@@ -3993,10 +4019,13 @@ async fn retained_knowledge_detail_summary_lifecycle_and_cas_guards() {
         .await
         .expect("summary patch admits");
     assert_eq!(
-        patched.body.as_ref().and_then(|body| body.summary.as_deref()),
+        patched
+            .body
+            .as_ref()
+            .and_then(|body| body.summary.as_deref()),
         Some("edited summary")
     );
-    assert_eq!(patched.revision, Some((revision + 1) as u64));
+    assert_eq!(patched.revision, Some(u64::try_from(revision + 1).unwrap()));
 
     // A rename-only patch preserves the summary.
     let renamed = core
@@ -4013,10 +4042,13 @@ async fn retained_knowledge_detail_summary_lifecycle_and_cas_guards() {
         .expect("rename admits");
     assert_eq!(renamed.canonical_name, "FactRenamed");
     assert_eq!(
-        renamed.body.as_ref().and_then(|body| body.summary.as_deref()),
+        renamed
+            .body
+            .as_ref()
+            .and_then(|body| body.summary.as_deref()),
         Some("edited summary")
     );
-    assert_eq!(renamed.revision, Some((revision + 2) as u64));
+    assert_eq!(renamed.revision, Some(u64::try_from(revision + 2).unwrap()));
 
     // A null summary clears it; an empty patch is refused; a stale revision
     // conflicts.
@@ -4053,11 +4085,12 @@ async fn retained_knowledge_detail_summary_lifecycle_and_cas_guards() {
 
     let body_json: String = {
         let pool = plain_pool(&env).await;
-        let value = sqlx::query_scalar("SELECT body_json FROM kb_key_blocks WHERE key_block_id = ?")
-            .bind(&entry_id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let value =
+            sqlx::query_scalar("SELECT body_json FROM kb_key_blocks WHERE key_block_id = ?")
+                .bind(&entry_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         pool.close().await;
         value
     };
@@ -4120,7 +4153,10 @@ async fn retained_knowledge_detail_summary_lifecycle_and_cas_guards() {
             revision + 3,
         )
         .await;
-    assert!(deleted.is_ok(), "delete admits without anchors: {deleted:?}");
+    assert!(
+        deleted.is_ok(),
+        "delete admits without anchors: {deleted:?}"
+    );
     let missing = core
         .actor_knowledge_entry(&principal, env.character_id.clone(), entry_id.clone())
         .await
@@ -4224,8 +4260,13 @@ fn tom_query(
     serde_json::from_value(value).expect("ToM list query is wire-valid")
 }
 
-/// One Character-owned ToM carrier with the given `modules` payload.
-async fn seed_carrier(env: &Env, character_id: &str, name: &str, modules: serde_json::Value) -> String {
+/// One Character-owned `ToM` carrier with the given `modules` payload.
+async fn seed_carrier(
+    env: &Env,
+    character_id: &str,
+    name: &str,
+    modules: serde_json::Value,
+) -> String {
     let pool = plain_pool(env).await;
     let store = SqliteKbStore::new(pool.clone());
     let mut row = KnowledgeEntryRecord::for_character(character_id, BlockType::Character, name);
@@ -4236,7 +4277,7 @@ async fn seed_carrier(env: &Env, character_id: &str, name: &str, modules: serde_
     entry_id
 }
 
-/// One binding-owned ToM carrier (the unselected-binding shape).
+/// One binding-owned `ToM` carrier (the unselected-binding shape).
 async fn seed_binding_carrier(
     env: &Env,
     binding_id: &str,
@@ -4346,11 +4387,18 @@ fn carrier_ids(page: &ListCharacterTomResponse) -> Vec<String> {
 
 /// Migrated `character_tom_api::record_l1_list_l1_before_l2_and_l2_subject_rules`
 /// and `::record_and_list_succeed_without_agent_host`.
+#[allow(clippy::too_many_lines)] // one ToM L1/L2 ordering journey asserted end to end
 #[tokio::test]
 async fn retained_tom_l1_l2_order_and_subject_rules() {
     let env = seed_env().await;
     let (core, principal) = open_core(&env).await;
-    let carrier = seed_carrier(&env, &env.character_id, "TomCarrier", serde_json::json!({"belief": []})).await;
+    let carrier = seed_carrier(
+        &env,
+        &env.character_id,
+        "TomCarrier",
+        serde_json::json!({"belief": []}),
+    )
+    .await;
     let subject = core
         .create_character(&principal, create_character_request("Ben", WORLD, None))
         .await
@@ -4379,7 +4427,15 @@ async fn retained_tom_l1_l2_order_and_subject_rules() {
         .record_character_tom(
             &principal,
             env.character_id.clone(),
-            tom_request(WORLD, &env.binding_id, &carrier, 1, &subject_id, "Ben is cautious", 2),
+            tom_request(
+                WORLD,
+                &env.binding_id,
+                &carrier,
+                1,
+                &subject_id,
+                "Ben is cautious",
+                2,
+            ),
         )
         .await
         .expect("L2 about another active owned Character records");
@@ -4411,7 +4467,15 @@ async fn retained_tom_l1_l2_order_and_subject_rules() {
         .record_character_tom(
             &principal,
             env.character_id.clone(),
-            tom_request(WORLD, &env.binding_id, &carrier, 2, &env.character_id, "bad", 2),
+            tom_request(
+                WORLD,
+                &env.binding_id,
+                &carrier,
+                2,
+                &env.character_id,
+                "bad",
+                2,
+            ),
         )
         .await
         .unwrap_err();
@@ -4435,16 +4499,27 @@ async fn retained_tom_l1_l2_order_and_subject_rules() {
         .await
         .unwrap_err();
     assert_not_found(&l2_unbound);
-    assert_eq!(carrier_revision(&env, &carrier).await, 2, "refusals never bump the CAS");
+    assert_eq!(
+        carrier_revision(&env, &carrier).await,
+        2,
+        "refusals never bump the CAS"
+    );
 }
 
 /// Migrated `character_tom_api::foreign_carrier_alias_and_stale_revision_fail_closed`
 /// and `::inactive_viewer_world_and_subject_fail_closed`.
+#[allow(clippy::too_many_lines)] // one ToM carrier liveness journey asserted end to end
 #[tokio::test]
 async fn retained_tom_carrier_and_liveness_fail_closed() {
     let env = seed_env().await;
     let (core, principal) = open_core(&env).await;
-    let carrier = seed_carrier(&env, &env.character_id, "TomCarrier", serde_json::json!({"belief": []})).await;
+    let carrier = seed_carrier(
+        &env,
+        &env.character_id,
+        "TomCarrier",
+        serde_json::json!({"belief": []}),
+    )
+    .await;
     let world_carrier = {
         let pool = plain_pool(&env).await;
         let store = SqliteKbStore::new(pool.clone());
@@ -4462,20 +4537,46 @@ async fn retained_tom_carrier_and_liveness_fail_closed() {
         .record_character_tom(
             &principal,
             env.character_id.clone(),
-            tom_request(WORLD, &env.binding_id, &world_carrier, 0, &env.character_id, "x", 1),
+            tom_request(
+                WORLD,
+                &env.binding_id,
+                &world_carrier,
+                0,
+                &env.character_id,
+                "x",
+                1,
+            ),
         )
         .await
         .unwrap_err();
     assert_invalid_input(&world_owned);
-    assert_eq!(mind_state_count(&env).await, before, "no derivative is written");
+    assert_eq!(
+        mind_state_count(&env).await,
+        before,
+        "no derivative is written"
+    );
 
     // A carrier owned by another Character is a not-found.
-    let foreign_carrier = seed_carrier(&env, &env.foreign_character_id, "ForeignCarrier", serde_json::json!({"belief": []})).await;
+    let foreign_carrier = seed_carrier(
+        &env,
+        &env.foreign_character_id,
+        "ForeignCarrier",
+        serde_json::json!({"belief": []}),
+    )
+    .await;
     let foreign = core
         .record_character_tom(
             &principal,
             env.character_id.clone(),
-            tom_request(WORLD, &env.binding_id, &foreign_carrier, 0, &env.character_id, "x", 1),
+            tom_request(
+                WORLD,
+                &env.binding_id,
+                &foreign_carrier,
+                0,
+                &env.character_id,
+                "x",
+                1,
+            ),
         )
         .await
         .unwrap_err();
@@ -4485,7 +4586,15 @@ async fn retained_tom_carrier_and_liveness_fail_closed() {
     core.record_character_tom(
         &principal,
         env.character_id.clone(),
-        tom_request(WORLD, &env.binding_id, &carrier, 0, &env.character_id, "ok", 1),
+        tom_request(
+            WORLD,
+            &env.binding_id,
+            &carrier,
+            0,
+            &env.character_id,
+            "ok",
+            1,
+        ),
     )
     .await
     .expect("first record");
@@ -4493,11 +4602,19 @@ async fn retained_tom_carrier_and_liveness_fail_closed() {
         .record_character_tom(
             &principal,
             env.character_id.clone(),
-            tom_request(WORLD, &env.binding_id, &carrier, 0, &env.character_id, "stale", 1),
+            tom_request(
+                WORLD,
+                &env.binding_id,
+                &carrier,
+                0,
+                &env.character_id,
+                "stale",
+                1,
+            ),
         )
         .await
         .unwrap_err();
-    assert_actor_conflict(stale);
+    assert_actor_conflict(&stale);
     assert_eq!(mind_state_count(&env).await, before + 1);
 
     // An archived viewer refuses the write but keeps the retained list read.
@@ -4506,7 +4623,15 @@ async fn retained_tom_carrier_and_liveness_fail_closed() {
         .record_character_tom(
             &principal,
             env.character_id.clone(),
-            tom_request(WORLD, &env.binding_id, &carrier, 1, &env.character_id, "x", 1),
+            tom_request(
+                WORLD,
+                &env.binding_id,
+                &carrier,
+                1,
+                &env.character_id,
+                "x",
+                1,
+            ),
         )
         .await
         .unwrap_err();
@@ -4528,7 +4653,15 @@ async fn retained_tom_carrier_and_liveness_fail_closed() {
         .record_character_tom(
             &principal,
             env.character_id.clone(),
-            tom_request(WORLD, &env.binding_id, &carrier, 1, &env.character_id, "x", 1),
+            tom_request(
+                WORLD,
+                &env.binding_id,
+                &carrier,
+                1,
+                &env.character_id,
+                "x",
+                1,
+            ),
         )
         .await
         .unwrap_err();
@@ -4541,6 +4674,7 @@ async fn retained_tom_carrier_and_liveness_fail_closed() {
 /// `::absent_belief_is_zero_rows_and_legacy_modules_round_trip`,
 /// `::invalid_json_modules_fails_closed_and_never_overwritten` and
 /// `::order_outside_closed_space_and_invalid_labels_reject`.
+#[allow(clippy::too_many_lines)] // one ToM module-shape journey asserted end to end
 #[tokio::test]
 async fn retained_tom_module_shape_and_absent_belief() {
     let env = seed_env().await;
@@ -4548,13 +4682,27 @@ async fn retained_tom_module_shape_and_absent_belief() {
 
     // Order outside the closed space is refused (labels are enum-typed on the
     // wire and covered by the nexus-knowledge validation unit cases).
-    let order3 = seed_carrier(&env, &env.character_id, "OrderCarrier", serde_json::json!({"belief": []})).await;
+    let order3 = seed_carrier(
+        &env,
+        &env.character_id,
+        "OrderCarrier",
+        serde_json::json!({"belief": []}),
+    )
+    .await;
     let before = mind_state_count(&env).await;
     let refused_order = core
         .record_character_tom(
             &principal,
             env.character_id.clone(),
-            tom_request(WORLD, &env.binding_id, &order3, 0, &env.character_id, "x", 3),
+            tom_request(
+                WORLD,
+                &env.binding_id,
+                &order3,
+                0,
+                &env.character_id,
+                "x",
+                3,
+            ),
         )
         .await
         .unwrap_err();
@@ -4563,16 +4711,30 @@ async fn retained_tom_module_shape_and_absent_belief() {
     assert_eq!(carrier_revision(&env, &order3).await, 0);
 
     // A non-object `modules` and a non-array `belief` reject without rewrite.
-    let array_modules = seed_carrier(&env, &env.character_id, "ArrModules", serde_json::json!([1, 2, 3])).await;
+    let array_modules = seed_carrier(
+        &env,
+        &env.character_id,
+        "ArrModules",
+        serde_json::json!([1, 2, 3]),
+    )
+    .await;
     let refused = core
         .record_character_tom(
             &principal,
             env.character_id.clone(),
-            tom_request(WORLD, &env.binding_id, &array_modules, 0, &env.character_id, "x", 1),
+            tom_request(
+                WORLD,
+                &env.binding_id,
+                &array_modules,
+                0,
+                &env.character_id,
+                "x",
+                1,
+            ),
         )
         .await
         .unwrap_err();
-    assert_actor_conflict(refused);
+    assert_actor_conflict(&refused);
     assert_eq!(
         carrier_modules_json(&env, &array_modules).await,
         "[1,2,3]",
@@ -4590,11 +4752,19 @@ async fn retained_tom_module_shape_and_absent_belief() {
         .record_character_tom(
             &principal,
             env.character_id.clone(),
-            tom_request(WORLD, &env.binding_id, &object_belief, 0, &env.character_id, "x", 1),
+            tom_request(
+                WORLD,
+                &env.binding_id,
+                &object_belief,
+                0,
+                &env.character_id,
+                "x",
+                1,
+            ),
         )
         .await
         .unwrap_err();
-    assert_actor_conflict(refused);
+    assert_actor_conflict(&refused);
     assert_eq!(
         carrier_modules_json(&env, &object_belief).await,
         "{\"belief\":{\"legacy\":true}}",
@@ -4603,13 +4773,27 @@ async fn retained_tom_module_shape_and_absent_belief() {
 
     // Invalid persisted JSON is a distinguishable refusal that never
     // overwrites the bytes, on both record and list.
-    let invalid = seed_carrier(&env, &env.character_id, "InvalidJson", serde_json::json!({"belief": []})).await;
+    let invalid = seed_carrier(
+        &env,
+        &env.character_id,
+        "InvalidJson",
+        serde_json::json!({"belief": []}),
+    )
+    .await;
     set_carrier_modules_text(&env, &invalid, "{\"belief\": [").await;
     let refused = core
         .record_character_tom(
             &principal,
             env.character_id.clone(),
-            tom_request(WORLD, &env.binding_id, &invalid, 0, &env.character_id, "x", 1),
+            tom_request(
+                WORLD,
+                &env.binding_id,
+                &invalid,
+                0,
+                &env.character_id,
+                "x",
+                1,
+            ),
         )
         .await
         .unwrap_err();
@@ -4641,7 +4825,15 @@ async fn retained_tom_module_shape_and_absent_belief() {
     core.record_character_tom(
         &principal,
         env.character_id.clone(),
-        tom_request(WORLD, &env.binding_id, &absent, 0, &env.character_id, "empty ok", 1),
+        tom_request(
+            WORLD,
+            &env.binding_id,
+            &absent,
+            0,
+            &env.character_id,
+            "empty ok",
+            1,
+        ),
     )
     .await
     .expect("an absent belief member admits");
@@ -4660,7 +4852,15 @@ async fn retained_tom_module_shape_and_absent_belief() {
     core.record_character_tom(
         &principal,
         env.character_id.clone(),
-        tom_request(WORLD, &env.binding_id, &mixed, 0, &env.character_id, "mixed", 1),
+        tom_request(
+            WORLD,
+            &env.binding_id,
+            &mixed,
+            0,
+            &env.character_id,
+            "mixed",
+            1,
+        ),
     )
     .await
     .expect("unknown sibling keys do not block a record");
@@ -4687,6 +4887,7 @@ async fn retained_tom_module_shape_and_absent_belief() {
 /// `::corpus_and_row_caps_fail_closed_before_materialization`,
 /// `::oversize_belief_array_rejects_via_db_probe_without_panic` and
 /// `::record_rejects_201st_belief_row_without_mutation`.
+#[allow(clippy::too_many_lines)] // one ToM ordinal/corpus cap journey asserted end to end
 #[tokio::test]
 async fn retained_tom_physical_ordinal_and_corpus_caps() {
     let env = seed_env().await;
@@ -4796,7 +4997,15 @@ async fn retained_tom_physical_ordinal_and_corpus_caps() {
         .record_character_tom(
             &principal2,
             env2.character_id.clone(),
-            tom_request(WORLD, &env2.binding_id, &full, 0, &env2.character_id, "201st", 1),
+            tom_request(
+                WORLD,
+                &env2.binding_id,
+                &full,
+                0,
+                &env2.character_id,
+                "201st",
+                1,
+            ),
         )
         .await
         .unwrap_err();
@@ -4838,11 +5047,25 @@ async fn retained_tom_physical_ordinal_and_corpus_caps() {
 async fn retained_tom_derivative_history_and_binding_scoped_timestamps() {
     let env = seed_env().await;
     let (core, principal) = open_core(&env).await;
-    let alive = seed_carrier(&env, &env.character_id, "AliveCarrier", serde_json::json!({"belief": []})).await;
+    let alive = seed_carrier(
+        &env,
+        &env.character_id,
+        "AliveCarrier",
+        serde_json::json!({"belief": []}),
+    )
+    .await;
     core.record_character_tom(
         &principal,
         env.character_id.clone(),
-        tom_request(WORLD, &env.binding_id, &alive, 0, &env.character_id, "one", 1),
+        tom_request(
+            WORLD,
+            &env.binding_id,
+            &alive,
+            0,
+            &env.character_id,
+            "one",
+            1,
+        ),
     )
     .await
     .expect("record");
@@ -4852,7 +5075,13 @@ async fn retained_tom_derivative_history_and_binding_scoped_timestamps() {
     insert_derivative(&env, "ms_latest", &alive, "2099-01-03T00:00:00Z").await;
 
     // A deleted carrier's large history never surfaces.
-    let deleted = seed_carrier(&env, &env.character_id, "StaleCarrier", serde_json::json!({"belief": []})).await;
+    let deleted = seed_carrier(
+        &env,
+        &env.character_id,
+        "StaleCarrier",
+        serde_json::json!({"belief": []}),
+    )
+    .await;
     for i in 0..50 {
         insert_derivative(
             &env,
@@ -4916,6 +5145,7 @@ async fn retained_tom_derivative_history_and_binding_scoped_timestamps() {
 /// `::storage_failure_is_internal_not_not_found`,
 /// `::summary_patch_does_not_clobber_tom_modules_on_carrier` and
 /// `::tom_cas_bumps_revision_blocking_stale_summary_patch`.
+#[allow(clippy::too_many_lines)] // one ToM revision-domain journey asserted end to end
 #[tokio::test]
 async fn retained_tom_revision_domain_storage_error_and_summary_interaction() {
     let env = seed_env().await;
@@ -4945,7 +5175,15 @@ async fn retained_tom_revision_domain_storage_error_and_summary_interaction() {
             .record_character_tom(
                 &principal,
                 env.character_id.clone(),
-                tom_request(WORLD, &env.binding_id, &carrier, extreme, &env.character_id, "x", 1),
+                tom_request(
+                    WORLD,
+                    &env.binding_id,
+                    &carrier,
+                    extreme,
+                    &env.character_id,
+                    "x",
+                    1,
+                ),
             )
             .await
             .unwrap_err();
@@ -4967,7 +5205,7 @@ async fn retained_tom_revision_domain_storage_error_and_summary_interaction() {
         )
         .await
         .unwrap_err();
-    assert_actor_conflict(near_max);
+    assert_actor_conflict(&near_max);
     assert_eq!(mind_state_count(&env).await, 0);
     assert_eq!(carrier_revision(&env, &carrier).await, 0);
 
@@ -4984,7 +5222,15 @@ async fn retained_tom_revision_domain_storage_error_and_summary_interaction() {
         .record_character_tom(
             &principal,
             env.character_id.clone(),
-            tom_request(WORLD, &env.binding_id, &carrier, 0, &env.character_id, "x", 1),
+            tom_request(
+                WORLD,
+                &env.binding_id,
+                &carrier,
+                0,
+                &env.character_id,
+                "x",
+                1,
+            ),
         )
         .await
         .unwrap_err();
@@ -5008,7 +5254,15 @@ async fn retained_tom_revision_domain_storage_error_and_summary_interaction() {
         .record_character_tom(
             &principal2,
             env2.character_id.clone(),
-            tom_request(WORLD, &env2.binding_id, &carrier2, 0, &env2.character_id, "one", 1),
+            tom_request(
+                WORLD,
+                &env2.binding_id,
+                &carrier2,
+                0,
+                &env2.character_id,
+                "one",
+                1,
+            ),
         )
         .await
         .expect("record");
@@ -5025,7 +5279,10 @@ async fn retained_tom_revision_domain_storage_error_and_summary_interaction() {
         .await
         .expect("summary patch admits");
     assert_eq!(
-        patched.body.as_ref().and_then(|body| body.summary.as_deref()),
+        patched
+            .body
+            .as_ref()
+            .and_then(|body| body.summary.as_deref()),
         Some("updated carrier summary")
     );
     assert_eq!(patched.revision, Some(2));
@@ -5037,7 +5294,11 @@ async fn retained_tom_revision_domain_storage_error_and_summary_interaction() {
         )
         .await
         .expect("list after summary edit");
-    assert_eq!(listed.items.len(), 1, "the belief row survives a summary edit");
+    assert_eq!(
+        listed.items.len(),
+        1,
+        "the belief row survives a summary edit"
+    );
 
     let stale = core2
         .patch_actor_knowledge_entry(

@@ -2,7 +2,7 @@
 //!
 //! The whole journey runs the REAL `nexus42` binary against the hermetic
 //! direct-core actor fixture ([`direct_actor::DirectActor`]): no daemon
-//! fixture, no HTTP client, no Node child. Every KnowledgeEntry is authored
+//! fixture, no HTTP client, no Node child. Every `KnowledgeEntry` is authored
 //! through the shipped `creator character knowledge` / `creator world kb`
 //! verbs, so the five viewpoints below are the core's own admitted projections
 //! — a Character viewpoint stays the strict holder-filtered view, the Creator
@@ -110,6 +110,7 @@ fn add_entry(
 
 /// Build the full RN-ACT-4 graph through the shipped CLI verbs and the
 /// fixture's authorized core seeds.
+#[allow(clippy::similar_names)] // paired a/b fixture ids intentionally cluster
 async fn seed(actor: &DirectActor) -> RnAct4Graph {
     let creator_id = actor.creator_id().to_string();
     let world_w1 = actor.create_world("RN-ACT-4 World One").await;
@@ -249,7 +250,12 @@ fn view_character_ids(
     world_id: &str,
     binding_id: &str,
 ) -> BTreeSet<String> {
-    entry_ids(&view_character_cli(actor, character_id, world_id, binding_id))
+    entry_ids(&view_character_cli(
+        actor,
+        character_id,
+        world_id,
+        binding_id,
+    ))
 }
 
 /// Index a view page by stable `entry_id`. Duplicate ids mean a copied row.
@@ -302,11 +308,12 @@ async fn read_only_pool(actor: &DirectActor) -> sqlx::SqlitePool {
 /// The `knowledge_holders` registry row id of one stored Creator.
 async fn creator_holder(actor: &DirectActor, creator_id: &str) -> String {
     let pool = read_only_pool(actor).await;
-    let holder = sqlx::query_scalar("SELECT holder_entry_id FROM knowledge_holders WHERE creator_id = ?")
-        .bind(creator_id)
-        .fetch_one(&pool)
-        .await
-        .expect("stored Creator holder");
+    let holder =
+        sqlx::query_scalar("SELECT holder_entry_id FROM knowledge_holders WHERE creator_id = ?")
+            .bind(creator_id)
+            .fetch_one(&pool)
+            .await
+            .expect("stored Creator holder");
     pool.close().await;
     holder
 }
@@ -314,13 +321,12 @@ async fn creator_holder(actor: &DirectActor, creator_id: &str) -> String {
 /// The `knowledge_holders` registry row id of one stored Character.
 async fn character_holder(actor: &DirectActor, character_id: &str) -> String {
     let pool = read_only_pool(actor).await;
-    let holder = sqlx::query_scalar(
-        "SELECT holder_entry_id FROM knowledge_holders WHERE character_id = ?",
-    )
-    .bind(character_id)
-    .fetch_one(&pool)
-    .await
-    .expect("stored Character holder");
+    let holder =
+        sqlx::query_scalar("SELECT holder_entry_id FROM knowledge_holders WHERE character_id = ?")
+            .bind(character_id)
+            .fetch_one(&pool)
+            .await
+            .expect("stored Character holder");
     pool.close().await;
     holder
 }
@@ -612,8 +618,12 @@ async fn rn_act4_five_views_share_row_identity_without_copies() {
     // Character and to the Creator's management review, hidden from every other
     // Character.
     let private_entry = add_character_private(&actor, &g.character_a, NAME_A_PRIVATE);
-    let a_private =
-        page_index(&view_character_cli(&actor, &g.character_a, &g.world_w1, &g.bind_a_w1));
+    let a_private = page_index(&view_character_cli(
+        &actor,
+        &g.character_a,
+        &g.world_w1,
+        &g.bind_a_w1,
+    ));
     let creator_private = page_index(&view_creator_cli(&actor, &g.creator_id, &g.world_w1));
     let private_item = named_item(&a_private, NAME_A_PRIVATE);
     assert_eq!(private_item["entry_id"], private_entry);
@@ -635,8 +645,12 @@ async fn rn_act4_five_views_share_row_identity_without_copies() {
     let shared = edit_audience(&actor, &g.character_a, &private_entry, 0, "shared", None);
     assert!(shared["item"]["holder_entry_id"].is_null());
     assert!(shared["item"]["disclosure"].is_null());
-    let a_shared =
-        page_index(&view_character_cli(&actor, &g.character_a, &g.world_w1, &g.bind_a_w1));
+    let a_shared = page_index(&view_character_cli(
+        &actor,
+        &g.character_a,
+        &g.world_w1,
+        &g.bind_a_w1,
+    ));
     assert_eq!(
         named_item(&a_shared, NAME_A_PRIVATE)["entry_id"],
         private_entry

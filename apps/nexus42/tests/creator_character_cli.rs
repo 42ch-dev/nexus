@@ -16,7 +16,7 @@ use direct_actor::DirectActor;
 use serde_json::Value;
 use std::process::Output;
 
-/// WorldSheet `KeyBlock` ids the direct-core fixture seeds (stored `kb_<hex>`).
+/// `WorldSheet` `KeyBlock` ids the direct-core fixture seeds (stored `kb_<hex>`).
 const SHEET_A: &str = "kb_5ee70001";
 const SHEET_B: &str = "kb_5ee70002";
 const SHEET_RETAINED: &str = "kb_5ee70003";

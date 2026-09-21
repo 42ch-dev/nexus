@@ -658,8 +658,7 @@ mod compute_seam {
                 .await
                 .unwrap()
                 .flatten();
-        let body: serde_json::Value =
-            serde_json::from_str(&raw.expect("body present")).unwrap();
+        let body: serde_json::Value = serde_json::from_str(&raw.expect("body present")).unwrap();
         body["state"]["character"]["current_hp"].as_i64().unwrap()
     }
 
@@ -726,8 +725,7 @@ mod compute_seam {
             ),
         )
         .unwrap();
-        let other_db =
-            nexus_home_layout::workspace_state_db_path(&other_home, OTHER_CREATOR, SLUG);
+        let other_db = nexus_home_layout::workspace_state_db_path(&other_home, OTHER_CREATOR, SLUG);
         {
             let guarded = nexus_local_db::init_engine_pool(&other_db).await.unwrap();
             nexus_local_db::ensure_creator_row(guarded.pool(), OTHER_CREATOR, "Other")

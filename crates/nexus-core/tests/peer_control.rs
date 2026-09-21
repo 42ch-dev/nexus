@@ -397,7 +397,9 @@ async fn peer_tool_admission_is_scoped_by_manifest_negotiation_allowlist_and_res
         },
         "the allowlist narrows the negotiated manifest to its exact id set"
     );
-    let entry = registry.get(TOOL_ALPHA).expect("admitted tool is registered");
+    let entry = registry
+        .get(TOOL_ALPHA)
+        .expect("admitted tool is registered");
     assert_eq!(entry.peer_id, PEER_ADMITTED);
     assert_eq!(
         String::from(entry.descriptor.capability_id.clone()),

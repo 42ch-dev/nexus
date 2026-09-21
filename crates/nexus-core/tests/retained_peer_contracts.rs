@@ -39,12 +39,12 @@ use futures_util::{SinkExt, StreamExt};
 use nexus_core::connect::table::ConnectResponderAdapter;
 use nexus_core::connect::{
     peer_tool_table, spawn_accept_loop, start_peer_tools_lane, ws_config, PeerConfigHolder,
-    PeerConfigSnapshot, PeerResponderOptions, PeerSessionManager, PeerToolsConfig,
-    DEFAULT_MAX_ENVELOPE_BYTES, WsTransport,
+    PeerConfigSnapshot, PeerResponderOptions, PeerSessionManager, PeerToolsConfig, WsTransport,
+    DEFAULT_MAX_ENVELOPE_BYTES,
 };
-use nexus_core::execution::peer_tools::{PeerInvokeError, PeerResponder};
 #[cfg(feature = "embedded-mcp")]
 use nexus_core::execution::peer_tools::invoke_peer_tool;
+use nexus_core::execution::peer_tools::{PeerInvokeError, PeerResponder};
 use nexus_spoke_adapter::{HostCapabilityManifest, SpokeResult};
 use serde_json::{json, Value};
 use serial_test::serial;
@@ -262,13 +262,10 @@ async fn dial_with_manifest(
     let stream = TcpStream::connect(addr)
         .await
         .map_err(|e| RemoteAdapterError::Handshake(format!("tcp connect failed: {e}")))?;
-    let (ws, _) = tokio_tungstenite::client_async_with_config(
-        url,
-        stream,
-        Some(ws_config_for_tests()),
-    )
-    .await
-    .map_err(|e| RemoteAdapterError::Handshake(format!("ws upgrade failed: {e}")))?;
+    let (ws, _) =
+        tokio_tungstenite::client_async_with_config(url, stream, Some(ws_config_for_tests()))
+            .await
+            .map_err(|e| RemoteAdapterError::Handshake(format!("ws upgrade failed: {e}")))?;
     let transport: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
     connect_remote_adapter(RemoteAdapterOptions {
         transport,
@@ -509,8 +506,8 @@ async fn ws_transport_fails_closed_on_over_cap_and_non_binary_frames() {
 /// once. Narrowed to the WS half (see the round-trip case).
 #[tokio::test]
 async fn ws_transport_golden_path_handshake_and_reverse_invoke() {
-    let (client, server) = ws_pair().await;
     const SEED_CLIENT: [u8; 32] = [0x11; 32];
+    let (client, server) = ws_pair().await;
 
     let peer_id_client = derive_peer_id_from_ed25519_pubkey(&pubkey(SEED_CLIENT));
     let responder = connect_responder(ConnectResponderOptions {
@@ -561,7 +558,9 @@ async fn ws_transport_golden_path_handshake_and_reverse_invoke() {
         "test-client"
     );
 
-    let result = adapter.invoke_tool(TOOL_PROBE_ECHO, json!({ "n": 1 })).await;
+    let result = adapter
+        .invoke_tool(TOOL_PROBE_ECHO, json!({ "n": 1 }))
+        .await;
     assert_eq!(
         result,
         SpokeResult::Ok(json!({ "echo": { "n": 1 } })),
@@ -593,7 +592,10 @@ async fn reconnect_for_a_peer_replaces_the_session_and_its_tool_rows() {
         8,
         vec![peer_id.clone()],
         HashMap::from([(peer_id.clone(), pubkey(seed_peer(0)))]),
-        vec![TOOL_RECONNECT_REPLACED.to_owned(), TOOL_RECONNECT_ECHO.to_owned()],
+        vec![
+            TOOL_RECONNECT_REPLACED.to_owned(),
+            TOOL_RECONNECT_ECHO.to_owned(),
+        ],
     )
     .await;
 
@@ -609,7 +611,11 @@ async fn reconnect_for_a_peer_replaces_the_session_and_its_tool_rows() {
         .await
     );
     assert_eq!(
-        harness.sessions.get(&peer_id).expect("session").admitted_ids,
+        harness
+            .sessions
+            .get(&peer_id)
+            .expect("session")
+            .admitted_ids,
         vec![TOOL_RECONNECT_REPLACED.to_owned()]
     );
     assert_eq!(harness.sessions.session_count(), 1);
@@ -694,7 +700,10 @@ async fn handshake_rejections_fail_fast_with_zero_session_state() {
     let harness = start_server(8, vec![keyless.clone()], HashMap::new(), Vec::new()).await;
     let started = Instant::now();
     let refused = dial(harness.addr, seed_peer(2), &[TOOL_HANDSHAKE]).await;
-    assert!(refused.is_err(), "a missing peer key must fail the handshake");
+    assert!(
+        refused.is_err(),
+        "a missing peer key must fail the handshake"
+    );
     assert!(
         started.elapsed() < Duration::from_secs(5),
         "handshake rejection must be immediate (no timeout park)"
@@ -900,7 +909,9 @@ async fn accept_gate_bounds_registered_and_in_flight_connections() {
 #[cfg(feature = "embedded-mcp")]
 use nexus_core::connect::mcp_bridge::{CatalogRow, McpBackend, ToolCallOutcome};
 #[cfg(feature = "embedded-mcp")]
-use nexus_core::connect::mcp_embedded::{start_embedded_mcp_server, EmbeddedMcpServer, EmbeddedShutdown};
+use nexus_core::connect::mcp_embedded::{
+    start_embedded_mcp_server, EmbeddedMcpServer, EmbeddedShutdown,
+};
 #[cfg(feature = "embedded-mcp")]
 use nexus_core::connect::table::{mcp_catalog_admission, mcp_catalog_output_root_object};
 #[cfg(feature = "embedded-mcp")]
@@ -968,13 +979,11 @@ impl McpBackend for PeerRegistryBackend {
                         wire_code,
                     })
                 }
-                Err(PeerInvokeError::Timeout { message }) => {
-                    Ok(ToolCallOutcome::ExecutedError {
-                        code: "service_unavailable".to_owned(),
-                        message,
-                        wire_code: None,
-                    })
-                }
+                Err(PeerInvokeError::Timeout { message }) => Ok(ToolCallOutcome::ExecutedError {
+                    code: "service_unavailable".to_owned(),
+                    message,
+                    wire_code: None,
+                }),
                 Err(PeerInvokeError::Disconnected { message })
                 | Err(PeerInvokeError::Internal { message }) => {
                     Ok(ToolCallOutcome::ExecutedError {
@@ -1591,9 +1600,13 @@ async fn reload_adopts_grants_at_session_boundaries_only() {
     // A reconnect re-evaluates against the FRESH snapshot: the new grant is
     // admitted and the retired row is gone.
     live.close();
-    let reconnected = dial(handle.addr, seed_peer(8), &[TOOL_ROTATED_OLD, TOOL_ROTATED_NEW])
-        .await
-        .expect("reconnect against the reloaded snapshot");
+    let reconnected = dial(
+        handle.addr,
+        seed_peer(8),
+        &[TOOL_ROTATED_OLD, TOOL_ROTATED_NEW],
+    )
+    .await
+    .expect("reconnect against the reloaded snapshot");
     reconnected.register_tool_handler(TOOL_ROTATED_NEW, echo_handler());
     assert!(
         wait_until(

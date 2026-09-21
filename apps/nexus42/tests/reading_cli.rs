@@ -145,18 +145,17 @@ async fn progress_set_get_round_trip() {
     let env = fresh_env().await;
     let work_id = env.work_id.as_str();
 
-    let set = env
-        .cli(&[
-            "creator",
-            "reading",
-            "progress",
-            "set",
-            work_id,
-            "--chapter",
-            "3",
-            "--scroll",
-            "7500",
-        ]);
+    let set = env.cli(&[
+        "creator",
+        "reading",
+        "progress",
+        "set",
+        work_id,
+        "--chapter",
+        "3",
+        "--scroll",
+        "7500",
+    ]);
     assert!(set.status.success(), "set failed: {}", stderr(&set));
     assert!(
         stdout(&set).contains("Saved reading progress."),
@@ -165,16 +164,15 @@ async fn progress_set_get_round_trip() {
     );
     assert!(stdout(&set).contains("7500"), "{}", stdout(&set));
 
-    let get = env
-        .cli(&[
-            "creator",
-            "reading",
-            "progress",
-            "get",
-            work_id,
-            "--chapter",
-            "3",
-        ]);
+    let get = env.cli(&[
+        "creator",
+        "reading",
+        "progress",
+        "get",
+        work_id,
+        "--chapter",
+        "3",
+    ]);
     assert!(get.status.success(), "get failed: {}", stderr(&get));
     assert!(stdout(&get).contains("7500"), "{}", stdout(&get));
     assert!(stdout(&get).contains(work_id), "{}", stdout(&get));
@@ -184,22 +182,20 @@ async fn progress_set_get_round_trip() {
 async fn progress_set_json_emits_dto_verbatim() {
     let env = fresh_env().await;
 
-    let out = env
-        .cli(&[
-            "creator",
-            "reading",
-            "progress",
-            "set",
-            &env.work_id,
-            "--chapter",
-            "2",
-            "--scroll",
-            "1234",
-            "--json",
-        ]);
+    let out = env.cli(&[
+        "creator",
+        "reading",
+        "progress",
+        "set",
+        &env.work_id,
+        "--chapter",
+        "2",
+        "--scroll",
+        "1234",
+        "--json",
+    ]);
     assert!(out.status.success(), "set --json failed: {}", stderr(&out));
-    let json: serde_json::Value =
-        serde_json::from_str(&stdout(&out)).expect("json output");
+    let json: serde_json::Value = serde_json::from_str(&stdout(&out)).expect("json output");
     assert_eq!(json["work_id"], env.work_id);
     assert_eq!(json["chapter"], 2);
     assert_eq!(json["scroll_progress"], 1234);
@@ -211,43 +207,40 @@ async fn progress_clear_removes_row() {
     let env = fresh_env().await;
     let work_id = env.work_id.as_str();
 
-    let _ = env
-        .cli(&[
-            "creator",
-            "reading",
-            "progress",
-            "set",
-            work_id,
-            "--chapter",
-            "1",
-            "--scroll",
-            "500",
-        ]);
-    let clear = env
-        .cli(&[
-            "creator",
-            "reading",
-            "progress",
-            "clear",
-            work_id,
-            "--chapter",
-            "1",
-        ]);
+    let _ = env.cli(&[
+        "creator",
+        "reading",
+        "progress",
+        "set",
+        work_id,
+        "--chapter",
+        "1",
+        "--scroll",
+        "500",
+    ]);
+    let clear = env.cli(&[
+        "creator",
+        "reading",
+        "progress",
+        "clear",
+        work_id,
+        "--chapter",
+        "1",
+    ]);
     assert!(clear.status.success(), "clear failed: {}", stderr(&clear));
     assert!(stdout(&clear).contains("Cleared"), "{}", stdout(&clear));
 
     // After the clear the core reports the default (0) progress.
-    let get = env
-        .cli(&[
-            "creator",
-            "reading",
-            "progress",
-            "get",
-            work_id,
-            "--chapter",
-            "1",
-            "--json",
-        ]);
+    let get = env.cli(&[
+        "creator",
+        "reading",
+        "progress",
+        "get",
+        work_id,
+        "--chapter",
+        "1",
+        "--json",
+    ]);
     assert!(
         get.status.success(),
         "get after clear failed: {}",
@@ -262,29 +255,27 @@ async fn progress_clear_json_prints_empty_stdout() {
     let env = fresh_env().await;
     let work_id = env.work_id.as_str();
 
-    let _ = env
-        .cli(&[
-            "creator",
-            "reading",
-            "progress",
-            "set",
-            work_id,
-            "--chapter",
-            "2",
-            "--scroll",
-            "1000",
-        ]);
-    let out = env
-        .cli(&[
-            "creator",
-            "reading",
-            "progress",
-            "clear",
-            work_id,
-            "--chapter",
-            "2",
-            "--json",
-        ]);
+    let _ = env.cli(&[
+        "creator",
+        "reading",
+        "progress",
+        "set",
+        work_id,
+        "--chapter",
+        "2",
+        "--scroll",
+        "1000",
+    ]);
+    let out = env.cli(&[
+        "creator",
+        "reading",
+        "progress",
+        "clear",
+        work_id,
+        "--chapter",
+        "2",
+        "--json",
+    ]);
     assert!(
         out.status.success(),
         "clear --json failed: {}",
@@ -301,16 +292,15 @@ async fn progress_clear_json_prints_empty_stdout() {
 async fn progress_clear_unknown_work_surfaces_core_error() {
     let env = fresh_env().await;
 
-    let out = env
-        .cli(&[
-            "creator",
-            "reading",
-            "progress",
-            "clear",
-            "wrk_does_not_exist",
-            "--chapter",
-            "1",
-        ]);
+    let out = env.cli(&[
+        "creator",
+        "reading",
+        "progress",
+        "clear",
+        "wrk_does_not_exist",
+        "--chapter",
+        "1",
+    ]);
     assert!(!out.status.success(), "unknown work must fail");
     let err = stderr(&out);
     assert!(
@@ -323,18 +313,17 @@ async fn progress_clear_unknown_work_surfaces_core_error() {
 async fn progress_set_rejects_out_of_range_scroll() {
     let env = fresh_env().await;
 
-    let out = env
-        .cli(&[
-            "creator",
-            "reading",
-            "progress",
-            "set",
-            &env.work_id,
-            "--chapter",
-            "1",
-            "--scroll",
-            "20000",
-        ]);
+    let out = env.cli(&[
+        "creator",
+        "reading",
+        "progress",
+        "set",
+        &env.work_id,
+        "--chapter",
+        "1",
+        "--scroll",
+        "20000",
+    ]);
     assert!(!out.status.success(), "out-of-range scroll must fail");
     assert!(
         stderr(&out).contains("--scroll"),
@@ -352,16 +341,15 @@ async fn progress_set_rejects_out_of_range_scroll() {
 async fn progress_get_unknown_work_surfaces_core_error() {
     let env = fresh_env().await;
 
-    let out = env
-        .cli(&[
-            "creator",
-            "reading",
-            "progress",
-            "get",
-            "wrk_does_not_exist",
-            "--chapter",
-            "1",
-        ]);
+    let out = env.cli(&[
+        "creator",
+        "reading",
+        "progress",
+        "get",
+        "wrk_does_not_exist",
+        "--chapter",
+        "1",
+    ]);
     assert!(!out.status.success(), "unknown work must fail");
     let err = stderr(&out);
     assert!(
@@ -380,41 +368,39 @@ async fn annotation_lifecycle_round_trip() {
     let env = fresh_env().await;
     let work_id = env.work_id.as_str();
 
-    let add = env
-        .cli(&[
-            "creator",
-            "reading",
-            "annotation",
-            "add",
-            work_id,
-            "--chapter",
-            "5",
-            "--start",
-            "10",
-            "--end",
-            "22",
-            "--selected-text",
-            "the gate groaned",
-            "--color",
-            "yellow",
-            "--note",
-            "check pacing",
-        ]);
+    let add = env.cli(&[
+        "creator",
+        "reading",
+        "annotation",
+        "add",
+        work_id,
+        "--chapter",
+        "5",
+        "--start",
+        "10",
+        "--end",
+        "22",
+        "--selected-text",
+        "the gate groaned",
+        "--color",
+        "yellow",
+        "--note",
+        "check pacing",
+    ]);
     assert!(add.status.success(), "add failed: {}", stderr(&add));
     let added = stdout(&add);
     assert!(added.contains("Created annotation"), "{added}");
 
-    let list = env
-        .cli(&[
-            "creator",
-            "reading",
-            "annotation",
-            "list",
-            work_id,
-            "--chapter",
-            "5",
-            "--json",
-        ]);
+    let list = env.cli(&[
+        "creator",
+        "reading",
+        "annotation",
+        "list",
+        work_id,
+        "--chapter",
+        "5",
+        "--json",
+    ]);
     assert!(list.status.success(), "list failed: {}", stderr(&list));
     let json: serde_json::Value = serde_json::from_str(&stdout(&list)).expect("json list");
     let items = json["items"].as_array().expect("items array");
@@ -425,38 +411,35 @@ async fn annotation_lifecycle_round_trip() {
     assert_eq!(items[0]["color"], "yellow");
     assert_eq!(items[0]["note"], "check pacing");
 
-    let patch = env
-        .cli(&[
-            "creator",
-            "reading",
-            "annotation",
-            "patch",
-            annotation_id,
-            "--color",
-            "pink",
-            "--note",
-            "rewritten",
-        ]);
+    let patch = env.cli(&[
+        "creator",
+        "reading",
+        "annotation",
+        "patch",
+        annotation_id,
+        "--color",
+        "pink",
+        "--note",
+        "rewritten",
+    ]);
     assert!(patch.status.success(), "patch failed: {}", stderr(&patch));
 
-    let list2 = env
-        .cli(&[
-            "creator",
-            "reading",
-            "annotation",
-            "list",
-            work_id,
-            "--chapter",
-            "5",
-            "--json",
-        ]);
+    let list2 = env.cli(&[
+        "creator",
+        "reading",
+        "annotation",
+        "list",
+        work_id,
+        "--chapter",
+        "5",
+        "--json",
+    ]);
     let json2: serde_json::Value = serde_json::from_str(&stdout(&list2)).expect("json list 2");
     let item2 = &json2["items"][0];
     assert_eq!(item2["color"], "pink");
     assert_eq!(item2["note"], "rewritten");
 
-    let remove = env
-        .cli(&["creator", "reading", "annotation", "remove", annotation_id]);
+    let remove = env.cli(&["creator", "reading", "annotation", "remove", annotation_id]);
     assert!(
         remove.status.success(),
         "remove failed: {}",
@@ -468,16 +451,15 @@ async fn annotation_lifecycle_round_trip() {
         stdout(&remove)
     );
 
-    let list3 = env
-        .cli(&[
-            "creator",
-            "reading",
-            "annotation",
-            "list",
-            work_id,
-            "--chapter",
-            "5",
-        ]);
+    let list3 = env.cli(&[
+        "creator",
+        "reading",
+        "annotation",
+        "list",
+        work_id,
+        "--chapter",
+        "5",
+    ]);
     assert!(list3.status.success());
     assert!(
         stdout(&list3).contains("No annotations"),
@@ -490,28 +472,26 @@ async fn annotation_lifecycle_round_trip() {
 async fn annotation_add_json_emits_dto() {
     let env = fresh_env().await;
 
-    let out = env
-        .cli(&[
-            "creator",
-            "reading",
-            "annotation",
-            "add",
-            &env.work_id,
-            "--chapter",
-            "1",
-            "--start",
-            "0",
-            "--end",
-            "5",
-            "--selected-text",
-            "text",
-            "--color",
-            "blue",
-            "--json",
-        ]);
+    let out = env.cli(&[
+        "creator",
+        "reading",
+        "annotation",
+        "add",
+        &env.work_id,
+        "--chapter",
+        "1",
+        "--start",
+        "0",
+        "--end",
+        "5",
+        "--selected-text",
+        "text",
+        "--color",
+        "blue",
+        "--json",
+    ]);
     assert!(out.status.success(), "add --json failed: {}", stderr(&out));
-    let json: serde_json::Value =
-        serde_json::from_str(&stdout(&out)).expect("json annotation");
+    let json: serde_json::Value = serde_json::from_str(&stdout(&out)).expect("json annotation");
     let annotation_id = json["annotation_id"].as_str().expect("annotation id");
     assert!(annotation_id.starts_with("ann_"), "{annotation_id}");
     assert_eq!(json["color"], "blue");
@@ -522,40 +502,38 @@ async fn annotation_add_json_emits_dto() {
 async fn annotation_patch_json_emits_dto() {
     let env = fresh_env().await;
 
-    let add = env
-        .cli(&[
-            "creator",
-            "reading",
-            "annotation",
-            "add",
-            &env.work_id,
-            "--chapter",
-            "1",
-            "--start",
-            "0",
-            "--end",
-            "5",
-            "--selected-text",
-            "text",
-            "--color",
-            "blue",
-            "--json",
-        ]);
+    let add = env.cli(&[
+        "creator",
+        "reading",
+        "annotation",
+        "add",
+        &env.work_id,
+        "--chapter",
+        "1",
+        "--start",
+        "0",
+        "--end",
+        "5",
+        "--selected-text",
+        "text",
+        "--color",
+        "blue",
+        "--json",
+    ]);
     assert!(add.status.success(), "add failed: {}", stderr(&add));
     let added: serde_json::Value = serde_json::from_str(&stdout(&add)).expect("json added");
     let annotation_id = added["annotation_id"].as_str().expect("annotation id");
 
-    let out = env
-        .cli(&[
-            "creator",
-            "reading",
-            "annotation",
-            "patch",
-            annotation_id,
-            "--color",
-            "green",
-            "--json",
-        ]);
+    let out = env.cli(&[
+        "creator",
+        "reading",
+        "annotation",
+        "patch",
+        annotation_id,
+        "--color",
+        "green",
+        "--json",
+    ]);
     assert!(
         out.status.success(),
         "patch --json failed: {}",
@@ -570,38 +548,36 @@ async fn annotation_patch_json_emits_dto() {
 async fn annotation_remove_json_prints_empty_stdout() {
     let env = fresh_env().await;
 
-    let add = env
-        .cli(&[
-            "creator",
-            "reading",
-            "annotation",
-            "add",
-            &env.work_id,
-            "--chapter",
-            "1",
-            "--start",
-            "0",
-            "--end",
-            "5",
-            "--selected-text",
-            "text",
-            "--color",
-            "blue",
-            "--json",
-        ]);
+    let add = env.cli(&[
+        "creator",
+        "reading",
+        "annotation",
+        "add",
+        &env.work_id,
+        "--chapter",
+        "1",
+        "--start",
+        "0",
+        "--end",
+        "5",
+        "--selected-text",
+        "text",
+        "--color",
+        "blue",
+        "--json",
+    ]);
     assert!(add.status.success(), "add failed: {}", stderr(&add));
     let added: serde_json::Value = serde_json::from_str(&stdout(&add)).expect("json added");
     let annotation_id = added["annotation_id"].as_str().expect("annotation id");
 
-    let out = env
-        .cli(&[
-            "creator",
-            "reading",
-            "annotation",
-            "remove",
-            annotation_id,
-            "--json",
-        ]);
+    let out = env.cli(&[
+        "creator",
+        "reading",
+        "annotation",
+        "remove",
+        annotation_id,
+        "--json",
+    ]);
     assert!(
         out.status.success(),
         "remove --json failed: {}",
@@ -618,24 +594,23 @@ async fn annotation_remove_json_prints_empty_stdout() {
 async fn annotation_add_rejects_invalid_color() {
     let env = fresh_env().await;
 
-    let out = env
-        .cli(&[
-            "creator",
-            "reading",
-            "annotation",
-            "add",
-            &env.work_id,
-            "--chapter",
-            "1",
-            "--start",
-            "0",
-            "--end",
-            "4",
-            "--selected-text",
-            "text",
-            "--color",
-            "purple",
-        ]);
+    let out = env.cli(&[
+        "creator",
+        "reading",
+        "annotation",
+        "add",
+        &env.work_id,
+        "--chapter",
+        "1",
+        "--start",
+        "0",
+        "--end",
+        "4",
+        "--selected-text",
+        "text",
+        "--color",
+        "purple",
+    ]);
     assert!(!out.status.success(), "invalid color must fail");
     assert!(
         stderr(&out).contains("yellow, blue, green, pink"),
@@ -648,8 +623,7 @@ async fn annotation_add_rejects_invalid_color() {
 async fn annotation_remove_unknown_id_surfaces_core_error() {
     let env = fresh_env().await;
 
-    let out = env
-        .cli(&["creator", "reading", "annotation", "remove", "ann_missing"]);
+    let out = env.cli(&["creator", "reading", "annotation", "remove", "ann_missing"]);
     assert!(!out.status.success(), "unknown annotation must fail");
     assert!(
         stderr(&out).contains("404") || stderr(&out).to_lowercase().contains("not found"),
@@ -662,16 +636,15 @@ async fn annotation_remove_unknown_id_surfaces_core_error() {
 async fn annotation_list_unknown_work_surfaces_core_error() {
     let env = fresh_env().await;
 
-    let out = env
-        .cli(&[
-            "creator",
-            "reading",
-            "annotation",
-            "list",
-            "wrk_does_not_exist",
-            "--chapter",
-            "1",
-        ]);
+    let out = env.cli(&[
+        "creator",
+        "reading",
+        "annotation",
+        "list",
+        "wrk_does_not_exist",
+        "--chapter",
+        "1",
+    ]);
     assert!(!out.status.success(), "unknown work must fail");
     let err = stderr(&out);
     assert!(
@@ -684,16 +657,15 @@ async fn annotation_list_unknown_work_surfaces_core_error() {
 async fn annotation_patch_unknown_id_surfaces_core_error() {
     let env = fresh_env().await;
 
-    let out = env
-        .cli(&[
-            "creator",
-            "reading",
-            "annotation",
-            "patch",
-            "ann_missing",
-            "--color",
-            "pink",
-        ]);
+    let out = env.cli(&[
+        "creator",
+        "reading",
+        "annotation",
+        "patch",
+        "ann_missing",
+        "--color",
+        "pink",
+    ]);
     assert!(!out.status.success(), "unknown annotation must fail");
     let err = stderr(&out);
     assert!(

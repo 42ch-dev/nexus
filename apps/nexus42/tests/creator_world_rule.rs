@@ -349,7 +349,10 @@ async fn json_summary_shape_projects_carrier_first_class() {
     assert_eq!(summary.kind, "prohibition");
     assert_eq!(summary.status.as_deref(), Some("active"));
     assert_eq!(summary.severity_hint.as_deref(), Some("error"));
-    assert_eq!(summary.statement.as_deref(), Some("At most three observers per event."));
+    assert_eq!(
+        summary.statement.as_deref(),
+        Some("At most three observers per event.")
+    );
     assert!(summary.target_entry_types.is_empty());
     assert_eq!(
         summary.constraint,
@@ -375,7 +378,10 @@ async fn malformed_carrier_rejects_naming_member_no_write() {
         (r"[1,2,3]", "constraint must be a JSON object"),
         (r#""tone""#, "constraint must be a JSON object"),
         // unknown family
-        (r#"{"family":"tone","module_key":"x"}"#, r#"unknown family "tone""#),
+        (
+            r#"{"family":"tone","module_key":"x"}"#,
+            r#"unknown family "tone""#,
+        ),
         // entry-level field outside the closed set
         (
             r#"{"family":"required_field","field":"body.plot"}"#,
