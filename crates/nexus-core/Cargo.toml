@@ -164,6 +164,10 @@ parking_lot = "0.12"
 nexus-wasm-host = { path = "../nexus-wasm-host" }
 nexus-orchestration = { path = "../nexus-orchestration" }
 nexus-knowledge = { path = "../nexus-knowledge" }
+# The WAT compiler named above: the capability/compute target compiles the
+# runaway module its sandbox-limit cases trap on (the same way
+# `nexus-wasm-host`'s own sandbox tests build their loop fixture).
+wat = "1"
 chrono.workspace = true
 serde_json.workspace = true
 async-trait.workspace = true
