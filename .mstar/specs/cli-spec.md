@@ -9,7 +9,7 @@
 **V1.45 Shipped amendments:** §6.2D generic `creator run <preset_id>` — see [creator-run-preset-entry.md](creator-run-preset-entry.md) (**Shipped Master**); legacy subcommand enum removed from clap surface (**the runner lost its CLI entry in v1.193 P2; the Master is the version history of that pre-retirement surface**).  
 **V1.46 Shipped amendment:** §6.2E FL-E stage subcommand block deleted (superseded by V1.45 generic preset runner — see changelog). Normative CLI IA: [creator-run-preset-entry.md](creator-run-preset-entry.md).  
 **V1.51 Shipped amendments:** §6.2K `creator world kb adopt` LLM metadata surfaces; `creator kb rescan --work <work_ref>` cross-chapter reconciliation; `creator world kb pending --missing-only` (T-A P0/P1/P2).
-**V1.52 Shipped amendments:** §6.2G.1 `creator world kb adopt --auto` + §6.2G.2 Legacy `creator kb --scope world` alias + deprecation for World KB CLI surface consolidation (closes R-V150KBED-01); both sections promoted to Normative (V1.158).
+**V1.52 Shipped amendments:** §6.2G.1 `creator world kb adopt --auto` + §6.2G.2 Legacy `creator kb --scope world` alias + deprecation for World KB CLI surface consolidation (closes R-V150KBED-01); both sections promoted to Normative (V1.158). **(The `--scope world` alias itself was deleted in v1.193 P2 — §6.2G.2 is now a historical record.)**
 **V1.54 P0 Draft overlay:** §6.2M ACP host write-tool CLI mappings — 6 new mutation-capable `nexus.*` host tools map to `creator world kb edit/adopt`, `creator world configure`, `creator works cron set`, `creator findings resolve`, and `creator pool` entry management (DF-46).
 **V1.64 P3 Draft overlay (retired in v1.193 P2):** §6.3 daemon Web UI serving — `daemon start` logged the Web UI URL; the `daemon ui`/`daemon web` convenience command and the §7.1 first-run step are deleted. See also [web-ui.md](./web-ui.md) §11 and [daemon-runtime.md](./daemon-runtime.md) §4.4 (historical host spec — its crate was deleted in v1.193 P2).
 **V1.65 Prepare amendment:** outline and chapter-structure editing becomes UI-first through the bundled Web UI chapter-content Daemon API. CLI parity for existing creator/run/chapter workflows is retained; no shipped CLI command is removed or renamed by this UI-first slice.
@@ -71,7 +71,7 @@ Ordinary CLI uses the proposed real `cli` default cohort; optional `connect-host
 - **定位**：Nexus CLI 是 **ACP-first 控制面** + **Creator 本地知识面**，不是执行逻辑聚合层。
 - **执行边界**：推理、工具调用、文件输出等执行能力统一经 ACP capability invocation。
 - **运行边界**：**Historical:** daemon runtime 曾是编排运行态的持有者，CLI 负责控制、声明与可观测。**Delivered (v1.193 P2):** 编排运行态由 TS/Electron 与 `nexus-core` execution 持有；CLI 不再提供 daemon 控制面。
-- **知识边界**：`SOUL` / `memory` 归属 Creator；CLI `creator kb --scope work` 仅表示活跃 Creator + workspace 下的**本地工作资料索引**；World/narrative KB 归属 `nexus-kb` + `nexus-narrative`，User/global knowledge 归属 `nexus-knowledge`。
+- **知识边界**：`SOUL` / `memory` 归属 Creator；CLI `creator kb`（work-scope 索引；`--scope` flag 已随 v1.193 P2 删除）仅表示活跃 Creator + workspace 下的**本地工作资料索引**；World/narrative KB 归属 `nexus-kb` + `nexus-narrative`，User/global knowledge 归属 `nexus-knowledge`。
 
 ---
 
@@ -228,13 +228,13 @@ V2 命令面按以下顶层执行（pre-release 允许破坏性调整）。**V1.
 **Sync 迁移（V1.35 target）**：
 
 - **Canonical**：`nexus42 platform sync pull|push|status`
-- **Deprecated alias (current only)**：`nexus42 sync ...` → 转发至 `platform sync`。**v1.193 target:** 删除该 alias；只保留 `platform sync`
+- **Delivered (v1.193 P2)：** 顶层 `nexus42 sync ...` alias 已删除 — 只保留 canonical `nexus42 platform sync pull|push|status|resolve`（§6.5）。**Historical:** 该 alias 曾转发至 `platform sync`（V1.35 deprecation），未保留 no-op。
 
 设计约束：
 
 - **Historical:** `daemon` 与 `acp` 分离。**Delivered (v1.193 P2):** 不再有 CLI daemon 运行控制；`acp` 保留 registry/probe/agent/session/policy/permission/run，删除 `acp status|doctor` 的 loopback 诊断。
-- `creator` 统一承载 Creator 本地知识资产：`soul` / `memory` / `kb --scope work` 作为 Creator 子命令，不再分散为平级心智入口。
-- `creator kb` 采用显式 scope 语义：本地默认 `work`；未来 `world` 必须路由到 World-scoped narrative KB（`nexus-kb` + `nexus-narrative`）；User/global knowledge 不属于 `creator kb`，应走 `nexus-knowledge` 对应的 CLI 入口。
+- `creator` 统一承载 Creator 本地知识资产：`soul` / `memory` / `kb`（work-scope 索引；`--scope` flag 已删除）作为 Creator 子命令，不再分散为平级心智入口。
+- `creator kb` 只承载 work-scope 文件索引（`--scope` flag 已随 v1.193 P2 删除，work 是唯一 scope）；World-scoped narrative KB 必须走 canonical `creator world kb ...`（`nexus-kb` + `nexus-narrative`）；User/global knowledge 不属于 `creator kb`，应走 `nexus-knowledge` 对应的 CLI 入口。
 
 ### 6.1 `nexus42 system`（系统命令组）
 
@@ -364,7 +364,7 @@ V2 命令面按以下顶层执行（pre-release 允许破坏性调整）。**V1.
 
 - `nexus42 creator soul ...`：维护 `SOUL.md`（`Personality` / `Experience`）
 - `nexus42 creator memory ...`：长期记忆与回顾沉淀管理
-- `nexus42 creator kb ...`：知识资产索引（默认 `--scope work`；`--scope world` 路由至 World-scoped narrative KB）
+- `nexus42 creator kb ...`：**work-scope** 知识资产索引（唯一 scope；World-scoped narrative KB 走 canonical `nexus42 creator world kb ...` — 历史 `--scope world` alias 已于 v1.193 P2 删除，见 §6.2G.2）
 - `nexus42 creator world ...`：World 创建、浏览与 narrative 状态查询（**V1.40**: `create` shipped; `list`/`show` read-only; platform fork 不在本地范围 — PD-01）
 - `nexus42 creator knowledge ...`：User knowledge / reference 管理入口（`nexus-knowledge`）
 - `nexus42 creator demo-seed ...`：演示数据填充（world + KB seed）
@@ -378,18 +378,18 @@ V2 命令面按以下顶层执行（pre-release 允许破坏性调整）。**V1.
 - `nexus42 creator kb queue-extract <work-entry-id> --world-id <id>` — enqueue a work entry for KB extraction into a World (idempotent)
 - `nexus42 creator kb extract-status [--job-id]` — check extraction job status (all jobs or specific)
 
-**V1.40 P2 note**: To debug the World context block injected into `novel-writing` prompts, use `nexus42 creator kb --scope world list/search` with `--world-id`. No new subcommand is needed; the prompt-time block is assembled by `nexus-moment-context-assembly` (`build_chapter_kb_block`) and passed as `world_kb_block` template var.
+**V1.40 P2 note (surface updated to the delivered form)**: To debug the World context block injected into `novel-writing` prompts, use the canonical World KB surface `nexus42 creator world kb list|show --world-id <id>` (the historical `creator kb --scope world` spelling is deleted — §6.2G.2). No new subcommand is needed; the prompt-time block is assembled by `nexus-moment-context-assembly` (`build_chapter_kb_block`) and passed as `world_kb_block` template var.
 
 `creator kb` scope 约束（对齐 [`entity-scope-model.md`](./entity-scope-model.md) §5.3）：
 
-- **`--scope work`（默认，V1.23 必须保留；V1.24 KCA-003 C2 强化为唯一已实现 scope）**：表示活跃 `creator_id` + 活跃 `workspace_slug` 下的 **CLI local work KB index**。**Delivered (v1.193 P2):** 实现直接读 `$HOME/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/...` 下的本地文件 / `index.json` 工作索引——原 daemon local API 优先路径（`/v1/daemon/kb/entries`）已随 daemon 删除，无 HTTP 回退。它是工作资料/文件索引，**不是** `nexus-kb` 的 World graph，**也不是** `nexus-knowledge` 的 User/global knowledge index。V1.24 的 daemon handler (`handlers/kb.rs`) 和 CLI (`creator kb`) 均已明确标注为 work-scope only。
-- **`--scope world`（V1.27+ shipped）**：要求可解析的 `world_id`（显式 flag 或当前 workspace binding），并路由到 `nexus-narrative` + `nexus-knowledge`。该路径查询的是 World-scoped narrative KB assets（KnowledgeEntries、SourceAnchors、graph/query primitives），不得回退到 `--scope work` 文件索引。
+- **`--scope work`（唯一 scope；V1.23 保留，V1.24 KCA-003 C2 强化为唯一已实现 scope）**：表示活跃 `creator_id` + 活跃 `workspace_slug` 下的 **CLI local work KB index**。**Delivered (v1.193 P2):** 实现直接读 `$HOME/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/...` 下的本地文件 / `index.json` 工作索引——原 daemon local API 优先路径（`/v1/daemon/kb/entries`）已随 daemon 删除，无 HTTP 回退。它是工作资料/文件索引，**不是** `nexus-kb` 的 World graph，**也不是** `nexus-knowledge` 的 User/global knowledge index。V1.24 的 daemon handler (`handlers/kb.rs`) 和 CLI (`creator kb`) 均已明确标注为 work-scope only。
+- **`--scope world`（retired alias — deleted in v1.193 P2；historical V1.27+ shipped）**：曾要求可解析的 `world_id`（显式 flag 或当前 workspace binding）并路由到 `nexus-narrative` + `nexus-knowledge`，查询 World-scoped narrative KB assets（KnowledgeEntries、SourceAnchors、graph/query primitives），且不得回退到 work-scope 文件索引。**Delivered:** 该 scope 现在只通过 canonical `nexus42 creator world kb ...` 暴露（§6.2G.2）；`creator kb` 只服务 work-scope 文件索引。
 - **User/global knowledge（未来目标）**：不得塞进 `creator kb` 或 `creator kb --scope user`。User-scoped global knowledge/reference material 应通过 `nexus-knowledge` 的 CLI 入口暴露；在六组顶层命令锁定下，推荐入口为 `nexus42 platform knowledge ...`（或等价的 platform/user knowledge 子命令），并由 `nexus-knowledge` 处理存储、标签检索与供 Moment assembly 读取的切片。**Durable roadmap:** DR-52 (user/global knowledge entry surface).
 
 命名与行为建议：
 
-- **V1.23 最小落地**：保持 `nexus42 creator kb` 作为现有命令组；所有无 `--scope` 调用按 `--scope work` 解释，并在 help/文案中写明“local work index”。
-- **推荐别名 / 迁移方向**：由于 `creator kb` 与 crate `nexus-kb` 的语义碰撞风险为高，建议在 V1.23 或下一 pre-release 引入更直观的别名，例如 `nexus42 creator assets ...` 或 `nexus42 creator work-index ...`，作为 `creator kb --scope work` 的首选用户文案；`creator kb --scope work` 可暂留为兼容别名，避免打断现有脚本。
+- **V1.23 最小落地**：保持 `nexus42 creator kb` 作为现有命令组；它是 work-scope 文件索引（`--scope` flag 已随 v1.193 P2 删除），help/文案中写明“local work index”。
+- **推荐别名 / 迁移方向**：由于 `creator kb` 与 crate `nexus-kb` 的语义碰撞风险为高，建议在 V1.23 或下一 pre-release 引入更直观的别名，例如 `nexus42 creator assets ...` 或 `nexus42 creator work-index ...`，作为 work-scope 索引的首选用户文案。**Delivered:** 该 work-scope 面目前仍是 `nexus42 creator kb`（无 `--scope` flag；work scope 是唯一 scope），未引入新的别名，也没有保留任何 no-op 兼容拼写。
 - **不推荐硬改为泛化 KB**：不要把 `creator kb` 解释成“所有知识入口”。World KB、User knowledge、Creator memory 三者的 owning crate 与 entity scope 不同，CLI 只能做路由，不能在 `nexus42` 内实现第二套领域模型。
 
 ### 6.2E KB / knowledge 术语禁用简写
@@ -398,7 +398,7 @@ V2 命令面按以下顶层执行（pre-release 允许破坏性调整）。**V1.
 
 - **World KB** / **narrative KB**：指 `nexus-knowledge` 所有的 World-scoped narrative KB graph（KnowledgeEntries、SourceAnchors、graph insertion/query），由 `nexus-narrative` 协调 World/Timeline/Event 语境。
 - **User knowledge** / **global knowledge index**：指 `nexus-knowledge` 所有的 User-scoped global knowledge/reference material。
-- **CLI local work KB index** / **local work index**：指 `nexus42 creator kb --scope work` 当前的活跃 Creator + workspace 本地文件索引。
+- **CLI local work KB index** / **local work index**：指 `nexus42 creator kb` 的活跃 Creator + workspace 本地文件索引（work scope 是唯一 scope）。
 
 禁止在存在歧义的上下文中单独写“KB”来同时指代以上三者；CLI help、错误提示、spec、ADR、计划任务均应使用限定词。
 
@@ -408,10 +408,10 @@ V1.23 结束时，KB / knowledge 相关 CLI 路由目标应固定为：
 
 | User intent | CLI command model | Required scope inputs | Owning crates / modules | Behavior |
 | --- | --- | --- | --- | --- |
-| Manage local work files / notes as workspace assets | `nexus42 creator kb ...` (default `--scope work`); preferred alias candidate `nexus42 creator assets ...` | active `creator_id`, active `workspace_slug` | `nexus42` command router + local workspace storage (the daemon local API half was deleted in v1.193 P2); later storage may move behind local-domain crates | List/search/show/add/remove local work index entries only. Must not create World KnowledgeEntries or User knowledge rows. |
-| Manage narrative knowledge inside a World | `nexus42 creator kb ... --scope world --world-id <world_id>` or workspace-bound equivalent | active `creator_id`, `workspace_slug`, explicit/resolved `world_id` | `nexus-narrative` + `nexus-knowledge` | Route to World-scoped narrative KB graph. Must preserve KnowledgeEntry / SourceAnchor provenance and narrative ownership. No silent fallback to work index. |
+| Manage local work files / notes as workspace assets | `nexus42 creator kb ...` (work-scope index; the `--scope` flag was deleted in v1.193 P2); preferred alias candidate `nexus42 creator assets ...` | active `creator_id`, active `workspace_slug` | `nexus42` command router + local workspace storage (the daemon local API half was deleted in v1.193 P2); later storage may move behind local-domain crates | List/search/show/add/remove local work index entries only. Must not create World KnowledgeEntries or User knowledge rows. |
+| Manage narrative knowledge inside a World | `nexus42 creator world kb ... --world-id <world_id>` (canonical; the historical `creator kb --scope world` alias was deleted in v1.193 P2 — §6.2G.2) | active `creator_id`, `workspace_slug`, explicit/resolved `world_id` | `nexus-narrative` + `nexus-knowledge` | Route to World-scoped narrative KB graph. Must preserve KnowledgeEntry / SourceAnchor provenance and narrative ownership. No silent fallback to work index. |
 | Manage User/global reference knowledge | `nexus42 creator knowledge ...` | authenticated User / Pairing context; optional Creator only as acting context, not owner | `nexus-knowledge` | Store/search/list user-scoped global knowledge/reference material. May be pulled into Moment assembly; promotion into World KB is an explicit cross-scope operation. **Durable roadmap:** DR-52 (user/global knowledge entry surface). |
-| Create / browse World narrative state | `nexus42 creator world create\|list\|show ...` | active `creator_id`, workspace_slug; `create` requires `--title` (`--name` alias) and narrative kind is implicit in V1.40 | `nexus-narrative` + `nexus-kb` | **V1.40 P0**: `create` returns `world_id` and persists World row. `list`/`show` are read-only. No local fork (PD-01: fork is platform-only). |
+| Create / browse World narrative state | `nexus42 creator world create\|list\|show ...` | active `creator_id`, workspace_slug; `create` requires `--title` (the historical `--name` alias was deleted in v1.193 P2) and narrative kind is implicit in V1.40 | `nexus-narrative` + `nexus-kb` | **V1.40 P0**: `create` returns `world_id` and persists World row. `list`/`show` are read-only. No local fork (PD-01: fork is platform-only). |
 | Seed demo data | `nexus42 creator demo-seed ...` | active `creator_id`, workspace_slug | `nexus-creator` + `nexus-narrative` + `nexus-kb` | Populate demo world + KB entries for testing. |
 | Assemble direct platform cloud context | `nexus42 platform context assemble` | `--world-id`; optional workspace/creator and include/limit flags | Future direct platform context assembly path | **Deferred (V1.26).** Platform cloud assembly is not yet available; CLI exits with clear guidance to use `assemble-moment`. It must not call the retired daemon context-assemble Daemon API. |
 | **Assemble local four-domain Moment snapshot (single SSOT)** | `nexus42 platform context assemble-moment` | optional `--world-id`, `--user-id`, `--branch-id`, `--event-id`; **frozen flags:** `--max-tokens`, `--no-fragments`, `--hint`, `--kb-limit`, `--kb-search`, `--kb-type`, `--knowledge-limit` | `assemble_moment` in `nexus-moment-context-assembly` reading Stage-0 context plus local narrative, World KB, and User knowledge slices | **Shipped (local, V1.26+).** Single assembly SSOT — replaces the retired `assemble-local` path. Runs in-process and calls `assemble_moment`; narrative and World KB are read through persistent local stores, while User knowledge reads from SQLite (V1.27+). No platform cloud assembly and no daemon context-assemble route. |
@@ -547,7 +547,7 @@ Normative World binding: [novel-writing/workflow-profile.md §3.5](./novel-writi
 
 | Command | Purpose |
 | --- | --- |
-| `nexus42 creator world create --title "<text>" [--name "<text>"] [--slug "<slug>"] [--description "<text>"]` | Create a World; returns `world_id` (`wld_<uuid>`). Used by `novel-project-init` grill-me "create new World" path. `--name` is an alias for `--title` (spec backward-compat). `--kind` deferred to P1 (narrative is implicit default). |
+| `nexus42 creator world create --title "<text>" [--slug "<slug>"] [--description "<text>"]` | Create a World; returns `world_id` (`wld_<uuid>`). Used by `novel-project-init` grill-me "create new World" path. The historical `--name` alias for `--title` was **deleted in v1.193 P2**. `--kind` deferred to P1 (narrative is implicit default). |
 | `nexus42 creator world list` | List Worlds visible under active `creator_id` + `workspace_slug`. |
 | `nexus42 creator world show <world_id>` | Show World metadata and summary counts (read-only). Clean not-found with remediation if missing. |
 
@@ -680,24 +680,26 @@ Rules:
 - Audit logs are written under `Works/<work_ref>/Logs/kb/auto-promoted/<YYYY-MM-DD>-<extract_job_id>.md` when a workspace root is bound.
 - The canonical World KB surface remains `creator world kb ...`; no new aliases or deprecations are introduced in V1.52.
 
-### 6.2G.2 Legacy `creator kb --scope world` alias + deprecation (V1.52 T-A P1 — Normative)
+### 6.2G.2 Legacy `creator kb --scope world` alias + deprecation (V1.52 T-A P1 — **alias deleted in v1.193 P2**; historical record)
 
-`creator kb --scope world <subcmd>` is a **deprecated alias** for `creator world kb <subcmd>`.
+> **Retired.** The `creator kb --scope world` compatibility spelling is **gone**: `creator kb` serves the work-scope file index only, and World-scoped narrative KB lives on the canonical `creator world kb ...` surface (`apps/nexus42/src/commands/creator/kb.rs` module docs, §6.2F). Nothing below is a current instruction — it records the V1.52 deprecation window.
 
-| Legacy command | Canonical replacement |
+Historical behavior: `creator kb --scope world <subcmd>` was a **deprecated alias** for `creator world kb <subcmd>`.
+
+| Legacy command (retired) | Canonical replacement |
 | --- | --- |
 | `nexus42 creator kb list --scope world --world-id <id>` | `nexus42 creator world kb list <id>` |
 | `nexus42 creator kb show <entry_id> --scope world --world-id <id>` | `nexus42 creator world kb show <id> <entry_id>` |
 | `nexus42 creator kb remove <entry_id> --scope world --world-id <id>` | `nexus42 creator world kb delete <id> <entry_id> --yes` |
 
-Rules:
+Historical rules (all retired with the alias):
 
-- Each legacy invocation emits a **deprecation warning** on stderr and via `tracing::warn!`: "`creator kb --scope world <subcmd>` is deprecated; use `creator world kb <subcmd>` instead (planned removal V1.53)."
-- `list`, `show`, and `remove` (World scope) **transparently forward** to the canonical `world::kb` hermetic functions. Output is identical to the canonical path.
-- `search` and `add` (World scope) do not have canonical equivalents; they continue to operate inline but emit the deprecation warning.
-- `remove` with World scope now gates on **world ownership** (the legacy path did not enforce auth; forwarding through `kb_delete` adds the `WORLD_KB_FORBIDDEN` gate, which is the correct behavior per entity-scope-model §5.5).
-- The `--scope world` flag on `creator kb` variants is preserved for backward compatibility; it will be removed in V1.53.
-- Work-scope operations (`creator kb --scope work`, the default) are **unaffected** by this consolidation.
+- Each legacy invocation emitted a **deprecation warning** on stderr and via `tracing::warn!`: "`creator kb --scope world <subcmd>` is deprecated; use `creator world kb <subcmd>` instead (planned removal V1.53)."
+- `list`, `show`, and `remove` (World scope) **transparently forwarded** to the canonical `world::kb` hermetic functions. Output was identical to the canonical path.
+- `search` and `add` (World scope) had no canonical equivalents; they operated inline while emitting the deprecation warning.
+- `remove` with World scope gated on **world ownership** (forwarding through `kb_delete` added the `WORLD_KB_FORBIDDEN` gate, per entity-scope-model §5.5).
+- The `--scope world` flag on `creator kb` variants was preserved for backward compatibility during the V1.52 window and was **deleted in v1.193 P2** together with the other compatibility spellings (no silent no-op alias remains).
+- Work-scope operations (`creator kb`, the work index) were **unaffected** by this consolidation and remain the only scope.
 
 ### 6.2G.3 V1.175 P1 amendment — reading, fork, and inspector leaves (RN-1 §5 groups 3, 5, 6)
 
@@ -797,7 +799,7 @@ Rules:
     `strategy_transition_missing_old_target`, `strategy_transition_not_found`).
 - **Write bodies are typed long flags** (AR-83 #4); prompt bodies come from
   `--file` or stdin (`-`), matching the `creator soul` stdin convention.
-- **User presets only.** The core rejects embedded/system presets
+- **User presets only.** The core rejects embedded/system-shipped presets
   (read-only); the CLI surfaces the resulting refusal as `bad_request`.
 
 ### 6.2G.5 V1.175 P1 amendment — outline/chapter/timeline patch leaves (RN-1 §5 group 2)
@@ -1280,7 +1282,7 @@ Implementation authorities: `apps/nexus42/src/commands/ops.rs`,
 
 | User intent | CLI group | ACP / preset contract |
 | --- | --- | --- |
-| Structured state sync | `nexus42 platform sync ...`（**V1.35**；legacy `nexus42 sync` deprecated alias） | `sync.*` + bundle/delta contracts |
+| Structured state sync | `nexus42 platform sync ...`（canonical；顶层 `nexus42 sync` alias 已于 v1.193 P2 删除 — §6.5） | `sync.*` + bundle/delta contracts |
 | Runtime orchestration control | `nexus42 daemon schedule ...` (**retired in v1.193 P2** — the whole group is deleted) | No CLI orchestration-control surface remains; schedule commands called the daemon orchestration schedules Daemon API and owned session control via `current_session_id` + supervisor signal cascade. The retained scheduling surface is `creator works cron` declaration editing |
 | ACP capability negotiation | `nexus42 acp ...` | registry/probe/session capability negotiation |
 | Context assembly snapshot | `nexus42 platform context assemble` (**Deferred platform cloud**); `nexus42 platform context assemble-moment` (**Shipped local four-domain Moment — single SSOT**) | shipped path is CLI in-process; `assemble-moment` calls local `assemble_moment` with persistent narrative / World KB stores and SQLite User knowledge. Frozen flags: `--max-tokens`, `--no-fragments`, `--hint`, `--kb-limit`, `--kb-search`, `--kb-type`, `--knowledge-limit`. Daemon context-assemble Daemon API is **Retired** (KCA-002 B2). `assemble-local` is **removed** in pre-release. |
@@ -1315,7 +1317,7 @@ V1.35 将首次使用拆为 **纯本地**（默认，`platform_integration = pau
 
 1. `nexus42 platform auth login`
 2. `nexus42 creator list` 或 `creator register` + `creator pair`（按需）
-3. **`nexus42 platform sync pull`** 获取结构化世界基线（**V1.35**；legacy `nexus42 sync pull` 为 deprecated alias，**v1.193 target:** 该 alias 删除，只保留 `platform sync`）
+3. **`nexus42 platform sync pull`** 获取结构化世界基线（canonical；legacy `nexus42 sync pull` alias 已于 v1.193 P2 删除 — §6.5）
 
 **Creator-first 变体**：先完成 §7.1 步骤 3–5，再在需要 cloud 世界时执行 `platform auth login` + `creator pair` + `platform sync pull`（路径 B，见架构 §10.3）。
 

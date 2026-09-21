@@ -205,9 +205,9 @@ Do **not** claim that all basic commands already work as direct library calls. S
 
 ### 7.4 Deferred, stubbed, hidden, or platform-only leaves
 
-Callable but incomplete rows remain inventory rows until a named plan owns them:
+Historical roster (pre-v1.193 overlay) of the callable-but-incomplete leaves at that time:
 
-- hidden hard-deprecated `creator workspace clone`
+- hidden hard-deprecated `creator workspace clone` — now an **unknown command** (the retired leaf is asserted as `retired_creator_workspace_clone_is_unknown`)
 - coming-soon `workspace link|unlink|status`
 - platform-only `explore browse|search`, deferred `platform context assemble`, coming-soon `publish`
 - visible deprecated `system preset` forwarding alias; hidden but callable top-level `sync`/`preset`/`capability`
