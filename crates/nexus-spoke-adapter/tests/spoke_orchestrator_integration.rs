@@ -583,23 +583,39 @@ async fn move_key_block_to_world(pool: &sqlx::SqlitePool, entry_id: &str, world_
         .unwrap();
 }
 
-/// INDEPENDENT direct sqlx read of a `kb_relationships` row:
-/// `(world_id, revision, relation_type, custom_label)`.
-async fn read_relation_row(
-    pool: &sqlx::SqlitePool,
-    relation_id: &str,
-) -> (String, i64, String, Option<String>) {
+/// One `kb_relationships` row's observable columns, read directly from the
+/// store — every mutable column a leaked CAS write could change (the immutable
+/// `source` is excluded; `world_id`/`revision` are the second writer's).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RelationRow {
+    world_id: String,
+    revision: i64,
+    relation_type: String,
+    custom_label: Option<String>,
+    metadata: Option<String>,
+    updated_at: String,
+}
+
+/// INDEPENDENT direct sqlx read of a `kb_relationships` row.
+async fn read_relation_row(pool: &sqlx::SqlitePool, relation_id: &str) -> RelationRow {
     // SAFETY: test-only verification query against the post-migration
     // kb_relationships schema.
     let row = sqlx::query(
-        "SELECT world_id, revision, relation_type, custom_label \
+        "SELECT world_id, revision, relation_type, custom_label, metadata, updated_at \
          FROM kb_relationships WHERE relationship_id = ?",
     )
     .bind(relation_id)
     .fetch_one(pool)
     .await
     .unwrap_or_else(|e| panic!("read back relation {relation_id}: {e}"));
-    (row.get(0), row.get(1), row.get(2), row.get(3))
+    RelationRow {
+        world_id: row.get(0),
+        revision: row.get(1),
+        relation_type: row.get(2),
+        custom_label: row.get(3),
+        metadata: row.get(4),
+        updated_at: row.get(5),
+    }
 }
 
 /// The `(world_id, revision)` a second writer left on a row — the preimage the
@@ -930,16 +946,20 @@ async fn orchestrate_promote_denies_row_moved_to_another_world_between_verificat
     );
 
     // Writer 1 promotes its world-A preimage (revision 1); the orchestrator
-    // bases the accepted revision on that preimage (= stored + 1).
-    let candidate = spoke_entry(entry_id, "WorldCasPromote", Some(1), "provisional");
+    // bases the accepted revision on that preimage (= stored + 1). The
+    // candidate carries a distinct body, so a leaked write is visible in the
+    // post-state (the store's create path already wrote the summary).
+    let mut candidate = spoke_entry(entry_id, "WorldCasPromote", Some(1), "provisional");
+    candidate.body.summary = Some("WorldCasPromote raced body".to_string());
     let result = orchestrate_promote(&barrier, promote_request(&candidate)).await;
     expect_world_conflict_reject(result, WORLD_ID, "wld_2");
 
     // INDEPENDENT verification: neither the world/revision nor the promotion
-    // landed — the row is still provisional in the second writer's world.
+    // landed — the row is still provisional with its pre-race body in the
+    // second writer's world.
     let left = barrier.left(entry_id);
     assert_eq!(left.world_id, "wld_2");
-    let (name, status, revision, world, _body) = read_kb_row(&pool, entry_id).await;
+    let (name, status, revision, world, body) = read_kb_row(&pool, entry_id).await;
     assert_eq!(world, left.world_id);
     assert_eq!(revision, left.revision);
     assert_eq!(
@@ -949,6 +969,10 @@ async fn orchestrate_promote_denies_row_moved_to_another_world_between_verificat
     assert_eq!(
         status, "provisional",
         "denied promote must not flip status to confirmed"
+    );
+    assert!(
+        body.contains("WorldCasPromote summary"),
+        "denied promote must not rewrite the body: {body}"
     );
 }
 
@@ -976,9 +1000,11 @@ async fn orchestrate_relate_denies_row_moved_to_another_world_between_verificati
         matches!(create_result, SpokeResult::Ok(_)),
         "relate create must succeed first"
     );
+    // Capture the row the create left, so "untouched" is checked against the
+    // pre-race values of every mutable column rather than a table of literals.
+    let before = read_relation_row(&pool, relation_id).await;
     assert_eq!(
-        read_relation_row(&pool, relation_id).await.0,
-        WORLD_ID,
+        before.world_id, WORLD_ID,
         "precondition: the relation row is in the claimed world"
     );
 
@@ -989,36 +1015,48 @@ async fn orchestrate_relate_denies_row_moved_to_another_world_between_verificati
         SecondWriterMove::relation(relation_id, "wld_2"),
     );
 
-    // Writer 1 replays its world-A preimage with a distinct label, so a leaked
-    // write is visible in the post-state.
+    // Writer 1 replays its world-A preimage with a distinct label AND a
+    // distinct metadata bag, so a leaked write is visible in the post-state.
     let mut candidate = relate_relation(relation_id, "kb_wc_src", "kb_wc_dst");
     candidate.revision = Some(1);
     candidate.label = Some("raced write".to_string());
+    candidate
+        .metadata
+        .insert("raced".to_string(), serde_json::Value::Bool(true));
     let result = orchestrate_relate(&barrier, relate_request(&candidate)).await;
     expect_world_conflict_reject(result, WORLD_ID, "wld_2");
 
-    // INDEPENDENT verification: the relation row is untouched apart from the
-    // second writer's move.
+    // INDEPENDENT verification: apart from the second writer's move, the
+    // relation row is exactly what the create left — the candidate's label and
+    // metadata bag, and the update timestamp, are all unchanged.
     let left = barrier.left(relation_id);
     assert_eq!(left.world_id, "wld_2");
-    let (world, revision, relation_type, custom_label) =
-        read_relation_row(&pool, relation_id).await;
+    let after = read_relation_row(&pool, relation_id).await;
     assert_eq!(
-        world, left.world_id,
+        after.world_id, left.world_id,
         "relation stays in the world the interleaved writer set"
     );
     assert_eq!(
-        revision, left.revision,
+        after.revision, left.revision,
         "denied CAS must not bump the revision the second writer left"
     );
     assert_eq!(
-        relation_type, "allied_with",
+        after.relation_type, before.relation_type,
         "denied CAS must not rewrite relation_type"
     );
     assert_eq!(
-        custom_label.as_deref(),
-        Some("test edge"),
-        "denied CAS must not rewrite the label"
+        after.custom_label, before.custom_label,
+        "denied CAS must not write the candidate label: {:?}",
+        after.custom_label
+    );
+    assert_eq!(
+        after.metadata, before.metadata,
+        "denied CAS must not write the candidate metadata bag: {:?}",
+        after.metadata
+    );
+    assert_eq!(
+        after.updated_at, before.updated_at,
+        "denied CAS must not touch the update timestamp"
     );
 }
 
@@ -1165,6 +1203,11 @@ async fn initially_hidden_relation_is_indistinguishable_from_absent() {
         "a hidden relation must read as absent"
     );
     assert!(
+        !carries_world_conflict(&hidden_get),
+        "the hidden-relation read must not carry the world-conflict marker: {}",
+        outcome(&hidden_get)
+    );
+    assert!(
         !outcome(&hidden_get).contains("wld_2"),
         "the not-found shape must not disclose the endpoint world: {}",
         outcome(&hidden_get)
@@ -1214,7 +1257,7 @@ async fn initially_hidden_relation_is_indistinguishable_from_absent() {
         assert_eq!(world, "wld_2");
     }
     assert_eq!(
-        read_relation_row(&hidden_pool, relation_id).await.0,
+        read_relation_row(&hidden_pool, relation_id).await.world_id,
         WORLD_ID
     );
 }
