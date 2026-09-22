@@ -27,13 +27,32 @@ use nexus_contracts::generated::core::{
     CoreRunEventsResponse, CoreRunEventsResponseEventsItem, CoreRunEventsResponseEventsItemKind,
     CoreRunEventsResponseNextSequence, CoreRunEventsResponseRunId,
 };
+use nexus_contracts::generated::daemon_api::orchestration::sessions::list_sessions_query::ListSessionsQuery;
+use nexus_contracts::generated::daemon_api::orchestration::sessions::list_sessions_response::{
+    ListSessionsResponse, NexusOrchestrationSessionSummary as ListedSessionWire,
+    NexusPaginationInfo as SessionPaginationInfo,
+};
+use nexus_contracts::generated::daemon_api::orchestration::sessions::session_detail_response::{
+    NexusOrchestrationSessionSummary as DetailSessionWire, SessionDetailResponse,
+};
+use nexus_contracts::generated::daemon_api::schedule::edit_core_context_request::EditCoreContextRequest;
+use nexus_contracts::generated::daemon_api::schedule::edit_core_context_response::EditCoreContextResponse;
+use nexus_contracts::generated::daemon_api::schedule::inspect_schedule_response::{
+    InspectScheduleResponse, NexusScheduleSummary as InspectedScheduleWire,
+};
+use nexus_contracts::generated::daemon_api::schedule::list_schedules_query::ListSchedulesQuery;
+use nexus_contracts::generated::daemon_api::schedule::list_schedules_response::{
+    ListSchedulesResponse, NexusPaginationInfo as SchedulePaginationInfo,
+    NexusScheduleSummary as ListedScheduleWire,
+};
 use nexus_contracts::local::orchestration::preset_gate::{FailedGate, PresetGatesFailed};
 use nexus_contracts::local::schedule::http::{
     AddScheduleRequest, AddScheduleResponse, ScheduleConcurrencyRequest, SignalScheduleRequest,
     SignalScheduleResponse,
 };
 use nexus_contracts::local::schedule::{
-    CoreContextVersion, ParallelWithIds, Schedule, ScheduleConcurrency, ScheduleId, ScheduleStatus,
+    CoreContextVersion, EditOp, ParallelWithIds, Schedule, ScheduleConcurrency, ScheduleId,
+    ScheduleStatus,
 };
 use nexus_contracts::CoreRunEventsRequest;
 use nexus_orchestration::preset_gates::{
@@ -54,6 +73,12 @@ use nexus_contracts::generated::core::core_tool_execute_response::CoreToolExecut
 
 /// Default page size for a cursorless run-event read.
 const DEFAULT_RUN_EVENT_LIMIT: usize = 64;
+
+/// Default page size for a cursorless durable list read (retained default).
+const DEFAULT_LIST_LIMIT: i64 = 100;
+
+/// Maximum page size a durable list read serves (retained cap).
+const MAX_LIST_LIMIT: i64 = 500;
 
 /// Maximum length for a `force_gates` audit reason (mirrors the transport).
 const MAX_REASON_LEN: usize = 512;
@@ -138,6 +163,275 @@ impl ExecutionHandle {
             schedule_id,
             status: "pending".to_string(),
             core_context_version: 0,
+        })
+    }
+
+    /// List the admitted Creator's durable schedules.
+    ///
+    /// The scope is the STORED ownership: the query is bound to the principal's
+    /// creator, and an explicit foreign `creator_id` filter is refused BEFORE
+    /// any query runs — never answered with a silently empty page. The response
+    /// is the generated snake_case public DTO (the legacy `camelCase` local
+    /// summary is not a public read shape).
+    ///
+    /// # Errors
+    /// `Closing` when the owner is shutting down, `AuthRequired` when the
+    /// principal was not minted by this service, `Forbidden` for a foreign
+    /// creator filter, `InvalidInput` for an unsupported sort key or cursor,
+    /// and the mapped storage error otherwise.
+    pub async fn list_schedules(
+        &self,
+        principal: &Principal,
+        query: ListSchedulesQuery,
+    ) -> CoreResult<ListSchedulesResponse> {
+        self.ensure_admitting()?;
+        self.linked_core()?.verify_principal(principal)?;
+        let creator_id = principal.creator_id().to_string();
+        refuse_foreign_filter(query.creator_id.as_deref(), &creator_id, "schedules")?;
+
+        let order = order_by(
+            query.sort.as_deref(),
+            &["created_at", "updated_at", "status", "preset_id", "label"],
+            "schedule_id",
+            "schedule",
+        )?;
+        let offset = decode_offset_cursor(query.cursor.as_deref())?;
+        let limit = list_limit(query.limit);
+
+        let pool = self.coordinator().pool();
+        // The page and its count come from ONE read snapshot, so `has_more` and
+        // the page cannot disagree under a concurrent add/delete.
+        let mut tx = pool.begin().await.map_err(|e| crate::error::db_err(&e))?;
+        // SAFETY: dynamic SQL — only the whitelisted ORDER BY identifiers above
+        // are interpolated; every value is bound.
+        let rows = sqlx::query_as::<_, ScheduleRow>(sqlx::AssertSqlSafe(format!(
+            "SELECT schedule_id, creator_id, preset_id, status, execution_policy,
+                    current_session_id, label, current_core_context_version,
+                    created_at, updated_at, concurrency_kind
+             FROM creator_schedules
+             WHERE creator_id = ?
+             ORDER BY {order}
+             LIMIT ? OFFSET ?"
+        )))
+        .bind(&creator_id)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(|e| crate::error::db_err(&e))?;
+        let total: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM creator_schedules WHERE creator_id = ?")
+                .bind(&creator_id)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(|e| crate::error::db_err(&e))?;
+        tx.commit().await.map_err(|e| crate::error::db_err(&e))?;
+
+        let has_more = total > offset.saturating_add(limit);
+        Ok(ListSchedulesResponse {
+            items: rows.into_iter().map(listed_schedule_wire).collect(),
+            pagination: SchedulePaginationInfo {
+                has_more,
+                limit,
+                next_cursor: has_more.then(|| encode_offset_cursor(offset.saturating_add(limit))),
+            },
+        })
+    }
+
+    /// Inspect one of the admitted Creator's schedules.
+    ///
+    /// A foreign id and an absent id close with the SAME `NotFound`: the scope
+    /// is the STORED owner (`schedule_id` + `creator_id` in one predicate), so
+    /// a caller can never probe another creator's ids or observe a difference
+    /// between "not yours" and "does not exist". Read-only: no mutation, no
+    /// admission, and therefore no run is ever minted by an inspect.
+    ///
+    /// # Errors
+    /// `Closing` when the owner is shutting down, `AuthRequired` for a foreign
+    /// principal, `NotFound` for an absent or foreign schedule, and the mapped
+    /// storage error otherwise.
+    pub async fn inspect_schedule(
+        &self,
+        principal: &Principal,
+        schedule_id: String,
+    ) -> CoreResult<InspectScheduleResponse> {
+        self.ensure_admitting()?;
+        self.linked_core()?.verify_principal(principal)?;
+        let row = self.owned_schedule(principal, &schedule_id).await?;
+        let pool = self.coordinator().pool();
+        let depends_on: Vec<String> = sqlx::query_scalar(
+            "SELECT depends_on FROM schedule_dependencies
+             WHERE schedule_id = ? ORDER BY depends_on",
+        )
+        .bind(&schedule_id)
+        .fetch_all(pool.as_ref())
+        .await
+        .map_err(|e| crate::error::db_err(&e))?;
+
+        Ok(InspectScheduleResponse {
+            concurrency_kind: row.concurrency_kind.clone(),
+            depends_on,
+            schedule: inspected_schedule_wire(row),
+        })
+    }
+
+    /// List the admitted Creator's durable workflow runs.
+    ///
+    /// The page is read from the DURABLE `orchestration_sessions` rows (root
+    /// runs only — `parent_session_id IS NULL`), never from an in-memory engine
+    /// map or a Host session list, so a run that already settled (or was
+    /// recovered) is listed exactly as it is stored.
+    ///
+    /// # Errors
+    /// `Closing` when the owner is shutting down, `AuthRequired` for a foreign
+    /// principal, `Forbidden` for a foreign creator filter, `InvalidInput` for
+    /// an unsupported sort key or cursor, and the mapped storage error.
+    pub async fn list_workflow_sessions(
+        &self,
+        principal: &Principal,
+        query: ListSessionsQuery,
+    ) -> CoreResult<ListSessionsResponse> {
+        self.ensure_admitting()?;
+        self.linked_core()?.verify_principal(principal)?;
+        let creator_id = principal.creator_id().to_string();
+        refuse_foreign_filter(query.creator_id.as_deref(), &creator_id, "sessions")?;
+
+        let order = order_by(
+            query.sort.as_deref(),
+            &["session_id", "creator_id", "preset_id", "status"],
+            "session_id",
+            "session",
+        )?;
+        let offset = decode_offset_cursor(query.cursor.as_deref())?;
+        let limit = list_limit(query.limit);
+
+        let pool = self.coordinator().pool();
+        let mut tx = pool.begin().await.map_err(|e| crate::error::db_err(&e))?;
+        // SAFETY: dynamic SQL — only the whitelisted ORDER BY identifiers above
+        // are interpolated; every value is bound.
+        let rows = sqlx::query_as::<_, SessionRow>(sqlx::AssertSqlSafe(format!(
+            "SELECT session_id, creator_id, preset_id, status, current_task_id, run_state_json
+             FROM orchestration_sessions
+             WHERE parent_session_id IS NULL AND creator_id = ?
+             ORDER BY {order}
+             LIMIT ? OFFSET ?"
+        )))
+        .bind(&creator_id)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(|e| crate::error::db_err(&e))?;
+        let total: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM orchestration_sessions
+             WHERE parent_session_id IS NULL AND creator_id = ?",
+        )
+        .bind(&creator_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| crate::error::db_err(&e))?;
+        tx.commit().await.map_err(|e| crate::error::db_err(&e))?;
+
+        let has_more = total > offset.saturating_add(limit);
+        Ok(ListSessionsResponse {
+            items: rows.into_iter().map(listed_session_wire).collect(),
+            pagination: SessionPaginationInfo {
+                has_more,
+                limit,
+                next_cursor: has_more.then(|| encode_offset_cursor(offset.saturating_add(limit))),
+            },
+        })
+    }
+
+    /// Read one durable workflow run of the admitted Creator.
+    ///
+    /// Root runs only, scoped by the STORED owner: an unknown id, a foreign id
+    /// and a CHILD session id all close with the same `NotFound`. A child run is
+    /// never independently authorized by stripping `:child:` from a caller's
+    /// string — the public session is the root run the schedule owns.
+    ///
+    /// # Errors
+    /// `Closing` when the owner is shutting down, `AuthRequired` for a foreign
+    /// principal, `NotFound` for an absent, foreign or child session, and the
+    /// mapped storage error otherwise.
+    pub async fn get_workflow_session(
+        &self,
+        principal: &Principal,
+        session_id: String,
+    ) -> CoreResult<SessionDetailResponse> {
+        self.ensure_admitting()?;
+        self.linked_core()?.verify_principal(principal)?;
+        let pool = self.coordinator().pool();
+        let row = sqlx::query_as::<_, SessionRow>(
+            "SELECT session_id, creator_id, preset_id, status, current_task_id, run_state_json
+             FROM orchestration_sessions
+             WHERE session_id = ? AND parent_session_id IS NULL AND creator_id = ?",
+        )
+        .bind(&session_id)
+        .bind(principal.creator_id())
+        .fetch_optional(pool.as_ref())
+        .await
+        .map_err(|e| crate::error::db_err(&e))?
+        .ok_or_else(|| CoreError::NotFound {
+            resource: format!("workflow session {session_id}"),
+        })?;
+
+        Ok(SessionDetailResponse {
+            session: detail_session_wire(row),
+        })
+    }
+
+    /// Append (or structurally edit) a schedule's core context.
+    ///
+    /// The request is the existing `{op, body?, patch?, path?}` shape with no
+    /// caller-supplied version: the version is derived inside the shared
+    /// [`CoreContextManager`], which commits the immutable version row and the
+    /// schedule's pointer advance in ONE transaction. The Steer order
+    /// (append, then resume) therefore observes a durable version before the
+    /// resume, and the next execution boundary reads that committed version.
+    ///
+    /// `replace` stays refused (a user edit never overwrites system-managed
+    /// context), and a terminal schedule refuses the edit: neither is a
+    /// half-applied version.
+    ///
+    /// # Errors
+    /// `Closing` when the owner is shutting down, `AuthRequired` for a foreign
+    /// principal, `NotFound` for an absent or foreign schedule, `InvalidInput`
+    /// for an unknown/`replace` op or a missing op field, `Coded`
+    /// (`workflow_state_conflict`) for a terminal schedule or a lost version
+    /// race, and the mapped storage error otherwise.
+    pub async fn edit_core_context(
+        &self,
+        principal: &Principal,
+        schedule_id: String,
+        request: EditCoreContextRequest,
+    ) -> CoreResult<EditCoreContextResponse> {
+        self.ensure_admitting()?;
+        self.linked_core()?.verify_principal(principal)?;
+        let supervisor = self.schedule_supervisor()?;
+        let row = self.owned_schedule(principal, &schedule_id).await?;
+        if matches!(row.status.as_str(), "completed" | "cancelled" | "failed") {
+            return Err(CoreError::Coded {
+                code: "workflow_state_conflict".to_string(),
+                message: format!(
+                    "schedule {schedule_id} is in terminal status '{}'; core-context edits are not allowed",
+                    row.status
+                ),
+            });
+        }
+
+        let op = parse_core_context_edit(&request)?;
+        let record = supervisor
+            .core_context_manager()
+            .apply_user_edit(
+                &ScheduleId(schedule_id),
+                op,
+                Some(principal.creator_id().to_string()),
+            )
+            .await
+            .map_err(map_context_error)?;
+        Ok(EditCoreContextResponse {
+            new_version: i64::from(record.version.0),
         })
     }
 
@@ -410,28 +704,45 @@ impl ExecutionHandle {
         Ok(())
     }
 
+    /// Read one durable schedule row scoped to the principal's STORED creator.
+    ///
+    /// The predicate carries BOTH the id and the stored `creator_id`, so a
+    /// foreign row and an absent row produce the same `NotFound` — the scope is
+    /// the stored owner, never a caller-supplied creator.
+    ///
+    /// # Errors
+    /// `NotFound` for an absent or foreign row; the mapped storage error.
+    async fn owned_schedule(&self, principal: &Principal, schedule_id: &str) -> CoreResult<ScheduleRow> {
+        let pool = self.coordinator().pool();
+        sqlx::query_as::<_, ScheduleRow>(
+            "SELECT schedule_id, creator_id, preset_id, status, execution_policy,
+                    current_session_id, label, current_core_context_version,
+                    created_at, updated_at, concurrency_kind
+             FROM creator_schedules
+             WHERE schedule_id = ? AND creator_id = ?",
+        )
+        .bind(schedule_id)
+        .bind(principal.creator_id())
+        .fetch_optional(pool.as_ref())
+        .await
+        .map_err(|e| crate::error::db_err(&e))?
+        .ok_or_else(|| CoreError::NotFound {
+            resource: format!("schedule {schedule_id}"),
+        })
+    }
+
     /// Require the durable schedule row to belong to the principal's creator.
     ///
     /// A missing row and a foreign row return the SAME `NotFound`, so a caller
-    /// cannot probe for the existence of another creator's schedules.
+    /// cannot probe for the existence of another creator's schedules. Delegates
+    /// to [`Self::owned_schedule`] so every reader shares ONE stored-ownership
+    /// predicate.
     async fn require_schedule_owner(
         &self,
         principal: &Principal,
         schedule_id: &str,
     ) -> CoreResult<()> {
-        let pool = self.coordinator().pool();
-        let owner: Option<String> =
-            sqlx::query_scalar("SELECT creator_id FROM creator_schedules WHERE schedule_id = ?")
-                .bind(schedule_id)
-                .fetch_optional(pool.as_ref())
-                .await
-                .map_err(|e| crate::error::db_err(&e))?;
-        if owner.as_deref() == Some(principal.creator_id()) {
-            return Ok(());
-        }
-        Err(CoreError::NotFound {
-            resource: format!("schedule {schedule_id}"),
-        })
+        self.owned_schedule(principal, schedule_id).await.map(|_| ())
     }
 
     /// Write the audited `force_gates` bypass row.
@@ -829,6 +1140,291 @@ pub fn run_event_page(
         terminal: page.terminal,
         resync_required: page.resync_required,
     })
+}
+
+/// One durable `creator_schedules` row as read by the public list/inspect.
+///
+/// `concurrency_kind` is read by inspect (the list selects it too, so a single
+/// row shape serves both reads).
+#[derive(sqlx::FromRow)]
+struct ScheduleRow {
+    schedule_id: String,
+    creator_id: String,
+    preset_id: String,
+    status: String,
+    execution_policy: String,
+    current_session_id: Option<String>,
+    label: Option<String>,
+    current_core_context_version: i64,
+    created_at: i64,
+    updated_at: i64,
+    concurrency_kind: String,
+}
+
+/// One durable root `orchestration_sessions` row as read by the public list and
+/// the session detail.
+#[derive(sqlx::FromRow)]
+struct SessionRow {
+    session_id: String,
+    creator_id: String,
+    preset_id: String,
+    status: String,
+    current_task_id: Option<String>,
+    /// Raw durable v1 run state — the actionable failure record lives here.
+    run_state_json: Option<Vec<u8>>,
+}
+
+/// Project a stored schedule row into the LIST wire item.
+///
+/// `execution` stays absent: neither the acceptance scenarios (S0-2/S0-5) nor
+/// any consumer reads the A2/A7 run projection yet, and the schema marks the
+/// field optional. The durable identity/status/policy/pointer are what the
+/// overlay and inspect are specified against.
+fn listed_schedule_wire(row: ScheduleRow) -> ListedScheduleWire {
+    ListedScheduleWire {
+        created_at: row.created_at.to_string(),
+        creator_id: row.creator_id,
+        current_core_context_version: row.current_core_context_version,
+        current_session_id: row.current_session_id,
+        execution: None,
+        execution_policy: row.execution_policy,
+        label: row.label,
+        preset_id: row.preset_id,
+        schedule_id: row.schedule_id,
+        status: row.status,
+        updated_at: row.updated_at.to_string(),
+    }
+}
+
+/// Project a stored schedule row into the INSPECT wire item. The generated
+/// codegen inlines the shared summary schema per response module, so the two
+/// wire items are distinct types with the same shape.
+fn inspected_schedule_wire(row: ScheduleRow) -> InspectedScheduleWire {
+    InspectedScheduleWire {
+        created_at: row.created_at.to_string(),
+        creator_id: row.creator_id,
+        current_core_context_version: row.current_core_context_version,
+        current_session_id: row.current_session_id,
+        execution: None,
+        execution_policy: row.execution_policy,
+        label: row.label,
+        preset_id: row.preset_id,
+        schedule_id: row.schedule_id,
+        status: row.status,
+        updated_at: row.updated_at.to_string(),
+    }
+}
+
+/// Project a stored run row into the LIST wire item.
+fn listed_session_wire(row: SessionRow) -> ListedSessionWire {
+    let failure_reason = failure_reason(&row);
+    ListedSessionWire {
+        creator_id: row.creator_id,
+        current_task_id: row.current_task_id,
+        execution: None,
+        failure_reason,
+        preset_id: row.preset_id,
+        session_id: row.session_id,
+        status: row.status,
+    }
+}
+
+/// Project a stored run row into the DETAIL wire item (same fields, distinct
+/// generated type from `session_detail_response`).
+fn detail_session_wire(row: SessionRow) -> DetailSessionWire {
+    let failure_reason = failure_reason(&row);
+    DetailSessionWire {
+        creator_id: row.creator_id,
+        current_task_id: row.current_task_id,
+        execution: None,
+        failure_reason,
+        preset_id: row.preset_id,
+        session_id: row.session_id,
+        status: row.status,
+    }
+}
+
+/// Actionable failure reason from the durable v1 run state (e.g. an
+/// unconfirmed cancel cleanup that left the run `interrupted`).
+fn failure_reason(row: &SessionRow) -> Option<String> {
+    row.run_state_json
+        .as_deref()
+        .and_then(|blob| {
+            serde_json::from_slice::<nexus_orchestration::run_state::RunStateV1>(blob).ok()
+        })
+        .and_then(|state| state.failure)
+        .map(|failure| failure.message)
+}
+
+/// Refuse an explicit creator filter that is not the admitted Creator.
+///
+/// Query scope is the active Creator; a foreign filter is a refusal BEFORE any
+/// query runs, never a silently empty (and therefore misleading) page.
+///
+/// # Errors
+/// `Forbidden` naming both creators.
+fn refuse_foreign_filter(
+    filter: Option<&str>,
+    creator_id: &str,
+    resource: &str,
+) -> CoreResult<()> {
+    match filter {
+        Some(other) if other != creator_id => Err(CoreError::Forbidden {
+            resource: format!("{resource} for creator {other} (principal owns {creator_id})"),
+        }),
+        _ => Ok(()),
+    }
+}
+
+/// Page size for a durable list read: the retained default, capped at the
+/// retained maximum.
+fn list_limit(limit: Option<i64>) -> i64 {
+    limit.unwrap_or(DEFAULT_LIST_LIMIT).clamp(1, MAX_LIST_LIMIT)
+}
+
+/// Decode the opaque offset cursor (the retained `v1:<offset>` grammar).
+///
+/// # Errors
+/// `InvalidInput` for a cursor this owner did not mint.
+fn decode_offset_cursor(cursor: Option<&str>) -> CoreResult<i64> {
+    let Some(raw) = cursor else {
+        return Ok(0);
+    };
+    raw.strip_prefix("v1:")
+        .and_then(|offset| offset.parse::<i64>().ok())
+        .filter(|offset| *offset >= 0)
+        .ok_or_else(|| CoreError::InvalidInput {
+            field: "cursor".into(),
+            reason: "invalid pagination cursor; pass the `next_cursor` value returned by the \
+                     previous response unchanged"
+                .into(),
+        })
+}
+
+/// Encode an offset cursor (opaque to clients).
+fn encode_offset_cursor(offset: i64) -> String {
+    format!("v1:{offset}")
+}
+
+/// Build the `ORDER BY` clause from the request's sort terms.
+///
+/// Only whitelisted column names are interpolated, and the resource's id is
+/// always appended as a deterministic tie-break so two rows sharing a sort key
+/// cannot swap across pages of an offset cursor.
+///
+/// # Errors
+/// `InvalidInput` for a sort key outside the schema's allowed set.
+fn order_by(
+    sort: Option<&str>,
+    allowed: &[&str],
+    tie_break: &str,
+    resource: &str,
+) -> CoreResult<String> {
+    let mut clauses: Vec<String> = Vec::new();
+    if let Some(raw) = sort {
+        for term in raw.split(',') {
+            let term = term.trim();
+            if term.is_empty() {
+                continue;
+            }
+            let (descending, key) = term
+                .strip_prefix('-')
+                .map_or((false, term), |stripped| (true, stripped));
+            if !allowed.contains(&key) {
+                return Err(CoreError::InvalidInput {
+                    field: "sort".into(),
+                    reason: format!(
+                        "unsupported {resource} sort key '{key}'; allowed: {}",
+                        allowed.join(", ")
+                    ),
+                });
+            }
+            clauses.push(format!("{key} {}", if descending { "DESC" } else { "ASC" }));
+        }
+    }
+    if clauses.is_empty() {
+        // Schema default: most recently created first.
+        clauses.push("created_at DESC".to_string());
+    }
+    if !clauses.iter().any(|clause| clause.starts_with(tie_break)) {
+        clauses.push(format!("{tie_break} ASC"));
+    }
+    Ok(clauses.join(", "))
+}
+
+/// Translate the generated PATCH body into the derivation edit op.
+///
+/// `replace` is a KNOWN op the core still refuses (a user edit may not
+/// overwrite system-managed context): refused here as invalid input so the
+/// refusal is a 400, never a storage-layer 500 after a payload was computed.
+///
+/// # Errors
+/// `InvalidInput` for an unknown op, `replace`, or a missing op field.
+fn parse_core_context_edit(request: &EditCoreContextRequest) -> CoreResult<EditOp> {
+    match request.op.as_str() {
+        "append" => Ok(EditOp::Append {
+            body: required_field(request.body.as_ref(), "append", "body")?.clone(),
+        }),
+        "struct_merge" => Ok(EditOp::StructMerge {
+            patch: required_field(request.patch.as_ref(), "struct_merge", "patch")?.clone(),
+        }),
+        "struct_remove" => Ok(EditOp::StructRemove {
+            path: required_field(request.path.as_ref(), "struct_remove", "path")?.clone(),
+        }),
+        "replace" => Err(CoreError::InvalidInput {
+            field: "op".into(),
+            reason: "op 'replace' is not allowed: a user edit may only append or \
+                     structurally merge (system-managed context is never overwritten)"
+                .into(),
+        }),
+        other => Err(CoreError::InvalidInput {
+            field: "op".into(),
+            reason: format!("unknown op '{other}'; expected append|struct_merge|struct_remove"),
+        }),
+    }
+}
+
+/// Borrow an op's required field, or refuse with the field's name.
+///
+/// # Errors
+/// `InvalidInput` naming the missing field.
+fn required_field<'a, T>(value: Option<&'a T>, op: &str, field: &str) -> CoreResult<&'a T> {
+    value.ok_or_else(|| CoreError::InvalidInput {
+        field: field.into(),
+        reason: format!("{op} requires the '{field}' field"),
+    })
+}
+
+/// Map a core-context refusal onto the neutral taxonomy.
+fn map_context_error(err: nexus_orchestration::schedule::derivation::CoreContextError) -> CoreError {
+    use nexus_orchestration::schedule::derivation::CoreContextError as E;
+    match err {
+        E::NotFound(schedule_id) => CoreError::NotFound {
+            resource: format!("schedule {schedule_id}"),
+        },
+        E::VersionNotFound(schedule_id, version) => CoreError::NotFound {
+            resource: format!("core-context version {version} of schedule {schedule_id}"),
+        },
+        E::UserEditValidation(reason) | E::PresetHookValidation(reason) => CoreError::InvalidInput {
+            field: "op".into(),
+            reason,
+        },
+        // A lost pointer advance: the append and its version row were rolled
+        // back, so this is a state conflict (the caller re-reads and retries),
+        // never a successful version.
+        E::VersionRace(schedule_id, version) => CoreError::Coded {
+            code: "workflow_state_conflict".to_string(),
+            message: format!(
+                "core-context version race on schedule {schedule_id}: the pointer no longer \
+                 names version {version}"
+            ),
+        },
+        E::Serde(e) => CoreError::InvalidInput {
+            field: "op".into(),
+            reason: e.to_string(),
+        },
+        E::Database(e) => crate::error::db_err(&e),
+    }
 }
 
 /// Build a durable pending row from the generated add request.

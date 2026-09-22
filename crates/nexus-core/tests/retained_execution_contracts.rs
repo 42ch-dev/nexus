@@ -2768,3 +2768,420 @@ async fn non_owned_running_schedule_is_refused_without_minting_a_run() {
     fixture.handle.close().await.expect("owner close");
     fixture.core.close().await.expect("core close");
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Public durable reads and core-context append (v1.195 P0-T3)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The public durable read/context surface (S0-2/S0-3/S0-5).
+///
+/// One admitted Creator and one durable schedule: the public lists and inspect
+/// report the STORED identity/status/version, an unknown id and a FOREIGN row
+/// close with the same refusal (the scope is the stored owner, never a
+/// caller-supplied creator), and a Steer append commits the immutable version
+/// and the pointer advance as one transaction — concurrent appends leave every
+/// body in the version chain with the pointer on the winner, and the NEXT
+/// execution boundary freezes that committed version into the run.
+#[allow(clippy::too_many_lines)] // one linear public journey; splitting hides the ordering evidence
+#[tokio::test]
+#[serial_test::serial]
+async fn public_schedule_reads_and_context_are_owned() {
+    use nexus_contracts::generated::daemon_api::orchestration::sessions::list_sessions_query::ListSessionsQuery;
+    use nexus_contracts::generated::daemon_api::schedule::edit_core_context_request::EditCoreContextRequest;
+    use nexus_contracts::generated::daemon_api::schedule::list_schedules_query::ListSchedulesQuery;
+    use nexus_contracts::local::schedule::{
+        CoreContextPayload, CoreContextVersion, ScheduleId,
+    };
+
+    /// The generated PATCH body for one append.
+    fn append(body: &str) -> EditCoreContextRequest {
+        EditCoreContextRequest {
+            op: "append".to_string(),
+            body: Some(body.to_string()),
+            patch: None,
+            path: None,
+        }
+    }
+
+    let fixture = owner_fixture().await;
+    let principal = fixture.core.active_principal().await.unwrap();
+    let pool = fixture.pool();
+    let coordinator = fixture.coordinator();
+    let caps = fixture.handle.capability_holder();
+    let home = fixture.nexus_home();
+    let executor =
+        fixture.executor.clone() as Arc<dyn nexus_orchestration::capability::PromptExecutor>;
+
+    // ── 1. A durable pending row created through the PUBLIC add appears in the
+    //       schedule list with its stored identity/status/policy and NO run. ──
+    let schedule_id = add_pending_schedule(&fixture, "retained-reads").await;
+
+    let schedules = fixture
+        .handle
+        .list_schedules(&principal, ListSchedulesQuery::default())
+        .await
+        .expect("list schedules");
+    let listed = schedules
+        .items
+        .iter()
+        .find(|item| item.schedule_id == schedule_id)
+        .expect("the durable row is listed");
+    assert_eq!(listed.creator_id, CREATOR);
+    assert_eq!(listed.preset_id, PROMPT_PRESET);
+    assert_eq!(listed.status, "pending");
+    assert_eq!(listed.execution_policy, "driven_v1");
+    assert_eq!(listed.current_core_context_version, 0);
+    assert_eq!(listed.label.as_deref(), Some("retained-reads"));
+    assert!(
+        listed.current_session_id.is_none(),
+        "a public read must never manufacture an owned run: {listed:?}"
+    );
+    assert!(
+        !schedules.pagination.has_more,
+        "one row must fit the default page"
+    );
+
+    // Nothing has been admitted, so the DURABLE session list is empty (this is
+    // the store, not an in-memory engine map or a Host session list).
+    let sessions = fixture
+        .handle
+        .list_workflow_sessions(&principal, ListSessionsQuery::default())
+        .await
+        .expect("list sessions");
+    assert!(
+        sessions.items.is_empty(),
+        "an empty durable session list is valid only before any admission: {:?}",
+        sessions.items
+    );
+
+    let inspected = fixture
+        .handle
+        .inspect_schedule(&principal, schedule_id.clone())
+        .await
+        .expect("inspect the pending row");
+    assert_eq!(inspected.schedule.schedule_id, schedule_id);
+    assert_eq!(inspected.schedule.status, "pending");
+    assert_eq!(inspected.schedule.current_core_context_version, 0);
+    assert!(inspected.schedule.current_session_id.is_none());
+    assert_eq!(inspected.concurrency_kind, "serial");
+    assert!(inspected.depends_on.is_empty());
+
+    // ── 2. Foreign and unknown ids close IDENTICALLY, and an explicit foreign
+    //       creator filter refuses before any query runs. ──
+    // The foreign row is staged directly: the public add path can only mint
+    // rows for the admitted Creator, so the foreign owner must come from
+    // storage (the point of the assertion is the READ scope).
+    sqlx::query(
+        "INSERT INTO creator_schedules
+           (schedule_id, creator_id, preset_id, preset_version, status,
+            concurrency_kind, current_core_context_version, created_at, updated_at)
+         VALUES ('SCH-foreign', 'other_creator', ?, 1, 'pending', 'serial', 0, 1, 1)",
+    )
+    .bind(PROMPT_PRESET)
+    .execute(pool.as_ref())
+    .await
+    .expect("stage a foreign-owned schedule row");
+
+    let unknown = fixture
+        .handle
+        .inspect_schedule(&principal, "SCH-missing".to_string())
+        .await
+        .unwrap_err();
+    let foreign = fixture
+        .handle
+        .inspect_schedule(&principal, "SCH-foreign".to_string())
+        .await
+        .unwrap_err();
+    for (id, err) in [("SCH-missing", &unknown), ("SCH-foreign", &foreign)] {
+        match err {
+            nexus_core::CoreError::NotFound { resource } => {
+                assert_eq!(
+                    resource,
+                    &format!("schedule {id}"),
+                    "an unknown id and a foreign id must close with the same refusal"
+                );
+            }
+            other => panic!("a foreign or unknown id must close as NotFound, got {other:?}"),
+        }
+    }
+
+    let foreign_filter = fixture
+        .handle
+        .list_schedules(
+            &principal,
+            ListSchedulesQuery {
+                creator_id: Some("other_creator".to_string()),
+                ..ListSchedulesQuery::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(foreign_filter, nexus_core::CoreError::Forbidden { .. }),
+        "an explicit foreign creator filter must refuse, never answer an empty page: \
+         {foreign_filter:?}"
+    );
+    assert!(
+        schedules
+            .items
+            .iter()
+            .all(|item| item.schedule_id != "SCH-foreign"),
+        "another creator's row must never be listed"
+    );
+
+    // ── 3. A Steer append is ONE durable version plus the pointer advance. ──
+    let appended = fixture
+        .handle
+        .edit_core_context(&principal, schedule_id.clone(), append("idea-one"))
+        .await
+        .expect("append the first idea");
+    assert_eq!(appended.new_version, 1);
+    let inspected = fixture
+        .handle
+        .inspect_schedule(&principal, schedule_id.clone())
+        .await
+        .expect("inspect after the append");
+    assert_eq!(
+        inspected.schedule.current_core_context_version, 1,
+        "inspect must report the version the append committed"
+    );
+
+    let unknown_edit = fixture
+        .handle
+        .edit_core_context(&principal, "SCH-missing".to_string(), append("nope"))
+        .await
+        .unwrap_err();
+    let foreign_edit = fixture
+        .handle
+        .edit_core_context(&principal, "SCH-foreign".to_string(), append("nope"))
+        .await
+        .unwrap_err();
+    for (id, err) in [("SCH-missing", &unknown_edit), ("SCH-foreign", &foreign_edit)] {
+        match err {
+            nexus_core::CoreError::NotFound { resource } => assert_eq!(
+                resource,
+                &format!("schedule {id}"),
+                "a foreign append must close exactly like an unknown one"
+            ),
+            other => panic!("a foreign or unknown append must close as NotFound, got {other:?}"),
+        }
+    }
+    let foreign_versions: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM core_context_versions WHERE schedule_id = 'SCH-foreign'",
+    )
+    .fetch_one(pool.as_ref())
+    .await
+    .expect("foreign version count");
+    assert_eq!(
+        foreign_versions, 0,
+        "a refused append to another creator's schedule must write nothing"
+    );
+
+    // ── 4. CONCURRENT appends: every body is durable exactly once, the versions
+    //       are monotonic, and the pointer names the last one (no lost body). ──
+    let bodies = ["idea-two", "idea-three", "idea-four", "idea-five"];
+    let results = futures_util::future::join_all(bodies.iter().map(|body| {
+        fixture
+            .handle
+            .edit_core_context(&principal, schedule_id.clone(), append(body))
+    }))
+    .await;
+    // Pair every append with the version it committed. The COMMIT order is the
+    // winner of the writer race, not the call order, so the version numbers
+    // (never the call indices) are what the chain must be read in.
+    let mut committed: Vec<(i64, &str)> = vec![(1, "idea-one")];
+    for (body, result) in bodies.iter().zip(results) {
+        let version = result
+            .expect("a concurrent append must commit, never lose its body")
+            .new_version;
+        committed.push((version, body));
+    }
+    committed.sort_unstable_by_key(|(version, _)| *version);
+    assert_eq!(
+        committed.iter().map(|(version, _)| *version).collect::<Vec<_>>(),
+        vec![1, 2, 3, 4, 5],
+        "concurrent appends must claim one distinct, monotonic version each"
+    );
+
+    let manager = fixture
+        .handle
+        .coordinator()
+        .schedule_supervisor()
+        .expect("the fixture attaches a supervisor")
+        .core_context_manager();
+    let sid = ScheduleId(schedule_id.clone());
+    assert_eq!(
+        manager.current_version(&sid).await.expect("pointer").0,
+        5,
+        "the pointer is the version authority and names the last committed append"
+    );
+    // Version 0 is the durable seed, so the chain starts from an empty body.
+    let seed = manager
+        .read(&sid, CoreContextVersion(0))
+        .await
+        .expect("the version-0 seed is durable");
+    match seed.content {
+        CoreContextPayload::Text { body } => assert!(body.is_empty(), "empty seed, got: {body}"),
+        CoreContextPayload::Struct { .. } => panic!("the seed is text"),
+    }
+    // Every version must be the previous version PLUS exactly its own body: a
+    // lost body shortens the chain, a duplicated body extends it, and a version
+    // derived from a stale base would reorder it.
+    let mut expected = String::new();
+    for (version, body) in &committed {
+        expected.push_str(body);
+        let record = manager
+            .read(&sid, CoreContextVersion(u32::try_from(*version).expect("version fits")))
+            .await
+            .unwrap_or_else(|e| panic!("version {version} must be durable: {e}"));
+        let CoreContextPayload::Text { body: durable } = record.content else {
+            panic!("the appended context stays text");
+        };
+        assert_eq!(
+            durable, expected,
+            "version {version} must be the previous version plus exactly '{body}'"
+        );
+    }
+
+    // ── 5. The NEXT EXECUTION BOUNDARY consumes the winning committed version:
+    //       admission freezes the pointer's payload into the run, and the public
+    //       reads report that same run and version. ──
+    let run_id = coordinator
+        .admit_schedule(
+            &schedule_id,
+            pool.as_ref(),
+            &home,
+            &caps,
+            None,
+            Some(executor),
+        )
+        .await
+        .expect("admission")
+        .0;
+    let context_json: Vec<u8> =
+        sqlx::query_scalar("SELECT context_json FROM orchestration_sessions WHERE session_id = ?")
+            .bind(&run_id)
+            .fetch_one(pool.as_ref())
+            .await
+            .expect("the admitted run row");
+    let context: Value =
+        serde_json::from_slice(&context_json).expect("the durable run context parses");
+    let frozen = context["data"]["core_context.text"]
+        .as_str()
+        .expect("the boundary freezes core_context.text into the run");
+    for body in ["idea-one", "idea-two", "idea-three", "idea-four", "idea-five"] {
+        assert_eq!(
+            frozen.matches(body).count(),
+            1,
+            "the boundary must consume the winning version with every body once: {frozen}"
+        );
+    }
+
+    let inspected = fixture
+        .handle
+        .inspect_schedule(&principal, schedule_id.clone())
+        .await
+        .expect("inspect the admitted row");
+    assert_eq!(inspected.schedule.status, "running");
+    assert_eq!(
+        inspected.schedule.current_session_id.as_deref(),
+        Some(run_id.as_str()),
+        "inspect must report the SAME run the schedule owns"
+    );
+    assert_eq!(inspected.schedule.current_core_context_version, 5);
+
+    let sessions = fixture
+        .handle
+        .list_workflow_sessions(&principal, ListSessionsQuery::default())
+        .await
+        .expect("list sessions after admission");
+    let listed = sessions
+        .items
+        .iter()
+        .find(|item| item.session_id == run_id)
+        .expect("the admitted run is listed from the durable store");
+    assert_eq!(listed.creator_id, CREATOR);
+    assert_eq!(listed.preset_id, PROMPT_PRESET);
+    assert_eq!(listed.status, "running");
+
+    let detail = fixture
+        .handle
+        .get_workflow_session(&principal, run_id.clone())
+        .await
+        .expect("the run detail is readable");
+    assert_eq!(detail.session.session_id, run_id);
+    assert_eq!(detail.session.creator_id, CREATOR);
+    assert_eq!(detail.session.status, "running");
+
+    // A foreign run, a child run and an unknown id are all equally closed: a
+    // child is never independently authorized by naming it.
+    sqlx::query(
+        "INSERT INTO orchestration_sessions
+           (session_id, creator_id, preset_id, preset_version, parent_session_id, status,
+            context_json, created_at, updated_at)
+         VALUES ('run-foreign', 'other_creator', ?, 1, NULL, 'running', '{}', 1, 1),
+                ('run-child', ?, ?, 1, ?, 'running', '{}', 1, 1)",
+    )
+    .bind(PROMPT_PRESET)
+    .bind(CREATOR)
+    .bind(PROMPT_PRESET)
+    .bind(&run_id)
+    .execute(pool.as_ref())
+    .await
+    .expect("stage a foreign and a child run row");
+
+    for (id, err) in [
+        (
+            "run-child".to_string(),
+            fixture
+                .handle
+                .get_workflow_session(&principal, "run-child".to_string())
+                .await
+                .unwrap_err(),
+        ),
+        (
+            "run-foreign".to_string(),
+            fixture
+                .handle
+                .get_workflow_session(&principal, "run-foreign".to_string())
+                .await
+                .unwrap_err(),
+        ),
+        (
+            "run-missing".to_string(),
+            fixture
+                .handle
+                .get_workflow_session(&principal, "run-missing".to_string())
+                .await
+                .unwrap_err(),
+        ),
+    ] {
+        match err {
+            nexus_core::CoreError::NotFound { resource } => assert_eq!(
+                resource,
+                format!("workflow session {id}"),
+                "a child, a foreign and an unknown run must close identically"
+            ),
+            other => panic!("run {id} must close as NotFound, got {other:?}"),
+        }
+    }
+    let sessions = fixture
+        .handle
+        .list_workflow_sessions(&principal, ListSessionsQuery::default())
+        .await
+        .expect("list sessions with foreign/child rows present");
+    assert_eq!(
+        sessions.items.len(),
+        1,
+        "only the creator's own ROOT run is listed: {:?}",
+        sessions.items
+    );
+    assert_eq!(sessions.items[0].session_id, run_id);
+
+    // ── 6. Cleanup: release the parked prompt, then close the owner. ──
+    wait_for_prompt(&fixture.host).await;
+    fixture.host.release_all();
+    let report = fixture.handle.close().await.expect("owner close");
+    assert!(report.cleanup_confirmed, "close must report confirmed cleanup");
+    fixture.core.close().await.expect("core close");
+}

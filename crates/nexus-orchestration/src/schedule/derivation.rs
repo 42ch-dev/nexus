@@ -29,6 +29,15 @@ pub enum CoreContextError {
     UserEditValidation(String),
     #[error("version {1} not found for schedule {0}")]
     VersionNotFound(String, u32),
+    /// The schedule pointer no longer named the version an append derived
+    /// from, so the append (and its immutable version row) was rolled back.
+    ///
+    /// A version race never produces an orphan successful version: the caller
+    /// re-reads the pointer and retries against the committed winner.
+    #[error(
+        "core context version race on schedule {0}: the pointer no longer names version {1}"
+    )]
+    VersionRace(String, u32),
     #[error("serde error: {0}")]
     Serde(#[from] serde_json::Error),
 }
@@ -178,36 +187,65 @@ impl CoreContextManager {
 
     /// Apply a derivation step to produce the next version of `core_context`.
     ///
-    /// - Reads the current version.
+    /// - Reads the schedule's current version (the pointer) and that version's
+    ///   payload.
     /// - Applies the `DerivationStep` to compute the new payload.
-    /// - Inserts a new `core_context_versions` row.
-    /// - Bumps `creator_schedules.current_core_context_version`.
+    /// - Inserts the new immutable `core_context_versions` row.
+    /// - Advances `creator_schedules.current_core_context_version` to it.
+    ///
+    /// All four steps are ONE `BEGIN IMMEDIATE` transaction. The pointer is the
+    /// single version authority, and the advance is conditional
+    /// (`WHERE current_core_context_version = <derived-from version>`), so two
+    /// concurrent appends — this manager's other schedules, a second manager,
+    /// or a second process over the same Creator DB — cannot interleave: the
+    /// winner commits version N *and* pointer N together and the next append
+    /// derives from N. A lost advance (the schedule row vanished) rolls the
+    /// whole transaction back: a version row is never committed while the
+    /// pointer still names an older one, and no append body is lost.
     ///
     /// Returns the new [`CoreContextRecord`].
     ///
     /// # Errors
-    /// Returns [`CoreContextError`] if step application fails.
+    /// Returns [`CoreContextError`] if step application fails,
+    /// [`CoreContextError::NotFound`] when the schedule row is absent, and
+    /// [`CoreContextError::VersionRace`] when the pointer no longer named the
+    /// version this step derived from.
     pub async fn apply(
         &self,
         schedule_id: &ScheduleId,
         step: DerivationStep,
         author: CoreContextAuthor,
     ) -> Result<CoreContextRecord, CoreContextError> {
-        // R6: Per-schedule lock to prevent version chain corruption.
+        // R6: Per-schedule lock. The lock serializes THIS manager's writers on
+        // one schedule; the transaction below is what makes the
+        // version+pointer pair atomic against every other writer.
         let guard = self.schedule_guard(schedule_id).await;
         let _lock = guard.lock().await;
 
         let now = chrono::Utc::now().timestamp();
+        let schedule_id_owned = schedule_id.0.clone();
 
-        // Read current version and payload
-        let current_version = self.current_version(schedule_id).await?;
+        // `BEGIN IMMEDIATE` takes the Creator-DB writer lock up front, so the
+        // read-derive-insert-advance sequence is never split by another writer
+        // (and never has to upgrade a read lock mid-transaction).
+        let mut tx = nexus_local_db::begin_immediate(&self.pool)
+            .await
+            .map_err(|e| CoreContextError::Database(begin_error(e)))?;
+
+        // The schedule row's pointer is the version authority.
+        let current = sqlx::query_scalar::<_, i64>(
+            "SELECT current_core_context_version FROM creator_schedules WHERE schedule_id = ?",
+        )
+        .bind(&schedule_id_owned)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| CoreContextError::NotFound(schedule_id.0.clone()))?;
+        let current_version = CoreContextVersion(u32::try_from(current).unwrap_or_default());
         let new_version = CoreContextVersion(current_version.0 + 1);
 
-        // Compute new payload from previous content
-        let previous_payload = {
-            let record = self.read(schedule_id, current_version).await?;
-            Some(record.content)
-        };
+        // Compute new payload from the previous (pointed-at) content.
+        let previous_payload =
+            Some(read_version_in_tx(&mut tx, &schedule_id_owned, current_version).await?.content);
 
         let new_payload = apply_step(previous_payload.as_ref(), &step, &author)?;
 
@@ -225,42 +263,54 @@ impl CoreContextManager {
         };
 
         let derivation_kind = derivation_kind_str(&step);
-
-        // Pre-own all bind params (borrow lifetime rules for sqlx macros).
-        let schedule_id_owned = schedule_id.0.clone();
         let version_i64 = i64::from(new_version.0);
 
-        // Insert the new version row
-        sqlx::query!(
-            r#"INSERT INTO core_context_versions
+        // Runtime `sqlx::query` (not the compile-time macro) for the new
+        // statements: they carry no `.sqlx` offline entry, and this is the
+        // same convention the supervisor's admission transaction uses.
+        sqlx::query(
+            "INSERT INTO core_context_versions
                (schedule_id, version, payload_kind, content,
                 derivation_kind, derivation_detail,
                 created_at, created_by_kind, created_by_user_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
-            schedule_id_owned,
-            version_i64,
-            payload_kind,
-            content_bytes,
-            derivation_kind,
-            derivation_json,
-            now,
-            created_by_kind,
-            created_by_user_id
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
-        .execute(&*self.pool)
+        .bind(&schedule_id_owned)
+        .bind(version_i64)
+        .bind(payload_kind)
+        .bind(content_bytes)
+        .bind(derivation_kind)
+        .bind(derivation_json)
+        .bind(now)
+        .bind(created_by_kind)
+        .bind(created_by_user_id)
+        .execute(&mut *tx)
         .await?;
 
-        // Bump the schedule's current_core_context_version
-        sqlx::query!(
+        // Conditional pointer advance: the append is only durable together
+        // with the pointer that names it.
+        let advanced = sqlx::query(
             "UPDATE creator_schedules
              SET current_core_context_version = ?, updated_at = ?
-             WHERE schedule_id = ?",
-            version_i64,
-            now,
-            schedule_id_owned
+             WHERE schedule_id = ? AND current_core_context_version = ?",
         )
-        .execute(&*self.pool)
-        .await?;
+        .bind(version_i64)
+        .bind(now)
+        .bind(&schedule_id_owned)
+        .bind(current)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+
+        if advanced != 1 {
+            tx.rollback().await?;
+            return Err(CoreContextError::VersionRace(
+                schedule_id.0.clone(),
+                current_version.0,
+            ));
+        }
+
+        tx.commit().await?;
 
         Ok(CoreContextRecord {
             schedule_id: schedule_id.0.clone(),
@@ -596,6 +646,47 @@ impl CoreContextVersionRow {
             created_at: self.created_at.to_string(),
             created_by,
         })
+    }
+}
+
+/// Read one `core_context_versions` row through an OPEN transaction.
+///
+/// The append path reads the version it derives from through the same
+/// transaction that inserts the next one, so the payload can never come from a
+/// version another writer has since moved away from.
+///
+/// # Errors
+/// Returns the storage error, or [`CoreContextError::VersionNotFound`] when the
+/// version row is absent (a schedule whose pointer has no backing row is not a
+/// valid derivation base).
+async fn read_version_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    schedule_id: &str,
+    version: CoreContextVersion,
+) -> Result<CoreContextRecord, CoreContextError> {
+    let version_i64 = i64::from(version.0);
+    let row = sqlx::query_as::<_, CoreContextVersionRow>(
+        "SELECT schedule_id, version, payload_kind, content,
+                derivation_kind, derivation_detail,
+                created_at, created_by_kind, created_by_user_id
+         FROM core_context_versions
+         WHERE schedule_id = ? AND version = ?",
+    )
+    .bind(schedule_id)
+    .bind(version_i64)
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or_else(|| CoreContextError::VersionNotFound(schedule_id.to_string(), version.0))?;
+    row.into_record()
+}
+
+/// Map a `nexus_local_db` transaction-open failure onto the sqlx error this
+/// module's error type carries (the local-db wrapper preserves the source
+/// `sqlx::Error`; every other local-db refusal is a plain protocol error).
+fn begin_error(err: nexus_local_db::LocalDbError) -> sqlx::Error {
+    match err {
+        nexus_local_db::LocalDbError::Sqlx(e) => e,
+        other => sqlx::Error::Protocol(other.to_string()),
     }
 }
 
