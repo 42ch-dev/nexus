@@ -29,6 +29,11 @@
 //!   synthesizer, moved here from the deleted daemon composition (v1.193
 //!   P2-T2, technical contracts §4). Each stays the single owner of its
 //!   adapter.
+//! - `production` — the core-owned hosted workspace composition (v1.195
+//!   P0-T1): it resolves the selected creative root from the core's own
+//!   metadata and builds the workspace port bundle the hosted production
+//!   factory consumes. It needs the Host edge only because that factory does,
+//!   so it rides `execution + provider-host`.
 //!
 //! The handle is the ONE owner of the task set, engine epoch and cleanup:
 //! duplicate `start_execution` refuses or returns the same established owner
@@ -47,6 +52,11 @@ pub mod executor;
 pub mod handle_ops;
 pub mod lifecycle;
 pub mod peer_tools;
+// v1.195 P0-T1: the hosted production composition. It builds the selected-root
+// workspace port bundle for the hosted factory that the NEXT task adds, so it
+// needs both the execution layer and that factory's Host edge.
+#[cfg(all(feature = "execution", feature = "provider-host"))]
+pub mod production;
 // v1.193 P2-T2: the production `PromptExecutor` over the existing Host plane
 // moved here from the deleted daemon composition (technical contracts §4).
 // It needs the Host facade edge, so it compiles only with `provider-host`.
