@@ -19,6 +19,7 @@
 #![allow(clippy::unwrap_used)]
 
 use nexus_contracts::generated::daemon_api::compute::{
+    clear_runs_query::{ClearRunsQuery, ClearRunsQueryStatus},
     list_runs_query::{ListRunsQuery, ListRunsQueryStatus},
     run_accept_request::RunAcceptRequest,
     run_request::RunRequest,
@@ -28,8 +29,8 @@ use nexus_core::execution::capabilities::{
     execute_tool, ToolContext, ToolExecuteRequest, ToolRuntimeFacts,
 };
 use nexus_core::execution::compute::{
-    accept_compute_run, compute_run, discard_compute_run, get_compute_run, list_compute_runs,
-    ComputeContext,
+    accept_compute_run, clear_compute_runs, compute_run, discard_compute_run, get_compute_run,
+    list_compute_runs, ComputeContext,
 };
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService, WorkPatchRequest};
 use nexus_wasm_host::{CachedModule, ModuleCache, ModuleManifest, SandboxConfig, WasmEngine};
@@ -2475,6 +2476,201 @@ async fn compute_module_registry_lists_embedded_modules() {
         matches!(unknown, Err(CoreError::NotFound { .. })),
         "an unknown module must be not_found, got {unknown:?}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// v1.195 P2-T2 — terminal history clear (C8 / S2-5)
+// ---------------------------------------------------------------------------
+
+/// Whether a direct-lane run row is still durable.
+///
+/// Clear DELETES rows, so an absence claim is read back through the
+/// authority's own point lookup instead of being inferred from a list page.
+async fn run_row_survives(pool: &sqlx::SqlitePool, run_id: &str) -> bool {
+    nexus_local_db::compute_runs::get_run(pool, run_id)
+        .await
+        .expect("run row read")
+        .is_some()
+}
+
+/// Clear removes a World's TERMINAL run rows — and nothing else.
+///
+/// The three ways a clear can go wrong are each asserted:
+///
+/// - **It eats work that is not history.** A `succeeded` run still awaits
+///   review and a `running` run is not terminal: both must survive, by the
+///   storage predicate rather than by the caller's discipline.
+/// - **It reaches past the World.** Another creator's TERMINAL row is never
+///   touched, and clearing that World is refused as an ownership denial.
+/// - **It undoes an accepted effect.** The applied state delta and the CANON
+///   `compute_result` event are World truth, not run-row state, so they are
+///   still there after the row that produced them is gone.
+///
+/// `query.status` narrows Clear to ONE terminal state and never widens it, and
+/// the owner door (`ExecutionHandle::clear_compute_runs`) consumes the SAME
+/// authority.
+#[tokio::test]
+#[serial_test::serial]
+async fn clear_owned_terminal_history_preserves_effects_and_pending() {
+    let f = fixture().await;
+    let principal = f.core.active_principal().await.unwrap();
+    seed_foreign_world(f.core.pool()).await;
+
+    // ACCEPTED: terminal, and its effect is committed World truth.
+    let applied = run_succeeded(&f, &f.compute).await;
+    accept_compute_run(&f.core, &principal, &applied, accept_request(json!({})))
+        .await
+        .expect("accept succeeds");
+    // Damage = max(0, 20 − 5); the event is canon.
+    assert_eq!(defender_hp(f.core.pool(), "kb_def").await, 15);
+    let effects_before = timeline_rows(f.core.pool()).await;
+    assert_eq!(effects_before.len(), 1);
+
+    // DISCARDED: terminal and clearable, but it never had an effect.
+    let discarded = run_succeeded(&f, &f.compute).await;
+    discard_compute_run(&f.core, &principal, &discarded)
+        .await
+        .expect("discard succeeds");
+
+    // SUCCEEDED: terminal-capable only after review — never clearable yet.
+    let pending = run_succeeded(&f, &f.compute).await;
+
+    // RUNNING: not terminal.
+    let running = nexus_local_db::compute_runs::insert_run(
+        f.core.pool(),
+        WORLD,
+        MODULE,
+        Some("1.0.0"),
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+
+    // Another creator's World, holding a TERMINAL row of its own.
+    let foreign = nexus_local_db::compute_runs::insert_run(
+        f.core.pool(),
+        FOREIGN_WORLD,
+        MODULE,
+        Some("1.0.0"),
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    nexus_local_db::compute_runs::set_run_succeeded(f.core.pool(), &foreign, "{}")
+        .await
+        .unwrap();
+    nexus_local_db::compute_runs::set_run_discarded(f.core.pool(), &foreign)
+        .await
+        .unwrap();
+
+    // A terminal filter matches only its own state: nothing here is `failed`,
+    // and the applied/discarded rows are still standing afterwards.
+    let none_failed = clear_compute_runs(
+        &f.core,
+        &principal,
+        ClearRunsQuery {
+            status: Some(ClearRunsQueryStatus::Failed),
+            world_id: WORLD.to_string(),
+        },
+    )
+    .await
+    .expect("clear with a terminal filter succeeds");
+    assert_eq!(none_failed.deleted, 0, "no run of this World is failed");
+    assert!(run_row_survives(f.core.pool(), &applied).await);
+    assert!(run_row_survives(f.core.pool(), &discarded).await);
+
+    // The `discarded` filter takes exactly that row.
+    let cleared_discarded = clear_compute_runs(
+        &f.core,
+        &principal,
+        ClearRunsQuery {
+            status: Some(ClearRunsQueryStatus::Discarded),
+            world_id: WORLD.to_string(),
+        },
+    )
+    .await
+    .expect("clear succeeds");
+    assert_eq!(cleared_discarded.deleted, 1);
+    assert!(!run_row_survives(f.core.pool(), &discarded).await);
+    assert!(run_row_survives(f.core.pool(), &applied).await);
+
+    // Unfiltered: every terminal row of the World goes — and only those.
+    let cleared = clear_compute_runs(
+        &f.core,
+        &principal,
+        ClearRunsQuery {
+            status: None,
+            world_id: WORLD.to_string(),
+        },
+    )
+    .await
+    .expect("clear succeeds");
+    assert_eq!(cleared.deleted, 1, "the applied row was the last terminal one");
+    assert!(!run_row_survives(f.core.pool(), &applied).await);
+    assert!(
+        run_row_survives(f.core.pool(), &pending).await,
+        "a succeeded run still needs review"
+    );
+    assert!(
+        run_row_survives(f.core.pool(), &running).await,
+        "a running run is not history"
+    );
+    assert!(
+        run_row_survives(f.core.pool(), &foreign).await,
+        "another World's terminal row is out of scope"
+    );
+
+    // The accepted effect outlived the run row that produced it.
+    assert_eq!(defender_hp(f.core.pool(), "kb_def").await, 15);
+    assert_eq!(timeline_rows(f.core.pool()).await, effects_before);
+
+    // The pending run is still readable AS the succeeded run it was, with its
+    // proposals intact.
+    let detail = get_compute_run(&f.core, &principal, &pending)
+        .await
+        .expect("pending detail read");
+    let detail = serde_json::to_value(&detail).unwrap();
+    assert_eq!(detail["status"], "succeeded");
+    assert!(detail["proposals"].is_object());
+
+    // The owner door reaches the same authority: nothing terminal is left for
+    // this World, and the pending/foreign rows still survive it.
+    let handle = open_compute_handle(&f).await;
+    let door = handle
+        .clear_compute_runs(
+            &principal,
+            ClearRunsQuery {
+                status: None,
+                world_id: WORLD.to_string(),
+            },
+        )
+        .await
+        .expect("facade clear");
+    assert_eq!(door.deleted, 0);
+    assert!(run_row_survives(f.core.pool(), &pending).await);
+    assert!(run_row_survives(f.core.pool(), &foreign).await);
+
+    // ... and is refused for a World the creator does not own; that World's
+    // terminal row is untouched.
+    let refused = handle
+        .clear_compute_runs(
+            &principal,
+            ClearRunsQuery {
+                status: None,
+                world_id: FOREIGN_WORLD.to_string(),
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(refused, CoreError::WorldOwnerDenied { .. }),
+        "a foreign World must be refused as ownership, got {refused:?}"
+    );
+    assert!(run_row_survives(f.core.pool(), &foreign).await);
 }
 
 // ---------------------------------------------------------------------------

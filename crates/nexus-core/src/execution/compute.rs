@@ -52,6 +52,8 @@ use crate::execution::lifecycle::ExecutionHandle;
 use crate::principal::Principal;
 use crate::service::CoreService;
 use nexus_contracts::generated::daemon_api::compute::{
+    clear_runs_query::ClearRunsQuery,
+    clear_runs_response::ClearRunsResponse,
     discard_run_response::{DiscardRunResponse, DiscardRunResponseStatus},
     list_modules_response::{
         ListModulesResponse, NexusComputeModuleSummary, NexusComputeModuleSummaryStatus,
@@ -603,6 +605,57 @@ pub async fn discard_compute_run(
     Ok(())
 }
 
+/// Clear a World's TERMINAL run history, returning how many rows went (C8).
+///
+/// Clear is World-scoped, never a world-wide purge: `query.world_id` is
+/// required by the generated query, and ownership is verified BEFORE any row
+/// is touched, so a foreign World is refused (and its history never disclosed)
+/// rather than cleared.
+///
+/// Deleting a run row is not an UNDO. An accepted run's effect — the applied
+/// state delta, the new key blocks, the CANON `compute_result` timeline
+/// events — lives in the World, not on the run row, so Clear drops history
+/// without reverting anything its owner accepted (retained C8: "does not undo
+/// an already accepted World effect"). The same reason keeps `running` and
+/// `succeeded` rows: a succeeded run still needs review.
+///
+/// # Retention
+/// [`nexus_local_db::compute_runs::delete_terminal_runs`] owns the predicate.
+/// Only `applied` | `discarded` | `failed` are matched, and the `run_id IS NOT
+/// NULL` clause keeps Clear inside the direct lane, so peer/spoke adapter rows
+/// cannot be reached at all. `query.status` narrows Clear to ONE terminal
+/// state; the generated `clear-runs-query` schema admits only terminal values,
+/// and the storage predicate re-validates as defense in depth — a
+/// status/CAS-suppressing "clear everything" is not expressible here.
+///
+/// # Errors
+/// `WorldOwnerDenied` when the principal's creator does not own the World;
+/// `Internal` for storage faults.
+pub async fn clear_compute_runs(
+    core: &CoreService,
+    principal: &Principal,
+    query: ClearRunsQuery,
+) -> CoreResult<ClearRunsResponse> {
+    let pool = &core.inner.pool;
+    let ClearRunsQuery { status, world_id } = query;
+
+    ensure_world_owned(pool, principal.creator_id(), &world_id).await?;
+
+    let status = status.map(|status| status.to_string());
+    let deleted = compute_runs::delete_terminal_runs(pool, &world_id, status.as_deref())
+        .await
+        .map_err(crate::error::local_db_err)?;
+
+    // The wire field is `i64` (the generated schema's integer) while SQLite
+    // reports a `u64`. A row count is bounded by the table, so the conversion
+    // is total in practice; refuse rather than truncate if it ever is not.
+    let deleted = i64::try_from(deleted).map_err(|_| CoreError::Internal {
+        category: format!("cleared run count {deleted} does not fit the response field"),
+    })?;
+
+    Ok(ClearRunsResponse { deleted })
+}
+
 /// List runs for the creator's owned Worlds, cursor-paginated.
 ///
 /// The query is the generated `list-runs-query` DTO, so the native/service
@@ -732,9 +785,9 @@ pub async fn get_compute_run(
 /// owner fence and the principal binding are applied EXACTLY as the
 /// neighbouring `handle_ops` entry points apply them, and the operation is
 /// then delegated, so a non-HTTP caller cannot reach a second implementation
-/// of discovery, run detail or history. Nothing here inspects the pool, the
-/// registry or the run rows directly — a missing authority is a typed refusal
-/// from the authority, never an empty success.
+/// of discovery, run detail, history or clear. Nothing here inspects the pool,
+/// the registry or the run rows directly — a missing authority is a typed
+/// refusal from the authority, never an empty success.
 ///
 /// `compute_run` and `accept_compute_run` already exist in `handle_ops` with
 /// the retained signatures (current-host-contracts §5) and are not duplicated.
@@ -849,6 +902,25 @@ impl ExecutionHandle {
             run_id,
             status: DiscardRunResponseStatus::Discarded,
         })
+    }
+
+    /// Clear the creator's TERMINAL run history for ONE owned World (C8),
+    /// returning the generated `{deleted}` count.
+    ///
+    /// # Errors
+    /// `Closing` when the owner is shutting down; `AuthRequired` when the
+    /// principal does not belong to this owner's service; `WorldOwnerDenied`
+    /// for a World the principal's creator does not own; `Internal` for
+    /// storage faults.
+    pub async fn clear_compute_runs(
+        &self,
+        principal: &Principal,
+        query: ClearRunsQuery,
+    ) -> CoreResult<ClearRunsResponse> {
+        self.ensure_not_draining()?;
+        let core = self.linked_core()?;
+        core.verify_principal(principal)?;
+        crate::execution::compute::clear_compute_runs(core.as_ref(), principal, query).await
     }
 }
 
