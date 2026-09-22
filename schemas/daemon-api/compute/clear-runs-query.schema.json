@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/compute/clear-runs-query.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ClearRunsQuery",
+  "description": "Query parameters for DELETE /v1/daemon/compute/runs — World-scoped clear of terminal run history (V1.147 P3 T2).",
+  "type": "object",
+  "required": ["world_id"],
+  "additionalProperties": false,
+  "properties": {
+    "world_id": {
+      "type": "string",
+      "description": "World whose terminal runs are cleared (must be owned by the active creator)."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["applied", "discarded", "failed"],
+      "description": "Optional terminal-state filter; absent → every terminal run of the World. Running and succeeded (needs-review) rows are never deleted."
+    }
+  }
+}

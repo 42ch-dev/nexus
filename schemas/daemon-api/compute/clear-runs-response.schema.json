@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/compute/clear-runs-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ClearRunsResponse",
+  "description": "Response for DELETE /v1/daemon/compute/runs — the number of terminal run rows removed (V1.147 P3 T2).",
+  "type": "object",
+  "required": ["deleted"],
+  "additionalProperties": false,
+  "properties": {
+    "deleted": {
+      "type": "integer",
+      "description": "Number of terminal runs deleted (applied|discarded|failed)."
+    }
+  }
+}
