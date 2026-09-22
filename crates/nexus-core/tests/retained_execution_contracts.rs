@@ -2416,7 +2416,7 @@ inner_graphs:
       - id: hosted_prompt
         kind: acp_prompt
         template_file: prompts/generate.md
-        tool_policy: auto_grant_read_only
+        tool_policy: deny_all
     output_binding: hosted_prompt.text
 "#
     )
@@ -2658,5 +2658,113 @@ async fn hosted_schedule_drives_once_and_closes() {
         "close must join the owned scheduler task"
     );
     assert!(fixture.handle.is_settled(), "close settles the owner");
+    fixture.core.close().await.expect("core close");
+}
+
+/// A `running` row that owns NO run is REFUSED — never admitted, and never
+/// turned into a fresh run (v1.195 P0-T2 fix, L2 C1).
+///
+/// The stale shape is staged directly in storage. The durable product contract
+/// is that a never-started row merely LABELLED `Running` is not running:
+/// "Boot/tick/cron exclude legacy never-started pending/running/paused rows;
+/// missing session ID or creation time is not automatic opt-in. Explicit public
+/// schedule start revalidates and opts only that row in."
+/// (`.mstar/specs/daemon-runtime.md` §3). Both production paths therefore refuse
+/// it — the direct coordinator gate AND the coordinator-backed starter the
+/// owned clock drives — and nothing is minted: no owned session, no run row, no
+/// prompt.
+#[tokio::test]
+#[serial_test::serial]
+async fn non_owned_running_schedule_is_refused_without_minting_a_run() {
+    let fixture = hosted_fixture().await;
+    let coordinator = fixture.handle.coordinator();
+    let pool = coordinator.pool();
+    let caps = fixture.handle.capability_holder();
+    let home = fixture.tmp.path().join(".nexus42");
+
+    // The row is created through the PUBLIC add (so it carries a frozen
+    // descriptor + version-0 seed exactly as a real driven row does) and is
+    // then staged into the stale shape: `running` with NO owned run. The
+    // staging UPDATE lands within the same millisecond as the insert, while the
+    // owned clock's first tick is a full interval away — and from then on the
+    // row is `running`, which the tick never treats as a pending candidate.
+    let schedule_id = add_hosted_schedule(&fixture).await;
+    sqlx::query(
+        "UPDATE creator_schedules SET status = 'running', current_session_id = NULL \
+         WHERE schedule_id = ?",
+    )
+    .bind(&schedule_id)
+    .execute(pool.as_ref())
+    .await
+    .expect("stage the non-owned running row");
+    assert!(
+        !fixture.handle.owned_tasks_finished(),
+        "the owned clock is live while this case asserts"
+    );
+
+    // ── 1. The direct admission gate (what an explicit start reaches). ──
+    match coordinator
+        .admit_schedule(&schedule_id, pool.as_ref(), &home, &caps, None, None)
+        .await
+    {
+        Err(RunControlError::NotEligible(id, reason)) => {
+            assert_eq!(id, schedule_id, "the refusal names the row");
+            assert!(
+                reason.contains("no owned run"),
+                "the refusal must name the non-owned row: {reason}"
+            );
+            assert!(
+                reason.contains("Boot recovery"),
+                "the refusal must point at boot-recovery classification: {reason}"
+            );
+        }
+        other => panic!("a non-owned running row must be refused as not eligible, got {other:?}"),
+    }
+
+    // ── 2. The coordinator-backed starter — the owned clock's own path — and a
+    //       real clock tick (a no-op for a row that owns no run). ──
+    let supervisor = coordinator
+        .schedule_supervisor()
+        .expect("the factory attaches the production supervisor");
+    let starter = supervisor
+        .schedule_starter_clone()
+        .expect("the factory injects the coordinator-backed starter");
+    let via_starter = starter.start(&schedule_id).await;
+    let starter_message = format!("{via_starter:?}");
+    assert!(
+        via_starter.is_err(),
+        "the starter must refuse a non-owned running row: {starter_message}"
+    );
+    assert!(
+        starter_message.contains("no owned run"),
+        "the starter refusal must carry the same typed reason: {starter_message}"
+    );
+    nexus_core::execution::schedules::hosted_scheduler::run_one_tick(&supervisor)
+        .await
+        .expect("a clock tick is a no-op for a non-owned running row");
+
+    // ── 3. Nothing was minted by any of the three attempts. ──
+    let (status, owned) = schedule_row(pool.as_ref(), &schedule_id).await;
+    assert_eq!(status, "running", "the staged row keeps its durable state");
+    assert!(owned.is_none(), "no run may be claimed for a non-owned row");
+    let owned_rows: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM creator_schedules WHERE current_session_id IS NOT NULL",
+    )
+    .fetch_one(pool.as_ref())
+    .await
+    .expect("owned schedule count");
+    assert_eq!(owned_rows, 0, "no schedule may own a run");
+    let run_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM orchestration_sessions")
+        .fetch_one(pool.as_ref())
+        .await
+        .expect("run row count");
+    assert_eq!(run_rows, 0, "refusal must not create a run row");
+    assert_eq!(
+        fixture.host.prompt_count(),
+        0,
+        "no drive may reach the prompt port"
+    );
+
+    fixture.handle.close().await.expect("owner close");
     fixture.core.close().await.expect("core close");
 }

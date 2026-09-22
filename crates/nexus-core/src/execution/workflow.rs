@@ -2337,13 +2337,21 @@ impl WorkflowRunCoordinator {
         // Policy cutover happens inside admit_schedule_run (same claim
         // transaction). Do not UPDATE execution_policy before the payload
         // and run row exist (C-3).
-        self.admit_schedule(
+        //
+        // `legacy_opt_in = true`: this IS the explicit authorized public start
+        // that spec §3 names as the sole path allowed to opt a legacy
+        // never-started row in — including an admission-only `Running` row
+        // with no owned session. The inner gate still requires the row to be
+        // `legacy_inert`, so a `driven_v1` row whose claim lost its run is
+        // refused even here.
+        self.admit_schedule_inner(
             schedule_id,
             pool,
             nexus_home,
             caps,
             daemon_tool_dispatch,
             prompt_executor,
+            true,
         )
         .await
     }
@@ -2519,10 +2527,17 @@ impl WorkflowRunCoordinator {
     /// owned run: the schedule already carries `current_session_id`, so the
     /// second caller observes the existing run and drives it (single-flight).
     ///
+    /// A `running` row with NO owned run is refused here (typed
+    /// [`RunControlError::NotEligible`]): it is either a lost/foreign claim or
+    /// a historical never-started row, and neither may be admitted on a
+    /// tick/starter/ordinary-start path. Only
+    /// [`Self::start_legacy_schedule`] may opt a `legacy_inert` never-started
+    /// row in, and it does so through [`Self::admit_schedule_inner`]'s
+    /// `legacy_opt_in`.
+    ///
     /// # Errors
     /// Returns [`RunControlError`] on any admission failure. A failed
     /// admission never marks the row `Running` without a session.
-    #[allow(clippy::too_many_lines)] // a single eligibility + admission + drive handoff sequence; splitting obscures ordering
     pub async fn admit_schedule(
         &self,
         schedule_id: &str,
@@ -2535,6 +2550,43 @@ impl WorkflowRunCoordinator {
         prompt_executor: Option<
             std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor>,
         >,
+    ) -> Result<SessionId, RunControlError> {
+        self.admit_schedule_inner(
+            schedule_id,
+            pool,
+            nexus_home,
+            caps,
+            daemon_tool_dispatch,
+            prompt_executor,
+            false,
+        )
+        .await
+    }
+
+    /// The ONE admission implementation, shared by the public gate and the
+    /// explicit legacy opt-in.
+    ///
+    /// `legacy_opt_in` is `true` from [`Self::start_legacy_schedule`] ONLY —
+    /// the single authorized path by which a `legacy_inert` never-started row
+    /// labelled `Running` (with no owned session) may be opted in. Every other
+    /// caller passes `false`, so such a row fails closed with a typed refusal
+    /// instead of reaching eligibility or the atomic claim.
+    // The inner form adds the legacy opt-in to the same dependency seam; a
+    // wrapper struct would only hide which caller may opt a row in.
+    #[allow(clippy::too_many_arguments, clippy::too_many_lines)] // a single eligibility + admission + drive handoff sequence; splitting obscures ordering
+    async fn admit_schedule_inner(
+        &self,
+        schedule_id: &str,
+        pool: &sqlx::SqlitePool,
+        nexus_home: &std::path::Path,
+        caps: &nexus_orchestration::CapabilityRegistryHolder,
+        daemon_tool_dispatch: Option<
+            std::sync::Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>,
+        >,
+        prompt_executor: Option<
+            std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor>,
+        >,
+        legacy_opt_in: bool,
     ) -> Result<SessionId, RunControlError> {
         // C2: a closing coordinator admits no schedule run either. Checked
         // BEFORE the eligibility read and the admission transaction below, so
@@ -2575,16 +2627,42 @@ impl WorkflowRunCoordinator {
                 format!("execution_policy is '{}'", row.execution_policy),
             ));
         }
-        // Status gate. A `running` row is a candidate for RE-ENTRY (the
-        // owned-session branch below): the store's atomic claim writes
-        // `status='running'` WITH `current_session_id`, so a repeat caller —
-        // a second tick, an explicit start, the coordinator-backed starter —
-        // must observe and drive the SAME run instead of being refused. Only
-        // a terminal row (`completed`/`failed`/`cancelled`) is never
-        // re-admitted. A `running` row with NO owned session is the stale
-        // claim case the branch below refuses by name.
-        let status_ok = matches!(row.status.as_str(), "pending" | "paused" | "running");
+        // Status gate. `pending`/`paused` are admission candidates, and a
+        // `running` row is a candidate for RE-ENTRY (the owned-session branch
+        // below): the store's atomic claim writes `status='running'` WITH
+        // `current_session_id`, so a repeat caller — a second tick, an
+        // explicit start, the coordinator-backed starter — must observe and
+        // drive the SAME run instead of being refused.
+        //
+        // A `running` row with NO owned run is NEVER admitted here. The
+        // durable product contract is that a never-started row merely LABELLED
+        // `Running` is not running at all: "Boot/tick/cron exclude legacy
+        // never-started pending/running/paused rows; missing session ID or
+        // creation time is not automatic opt-in. Explicit public schedule
+        // start revalidates and opts only that row in."
+        // (`.mstar/specs/daemon-runtime.md` §1217). A `driven_v1` row cannot
+        // legitimately reach that state either — its claim writes the status
+        // and the session identity in ONE transaction — so admitting it here
+        // would mint a fresh run for a lost/foreign claim on exactly the paths
+        // that contract excludes. The ONE caller allowed to opt such a row in
+        // is the explicit legacy start (`start_legacy_schedule`), which passes
+        // `legacy_opt_in` and additionally requires the row to still be
+        // `legacy_inert`.
+        let status_ok = matches!(row.status.as_str(), "pending" | "paused")
+            || (row.status == "running"
+                && (row.current_session_id.is_some()
+                    || (legacy_opt_in && row.execution_policy == "legacy_inert")));
         if !status_ok {
+            if row.status == "running" {
+                return Err(RunControlError::NotEligible(
+                    schedule_id.to_string(),
+                    "running with no owned run: this row carries a claim no run backs \
+                     (a lost/foreign claim, or a historical never-started row). Boot \
+                     recovery classifies it; only an explicit legacy start may opt a \
+                     legacy never-started row in"
+                        .to_string(),
+                ));
+            }
             return Err(RunControlError::NotEligible(
                 schedule_id.to_string(),
                 format!("status is '{}'", row.status),

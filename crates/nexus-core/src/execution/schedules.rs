@@ -21,11 +21,20 @@
 //!   the four tasks above it is not daemon-era behavior moved here: it is the
 //!   clock the hosted production factory installs over its own supervisor.
 //!
-//! Every task is a detached `tokio::spawn` owned by its caller (the daemon
-//! boot composition), is best-effort (a failed tick logs and continues), and
-//! exits cleanly on the supplied shutdown [`tokio::sync::Notify`]. Each also
-//! exposes a `run_one_*` entry point so tests drive a deterministic tick
-//! without the interval loop.
+//! Ownership differs by task, and the difference is load-bearing:
+//!
+//! - the four daemon-era tasks (`cron`, `stale_findings`, `refresh`,
+//!   `chronology`) stay genuinely DETACHED: each is a bare `tokio::spawn`
+//!   whose `JoinHandle` the caller may drop (the daemon boot composition did),
+//!   is best-effort (a failed tick logs and continues), and exits cleanly on
+//!   the supplied shutdown [`tokio::sync::Notify`];
+//! - [`hosted_scheduler`] is OWNED, not detached: the v1.195 hosted execution
+//!   owner RETAINS its `JoinHandle` on the [`crate::execution::ExecutionHandle`]
+//!   and `ExecutionHandle::close` fires its shutdown notify and JOINS it, so no
+//!   scheduler tick can outlive the owner's drain.
+//!
+//! Each task also exposes a `run_one_*` entry point so tests drive a
+//! deterministic tick without the interval loop.
 //!
 //! `cron::run_one_tick` and `chronology::run_one_tick` deliberately keep their
 //! original names in their own modules and are NOT re-exported here — both
