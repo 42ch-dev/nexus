@@ -1010,7 +1010,11 @@ pub async fn commit_recoverable_owned(
 /// replays a rollback (so it can never overwrite or delete bytes an external
 /// writer produced afterwards) and never raises a conflict. Unreadable or
 /// unresolvable rows are skipped.
-async fn cleanup_settled_artifacts(mgr: &WorkspaceSessionManager) {
+///
+/// `root_filter` restricts the sweep to rows belonging to ONE workspace root
+/// (the same identity rule the root-scoped recovery uses); `None` sweeps the
+/// whole DB, which is what the whole-DB startup pass owns.
+async fn cleanup_settled_artifacts(mgr: &WorkspaceSessionManager, root_filter: Option<&str>) {
     let rows = match db::list_settled_intents_for_cleanup(mgr.pool().as_ref()).await {
         Ok(rows) => rows,
         Err(err) => {
@@ -1020,6 +1024,16 @@ async fn cleanup_settled_artifacts(mgr: &WorkspaceSessionManager) {
     };
 
     for (session_id, workspace_root, entries_json) in rows {
+        if let Some(active_root) = root_filter {
+            // A bundle admitted for one root must not unlink another root's
+            // artifacts, even dead ones.
+            if super::scope::enforce_active_workspace_root(&workspace_root, active_root)
+                .await
+                .is_err()
+            {
+                continue;
+            }
+        }
         // FAIL CLOSED: this document names the files we are about to unlink, so
         // it goes through the full raw-size/entry/path/artifact-basename
         // validation before any filesystem work. A malformed row is skipped
@@ -1079,6 +1093,57 @@ pub async fn startup_recovery_all(mgr: &WorkspaceSessionManager) -> Result<(), S
         }
         Err(e) => return Err(SessionError::Database(e.to_string())),
     };
+    settle_unsettled_intents(mgr, intents).await?;
+
+    // Unsettled work is resolved above; only now reap material belonging to
+    // commits that already reached the durable committed transition.
+    cleanup_settled_artifacts(mgr, None).await;
+    Ok(())
+}
+
+/// Startup recovery for the unsettled intents of ONE workspace root.
+///
+/// An authority admitted for a single canonical root (the hosted production
+/// bundle) must not settle, roll back or fail on another root's unsettled
+/// intents. Only rows whose stored root matches `workspace_root` are read, and
+/// the settled-artifact sweep is filtered to the same root; every other root's
+/// rows keep their persisted state and their files untouched.
+///
+/// # Errors
+///
+/// As [`startup_recovery_all`], for the selected root only.
+pub async fn startup_recovery_for_root(
+    mgr: &WorkspaceSessionManager,
+    workspace_root: &str,
+) -> Result<(), SessionError> {
+    let _guard = mgr.lock_mutation().await;
+    let intents = match db::list_unsettled_intents(mgr.pool().as_ref(), workspace_root).await {
+        Ok(rows) => rows,
+        Err(db::LocalDbError::CorruptIntent { workspace_root, .. }) => {
+            return Err(SessionError::RecoveryConflict(workspace_root));
+        }
+        Err(e) => return Err(SessionError::Database(e.to_string())),
+    };
+    settle_unsettled_intents(mgr, intents).await?;
+    cleanup_settled_artifacts(mgr, Some(workspace_root)).await;
+    Ok(())
+}
+
+/// Settle every listed unsettled intent.
+///
+/// A persisted recovery conflict refuses the whole pass before any further row
+/// is touched; Applying/RollingBack rows are resolved through
+/// [`recover_unsettled_locked`] for their OWN stored root, which the caller has
+/// already scoped.
+///
+/// # Errors
+///
+/// Returns [`SessionError::RecoveryConflict`] for a persisted conflict row and
+/// whatever the per-intent recovery reports.
+async fn settle_unsettled_intents(
+    mgr: &WorkspaceSessionManager,
+    intents: Vec<db::CommitIntentRow>,
+) -> Result<(), SessionError> {
     for intent in intents {
         if intent.state == db::IntentState::RecoveryConflict {
             return Err(SessionError::RecoveryConflict(
@@ -1092,9 +1157,5 @@ pub async fn startup_recovery_all(mgr: &WorkspaceSessionManager) -> Result<(), S
             recover_unsettled_locked(mgr, &intent.workspace_root).await?;
         }
     }
-
-    // Unsettled work is resolved above; only now reap material belonging to
-    // commits that already reached the durable committed transition.
-    cleanup_settled_artifacts(mgr).await;
     Ok(())
 }

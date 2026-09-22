@@ -157,6 +157,7 @@ fn map_commit_error(err: SessionError) -> CoreError {
         | SessionError::Expired(_)
         | SessionError::HashConflict { .. }
         | SessionError::RecoveryConflict(_)
+        | SessionError::AuthorityBusy
         | SessionError::ActiveWorkspaceMismatch { .. } => CoreError::Busy,
         SessionError::ManifestInvalid(msg) => CoreError::InvalidInput {
             field: "changes".into(),

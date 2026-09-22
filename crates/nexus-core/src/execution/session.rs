@@ -87,6 +87,14 @@ pub enum SessionError {
     ManifestInvalid(String),
     /// Unsettled commit intent blocks new writes (v1.188 P3).
     RecoveryConflict(String),
+    /// The exclusive workspace-authority lease beside the DB is held by
+    /// another workspace writer (v1.195 P0-T1).
+    ///
+    /// Deliberately distinct from [`Self::Io`]: the environment did not fail —
+    /// another workspace commit/recovery authority owns this DB — so a caller
+    /// must report a retryable writer conflict, not a storage fault. Only
+    /// [`WorkspaceSessionManager::new_recoverable`] produces this variant.
+    AuthorityBusy,
     /// A database error occurred during session operations.
     Database(String),
     /// An I/O error occurred during file operations.
@@ -131,6 +139,9 @@ impl fmt::Display for SessionError {
             Self::ManifestInvalid(msg) => write!(f, "manifest invalid: {msg}"),
             Self::RecoveryConflict(root) => {
                 write!(f, "workspace recovery conflict blocks writes: {root}")
+            }
+            Self::AuthorityBusy => {
+                write!(f, "workspace authority is held by another writer for this DB")
             }
             Self::Database(msg) => write!(f, "session database error: {msg}"),
             Self::Io(msg) => write!(f, "session I/O error: {msg}"),
@@ -409,11 +420,23 @@ impl WorkspaceSessionManager {
     ///
     /// # Errors
     ///
-    /// Returns [`SessionError::Io`] when the exclusive workspace-authority
-    /// lease beside `db_path` cannot be acquired (another manager holds it).
+    /// Returns [`SessionError::AuthorityBusy`] when the exclusive
+    /// workspace-authority lease beside `db_path` is held by another workspace
+    /// writer, and [`SessionError::Io`] when the environment prevents taking it
+    /// at all (the lease file cannot be created or opened). The two are
+    /// separated HERE because this is the only boundary that still sees the
+    /// [`std::io::Error`] kind: [`WorkspaceAuthorityLease::acquire`] reports a
+    /// held lease as [`std::io::ErrorKind::WouldBlock`] and everything else as
+    /// its own kind, and collapsing both into one string would make an
+    /// unusable lease path indistinguishable from a genuine writer conflict.
     pub fn new_recoverable(pool: Arc<SqlitePool>, db_path: PathBuf) -> Result<Self, SessionError> {
-        let authority_lease = WorkspaceAuthorityLease::acquire(&db_path)
-            .map_err(|e| SessionError::Io(e.to_string()))?;
+        let authority_lease = WorkspaceAuthorityLease::acquire(&db_path).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::WouldBlock {
+                SessionError::AuthorityBusy
+            } else {
+                SessionError::Io(e.to_string())
+            }
+        })?;
         Ok(Self {
             pool,
             recoverable: Some(RecoverableCommitConfig {
@@ -977,6 +1000,25 @@ impl WorkspaceSessionManager {
     /// reports; a corrupt intent row is surfaced rather than skipped.
     pub async fn startup_recovery(&self) -> Result<(), SessionError> {
         super::session_commit::startup_recovery_all(self).await
+    }
+
+    /// Run startup recovery for the unsettled work of ONE workspace root.
+    ///
+    /// An authority admitted for a single canonical root must not settle, roll
+    /// back or fail on another root's unsettled intents — their files and
+    /// persisted state are not its business — so the hosted production bundle
+    /// uses this entry point instead of the whole-DB sweep.
+    ///
+    /// # Errors
+    ///
+    /// Returns whatever
+    /// [`session_commit::startup_recovery_for_root`](super::session_commit::startup_recovery_for_root)
+    /// reports for `workspace_root`; another root's rows are never read.
+    pub async fn startup_recovery_for_root(
+        &self,
+        workspace_root: &str,
+    ) -> Result<(), SessionError> {
+        super::session_commit::startup_recovery_for_root(self, workspace_root).await
     }
 
     /// Get the underlying database pool.

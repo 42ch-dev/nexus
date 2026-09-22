@@ -46,7 +46,10 @@ impl CoreService {
     ///
     /// Startup intent recovery runs HERE, before any port is returned: a commit
     /// interrupted by a crash must reach its durable conclusion before the
-    /// hosted owner can admit work against the same root.
+    /// hosted owner can admit work. Recovery is scoped to the SELECTED root —
+    /// another root's unsettled intents are left untouched, never settled,
+    /// rolled back, failed on or deleted, because this authority was not
+    /// admitted for them.
     ///
     /// # Errors
     /// - [`CoreError::AuthRequired`] when the service is closing or the
@@ -55,9 +58,11 @@ impl CoreService {
     ///   registered creative root, or that root no longer exists;
     /// - [`CoreError::Busy`] when this DB already has a workspace
     ///   commit/recovery authority (a second bundle must never become a
-    ///   duplicate writer);
-    /// - [`CoreError::Internal`] for a metadata/IO fault or an unresolvable
-    ///   recovery state.
+    ///   duplicate writer), or when the selected root's own recovery state is
+    ///   an unresolvable conflict;
+    /// - [`CoreError::Internal`] when the environment prevents establishing the
+    ///   authority (the lease file cannot be created or opened) or a
+    ///   metadata/IO fault occurs.
     pub(crate) async fn hosted_workspace_deps(&self) -> CoreResult<RunnerDeps> {
         // The selection comes from the core's own config snapshot, so a caller
         // cannot inject a different creator/workspace into the bundle.
@@ -78,7 +83,10 @@ impl CoreService {
             )
             .map_err(map_authority_error)?,
         );
-        manager.startup_recovery().await.map_err(map_recovery_error)?;
+        manager
+            .startup_recovery_for_root(&canonical_root)
+            .await
+            .map_err(map_recovery_error)?;
 
         let executor: Arc<dyn WorkspaceExecutor> = Arc::new(WorkspaceCommitExecutor::new(
             Arc::clone(&manager),
@@ -120,14 +128,24 @@ async fn canonical_workspace_root(selected_root: &str) -> CoreResult<String> {
 
 /// Map a refused workspace-authority construction onto the neutral taxonomy.
 ///
-/// `WorkspaceSessionManager::new_recoverable`'s only fallible step is taking
-/// the exclusive workspace-authority lease beside the DB, so its failure is a
-/// WRITER conflict: this DB already has a workspace commit/recovery authority.
-/// Refusing as [`CoreError::Busy`] keeps that refusal typed instead of turning
-/// it into a storage fault; the lease's own diagnostic is logged.
+/// [`SessionError::AuthorityBusy`] is a WRITER conflict: this DB already has a
+/// workspace commit/recovery authority, so the refusal is retryable. Every
+/// other failure came from the environment — the lease file cannot be created
+/// or opened (read-only mount, permissions, unusable path) — and is reported as
+/// [`CoreError::Internal`], never as "another writer holds this DB".
 fn map_authority_error(err: SessionError) -> CoreError {
-    tracing::error!(error = %err, "workspace commit/recovery authority unavailable");
-    CoreError::Busy
+    match err {
+        SessionError::AuthorityBusy => {
+            tracing::error!("workspace commit/recovery authority is held by another writer");
+            CoreError::Busy
+        }
+        other => {
+            tracing::error!(error = %other, "workspace authority could not be established");
+            CoreError::Internal {
+                category: format!("workspace authority: {other}"),
+            }
+        }
+    }
 }
 
 /// Map a refused startup intent recovery onto the neutral taxonomy.
@@ -248,6 +266,49 @@ mod tests {
         base64::engine::general_purpose::STANDARD.encode(content)
     }
 
+    /// A one-change commit request in the generated wire shape.
+    fn commit_request(session_id: &str, path: &str) -> CoreWorkspaceCommitRequest {
+        CoreWorkspaceCommitRequest {
+            changes: vec![CoreWorkspaceCommitRequestChangesItem {
+                content_base64: Some(b64(PAYLOAD)),
+                expected_hash: None,
+                op: CoreWorkspaceCommitRequestChangesItemOp::Create,
+                path: path.parse().expect("non-empty path"),
+            }],
+            session_id: session_id.parse().expect("non-empty session id"),
+        }
+    }
+
+    /// Interrupt a commit that runs through the PRODUCTION authority port.
+    ///
+    /// `WorkspaceCommitAuthority::commit` runs on the RETAINED owner, which
+    /// clears inherited crash points at spawn — so arming the seam before the
+    /// call would prove nothing. The owner gate parks the owner at its
+    /// admission boundary (claim held, nothing applied yet), the test arms the
+    /// seam AFTER that clear, then releases it: no sleeps, no races. The
+    /// interrupted commit is exactly what a process death at the apply leaves.
+    async fn interrupted_authority_commit(
+        authority: &WorkspaceCommitAuthority,
+        session_id: &str,
+        path: &str,
+    ) -> CoreError {
+        let gate = Arc::new(test_hooks::OwnerGate::for_session(session_id.to_string()));
+        test_hooks::set_owner_gate(Some(Arc::clone(&gate)));
+        let authority = authority.clone();
+        let request = commit_request(session_id, path);
+        let caller = tokio::spawn(async move { authority.commit(request).await });
+        gate.admitted.notified().await;
+        test_hooks::set_crash_point(Some("after_file_apply"));
+        gate.proceed.notify_one();
+        gate.settled.notified().await;
+        test_hooks::set_owner_gate(None);
+        test_hooks::set_crash_point(None);
+        caller
+            .await
+            .expect("the retained commit owner joins")
+            .expect_err("the armed crash point must interrupt the apply")
+    }
+
     /// The workspace bundle must bind every port to the SELECTED root, refuse a
     /// foreign root and a second authority, and recover an interrupted commit
     /// before it publishes those ports.
@@ -327,51 +388,36 @@ mod tests {
                 .open_session(&other_root_string, "", true)
                 .await
                 .expect("foreign session");
-            let foreign = CoreWorkspaceCommitRequest {
-                changes: vec![CoreWorkspaceCommitRequestChangesItem {
-                    content_base64: Some(b64(b"escape")),
-                    expected_hash: None,
-                    op: CoreWorkspaceCommitRequestChangesItemOp::Create,
-                    path: "escape.txt".parse().expect("non-empty path"),
-                }],
-                session_id: foreign_session
-                    .to_string()
-                    .parse()
-                    .expect("non-empty session id"),
-            };
             assert!(
-                matches!(authority.commit(foreign).await, Err(CoreError::Busy)),
+                matches!(
+                    authority
+                        .commit(commit_request(&foreign_session.to_string(), "escape.txt"))
+                        .await,
+                    Err(CoreError::Busy)
+                ),
                 "a foreign workspace root must be refused"
             );
             assert!(!fx.creative_root.join("escape.txt").exists());
             assert!(!other_root.join("escape.txt").exists());
 
-            // ── An interrupted commit: the file apply lands, the intent does
-            // not settle (the crash seam stands in for a process death). The
-            // crash point is per applied entry, so this commit carries exactly
-            // one change — recovery then completes the whole applied set. ──
-            let session = manager
-                .open_session(&canonical_root, "notes", true)
+            // ── An interrupted commit, produced through the PRODUCTION ports:
+            // the session is opened by the bundle's executor and the commit is
+            // interrupted inside the authority's retained owner. ──
+            let opened = executor
+                .open(WorkspaceOpenInput {
+                    path: "notes".to_string(),
+                })
                 .await
-                .expect("recovery session");
-            recovered_session = session.clone();
-            test_hooks::set_crash_point(Some("after_file_apply"));
-            let crashed = manager
-                .commit_session_durable(
-                    &session,
-                    &[create_entry("recovered.txt", PAYLOAD)],
-                    &canonical_root,
-                )
-                .await;
-            test_hooks::set_crash_point(None);
+                .expect("open recovery session");
+            recovered_session = SessionId(opened.session_id.clone());
+            let crashed =
+                interrupted_authority_commit(&authority, &opened.session_id, "recovered.txt").await;
             match crashed {
-                Err(SessionError::Internal(message)) => {
-                    assert!(
-                        message.contains("test_crash"),
-                        "the armed crash point must be what interrupted the apply, got: {message}"
-                    );
-                }
-                other => panic!("the armed crash point must interrupt the apply: {other:?}"),
+                CoreError::Internal { ref category } => assert!(
+                    category.contains("test_crash"),
+                    "the armed crash point must be what interrupted the apply, got: {category}"
+                ),
+                other => panic!("the crash must surface as a storage fault, got: {other:?}"),
             }
             assert_eq!(
                 std::fs::read(fx.creative_root.join("notes/recovered.txt")).expect("applied bytes"),
@@ -416,5 +462,149 @@ mod tests {
                 "{path} must survive recovery"
             );
         }
+    }
+
+    /// A held workspace authority and an unusable lease path must not be
+    /// reported alike: the first is a retryable writer conflict, the second is
+    /// an environment fault.
+    #[tokio::test]
+    async fn workspace_authority_failure_distinguishes_busy_from_environment() {
+        let fx = fixture().await;
+        let core = open_core(&fx).await;
+
+        // ── Environment fault: the lease file cannot even be opened (a
+        // directory occupies its path), so no writer holds anything and the
+        // refusal must not claim one does. ──
+        let lease_path = core
+            .inner
+            .db_path
+            .with_extension("workspace_authority.lock");
+        std::fs::create_dir(&lease_path).expect("obstruct the lease path");
+        match core.hosted_workspace_deps().await.map(|_| ()) {
+            Err(CoreError::Internal { category }) => assert!(
+                category.contains("workspace authority"),
+                "unexpected category: {category}"
+            ),
+            other => panic!("an unusable lease path must be an environment fault, got: {other:?}"),
+        }
+
+        // ── With a usable lease path the first bundle succeeds, a genuine
+        // second authority is still a conflict, and the lease is released with
+        // the bundle. ──
+        std::fs::remove_dir(&lease_path).expect("clear the obstruction");
+        let first = core.hosted_workspace_deps().await.expect("first bundle");
+        assert!(
+            matches!(
+                core.hosted_workspace_deps().await.map(|_| ()),
+                Err(CoreError::Busy)
+            ),
+            "a genuinely held workspace authority must be refused as a conflict"
+        );
+        drop(first);
+        assert!(
+            core.hosted_workspace_deps().await.is_ok(),
+            "the workspace authority is released with the bundle"
+        );
+    }
+
+    /// Recovery through the bundle is scoped to the SELECTED root: another
+    /// root's unsettled intent keeps its persisted state and its files.
+    #[tokio::test]
+    #[serial]
+    async fn hosted_workspace_recovery_ignores_foreign_root_intents() {
+        let fx = fixture().await;
+        let core = open_core(&fx).await;
+        let canonical_root = std::fs::canonicalize(&fx.creative_root)
+            .expect("canonical selected root")
+            .to_string_lossy()
+            .into_owned();
+        let foreign_root = fx.tmp.path().join("foreign-root");
+        std::fs::create_dir_all(foreign_root.join("notes")).expect("foreign root");
+        let foreign_root_string = std::fs::canonicalize(&foreign_root)
+            .expect("canonical foreign root")
+            .to_string_lossy()
+            .into_owned();
+        let selected_session: SessionId;
+
+        {
+            let deps = core.hosted_workspace_deps().await.expect("workspace bundle");
+            let executor = deps.workspace_executor.clone().expect("workspace executor");
+            let authority = deps.workspace_commit.clone().expect("commit authority");
+
+            // The SELECTED root's interrupted commit, through the real ports.
+            let opened = executor
+                .open(WorkspaceOpenInput {
+                    path: "notes".to_string(),
+                })
+                .await
+                .expect("open selected session");
+            selected_session = SessionId(opened.session_id.clone());
+            let crashed =
+                interrupted_authority_commit(&authority, &opened.session_id, "selected.txt").await;
+            assert!(
+                matches!(crashed, CoreError::Internal { ref category } if category.contains("test_crash")),
+                "the armed crash point must interrupt the selected root's apply: {crashed:?}"
+            );
+
+            // A DIFFERENT root's interrupted commit. The bundle refuses foreign
+            // roots by design, so this one is left through the manager's own
+            // durable commit path — what an earlier process death would leave.
+            let manager = Arc::clone(authority.manager());
+            let foreign_session = manager
+                .open_session(&foreign_root_string, "notes", true)
+                .await
+                .expect("foreign session");
+            test_hooks::set_crash_point(Some("after_file_apply"));
+            let foreign_crashed = manager
+                .commit_session_durable(
+                    &foreign_session,
+                    &[create_entry("foreign.txt", PAYLOAD)],
+                    &foreign_root_string,
+                )
+                .await;
+            test_hooks::set_crash_point(None);
+            assert!(
+                matches!(foreign_crashed, Err(SessionError::Internal(_))),
+                "the armed crash point must interrupt the foreign root's apply"
+            );
+            assert_eq!(
+                std::fs::read(foreign_root.join("notes/foreign.txt")).expect("foreign applied bytes"),
+                PAYLOAD
+            );
+        }
+
+        // ── Reopen: the selected root is recovered, the foreign root is not. ──
+        let reopened = core.hosted_workspace_deps().await.expect("reopened bundle");
+        let state = reopened
+            .workspace_state_provider
+            .clone()
+            .expect("state provider")
+            .workspace_state()
+            .await
+            .expect("selected root workspace state");
+        assert_eq!(state["committed"], serde_json::json!(true));
+        assert_eq!(
+            state["session_id"],
+            serde_json::json!(selected_session.to_string())
+        );
+        assert_eq!(state["workspace_root"], serde_json::json!(canonical_root));
+
+        let foreign_state: String = sqlx::query_scalar(
+            "SELECT state FROM workspace_commit_intents WHERE workspace_root = ? \
+             ORDER BY rowid DESC LIMIT 1",
+        )
+        .bind(&foreign_root_string)
+        .fetch_one(&core.inner.pool)
+        .await
+        .expect("foreign intent row");
+        assert_eq!(
+            foreign_state, "applying",
+            "the foreign root's intent must stay unsettled"
+        );
+        assert_eq!(
+            std::fs::read(foreign_root.join("notes/foreign.txt")).expect("foreign bytes"),
+            PAYLOAD,
+            "the foreign root's applied files must be untouched"
+        );
     }
 }
