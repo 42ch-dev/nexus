@@ -103,9 +103,10 @@ nexus-module-manifest = { path = "../../modules/nexus-module-manifest", optional
 spoke-connect = { workspace = true, optional = true }
 # V1.153 P1 N-C1: the connect wire `ErrorEnvelope`
 # (`spoke_schemas::connect::connect_invoke_response::ErrorEnvelope`) the
-# invoke handler returns. Same 0.10.0 pin; optional + feature-gated with
-# `connect-host` (spoke-schemas is a lightweight schema crate, but the
-# connect path is the only consumer).
+# invoke handler returns. Same workspace lockstep pin as `spoke-connect`
+# (the root `Cargo.toml` pin lineage owns the version); optional +
+# feature-gated with `connect-host` (spoke-schemas is a lightweight schema
+# crate, but the connect path is the only consumer).
 spoke-schemas = { workspace = true, optional = true }
 # libp2p identity/PeerId/Multiaddr types for the `connect start` CLI (key
 # generation + protobuf key persistence + allowlist/listen parsing). Same
