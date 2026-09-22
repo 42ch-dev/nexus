@@ -3178,7 +3178,238 @@ async fn public_schedule_reads_and_context_are_owned() {
     );
     assert_eq!(sessions.items[0].session_id, run_id);
 
-    // ── 6. Cleanup: release the parked prompt, then close the owner. ──
+    // ── 6. The declared `status` filter narrows the PAGE and its COUNT
+    //       identically: a filtered page is never paginated against an
+    //       unfiltered total. ──
+    // A second durable row of the SAME creator, left `pending` (the fixture
+    // runs no clock, so only the explicit admission above owns a run).
+    let pending_id = add_pending_schedule(&fixture, "retained-reads-pending").await;
+
+    let running_only = fixture
+        .handle
+        .list_schedules(
+            &principal,
+            ListSchedulesQuery {
+                status: Some("running".to_string()),
+                ..ListSchedulesQuery::default()
+            },
+        )
+        .await
+        .expect("filter by status=running");
+    assert_eq!(
+        running_only
+            .items
+            .iter()
+            .map(|item| item.schedule_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![schedule_id.as_str()],
+        "the status filter must return ONLY matching rows"
+    );
+    assert!(!running_only.pagination.has_more);
+
+    // The decisive page/count agreement check: exactly ONE row matches
+    // `pending`, so `limit = 1` exhausts the filter. A COUNT that ignored
+    // `status` (two creator rows) would answer `has_more = true` here.
+    let pending_page = fixture
+        .handle
+        .list_schedules(
+            &principal,
+            ListSchedulesQuery {
+                status: Some("pending".to_string()),
+                limit: Some(1),
+                ..ListSchedulesQuery::default()
+            },
+        )
+        .await
+        .expect("filter by status=pending");
+    assert_eq!(pending_page.items.len(), 1);
+    assert_eq!(pending_page.items[0].schedule_id, pending_id);
+    assert_eq!(pending_page.items[0].status, "pending");
+    assert!(
+        !pending_page.pagination.has_more,
+        "the COUNT must apply the SAME status filter as the page: {:?}",
+        pending_page.pagination
+    );
+    assert!(pending_page.pagination.next_cursor.is_none());
+
+    let no_matches = fixture
+        .handle
+        .list_schedules(
+            &principal,
+            ListSchedulesQuery {
+                status: Some("cancelled".to_string()),
+                ..ListSchedulesQuery::default()
+            },
+        )
+        .await
+        .expect("filter by a status nothing has reached");
+    assert!(
+        no_matches.items.is_empty(),
+        "a filter with no matches returns an empty page, never the unfiltered set: {:?}",
+        no_matches.items
+    );
+    assert!(!no_matches.pagination.has_more);
+
+    // ── 7. Each list's DEFAULT order is its OWN schema's declared default:
+    //       schedules `created_at` (newest first), sessions `session_id`
+    //       ascending. ──
+    // Ordering anchors that CONTRADICT the other list's default: a schedule far
+    // in the future/past, and two extra root runs whose `created_at` order is
+    // the reverse of their id order.
+    sqlx::query(
+        "INSERT INTO creator_schedules
+           (schedule_id, creator_id, preset_id, preset_version, status, concurrency_kind,
+            current_core_context_version, created_at, updated_at)
+         VALUES ('SCH-zzz-future', ?, ?, 1, 'pending', 'serial', 0, 4102444800, 4102444800),
+                ('SCH-aaa-past', ?, ?, 1, 'pending', 'serial', 0, 1, 1)",
+    )
+    .bind(CREATOR)
+    .bind(PROMPT_PRESET)
+    .bind(CREATOR)
+    .bind(PROMPT_PRESET)
+    .execute(pool.as_ref())
+    .await
+    .expect("stage schedule ordering anchors");
+    sqlx::query(
+        "INSERT INTO orchestration_sessions
+           (session_id, creator_id, preset_id, preset_version, parent_session_id, status,
+            context_json, created_at, updated_at)
+         VALUES ('run-aaa', ?, ?, 1, NULL, 'running', '{}', 4102444800, 4102444800),
+                ('run-zzz', ?, ?, 1, NULL, 'completed', '{}', 1, 1)",
+    )
+    .bind(CREATOR)
+    .bind(PROMPT_PRESET)
+    .bind(CREATOR)
+    .bind(PROMPT_PRESET)
+    .execute(pool.as_ref())
+    .await
+    .expect("stage run ordering anchors");
+
+    let schedule_ids = |response: &nexus_contracts::generated::daemon_api::schedule::list_schedules_response::ListSchedulesResponse| {
+        response
+            .items
+            .iter()
+            .map(|item| item.schedule_id.clone())
+            .collect::<Vec<_>>()
+    };
+    let default_schedules = schedule_ids(
+        &fixture
+            .handle
+            .list_schedules(&principal, ListSchedulesQuery::default())
+            .await
+            .expect("default schedule order"),
+    );
+    let created_at_sorts = schedule_ids(
+        &fixture
+            .handle
+            .list_schedules(
+                &principal,
+                ListSchedulesQuery {
+                    sort: Some("-created_at".to_string()),
+                    ..ListSchedulesQuery::default()
+                },
+            )
+            .await
+            .expect("explicit created_at order"),
+    );
+    assert_eq!(
+        default_schedules, created_at_sorts,
+        "the schedule default must be the schema's `created_at` default"
+    );
+    assert_eq!(
+        default_schedules.first().map(String::as_str),
+        Some("SCH-zzz-future"),
+        "`created_at` descending puts the newest row first: {default_schedules:?}"
+    );
+    assert_eq!(
+        default_schedules.last().map(String::as_str),
+        Some("SCH-aaa-past"),
+        "`created_at` descending puts the oldest row last: {default_schedules:?}"
+    );
+    assert!(
+        !default_schedules.contains(&"SCH-foreign".to_string()),
+        "the default order must still exclude another creator's row"
+    );
+
+    let session_ids = fixture
+        .handle
+        .list_workflow_sessions(&principal, ListSessionsQuery::default())
+        .await
+        .expect("default session order")
+        .items
+        .iter()
+        .map(|item| item.session_id.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        session_ids,
+        vec![
+            run_id.clone(),
+            "run-aaa".to_string(),
+            "run-zzz".to_string()
+        ],
+        "the session default must be the schema's `session_id` ASCENDING default, \
+         not the schedule default: {session_ids:?}"
+    );
+    let by_session_id = fixture
+        .handle
+        .list_workflow_sessions(
+            &principal,
+            ListSessionsQuery {
+                sort: Some("session_id".to_string()),
+                ..ListSessionsQuery::default()
+            },
+        )
+        .await
+        .expect("explicit session_id order");
+    assert_eq!(
+        by_session_id
+            .items
+            .iter()
+            .map(|item| item.session_id.clone())
+            .collect::<Vec<_>>(),
+        session_ids,
+        "the session default must be the schema's `session_id` default"
+    );
+    let descending = fixture
+        .handle
+        .list_workflow_sessions(
+            &principal,
+            ListSessionsQuery {
+                sort: Some("-session_id".to_string()),
+                ..ListSessionsQuery::default()
+            },
+        )
+        .await
+        .expect("explicit descending session_id order");
+    assert_eq!(
+        descending
+            .items
+            .iter()
+            .map(|item| item.session_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["run-zzz", "run-aaa", run_id.as_str()],
+        "`-session_id` reverses the order, so the default above is the ASCENDING one"
+    );
+    // The staged anchors deliberately reverse under a `created_at` sort (their
+    // `created_at` order is the reverse of their id order), so the ordering the
+    // schedule default would have produced here is visibly different.
+    assert_ne!(
+        session_ids,
+        vec![
+            "run-aaa".to_string(),
+            run_id.clone(),
+            "run-zzz".to_string()
+        ],
+        "the session default must not be a `created_at` ordering"
+    );
+    assert!(
+        session_ids
+            .iter()
+            .all(|id| id != "run-foreign" && id != "run-child"),
+        "the default order must still exclude foreign and child runs: {session_ids:?}"
+    );
+
+    // ── 8. Cleanup: release the parked prompt, then close the owner. ──
     wait_for_prompt(&fixture.host).await;
     fixture.host.release_all();
     let report = fixture.handle.close().await.expect("owner close");

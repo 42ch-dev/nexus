@@ -189,12 +189,7 @@ impl ExecutionHandle {
         let creator_id = principal.creator_id().to_string();
         refuse_foreign_filter(query.creator_id.as_deref(), &creator_id, "schedules")?;
 
-        let order = order_by(
-            query.sort.as_deref(),
-            &["created_at", "updated_at", "status", "preset_id", "label"],
-            "schedule_id",
-            "schedule",
-        )?;
+        let order = schedule_order(query.sort.as_deref())?;
         let offset = decode_offset_cursor(query.cursor.as_deref())?;
         let limit = list_limit(query.limit);
 
@@ -202,29 +197,48 @@ impl ExecutionHandle {
         // The page and its count come from ONE read snapshot, so `has_more` and
         // the page cannot disagree under a concurrent add/delete.
         let mut tx = pool.begin().await.map_err(|e| crate::error::db_err(&e))?;
+        // The requested `status` filter is part of the bound value set and the
+        // SAME fragment is appended to the page query and its count, so a
+        // filtered page can never be paginated against an unfiltered total.
+        let status_filter = if query.status.is_some() {
+            " AND status = ?"
+        } else {
+            ""
+        };
         // SAFETY: dynamic SQL — only the whitelisted ORDER BY identifiers above
-        // are interpolated; every value is bound.
-        let rows = sqlx::query_as::<_, ScheduleRow>(sqlx::AssertSqlSafe(format!(
+        // and the fixed `status_filter` fragment are interpolated; every value
+        // (creator, status, limit, offset) is bound.
+        let mut page = sqlx::query_as::<_, ScheduleRow>(sqlx::AssertSqlSafe(format!(
             "SELECT schedule_id, creator_id, preset_id, status, execution_policy,
                     current_session_id, label, current_core_context_version,
                     created_at, updated_at, concurrency_kind
              FROM creator_schedules
-             WHERE creator_id = ?
+             WHERE creator_id = ?{status_filter}
              ORDER BY {order}
              LIMIT ? OFFSET ?"
         )))
-        .bind(&creator_id)
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(&mut *tx)
-        .await
-        .map_err(|e| crate::error::db_err(&e))?;
-        let total: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM creator_schedules WHERE creator_id = ?")
-                .bind(&creator_id)
-                .fetch_one(&mut *tx)
-                .await
-                .map_err(|e| crate::error::db_err(&e))?;
+        .bind(&creator_id);
+        if let Some(status) = query.status.as_deref() {
+            page = page.bind(status);
+        }
+        let rows = page
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(|e| crate::error::db_err(&e))?;
+        // SAFETY: dynamic SQL — the SAME `status_filter` fragment as the page.
+        let mut count = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
+            "SELECT COUNT(*) FROM creator_schedules WHERE creator_id = ?{status_filter}"
+        )))
+        .bind(&creator_id);
+        if let Some(status) = query.status.as_deref() {
+            count = count.bind(status);
+        }
+        let total: i64 = count
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| crate::error::db_err(&e))?;
         tx.commit().await.map_err(|e| crate::error::db_err(&e))?;
 
         let has_more = total > offset.saturating_add(limit);
@@ -296,12 +310,7 @@ impl ExecutionHandle {
         let creator_id = principal.creator_id().to_string();
         refuse_foreign_filter(query.creator_id.as_deref(), &creator_id, "sessions")?;
 
-        let order = order_by(
-            query.sort.as_deref(),
-            &["session_id", "creator_id", "preset_id", "status"],
-            "session_id",
-            "session",
-        )?;
+        let order = session_order(query.sort.as_deref())?;
         let offset = decode_offset_cursor(query.cursor.as_deref())?;
         let limit = list_limit(query.limit);
 
@@ -1306,17 +1315,59 @@ fn encode_offset_cursor(offset: i64) -> String {
     format!("v1:{offset}")
 }
 
+/// Order terms for the durable schedule list.
+///
+/// `schemas/daemon-api/schedule/list-schedules-query.schema.json`: allowed keys
+/// `created_at` (**default**), `updated_at`, `status`, `preset_id`, `label`,
+/// `-` prefix for descending. The default direction is the retained daemon's
+/// newest-first `created_at DESC`.
+///
+/// # Errors
+/// `InvalidInput` for a key outside that set.
+fn schedule_order(sort: Option<&str>) -> CoreResult<String> {
+    order_by(
+        sort,
+        &["created_at", "updated_at", "status", "preset_id", "label"],
+        "created_at DESC",
+        "schedule_id",
+        "schedule",
+    )
+}
+
+/// Order terms for the durable orchestration-session list.
+///
+/// `schemas/daemon-api/orchestration/sessions/list-sessions-query.schema.json`:
+/// allowed keys `session_id` (**default**), `creator_id`, `preset_id`,
+/// `status`, `-` prefix for descending. The default key is deliberately
+/// `session_id` (ascending) and NOT the schedule default: a key outside the
+/// session schema's allowed set would make the documented default unsortable.
+///
+/// # Errors
+/// `InvalidInput` for a key outside that set.
+fn session_order(sort: Option<&str>) -> CoreResult<String> {
+    order_by(
+        sort,
+        &["session_id", "creator_id", "preset_id", "status"],
+        "session_id ASC",
+        "session_id",
+        "session",
+    )
+}
+
 /// Build the `ORDER BY` clause from the request's sort terms.
 ///
-/// Only whitelisted column names are interpolated, and the resource's id is
-/// always appended as a deterministic tie-break so two rows sharing a sort key
-/// cannot swap across pages of an offset cursor.
+/// `default_order` is the calling resource's OWN schema-declared default (the
+/// two list schemas declare different defaults), so no shared fallback can
+/// contradict a schema. Only whitelisted column names are interpolated, and the
+/// resource's id is always appended as a deterministic tie-break so two rows
+/// sharing a sort key cannot swap across pages of an offset cursor.
 ///
 /// # Errors
 /// `InvalidInput` for a sort key outside the schema's allowed set.
 fn order_by(
     sort: Option<&str>,
     allowed: &[&str],
+    default_order: &str,
     tie_break: &str,
     resource: &str,
 ) -> CoreResult<String> {
@@ -1343,8 +1394,7 @@ fn order_by(
         }
     }
     if clauses.is_empty() {
-        // Schema default: most recently created first.
-        clauses.push("created_at DESC".to_string());
+        clauses.push(default_order.to_string());
     }
     if !clauses.iter().any(|clause| clause.starts_with(tie_break)) {
         clauses.push(format!("{tie_break} ASC"));
