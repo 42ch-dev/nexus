@@ -126,7 +126,7 @@ These are the shipped dependency cohorts (v1.193 P2 delivered them), kept as the
 | Ordinary CLI (`cli`, the default product selector) | Direct local commands, existing cloud clients and local ACP spawning; existing chronology/cron/ops library dependencies | daemon-runtime, Axum router, SPA, default libp2p, Node requirement, TS-service mediation or scheduler startup |
 | Optional CLI Connect (`cli,connect-host`) | Explicit spoke/libp2p plus existing spoke-adapter compute | implicit Rust daemon/HTTP host |
 | Connect-only runtime (`connect-host`, no defaults) | Existing stored-Actor invoke authority and spoke-connect/libp2p; explicit spoke-adapter `compute` preserves WASM/module-cache behavior | CLI-only ACP/agent-host, orchestration scheduler, SPA/HTTP/Node; `connect-host` must not imply `cli` |
-| TS native service | Preserve current `nexus-core-node` selection of core `[execution]` and existing native-owned Host/ProviderPort composition | old-daemon proxy; do not claim compute/provider-host/peer features or routes are shipped merely because core exports them |
+| TS native service | Current delivered selection is core `[execution]` with native-owned Host/ProviderPort. The planned current-host completion target explicitly selects `[execution,provider-host,compute]` and composes existing Rust owners; it is not shipped merely by changing the feature list. | old-daemon proxy, TS domain/SQL owner, duplicate engine/Host/WASM runtime; domain/default and Connect-only cohorts must not inherit native-service startup |
 
 The existing pure `nexus-preset` closure and default-disabled MCA/core spoke edges are retained. The app's spoke dependency also disables defaults; only `connect-host` explicitly enables its real compute feature. Current Connect invoke code already serves compute with stored holder/module scope and a shared cache; removing WASM to satisfy a graph slogan would delete supported functionality. The ordinary CLI may retain orchestration **library** edges for chronology/cron/ops without starting an engine. Core domain closure remains engine/Host/WASM-free.
 
@@ -135,6 +135,8 @@ The existing pure `nexus-preset` closure and default-disabled MCA/core spoke edg
 `CoreService::start_execution(&self, _providers: Arc<dyn ProviderPort>, mut deps: RunnerDeps) -> Result<Arc<ExecutionHandle>, ExecutionOpenError>` requires EngineOwner and preserves typed ownership/closing errors. Production prompt/tool/workspace dependencies must be supplied; default dependencies are not execution parity. Domain open starts no scheduler or Host. CoreService remains bound to the selected Creator/workspace generation; selection changes require reopen. Direct CLI adapters obtain a stored Principal, call typed family methods, and await close on success and failure without pool escape hatches or JSON dispatch.
 
 Retire CLI `creator run`, `bootstrap`, Work `intake`/`resume-chain`, `preset run`, Character `run`/`soul reflect`, reference refresh, compute run and old runtime catalog/tool entrances where the complete direct production/observation closure does not exist. Preserve underlying Work/execution/Host/capture/SOUL/reference/compute libraries. `resume_driven_sessions` is not Work auto-chain; HostHandle query does not supply the Character CLI capture stream. Existing TS schedule add/signal and provider routes are not claimed as equivalent workflow replacements; TS compute run is currently route-not-migrated and forced native SOUL reflection has no synthesizer.
+
+**Current target (v1.195, not yet delivered):** complete retained workflow admission/list/inspect/context/control, same-run bounded observation/restart, and first-party Compute discovery/run/review/history/terminal-clear through the existing execution or compute owner. One Rust-owned production composition binds the admitted Creator/canonical workspace, real Host prompt/catalog, scheduler starter, workspace-intent recovery and conditionally shared WASM engine/cache/serializer before readiness. Public workflow events use durable root ownership and the existing epoch-based run rings, not Host identity. Context append precedes resume; cancellation success requires durable confirmed settlement, not provider acknowledgement. This target does not restore retired CLI entrances or alter SPOKE/version pins.
 
 Neutral production `HostPromptExecutor` moves into optional core execution with provider-host selected, and `AcpSoulNarrativeSynthesizer` into optional core execution. Existing core directive/pack/capability implementations replace daemon wrappers rather than gain duplicates. PATH enrichment moves to existing agent-host discovery for the CLI and remaining discovery probe; Connect-only runtime drops provider probing and gains no Host dependency. Retained semantic tests move to core before the obsolete Rust-host crate and server fixtures are deleted.
 
@@ -232,6 +234,15 @@ RFT-00–04 shipped together as milestone **RFT-M1** (v1.189). RFT-05–08 are o
 | RFT-09 | Formal desktop cutover (Electron host after the M1 development GO; reuse web/Studio; no visual redesign) | M3 / **delivered in v1.192** (accepted) |
 | RFT-10 | Production distribution / Developer ID signing / notarization / stapling | M3. **v1.192 delivers the unsigned half** (`.app` and `.dmg`, both macOS architectures, no Apple credentials required); that delivery is not dual-architecture GUI qualification. Signing remains the durable destination and is a Non-Goal until explicit release authorization |
 | RFT-11 | Obsolete-host retirement **and** retained v1.188 P5 public first-run / Quick Start / live request | **v1.192** retired Tauri. **v1.193 P2 delivered:** the remaining daemon/SPA/`legacy-cli` composition and the dormant CLI rows listed in §7.4 were retired in that iteration. P5 first-run/live request stays out |
+
+### 7.5.1 Current-target reading (v1.195)
+
+The milestone labels above are historical program keys. They are not a blank-slate order, and they are not a claim that every family is product-complete.
+
+- Landed World/Work, Actor/Character, ordinary CLI, and desktop-host behavior stay out of v1.195 except where a selected workflow or Compute operation touches their existing authorization, CAS, or durable-effect contracts.
+- RFT-07 is partial on the public service. Mounted schedule add and schedule signal are not list, inspect, core-context steering, cancellation settlement, or same-workflow observation.
+- The TS-service Compute / Run Studio rows in the v1.195 inventory are still open. A native `compute` feature flag is not that closure.
+- RFT-11 public first-run, Quick Start, and the single authorized live request stay open. v1.195 recomposes them onto the current TS/native/core host. Retired daemon commands stay retired.
 
 ## 8. Concurrent writes (user-locked)
 
@@ -360,7 +371,7 @@ Measurement protocol: same candidate hardware and seeded real DB (500 entities,1
 - Removing Works reads (`creator works list|status|use`) or any retained leaf. CLI entries removed by this overlay are deletions of the *entry*, not of the capability
 - Uninterrupted native continuation across TS restart
 - New ARM Linux / musl / Windows ARM / Windows-or-Linux GUI support
-- Paid/live model requests; P5 public first-run
+- Unauthorized paid or live model requests. Historical P5 public first-run remains unshipped. v1.195 may execute only the one short request named by that iteration's Decision D5, after deterministic prerequisites and a one-request guard. That authorization does not reopen general live spend.
 - Destructive data reset as migration/implementation shortcut; this does not remove the shipped explicitly confirmed desktop local-state-reset function, whose scope/fencing/recovery contract is preserved in [desktop-shell.md](desktop-shell.md) §8
 - Browser/device/installed-deployment E2E as a development acceptance gate
 
