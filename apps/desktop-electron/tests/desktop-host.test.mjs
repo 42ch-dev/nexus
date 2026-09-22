@@ -22,6 +22,7 @@ import { fileURLToPath } from 'node:url';
 import {
   applyProductIdentity,
   composeDesktopHost,
+  createLegacyCredentialAdapter,
   loadProductIdentity,
   resolveDesktopDistRoot,
   resolveDevUrl,
@@ -31,6 +32,7 @@ import {
   DESKTOP_OPERATIONS,
   DESKTOP_RUNTIME_CHANNEL,
   errorCode,
+  errorMessage,
 } from '../dist/desktop-contract.js';
 import { assertDesktopEventSender } from '../dist/desktop-ipc.js';
 
@@ -246,6 +248,7 @@ const product = loadProductIdentity(RESOURCES_DIR);
 async function makeHost(overrides = {}) {
   const electron = makeFakeElectron();
   const dir = mkdtempSync(join(root, 'case-'));
+  const { adapters: adapterOverrides = {}, paths: pathsOverride = {}, ...hostOverrides } = overrides;
   const paths = {
     resourcesDir: RESOURCES_DIR,
     distRoot: dir,
@@ -255,6 +258,7 @@ async function makeHost(overrides = {}) {
     userDataDir: join(dir, 'userData'),
     home: join(dir, 'home'),
     documentsPath: join(dir, 'documents'),
+    ...pathsOverride,
   };
   mkdirSync(paths.home, { recursive: true });
   mkdirSync(paths.documentsPath, { recursive: true });
@@ -267,7 +271,6 @@ async function makeHost(overrides = {}) {
   // before any window is created (scheme privilege is bootstrap-only,
   // pre-ready — composeDesktopHost has no registerSchemes seam at all).
   electron.lifecycleEvents = [];
-  const { adapters: adapterOverrides = {}, ...hostOverrides } = overrides;
   const { BrowserWindow: FakeBrowserWindow } = electron;
   electron.BrowserWindow = class extends FakeBrowserWindow {
     constructor(options) {
@@ -298,6 +301,13 @@ async function makeHost(overrides = {}) {
       },
       attachNetworkHooks: (sessionArg, getActiveAuth) => {
         networkHooks.push({ session: sessionArg, getActiveAuth });
+      },
+      // No test may touch the real OS keychain or the user's app-data: the
+      // default legacy adapter has neither a source nor anything to remove.
+      // Tests that own the migration pass their own adapter.
+      legacyCredentials: {
+        read: async () => null,
+        cleanup: async () => {},
       },
       ...adapterOverrides,
     },
@@ -424,7 +434,10 @@ test('production window policy and protocol registration', async () => {
   assert.equal(electron.app.name, 'Nexus');
 
   // Full typed handler map — exactly the frozen operation union.
-  assert.deepEqual(Object.keys(host.handlers).sort(), [...DESKTOP_OPERATIONS].sort());
+  assert.deepEqual(
+    Object.keys(host.handlers).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)),
+    [...DESKTOP_OPERATIONS].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)),
+  );
 
   // Protocol registered with the local service origin, BEFORE the first
   // window was created. Scheme privilege is registered exactly once,
@@ -795,6 +808,342 @@ test('CSP is refreshed per response with the active connection origin only', asy
   const remote = await respond({});
   const remoteCsp = remote.responseHeaders['Content-Security-Policy'][0];
   assert.match(remoteCsp, /connect-src 'self' https:\/\/remote\.example:9000 https:\/\/remote\.example:9000/);
+  host.dispose();
+});
+
+test('set_connection_config refuses unsupported endpoint values without replacing the stored config', async () => {
+  const { host, networkHooks } = await makeHost();
+  await host.handlers.set_connection_config({
+    config: { endpointUrl: 'https://remote.example:9000', active: true, hasApiKey: true },
+    credential: { action: 'replace', value: 'sk-keep' },
+  });
+
+  for (const endpointUrl of [
+    'null',
+    'about:blank',
+    'file:///etc/passwd',
+    'https://*.example.com',
+    'http://user:pass@remote.example:9000',
+    // Empty delimiters / dot-segment paths that WHATWG normalizes away.
+    'https://remote.example:9000?',
+    'https://remote.example:9000#',
+    'http://@remote.example:9000',
+    'http://:@remote.example:9000',
+    'https://remote.example:9000/.',
+    'https://remote.example:9000/..',
+    'https://remote.example:9000:',
+    'https://remote.example:9000/v1/daemon',
+    'https://remote.example:9000?token=1',
+  ]) {
+    await assert.rejects(
+      () =>
+        host.handlers.set_connection_config({
+          config: { endpointUrl, active: true, hasApiKey: true },
+          credential: { action: 'replace', value: 'sk-bad' },
+        }),
+      (err) => errorCode(err) === 'invalid_input',
+      `endpoint must be refused: ${endpointUrl}`,
+    );
+  }
+
+  // The stored config and the live auth authority are exactly what they were.
+  assert.deepEqual(await host.handlers.get_connection_config(), {
+    endpointUrl: 'https://remote.example:9000',
+    active: true,
+    hasApiKey: true,
+  });
+  assert.deepEqual(networkHooks[0].getActiveAuth(), {
+    endpointOrigin: 'https://remote.example:9000',
+    apiKey: 'sk-keep',
+  });
+  host.dispose();
+});
+
+test('a valid remote connection config projects its exact origin, auth and CSP, IPv6 included', async () => {
+  const { host, networkHooks, sessionHooks } = await makeHost();
+  const listener = sessionHooks.headersReceivedCalls[0][1];
+  const cspFor = (responseHeaders = {}) =>
+    new Promise((resolve) => {
+      listener({ url: 'nexus://app/index.html', responseHeaders }, (result) =>
+        resolve(result.responseHeaders['Content-Security-Policy'][0]),
+      );
+    });
+
+  await host.handlers.set_connection_config({
+    config: { endpointUrl: 'https://remote.example:9000/', active: true, hasApiKey: true },
+    credential: { action: 'replace', value: 'sk-remote' },
+  });
+  // A root trailing slash is not part of the origin; auth pins the exact one.
+  assert.deepEqual(networkHooks[0].getActiveAuth(), {
+    endpointOrigin: 'https://remote.example:9000',
+    apiKey: 'sk-remote',
+  });
+  // Stored identity is preserved verbatim — never rewritten to normalize.
+  assert.equal(
+    (await host.handlers.get_connection_config()).endpointUrl,
+    'https://remote.example:9000/',
+  );
+  assert.match(
+    await cspFor(),
+    /connect-src 'self' https:\/\/remote\.example:9000 https:\/\/remote\.example:9000/,
+  );
+
+  // Bracketed IPv6 literal remotes stay exact.
+  await host.handlers.set_connection_config({
+    config: { endpointUrl: 'http://[::1]:8420', active: true, hasApiKey: false },
+    credential: { action: 'keep' },
+  });
+  assert.match(await cspFor(), /connect-src 'self' http:\/\/\[::1\]:8420 http:\/\/\[::1\]:8420/);
+  host.dispose();
+});
+
+test('an invalid stored connection config can never omit the CSP', async () => {
+  const userDataDir = mkdtempSync(join(root, 'corrupt-user-data-'));
+  const storePath = join(userDataDir, 'connection-config.enc');
+  // An opaque stored endpoint: the old derivation `new URL(value).origin`
+  // returned the literal "null" for it, and the CSP builder then threw inside
+  // the header listener — leaving the response without any policy.
+  writeFileSync(
+    storePath,
+    JSON.stringify({ version: 1, config: { endpointUrl: 'about:blank', active: true, hasApiKey: true } }),
+  );
+  const { host, networkHooks, sessionHooks } = await makeHost({ paths: { userDataDir } });
+
+  // Not activated and no credential authority...
+  assert.equal(await host.handlers.get_connection_config(), null);
+  assert.equal(networkHooks[0].getActiveAuth(), null);
+
+  // ...and the header listener always ANSWERS (it never throws out of the
+  // Electron callback) with the restrictive local-origin policy.
+  const listener = sessionHooks.headersReceivedCalls[0][1];
+  let response = null;
+  listener(
+    { url: 'nexus://app/index.html', responseHeaders: { 'content-security-policy': ['default-src *'] } },
+    (result) => {
+      response = result;
+    },
+  );
+  assert.ok(response, 'every response must receive a policy');
+  const csp = response.responseHeaders['Content-Security-Policy'][0];
+  assert.equal(csp.includes('null'), false, 'the opaque origin must never reach the CSP');
+  assert.equal(csp.includes('*'), false, 'no wildcard anywhere in the CSP');
+  assert.equal(csp.includes('default-src *'), false, 'the upstream policy is replaced, never merged');
+  assert.match(csp, /connect-src 'self' http:\/\/127\.0\.0\.1:8420 http:\/\/127\.0\.0\.1:8420/);
+
+  // The invalid bytes stay on disk for recovery.
+  assert.ok(readFileSync(storePath, 'utf8').includes('about:blank'));
+  host.dispose();
+});
+
+// ---------------------------------------------------------------------------
+// Legacy credential removal (v1.194 P1-T3): the production targets, the
+// ordered host migration and the sanitized failure
+// ---------------------------------------------------------------------------
+
+test('legacy credential cleanup adapter targets exactly the old keychain item and app-data JSON, idempotently', async () => {
+  const appData = mkdtempSync(join(root, 'legacy-appdata-'));
+  const legacyDir = join(appData, 'io.nexus42.desktop');
+  const jsonPath = join(legacyDir, 'connection_config.json');
+  mkdirSync(legacyDir, { recursive: true });
+  writeFileSync(jsonPath, JSON.stringify({ endpointUrl: 'https://legacy.example:8443', apiKey: 'sk-legacy' }));
+  const neighbour = join(legacyDir, 'unrelated.json');
+  writeFileSync(neighbour, '{"keep":true}');
+
+  const commands = [];
+  // A capturing runner: the exact argv is asserted WITHOUT invoking the user's
+  // keychain. `delete` reports the documented errSecItemNotFound (exit 44).
+  const adapter = createLegacyCredentialAdapter(appData, {
+    platform: 'darwin',
+    runSecurity: async (args) => {
+      commands.push(args);
+      if (args[0] === 'delete-generic-password') {
+        throw Object.assign(new Error('could not be found in the keychain'), { code: 44 });
+      }
+      return { stdout: '{"endpointUrl":"https://legacy.example:8443","apiKey":"sk-legacy"}\n' };
+    },
+  });
+
+  assert.equal(
+    await adapter.read(),
+    '{"endpointUrl":"https://legacy.example:8443","apiKey":"sk-legacy"}',
+    'the legacy secret is read through `find-generic-password -w`',
+  );
+  await adapter.cleanup();
+  await adapter.cleanup(); // second run: both targets are already gone
+
+  assert.deepEqual(
+    commands,
+    [
+      ['find-generic-password', '-s', 'nexus42', '-a', 'connection_config', '-w'],
+      ['delete-generic-password', '-s', 'nexus42', '-a', 'connection_config'],
+      ['delete-generic-password', '-s', 'nexus42', '-a', 'connection_config'],
+    ],
+    'exact argv identity: /usr/bin/security, no shell, only service nexus42 / account connection_config',
+  );
+  assert.equal(existsSync(jsonPath), false, 'the app-data plaintext JSON is removed');
+  assert.equal(existsSync(neighbour), true, 'only the legacy JSON is removed, nothing else in the directory');
+});
+
+test('legacy credential cleanup adapter keeps only item-not-found and ENOENT as success', async () => {
+  const appData = mkdtempSync(join(root, 'legacy-refusals-'));
+  const legacyDir = join(appData, 'io.nexus42.desktop');
+  const jsonPath = join(legacyDir, 'connection_config.json');
+  mkdirSync(legacyDir, { recursive: true });
+  writeFileSync(jsonPath, '{"apiKey":"sk-legacy"}');
+
+  // An unrelated keychain failure is NOT success.
+  const denied = createLegacyCredentialAdapter(appData, {
+    platform: 'darwin',
+    runSecurity: async () => {
+      throw Object.assign(new Error('security: SecKeychainItemDelete: could not delete'), { code: 51 });
+    },
+  });
+  await assert.rejects(() => denied.cleanup(), (err) => err.code === 51);
+
+  // An already-absent item (exit 44) and an already-absent JSON (ENOENT) are.
+  const gone = createLegacyCredentialAdapter(appData, {
+    platform: 'darwin',
+    runSecurity: async () => {
+      throw Object.assign(new Error('could not be found in the keychain'), { code: 44 });
+    },
+    removeFile: () => {
+      throw Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' });
+    },
+  });
+  await gone.cleanup();
+
+  // A JSON removal failure that is not ENOENT is NOT success.
+  const undeletable = createLegacyCredentialAdapter(appData, {
+    platform: 'linux',
+    removeFile: () => {
+      throw Object.assign(new Error('EPERM: operation not permitted'), { code: 'EPERM' });
+    },
+  });
+  await assert.rejects(() => undeletable.cleanup(), (err) => err.code === 'EPERM');
+
+  // Off darwin the macOS keychain item is never targeted.
+  const commands = [];
+  const elsewhere = createLegacyCredentialAdapter(appData, {
+    platform: 'linux',
+    runSecurity: async (args) => {
+      commands.push(args);
+      return { stdout: '' };
+    },
+  });
+  await elsewhere.cleanup();
+  assert.deepEqual(commands, [], '`security` is never invoked off darwin');
+  assert.equal(existsSync(jsonPath), false, 'the app-data JSON is still removed');
+});
+
+test('host migration removes the legacy sources only after the encrypted store is readable, and reopens idempotently', async () => {
+  const dir = mkdtempSync(join(root, 'legacy-migration-'));
+  const userDataDir = join(dir, 'userData');
+  const storePath = join(userDataDir, 'connection-config.enc');
+  const observed = [];
+  const { host, networkHooks } = await makeHost({
+    paths: { userDataDir },
+    adapters: {
+      legacyCredentials: {
+        read: async () =>
+          JSON.stringify({ endpointUrl: 'https://remote.example:9000', apiKey: 'sk-legacy', active: true }),
+        cleanup: async () => {
+          // Observed from inside the removal: the encrypted bytes are already
+          // on disk, carry no plaintext, and decrypt again.
+          const onDisk = readFileSync(storePath, 'utf8');
+          observed.push({
+            plaintextOnDisk: onDisk.includes('sk-legacy'),
+            // The fixture safeStorage prefixes its ciphertext with `enc:`.
+            decrypted: new TextDecoder()
+              .decode(Buffer.from(JSON.parse(onDisk).credential, 'base64'))
+              .slice(4),
+          });
+        },
+      },
+    },
+  });
+  assert.deepEqual(observed, [{ plaintextOnDisk: false, decrypted: 'sk-legacy' }]);
+  assert.equal(host.connectionStore.legacyCleanupFailure, null, 'a clean migration claims no failure');
+  assert.deepEqual(await host.handlers.get_connection_config(), {
+    endpointUrl: 'https://remote.example:9000',
+    active: true,
+    hasApiKey: true,
+  });
+  assert.deepEqual(networkHooks[0].getActiveAuth(), {
+    endpointOrigin: 'https://remote.example:9000',
+    apiKey: 'sk-legacy',
+  });
+  host.dispose();
+
+  // The next launch opens the authoritative encrypted store — never the legacy
+  // source — and re-runs the idempotent removal.
+  const cleanups = [];
+  const { host: reopened } = await makeHost({
+    paths: { userDataDir },
+    adapters: {
+      legacyCredentials: {
+        read: async () => {
+          throw new Error('an authoritative encrypted store must never re-read the legacy source');
+        },
+        cleanup: async () => {
+          cleanups.push('cleanup');
+        },
+      },
+    },
+  });
+  assert.deepEqual(cleanups, ['cleanup'], 'the ordinary reopen finishes the legacy cleanup');
+  assert.deepEqual(await reopened.handlers.get_connection_config(), {
+    endpointUrl: 'https://remote.example:9000',
+    active: true,
+    hasApiKey: true,
+  });
+  reopened.dispose();
+});
+
+test('a refused legacy cleanup does not fail host startup and surfaces only the sanitized failure', async () => {
+  const dir = mkdtempSync(join(root, 'legacy-refused-'));
+  const userDataDir = join(dir, 'userData');
+  const storePath = join(userDataDir, 'connection-config.enc');
+  const refusal = Object.assign(new Error('security: SecKeychainItemDelete: sk-legacy could not be removed'), {
+    code: 51,
+    stderr: 'security: could not delete sk-legacy\n',
+  });
+
+  const { host, networkHooks } = await makeHost({
+    paths: { userDataDir },
+    adapters: {
+      legacyCredentials: {
+        read: async () =>
+          JSON.stringify({ endpointUrl: 'https://remote.example:9000', apiKey: 'sk-legacy', active: true }),
+        cleanup: async () => {
+          throw refusal;
+        },
+      },
+    },
+  });
+
+  // The app boots and the migrated session works: cleanup is not a startup gate.
+  assert.deepEqual(networkHooks[0].getActiveAuth(), {
+    endpointOrigin: 'https://remote.example:9000',
+    apiKey: 'sk-legacy',
+  });
+  assert.deepEqual(await host.handlers.get_connection_config(), {
+    endpointUrl: 'https://remote.example:9000',
+    active: true,
+    hasApiKey: true,
+  });
+
+  // The sanitized signal is observable on the composed host, and the
+  // migration is NOT reported as clean while the plaintext source remains.
+  const failure = host.connectionStore.legacyCleanupFailure;
+  assert.ok(failure !== null, 'the refused cleanup is observable');
+  assert.equal(errorCode(failure), 'legacy_credential_cleanup_failed');
+  for (const surfaced of [errorMessage(failure), String(failure.stack ?? '')]) {
+    assert.ok(!surfaced.includes('sk-legacy'), 'no secret may surface');
+    assert.ok(!surfaced.includes('SecKeychainItemDelete'), 'no command output may surface');
+  }
+  assert.ok(errorMessage(failure).includes('(51)'), 'the exit status stays available for diagnosis');
+  assert.equal(existsSync(storePath), true, 'the readable encrypted store survives');
+  assert.ok(!readFileSync(storePath, 'utf8').includes('sk-legacy'), 'recovery bytes stay ciphertext');
   host.dispose();
 });
 

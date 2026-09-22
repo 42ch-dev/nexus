@@ -676,6 +676,43 @@ async fn kb_scope_isolation_and_entry_round_trip() {
         panic!("traversal entry id must be rejected");
     };
     assert_eq!(field, "entry_id");
+
+    // Out-of-root preservation: an unvalidated id escaping the KB entries dir
+    // resolves to this sentinel, which sits outside the nexus root entirely.
+    // Proving that resolution first keeps the guard below from passing vacuously.
+    let sentinel = temp.path().join("sentinel.md");
+    std::fs::write(&sentinel, b"out-of-root sentinel").unwrap();
+    let entries_dir = nexus_home_layout::creator_kb_entries_dir(temp.path(), "author", "default");
+    let escape_depth = entries_dir
+        .strip_prefix(temp.path())
+        .expect("KB entries dir must live under the test home")
+        .components()
+        .count();
+    let traversal_id = format!("{}/sentinel", vec![".."; escape_depth].join("/"));
+    assert_eq!(
+        std::fs::canonicalize(entries_dir.join(format!("{traversal_id}.md"))).unwrap(),
+        std::fs::canonicalize(&sentinel).unwrap(),
+        "the sentinel must be reachable from the entry sink, or this guard proves nothing"
+    );
+
+    // Both read and delete must refuse that id without touching the sink.
+    let Err(CoreError::InvalidInput { field, .. }) =
+        core.get_kb_entry(&principal, traversal_id.clone()).await
+    else {
+        panic!("traversal entry id must be rejected on read");
+    };
+    assert_eq!(field, "entry_id");
+    let Err(CoreError::InvalidInput { field, .. }) =
+        core.delete_kb_entry(&principal, traversal_id.clone()).await
+    else {
+        panic!("traversal entry id must be rejected on delete");
+    };
+    assert_eq!(field, "entry_id");
+    assert_eq!(
+        std::fs::read(&sentinel).unwrap(),
+        b"out-of-root sentinel",
+        "out-of-root file must survive a refused read and delete"
+    );
     core.close().await.unwrap();
 }
 

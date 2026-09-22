@@ -33,9 +33,9 @@ jobs:
           predicate-quantifier: 'some-with-excludes'
           filters: |
             typescript:
-              - '**/*.ts'
+              - '**/*.{ts,mts,cts}'
               - '**/*.tsx'
-              - '**/*.js'
+              - '**/*.{js,mjs,cjs}'
               - '**/*.jsx'
               - '**/*.css'
               - '**/package.json'
@@ -46,13 +46,19 @@ jobs:
               - 'packages/nexus-ui/assets/**'
               - 'apps/web/**'
               - 'apps/design-studio/**'
+              - 'apps/desktop-electron/**'
+              - 'apps/nexus-service/**'
               - 'packages/**'
               - 'tooling/codegen/**'
               - 'tooling/design-tokens/**'
               - 'tooling/validation/**'
               - 'strategy-samples/**'
+              - 'scripts/**'
               - '.github/workflows/ci.yml'
               - '.github/actions/**'
+              - '.oxlintrc.json'
+              - '**/tsconfig.json'
+              - '**/tsconfig.*.json'
               - '!**/*.md'
             rust:
               - '**/*.rs'
@@ -318,6 +324,21 @@ jobs:
         run: pnpm --filter @42ch/nexus-contracts run build
       - name: Typecheck
         run: pnpm run typecheck
+      # oxlint's type-aware pass (options.typeAware) resolves the linted apps'
+      # workspace imports through each package's `types` field
+      # (dist/index.d.ts). Without those declarations @42ch/nexus-service
+      # imports resolve to error types and
+      # apps/desktop-electron/src/utility-host.ts:41 collapses its union into
+      # `typescript/no-redundant-type-constituents`. Build the dependency
+      # chain in order — native and provider-acp are nexus-service's
+      # prerequisites (`tsc` fails on TS2307 without either) — so the linted
+      # program sees real declarations. Root-cause repair: no rule and no file
+      # is disabled for it.
+      - name: Build workspace type dependencies
+        run: |
+          pnpm --filter @42ch/nexus-native run build
+          pnpm --filter @42ch/nexus-provider-acp run build
+          pnpm --filter @42ch/nexus-service run build
       - name: Lint
         run: pnpm run lint
 
@@ -641,6 +662,14 @@ jobs:
         run: cargo build -p nexus42 --features connect-host --example runtime_smoke_probe
       - name: Run the headless runtime smoke test
         run: cargo test -p nexus42 --features connect-host --test nexus_runtime_smoke headless_runtime_prints_readiness_serves_connect_and_has_no_http_listener -- --exact
+      - name: Run Connect library tests
+        run: >-
+          cargo test -p nexus42 --no-default-features --features connect-host --lib commands::connect::
+      - name: Run Connect token CLI tests
+        run: cargo test -p nexus42 --features connect-host --test connect_token_issue
+      - name: Run Connect command surface contract
+        run: cargo test -p nexus42 --features connect-host --test command_surface_contract v1193_connect_help_describes_served_compute_surface -- --exact
+
 
   # QC3 W-001 / QC2 F-001 (v1.193 P2-T14). Retiring the Rust daemon crate moved
   # its domain coverage into `crates/nexus-core/tests/` (the `retained_*` owners
@@ -653,13 +682,14 @@ jobs:
   #     work/home/preset, reading/context/content/timeline, memory)
   #   * execution,compute,provider-host (Host/execution owners):
   #     retained_execution_contracts, execution_lifecycle, handle_ops,
-  #     workspace_commit, capability_compute, host_actor_lifecycle, actor_services
+  #     workspace_commit, capability_compute, host_actor_lifecycle
   #   * connect-client,embedded-mcp (core MCP/peer library owners):
   #     retained_peer_contracts, peer_control
   # Deliberately no `--all-targets` and no connect-host/other-cohort row
-  # (P2-T13 C1). `--test-threads=2` matches the P2 verification rounds and keeps
-  # the still-open R-V1193-P2T6-ACTOR-VIEW-PAGING-FLAKE (PM owns the scheduling
-  # decision) out of the default-parallelism path.
+  # (P2-T13 C1). The non-actor owners stay at `--test-threads=2`; the
+  # actor_services cohort runs separately at `--test-threads=4` on T5's
+  # deterministic boundary and repeated concurrent-run evidence.
+
   rust-core-domain:
     name: Rust core domain coverage
     runs-on: ubuntu-latest
@@ -703,8 +733,13 @@ jobs:
           cargo test -p nexus-core --features provider-host,compute
           --test retained_execution_contracts --test execution_lifecycle
           --test handle_ops --test workspace_commit --test capability_compute
-          --test host_actor_lifecycle --test actor_services
+          --test host_actor_lifecycle
           -- --test-threads=2
+      - name: Actor view owners
+        run: >-
+          cargo test -p nexus-core --features provider-host,compute
+          --test actor_services
+          -- --test-threads=4
       - name: Core MCP/peer library owners
         run: >-
           cargo test -p nexus-core --features connect-client,embedded-mcp

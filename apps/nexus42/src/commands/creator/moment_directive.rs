@@ -471,9 +471,11 @@ fn effective_label(
 mod tests {
     use super::*;
     use nexus_contracts::{
-        CoreRegisterCreatorRequest, CreateWorkRequest, SetActiveWorkspaceRequest,
+        CoreRegisterCreatorRequest, CreateWorkRequest, ListWorksQuery, SetActiveWorkspaceRequest,
     };
-    use nexus_core::{CoreAccess, CoreHomeService, CoreOpenOptions, LocalDirectiveStore};
+    use nexus_core::{
+        CoreAccess, CoreHomeService, CoreOpenOptions, ListPoolQuery, LocalDirectiveStore,
+    };
     use nexus_home_layout::{operational_workspace_dir, workspace_state_db_path};
     use nexus_local_db::moment_directive::{
         get_active_for_work, get_by_id, scope_kind, set_active,
@@ -738,6 +740,62 @@ mod tests {
         assert_eq!(expired.len(), 1, "the row is retained: {expired:?}");
         assert_eq!(expired[0].1, "expired");
         pool.close().await;
+    }
+
+    /// An omitted Work resolves through the pool `active` entry first, and a
+    /// `works.status = active` Work the pool does not carry still resolves
+    /// through the fallback selection: the pool store and `works.status` are
+    /// independent, so a fixture Work that lives only in `works` must not
+    /// refuse.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn implicit_work_resolution_falls_back_to_works_status_when_the_pool_is_empty() {
+        let env = Env::new().await;
+
+        // Premise: the fixture's pool carries no `active` entry at all, so the
+        // pool step alone cannot resolve anything here.
+        let pool_page = env
+            .core
+            .list_work_pool(
+                &env.principal,
+                ListPoolQuery {
+                    status: Some("active".to_string()),
+                    limit: Some(1),
+                    offset: Some(0),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(
+            pool_page.entries.is_empty(),
+            "fixture premise: the pool has no active entry: {:?}",
+            pool_page.entries.len()
+        );
+
+        // Premise: the Work is the `status = active` row the fallback step
+        // selects.
+        let works_page = env
+            .core
+            .list_works(
+                &env.principal,
+                ListWorksQuery {
+                    status: Some("active".to_string()),
+                    limit: Some(1),
+                    ..ListWorksQuery::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            works_page.items.first().map(|w| w.work_id.as_str()),
+            Some(env.work_id.as_str()),
+            "fixture premise: the Works selection is what the fallback reads"
+        );
+
+        // The implicit resolution lands on that Work instead of refusing.
+        let resolved = active_work_id_core(&env.core, &env.principal)
+            .await
+            .unwrap();
+        assert_eq!(resolved, env.work_id);
     }
 
     /// A Work with no own directive inherits the bound World's override, and

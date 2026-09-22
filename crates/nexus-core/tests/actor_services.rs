@@ -1605,6 +1605,17 @@ async fn entry_id_by_name(pool: &SqlitePool, name: &str) -> String {
         .unwrap()
 }
 
+/// Store one `created_at` value verbatim, replacing a fixture row's wall-clock
+/// nanoseconds with a pinned one.
+async fn set_created_at(pool: &SqlitePool, entry_id: &str, created_at: &str) {
+    sqlx::query("UPDATE kb_key_blocks SET created_at = ? WHERE key_block_id = ?")
+        .bind(created_at)
+        .bind(entry_id)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
 fn sorted_names(rows: &[KnowledgeEntryRecord]) -> Vec<String> {
     let mut names: Vec<String> = rows.iter().map(|row| row.canonical_name.clone()).collect();
     names.sort();
@@ -1707,6 +1718,91 @@ async fn v1191_holder_visibility_actor_view_pages_skip_hidden_rows() {
         !second_names.contains(&"FirstCharacterPrivate".to_string())
             && !second_names.contains(&"FirstCharacterShared".to_string()),
         "another Character's container never joins this view: {second_names:?}"
+    );
+}
+
+/// One total-order key, not two: `strftime('%f')` *rounds* the stored
+/// sub-second fraction to three digits while
+/// `stored_created_at_order_millis` (`timestamp_millis`) *truncates* it, so at
+/// the `.xxx5` boundary SQL placed a row one millisecond later than the Rust
+/// merge did. The walk's cursor then excluded a row that had not been paged
+/// yet, `has_more` went false on a short page, and the walk ended with a row
+/// missing.
+///
+/// Every eligible row is pinned here (no wall-clock fraction), and the two rows
+/// that truncate to the boundary millisecond are assigned by id — the
+/// rounding-up fraction goes to the smaller `key_block_id` — so SQL's order and
+/// the Rust tie-break are forced apart whatever ids the fixture drew.
+#[tokio::test]
+async fn v1191_holder_visibility_actor_view_boundary_fraction_pages_every_row() {
+    let env = seed_env().await;
+    let _fixture = seed_governance_fixture(&env).await;
+    let guarded = init_engine_pool(&env.db_path, CREATOR, GuardedPoolOptions::default())
+        .await
+        .unwrap();
+    let pool = guarded.clone_pool();
+    for (name, created_at) in [
+        ("FirstCharacterShared", "2026-01-01T10:00:01.000000000Z"),
+        ("FirstCharacterPrivate", "2026-01-01T10:00:01.002000000Z"),
+        ("FirstBindingPrivate", "2026-01-01T10:00:01.003000000Z"),
+    ] {
+        let entry_id = entry_id_by_name(&pool, name).await;
+        set_created_at(&pool, &entry_id, created_at).await;
+    }
+    let mut shared = entry_id_by_name(&pool, "WorldShared").await;
+    let mut private = entry_id_by_name(&pool, "WorldFirstPrivate").await;
+    if private < shared {
+        std::mem::swap(&mut shared, &mut private);
+    }
+    // Both truncate to 10:00:00.000; only the smaller id rounds up a millisecond.
+    set_created_at(&pool, &shared, "2026-01-01T10:00:00.000900000Z").await;
+    set_created_at(&pool, &private, "2026-01-01T10:00:00.000100000Z").await;
+    pool.close().await;
+
+    let (core, principal) = open_core(&env).await;
+    let actor = AdmittedActor::Character {
+        character_id: env.character_id.clone(),
+    };
+    let mut cursor: Option<String> = None;
+    let mut names: Vec<String> = Vec::new();
+    let mut pages = 0;
+    loop {
+        let page = core
+            .actor_knowledge_view(
+                &principal,
+                &actor,
+                ActorKnowledgeViewQuery {
+                    world_id: WORLD.to_string(),
+                    binding_id: Some(env.binding_id.clone()),
+                    limit: 1,
+                    cursor,
+                },
+            )
+            .await
+            .expect("one-row page");
+        assert_eq!(page.items.len(), 1, "a one-row page carries one row");
+        names.extend(page.items.iter().map(|row| row.canonical_name.clone()));
+        pages += 1;
+        if !page.has_more {
+            assert!(page.next_cursor.is_none(), "a final page exposes no cursor");
+            break;
+        }
+        cursor = page.next_cursor;
+        assert!(cursor.is_some(), "has_more implies a next cursor");
+        assert!(pages < 32, "the walk must terminate: {names:?}");
+    }
+    assert_eq!(pages, 5, "one page per eligible row: {names:?}");
+    names.sort();
+    assert_eq!(
+        names,
+        vec![
+            "FirstBindingPrivate",
+            "FirstCharacterPrivate",
+            "FirstCharacterShared",
+            "WorldFirstPrivate",
+            "WorldShared",
+        ],
+        "the paginated ActorView holds exactly the eligible rows"
     );
 }
 

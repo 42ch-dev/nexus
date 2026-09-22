@@ -2,7 +2,7 @@
 
 pub use nexus_home_layout::{
     creator_kb_dir, creator_kb_entries_dir, creator_workspaces_root, operational_workspace_dir,
-    validate_creator_id_safe, validate_entry_id_safe, workspace_state_db_path,
+    sanitize_entry_id, validate_creator_id_safe, workspace_state_db_path,
 };
 
 /// Workspace `state.db` path (alias for plan/ADR naming).

@@ -9,15 +9,15 @@
 
 | Layer | Authority | Honest claim |
 | --- | --- | --- |
-| **Shipped current policy** | Shipped Masters above (`local-runtime-boundary`, `daemon-runtime`, `cli-spec`, `desktop-shell`, `agent-host`, `concurrency`) | The retired integrated `nexus42` daemon and the CLI `DaemonClient` leaves are deleted (v1.193 P2): retained families call the Rust authority directly, or through the standalone TS service for browser/Electron. Since the v1.192 cutover the shipped desktop is the Electron host and no Tauri sidecar shell is part of it. `daemon-runtime` stays listed only as the historical host Master |
+| **Shipped current policy** | Shipped Masters: `local-runtime-boundary`, `cli-spec`, `desktop-shell`, `agent-host`, `concurrency` (plus this document for the boundary itself) | The retired integrated `nexus42` daemon and the CLI `DaemonClient` leaves are deleted (v1.193 P2): retained families call the Rust authority directly, or through the standalone TS service for browser/Electron. Since the v1.192 cutover the shipped desktop is the Electron host and no Tauri sidecar shell is part of it. `daemon-runtime` is listed in *Coordinates with* only as the historical host Master — it is not an implementable authority |
 | **Exercised M1 subset** | This document + merged v1.189 on `main` (`71e01cf9`) | World KB graph/patch, candidates read-only projection, napi/provider ACP vertical, standalone TS M1 routes, Cargo-free stable-interface DX, Electron development GO. Not full API/CLI cutover |
 | **Accepted target** | This document | Transport-neutral Rust authority for every retained family, independent Rust CLI/runtime, complete TS service composition, proof-gated Electron desktop |
 | **Wire DTOs** | `schemas/` → generated Rust + `@42ch/nexus-contracts` | Unchanged by this lock |
 | **Product names** | Root `AGENTS.md` | `Nexus`, `nexus42`, `nexus-runtime`, `@42ch` — the retired integrated daemon runtime is no longer a product name |
 
-**Activation rule:** a family uses the target topology only after the extracted Rust service is the single effect owner **and** the old mixed-handler path for that family has an explicit deletion owner and proof. The M1 World KB graph/patch + native ACP + TS M1 vertical families have fired that gate. Until other families fire it, shipped Masters remain the implementable SSOT for those families. Do not describe unmigrated code as already on the target, and do not describe the M1 subset as the complete program.
+**Activation rule:** a family uses the target topology only after the extracted Rust service is the single effect owner **and** the old mixed-handler path for that family has an explicit deletion owner and proof. **Delivered (v1.193 P2):** that gate fired for every retained family — the old mixed-handler path is the deleted daemon/SPA composition, so no shipped Master still describes an implementable daemon topology, and the retained SSOT is this document plus `cli-spec`, `desktop-shell` and the TS service. What has *not* been exercised is the rest of the program: the RFT-05–11 destinations listed in §7.5 (complete TS API, remaining World/Work families, Actor families) remain open. Do not describe an unexercised destination as delivered, and do not describe the M1 subset as the complete program.
 
-Historical 2026-09-12 research (source baseline `3bb262b`) is advisory structure only. It is not runtime proof, a measurement, or this spec's authority. Current integrated baseline for planning is merged v1.189 on `main` at `71e01cf9e1a8c64cb68062ac9a08762e2156a925` (PR #306). Inherited v1.188 reliability remains `bbaae32d422b673576d683859b474da6bd787743`.
+Historical 2026-09-12 research (source baseline `3bb262b`) is advisory structure only. It is not runtime proof, a measurement, or this spec's authority. The merged v1.189 record for the exercised M1 subset is `71e01cf9e1a8c64cb68062ac9a08762e2156a925` (PR #306); the baseline has since advanced — v1.192 (RFT-09 cutover + unsigned packaging) and v1.193 P2 (obsolete-host retirement) are **merged on `main`**, so the retained `cli`/`connect-host` cohorts and the Electron host are shipped current state, not target state. Inherited v1.188 reliability remains `bbaae32d422b673576d683859b474da6bd787743`.
 
 ## 1. Problem
 
@@ -123,7 +123,7 @@ These are the shipped dependency cohorts (v1.193 P2 delivered them), kept as the
 | Core `provider-host` | optional existing Host/ACP adapters and one admitted session registry | implicit scheduler/execution startup |
 | Core `compute` | explicit execution plus WASM/spoke compute, including optional orchestration compute edges | default/domain/Connect-host activation |
 | Peer-control operator | optional reverse-invoke/Connect-client/MCP adapters | activation by Connect-host product |
-| Ordinary CLI (`cli`, proposed default product selector) | Direct local commands, existing cloud clients and local ACP spawning; existing chronology/cron/ops library dependencies | daemon-runtime, Axum router, SPA, default libp2p, Node requirement, TS-service mediation or scheduler startup |
+| Ordinary CLI (`cli`, the default product selector) | Direct local commands, existing cloud clients and local ACP spawning; existing chronology/cron/ops library dependencies | daemon-runtime, Axum router, SPA, default libp2p, Node requirement, TS-service mediation or scheduler startup |
 | Optional CLI Connect (`cli,connect-host`) | Explicit spoke/libp2p plus existing spoke-adapter compute | implicit Rust daemon/HTTP host |
 | Connect-only runtime (`connect-host`, no defaults) | Existing stored-Actor invoke authority and spoke-connect/libp2p; explicit spoke-adapter `compute` preserves WASM/module-cache behavior | CLI-only ACP/agent-host, orchestration scheduler, SPA/HTTP/Node; `connect-host` must not imply `cli` |
 | TS native service | Preserve current `nexus-core-node` selection of core `[execution]` and existing native-owned Host/ProviderPort composition | old-daemon proxy; do not claim compute/provider-host/peer features or routes are shipped merely because core exports them |
@@ -174,7 +174,7 @@ Selected M2 composition reuses actual maintained adapters: TS ACP uses `packages
 
 ### 7.1 Independent Rust CLI (basic local authoring/storage)
 
-**Destination:** daemon-free, Node-free, full-engine-free product cohort completed in **RFT-08 (M2)**. Ordinary default authoring/storage entry points switch in M2. M1 delivered **one real slice**, now shipped; it is not the whole basic CLI.
+**Destination:** daemon-free, Node-free, full-engine-free product cohort completed in **RFT-08**. **Delivered (v1.193 P2):** the ordinary default authoring/storage entries are this cohort (`default = ["cli"]`, `nexus42` bin `required-features = ["cli"]`); M1 delivered **one real slice** of it, and it is not the whole basic CLI.
 
 **M1 first slice (RFT-01) — delivered in v1.189:**
 
@@ -205,9 +205,9 @@ Do **not** claim that all basic commands already work as direct library calls. S
 
 ### 7.4 Deferred, stubbed, hidden, or platform-only leaves
 
-Callable but incomplete rows remain inventory rows until a named plan owns them:
+Historical roster (pre-v1.193 overlay) of the callable-but-incomplete leaves at that time:
 
-- hidden hard-deprecated `creator workspace clone`
+- hidden hard-deprecated `creator workspace clone` — now an **unknown command** (the retired leaf is asserted as `retired_creator_workspace_clone_is_unknown`)
 - coming-soon `workspace link|unlink|status`
 - platform-only `explore browse|search`, deferred `platform context assemble`, coming-soon `publish`
 - visible deprecated `system preset` forwarding alias; hidden but callable top-level `sync`/`preset`/`capability`
@@ -228,7 +228,7 @@ RFT-00–04 shipped together as milestone **RFT-M1** (v1.189). RFT-05–08 are o
 | RFT-05 | Remaining World/Work/KB/narrative/fork families, including Works reads/writes beyond the M1 slice | M2 / not started |
 | RFT-06 | Actor/Character/admission/memory/context | M2 / not started |
 | RFT-07 | Execution/scheduler/Host/providers/capabilities/MCP/Connect control plane **and** complete TS API/default service entry | M2 / not started |
-| RFT-08 | Complete independent Rust CLI + headless product cutover (default authoring entry; Connect-only runtime). **v1.193 target:** no CLI operator control surface for the TS service | M2 / not started; the v1.193 iteration executes this cutover |
+| RFT-08 | Complete independent Rust CLI + headless product cutover (default authoring entry; Connect-only runtime). **v1.193 target:** no CLI operator control surface for the TS service | **Delivered (v1.193 P2)** — the ordinary `cli` cohort is the default authoring entry, `nexus-runtime` is the Connect-only headless binary, and no CLI operator control surface for the TS service exists. The unexercised destinations above stay open |
 | RFT-09 | Formal desktop cutover (Electron host after the M1 development GO; reuse web/Studio; no visual redesign) | M3 / **delivered in v1.192** (accepted) |
 | RFT-10 | Production distribution / Developer ID signing / notarization / stapling | M3. **v1.192 delivers the unsigned half** (`.app` and `.dmg`, both macOS architectures, no Apple credentials required); that delivery is not dual-architecture GUI qualification. Signing remains the durable destination and is a Non-Goal until explicit release authorization |
 | RFT-11 | Obsolete-host retirement **and** retained v1.188 P5 public first-run / Quick Start / live request | **v1.192** retired Tauri. **v1.193 P2 delivered:** the remaining daemon/SPA/`legacy-cli` composition and the dormant CLI rows listed in §7.4 were retired in that iteration. P5 first-run/live request stays out |
@@ -300,7 +300,7 @@ Electron is the **shipped** desktop host — v1.192 delivered the cutover and un
 
 - Reuse `apps/web`, Design Studio, and `packages/nexus-ui`. No visual redesign and no second desktop UI.
 - P3 was feasibility, not production distribution (RFT-10) and not Tauri retirement (RFT-11); v1.192 delivered the RFT-09 cutover and retired the Tauri composition.
-- **No-go does not complete M1.** M1 recorded a **development GO**, authorized by the v1.189 compass and native matrix run `34881345823`, not shipped desktop migration or production signing; v1.192 then delivered the RFT-09 product switch with unsigned app+DMG only, superseding that GO as the desktop's product basis. The historical decision JSON remains blocked (13 pass / 0 fail / 22 missing-or-unobserved, including x64 GUI rows); the CI matrix does not prove those rows passed. RFT-11 retired the replaced Tauri family after host/packaging acceptance; verified still-consumed daemon/SPA and callable dormant CLI rows stay. Product does not silently choose an alternative desktop. **Delivered (v1.193 P2):** the still-retained daemon/SPA composition and the dormant CLI rows are retired in that iteration (§7.2, §7.4); the desktop half stays as delivered.
+- **No-go does not complete M1.** M1 recorded a **development GO**, authorized by the v1.189 compass and native matrix run `34881345823`, not shipped desktop migration or production signing; v1.192 then delivered the RFT-09 product switch with unsigned app+DMG only, superseding that GO as the desktop's product basis. The historical decision JSON remains blocked (13 pass / 0 fail / 22 missing-or-unobserved, including x64 GUI rows); the CI matrix does not prove those rows passed. RFT-11 retired the replaced Tauri family after host/packaging acceptance; the still-consumed daemon/SPA composition and callable dormant CLI rows were **not** retired by that desktop change and stayed until v1.193 P2 removed them (see the delivered sentence at the end of this bullet). Product does not silently choose an alternative desktop. **Delivered (v1.193 P2):** the still-retained daemon/SPA composition and the dormant CLI rows are retired in that iteration (§7.2, §7.4); the desktop half stays as delivered.
 - Tauri sidecar/IPC/path-guard behavior is retired with the composition; the shipped host's IPC/path/credential contract is owned by [desktop-shell.md](desktop-shell.md). Dual-architecture GUI and installed-deployment rows remain **[UNVERIFIED]** there.
 
 ## 13. Frontend DX (hard product goal)
@@ -366,10 +366,10 @@ Measurement protocol: same candidate hardware and seeded real DB (500 entities,1
 
 ## 17. Conflict with shipped Masters
 
-Until a family migration is exercised:
+A family that has landed on the target:
 
-1. Implement current behavior against the shipped Master for that domain.
-2. Use this document for destination, host/lifetime, CLI disposition, the delivered M1 vertical identity, and M2/M3 keep/cutover rules.
-3. When a family lands on the target, fold the shipped Master section or record the deletion gate in the family plan. Do not leave two contradictory implementable topologies for the same family.
+1. Implement current behavior against **this document** plus the retained Masters named in §0 (`cli-spec`, `desktop-shell`, `agent-host`, `concurrency`) — the deleted composition's Master (`daemon-runtime.md`) is history, not an implementable authority.
+2. Use this document for destination, host/lifetime, CLI disposition, the delivered M1 vertical identity, and the remaining RFT-05–11 keep/cutover rules.
+3. When a remaining family lands on the target, fold the superseded section or record the deletion gate in the family plan. Do not leave two contradictory implementable topologies for the same family.
 
-The M1 World KB graph/patch, napi ACP, and TS M1 vertical families have landed. Remaining families still follow this conflict rule until their gates fire.
+**Delivered (v1.193 P2):** the M1 World KB graph/patch, napi ACP, TS M1 vertical **and** the remaining retained families all fired their gates — the old mixed-handler topology no longer exists to conflict with. The rule above now binds only the unexercised RFT-05–11 destinations (§7.5), which must not be described as delivered before their own gates fire.

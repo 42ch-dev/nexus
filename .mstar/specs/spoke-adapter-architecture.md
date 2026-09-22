@@ -20,7 +20,7 @@ These are the architecture bedrock — do not re-litigate.
 nexus depends on spoke's published packages directly:
 - **Rust:** `spoke-schemas` + `spoke-operations` (crates.io, lockstep exact pin on the **pinned upstream lockstep release** — version SSOT: the workspace manifest)
 - **TypeScript:** `@42ch/spoke-schemas` + `@42ch/spoke-operations` (npm, lockstep exact pin on the same release — the two root `package.json` pins)
-- **Rust (opt-in Connect Host only):** `spoke-connect` (crates.io, lockstep exact pin on the same release) — workspace dep consumed **only** behind cargo feature `connect-host` on `apps/nexus42`. Default `nexus42` / daemon builds MUST NOT link `spoke-connect`. See §10.
+- **Rust (opt-in Connect Host only):** `spoke-connect` (crates.io, lockstep exact pin on the same release) — workspace dep consumed **only** behind cargo feature `connect-host` on `apps/nexus42`. The ordinary `nexus42` (`cli`) build MUST NOT link `spoke-connect`. See §10.
 
 **Lockstep cutover (shipped, v1.191 P1):** all three Rust and both root npm pins, `tooling/check-wire-drift.sh::SPOKE_PIN`, and the strategy sample pin references moved together, in one custodian checkpoint. `libp2p =0.56.0` is unchanged. Both `connect-host` and `connect-client` feature consumers were verified; no default-build linkage expansion was introduced.
 
@@ -272,7 +272,7 @@ The daemon API HTTP route paths under `/v1/daemon/.../kb/` are **not renamed** i
 | Path stability | `kb` = knowledge base — semantically accurate. Changing it breaks other consuming clients unnecessarily. |
 | Deferred concern | Route path renaming is a separate CLI-IA concern, not a data-model refactor. **Durable roadmap:** DR-42 (holistic route-path review). |
 | Product alignment | The `nexus42 kb ...` CLI subcommand already stays as `kb` — consistent with the daemon path. |
-| Client impact | The daemon API is consumed by the bundled web UI (same repo) and potentially by the Tauri desktop shell. Renaming paths would cascade into client-side URL builders for no data-model benefit. |
+| Client impact | The `/v1/daemon/*` family is consumed by the bundled web UI (same repo) and by the Electron desktop host — both served today by the standalone TS service (v1.193 P2). Renaming paths would cascade into client-side URL builders for no data-model benefit. |
 
 **Affected paths (keep as-is):**
 
@@ -660,6 +660,12 @@ True concurrent safety requires the CAS check to be atomic with the write. The V
 
 On create, the adapter seeds `revision = 1` (spoke convention), not `0` (nexus V1.74 legacy). The spoke `Relation.revision` field is `Option<u64>`, so consumers already handle optionality — no wire break.
 
+**World-aware CAS precedence (settled — v1.194 P2-T4).** The conditional-write predicate carries the stored `world_id` alongside the row identity and revision (`kb_key_blocks`: `key_block_id` + `COALESCE(revision, 0)` + `world_id`; `kb_relationships`: `relationship_id` + `revision` + `world_id`), and the store disambiguates a zero-row CAS by that stored world. Precedence, in the order the racing request can observe it:
+
+1. **Never admitted by this request** (hidden rows, foreign Worlds): the refusal stays **indistinguishable from absent** — same code, message and details, no world-conflict marker, no foreign World id. A hidden row must never become an existence oracle.
+2. **Admitted by this request, then moved by a second writer before the conditional mutation**: the write is denied and the adapter's world-conflict carrier survives every mapping layer to the Connect wire code `world_conflict` (`is_world_conflict_reject` → the Connect host's reject mapping). It is **never** collapsed into `REVISION_CONFLICT` / `STORED_REVISION_STALE`, which remain the same-World stale-revision outcomes of the tables above.
+3. **Moved before this request's own admission read**: the moved row has a bumped stored revision, so the pinned spoke-operations pre-flight classifies the request as a stale revision *before* the adapter CAS is reached. That is a legitimately different refusal, not a world-conflict carrier — a pre-read move must not be re-labelled as a world conflict, and the revision bucket must not be weakened to make it one.
+
 `RelationPort::get_relation` reads from `kb_relationships` via the existing `KbRelationshipRow` → spoke `Relation` conversion. On not-found it returns `SpokeRejectCode::RelationNotFound` (available in spoke 0.5.0; verified in `result.rs` line 28). The conversion mapping is identical to the `put_relation` path (see `relation_port.rs` header table, verified for 0.5.0 field names).
 
 #### Scope-pushdown contract — Nexus query filters alongside `Scope` (V1.145 P2)
@@ -808,16 +814,16 @@ Normative architectural surface for the first FL-R Connect Host slice. Product b
 | Rule | Norm |
 |------|------|
 | Cargo feature | `connect-host` on `apps/nexus42` (default **off**) |
-| CLI entrypoint | `nexus42 connect start` only (feature-gated) |
+| CLI entrypoint | `nexus42 connect start` (feature-gated) or the independent `nexus-runtime` binary |
 | Dependency | `spoke-connect = "=0.9.2"` workspace dep; optional on `nexus42` |
-| Default daemon | Feature-off build does **not** link `spoke-connect`. `nexus42 daemon start` never opens a Connect listener (even if feature-on binary is used as daemon). |
+| Default CLI | Feature-off build does **not** link `spoke-connect`; the ordinary `cli` graph stays libp2p-free. The deleted `nexus42 daemon start` never opened a Connect listener, and no retained CLI entry does either except the `connect` group. |
 | mDNS | spoke-connect exposes no `mdns` feature as of 0.9.2 (removed upstream); hickory/libp2p-mdns stay lockfile-only via libp2p 0.56 optional deps, never compiled |
 
 ### 10.2 Topology
 
-- Connect Host runs as a **separate OS process** (`connect start`), not a tokio task inside the daemon.
-- N-C0 does **not** share `Arc<NexusAdapter>` with the daemon process (no invoke path needs the adapter).
-- Coexistence with Daemon HTTP is process-level (both may run); Connect does not proxy creator HTTP routes.
+- Connect Host runs as a **separate OS process** (`connect start`, or the `nexus-runtime` binary), not a tokio task inside any other host process.
+- N-C0 does **not** share `Arc<NexusAdapter>` with the HTTP host process (no invoke path needs the adapter).
+- Coexistence with the `/v1/daemon/*` HTTP host is process-level (both may run); Connect does not proxy creator HTTP routes. The deleted Rust daemon was the original coexistence example.
 - N-C1+ may open workspace DB inside the Connect process and construct `NexusAdapter` there.
 
 ### 10.3 Manifest honesty
@@ -909,9 +915,7 @@ extra_modules }`.
 | `/v1/daemon/worlds/:world_id/kb/pack/export` | POST | `PackExportRequest` `{include_deprecated?, include_anchors?, title?, pack_version?, description?}` | handbook pack envelope JSON (opaque items — entries/relations are spoke objects per the V1.139 `$ref` fallback §3.4) |
 | `/v1/daemon/worlds/:world_id/kb/pack/import` | POST | `PackImportRequest` `{pack: <opaque handbook pack>, conflict: "skip"\|"rename"\|"overwrite", include_anchors?}` | `PackImportResponse` `{entries: AtomCounts, relations: AtomCounts, details: ImportDetail[]}` |
 
-Handler: `crates/nexus-daemon-runtime/src/api/handlers/world_kb_pack.rs`.
-Registered via a `pack_routes()` fn merged into `tier2_routes()` (`api/mod.rs`),
-mirroring the V1.151 `inspector_routes()` pattern.
+**Owner (v1.193 P2):** these routes are **retained wire contracts** served today by the standalone TS service (`apps/nexus-service/src/worlds.ts`); the original handler was the deleted `crates/nexus-daemon-runtime/src/api/handlers/world_kb_pack.rs`, registered through `pack_routes()` → `tier2_routes()` (`api/mod.rs`) mirroring the V1.151 `inspector_routes()` pattern.
 
 **Auth/guard (HARD):** both routes are tier2 (`require_api_key` +
 `require_active_creator` middleware) and additionally call `require_creator` +
@@ -955,42 +959,46 @@ required this iteration.
 Created, renamed, and overwritten rows carry
 `source_provenance_kind = "pack_import"` (stamped via
 `extensions::set_provenance(..., Some("pack_import"))`). Skipped rows are
-unchanged. The constant `IMPORT_PROVENANCE = "pack_import"` is shared by CLI
-and daemon (V1.146 lock; DB CHECK includes this value since migration
+unchanged. The constant `IMPORT_PROVENANCE = "pack_import"` is shared by the
+CLI and the HTTP path (V1.146 lock; DB CHECK includes this value since migration
 `20260731000001`).
 
 ### 11.5 Shared import-orchestration module
 
 The import-orchestration logic (conflict detection per policy, orchestrator
-calls, provenance stamp, endpoint remap) lives in **one** shared module:
-`crates/nexus-daemon-runtime/src/pack_import.rs` (`pub async fn import_pack`).
-Both the CLI (`apps/nexus42/.../pack.rs::import` — thin caller) and the daemon
-route (`world_kb_pack.rs::pack_import` — thin HTTP caller) consume it. This
-follows the V1.151 `LocalDirectiveStore` relocation precedent
-(`directive_store.rs:1-12`): a composition-root module in `nexus-daemon-runtime`
-that both the CLI (which depends on `nexus-daemon-runtime`,
-`apps/nexus42/Cargo.toml:40`) and the daemon consume.
+calls, provenance stamp, endpoint remap) lives in **one** shared place:
+today the owner is `nexus-core`'s typed pack surface
+(`CoreService::import_world_pack` / `dispatch_world_pack_import` /
+`preview_world_pack_import`, `crates/nexus-core/src/world_pack.rs`). Both the CLI
+(`apps/nexus42/src/commands/creator/world/kb/pack.rs` — direct-core caller) and
+the HTTP route (`apps/nexus-service/src/worlds.ts` — thin caller) consume that
+one path. The original V1.146/V1.152 home was the shared
+`nexus-daemon-runtime/src/pack_import.rs` module with its
+`LocalDirectiveStore` relocation precedent; both were deleted with the host in
+v1.193 P2, and the invariant they established — one shared import path, no
+second implementation — is what carries over.
 
-`import_pack` does **not** perform the owner gate — each caller calls
-`require_world_owner` before invoking it (auth is the caller's job, matching the
-`LocalDirectiveStore` precedent). The pack round-trip guarantee is not broken:
-`import_pack` consumes `ParsedPack` (which carries `extra_modules`) and writes
-atoms via orchestrators — it never re-builds the pack.
+Admission is the **core's** responsibility now: `CoreService::import_world_pack`
+takes the `Principal` and runs `verify_principal`, the read-only refusal and
+`require_world_owner` itself, so no caller can bypass the owner gate; an HTTP
+caller only adds its route's tier middleware in front of the same core call.
+The pack round-trip guarantee is unchanged: the import path consumes the parsed
+pack (which carries its extra modules) and writes atoms via the orchestrators —
+it never re-builds the pack.
 
 ### 11.6 CLI surface (LOCKED — V1.146 placement, V1.152 completeness)
 
 User-facing path: `creator world kb pack export|import` (Pack is World-lore
 transport). All three conflict policies are implemented (V1.146 shipped `skip`;
 V1.152 implements `rename` + `overwrite`, removing the "not yet implemented"
-stubs). `skip` is the default. `--dry-run` covers all three policies. CLI +
-daemon share the single `import_pack` path.
+stubs). `skip` is the default. `--dry-run` covers all three policies. The CLI and the HTTP path share the single core `import_world_pack` path.
 
 ### 11.7 Clean-room SillyTavern lorebook import (V1.181 / DF-80 — shipped)
 
 The CLI accepts
 `creator world kb pack import <world_ref> --from-st <PATH>` as an alternative
 to `--in <PACK>`; clap requires exactly one of those inputs. This is a
-CLI-only documented-format converter, not a daemon route. Format knowledge
+CLI-only documented-format converter, not an HTTP route. Format knowledge
 comes from the public SillyTavern World Info documentation, never from
 SillyTavern source code.
 

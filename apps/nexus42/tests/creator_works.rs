@@ -867,11 +867,11 @@ fn json_stdout(output: &std::process::Output) -> serde_json::Value {
 /// the human path's stale banner comes from the same in-process read.
 ///
 /// What it does not establish: pool pagination/filter edges beyond the
-/// single promoted row, and any concurrency behavior. It also records, rather
-/// than repairs, the pre-existing divergence between the pool `active` row
-/// `works use` writes and the `works.status = "active"` selection an omitted
-/// `<work_id>` reads: this task preserves both, and the omitted-id refusal
-/// below is that retained filter observed through the core.
+/// single promoted row, and any concurrency behavior. The omitted `<work_id>`
+/// step is a smoke check that the resolution addresses the pool `active` row
+/// the promotion wrote; [`omitted_work_id_uses_pool_active_entry`] is the
+/// regression that discriminates that selector (two Works, a newer non-active
+/// pool row, an explicit id, and the no-active refusal).
 #[allow(clippy::too_many_lines)] // one cross-write negative proof over a single local home
 #[test]
 fn work_pool_and_work_inspiration_do_not_cross_write() {
@@ -1221,12 +1221,13 @@ fn work_pool_and_work_inspiration_do_not_cross_write() {
         "works use must leave the selected Work as the pool `active` row: {selected}"
     );
 
-    // The omitted `<work_id>` keeps the CLI's retained active-Work filter
-    // (`works.status = "active"`, the same selection `run`/`findings` resolve
-    // through) — no Work in this fixture holds it, and a pool promotion writes
-    // `draft`. The refusal must therefore be that selection refusal reported by
-    // the core, not a transport error, and it must open no connection: the
-    // retired leaf resolved the active Work with a daemon call.
+    // The omitted `<work_id>` resolves that same pool `active` row. The
+    // selection reads `novel_pool_entries` — which holds this Work as `active`
+    // — and not the Work's own `works.status` column, which a promotion leaves
+    // at `draft` (R-V1193-P0T5-OMITTED-ID-POOL-ACTIVE; the selector
+    // discriminating regression is
+    // [`omitted_work_id_uses_pool_active_entry`]). The read must stay on the
+    // direct core: the retired leaf resolved the active Work with a daemon call.
     let omitted_id_status = hermetic_cli(
         home.path(),
         cwd.path(),
@@ -1234,12 +1235,19 @@ fn work_pool_and_work_inspiration_do_not_cross_write() {
     );
     let omitted_id_output = combined_output(&omitted_id_status);
     assert!(
-        !omitted_id_status.status.success(),
-        "the omitted <work_id> must refuse when no Work holds the active status: {omitted_id_output}"
+        omitted_id_status.status.success(),
+        "the omitted <work_id> must resolve the pool `active` Work: {omitted_id_output}"
     );
-    assert!(
-        omitted_id_output.contains("No active Work found"),
-        "the omitted <work_id> must report the retained core selection refusal: {omitted_id_output}"
+    let omitted_resolved = json_stdout(&omitted_id_status);
+    assert_eq!(
+        omitted_resolved.get("work_id").and_then(|v| v.as_str()),
+        Some(work_id.as_str()),
+        "the omitted <work_id> must address the Work `works use` selected: {omitted_resolved}"
+    );
+    assert_eq!(
+        omitted_resolved.get("status").and_then(|v| v.as_str()),
+        Some("draft"),
+        "the pool-active Work keeps its own draft status: {omitted_resolved}"
     );
 
     // --- 5. No step of the sequence consulted the configured daemon ------
@@ -1260,3 +1268,435 @@ const POOL_ITEM_TITLE: &str = "Pool-only idea";
 
 /// Note appended to the Work's own `inspiration_log`.
 const WORK_NOTE: &str = "Work-side note";
+
+// =============================================================================
+// Omitted `<work_id>` → pool `active` Work
+// (v1.194 P2-T1 — R-V1193-P0T5-OMITTED-ID-POOL-ACTIVE)
+// =============================================================================
+
+/// Title of the first Work promoted by [`omitted_work_id_uses_pool_active_entry`].
+const POOL_ACTIVE_ALPHA_TITLE: &str = "Alpha pool idea";
+
+/// Title of the second promoted Work — the one the pool holds `active`.
+const POOL_ACTIVE_BETA_TITLE: &str = "Beta pool idea";
+
+/// Note the omitted-`<work_id>` `works inspire` appends.
+const OMITTED_ID_NOTE: &str = "note via the pool-active Work";
+
+/// Note the explicit-`<work_id>` `works inspire` appends.
+const EXPLICIT_ID_NOTE: &str = "note via an explicit Work id";
+
+/// Add a pool inspiration item titled `title`, promote it, and return the Work
+/// the promotion created.
+///
+/// Both steps go through the real leaves: `pool inspiration add` (pool-store
+/// write) and `pool inspiration promote` (the core's atomic Work create + pool
+/// promote + item update).
+fn promote_pool_idea(home: &std::path::Path, cwd: &std::path::Path, title: &str) -> String {
+    let add = hermetic_cli(
+        home,
+        cwd,
+        &[
+            "creator",
+            "works",
+            "pool",
+            "inspiration",
+            "add",
+            title,
+            "--json",
+        ],
+    );
+    assert!(
+        add.status.success(),
+        "pool inspiration add must succeed on the direct core: {}",
+        combined_output(&add)
+    );
+    let item_id = json_stdout(&add)
+        .get("item_id")
+        .and_then(|v| v.as_str())
+        .expect("the add DTO must carry the item id")
+        .to_string();
+
+    let promote = hermetic_cli(
+        home,
+        cwd,
+        &[
+            "creator",
+            "works",
+            "pool",
+            "inspiration",
+            "promote",
+            &item_id,
+        ],
+    );
+    assert!(
+        promote.status.success(),
+        "pool inspiration promote must succeed on the direct core: {}",
+        combined_output(&promote)
+    );
+
+    let page = json_stdout(&hermetic_cli(
+        home,
+        cwd,
+        &["creator", "works", "pool", "inspiration", "list", "--json"],
+    ));
+    let work_id = page
+        .get("items")
+        .and_then(|v| v.as_array())
+        .and_then(|items| {
+            items
+                .iter()
+                .find(|item| item.get("item_id").and_then(|v| v.as_str()) == Some(item_id.as_str()))
+        })
+        .and_then(|item| item.get("promoted_work_id"))
+        .and_then(|v| v.as_str())
+        .unwrap_or_else(|| panic!("promoted item {item_id} must name its Work: {page}"))
+        .to_string();
+    assert!(
+        work_id.starts_with("wrk_"),
+        "promotion must create a `wrk_` Work, got {work_id:?}"
+    );
+    work_id
+}
+
+/// The pool listing's entry for `work_id`, failing the case when it holds none.
+fn pool_entry_for(pool_page: &serde_json::Value, work_id: &str) -> serde_json::Value {
+    pool_page
+        .get("entries")
+        .and_then(|v| v.as_array())
+        .unwrap_or_else(|| panic!("the pool list DTO must carry an entries array: {pool_page}"))
+        .iter()
+        .find(|entry| entry.get("work_id").and_then(|v| v.as_str()) == Some(work_id))
+        .unwrap_or_else(|| panic!("the pool must hold an entry for {work_id}: {pool_page}"))
+        .clone()
+}
+
+/// Read one Work through `works status --json` (an explicit `<work_id>`).
+fn work_status_json(
+    home: &std::path::Path,
+    cwd: &std::path::Path,
+    work_id: &str,
+) -> serde_json::Value {
+    let output = hermetic_cli(
+        home,
+        cwd,
+        &["creator", "works", "status", work_id, "--json"],
+    );
+    assert!(
+        output.status.success(),
+        "works status {work_id} must succeed on the direct core: {}",
+        combined_output(&output)
+    );
+    json_stdout(&output)
+}
+
+/// The note texts the Work's own `inspiration_log` holds, in stored order.
+fn inspiration_note_texts(work: &serde_json::Value) -> Vec<String> {
+    work.get("inspiration_log")
+        .and_then(|v| v.as_array())
+        .unwrap_or_else(|| panic!("the Work DTO must carry its inspiration_log: {work}"))
+        .iter()
+        .filter_map(|entry| entry.get("note").and_then(|v| v.as_str()))
+        .map(str::to_string)
+        .collect()
+}
+
+/// Every Work id the active creator's `works list` page holds, in page order.
+fn listed_work_ids(home: &std::path::Path, cwd: &std::path::Path) -> Vec<String> {
+    let page = json_stdout(&hermetic_cli(
+        home,
+        cwd,
+        &["creator", "works", "list", "--json"],
+    ));
+    page.get("items")
+        .and_then(|v| v.as_array())
+        .unwrap_or_else(|| panic!("the works list DTO must carry an items array: {page}"))
+        .iter()
+        .filter_map(|item| item.get("work_id").and_then(|v| v.as_str()))
+        .map(str::to_string)
+        .collect()
+}
+
+/// NEW (v1.194 P2-T1, R-V1193-P0T5-OMITTED-ID-POOL-ACTIVE): an omitted
+/// `<work_id>` resolves the pool `active` Work.
+///
+/// The selection pool (`novel_pool_entries.status = 'active'`, written by
+/// `works use` and every promotion) and the Work's own `works.status` column are
+/// independent domains: a promoted Work stays `draft`, so the retired
+/// resolution (`works.status = 'active'`) found nothing and `works status` /
+/// `works inspire` refused with "No active Work found" for a pool-active Work.
+///
+/// The fixture promotes two Works so a wrong selector fails on it. The second
+/// promotion leaves `Alpha` queued and `Beta` active, and `Alpha`'s pool row is
+/// then archived — under the pool listing's `updated_at DESC` order that makes
+/// the non-active entry the first row (asserted below, so the case fails loudly
+/// if that premise ever stops holding). A `works.status` selector therefore
+/// resolves nothing, a "first row of the pool listing" selector resolves the
+/// archived `Alpha`, and only the `status = 'active'` pool query resolves
+/// `Beta`.
+///
+/// What it does not establish: the other omitted-`<work_id>` arms (`reopen`,
+/// `reconcile-chapters`, the findings/rules leaves), pool pagination beyond the
+/// two entries, and any concurrency behavior.
+#[allow(clippy::too_many_lines)] // one selection-domain proof over a single local home
+#[test]
+fn omitted_work_id_uses_pool_active_entry() {
+    let home = tempfile::tempdir().expect("temp home");
+    let cwd = tempfile::tempdir().expect("temp cwd");
+    seed_selected_local_creator(home.path(), cwd.path());
+
+    // --- 1. Two promoted Works; the pool holds the second one `active` ----
+    let alpha = promote_pool_idea(home.path(), cwd.path(), POOL_ACTIVE_ALPHA_TITLE);
+    let beta = promote_pool_idea(home.path(), cwd.path(), POOL_ACTIVE_BETA_TITLE);
+    assert_ne!(alpha, beta, "each promotion must create its own Work");
+
+    // Promotion writes the pool row, never `works.status`: both Works stay
+    // `draft`, so no Work in this fixture satisfies the retired selector.
+    for work_id in [&alpha, &beta] {
+        let work = work_status_json(home.path(), cwd.path(), work_id);
+        assert_eq!(
+            work.get("status").and_then(|v| v.as_str()),
+            Some("draft"),
+            "a pool-promoted Work must stay draft: {work}"
+        );
+    }
+
+    let pool = json_stdout(&hermetic_cli(
+        home.path(),
+        cwd.path(),
+        &["creator", "works", "pool", "list", "--json"],
+    ));
+    let alpha_entry = pool_entry_for(&pool, &alpha);
+    let beta_entry = pool_entry_for(&pool, &beta);
+    assert_eq!(
+        alpha_entry.get("status").and_then(|v| v.as_str()),
+        Some("queued"),
+        "the first promoted Work is demoted to queued: {pool}"
+    );
+    assert_eq!(
+        beta_entry.get("status").and_then(|v| v.as_str()),
+        Some("active"),
+        "the pool `active` row is the second promoted Work: {pool}"
+    );
+    let alpha_entry_id = alpha_entry
+        .get("entry_id")
+        .and_then(|v| v.as_str())
+        .expect("the pool entry carries its id")
+        .to_string();
+    let beta_entry_id = beta_entry
+        .get("entry_id")
+        .and_then(|v| v.as_str())
+        .expect("the pool entry carries its id")
+        .to_string();
+
+    // Archive the *queued* Work's pool row: the archived, non-active entry
+    // becomes the pool listing's newest row, which is what discriminates the
+    // `status = 'active'` filter from a first-row read.
+    let archive_queued = hermetic_cli(
+        home.path(),
+        cwd.path(),
+        &["creator", "works", "pool", "archive", &alpha_entry_id],
+    );
+    assert!(
+        archive_queued.status.success(),
+        "pool archive must succeed on the direct core: {}",
+        combined_output(&archive_queued)
+    );
+
+    let pool_after_archive = json_stdout(&hermetic_cli(
+        home.path(),
+        cwd.path(),
+        &["creator", "works", "pool", "list", "--json"],
+    ));
+    let entries_after_archive = pool_after_archive
+        .get("entries")
+        .and_then(|v| v.as_array())
+        .unwrap_or_else(|| {
+            panic!("the pool list DTO must carry an entries array: {pool_after_archive}")
+        });
+    assert_eq!(
+        entries_after_archive.len(),
+        2,
+        "both pool entries stay listed: {pool_after_archive}"
+    );
+    assert_eq!(
+        entries_after_archive[0]
+            .get("entry_id")
+            .and_then(|v| v.as_str()),
+        Some(alpha_entry_id.as_str()),
+        "fixture premise: the archived, non-active entry must be the pool listing's first row \
+         (`ORDER BY updated_at DESC`): {pool_after_archive}"
+    );
+    assert_eq!(
+        entries_after_archive[0]
+            .get("status")
+            .and_then(|v| v.as_str()),
+        Some("archived"),
+        "the first pool row is the archived entry: {pool_after_archive}"
+    );
+
+    // --- 2. Omitted `works status` resolves the pool-active Work ----------
+    let omitted_status = hermetic_cli(
+        home.path(),
+        cwd.path(),
+        &["creator", "works", "status", "--json"],
+    );
+    assert!(
+        omitted_status.status.success(),
+        "an omitted <work_id> must resolve the pool-active Work: {}",
+        combined_output(&omitted_status)
+    );
+    let resolved = json_stdout(&omitted_status);
+    assert_eq!(
+        resolved.get("work_id").and_then(|v| v.as_str()),
+        Some(beta.as_str()),
+        "the omitted <work_id> must resolve the pool `active` entry's Work: {resolved}"
+    );
+    assert_eq!(
+        resolved.get("title").and_then(|v| v.as_str()),
+        Some(POOL_ACTIVE_BETA_TITLE),
+        "the resolved Work is the pool-active one: {resolved}"
+    );
+    assert_eq!(
+        resolved.get("status").and_then(|v| v.as_str()),
+        Some("draft"),
+        "the resolved pool Work keeps its own draft status: {resolved}"
+    );
+
+    // --- 3. Omitted `works inspire` writes the same Work -----------------
+    let omitted_inspire = hermetic_cli(
+        home.path(),
+        cwd.path(),
+        &[
+            "creator",
+            "works",
+            "inspire",
+            "--note",
+            OMITTED_ID_NOTE,
+            "--json",
+        ],
+    );
+    assert!(
+        omitted_inspire.status.success(),
+        "an omitted <work_id> must resolve the pool-active Work: {}",
+        combined_output(&omitted_inspire)
+    );
+    let appended = json_stdout(&omitted_inspire);
+    assert_eq!(
+        appended.get("work_id").and_then(|v| v.as_str()),
+        Some(beta.as_str()),
+        "the omitted <work_id> append must address the pool-active Work: {appended}"
+    );
+    assert_eq!(
+        appended
+            .get("inspiration_count")
+            .and_then(serde_json::Value::as_i64),
+        Some(1),
+        "the append DTO must report the Work's own note count: {appended}"
+    );
+    assert_eq!(
+        inspiration_note_texts(&work_status_json(home.path(), cwd.path(), &beta)),
+        vec![OMITTED_ID_NOTE.to_string()],
+        "the pool-active Work must hold the omitted-id note"
+    );
+    assert!(
+        inspiration_note_texts(&work_status_json(home.path(), cwd.path(), &alpha)).is_empty(),
+        "the omitted <work_id> must not append to the other Work"
+    );
+
+    // --- 4. An explicit `<work_id>` still wins over the pool default -----
+    let explicit = work_status_json(home.path(), cwd.path(), &alpha);
+    assert_eq!(
+        explicit.get("work_id").and_then(|v| v.as_str()),
+        Some(alpha.as_str()),
+        "an explicit <work_id> must address that Work, not the pool default: {explicit}"
+    );
+    assert_eq!(
+        explicit.get("title").and_then(|v| v.as_str()),
+        Some(POOL_ACTIVE_ALPHA_TITLE),
+        "the explicit <work_id> must win over the pool default: {explicit}"
+    );
+
+    let explicit_inspire = hermetic_cli(
+        home.path(),
+        cwd.path(),
+        &[
+            "creator",
+            "works",
+            "inspire",
+            &alpha,
+            "--note",
+            EXPLICIT_ID_NOTE,
+            "--json",
+        ],
+    );
+    assert!(
+        explicit_inspire.status.success(),
+        "works inspire with an explicit <work_id> must succeed: {}",
+        combined_output(&explicit_inspire)
+    );
+    assert_eq!(
+        json_stdout(&explicit_inspire)
+            .get("work_id")
+            .and_then(|v| v.as_str()),
+        Some(alpha.as_str()),
+        "an explicit <work_id> must divert the append from the pool default"
+    );
+    assert_eq!(
+        inspiration_note_texts(&work_status_json(home.path(), cwd.path(), &alpha)),
+        vec![EXPLICIT_ID_NOTE.to_string()],
+        "the explicit Work holds only its own note"
+    );
+    assert_eq!(
+        inspiration_note_texts(&work_status_json(home.path(), cwd.path(), &beta)),
+        vec![OMITTED_ID_NOTE.to_string()],
+        "an explicit <work_id> must not append to the pool-active Work"
+    );
+
+    // --- 5. No pool `active` entry: refuse, and write no Work -------------
+    let works_before = listed_work_ids(home.path(), cwd.path());
+    assert_eq!(
+        works_before.len(),
+        2,
+        "the fixture holds the two promoted Works: {works_before:?}"
+    );
+
+    let archive_active = hermetic_cli(
+        home.path(),
+        cwd.path(),
+        &["creator", "works", "pool", "archive", &beta_entry_id],
+    );
+    assert!(
+        archive_active.status.success(),
+        "archiving the pool `active` entry must succeed: {}",
+        combined_output(&archive_active)
+    );
+
+    for args in [
+        vec!["creator", "works", "status", "--json"],
+        vec![
+            "creator",
+            "works",
+            "inspire",
+            "--note",
+            OMITTED_ID_NOTE,
+            "--json",
+        ],
+    ] {
+        let refused = hermetic_cli(home.path(), cwd.path(), &args);
+        let output = combined_output(&refused);
+        assert!(
+            !refused.status.success(),
+            "with no pool `active` entry the omitted <work_id> must refuse: {output}"
+        );
+        assert!(
+            output.contains("No active Work found"),
+            "the refusal stays the retained selection text: {output}"
+        );
+    }
+    assert_eq!(
+        listed_work_ids(home.path(), cwd.path()),
+        works_before,
+        "a refused omitted <work_id> must not write another Work"
+    );
+}
