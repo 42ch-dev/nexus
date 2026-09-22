@@ -46,12 +46,13 @@ use futures_util::StreamExt;
 use nexus_agent_host::capability::model::{
     CapabilityDescriptor, CreateSessionRequest, FinishReason, HostEvent, HostEventStream,
     HostHealth, HostOperation, HostStartConfig, OperationFinishedEvent, OperationStartedEvent,
-    TextDeltaEvent,
+    ProtocolKind, ProviderHealth, TextDeltaEvent,
 };
 use nexus_agent_host::config::TimeoutConfig;
 use nexus_agent_host::{
-    HostError, HostFacade, HostOperationId, HostResult, HostSession, HostSessionId,
-    ProviderCatalog, SessionState,
+    DiscoverySource, HostError, HostFacade, HostOperationId, HostResult, HostSession,
+    HostSessionId, LaunchStrategy, ProviderCatalog, ProviderCatalogEntry, ProviderId, SessionState,
+    TrustLevel,
 };
 use nexus_contracts::local::schedule::http::{AddScheduleRequest, AgentBindingDto};
 use nexus_contracts::{
@@ -94,6 +95,9 @@ const SLUG: &str = "default";
 /// needs an explicit binding and the drive reaches the prompt port.
 const PROMPT_PRESET: &str = "memory-augmented";
 const PROVIDER: &str = "retained-provider";
+/// The user preset the hosted composition (v1.195 P0-T2) drives: workspace
+/// capability chain + prompt.
+const HOSTED_PRESET: &str = "hosted-schedule-drive";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Fixtures
@@ -333,7 +337,31 @@ impl HostFacade for ParkedHost {
     }
 
     async fn provider_catalog(&self) -> HostResult<ProviderCatalog> {
-        Ok(ProviderCatalog::new())
+        // The production catalog truth the hosted factory validates frozen
+        // role bindings against: the parked provider is CONFIGURED, so a
+        // binding that names it is accepted. An empty catalog here would make
+        // every admission refuse with "unknown provider" instead.
+        Ok(ProviderCatalog {
+            entries: vec![ProviderCatalogEntry {
+                provider_id: ProviderId::new(PROVIDER),
+                display_name: "Retained parked provider".to_string(),
+                protocol_kind: ProtocolKind::Acp,
+                launch: LaunchStrategy::Acp {
+                    command: "retained-parked-host".to_string(),
+                    args: vec![],
+                    env: HashMap::new(),
+                },
+                source: DiscoverySource::Config,
+                trust: TrustLevel::Explicit,
+                capabilities: CapabilityDescriptor::native_cli_limited(),
+                health: ProviderHealth {
+                    provider_id: ProviderId::new(PROVIDER),
+                    available: true,
+                    latency_ms: None,
+                    message: None,
+                },
+            }],
+        })
     }
 
     fn subscribe_events(
@@ -2319,4 +2347,316 @@ async fn graph_prompt_context_serializes_output_without_host_handles() {
         !serialized.contains("ManagedAcpProcess"),
         "no process handle in context: {serialized}"
     );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Hosted production composition (v1.195 P0-T2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The payload the driven run commits through `workspace.commit`, base64 (the
+/// capability's wire shape) with the plaintext kept beside it for the
+/// on-disk assertion.
+const HOSTED_PAYLOAD: &[u8] = b"hosted workspace payload\n";
+const HOSTED_PAYLOAD_B64: &str = "aG9zdGVkIHdvcmtzcGFjZSBwYXlsb2FkCg==";
+
+/// The user preset the hosted composition drives: an AUTHORIZED workspace
+/// capability chain (`workspace.open` into the frozen root, then one declared
+/// create through the bound commit authority), then a prompt. Both halves of
+/// the hosted wiring are therefore load-bearing for the run to reach the
+/// parked Host.
+fn hosted_preset_yaml() -> String {
+    format!(
+        r#"
+preset:
+  id: {HOSTED_PRESET}
+  version: 1
+  kind: creator
+  description: "hosted production composition proof"
+  requires_capabilities:
+    - workspace.open
+    - workspace.commit
+    - acp.prompt
+  initial: open_scope
+  terminal: done
+states:
+  - id: open_scope
+    description: "open a scope inside the factory-resolved creative root"
+    enter:
+      - kind: capability
+        name: workspace.open
+        args:
+          path: notes
+    exit_when: {{ kind: rule }}
+    next: commit_scope
+  - id: commit_scope
+    description: "one declared create through the bound commit authority"
+    enter:
+      - kind: capability
+        name: workspace.commit
+        args:
+          sessionId: "{{{{_capability_output.sessionId}}}}"
+          changes:
+            - path: hosted.txt
+              op: create
+              contentBase64: "{HOSTED_PAYLOAD_B64}"
+    exit_when: {{ kind: rule }}
+    next: generate
+  - id: generate
+    enter:
+      - kind: inner_graph
+        name: generate_graph
+    exit_when: {{ kind: graph_complete }}
+    next: done
+  - id: done
+    terminal: true
+
+inner_graphs:
+  generate_graph:
+    nodes:
+      - id: hosted_prompt
+        kind: acp_prompt
+        template_file: prompts/generate.md
+        tool_policy: auto_grant_read_only
+    output_binding: hosted_prompt.text
+"#
+    )
+}
+
+/// An engine-owner core over a REAL selected creative root, plus the owner the
+/// public `start_hosted_execution` factory composed for it.
+///
+/// Unlike [`owner_fixture`], nothing is attached by hand: the supervisor, its
+/// coordinator-backed starter and the clock task all come from the factory,
+/// and the creative root comes from the core's own operational metadata (the
+/// document the workspace registration writes) rather than a test argument.
+struct HostedFixture {
+    tmp: TempDir,
+    core: CoreService,
+    host: Arc<ParkedHost>,
+    handle: Arc<ExecutionHandle>,
+    /// Canonical root the factory resolved (`meta.json` `local_root`).
+    root: PathBuf,
+}
+
+async fn hosted_fixture() -> HostedFixture {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let home = tmp.path();
+    let nexus_home = home.join(".nexus42");
+    std::fs::create_dir_all(&nexus_home).expect("nexus home");
+    let creative_root = home.join("creative");
+    std::fs::create_dir_all(creative_root.join("notes")).expect("creative root");
+    std::fs::write(
+        nexus_home.join("config.toml"),
+        format!(
+            "active_creator_id = \"{CREATOR}\"\n[active_workspace_slug_by_creator]\n\"{CREATOR}\" = \"{SLUG}\"\n"
+        ),
+    )
+    .expect("config");
+    let operational = nexus_home_layout::operational_workspace_dir(home, CREATOR, SLUG);
+    std::fs::create_dir_all(&operational).expect("operational dir");
+    std::fs::write(
+        operational.join("meta.json"),
+        serde_json::to_vec(&json!({ "local_root": creative_root })).expect("meta json"),
+    )
+    .expect("meta");
+
+    // The user preset bundle the shared resolver reads at add AND admission
+    // time (its content-addressed source identity is frozen into the row).
+    let bundle = nexus_home.join("presets").join(HOSTED_PRESET);
+    std::fs::create_dir_all(bundle.join("prompts")).expect("preset bundle");
+    std::fs::write(bundle.join("preset.yaml"), hosted_preset_yaml()).expect("preset yaml");
+    std::fs::write(
+        bundle.join("prompts/generate.md"),
+        "Summarize the hosted topic: {{preset.input.topic}}\n",
+    )
+    .expect("prompt template");
+
+    let db_path = nexus_home_layout::workspace_state_db_path(home, CREATOR, SLUG);
+    // Seed through a temporary admitted pool and RELEASE the writer guard
+    // before the engine owner opens (the owner takes an OS lock).
+    {
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
+            .await
+            .expect("engine pool init");
+        sqlx::query(
+            "INSERT OR IGNORE INTO creators (creator_id, display_name, status, \
+             cached_at, data) VALUES (?, 'Hosted', 'active', datetime('now'), '{}')",
+        )
+        .bind(CREATOR)
+        .execute(guarded.pool())
+        .await
+        .expect("seed the admitted creator row");
+        guarded.pool().close().await;
+        nexus_local_db::writer_protocol::release_retained_writer_guards(&db_path);
+    }
+
+    let core = CoreService::open(CoreOpenOptions {
+        user_home: home.into(),
+        access: CoreAccess::EngineOwner,
+    })
+    .await
+    .expect("engine-owner core open");
+    let host = ParkedHost::new();
+    let handle = core
+        .start_hosted_execution(
+            host.clone(),
+            Arc::new(NullProvider) as Arc<dyn ProviderPort>,
+            TimeoutConfig::default(),
+        )
+        .await
+        .expect("the public factory composes the hosted owner");
+
+    HostedFixture {
+        tmp,
+        core,
+        host,
+        handle,
+        root: std::fs::canonicalize(&creative_root).expect("canonical creative root"),
+    }
+}
+
+/// A `driven_v1` pending schedule for the hosted preset, created through the
+/// PUBLIC add path on the factory-composed owner.
+async fn add_hosted_schedule(fixture: &HostedFixture) -> String {
+    let principal = fixture.core.active_principal().await.unwrap();
+    let request = AddScheduleRequest {
+        creator_id: CREATOR.to_string(),
+        preset_id: HOSTED_PRESET.to_string(),
+        seed: None,
+        label: Some("hosted-once".to_string()),
+        depends_on: None,
+        concurrency: None,
+        scheduled_at: None,
+        input: Some(json!({ "topic": "hosted-scheduler" })),
+        force_gates: false,
+        reason: None,
+        agent_bindings: Some(default_bindings()),
+    };
+    fixture
+        .handle
+        .add_schedule(&principal, request)
+        .await
+        .expect("public schedule add")
+        .schedule_id
+}
+
+/// The hosted owner drives exactly one durable pending schedule end to end —
+/// through the production supervisor, starter and clock task the factory
+/// installed — and joins that clock task on close.
+///
+/// Ordering evidence: the public add answers `pending` and the durable row
+/// still owns nothing; only the owned clock's tick claims the row, and that
+/// claim is the atomic schedule→run identity the store writes (never a
+/// status-only flip). The run then executes the authorized workspace
+/// capability chain inside the factory-resolved root and reaches the real
+/// prompt port; a repeat tick plus a repeat admission return the SAME run, so
+/// no second drive can reach the port.
+#[tokio::test]
+#[serial_test::serial]
+async fn hosted_schedule_drives_once_and_closes() {
+    let fixture = hosted_fixture().await;
+    let pool = fixture.handle.coordinator().pool();
+
+    // ── The factory installed ONE live background task (the supervisor
+    //    wake/clock) before any row exists. ──
+    assert!(
+        !fixture.handle.owned_tasks_finished(),
+        "the hosted owner must install its scheduler task"
+    );
+
+    // ── Public add is PENDING: durable, frozen, and owning no run. ──
+    let schedule_id = add_hosted_schedule(&fixture).await;
+    let (status, owned) = schedule_row(pool.as_ref(), &schedule_id).await;
+    assert_eq!(
+        status, "pending",
+        "the public add must leave the row pending, never running"
+    );
+    assert!(
+        owned.is_none(),
+        "the public add must not manufacture an owned run"
+    );
+    assert_eq!(
+        fixture.host.prompt_count(),
+        0,
+        "no run may reach the prompt port before admission"
+    );
+    assert!(
+        !fixture
+            .tmp
+            .path()
+            .join("creative/notes/hosted.txt")
+            .exists(),
+        "no workspace effect may exist before admission"
+    );
+
+    // ── The OWNED clock drives it: exactly one run, executing the workspace
+    //    capability chain inside the canonical root and then the prompt. ──
+    wait_for_prompt(&fixture.host).await;
+    assert_eq!(
+        fixture.host.prompt_count(),
+        1,
+        "exactly one run may reach the prompt port"
+    );
+    assert_eq!(
+        std::fs::read(fixture.root.join("notes/hosted.txt")).expect("committed bytes"),
+        HOSTED_PAYLOAD,
+        "the authorized workspace capability must commit inside the factory-resolved root"
+    );
+    let (status, owned) = schedule_row(pool.as_ref(), &schedule_id).await;
+    assert_eq!(status, "running", "the admitted row owns its run");
+    let run_id = owned.expect("the admitted schedule owns its run");
+    let owned_rows: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM creator_schedules WHERE current_session_id IS NOT NULL",
+    )
+    .fetch_one(pool.as_ref())
+    .await
+    .expect("owned schedule count");
+    assert_eq!(owned_rows, 1, "exactly one schedule may own a run");
+    let run_rows: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM orchestration_sessions WHERE session_id = ?")
+            .bind(&run_id)
+            .fetch_one(pool.as_ref())
+            .await
+            .expect("run row count");
+    assert_eq!(run_rows, 1, "the schedule's owned run exists exactly once");
+
+    // ── Repeated tick + repeated admission yield the SAME run. ──
+    let supervisor = fixture
+        .handle
+        .coordinator()
+        .schedule_supervisor()
+        .expect("the factory attaches the production supervisor");
+    nexus_core::execution::schedules::hosted_scheduler::run_one_tick(&supervisor)
+        .await
+        .expect("a repeated clock tick is a no-op for an already-owned row");
+    let starter = supervisor
+        .schedule_starter_clone()
+        .expect("the factory injects the coordinator-backed starter");
+    let again = starter
+        .start(&schedule_id)
+        .await
+        .expect("repeated admission returns the owned run");
+    assert_eq!(
+        again.0, run_id,
+        "repeated admission must return the same run, never mint a second"
+    );
+    assert_eq!(
+        fixture.host.prompt_count(),
+        1,
+        "no second drive may reach the prompt port"
+    );
+    let (status_after, owned_after) = schedule_row(pool.as_ref(), &schedule_id).await;
+    assert_eq!(status_after, "running");
+    assert_eq!(owned_after.as_deref(), Some(run_id.as_str()));
+
+    // ── Close JOINS the owned scheduler task. ──
+    fixture.host.release_all();
+    let report = fixture.handle.close().await.expect("owner close");
+    assert!(report.cleanup_confirmed, "close must report confirmed cleanup");
+    assert!(
+        fixture.handle.owned_tasks_finished(),
+        "close must join the owned scheduler task"
+    );
+    assert!(fixture.handle.is_settled(), "close settles the owner");
+    fixture.core.close().await.expect("core close");
 }

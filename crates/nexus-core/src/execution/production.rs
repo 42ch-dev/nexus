@@ -1,18 +1,18 @@
-//! Core-owned hosted workspace production composition (v1.195 P0-T1).
+//! Core-owned hosted production composition (v1.195 P0-T1/P0-T2).
 //!
 //! The hosted production owner is composed ONCE, from the state the core was
-//! opened against — never from a caller-supplied path. This module owns the
-//! workspace half of that composition: it resolves the SELECTED creator's
-//! canonical creative workspace root from the core's own home metadata,
-//! constructs the one durable workspace commit/recovery authority over the
-//! core's pool, settles every interrupted commit BEFORE returning, and hands
-//! back the [`RunnerDeps`] workspace ports consumed by
-//! [`crate::CoreService::start_execution`].
+//! opened against — never from a caller-supplied path. This module owns both
+//! halves of that composition:
 //!
-//! The public `start_hosted_execution` factory (prompt/catalog/starter
-//! adapters, the shared maps and the owned scheduler) is composed by the
-//! following task and is deliberately absent here: this module produces a
-//! bundle, it never starts an engine and never accepts work.
+//! - [`CoreService::hosted_workspace_deps`] (P0-T1) resolves the SELECTED
+//!   creator's canonical creative workspace root from the core's own home
+//!   metadata, constructs the one durable workspace commit/recovery authority
+//!   over the core's pool, settles every interrupted commit BEFORE returning,
+//!   and hands back the [`RunnerDeps`] workspace ports;
+//! - [`CoreService::start_hosted_execution`] (P0-T2), the public factory of
+//!   current-host contracts §3.1, adds the Host-plane half — prompt executor,
+//!   provider-catalog port, run-event port and the shared maps — plus the
+//!   hosted scheduler, and calls [`CoreService::start_execution`] once.
 //!
 //! Why the root is resolved here rather than accepted as an argument: a
 //! caller-supplied root would be a second, unvalidated workspace truth beside
@@ -21,20 +21,112 @@
 //! root the commit authority commits through; building both from one canonical
 //! value in this function is what makes them identical.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use nexus_orchestration::capability::{WorkspaceExecutor, WorkspaceStateProvider};
+use async_trait::async_trait;
+use nexus_agent_host::config::TimeoutConfig;
+use nexus_agent_host::{HostFacade, ProviderId};
+use nexus_orchestration::capability::{PromptExecutor, WorkspaceExecutor, WorkspaceStateProvider};
+use nexus_orchestration::run_state::{RunRecord, WorkflowStateStore};
+use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
+use nexus_provider_ports::ProviderPort;
 
 use crate::error::{CoreError, CoreResult};
 use crate::execution::executor::WorkspaceCommitExecutor;
-use crate::execution::lifecycle::RunnerDeps;
+use crate::execution::lifecycle::{ExecutionHandle, ExecutionOpenError, RunnerDeps};
+use crate::execution::prompt_executor::HostPromptExecutor;
+use crate::execution::run_events::{PageError, RunEventRegistry, RunEventSinkMap, RunPage};
+use crate::execution::schedules::HostedSchedulerConfig;
 use crate::execution::session::{SessionError, WorkspaceSessionManager};
 use crate::execution::state_provider::CoreWorkspaceStateProvider;
+use crate::execution::workflow::{ProviderCatalogPort, RunEventPort};
 use crate::execution::workspace::WorkspaceCommitAuthority;
 use crate::service::CoreService;
 
 impl CoreService {
+    /// Start the ONE hosted execution owner for this core (v1.195 P0-T2).
+    ///
+    /// The public factory of current-host contracts §3.1. It composes the
+    /// complete hosted owner from state the core ALREADY owns and calls
+    /// [`CoreService::start_execution`] exactly once:
+    ///
+    /// 1. the selected-root workspace bundle (P0-T1) — canonical creative root
+    ///    resolved from this core's own creator/workspace metadata, startup
+    ///    intent recovery settled BEFORE any port is published;
+    /// 2. the ONE Host prompt executor
+    ///    ([`HostPromptExecutor::new_with_run_event_sinks`]) over that durable
+    ///    store, publishing host events into the shared sink map;
+    /// 3. the shared per-run cancellation map and the bounded per-run event
+    ///    registry/sink map (ring reservation, run-state publication, terminal
+    ///    closing) the coordinator reads through [`RunEventPort`];
+    /// 4. the provider-catalog port over the SAME Host, so admission validates
+    ///    frozen role bindings against live native+ACP catalog truth;
+    /// 5. the hosted scheduler (through
+    ///    [`RunnerDeps::hosted_scheduler`](crate::execution::lifecycle::RunnerDeps)):
+    ///    the production supervisor with the coordinator-backed
+    ///    [`crate::execution::workflow::CoordinatorScheduleRunStarter`], plus
+    ///    the ONE clock task — installed before recovery, started after it.
+    ///
+    /// Callers cannot override the creator, the canonical workspace root or the
+    /// DB: every one of those comes from the opened core. No second Host is
+    /// created and no SQL is owned here — the caller passes the Host it already
+    /// owns.
+    ///
+    /// What this factory deliberately does NOT do:
+    ///
+    /// - It does not guess a default binding provider. Explicit frozen
+    ///   `agent_bindings` (what the public add path freezes) win; a row with
+    ///   prompt roles and no explicit binding refuses at admission with a typed
+    ///   error instead of being bound to an arbitrary catalog row.
+    /// - It does not start unrelated historical jobs (cron staggering,
+    ///   refresh, SOUL narrative). Only schedule admission is clocked here.
+    ///
+    /// # Errors
+    /// - [`ExecutionOpenError::Workspace`] when the selected workspace cannot
+    ///   be composed (uninitialized root, a rival workspace authority, or an
+    ///   environment/storage fault);
+    /// - the [`CoreService::start_execution`] refusals (not engine owner,
+    ///   already owned, closing).
+    pub async fn start_hosted_execution(
+        &self,
+        host: Arc<dyn HostFacade>,
+        providers: Arc<dyn ProviderPort>,
+        timeouts: TimeoutConfig,
+    ) -> Result<Arc<ExecutionHandle>, ExecutionOpenError> {
+        let mut deps = self
+            .hosted_workspace_deps()
+            .await
+            .map_err(ExecutionOpenError::Workspace)?;
+
+        // ONE bounded ring registry plus the ONE sink map: the coordinator
+        // reserves/publishes/closes a run's ring through the port while the
+        // prompt executor publishes that run's host events into this map.
+        let registry = Arc::new(RunEventRegistry::new());
+        let sinks: RunEventSinkMap = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+
+        let workflow_store: Arc<dyn WorkflowStateStore> =
+            Arc::new(SqliteSessionStorage::new(Arc::new(self.inner.pool.clone())));
+        deps.prompt_executor = Some(Arc::new(HostPromptExecutor::new_with_run_event_sinks(
+            Arc::clone(&host),
+            workflow_store,
+            timeouts,
+            Some(Arc::clone(&sinks)),
+        )) as Arc<dyn PromptExecutor>);
+        // Catalog presence is a candidate, never readiness: this port answers
+        // "known" only, and the caller owns the readiness probe.
+        deps.provider_catalog = Some(Arc::new(HostProviderCatalogPort::new(Arc::clone(&host))));
+        deps.run_events = Some(Arc::new(CoreRunEventPort::new(registry, sinks)));
+        // ONE shared cancellation map: the engine, the coordinator and every
+        // cancel path that fires a run's token must resolve the same token.
+        deps.session_cancels = Some(Arc::new(std::sync::RwLock::new(HashMap::new())));
+        // The owner's own supervisor, coordinator-backed starter and clock task.
+        deps.hosted_scheduler = Some(HostedSchedulerConfig::from_env());
+
+        self.start_execution(providers, deps).await
+    }
+
     /// Assemble the selected-root workspace port bundle for hosted production.
     ///
     /// The bundle carries the complete workspace half of the hosted owner: a
@@ -106,6 +198,89 @@ impl CoreService {
             nexus_home: Some(self.inner.nexus_home.clone()),
             ..RunnerDeps::default()
         })
+    }
+}
+
+/// Adapts the execution layer's provider-catalog port onto the ONE Host.
+///
+/// The catalog read is the same one admission always performed (explicit
+/// config → PATH scan → ACP registry); the port only stops the execution layer
+/// from naming `HostFacade`/`ProviderId`. It answers WHETHER a provider is
+/// known — never whether it is ready, which stays the boot caller's probe.
+struct HostProviderCatalogPort {
+    host: Arc<dyn HostFacade>,
+}
+
+impl HostProviderCatalogPort {
+    fn new(host: Arc<dyn HostFacade>) -> Self {
+        Self { host }
+    }
+}
+
+#[async_trait]
+impl ProviderCatalogPort for HostProviderCatalogPort {
+    async fn provider_available(&self, provider_id: &str) -> Result<bool, String> {
+        let catalog = self
+            .host
+            .provider_catalog()
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(catalog
+            .find(&ProviderId::new(provider_id.to_string()))
+            .is_some())
+    }
+}
+
+/// Adapts the bounded per-run registry to the coordinator's [`RunEventPort`].
+///
+/// Every operation forwards to the existing registry, so item/byte/subscriber
+/// accounting, ring reuse, the shared sink map and terminal-closing semantics
+/// stay owned by [`RunEventRegistry`] — the execution layer only reserves,
+/// publishes and releases.
+struct CoreRunEventPort {
+    registry: Arc<RunEventRegistry>,
+    /// The SAME sink map the prompt executor was constructed with, so a
+    /// reserved ring is visible to that executor's host events.
+    sinks: RunEventSinkMap,
+}
+
+impl CoreRunEventPort {
+    fn new(registry: Arc<RunEventRegistry>, sinks: RunEventSinkMap) -> Self {
+        Self { registry, sinks }
+    }
+}
+
+#[async_trait]
+impl RunEventPort for CoreRunEventPort {
+    async fn try_register_live(&self, run_id: &str) -> bool {
+        let Some(sink) = self.registry.try_register_live(run_id) else {
+            return false;
+        };
+        self.sinks.lock().await.insert(run_id.to_string(), sink);
+        true
+    }
+
+    async fn remove_live(&self, run_id: &str) {
+        self.sinks.lock().await.remove(run_id);
+    }
+
+    fn publish_run_state(&self, run_id: &str, record: &RunRecord) {
+        self.registry.publish_run_state(run_id, record);
+    }
+
+    fn mark_terminal(&self, run_id: &str) {
+        self.registry.mark_terminal(run_id);
+    }
+
+    fn read_page(
+        &self,
+        run_id: &str,
+        after_sequence: Option<u64>,
+        limit: usize,
+    ) -> Result<RunPage, PageError> {
+        // Forwards to the same bounded ring the SSE surface reads, so caps and
+        // explicit-gap semantics cannot drift between the two readers.
+        self.registry.read_page(run_id, after_sequence, limit)
     }
 }
 

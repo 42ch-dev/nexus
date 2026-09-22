@@ -33,6 +33,7 @@
 //!   `WaitingForInput` (with [`PresetRunConfig::resume_waiting`]) is safe
 //!   because `run_step` itself never consults the tracker status.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -45,6 +46,7 @@ use nexus_orchestration::engine::{
 };
 use nexus_orchestration::resume_rules;
 use nexus_orchestration::run_state::{RunRecord, WorkflowStateStore};
+use nexus_orchestration::schedule::supervisor::{ScheduleRunStarter, SupervisorError};
 use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
 use tokio_util::sync::CancellationToken;
 
@@ -970,7 +972,8 @@ pub enum RunControlError {
     #[error("schedule {0} not found")]
     ScheduleNotFound(String),
     /// The schedule is not eligible for driven admission (legacy/system
-    /// inert, terminal, or already running with an owned session).
+    /// inert, terminal, or `running` with no owned run — the stale-claim
+    /// case).
     #[error("schedule {0} is not eligible for driven admission: {1}")]
     NotEligible(String, String),
     /// The preset could not be resolved (embedded or directory bundle).
@@ -2492,7 +2495,10 @@ impl WorkflowRunCoordinator {
     ///
     /// Atomic admission contract (C-1/C-2):
     /// 1. Loads the schedule row and verifies eligibility (exists, policy
-    ///    `driven_v1`, status pending/paused, no owned session).
+    ///    `driven_v1`, status pending/paused/`running`). A row that already
+    ///    owns a run is a RE-ENTRY (step 3's owned-session branch), never a
+    ///    fresh claim; a `running` row with no owned session is the
+    ///    stale-claim case refused there.
     /// 2. Resolves the preset, freezes the descriptor + core-context seed,
     ///    and calls the P0 store's atomic `admit_schedule_run` — ONE
     ///    Creator-DB transaction linearizes the schedule claim
@@ -2569,9 +2575,15 @@ impl WorkflowRunCoordinator {
                 format!("execution_policy is '{}'", row.execution_policy),
             ));
         }
-        let status_ok = row.status == "pending"
-            || row.status == "paused"
-            || (row.status == "running" && row.current_session_id.is_none());
+        // Status gate. A `running` row is a candidate for RE-ENTRY (the
+        // owned-session branch below): the store's atomic claim writes
+        // `status='running'` WITH `current_session_id`, so a repeat caller —
+        // a second tick, an explicit start, the coordinator-backed starter —
+        // must observe and drive the SAME run instead of being refused. Only
+        // a terminal row (`completed`/`failed`/`cancelled`) is never
+        // re-admitted. A `running` row with NO owned session is the stale
+        // claim case the branch below refuses by name.
+        let status_ok = matches!(row.status.as_str(), "pending" | "paused" | "running");
         if !status_ok {
             return Err(RunControlError::NotEligible(
                 schedule_id.to_string(),
@@ -3235,6 +3247,85 @@ async fn schedule_eligible(
         }
         // "serial" (and any unknown kind — conservative fail-closed).
         _ => Ok(running.is_empty()),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Coordinator-backed ScheduleRunStarter (v1.195 P0-T2)
+// ---------------------------------------------------------------------------
+
+/// The coordinator-backed `ScheduleRunStarter` the hosted supervisor admits
+/// through (A3 seam).
+///
+/// `ScheduleSupervisor` lives in `nexus-orchestration` and must not couple to
+/// the engine/coordinator, so this adapter is the seam that bridges its `tick`
+/// admission to the ONE [`WorkflowRunCoordinator`]: an eligible durable
+/// pending `driven_v1` row is admitted through the SAME atomic claim (schedule
+/// → owned run identity) and the SAME single-flight drive owner every other
+/// admission path uses. It never flips a row to `running` without a run — a
+/// refusal is returned to the supervisor verbatim and the row stays pending
+/// for a later tick or an explicit start.
+///
+/// Constructed once per hosted owner, before recovery runs, by
+/// [`crate::execution::lifecycle::CoreService::start_execution`] through
+/// [`RunnerDeps::hosted_scheduler`](crate::execution::lifecycle::RunnerDeps)
+/// — the same place the supervisor and its clock task are installed.
+pub struct CoordinatorScheduleRunStarter {
+    /// The ONE coordinator that owns admission and drive single-flight.
+    coordinator: Arc<WorkflowRunCoordinator>,
+    /// Nexus home the preset is resolved against (the same value the add path
+    /// froze the descriptor with).
+    nexus_home: PathBuf,
+    /// The capability registry the admission builds its wired graph with —
+    /// the SAME holder the engine reads through.
+    caps: nexus_orchestration::CapabilityRegistryHolder,
+    /// Optional daemon-side tool dispatch for the admitted graph.
+    daemon_tool_dispatch:
+        Option<Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>>,
+    /// The production prompt executor (Host plane) for the admitted graph.
+    prompt_executor: Option<Arc<dyn nexus_orchestration::capability::PromptExecutor>>,
+}
+
+impl CoordinatorScheduleRunStarter {
+    /// Build the starter over the owning coordinator and its admission inputs.
+    #[must_use]
+    pub fn new(
+        coordinator: Arc<WorkflowRunCoordinator>,
+        nexus_home: PathBuf,
+        caps: nexus_orchestration::CapabilityRegistryHolder,
+        daemon_tool_dispatch: Option<
+            Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>,
+        >,
+        prompt_executor: Option<Arc<dyn nexus_orchestration::capability::PromptExecutor>>,
+    ) -> Self {
+        Self {
+            coordinator,
+            nexus_home,
+            caps,
+            daemon_tool_dispatch,
+            prompt_executor,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl ScheduleRunStarter for CoordinatorScheduleRunStarter {
+    async fn start(
+        &self,
+        schedule_id: &str,
+    ) -> Result<SessionId, SupervisorError> {
+        let pool = self.coordinator.pool();
+        self.coordinator
+            .admit_schedule(
+                schedule_id,
+                &pool,
+                &self.nexus_home,
+                &self.caps,
+                self.daemon_tool_dispatch.clone(),
+                self.prompt_executor.clone(),
+            )
+            .await
+            .map_err(|e| SupervisorError::Database(sqlx::Error::Protocol(e.to_string())))
     }
 }
 

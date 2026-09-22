@@ -15,6 +15,11 @@
 //!   ([`refresh::spawn_refresh_scheduler`]).
 //! - [`chronology`] — per-Work volume auto-advance
 //!   ([`chronology::spawn_auto_chronology_tick`]).
+//! - [`hosted_scheduler`] — the v1.195 P0-T2 hosted owner's ONE supervisor
+//!   wake/clock task (and its `HostedSchedulerConfig`), which admits eligible
+//!   durable pending schedules through the coordinator-backed starter. Unlike
+//!   the four tasks above it is not daemon-era behavior moved here: it is the
+//!   clock the hosted production factory installs over its own supervisor.
 //!
 //! Every task is a detached `tokio::spawn` owned by its caller (the daemon
 //! boot composition), is best-effort (a failed tick logs and continues), and
@@ -29,10 +34,15 @@
 
 pub mod chronology;
 pub mod cron;
+pub mod hosted_scheduler;
 pub mod refresh;
 pub mod stale_findings;
 
 pub use chronology::{AutoChronologyConfig, DEFAULT_AUTO_CHRONOLOGY_INTERVAL_SECS};
 pub use cron::{CronSupervisorConfig, DEFAULT_CRON_INTERVAL_SECS};
+pub use hosted_scheduler::{
+    HostedSchedulerConfig, DEFAULT_HOSTED_SCHEDULER_INTERVAL_SECS,
+    ENV_HOSTED_SCHEDULER_INTERVAL_SECS,
+};
 pub use refresh::{RefreshSchedulerConfig, DEFAULT_REFRESH_INTERVAL_SECS};
 pub use stale_findings::{StaleFindingsWatcherConfig, DEFAULT_SWEEP_INTERVAL_SECS};
