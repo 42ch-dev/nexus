@@ -1031,6 +1031,14 @@ impl WorkspaceSessionManager {
     /// On conflict (hash mismatch, stale, or expired), the OCC counter is
     /// incremented and a structured `tracing::warn!` is emitted (T6).
     ///
+    /// With recoverable authority this delegates to
+    /// [`Self::commit_session_durable_owned`]: the mutation runs on the
+    /// RETAINED owner task that holds this authority's admission for its whole
+    /// duration (see [`CommitAdmissions`]), so a caller that disconnects or is
+    /// cancelled cannot release that admission while the commit is still
+    /// applying. The validate+consume CAS below is the non-recoverable path,
+    /// unchanged.
+    ///
     /// # Errors
     ///
     /// Returns [`SessionError`] if validation fails (hash conflict), the
@@ -1038,22 +1046,17 @@ impl WorkspaceSessionManager {
     /// this authority's close boundary is already sealed
     /// ([`SessionError::AuthorityBusy`]).
     pub async fn commit_session(
-        &self,
+        self: &Arc<Self>,
         session_id: &SessionId,
         changes: &[ChangeEntry],
         active_workspace_root: &str,
     ) -> Result<db::WorkspaceSessionRow, SessionError> {
         if self.recoverable.is_some() {
-            // A recoverable mutation registers in the SAME close boundary the
-            // owning handle drains BEFORE it starts, and holds that place for
-            // its whole duration — see [`CommitAdmissions`]. A sealed boundary
-            // refuses here, before any file or intent work.
-            let _admission = self.admit_commit()?;
-            let _outcome = super::session_commit::commit_recoverable(
-                self,
-                session_id,
-                changes,
-                active_workspace_root,
+            Self::commit_session_durable_owned(
+                Arc::clone(self),
+                session_id.clone(),
+                changes.to_vec(),
+                active_workspace_root.to_string(),
             )
             .await?;
             return db::get_session(&self.pool, &session_id.to_string())
@@ -1081,9 +1084,11 @@ impl WorkspaceSessionManager {
 
     /// Durable commit returning revision metadata (v1.188 P3).
     ///
-    /// Registers in this authority's close boundary for the whole commit (the
-    /// same boundary `commit_session_durable_owned` and the handle route use),
-    /// so an owning close either drains this commit or refuses it.
+    /// Delegates to [`Self::commit_session_durable_owned`], so this entrance
+    /// runs on the SAME retained owner task as the handle/executor route and
+    /// registers in the same close boundary: an owning close either drains this
+    /// commit or refuses it, and a caller that is cancelled cannot release the
+    /// admission while the commit is still applying.
     ///
     /// # Errors
     ///
@@ -1092,7 +1097,7 @@ impl WorkspaceSessionManager {
     /// the boundary, otherwise whatever
     /// `session_commit::commit_recoverable` reports for the manifest.
     pub async fn commit_session_durable(
-        &self,
+        self: &Arc<Self>,
         session_id: &SessionId,
         changes: &[ChangeEntry],
         active_workspace_root: &str,
@@ -1102,12 +1107,21 @@ impl WorkspaceSessionManager {
                 "recoverable workspace authority required".into(),
             ));
         }
-        let _admission = self.admit_commit()?;
-        super::session_commit::commit_recoverable(self, session_id, changes, active_workspace_root)
-            .await
+        Self::commit_session_durable_owned(
+            Arc::clone(self),
+            session_id.clone(),
+            changes.to_vec(),
+            active_workspace_root.to_string(),
+        )
+        .await
     }
 
     /// Durable commit on an `Arc` manager; retains ownership through caller cancellation.
+    ///
+    /// Every recoverable commit entrance routes here — the handle/executor
+    /// route, [`Self::commit_session_durable`] and the recoverable branch of
+    /// [`Self::commit_session`] — so all of them admit once, on the retained
+    /// owner, and none of them can release its place by being cancelled.
     ///
     /// The caller must pass the verified active workspace root from its own
     /// authority context (for example HTTP [`WorkspaceState::workspace_path`]
@@ -1136,10 +1150,12 @@ impl WorkspaceSessionManager {
 
     /// Run startup recovery for all unsettled intents (call before publishing executor).
     ///
-    /// Registers in this authority's close boundary for the whole pass: a
-    /// recovery pass applies or rolls back workspace bytes exactly like a
-    /// commit, so the owning close must drain it — or the sealed boundary must
-    /// refuse it.
+    /// Runs on the retained owner task of
+    /// `session_commit::startup_recovery_owned`: this authority's admission is
+    /// held by that task for the whole pass, so a caller that disconnects or is
+    /// cancelled cannot release it while intents are still being applied or
+    /// rolled back. A sealed boundary refuses the pass
+    /// ([`SessionError::AuthorityBusy`]) before any row is read.
     ///
     /// # Errors
     ///
@@ -1147,9 +1163,12 @@ impl WorkspaceSessionManager {
     /// boundary, otherwise whatever
     /// `session_commit::startup_recovery_all` reports; a corrupt intent row is
     /// surfaced rather than skipped.
-    pub async fn startup_recovery(&self) -> Result<(), SessionError> {
-        let _admission = self.admit_commit()?;
-        super::session_commit::startup_recovery_all(self).await
+    pub async fn startup_recovery(self: &Arc<Self>) -> Result<(), SessionError> {
+        super::session_commit::startup_recovery_owned(
+            Arc::clone(self),
+            super::session_commit::RecoveryScope::All,
+        )
+        .await
     }
 
     /// Run startup recovery for the unsettled work of ONE workspace root.
@@ -1159,6 +1178,10 @@ impl WorkspaceSessionManager {
     /// persisted state are not its business — so the hosted production bundle
     /// uses this entry point instead of the whole-DB sweep.
     ///
+    /// Like [`Self::startup_recovery`], the pass runs on a RETAINED owner task,
+    /// so caller cancellation cannot release its admission while the pass is
+    /// still applying or rolling back.
+    ///
     /// # Errors
     ///
     /// Returns [`SessionError::AuthorityBusy`] once the owning close sealed the
@@ -1166,11 +1189,14 @@ impl WorkspaceSessionManager {
     /// `session_commit::startup_recovery_for_root` reports for `workspace_root`;
     /// another root's rows are never read.
     pub async fn startup_recovery_for_root(
-        &self,
+        self: &Arc<Self>,
         workspace_root: &str,
     ) -> Result<(), SessionError> {
-        let _admission = self.admit_commit()?;
-        super::session_commit::startup_recovery_for_root(self, workspace_root).await
+        super::session_commit::startup_recovery_owned(
+            Arc::clone(self),
+            super::session_commit::RecoveryScope::Root(workspace_root.to_string()),
+        )
+        .await
     }
 
     /// Get the underlying database pool.

@@ -1467,19 +1467,38 @@ mod tests {
             // A DIFFERENT root's interrupted commit. The bundle refuses foreign
             // roots by design, so this one is left through the manager's own
             // durable commit path — what an earlier process death would leave.
+            // That path is a RETAINED owner too (it clears an inherited crash
+            // seam at spawn), so the seam is armed from inside its admission
+            // rendezvous, like [`interrupted_authority_commit`].
             let manager = Arc::clone(authority.manager());
             let foreign_session = manager
                 .open_session(&foreign_root_string, "notes", true)
                 .await
                 .expect("foreign session");
+            let gate = Arc::new(test_hooks::OwnerGate::for_session(foreign_session.to_string()));
+            test_hooks::set_owner_gate(Some(Arc::clone(&gate)));
+            let foreign_commit = {
+                let manager = Arc::clone(&manager);
+                let session = foreign_session.clone();
+                let root = foreign_root_string.clone();
+                tokio::spawn(async move {
+                    manager
+                        .commit_session_durable(
+                            &session,
+                            &[create_entry("foreign.txt", PAYLOAD)],
+                            &root,
+                        )
+                        .await
+                })
+            };
+            gate.admitted.notified().await;
             test_hooks::set_crash_point(Some("after_file_apply"));
-            let foreign_crashed = manager
-                .commit_session_durable(
-                    &foreign_session,
-                    &[create_entry("foreign.txt", PAYLOAD)],
-                    &foreign_root_string,
-                )
-                .await;
+            gate.proceed.notify_one();
+            gate.settled.notified().await;
+            test_hooks::set_owner_gate(None);
+            let foreign_crashed = foreign_commit
+                .await
+                .expect("the retained commit owner joins");
             test_hooks::set_crash_point(None);
             assert!(
                 matches!(foreign_crashed, Err(SessionError::Internal(_))),

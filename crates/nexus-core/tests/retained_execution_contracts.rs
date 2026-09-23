@@ -4982,6 +4982,443 @@ async fn a_direct_durable_commit_is_drained_before_the_close_releases_the_author
     core_b.close().await.expect("close the next core");
 }
 
+/// Which direct recoverable entrance a caller-cancellation regression drives.
+#[cfg(feature = "test-hooks")]
+#[derive(Clone, Copy)]
+enum DirectEntrance {
+    /// `WorkspaceSessionManager::commit_session_durable`.
+    Durable,
+    /// The recoverable branch of `WorkspaceSessionManager::commit_session`.
+    Plain,
+}
+
+impl DirectEntrance {
+    /// Run this entrance from a caller task; the result is discarded because
+    /// these regressions CANCEL the caller before it can observe it.
+    async fn call(
+        self,
+        manager: &Arc<WorkspaceSessionManager>,
+        session: &SessionId,
+        path: &str,
+        root: &str,
+    ) -> Result<(), String> {
+        let changes = [direct_change(path, HOSTED_PAYLOAD_B64)];
+        match self {
+            Self::Durable => manager
+                .commit_session_durable(session, &changes, root)
+                .await
+                .map(|_| ())
+                .map_err(|err| err.to_string()),
+            Self::Plain => manager
+                .commit_session(session, &changes, root)
+                .await
+                .map(|_| ())
+                .map_err(|err| err.to_string()),
+        }
+    }
+}
+
+/// A CANCELLED caller of the manager's OWN recoverable entrance must not take
+/// its admitted commit out of the owner's close drain.
+///
+/// The direct entrances are reachable through `WorkspaceCommitAuthority::manager()`
+/// and can apply workspace bytes, so they must hold their admission on the
+/// RETAINED owner task — not on the awaiting caller's future. A caller dropped
+/// at the POST-INTENT / PRE-FILE barrier (claim held, nothing applied yet) used
+/// to release the guard with its own future: the close then drained nothing,
+/// reported `closed`/`cleanup_confirmed` and released the workspace authority
+/// while that commit was still in flight, so a replacement owner could take the
+/// same root beside it. Red before the retained-owner fix at the first
+/// `finished_within` assertion below.
+#[cfg(feature = "test-hooks")]
+async fn cancelled_direct_caller_is_drained_by_the_close(entrance: DirectEntrance) {
+    let fixture = hosted_fixture().await;
+    let home = fixture.tmp.path().to_path_buf();
+    let db_path = nexus_home_layout::workspace_state_db_path(&home, CREATOR, SLUG);
+    let epoch_a = fixture.handle.engine_epoch();
+    let manager = retained_manager(&fixture);
+    let root = fixture.root.to_string_lossy().into_owned();
+    let session = manager
+        .open_session(&root, "notes", true)
+        .await
+        .expect("open a commit session");
+    let session_id = session.to_string();
+
+    let gate = Arc::new(test_hooks::OwnerGate::for_session(session_id.clone()));
+    test_hooks::set_owner_gate(Some(Arc::clone(&gate)));
+
+    // The manager's OWN entrance, NOT the handle's `commit_workspace`.
+    let mut direct = {
+        let manager = Arc::clone(&manager);
+        let session = session.clone();
+        let root = root.clone();
+        tokio::spawn(async move { entrance.call(&manager, &session, DRAINED_PATH, &root).await })
+    };
+    tokio::select! {
+        () = gate.admitted.notified() => {}
+        refused = &mut direct => panic!(
+            "the direct commit was refused before its admission boundary: {refused:?}"
+        ),
+    }
+
+    // The barrier is POST-INTENT / PRE-FILE: the claim is held and no byte of
+    // the workspace has changed yet.
+    let parked = commit_state(fixture.core.pool()).await;
+    assert!(
+        parked
+            .iter()
+            .any(|row| row.contains(&session_id) && row.contains("applying")),
+        "the parked direct commit must hold its durable claim: {parked:?}"
+    );
+    assert!(
+        !fixture.root.join("notes").join(DRAINED_PATH).exists(),
+        "the barrier must be reached before any file is applied"
+    );
+
+    // CANCEL the awaiting caller, exactly as a dropped client or a shutdown
+    // that abandons the future does.
+    direct.abort();
+    assert!(
+        direct
+            .await
+            .expect_err("the aborted caller cannot report a commit")
+            .is_cancelled(),
+        "the caller task must have been cancelled at the barrier"
+    );
+
+    // Close the OWNER now (the service stays open, so the durable rows can be
+    // re-read after the confirmation). While the commit the cancelled caller
+    // left behind is still applying, NO confirmed close, NO released lease and
+    // NO replacement owner may appear.
+    let mut closer = {
+        let handle = Arc::clone(&fixture.handle);
+        tokio::spawn(async move { handle.close().await })
+    };
+    assert!(
+        !finished_within(&mut closer, CLOSE_OBSERVATION_WINDOW).await,
+        "close settled after a cancelled direct caller left its admitted commit in flight"
+    );
+    assert!(
+        !fixture.handle.is_settled(),
+        "the owner settled while the cancelled caller's commit was still applying"
+    );
+    assert!(
+        WorkspaceAuthorityLease::acquire(&db_path).is_err(),
+        "the workspace authority was released before the cancelled caller's commit settled"
+    );
+
+    // Release the gate: the retained commit reaches its durable conclusion, and
+    // only THEN does the close confirm. The bytes are already durable when the
+    // close reports, so nothing can land after it.
+    gate.proceed.notify_one();
+    gate.settled.notified().await;
+    let drained_files = root_files(&fixture.root);
+    let drained_state = commit_state(fixture.core.pool()).await;
+    assert_eq!(
+        std::fs::read(fixture.root.join("notes").join(DRAINED_PATH))
+            .expect("the drained commit applied its bytes"),
+        HOSTED_PAYLOAD
+    );
+    let report = closer
+        .await
+        .expect("the close task joins")
+        .expect("a close report");
+    assert_eq!(report.state, nexus_contracts::CoreCloseReportState::Closed);
+    assert!(
+        report.cleanup_confirmed,
+        "the close confirms only after the cancelled caller's commit settled"
+    );
+    assert!(
+        WorkspaceAuthorityLease::acquire(&db_path).is_ok(),
+        "the authority is released only after the drained commit settled"
+    );
+    test_hooks::set_owner_gate(None);
+
+    // NO LATE WRITE after the confirmed close: the workspace bytes and the
+    // durable rows the drained commit produced are unchanged across the close.
+    assert_eq!(
+        root_files(&fixture.root),
+        drained_files,
+        "a workspace write landed after the confirmed close"
+    );
+    assert_eq!(
+        commit_state(fixture.core.pool()).await,
+        drained_state,
+        "a durable write landed after the confirmed close"
+    );
+
+    // The service close seals the same boundary the owner close settled, then
+    // the next owner over the same home is a NEW admission that reads the
+    // revision the drained commit settled.
+    fixture.core.close().await.expect("the core close");
+    let (core_b, _host_b, handle_b) = open_hosted_owner(&home).await;
+    assert!(
+        handle_b.engine_epoch() > epoch_a,
+        "the next owner must be a NEW admission ({} -> {})",
+        epoch_a,
+        handle_b.engine_epoch()
+    );
+    let revision = settled_revision(&core_b, &session_id).await;
+    assert!(
+        revision.starts_with("rev_"),
+        "the next owner reads the settled revision, got {revision}"
+    );
+    handle_b.close().await.expect("close the next owner");
+    core_b.close().await.expect("close the next core");
+}
+
+/// `commit_session_durable` through the manager: a cancelled caller keeps the
+/// commit inside the owner's drain (see the scenario above).
+#[cfg(feature = "test-hooks")]
+#[tokio::test]
+#[serial_test::serial]
+async fn a_cancelled_direct_durable_caller_is_drained_before_the_close_releases() {
+    cancelled_direct_caller_is_drained_by_the_close(DirectEntrance::Durable).await;
+}
+
+/// `commit_session`'s recoverable branch through the manager: a cancelled
+/// caller keeps the commit inside the owner's drain (see the scenario above).
+#[cfg(feature = "test-hooks")]
+#[tokio::test]
+#[serial_test::serial]
+async fn a_cancelled_direct_plain_caller_is_drained_before_the_close_releases() {
+    cancelled_direct_caller_is_drained_by_the_close(DirectEntrance::Plain).await;
+}
+
+/// Which retained recovery entrance a caller-cancellation regression drives.
+#[cfg(feature = "test-hooks")]
+#[derive(Clone, Copy)]
+enum RecoveryEntrance {
+    /// `WorkspaceSessionManager::startup_recovery` (whole DB).
+    All,
+    /// `WorkspaceSessionManager::startup_recovery_for_root` (the production
+    /// bundle's entry).
+    Root,
+}
+
+impl RecoveryEntrance {
+    /// Run this entrance from a caller task; the result is discarded because
+    /// these regressions CANCEL the caller before it can observe it.
+    async fn call(self, manager: &Arc<WorkspaceSessionManager>, root: &str) -> Result<(), String> {
+        match self {
+            Self::All => manager
+                .startup_recovery()
+                .await
+                .map_err(|err| err.to_string()),
+            Self::Root => manager
+                .startup_recovery_for_root(root)
+                .await
+                .map_err(|err| err.to_string()),
+        }
+    }
+}
+
+/// Leave ONE crash-consistent unsettled intent behind, the way a process death
+/// mid-apply does: claim held, workspace bytes applied, no committed transition.
+///
+/// Driven through the manager's own durable entrance, whose RETAINED owner
+/// clears an inherited crash seam at spawn — so the seam is armed from inside
+/// its admission rendezvous (no sleeps, no races).
+#[cfg(feature = "test-hooks")]
+async fn leave_unsettled_after_apply(
+    manager: &Arc<WorkspaceSessionManager>,
+    root: &str,
+) -> String {
+    let session = manager
+        .open_session(root, "notes", true)
+        .await
+        .expect("open a commit session");
+    let session_id = session.to_string();
+    let gate = Arc::new(test_hooks::OwnerGate::for_session(session_id.clone()));
+    test_hooks::set_owner_gate(Some(Arc::clone(&gate)));
+    let caller = {
+        let manager = Arc::clone(manager);
+        let session = session.clone();
+        let root = root.to_string();
+        tokio::spawn(async move {
+            manager
+                .commit_session_durable(
+                    &session,
+                    &[direct_change(DRAINED_PATH, HOSTED_PAYLOAD_B64)],
+                    &root,
+                )
+                .await
+        })
+    };
+    gate.admitted.notified().await;
+    test_hooks::set_crash_point(Some("after_file_apply"));
+    gate.proceed.notify_one();
+    // Await the caller's own result, not a settle signal: the crash ends the
+    // commit either way, and the interrupted state is fully durable by then.
+    let crashed = caller.await.expect("the retained commit owner joins");
+    test_hooks::set_owner_gate(None);
+    assert!(
+        matches!(crashed, Err(SessionError::Internal(_))),
+        "the armed crash point must leave the commit unsettled: {crashed:?}"
+    );
+    test_hooks::set_crash_point(None);
+    session_id
+}
+
+/// A CANCELLED caller of a recoverable RECOVERY entrance must not take its
+/// admitted pass out of the owner's close drain.
+///
+/// A recovery pass applies or rolls back workspace bytes exactly like a commit,
+/// so it needs the same retained-owner admission: a caller dropped at the
+/// settlement boundary (crash-consistent intent on disk, nothing settled yet)
+/// used to release the guard with its own future, letting the close report
+/// `closed`/`cleanup_confirmed` and release the workspace authority while the
+/// pass was still in flight. Red before the retained-owner fix at the first
+/// `finished_within` assertion below.
+#[cfg(feature = "test-hooks")]
+async fn cancelled_recovery_caller_is_drained_by_the_close(entrance: RecoveryEntrance) {
+    let fixture = hosted_fixture().await;
+    let home = fixture.tmp.path().to_path_buf();
+    let db_path = nexus_home_layout::workspace_state_db_path(&home, CREATOR, SLUG);
+    let epoch_a = fixture.handle.engine_epoch();
+    let manager = retained_manager(&fixture);
+    let root = fixture.root.to_string_lossy().into_owned();
+    let session_id = leave_unsettled_after_apply(&manager, &root).await;
+
+    // The crash-consistent state the pass is about to settle.
+    let unsettled = commit_state(fixture.core.pool()).await;
+    assert!(
+        unsettled
+            .iter()
+            .any(|row| row.contains(&session_id) && row.contains("applying")),
+        "the seeded intent must be unsettled: {unsettled:?}"
+    );
+    assert_eq!(
+        std::fs::read(fixture.root.join("notes").join(DRAINED_PATH))
+            .expect("the interrupted commit applied its bytes"),
+        HOSTED_PAYLOAD
+    );
+
+    let gate = Arc::new(test_hooks::RecoveryGate::new());
+    test_hooks::set_recovery_gate(Some(Arc::clone(&gate)));
+
+    let mut recovery = {
+        let manager = Arc::clone(&manager);
+        let root = root.clone();
+        tokio::spawn(async move { entrance.call(&manager, &root).await })
+    };
+    tokio::select! {
+        () = gate.admitted.notified() => {}
+        refused = &mut recovery => panic!(
+            "the recovery pass was refused before its settlement boundary: {refused:?}"
+        ),
+    }
+
+    // CANCEL the awaiting caller, exactly as a dropped client or a shutdown
+    // that abandons the future does.
+    recovery.abort();
+    assert!(
+        recovery
+            .await
+            .expect_err("the aborted caller cannot report a recovery pass")
+            .is_cancelled(),
+        "the caller task must have been cancelled at the settlement boundary"
+    );
+
+    // Close the OWNER now (the service stays open, so the durable rows can be
+    // re-read after the confirmation). While the pass the cancelled caller left
+    // behind is still running, NO confirmed close, NO released lease and NO
+    // replacement owner may appear.
+    let mut closer = {
+        let handle = Arc::clone(&fixture.handle);
+        tokio::spawn(async move { handle.close().await })
+    };
+    assert!(
+        !finished_within(&mut closer, CLOSE_OBSERVATION_WINDOW).await,
+        "close settled after a cancelled recovery caller left its admitted pass in flight"
+    );
+    assert!(
+        !fixture.handle.is_settled(),
+        "the owner settled while the cancelled caller's recovery pass was still running"
+    );
+    assert!(
+        WorkspaceAuthorityLease::acquire(&db_path).is_err(),
+        "the workspace authority was released before the cancelled caller's recovery pass settled"
+    );
+
+    // Release the gate: the retained pass settles the intent, and only THEN
+    // does the close confirm.
+    gate.proceed.notify_one();
+    gate.settled.notified().await;
+    let drained_files = root_files(&fixture.root);
+    let drained_state = commit_state(fixture.core.pool()).await;
+    assert!(
+        drained_state
+            .iter()
+            .any(|row| row.contains(&session_id) && row.contains("committed")),
+        "the drained recovery pass settled the interrupted commit: {drained_state:?}"
+    );
+    let report = closer
+        .await
+        .expect("the close task joins")
+        .expect("a close report");
+    assert_eq!(report.state, nexus_contracts::CoreCloseReportState::Closed);
+    assert!(
+        report.cleanup_confirmed,
+        "the close confirms only after the cancelled caller's recovery pass settled"
+    );
+    assert!(
+        WorkspaceAuthorityLease::acquire(&db_path).is_ok(),
+        "the authority is released only after the drained recovery pass settled"
+    );
+    test_hooks::set_recovery_gate(None);
+
+    // NO LATE WRITE after the confirmed close: the workspace bytes and the
+    // durable rows the drained pass produced are unchanged across the close.
+    assert_eq!(
+        root_files(&fixture.root),
+        drained_files,
+        "a workspace write landed after the confirmed close"
+    );
+    assert_eq!(
+        commit_state(fixture.core.pool()).await,
+        drained_state,
+        "a durable write landed after the confirmed close"
+    );
+
+    // The service close seals the same boundary the owner close settled, then
+    // the next owner over the same home is a NEW admission that reads the
+    // revision the recovered commit settled.
+    fixture.core.close().await.expect("the core close");
+    let (core_b, _host_b, handle_b) = open_hosted_owner(&home).await;
+    assert!(
+        handle_b.engine_epoch() > epoch_a,
+        "the next owner must be a NEW admission ({} -> {})",
+        epoch_a,
+        handle_b.engine_epoch()
+    );
+    let revision = settled_revision(&core_b, &session_id).await;
+    assert!(
+        revision.starts_with("rev_"),
+        "the next owner reads the recovered revision, got {revision}"
+    );
+    handle_b.close().await.expect("close the next owner");
+    core_b.close().await.expect("close the next core");
+}
+
+/// Whole-DB `startup_recovery` through the manager: a cancelled caller keeps
+/// the pass inside the owner's drain (see the scenario above).
+#[cfg(feature = "test-hooks")]
+#[tokio::test]
+#[serial_test::serial]
+async fn a_cancelled_recovery_caller_is_drained_before_the_close_releases() {
+    cancelled_recovery_caller_is_drained_by_the_close(RecoveryEntrance::All).await;
+}
+
+/// Root-scoped `startup_recovery_for_root` (the production bundle's entry): a
+/// cancelled caller keeps the pass inside the owner's drain (see above).
+#[cfg(feature = "test-hooks")]
+#[tokio::test]
+#[serial_test::serial]
+async fn a_cancelled_root_scoped_recovery_caller_is_drained_before_the_close_releases() {
+    cancelled_recovery_caller_is_drained_by_the_close(RecoveryEntrance::Root).await;
+}
+
 /// After a CONFIRMED close, EVERY direct recoverable entrance on the retained
 /// manager fails closed with a typed refusal and mutates nothing.
 ///

@@ -104,11 +104,14 @@ impl NativeCore {
     /// - `engine_epoch` is the ACTUAL `ExecutionHandle::engine_epoch()` of the
     ///   established owner, or `null` when this profile cannot host one (the
     ///   selected workspace registers no creative root, so the factory's
-    ///   workspace composition refuses with `uninitialized`). Every other
-    ///   refusal — not the engine owner, an owner already exists, closing, a
-    ///   selected root that moved after this admission was pinned, a rival
-    ///   commit authority — propagates as its own typed wire error: a duplicate
-    ///   or stale boot must never look like a quiet success.
+    ///   workspace composition refuses with `uninitialized`). A refusal that
+    ///   carries a workspace `CoreError` — a selected root that moved after this
+    ///   admission was pinned, a rival commit authority, a storage fault —
+    ///   keeps that typed class on the wire. The other three owner refusals —
+    ///   not the engine owner, an owner already exists, closing — carry NO typed
+    ///   code: they cross as an unstructured native reason, which the service
+    ///   reports as its generic `internal` failure. Either way a duplicate or
+    ///   stale boot is a hard failure, never a quiet success.
     /// - `provider_ready` is the native-owned readiness of the providers this
     ///   host configuration SELECTS, read from the SAME Host that ran the
     ///   bounded owner-bound probes at open. Catalog presence is a candidate,

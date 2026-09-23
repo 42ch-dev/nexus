@@ -98,6 +98,44 @@ async fn intent_state(pool: &sqlx::SqlitePool, revision: &str) -> String {
         .expect("intent row")
 }
 
+/// Interrupt one durable commit through the manager's OWN entrance.
+///
+/// `commit_session_durable` runs on the RETAINED owner task, which clears an
+/// inherited crash seam at spawn — so arming the seam before the call would
+/// prove nothing. The owner gate parks that task at its admission boundary
+/// (claim held, nothing applied yet), the test arms the seam AFTER the clear,
+/// then releases it: no sleeps, no races.
+async fn interrupted_direct_commit(
+    mgr: &Arc<WorkspaceSessionManager>,
+    session: &SessionId,
+    change: ChangeEntry,
+    root: &str,
+    crash_point: &'static str,
+) -> SessionError {
+    let gate = Arc::new(OwnerGate::for_session(session.to_string()));
+    set_owner_gate(Some(Arc::clone(&gate)));
+    let caller = {
+        let mgr = Arc::clone(mgr);
+        let session = session.clone();
+        let root = root.to_string();
+        tokio::spawn(async move {
+            mgr.commit_session_durable(&session, std::slice::from_ref(&change), &root)
+                .await
+        })
+    };
+    gate.admitted.notified().await;
+    set_crash_point(Some(crash_point));
+    gate.proceed.notify_one();
+    gate.settled.notified().await;
+    set_owner_gate(None);
+    let err = caller
+        .await
+        .expect("the retained commit owner joins")
+        .expect_err("the armed crash point must interrupt the apply");
+    set_crash_point(None);
+    err
+}
+
 /// ACCEPTANCE ANCHOR (ported from `workspace_commit_l2_proof.rs`).
 ///
 /// A crash after the file apply leaves the applied bytes in place; startup
@@ -111,12 +149,14 @@ async fn simulated_crash_after_file_apply_then_recovery_completes() {
     let ws = tempfile::tempdir().unwrap();
     let root = ws.path().to_string_lossy().to_string();
     let session = mgr.open_session(&root, "", true).await.expect("open");
-    set_crash_point(Some("after_file_apply"));
-    let err = mgr
-        .commit_session_durable(&session, &[create_change("applied.txt", b"payload")], &root)
-        .await
-        .unwrap_err();
-    set_crash_point(None);
+    let err = interrupted_direct_commit(
+        &mgr,
+        &session,
+        create_change("applied.txt", b"payload"),
+        &root,
+        "after_file_apply",
+    )
+    .await;
     assert!(matches!(err, SessionError::Internal(_)));
     assert!(ws.path().join("applied.txt").exists());
     mgr.startup_recovery().await.expect("recovery");
@@ -136,12 +176,14 @@ async fn simulated_crash_after_entries_then_startup_recovery() {
     let ws = tempfile::tempdir().unwrap();
     let root = ws.path().to_string_lossy().to_string();
     let session = mgr.open_session(&root, "", true).await.expect("open");
-    set_crash_point(Some("after_entries_persisted"));
-    let err = mgr
-        .commit_session_durable(&session, &[create_change("crash.txt", b"payload")], &root)
-        .await
-        .unwrap_err();
-    set_crash_point(None);
+    let err = interrupted_direct_commit(
+        &mgr,
+        &session,
+        create_change("crash.txt", b"payload"),
+        &root,
+        "after_entries_persisted",
+    )
+    .await;
     assert!(matches!(err, SessionError::Internal(_)));
     assert!(!ws.path().join("crash.txt").exists());
     mgr.startup_recovery().await.expect("recovery");
@@ -564,7 +606,7 @@ async fn concurrent_consume_has_one_winner_and_a_stale_reentry() {
 #[serial]
 async fn concurrent_commit_session_has_one_winner() {
     let (pool, _dir) = fresh_pool().await;
-    let mgr = WorkspaceSessionManager::new(pool);
+    let mgr = Arc::new(WorkspaceSessionManager::new(pool));
 
     let ws_dir = tempfile::tempdir().unwrap();
     let ws_root = ws_dir.path().to_string_lossy().to_string();

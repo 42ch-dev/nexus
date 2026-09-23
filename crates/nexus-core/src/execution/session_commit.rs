@@ -64,6 +64,25 @@ fn test_owner_gate_settled(session_id: &str) {
 #[cfg(not(any(test, feature = "test-hooks")))]
 const fn test_owner_gate_settled(_session_id: &str) {}
 
+/// Rendezvous at a recovery pass's settlement boundary, when a test gate is armed.
+///
+/// Gated builds only: the production callsite is compiled out, so no
+/// never-awaiting async wrapper exists there.
+#[cfg(any(test, feature = "test-hooks"))]
+async fn test_recovery_gate_admitted() {
+    super::test_hooks::recovery_gate_admitted().await;
+}
+
+/// Signal that the retained recovery owner task has settled, when a gate is armed.
+#[cfg(any(test, feature = "test-hooks"))]
+fn test_recovery_gate_settled() {
+    super::test_hooks::recovery_gate_settled();
+}
+
+/// Production no-op for the gated recovery settle signal.
+#[cfg(not(any(test, feature = "test-hooks")))]
+const fn test_recovery_gate_settled() {}
+
 #[cfg(any(test, feature = "test-hooks"))]
 use super::test_hooks::clear_crash_point;
 
@@ -983,6 +1002,11 @@ fn cleanup_staged_confirmed(
 
 /// Durable commit on an `Arc` manager; retains ownership through caller cancellation.
 ///
+/// This is the ONE retained-owner admission every recoverable commit entrance
+/// uses — the handle route, the executor route, `commit_session_durable` and
+/// `commit_session`'s recoverable branch — so a direct entrance has exactly the
+/// same close-boundary retention as the handle route.
+///
 /// # Errors
 ///
 /// Returns whatever [`commit_recoverable`] reports for the manifest.
@@ -1090,6 +1114,63 @@ async fn cleanup_settled_artifacts(mgr: &WorkspaceSessionManager, root_filter: O
     }
 }
 
+/// Which unsettled intents a retained recovery pass settles.
+#[derive(Debug, Clone)]
+pub(crate) enum RecoveryScope {
+    /// Every root in this workspace DB.
+    All,
+    /// Only the intents stored for this canonical root.
+    Root(String),
+}
+
+/// Run one recovery pass on a RETAINED owner task.
+///
+/// This is the ONE entry both public recovery entrances use
+/// (`WorkspaceSessionManager::startup_recovery` and
+/// `startup_recovery_for_root`), so they share the close-boundary retention the
+/// commit entrances have: the admission is taken BEFORE the owner task is
+/// spawned and held BY that task, so a waiting caller that disconnects or is
+/// cancelled cannot release it while intents are still being applied or rolled
+/// back. A manager without recoverable authority has no boundary to hold and
+/// runs the pass inline, exactly as it did before the retention existed.
+///
+/// # Errors
+///
+/// Returns [`SessionError::AuthorityBusy`] once the owning close sealed the
+/// boundary, otherwise whatever the selected pass reports.
+pub(crate) async fn startup_recovery_owned(
+    mgr: Arc<WorkspaceSessionManager>,
+    scope: RecoveryScope,
+) -> Result<(), SessionError> {
+    if mgr.recoverable_config().is_none() {
+        return run_recovery(&mgr, scope).await;
+    }
+    // ATOMIC admission: registered before the close boundary can be closed, or
+    // refused. The guard moves INTO the retained owner below, so a waiter that
+    // disconnects (or is cancelled) cannot release it.
+    let admission = mgr.admit_commit()?;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    tokio::spawn(async move {
+        let _admission = admission;
+        let result = run_recovery(&mgr, scope).await;
+        test_recovery_gate_settled();
+        let _ = tx.send(result);
+    });
+    rx.await
+        .unwrap_or_else(|_| Err(SessionError::Internal("recovery owner channel closed".into())))
+}
+
+/// The selected recovery pass, lower-level than the close boundary above.
+async fn run_recovery(
+    mgr: &WorkspaceSessionManager,
+    scope: RecoveryScope,
+) -> Result<(), SessionError> {
+    match scope {
+        RecoveryScope::All => startup_recovery_all(mgr).await,
+        RecoveryScope::Root(root) => startup_recovery_for_root(mgr, &root).await,
+    }
+}
+
 /// Startup recovery for every unsettled intent, under the mutation lock.
 ///
 /// Crate-internal: [`WorkspaceSessionManager::startup_recovery`] takes the
@@ -1175,6 +1256,12 @@ async fn settle_unsettled_intents(
             intent.state,
             db::IntentState::Applying | db::IntentState::RollingBack
         ) {
+            // The pass holds its admission and the crash-consistent on-disk
+            // state (claim held, artifacts applied or staged) is about to
+            // change: the gated rendezvous lets a test cancel the awaiting
+            // caller exactly here.
+            #[cfg(any(test, feature = "test-hooks"))]
+            test_recovery_gate_admitted().await;
             recover_unsettled_locked(mgr, &intent.workspace_root).await?;
         }
     }
