@@ -45,13 +45,21 @@
  *     a human wait, so the driver never issues it there and never claims a
  *     Steer it could not place;
  *   * the receipt must carry the real **commit** revision of the declared
- *     workspace commit, read from a routed same-run frame that carries the
- *     canonical workspace-commit response shape (`rev_<id>`). The durable
- *     run-state revision is recorded beside it as an explicitly labeled
- *     informational fact and never substitutes for it: a run-state revision
- *     proves run state, not the committed workspace. A missing commit revision
- *     is a failure, never a success, and no number is ever invented or derived
- *     from the fixture bytes;
+ *     workspace commit, accepted only from a routed same-run frame that is
+ *     identifiable as a workspace-commit response and whose parsed payload is
+ *     the canonical response object (`revision: rev_<id>`, `committed: true`;
+ *     `schemas/core/core-workspace-commit-response.schema.json`). No other frame
+ *     text is evidence of a commit — not an unrelated `host_event`/`run_state`/
+ *     `gap` payload that merely mentions a revision, not a nested or
+ *     double-encoded string, not an unsuccessful commit. The current run-event
+ *     vocabulary routes no such response at all, so the effect is refused with
+ *     `missing_commit_revision` until that producer exists (P3-T2 dependency:
+ *     no run-event identity carries the `CoreWorkspaceCommitResponse`).
+ *     The durable run-state revision is recorded beside it as an explicitly
+ *     labeled informational fact and never substitutes for it: a run-state
+ *     revision proves run state, not the committed workspace. A missing commit
+ *     revision is a failure, never a success, and no number is ever invented or
+ *     derived from the fixture bytes;
  *   * a failed or unconfirmed shutdown of any owned child — the service or the
  *     loopback model endpoint — overrides an otherwise successful journey: the
  *     receipt stays non-success and the process exits non-zero with its
@@ -1146,16 +1154,74 @@ function readEventStream(port, runId, { lastEventId, maxFrames = MAX_EVENT_FRAME
 }
 
 /**
- * The workspace-commit revision identifier when a routed event carries it
- * (`{"revision":"rev_<uuid>"}`, the `CoreWorkspaceCommitResponse` shape); never
- * invented and never derived from the fixture bytes.
+ * Frame `event:` identities that carry a `CoreWorkspaceCommitResponse` — the
+ * only admissible source of the receipt's commit revision (§6.1).
+ *
+ * Empty **by measurement, not as a placeholder**. `RunEventRegistry`
+ * (`crates/nexus-core/src/execution/run_events.rs`) publishes exactly three
+ * frame identities — `run_state`, `host_event` and `gap` — plus the
+ * `history_unavailable` subscription refusal; `HostEvent`
+ * (`crates/nexus-agent-host/src/capability/model.rs`) has no
+ * commit/capability-output variant; and the `workspace.commit` capability's
+ * `CoreWorkspaceCommitResponse` is returned in-process
+ * (`crates/nexus-core/src/execution/workspace.rs`). No producer routes that
+ * response onto a run ring, so no frame of the current vocabulary is evidence
+ * of a commit. Wiring that producer (P3-T2) adds its identity here; loosening
+ * the matcher below is never the fix.
+ */
+const COMMIT_RESPONSE_EVENT_IDENTITIES = new Set();
+
+/**
+ * The workspace-commit revision carried by a routed same-run **workspace-commit
+ * response** frame; `null` when no such frame exists. Never invented and never
+ * derived from frame text or from the fixture bytes.
+ *
+ * Admission rules (the accepting branch lands with the P3-T2 producer, together
+ * with its own evidence):
+ *
+ *   * `event:` must be an identity in {@link COMMIT_RESPONSE_EVENT_IDENTITIES}
+ *     — an unrelated `host_event`/`run_state`/`gap`/`history_unavailable` frame
+ *     is never a commit response, so its payload is never scanned;
+ *   * `data:` must parse as the canonical response object
+ *     (`schemas/core/core-workspace-commit-response.schema.json`,
+ *     `additionalProperties: false`) with exactly `revision` (a `rev_<id>`
+ *     identifier) and `committed: true`; a nested or double-encoded string, an
+ *     extra field and an unsuccessful commit are all inadmissible.
+ *
+ * Until that producer exists the answer is always `null`, the effect stays
+ * refused as `missing_commit_revision`, and no frame text substitutes for it.
  */
 function findCommitRevision(frames) {
   for (const frame of frames) {
-    const match = /"revision"\s*:\s*"([^"]+)"/.exec(frame.data ?? '');
-    if (match && COMMIT_REVISION_PATTERN.test(match[1])) return match[1];
+    if (!COMMIT_RESPONSE_EVENT_IDENTITIES.has(frame?.event)) continue;
+    return parseCommitResponseRevision(frame);
   }
   return null;
+}
+
+/**
+ * Payload predicate for the admission rules above. Kept beside the gate so the
+ * P3-T2 producer change only adds its identity; the branch is unreachable while
+ * no identity is admissible, so it is asserted against the schema directly
+ * rather than through a fabricated frame.
+ *
+ * @returns {string|null} the canonical revision, or `null` when the frame
+ *   payload is not a successful workspace-commit response.
+ */
+function parseCommitResponseRevision(frame) {
+  if (typeof frame?.data !== 'string') return null;
+  let payload = null;
+  try {
+    payload = JSON.parse(frame.data);
+  } catch {
+    return null;
+  }
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  const keys = Object.keys(payload);
+  if (keys.length !== 2 || !keys.includes('revision') || !keys.includes('committed')) return null;
+  if (payload.committed !== true) return null;
+  if (typeof payload.revision !== 'string' || !COMMIT_REVISION_PATTERN.test(payload.revision)) return null;
+  return payload.revision;
 }
 
 /** Durable run-state revision from routed `run_state` frames (real projection, never computed). */
@@ -1180,11 +1246,13 @@ function findRunStateRevision(frames) {
  * file *and* its commit revision; §6.1 requires the commit revision in the
  * receipt).
  *
- * The only accepted source is a routed same-run frame carrying the canonical
- * workspace-commit response shape (`{"revision":"rev_<id>","committed":…}`,
- * `schemas/core/core-workspace-commit-response.schema.json`) — the identifier
- * the durable workspace-commit authority returned for this run. Nothing is
- * computed from the fixture bytes and no identifier is invented.
+ * The only accepted source is a routed same-run frame identified as a
+ * workspace-commit response whose parsed payload is the canonical object
+ * (`{"revision":"rev_<id>","committed":true}`,
+ * `schemas/core/core-workspace-commit-response.schema.json`), detected by
+ * {@link findCommitRevision} — the identifier the durable workspace-commit
+ * authority returned for this run. Nothing is computed from the fixture bytes,
+ * nothing is read out of unrelated frame text, and no identifier is invented.
  *
  * The durable run-state revision (`RunStateWire.state_revision`, from routed
  * `run_state` frames or the inspect execution projection) proves run state, not
@@ -1206,8 +1274,9 @@ function resolveEffectRevision({ commitRevision, frames, projectionStateRevision
   if (commit === null) {
     throw failed(
       'missing_commit_revision',
-      'the declared workspace effect landed, but no routed same-run frame exposed the workspace commit revision ' +
-        '(no rev_<id> in a CoreWorkspaceCommitResponse-shaped payload; ' +
+      'the declared workspace effect landed, but no routed same-run frame was an identifiable successful ' +
+        'workspace-commit response carrying a rev_<id> revision (the run-event ring routes run_state/host_event/gap ' +
+        'and no commit response; ' +
         `durable run-state revision ${durableStateRevision === null ? 'none observed' : durableStateRevision} ` +
         'proves run state, not the committed workspace and is never substituted); §6.1 and the P3-T1 card require ' +
         'the committed file and its commit revision, so the effect is not a success',
@@ -1550,10 +1619,13 @@ async function runDeterministic(options) {
     };
     record('stream', 'ok', { frames: stream.frames.length });
 
-    // 11. Bounded revision follow-up reads: the commit frame may land after the
-    // first bounded read, and §6.1 requires the committed file *and* revision.
-    // Every follow-up is a reconnect from the last observed cursor (O2), never a
-    // new run.
+    // 11. Bounded revision follow-up reads: a routed commit-response frame may
+    // land after the first bounded read, and §6.1 requires the committed file
+    // *and* revision. Every follow-up is a reconnect from the last observed
+    // cursor (O2), never a new run. Today the ring routes no commit-response
+    // identity at all (`COMMIT_RESPONSE_EVENT_IDENTITIES`), so these reconnects
+    // cannot admit evidence and the effect stays refused until the producer
+    // lands (P3-T2).
     let allFrames = [...stream.frames];
     let observedRevision = findCommitRevision(allFrames);
     let tailReads = 0;
@@ -1848,6 +1920,7 @@ export {
   executionProjectionOf,
   exitCodeFor,
   findCommitRevision,
+  parseCommitResponseRevision,
   readFixture,
   resolveEffectRevision,
   resolveExecutable,
