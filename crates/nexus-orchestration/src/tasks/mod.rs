@@ -1934,6 +1934,20 @@ impl Task for StateCompositeTask {
                         }
                     }
                     context.set("_capability_input", cap_input)?;
+                    // One invocation, one result: the PREVIOUS invocation's
+                    // result keys are cleared here — AFTER this invocation's
+                    // args were rendered above (a preset may legitimately read
+                    // the previous output while rendering, e.g.
+                    // `{{_capability_output.sessionId}}`) and BEFORE the
+                    // capability runs. `CapabilityTask` then writes this
+                    // invocation's own outcome, so a failure can never leave an
+                    // older successful `_capability_output` standing next to the
+                    // current `_capability_name`, and a success never leaves a
+                    // stale `_capability_error` behind. Absence (not `Null`)
+                    // matches the pre-first-invocation state the graph already
+                    // exposes.
+                    context.remove("_capability_output");
+                    context.remove("_capability_error");
                     let registry = self.registry.clone().unwrap_or_else(|| {
                         std::sync::Arc::new(CapabilityRegistry::with_builtins())
                     });

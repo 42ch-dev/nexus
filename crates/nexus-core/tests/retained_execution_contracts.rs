@@ -6346,6 +6346,69 @@ states:
     )
 }
 
+/// The SUCCESS→FAILURE sequence on ONE capability name: `workspace.open`, a
+/// first `workspace.commit` that applies, then a SECOND `workspace.commit`
+/// that cannot apply. The second invocation fails while `_capability_name`
+/// still reads `workspace.commit`, so a projection that does not require the
+/// output to belong to the SAME invocation reports the first attempt's
+/// revision as if the latest — failed — commit had produced it.
+const DOUBLE_COMMIT_PRESET: &str = "projection-double-commit";
+
+fn double_commit_preset_yaml() -> String {
+    format!(
+        r#"
+preset:
+  id: {DOUBLE_COMMIT_PRESET}
+  version: 1
+  kind: creator
+  description: "projection fixture — one successful commit, then a failing second commit"
+  requires_capabilities:
+    - workspace.open
+    - workspace.commit
+  initial: open_scope
+  terminal: done
+states:
+  - id: open_scope
+    description: "open a scope inside the factory-resolved creative root"
+    enter:
+      - kind: capability
+        name: workspace.open
+        args:
+          path: notes
+    exit_when: {{ kind: rule }}
+    next: first_commit
+  - id: first_commit
+    description: "the commit that applies (its session comes from the open output)"
+    enter:
+      - kind: capability
+        name: workspace.commit
+        args:
+          sessionId: "{{{{_capability_output.sessionId}}}}"
+          changes:
+            - path: first.txt
+              op: create
+              contentBase64: "{HOSTED_PAYLOAD_B64}"
+    exit_when: {{ kind: rule }}
+    next: second_commit
+  - id: second_commit
+    description: "the SECOND commit on the same name that cannot apply"
+    enter:
+      - kind: capability
+        name: workspace.commit
+        args:
+          sessionId: "no-such-workspace-session"
+          changes:
+            - path: second.txt
+              op: create
+              contentBase64: "{HOSTED_PAYLOAD_B64}"
+    exit_when: {{ kind: rule }}
+    next: done
+  - id: done
+    terminal: true
+"#
+    )
+}
+
 /// The durable `workspace.commit` checkpoint of one run, read straight out of
 /// the persisted graph context: `(output revision, capability error)`.
 ///
@@ -6997,6 +7060,73 @@ async fn hosted_workspace_commit_projection_is_authorized_and_survives_restart()
         "a failed commit must never yield a revision"
     );
 
+    // ── The SUCCESS→FAILURE sequence on the same capability name: the first
+    //    commit applies, the SECOND one fails. The failed invocation owns no
+    //    output, so the detail must project NOTHING — the previous attempt's
+    //    revision must never be presented as the latest checkpoint. ──
+    write_preset_bundle(
+        &nexus_home,
+        DOUBLE_COMMIT_PRESET,
+        &double_commit_preset_yaml(),
+        "unused by this preset\n",
+    );
+    let settled_before_double = committed_intent_revisions(pool.as_ref()).await;
+    let double_schedule = add_parallel_any_schedule(
+        &fixture.handle,
+        &principal,
+        DOUBLE_COMMIT_PRESET,
+        "projection-double-commit",
+    )
+    .await;
+    let double_run = wait_for_schedule_run(pool.as_ref(), &double_schedule).await;
+    assert_eq!(
+        wait_for_terminal_run(pool.as_ref(), &double_run).await,
+        "completed",
+        "the graph finishes; the second commit's failure is a step status"
+    );
+    assert_eq!(
+        std::fs::read(fixture.root.join("notes/first.txt")).expect("the first commit applies"),
+        HOSTED_PAYLOAD,
+        "the FIRST commit must be the one that linearized"
+    );
+    assert!(
+        !fixture.root.join("notes/second.txt").exists(),
+        "the failing second commit applies nothing"
+    );
+    let settled_after_double = committed_intent_revisions(pool.as_ref()).await;
+    assert_eq!(
+        settled_after_double.len(),
+        settled_before_double.len() + 1,
+        "exactly the FIRST commit of the double sequence may settle: \
+         {settled_before_double:?} -> {settled_after_double:?}"
+    );
+    assert!(
+        settled_before_double
+            .iter()
+            .all(|revision| settled_after_double.contains(revision)),
+        "the earlier settled revision stays durable: {settled_after_double:?}"
+    );
+    let (double_output, double_error) =
+        durable_commit_checkpoint(pool.as_ref(), &double_run).await;
+    assert!(
+        fixture
+            .handle
+            .get_workflow_session(&principal, double_run.clone())
+            .await
+            .expect("the double-commit run's detail")
+            .workspace_commit
+            .is_none(),
+        "the previous attempt's revision must never be projected for a failed latest commit"
+    );
+    assert!(
+        double_error.is_some(),
+        "the second commit must have failed durably: {double_error:?}"
+    );
+    assert!(
+        double_output.is_none(),
+        "the failed invocation must leave NO output of its own: {double_output:?}"
+    );
+
     // ── The restart: the same revision, once. ──
     fixture.host.release_all();
     let report = fixture.handle.close().await.expect("owner close");
@@ -7025,8 +7155,8 @@ async fn hosted_workspace_commit_projection_is_authorized_and_survives_restart()
     );
     assert_eq!(
         committed_intent_revisions(pool_b.as_ref()).await,
-        vec![committed_revision.clone()],
-        "the restart settles no second commit revision"
+        settled_after_double,
+        "the restart settles no further commit revision"
     );
     assert!(
         handle_b
@@ -7045,6 +7175,20 @@ async fn hosted_workspace_commit_projection_is_authorized_and_survives_restart()
             .workspace_commit
             .is_none(),
         "a failed commit still exposes nothing after the restart"
+    );
+    assert!(
+        handle_b
+            .get_workflow_session(&principal_b, double_run.clone())
+            .await
+            .expect("the double-commit run's detail after the restart")
+            .workspace_commit
+            .is_none(),
+        "a failed LATEST commit still exposes nothing after the restart"
+    );
+    assert_eq!(
+        durable_commit_checkpoint(pool_b.as_ref(), &double_run).await,
+        (None, double_error.clone()),
+        "the failed invocation's durable pair survives the restart unchanged"
     );
 
     // ── The shape matrix on the live owner. A staged context is the
