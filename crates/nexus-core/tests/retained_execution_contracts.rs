@@ -56,9 +56,14 @@ use nexus_agent_host::{
 };
 use nexus_contracts::local::schedule::http::{AddScheduleRequest, AgentBindingDto};
 use nexus_contracts::{
-    CoreError as WireCoreError, CoreErrorCode, ProviderCall, ProviderEventBatch, ProviderReply,
+    CoreError as WireCoreError, CoreErrorCode, CoreWorkspaceCommitRequest,
+    CoreWorkspaceCommitRequestChangesItem, CoreWorkspaceCommitRequestChangesItemOp, ProviderCall,
+    ProviderEventBatch, ProviderReply,
 };
+use nexus_core::execution::authority::WorkspaceAuthorityLease;
 use nexus_core::execution::prompt_executor::HostPromptExecutor;
+#[cfg(feature = "test-hooks")]
+use nexus_core::execution::test_hooks;
 use nexus_core::execution::schedules::chronology::{
     parse_interval_secs, run_one_tick as chronology_run_one_tick, AutoChronologyConfig,
     DEFAULT_AUTO_CHRONOLOGY_INTERVAL_SECS, ENV_AUTO_CHRONOLOGY_INTERVAL_MIN,
@@ -2600,7 +2605,23 @@ struct HostedFixture {
 
 async fn hosted_fixture() -> HostedFixture {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let home = tmp.path();
+    let root = prepare_hosted_home(tmp.path()).await;
+    let (core, host, handle) = open_hosted_owner(tmp.path()).await;
+    HostedFixture {
+        tmp,
+        core,
+        host,
+        handle,
+        root,
+    }
+}
+
+/// Prepare a home that [`open_hosted_owner`] can open: the nexus config
+/// selecting the fixture Creator/workspace, a registered creative root, the
+/// seeded admitted Creator row and the hosted preset bundle.
+///
+/// Returns the CANONICAL creative root the factory will resolve.
+async fn prepare_hosted_home(home: &Path) -> PathBuf {
     let nexus_home = home.join(".nexus42");
     std::fs::create_dir_all(&nexus_home).expect("nexus home");
     let creative_root = home.join("creative");
@@ -2650,6 +2671,14 @@ async fn hosted_fixture() -> HostedFixture {
         nexus_local_db::writer_protocol::release_retained_writer_guards(&db_path);
     }
 
+    std::fs::canonicalize(&creative_root).expect("canonical creative root")
+}
+
+/// Open ONE hosted owner over a home prepared by [`prepare_hosted_home`].
+///
+/// Separate from [`hosted_fixture`] so a test can open a SECOND owner over the
+/// same home after the first one closed.
+async fn open_hosted_owner(home: &Path) -> (CoreService, Arc<ParkedHost>, Arc<ExecutionHandle>) {
     let core = CoreService::open(CoreOpenOptions {
         user_home: home.into(),
         access: CoreAccess::EngineOwner,
@@ -2665,14 +2694,7 @@ async fn hosted_fixture() -> HostedFixture {
         )
         .await
         .expect("the public factory composes the hosted owner");
-
-    HostedFixture {
-        tmp,
-        core,
-        host,
-        handle,
-        root: std::fs::canonicalize(&creative_root).expect("canonical creative root"),
-    }
+    (core, host, handle)
 }
 
 /// A `driven_v1` pending schedule for the hosted preset, created through the
@@ -4469,4 +4491,281 @@ async fn public_resume_reconciles_the_paused_schedule_row() {
     let report = fixture.handle.close().await.expect("owner close");
     assert!(report.cleanup_confirmed, "close must report confirmed cleanup");
     fixture.core.close().await.expect("core close");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Close vs. admitted durable commit (v1.195 P0-T5 close findings)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The file the close-vs-commit regressions commit into the selected root.
+///
+/// Scope-relative: the session is opened on `notes`, so the manifest path is
+/// `drained.txt` and the file lands at `notes/drained.txt` (the same shape the
+/// hosted preset's own `workspace.commit` uses).
+const DRAINED_PATH: &str = "drained.txt";
+
+/// How long a caller's cleanup budget is simulated to last.
+///
+/// The native close wrapper wraps `cleanup_owners -> CoreService::close` in a
+/// 5s budget; the regressions below use a shorter one because the property
+/// under test is cancellation safety, not the exact duration.
+const CALLER_CLEANUP_BUDGET: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// The observation window for "this close must NOT have finished yet".
+///
+/// NOT the race fence — the armed [`test_hooks::OwnerGate`] is: it parks the
+/// retained commit owner at its admission boundary, so a correct close
+/// provably cannot finish while the gate is held. The window only gives an
+/// INCORRECT close the time to prove it by finishing during the hold.
+const CLOSE_OBSERVATION_WINDOW: std::time::Duration = std::time::Duration::from_millis(750);
+
+/// Whether `task` finished within `window` (checked without consuming it).
+#[cfg(feature = "test-hooks")]
+async fn finished_within<T>(
+    task: &mut tokio::task::JoinHandle<T>,
+    window: std::time::Duration,
+) -> bool {
+    tokio::time::timeout(window, async {
+        loop {
+            if task.is_finished() {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .is_ok()
+}
+
+/// Admit ONE durable workspace commit through the PUBLIC handle op, park the
+/// retained owner at its admission boundary with the test gate, and drop the
+/// awaiting client.
+///
+/// This is the exact shape of a client disconnect mid-commit: the owner holds
+/// its durable claim and keeps running, while nothing is left awaiting it.
+#[cfg(feature = "test-hooks")]
+async fn admit_commit_and_drop_the_client(
+    fixture: &HostedFixture,
+) -> (Arc<test_hooks::OwnerGate>, String) {
+    let principal = fixture.core.active_principal().await.unwrap();
+    let manager = Arc::clone(
+        fixture
+            .handle
+            .workspace_commit_authority()
+            .expect("the hosted owner is bound to a commit authority")
+            .manager(),
+    );
+    let root = fixture.root.to_string_lossy().into_owned();
+    let session = manager
+        .open_session(&root, "notes", true)
+        .await
+        .expect("open a commit session");
+    let session_id = session.to_string();
+
+    let gate = Arc::new(test_hooks::OwnerGate::for_session(session_id.clone()));
+    test_hooks::set_owner_gate(Some(Arc::clone(&gate)));
+
+    let request = CoreWorkspaceCommitRequest {
+        session_id: session_id.parse().expect("non-empty session id"),
+        changes: vec![CoreWorkspaceCommitRequestChangesItem {
+            content_base64: Some(HOSTED_PAYLOAD_B64.to_string()),
+            expected_hash: None,
+            op: CoreWorkspaceCommitRequestChangesItemOp::Create,
+            path: DRAINED_PATH.parse().expect("non-empty path"),
+        }],
+    };
+    let mut committer = {
+        let handle = Arc::clone(&fixture.handle);
+        tokio::spawn(async move { handle.commit_workspace(&principal, request).await })
+    };
+    // Deterministic: the owner holds its durable claim (nothing applied yet).
+    // A refusal instead of the rendezvous is a TEST failure, never a hang.
+    tokio::select! {
+        () = gate.admitted.notified() => {}
+        refused = &mut committer => panic!(
+            "the commit was refused before its admission boundary: {:?}",
+            refused
+        ),
+    }
+    // Drop the awaiting client; the retained owner keeps applying.
+    committer.abort();
+    let _ = committer.await;
+    (gate, session_id)
+}
+
+/// The durable revision of the commit `session_id` settled, read through a
+/// LATER owner's admitted pool.
+#[cfg(feature = "test-hooks")]
+async fn settled_revision(core: &CoreService, session_id: &str) -> String {
+    let pool = core.pool();
+    let digest = nexus_local_db::get_committed_request_digest(pool, session_id)
+        .await
+        .expect("read the committed digest")
+        .expect("the session's commit is durably recorded");
+    nexus_local_db::get_committed_intent_by_digest(pool, session_id, &digest)
+        .await
+        .expect("read the committed intent")
+        .expect("the committed digest names an intent")
+        .revision
+}
+
+/// A confirmed close WAITS for every already-admitted durable workspace commit.
+///
+/// `handle.commit_workspace` runs on a RETAINED owner task that outlives its
+/// awaiting caller (client disconnect, shutdown), so the drive drain alone
+/// cannot cover it: a commit admitted just before `close()` must reach its
+/// durable conclusion BEFORE the workspace authority is released, or a new
+/// owner could recover/use the same root while the old commit was still
+/// applying.
+#[cfg(feature = "test-hooks")]
+#[tokio::test]
+#[serial_test::serial]
+async fn close_drains_an_admitted_durable_commit_before_releasing_the_authority() {
+    let fixture = hosted_fixture().await;
+    let home = fixture.tmp.path().to_path_buf();
+    let db_path = nexus_home_layout::workspace_state_db_path(&home, CREATOR, SLUG);
+    let epoch_a = fixture.handle.engine_epoch();
+    let (gate, session_id) = admit_commit_and_drop_the_client(&fixture).await;
+
+    // Close now. While the admitted commit is still applying, NO confirmed
+    // close, NO released lease and NO replacement owner may appear.
+    let mut closer = {
+        let core = fixture.core.clone();
+        tokio::spawn(async move { core.close().await })
+    };
+    assert!(
+        !finished_within(&mut closer, CLOSE_OBSERVATION_WINDOW).await,
+        "close reported a settled state while an admitted durable commit was still applying"
+    );
+    assert!(
+        !fixture.handle.is_settled(),
+        "the owner settled while an admitted durable commit was still applying"
+    );
+    assert!(
+        WorkspaceAuthorityLease::acquire(&db_path).is_err(),
+        "the workspace authority was released before the admitted commit settled"
+    );
+
+    // Release the gate: the commit applies, and only THEN does close confirm.
+    gate.proceed.notify_one();
+    gate.settled.notified().await;
+    let report = closer
+        .await
+        .expect("the close task joins")
+        .expect("a close report");
+    assert_eq!(report.state, nexus_contracts::CoreCloseReportState::Closed);
+    assert!(
+        report.cleanup_confirmed,
+        "the close confirms only after the admitted commit settled"
+    );
+    test_hooks::set_owner_gate(None);
+
+    // The commit the disconnect left behind is durably applied ...
+    assert_eq!(
+        std::fs::read(fixture.root.join("notes").join(DRAINED_PATH))
+            .expect("the committed bytes are durable"),
+        HOSTED_PAYLOAD
+    );
+
+    // ... and the NEXT owner over the same home is a NEW admission (advanced
+    // engine epoch) that reads that commit's durable revision.
+    let (core_b, _host_b, handle_b) = open_hosted_owner(&home).await;
+    assert!(
+        handle_b.engine_epoch() > epoch_a,
+        "the next owner must be a NEW admission ({} -> {})",
+        epoch_a,
+        handle_b.engine_epoch()
+    );
+    let revision = settled_revision(&core_b, &session_id).await;
+    assert!(
+        revision.starts_with("rev_"),
+        "the next owner reads the settled revision, got {revision}"
+    );
+    handle_b.close().await.expect("close the next owner");
+    core_b.close().await.expect("close the next core");
+}
+
+/// An INTERRUPTED close neither confirms nor releases anything, and the retry
+/// waits for the REAL drain instead of fabricating a confirmation.
+///
+/// The native cleanup budget cancels `CoreService::close()`'s future. The
+/// drain the first close started must survive that cancellation, and a later
+/// close must observe the real settlement — never report a close that never
+/// happened while the admitted commit still runs.
+#[cfg(feature = "test-hooks")]
+#[tokio::test]
+#[serial_test::serial]
+async fn an_interrupted_close_is_retried_honestly() {
+    let fixture = hosted_fixture().await;
+    let home = fixture.tmp.path().to_path_buf();
+    let db_path = nexus_home_layout::workspace_state_db_path(&home, CREATOR, SLUG);
+    let epoch_a = fixture.handle.engine_epoch();
+    let (gate, session_id) = admit_commit_and_drop_the_client(&fixture).await;
+
+    // The caller's cleanup budget expires with the commit still applying: the
+    // close future is DROPPED, exactly as the native close wrapper drops it.
+    let interrupted =
+        tokio::time::timeout(CALLER_CLEANUP_BUDGET, fixture.core.close()).await;
+    assert!(
+        interrupted.is_err(),
+        "close must not settle while an admitted durable commit is still applying"
+    );
+
+    // Nothing was confirmed and nothing was released.
+    assert!(
+        !fixture.handle.is_settled(),
+        "an interrupted close must retain the owner it did not settle"
+    );
+    assert!(
+        WorkspaceAuthorityLease::acquire(&db_path).is_err(),
+        "an interrupted close must retain the workspace authority"
+    );
+
+    // The RETRY must not fabricate a confirmation either.
+    let retried = tokio::time::timeout(CALLER_CLEANUP_BUDGET, fixture.core.close()).await;
+    assert!(
+        retried.is_err(),
+        "a retried close must wait for the retained drain, never report a close that never happened"
+    );
+    assert!(
+        !fixture.handle.is_settled(),
+        "a retried close must not settle the owner it never drained"
+    );
+    assert!(
+        WorkspaceAuthorityLease::acquire(&db_path).is_err(),
+        "a retried close must not release the authority before the commit settled"
+    );
+
+    // Release the gate: the retained drain finishes, and the retry confirms
+    // the REAL settlement.
+    gate.proceed.notify_one();
+    gate.settled.notified().await;
+    let report = fixture.core.close().await.expect("a close report");
+    assert_eq!(report.state, nexus_contracts::CoreCloseReportState::Closed);
+    assert!(
+        report.cleanup_confirmed,
+        "the retry confirms the drain that actually ran"
+    );
+    test_hooks::set_owner_gate(None);
+    assert_eq!(
+        std::fs::read(fixture.root.join("notes").join(DRAINED_PATH))
+            .expect("the committed bytes are durable"),
+        HOSTED_PAYLOAD
+    );
+
+    // The home is free again: a fresh owner takes a NEW admission.
+    let (core_b, _host_b, handle_b) = open_hosted_owner(&home).await;
+    assert!(
+        handle_b.engine_epoch() > epoch_a,
+        "the next owner must be a NEW admission ({} -> {})",
+        epoch_a,
+        handle_b.engine_epoch()
+    );
+    let revision = settled_revision(&core_b, &session_id).await;
+    assert!(
+        revision.starts_with("rev_"),
+        "the next owner reads the settled revision, got {revision}"
+    );
+    handle_b.close().await.expect("close the next owner");
+    core_b.close().await.expect("close the next core");
 }

@@ -979,25 +979,31 @@ fn cleanup_staged_confirmed(
 /// # Errors
 ///
 /// Returns whatever [`commit_recoverable`] reports for the manifest.
-/// Cancellation of the awaiting caller does not abandon the owned commit; the
-/// spawned owner is registered on the manager so a later pass can reap it.
+/// Cancellation of the awaiting caller does not abandon the owned commit. The
+/// admission is taken BEFORE the owner task is spawned and held BY that task,
+/// so the owning handle's close either sees this commit (and waits for it) or
+/// refuses it — never both, and never neither.
 pub async fn commit_recoverable_owned(
     mgr: Arc<WorkspaceSessionManager>,
     session_id: SessionId,
     changes: Vec<WorkspaceChangeEntry>,
     active_workspace_root: String,
 ) -> Result<CommitOutcome, SessionError> {
+    // ATOMIC admission: registered before the close boundary can be closed, or
+    // refused. The guard moves INTO the retained owner below, so a waiter that
+    // disconnects (or is cancelled) cannot release it.
+    let admission = mgr.admit_commit()?;
     let (tx, rx) = tokio::sync::oneshot::channel();
     let mgr2 = Arc::clone(&mgr);
     let sid = session_id.clone();
     let active_root = active_workspace_root.clone();
-    let owner = tokio::spawn(async move {
+    tokio::spawn(async move {
+        let _admission = admission;
         clear_inherited_crash_point();
         let result = commit_recoverable(&mgr2, &sid, &changes, &active_root).await;
         test_owner_gate_settled(&sid.to_string());
         let _ = tx.send(result);
     });
-    mgr.register_commit_owner(owner).await;
     rx.await
         .unwrap_or_else(|_| Err(SessionError::Internal("commit owner channel closed".into())))
 }

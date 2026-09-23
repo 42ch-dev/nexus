@@ -98,6 +98,18 @@ pub struct CoreInner {
     generation: AtomicU64,
     pub(crate) access: CoreAccess,
     closing: AtomicBool,
+    /// Set by the FIRST [`CoreService::close`]: the ONE retained close drain
+    /// was started.
+    ///
+    /// The drain runs on its own task (see [`CoreService::close`]) so an
+    /// interrupted caller cannot abandon a half-drained service, and a later
+    /// close observes the real settlement instead of reporting a close that
+    /// never happened.
+    close_drain_started: AtomicBool,
+    /// The retained drain's REAL result — `None` until it finishes.
+    close_report: Mutex<Option<CoreCloseReport>>,
+    /// Notified when [`Self::close_report`] is published.
+    close_settled: tokio::sync::Notify,
     /// Per-Character activity/transition fences (v1.190 P2-T1), Host-free
     /// and separate from any process session registry.
     pub(crate) character_fences: ActorFenceTable,
@@ -232,6 +244,9 @@ impl CoreService {
                 generation: AtomicU64::new(1),
                 access: options.access,
                 closing: AtomicBool::new(false),
+                close_drain_started: AtomicBool::new(false),
+                close_report: Mutex::new(None),
+                close_settled: tokio::sync::Notify::new(),
                 #[cfg(feature = "provider-host")]
                 host_authority_established: Mutex::new(false),
                 character_fences: ActorFenceTable::new(&db_path),
@@ -488,78 +503,154 @@ impl CoreService {
         read_changes(&self.inner.pool, request).await
     }
 
-    /// Close the pool and release writer guards exactly once; repeated calls
-    /// report the already-closed state.
+    /// Close the pool and release writer guards exactly once.
+    ///
+    /// The drain runs as a RETAINED task, not on the caller's future: the
+    /// native cleanup budget cancels this future mid-drain, and a later close
+    /// must observe (and wait for) the REAL drain instead of reporting a close
+    /// that never happened. Every caller — including a retry after an
+    /// interrupted close — waits for that task's result, so a confirmed report
+    /// is only ever published by a close that actually settled, and an
+    /// interrupted caller retains the pool, the writer admission and the
+    /// execution owner it did not settle.
     ///
     /// # Errors
-    /// Currently infallible: the report always describes a fully settled
-    /// close (`cleanup_confirmed`), including for repeat callers.
+    /// Currently infallible: the report describes a settled close, or the
+    /// unconfirmed report of a drain that could not run.
     pub async fn close(&self) -> CoreResult<CoreCloseReport> {
+        self.start_close_drain();
+        loop {
+            let notified = self.inner.close_settled.notified();
+            tokio::pin!(notified);
+            // Register BEFORE the check so a settlement that lands in between
+            // cannot be missed.
+            notified.as_mut().enable();
+            let report = self
+                .inner
+                .close_report
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
+            if let Some(report) = report {
+                return Ok(report);
+            }
+            notified.await;
+        }
+    }
+
+    /// Start the ONE close drain, if it has not been started yet.
+    ///
+    /// The fence rises in the caller's own step, before the drain task first
+    /// runs, so an operation that arrives after `close` began is refused even
+    /// while the drain is still being scheduled.
+    fn start_close_drain(&self) {
         if self
             .inner
-            .closing
+            .close_drain_started
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_err()
         {
-            return Ok(CoreCloseReport {
-                state: nexus_contracts::CoreCloseReportState::Closed,
-                cleanup_confirmed: true,
-                pending_operations: vec![],
-                reason: None,
-            });
+            return;
         }
-        // I4: settle the execution owner BEFORE the SQL pool closes. Drive
-        // cancellation, the bounded join and every final durable settlement
-        // run against a LIVE pool — closing the pool first would make the
-        // documented cleanup path fail against a dead connection.
-        #[cfg(feature = "execution")]
-        let execution_handle = self
-            .inner
-            .execution
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take();
-        #[cfg(feature = "execution")]
-        if let Some(handle) = &execution_handle {
-            handle.shutdown().await;
-        }
-        self.inner.pool.close().await;
-        // A confirmed close ends the admission THIS open took over the home.
-        // Both halves are needed for the OS lock to actually go away:
-        //
-        // 1. the retained guard is what a later open would otherwise JOIN — and
-        //    joining a settled generation would republish its epoch while
-        //    claiming a fresh owner, so the next owner must take a new
-        //    admission (a new epoch) instead;
-        // 2. this open's own admitted-pool handle is given up, so a closed
-        //    service value that is still referenced cannot keep the guard
-        //    behind `state.db.engine.lock` alive after the close reported the
-        //    service released.
-        //
-        // `owns_engine_admission` keeps the two accesses apart: an
-        // `EngineOwner` that merely JOINED a live in-process admission (the
-        // daemon's co-host shape) releases nothing, because the creator still
-        // owns it. The `DirectWriter` arm is the pre-existing cooperative
-        // rule (`init_guarded_pool` always creates its own admission).
-        if self.inner.access == CoreAccess::DirectWriter || self.inner.owns_engine_admission {
-            release_retained_writer_guards(&self.inner.db_path);
-            self.inner
-                .guarded
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .take();
-        }
-        // `take` returned the handle, so ownership is settled; release the
-        // per-DB fence so a later open of the same DB can claim it.
-        #[cfg(feature = "execution")]
-        if let Some(handle) = execution_handle {
-            crate::execution::lifecycle::release_owner_slot(&self.inner.db_path, &handle);
-        }
-        Ok(CoreCloseReport {
-            state: nexus_contracts::CoreCloseReportState::Closed,
-            cleanup_confirmed: true,
-            pending_operations: vec![],
-            reason: None,
-        })
+        self.inner.closing.store(true, Ordering::SeqCst);
+        let inner = Arc::clone(&self.inner);
+        tokio::spawn(async move {
+            // A drain that panicked must not strand every later close on a
+            // report that never comes.
+            if tokio::spawn(close_drain(Arc::clone(&inner))).await.is_err() {
+                publish_close_report(&inner, interrupted_close_report());
+            }
+        });
+    }
+}
+
+/// The retained close drain: settle the execution owner, then the SQL pool and
+/// every admission this open took over the home, then publish the ONE report.
+///
+/// I4 ordering is load-bearing: the execution owner is settled BEFORE the SQL
+/// pool closes, because drive cancellation, the bounded join and every final
+/// durable settlement run against a LIVE pool.
+async fn close_drain(inner: Arc<CoreInner>) {
+    #[cfg(feature = "execution")]
+    let execution_handle = inner
+        .execution
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .take();
+    #[cfg(feature = "execution")]
+    if let Some(handle) = &execution_handle {
+        handle.shutdown().await;
+    }
+    inner.pool.close().await;
+    // A confirmed close ends the admission THIS open took over the home.
+    // Both halves are needed for the OS lock to actually go away:
+    //
+    // 1. the retained guard is what a later open would otherwise JOIN — and
+    //    joining a settled generation would republish its epoch while
+    //    claiming a fresh owner, so the next owner must take a new
+    //    admission (a new epoch) instead;
+    // 2. this open's own admitted-pool handle is given up, so a closed
+    //    service value that is still referenced cannot keep the guard
+    //    behind `state.db.engine.lock` alive after the close reported the
+    //    service released.
+    //
+    // `owns_engine_admission` keeps the two accesses apart: an
+    // `EngineOwner` that merely JOINED a live in-process admission (the
+    // daemon's co-host shape) releases nothing, because the creator still
+    // owns it. The `DirectWriter` arm is the pre-existing cooperative
+    // rule (`init_guarded_pool` always creates its own admission).
+    if inner.access == CoreAccess::DirectWriter || inner.owns_engine_admission {
+        release_retained_writer_guards(&inner.db_path);
+    }
+    // EVERY closing core gives up its OWN admitted-pool handle, joiner
+    // included: a cooperative joiner holds a clone of the CREATOR's guard, so
+    // a closed-but-still-referenced joiner would otherwise keep
+    // `state.db.engine.lock` open after the creator released the retained
+    // entry — and a fresh open over the same home would fail `OwnerBusy` with
+    // no live owner at all.
+    inner
+        .guarded
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .take();
+    // `take` returned the handle, so ownership is settled; release the
+    // per-DB fence so a later open of the same DB can claim it.
+    #[cfg(feature = "execution")]
+    if let Some(handle) = execution_handle {
+        crate::execution::lifecycle::release_owner_slot(&inner.db_path, &handle);
+    }
+    publish_close_report(&inner, settled_close_report());
+}
+
+/// Publish the drain's result exactly ONCE and wake every waiter.
+fn publish_close_report(inner: &CoreInner, report: CoreCloseReport) {
+    let mut slot = inner
+        .close_report
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if slot.is_none() {
+        *slot = Some(report);
+    }
+    drop(slot);
+    inner.close_settled.notify_waiters();
+}
+
+const fn settled_close_report() -> CoreCloseReport {
+    CoreCloseReport {
+        state: nexus_contracts::CoreCloseReportState::Closed,
+        cleanup_confirmed: true,
+        pending_operations: Vec::new(),
+        reason: None,
+    }
+}
+
+/// The report of a drain that could not run to completion: nothing was
+/// released and no caller may treat it as a confirmation.
+const fn interrupted_close_report() -> CoreCloseReport {
+    CoreCloseReport {
+        state: nexus_contracts::CoreCloseReportState::Interrupted,
+        cleanup_confirmed: false,
+        pending_operations: Vec::new(),
+        reason: None,
     }
 }

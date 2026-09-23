@@ -7,7 +7,7 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use nexus_contracts::local::orchestration::{WorkspaceChangeEntry, WorkspaceChangeOp};
 use nexus_local_db as db;
@@ -357,13 +357,109 @@ async fn compute_content_hashes_inner(
 
 // ── Workspace session manager (DB-backed) ───────────────────────────────────
 
+/// The atomic close/admission boundary for one authority's durable commits.
+///
+/// A durable commit is admitted by a RETAINED owner task that outlives its
+/// awaiting caller, so no single `JoinHandle` can tell an owner close what it
+/// must wait for — a later commit would overwrite an earlier unfinished one.
+/// This counter is that boundary instead: [`Self::admit`] either registers a
+/// commit BEFORE the boundary was closed, or fails closed; [`Self::close`]
+/// stops further admissions; and [`Self::wait_idle`] returns only once every
+/// registered owner task has finished — including one whose awaiting caller
+/// disconnected, because the guard lives in the OWNER task, never in a waiter.
+#[derive(Debug, Default)]
+struct CommitAdmissions {
+    state: Mutex<CommitAdmissionState>,
+    idle: tokio::sync::Notify,
+}
+
+#[derive(Debug, Default)]
+struct CommitAdmissionState {
+    /// Closed by the owning handle's close: no further commit may be admitted.
+    closed: bool,
+    /// Admitted commits whose retained owner task has not finished yet.
+    active: usize,
+}
+
+impl CommitAdmissions {
+    /// Register one durable commit, or refuse because the boundary is closed.
+    fn admit(self: &Arc<Self>) -> Result<CommitAdmission, SessionError> {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        if state.closed {
+            return Err(SessionError::AuthorityBusy);
+        }
+        state.active += 1;
+        drop(state);
+        Ok(CommitAdmission {
+            admissions: Arc::clone(self),
+        })
+    }
+
+    /// Close the boundary: every later admission fails closed.
+    fn close(&self) {
+        self.state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .closed = true;
+    }
+
+    /// Wait until every admitted commit has finished.
+    async fn wait_idle(&self) {
+        loop {
+            let notified = self.idle.notified();
+            tokio::pin!(notified);
+            // Register BEFORE the check: the release path uses
+            // `notify_waiters`, which wakes only already-registered waiters,
+            // so an unregistered check-then-await would sleep through it.
+            notified.as_mut().enable();
+            if self
+                .state
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .active
+                == 0
+            {
+                return;
+            }
+            notified.await;
+        }
+    }
+}
+
+/// One admitted durable commit's share of its authority's admission count.
+///
+/// Held by the RETAINED OWNER TASK for that task's whole lifetime, so a
+/// waiter that disconnects or is cancelled cannot release it and the owning
+/// close cannot miss the commit.
+#[derive(Debug)]
+pub(crate) struct CommitAdmission {
+    admissions: Arc<CommitAdmissions>,
+}
+
+impl Drop for CommitAdmission {
+    fn drop(&mut self) {
+        let mut state = self
+            .admissions
+            .state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        state.active -= 1;
+        let idle = state.active == 0;
+        drop(state);
+        if idle {
+            self.admissions.idle.notify_waiters();
+        }
+    }
+}
+
 /// Recoverable commit configuration (v1.188 P3).
 pub struct RecoverableCommitConfig {
     pub db_path: PathBuf,
     pub mutation_guard: Arc<tokio::sync::Mutex<()>>,
     pub authority_lease: Arc<WorkspaceAuthorityLease>,
-    /// Retained commit operation owner (survives caller cancellation).
-    pub commit_owner: Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    /// The atomic close/admission boundary for this authority's durable
+    /// commits (see [`CommitAdmissions`]).
+    admissions: Arc<CommitAdmissions>,
 }
 
 /// DB-backed workspace session manager.
@@ -397,7 +493,7 @@ impl Clone for WorkspaceSessionManager {
                     db_path: cfg.db_path.clone(),
                     mutation_guard: Arc::clone(&cfg.mutation_guard),
                     authority_lease: Arc::clone(&cfg.authority_lease),
-                    commit_owner: Arc::clone(&cfg.commit_owner),
+                    admissions: Arc::clone(&cfg.admissions),
                 }),
         }
     }
@@ -443,7 +539,7 @@ impl WorkspaceSessionManager {
                 db_path,
                 mutation_guard: Arc::new(tokio::sync::Mutex::new(())),
                 authority_lease,
-                commit_owner: Arc::new(tokio::sync::Mutex::new(None)),
+                admissions: Arc::new(CommitAdmissions::default()),
             }),
         })
     }
@@ -462,11 +558,43 @@ impl WorkspaceSessionManager {
         }
     }
 
-    /// Register the retained commit operation owner spawned for caller cancellation safety.
-    pub async fn register_commit_owner(&self, handle: tokio::task::JoinHandle<()>) {
+    /// Admit one durable commit against this authority's close boundary.
+    ///
+    /// Fails CLOSED once the owning execution handle closed the boundary: a
+    /// commit that would land after a close must never apply beside that
+    /// close's authority release. `None` means this manager has no recoverable
+    /// authority to fence (such a commit refuses on its own).
+    ///
+    /// # Errors
+    ///
+    /// [`SessionError::AuthorityBusy`] when the boundary is already closed.
+    pub(crate) fn admit_commit(&self) -> Result<Option<CommitAdmission>, SessionError> {
+        match &self.recoverable {
+            Some(cfg) => cfg.admissions.admit().map(Some),
+            None => Ok(None),
+        }
+    }
+
+    /// Close the durable-commit admission boundary.
+    ///
+    /// The owner's close calls this BEFORE it releases the workspace
+    /// authority: every later admission fails closed, and every commit
+    /// admitted before it is still drained by
+    /// [`Self::wait_for_admitted_commits`].
+    pub(crate) fn close_commit_admission(&self) {
         if let Some(cfg) = &self.recoverable {
-            let mut guard = cfg.commit_owner.lock().await;
-            *guard = Some(handle);
+            cfg.admissions.close();
+        }
+    }
+
+    /// Wait until every already-admitted durable commit has finished.
+    ///
+    /// The owner's close calls this before it releases the workspace
+    /// authority, so the released lease can never outlive a commit that is
+    /// still applying through it.
+    pub(crate) async fn wait_for_admitted_commits(&self) {
+        if let Some(cfg) = &self.recoverable {
+            cfg.admissions.wait_idle().await;
         }
     }
 

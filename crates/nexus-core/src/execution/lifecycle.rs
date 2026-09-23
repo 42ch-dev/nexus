@@ -246,6 +246,14 @@ pub struct ExecutionHandle {
     /// Set when `close()` has finished: every owned drive was cancelled and
     /// joined (C1). Only a SETTLED owner may be superseded in the registry.
     settled: AtomicBool,
+    /// Set by the FIRST close: the ONE retained close drain was started.
+    ///
+    /// The drain runs on its own task (see [`Self::close`]) so an interrupted
+    /// caller cannot abandon it and a later close observes the real settlement
+    /// instead of waiting forever for a drain that died with its caller.
+    drain_started: AtomicBool,
+    /// Notified when the retained drain publishes [`Self::settled`].
+    settled_notify: Arc<tokio::sync::Notify>,
     /// The owner's ONE bounded supervisor wake/clock task (v1.195 P0-T2).
     ///
     /// `Some` for a hosted owner (`RunnerDeps::hosted_scheduler`), `None` for
@@ -461,12 +469,14 @@ impl ExecutionHandle {
     /// Abort every owned drive and settle the handle's cleanup in the
     /// documented order.
     ///
-    /// Ordering: fence new drive admission (C2), stop and JOIN the owned
-    /// scheduler task, fire every owned cancellation token and join the drive
-    /// loops, RELEASE the workspace commit/recovery authority this owner
-    /// composed, THEN mark the handle settled (C1) so the per-DB registry
-    /// admits a replacement only after every owned drive has joined. Repeated
-    /// calls report the already-closed state.
+    /// Ordering: fence new drive admission (C2), close the durable-commit
+    /// admission boundary so no further commit can be admitted, stop and JOIN
+    /// the owned scheduler task, fire every owned cancellation token and join
+    /// the drive loops, WAIT for every already-admitted durable commit (a
+    /// retained owner outlives its awaiting caller, so the drive drain alone
+    /// does not cover it) and RELEASE the workspace commit/recovery authority
+    /// this owner composed, THEN mark the handle settled (C1) so the per-DB
+    /// registry admits a replacement only after every owned operation joined.
     ///
     /// The scheduler is joined BEFORE the drive drain on purpose: the C2 fence
     /// already refuses an admission once `begin_shutdown` ran, and joining
@@ -479,37 +489,62 @@ impl ExecutionHandle {
     /// this handle, so a drop-based release would keep the OS lease—and with
     /// it the whole home—fenced after the owner reported `closed`. Everything
     /// this owner could still write through is fenced at this point
-    /// (`ensure_admitting`), so the lease fences nothing live.
+    /// (`ensure_admitting`), and every admitted commit has joined, so the lease
+    /// fences nothing live.
+    ///
+    /// The drain runs on its OWN task, started by the first close: an
+    /// interrupted caller (the native cleanup budget cancels this future) must
+    /// not abandon a half-drained owner, and a later close must observe the
+    /// real settlement rather than wait forever for a drain nobody runs.
     ///
     /// # Errors
     /// Currently infallible: the report always describes a settled close.
-    pub async fn close(&self) -> CoreResult<CoreCloseReport> {
+    pub async fn close(self: &Arc<Self>) -> CoreResult<CoreCloseReport> {
         if self
-            .closing
+            .drain_started
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-            .is_err()
+            .is_ok()
         {
-            // Another close owns the drain (C2). It reports `confirmed` only
-            // AFTER the drives have joined — wait for that settle rather than
-            // returning a false confirmed report from a close that did
-            // nothing.
-            while !self.is_settled() {
-                tokio::time::sleep(std::time::Duration::from_millis(2)).await;
-            }
-            return Ok(closed_report());
+            self.closing.store(true, Ordering::SeqCst);
+            tokio::spawn(Self::run_close(Arc::clone(self)));
         }
-        self.coordinator.begin_shutdown();
-        self.stop_scheduler().await;
-        self.coordinator.abort_all_drives().await;
-        if let Some(authority) = &self.workspace_commit {
-            authority.release_authority();
-        }
-        self.settled.store(true, Ordering::SeqCst);
+        self.await_settled().await;
         Ok(closed_report())
     }
 
+    /// The retained drain body (see [`Self::close`] for the ordering contract).
+    async fn run_close(self: Arc<Self>) {
+        self.coordinator.begin_shutdown();
+        if let Some(authority) = &self.workspace_commit {
+            authority.manager().close_commit_admission();
+        }
+        self.stop_scheduler().await;
+        self.coordinator.abort_all_drives().await;
+        if let Some(authority) = &self.workspace_commit {
+            authority.manager().wait_for_admitted_commits().await;
+            authority.release_authority();
+        }
+        self.settled.store(true, Ordering::SeqCst);
+        self.settled_notify.notify_waiters();
+    }
+
+    /// Wait until the retained drain has published the settlement.
+    async fn await_settled(&self) {
+        loop {
+            let notified = self.settled_notify.notified();
+            tokio::pin!(notified);
+            // Register BEFORE the check so a settlement that lands in between
+            // cannot be missed.
+            notified.as_mut().enable();
+            if self.is_settled() {
+                return;
+            }
+            notified.await;
+        }
+    }
+
     /// Close without owning the report (used by [`CoreService::close`]).
-    pub(crate) async fn shutdown(&self) {
+    pub(crate) async fn shutdown(self: &Arc<Self>) {
         let _ = self.close().await;
     }
 }
@@ -914,6 +949,8 @@ impl CoreService {
             engine_epoch,
             closing: AtomicBool::new(false),
             settled: AtomicBool::new(false),
+            drain_started: AtomicBool::new(false),
+            settled_notify: Arc::new(tokio::sync::Notify::new()),
             scheduler_task: Mutex::new(scheduler_task),
             scheduler_shutdown,
             #[cfg(feature = "connect-client")]
