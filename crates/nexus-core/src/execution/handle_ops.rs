@@ -2,10 +2,11 @@
 //!
 //! The four operations the execution authority owns for the transport:
 //! schedule add/signal, durable workspace commit, and the bounded run-event
-//! page. Each is a typed entry point over an authority the handle already
-//! owns — the transport keeps its HTTP envelope, status codes and CLI
-//! composition; this module only removes the transport's need to reach into
-//! scheduler or commit internals directly.
+//! page, plus the authorized bounded subscription family (P1-T1) that streams
+//! the same ring to a native pull/release client. Each is a typed entry point
+//! over an authority the handle already owns — the transport keeps its HTTP
+//! envelope, status codes and CLI composition; this module only removes the
+//! transport's need to reach into scheduler or commit internals directly.
 //!
 //! Three invariants hold across every operation here:
 //!
@@ -20,12 +21,20 @@
 //!    declared gates pass — or after an audited `force_gates` bypass — exactly
 //!    as the transport path does. The typed seam cannot enqueue a gated preset
 //!    on a missing, foreign or invalid Work.
+//!
+//! The run-event reads (page and subscription) add their own ordering rule:
+//! the principal is verified and the run's durable ROOT ownership resolved
+//! BEFORE any ring, epoch or cursor is consulted, so neither surface can leak
+//! existence, ancestry or history for a run the caller does not own.
 
 use std::sync::Arc;
 
 use nexus_contracts::generated::core::{
     CoreRunEventsResponse, CoreRunEventsResponseEventsItem, CoreRunEventsResponseEventsItemKind,
-    CoreRunEventsResponseNextSequence, CoreRunEventsResponseRunId,
+    CoreRunEventsResponseNextSequence, CoreRunEventsResponseRunId, CoreWorkflowEventBatch,
+    CoreWorkflowEventBatchEventsItem, CoreWorkflowEventBatchEventsItemEvent,
+    CoreWorkflowSubscribeRequest, CoreWorkflowSubscription,
+    CoreWorkflowSubscriptionSubscriptionId,
 };
 use nexus_contracts::generated::daemon_api::orchestration::sessions::list_sessions_query::ListSessionsQuery;
 use nexus_contracts::generated::daemon_api::orchestration::sessions::list_sessions_response::{
@@ -34,6 +43,7 @@ use nexus_contracts::generated::daemon_api::orchestration::sessions::list_sessio
 };
 use nexus_contracts::generated::daemon_api::orchestration::sessions::session_detail_response::{
     NexusOrchestrationSessionSummary as DetailSessionWire, SessionDetailResponse,
+    SessionDetailResponseWorkspaceCommit,
 };
 use nexus_contracts::generated::daemon_api::schedule::edit_core_context_request::EditCoreContextRequest;
 use nexus_contracts::generated::daemon_api::schedule::edit_core_context_response::EditCoreContextResponse;
@@ -67,7 +77,9 @@ use crate::execution::capabilities::{ToolContext, ToolExecuteRequest};
 #[cfg(feature = "compute")]
 use crate::execution::compute::ComputeContext;
 use crate::execution::lifecycle::ExecutionHandle;
-use crate::execution::run_events::PageError;
+use crate::execution::run_events::{
+    PageError, PullOutcome, SubscribeError, WorkflowSubscription,
+};
 use crate::execution::workflow::{RunControlError, RunEventPort, RunSignal};
 use crate::principal::Principal;
 use crate::PresetError;
@@ -361,6 +373,39 @@ impl ExecutionHandle {
     /// never independently authorized by stripping `:child:` from a caller's
     /// string — the public session is the root run the schedule owns.
     ///
+    /// The same authorized row also carries the OPTIONAL `workspace_commit`
+    /// projection (contract §4): the durable revision of this run's own
+    /// checkpointed `workspace.commit` capability output, read from
+    /// `orchestration_sessions.context_json` — the durable graph context —
+    /// AFTER the root row and its stored Creator matched. It is a projection of
+    /// an EXISTING checkpoint, never an inference: the run's
+    /// `RunStateWire.state_revision` is not a commit revision, file bytes are
+    /// not hashed here, and no other context value is exposed.
+    ///
+    /// `context_json` embeds the run's chat history, so it is never loaded into
+    /// memory: the projection is evaluated in SQL with the same
+    /// `json_valid`/`json_type` guards the recovery projection uses (a corrupt
+    /// or non-object context yields nothing instead of raising). The field is
+    /// present only when the LAST capability the graph invoked was
+    /// `workspace.commit` AND the stored `_capability_output` is exactly that
+    /// capability's successful output shape — `{revision: <non-empty>,
+    /// committed: true}` with no other member, i.e. its own
+    /// `additionalProperties: false` output schema. Every other shape yields
+    /// nothing:
+    ///
+    /// - a run that never committed (the pair is absent, or names another
+    ///   capability): absent;
+    /// - a commit that failed or was never checkpointed: absent — the engine
+    ///   writes each invocation's OWN result pair (it clears the previous
+    ///   `_capability_output`/`_capability_error` immediately before a
+    ///   capability runs, after that invocation's args were rendered), so a
+    ///   failure leaves its failure record and no output at all, and a
+    ///   SUCCESS→FAILURE sequence on this same name cannot present the earlier
+    ///   attempt's revision as the latest result. The shape guard below rejects
+    ///   any output another capability produced as well;
+    /// - a malformed/foreign output (wrong types, `committed` not `true`,
+    ///   extra members, empty revision): absent.
+    ///
     /// # Errors
     /// `Closing` when the owner is shutting down, `AuthRequired` for a foreign
     /// principal, `NotFound` for an absent, foreign or child session, and the
@@ -373,8 +418,21 @@ impl ExecutionHandle {
         self.ensure_admitting()?;
         self.linked_core()?.verify_principal(principal)?;
         let pool = self.coordinator().pool();
-        let row = sqlx::query_as::<_, SessionRow>(
-            "SELECT session_id, creator_id, preset_id, status, current_task_id, run_state_json
+        let mut row = sqlx::query_as::<_, SessionRow>(
+            "SELECT session_id, creator_id, preset_id, status, current_task_id, run_state_json,
+                    CASE
+                        WHEN json_valid(context_json)
+                             AND json_type(context_json, '$.data') = 'object'
+                             AND json_extract(context_json, '$.data._capability_name') = 'workspace.commit'
+                             AND json_type(context_json, '$.data._capability_output') = 'object'
+                             AND json_type(context_json, '$.data._capability_output.revision') = 'text'
+                             AND length(json_extract(context_json, '$.data._capability_output.revision')) > 0
+                             AND json_type(context_json, '$.data._capability_output.committed') = 'true'
+                             AND (SELECT COUNT(*) FROM json_each(
+                                      json_extract(context_json, '$.data._capability_output'))) = 2
+                        THEN json_extract(context_json, '$.data._capability_output.revision')
+                        ELSE NULL
+                    END AS workspace_commit_revision
              FROM orchestration_sessions
              WHERE session_id = ? AND parent_session_id IS NULL AND creator_id = ?",
         )
@@ -387,8 +445,15 @@ impl ExecutionHandle {
             resource: format!("workflow session {session_id}"),
         })?;
 
+        // `committed` is the capability's own post-condition: the SQL
+        // projection above only matched an output that carries `true`.
+        let revision = row.workspace_commit_revision.take();
         Ok(SessionDetailResponse {
             session: detail_session_wire(row),
+            workspace_commit: revision.map(|revision| SessionDetailResponseWorkspaceCommit {
+                revision,
+                committed: true,
+            }),
         })
     }
 
@@ -848,23 +913,265 @@ impl ExecutionHandle {
     }
     /// Read a bounded page of a run's retained events.
     ///
+    /// The run is authorized BEFORE the ring or the cursor is touched: the
+    /// scope is the STORED owner (a root `orchestration_sessions` row of the
+    /// principal's creator), so an unknown run, a FOREIGN run and a child
+    /// session id all close with the same `NotFound` and none of them can infer
+    /// existence, epoch or payload from this page.
+    ///
+    /// This numeric-cursor page is the durable read surface; it is NOT the SSE
+    /// subscription (that one keeps `<epoch>:<sequence>` cursors). It shares
+    /// the same bounded ring, so caps and explicit gaps cannot drift.
+    ///
     /// # Errors
-    /// `Closing` when the owner is shutting down, `NotFound` when this owner
-    /// has no run-event port (or no ring for the run), `InvalidInput` for an
-    /// unparsable cursor.
-    pub fn run_events(
+    /// `Closing` when the owner is shutting down, `AuthRequired` for a foreign
+    /// principal, `NotFound` for an absent/foreign/child run or a missing
+    /// run-event port, `InvalidInput` for an unparsable cursor.
+    pub async fn run_events(
         &self,
-        _principal: &Principal,
+        principal: &Principal,
         request: CoreRunEventsRequest,
     ) -> CoreResult<CoreRunEventsResponse> {
         self.ensure_admitting()?;
-        let port = self
-            .coordinator()
+        self.linked_core()?.verify_principal(principal)?;
+        let run_id = request.run_id.as_str().to_string();
+        self.owned_root_run(principal, &run_id).await?;
+        // Same re-check as the subscription path: the durable check awaits, so
+        // a drain that began during it must not be raced by this read either.
+        self.ensure_admitting()?;
+        let port = self.run_event_port()?;
+        run_event_page(&port, request)
+    }
+
+    /// Open ONE authorized subscription to a durable run's bounded event
+    /// stream (contract §4).
+    ///
+    /// Ordering is the contract: the principal is verified, the run's STORED
+    /// ownership is resolved, and only then is the ring consulted — so an
+    /// unknown or foreign run closes with `NotFound` before any ring, epoch or
+    /// cursor is disclosed. A malformed or future cursor is a typed
+    /// invalid-input refusal (the transport's pre-header 400); an unresumable
+    /// history (prior epoch, evicted ring, restart) is NOT an error but the
+    /// single `history_unavailable` control frame the caller streams before it
+    /// closes.
+    ///
+    /// The returned token is opaque and bound to the principal's creator, this
+    /// owner's core generation and the one root run.
+    ///
+    /// # Errors
+    /// `Closing` when the owner is shutting down, `AuthRequired` for a foreign
+    /// principal, `NotFound` for an absent/foreign/child run or a missing
+    /// run-event port, `InvalidInput` for a malformed or future
+    /// `last_event_id`, `Busy` when the run's subscriber cap is reached.
+    pub async fn subscribe_workflow_events(
+        &self,
+        principal: &Principal,
+        request: CoreWorkflowSubscribeRequest,
+    ) -> CoreResult<CoreWorkflowSubscription> {
+        self.ensure_admitting()?;
+        self.linked_core()?.verify_principal(principal)?;
+        let run_id = request.run_id.as_str().to_string();
+        // Authorization FIRST: nothing about the run below this line runs for a
+        // caller who does not durably own it.
+        self.owned_root_run(principal, &run_id).await?;
+        // The drain fence is re-checked after EVERY await on this path: an
+        // owner close that began while the durable check was in flight must not
+        // be raced. (The window below this point is closed by the registry's
+        // seal, which is atomic with the mint.)
+        self.ensure_admitting()?;
+        if let Some(observer) = self.subscription_observer() {
+            observer.owner_resolved().await;
+        }
+        let port = self.run_event_port()?;
+        let inspect_url = run_inspect_url(&run_id);
+        let cursor = request.last_event_id.as_ref().map(|c| c.as_str().to_string());
+        let creator_id = principal.creator_id().to_string();
+        let generation = self.engine_epoch();
+        let subscription = match port.subscribe_live(&run_id, cursor.as_deref(), inspect_url) {
+            Ok(live) => WorkflowSubscription::live(creator_id, generation, run_id, live),
+            // The ring answered that this history cannot be resumed. That is a
+            // stream outcome, not a request failure: the caller gets the one
+            // control frame and a closed stream.
+            Err(SubscribeError::HistoryUnavailable(wire)) => {
+                WorkflowSubscription::unresumable(creator_id, generation, run_id, wire.to_frame())
+            }
+            Err(SubscribeError::MalformedCursor) => {
+                return Err(CoreError::InvalidInput {
+                    field: "last_event_id".into(),
+                    reason: "must be `<UUID epoch>:<decimal sequence>`".into(),
+                });
+            }
+            Err(SubscribeError::FutureCursor) => {
+                return Err(CoreError::InvalidInput {
+                    field: "last_event_id".into(),
+                    reason: "cursor is ahead of the run's retained events".into(),
+                });
+            }
+            Err(SubscribeError::TooManySubscribers) => return Err(CoreError::Busy),
+        };
+        let Some(subscription) = self.workflow_subscriptions.mint(subscription) else {
+            // The owner sealed its table while this call was in flight. The
+            // subscription — and with it the ring subscriber permit attached
+            // just above — is dropped by the refused mint, so nothing leaks.
+            return Err(CoreError::Closing);
+        };
+        // The seal covers every mint from here on, but a close that sealed
+        // right after this mint already withdrew and released the entry; the
+        // caller gets that honest refusal instead of a dead token.
+        if self.is_draining() {
+            self.workflow_subscriptions.take(subscription.id());
+            subscription.release();
+            return Err(CoreError::Closing);
+        }
+        Ok(CoreWorkflowSubscription {
+            subscription_id: CoreWorkflowSubscriptionSubscriptionId::try_from(
+                subscription.id().to_string(),
+            )
+            .map_err(|err| CoreError::Internal {
+                category: format!("workflow subscription token encode: {err}"),
+            })?,
+        })
+    }
+
+    /// Take the next bounded batch of a subscribed run's stream.
+    ///
+    /// At most 16 frames / 1 MiB, already encoded, in ring order, from the
+    /// retained replay and then the live tail. One pull may be outstanding per
+    /// subscription. `closed` reports that the stream ended at this batch (the
+    /// run's durable terminal frame, a gone ring, or a released/closed
+    /// subscription) — after which the token is withdrawn.
+    ///
+    /// # Errors
+    /// `Closing` when the owner is shutting down, `AuthRequired` for a foreign
+    /// principal, `NotFound` for a released, foreign or stale-generation
+    /// token, `Busy` when a pull is already outstanding.
+    pub async fn next_workflow_events(
+        &self,
+        principal: &Principal,
+        subscription_id: String,
+    ) -> CoreResult<CoreWorkflowEventBatch> {
+        self.ensure_admitting()?;
+        self.linked_core()?.verify_principal(principal)?;
+        let subscription = self.owned_subscription(principal, &subscription_id)?;
+        let (frames, closed) = match subscription.pull().await {
+            PullOutcome::Batch { frames, closed } => (frames, closed),
+            PullOutcome::Busy => return Err(CoreError::Busy),
+        };
+        let events = frames
+            .into_iter()
+            .map(|frame| {
+                let event = CoreWorkflowEventBatchEventsItemEvent::try_from(frame.event)
+                    .map_err(|err| CoreError::Internal {
+                        category: format!("run-event name encode: {err}"),
+                    })?;
+                Ok(CoreWorkflowEventBatchEventsItem {
+                    id: frame.id,
+                    event,
+                    data: frame.data,
+                })
+            })
+            .collect::<CoreResult<Vec<_>>>()?;
+        if closed {
+            // A closed stream serves no further pull: withdraw the token so a
+            // repeat call refuses like any other released one.
+            self.workflow_subscriptions.take(&subscription_id);
+        }
+        Ok(CoreWorkflowEventBatch { events, closed })
+    }
+
+    /// Release one subscription (a disconnect, an ended stream).
+    ///
+    /// The run's subscriber permit is freed and a pull blocked on that
+    /// subscription wakes with `closed` instead of waiting for a frame that
+    /// can no longer arrive. The owner's close releases every subscription it
+    /// still holds, so a transport that never reaches this call leaks nothing.
+    ///
+    /// # Errors
+    /// `Closing` when the owner is shutting down, `AuthRequired` for a foreign
+    /// principal, `NotFound` for a released, foreign or stale-generation token.
+    pub async fn release_workflow_events(
+        &self,
+        principal: &Principal,
+        subscription_id: String,
+    ) -> CoreResult<()> {
+        self.ensure_admitting()?;
+        self.linked_core()?.verify_principal(principal)?;
+        let subscription = self.owned_subscription(principal, &subscription_id)?;
+        if self.workflow_subscriptions.take(&subscription_id).is_none() {
+            // A concurrent release won the withdrawal: the token is gone, so
+            // this call refuses exactly like any other released one.
+            return Err(CoreError::NotFound {
+                resource: format!("workflow event subscription {subscription_id}"),
+            });
+        }
+        subscription.release();
+        Ok(())
+    }
+
+    /// The subscribed run-event port, or the same `NotFound` the page read
+    /// reports when this owner has no registry attached.
+    fn run_event_port(&self) -> CoreResult<Arc<dyn RunEventPort>> {
+        self.coordinator()
             .run_event_port()
             .ok_or_else(|| CoreError::NotFound {
                 resource: "run event ring (no execution owner attached)".into(),
+            })
+    }
+
+    /// Verify that the principal durably OWNS `run_id` as a ROOT run.
+    ///
+    /// The durable run row is the authority: a child session id is never
+    /// authorized by stripping `:child:` from the caller's string, and an
+    /// absent id, a foreign id and a child id all close with the SAME refusal
+    /// so this cannot be used to probe another creator's runs (or their
+    /// ancestry) before any ring is touched.
+    ///
+    /// # Errors
+    /// `NotFound` for an absent, foreign or child run; the mapped storage error.
+    async fn owned_root_run(&self, principal: &Principal, run_id: &str) -> CoreResult<()> {
+        let pool = self.coordinator().pool();
+        let owned: Option<i64> = sqlx::query_scalar(
+            "SELECT 1 FROM orchestration_sessions
+             WHERE session_id = ? AND parent_session_id IS NULL AND creator_id = ?",
+        )
+        .bind(run_id)
+        .bind(principal.creator_id())
+        .fetch_optional(pool.as_ref())
+        .await
+        .map_err(|e| crate::error::db_err(&e))?;
+        owned
+            .map(|_| ())
+            .ok_or_else(|| CoreError::NotFound {
+                resource: format!("workflow session {run_id}"),
+            })
+    }
+
+    /// Resolve a token this owner still serves AND that was minted for this
+    /// principal and this core generation.
+    ///
+    /// A released, unknown, foreign-creator or stale-generation token all close
+    /// with the same `NotFound`, so a token cannot be used to probe another
+    /// creator's subscriptions.
+    ///
+    /// # Errors
+    /// `NotFound` for every unresolvable token.
+    fn owned_subscription(
+        &self,
+        principal: &Principal,
+        subscription_id: &str,
+    ) -> CoreResult<Arc<WorkflowSubscription>> {
+        let subscription = self
+            .workflow_subscriptions
+            .get(subscription_id)
+            .ok_or_else(|| CoreError::NotFound {
+                resource: format!("workflow event subscription {subscription_id}"),
             })?;
-        run_event_page(&port, request)
+        if !subscription.is_bound_to(principal.creator_id(), self.engine_epoch()) {
+            return Err(CoreError::NotFound {
+                resource: format!("workflow event subscription {subscription_id}"),
+            });
+        }
+        Ok(subscription)
     }
 
     /// The owner-level fence every entry point checks.
@@ -1238,6 +1545,16 @@ impl ExecutionHandle {
     }
 }
 
+/// The retained public inspect path for one durable run (W4/O3 route).
+///
+/// The `history_unavailable` control frame carries it so a subscriber that
+/// cannot resume the stream re-reads the run instead of an invented history
+/// (contract §4). The path is the frozen public route, so the control frame
+/// names the SAME resource the caller inspects.
+fn run_inspect_url(run_id: &str) -> String {
+    format!("/v1/daemon/orchestration/sessions/{run_id}")
+}
+
 /// Read a bounded page of a run's retained events.
 ///
 /// The page comes from the SAME bounded ring the SSE transport replays from
@@ -1347,6 +1664,15 @@ struct SessionRow {
     current_task_id: Option<String>,
     /// Raw durable v1 run state — the actionable failure record lives here.
     run_state_json: Option<Vec<u8>>,
+    /// The run's checkpointed `workspace.commit` revision, projected in SQL
+    /// from `context_json` (contract §4). `None` unless the durable graph
+    /// context holds that capability's exact successful output.
+    ///
+    /// `#[sqlx(default)]`: the LIST page deliberately does not select it — a
+    /// page of rows must never evaluate an unbounded graph-context blob that
+    /// embeds chat history — so only the detail read carries the column.
+    #[sqlx(default)]
+    workspace_commit_revision: Option<String>,
 }
 
 /// Project a stored schedule row into the LIST wire item.

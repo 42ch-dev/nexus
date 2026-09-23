@@ -72,6 +72,23 @@ pub trait RunEventPort: Send + Sync {
     fn publish_run_state(&self, run_id: &str, record: &RunRecord);
     /// Close the run's ring as authoritative-terminal.
     fn mark_terminal(&self, run_id: &str);
+    /// Open the run's atomic replay-then-live attachment.
+    ///
+    /// Returns the subscription the ring itself owns: the retained frames
+    /// strictly after `last_event_id` are replayed first, then the live tail.
+    /// The caller has ALREADY authorized the run; this is the ring lookup and
+    /// cursor resolution the contract requires to happen last.
+    ///
+    /// # Errors
+    /// The ring's own refusals: an unparsable/future cursor, the per-run
+    /// subscriber cap, and an unresumable history (no ring, or a cursor from a
+    /// different epoch).
+    fn subscribe_live(
+        &self,
+        run_id: &str,
+        last_event_id: Option<&str>,
+        inspect_url: String,
+    ) -> Result<crate::execution::run_events::LiveSubscription, crate::execution::run_events::SubscribeError>;
     /// Read a bounded page of the run's retained frames.
     ///
     /// The ring's item/byte caps and the explicit-gap semantics are the
@@ -9697,6 +9714,23 @@ mod tests {
             }
             fn publish_run_state(&self, _run_id: &str, _record: &RunRecord) {}
             fn mark_terminal(&self, _run_id: &str) {}
+            fn subscribe_live(
+                &self,
+                run_id: &str,
+                _last_event_id: Option<&str>,
+                inspect_url: String,
+            ) -> Result<
+                crate::execution::run_events::LiveSubscription,
+                crate::execution::run_events::SubscribeError,
+            > {
+                // No ring is ever registered by this double.
+                Err(crate::execution::run_events::SubscribeError::HistoryUnavailable(
+                    crate::execution::run_events::HistoryUnavailableWire {
+                        run_id: run_id.to_string(),
+                        inspect_url,
+                    },
+                ))
+            }
             fn read_page(
                 &self,
                 run_id: &str,
@@ -10104,6 +10138,23 @@ mod tests {
         async fn remove_live(&self, _run_id: &str) {}
         fn publish_run_state(&self, _run_id: &str, _record: &RunRecord) {}
         fn mark_terminal(&self, _run_id: &str) {}
+        fn subscribe_live(
+            &self,
+            run_id: &str,
+            _last_event_id: Option<&str>,
+            inspect_url: String,
+        ) -> Result<
+            crate::execution::run_events::LiveSubscription,
+            crate::execution::run_events::SubscribeError,
+        > {
+            // The quota-refused port never registered a ring.
+            Err(crate::execution::run_events::SubscribeError::HistoryUnavailable(
+                crate::execution::run_events::HistoryUnavailableWire {
+                    run_id: run_id.to_string(),
+                    inspect_url,
+                },
+            ))
+        }
         fn read_page(
             &self,
             run_id: &str,
@@ -10241,6 +10292,23 @@ mod tests {
         }
         fn mark_terminal(&self, run_id: &str) {
             self.terminal.lock().push(run_id.to_string());
+        }
+        fn subscribe_live(
+            &self,
+            run_id: &str,
+            _last_event_id: Option<&str>,
+            inspect_url: String,
+        ) -> Result<
+            crate::execution::run_events::LiveSubscription,
+            crate::execution::run_events::SubscribeError,
+        > {
+            // This double only records publishes; it owns no ring to replay.
+            Err(crate::execution::run_events::SubscribeError::HistoryUnavailable(
+                crate::execution::run_events::HistoryUnavailableWire {
+                    run_id: run_id.to_string(),
+                    inspect_url,
+                },
+            ))
         }
         fn read_page(
             &self,

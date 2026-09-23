@@ -155,6 +155,17 @@ pub struct RunnerDeps {
     /// attach their own supervisor) installs neither, so a core-only start
     /// owns exactly the drives it was given.
     pub hosted_scheduler: Option<HostedSchedulerConfig>,
+    /// Optional barrier invoked after a subscription's durable ROOT ownership
+    /// check and BEFORE its ring attachment and token mint (P1-T1).
+    ///
+    /// Production supplies `None`. It exists so a test can hold the EXACT
+    /// window the subscribe/owner-close race lives in — a close landing between
+    /// those two steps must neither publish a token nor keep the ring
+    /// subscriber permit — and force that interleaving deterministically
+    /// instead of hoping for it. Like [`ExecutionBuildObserver`] it is a
+    /// diagnostic seam, not a collaborator: it observes no state and its only
+    /// power is to delay its own caller.
+    pub subscription_observer: Option<Arc<dyn ExecutionSubscriptionObserver>>,
     /// Optional barrier invoked once the owner is fully built but BEFORE
     /// [`CoreService::start_execution`] publishes it into the per-service slot.
     ///
@@ -166,6 +177,19 @@ pub struct RunnerDeps {
     /// fires, so a close racing here observes exactly the split the
     /// install-time double check must resolve.
     pub build_observer: Option<Arc<dyn ExecutionBuildObserver>>,
+}
+
+/// Observable point across a subscription's durable-owner check and its ring
+/// attachment.
+///
+/// A single await where the caller may hold that window open (see
+/// [`RunnerDeps::subscription_observer`]). It observes no state and its only
+/// power is to delay its own caller.
+#[async_trait::async_trait]
+pub trait ExecutionSubscriptionObserver: Send + Sync {
+    /// Called once per subscription: after the run's durable ROOT ownership was
+    /// resolved, before the ring is attached and the token minted.
+    async fn owner_resolved(&self);
 }
 
 /// Observable point in [`CoreService::start_execution`]'s build phase.
@@ -269,6 +293,14 @@ pub struct ExecutionHandle {
     /// Empty until `start_peer_control` succeeds; closed with the owner.
     #[cfg(feature = "connect-client")]
     pub(crate) peer_control: std::sync::Mutex<Option<Arc<crate::connect::PeerControlLane>>>,
+    /// The authorized workflow-event subscriptions this owner minted (P1-T1).
+    ///
+    /// Owner-scoped, never process-global: the tokens die with the generation
+    /// that minted them, and `close` wakes and withdraws every one of them.
+    pub(crate) workflow_subscriptions: crate::execution::run_events::WorkflowSubscriptionRegistry,
+    /// Optional diagnostic barrier held across a subscription's durable-owner
+    /// check and its ring attachment (see [`RunnerDeps::subscription_observer`]).
+    subscription_observer: Option<Arc<dyn ExecutionSubscriptionObserver>>,
 }
 
 impl ExecutionHandle {
@@ -359,6 +391,17 @@ impl ExecutionHandle {
     #[must_use]
     pub fn is_closed(&self) -> bool {
         self.closing.load(Ordering::SeqCst)
+    }
+
+    /// The subscription observation point this owner was built with, if any.
+    ///
+    /// `None` in production: only a test that must force the subscribe/close
+    /// interleaving supplies one (see [`RunnerDeps::subscription_observer`]).
+    #[must_use]
+    pub(crate) fn subscription_observer(
+        &self,
+    ) -> Option<Arc<dyn ExecutionSubscriptionObserver>> {
+        self.subscription_observer.clone()
     }
 
     /// The process-level facts the tool health surface reports.
@@ -515,6 +558,10 @@ impl ExecutionHandle {
     /// The retained drain body (see [`Self::close`] for the ordering contract).
     async fn run_close(self: Arc<Self>) {
         self.coordinator.begin_shutdown();
+        // Every authorized subscription this owner minted ends HERE: a pull
+        // blocked on a silent run wakes with `closed` instead of hanging past
+        // the close, and no token survives the generation that minted it.
+        self.workflow_subscriptions.close_all();
         if let Some(authority) = &self.workspace_commit {
             authority.manager().close_commit_admission();
         }
@@ -964,6 +1011,9 @@ impl CoreService {
             scheduler_shutdown,
             #[cfg(feature = "connect-client")]
             peer_control: std::sync::Mutex::new(None),
+            workflow_subscriptions:
+                crate::execution::run_events::WorkflowSubscriptionRegistry::new(),
+            subscription_observer: deps.subscription_observer,
         }))
     }
 }

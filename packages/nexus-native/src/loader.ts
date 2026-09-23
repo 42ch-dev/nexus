@@ -339,6 +339,10 @@ export interface NativeCoreBinding {
     scheduleId: string,
     requestJson: Uint8Array,
   ): Promise<Uint8Array>;
+  // ── P1-T3 same-run event subscriptions ─────────────────────────────────────
+  subscribeWorkflowEvents(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
+  nextWorkflowEvents(principal: string, subscriptionId: string): Promise<Uint8Array>;
+  releaseWorkflowEvents(principal: string, subscriptionId: string): Promise<Uint8Array>;
 }
 
 export interface NativeBinding {

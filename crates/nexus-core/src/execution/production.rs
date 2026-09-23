@@ -54,7 +54,9 @@ use crate::error::{CoreError, CoreResult};
 use crate::execution::executor::WorkspaceCommitExecutor;
 use crate::execution::lifecycle::{ExecutionHandle, ExecutionOpenError, RunnerDeps};
 use crate::execution::prompt_executor::HostPromptExecutor;
-use crate::execution::run_events::{PageError, RunEventRegistry, RunEventSinkMap, RunPage};
+use crate::execution::run_events::{
+    LiveSubscription, PageError, RunEventRegistry, RunEventSinkMap, RunPage, SubscribeError,
+};
 use crate::execution::schedules::HostedSchedulerConfig;
 use crate::execution::session::{SessionError, WorkspaceSessionManager};
 use crate::execution::state_provider::CoreWorkspaceStateProvider;
@@ -314,7 +316,11 @@ impl ProviderCatalogPort for HostProviderCatalogPort {
 /// accounting, ring reuse, the shared sink map and terminal-closing semantics
 /// stay owned by [`RunEventRegistry`] — the execution layer only reserves,
 /// publishes and releases.
-struct CoreRunEventPort {
+///
+/// Public because it is the ONE production adapter for the trait: a test that
+/// must drive the real ring through a real owner composes this over a real
+/// [`RunEventRegistry`] instead of re-implementing the forwarding.
+pub struct CoreRunEventPort {
     registry: Arc<RunEventRegistry>,
     /// The SAME sink map the prompt executor was constructed with, so a
     /// reserved ring is visible to that executor's host events.
@@ -322,7 +328,8 @@ struct CoreRunEventPort {
 }
 
 impl CoreRunEventPort {
-    fn new(registry: Arc<RunEventRegistry>, sinks: RunEventSinkMap) -> Self {
+    #[must_use]
+    pub fn new(registry: Arc<RunEventRegistry>, sinks: RunEventSinkMap) -> Self {
         Self { registry, sinks }
     }
 }
@@ -347,6 +354,18 @@ impl RunEventPort for CoreRunEventPort {
 
     fn mark_terminal(&self, run_id: &str) {
         self.registry.mark_terminal(run_id);
+    }
+
+    fn subscribe_live(
+        &self,
+        run_id: &str,
+        last_event_id: Option<&str>,
+        inspect_url: String,
+    ) -> Result<LiveSubscription, SubscribeError> {
+        // Forwards to the same bounded ring the page reader reads, so replay,
+        // epoch validation and the explicit-gap semantics cannot drift.
+        self.registry
+            .subscribe_live(run_id, last_event_id, inspect_url)
     }
 
     fn read_page(

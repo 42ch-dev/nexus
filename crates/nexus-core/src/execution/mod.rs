@@ -80,7 +80,10 @@ pub mod workflow;
 pub mod workspace;
 
 pub use handle_ops::run_event_page;
-pub use lifecycle::{ExecutionBuildObserver, ExecutionHandle, ExecutionOpenError, RunnerDeps};
+pub use lifecycle::{
+    ExecutionBuildObserver, ExecutionHandle, ExecutionOpenError, ExecutionSubscriptionObserver,
+    RunnerDeps,
+};
 pub use schedules::{
     AutoChronologyConfig, CronSupervisorConfig, RefreshSchedulerConfig, StaleFindingsWatcherConfig,
 };

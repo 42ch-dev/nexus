@@ -122,6 +122,7 @@ describe('route-inventory (P5-T5)', () => {
   ['GET', '/v1/daemon/orchestration/schedules/([^/]+)', 'tier2', 'execution'],
   ['GET', '/v1/daemon/orchestration/sessions', 'tier2', 'execution'],
   ['GET', '/v1/daemon/orchestration/sessions/([^/]+)', 'tier2', 'execution'],
+  ['GET', '/v1/daemon/orchestration/sessions/([^/]+)/events', 'tier2', 'workflow_observation'],
   ['GET', '/v1/daemon/presets', 'tier2', 'presets'],
   ['GET', '/v1/daemon/presets/([^/]+)', 'tier2', 'presets'],
   ['GET', '/v1/daemon/reading/annotations', 'tier2', 'knowledge'],
