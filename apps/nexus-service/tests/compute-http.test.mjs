@@ -143,14 +143,20 @@ async function runModule(baseUrl, worldId, attackerId, defenderId) {
   });
 }
 
+/**
+ * The two `kb_<hex>` entity ids one staged World uses. Entity ids must satisfy
+ * the retained `kb_<hex>` convention, so the per-World suffix is taken from the
+ * World's own hex uuid.
+ */
+function combatantIds(worldId) {
+  const suffix = worldId.replace(/[^0-9a-f]/g, '').slice(-12);
+  return { attackerId: `kb_a${suffix}`, defenderId: `kb_d${suffix}` };
+}
+
 /** A World with one attacker (20 ATK) and one defender (30/50 HP, 5 DEF). */
 async function stageCombatWorld(baseUrl, title) {
   const worldId = await createWorld(baseUrl, title);
-  // Entity ids must satisfy the retained `kb_<hex>` convention, so the
-  // per-World suffix is taken from the World's own hex uuid.
-  const suffix = worldId.replace(/[^0-9a-f]/g, '').slice(-12);
-  const attackerId = `kb_a${suffix}`;
-  const defenderId = `kb_d${suffix}`;
+  const { attackerId, defenderId } = combatantIds(worldId);
   await stageCombatant(baseUrl, worldId, attackerId, 'Striker', {
     maxHp: 100,
     baseAtk: 20,
@@ -370,6 +376,88 @@ describe('compute-http (v1.195 P2-T3)', () => {
     assert.equal(appliedDetail.status, 200, appliedDetail.text);
     assert.equal(appliedDetail.payload.status, 'applied');
     assert.equal(appliedDetail.payload.proposals.state_delta[0].value, 15);
+  });
+
+  test('compute lifecycle: a schema-invalid run persists as a failed row with its input detail', async () => {
+    // A computable entry the manifest's `key_block_state.character` schema
+    // REJECTS: `current_hp` has `minimum: 0`. The KB write path validates the
+    // body structurally (novel category/attributes shape), not against the
+    // module manifest, and the core's ComputeInputBuilder does not read the
+    // manifest schema either — so this input passes assembly and fails at the
+    // WASM authority's own input validation, i.e. AFTER the run row exists.
+    //
+    // The violation deliberately lives in `body.state`, not in
+    // `body.attributes`: the delivered `ComputeInput.key_blocks` carries the
+    // spoke ERC721 attributes ARRAY, which the manifest declares as an accepted
+    // form (`type: ["object","array"]`), whereas the state map is carried
+    // verbatim and its `character.current_hp` integer minimum applies.
+    const worldId = await createWorld(baseUrl, 'Compute invalid-input world');
+    const { attackerId, defenderId } = combatantIds(worldId);
+    await stageCombatant(baseUrl, worldId, attackerId, 'Wounded Striker', {
+      maxHp: 100,
+      baseAtk: 20,
+      baseDef: 3,
+      currentHp: -5,
+    });
+    await stageCombatant(baseUrl, worldId, defenderId, 'Guardian', {
+      maxHp: 50,
+      baseAtk: 10,
+      baseDef: 5,
+      currentHp: 30,
+    });
+
+    // The refusal is the retained 422 `invalid_input` with per-entry detail.
+    const refused = await runModule(baseUrl, worldId, attackerId, defenderId);
+    assert.equal(refused.status, 422, refused.text);
+    assert.equal(refused.payload.error.code, 'invalid_input', refused.text);
+    const entries = refused.payload.error.details?.invalid_entries;
+    assert.ok(Array.isArray(entries) && entries.length >= 1, refused.text);
+    assert.equal(
+      entries.some((entry) => entry.entry_id === attackerId),
+      true,
+      `the refusal names the offending entry: ${refused.text}`,
+    );
+    assert.equal(entries.every((entry) => typeof entry.reason === 'string'), true, refused.text);
+
+    // …and the FAILED row is durably persisted and reviewable: it lists under
+    // the failed filter and its detail keeps the same input detail.
+    const failedList = await jsonFetch(
+      `${baseUrl}/v1/daemon/compute/runs?world_id=${worldId}&status=failed`,
+    );
+    assert.equal(failedList.status, 200, failedList.text);
+    assert.equal(failedList.payload.items.length, 1, failedList.text);
+    const failedRow = failedList.payload.items[0];
+    assert.equal(failedRow.status, 'failed', failedList.text);
+    assert.equal(failedRow.world_id, worldId, failedList.text);
+    assert.equal(failedRow.module_id, MODULE, failedList.text);
+    assert.ok(failedRow.run_id?.startsWith('run_'), failedList.text);
+
+    const failedDetail = await jsonFetch(
+      `${baseUrl}/v1/daemon/compute/runs/${failedRow.run_id}`,
+    );
+    assert.equal(failedDetail.status, 200, failedDetail.text);
+    assert.equal(failedDetail.payload.status, 'failed', failedDetail.text);
+    assert.equal(failedDetail.payload.error.code, 'invalid_input', failedDetail.text);
+    const detailEntries = failedDetail.payload.error.details?.invalid_entries;
+    assert.ok(Array.isArray(detailEntries) && detailEntries.length >= 1, failedDetail.text);
+    assert.equal(
+      detailEntries.some((entry) => entry.entry_id === attackerId),
+      true,
+      `the durable failure detail survives the read: ${failedDetail.text}`,
+    );
+
+    // A failed run is a review row, not an effect: the World is untouched and
+    // there is nothing to accept (the run never reached `succeeded`).
+    const defenderState = await readKeyBlockState(baseUrl, worldId, defenderId);
+    assert.equal(defenderState.state.character.current_hp, 30);
+    assert.deepEqual(await readComputeTimeline(baseUrl, worldId), []);
+    const acceptFailed = await jsonFetch(
+      `${baseUrl}/v1/daemon/compute/runs/${failedRow.run_id}/accept`,
+      { method: 'POST', body: {} },
+    );
+    assert.equal(acceptFailed.status, 422, acceptFailed.text);
+    assert.equal(acceptFailed.payload.error.details?.wire_code, 'invalid_state', acceptFailed.text);
+    assert.equal((await readComputeTimeline(baseUrl, worldId)).length, 0);
   });
 
   test('compute ownership: foreign scope and malformed queries refuse without side effects', async () => {
