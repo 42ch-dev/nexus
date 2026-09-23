@@ -30,6 +30,7 @@ import { MEMORY_ROUTES } from './memory.js';
 import { CONTEXT_ROUTES } from './context.js';
 import { PRESET_ROUTES } from './presets.js';
 import { EXECUTION_ROUTES } from './execution.js';
+import { WORKFLOW_OBSERVATION_ROUTES } from './workflow-observation.js';
 
 /**
  * The World/Work/content/knowledge families self-describe their retained
@@ -46,9 +47,22 @@ export type DomainFamily =
   | 'context'
   | 'presets'
   | 'execution'
+  | 'workflow_observation'
   | 'runtime'
   | 'host'
-  | 'world_kb'
+  | 'world_kb';
+
+/**
+ * The request context a family handler may need beyond its path parameters,
+ * query string and body. Deliberately one optional retained header instead of
+ * a general request object: the body/query already cross as owned values, and
+ * a mutable per-request bag would invite a family to read ambient transport
+ * state the contract never granted it.
+ */
+export interface RouteRequestContext {
+  /** Retained `Last-Event-ID` header, forwarded verbatim (SSE resume cursor). */
+  readonly lastEventId?: string;
+}
 
 /** One retained family identity: exact path pattern, verb, tier and handler. */
 export interface DomainRoute {
@@ -66,6 +80,7 @@ export interface DomainRoute {
     params: string[],
     searchParams: URLSearchParams,
     body: unknown,
+    request: RouteRequestContext,
   ) => Promise<DomainResult>;
 }
 
@@ -131,6 +146,7 @@ export async function handleRoute(
   pathname: string,
   searchParams: URLSearchParams,
   body: unknown,
+  request: RouteRequestContext,
 ): Promise<RouteHandlerResult> {
   const route = matchRoute(method, pathname);
   if (!route) {
@@ -144,7 +160,7 @@ export async function handleRoute(
     if (!entry) {
       throw routeNotMigrated(pathname);
     }
-    const result = await entry.handle(service, route.params, searchParams, body);
+    const result = await entry.handle(service, route.params, searchParams, body, request);
     if ('kind' in result && result.kind === 'sse') {
       return result;
     }
@@ -475,6 +491,7 @@ export const DOMAIN_ROUTES: readonly DomainRoute[] = [
   ...CONTEXT_ROUTES,
   ...PRESET_ROUTES,
   ...EXECUTION_ROUTES,
+  ...WORKFLOW_OBSERVATION_ROUTES,
   ...RUNTIME_ROUTES,
   ...HOST_ROUTES,
   ...WORLD_KB_ROUTES,

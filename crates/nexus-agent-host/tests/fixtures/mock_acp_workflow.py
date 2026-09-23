@@ -28,6 +28,16 @@ Modes (env vars, all optional):
   - DESCENDANT=1     spawn a child process that outlives the fixture; the
                      host's owned process-tree shutdown must reap the exact
                      child (never a reused/unowned PID).
+  - ACP_FIXTURE_PROMPT_GATE_DIR=<dir>  hold every prompt until the test
+                     releases it: the prompt is logged (its evidence recorded)
+                     and then the peer waits for `<dir>/release-<n>`, where
+                     `<n>` is that prompt's 1-based position among the prompts
+                     recorded in ACP_FIXTURE_LOG. This makes a mid-state edit
+                     deterministic — the test knows a state boundary has
+                     rendered its prompt and the step is genuinely in flight
+                     while it edits durable state, without sleeping.
+                     `ACP_FIXTURE_PROMPT_GATE_TIMEOUT_S` (default 60) bounds the
+                     wait so a missing release can never hang a run.
 
 The fixture writes sanitized evidence (cwd, pid, request log) to the path
 in ACP_FIXTURE_LOG (one JSON object per line). It never writes secrets.
@@ -45,6 +55,8 @@ DESCENDANT = os.environ.get("DESCENDANT") == "1"
 DELAYED_CANCEL_ACK = os.environ.get("DELAYED_CANCEL_ACK") == "1"
 OVERSIZED_UPDATE = os.environ.get("OVERSIZED_UPDATE") == "1"
 STALL_AFTER_INIT = os.environ.get("STALL_AFTER_INIT") == "1"
+PROMPT_GATE_DIR = os.environ.get("ACP_FIXTURE_PROMPT_GATE_DIR")
+PROMPT_GATE_TIMEOUT_S = float(os.environ.get("ACP_FIXTURE_PROMPT_GATE_TIMEOUT_S") or "60")
 
 def _prior_run_count():
     """Fixture starts already recorded in the shared log (0 for the first)."""
@@ -103,6 +115,43 @@ def notify(method, params):
     send({"jsonrpc": "2.0", "method": method, "params": params})
 
 
+def _logged_prompt_count():
+    """How many prompts the shared log already records."""
+    if not LOG_PATH or not os.path.exists(LOG_PATH):
+        return 0
+    count = 0
+    with open(LOG_PATH, encoding="utf-8") as fh:
+        for line in fh:
+            try:
+                if json.loads(line).get("event") == "prompt":
+                    count += 1
+            except json.JSONDecodeError:
+                continue
+    return count
+
+
+def await_prompt_gate():
+    """Hold the prompt just logged until the test releases it (gated mode only).
+
+    The prompt evidence is already durable when this blocks, so a test can
+    observe that the state boundary rendered its prompt and then edit durable
+    state while the step is genuinely in flight — no sleeping. The release is
+    keyed by the prompt's 1-based position in the SHARED log, so a fresh peer
+    process for the same run continues the same sequence.
+    """
+    if not PROMPT_GATE_DIR:
+        return
+    index = _logged_prompt_count()
+    release = os.path.join(PROMPT_GATE_DIR, "release-%d" % index)
+    deadline = time.monotonic() + PROMPT_GATE_TIMEOUT_S
+    while not os.path.exists(release):
+        if time.monotonic() > deadline:
+            log({"event": "prompt_gate_timeout", "index": index})
+            return
+        time.sleep(0.02)
+    log({"event": "prompt_released", "index": index})
+
+
 def main():
     global _descendant
     log({"event": "start", "pid": os.getpid(), "cwd": os.getcwd()})
@@ -157,6 +206,10 @@ def main():
                 if block.get("type") == "text":
                     prompt += block.get("text", "")
             log({"event": "prompt", "session_id": params.get("sessionId"), "prompt": prompt})
+            # Gated mode: the prompt evidence above is durable before this
+            # blocks, so a test can edit durable state while the step is in
+            # flight (no-op when the gate is unset).
+            await_prompt_gate()
             if BLOCK_PROMPT:
                 # Never respond to the prompt, but keep reading stdin so a
                 # session/cancel notification is observed and recorded.

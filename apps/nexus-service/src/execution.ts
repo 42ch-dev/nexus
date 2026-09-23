@@ -1,20 +1,35 @@
 /**
- * Execution family HTTP surface (P5-T3): the durable schedule mutations
- * (add/signal) over the P3 `ExecutionHandle` authority. The handle is the
- * single execution owner established on the native side — this surface never
- * starts a second scheduler and never owns domain terminal truth.
+ * Execution family HTTP surface (P5-T3 + v1.195 P0-T6): the durable schedule
+ * control journey over the P3 `ExecutionHandle` authority — add/signal, the
+ * durable schedule list/inspect reads, the durable run list/detail reads and
+ * the core-context edit. The handle is the single execution owner established
+ * on the native side: this surface never starts a second scheduler, never
+ * reads SQL itself and never owns domain terminal truth.
  *
- * Deliberately NOT routed on this surface (no core authority exists; the
- * legacy daemon handlers are the only producers): orchestration session
- * CRUD/list (still the embedded host's own state, mirrored through
- * `hostQuery` where retained), schedule list/inspect/delete and
- * core-context/history, and the compute run family (the WASM edge is a
- * daemon-cohort capability). Those identities keep their truthful
- * `route_not_migrated` refusal rather than a degraded fake.
+ * Query forwarding is the schema's, not the transport's: the generated DTO
+ * travels to the native decoder, which is where an unknown key or a bad value
+ * becomes a typed refusal. `limit` is the one key that needs a transport-side
+ * parse (the JSON wire carries a number, not a string), and the transport
+ * only checks that it IS an integer — the core owner applies the documented
+ * default/cap, so the two surfaces cannot disagree about a page size.
+ *
+ * Deliberately NOT routed on this surface (no core authority exists): the
+ * core-context HISTORY reads and the schedule label/delete mutations, plus
+ * the compute run family (a daemon-cohort capability). Those identities keep
+ * their truthful `route_not_migrated` refusal rather than a degraded fake.
  */
+import type {
+  ListSchedulesQuery,
+  ListSessionsQuery,
+} from '@42ch/nexus-contracts';
 import type { ServiceCore } from './lifecycle.js';
 import type { DomainRoute } from './routes.js';
-import { withPrincipal, wirePayload } from './world-kb.js';
+import { HttpError } from './errors.js';
+import {
+  parseOptionalInteger,
+  withPrincipal,
+  wirePayload,
+} from './world-kb.js';
 
 /** `POST /v1/daemon/orchestration/schedules` — add a durable schedule. */
 export function addSchedule(service: ServiceCore, body: unknown) {
@@ -30,6 +45,100 @@ export function signalSchedule(service: ServiceCore, scheduleId: string, body: u
   );
 }
 
+/** `GET /v1/daemon/orchestration/schedules` — the Creator's durable page. */
+export function listSchedules(service: ServiceCore, query: ListSchedulesQuery) {
+  return withPrincipal(service, (principal) => service.core.listSchedules(principal, query));
+}
+
+/** `GET /v1/daemon/orchestration/schedules/{schedule_id}` — durable inspect. */
+export function inspectSchedule(service: ServiceCore, scheduleId: string) {
+  return withPrincipal(service, (principal) => service.core.inspectSchedule(principal, scheduleId));
+}
+
+/** `GET /v1/daemon/orchestration/sessions` — the Creator's durable run page. */
+export function listWorkflowSessions(service: ServiceCore, query: ListSessionsQuery) {
+  return withPrincipal(service, (principal) =>
+    service.core.listWorkflowSessions(principal, query),
+  );
+}
+
+/** `GET /v1/daemon/orchestration/sessions/{run_id}` — the durable run detail. */
+export function getWorkflowSession(service: ServiceCore, sessionId: string) {
+  return withPrincipal(service, (principal) =>
+    service.core.getWorkflowSession(principal, sessionId),
+  );
+}
+
+/** `PATCH /v1/daemon/orchestration/schedules/{schedule_id}/core-context`. */
+export function editCoreContext(service: ServiceCore, scheduleId: string, body: unknown) {
+  return withPrincipal(service, (principal) =>
+    service.core.editCoreContext(principal, scheduleId, wirePayload(body, 'request')),
+  );
+}
+
+/**
+ * `ListSchedulesQuery` from query-string parameters.
+ *
+ * `creator_id`/`status`/`cursor`/`sort` are opaque strings forwarded verbatim —
+ * the core owner validates `sort` and the pagination cursor, and the explicit
+ * `creator_id` filter is what the core refuses for a foreign creator (a
+ * transport-side drop would answer with a silently empty page instead).
+ *
+ * A key outside this schema's own key set is refused, never dropped: the DTO
+ * is assembled here from a fixed set, so an unfiltered drop would answer a
+ * misspelled filter with a broader (and misleading) success page.
+ */
+function listSchedulesQuery(search: URLSearchParams): ListSchedulesQuery {
+  refuseUnknownQueryKeys(search, ['creator_id', 'status', 'sort', 'cursor', 'limit']);
+  const creator_id = search.get('creator_id');
+  const status = search.get('status');
+  const sort = search.get('sort');
+  const cursor = search.get('cursor');
+  const limit = search.get('limit');
+  return {
+    ...(creator_id !== null ? { creator_id } : {}),
+    ...(status !== null ? { status } : {}),
+    ...(sort !== null ? { sort } : {}),
+    ...(cursor !== null ? { cursor } : {}),
+    ...(limit !== null ? { limit: parseOptionalInteger(search, 'limit') } : {}),
+  };
+}
+
+/** `ListSessionsQuery` from query-string parameters (same forwarding rules). */
+function listSessionsQuery(search: URLSearchParams): ListSessionsQuery {
+  refuseUnknownQueryKeys(search, ['creator_id', 'sort', 'cursor', 'limit']);
+  const creator_id = search.get('creator_id');
+  const sort = search.get('sort');
+  const cursor = search.get('cursor');
+  const limit = search.get('limit');
+  return {
+    ...(creator_id !== null ? { creator_id } : {}),
+    ...(sort !== null ? { sort } : {}),
+    ...(cursor !== null ? { cursor } : {}),
+    ...(limit !== null ? { limit: parseOptionalInteger(search, 'limit') } : {}),
+  };
+}
+
+/**
+ * Refuse every query key outside `allowed` — this adapter's own schema key set.
+ *
+ * The generated query DTOs declare `additionalProperties: false`, but they are
+ * assembled from a fixed key set here, so an unsupported or misspelled
+ * parameter would be silently discarded before the native decoder could refuse
+ * it: the caller would get a broader unfiltered page instead of the typed
+ * refusal its contract promises. The refusal is the same client error as a bad
+ * value; no supported key is re-parsed, re-validated or re-defaulted here.
+ */
+function refuseUnknownQueryKeys(search: URLSearchParams, allowed: readonly string[]): void {
+  for (const key of search.keys()) {
+    if (!allowed.includes(key)) {
+      throw new HttpError(400, 'invalid_input', `unknown query parameter '${key}'`, {
+        field: key,
+      });
+    }
+  }
+}
+
 /** Exact path/verb/tier identities this family owns (composer input). */
 export const EXECUTION_ROUTES: readonly DomainRoute[] = [
   {
@@ -43,12 +152,57 @@ export const EXECUTION_ROUTES: readonly DomainRoute[] = [
     }),
   },
   {
+    method: 'GET',
+    pattern: /^\/v1\/daemon\/orchestration\/schedules$/,
+    tier: 'tier2',
+    family: 'execution',
+    handle: async (service, _params, search) => ({
+      body: await listSchedules(service, listSchedulesQuery(search)),
+    }),
+  },
+  {
+    method: 'GET',
+    pattern: /^\/v1\/daemon\/orchestration\/schedules\/([^/]+)$/,
+    tier: 'tier2',
+    family: 'execution',
+    handle: async (service, params) => ({
+      body: await inspectSchedule(service, params[0]),
+    }),
+  },
+  {
+    method: 'PATCH',
+    pattern: /^\/v1\/daemon\/orchestration\/schedules\/([^/]+)\/core-context$/,
+    tier: 'tier2',
+    family: 'execution',
+    handle: async (service, params, _search, body) => ({
+      body: await editCoreContext(service, params[0], body),
+    }),
+  },
+  {
     method: 'POST',
     pattern: /^\/v1\/daemon\/orchestration\/schedules\/([^/]+)\/signal$/,
     tier: 'tier2',
     family: 'execution',
     handle: async (service, params, _search, body) => ({
       body: await signalSchedule(service, params[0], body),
+    }),
+  },
+  {
+    method: 'GET',
+    pattern: /^\/v1\/daemon\/orchestration\/sessions$/,
+    tier: 'tier2',
+    family: 'execution',
+    handle: async (service, _params, search) => ({
+      body: await listWorkflowSessions(service, listSessionsQuery(search)),
+    }),
+  },
+  {
+    method: 'GET',
+    pattern: /^\/v1\/daemon\/orchestration\/sessions\/([^/]+)$/,
+    tier: 'tier2',
+    family: 'execution',
+    handle: async (service, params) => ({
+      body: await getWorkflowSession(service, params[0]),
     }),
   },
 ];

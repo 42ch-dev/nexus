@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-workflow-subscribe-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CoreWorkflowSubscribeRequest",
+  "description": "Open one authorized subscription to a durable workflow run's bounded event stream. The subscription streams the same retained/live frames the run's ring already holds; it is not a second event dialect.",
+  "type": "object",
+  "required": ["run_id"],
+  "additionalProperties": false,
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Root durable workflow run id (the session id the public inspect returns). A child session id is never accepted: ancestry is resolved from stored state, never from the caller's string."
+    },
+    "last_event_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Exclusive resume cursor `<UUID epoch>:<decimal sequence>` from a previously delivered frame, passed verbatim."
+    }
+  }
+}

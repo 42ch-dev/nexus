@@ -100,8 +100,17 @@ pub struct OutboxCompactOutput {
 // ---------------------------------------------------------------------------
 
 /// Input for `workspace.open` — open a scope-relative path within the bound workspace.
+///
+/// Unknown fields are IGNORED, matching every other capability input (v1.195
+/// P0-T2 fix). The orchestration engine injects the trusted `_creator_id` /
+/// `_session_id` into every capability invocation's arguments
+/// (`tasks::CapabilityTask`), so a strict parse would refuse this capability in
+/// any preset graph. The declared JSON Schema (`WORKSPACE_OPEN_INPUT_SCHEMA`,
+/// `additionalProperties: false`) remains the wire-shape authority for
+/// schema-validating callers, and the injected identity is always the engine's
+/// trusted value — never a preset-supplied one.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspaceOpenInput {
     /// Safe workspace-relative scope path (required).
     pub path: String,
@@ -155,8 +164,15 @@ pub struct WorkspaceChangeEntry {
 }
 
 /// Input for `workspace.commit`.
+///
+/// Unknown fields are IGNORED for the same reason as
+/// [`WorkspaceOpenInput`]: the engine injects trusted `_creator_id` /
+/// `_session_id` into every capability invocation, and `changes` entries stay
+/// strict about their own fields. The declared JSON Schema
+/// (`WORKSPACE_COMMIT_INPUT_SCHEMA`) keeps `additionalProperties: false` for
+/// schema-validating callers.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspaceCommitInput {
     pub session_id: String,
     pub changes: Vec<WorkspaceChangeEntry>,

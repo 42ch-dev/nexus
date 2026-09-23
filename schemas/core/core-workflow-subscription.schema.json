@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-workflow-subscription.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CoreWorkflowSubscription",
+  "description": "Environment-local opaque subscription handle. It is bound to the admitted principal, the core generation that minted it and the one root run; a released or foreign handle refuses.",
+  "type": "object",
+  "required": ["subscription_id"],
+  "additionalProperties": false,
+  "properties": {
+    "subscription_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Opaque environment-local subscription UUID. Release it on disconnect so the run's subscriber permit is freed."
+    }
+  }
+}

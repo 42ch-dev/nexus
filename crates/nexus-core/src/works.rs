@@ -684,37 +684,201 @@ impl CoreService {
 
     pub(crate) fn work_workspace_path(&self, principal: &Principal) -> CoreResult<Option<String>> {
         self.verify_principal(principal)?;
-        let meta = self
-            .inner
-            .nexus_home
-            .join("creators")
-            .join(principal.creator_id())
-            .join("workspaces")
-            .join(principal.workspace_slug())
-            .join("meta.json");
-        let text = match std::fs::read_to_string(&meta) {
-            Ok(text) => text,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => {
-                return Err(CoreError::Internal {
-                    category: format!("workspace metadata: {error}"),
-                })
-            }
-        };
-        let metadata: serde_json::Value =
-            serde_json::from_str(&text).map_err(|error| CoreError::Internal {
-                category: format!("workspace metadata: {error}"),
-            })?;
-        // The operational meta.json key written by the daemon and CLI
-        // workspace registration (`local_root`; handlers/workspaces.rs and
-        // the CLI legacy_impl both emit it). There is no `creative_root`
-        // writer anywhere — reading it resolved every core filesystem path
-        // against an empty root.
-        Ok(metadata
-            .get("local_root")
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_owned))
+        selected_workspace_meta_root(
+            &self.inner.nexus_home,
+            principal.creator_id(),
+            principal.workspace_slug(),
+        )
     }
+}
+
+/// The raw `local_root` the selected workspace's own `meta.json` registers.
+///
+/// The ONE reader of that document: every consumer that resolves a selected
+/// creative root — the Work family's own paths, the engine-owner admission pin
+/// and that pin's drift check — reads through here, so no two callers can
+/// disagree about what the document says. A workspace with no registration is
+/// `Ok(None)`; an unreadable or malformed document is an environment fault.
+pub(crate) fn selected_workspace_meta_root(
+    nexus_home: &std::path::Path,
+    creator_id: &str,
+    workspace_slug: &str,
+) -> CoreResult<Option<String>> {
+    let meta = nexus_home
+        .join("creators")
+        .join(creator_id)
+        .join("workspaces")
+        .join(workspace_slug)
+        .join("meta.json");
+    let text = match std::fs::read_to_string(&meta) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(CoreError::Internal {
+                category: format!("workspace metadata: {error}"),
+            })
+        }
+    };
+    let metadata: serde_json::Value =
+        serde_json::from_str(&text).map_err(|error| CoreError::Internal {
+            category: format!("workspace metadata: {error}"),
+        })?;
+    // The operational meta.json key written by the daemon and CLI
+    // workspace registration (`local_root`; handlers/workspaces.rs and
+    // the CLI legacy_impl both emit it). There is no `creative_root`
+    // writer anywhere — reading it resolved every core filesystem path
+    // against an empty root.
+    Ok(metadata
+        .get("local_root")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned))
+}
+
+/// The CANONICAL creative root the selected workspace registers, if any.
+///
+/// Canonicalizing is what makes the admission pin, the Host probe boundary,
+/// the frozen run root, the executor's scope root and the commit authority's
+/// active root the same string, so a symlinked or non-normalized selection
+/// cannot produce two roots that compare unequal.
+///
+/// The canonical root must ALSO have a lossless UTF-8 form, because every
+/// workspace PORT the hosted owner composes from it is `String`-typed. A root
+/// that is not valid UTF-8 could only be carried by substituting U+FFFD for its
+/// bytes, which would point those ports at a different directory than the one
+/// the native Host probes — one owner with two roots. Such a root is refused
+/// here, at the pin, with the typed environment class, and never replaced (see
+/// [`lossless_root_str`]).
+///
+/// A root that is named but no longer exists is an uninitialized workspace
+/// rather than an environment fault, and a blank registration is the same "no
+/// root" answer; every other failure is reported verbatim.
+///
+/// Only the execution cohort has an admission to pin (§Cohorts: the
+/// default/domain cohort composes no execution owner), so the resolver is part
+/// of that edge rather than dead weight in every other build.
+///
+/// The representability refusal is THIS function's, because only the pin-time
+/// selection can become the Host probe owner. The drift check that a hosted
+/// factory runs later compares SELECTIONS and must not apply it — see
+/// [`selection_matches_pinned_root`].
+#[cfg(feature = "execution")]
+pub(crate) fn canonical_selected_workspace_root(
+    nexus_home: &std::path::Path,
+    creator_id: &str,
+    workspace_slug: &str,
+) -> CoreResult<Option<std::path::PathBuf>> {
+    let Some(path) = selected_canonical_workspace_root(nexus_home, creator_id, workspace_slug)?
+    else {
+        return Ok(None);
+    };
+    // A canonical root the `String`-typed workspace ports cannot carry is
+    // refused HERE, at the pin: `lossless_root_str` is the same check the
+    // hosted factory re-runs before it builds a single port.
+    lossless_root_str(&path)?;
+    Ok(Some(path))
+}
+
+/// Does the registration still name EXACTLY the pinned root?
+///
+/// This is the drift comparison the hosted factory runs before it composes a
+/// single port. It compares the RAW canonical paths, BEFORE any representability
+/// requirement is applied to the current selection: a selection that moved to a
+/// root with no lossless UTF-8 form is still a DIFFERENT root, so it must keep
+/// the stale-admission refusal class ([`CoreError::AuthRequired`] — a later open
+/// admits the moved root as a new epoch with its own pin). Running the
+/// representability refusal first would report an environment fault for a
+/// selection that merely moved, and would hide the very case the pin rule
+/// exists for.
+///
+/// No registration, a blank one and one whose root no longer exists all answer
+/// "not the pinned root"; every other read or canonicalization failure is
+/// reported verbatim, because a document that cannot be read is not evidence
+/// that the selection moved.
+///
+/// Unlike the pin, this function needs no lossless form: it answers with a
+/// boolean and never with a root any port could be built from.
+///
+/// Compiled with the hosted factory it exists for (§Cohorts: that factory IS
+/// the execution+Host edge), so a build without the Host plane carries no dead
+/// comparison.
+#[cfg(all(feature = "execution", feature = "provider-host"))]
+pub(crate) fn selection_matches_pinned_root(
+    nexus_home: &std::path::Path,
+    creator_id: &str,
+    workspace_slug: &str,
+    pinned: &std::path::Path,
+) -> CoreResult<bool> {
+    Ok(
+        selected_canonical_workspace_root(nexus_home, creator_id, workspace_slug)?.as_deref()
+            == Some(pinned),
+    )
+}
+
+/// The canonical root the selected workspace registers right now, with no
+/// representability requirement — the ONE body the pin and the drift comparison
+/// share, so both read the same document through the same reader and resolve the
+/// same canonical form.
+///
+/// A root that is named but no longer exists is an uninitialized workspace
+/// rather than an environment fault, and a blank registration is the same "no
+/// root" answer; every other failure is reported verbatim. Whether a resolved
+/// root can be OWNED is a separate question that only the pin asks: a moved
+/// selection has to be classified as moved before its representation matters.
+#[cfg(feature = "execution")]
+fn selected_canonical_workspace_root(
+    nexus_home: &std::path::Path,
+    creator_id: &str,
+    workspace_slug: &str,
+) -> CoreResult<Option<std::path::PathBuf>> {
+    let Some(raw) = selected_workspace_meta_root(nexus_home, creator_id, workspace_slug)? else {
+        return Ok(None);
+    };
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Ok(None);
+    }
+    match std::fs::canonicalize(raw) {
+        Ok(path) => Ok(Some(path)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(CoreError::Internal {
+            category: format!("workspace root {raw}: {error}"),
+        }),
+    }
+}
+
+/// The canonical creative root as the LOSSLESS UTF-8 string a `String`-typed
+/// workspace port requires.
+///
+/// The native Host binds the selected root as raw path BYTES, while every
+/// workspace port the hosted owner composes from that same root is
+/// `String`-typed ([`WorkspaceCommitExecutor`], [`CoreWorkspaceStateProvider`],
+/// [`WorkspaceCommitAuthority`], the startup-recovery root filter and
+/// `RunnerDeps::workspace_root`). A canonical root that is not valid UTF-8 has
+/// no lossless string form, so `to_string_lossy` would substitute U+FFFD and
+/// point those ports at a different — possibly existing — directory while the
+/// Host kept probing the real bytes: one owner committing through one root and
+/// probing another.
+///
+/// Refusing is therefore the only truthful answer for a root the execution side
+/// cannot represent. It happens at the admission PIN (no probe boundary, no
+/// owner, no authority exists yet) and is re-checked here by the hosted factory
+/// before any port is built, so no caller can bypass the invariant.
+///
+/// Valid UTF-8 path bytes pass through unchanged: `to_str` neither allocates
+/// nor normalizes, so an accepted root is byte-identical to the canonical one.
+///
+/// [`WorkspaceCommitExecutor`]: crate::execution::executor::WorkspaceCommitExecutor
+/// [`CoreWorkspaceStateProvider`]: crate::execution::state_provider::CoreWorkspaceStateProvider
+/// [`WorkspaceCommitAuthority`]: crate::execution::workspace::WorkspaceCommitAuthority
+#[cfg(feature = "execution")]
+pub(crate) fn lossless_root_str(canonical: &std::path::Path) -> CoreResult<&str> {
+    canonical.to_str().ok_or_else(|| CoreError::Internal {
+        category: format!(
+            "workspace root {}: the canonical creative root is not valid UTF-8, so the \
+             String-typed workspace ports cannot carry it",
+            canonical.display()
+        ),
+    })
 }
 
 fn checked_work_directory(

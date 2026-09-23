@@ -7,7 +7,7 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use nexus_contracts::local::orchestration::{WorkspaceChangeEntry, WorkspaceChangeOp};
 use nexus_local_db as db;
@@ -87,6 +87,14 @@ pub enum SessionError {
     ManifestInvalid(String),
     /// Unsettled commit intent blocks new writes (v1.188 P3).
     RecoveryConflict(String),
+    /// The exclusive workspace-authority lease beside the DB is held by
+    /// another workspace writer (v1.195 P0-T1).
+    ///
+    /// Deliberately distinct from [`Self::Io`]: the environment did not fail —
+    /// another workspace commit/recovery authority owns this DB — so a caller
+    /// must report a retryable writer conflict, not a storage fault. Only
+    /// [`WorkspaceSessionManager::new_recoverable`] produces this variant.
+    AuthorityBusy,
     /// A database error occurred during session operations.
     Database(String),
     /// An I/O error occurred during file operations.
@@ -131,6 +139,9 @@ impl fmt::Display for SessionError {
             Self::ManifestInvalid(msg) => write!(f, "manifest invalid: {msg}"),
             Self::RecoveryConflict(root) => {
                 write!(f, "workspace recovery conflict blocks writes: {root}")
+            }
+            Self::AuthorityBusy => {
+                write!(f, "workspace authority is held by another writer for this DB")
             }
             Self::Database(msg) => write!(f, "session database error: {msg}"),
             Self::Io(msg) => write!(f, "session I/O error: {msg}"),
@@ -346,13 +357,112 @@ async fn compute_content_hashes_inner(
 
 // ── Workspace session manager (DB-backed) ───────────────────────────────────
 
+/// The atomic close/admission boundary for one authority's recoverable
+/// mutations (durable commits AND recovery passes — both apply or roll back
+/// workspace bytes through this authority).
+///
+/// A retained durable commit is admitted by a RETAINED owner task that outlives
+/// its awaiting caller, so no single `JoinHandle` can tell an owner close what
+/// it must wait for — a later commit would overwrite an earlier unfinished one.
+/// This counter is that boundary instead: [`Self::admit`] either registers a
+/// commit BEFORE the boundary was closed, or fails closed; [`Self::close`]
+/// stops further admissions; and [`Self::wait_idle`] returns only once every
+/// registered owner task has finished — including one whose awaiting caller
+/// disconnected, because the guard lives in the OWNER task, never in a waiter.
+#[derive(Debug, Default)]
+struct CommitAdmissions {
+    state: Mutex<CommitAdmissionState>,
+    idle: tokio::sync::Notify,
+}
+
+#[derive(Debug, Default)]
+struct CommitAdmissionState {
+    /// Closed by the owning handle's close: no further commit may be admitted.
+    closed: bool,
+    /// Admitted commits whose retained owner task has not finished yet.
+    active: usize,
+}
+
+impl CommitAdmissions {
+    /// Register one durable commit, or refuse because the boundary is closed.
+    fn admit(self: &Arc<Self>) -> Result<CommitAdmission, SessionError> {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        if state.closed {
+            return Err(SessionError::AuthorityBusy);
+        }
+        state.active += 1;
+        drop(state);
+        Ok(CommitAdmission {
+            admissions: Arc::clone(self),
+        })
+    }
+
+    /// Close the boundary: every later admission fails closed.
+    fn close(&self) {
+        self.state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .closed = true;
+    }
+
+    /// Wait until every admitted commit has finished.
+    async fn wait_idle(&self) {
+        loop {
+            let notified = self.idle.notified();
+            tokio::pin!(notified);
+            // Register BEFORE the check: the release path uses
+            // `notify_waiters`, which wakes only already-registered waiters,
+            // so an unregistered check-then-await would sleep through it.
+            notified.as_mut().enable();
+            if self
+                .state
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .active
+                == 0
+            {
+                return;
+            }
+            notified.await;
+        }
+    }
+}
+
+/// One admitted recoverable mutation's share of its authority's admission
+/// count.
+///
+/// Held by the RETAINED OWNER TASK for that task's whole lifetime, so a
+/// waiter that disconnects or is cancelled cannot release it and the owning
+/// close cannot miss the commit.
+#[derive(Debug)]
+pub(crate) struct CommitAdmission {
+    admissions: Arc<CommitAdmissions>,
+}
+
+impl Drop for CommitAdmission {
+    fn drop(&mut self) {
+        let mut state = self
+            .admissions
+            .state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        state.active -= 1;
+        let idle = state.active == 0;
+        drop(state);
+        if idle {
+            self.admissions.idle.notify_waiters();
+        }
+    }
+}
+
 /// Recoverable commit configuration (v1.188 P3).
 pub struct RecoverableCommitConfig {
     pub db_path: PathBuf,
     pub mutation_guard: Arc<tokio::sync::Mutex<()>>,
     pub authority_lease: Arc<WorkspaceAuthorityLease>,
-    /// Retained commit operation owner (survives caller cancellation).
-    pub commit_owner: Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    /// The atomic close/admission boundary for this authority's durable
+    /// commits (see [`CommitAdmissions`]).
+    admissions: Arc<CommitAdmissions>,
 }
 
 /// DB-backed workspace session manager.
@@ -386,7 +496,7 @@ impl Clone for WorkspaceSessionManager {
                     db_path: cfg.db_path.clone(),
                     mutation_guard: Arc::clone(&cfg.mutation_guard),
                     authority_lease: Arc::clone(&cfg.authority_lease),
-                    commit_owner: Arc::clone(&cfg.commit_owner),
+                    admissions: Arc::clone(&cfg.admissions),
                 }),
         }
     }
@@ -409,18 +519,30 @@ impl WorkspaceSessionManager {
     ///
     /// # Errors
     ///
-    /// Returns [`SessionError::Io`] when the exclusive workspace-authority
-    /// lease beside `db_path` cannot be acquired (another manager holds it).
+    /// Returns [`SessionError::AuthorityBusy`] when the exclusive
+    /// workspace-authority lease beside `db_path` is held by another workspace
+    /// writer, and [`SessionError::Io`] when the environment prevents taking it
+    /// at all (the lease file cannot be created or opened). The two are
+    /// separated HERE because this is the only boundary that still sees the
+    /// [`std::io::Error`] kind: [`WorkspaceAuthorityLease::acquire`] reports a
+    /// held lease as [`std::io::ErrorKind::WouldBlock`] and everything else as
+    /// its own kind, and collapsing both into one string would make an
+    /// unusable lease path indistinguishable from a genuine writer conflict.
     pub fn new_recoverable(pool: Arc<SqlitePool>, db_path: PathBuf) -> Result<Self, SessionError> {
-        let authority_lease = WorkspaceAuthorityLease::acquire(&db_path)
-            .map_err(|e| SessionError::Io(e.to_string()))?;
+        let authority_lease = WorkspaceAuthorityLease::acquire(&db_path).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::WouldBlock {
+                SessionError::AuthorityBusy
+            } else {
+                SessionError::Io(e.to_string())
+            }
+        })?;
         Ok(Self {
             pool,
             recoverable: Some(RecoverableCommitConfig {
                 db_path,
                 mutation_guard: Arc::new(tokio::sync::Mutex::new(())),
                 authority_lease,
-                commit_owner: Arc::new(tokio::sync::Mutex::new(None)),
+                admissions: Arc::new(CommitAdmissions::default()),
             }),
         })
     }
@@ -439,11 +561,43 @@ impl WorkspaceSessionManager {
         }
     }
 
-    /// Register the retained commit operation owner spawned for caller cancellation safety.
-    pub async fn register_commit_owner(&self, handle: tokio::task::JoinHandle<()>) {
+    /// Admit one recoverable mutation against this authority's close boundary.
+    ///
+    /// Fails CLOSED once the owning execution handle closed the boundary: a
+    /// mutation that would land after a close must never apply beside that
+    /// close's authority release. `None` means this manager has no recoverable
+    /// authority to fence (such a commit refuses on its own).
+    ///
+    /// # Errors
+    ///
+    /// [`SessionError::AuthorityBusy`] when the boundary is already closed.
+    pub(crate) fn admit_commit(&self) -> Result<Option<CommitAdmission>, SessionError> {
+        match &self.recoverable {
+            Some(cfg) => cfg.admissions.admit().map(Some),
+            None => Ok(None),
+        }
+    }
+
+    /// Close the durable-commit admission boundary.
+    ///
+    /// The owner's close calls this BEFORE it releases the workspace
+    /// authority: every later admission fails closed, and every mutation
+    /// admitted before it is still drained by
+    /// [`Self::wait_for_admitted_commits`].
+    pub(crate) fn close_commit_admission(&self) {
         if let Some(cfg) = &self.recoverable {
-            let mut guard = cfg.commit_owner.lock().await;
-            *guard = Some(handle);
+            cfg.admissions.close();
+        }
+    }
+
+    /// Wait until every already-admitted recoverable mutation has finished.
+    ///
+    /// The owner's close calls this before it releases the workspace
+    /// authority, so the released lease can never outlive a mutation that is
+    /// still applying or rolling back through it.
+    pub(crate) async fn wait_for_admitted_commits(&self) {
+        if let Some(cfg) = &self.recoverable {
+            cfg.admissions.wait_idle().await;
         }
     }
 
@@ -877,22 +1031,32 @@ impl WorkspaceSessionManager {
     /// On conflict (hash mismatch, stale, or expired), the OCC counter is
     /// incremented and a structured `tracing::warn!` is emitted (T6).
     ///
+    /// With recoverable authority this delegates to
+    /// [`Self::commit_session_durable_owned`]: the mutation runs on the
+    /// RETAINED owner task that holds this authority's admission for its whole
+    /// duration (see [`CommitAdmissions`]), so a caller that disconnects or is
+    /// cancelled cannot release that admission while the commit is still
+    /// applying. The validate+consume CAS below is the non-recoverable path,
+    /// unchanged.
+    ///
     /// # Errors
     ///
     /// Returns [`SessionError`] if validation fails (hash conflict), the
-    /// session is stale/expired, or the consume loses the single-writer race.
+    /// session is stale/expired, the consume loses the single-writer race, or
+    /// this authority's close boundary is already sealed
+    /// ([`SessionError::AuthorityBusy`]).
     pub async fn commit_session(
-        &self,
+        self: &Arc<Self>,
         session_id: &SessionId,
         changes: &[ChangeEntry],
         active_workspace_root: &str,
     ) -> Result<db::WorkspaceSessionRow, SessionError> {
         if self.recoverable.is_some() {
-            let _outcome = super::session_commit::commit_recoverable(
-                self,
-                session_id,
-                changes,
-                active_workspace_root,
+            Self::commit_session_durable_owned(
+                Arc::clone(self),
+                session_id.clone(),
+                changes.to_vec(),
+                active_workspace_root.to_string(),
             )
             .await?;
             return db::get_session(&self.pool, &session_id.to_string())
@@ -920,14 +1084,20 @@ impl WorkspaceSessionManager {
 
     /// Durable commit returning revision metadata (v1.188 P3).
     ///
+    /// Delegates to [`Self::commit_session_durable_owned`], so this entrance
+    /// runs on the SAME retained owner task as the handle/executor route and
+    /// registers in the same close boundary: an owning close either drains this
+    /// commit or refuses it, and a caller that is cancelled cannot release the
+    /// admission while the commit is still applying.
+    ///
     /// # Errors
     ///
     /// Returns [`SessionError::Internal`] when this manager has no recoverable
-    /// authority, otherwise whatever
-    /// [`session_commit::commit_recoverable`](super::session_commit::commit_recoverable)
-    /// reports for the manifest.
+    /// authority, [`SessionError::AuthorityBusy`] once the owning close sealed
+    /// the boundary, otherwise whatever
+    /// `session_commit::commit_recoverable` reports for the manifest.
     pub async fn commit_session_durable(
-        &self,
+        self: &Arc<Self>,
         session_id: &SessionId,
         changes: &[ChangeEntry],
         active_workspace_root: &str,
@@ -937,11 +1107,21 @@ impl WorkspaceSessionManager {
                 "recoverable workspace authority required".into(),
             ));
         }
-        super::session_commit::commit_recoverable(self, session_id, changes, active_workspace_root)
-            .await
+        Self::commit_session_durable_owned(
+            Arc::clone(self),
+            session_id.clone(),
+            changes.to_vec(),
+            active_workspace_root.to_string(),
+        )
+        .await
     }
 
     /// Durable commit on an `Arc` manager; retains ownership through caller cancellation.
+    ///
+    /// Every recoverable commit entrance routes here — the handle/executor
+    /// route, [`Self::commit_session_durable`] and the recoverable branch of
+    /// [`Self::commit_session`] — so all of them admit once, on the retained
+    /// owner, and none of them can release its place by being cancelled.
     ///
     /// The caller must pass the verified active workspace root from its own
     /// authority context (for example HTTP [`WorkspaceState::workspace_path`]
@@ -951,8 +1131,8 @@ impl WorkspaceSessionManager {
     /// # Errors
     ///
     /// Returns whatever
-    /// [`session_commit::commit_recoverable_owned`](super::session_commit::commit_recoverable_owned)
-    /// reports; caller cancellation does not abandon the owned commit.
+    /// `session_commit::commit_recoverable_owned` reports; caller cancellation
+    /// does not abandon the owned commit.
     pub async fn commit_session_durable_owned(
         self_arc: Arc<Self>,
         session_id: SessionId,
@@ -970,13 +1150,53 @@ impl WorkspaceSessionManager {
 
     /// Run startup recovery for all unsettled intents (call before publishing executor).
     ///
+    /// Runs on the retained owner task of
+    /// `session_commit::startup_recovery_owned`: this authority's admission is
+    /// held by that task for the whole pass, so a caller that disconnects or is
+    /// cancelled cannot release it while intents are still being applied or
+    /// rolled back. A sealed boundary refuses the pass
+    /// ([`SessionError::AuthorityBusy`]) before any row is read.
+    ///
     /// # Errors
     ///
-    /// Returns whatever
-    /// [`session_commit::startup_recovery_all`](super::session_commit::startup_recovery_all)
-    /// reports; a corrupt intent row is surfaced rather than skipped.
-    pub async fn startup_recovery(&self) -> Result<(), SessionError> {
-        super::session_commit::startup_recovery_all(self).await
+    /// Returns [`SessionError::AuthorityBusy`] once the owning close sealed the
+    /// boundary, otherwise whatever
+    /// `session_commit::startup_recovery_all` reports; a corrupt intent row is
+    /// surfaced rather than skipped.
+    pub async fn startup_recovery(self: &Arc<Self>) -> Result<(), SessionError> {
+        super::session_commit::startup_recovery_owned(
+            Arc::clone(self),
+            super::session_commit::RecoveryScope::All,
+        )
+        .await
+    }
+
+    /// Run startup recovery for the unsettled work of ONE workspace root.
+    ///
+    /// An authority admitted for a single canonical root must not settle, roll
+    /// back or fail on another root's unsettled intents — their files and
+    /// persisted state are not its business — so the hosted production bundle
+    /// uses this entry point instead of the whole-DB sweep.
+    ///
+    /// Like [`Self::startup_recovery`], the pass runs on a RETAINED owner task,
+    /// so caller cancellation cannot release its admission while the pass is
+    /// still applying or rolling back.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionError::AuthorityBusy`] once the owning close sealed the
+    /// boundary, otherwise whatever
+    /// `session_commit::startup_recovery_for_root` reports for `workspace_root`;
+    /// another root's rows are never read.
+    pub async fn startup_recovery_for_root(
+        self: &Arc<Self>,
+        workspace_root: &str,
+    ) -> Result<(), SessionError> {
+        super::session_commit::startup_recovery_owned(
+            Arc::clone(self),
+            super::session_commit::RecoveryScope::Root(workspace_root.to_string()),
+        )
+        .await
     }
 
     /// Get the underlying database pool.

@@ -58,6 +58,12 @@ fn map_session_error(err: SessionError) -> CapabilityError {
         SessionError::ActiveWorkspaceMismatch { .. } => {
             CapabilityError::InputInvalid("session workspace root mismatch".into())
         }
+        // A held workspace authority is a conflict, not a capability fault; it
+        // cannot arise from an executor call (the bundle takes the lease before
+        // the executor exists), so this arm is only here for exhaustiveness.
+        SessionError::AuthorityBusy => {
+            CapabilityError::PermanentExternal("workspace authority busy".into())
+        }
         SessionError::Database(_) | SessionError::Io(_) | SessionError::Internal(_) => {
             CapabilityError::Internal("workspace storage error".into())
         }

@@ -2571,6 +2571,18 @@ impl WorkflowStateStore for SqliteSessionStorage {
     /// external effect dispatch (A2/A7 Important 5), so a crash after an
     /// effect but before the result checkpoint leaves an interrupted (never
     /// replayable) run.
+    ///
+    /// The marker is also the durable cancel-intent fence (v1.195 P0-T6): it
+    /// rewrites `run_state_json` wholesale from the step's own state, so a
+    /// step whose pre-step load already observed a COMMITTED cancel intent
+    /// would otherwise erase that intent and dispatch its external effect
+    /// after the cancel linearization point. The revision CAS cannot catch
+    /// that case — the intent fence deliberately keeps the status
+    /// non-terminal, so the post-fence revision is exactly the revision the
+    /// step anchors to. A marker that would have been admitted on that
+    /// revision while the intent is set is refused as a
+    /// [`graph_flow::GraphError::SessionConflict`] (the "a concurrent
+    /// authoritative writer owns this row" disposition) and writes nothing.
     async fn mark_step_in_flight(
         &self,
         session_id: &SessionId,
@@ -2620,6 +2632,43 @@ impl WorkflowStateStore for SqliteSessionStorage {
                     session_id.0
                 )))
             })?;
+        let cancel_intent: Option<i64> = sqlx::query_scalar(
+            r"
+            SELECT CASE WHEN json_extract(COALESCE(run_state_json, '{}'), '$.cancel_requested') IS 1
+                        THEN 1 ELSE 0 END
+            FROM orchestration_sessions
+            WHERE session_id = ? AND status IN ('running', 'paused')
+              AND state_revision = ?
+              AND graph_version >= 0 AND graph_version < 9223372036854775807
+              AND (? IS NULL OR graph_version = ?)
+            ",
+        )
+        .bind(&id)
+        .bind(expected_revision_i64)
+        .bind(expected_graph_i64)
+        .bind(expected_graph_i64)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "mark_step_in_flight '{}': cancel-intent fence read: {e}",
+                session_id.0
+            )))
+        })?;
+        if cancel_intent == Some(1) {
+            // The marker would have been admitted on this exact revision, so
+            // only the cancel intent stands between the step and an external
+            // effect committed after the cancel winner. Refuse it: the drive
+            // loop stops as a losing writer (no failure settlement, no
+            // durable write of any kind).
+            return Err(EngineError::GraphFlow(
+                graph_flow::GraphError::SessionConflict(format!(
+                    "mark_step_in_flight '{}': durable cancel intent committed at revision {}; \
+                     the cancel fence owns this run",
+                    session_id.0, expected_revision
+                )),
+            ));
+        }
         let result = sqlx::query!(
             r"
             UPDATE orchestration_sessions

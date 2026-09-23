@@ -105,7 +105,11 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
       refetch: strategyState.graphQuery.refetch,
     };
   }, [
-    strategyState.graphQuery,
+    strategyState.graphQuery.data,
+    strategyState.graphQuery.isLoading,
+    strategyState.graphQuery.isError,
+    strategyState.graphQuery.error,
+    strategyState.graphQuery.refetch,
     strategyState.activeSession,
   ]);
 

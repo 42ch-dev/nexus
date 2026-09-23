@@ -75,6 +75,32 @@ pub enum SupervisorError {
     },
 }
 
+/// Durable disposition of a schedule-level `cancel` (v1.195 P0-T4, §3.4).
+///
+/// A row that owns NO run is cancelled by ONE conditional write on the SAME
+/// `current_session_id IS NULL` fence the admission claim uses, so a cancel
+/// and a concurrent admission can never both win the row. The loser of that
+/// fence is answered from the row the winner left behind — its owned run,
+/// its terminal status, or its absence — never from the caller's stale
+/// snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ScheduleCancelDisposition {
+    /// The fence was won: the row owned no run and is now durably
+    /// `cancelled`.
+    Cancelled,
+    /// The row owns a run (claimed concurrently, or admitted earlier). The
+    /// named run is the durable winner; the caller cancels THAT run through
+    /// the single coordinator cancel owner.
+    Admitted(String),
+    /// The fence was not won and the row owns no run: the durable status the
+    /// write deliberately did not overwrite (a terminal row, or any other
+    /// state this cancel cannot claim).
+    NotCancelled(String),
+    /// No such row for this creator: an absent id and a foreign id close
+    /// identically.
+    Absent,
+}
+
 /// Per-creator schedule supervisor.
 ///
 /// Responsibilities:
@@ -1830,6 +1856,75 @@ impl ScheduleSupervisor {
         }
 
         Ok(true)
+    }
+
+    /// Cancel a schedule under the SAME durable fence the admission claim
+    /// uses (v1.195 P0-T4, §3.4).
+    ///
+    /// A row that owns NO run is cancelled by ONE conditional UPDATE. Its
+    /// predicate (`current_session_id IS NULL` + a non-terminal status) is
+    /// exactly the predicate `admit_schedule_run`'s claim writes on, so the
+    /// two writers serialize on the row: exactly one of them wins, a cancel
+    /// never writes over a claimed row, and an admission never claims a
+    /// cancelled one. The CAS has no read-then-write window; only when it
+    /// does NOT win is the row re-read to return the durable winner the
+    /// other writer left (its owned run, or its terminal status).
+    ///
+    /// A row that already owns a run is never written here: it answers
+    /// [`ScheduleCancelDisposition::Admitted`], and the caller routes the
+    /// cancel to that run through the coordinator — the ONE owner of run
+    /// cancellation, durable cancel-intent fence included.
+    ///
+    /// `creator_id` is part of the fence, so a foreign row is indistinguishable
+    /// from an absent one ([`ScheduleCancelDisposition::Absent`]).
+    ///
+    /// # Errors
+    /// Returns [`SupervisorError`] only for storage faults.
+    pub async fn cancel_schedule(
+        &self,
+        schedule_id: &str,
+        creator_id: &str,
+    ) -> Result<ScheduleCancelDisposition, SupervisorError> {
+        let now = chrono::Utc::now().timestamp();
+        // SAFETY: runtime `sqlx::query` — a new UPDATE for the schedule-level
+        // cancel CAS; every value is bound and the only interpolated text is
+        // the constant fence/status list.
+        let cancelled = sqlx::query(
+            "UPDATE creator_schedules
+                SET status = 'cancelled', terminated_at = ?, updated_at = ?
+              WHERE schedule_id = ? AND creator_id = ?
+                AND current_session_id IS NULL
+                AND status NOT IN ('completed', 'failed', 'cancelled')",
+        )
+        .bind(now)
+        .bind(now)
+        .bind(schedule_id)
+        .bind(creator_id)
+        .execute(&*self.pool)
+        .await?;
+        if cancelled.rows_affected() == 1 {
+            // A cancelled row owns no run, so it can never be in the running
+            // set; drop any stale cache entry all the same.
+            self.remove_from_running_cache(schedule_id, creator_id).await;
+            return Ok(ScheduleCancelDisposition::Cancelled);
+        }
+
+        // The fence was not won: the row moved on (or never existed for this
+        // creator). The DURABLE row is the winner — read it once and report
+        // exactly what it says.
+        let row: Option<(String, Option<String>)> = sqlx::query_as(
+            "SELECT status, current_session_id FROM creator_schedules
+              WHERE schedule_id = ? AND creator_id = ?",
+        )
+        .bind(schedule_id)
+        .bind(creator_id)
+        .fetch_optional(&*self.pool)
+        .await?;
+        Ok(match row {
+            None => ScheduleCancelDisposition::Absent,
+            Some((_status, Some(run_id))) => ScheduleCancelDisposition::Admitted(run_id),
+            Some((status, None)) => ScheduleCancelDisposition::NotCancelled(status),
+        })
     }
 
     // -----------------------------------------------------------------------
