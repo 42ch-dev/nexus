@@ -395,9 +395,14 @@ impl ExecutionHandle {
     ///
     /// - a run that never committed (the pair is absent, or names another
     ///   capability): absent;
-    /// - a commit that failed or was never checkpointed (the failure record is
-    ///   `_capability_error`; a stale/other capability's output does not match
-    ///   the shape): absent;
+    /// - a commit that failed or was never checkpointed: absent — the engine
+    ///   writes each invocation's OWN result pair (it clears the previous
+    ///   `_capability_output`/`_capability_error` immediately before a
+    ///   capability runs, after that invocation's args were rendered), so a
+    ///   failure leaves its failure record and no output at all, and a
+    ///   SUCCESS→FAILURE sequence on this same name cannot present the earlier
+    ///   attempt's revision as the latest result. The shape guard below rejects
+    ///   any output another capability produced as well;
     /// - a malformed/foreign output (wrong types, `committed` not `true`,
     ///   extra members, empty revision): absent.
     ///
