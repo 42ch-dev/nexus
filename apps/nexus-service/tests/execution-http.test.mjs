@@ -259,13 +259,20 @@ describe('execution-http (P5-T3)', () => {
     // core's own 404 refusal — never 501, never a synthesized success.
     assert.equal(strategyPatch.status, 404, strategyPatch.text);
 
-    // The compute run family is cohort-excluded on this surface: a truthful
-    // migration refusal (501 route_not_migrated), never a degraded success.
+    // The Compute family (v1.195 P2-T3) is a mounted family of its own
+    // (`compute.ts`) over the hosted owner, not an unmigrated route: this
+    // profile therefore answers from the compute/owner boundary — never the
+    // router's 501. The live C1–C8 contracts (and their refusals) are asserted
+    // in `compute-http.test.mjs`, which stages a real World and the real owned
+    // execution owner this fixture's workspace does not register.
     const computeRun = await jsonFetch(`${baseUrl}/v1/daemon/compute/run`, {
       method: 'POST',
       body: { capability_id: 'x', inputs: {} },
     });
-    assert.equal(computeRun.status, 501, computeRun.text);
-    assert.equal(computeRun.payload.error.code, 'route_not_migrated', computeRun.text);
+    assert.notEqual(
+      computeRun.payload?.error?.code,
+      'route_not_migrated',
+      `compute/run is a mounted identity now: ${computeRun.text}`,
+    );
   });
 });

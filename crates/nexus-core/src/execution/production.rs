@@ -12,7 +12,9 @@
 //! - [`CoreService::start_hosted_execution`] (P0-T2), the public factory of
 //!   current-host contracts §3.1, adds the Host-plane half — prompt executor,
 //!   provider-catalog port, run-event port and the shared maps — plus the
-//!   hosted scheduler, and calls [`CoreService::start_execution`] once.
+//!   hosted scheduler and, under the `compute` feature, the ONE shared WASM
+//!   engine/cache/serializer bundle (P2-T3), and calls
+//!   [`CoreService::start_execution`] once.
 //!
 //! Why the root is the OPEN-TIME PIN rather than a value read here: the native
 //! boot binds its Host probe boundary through
@@ -82,7 +84,11 @@ impl CoreService {
     ///    closing) the coordinator reads through [`RunEventPort`];
     /// 4. the provider-catalog port over the SAME Host, so admission validates
     ///    frozen role bindings against live native+ACP catalog truth;
-    /// 5. the hosted scheduler (through
+    /// 5. under the `compute` feature, the ONE WASM runtime bundle: a single
+    ///    [`nexus_wasm_host::WasmEngine`], the embedded
+    ///    [`nexus_wasm_host::ModuleCache`] warmed against it, and the ONE
+    ///    engine-global invocation serializer (P2-T3);
+    /// 6. the hosted scheduler (through
     ///    [`RunnerDeps::hosted_scheduler`](crate::execution::lifecycle::RunnerDeps)):
     ///    the production supervisor with the coordinator-backed
     ///    [`crate::execution::workflow::CoordinatorScheduleRunStarter`], plus
@@ -147,6 +153,46 @@ impl CoreService {
         // ONE shared cancellation map: the engine, the coordinator and every
         // cancel path that fires a run's token must resolve the same token.
         deps.session_cancels = Some(Arc::new(std::sync::RwLock::new(HashMap::new())));
+        // ONE WASM engine, its warmed embedded module cache and the
+        // engine-global invocation serializer (current-host contracts §5),
+        // constructed WITH this owner and shared by every compute request —
+        // never per request. `wasmtime`'s interrupt counter is engine-global,
+        // so the first watchdog to fire would trap every concurrent invocation
+        // at the shortest budget; one permit makes each run's watchdog observe
+        // only its own budget. `ModuleCache::warm_embedded` compiles the
+        // registry's shipped modules ONCE here, so the run path never compiles
+        // per request.
+        //
+        // A build without the `compute` feature compiles none of this: the
+        // domain/default and Connect-only cohorts keep the WASM edge off. An
+        // environment where the engine itself cannot be constructed leaves the
+        // runtime uninstalled rather than failing this owner's boot: module
+        // DISCOVERY (a compiled-in registry) still answers truthfully, and
+        // every invocation path refuses with the typed missing-runtime
+        // refusal — never a fabricated success.
+        #[cfg(feature = "compute")]
+        match nexus_wasm_host::WasmEngine::new() {
+            Ok(engine) => {
+                let engine = Arc::new(engine);
+                let cache = Arc::new(nexus_wasm_host::ModuleCache::new());
+                if let Err(error) = cache.warm_embedded(&engine) {
+                    tracing::error!(
+                        %error,
+                        "hosted execution: embedded compute modules did not warm; \
+                         an unwarmed module is a not-found refusal, never a fake run"
+                    );
+                }
+                deps.compute_engine = Some(engine);
+                deps.compute_cache = Some(cache);
+                deps.compute_serializer = Some(Arc::new(tokio::sync::Semaphore::new(1)));
+            }
+            Err(error) => {
+                tracing::error!(
+                    %error,
+                    "hosted execution: WASM engine unavailable; compute invocations refuse"
+                );
+            }
+        }
         // The owner's own supervisor, coordinator-backed starter and clock task.
         deps.hosted_scheduler = Some(HostedSchedulerConfig::from_env());
 

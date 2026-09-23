@@ -17,9 +17,13 @@ crate-type = ["cdylib", "rlib"]
 napi = { workspace = true }
 napi-derive = { workspace = true }
 # `execution` (P3 engine/schedule authority) + `provider-host` (the hosted
-# production factory's Host-plane half, v1.195 P0-T5) without `compute`: the
-# WASM edge stays a daemon-cohort capability per architecture §Cohorts.
-nexus-core = { path = "../nexus-core", features = ["execution", "provider-host"] }
+# production factory's Host-plane half, v1.195 P0-T5) + `compute` (the WASM
+# module/run/transaction edge, v1.195 P2-T3): the native/TS host cohort owns
+# the ONE hosted composition, so the compute runtime is wired into the SAME
+# owner the control plane uses. The domain/default cohort stays empty and the
+# Connect-only cohort keeps its own explicit spoke `compute` without acquiring
+# this Host/scheduler edge (architecture §Cohorts).
+nexus-core = { path = "../nexus-core", features = ["execution", "provider-host", "compute"] }
 nexus-contracts = { path = "../nexus-contracts" }
 nexus-agent-host = { path = "../nexus-agent-host" }
 nexus-provider-ports = { path = "../nexus-provider-ports" }

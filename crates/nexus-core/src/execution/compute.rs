@@ -792,20 +792,6 @@ pub async fn get_compute_run(
 /// `compute_run` and `accept_compute_run` already exist in `handle_ops` with
 /// the retained signatures (current-host-contracts §5) and are not duplicated.
 impl ExecutionHandle {
-    /// The owner-level admission fence every entry point checks.
-    ///
-    /// The same predicate the neighbouring `handle_ops` entry points apply —
-    /// the coordinator's draining barrier, read through this handle's public
-    /// `is_draining` view — so the two surfaces cannot disagree about when the
-    /// owner has stopped accepting work. (`handle_ops::ensure_admitting` is
-    /// module-private and cannot be shared, hence the local name.)
-    fn ensure_not_draining(&self) -> CoreResult<()> {
-        if self.is_draining() {
-            return Err(CoreError::Closing);
-        }
-        Ok(())
-    }
-
     /// List the installed compute modules (C1).
     ///
     /// The registry is compiled in, so the list is machine capability rather
@@ -817,7 +803,7 @@ impl ExecutionHandle {
     /// `Closing` when the owner is shutting down; `AuthRequired` when the
     /// principal does not belong to this owner's service.
     pub fn list_compute_modules(&self, principal: &Principal) -> CoreResult<ListModulesResponse> {
-        self.ensure_not_draining()?;
+        self.ensure_admitting()?;
         self.linked_core()?.verify_principal(principal)?;
         let items = crate::execution::compute::list_compute_modules()?
             .into_iter()
@@ -842,7 +828,7 @@ impl ExecutionHandle {
         principal: &Principal,
         module_id: String,
     ) -> CoreResult<ModuleDetail> {
-        self.ensure_not_draining()?;
+        self.ensure_admitting()?;
         self.linked_core()?.verify_principal(principal)?;
         crate::execution::compute::get_compute_module(&module_id)
     }
@@ -859,7 +845,7 @@ impl ExecutionHandle {
         principal: &Principal,
         run_id: String,
     ) -> CoreResult<RunDetail> {
-        self.ensure_not_draining()?;
+        self.ensure_admitting()?;
         let core = self.linked_core()?;
         core.verify_principal(principal)?;
         crate::execution::compute::get_compute_run(core.as_ref(), principal, &run_id).await
@@ -876,7 +862,7 @@ impl ExecutionHandle {
         principal: &Principal,
         query: ListRunsQuery,
     ) -> CoreResult<RunListResponse> {
-        self.ensure_not_draining()?;
+        self.ensure_admitting()?;
         let core = self.linked_core()?;
         core.verify_principal(principal)?;
         crate::execution::compute::list_compute_runs(core.as_ref(), principal, query).await
@@ -894,7 +880,7 @@ impl ExecutionHandle {
         principal: &Principal,
         run_id: String,
     ) -> CoreResult<DiscardRunResponse> {
-        self.ensure_not_draining()?;
+        self.ensure_admitting()?;
         let core = self.linked_core()?;
         core.verify_principal(principal)?;
         crate::execution::compute::discard_compute_run(core.as_ref(), principal, &run_id).await?;
@@ -917,7 +903,7 @@ impl ExecutionHandle {
         principal: &Principal,
         query: ClearRunsQuery,
     ) -> CoreResult<ClearRunsResponse> {
-        self.ensure_not_draining()?;
+        self.ensure_admitting()?;
         let core = self.linked_core()?;
         core.verify_principal(principal)?;
         crate::execution::compute::clear_compute_runs(core.as_ref(), principal, query).await

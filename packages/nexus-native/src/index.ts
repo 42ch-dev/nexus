@@ -4,6 +4,18 @@ import type {
   CoreCloseReport,
   CoreHostQuery,
   CoreHostQueryResponse,
+  ClearRunsQuery,
+  ClearRunsResponse,
+  DiscardRunResponse,
+  ListModulesResponse,
+  ListRunsQuery,
+  ModuleDetail,
+  RunAcceptRequest,
+  RunAcceptResponse,
+  RunDetail,
+  RunListResponse,
+  RunRequest,
+  RunResponse,
   NativeCompatibility,
   NativeOpenOptions,
   ProviderCall,
@@ -743,6 +755,36 @@ export interface NativeCore {
     subscriptionId: string,
   ): Promise<CoreWorkflowEventBatch>;
   releaseWorkflowEvents(principal: PrincipalHandle, subscriptionId: string): Promise<void>;
+  // ── v1.195 P2-T3 Compute module/run/transaction surface ────────────────────
+  /**
+   * The retained C1–C8 Compute operations over the SAME hosted owner the
+   * control surface uses. Discovery/detail read the compiled-in module
+   * registry (the invocation schema Run Studio renders comes from the shipped
+   * manifest, never from TS); run/detail/history/discard/clear delegate to the
+   * existing compute authority, so the World-ownership gate, the one
+   * transactional accept with its CAS, the effect-free discard and the
+   * World-scoped terminal clear are the core's semantics, not a second
+   * implementation. The WASM engine/cache/serializer are the ONE bundle the
+   * hosted factory installed at boot — no caller can supply or replace them.
+   */
+  listComputeModules(principal: PrincipalHandle): Promise<ListModulesResponse>;
+  getComputeModule(principal: PrincipalHandle, moduleId: string): Promise<ModuleDetail>;
+  computeRun(principal: PrincipalHandle, request: RunRequest): Promise<RunResponse>;
+  getComputeRun(principal: PrincipalHandle, runId: string): Promise<RunDetail>;
+  listComputeRuns(
+    principal: PrincipalHandle,
+    query: ListRunsQuery,
+  ): Promise<RunListResponse>;
+  acceptComputeRun(
+    principal: PrincipalHandle,
+    runId: string,
+    request: RunAcceptRequest,
+  ): Promise<RunAcceptResponse>;
+  discardComputeRun(principal: PrincipalHandle, runId: string): Promise<DiscardRunResponse>;
+  clearComputeRuns(
+    principal: PrincipalHandle,
+    query: ClearRunsQuery,
+  ): Promise<ClearRunsResponse>;
 }
 
 function wrapCore(inner: NativeCoreBinding): NativeCore {
@@ -948,6 +990,14 @@ type DomainSurface = Pick<
   | 'subscribeWorkflowEvents'
   | 'nextWorkflowEvents'
   | 'releaseWorkflowEvents'
+  | 'listComputeModules'
+  | 'getComputeModule'
+  | 'computeRun'
+  | 'getComputeRun'
+  | 'listComputeRuns'
+  | 'acceptComputeRun'
+  | 'discardComputeRun'
+  | 'clearComputeRuns'
 >;
 
 function wrapDomainSurface(inner: NativeCoreBinding): DomainSurface {
@@ -1442,6 +1492,31 @@ function wrapDomainSurface(inner: NativeCoreBinding): DomainSurface {
     },
     async releaseWorkflowEvents(principal, subscriptionId) {
       await inner.releaseWorkflowEvents(principal, subscriptionId);
+    },
+    // ── v1.195 P2-T3 Compute module/run/transaction surface ──────────────────
+    async listComputeModules(principal) {
+      return json(await inner.listComputeModules(principal));
+    },
+    async getComputeModule(principal, moduleId) {
+      return json(await inner.getComputeModule(principal, moduleId));
+    },
+    async computeRun(principal, request) {
+      return json(await inner.computeRun(principal, wire(request, 'request')));
+    },
+    async getComputeRun(principal, runId) {
+      return json(await inner.getComputeRun(principal, runId));
+    },
+    async listComputeRuns(principal, query) {
+      return json(await inner.listComputeRuns(principal, wire(query, 'query')));
+    },
+    async acceptComputeRun(principal, runId, request) {
+      return json(await inner.acceptComputeRun(principal, runId, wire(request, 'request')));
+    },
+    async discardComputeRun(principal, runId) {
+      return json(await inner.discardComputeRun(principal, runId));
+    },
+    async clearComputeRuns(principal, query) {
+      return json(await inner.clearComputeRuns(principal, wire(query, 'query')));
     },
   };
 }
