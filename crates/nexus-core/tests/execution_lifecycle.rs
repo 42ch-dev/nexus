@@ -720,3 +720,65 @@ async fn concurrent_close_and_start_never_leave_an_owner() {
         owner.close().await.unwrap();
     }
 }
+
+// ── Close / admission ownership (v1.195 P0-T5 close findings) ───────────────
+
+/// The durable engine epoch this open's admission was granted.
+///
+/// `nexus_engine_epoch()` is installed per connection by the writer protocol
+/// from the admitting context, so it reports the generation THIS pool was
+/// admitted with — the same generation the execution handle publishes.
+async fn admission_engine_epoch(core: &CoreService) -> i64 {
+    let epoch: Option<i64> = sqlx::query_scalar("SELECT nexus_engine_epoch()")
+        .fetch_one(core.pool())
+        .await
+        .expect("the admitted pool carries an engine epoch");
+    epoch.expect("an admitted engine pool reports a non-null epoch")
+}
+
+/// A confirmed close gives up the closing core's OWN admitted-pool handle.
+///
+/// A cooperative `EngineOwner` joiner holds a CLONE of the creator's
+/// `WorkspaceWriterGuard`, so that guard — and the `state.db.engine.lock` file
+/// it keeps open — stays alive until every clone is gone. Closing the retained
+/// registry entry and the creator's own handle is not enough: a
+/// closed-but-still-referenced joiner would keep the home fenced, and a fresh
+/// same-process open would fail `OwnerBusy` with no live owner at all. Only
+/// the admission creator removes the retained entry; every closing core drops
+/// its own handle.
+#[tokio::test]
+async fn closed_joiner_does_not_keep_the_engine_admission_alive() {
+    let f = fixture().await;
+
+    // ── The creator takes the engine admission. ──
+    let creator = open_engine_owner(&f).await;
+    let epoch = admission_engine_epoch(&creator).await;
+
+    // ── A cooperating open JOINS that live admission: a live peer still fences
+    //    a duplicate, so the joiner is the SAME generation, never a second
+    //    owner admitted with a new epoch. ──
+    let joiner = open_engine_owner(&f).await;
+    assert_eq!(
+        admission_engine_epoch(&joiner).await,
+        epoch,
+        "a live peer still fences a new admission"
+    );
+
+    // ── Close the JOINER first, then the CREATOR. Both closed values stay
+    //    referenced for the rest of the test. ──
+    joiner.close().await.expect("close the joiner");
+    creator.close().await.expect("close the creator");
+    assert!(joiner.is_closing() && creator.is_closing());
+
+    // ── A fresh owner over the same home must genuinely RE-ADMIT: a new engine
+    //    epoch, not the settled generation's. ──
+    let fresh = CoreService::open(open_options(&f, CoreAccess::EngineOwner))
+        .await
+        .expect("a fresh owner must reopen the home after both closures");
+    let fresh_epoch = admission_engine_epoch(&fresh).await;
+    assert!(
+        fresh_epoch > epoch,
+        "the fresh owner must take a NEW engine admission ({epoch} -> {fresh_epoch})"
+    );
+    fresh.close().await.expect("close the fresh owner");
+}

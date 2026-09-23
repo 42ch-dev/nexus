@@ -64,6 +64,25 @@ fn test_owner_gate_settled(session_id: &str) {
 #[cfg(not(any(test, feature = "test-hooks")))]
 const fn test_owner_gate_settled(_session_id: &str) {}
 
+/// Rendezvous at a recovery pass's settlement boundary, when a test gate is armed.
+///
+/// Gated builds only: the production callsite is compiled out, so no
+/// never-awaiting async wrapper exists there.
+#[cfg(any(test, feature = "test-hooks"))]
+async fn test_recovery_gate_admitted() {
+    super::test_hooks::recovery_gate_admitted().await;
+}
+
+/// Signal that the retained recovery owner task has settled, when a gate is armed.
+#[cfg(any(test, feature = "test-hooks"))]
+fn test_recovery_gate_settled() {
+    super::test_hooks::recovery_gate_settled();
+}
+
+/// Production no-op for the gated recovery settle signal.
+#[cfg(not(any(test, feature = "test-hooks")))]
+const fn test_recovery_gate_settled() {}
+
 #[cfg(any(test, feature = "test-hooks"))]
 use super::test_hooks::clear_crash_point;
 
@@ -90,7 +109,7 @@ pub struct CommitOutcome {
 /// Returns whatever [`recover_unsettled_locked`] reports: a
 /// [`SessionError::Database`] failure while listing or settling rows, or the
 /// recovery-conflict error for an intent another writer already claimed.
-pub async fn recover_unsettled(
+pub(crate) async fn recover_unsettled(
     mgr: &WorkspaceSessionManager,
     workspace_root: &str,
 ) -> Result<(), SessionError> {
@@ -105,7 +124,7 @@ pub async fn recover_unsettled(
 /// Returns a [`SessionError::Database`] failure while listing or settling
 /// rows, or [`SessionError::RecoveryConflict`] when an intent is owned by
 /// another writer.
-pub async fn recover_unsettled_locked(
+pub(crate) async fn recover_unsettled_locked(
     mgr: &WorkspaceSessionManager,
     workspace_root: &str,
 ) -> Result<(), SessionError> {
@@ -686,6 +705,13 @@ async fn committed_replay_outcome(
 /// Apply one recoverable commit: normalize, validate, CAS-verify each entry at
 /// the mutation boundary, persist the durable intent, then settle it.
 ///
+/// Deliberately crate-internal, and lower-level than the close boundary: the
+/// three public entrances (`commit_session`, `commit_session_durable`,
+/// `commit_session_durable_owned`) register in the authority's admission
+/// counter FIRST, and this function must never become reachable without that
+/// admission — a commit that the owning close cannot see may still be applying
+/// when the close releases the workspace authority.
+///
 /// # Errors
 ///
 /// Returns [`SessionError::Internal`] when the manager has no recoverable
@@ -705,7 +731,7 @@ async fn committed_replay_outcome(
 // helpers would scatter the CAS/settlement ordering that makes a partially
 // applied commit recoverable, so the length is deliberate.
 #[allow(clippy::too_many_lines)]
-pub async fn commit_recoverable(
+pub(crate) async fn commit_recoverable(
     mgr: &WorkspaceSessionManager,
     session_id: &SessionId,
     changes: &[WorkspaceChangeEntry],
@@ -976,28 +1002,39 @@ fn cleanup_staged_confirmed(
 
 /// Durable commit on an `Arc` manager; retains ownership through caller cancellation.
 ///
+/// This is the ONE retained-owner admission every recoverable commit entrance
+/// uses — the handle route, the executor route, `commit_session_durable` and
+/// `commit_session`'s recoverable branch — so a direct entrance has exactly the
+/// same close-boundary retention as the handle route.
+///
 /// # Errors
 ///
 /// Returns whatever [`commit_recoverable`] reports for the manifest.
-/// Cancellation of the awaiting caller does not abandon the owned commit; the
-/// spawned owner is registered on the manager so a later pass can reap it.
-pub async fn commit_recoverable_owned(
+/// Cancellation of the awaiting caller does not abandon the owned commit. The
+/// admission is taken BEFORE the owner task is spawned and held BY that task,
+/// so the owning handle's close either sees this commit (and waits for it) or
+/// refuses it — never both, and never neither.
+pub(crate) async fn commit_recoverable_owned(
     mgr: Arc<WorkspaceSessionManager>,
     session_id: SessionId,
     changes: Vec<WorkspaceChangeEntry>,
     active_workspace_root: String,
 ) -> Result<CommitOutcome, SessionError> {
+    // ATOMIC admission: registered before the close boundary can be closed, or
+    // refused. The guard moves INTO the retained owner below, so a waiter that
+    // disconnects (or is cancelled) cannot release it.
+    let admission = mgr.admit_commit()?;
     let (tx, rx) = tokio::sync::oneshot::channel();
     let mgr2 = Arc::clone(&mgr);
     let sid = session_id.clone();
     let active_root = active_workspace_root.clone();
-    let owner = tokio::spawn(async move {
+    tokio::spawn(async move {
+        let _admission = admission;
         clear_inherited_crash_point();
         let result = commit_recoverable(&mgr2, &sid, &changes, &active_root).await;
         test_owner_gate_settled(&sid.to_string());
         let _ = tx.send(result);
     });
-    mgr.register_commit_owner(owner).await;
     rx.await
         .unwrap_or_else(|_| Err(SessionError::Internal("commit owner channel closed".into())))
 }
@@ -1010,7 +1047,11 @@ pub async fn commit_recoverable_owned(
 /// replays a rollback (so it can never overwrite or delete bytes an external
 /// writer produced afterwards) and never raises a conflict. Unreadable or
 /// unresolvable rows are skipped.
-async fn cleanup_settled_artifacts(mgr: &WorkspaceSessionManager) {
+///
+/// `root_filter` restricts the sweep to rows belonging to ONE workspace root
+/// (the same identity rule the root-scoped recovery uses); `None` sweeps the
+/// whole DB, which is what the whole-DB startup pass owns.
+async fn cleanup_settled_artifacts(mgr: &WorkspaceSessionManager, root_filter: Option<&str>) {
     let rows = match db::list_settled_intents_for_cleanup(mgr.pool().as_ref()).await {
         Ok(rows) => rows,
         Err(err) => {
@@ -1020,6 +1061,16 @@ async fn cleanup_settled_artifacts(mgr: &WorkspaceSessionManager) {
     };
 
     for (session_id, workspace_root, entries_json) in rows {
+        if let Some(active_root) = root_filter {
+            // A bundle admitted for one root must not unlink another root's
+            // artifacts, even dead ones.
+            if super::scope::enforce_active_workspace_root(&workspace_root, active_root)
+                .await
+                .is_err()
+            {
+                continue;
+            }
+        }
         // FAIL CLOSED: this document names the files we are about to unlink, so
         // it goes through the full raw-size/entry/path/artifact-basename
         // validation before any filesystem work. A malformed row is skipped
@@ -1063,14 +1114,75 @@ async fn cleanup_settled_artifacts(mgr: &WorkspaceSessionManager) {
     }
 }
 
+/// Which unsettled intents a retained recovery pass settles.
+#[derive(Debug, Clone)]
+pub(crate) enum RecoveryScope {
+    /// Every root in this workspace DB.
+    All,
+    /// Only the intents stored for this canonical root.
+    Root(String),
+}
+
+/// Run one recovery pass on a RETAINED owner task.
+///
+/// This is the ONE entry both public recovery entrances use
+/// (`WorkspaceSessionManager::startup_recovery` and
+/// `startup_recovery_for_root`), so they share the close-boundary retention the
+/// commit entrances have: the admission is taken BEFORE the owner task is
+/// spawned and held BY that task, so a waiting caller that disconnects or is
+/// cancelled cannot release it while intents are still being applied or rolled
+/// back. A manager without recoverable authority has no boundary to hold and
+/// runs the pass inline, exactly as it did before the retention existed.
+///
+/// # Errors
+///
+/// Returns [`SessionError::AuthorityBusy`] once the owning close sealed the
+/// boundary, otherwise whatever the selected pass reports.
+pub(crate) async fn startup_recovery_owned(
+    mgr: Arc<WorkspaceSessionManager>,
+    scope: RecoveryScope,
+) -> Result<(), SessionError> {
+    if mgr.recoverable_config().is_none() {
+        return run_recovery(&mgr, scope).await;
+    }
+    // ATOMIC admission: registered before the close boundary can be closed, or
+    // refused. The guard moves INTO the retained owner below, so a waiter that
+    // disconnects (or is cancelled) cannot release it.
+    let admission = mgr.admit_commit()?;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    tokio::spawn(async move {
+        let _admission = admission;
+        let result = run_recovery(&mgr, scope).await;
+        test_recovery_gate_settled();
+        let _ = tx.send(result);
+    });
+    rx.await
+        .unwrap_or_else(|_| Err(SessionError::Internal("recovery owner channel closed".into())))
+}
+
+/// The selected recovery pass, lower-level than the close boundary above.
+async fn run_recovery(
+    mgr: &WorkspaceSessionManager,
+    scope: RecoveryScope,
+) -> Result<(), SessionError> {
+    match scope {
+        RecoveryScope::All => startup_recovery_all(mgr).await,
+        RecoveryScope::Root(root) => startup_recovery_for_root(mgr, &root).await,
+    }
+}
+
 /// Startup recovery for every unsettled intent, under the mutation lock.
+///
+/// Crate-internal: [`WorkspaceSessionManager::startup_recovery`] takes the
+/// authority's admission before calling this, so a recovery pass is either
+/// drained by the owning close or refused by the sealed boundary.
 ///
 /// # Errors
 ///
 /// Returns [`SessionError::Database`] when listing unsettled intents fails
 /// (including a corrupt intent payload), or whatever the per-intent recovery
 /// reports.
-pub async fn startup_recovery_all(mgr: &WorkspaceSessionManager) -> Result<(), SessionError> {
+pub(crate) async fn startup_recovery_all(mgr: &WorkspaceSessionManager) -> Result<(), SessionError> {
     let _guard = mgr.lock_mutation().await;
     let intents = match db::list_all_unsettled_intents(mgr.pool().as_ref()).await {
         Ok(rows) => rows,
@@ -1079,6 +1191,61 @@ pub async fn startup_recovery_all(mgr: &WorkspaceSessionManager) -> Result<(), S
         }
         Err(e) => return Err(SessionError::Database(e.to_string())),
     };
+    settle_unsettled_intents(mgr, intents).await?;
+
+    // Unsettled work is resolved above; only now reap material belonging to
+    // commits that already reached the durable committed transition.
+    cleanup_settled_artifacts(mgr, None).await;
+    Ok(())
+}
+
+/// Startup recovery for the unsettled intents of ONE workspace root.
+///
+/// An authority admitted for a single canonical root (the hosted production
+/// bundle) must not settle, roll back or fail on another root's unsettled
+/// intents. Only rows whose stored root matches `workspace_root` are read, and
+/// the settled-artifact sweep is filtered to the same root; every other root's
+/// rows keep their persisted state and their files untouched.
+///
+/// Crate-internal, like [`startup_recovery_all`]:
+/// [`WorkspaceSessionManager::startup_recovery_for_root`] takes the authority's
+/// admission before calling this.
+///
+/// # Errors
+///
+/// As [`startup_recovery_all`], for the selected root only.
+pub(crate) async fn startup_recovery_for_root(
+    mgr: &WorkspaceSessionManager,
+    workspace_root: &str,
+) -> Result<(), SessionError> {
+    let _guard = mgr.lock_mutation().await;
+    let intents = match db::list_unsettled_intents(mgr.pool().as_ref(), workspace_root).await {
+        Ok(rows) => rows,
+        Err(db::LocalDbError::CorruptIntent { workspace_root, .. }) => {
+            return Err(SessionError::RecoveryConflict(workspace_root));
+        }
+        Err(e) => return Err(SessionError::Database(e.to_string())),
+    };
+    settle_unsettled_intents(mgr, intents).await?;
+    cleanup_settled_artifacts(mgr, Some(workspace_root)).await;
+    Ok(())
+}
+
+/// Settle every listed unsettled intent.
+///
+/// A persisted recovery conflict refuses the whole pass before any further row
+/// is touched; Applying/RollingBack rows are resolved through
+/// [`recover_unsettled_locked`] for their OWN stored root, which the caller has
+/// already scoped.
+///
+/// # Errors
+///
+/// Returns [`SessionError::RecoveryConflict`] for a persisted conflict row and
+/// whatever the per-intent recovery reports.
+async fn settle_unsettled_intents(
+    mgr: &WorkspaceSessionManager,
+    intents: Vec<db::CommitIntentRow>,
+) -> Result<(), SessionError> {
     for intent in intents {
         if intent.state == db::IntentState::RecoveryConflict {
             return Err(SessionError::RecoveryConflict(
@@ -1089,12 +1256,14 @@ pub async fn startup_recovery_all(mgr: &WorkspaceSessionManager) -> Result<(), S
             intent.state,
             db::IntentState::Applying | db::IntentState::RollingBack
         ) {
+            // The pass holds its admission and the crash-consistent on-disk
+            // state (claim held, artifacts applied or staged) is about to
+            // change: the gated rendezvous lets a test cancel the awaiting
+            // caller exactly here.
+            #[cfg(any(test, feature = "test-hooks"))]
+            test_recovery_gate_admitted().await;
             recover_unsettled_locked(mgr, &intent.workspace_root).await?;
         }
     }
-
-    // Unsettled work is resolved above; only now reap material belonging to
-    // commits that already reached the durable committed transition.
-    cleanup_settled_artifacts(mgr).await;
     Ok(())
 }

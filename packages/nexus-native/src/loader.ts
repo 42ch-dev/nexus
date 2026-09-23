@@ -330,6 +330,15 @@ export interface NativeCoreBinding {
   ): Promise<Uint8Array>;
   addSchedule(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
   signalSchedule(principal: string, scheduleId: string, requestJson: Uint8Array): Promise<Uint8Array>;
+  listSchedules(principal: string, queryJson: Uint8Array): Promise<Uint8Array>;
+  inspectSchedule(principal: string, scheduleId: string): Promise<Uint8Array>;
+  listWorkflowSessions(principal: string, queryJson: Uint8Array): Promise<Uint8Array>;
+  getWorkflowSession(principal: string, sessionId: string): Promise<Uint8Array>;
+  editCoreContext(
+    principal: string,
+    scheduleId: string,
+    requestJson: Uint8Array,
+  ): Promise<Uint8Array>;
 }
 
 export interface NativeBinding {
