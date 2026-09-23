@@ -171,6 +171,15 @@ const STEER_IDEA = 'public first-workflow steer';
 const CORE_CONTEXT_TEMPLATE = '{{core_context.text}}';
 /** Cap on the prompt body the loopback endpoint reads for its non-secret marker check. */
 const MODEL_PROMPT_READ_CAP_BYTES = 262_144;
+/**
+ * Ceiling for ONE placement observation taken outside a poll (the polls clamp
+ * their reads to what is left of their own absolute bound). Same order as
+ * `HTTP_TIMEOUT_MS`: a single read is bounded, and overrunning it is its own
+ * typed STOP rather than a global CLI timeout.
+ */
+const PLACEMENT_READ_TIMEOUT_MS = 30_000;
+/** Cap on the placement CLI's captured output (a DTO is small). */
+const PLACEMENT_OUTPUT_CAP_BYTES = 1_048_576;
 
 /**
  * `creator_schedules.status` terminal values (`crates/nexus-orchestration/src/
@@ -989,26 +998,96 @@ function parsePlacementDto(dto, runId) {
 }
 
 /**
+ * Run one placement CLI invocation ASYNCHRONOUSLY.
+ *
+ * `spawnSync` (used by the setup CLI calls) BLOCKS the JS event loop, so a
+ * stalled command would outlive any deadline timer a caller armed — a declared
+ * 15 s gate poll could be held for the global CLI timeout. This runner spawns
+ * the child without blocking, so the poll's absolute bound really fires, and it
+ * kills the child on the caller's clamped timeout. A timeout is reported as
+ * `timedOut` (never as a spawn error), so it can become the poll's own typed
+ * STOP instead of `cli_unavailable`.
+ *
+ * The child joins the driver's owned children, so it is killed with them if the
+ * journey fails, and its captured output is capped.
+ *
+ * @returns {Promise<{status: number|null, signal: string|null, stdout: string,
+ *   stderr: string, timedOut: boolean, spawnError: string|null}>}
+ */
+function runPlacementCli(cliBinary, args, childEnv, timeoutMs) {
+  return new Promise((resolvePromise) => {
+    const child = spawn(cliBinary, args, { env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+    owned.children.add(child);
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      owned.children.delete(child);
+      resolvePromise(result);
+    };
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      finish({ status: null, signal: 'SIGKILL', stdout, stderr, timedOut: true, spawnError: null });
+    }, timeoutMs);
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => {
+      if (stdout.length < PLACEMENT_OUTPUT_CAP_BYTES) stdout += chunk;
+    });
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk) => {
+      if (stderr.length < PLACEMENT_OUTPUT_CAP_BYTES) stderr += chunk;
+    });
+    child.once('error', (error) =>
+      finish({ status: null, signal: null, stdout, stderr, timedOut: false, spawnError: error.message }),
+    );
+    child.once('exit', (code, signal) =>
+      finish({ status: code, signal, stdout, stderr, timedOut: false, spawnError: null }),
+    );
+  });
+}
+
+/**
  * Read one placement observation for the synchronized root run from the public
  * daemon-free operator surface. The CLI is handed the SAME root run id the W4
  * read resolved, and every failure is a typed, fail-closed STOP: a spawn failure
- * keeps its unmet-prerequisite outcome, a non-zero exit is
- * `failed/placement_unreadable`, non-JSON stdout is `failed/placement_unreadable`
- * and a DTO that cannot prove the run (or misses a field the driver consumes) is
+ * keeps its unmet-prerequisite outcome, an overrun returns the caller's own
+ * poll STOP (or `placement_timeout` for a single bounded observation), a
+ * non-zero exit and non-JSON stdout are `failed/placement_unreadable`, and a DTO
+ * that cannot prove the run (or misses a field the driver consumes) is
  * `failed/placement_contract`.
+ *
+ * `timeoutMs` must be the caller's remaining budget: inside a poll that is the
+ * time left of the poll's absolute deadline, so the placement read can never
+ * outlive the declared gate/effect bound.
  */
-function readPlacementViaCli(cliBinary, childEnv, runId, step) {
+async function readPlacementViaCli(
+  cliBinary,
+  childEnv,
+  runId,
+  step,
+  { timeoutMs = PLACEMENT_READ_TIMEOUT_MS, onTimeout = null } = {},
+) {
   const label = `${step}: nexus42 ops inspect <run> --json`;
-  let stdout;
-  try {
-    ({ stdout } = runCli(cliBinary, ['ops', 'inspect', runId, '--json'], childEnv, label));
-  } catch (error) {
-    if (error instanceof DriverFailure && error.outcome === 'blocked') throw error;
+  const result = await runPlacementCli(cliBinary, ['ops', 'inspect', runId, '--json'], childEnv, timeoutMs);
+  if (result.timedOut) {
+    if (onTimeout !== null) throw onTimeout();
     throw failed(
-      'placement_unreadable',
-      `${label}: the public placement read failed${error instanceof Error ? ` — ${error.message}` : ''}`,
+      'placement_timeout',
+      `${label}: the placement read did not answer within ${timeoutMs}ms and was aborted`,
     );
   }
+  if (result.spawnError !== null) throw blocked('cli_unavailable', `${label}: ${result.spawnError}`);
+  if (result.status !== 0) {
+    const detail = tailLines(result.stderr, 6).join(' | ');
+    throw failed(
+      'placement_unreadable',
+      `${label}: exit ${result.status}${detail ? ` — ${detail}` : ''}`,
+    );
+  }
+  const stdout = result.stdout;
   let dto = null;
   try {
     dto = JSON.parse(stdout);
@@ -1143,11 +1222,15 @@ async function awaitPreEffectGate({ readPlacement, runId, gate, model }) {
   let observation = { state: 'transient', observed: null };
   const boundStop = () => preEffectGateStop('gate', observation, gate.stateId);
   for (;;) {
-    if (Date.now() >= deadline) throw boundStop();
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw boundStop();
     let placement;
     try {
       placement = await boundedObservation(
-        Promise.resolve().then(() => readPlacement(runId, 'gate')),
+        // The read is clamped to what is left of the poll's absolute bound, and
+        // its own overrun aborts as this poll's typed STOP (never as a global
+        // CLI timeout), so the declared bound is the one that holds.
+        readPlacement(runId, 'gate', { timeoutMs: Math.max(1, remaining), onTimeout: boundStop }),
         deadline,
         boundStop,
       );
@@ -1213,11 +1296,14 @@ async function awaitEffectBoundary({ readPlacement, runId, effectStateId }) {
         `across ${polls} reads (last observation ${JSON.stringify(observation.observed)})`,
     );
   for (;;) {
-    if (Date.now() >= deadline) throw boundStop();
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw boundStop();
     let placement;
     try {
       placement = await boundedObservation(
-        Promise.resolve().then(() => readPlacement(runId, 'effect boundary')),
+        // Same clamp as the gate poll: the placement read cannot outlive this
+        // poll's absolute bound, and its overrun is this poll's typed STOP.
+        readPlacement(runId, 'effect boundary', { timeoutMs: Math.max(1, remaining), onTimeout: boundStop }),
         deadline,
         boundStop,
       );
@@ -2186,7 +2272,8 @@ async function runDeterministic(options) {
     // THIS root run (the W4 detail above resolved its identity); every placement
     // read below is bound to the same id and fails closed on a refused CLI, a
     // non-JSON answer, or a DTO that does not prove the run.
-    const readPlacement = (targetRunId, step) => readPlacementViaCli(cliBinary, childEnv, targetRunId, step);
+    const readPlacement = (targetRunId, step, options) =>
+      readPlacementViaCli(cliBinary, childEnv, targetRunId, step, options);
     facts.inspect = {
       status: admission.summary.status,
       current_core_context_version: admission.summary.current_core_context_version ?? null,
@@ -2221,7 +2308,7 @@ async function runDeterministic(options) {
     // re-taken.
     await readDurableObservation(port, scheduleId, runId, 'gate after deadline');
     const afterDeadlineBoundary = classifyPreEffectGate(
-      readPlacement(runId, 'gate after deadline'),
+      await readPlacement(runId, 'gate after deadline'),
       fixture.gate.stateId,
     );
     if (afterDeadlineBoundary.state !== 'gate') {
@@ -2265,7 +2352,10 @@ async function runDeterministic(options) {
     // observed state; the appended version stays durable and is never
     // re-appended (S0-3).
     await readDurableObservation(port, scheduleId, runId, 'gate recheck');
-    const gateRecheck = classifyPreEffectGate(readPlacement(runId, 'gate recheck'), fixture.gate.stateId);
+    const gateRecheck = classifyPreEffectGate(
+      await readPlacement(runId, 'gate recheck'),
+      fixture.gate.stateId,
+    );
     facts.steer.recheck = gateRecheck.observed;
     if (gateRecheck.state !== 'gate') {
       const stop = preEffectGateStop('gate recheck', gateRecheck, fixture.gate.stateId);
@@ -2430,7 +2520,7 @@ async function runDeterministic(options) {
     // identifier is invented; a missing/malformed/failed/foreign revision
     // refuses the effect (missing_commit_revision), never a success.
     const effectObservation = await readDurableObservation(port, scheduleId, runId, 'effect');
-    const placementAtEffect = readPlacement(runId, 'effect');
+    const placementAtEffect = await readPlacement(runId, 'effect');
     const sessionCommitRevision = parseSessionWorkspaceCommit(effectObservation.detail);
     const detailWorkspaceCommit = effectObservation.detail?.workspace_commit ?? null;
     facts.effect = {
