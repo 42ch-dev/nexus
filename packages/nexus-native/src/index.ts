@@ -635,7 +635,14 @@ export interface NativeCore {
     request: MomentDirectiveRequest,
   ): Promise<MomentDirectiveResponse>;
   // ── P5-T3 Execution / preset / strategy family surface ────────────────────
-  startExecutionOwner(): Promise<{ engine_epoch: number }>;
+  /**
+   * Establish the ONE hosted execution owner (v1.195 P0-T5) and report the
+   * facts to publish: `engine_epoch` is the actual established owner's epoch,
+   * or `null` when this profile's selected workspace cannot host an owner
+   * (no registered creative root); `provider_ready` is the native-owned
+   * readiness of the providers this host configuration selects.
+   */
+  startExecutionOwner(): Promise<{ engine_epoch: number | null; provider_ready: boolean }>;
   listPresets(principal: PrincipalHandle): Promise<ListPresetsResponse>;
   getPreset(principal: PrincipalHandle, presetId: string): Promise<GetPresetResponse>;
   scaffoldPreset(

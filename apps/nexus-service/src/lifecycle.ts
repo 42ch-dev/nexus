@@ -8,7 +8,7 @@ import {
 } from '@42ch/nexus-native';
 import type { CertFingerprintResponse, CoreCloseReport } from '@42ch/nexus-contracts';
 import type { ResolvedServiceConfig } from './config.js';
-import { PROVIDER_DEFAULT_DEADLINE_MS, validateServiceHome } from './config.js';
+import { validateServiceHome } from './config.js';
 import { HttpError, mapNativeError } from './errors.js';
 import { certCreatedAtFromMtime, fingerprintFromPem } from './tls.js';
 import { ProviderRegistry } from './provider-registry.js';
@@ -20,6 +20,11 @@ export interface ServiceCore {
   startedAt: string;
   /** False for the status-only profile: no principal, no KB/host/provider effects. */
   workspaceInitialized: boolean;
+  /**
+   * Native-reported readiness of the providers this host configuration
+   * selects. Catalog membership, Host liveness or an unrelated available
+   * provider never substitutes for the selected providers' own probes.
+   */
   providerReady: boolean;
   /** HTTP-side session/operation mirror for JS-provider inspect paths (not a second HostManager). */
   providerRegistry: ProviderRegistry;
@@ -28,7 +33,13 @@ export interface ServiceCore {
   /** Selected identity of an initialized core; null on the uninitialized shell. */
   creatorId: string | null;
   workspaceSlug: string | null;
-  /** Monotonic engine epoch; null until the core is initialized. */
+  /**
+   * Engine identity of this process: the ACTUAL established hosted owner's
+   * epoch, null on the uninitialized shell, and 0 when the profile owns no
+   * execution engine (the domain-only profile, or a selected workspace that
+   * cannot host a hosted owner). 0 is the core's own "no engine epoch"
+   * sentinel, never a synthesized epoch.
+   */
   engineEpoch: number | null;
 }
 
@@ -118,14 +129,31 @@ export async function openServiceCore(
   }
 
   let providerReady = false;
+  let engineEpoch: number | null = null;
   if (workspaceInitialized) {
-    providerReady = config.domainOnly ? true : await confirmProviderReadiness(core);
+    try {
+      if (config.domainOnly) {
+        // The domain-only profile owns no execution engine; it also acquires
+        // no provider runtime edge, so nothing can make it "provider ready"
+        // and there is no engine epoch to report.
+        providerReady = true;
+        engineEpoch = 0;
+      } else {
+        // The ONE hosted execution owner is established BEFORE readiness is
+        // computed and before the record is published. The native factory
+        // composes the complete owner (selected-root workspace ports and
+        // startup recovery, prompt executor, catalog, run-event registry,
+        // cancellation map, scheduler) and reports the ACTUAL epoch plus the
+        // native-owned selected-provider readiness — never a default.
+        const owner = await core.startExecutionOwner();
+        engineEpoch = owner.engine_epoch ?? 0;
+        providerReady = owner.provider_ready;
+      }
+    } catch (error) {
+      await core.close().catch(() => undefined);
+      throw mapNativeError(error);
+    }
   }
-
-  // simplify: engine epoch is process-local until the native writer-protocol
-  // epoch is exposed through the nexus-native export lane (P5-T1/P5-T5);
-  // cross-restart staleness is already covered by the per-start instance id.
-  const engineEpoch = workspaceInitialized ? 1 : null;
   return {
     core,
     domainOnly: Boolean(config.domainOnly),
@@ -139,40 +167,6 @@ export async function openServiceCore(
     workspaceSlug: identity?.workspaceSlug ?? null,
     engineEpoch,
   };
-}
-
-/**
- * Confirm provider readiness before publication.
- *
- * Host-manager liveness alone is not readiness: a running host with no admitted
- * provider still reports `running: true`. Readiness requires at least one
- * admitted provider in the catalog **and** at least one provider whose bounded
- * no-model availability probe succeeded. When either is unavailable the
- * provider-enabled profile is published as degraded/not-ready — a failed or
- * unperformed probe is never reported as ready.
- */
-async function confirmProviderReadiness(core: NativeCore): Promise<boolean> {
-  try {
-    const catalog = await core.hostQuery({ query: 'catalog', format: 'catalog' });
-    const providers = catalog.catalog?.providers ?? [];
-    if (providers.length === 0) {
-      return false;
-    }
-    for (const provider of providers) {
-      const reply = await core.providerCall({
-        method: 'probe',
-        request_id: randomUUID(),
-        deadline_ms: PROVIDER_DEFAULT_DEADLINE_MS,
-        payload: { provider_id: provider.provider_id },
-      });
-      if (reply.ok && reply.health?.available) {
-        return true;
-      }
-    }
-    return false;
-  } catch {
-    return false;
-  }
 }
 
 export async function closeServiceCore(core: NativeCore): Promise<CoreCloseReport> {

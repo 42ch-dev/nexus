@@ -8,6 +8,7 @@ const CLOSE_CANCEL_PHASE: Duration = Duration::from_secs(2);
 use std::sync::Arc;
 
 use nexus_agent_host::capability::model::HostStartConfig;
+use nexus_agent_host::capability::model::SessionOwner;
 use nexus_agent_host::config::{
     agent_host_config_path, load_config_from_path, validate_workspace_path, AgentHostConfig,
 };
@@ -17,7 +18,7 @@ use nexus_contracts::native_open_options::NativeOpenOptionsAccess;
 use nexus_contracts::{CoreCloseReport, CoreCloseReportState, NativeOpenOptions};
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService};
 use nexus_home_layout::active_context::{try_resolve_state_db_path, CliConfigSnapshot};
-use nexus_home_layout::nexus_root_from_home;
+use nexus_home_layout::{nexus_root_from_home, operational_workspace_dir};
 use nexus_provider_ports::ProviderPort;
 
 use super::admitting_provider_port::AdmittingProviderPort;
@@ -59,6 +60,53 @@ fn is_genuinely_uninitialized(user_home: &Path, access: CoreAccess) -> bool {
         Err(CoreError::Uninitialized) | Err(CoreError::AuthRequired) => true,
         Err(_) => false,
     }
+}
+
+/// The verified owner the engine-owner Host binds its bounded readiness probes
+/// to: the stored Creator plus that Creator's canonical creative workspace root.
+///
+/// The root is read from the SAME `meta.json` `local_root` document the core's
+/// hosted factory resolves its selected root from (no second workspace-root
+/// writer exists), and it is canonicalized so the probe child's cwd, the Host
+/// boundary and the factory's frozen run root compare equal. A home whose
+/// selected workspace registers no root — or registers one that no longer
+/// exists — falls back to the open boundary: the factory still refuses to
+/// compose an execution owner without a real root, so the fallback can never
+/// publish an owner over an unregistered workspace, it only lets the Host's
+/// admission surface keep the boundary it already had.
+fn selected_probe_owner(user_home: &Path) -> Option<SessionOwner> {
+    let nexus_home = nexus_root_from_home(user_home);
+    let cfg = CliConfigSnapshot::load(&nexus_home).ok()?;
+    let creator_id = cfg.active_creator_id.clone()?;
+    let workspace_slug = cfg.workspace_slug_for_creator(&creator_id);
+    if workspace_slug.trim().is_empty() {
+        return None;
+    }
+    let workspace_root =
+        selected_creative_root(user_home, &creator_id, &workspace_slug).unwrap_or_else(|| {
+            user_home.to_path_buf()
+        });
+    Some(SessionOwner {
+        creator_id,
+        workspace_root,
+        orchestration_run_id: None,
+    })
+}
+
+/// The canonical creative root the selected workspace registers, if any.
+fn selected_creative_root(
+    user_home: &Path,
+    creator_id: &str,
+    workspace_slug: &str,
+) -> Option<PathBuf> {
+    let meta = operational_workspace_dir(user_home, creator_id, workspace_slug).join("meta.json");
+    let text = std::fs::read_to_string(meta).ok()?;
+    let metadata: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let raw = metadata.get("local_root")?.as_str()?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    std::fs::canonicalize(raw).ok()
 }
 
 struct ValidatedHostAdmission {
@@ -586,15 +634,28 @@ pub async fn open_core(
     }
 
     let host = Arc::new(HostManager::new());
+    // Only the execution-owner profile carries the runtime edges: it binds the
+    // ONE Host to the selected Creator's canonical creative workspace and runs
+    // the bounded owner-bound readiness probes (the ordinary+sealed no-model
+    // recipes) there. A domain-only / read-only open acquires neither that
+    // boundary nor any provider probe — it keeps the open boundary it had.
+    let probe_owner = if access == CoreAccess::EngineOwner {
+        selected_probe_owner(&user_home)
+    } else {
+        None
+    };
+    let workspace_root = probe_owner
+        .as_ref()
+        .map_or_else(|| user_home.clone(), |owner| owner.workspace_root.clone());
     let start_config = HostStartConfig {
         config_path: admission.config_path,
-        workspace_root: user_home.clone(),
+        workspace_root,
         max_sessions: admission.host_config.max_sessions,
         max_ops_per_session: admission.host_config.max_ops_per_session,
         timeouts: admission.host_config.timeouts.clone(),
         host_config: Some(admission.host_config),
         admitted_catalog: Some(admission.admitted_catalog),
-        probe_owner: None,
+        probe_owner,
     };
     if let Err(err) = host.start(start_config).await {
         let reason = core_error::open_reason_from_host(err);

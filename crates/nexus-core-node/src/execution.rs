@@ -23,6 +23,9 @@
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
+use nexus_agent_host::config::AgentHostConfig;
+use nexus_agent_host::discovery::ProviderCatalog;
+use nexus_agent_host::{HostFacade, HostManager};
 use nexus_contracts::local::schedule::http::{
     AddScheduleRequest, AddScheduleResponse, SignalScheduleRequest, SignalScheduleResponse,
 };
@@ -31,7 +34,8 @@ use nexus_contracts::{
     StrategyPatchPromptTemplateRequest, StrategyPatchStateRequest, StrategyPatchTransitionRequest,
     UpdatePresetRequest, UpdatePresetResponse, ValidatePresetRequest, ValidatePresetResponse,
 };
-use nexus_core::execution::RunnerDeps;
+use nexus_core::execution::ExecutionOpenError;
+use nexus_core::CoreError;
 
 use crate::NativeCore;
 
@@ -40,13 +44,62 @@ fn decode<T: serde::de::DeserializeOwned>(payload: Buffer, label: &str) -> Resul
         .map_err(|error| Error::from_reason(format!("invalid {label}: {error}")))
 }
 
+/// Whether every provider this host configuration SELECTS is available.
+///
+/// The selection is the enabled provider set of the Host's own configuration —
+/// the same document admission reads — in configuration order, so readiness is
+/// never decided by a discovery/catalog row order and never by a provider the
+/// operator did not select. An EMPTY selection is not ready: a catalog
+/// candidate nobody selected can be a candidate, never a readiness claim.
+///
+/// `available` is the bounded owner-bound probe result the Host published at
+/// open (`probe_all_providers`); a provider that was never probed — the
+/// owner-less start that marks every row `probe_context_unavailable` — reports
+/// unavailable and therefore not ready.
+async fn selected_providers_ready(host: &HostManager) -> std::result::Result<bool, String> {
+    let config = host.agent_config().await;
+    let catalog = host
+        .provider_catalog()
+        .await
+        .map_err(|e| format!("provider catalog: {e}"))?;
+    Ok(selected_providers_available(&config, &catalog))
+}
+
+fn selected_providers_available(config: &AgentHostConfig, catalog: &ProviderCatalog) -> bool {
+    let selected: Vec<_> = config.providers.iter().filter(|pc| pc.enabled).collect();
+    if selected.is_empty() {
+        return false;
+    }
+    selected.iter().all(|pc| {
+        catalog
+            .find(&pc.provider_id())
+            .is_some_and(|entry| entry.health.available)
+    })
+}
+
 #[napi]
 impl NativeCore {
-    /// Establish the single execution owner for this engine-owner core,
-    /// building `RunnerDeps` from core-side defaults and wiring the env's
-    /// JS-provider port. Refuses when the core is not the execution owner
-    /// (`NotEngineOwner`) or an owner already exists (`AlreadyOwned`) — the
-    /// same single-owner fence the daemon boot obeys.
+    /// Establish the single hosted execution owner for this engine-owner core.
+    ///
+    /// This is the production boot of current-host contracts §3.1: the ONE
+    /// core-owned `start_hosted_execution` factory composes the complete
+    /// hosted owner (selected-root workspace bundle and its settled startup
+    /// recovery, the prompt executor over the ONE already-owned Host, the
+    /// provider catalog, the run-event registry, the shared cancellation map
+    /// and the hosted scheduler) and reports the facts the caller must publish
+    /// rather than defaults:
+    ///
+    /// - `engine_epoch` is the ACTUAL `ExecutionHandle::engine_epoch()` of the
+    ///   established owner, or `null` when this profile cannot host one (the
+    ///   selected workspace registers no creative root, so the factory's
+    ///   workspace composition refuses with `uninitialized`). Every other
+    ///   refusal — not the engine owner, an owner already exists, closing —
+    ///   propagates: a duplicate boot must never look like a quiet success.
+    /// - `provider_ready` is the native-owned readiness of the providers this
+    ///   host configuration SELECTS, read from the SAME Host that ran the
+    ///   bounded owner-bound probes at open. Catalog presence is a candidate,
+    ///   never readiness: a provider without a successful probe (or with no
+    ///   selection at all) is not ready.
     #[napi]
     pub async fn start_execution_owner(&self) -> Result<Buffer> {
         self.deny_service_only()?;
@@ -64,12 +117,32 @@ impl NativeCore {
             .map_err(|_| Error::from_reason("port mutex poisoned"))?
             .clone()
             .ok_or_else(|| Error::from_reason("provider port unavailable"))?;
-        let handle = core
-            .start_execution(providers, RunnerDeps::default())
+        let host = self
+            .inner
+            .host
+            .lock()
+            .map_err(|_| Error::from_reason("host mutex poisoned"))?
+            .clone()
+            .ok_or_else(|| Error::from_reason("host not started"))?;
+        // The readiness answer is read BEFORE establishment so a workspace
+        // refusal still reports the truth about the provider lane.
+        let provider_ready = selected_providers_ready(&host)
             .await
-            .map_err(|error| Error::from_reason(format!("execution owner: {error}")))?;
+            .map_err(|error| Error::from_reason(format!("provider readiness: {error}")))?;
+        let timeouts = host.agent_config().await.timeouts;
+        let engine_epoch = match core
+            .start_hosted_execution(host, providers, timeouts)
+            .await
+        {
+            Ok(handle) => Some(handle.engine_epoch()),
+            Err(ExecutionOpenError::Workspace(CoreError::Uninitialized)) => None,
+            Err(error) => {
+                return Err(Error::from_reason(format!("execution owner: {error}")));
+            }
+        };
         Ok(Buffer::from(serde_json::to_vec(&serde_json::json!({
-            "engine_epoch": handle.engine_epoch(),
+            "engine_epoch": engine_epoch,
+            "provider_ready": provider_ready,
         }))?))
     }
 
@@ -287,5 +360,112 @@ impl NativeCore {
             Ok(response)
         })
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nexus_agent_host::capability::model::{ProviderHealth, ProtocolKind};
+    use nexus_agent_host::config::ProviderConfig;
+    use nexus_agent_host::{DiscoverySource, LaunchStrategy, ProviderId, TrustLevel};
+
+    fn configured(id: &str, enabled: bool) -> ProviderConfig {
+        ProviderConfig {
+            id: id.to_string(),
+            protocol: "acp".to_string(),
+            command: Some("/bin/true".to_string()),
+            args: Vec::new(),
+            env: std::collections::HashMap::new(),
+            enabled,
+        }
+    }
+
+    /// A catalog row whose bounded probe already published `available`.
+    fn entry(id: &str, available: bool) -> nexus_agent_host::ProviderCatalogEntry {
+        let provider_id = ProviderId::new(id.to_string());
+        nexus_agent_host::ProviderCatalogEntry {
+            provider_id: provider_id.clone(),
+            display_name: id.to_string(),
+            protocol_kind: ProtocolKind::Acp,
+            launch: LaunchStrategy::Acp {
+                command: "/bin/true".to_string(),
+                args: Vec::new(),
+                env: std::collections::HashMap::new(),
+            },
+            source: DiscoverySource::Config,
+            trust: TrustLevel::Explicit,
+            capabilities: nexus_agent_host::capability::model::CapabilityDescriptor::acp_full(),
+            health: ProviderHealth {
+                provider_id,
+                available,
+                latency_ms: None,
+                message: None,
+            },
+        }
+    }
+
+    fn catalog(entries: Vec<nexus_agent_host::ProviderCatalogEntry>) -> ProviderCatalog {
+        ProviderCatalog { entries }
+    }
+
+    #[test]
+    fn unselected_catalog_presence_is_never_readiness() {
+        // A perfectly available catalog with no selected provider: the profile
+        // has nothing it can dispatch to, so it is not ready.
+        let config = AgentHostConfig::default();
+        assert!(!selected_providers_available(
+            &config,
+            &catalog(vec![entry("dsh-native", true)])
+        ));
+    }
+
+    #[test]
+    fn unprobed_or_unavailable_selected_provider_is_not_ready() {
+        // Selected but never probed (the owner-less start marks the row
+        // unavailable) — or probed and unavailable: both are not ready.
+        let config = AgentHostConfig {
+            providers: vec![configured("dsh-native", true)],
+            ..AgentHostConfig::default()
+        };
+        assert!(!selected_providers_available(
+            &config,
+            &catalog(vec![entry("dsh-native", false)])
+        ));
+        assert!(!selected_providers_available(
+            &config,
+            &catalog(vec![entry("mock-acp", true)])
+        ));
+        assert!(selected_providers_available(
+            &config,
+            &catalog(vec![entry("dsh-native", true)])
+        ));
+    }
+
+    #[test]
+    fn disabled_selection_does_not_pass_and_partial_selection_does_not_pass() {
+        // A disabled entry is not a selection: nothing is selected.
+        let only_disabled = AgentHostConfig {
+            providers: vec![configured("dsh-native", false)],
+            ..AgentHostConfig::default()
+        };
+        assert!(!selected_providers_available(
+            &only_disabled,
+            &catalog(vec![entry("dsh-native", true)])
+        ));
+        // Every selected provider must be available: one unrelated healthy row
+        // never substitutes for an unavailable selected one.
+        let both = AgentHostConfig {
+            providers: vec![configured("dsh-native", true), configured("mock-acp", true)],
+            ..AgentHostConfig::default()
+        };
+        assert!(!selected_providers_available(
+            &both,
+            &catalog(vec![entry("dsh-native", false), entry("mock-acp", true)])
+        ));
+        assert!(selected_providers_available(
+            &both,
+            &catalog(vec![entry("dsh-native", true), entry("mock-acp", true)])
+        ));
     }
 }
