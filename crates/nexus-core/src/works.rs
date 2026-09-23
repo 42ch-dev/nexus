@@ -741,6 +741,14 @@ pub(crate) fn selected_workspace_meta_root(
 /// active root the same string, so a symlinked or non-normalized selection
 /// cannot produce two roots that compare unequal.
 ///
+/// The canonical root must ALSO have a lossless UTF-8 form, because every
+/// workspace PORT the hosted owner composes from it is `String`-typed. A root
+/// that is not valid UTF-8 could only be carried by substituting U+FFFD for its
+/// bytes, which would point those ports at a different directory than the one
+/// the native Host probes — one owner with two roots. Such a root is refused
+/// here, at the pin, with the typed environment class, and never replaced (see
+/// [`lossless_root_str`]).
+///
 /// A root that is named but no longer exists is an uninitialized workspace
 /// rather than an environment fault, and a blank registration is the same "no
 /// root" answer; every other failure is reported verbatim.
@@ -762,12 +770,53 @@ pub(crate) fn canonical_selected_workspace_root(
         return Ok(None);
     }
     match std::fs::canonicalize(raw) {
-        Ok(path) => Ok(Some(path)),
+        // A canonical root the `String`-typed workspace ports cannot carry is
+        // refused HERE, at the pin: `lossless_root_str` is the same check the
+        // hosted factory re-runs before it builds a single port.
+        Ok(path) => {
+            lossless_root_str(&path)?;
+            Ok(Some(path))
+        }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(CoreError::Internal {
             category: format!("workspace root {raw}: {error}"),
         }),
     }
+}
+
+/// The canonical creative root as the LOSSLESS UTF-8 string a `String`-typed
+/// workspace port requires.
+///
+/// The native Host binds the selected root as raw path BYTES, while every
+/// workspace port the hosted owner composes from that same root is
+/// `String`-typed ([`WorkspaceCommitExecutor`], [`CoreWorkspaceStateProvider`],
+/// [`WorkspaceCommitAuthority`], the startup-recovery root filter and
+/// `RunnerDeps::workspace_root`). A canonical root that is not valid UTF-8 has
+/// no lossless string form, so `to_string_lossy` would substitute U+FFFD and
+/// point those ports at a different — possibly existing — directory while the
+/// Host kept probing the real bytes: one owner committing through one root and
+/// probing another.
+///
+/// Refusing is therefore the only truthful answer for a root the execution side
+/// cannot represent. It happens at the admission PIN (no probe boundary, no
+/// owner, no authority exists yet) and is re-checked here by the hosted factory
+/// before any port is built, so no caller can bypass the invariant.
+///
+/// Valid UTF-8 path bytes pass through unchanged: `to_str` neither allocates
+/// nor normalizes, so an accepted root is byte-identical to the canonical one.
+///
+/// [`WorkspaceCommitExecutor`]: crate::execution::executor::WorkspaceCommitExecutor
+/// [`CoreWorkspaceStateProvider`]: crate::execution::state_provider::CoreWorkspaceStateProvider
+/// [`WorkspaceCommitAuthority`]: crate::execution::workspace::WorkspaceCommitAuthority
+#[cfg(feature = "execution")]
+pub(crate) fn lossless_root_str(canonical: &std::path::Path) -> CoreResult<&str> {
+    canonical.to_str().ok_or_else(|| CoreError::Internal {
+        category: format!(
+            "workspace root {}: the canonical creative root is not valid UTF-8, so the \
+             String-typed workspace ports cannot carry it",
+            canonical.display()
+        ),
+    })
 }
 
 fn checked_work_directory(

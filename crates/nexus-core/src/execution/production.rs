@@ -25,9 +25,17 @@
 //! `Filesystem` gates resolve against, so it MUST be the same root the commit
 //! authority commits through; taking both from the one pinned value is what
 //! makes them identical.
+//!
+//! The pin is also where a root this build cannot OWN is refused. Every port
+//! built below is `String`-typed while the Host binds raw path bytes, so a
+//! canonical root with no lossless UTF-8 form could only be carried by
+//! substituting U+FFFD — pointing the ports at a different, possibly existing,
+//! directory than the Host probes. Such a root never becomes a pin
+//! ([`crate::works::canonical_selected_workspace_root`]), and this factory
+//! re-checks the invariant with [`crate::works::lossless_root_str`] before it
+//! constructs a single port, so a substituted root can never be published.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -169,8 +177,13 @@ impl CoreService {
     ///   duplicate writer), or when the selected root's own recovery state is
     ///   an unresolvable conflict;
     /// - [`CoreError::Internal`] when the environment prevents establishing the
-    ///   authority (the lease file cannot be created or opened) or a
-    ///   metadata/IO fault occurs.
+    ///   authority (the lease file cannot be created or opened), when a
+    ///   metadata/IO fault occurs, or when the pinned canonical root has no
+    ///   lossless UTF-8 form — the `String`-typed workspace ports could only
+    ///   carry a U+FFFD-substituted root, which is a different directory, so the
+    ///   bundle is refused instead of published over a substituted path. (The
+    ///   pin already refuses such a root at open, so in practice this factory
+    ///   re-check never refuses on its own.)
     pub(crate) async fn hosted_workspace_deps(&self) -> CoreResult<RunnerDeps> {
         // The selection comes from the core's own config snapshot, so a caller
         // cannot inject a different creator/workspace into the bundle.
@@ -203,7 +216,15 @@ impl CoreService {
             );
             return Err(CoreError::AuthRequired);
         }
-        let canonical_root = canonical_root.to_string_lossy().into_owned();
+        // The ports below are `String`-typed, so the pinned root is carried
+        // through the SAME lossless check the pin itself passed. A lossy
+        // conversion here is what let one owner assemble a Host bound to the
+        // real root while its executor, state provider, commit authority and
+        // recovery filter addressed a U+FFFD-substituted path — a different,
+        // possibly existing, directory. Re-checking the invariant at the very
+        // seam the ports are built from is what makes it unbypassable: no port
+        // is ever constructed from a substituted root.
+        let canonical_root_str = crate::works::lossless_root_str(&canonical_root)?.to_owned();
 
         // ONE manager per DB: `new_recoverable` takes the exclusive
         // workspace-authority lease, so a second authority over the same DB
@@ -216,25 +237,27 @@ impl CoreService {
             .map_err(map_authority_error)?,
         );
         manager
-            .startup_recovery_for_root(&canonical_root)
+            .startup_recovery_for_root(&canonical_root_str)
             .await
             .map_err(map_recovery_error)?;
 
         let executor: Arc<dyn WorkspaceExecutor> = Arc::new(WorkspaceCommitExecutor::new(
             Arc::clone(&manager),
-            canonical_root.clone(),
+            canonical_root_str.clone(),
         ));
         let state_provider: Arc<dyn WorkspaceStateProvider> = Arc::new(
-            CoreWorkspaceStateProvider::new(Arc::clone(&manager), canonical_root.clone()),
+            CoreWorkspaceStateProvider::new(Arc::clone(&manager), canonical_root_str.clone()),
         );
         let commit_authority =
-            WorkspaceCommitAuthority::new(Arc::clone(&manager), canonical_root.clone());
+            WorkspaceCommitAuthority::new(Arc::clone(&manager), canonical_root_str);
 
         Ok(RunnerDeps {
             workspace_executor: Some(executor),
             workspace_state_provider: Some(state_provider),
             workspace_commit: Some(commit_authority),
-            workspace_root: Some(PathBuf::from(&canonical_root)),
+            // The pin itself, not a re-parsed string: the engine's `Filesystem`
+            // gates then resolve against the exact bytes the native Host probes.
+            workspace_root: Some(canonical_root),
             nexus_home: Some(self.inner.nexus_home.clone()),
             ..RunnerDeps::default()
         })
@@ -765,6 +788,134 @@ mod tests {
                 "a pinned-empty admission must refuse with uninitialized"
             );
         }
+    }
+
+    /// The port seam refuses a canonical root with no lossless UTF-8 form, and
+    /// the substitution it prevents would address a real, DIFFERENT directory.
+    ///
+    /// Runs wherever the harness runs: the seam is driven with an in-memory
+    /// canonical root carrying non-UTF-8 path bytes — the value `canonicalize`
+    /// yields for the symlink fixture below on a filesystem that can host it.
+    #[cfg(unix)]
+    #[test]
+    fn a_root_without_a_lossless_utf8_form_is_refused_by_the_port_seam() {
+        use std::os::unix::ffi::OsStrExt as _;
+
+        let home = tempfile::tempdir().expect("sentinel home");
+        let raw = home.path().join(std::ffi::OsStr::from_bytes(b"creative-\xff"));
+        assert!(raw.to_str().is_none(), "the fixture must not be UTF-8");
+        // The name a lossy conversion would substitute exists as a real
+        // directory — the wrong root those ports must never commit through.
+        let substituted = raw.to_string_lossy().into_owned();
+        std::fs::create_dir(&substituted).expect("replacement-character directory");
+        assert!(
+            std::path::Path::new(&substituted).is_dir(),
+            "the substituted path must be addressable"
+        );
+        assert!(
+            matches!(
+                crate::works::lossless_root_str(&raw),
+                Err(CoreError::Internal { .. })
+            ),
+            "a root with no lossless UTF-8 form must be refused, not substituted"
+        );
+        let representable = home.path().join("creative-plain");
+        assert_eq!(
+            crate::works::lossless_root_str(&representable).ok(),
+            representable.to_str(),
+            "a representable root must pass through byte-identically"
+        );
+    }
+
+    /// A selected root with no lossless UTF-8 form is refused AT THE PIN: no
+    /// probe boundary, no owner and no workspace authority — instead of one
+    /// owner whose Host probes the real bytes while its executor, state
+    /// provider, commit authority and recovery filter write through the
+    /// U+FFFD-substituted path.
+    ///
+    /// The fixture is the shape the defect needs: `meta.json.local_root` is an
+    /// ordinary UTF-8 path to a SYMLINK whose target directory carries
+    /// non-UTF-8 bytes, and the replacement-character path a lossy conversion
+    /// would name exists as a DIFFERENT directory (the discriminating
+    /// sentinel). A filesystem that cannot host non-UTF-8 names — macOS APFS
+    /// answers `EILSEQ` for the create — cannot express the state this case is
+    /// about, so it reports the skip instead of a hollow pass.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_canonical_root_without_a_lossless_utf8_form_is_refused_at_the_pin() {
+        use std::os::unix::ffi::OsStringExt as _;
+
+        let fx = fixture().await;
+        let raw_root = fx.tmp.path().join("raw-root");
+        std::fs::create_dir_all(&raw_root).expect("raw root parent");
+        // One replacement character per invalid byte: `creative-\xff\xfe`
+        // renders lossily as `creative-\u{FFFD}\u{FFFD}`.
+        let target = raw_root.join(std::ffi::OsString::from_vec(b"creative-\xff\xfe".to_vec()));
+        if let Err(error) = std::fs::create_dir(&target) {
+            eprintln!(
+                "skipping: this filesystem cannot host a non-UTF-8 directory name ({error}), \
+                 so the lossy-canonical-root fixture cannot exist"
+            );
+            return;
+        }
+        let sentinel = raw_root.join("creative-\u{FFFD}\u{FFFD}");
+        std::fs::create_dir(&sentinel).expect("the replacement-character directory");
+        // The registration itself is representable: the symlink's NAME is
+        // UTF-8, only its resolved target is not.
+        let link = raw_root.join("creative-link");
+        std::os::unix::fs::symlink(&target, &link).expect("symlink to the non-UTF-8 root");
+        let pinned = std::fs::canonicalize(&link).expect("the symlink resolves");
+        assert!(
+            pinned.to_str().is_none(),
+            "the fixture must resolve to a non-UTF-8 canonical root, got {pinned:?}"
+        );
+        register_selected_root(fx.tmp.path(), serde_json::json!(link));
+        let core = open_core(&fx).await;
+
+        match core.hosted_workspace_deps().await {
+            Err(CoreError::Internal { category }) => assert!(
+                category.contains("not valid UTF-8"),
+                "the refusal must name the representation fault, got {category}"
+            ),
+            Err(other) => panic!("the refusal must be the typed environment class, got {other:?}"),
+            Ok(deps) => panic!(
+                "a canonical root with no lossless UTF-8 form must not compose a workspace \
+                 bundle: the ports were pointed at {:?} while the Host probes {pinned:?}",
+                deps.workspace_root
+            ),
+        }
+        // No pin means no probe boundary: the native boot binds its Host to the
+        // PINNED root only, so a root the execution side cannot own is never
+        // probed and no owner is ever admitted over it.
+        assert!(
+            core.admission_creative_root().is_none(),
+            "a root with no lossless UTF-8 form must pin nothing"
+        );
+        assert!(
+            !authority_lease_path(&core).exists(),
+            "the refusal must land before any workspace authority lease exists"
+        );
+        for dir in [&sentinel, &target] {
+            assert!(
+                std::fs::read_dir(dir).expect("fixture dir").next().is_none(),
+                "the refusal must not touch {}",
+                dir.display()
+            );
+        }
+
+        // Control over the same helper flow: a representable root still pins
+        // and composes, so the refusal above is about the representation and
+        // not about the fixture shape.
+        let control = fixture().await;
+        let core = open_core(&control).await;
+        let expected =
+            std::fs::canonicalize(&control.creative_root).expect("canonical control root");
+        assert_eq!(core.admission_creative_root(), Some(expected.as_path()));
+        let deps = core
+            .hosted_workspace_deps()
+            .await
+            .expect("a representable root composes");
+        assert_eq!(deps.workspace_root.as_deref(), Some(expected.as_path()));
     }
 
     /// Deterministic no-model provider port: the owner/close contract is what
