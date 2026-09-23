@@ -16,9 +16,10 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 napi = { workspace = true }
 napi-derive = { workspace = true }
-# `execution` (P3 engine/schedule authority) without `compute`: the WASM
-# edge stays a daemon-cohort capability per architecture §Cohorts.
-nexus-core = { path = "../nexus-core", features = ["execution"] }
+# `execution` (P3 engine/schedule authority) + `provider-host` (the hosted
+# production factory's Host-plane half, v1.195 P0-T5) without `compute`: the
+# WASM edge stays a daemon-cohort capability per architecture §Cohorts.
+nexus-core = { path = "../nexus-core", features = ["execution", "provider-host"] }
 nexus-contracts = { path = "../nexus-contracts" }
 nexus-agent-host = { path = "../nexus-agent-host" }
 nexus-provider-ports = { path = "../nexus-provider-ports" }

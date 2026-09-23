@@ -231,7 +231,9 @@
     "toast": {
       "runQueued": "Preset run queued",
       "ideaSent": "Idea sent to Preset",
-      "resumed": "Preset resumed"
+      "resumed": "Preset resumed",
+      "steerResumeRefused": "Idea saved as core context version {{version}}, but the resume was refused",
+      "steerResumeConflict": "Idea saved as core context version {{version}}; this schedule is waiting on a manual step, so the resume was refused as a state conflict"
     },
     "draftTransitionLabel": "Draft transition",
     "draftTransitionEditor": "Draft transition editor",

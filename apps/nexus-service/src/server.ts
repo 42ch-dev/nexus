@@ -391,7 +391,19 @@ export function createServiceServer(
 
       const bodyBuffer = method === 'GET' || method === 'HEAD' ? Buffer.alloc(0) : await readBody(req);
       const body = parseJsonBody(bodyBuffer, method);
-      const result = await handleRoute(service, method, urlObj.pathname, urlObj.searchParams, body);
+      // The retained SSE resume cursor crosses verbatim: this transport does
+      // not judge it — the core's subscription authority is the one that
+      // decides whether `<epoch>:<sequence>` is resumable, malformed or
+      // future, and a bad cursor must become ITS typed refusal, not a guess.
+      const lastEventId = req.headers['last-event-id'];
+      const result = await handleRoute(
+        service,
+        method,
+        urlObj.pathname,
+        urlObj.searchParams,
+        body,
+        typeof lastEventId === 'string' ? { lastEventId } : {},
+      );
       if (result.kind === 'sse') {
         const subscriberSessionId =
           route.sessionId && method === 'GET' && urlObj.pathname.endsWith('/events')

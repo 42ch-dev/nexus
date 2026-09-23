@@ -178,8 +178,19 @@ import type {
   StrategyPatchPromptTemplateRequest,
   AddScheduleRequest,
   AddScheduleResponse,
+  CoreWorkflowEventBatch,
+  CoreWorkflowSubscribeRequest,
+  CoreWorkflowSubscription,
   SignalScheduleRequest,
   SignalScheduleResponse,
+  EditCoreContextRequest,
+  EditCoreContextResponse,
+  InspectScheduleResponse,
+  ListSchedulesQuery,
+  ListSchedulesResponse,
+  ListSessionsQuery,
+  ListSessionsResponse,
+  SessionDetailResponse,
 } from '@42ch/nexus-contracts';
 import { isAbsolute } from 'node:path';
 import {
@@ -635,7 +646,14 @@ export interface NativeCore {
     request: MomentDirectiveRequest,
   ): Promise<MomentDirectiveResponse>;
   // ── P5-T3 Execution / preset / strategy family surface ────────────────────
-  startExecutionOwner(): Promise<{ engine_epoch: number }>;
+  /**
+   * Establish the ONE hosted execution owner (v1.195 P0-T5) and report the
+   * facts to publish: `engine_epoch` is the actual established owner's epoch,
+   * or `null` when this profile's selected workspace cannot host an owner
+   * (no registered creative root); `provider_ready` is the native-owned
+   * readiness of the providers this host configuration selects.
+   */
+  startExecutionOwner(): Promise<{ engine_epoch: number | null; provider_ready: boolean }>;
   listPresets(principal: PrincipalHandle): Promise<ListPresetsResponse>;
   getPreset(principal: PrincipalHandle, presetId: string): Promise<GetPresetResponse>;
   scaffoldPreset(
@@ -680,6 +698,51 @@ export interface NativeCore {
     scheduleId: string,
     request: SignalScheduleRequest,
   ): Promise<SignalScheduleResponse>;
+  /**
+   * The durable control reads and the core-context edit (v1.195 P0-T6), over
+   * the SAME established owner as the mutations. Every list/read is scoped to
+   * the principal's stored creator and answers with the generated public DTO;
+   * a foreign or absent identity closes with the same not-found refusal.
+   */
+  listSchedules(principal: PrincipalHandle, query: ListSchedulesQuery): Promise<ListSchedulesResponse>;
+  inspectSchedule(
+    principal: PrincipalHandle,
+    scheduleId: string,
+  ): Promise<InspectScheduleResponse>;
+  listWorkflowSessions(
+    principal: PrincipalHandle,
+    query: ListSessionsQuery,
+  ): Promise<ListSessionsResponse>;
+  getWorkflowSession(
+    principal: PrincipalHandle,
+    sessionId: string,
+  ): Promise<SessionDetailResponse>;
+  editCoreContext(
+    principal: PrincipalHandle,
+    scheduleId: string,
+    request: EditCoreContextRequest,
+  ): Promise<EditCoreContextResponse>;
+  /**
+   * Same-run event observation (v1.195 P1-T3), over the SAME established
+   * owner as the control surface. `subscribeWorkflowEvents` authorizes the
+   * run's STORED root ownership before opening the bounded ring subscription
+   * and returns the opaque environment-local token; `nextWorkflowEvents`
+   * takes one bounded batch of already-encoded frames (`id`/`event`/`data`
+   * verbatim, `<= 16` frames / 1 MiB, `closed` when the stream ended);
+   * `releaseWorkflowEvents` frees the run's subscriber permit and must be
+   * called on every disconnect path. A released/foreign token refuses, and an
+   * unresumable history answers the single `history_unavailable` control
+   * frame instead of an error.
+   */
+  subscribeWorkflowEvents(
+    principal: PrincipalHandle,
+    request: CoreWorkflowSubscribeRequest,
+  ): Promise<CoreWorkflowSubscription>;
+  nextWorkflowEvents(
+    principal: PrincipalHandle,
+    subscriptionId: string,
+  ): Promise<CoreWorkflowEventBatch>;
+  releaseWorkflowEvents(principal: PrincipalHandle, subscriptionId: string): Promise<void>;
 }
 
 function wrapCore(inner: NativeCoreBinding): NativeCore {
@@ -877,6 +940,14 @@ type DomainSurface = Pick<
   | 'patchStrategyPromptTemplate'
   | 'addSchedule'
   | 'signalSchedule'
+  | 'listSchedules'
+  | 'inspectSchedule'
+  | 'listWorkflowSessions'
+  | 'getWorkflowSession'
+  | 'editCoreContext'
+  | 'subscribeWorkflowEvents'
+  | 'nextWorkflowEvents'
+  | 'releaseWorkflowEvents'
 >;
 
 function wrapDomainSurface(inner: NativeCoreBinding): DomainSurface {
@@ -1347,6 +1418,30 @@ function wrapDomainSurface(inner: NativeCoreBinding): DomainSurface {
       return json(
         await inner.signalSchedule(principal, scheduleId, wire(request, 'request')),
       );
+    },
+    async listSchedules(principal, query) {
+      return json(await inner.listSchedules(principal, wire(query, 'query')));
+    },
+    async inspectSchedule(principal, scheduleId) {
+      return json(await inner.inspectSchedule(principal, scheduleId));
+    },
+    async listWorkflowSessions(principal, query) {
+      return json(await inner.listWorkflowSessions(principal, wire(query, 'query')));
+    },
+    async getWorkflowSession(principal, sessionId) {
+      return json(await inner.getWorkflowSession(principal, sessionId));
+    },
+    async editCoreContext(principal, scheduleId, request) {
+      return json(await inner.editCoreContext(principal, scheduleId, wire(request, 'request')));
+    },
+    async subscribeWorkflowEvents(principal, request) {
+      return json(await inner.subscribeWorkflowEvents(principal, wire(request, 'request')));
+    },
+    async nextWorkflowEvents(principal, subscriptionId) {
+      return json(await inner.nextWorkflowEvents(principal, subscriptionId));
+    },
+    async releaseWorkflowEvents(principal, subscriptionId) {
+      await inner.releaseWorkflowEvents(principal, subscriptionId);
     },
   };
 }
