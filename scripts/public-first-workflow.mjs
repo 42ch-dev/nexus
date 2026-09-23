@@ -39,11 +39,27 @@
  *     keeps a still-pending asynchronous admission (§3.3) distinct from a
  *     terminal refusal — a pending admission is never reported as a missing
  *     producer;
- *   * W5/W6 (steer) are issued only at a durable pre-manual execution boundary
- *     read from the public execution projection (`recovery_class`,
- *     `allowed_actions`, `wait`); a plain resume is refused by the A4 fence at
- *     a human wait, so the driver never issues it there and never claims a
- *     Steer it could not place;
+ *   * W5/W6 (steer) are issued only at the fixture's own bounded pre-effect
+ *     converge gate, identified from the checked-in YAML (the `converge:` state
+ *     plus its `timeout_ms` and `on_timeout` target, which must be the effect
+ *     state that owns the prompt, the open and the commit) and confirmed
+ *     against the routed durable projection: the gate's A7 class is the
+ *     parked converge/merge class, the run detail's `current_task_id` is that
+ *     gate state, there is no durable human wait and no in-flight marker, and
+ *     no model request has been dispatched yet. A plain resume is refused by
+ *     the A4 fence at a human wait, so the driver never issues it there, never
+ *     writes W5/W6 on a timing assumption and never claims a Steer it could
+ *     not place. The gate must be observed QUIET (two reads with the same
+ *     durable revision) and must stay parked across its own deadline before
+ *     the W5 append and the W6 same-schedule resume; the resume re-drives that
+ *     ONE run, whose deadline reroute enters the effect state;
+ *   * the first real prompt of the run must observe the appended Idea at that
+ *     next execution boundary: the fixture prompt renders
+ *     `{{core_context.text}}`, and the driver's own loopback model endpoint
+ *     records ONE non-secret boolean per request — whether the prompt body
+ *     carried the appended Idea — never the body, its headers or its key. Zero
+ *     requests, a second request or a prompt without the Idea all fail the
+ *     journey;
  *   * the receipt must carry the real **commit** revision of the declared
  *     workspace commit, accepted only from a routed same-run frame that is
  *     identifiable as a workspace-commit response and whose parsed payload is
@@ -126,15 +142,32 @@ const MAX_EVENT_FRAMES = 256;
 const ADMISSION_POLL_TIMEOUT_MS = 30_000;
 const ADMISSION_POLL_START_INTERVAL_MS = 150;
 const ADMISSION_POLL_MAX_INTERVAL_MS = 1_000;
-/** Bounded synchronization of W5/W6 against the durable execution projection. */
-const STEER_BOUNDARY_TIMEOUT_MS = 15_000;
-const STEER_BOUNDARY_START_INTERVAL_MS = 100;
-const STEER_BOUNDARY_MAX_INTERVAL_MS = 500;
+/** Bounded synchronization of W5/W6 against the fixture's bounded converge gate. */
+const GATE_BOUNDARY_TIMEOUT_MS = 15_000;
+const GATE_BOUNDARY_START_INTERVAL_MS = 100;
+const GATE_BOUNDARY_MAX_INTERVAL_MS = 500;
+/**
+ * Extra time past the fixture's `timeout_ms` the driver waits with nobody
+ * driving the run before the W6 resume re-drives it. The deadline is only
+ * evaluated by a driver (`join_timeout_tick`), so the wait is what makes the
+ * reroute deterministic instead of a race against the deadline.
+ */
+const GATE_DEADLINE_MARGIN_MS = 750;
+/** Sanity bound on the fixture's declared `timeout_ms` (a usable bounded wait). */
+const GATE_TIMEOUT_MS_MAX = 60_000;
+/** Bounded wait for the post-resume durable boundary (the effect state's manual wait). */
+const EFFECT_BOUNDARY_TIMEOUT_MS = 30_000;
+const EFFECT_BOUNDARY_START_INTERVAL_MS = 100;
+const EFFECT_BOUNDARY_MAX_INTERVAL_MS = 500;
 /** Bounded revision follow-up reads (an O2 reconnect, never a new run). */
 const EFFECT_REVISION_MAX_TAIL_READS = 5;
 const EVENT_TAIL_TIMEOUT_MS = 2_000;
 /** The Idea W5 appends before W6 resumes (S0-3 append-before-resume). */
 const STEER_IDEA = 'public first-workflow steer';
+/** Template the sealed prompt must render so the appended Idea reaches the boundary. */
+const CORE_CONTEXT_TEMPLATE = '{{core_context.text}}';
+/** Cap on the prompt body the loopback endpoint reads for its non-secret marker check. */
+const MODEL_PROMPT_READ_CAP_BYTES = 262_144;
 
 /**
  * `creator_schedules.status` terminal values (`crates/nexus-orchestration/src/
@@ -144,16 +177,15 @@ const STEER_IDEA = 'public first-workflow steer';
 const TERMINAL_SCHEDULE_STATUSES = new Set(['cancelled', 'completed', 'failed']);
 
 /**
- * Durable recovery classes at which `POST …/signal {signal:'resume'}` is legal.
- * The engine fences `resume` against terminal states, durable human waits and
- * in-flight/step-in-flight markers (`crates/nexus-orchestration/src/engine.rs`),
- * so only a fully committed step boundary with no wait token qualifies — the
- * pre-manual execution boundary W5/W6 must be placed at. Anything else is a
- * typed STOP, never a guess and never a bypassed human wait.
+ * Durable A7 recovery class of the parked bounded converge/merge gate
+ * (`crates/nexus-orchestration/src/resume_rules.rs` rule 5: a non-terminal run
+ * parked at a scheduler gate with its live `_gate_park_<task>` marker and no
+ * human wait token). This is the ONE durable class W5/W6 may be placed at: a
+ * fully committed step boundary (`safe_boundary`) has no gate to reroute, a
+ * durable human wait is fenced against a plain resume, and a terminal or
+ * interrupted run is never steered.
  */
-const STEERABLE_RECOVERY_CLASSES = new Set(['safe_boundary']);
-/** Legal-action marker of that boundary (`allowed_actions`, A2/A7 vocabulary). */
-const STEERABLE_ALLOWED_ACTION = 'continue';
+const GATE_PARK_RECOVERY_CLASS = 'converge_merge';
 /** Committed revision identifier shape (`crates/nexus-core/src/execution/session_commit.rs`). */
 const COMMIT_REVISION_PATTERN = /^rev_[A-Za-z0-9-]+$/;
 
@@ -349,9 +381,111 @@ function extractPresetId(lines) {
 }
 
 /**
+ * The fixture's top-level state blocks: `{id, start, end}` line ranges, derived
+ * from the shallowest `- id:` indent so the split follows the file's own shape.
+ */
+function stateBlocks(lines) {
+  const entries = [];
+  lines.forEach((line, index) => {
+    const match = /^(\s*)- id:\s*(\S+)\s*$/.exec(line);
+    if (match) entries.push({ id: match[2], index, indent: match[1].length });
+  });
+  if (entries.length === 0) throw failed('fixture_contract', 'fixture declares no states');
+  const indent = Math.min(...entries.map((entry) => entry.indent));
+  const states = entries.filter((entry) => entry.indent === indent);
+  return states.map((entry, position) => ({
+    id: entry.id,
+    start: entry.index,
+    end: position + 1 < states.length ? states[position + 1].index : lines.length,
+  }));
+}
+
+/** The state block whose line range contains `index`. */
+function stateBlockAt(blocks, index) {
+  return blocks.find((block) => index >= block.start && index < block.end) ?? null;
+}
+
+/** The state that owns the enter action declaring `name: <capability>`. */
+function stateOfCapability(lines, blocks, capability) {
+  const nameIndex = lines.findIndex((line) => line.trim() === `name: ${capability}`);
+  if (nameIndex < 0) {
+    throw failed('fixture_contract', `fixture does not declare capability '${capability}'`);
+  }
+  const block = stateBlockAt(blocks, nameIndex);
+  if (block === null) {
+    throw failed('fixture_contract', `capability '${capability}' is declared outside a state block`);
+  }
+  return block;
+}
+
+/** Do any of a state block's lines match `pattern`? */
+function blockMatches(lines, block, pattern) {
+  for (let index = block.start; index < block.end; index += 1) {
+    if (pattern.test(lines[index])) return true;
+  }
+  return false;
+}
+
+/** Value of `<key>: <scalar>` inside one state block. */
+function blockScalar(lines, block, key) {
+  const matches = [];
+  for (let index = block.start; index < block.end; index += 1) {
+    const match = new RegExp(`^\\s*${key}:\\s*(.+)$`).exec(lines[index]);
+    if (match) matches.push(yamlScalar(match[1]));
+  }
+  return matches;
+}
+
+/**
+ * The fixture's bounded pre-effect converge gate: the single state carrying a
+ * `converge:` block, its `timeout_ms` deadline and the `on_timeout` state the
+ * deadline reroutes onto. Every fact W5/W6 are placed with comes from here; the
+ * driver never hard-codes a state name.
+ */
+function extractConvergeGate(lines, blocks) {
+  const gateBlocks = blocks.filter((block) => blockMatches(lines, block, /^\s*converge:/));
+  if (gateBlocks.length !== 1) {
+    throw failed(
+      'fixture_contract',
+      `fixture must declare exactly one converge gate state (found ${gateBlocks.length})`,
+    );
+  }
+  const block = gateBlocks[0];
+  if (blockMatches(lines, block, /^\s*terminal:\s*true\s*$/)) {
+    throw failed('fixture_contract', `converge gate '${block.id}' must not be terminal`);
+  }
+  if (blockMatches(lines, block, /^\s*enter:/)) {
+    throw failed(
+      'fixture_contract',
+      `converge gate '${block.id}' declares enter actions; the bounded gate must be pre-effect (no enter action)`,
+    );
+  }
+  const deadlines = blockScalar(lines, block, 'timeout_ms');
+  if (deadlines.length !== 1) {
+    throw failed('fixture_contract', `converge gate '${block.id}' must declare exactly one timeout_ms`);
+  }
+  const timeoutMs = Number(deadlines[0]);
+  if (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > GATE_TIMEOUT_MS_MAX) {
+    throw failed(
+      'fixture_contract',
+      `converge gate '${block.id}' timeout_ms ${JSON.stringify(deadlines[0])} is not a bounded positive deadline ` +
+        `(1..${GATE_TIMEOUT_MS_MAX}ms)`,
+    );
+  }
+  const targets = blockScalar(lines, block, 'on_timeout');
+  if (targets.length !== 1) {
+    throw failed(
+      'fixture_contract',
+      `converge gate '${block.id}' must declare exactly one on_timeout reroute target`,
+    );
+  }
+  return { stateId: block.id, timeoutMs, onTimeoutStateId: targets[0] };
+}
+
+/**
  * Read the checked-in fixture and extract every fact this driver depends on.
  * The fixture stays authoritative; the driver never hard-codes the scope, the
- * committed path or the committed bytes.
+ * committed path, the committed bytes or the bounded gate's identity.
  */
 function readFixture() {
   if (!existsSync(FIXTURE_PATH)) {
@@ -360,17 +494,48 @@ function readFixture() {
   const yaml = readFileSync(FIXTURE_PATH, 'utf8');
   const lines = yaml.split('\n');
   const presetId = extractPresetId(lines);
+  const blocks = stateBlocks(lines);
   const promptToolPolicy = extractCapabilityArg(lines, 'acp.prompt', 'tool_policy');
+  const promptTemplate = extractCapabilityArg(lines, 'acp.prompt', 'prompt');
   const scopePath = extractCapabilityArg(lines, 'workspace.open', 'path');
   const changePath = extractCapabilityArg(lines, 'workspace.commit', 'path');
   const changeOp = extractCapabilityArg(lines, 'workspace.commit', 'op');
   const contentBase64 = extractCapabilityArg(lines, 'workspace.commit', 'contentBase64');
+  const gate = extractConvergeGate(lines, blocks);
+  const promptState = stateOfCapability(lines, blocks, 'acp.prompt');
+  const openState = stateOfCapability(lines, blocks, 'workspace.open');
+  const commitState = stateOfCapability(lines, blocks, 'workspace.commit');
 
   if (promptToolPolicy !== 'deny_all') {
     throw failed(
       'fixture_contract',
       `the fixture prompt must use the sealed deny-all scope, got ${JSON.stringify(promptToolPolicy)}`,
     );
+  }
+  if (!promptTemplate.includes(CORE_CONTEXT_TEMPLATE)) {
+    throw failed(
+      'fixture_contract',
+      `the fixture prompt must render ${CORE_CONTEXT_TEMPLATE} so the first real prompt observes the appended Idea, ` +
+        `got ${JSON.stringify(promptTemplate)}`,
+    );
+  }
+  if (!(promptState.id === openState.id && promptState.id === commitState.id)) {
+    throw failed(
+      'fixture_contract',
+      'the sealed prompt, workspace.open and the single workspace.commit must be enter actions of ONE effect state ' +
+        `(found prompt=${promptState.id}, open=${openState.id}, commit=${commitState.id})`,
+    );
+  }
+  if (gate.onTimeoutStateId !== promptState.id) {
+    throw failed(
+      'fixture_contract',
+      `the gate '${gate.stateId}' must reroute its deadline onto the effect state '${promptState.id}', ` +
+        `got ${JSON.stringify(gate.onTimeoutStateId)} — W5/W6 are placed at this gate only because its deadline ` +
+        'enters that state',
+    );
+  }
+  if (gate.stateId === promptState.id) {
+    throw failed('fixture_contract', 'the bounded gate and the effect state must be distinct states');
   }
   if (!/^[a-z][a-z0-9._-]*$/.test(presetId)) {
     throw failed('fixture_contract', `preset id ${JSON.stringify(presetId)} is not a valid preset id`);
@@ -396,8 +561,14 @@ function readFixture() {
     scopePath,
     changePath,
     promptToolPolicy,
+    promptTemplate,
     declaredBytes,
     declaredSha256: sha256(declaredBytes),
+    gate: {
+      stateId: gate.stateId,
+      timeoutMs: gate.timeoutMs,
+      effectStateId: promptState.id,
+    },
   };
 }
 
@@ -590,7 +761,7 @@ function tailLines(text, limit) {
 }
 
 // ---------------------------------------------------------------------------
-// Durable state classification (pure) and the two bounded public polls
+// Durable state classification (pure) and the bounded public polls
 // ---------------------------------------------------------------------------
 
 /**
@@ -622,10 +793,10 @@ function classifyAdmissionObservation(summary) {
 }
 
 /** One public W4 inspect, returning both the frozen response and its summary. */
-async function readScheduleInspect(port, scheduleId, step) {
+async function readScheduleInspect(port, scheduleId, step, { timeoutMs = HTTP_TIMEOUT_MS } = {}) {
   const inspected = requireOk(
     step,
-    await httpJson(port, 'GET', `/v1/daemon/orchestration/schedules/${encodeURIComponent(scheduleId)}`),
+    await httpJson(port, 'GET', `/v1/daemon/orchestration/schedules/${encodeURIComponent(scheduleId)}`, { timeoutMs }),
   );
   return { inspected, summary: scheduleSummary(step, inspected) };
 }
@@ -664,29 +835,85 @@ async function awaitRunIdentity(port, scheduleId) {
 }
 
 /**
- * Classify a durable execution projection into a Steer placement decision.
+ * One durable observation of the admitted run: the routed schedule projection
+ * (the only surface carrying `recovery_class`/`wait`/`allowed_actions`) plus the
+ * run detail the gate identity is bound to (`current_task_id`).
  *
- * `steerable` is the legal pre-manual execution boundary: a fully committed
- * step with no durable human wait and no in-flight marker, and the projected
- * legal actions include the continuation. Every other state is decisive and
- * the driver must stop instead of writing W5/W6:
+ * Both halves must PROVE they describe the run being synchronized: the schedule
+ * must own `runId`, and the run detail must ANSWER `runId`. An absent, empty,
+ * non-string or different `session_id` is a `wrong_run` STOP — a malformed or
+ * misrouted detail must never contribute gate identity.
  *
- *   * `human_wait` — a durable A4 wait exists; a plain `resume` is fenced and
- *     issuing it would bypass the human wait (§3.3 / §6.1).
- *   * `terminal` — the run already settled.
- *   * `not_legal` — in-flight/interrupted/other class, where resume is fenced.
- *   * `unobservable` — the public surface exposes no projection, so placement
- *     cannot be established at all.
+ * `deadlineMs` clamps each request to what is left of the caller's absolute
+ * bound (the shared `HTTP_TIMEOUT_MS` is only a ceiling), so a slow surface can
+ * never push the observation past the poll's own deadline.
  */
-function classifySteerBoundary(projection) {
-  if (projection === null) return { state: 'unobservable', observed: null };
+async function readDurableObservation(port, scheduleId, runId, step, { deadlineMs = null } = {}) {
+  const budget = () =>
+    deadlineMs === null ? HTTP_TIMEOUT_MS : Math.max(1, Math.min(HTTP_TIMEOUT_MS, deadlineMs - Date.now()));
+  const { summary } = await readScheduleInspect(port, scheduleId, `${step} (schedule)`, { timeoutMs: budget() });
+  if (summary.current_session_id !== runId) {
+    throw failed(
+      'wrong_run',
+      `${step}: the schedule owns run ${JSON.stringify(summary.current_session_id)} instead of ${JSON.stringify(runId)}; ` +
+        'W5/W6 address one admitted schedule/root run and are never re-placed on another',
+    );
+  }
+  const detail = requireOk(
+    `${step} (session)`,
+    await httpJson(port, 'GET', `/v1/daemon/orchestration/sessions/${encodeURIComponent(runId)}`, {
+      timeoutMs: budget(),
+    }),
+  );
+  const session = detail?.session;
+  if (session === null || typeof session !== 'object') {
+    throw failed('contract_violation', `${step}: the run detail response carries no session object`);
+  }
+  if (session.session_id !== runId) {
+    throw failed(
+      'wrong_run',
+      `${step}: the run detail answered ${JSON.stringify(session.session_id)} for run ${JSON.stringify(runId)}; ` +
+        'the gate identity is only ever read from the requested run',
+    );
+  }
+  return {
+    summary,
+    session,
+    projection: executionProjectionOf(summary),
+    taskId: typeof session.current_task_id === 'string' ? session.current_task_id : null,
+  };
+}
+
+/**
+ * Bound one already-started observation by an ABSOLUTE deadline. The HTTP
+ * client's own timeout is an inactivity timer, so an active/trickling response
+ * would outlive it; the guard makes the caller's declared bound real. A read
+ * that loses the race is abandoned (its own request timeout still closes the
+ * socket) and the caller converts the abort into its own typed STOP through
+ * `onDeadline` — a transport fault that is NOT the deadline keeps propagating
+ * as itself instead of being relabelled as a missing gate.
+ */
+async function boundedObservation(promise, deadlineMs, onDeadline) {
+  let timer = null;
+  const guard = new Promise((_resolve, rejectPromise) => {
+    timer = setTimeout(() => rejectPromise(onDeadline()), Math.max(0, deadlineMs - Date.now()));
+  });
+  try {
+    return await Promise.race([promise, guard]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Projection facts the STOP messages and the receipt both read. */
+function observedBoundary(projection, taskId) {
   const wait = projection.wait ?? null;
-  const recoveryClass = typeof projection.recovery_class === 'string' ? projection.recovery_class : null;
   const allowed = Array.isArray(projection.allowed_actions)
     ? projection.allowed_actions.filter((action) => typeof action === 'string')
     : [];
-  const observed = {
-    recovery_class: recoveryClass,
+  return {
+    task_id: typeof taskId === 'string' ? taskId : null,
+    recovery_class: typeof projection.recovery_class === 'string' ? projection.recovery_class : null,
     wait_id: wait !== null && typeof wait.wait_id === 'string' ? wait.wait_id : null,
     wait_kind: wait !== null && typeof wait.kind === 'string' ? wait.kind : null,
     reason_code: projection.reason_code ?? null,
@@ -694,62 +921,277 @@ function classifySteerBoundary(projection) {
     state_revision: projection.state_revision ?? null,
     allowed_actions: allowed,
   };
-  if (recoveryClass === 'terminal') return { state: 'terminal', observed };
-  if (wait !== null || recoveryClass === 'human_wait') return { state: 'human_wait', observed };
-  if (!STEERABLE_RECOVERY_CLASSES.has(recoveryClass)) return { state: 'not_legal', observed };
-  if (!allowed.includes(STEERABLE_ALLOWED_ACTION)) return { state: 'not_legal', observed };
-  return { state: 'steerable', observed };
 }
 
-/** Turn a non-steerable placement into the exact, typed STOP for that state. */
-function steerBoundaryStop(step, boundary) {
+/**
+ * Classify one durable observation against the fixture's bounded converge gate.
+ *
+ * `gate` is the only placement W5/W6 accept: the routed A7 class is the parked
+ * converge/merge gate (no human wait token, no in-flight marker) AND the run's
+ * `current_task_id` is the fixture's gate state. Every other state is decisive:
+ *
+ *   * `human_wait` — a durable A4 wait exists; a plain `resume` is fenced there
+ *     and issuing it would bypass the human wait (§3.3 / §6.1).
+ *   * `terminal` — the run already settled.
+ *   * `wrong_gate` — a converge/merge park that is NOT the fixture's gate, so
+ *     the graph does not match the checked-in journey.
+ *   * `transient` — a fully committed step boundary or an in-flight/other
+ *     class; the run may legitimately still be walking into the gate.
+ *   * `unobservable` — the routed surface exposes no projection at all.
+ */
+function classifyPreEffectGate(projection, taskId, gateStateId) {
+  if (projection === null) return { state: 'unobservable', observed: null };
+  const observed = observedBoundary(projection, taskId);
+  if (observed.recovery_class === 'terminal') return { state: 'terminal', observed };
+  if (observed.wait_id !== null || observed.recovery_class === 'human_wait') {
+    return { state: 'human_wait', observed };
+  }
+  if (observed.recovery_class !== GATE_PARK_RECOVERY_CLASS) return { state: 'transient', observed };
+  if (observed.task_id !== gateStateId) return { state: 'wrong_gate', observed };
+  return { state: 'gate', observed };
+}
+
+/**
+ * Classify one durable observation against the effect state's manual wait — the
+ * boundary the deadline reroute must reach, which proves the reroute happened
+ * and that W5/W6 were exercised strictly before the final manual wait.
+ *
+ *   * `manual_wait` — the effect state rests in a durable human wait.
+ *   * `wrong_state` — something else rests in a human wait.
+ *   * `terminal` — the run settled without reaching that wait.
+ *   * `pending` — still walking; re-read until the bound.
+ */
+function classifyManualWaitBoundary(projection, taskId, effectStateId) {
+  if (projection === null) return { state: 'unobservable', observed: null };
+  const observed = observedBoundary(projection, taskId);
+  if (observed.recovery_class === 'terminal') return { state: 'terminal', observed };
+  if (observed.wait_id !== null || observed.recovery_class === 'human_wait') {
+    return observed.task_id === effectStateId ? { state: 'manual_wait', observed } : { state: 'wrong_state', observed };
+  }
+  return { state: 'pending', observed };
+}
+
+/** Turn a non-gate placement into the exact, typed STOP for that state. */
+function preEffectGateStop(step, boundary, gateStateId) {
   const observed = JSON.stringify(boundary.observed);
   switch (boundary.state) {
     case 'unobservable':
       return blocked(
-        'steer_boundary_unobservable',
+        'gate_unobservable',
         `${step}: the routed inspect response carries no durable execution projection ` +
-          '(recovery_class/allowed_actions/wait), so a legal pre-manual Steer boundary cannot be ' +
-          'established; W5/W6 are not issued and no Steer success is claimed',
+          '(recovery_class/allowed_actions/wait), so the fixture-declared pre-effect gate cannot be ' +
+          'confirmed; W5/W6 are not issued and no Steer success is claimed',
       );
     case 'human_wait':
       return failed(
-        'steer_boundary_missed',
-        `${step}: the run already rests in a durable human wait (${observed}); the A4 fence makes a ` +
-          'plain resume illegal there, so W5/W6 are not issued rather than bypassing the wait',
+        'gate_human_wait',
+        `${step}: the run already rests in a durable human wait (${observed}) instead of the fixture's bounded ` +
+          `pre-effect gate '${gateStateId}'; the A4 fence makes a plain resume illegal there, so W5/W6 are not ` +
+          'issued rather than bypassing the human wait',
       );
     case 'terminal':
-      return failed('steer_run_terminal', `${step}: the run is already terminal (${observed}); W5/W6 are not issued`);
+      return failed(
+        'gate_terminal',
+        `${step}: the run is already terminal (${observed}); W5/W6 are not issued`,
+      );
+    case 'wrong_gate':
+      return failed(
+        'gate_wrong_state',
+        `${step}: the run is parked at a different converge/merge gate than the fixture gate ` +
+          `'${gateStateId}' (${observed}); W5/W6 are not issued on a graph the fixture does not declare`,
+      );
     default:
       return failed(
-        'steer_boundary_not_legal',
-        `${step}: the durable state is not a legal pre-manual execution boundary (${observed}); ` +
-          'W5/W6 are not issued',
+        'gate_not_observed',
+        `${step}: no steady bounded converge gate '${gateStateId}' was observed within ` +
+          `${GATE_BOUNDARY_TIMEOUT_MS}ms (last observation ${observed}); W5/W6 are not issued on a timing assumption`,
       );
   }
 }
 
 /**
- * Bounded synchronization of the Steer against durable state. A decisive
- * observation (a legal boundary, a human wait or a terminal run) returns
- * immediately; an in-flight/other transient class is re-read until the bound,
- * after which the last observation is returned so the caller stops with the
- * exact observed state instead of writing on a timing assumption.
+ * Bounded synchronization on the fixture's bounded pre-effect gate. The gate is
+ * accepted only when it is observed QUIET — two reads at least one poll apart
+ * with the SAME integer durable state revision, still parked at the fixture's
+ * gate state and still pre-effect (no model request dispatched). A decisive
+ * non-gate observation (a human wait, a terminal run, a foreign gate) STOPS
+ * immediately instead of being retried into a timing assumption.
+ *
+ * The poll bound is an absolute wall-clock deadline: no read starts after it,
+ * every request is clamped to what is left of it, an observation that does not
+ * answer inside it is aborted (`boundedObservation`) and the gate is never
+ * accepted after it. A gate observation whose routed projection carries no
+ * integer `state_revision` is refused outright — repeated absence is not
+ * evidence that the active run stayed at one durable revision, which is exactly
+ * what "quiet" claims.
  */
-async function awaitSteerBoundary(port, scheduleId) {
-  const deadline = Date.now() + STEER_BOUNDARY_TIMEOUT_MS;
-  let interval = STEER_BOUNDARY_START_INTERVAL_MS;
+async function awaitPreEffectGate(port, scheduleId, runId, gate, model) {
+  const deadline = Date.now() + GATE_BOUNDARY_TIMEOUT_MS;
+  let interval = GATE_BOUNDARY_START_INTERVAL_MS;
   let polls = 0;
-  let observation = { state: 'unobservable', observed: null };
+  let quiet = 0;
+  let quietRevision = null;
+  let observation = { state: 'transient', observed: null };
+  const boundStop = () => preEffectGateStop('gate', observation, gate.stateId);
   for (;;) {
-    const { summary } = await readScheduleInspect(port, scheduleId, 'GET /orchestration/schedules/{id} (steer boundary)');
+    if (Date.now() >= deadline) throw boundStop();
+    let durable;
+    try {
+      durable = await boundedObservation(
+        readDurableObservation(port, scheduleId, runId, 'gate', { deadlineMs: deadline }),
+        deadline,
+        boundStop,
+      );
+    } catch (error) {
+      // Both abort paths (the guard, and the request's own clamped socket
+      // timeout) land at or after the deadline; either one is the same typed
+      // STOP. A transport fault BEFORE the deadline keeps propagating as
+      // itself, so a real outage is never relabelled as a missing gate.
+      if (!(error instanceof DriverFailure) && Date.now() >= deadline) throw boundStop();
+      throw error;
+    }
     polls += 1;
-    observation = classifySteerBoundary(executionProjectionOf(summary));
-    if (observation.state !== 'not_legal') return { ...observation, polls };
-    if (Date.now() >= deadline) return { ...observation, polls };
-    await sleep(interval);
-    interval = Math.min(interval * 2, STEER_BOUNDARY_MAX_INTERVAL_MS);
+    observation = classifyPreEffectGate(durable.projection, durable.taskId, gate.stateId);
+    if (observation.state === 'gate') {
+      if (model.observations.requests !== 0) {
+        throw failed(
+          'gate_not_pre_effect',
+          `gate: the run already dispatched ${model.observations.requests} model request(s) before the bounded gate ` +
+            'was confirmed; the fixture gate must be pre-effect',
+        );
+      }
+      if (!Number.isInteger(observation.observed.state_revision) || observation.observed.state_revision < 0) {
+        throw blocked(
+          'gate_revision_unobservable',
+          `gate: the parked gate projection carries no integer durable state revision ` +
+            `(${JSON.stringify(observation.observed)}), so an unchanged revision cannot be established; a repeated ` +
+            'absent revision is not quiet and W5/W6 are not issued',
+        );
+      }
+      const revision = observation.observed.state_revision;
+      quiet = quiet > 0 && revision === quietRevision ? quiet + 1 : 1;
+      quietRevision = revision;
+      // Strict bound: the gate is never accepted after the declared deadline.
+      if (quiet >= 2 && Date.now() < deadline) {
+        return { ...observation, polls, quiet_polls: quiet, parked_at_ms: Date.now() };
+      }
+    } else if (observation.state !== 'transient') {
+      throw preEffectGateStop('gate', observation, gate.stateId);
+    }
+    if (Date.now() >= deadline) throw boundStop();
+    await sleep(Math.max(0, Math.min(interval, deadline - Date.now())));
+    interval = Math.min(interval * 2, GATE_BOUNDARY_MAX_INTERVAL_MS);
   }
+}
+
+/**
+ * Bounded wait for the durable boundary the deadline reroute must reach: the
+ * effect state resting in its manual wait. A human wait at any OTHER state, a
+ * settled run or an absent projection is a typed STOP, never a pass. The bound
+ * is absolute in the same way as the gate poll: no read starts after it, each
+ * request is clamped to what is left of it, an observation that overruns it is
+ * aborted, and the boundary is never accepted after it.
+ */
+async function awaitEffectBoundary(port, scheduleId, runId, effectStateId) {
+  const deadline = Date.now() + EFFECT_BOUNDARY_TIMEOUT_MS;
+  let interval = EFFECT_BOUNDARY_START_INTERVAL_MS;
+  let polls = 0;
+  let observation = { state: 'pending', observed: null };
+  const boundStop = () =>
+    failed(
+      'effect_boundary_timeout',
+      `effect boundary: '${effectStateId}' did not reach its manual wait within ${EFFECT_BOUNDARY_TIMEOUT_MS}ms ` +
+        `across ${polls} reads (last observation ${JSON.stringify(observation.observed)})`,
+    );
+  for (;;) {
+    if (Date.now() >= deadline) throw boundStop();
+    let durable;
+    try {
+      durable = await boundedObservation(
+        readDurableObservation(port, scheduleId, runId, 'effect boundary', { deadlineMs: deadline }),
+        deadline,
+        boundStop,
+      );
+    } catch (error) {
+      // Same disposition as the gate poll: an abort that lands at or after the
+      // declared bound is this poll's typed STOP, whatever aborted it, while a
+      // transport fault before the bound keeps propagating as itself.
+      if (!(error instanceof DriverFailure) && Date.now() >= deadline) throw boundStop();
+      throw error;
+    }
+    polls += 1;
+    observation = classifyManualWaitBoundary(durable.projection, durable.taskId, effectStateId);
+    if (observation.state === 'manual_wait') {
+      if (Date.now() < deadline) return { ...observation, polls };
+      throw boundStop();
+    }
+    if (observation.state !== 'pending') {
+      const observed = JSON.stringify(observation.observed);
+      if (observation.state === 'terminal') {
+        throw failed('effect_boundary_terminal', `effect boundary: the run settled without reaching '${effectStateId}' (${observed})`);
+      }
+      throw failed(
+        `effect_boundary_${observation.state}`,
+        `effect boundary: the durable boundary is not the effect state's manual wait '${effectStateId}' (${observed})`,
+      );
+    }
+    if (Date.now() >= deadline) throw boundStop();
+    await sleep(Math.max(0, Math.min(interval, deadline - Date.now())));
+    interval = Math.min(interval * 2, EFFECT_BOUNDARY_MAX_INTERVAL_MS);
+  }
+}
+
+/**
+ * The sealed-prompt cardinality contract of the effect boundary: the ONE
+ * admitted schedule/run crosses the effect state exactly once, so exactly one
+ * model request is authorized, it must carry the Idea W5 appended (the
+ * boundary's own evidence that it consumed the committed core-context version),
+ * and there is no second dispatch. Returns the checked counts for the receipt.
+ */
+function assertSealedPromptCardinality(observations) {
+  const requests = observations?.requests;
+  if (requests === 0) {
+    throw failed(
+      'effect_missing',
+      'the effect state reached its manual wait without dispatching the sealed prompt; no model request was performed',
+    );
+  }
+  if (requests > 1) {
+    throw failed(
+      'duplicate_effect',
+      `the sealed prompt was dispatched ${requests} times across one admitted schedule/run; ` +
+        'exactly one pre-manual prompt is authorized',
+    );
+  }
+  if (observations.prompt_with_idea !== 1) {
+    throw failed(
+      'steer_idea_not_observed',
+      'the first real prompt of the run did not carry the appended Idea; the next execution boundary did not ' +
+        'consume the committed core-context version W5 appended',
+    );
+  }
+  return { requests, prompt_with_idea: observations.prompt_with_idea };
+}
+
+/**
+ * The resumed schedule must still own exactly ONE run for this preset: the
+ * deadline reroute re-drives the admitted run, so a resume that minted a second
+ * run is a failure rather than a passing journey.
+ */
+function assertSingleRun(items, presetId, runId) {
+  if (!Array.isArray(items)) {
+    throw failed('contract_violation', 'GET /orchestration/sessions carries no items array');
+  }
+  const runs = items.filter((row) => row?.preset_id === presetId);
+  if (runs.length !== 1 || runs[0].session_id !== runId) {
+    throw failed(
+      'duplicate_run',
+      `the resumed schedule must own exactly one run: found ${runs.length} run(s) for preset ` +
+        `${JSON.stringify(presetId)} (${runs.map((row) => JSON.stringify(row?.session_id)).join(', ')}), ` +
+        `expected [${JSON.stringify(runId)}]`,
+    );
+  }
+  return { runs: runs.length, run_id: runs[0].session_id };
 }
 
 // ---------------------------------------------------------------------------
@@ -966,10 +1408,21 @@ function exitCodeFor(outcome) {
 /**
  * DeepSeek-compatible loopback endpoint. It answers one SSE completion for
  * `POST /chat/completions` and records only non-secret request structure —
- * never bodies, headers or keys.
+ * never bodies, headers or keys. The single non-structural fact it derives is
+ * one boolean per request: whether the prompt body carried the appended Steer
+ * Idea, which is the boundary's own evidence that the first real prompt of the
+ * run consumed the committed core-context version (W5). The body is read into a
+ * bounded buffer for that comparison only and is never stored, echoed or
+ * written anywhere.
  */
 function startModelEndpoint() {
-  const observations = { requests: 0, paths: [], unexpected: 0, authorization_header_present: false };
+  const observations = {
+    requests: 0,
+    paths: [],
+    unexpected: 0,
+    authorization_header_present: false,
+    prompt_with_idea: 0,
+  };
   const server = createServer((req, res) => {
     observations.requests += 1;
     if (typeof req.url === 'string') observations.paths.push(req.url.split('?')[0]);
@@ -980,8 +1433,18 @@ function startModelEndpoint() {
       res.end(JSON.stringify({ error: { message: 'only POST /chat/completions is served' } }));
       return;
     }
-    req.resume();
+    let promptBytes = 0;
+    let promptHasIdea = false;
+    req.on('data', (chunk) => {
+      if (promptBytes >= MODEL_PROMPT_READ_CAP_BYTES) return;
+      promptBytes += chunk.length;
+      // The marker comparison reads the request the sealed preset rendered; the
+      // matched substring is the driver's own non-secret Idea, and nothing is
+      // retained beyond this boolean.
+      if (!promptHasIdea && chunk.includes(STEER_IDEA)) promptHasIdea = true;
+    });
     req.on('end', () => {
+      if (promptHasIdea) observations.prompt_with_idea += 1;
       const chunk = (delta, finishReason) =>
         `data: ${JSON.stringify({
           id: 'chatcmpl-public-first-workflow',
@@ -1321,10 +1784,14 @@ async function runDeterministic(options) {
       prompt_tool_policy: fixture.promptToolPolicy,
       prompt_role: PROMPT_ROLE,
       prompt_role_binding: { [PROMPT_ROLE]: { provider_id: DSH_PROVIDER_ID } },
+      prompt_renders_core_context: fixture.promptTemplate.includes(CORE_CONTEXT_TEMPLATE),
       scope: fixture.scopePath,
       change_path: fixture.changePath,
       declared_bytes: fixture.declaredBytes.length,
       declared_sha256: fixture.declaredSha256,
+      gate_state: fixture.gate.stateId,
+      gate_timeout_ms: fixture.gate.timeoutMs,
+      gate_effect_state: fixture.gate.effectStateId,
     });
 
     const [nodeMajor, nodeMinor] = process.versions.node.split('.').map(Number);
@@ -1527,14 +1994,59 @@ async function runDeterministic(options) {
     };
     record('inspect', 'ok', { status: facts.inspect.status, admission_polls: admission.polls });
 
-    // 9. W5/W6 steer, synchronized on durable state (§6.1: W5/W6 are exercised
-    // before the final manual wait; S0-3: the append is durable before resume
-    // counts as success). Placement comes from the routed execution projection,
-    // never from the preceding bounded read: at a durable human wait the A4
-    // fence refuses a plain resume, so the driver stops with the exact observed
-    // state instead of bypassing the wait or claiming a Steer it did not place.
-    const steerBoundary = await awaitSteerBoundary(port, scheduleId);
-    if (steerBoundary.state !== 'steerable') throw steerBoundaryStop('steer', steerBoundary);
+    // 9. W5/W6 on the fixture's bounded pre-effect gate (§6.1: W5/W6 are
+    // exercised before the final manual wait; S0-3: the append is durable
+    // before resume counts as success). The gate is the state the checked-in
+    // fixture declares — its `converge:`/`timeout_ms` state, whose `on_timeout`
+    // reroute must be the effect state. Placement is confirmed against the
+    // routed durable projection plus the run detail's `current_task_id`; a
+    // durable human wait (where the A4 fence refuses a plain resume) or any
+    // other placement is a typed STOP, never a bypassed wait and never a Steer
+    // claimed on a timing assumption.
+    const gateBoundary = await awaitPreEffectGate(port, scheduleId, runId, fixture.gate, model);
+    // Nobody drives a parked gate: the deadline is only evaluated by a driver
+    // (`join_timeout_tick`), so waiting it out HERE, with no signal issued, is
+    // what makes the W6 resume deterministic instead of a race with the
+    // deadline. `timeout_ms` comes from the fixture; the margin is the driver's
+    // own, not the fixture's.
+    const deadlineAtMs = gateBoundary.parked_at_ms + fixture.gate.timeoutMs + GATE_DEADLINE_MARGIN_MS;
+    const deadlineWaitedMs = Math.max(0, deadlineAtMs - Date.now());
+    if (deadlineWaitedMs > 0) await sleep(deadlineWaitedMs);
+    // The gate must still be the same quiet park on the same run, and still
+    // pre-effect: crossing the deadline alone performs no work.
+    const afterDeadline = await readDurableObservation(port, scheduleId, runId, 'gate after deadline');
+    const afterDeadlineBoundary = classifyPreEffectGate(
+      afterDeadline.projection,
+      afterDeadline.taskId,
+      fixture.gate.stateId,
+    );
+    if (afterDeadlineBoundary.state !== 'gate') {
+      throw preEffectGateStop('gate after deadline', afterDeadlineBoundary, fixture.gate.stateId);
+    }
+    if (model.observations.requests !== 0) {
+      throw failed(
+        'gate_not_pre_effect',
+        `gate after deadline: ${model.observations.requests} model request(s) were dispatched across the gate ` +
+          'deadline; the fixture gate must stay pre-effect until the W6 resume',
+      );
+    }
+    facts.steer = {
+      gate_state: fixture.gate.stateId,
+      gate_effect_state: fixture.gate.effectStateId,
+      gate_timeout_ms: fixture.gate.timeoutMs,
+      gate_polls: gateBoundary.polls,
+      gate_quiet_polls: gateBoundary.quiet_polls,
+      gate_observed: gateBoundary.observed,
+      deadline_waited_ms: deadlineWaitedMs,
+      after_deadline: afterDeadlineBoundary.observed,
+      pre_effect_requests: model.observations.requests,
+      appended_version: null,
+      recheck: null,
+      resumed: false,
+      resume: null,
+      post_resume_boundary: null,
+      run_identity: null,
+    };
     const appendResponse = requireOk(
       'PATCH /orchestration/schedules/{id}/core-context',
       await httpJson(port, 'PATCH', `/v1/daemon/orchestration/schedules/${encodeURIComponent(scheduleId)}/core-context`, {
@@ -1542,33 +2054,26 @@ async function runDeterministic(options) {
       }),
     );
     requireFields('PATCH /orchestration/schedules/{id}/core-context', appendResponse, ['new_version']);
-    facts.steer = {
-      boundary: steerBoundary.observed,
-      boundary_polls: steerBoundary.polls,
-      appended_version: appendResponse.new_version,
-      recheck: null,
-      resumed: false,
-      resume: null,
-    };
+    facts.steer.appended_version = appendResponse.new_version;
     // Re-read the routed boundary before resuming: if the run moved on between
     // the durable append and the resume, a plain resume would land where it is
     // fenced. The Steer then stops with the exact observed state; the appended
     // version stays durable and is never re-appended (S0-3).
-    const steerRecheck = classifySteerBoundary(
-      executionProjectionOf(
-        (await readScheduleInspect(port, scheduleId, 'GET /orchestration/schedules/{id} (steer recheck)')).summary,
-      ),
-    );
-    facts.steer.recheck = steerRecheck.observed;
-    if (steerRecheck.state !== 'steerable') {
-      const stop = steerBoundaryStop('steer recheck', steerRecheck);
+    const recheckObservation = await readDurableObservation(port, scheduleId, runId, 'gate recheck');
+    const gateRecheck = classifyPreEffectGate(recheckObservation.projection, recheckObservation.taskId, fixture.gate.stateId);
+    facts.steer.recheck = gateRecheck.observed;
+    if (gateRecheck.state !== 'gate') {
+      const stop = preEffectGateStop('gate recheck', gateRecheck, fixture.gate.stateId);
       throw new DriverFailure(
         stop.outcome,
-        'steer_boundary_lost',
+        'gate_lost',
         `${stop.message} — the appended core-context version ${JSON.stringify(appendResponse.new_version)} remains ` +
           'durable; resume was not issued and the append is never retried',
       );
     }
+    // W6 resumes THIS schedule, whose admitted run is the gated run: the
+    // resume re-drives that run and its deadline reroute enters the effect
+    // state. It is not a new admission and not a manual-wait bypass.
     const resumeResponse = await httpJson(
       port,
       'POST',
@@ -1593,10 +2098,30 @@ async function runDeterministic(options) {
       );
     }
     facts.steer.resumed = true;
+    // The reroute must reach the effect state's manual wait on the SAME run:
+    // that is the observable proof that the deadline reroute ran, that the same
+    // schedule/root was re-driven, and that W5/W6 were exercised strictly
+    // before the final manual wait.
+    const effectBoundary = await awaitEffectBoundary(port, scheduleId, runId, fixture.gate.effectStateId);
+    facts.steer.post_resume_boundary = effectBoundary.observed;
+    // The resume must not have minted a second run: the Creator's durable page
+    // still carries exactly this preset's ONE run, and it is the gated run.
+    const sessionsPage = requireOk(
+      'GET /orchestration/sessions',
+      await httpJson(port, 'GET', '/v1/daemon/orchestration/sessions'),
+    );
+    const singleRun = assertSingleRun(sessionsPage.items, fixture.presetId, runId);
+    facts.steer.run_identity = {
+      run_id: runId,
+      preset_runs: singleRun.runs,
+      same_run: true,
+    };
     record('steer', 'ok', {
-      boundary_recovery_class: steerBoundary.observed.recovery_class,
-      boundary_polls: steerBoundary.polls,
+      gate_state: fixture.gate.stateId,
+      gate_polls: gateBoundary.polls,
+      deadline_waited_ms: deadlineWaitedMs,
       appended_version: appendResponse.new_version,
+      post_resume_state: effectBoundary.observed.task_id,
     });
 
     // 10. O1/O2: same-run stream against the inspected root session.
@@ -1650,7 +2175,11 @@ async function runDeterministic(options) {
     facts.stream.tail_frame_count = allFrames.length - stream.frames.length;
     record('stream_tail', 'ok', { reads: tailReads, frames: facts.stream.tail_frame_count });
 
-    // 12. §6.1: the declared workspace effect, read back byte-for-byte.
+    // 12. §6.1: the declared workspace effect, read back byte-for-byte. The
+    // effect is the FIRST real prompt of the run crossing into the effect
+    // state, so its cardinality is asserted here: exactly one sealed prompt,
+    // carrying the appended Idea, and no second dispatch.
+    assertSealedPromptCardinality(model.observations);
     const effectPath = join(scopeDir, fixture.changePath);
     if (!existsSync(effectPath)) {
       throw failed(
@@ -1669,14 +2198,14 @@ async function runDeterministic(options) {
     // Nothing is computed from the fixture bytes and no identifier is invented;
     // a missing commit revision refuses the effect (missing_commit_revision),
     // never a success.
-    const effectProjection = executionProjectionOf(
-      (await readScheduleInspect(port, scheduleId, 'GET /orchestration/schedules/{id} (effect)')).summary,
-    );
+    const effectObservation = await readDurableObservation(port, scheduleId, runId, 'effect');
     facts.effect = {
       relative_path: `${fixture.scopePath}/${fixture.changePath}`,
       bytes: landed.length,
       sha256: sha256(landed),
       declared_content_matches: true,
+      prompt_requests: model.observations.requests,
+      prompt_with_idea: model.observations.prompt_with_idea,
       commit_revision: null,
       durable_state_revision: null,
       revision_source: null,
@@ -1686,7 +2215,7 @@ async function runDeterministic(options) {
       resolveEffectRevision({
         commitRevision: observedRevision,
         frames: allFrames,
-        projectionStateRevision: effectProjection?.state_revision ?? null,
+        projectionStateRevision: effectObservation.projection?.state_revision ?? null,
       }),
     );
     record('workspace_effect', 'ok', {
@@ -1774,6 +2303,7 @@ async function runDeterministic(options) {
       paths: [...new Set(model.observations.paths)],
       unexpected_requests: model.observations.unexpected,
       authorization_header_present: model.observations.authorization_header_present,
+      prompt_with_idea: model.observations.prompt_with_idea,
     };
     record('model_endpoint', 'ok', {
       requests: model.observations.requests,
@@ -1903,30 +2433,36 @@ async function main() {
 /**
  * Scoped-check surface: the pure contract helpers of this driver. Importing the
  * module has no side effects; the journey only runs when the script is invoked
- * directly, so a focused authoring check can exercise the fixture extraction,
- * the child-environment isolation rule, the controlled model protocol, the
- * durable admission/boundary classification, the wire refusal classification,
- * the revision resolution, the bounded server close and the cleanup disposition
+ * directly, so a focused authoring check can exercise the fixture extraction
+ * (including the bounded pre-effect gate facts), the child-environment
+ * isolation rule, the controlled model protocol, the durable
+ * admission/boundary classification, the wire refusal classification, the
+ * revision resolution, the bounded server close and the cleanup disposition
  * without starting any service.
  */
 export {
   applyCleanupDisposition,
+  assertSealedPromptCardinality,
+  assertSingleRun,
+  awaitEffectBoundary,
+  awaitPreEffectGate,
   awaitRunIdentity,
-  awaitSteerBoundary,
+  boundedObservation,
   boundedServerClose,
   buildChildEnv,
   classifyAdmissionObservation,
-  classifySteerBoundary,
+  classifyManualWaitBoundary,
+  classifyPreEffectGate,
   executionProjectionOf,
   exitCodeFor,
   findCommitRevision,
   parseCommitResponseRevision,
+  preEffectGateStop,
   readFixture,
   resolveEffectRevision,
   resolveExecutable,
   startModelEndpoint,
   statusFailure,
-  steerBoundaryStop,
   summarizeChildEnv,
 };
 

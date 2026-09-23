@@ -7,13 +7,22 @@
 # preset grammar from `.mstar/iterations/v1.195/specs/current-host-contracts.md`
 # §6.1:
 #
+#   * ONE bounded pre-effect converge gate: a dedicated `converge:` state with a
+#     `timeout_ms` deadline and an `on_timeout` reroute. Exactly one of its two
+#     upstream edges is reachable, so the admitted run parks there legally — no
+#     human wait, no in-flight marker, and (because the gate declares no `enter`
+#     action) no workspace effect and no model request. The deadline is only
+#     evaluated by a driver, so the re-drive inside a same-run resume is what
+#     reroutes the run onto the effect state below;
 #   * a deny-all prompt — `acp.prompt` with `tool_policy: deny_all`, the sealed
-#     no-tools scope, so no model tool can produce an effect;
+#     no-tools scope, so no model tool can produce an effect — that renders the
+#     committed `{{core_context.text}}`, so the first real prompt of the run
+#     observes the Idea appended (W5) before the resume (W6);
 #   * `workspace.open` on a scope inside the canonical creative workspace;
 #   * exactly one declared `workspace.commit`, whose manifest content is the only
 #     authorized workspace effect of this preset;
 #   * a manual wait, so W4 inspect / O1 stream / W7 cancel address the same
-#     non-terminal run.
+#     non-terminal run, and W5/W6 are exercised strictly before it.
 #
 # Driver-coupled facts (change them only together with the driver):
 #
@@ -23,45 +32,64 @@
 #    `agent_bindings`: `{"default": {"provider_id": "dsh-native"}}`. The runtime
 #    is reached through `DshNativeProvider`; this preset never names an
 #    executable and never talks to a provider directly.
-# 2. `workspace.open` takes a workspace-relative directory that MUST already
+# 2. The bounded gate is what makes the checked-in journey deterministic. The
+#    driver derives its identity from THIS file (the gate state, its
+#    `timeout_ms`, and the `on_timeout` state it requires to be the effect
+#    state), waits out the deadline with nobody driving the run, appends the
+#    Idea to the core context, and then resumes that same schedule so the
+#    deadline reroute enters the effect state. A plain resume at a manual wait
+#    is fenced by the engine, so the gate is the only legal pre-manual boundary
+#    of this graph and no human wait is ever bypassed.
+# 3. `workspace.open` takes a workspace-relative directory that MUST already
 #    exist inside the canonical creative workspace: the commit applier walks the
 #    opened scope with `O_DIRECTORY` and creates nothing. The driver creates
 #    `<workspace>/notes` before the run starts.
-# 3. `workspace.commit` change paths are scope-relative. `contentBase64` is the
+# 4. `workspace.commit` change paths are scope-relative. `contentBase64` is the
 #    canonical base64 of the file the driver reads back byte-for-byte and
 #    verifies against the same fixture (declared manifest content == landed
 #    content).
-# 4. The manual `exit_when` keeps the run non-terminal, which is what makes the
+# 5. The manual `exit_when` keeps the run non-terminal, which is what makes the
 #    inspect / stream / cancel steps address one live run. The same wait is why
-#    the driver places its Steer (W5/W6) strictly before it: this state runs the
-#    enter actions (prompt, open, commit) and then rests in the manual wait, and
-#    the engine fences `resume` against a durable wait and against in-flight
-#    markers. The driver therefore synchronizes on the routed public inspect
-#    projection (`schedule.execution.recovery_class` / `allowed_actions` / `wait`)
-#    and appends + resumes only at a committed pre-manual execution boundary; at
-#    the wait it stops with the exact observed state rather than bypassing the
-#    human wait or claiming a Steer it could not place.
+#    the driver places W5/W6 strictly before it: the gate parks first, and only
+#    the deadline reroute enters this state.
 preset:
   id: first-workflow
   version: 1
   kind: creator
-  description: "Public first workflow: one sealed deny-all prompt, one declared workspace commit, one manual wait"
+  description: "Public first workflow: bounded pre-effect gate, one sealed deny-all prompt, one declared workspace commit, one manual wait"
   requires_capabilities:
     - acp.prompt
     - workspace.open
     - workspace.commit
   run_intents:
     - work_init
-  initial: first_run
+  initial: start
   terminal: done
 states:
+  - id: start
+    description: "Entry: leaves the one reachable upstream edge of the bounded converge gate"
+    next: walked
+  - id: walked
+    description: "The one reachable upstream edge of the bounded converge gate"
+    next:
+      branches: []
+      default: gate
+  - id: unreachable
+    description: "Second upstream edge of the gate — never walked, so only the gate deadline can leave it"
+    next: gate
+  - id: gate
+    description: "Bounded pre-effect converge gate: no enter action, no human wait and no in-flight marker; the deadline reroutes onto first_run"
+    converge: { strategy: wait_for_all }
+    timeout_ms: 1500
+    on_timeout: first_run
+    next: done
   - id: first_run
-    description: "Deny-all prompt, then the declared workspace commit, then a manual wait"
+    description: "Sealed deny-all prompt rendering the committed core context, then the declared workspace commit, then a manual wait"
     enter:
       - kind: capability
         name: acp.prompt
         args:
-          prompt: "Reply with the single word READY. Do not call any tool."
+          prompt: "Reply with the single word READY. Do not call any tool. Steer idea: {{core_context.text}}"
           tool_policy: deny_all
       - kind: capability
         name: workspace.open
