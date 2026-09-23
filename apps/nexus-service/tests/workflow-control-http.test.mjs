@@ -518,3 +518,363 @@ describe('workflow-control-http (v1.195 P0-T5 native boot and truthful readiness
     }
   });
 });
+
+// ── P0-T6: native/HTTP control closure (W1–W7 / S0-1–S0-7 boundary) ─────────
+
+const FOREIGN_CREATOR = 'other_creator';
+const FOREIGN_SCHEDULE_ID = 'SCH_foreign_control';
+const FOREIGN_SESSION_ID = 'sess_foreign_control';
+
+/** Resolve after `ms` milliseconds. */
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Poll `read` until `done` accepts its value; fail the case if the bounded
+ * window closes first. Admission is asynchronous by contract (§3.3): the row
+ * is durable before `POST /schedules` answers, and the owned run appears on
+ * the SAME durable row only after the hosted admission clock admits it — so
+ * the run identity is observed by polling the public read, never assumed.
+ */
+async function waitFor(read, done, { label, timeout = 30_000 } = {}) {
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    const value = await read();
+    if (done(value)) return value;
+    if (Date.now() > deadline) {
+      assert.fail(`${label ?? 'waitFor'} did not settle within ${timeout}ms`);
+    }
+    await delay(100);
+  }
+}
+
+/**
+ * Seed the durable rows only ANOTHER creator could have written: one terminal
+ * root run and one terminal schedule owned by `other_creator`, inside the same
+ * workspace state DB the restored owner serves.
+ *
+ * Both are terminal and `legacy_inert`, so neither boot recovery nor the
+ * hosted admission clock touches them. What they prove is the OWNERSHIP
+ * boundary: a surface that read stored rows without the stored owner would
+ * serve them, and an absent-id-only check could not tell the difference.
+ *
+ * The writer protocol validates every store write through connection-local
+ * scalar functions, so this seed declares the engine writer identity the
+ * fixture's own `init_engine_pool` committed (the same convention
+ * `execution-http.test.mjs` uses to inject a journal orphan).
+ */
+function seedForeignControlRows(home) {
+  const script = `
+import sqlite3, glob, sys
+path = glob.glob(sys.argv[1] + "/.nexus42/creators/*/workspaces/*/state.db")[0]
+conn = sqlite3.connect(path)
+gate = conn.execute("SELECT migration_epoch, engine_epoch FROM core_workspace_gate WHERE pk=1").fetchone()
+wid = conn.execute("SELECT writer_id FROM core_writer_registration WHERE mode='engine' AND engine_epoch=?", (gate[1],)).fetchone()[0]
+conn.create_function("nexus_writer_protocol", 0, lambda: 1)
+conn.create_function("nexus_writer_mode", 0, lambda: "engine")
+conn.create_function("nexus_writer_id", 0, lambda: wid)
+conn.create_function("nexus_migration_epoch", 0, lambda: gate[0])
+conn.create_function("nexus_engine_epoch", 0, lambda: gate[1])
+now = 1
+conn.execute("INSERT INTO orchestration_sessions (session_id, creator_id, preset_id, preset_version, parent_session_id, current_task_id, status, context_json, created_at, updated_at) VALUES (?, ?, 'foreign-preset', 1, NULL, NULL, 'completed', ?, ?, ?)", (${JSON.stringify(
+    FOREIGN_SESSION_ID,
+  )}, ${JSON.stringify(FOREIGN_CREATOR)}, b"{}", now, now))
+conn.execute("INSERT INTO creator_schedules (schedule_id, creator_id, preset_id, preset_version, status, concurrency_kind, concurrency_whitelist, current_core_context_version, current_session_id, scheduled_at, label, created_at, updated_at, terminated_at) VALUES (?, ?, 'foreign-preset', 1, 'completed', 'serial', NULL, 0, ?, NULL, NULL, ?, ?, NULL)", (${JSON.stringify(
+    FOREIGN_SCHEDULE_ID,
+  )}, ${JSON.stringify(FOREIGN_CREATOR)}, ${JSON.stringify(FOREIGN_SESSION_ID)}, now, now))
+conn.commit()
+`;
+  const seeded = spawnSync('python3', ['-c', script, home], { encoding: 'utf8' });
+  assert.equal(seeded.status, 0, seeded.stderr || seeded.stdout);
+}
+
+describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', () => {
+  before(() => {
+    // The Rust addon carries the new boundary, and the TS facade re-declares
+    // it; the service compiles against the facade's declaration output, so all
+    // three are built here (each is incremental after the first run).
+    assert.equal(
+      spawnSync('node', ['packages/nexus-native/scripts/build.mjs'], { cwd: root, stdio: 'inherit' })
+        .status,
+      0,
+    );
+    assert.equal(
+      spawnSync('npx', ['tsc', '-p', 'packages/nexus-native/tsconfig.json'], {
+        cwd: root,
+        stdio: 'inherit',
+      }).status,
+      0,
+    );
+    assert.equal(
+      spawnSync('npx', ['tsc', '-p', 'tsconfig.json'], { cwd: serviceRoot, stdio: 'inherit' }).status,
+      0,
+    );
+  });
+
+  test('control round trip: create, list, inspect, session, append, resume and cancel act on one durable run', async () => {
+    const home = seededHome(acpProviderConfig());
+    const service = await startServiceOn(home);
+    try {
+      const base = service.url;
+      const scheduleUrl = (id) => `${base}/v1/daemon/orchestration/schedules/${id}`;
+      const inspectSchedule = async (id = scheduleId) => {
+        const response = await jsonFetch(scheduleUrl(id));
+        assert.equal(response.status, 200, response.text);
+        return response.payload;
+      };
+      const inspectSession = async (id) => {
+        const response = await jsonFetch(`${base}/v1/daemon/orchestration/sessions/${id}`);
+        assert.equal(response.status, 200, response.text);
+        return response.payload;
+      };
+
+      // W1: a real user preset through the public authoring surface, then the
+      // schedule that runs it. Its scaffold graph opens the workspace and then
+      // waits for manual input, so the admitted run stays non-terminal for the
+      // whole control journey — no model request is involved anywhere.
+      const scaffolded = await jsonFetch(`${base}/v1/daemon/presets`, {
+        method: 'POST',
+        body: { name: 'p0t6-control' },
+      });
+      assert.equal(scaffolded.status, 201, scaffolded.text);
+      const presetId = scaffolded.payload.id;
+      assert.equal(presetId, 'p0t6-control', scaffolded.text);
+
+      const created = await jsonFetch(`${base}/v1/daemon/orchestration/schedules`, {
+        method: 'POST',
+        body: { creator_id: CREATOR, preset_id: presetId },
+      });
+      assert.equal(created.status, 201, created.text);
+      assert.equal(created.payload.status, 'pending', created.text);
+      assert.equal(created.payload.core_context_version, 0, created.text);
+      const scheduleId = created.payload.schedule_id;
+      assert.ok(scheduleId, created.text);
+
+      // W2: the durable row is listable for that creator/preset.
+      const listed = await jsonFetch(`${base}/v1/daemon/orchestration/schedules`);
+      assert.equal(listed.status, 200, listed.text);
+      const listedRow = listed.payload.items.find((row) => row.schedule_id === scheduleId);
+      assert.ok(listedRow, `the created schedule must be listed: ${listed.text}`);
+      assert.equal(listedRow.creator_id, CREATOR, listed.text);
+      assert.equal(listedRow.preset_id, presetId, listed.text);
+      assert.ok(listed.payload.pagination, listed.text);
+
+      // W4 + S0-2: admission is asynchronous, and the owned run identity lands
+      // on that durable row; the run then parks at the preset's manual wait.
+      const admitted = await waitFor(
+        () => inspectSchedule(),
+        (payload) => Boolean(payload.schedule.current_session_id),
+        { label: `schedule ${scheduleId} owned run identity` },
+      );
+      const runId = admitted.schedule.current_session_id;
+      const parked = await waitFor(() => inspectSession(runId), (payload) => payload.session.status === 'waiting_for_input', {
+        label: `run ${runId} manual wait`,
+      });
+      assert.equal(parked.session.session_id, runId, parked && JSON.stringify(parked));
+      assert.equal(parked.session.creator_id, CREATOR, JSON.stringify(parked));
+      assert.equal(parked.session.preset_id, presetId, JSON.stringify(parked));
+
+      // W3: the overlay list is the DURABLE run set of this creator.
+      const sessions = await jsonFetch(`${base}/v1/daemon/orchestration/sessions`);
+      assert.equal(sessions.status, 200, sessions.text);
+      const sessionRow = sessions.payload.items.find((row) => row.session_id === runId);
+      assert.ok(sessionRow, `the admitted run must be listed: ${sessions.text}`);
+      assert.equal(sessionRow.creator_id, CREATOR, sessions.text);
+      assert.equal(sessionRow.preset_id, presetId, sessions.text);
+      assert.equal(sessionRow.status, 'waiting_for_input', sessions.text);
+
+      // W4: inspect reports the durable status, the owned run and the context
+      // version of THAT schedule.
+      const inspected = await inspectSchedule();
+      assert.equal(inspected.schedule.schedule_id, scheduleId, JSON.stringify(inspected));
+      assert.equal(inspected.schedule.status, 'running', JSON.stringify(inspected));
+      assert.equal(inspected.schedule.current_session_id, runId, JSON.stringify(inspected));
+      assert.equal(inspected.schedule.current_core_context_version, 0, JSON.stringify(inspected));
+      assert.deepEqual(inspected.depends_on, [], JSON.stringify(inspected));
+      assert.equal(inspected.concurrency_kind, 'serial', JSON.stringify(inspected));
+
+      // W5: every refused append is a typed client refusal that leaves the
+      // durable version and status untouched — a failed append is a failed
+      // Steer, never a half-applied version and never a resume.
+      for (const body of [{}, { op: 'bogus', body: 'x' }, { op: 'struct_merge' }]) {
+        const refused = await jsonFetch(`${scheduleUrl(scheduleId)}/core-context`, {
+          method: 'PATCH',
+          body,
+        });
+        assert.equal(refused.status, 400, `${JSON.stringify(body)}: ${refused.text}`);
+        assert.equal(refused.payload.error.code, 'invalid_input', refused.text);
+      }
+      const refusedAppend = await jsonFetch(`${scheduleUrl(scheduleId)}/core-context`, {
+        method: 'PATCH',
+        body: { op: 'replace', body: 'a user edit never overwrites system context' },
+      });
+      assert.equal(refusedAppend.status, 400, refusedAppend.text);
+      const afterRefusal = await inspectSchedule();
+      assert.equal(
+        afterRefusal.schedule.current_core_context_version,
+        0,
+        `a refused append must not write a version: ${JSON.stringify(afterRefusal)}`,
+      );
+      assert.equal(afterRefusal.schedule.status, 'running', JSON.stringify(afterRefusal));
+
+      // W5: the real Steer append is durable BEFORE any resume counts.
+      const appended = await jsonFetch(`${scheduleUrl(scheduleId)}/core-context`, {
+        method: 'PATCH',
+        body: { op: 'append', body: 'P0-T6 steer idea' },
+      });
+      assert.equal(appended.status, 200, appended.text);
+      assert.equal(appended.payload.new_version, 1, appended.text);
+      const afterAppend = await inspectSchedule();
+      assert.equal(
+        afterAppend.schedule.current_core_context_version,
+        1,
+        `the appended version must be the durable pointer: ${JSON.stringify(afterAppend)}`,
+      );
+
+      // W6: a plain resume must not bypass the run's manual wait. The exact
+      // durable conflict comes back (409 + coded detail), the durable append
+      // stays, and NO second workflow is minted for the schedule.
+      const resumed = await jsonFetch(`${scheduleUrl(scheduleId)}/signal`, {
+        method: 'POST',
+        body: { signal: 'resume' },
+      });
+      assert.equal(resumed.status, 409, resumed.text);
+      assert.equal(
+        resumed.payload.error.details?.wire_code,
+        'workflow_state_conflict',
+        resumed.text,
+      );
+      const afterResume = await inspectSchedule();
+      assert.equal(afterResume.schedule.current_session_id, runId, JSON.stringify(afterResume));
+      assert.equal(afterResume.schedule.current_core_context_version, 1, JSON.stringify(afterResume));
+      assert.equal(afterResume.schedule.status, 'running', JSON.stringify(afterResume));
+      const sessionsAfterResume = await jsonFetch(`${base}/v1/daemon/orchestration/sessions`);
+      assert.equal(
+        sessionsAfterResume.payload.items.filter((row) => row.preset_id === presetId).length,
+        1,
+        `resume must never create a second workflow: ${sessionsAfterResume.text}`,
+      );
+
+      // W7: cancel settles the SAME run (never a provider acknowledgement),
+      // and the durable identity survives the terminal settlement.
+      const cancelled = await jsonFetch(`${scheduleUrl(scheduleId)}/signal`, {
+        method: 'POST',
+        body: { signal: 'cancel' },
+      });
+      assert.equal(cancelled.status, 200, cancelled.text);
+      assert.equal(cancelled.payload.status, 'cancelled', cancelled.text);
+      const settled = await waitFor(
+        () => inspectSchedule(),
+        (payload) => payload.schedule.status === 'cancelled',
+        { label: `schedule ${scheduleId} durable cancel settlement` },
+      );
+      assert.equal(settled.schedule.current_session_id, runId, JSON.stringify(settled));
+      const settledSession = await inspectSession(runId);
+      assert.equal(settledSession.session.status, 'cancelled', JSON.stringify(settledSession));
+
+      // The append on a terminal schedule is the state conflict, and the
+      // cancelled row stays inspectable (never a fabricated empty list).
+      const terminalAppend = await jsonFetch(`${scheduleUrl(scheduleId)}/core-context`, {
+        method: 'PATCH',
+        body: { op: 'append', body: 'too late' },
+      });
+      assert.equal(terminalAppend.status, 409, terminalAppend.text);
+      assert.equal(
+        terminalAppend.payload.error.details?.wire_code,
+        'workflow_state_conflict',
+        terminalAppend.text,
+      );
+      const finalList = await jsonFetch(`${base}/v1/daemon/orchestration/schedules`);
+      assert.ok(
+        finalList.payload.items.some(
+          (row) => row.schedule_id === scheduleId && row.status === 'cancelled',
+        ),
+        `the cancelled schedule stays durable: ${finalList.text}`,
+      );
+    } finally {
+      await service.close();
+    }
+  });
+
+  test('control ownership: foreign and absent ids close, foreign filters refuse, malformed input is typed', async () => {
+    const home = seededHome(acpProviderConfig());
+    seedForeignControlRows(home);
+    const service = await startServiceOn(home);
+    try {
+      const base = service.url;
+
+      // Both foreign rows are inside this workspace store, so a read that
+      // ignored the stored owner would serve them.
+      const schedules = await jsonFetch(`${base}/v1/daemon/orchestration/schedules`);
+      assert.equal(schedules.status, 200, schedules.text);
+      assert.ok(
+        !schedules.payload.items.some((row) => row.schedule_id === FOREIGN_SCHEDULE_ID),
+        `a foreign schedule must never be listed: ${schedules.text}`,
+      );
+      assert.deepEqual(
+        [...new Set(schedules.payload.items.map((row) => row.creator_id))].filter(
+          (creator) => creator !== CREATOR,
+        ),
+        [],
+        `list stays scoped to the admitted creator: ${schedules.text}`,
+      );
+
+      const sessions = await jsonFetch(`${base}/v1/daemon/orchestration/sessions`);
+      assert.equal(sessions.status, 200, sessions.text);
+      assert.ok(
+        !sessions.payload.items.some((row) => row.session_id === FOREIGN_SESSION_ID),
+        `a foreign run must never be listed: ${sessions.text}`,
+      );
+
+      // A foreign id closes EXACTLY like an absent one: same status, same
+      // code, no payload and no existence signal.
+      for (const id of [FOREIGN_SCHEDULE_ID, 'SCH_absent_control']) {
+        const response = await jsonFetch(`${base}/v1/daemon/orchestration/schedules/${id}`);
+        assert.equal(response.status, 404, response.text);
+        assert.equal(response.payload.error.code, 'not_found', response.text);
+      }
+      for (const id of [FOREIGN_SESSION_ID, 'sess_absent_control']) {
+        const response = await jsonFetch(`${base}/v1/daemon/orchestration/sessions/${id}`);
+        assert.equal(response.status, 404, response.text);
+        assert.equal(response.payload.error.code, 'not_found', response.text);
+      }
+
+      // An explicit foreign creator filter is refused BEFORE any query runs —
+      // never answered with a silently empty page.
+      for (const family of ['schedules', 'sessions']) {
+        const response = await jsonFetch(
+          `${base}/v1/daemon/orchestration/${family}?creator_id=${FOREIGN_CREATOR}`,
+        );
+        assert.equal(response.status, 403, response.text);
+        assert.equal(response.payload.error.code, 'forbidden', response.text);
+      }
+
+      // Malformed query input is the typed client refusal.
+      const badLimit = await jsonFetch(`${base}/v1/daemon/orchestration/schedules?limit=abc`);
+      assert.equal(badLimit.status, 400, badLimit.text);
+      assert.equal(badLimit.payload.error.code, 'invalid_input', badLimit.text);
+      const badSort = await jsonFetch(
+        `${base}/v1/daemon/orchestration/schedules?sort=not_a_sort_key`,
+      );
+      assert.equal(badSort.status, 400, badSort.text);
+      assert.equal(badSort.payload.error.details?.field, 'sort', badSort.text);
+      const badSessionSort = await jsonFetch(
+        `${base}/v1/daemon/orchestration/sessions?sort=not_a_sort_key`,
+      );
+      assert.equal(badSessionSort.status, 400, badSessionSort.text);
+      assert.equal(badSessionSort.payload.error.details?.field, 'sort', badSessionSort.text);
+
+      // Control on an unknown schedule is the not-found refusal, with no
+      // mutation of anything else.
+      const unknownSignal = await jsonFetch(`${base}/v1/daemon/orchestration/schedules/SCH_absent_control/signal`, {
+        method: 'POST',
+        body: { signal: 'cancel' },
+      });
+      assert.equal(unknownSignal.status, 404, unknownSignal.text);
+      assert.equal(unknownSignal.payload.error.code, 'not_found', unknownSignal.text);
+    } finally {
+      await service.close();
+    }
+  });
+});

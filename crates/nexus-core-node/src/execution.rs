@@ -17,15 +17,26 @@
 //!    injected JS-provider port: a handle can never exist without a provider
 //!    contract.
 //!
-//! Schedule listing/inspection and core-context history have no core
-//! authority yet (they remain daemon-internal); this surface deliberately
-//! does not route them rather than start a second scheduler.
+//! The control reads and the core-context edit (v1.195 P0-T6) are the SAME
+//! `ExecutionHandle` authority as the mutations: schedule list/inspect, the
+//! durable run list/detail and the core-context append all read or advance
+//! rows this owner already owns. Core-context HISTORY browsing stays
+//! unrouted — no producer exists for it on this owner, and this surface does
+//! not invent one.
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use nexus_agent_host::config::AgentHostConfig;
 use nexus_agent_host::discovery::ProviderCatalog;
 use nexus_agent_host::{HostFacade, HostManager};
+use nexus_contracts::generated::daemon_api::orchestration::sessions::list_sessions_query::ListSessionsQuery;
+use nexus_contracts::generated::daemon_api::orchestration::sessions::list_sessions_response::ListSessionsResponse;
+use nexus_contracts::generated::daemon_api::orchestration::sessions::session_detail_response::SessionDetailResponse;
+use nexus_contracts::generated::daemon_api::schedule::edit_core_context_request::EditCoreContextRequest;
+use nexus_contracts::generated::daemon_api::schedule::edit_core_context_response::EditCoreContextResponse;
+use nexus_contracts::generated::daemon_api::schedule::inspect_schedule_response::InspectScheduleResponse;
+use nexus_contracts::generated::daemon_api::schedule::list_schedules_query::ListSchedulesQuery;
+use nexus_contracts::generated::daemon_api::schedule::list_schedules_response::ListSchedulesResponse;
 use nexus_contracts::local::schedule::http::{
     AddScheduleRequest, AddScheduleResponse, SignalScheduleRequest, SignalScheduleResponse,
 };
@@ -208,6 +219,102 @@ impl NativeCore {
             let _ = &core;
             let response: SignalScheduleResponse = handle
                 .signal_schedule(&principal, schedule_id, request)
+                .await?;
+            Ok(response)
+        })
+        .await
+    }
+
+    // ── Durable control reads + core-context edits (P0-T6) ──────────────────
+
+    /// `GET /v1/daemon/orchestration/schedules`.
+    ///
+    /// The query crosses as the generated public DTO (`deny_unknown_fields`:
+    /// a key outside the schema is a typed client refusal), and the response is
+    /// the generated snake_case page. Scope and pagination stay the core
+    /// owner's: this adapter adds no filter and no default.
+    #[napi]
+    pub async fn list_schedules(
+        &self,
+        principal_handle: String,
+        query_json: Buffer,
+    ) -> Result<Buffer> {
+        let query: ListSchedulesQuery = decode(query_json, "query")?;
+        let handle = self.execution_handle()?;
+        self.json_call(principal_handle, async move |core, principal| {
+            let _ = &core;
+            let response: ListSchedulesResponse = handle.list_schedules(&principal, query).await?;
+            Ok(response)
+        })
+        .await
+    }
+
+    /// `GET /v1/daemon/orchestration/schedules/{schedule_id}`.
+    #[napi]
+    pub async fn inspect_schedule(
+        &self,
+        principal_handle: String,
+        schedule_id: String,
+    ) -> Result<Buffer> {
+        let handle = self.execution_handle()?;
+        self.json_call(principal_handle, async move |core, principal| {
+            let _ = &core;
+            let response: InspectScheduleResponse =
+                handle.inspect_schedule(&principal, schedule_id).await?;
+            Ok(response)
+        })
+        .await
+    }
+
+    /// `GET /v1/daemon/orchestration/sessions`.
+    #[napi]
+    pub async fn list_workflow_sessions(
+        &self,
+        principal_handle: String,
+        query_json: Buffer,
+    ) -> Result<Buffer> {
+        let query: ListSessionsQuery = decode(query_json, "query")?;
+        let handle = self.execution_handle()?;
+        self.json_call(principal_handle, async move |core, principal| {
+            let _ = &core;
+            let response: ListSessionsResponse =
+                handle.list_workflow_sessions(&principal, query).await?;
+            Ok(response)
+        })
+        .await
+    }
+
+    /// `GET /v1/daemon/orchestration/sessions/{run_id}`.
+    #[napi]
+    pub async fn get_workflow_session(
+        &self,
+        principal_handle: String,
+        session_id: String,
+    ) -> Result<Buffer> {
+        let handle = self.execution_handle()?;
+        self.json_call(principal_handle, async move |core, principal| {
+            let _ = &core;
+            let response: SessionDetailResponse =
+                handle.get_workflow_session(&principal, session_id).await?;
+            Ok(response)
+        })
+        .await
+    }
+
+    /// `PATCH /v1/daemon/orchestration/schedules/{schedule_id}/core-context`.
+    #[napi]
+    pub async fn edit_core_context(
+        &self,
+        principal_handle: String,
+        schedule_id: String,
+        request_json: Buffer,
+    ) -> Result<Buffer> {
+        let request: EditCoreContextRequest = decode(request_json, "request")?;
+        let handle = self.execution_handle()?;
+        self.json_call(principal_handle, async move |core, principal| {
+            let _ = &core;
+            let response: EditCoreContextResponse = handle
+                .edit_core_context(&principal, schedule_id, request)
                 .await?;
             Ok(response)
         })

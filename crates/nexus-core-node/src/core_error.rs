@@ -508,6 +508,13 @@ fn wire_core_error_from_preset(error: nexus_core::PresetError) -> CoreError {
 fn coded_wire_status(code: &str) -> i64 {
     match code {
         "conflict" => 409,
+        // Workflow control races (v1.195 S0-4/W6/W7): a lost/stale human-wait
+        // token and a run that refuses the signal are both CONFLICTS — the
+        // durable winner is safe and the losing call must be an exact 409 with
+        // its coded detail, never a 400 "bad request" or a 500. The core
+        // carries the code; this adapter decides the status
+        // (`.mstar/specs/orchestration-engine.md` §human wait).
+        "workflow_wait_conflict" | "workflow_state_conflict" => 409,
         "invalid_state"
         | "invalid_transition"
         | "invalid_input"

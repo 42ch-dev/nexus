@@ -180,6 +180,14 @@ import type {
   AddScheduleResponse,
   SignalScheduleRequest,
   SignalScheduleResponse,
+  EditCoreContextRequest,
+  EditCoreContextResponse,
+  InspectScheduleResponse,
+  ListSchedulesQuery,
+  ListSchedulesResponse,
+  ListSessionsQuery,
+  ListSessionsResponse,
+  SessionDetailResponse,
 } from '@42ch/nexus-contracts';
 import { isAbsolute } from 'node:path';
 import {
@@ -687,6 +695,30 @@ export interface NativeCore {
     scheduleId: string,
     request: SignalScheduleRequest,
   ): Promise<SignalScheduleResponse>;
+  /**
+   * The durable control reads and the core-context edit (v1.195 P0-T6), over
+   * the SAME established owner as the mutations. Every list/read is scoped to
+   * the principal's stored creator and answers with the generated public DTO;
+   * a foreign or absent identity closes with the same not-found refusal.
+   */
+  listSchedules(principal: PrincipalHandle, query: ListSchedulesQuery): Promise<ListSchedulesResponse>;
+  inspectSchedule(
+    principal: PrincipalHandle,
+    scheduleId: string,
+  ): Promise<InspectScheduleResponse>;
+  listWorkflowSessions(
+    principal: PrincipalHandle,
+    query: ListSessionsQuery,
+  ): Promise<ListSessionsResponse>;
+  getWorkflowSession(
+    principal: PrincipalHandle,
+    sessionId: string,
+  ): Promise<SessionDetailResponse>;
+  editCoreContext(
+    principal: PrincipalHandle,
+    scheduleId: string,
+    request: EditCoreContextRequest,
+  ): Promise<EditCoreContextResponse>;
 }
 
 function wrapCore(inner: NativeCoreBinding): NativeCore {
@@ -884,6 +916,11 @@ type DomainSurface = Pick<
   | 'patchStrategyPromptTemplate'
   | 'addSchedule'
   | 'signalSchedule'
+  | 'listSchedules'
+  | 'inspectSchedule'
+  | 'listWorkflowSessions'
+  | 'getWorkflowSession'
+  | 'editCoreContext'
 >;
 
 function wrapDomainSurface(inner: NativeCoreBinding): DomainSurface {
@@ -1354,6 +1391,21 @@ function wrapDomainSurface(inner: NativeCoreBinding): DomainSurface {
       return json(
         await inner.signalSchedule(principal, scheduleId, wire(request, 'request')),
       );
+    },
+    async listSchedules(principal, query) {
+      return json(await inner.listSchedules(principal, wire(query, 'query')));
+    },
+    async inspectSchedule(principal, scheduleId) {
+      return json(await inner.inspectSchedule(principal, scheduleId));
+    },
+    async listWorkflowSessions(principal, query) {
+      return json(await inner.listWorkflowSessions(principal, wire(query, 'query')));
+    },
+    async getWorkflowSession(principal, sessionId) {
+      return json(await inner.getWorkflowSession(principal, sessionId));
+    },
+    async editCoreContext(principal, scheduleId, request) {
+      return json(await inner.editCoreContext(principal, scheduleId, wire(request, 'request')));
     },
   };
 }
