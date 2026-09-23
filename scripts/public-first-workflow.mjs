@@ -61,21 +61,24 @@
  *     requests, a second request or a prompt without the Idea all fail the
  *     journey;
  *   * the receipt must carry the real **commit** revision of the declared
- *     workspace commit, accepted only from a routed same-run frame that is
- *     identifiable as a workspace-commit response and whose parsed payload is
- *     the canonical response object (`revision: rev_<id>`, `committed: true`;
- *     `schemas/core/core-workspace-commit-response.schema.json`). No other frame
- *     text is evidence of a commit — not an unrelated `host_event`/`run_state`/
- *     `gap` payload that merely mentions a revision, not a nested or
- *     double-encoded string, not an unsuccessful commit. The current run-event
- *     vocabulary routes no such response at all, so the effect is refused with
- *     `missing_commit_revision` until that producer exists (P3-T2 dependency:
- *     no run-event identity carries the `CoreWorkspaceCommitResponse`).
- *     The durable run-state revision is recorded beside it as an explicitly
- *     labeled informational fact and never substitutes for it: a run-state
- *     revision proves run state, not the committed workspace. A missing commit
- *     revision is a failure, never a success, and no number is ever invented or
- *     derived from the fixture bytes;
+ *     workspace commit. It is taken from the authorized root session detail's
+ *     schema-owned `workspace_commit` projection (contract §4, P1-T2): the
+ *     read is the same-run root detail this driver already synchronizes on, and
+ *     the member is accepted only as the canonical object
+ *     (`revision` matching `rev_<id>` and `committed: true`, exactly those two
+ *     keys). An absent, malformed, failed, extra-member, empty, non-`rev_` or
+ *     otherwise unverifiable value yields no revision. A routed same-run frame
+ *     is the only other admissible source, and only when it is identifiable as
+ *     a workspace-commit response whose parsed payload is that same canonical
+ *     object (`schemas/core/core-workspace-commit-response.schema.json`) — the
+ *     current run-event vocabulary routes no such frame, and no frame text is
+ *     ever evidence of a commit, so an unrelated `host_event`/`run_state`/`gap`
+ *     payload that merely mentions a revision is refused. The durable
+ *     `RunStateWire.state_revision` is recorded beside the commit revision as
+ *     an explicitly labeled informational fact and never substitutes for it:
+ *     run state is not the committed workspace, and the revision is never
+ *     synthesized from file bytes or arbitrary context. A missing commit
+ *     revision is a failure (`missing_commit_revision`), never a success;
  *   * a failed or unconfirmed shutdown of any owned child — the service or the
  *     loopback model endpoint — overrides an otherwise successful journey: the
  *     receipt stays non-success and the process exits non-zero with its
@@ -537,6 +540,23 @@ function readFixture() {
   if (gate.stateId === promptState.id) {
     throw failed('fixture_contract', 'the bounded gate and the effect state must be distinct states');
   }
+  // §4 publishes the session-detail `workspace_commit` projection only for a run
+  // whose durable context holds the `workspace.commit` capability output as the
+  // LAST capability the graph invoked. The fixture must therefore end its effect
+  // state with that capability, or the receipt could never carry the revision.
+  const effectStateCapabilities = [];
+  for (let index = promptState.start; index < promptState.end; index += 1) {
+    const match = /^\s*name:\s*(\S+)\s*$/.exec(lines[index]);
+    if (match) effectStateCapabilities.push(match[1]);
+  }
+  if (effectStateCapabilities.at(-1) !== 'workspace.commit') {
+    throw failed(
+      'fixture_contract',
+      `the effect state's LAST enter capability must be 'workspace.commit' (found ` +
+        `${JSON.stringify(effectStateCapabilities)}): the authorized session-detail workspace_commit projection is ` +
+        'published only for a run whose checkpointed last capability output is that successful commit (contract §4)',
+    );
+  }
   if (!/^[a-z][a-z0-9._-]*$/.test(presetId)) {
     throw failed('fixture_contract', `preset id ${JSON.stringify(presetId)} is not a valid preset id`);
   }
@@ -879,6 +899,7 @@ async function readDurableObservation(port, scheduleId, runId, step, { deadlineM
   return {
     summary,
     session,
+    detail,
     projection: executionProjectionOf(summary),
     taskId: typeof session.current_task_id === 'string' ? session.current_task_id : null,
   };
@@ -1705,31 +1726,79 @@ function findRunStateRevision(frames) {
 }
 
 /**
+ * The workspace-commit revision carried by the AUTHORIZED root session detail.
+ *
+ * P1-T2 extends `GET /v1/daemon/orchestration/sessions/{run_id}` with an
+ * optional top-level `workspace_commit: {revision: string, committed: true}`
+ * (`schemas/daemon-api/orchestration/sessions/session-detail-response.schema.json`,
+ * `additionalProperties: false`; contract §4). It is the durable projection of
+ * THIS run's own checkpointed `workspace.commit` capability output, read on the
+ * already-authorized root row, so it is the canonical commit-revision proof the
+ * P3 first workflow consumes — an existing authorized detail read, not an
+ * invented event frame.
+ *
+ * The shape is enforced here, not assumed: the member must be an object whose
+ * keys are exactly `revision` and `committed`, with `committed === true` and a
+ * `rev_<id>` revision (the identifier the durable commit authority mints). An
+ * absent, malformed, failed, extra-member, empty or non-`rev_` value yields
+ * `null`, so a missing/fake/foreign result can never reach the receipt — and
+ * the caller has already bound the detail to the same root run
+ * (`readDurableObservation`), which is the only foreign-run guard such a value
+ * can have: the DTO carries no run id of its own.
+ *
+ * @returns {string|null} the revision, or `null` when the detail does not
+ *   project a canonical successful workspace commit.
+ */
+function parseSessionWorkspaceCommit(detail) {
+  const commit = detail?.workspace_commit;
+  if (commit === null || typeof commit !== 'object' || Array.isArray(commit)) return null;
+  const keys = Object.keys(commit);
+  if (keys.length !== 2 || !keys.includes('revision') || !keys.includes('committed')) return null;
+  if (commit.committed !== true) return null;
+  if (typeof commit.revision !== 'string' || !COMMIT_REVISION_PATTERN.test(commit.revision)) return null;
+  return commit.revision;
+}
+
+/**
  * Resolve the revision the receipt must carry (Task 1 requires the committed
  * file *and* its commit revision; §6.1 requires the commit revision in the
  * receipt).
  *
- * The only accepted source is a routed same-run frame identified as a
- * workspace-commit response whose parsed payload is the canonical object
- * (`{"revision":"rev_<id>","committed":true}`,
- * `schemas/core/core-workspace-commit-response.schema.json`), detected by
- * {@link findCommitRevision} — the identifier the durable workspace-commit
- * authority returned for this run. Nothing is computed from the fixture bytes,
- * nothing is read out of unrelated frame text, and no identifier is invented.
+ * Two strictly validated, same-run sources are admissible, in this order:
  *
- * The durable run-state revision (`RunStateWire.state_revision`, from routed
- * `run_state` frames or the inspect execution projection) proves run state, not
- * the committed workspace, so it is returned as an explicitly labeled
- * informational field and NEVER substituted for the commit revision. A missing
- * commit revision is refused here — it is never represented as an acceptable
- * result — so a caller cannot record the effect as a success.
+ *   1. the authorized root session detail's projected `workspace_commit`
+ *      ({@link parseSessionWorkspaceCommit}) — the P1-T2 producer of §4;
+ *   2. a routed same-run frame identified as a workspace-commit response whose
+ *      parsed payload is the canonical object ({@link findCommitRevision}) —
+ *      admissible identities are empty by measurement today.
  *
- * @throws {DriverFailure} `failed`/`missing_commit_revision` when no routed
- *   frame exposed the workspace commit revision.
+ * Nothing is computed from the fixture bytes, nothing is read out of unrelated
+ * frame text, no identifier is invented, and the revision is never inferred
+ * from run state: the durable `RunStateWire.state_revision` (routed frames or
+ * the inspect projection) proves run state, not the committed workspace, so it
+ * is returned as an explicitly labeled informational field and NEVER
+ * substituted. A missing commit revision is refused here — it is never
+ * represented as an acceptable result — so a caller cannot record the effect as
+ * a success.
+ *
+ * @throws {DriverFailure} `failed`/`missing_commit_revision` when neither
+ *   source carries a commit revision for this run.
  */
-function resolveEffectRevision({ commitRevision, frames, projectionStateRevision }) {
-  const commit =
+function resolveEffectRevision({
+  commitRevision,
+  sessionCommitRevision = null,
+  frames,
+  projectionStateRevision,
+}) {
+  const routed =
     typeof commitRevision === 'string' && COMMIT_REVISION_PATTERN.test(commitRevision) ? commitRevision : null;
+  const projectedCommit =
+    typeof sessionCommitRevision === 'string' && COMMIT_REVISION_PATTERN.test(sessionCommitRevision)
+      ? sessionCommitRevision
+      : null;
+  const commit = projectedCommit ?? routed;
+  const revisionSource =
+    projectedCommit !== null ? 'session-detail-workspace-commit' : routed !== null ? 'run-event-stream-commit-revision' : null;
   const streamed = findRunStateRevision(frames);
   const projected =
     Number.isInteger(projectionStateRevision) && projectionStateRevision >= 0 ? projectionStateRevision : null;
@@ -1737,18 +1806,18 @@ function resolveEffectRevision({ commitRevision, frames, projectionStateRevision
   if (commit === null) {
     throw failed(
       'missing_commit_revision',
-      'the declared workspace effect landed, but no routed same-run frame was an identifiable successful ' +
-        'workspace-commit response carrying a rev_<id> revision (the run-event ring routes run_state/host_event/gap ' +
-        'and no commit response; ' +
+      'the declared workspace effect landed, but neither the authorized root session detail projected a ' +
+        'workspace-commit revision (no canonical {revision: rev_<id>, committed: true} member) nor was a routed ' +
+        'same-run frame an identifiable successful workspace-commit response; ' +
         `durable run-state revision ${durableStateRevision === null ? 'none observed' : durableStateRevision} ` +
-        'proves run state, not the committed workspace and is never substituted); §6.1 and the P3-T1 card require ' +
+        'proves run state, not the committed workspace and is never substituted; §6.1 and the P3-T1 card require ' +
         'the committed file and its commit revision, so the effect is not a success',
     );
   }
   return {
     commit_revision: commit,
     durable_state_revision: durableStateRevision,
-    revision_source: 'run-event-stream-commit-revision',
+    revision_source: revisionSource,
   };
 }
 
@@ -2147,10 +2216,12 @@ async function runDeterministic(options) {
     // 11. Bounded revision follow-up reads: a routed commit-response frame may
     // land after the first bounded read, and §6.1 requires the committed file
     // *and* revision. Every follow-up is a reconnect from the last observed
-    // cursor (O2), never a new run. Today the ring routes no commit-response
-    // identity at all (`COMMIT_RESPONSE_EVENT_IDENTITIES`), so these reconnects
-    // cannot admit evidence and the effect stays refused until the producer
-    // lands (P3-T2).
+    // cursor (O2), never a new run. This is the SECONDARY source: the primary
+    // revision proof is the authorized root session detail's schema-owned
+    // `workspace_commit` projection (contract §4) read in step 12. Today the
+    // ring routes no commit-response identity at all
+    // (`COMMIT_RESPONSE_EVENT_IDENTITIES`), so these reconnects cannot admit
+    // evidence and the receipt depends on the session-detail projection.
     let allFrames = [...stream.frames];
     let observedRevision = findCommitRevision(allFrames);
     let tailReads = 0;
@@ -2191,14 +2262,21 @@ async function runDeterministic(options) {
     if (!landed.equals(fixture.declaredBytes)) {
       throw failed('contract_violation', 'committed file content does not match the declared fixture manifest content');
     }
-    // The receipt must carry the **commit** revision read from a routed
-    // same-run frame carrying the canonical workspace-commit response. The
-    // durable run-state revision is recorded beside it as information only and
-    // never substitutes: it proves run state, not the committed workspace.
-    // Nothing is computed from the fixture bytes and no identifier is invented;
-    // a missing commit revision refuses the effect (missing_commit_revision),
-    // never a success.
+    // The receipt must carry the **commit** revision of this run: the
+    // authorized root session detail's projected `workspace_commit` (contract
+    // §4, P1-T2), strictly parsed here, or — if that projection is absent — a
+    // routed same-run frame carrying the canonical workspace-commit response.
+    // The read is a root-run read: `readDurableObservation` already refused any
+    // detail that is not the synchronized run, which is the only foreign-result
+    // guard such a projection can have (the DTO carries no run id of its own).
+    // The durable run-state revision is recorded beside the commit revision as
+    // information only and never substitutes: it proves run state, not the
+    // committed workspace. Nothing is computed from the fixture bytes and no
+    // identifier is invented; a missing/malformed/failed/foreign revision
+    // refuses the effect (missing_commit_revision), never a success.
     const effectObservation = await readDurableObservation(port, scheduleId, runId, 'effect');
+    const sessionCommitRevision = parseSessionWorkspaceCommit(effectObservation.detail);
+    const detailWorkspaceCommit = effectObservation.detail?.workspace_commit ?? null;
     facts.effect = {
       relative_path: `${fixture.scopePath}/${fixture.changePath}`,
       bytes: landed.length,
@@ -2206,6 +2284,8 @@ async function runDeterministic(options) {
       declared_content_matches: true,
       prompt_requests: model.observations.requests,
       prompt_with_idea: model.observations.prompt_with_idea,
+      session_detail_workspace_commit: detailWorkspaceCommit,
+      session_commit_revision_accepted: sessionCommitRevision,
       commit_revision: null,
       durable_state_revision: null,
       revision_source: null,
@@ -2214,6 +2294,7 @@ async function runDeterministic(options) {
       facts.effect,
       resolveEffectRevision({
         commitRevision: observedRevision,
+        sessionCommitRevision,
         frames: allFrames,
         projectionStateRevision: effectObservation.projection?.state_revision ?? null,
       }),
@@ -2457,7 +2538,9 @@ export {
   exitCodeFor,
   findCommitRevision,
   parseCommitResponseRevision,
+  parseSessionWorkspaceCommit,
   preEffectGateStop,
+  readDurableObservation,
   readFixture,
   resolveEffectRevision,
   resolveExecutable,
