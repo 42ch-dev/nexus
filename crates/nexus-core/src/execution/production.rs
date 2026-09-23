@@ -33,7 +33,11 @@
 //! directory than the Host probes. Such a root never becomes a pin
 //! ([`crate::works::canonical_selected_workspace_root`]), and this factory
 //! re-checks the invariant with [`crate::works::lossless_root_str`] before it
-//! constructs a single port, so a substituted root can never be published.
+//! constructs a single port, so a substituted root can never be published. The
+//! drift check that compares the CURRENT selection with that pin
+//! ([`crate::works::selection_matches_pinned_root`]) classifies by the raw
+//! canonical path alone, so a selection that moved to an unrepresentable root
+//! is refused as stale rather than as an environment fault.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -168,7 +172,10 @@ impl CoreService {
     /// - [`CoreError::Closing`] when the service has begun closing, and
     ///   [`CoreError::AuthRequired`] when the on-disk creator/workspace
     ///   selection — including the selected `local_root` — no longer matches
-    ///   the pinned admission;
+    ///   the pinned admission. The comparison is over the raw canonical path, so
+    ///   a moved selection stays this class even when its replacement root has
+    ///   no lossless UTF-8 form: it MOVED, and the next open admits it as a new
+    ///   epoch;
     /// - [`CoreError::Uninitialized`] when the pinned admission registered no
     ///   creative root (absent, blank, or a root that no longer existed at
     ///   open);
@@ -203,12 +210,19 @@ impl CoreService {
         // makes this admission stale: refuse BEFORE any authority exists, so
         // neither the probed root's lane nor a stale root's ports are published
         // as one owner. The next open (a new epoch) admits the moved root.
-        let selected = crate::works::canonical_selected_workspace_root(
+        //
+        // The comparison is over the raw canonical path, BEFORE the current
+        // selection's representability is required: a replacement root the
+        // `String`-typed ports could not carry is still a MOVED selection, so it
+        // keeps this stale-admission class here. Only the PIN-TIME selection can
+        // become the Host/probe owner, and that one passed (or was refused at)
+        // the pin's own lossless gate.
+        if !crate::works::selection_matches_pinned_root(
             &self.inner.nexus_home,
             principal.creator_id(),
             principal.workspace_slug(),
-        )?;
-        if selected.as_deref() != Some(canonical_root.as_path()) {
+            &canonical_root,
+        )? {
             tracing::warn!(
                 pinned = %canonical_root.display(),
                 "the selected creative root moved after this engine-owner admission was pinned; \
@@ -498,6 +512,53 @@ mod tests {
         core.inner
             .db_path
             .with_extension("workspace_authority.lock")
+    }
+
+    /// Is this error the FILESYSTEM's own refusal of a name whose bytes are not
+    /// a valid sequence for it — the ONE condition that makes a non-UTF-8
+    /// fixture name impossible to create?
+    ///
+    /// The condition is `EILSEQ` (`Errno::EILSEQ`; APFS answers it for a name
+    /// that is not valid UTF-8, observed as raw OS error 92 on this host, and
+    /// Linux filesystems answer the same errno). std maps it to
+    /// `ErrorKind::Uncategorized` here, so no `ErrorKind` can name it. Every
+    /// OTHER failure — a permission, resource or I/O fault — is a fixture-setup
+    /// failure, and a fixture that never ran must not be reported as a pass.
+    #[cfg(unix)]
+    fn filesystem_rejects_non_utf8_names(error: &std::io::Error) -> bool {
+        error.raw_os_error() == Some(nix::errno::Errno::EILSEQ as i32)
+    }
+
+    /// Only the filesystem's OWN refusal of the name bytes may be reported as a
+    /// skip: every unrelated setup fault must fail the fixture instead of
+    /// passing a case that never ran.
+    #[cfg(unix)]
+    #[test]
+    fn only_the_filesystems_own_refusal_skips_the_non_utf8_fixture() {
+        use std::io::Error;
+
+        for errno in [
+            nix::errno::Errno::EACCES,
+            nix::errno::Errno::ENOSPC,
+            nix::errno::Errno::EIO,
+            nix::errno::Errno::EEXIST,
+            nix::errno::Errno::ENOENT,
+        ] {
+            assert!(
+                !filesystem_rejects_non_utf8_names(&Error::from_raw_os_error(errno as i32)),
+                "{errno:?} is an unrelated setup fault, not an unsupported filesystem"
+            );
+        }
+        assert!(
+            !filesystem_rejects_non_utf8_names(&Error::from(std::io::ErrorKind::PermissionDenied)),
+            "an error with no OS errno is not evidence of an unsupported filesystem"
+        );
+        assert!(
+            filesystem_rejects_non_utf8_names(&Error::from_raw_os_error(
+                nix::errno::Errno::EILSEQ as i32
+            )),
+            "the filesystem's own refusal of the name bytes is the one condition that may skip"
+        );
     }
 
     fn create_entry(path: &str, content: &[u8]) -> ChangeEntry {
@@ -852,6 +913,14 @@ mod tests {
         // renders lossily as `creative-\u{FFFD}\u{FFFD}`.
         let target = raw_root.join(std::ffi::OsString::from_vec(b"creative-\xff\xfe".to_vec()));
         if let Err(error) = std::fs::create_dir(&target) {
+            // ONLY a filesystem that refuses the fixture's name BYTES may skip:
+            // any other failure here means the fixture never ran, which is a
+            // failure of this test, not an unsupported-filesystem pass.
+            assert!(
+                filesystem_rejects_non_utf8_names(&error),
+                "the non-UTF-8 root fixture could not be created for a reason other than the \
+                 filesystem refusing unsupported name bytes, so this case did not run: {error}"
+            );
             eprintln!(
                 "skipping: this filesystem cannot host a non-UTF-8 directory name ({error}), \
                  so the lossy-canonical-root fixture cannot exist"
@@ -916,6 +985,156 @@ mod tests {
             .await
             .expect("a representable root composes");
         assert_eq!(deps.workspace_root.as_deref(), Some(expected.as_path()));
+    }
+
+    /// A selection that MOVED to a root the `String`-typed ports could never
+    /// carry is still a moved selection: the drift check classifies by the raw
+    /// canonical path, so the factory keeps the stale-admission refusal class
+    /// instead of reporting the environment fault the representability gate
+    /// answers with.
+    ///
+    /// The fixture is the shape the defect needs: root A is pinned as an
+    /// ordinary representable directory, then the registration selects a UTF-8
+    /// symlink whose canonical TARGET is a non-UTF-8 directory B. Refusing B for
+    /// its representation first — while the pin is valid and the ports were
+    /// never built — would relabel a moved selection as an environment fault and
+    /// hide that a later open (a new epoch, with its own pin) simply admits B;
+    /// the same admission must instead refuse as stale, exactly as it does for a
+    /// representable B, with no authority lease, no port and no touch of the
+    /// directory a lossy conversion would have substituted.
+    ///
+    /// A filesystem that cannot host non-UTF-8 names cannot express B at all, so
+    /// it reports the skip; any OTHER setup fault fails the test.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_moved_selection_to_a_non_utf8_root_is_refused_as_stale() {
+        use std::os::unix::ffi::OsStringExt as _;
+
+        let fx = fixture().await;
+        let core = open_core(&fx).await;
+        let pinned = std::fs::canonicalize(&fx.creative_root).expect("canonical selected root");
+        assert_eq!(
+            core.admission_creative_root(),
+            Some(pinned.as_path()),
+            "the admission must pin the canonical registered creative root"
+        );
+        let lease_path = authority_lease_path(&core);
+
+        let raw_root = fx.tmp.path().join("raw-root");
+        std::fs::create_dir_all(&raw_root).expect("raw root parent");
+        let target = raw_root.join(std::ffi::OsString::from_vec(b"creative-\xff\xfe".to_vec()));
+        if let Err(error) = std::fs::create_dir(&target) {
+            assert!(
+                filesystem_rejects_non_utf8_names(&error),
+                "the moved non-UTF-8 root could not be created for a reason other than the \
+                 filesystem refusing unsupported name bytes, so this case did not run: {error}"
+            );
+            eprintln!(
+                "skipping: this filesystem cannot host a non-UTF-8 directory name ({error}), \
+                 so the moved non-UTF-8 root cannot exist"
+            );
+            return;
+        }
+        // The directory a lossy conversion would have substituted instead.
+        let sentinel = raw_root.join("creative-\u{FFFD}\u{FFFD}");
+        std::fs::create_dir(&sentinel).expect("the replacement-character directory");
+        // The registration itself is representable: the symlink's NAME is UTF-8.
+        let link = raw_root.join("creative-link");
+        std::os::unix::fs::symlink(&target, &link).expect("symlink to the non-UTF-8 root");
+        let moved = std::fs::canonicalize(&link).expect("the symlink resolves");
+        assert!(
+            moved.to_str().is_none(),
+            "the moved root must resolve to non-UTF-8 bytes, got {moved:?}"
+        );
+        assert_ne!(moved, pinned, "the moved root must differ from the pin");
+        register_selected_root(fx.tmp.path(), serde_json::json!(link));
+
+        assert_eq!(
+            core.admission_creative_root(),
+            Some(pinned.as_path()),
+            "a metadata write after open must not move the pinned admission root"
+        );
+        match core.hosted_workspace_deps().await.map(|_| ()) {
+            Err(CoreError::AuthRequired) => {}
+            Err(other) => panic!(
+                "a selection that moved to a non-UTF-8 root is a STALE admission, not an \
+                 environment fault, got {other:?}"
+            ),
+            Ok(()) => panic!(
+                "a moved selection must not compose a workspace bundle (the Host probes \
+                 {pinned:?})"
+            ),
+        }
+        assert!(
+            !lease_path.exists(),
+            "the refusal must land before any workspace authority lease exists"
+        );
+        for dir in [&sentinel, &target] {
+            assert!(
+                std::fs::read_dir(dir).expect("fixture dir").next().is_none(),
+                "the refusal must not touch {}",
+                dir.display()
+            );
+        }
+
+        // Nothing was retained by the refusal: the pinned selection composes the
+        // bundle it always would, so no manager or port survived it.
+        register_selected_root(fx.tmp.path(), serde_json::json!(fx.creative_root));
+        assert!(
+            core.hosted_workspace_deps().await.is_ok(),
+            "the refusal must retain no workspace authority"
+        );
+    }
+
+    /// A registration that cannot be read is NOT a moved selection: the drift
+    /// check reports the fault verbatim instead of answering `AuthRequired`,
+    /// which would tell a caller to re-open (a new epoch) for a root the
+    /// document never named.
+    ///
+    /// Two faults the classification must keep distinct from drift: a document
+    /// that does not parse, and a root that exists but cannot be canonicalized
+    /// (`notes/plain.txt` is a regular file, so anything below it answers
+    /// ENOTDIR rather than "no longer exists"). Neither may reach the workspace
+    /// authority, and the pin itself is unaffected by both.
+    #[tokio::test]
+    async fn an_unresolvable_registration_is_not_reported_as_a_moved_selection() {
+        let fx = fixture().await;
+        let core = open_core(&fx).await;
+        let pinned = std::fs::canonicalize(&fx.creative_root).expect("canonical selected root");
+        let meta = nexus_home_layout::operational_workspace_dir(fx.tmp.path(), CREATOR, SLUG)
+            .join("meta.json");
+
+        std::fs::write(&meta, b"{ not json").expect("malformed registration");
+        match core.hosted_workspace_deps().await.map(|_| ()) {
+            Err(CoreError::Internal { .. }) => {}
+            other => panic!("a malformed registration is an environment fault, got {other:?}"),
+        }
+
+        std::fs::write(fx.creative_root.join("notes/plain.txt"), b"not a directory")
+            .expect("fixture file");
+        register_selected_root(
+            fx.tmp.path(),
+            serde_json::json!(fx.creative_root.join("notes/plain.txt/inner")),
+        );
+        match core.hosted_workspace_deps().await.map(|_| ()) {
+            Err(CoreError::Internal { .. }) => {}
+            other => panic!("a canonicalization fault is an environment fault, got {other:?}"),
+        }
+
+        assert_eq!(
+            core.admission_creative_root(),
+            Some(pinned.as_path()),
+            "the pin must survive both faults unchanged"
+        );
+        assert!(
+            !authority_lease_path(&core).exists(),
+            "neither refusal may reach the workspace authority"
+        );
+        register_selected_root(fx.tmp.path(), serde_json::json!(fx.creative_root));
+        assert!(
+            core.hosted_workspace_deps().await.is_ok(),
+            "a valid registration must still compose the pinned bundle"
+        );
     }
 
     /// Deterministic no-model provider port: the owner/close contract is what
