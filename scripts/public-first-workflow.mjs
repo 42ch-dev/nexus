@@ -486,6 +486,21 @@ function extractConvergeGate(lines, blocks) {
 }
 
 /**
+ * The preset YAML file inside a scaffolded preset bundle.
+ *
+ * `POST /presets` answers with the bundle DIRECTORY (`scaffold_user_preset`
+ * returns `bundle.display()`), while every reader of a preset path —
+ * `validate_preset_file` for `POST /presets:validate`, `locate_preset` for
+ * update/delete, and the runtime loader — resolves `preset.yaml` inside that
+ * bundle. Handing the directory to the validator is read as a file, fails with
+ * an untyped internal/FILE_READ_ERROR and surfaces as HTTP 500, so the driver
+ * derives the file the PATCH above actually wrote.
+ */
+function presetYamlPath(bundlePath) {
+  return join(bundlePath, 'preset.yaml');
+}
+
+/**
  * Read the checked-in fixture and extract every fact this driver depends on.
  * The fixture stays authoritative; the driver never hard-codes the scope, the
  * committed path, the committed bytes or the bounded gate's identity.
@@ -578,6 +593,7 @@ function readFixture() {
   return {
     yaml,
     presetId,
+    stateCount: blocks.length,
     scopePath,
     changePath,
     promptToolPolicy,
@@ -694,6 +710,23 @@ function reserveLoopbackPort() {
   });
 }
 
+/**
+ * Percent-encode ONE path segment for a public request URL.
+ *
+ * RFC 3986 keeps `:` (and the sub-delims) legal inside a path segment, and this
+ * service hands the raw segment to its core owner untouched: encoding a session
+ * id's `:` as `%3A` makes the id arrive as a literal `preset%3Auuid` and the
+ * authorized read answers `not_found`. So only the characters that would
+ * corrupt the path structure are escaped, and the id reaches the owner with its
+ * own value.
+ */
+function encodePathSegment(value) {
+  return String(value).replace(/[%\/?#\s\u0000-\u001f\u007f]/g, (char) => {
+    const code = char.codePointAt(0);
+    return `%${code.toString(16).toUpperCase().padStart(2, '0')}`;
+  });
+}
+
 /** Bounded JSON/text HTTP request against the owned loopback service. */
 function httpJson(port, method, path, { body, headers = {}, timeoutMs = HTTP_TIMEOUT_MS } = {}) {
   return new Promise((resolvePromise, rejectPromise) => {
@@ -785,16 +818,6 @@ function tailLines(text, limit) {
 // ---------------------------------------------------------------------------
 
 /**
- * Durable execution projection from a frozen inspect response (A2/A7). The
- * projection is the only routed surface that carries `recovery_class`,
- * `allowed_actions` and the human `wait`; `null` means it is not observable.
- */
-function executionProjectionOf(summary) {
-  const projection = summary?.execution;
-  return projection === null || typeof projection !== 'object' ? null : projection;
-}
-
-/**
  * Classify one inspect observation. A still-pending asynchronous admission
  * (§3.3: W1 success means durable descriptor, the run identity may be claimed
  * after the response) is distinct from a terminal refusal that can never
@@ -816,7 +839,7 @@ function classifyAdmissionObservation(summary) {
 async function readScheduleInspect(port, scheduleId, step, { timeoutMs = HTTP_TIMEOUT_MS } = {}) {
   const inspected = requireOk(
     step,
-    await httpJson(port, 'GET', `/v1/daemon/orchestration/schedules/${encodeURIComponent(scheduleId)}`, { timeoutMs }),
+    await httpJson(port, 'GET', `/v1/daemon/orchestration/schedules/${encodePathSegment(scheduleId)}`, { timeoutMs }),
   );
   return { inspected, summary: scheduleSummary(step, inspected) };
 }
@@ -855,14 +878,15 @@ async function awaitRunIdentity(port, scheduleId) {
 }
 
 /**
- * One durable observation of the admitted run: the routed schedule projection
- * (the only surface carrying `recovery_class`/`wait`/`allowed_actions`) plus the
- * run detail the gate identity is bound to (`current_task_id`).
- *
- * Both halves must PROVE they describe the run being synchronized: the schedule
- * must own `runId`, and the run detail must ANSWER `runId`. An absent, empty,
+ * One W4 HTTP observation of the admitted run: the schedule summary (owner of
+ * `current_session_id`) plus the authorized root run detail (identity fields and
+ * the §4 `workspace_commit` projection). Placement does NOT come from here — the
+ * routed projection is empty on this baseline — but the run identity does: both
+ * halves must PROVE they describe the run being synchronized, the schedule by
+ * owning `runId` and the detail by ANSWERING `runId`. An absent, empty,
  * non-string or different `session_id` is a `wrong_run` STOP — a malformed or
- * misrouted detail must never contribute gate identity.
+ * misrouted detail must never contribute identity, and the CLI placement read
+ * that follows is bound to this same root run.
  *
  * `deadlineMs` clamps each request to what is left of the caller's absolute
  * bound (the shared `HTTP_TIMEOUT_MS` is only a ceiling), so a slow surface can
@@ -881,7 +905,7 @@ async function readDurableObservation(port, scheduleId, runId, step, { deadlineM
   }
   const detail = requireOk(
     `${step} (session)`,
-    await httpJson(port, 'GET', `/v1/daemon/orchestration/sessions/${encodeURIComponent(runId)}`, {
+    await httpJson(port, 'GET', `/v1/daemon/orchestration/sessions/${encodePathSegment(runId)}`, {
       timeoutMs: budget(),
     }),
   );
@@ -900,8 +924,6 @@ async function readDurableObservation(port, scheduleId, runId, step, { deadlineM
     summary,
     session,
     detail,
-    projection: executionProjectionOf(summary),
-    taskId: typeof session.current_task_id === 'string' ? session.current_task_id : null,
   };
 }
 
@@ -926,28 +948,94 @@ async function boundedObservation(promise, deadlineMs, onDeadline) {
   }
 }
 
-/** Projection facts the STOP messages and the receipt both read. */
-function observedBoundary(projection, taskId) {
-  const wait = projection.wait ?? null;
-  const allowed = Array.isArray(projection.allowed_actions)
-    ? projection.allowed_actions.filter((action) => typeof action === 'string')
+/**
+ * The A7 placement record the driver consumes from the public CLI DTO
+ * (`nexus42 ops inspect <run> --json`), or `null` when the DTO cannot prove it
+ * describes the synchronized root run.
+ *
+ * The routed W4 HTTP detail does not carry the A7 `execution` projection on this
+ * baseline (`crates/nexus-core/src/execution/handle_ops.rs::inspect_schedule`
+ * builds `execution: None`), so placement comes from the daemon-free operator
+ * surface that DOES compute it — the same classifier the boot re-drive uses
+ * (`crates/nexus-orchestration/src/resume_rules.rs`, `apps/nexus42/src/commands/ops.rs`).
+ *
+ * Fail-closed shape rules: the returned `session_id` must be the run the caller
+ * asks about (the DTO's own root-run identity), `recovery_class` and
+ * `current_task_id` must be non-empty strings and `state_revision` a
+ * non-negative integer. Anything else — absent fields, wrong types, another
+ * run's row — yields `null`, so a malformed or foreign placement can never
+ * confirm a gate.
+ */
+function parsePlacementDto(dto, runId) {
+  if (dto === null || typeof dto !== 'object' || Array.isArray(dto)) return null;
+  if (typeof dto.session_id !== 'string' || dto.session_id !== runId) return null;
+  if (typeof dto.recovery_class !== 'string' || dto.recovery_class.length === 0) return null;
+  if (typeof dto.current_task_id !== 'string' || dto.current_task_id.length === 0) return null;
+  if (!Number.isInteger(dto.state_revision) || dto.state_revision < 0) return null;
+  const allowed = Array.isArray(dto.allowed_actions)
+    ? dto.allowed_actions.filter((action) => typeof action === 'string')
     : [];
   return {
-    task_id: typeof taskId === 'string' ? taskId : null,
-    recovery_class: typeof projection.recovery_class === 'string' ? projection.recovery_class : null,
-    wait_id: wait !== null && typeof wait.wait_id === 'string' ? wait.wait_id : null,
-    wait_kind: wait !== null && typeof wait.kind === 'string' ? wait.kind : null,
-    reason_code: projection.reason_code ?? null,
-    execution_version: projection.execution_version ?? null,
-    state_revision: projection.state_revision ?? null,
+    session_id: dto.session_id,
+    recovery_class: dto.recovery_class,
     allowed_actions: allowed,
+    task_id: dto.current_task_id,
+    state_revision: dto.state_revision,
+    db_status: typeof dto.db_status === 'string' ? dto.db_status : null,
+    execution_version: Number.isInteger(dto.execution_version) ? dto.execution_version : null,
+    wait_id: null,
+    wait_kind: null,
   };
 }
 
 /**
- * Classify one durable observation against the fixture's bounded converge gate.
+ * Read one placement observation for the synchronized root run from the public
+ * daemon-free operator surface. The CLI is handed the SAME root run id the W4
+ * read resolved, and every failure is a typed, fail-closed STOP: a spawn failure
+ * keeps its unmet-prerequisite outcome, a non-zero exit is
+ * `failed/placement_unreadable`, non-JSON stdout is `failed/placement_unreadable`
+ * and a DTO that cannot prove the run (or misses a field the driver consumes) is
+ * `failed/placement_contract`.
+ */
+function readPlacementViaCli(cliBinary, childEnv, runId, step) {
+  const label = `${step}: nexus42 ops inspect <run> --json`;
+  let stdout;
+  try {
+    ({ stdout } = runCli(cliBinary, ['ops', 'inspect', runId, '--json'], childEnv, label));
+  } catch (error) {
+    if (error instanceof DriverFailure && error.outcome === 'blocked') throw error;
+    throw failed(
+      'placement_unreadable',
+      `${label}: the public placement read failed${error instanceof Error ? ` — ${error.message}` : ''}`,
+    );
+  }
+  let dto = null;
+  try {
+    dto = JSON.parse(stdout);
+  } catch {
+    throw failed('placement_unreadable', `${label}: the CLI answered no parseable A7 placement DTO`);
+  }
+  const placement = parsePlacementDto(dto, runId);
+  if (placement === null) {
+    throw failed(
+      'placement_contract',
+      `${label}: the placement DTO does not prove run ${JSON.stringify(runId)} with a recovery_class, a ` +
+        `current_task_id and an integer state_revision (answered ${JSON.stringify({
+          session_id: dto?.session_id ?? null,
+          recovery_class: dto?.recovery_class ?? null,
+          current_task_id: dto?.current_task_id ?? null,
+          state_revision: dto?.state_revision ?? null,
+        })})`,
+    );
+  }
+  return placement;
+}
+
+/**
+ * Classify one placement observation against the fixture's bounded converge
+ * gate.
  *
- * `gate` is the only placement W5/W6 accept: the routed A7 class is the parked
+ * `gate` is the only placement W5/W6 accept: the A7 class is the parked
  * converge/merge gate (no human wait token, no in-flight marker) AND the run's
  * `current_task_id` is the fixture's gate state. Every other state is decisive:
  *
@@ -958,38 +1046,38 @@ function observedBoundary(projection, taskId) {
  *     the graph does not match the checked-in journey.
  *   * `transient` — a fully committed step boundary or an in-flight/other
  *     class; the run may legitimately still be walking into the gate.
- *   * `unobservable` — the routed surface exposes no projection at all.
+ *   * `unobservable` — the placement surface returned nothing at all.
  */
-function classifyPreEffectGate(projection, taskId, gateStateId) {
-  if (projection === null) return { state: 'unobservable', observed: null };
-  const observed = observedBoundary(projection, taskId);
-  if (observed.recovery_class === 'terminal') return { state: 'terminal', observed };
-  if (observed.wait_id !== null || observed.recovery_class === 'human_wait') {
-    return { state: 'human_wait', observed };
+function classifyPreEffectGate(placement, gateStateId) {
+  if (placement === null) return { state: 'unobservable', observed: null };
+  if (placement.recovery_class === 'terminal') return { state: 'terminal', observed: placement };
+  if (placement.wait_id !== null || placement.recovery_class === 'human_wait') {
+    return { state: 'human_wait', observed: placement };
   }
-  if (observed.recovery_class !== GATE_PARK_RECOVERY_CLASS) return { state: 'transient', observed };
-  if (observed.task_id !== gateStateId) return { state: 'wrong_gate', observed };
-  return { state: 'gate', observed };
+  if (placement.recovery_class !== GATE_PARK_RECOVERY_CLASS) return { state: 'transient', observed: placement };
+  if (placement.task_id !== gateStateId) return { state: 'wrong_gate', observed: placement };
+  return { state: 'gate', observed: placement };
 }
 
 /**
- * Classify one durable observation against the effect state's manual wait — the
- * boundary the deadline reroute must reach, which proves the reroute happened
- * and that W5/W6 were exercised strictly before the final manual wait.
+ * Classify one placement observation against the effect state's manual wait —
+ * the boundary the deadline reroute must reach, which proves the reroute
+ * happened and that W5/W6 were exercised strictly before the final manual wait.
  *
  *   * `manual_wait` — the effect state rests in a durable human wait.
  *   * `wrong_state` — something else rests in a human wait.
  *   * `terminal` — the run settled without reaching that wait.
  *   * `pending` — still walking; re-read until the bound.
  */
-function classifyManualWaitBoundary(projection, taskId, effectStateId) {
-  if (projection === null) return { state: 'unobservable', observed: null };
-  const observed = observedBoundary(projection, taskId);
-  if (observed.recovery_class === 'terminal') return { state: 'terminal', observed };
-  if (observed.wait_id !== null || observed.recovery_class === 'human_wait') {
-    return observed.task_id === effectStateId ? { state: 'manual_wait', observed } : { state: 'wrong_state', observed };
+function classifyManualWaitBoundary(placement, effectStateId) {
+  if (placement === null) return { state: 'unobservable', observed: null };
+  if (placement.recovery_class === 'terminal') return { state: 'terminal', observed: placement };
+  if (placement.wait_id !== null || placement.recovery_class === 'human_wait') {
+    return placement.task_id === effectStateId
+      ? { state: 'manual_wait', observed: placement }
+      : { state: 'wrong_state', observed: placement };
   }
-  return { state: 'pending', observed };
+  return { state: 'pending', observed: placement };
 }
 
 /** Turn a non-gate placement into the exact, typed STOP for that state. */
@@ -999,8 +1087,8 @@ function preEffectGateStop(step, boundary, gateStateId) {
     case 'unobservable':
       return blocked(
         'gate_unobservable',
-        `${step}: the routed inspect response carries no durable execution projection ` +
-          '(recovery_class/allowed_actions/wait), so the fixture-declared pre-effect gate cannot be ' +
+        `${step}: the public placement surface answered no A7 record ` +
+          '(recovery_class/current_task_id/state_revision), so the fixture-declared pre-effect gate cannot be ' +
           'confirmed; W5/W6 are not issued and no Steer success is claimed',
       );
     case 'human_wait':
@@ -1031,22 +1119,22 @@ function preEffectGateStop(step, boundary, gateStateId) {
 }
 
 /**
- * Bounded synchronization on the fixture's bounded pre-effect gate. The gate is
- * accepted only when it is observed QUIET — two reads at least one poll apart
- * with the SAME integer durable state revision, still parked at the fixture's
- * gate state and still pre-effect (no model request dispatched). A decisive
- * non-gate observation (a human wait, a terminal run, a foreign gate) STOPS
- * immediately instead of being retried into a timing assumption.
+ * Bounded synchronization on the fixture's bounded pre-effect gate, reading the
+ * placement through the public operator surface. The gate is accepted only when
+ * it is observed QUIET — two reads at least one poll apart with the SAME integer
+ * `state_revision`, still parked at the fixture's gate state and still
+ * pre-effect (no model request dispatched). A decisive non-gate observation (a
+ * human wait, a terminal run, a foreign gate) STOPS immediately instead of
+ * being retried into a timing assumption.
  *
- * The poll bound is an absolute wall-clock deadline: no read starts after it,
- * every request is clamped to what is left of it, an observation that does not
- * answer inside it is aborted (`boundedObservation`) and the gate is never
- * accepted after it. A gate observation whose routed projection carries no
- * integer `state_revision` is refused outright — repeated absence is not
- * evidence that the active run stayed at one durable revision, which is exactly
- * what "quiet" claims.
+ * The poll bound is an absolute wall-clock deadline: no read starts after it, an
+ * observation that does not answer inside it is aborted (`boundedObservation`)
+ * and the gate is never accepted after it. A gate observation whose record
+ * carries no integer `state_revision` is refused outright — repeated absence is
+ * not evidence that the active run stayed at one durable revision, which is
+ * exactly what "quiet" claims.
  */
-async function awaitPreEffectGate(port, scheduleId, runId, gate, model) {
+async function awaitPreEffectGate({ readPlacement, runId, gate, model }) {
   const deadline = Date.now() + GATE_BOUNDARY_TIMEOUT_MS;
   let interval = GATE_BOUNDARY_START_INTERVAL_MS;
   let polls = 0;
@@ -1056,23 +1144,23 @@ async function awaitPreEffectGate(port, scheduleId, runId, gate, model) {
   const boundStop = () => preEffectGateStop('gate', observation, gate.stateId);
   for (;;) {
     if (Date.now() >= deadline) throw boundStop();
-    let durable;
+    let placement;
     try {
-      durable = await boundedObservation(
-        readDurableObservation(port, scheduleId, runId, 'gate', { deadlineMs: deadline }),
+      placement = await boundedObservation(
+        Promise.resolve().then(() => readPlacement(runId, 'gate')),
         deadline,
         boundStop,
       );
     } catch (error) {
-      // Both abort paths (the guard, and the request's own clamped socket
-      // timeout) land at or after the deadline; either one is the same typed
-      // STOP. A transport fault BEFORE the deadline keeps propagating as
-      // itself, so a real outage is never relabelled as a missing gate.
+      // An abort that lands at or after the declared bound is this poll's typed
+      // STOP, whatever aborted it; a placement failure BEFORE the bound keeps
+      // propagating as itself, so a refused CLI is never relabelled as a
+      // missing gate.
       if (!(error instanceof DriverFailure) && Date.now() >= deadline) throw boundStop();
       throw error;
     }
     polls += 1;
-    observation = classifyPreEffectGate(durable.projection, durable.taskId, gate.stateId);
+    observation = classifyPreEffectGate(placement, gate.stateId);
     if (observation.state === 'gate') {
       if (model.observations.requests !== 0) {
         throw failed(
@@ -1084,7 +1172,7 @@ async function awaitPreEffectGate(port, scheduleId, runId, gate, model) {
       if (!Number.isInteger(observation.observed.state_revision) || observation.observed.state_revision < 0) {
         throw blocked(
           'gate_revision_unobservable',
-          `gate: the parked gate projection carries no integer durable state revision ` +
+          `gate: the parked gate placement carries no integer durable state revision ` +
             `(${JSON.stringify(observation.observed)}), so an unchanged revision cannot be established; a repeated ` +
             'absent revision is not quiet and W5/W6 are not issued',
         );
@@ -1107,13 +1195,13 @@ async function awaitPreEffectGate(port, scheduleId, runId, gate, model) {
 
 /**
  * Bounded wait for the durable boundary the deadline reroute must reach: the
- * effect state resting in its manual wait. A human wait at any OTHER state, a
- * settled run or an absent projection is a typed STOP, never a pass. The bound
- * is absolute in the same way as the gate poll: no read starts after it, each
- * request is clamped to what is left of it, an observation that overruns it is
- * aborted, and the boundary is never accepted after it.
+ * effect state resting in its manual wait, read through the public operator
+ * surface. A human wait at any OTHER state, a settled run or an absent record is
+ * a typed STOP, never a pass. The bound is absolute in the same way as the gate
+ * poll: no read starts after it, an observation that overruns it is aborted, and
+ * the boundary is never accepted after it.
  */
-async function awaitEffectBoundary(port, scheduleId, runId, effectStateId) {
+async function awaitEffectBoundary({ readPlacement, runId, effectStateId }) {
   const deadline = Date.now() + EFFECT_BOUNDARY_TIMEOUT_MS;
   let interval = EFFECT_BOUNDARY_START_INTERVAL_MS;
   let polls = 0;
@@ -1126,22 +1214,19 @@ async function awaitEffectBoundary(port, scheduleId, runId, effectStateId) {
     );
   for (;;) {
     if (Date.now() >= deadline) throw boundStop();
-    let durable;
+    let placement;
     try {
-      durable = await boundedObservation(
-        readDurableObservation(port, scheduleId, runId, 'effect boundary', { deadlineMs: deadline }),
+      placement = await boundedObservation(
+        Promise.resolve().then(() => readPlacement(runId, 'effect boundary')),
         deadline,
         boundStop,
       );
     } catch (error) {
-      // Same disposition as the gate poll: an abort that lands at or after the
-      // declared bound is this poll's typed STOP, whatever aborted it, while a
-      // transport fault before the bound keeps propagating as itself.
       if (!(error instanceof DriverFailure) && Date.now() >= deadline) throw boundStop();
       throw error;
     }
     polls += 1;
-    observation = classifyManualWaitBoundary(durable.projection, durable.taskId, effectStateId);
+    observation = classifyManualWaitBoundary(placement, effectStateId);
     if (observation.state === 'manual_wait') {
       if (Date.now() < deadline) return { ...observation, polls };
       throw boundStop();
@@ -1287,10 +1372,22 @@ async function startService({ home, port, childEnv, evidenceDir, label }) {
     throw error;
   }
   writeFileSync(join(evidenceDir, `service-${label}.stderr.log`), stderrBuffer, 'utf8');
+  // The service's own stdout beyond the ready line carries its request/SSE
+  // diagnostics; the bounded tail is retained as evidence so a stream symptom
+  // is diagnosable from the receipt instead of only from the console.
+  const stdoutLog = join(evidenceDir, `service-${label}.stdout.log`);
+  const writeStdoutTail = () => {
+    try {
+      writeFileSync(stdoutLog, `${tailLines(stdoutBuffer, 200).join('\n')}\n`, 'utf8');
+    } catch {
+      // Evidence capture never fails the journey.
+    }
+  };
+  writeStdoutTail();
   if (discovery === null || typeof discovery !== 'object' || typeof discovery.instance_id !== 'string') {
     throw failed('contract_violation', `service ${label} ready record is missing instance_id`);
   }
-  return { child, discovery };
+  return { child, discovery, evidence: { stdoutLog, writeStdoutTail } };
 }
 
 /** Port of the published HTTP endpoint of a discovery record. */
@@ -1571,7 +1668,7 @@ function readEventStream(port, runId, { lastEventId, maxFrames = MAX_EVENT_FRAME
   return new Promise((resolvePromise, rejectPromise) => {
     const headers = { accept: 'text/event-stream' };
     if (lastEventId) headers['last-event-id'] = lastEventId;
-    const path = `/v1/daemon/orchestration/sessions/${encodeURIComponent(runId)}/events`;
+    const path = `/v1/daemon/orchestration/sessions/${encodePathSegment(runId)}/events`;
     const request = httpRequest({ host: '127.0.0.1', port, path, method: 'GET', headers }, (response) => {
       if (response.statusCode !== 200) {
         const chunks = [];
@@ -2001,27 +2098,59 @@ async function runDeterministic(options) {
     }
     const patched = requireOk(
       'PATCH /presets/{id}',
-      await httpJson(port, 'PATCH', `/v1/daemon/presets/${encodeURIComponent(fixture.presetId)}`, {
+      await httpJson(port, 'PATCH', `/v1/daemon/presets/${encodePathSegment(fixture.presetId)}`, {
         body: { yaml: fixture.yaml },
       }),
     );
     requireFields('PATCH /presets/{id}', patched, ['id', 'updated']);
     if (patched.updated !== true) throw failed('contract_violation', 'preset PATCH did not report updated=true');
+    // `POST /presets` answers with the preset BUNDLE directory
+    // (`scaffold_user_preset` returns `bundle.display()`), while
+    // `POST /presets:validate` takes the preset YAML FILE it reads and parses
+    // (`validate_preset_file` rejects a directory with an untyped
+    // internal/FILE_READ_ERROR, i.e. HTTP 500). The driver therefore validates
+    // the very file the PATCH above wrote, derived with the retained bundle
+    // convention (`preset.yaml`), and refuses locally if the bundle it was told
+    // about does not contain it.
+    const presetFile = presetYamlPath(scaffold.path);
+    if (!existsSync(presetFile)) {
+      throw failed(
+        'contract_violation',
+        `the scaffolded preset bundle ${JSON.stringify(scaffold.path)} does not contain ` +
+          `${JSON.stringify(basenameOf(presetFile))}, so the authored fixture cannot be validated`,
+      );
+    }
     const validated = requireOk(
       'POST /presets:validate',
-      await httpJson(port, 'POST', '/v1/daemon/presets:validate', { body: { path: scaffold.path } }),
+      await httpJson(port, 'POST', '/v1/daemon/presets:validate', { body: { path: presetFile } }),
     );
     requireFields('POST /presets:validate', validated, ['valid', 'errors']);
     if (validated.valid !== true) {
       throw failed('contract_violation', `preset validation refused the fixture: ${JSON.stringify(validated.errors)}`);
     }
+    if (validated.id !== fixture.presetId) {
+      throw failed(
+        'contract_violation',
+        `preset validation answered id ${JSON.stringify(validated.id)} for the authored fixture ` +
+          `${JSON.stringify(fixture.presetId)}`,
+      );
+    }
+    if (validated.state_count !== fixture.stateCount) {
+      throw failed(
+        'contract_violation',
+        `preset validation counted ${JSON.stringify(validated.state_count)} states for a fixture the driver reads as ` +
+          `${fixture.stateCount}; the validated artifact is not the checked-in graph`,
+      );
+    }
     facts.preset = {
       id: scaffold.id,
+      bundle_path: scaffold.path,
+      validated_file: presetFile,
       validated: true,
       state_count: validated.state_count ?? null,
       warnings: validated.warnings ?? [],
     };
-    record('preset_authoring', 'ok', { validated: true });
+    record('preset_authoring', 'ok', { validated: true, state_count: validated.state_count ?? null });
 
     // 7. Admit one workflow with the explicit prompt-role binding.
     const admitted = requireOk(
@@ -2053,13 +2182,18 @@ async function runDeterministic(options) {
     const scheduleId = admitted.schedule_id;
     const admission = await awaitRunIdentity(port, scheduleId);
     const runId = admission.run_id;
+    // The A7 placement is read from the public daemon-free operator surface for
+    // THIS root run (the W4 detail above resolved its identity); every placement
+    // read below is bound to the same id and fails closed on a refused CLI, a
+    // non-JSON answer, or a DTO that does not prove the run.
+    const readPlacement = (targetRunId, step) => readPlacementViaCli(cliBinary, childEnv, targetRunId, step);
     facts.inspect = {
       status: admission.summary.status,
       current_core_context_version: admission.summary.current_core_context_version ?? null,
       current_session_id: runId,
       execution_policy: admission.summary.execution_policy ?? null,
       admission_polls: admission.polls,
-      execution: executionProjectionOf(admission.summary),
+      placement_source: 'nexus42 ops inspect <run> --json',
     };
     record('inspect', 'ok', { status: facts.inspect.status, admission_polls: admission.polls });
 
@@ -2067,12 +2201,12 @@ async function runDeterministic(options) {
     // exercised before the final manual wait; S0-3: the append is durable
     // before resume counts as success). The gate is the state the checked-in
     // fixture declares — its `converge:`/`timeout_ms` state, whose `on_timeout`
-    // reroute must be the effect state. Placement is confirmed against the
-    // routed durable projection plus the run detail's `current_task_id`; a
-    // durable human wait (where the A4 fence refuses a plain resume) or any
-    // other placement is a typed STOP, never a bypassed wait and never a Steer
-    // claimed on a timing assumption.
-    const gateBoundary = await awaitPreEffectGate(port, scheduleId, runId, fixture.gate, model);
+    // reroute must be the effect state. Placement is confirmed on the public A7
+    // record (`recovery_class`/`current_task_id`/`state_revision`) of the SAME
+    // root run the W4 read resolved; a durable human wait (where the A4 fence
+    // refuses a plain resume) or any other placement is a typed STOP, never a
+    // bypassed wait and never a Steer claimed on a timing assumption.
+    const gateBoundary = await awaitPreEffectGate({ readPlacement, runId, gate: fixture.gate, model });
     // Nobody drives a parked gate: the deadline is only evaluated by a driver
     // (`join_timeout_tick`), so waiting it out HERE, with no signal issued, is
     // what makes the W6 resume deterministic instead of a race with the
@@ -2082,11 +2216,12 @@ async function runDeterministic(options) {
     const deadlineWaitedMs = Math.max(0, deadlineAtMs - Date.now());
     if (deadlineWaitedMs > 0) await sleep(deadlineWaitedMs);
     // The gate must still be the same quiet park on the same run, and still
-    // pre-effect: crossing the deadline alone performs no work.
-    const afterDeadline = await readDurableObservation(port, scheduleId, runId, 'gate after deadline');
+    // pre-effect: crossing the deadline alone performs no work. Both the W4
+    // identity read (same schedule/root) and the public placement read are
+    // re-taken.
+    await readDurableObservation(port, scheduleId, runId, 'gate after deadline');
     const afterDeadlineBoundary = classifyPreEffectGate(
-      afterDeadline.projection,
-      afterDeadline.taskId,
+      readPlacement(runId, 'gate after deadline'),
       fixture.gate.stateId,
     );
     if (afterDeadlineBoundary.state !== 'gate') {
@@ -2118,18 +2253,19 @@ async function runDeterministic(options) {
     };
     const appendResponse = requireOk(
       'PATCH /orchestration/schedules/{id}/core-context',
-      await httpJson(port, 'PATCH', `/v1/daemon/orchestration/schedules/${encodeURIComponent(scheduleId)}/core-context`, {
+      await httpJson(port, 'PATCH', `/v1/daemon/orchestration/schedules/${encodePathSegment(scheduleId)}/core-context`, {
         body: { op: 'append', body: STEER_IDEA },
       }),
     );
     requireFields('PATCH /orchestration/schedules/{id}/core-context', appendResponse, ['new_version']);
     facts.steer.appended_version = appendResponse.new_version;
-    // Re-read the routed boundary before resuming: if the run moved on between
-    // the durable append and the resume, a plain resume would land where it is
-    // fenced. The Steer then stops with the exact observed state; the appended
-    // version stays durable and is never re-appended (S0-3).
-    const recheckObservation = await readDurableObservation(port, scheduleId, runId, 'gate recheck');
-    const gateRecheck = classifyPreEffectGate(recheckObservation.projection, recheckObservation.taskId, fixture.gate.stateId);
+    // Re-read the W4 identity and the public placement before resuming: if the
+    // run moved on between the durable append and the resume, a plain resume
+    // would land where it is fenced. The Steer then stops with the exact
+    // observed state; the appended version stays durable and is never
+    // re-appended (S0-3).
+    await readDurableObservation(port, scheduleId, runId, 'gate recheck');
+    const gateRecheck = classifyPreEffectGate(readPlacement(runId, 'gate recheck'), fixture.gate.stateId);
     facts.steer.recheck = gateRecheck.observed;
     if (gateRecheck.state !== 'gate') {
       const stop = preEffectGateStop('gate recheck', gateRecheck, fixture.gate.stateId);
@@ -2146,7 +2282,7 @@ async function runDeterministic(options) {
     const resumeResponse = await httpJson(
       port,
       'POST',
-      `/v1/daemon/orchestration/schedules/${encodeURIComponent(scheduleId)}/signal`,
+      `/v1/daemon/orchestration/schedules/${encodePathSegment(scheduleId)}/signal`,
       { body: { signal: 'resume' } },
     );
     facts.steer.resume = {
@@ -2171,7 +2307,11 @@ async function runDeterministic(options) {
     // that is the observable proof that the deadline reroute ran, that the same
     // schedule/root was re-driven, and that W5/W6 were exercised strictly
     // before the final manual wait.
-    const effectBoundary = await awaitEffectBoundary(port, scheduleId, runId, fixture.gate.effectStateId);
+    const effectBoundary = await awaitEffectBoundary({
+      readPlacement,
+      runId,
+      effectStateId: fixture.gate.effectStateId,
+    });
     facts.steer.post_resume_boundary = effectBoundary.observed;
     // The resume must not have minted a second run: the Creator's durable page
     // still carries exactly this preset's ONE run, and it is the gated run.
@@ -2225,18 +2365,28 @@ async function runDeterministic(options) {
     let allFrames = [...stream.frames];
     let observedRevision = findCommitRevision(allFrames);
     let tailReads = 0;
+    let tailFailure = null;
     while (observedRevision === null && tailReads < EFFECT_REVISION_MAX_TAIL_READS) {
-      const tail = await readEventStream(port, runId, {
-        lastEventId: allFrames.map((frame) => frame.id).filter(Boolean).pop() ?? null,
-        maxFrames: 64,
-        timeoutMs: EVENT_TAIL_TIMEOUT_MS,
-      });
-      if (tail.status !== 200) {
-        throw statusFailure('GET /orchestration/sessions/{run_id}/events (tail)', {
-          status: tail.status,
-          json: tail.json,
-          text: '',
+      let tail = null;
+      try {
+        tail = await readEventStream(port, runId, {
+          lastEventId: allFrames.map((frame) => frame.id).filter(Boolean).pop() ?? null,
+          maxFrames: 64,
+          timeoutMs: EVENT_TAIL_TIMEOUT_MS,
         });
+      } catch (error) {
+        // This reconnect is the SECONDARY source of the commit revision (the
+        // authorized session detail is the primary one, read in step 12), so a
+        // transport hiccup on it is recorded as evidence and stops the loop
+        // instead of failing the whole journey with an untyped error. The
+        // receipt still cannot claim a commit revision without one of the two
+        // strictly validated sources.
+        tailFailure = { kind: 'transport', detail: error instanceof Error ? error.message : String(error) };
+        break;
+      }
+      if (tail.status !== 200) {
+        tailFailure = { kind: 'status', status: tail.status, detail: `HTTP ${tail.status}` };
+        break;
       }
       tailReads += 1;
       allFrames = [...allFrames, ...tail.frames];
@@ -2244,7 +2394,12 @@ async function runDeterministic(options) {
     }
     facts.stream.tail_reads = tailReads;
     facts.stream.tail_frame_count = allFrames.length - stream.frames.length;
-    record('stream_tail', 'ok', { reads: tailReads, frames: facts.stream.tail_frame_count });
+    facts.stream.tail_failure = tailFailure;
+    if (tailFailure !== null) {
+      record('stream_tail', 'degraded', { reads: tailReads, failure: tailFailure });
+    } else {
+      record('stream_tail', 'ok', { reads: tailReads, frames: facts.stream.tail_frame_count });
+    }
 
     // 12. §6.1: the declared workspace effect, read back byte-for-byte. The
     // effect is the FIRST real prompt of the run crossing into the effect
@@ -2275,6 +2430,7 @@ async function runDeterministic(options) {
     // identifier is invented; a missing/malformed/failed/foreign revision
     // refuses the effect (missing_commit_revision), never a success.
     const effectObservation = await readDurableObservation(port, scheduleId, runId, 'effect');
+    const placementAtEffect = readPlacement(runId, 'effect');
     const sessionCommitRevision = parseSessionWorkspaceCommit(effectObservation.detail);
     const detailWorkspaceCommit = effectObservation.detail?.workspace_commit ?? null;
     facts.effect = {
@@ -2296,7 +2452,9 @@ async function runDeterministic(options) {
         commitRevision: observedRevision,
         sessionCommitRevision,
         frames: allFrames,
-        projectionStateRevision: effectObservation.projection?.state_revision ?? null,
+        // The `state_revision` beside the commit revision is the informational
+        // run-state value from the same placement surface, never a substitute.
+        projectionStateRevision: placementAtEffect?.state_revision ?? null,
       }),
     );
     record('workspace_effect', 'ok', {
@@ -2309,7 +2467,7 @@ async function runDeterministic(options) {
     // 13. W7 cancel: a durable `cancelled` is the only success.
     requireOk(
       'POST /orchestration/schedules/{id}/signal (cancel)',
-      await httpJson(port, 'POST', `/v1/daemon/orchestration/schedules/${encodeURIComponent(scheduleId)}/signal`, {
+      await httpJson(port, 'POST', `/v1/daemon/orchestration/schedules/${encodePathSegment(scheduleId)}/signal`, {
         body: { signal: 'cancel' },
       }),
     );
@@ -2317,7 +2475,7 @@ async function runDeterministic(options) {
       'GET /orchestration/schedules/{id}',
       requireOk(
         'GET /orchestration/schedules/{id}',
-        await httpJson(port, 'GET', `/v1/daemon/orchestration/schedules/${encodeURIComponent(scheduleId)}`),
+        await httpJson(port, 'GET', `/v1/daemon/orchestration/schedules/${encodePathSegment(scheduleId)}`),
       ),
     );
     if (afterCancel.status !== 'cancelled') {
@@ -2344,7 +2502,7 @@ async function runDeterministic(options) {
       'GET /orchestration/schedules/{id} (restart)',
       requireOk(
         'GET /orchestration/schedules/{id} (restart)',
-        await httpJson(restartPort, 'GET', `/v1/daemon/orchestration/schedules/${encodeURIComponent(scheduleId)}`),
+        await httpJson(restartPort, 'GET', `/v1/daemon/orchestration/schedules/${encodePathSegment(scheduleId)}`),
       ),
     );
     if (afterRestart.current_session_id !== runId) {
@@ -2402,6 +2560,9 @@ async function runDeterministic(options) {
   } finally {
     const cleanups = [];
     if (running) {
+      // Retain the service's own post-ready stdout (request/SSE diagnostics)
+      // before the child is stopped, so a stream symptom is diagnosable.
+      running.evidence?.writeStdoutTail?.();
       // Cleanup disposition: a failed or unconfirmed owned shutdown is retained
       // as evidence and overrides an otherwise `ok` journey, so the receipt and
       // the exit code can never report success while an owned service may still
@@ -2534,12 +2695,15 @@ export {
   classifyAdmissionObservation,
   classifyManualWaitBoundary,
   classifyPreEffectGate,
-  executionProjectionOf,
+  encodePathSegment,
+  parsePlacementDto,
+  readPlacementViaCli,
   exitCodeFor,
   findCommitRevision,
   parseCommitResponseRevision,
   parseSessionWorkspaceCommit,
   preEffectGateStop,
+  presetYamlPath,
   readDurableObservation,
   readFixture,
   resolveEffectRevision,
