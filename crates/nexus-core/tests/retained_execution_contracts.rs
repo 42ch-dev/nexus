@@ -62,6 +62,11 @@ use nexus_contracts::{
     CoreWorkspaceCommitRequestChangesItem, CoreWorkspaceCommitRequestChangesItemOp, ProviderCall,
     ProviderEventBatch, ProviderReply,
 };
+use nexus_contracts::generated::core::{
+    CoreWorkflowEventBatchEventsItem, CoreWorkflowSubscribeRequest,
+    CoreWorkflowSubscribeRequestLastEventId, CoreWorkflowSubscribeRequestRunId,
+    CoreWorkflowSubscription,
+};
 use nexus_core::execution::authority::WorkspaceAuthorityLease;
 use nexus_core::execution::prompt_executor::HostPromptExecutor;
 #[cfg(feature = "test-hooks")]
@@ -74,7 +79,8 @@ use nexus_core::execution::schedules::cron;
 use nexus_core::execution::schedules::stale_findings::run_one_sweep;
 #[cfg(feature = "test-hooks")]
 use nexus_core::execution::session::{SessionError, SessionId, WorkspaceSessionManager};
-use nexus_core::execution::workflow::WorkflowRunCoordinator;
+use nexus_core::execution::run_events::{MAX_RECORDS_PER_RUN, MAX_SUBSCRIBERS_PER_RUN};
+use nexus_core::execution::workflow::{RunEventPort, WorkflowRunCoordinator};
 use nexus_core::execution::{
     drive_preset_run, resume_driven_sessions, ExecutionHandle, PresetRunConfig, PresetRunOutcome,
     ResumeDecision, RunControlError, RunnerDeps,
@@ -88,6 +94,7 @@ use nexus_orchestration::engine::{
     GraphFlowEngine, OrchestrationEngine, SessionStatus, SessionSummary,
 };
 use nexus_orchestration::preset_runtime::build_wired_outer_graph;
+use nexus_orchestration::run_state::RunRecord;
 use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
 use nexus_orchestration::{CapabilityRegistry, CapabilityRegistryHolder, WorkflowStateStore};
 use nexus_provider_ports::{ProviderPort, ProviderResult};
@@ -5513,6 +5520,737 @@ async fn every_direct_recoverable_entrance_refuses_after_a_confirmed_close() {
     );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Authorized bounded workflow event subscription (v1.195 P1-T1)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Root runs the subscription cases use. The authorization source is the
+/// durable `orchestration_sessions` row, so each case stages exactly the
+/// ownership it asserts on.
+const SUBSCRIBE_RUN: &str = "run-subscribed";
+const FOREIGN_RUN: &str = "run-foreign";
+const CHILD_RUN: &str = "run-subscribed:child:step";
+const UNKNOWN_RUN: &str = "run-absent";
+const SLOW_RUN: &str = "run-slow-consumer";
+const BLOCK_RUN: &str = "run-blocked-pull";
+
+/// Stage one durable `orchestration_sessions` row (the subscription's
+/// authorization source). A `parent_session_id` makes it a CHILD row.
+async fn stage_run_row(
+    pool: &sqlx::SqlitePool,
+    run_id: &str,
+    creator_id: &str,
+    parent_session_id: Option<&str>,
+) {
+    sqlx::query(
+        "INSERT INTO orchestration_sessions
+           (session_id, creator_id, preset_id, preset_version, parent_session_id,
+            status, context_json, created_at, updated_at)
+         VALUES (?, ?, 'hosted-schedule-drive', 1, ?, 'running', x'', 1, 1)",
+    )
+    .bind(run_id)
+    .bind(creator_id)
+    .bind(parent_session_id)
+    .execute(pool)
+    .await
+    .expect("stage a durable workflow run row");
+}
+
+/// One durable run record, with a `state_revision` that identifies the frame it
+/// becomes on the wire.
+fn run_record(run_id: &str, state_revision: u64) -> RunRecord {
+    RunRecord {
+        session_id: nexus_orchestration::engine::SessionId(run_id.to_string()),
+        status: SessionStatus::Running,
+        state_revision,
+        execution_version: 1,
+        descriptor: None,
+        state: None,
+        graph_version: 1,
+    }
+}
+
+/// Publish one `run_state` frame through the owner's own run-event port (the
+/// same call the coordinator makes at every durable revision).
+fn publish_run_state(port: &Arc<dyn RunEventPort>, run_id: &str, state_revision: u64) {
+    port.publish_run_state(run_id, &run_record(run_id, state_revision));
+}
+
+fn subscribe_request(run_id: &str, last_event_id: Option<&str>) -> CoreWorkflowSubscribeRequest {
+    CoreWorkflowSubscribeRequest {
+        run_id: CoreWorkflowSubscribeRequestRunId::try_from(run_id.to_string()).expect("run id"),
+        last_event_id: last_event_id.map(|cursor| {
+            CoreWorkflowSubscribeRequestLastEventId::try_from(cursor.to_string()).expect("cursor")
+        }),
+    }
+}
+
+/// The opaque token as the transport would pass it back.
+fn subscription_token(subscription: &CoreWorkflowSubscription) -> String {
+    subscription.subscription_id.as_str().to_string()
+}
+
+/// The numeric sequence a frame id carries (`<epoch>:<sequence>`).
+fn frame_sequence(id: &str) -> u64 {
+    id.rsplit_once(':')
+        .expect("frame id carries an epoch and a sequence")
+        .1
+        .parse()
+        .expect("numeric sequence")
+}
+
+/// The epoch a frame id carries.
+fn frame_epoch(id: &str) -> String {
+    id.rsplit_once(':')
+        .expect("frame id carries an epoch and a sequence")
+        .0
+        .to_string()
+}
+
+fn frame_json(item: &CoreWorkflowEventBatchEventsItem) -> Value {
+    serde_json::from_str(&item.data).expect("frame payload is JSON")
+}
+
+/// The `state_revision` a published `run_state` frame carries.
+fn frame_revision(item: &CoreWorkflowEventBatchEventsItem) -> u64 {
+    frame_json(item)["state_revision"]
+        .as_u64()
+        .expect("run_state frames carry a state revision")
+}
+
+/// The authorized bounded subscription (contract §4, S1-1/S1-2/S1-4).
+///
+/// Discriminates the whole frame/error table on ONE real owner: an unknown,
+/// foreign or child run closes as absent BEFORE the ring is read (the foreign
+/// run's ring is live and holds a frame, so a ring-first implementation would
+/// have served it), the replay hands off to the live tail exactly once, a
+/// prior-epoch cursor yields the single `history_unavailable` control frame
+/// instead of an error, a retention-trimmed tail and a lagging subscriber both
+/// surface as EXPLICIT gaps, and a released or closed owner wakes a blocked
+/// pull with `closed` and withdraws every token.
+#[allow(clippy::too_many_lines)] // one linear contract; splitting hides the ordering evidence
+#[tokio::test]
+#[serial_test::serial]
+async fn authorized_subscription_preserves_epoch_and_gap() {
+    use nexus_core::execution::run_events::MAX_PULL_FRAMES;
+    use std::num::NonZeroU64;
+    use std::time::Duration;
+
+    let fixture = hosted_fixture().await;
+    let principal = fixture.core.active_principal().await.unwrap();
+    let handle = Arc::clone(&fixture.handle);
+    let pool = handle.coordinator().pool();
+    let port = handle
+        .coordinator()
+        .run_event_port()
+        .expect("the hosted factory attaches the run-event registry");
+
+    // ── 1. Staged durable ownership + the live rings the refusals must not
+    //       reach. ──
+    stage_run_row(pool.as_ref(), SUBSCRIBE_RUN, CREATOR, None).await;
+    stage_run_row(pool.as_ref(), FOREIGN_RUN, "other_creator", None).await;
+    stage_run_row(pool.as_ref(), CHILD_RUN, CREATOR, Some(SUBSCRIBE_RUN)).await;
+    for run_id in [SUBSCRIBE_RUN, FOREIGN_RUN] {
+        assert!(
+            port.try_register_live(run_id).await,
+            "the run-event ring must exist for {run_id}"
+        );
+        publish_run_state(&port, run_id, 1);
+    }
+
+    // ── 2. Unknown, foreign and child runs close BEFORE any ring lookup. ──
+    for run_id in [UNKNOWN_RUN, FOREIGN_RUN, CHILD_RUN] {
+        let refusal = handle
+            .subscribe_workflow_events(&principal, subscribe_request(run_id, None))
+            .await
+            .unwrap_err();
+        match refusal {
+            nexus_core::CoreError::NotFound { resource } => assert_eq!(
+                resource,
+                format!("workflow session {run_id}"),
+                "an unauthorized run must close exactly like an absent one: {run_id}"
+            ),
+            other => panic!("{run_id} must close as NotFound, got {other:?}"),
+        }
+    }
+
+    // The numeric page method is gated by the SAME rule — the legacy read is
+    // not a bypass around the subscription's authorization.
+    let page_request = nexus_contracts::CoreRunEventsRequest {
+        after_sequence: None,
+        limit: NonZeroU64::new(64).expect("non-zero"),
+        run_id: nexus_contracts::CoreRunEventsRequestRunId::try_from(FOREIGN_RUN.to_string())
+            .expect("run id"),
+    };
+    let page_refusal = handle
+        .run_events(&principal, page_request)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(page_refusal, nexus_core::CoreError::NotFound { .. }),
+        "the bounded page read must refuse a foreign run before its ring: {page_refusal:?}"
+    );
+
+    // ── 3. Authorized subscription: retained replay, then the live tail, with
+    //       an exclusive cursor and no duplicate handoff. ──
+    for revision in 2..=3 {
+        publish_run_state(&port, SUBSCRIBE_RUN, revision);
+    }
+    let first = handle
+        .subscribe_workflow_events(&principal, subscribe_request(SUBSCRIBE_RUN, None))
+        .await
+        .expect("an owned root run subscribes");
+    let first_id = subscription_token(&first);
+    let replay = handle
+        .next_workflow_events(&principal, first_id.clone())
+        .await
+        .expect("the first pull");
+    assert!(
+        !replay.closed,
+        "a live run's stream stays open after its replay"
+    );
+    assert_eq!(
+        replay.events.iter().map(frame_revision).collect::<Vec<_>>(),
+        vec![1, 2, 3],
+        "the retained frames replay in ring order"
+    );
+    let handed_off = replay.events.last().expect("a replayed frame").id.clone();
+
+    for revision in 4..=6 {
+        publish_run_state(&port, SUBSCRIBE_RUN, revision);
+    }
+    let tail = handle
+        .next_workflow_events(&principal, first_id.clone())
+        .await
+        .expect("the live tail");
+    assert_eq!(
+        tail.events.iter().map(frame_revision).collect::<Vec<_>>(),
+        vec![4, 5, 6],
+        "the live tail continues the same stream without repeating the replay"
+    );
+
+    let resumed = handle
+        .subscribe_workflow_events(
+            &principal,
+            subscribe_request(SUBSCRIBE_RUN, Some(&handed_off)),
+        )
+        .await
+        .expect("a retained cursor resumes");
+    let resumed_id = subscription_token(&resumed);
+    let resumed_replay = handle
+        .next_workflow_events(&principal, resumed_id.clone())
+        .await
+        .expect("the resumed replay");
+    assert_eq!(
+        resumed_replay
+            .events
+            .iter()
+            .map(frame_revision)
+            .collect::<Vec<_>>(),
+        vec![4, 5, 6],
+        "the cursor is EXCLUSIVE: the frame it names is never re-sent"
+    );
+    assert!(
+        resumed_replay
+            .events
+            .iter()
+            .all(|event| event.id != handed_off),
+        "no duplicate handoff frame: {resumed_replay:?}"
+    );
+    publish_run_state(&port, SUBSCRIBE_RUN, 7);
+    let live = handle
+        .next_workflow_events(&principal, resumed_id.clone())
+        .await
+        .expect("the resumed live tail");
+    assert_eq!(
+        live.events.iter().map(frame_revision).collect::<Vec<_>>(),
+        vec![7],
+        "the resumed attachment receives only what follows its replay"
+    );
+
+    for token in [first_id.clone(), resumed_id.clone()] {
+        handle
+            .release_workflow_events(&principal, token)
+            .await
+            .expect("release");
+    }
+    assert!(
+        matches!(
+            handle
+                .next_workflow_events(&principal, first_id.clone())
+                .await
+                .unwrap_err(),
+            nexus_core::CoreError::NotFound { .. }
+        ),
+        "a released token refuses"
+    );
+
+    // ── 4. Cursor validation is typed; an unresumable history is a control
+    //       frame, not an error. ──
+    let malformed = handle
+        .subscribe_workflow_events(
+            &principal,
+            subscribe_request(SUBSCRIBE_RUN, Some("not-a-cursor")),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&malformed, nexus_core::CoreError::InvalidInput { field, .. } if field == "last_event_id"),
+        "a malformed cursor must be a typed invalid-input refusal: {malformed:?}"
+    );
+    let future_cursor = format!("{}:9999", frame_epoch(&handed_off));
+    let future = handle
+        .subscribe_workflow_events(
+            &principal,
+            subscribe_request(SUBSCRIBE_RUN, Some(&future_cursor)),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&future, nexus_core::CoreError::InvalidInput { field, .. } if field == "last_event_id"),
+        "a future cursor must be a typed invalid-input refusal: {future:?}"
+    );
+
+    // A different epoch is a PREVIOUS core generation: the run is still owned
+    // and retained, but its history cannot be resumed.
+    let stale_cursor = format!("{}:3", uuid::Uuid::nil());
+    let stale = handle
+        .subscribe_workflow_events(&principal, subscribe_request(SUBSCRIBE_RUN, Some(&stale_cursor)))
+        .await
+        .expect("a prior-epoch cursor still opens a subscription");
+    let stale_id = subscription_token(&stale);
+    let control = handle
+        .next_workflow_events(&principal, stale_id.clone())
+        .await
+        .expect("the control frame");
+    assert!(control.closed, "history_unavailable closes the stream");
+    assert_eq!(control.events.len(), 1, "exactly one control frame");
+    let unavailable = &control.events[0];
+    assert_eq!(
+        unavailable.event.as_str(),
+        "history_unavailable",
+        "the frame keeps the retained control vocabulary: {unavailable:?}"
+    );
+    assert_eq!(
+        unavailable.id, "",
+        "the control frame carries NO cursor, so a verbatim transport never advances Last-Event-ID"
+    );
+    let wire = frame_json(unavailable);
+    assert_eq!(wire["run_id"], SUBSCRIBE_RUN);
+    assert_eq!(
+        wire["inspect_url"],
+        format!("/v1/daemon/orchestration/sessions/{SUBSCRIBE_RUN}"),
+        "the control frame names the run's public inspect route"
+    );
+    assert!(
+        matches!(
+            handle
+                .next_workflow_events(&principal, stale_id)
+                .await
+                .unwrap_err(),
+            nexus_core::CoreError::NotFound { .. }
+        ),
+        "a closed stream's token is withdrawn"
+    );
+
+    // ── 5. Retention trimming is an EXPLICIT gap over the dropped range, never
+    //       fabricated content. ──
+    let published = MAX_RECORDS_PER_RUN as u64 + 50;
+    for revision in 100..(100 + published) {
+        publish_run_state(&port, SUBSCRIBE_RUN, revision);
+    }
+    let trimmed = handle
+        .subscribe_workflow_events(&principal, subscribe_request(SUBSCRIBE_RUN, None))
+        .await
+        .expect("a trimmed ring still subscribes");
+    let trimmed_id = subscription_token(&trimmed);
+    let trimmed_batch = handle
+        .next_workflow_events(&principal, trimmed_id.clone())
+        .await
+        .expect("the trimmed pull");
+    let gap_frame = trimmed_batch
+        .events
+        .first()
+        .expect("at least the explicit gap");
+    assert_eq!(
+        gap_frame.event.as_str(),
+        "gap",
+        "a trimmed tail is announced, never silently re-based: {gap_frame:?}"
+    );
+    let dropped = frame_json(gap_frame);
+    assert_eq!(dropped["from_sequence"], json!(1));
+    let first_retained = trimmed_batch
+        .events
+        .get(1)
+        .expect("retained frames follow the gap");
+    let first_retained_sequence = frame_sequence(&first_retained.id);
+    assert!(
+        first_retained_sequence > 1,
+        "the ring must actually have trimmed for this case to mean anything"
+    );
+    assert_eq!(
+        dropped["to_sequence"].as_u64().map(|to| to + 1),
+        Some(first_retained_sequence),
+        "the gap covers EXACTLY the dropped range and nothing else"
+    );
+    let delivered: Vec<u64> = trimmed_batch.events[1..]
+        .iter()
+        .map(frame_revision)
+        .collect();
+    assert!(
+        delivered.windows(2).all(|pair| pair[0] < pair[1]),
+        "delivered frames stay in published order: {delivered:?}"
+    );
+    assert!(
+        delivered.iter().all(|revision| (100..100 + published).contains(revision)),
+        "only frames the ring actually retained are delivered: {delivered:?}"
+    );
+    assert!(
+        trimmed_batch.events.len() <= MAX_PULL_FRAMES,
+        "a pull is capped at {MAX_PULL_FRAMES} frames"
+    );
+    handle
+        .release_workflow_events(&principal, trimmed_id)
+        .await
+        .expect("release");
+
+    // ── 6. A lagging subscriber is EVICTED with an explicit terminal gap on
+    //       its own run, where every sequence is known. ──
+    stage_run_row(pool.as_ref(), SLOW_RUN, CREATOR, None).await;
+    assert!(port.try_register_live(SLOW_RUN).await, "slow-run ring");
+    publish_run_state(&port, SLOW_RUN, 1);
+    let seed = handle
+        .subscribe_workflow_events(&principal, subscribe_request(SLOW_RUN, None))
+        .await
+        .expect("seed subscription");
+    let seed_id = subscription_token(&seed);
+    let seed_batch = handle
+        .next_workflow_events(&principal, seed_id.clone())
+        .await
+        .expect("seed pull");
+    let slow_cursor = seed_batch.events.last().expect("a seed frame").id.clone();
+    assert_eq!(frame_sequence(&slow_cursor), 1, "the ring starts at sequence 1");
+    handle
+        .release_workflow_events(&principal, seed_id)
+        .await
+        .expect("release the seed");
+
+    let slow = handle
+        .subscribe_workflow_events(&principal, subscribe_request(SLOW_RUN, Some(&slow_cursor)))
+        .await
+        .expect("slow subscription");
+    let slow_id = subscription_token(&slow);
+    // 20 frames, none pulled: the 17th exceeds the subscriber's data-frame cap
+    // (16) and evicts it into the reserved control slot.
+    for revision in 2..=21 {
+        publish_run_state(&port, SLOW_RUN, revision);
+    }
+    let drained = handle
+        .next_workflow_events(&principal, slow_id.clone())
+        .await
+        .expect("drain");
+    assert_eq!(
+        drained.events.len(),
+        MAX_PULL_FRAMES,
+        "the buffered data frames drain first, capped at {MAX_PULL_FRAMES}"
+    );
+    assert!(!drained.closed, "the lag gap has not been read yet");
+    assert!(
+        drained
+            .events
+            .iter()
+            .all(|event| event.event.as_str() == "run_state"),
+        "the data frames precede the lag gap: {drained:?}"
+    );
+    let lag = handle
+        .next_workflow_events(&principal, slow_id.clone())
+        .await
+        .expect("the lag gap");
+    assert_eq!(lag.events.len(), 1, "the lag gap fills the reserved slot");
+    assert_eq!(lag.events[0].event.as_str(), "gap");
+    let lag_wire = frame_json(&lag.events[0]);
+    let lag_sequence = frame_sequence(&slow_cursor) + 17;
+    assert_eq!(
+        lag_wire["from_sequence"].as_u64(),
+        Some(lag_sequence),
+        "the gap names the frame the subscriber fell behind at"
+    );
+    assert_eq!(lag_wire["to_sequence"].as_u64(), Some(lag_sequence));
+    assert!(
+        lag.closed,
+        "a lagging subscription CLOSES instead of silently ending"
+    );
+    assert!(
+        matches!(
+            handle
+                .next_workflow_events(&principal, slow_id)
+                .await
+                .unwrap_err(),
+            nexus_core::CoreError::NotFound { .. }
+        ),
+        "the lagging subscription's token is withdrawn after its gap"
+    );
+
+    // ── 7. The per-run subscriber cap refuses typed, and a release frees the
+    //       permit again (the ring's own accounting, never a fabricated token).
+    stage_run_row(pool.as_ref(), BLOCK_RUN, CREATOR, None).await;
+    assert!(port.try_register_live(BLOCK_RUN).await, "blocking ring");
+    let mut holders = Vec::new();
+    for _ in 0..MAX_SUBSCRIBERS_PER_RUN {
+        let held = handle
+            .subscribe_workflow_events(&principal, subscribe_request(BLOCK_RUN, None))
+            .await
+            .expect("a subscriber permit");
+        holders.push(subscription_token(&held));
+    }
+    let capped = handle
+        .subscribe_workflow_events(&principal, subscribe_request(BLOCK_RUN, None))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(capped, nexus_core::CoreError::Busy),
+        "the run's subscriber cap must refuse as busy: {capped:?}"
+    );
+    let freed = holders.pop().expect("a held permit");
+    handle
+        .release_workflow_events(&principal, freed)
+        .await
+        .expect("release");
+    let admitted = handle
+        .subscribe_workflow_events(&principal, subscribe_request(BLOCK_RUN, None))
+        .await
+        .expect("a released permit is reusable, never leaked");
+    holders.push(subscription_token(&admitted));
+    for token in holders {
+        handle
+            .release_workflow_events(&principal, token)
+            .await
+            .expect("release");
+    }
+
+    // ── 8. Release WAKES a pull blocked on a silent ring. ──
+    let blocked = handle
+        .subscribe_workflow_events(&principal, subscribe_request(BLOCK_RUN, None))
+        .await
+        .expect("a silent ring still subscribes");
+    let blocked_id = subscription_token(&blocked);
+    let puller = tokio::spawn({
+        let handle = Arc::clone(&handle);
+        let principal = principal.clone();
+        let token = blocked_id.clone();
+        async move { handle.next_workflow_events(&principal, token).await }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(
+        !puller.is_finished(),
+        "an empty live ring must BLOCK the pull, not answer an empty batch"
+    );
+    // Exactly ONE pull may be outstanding per subscription.
+    let concurrent = handle
+        .next_workflow_events(&principal, blocked_id.clone())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(concurrent, nexus_core::CoreError::Busy),
+        "a second pull on the same subscription must refuse as busy: {concurrent:?}"
+    );
+    handle
+        .release_workflow_events(&principal, blocked_id.clone())
+        .await
+        .expect("release");
+    let woken = tokio::time::timeout(Duration::from_secs(5), puller)
+        .await
+        .expect("release must wake the blocked pull")
+        .expect("join")
+        .expect("a woken pull is not an error");
+    assert!(woken.closed, "a released subscription reports `closed`");
+    assert!(
+        woken.events.is_empty(),
+        "no frame was invented to end the pull: {woken:?}"
+    );
+    assert!(
+        matches!(
+            handle
+                .next_workflow_events(&principal, blocked_id)
+                .await
+                .unwrap_err(),
+            nexus_core::CoreError::NotFound { .. }
+        ),
+        "the released token refuses"
+    );
+
+    // ── 9. Owner close wakes a blocked pull and withdraws every token. ──
+    let closing = handle
+        .subscribe_workflow_events(&principal, subscribe_request(BLOCK_RUN, None))
+        .await
+        .expect("subscribe before close");
+    let closing_id = subscription_token(&closing);
+    let puller = tokio::spawn({
+        let handle = Arc::clone(&handle);
+        let principal = principal.clone();
+        let token = closing_id.clone();
+        async move { handle.next_workflow_events(&principal, token).await }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(!puller.is_finished(), "the pull is blocked when close begins");
+    let report = handle.close().await.expect("owner close");
+    assert!(report.cleanup_confirmed, "close must report confirmed cleanup");
+    let woken = tokio::time::timeout(Duration::from_secs(5), puller)
+        .await
+        .expect("close must wake the blocked pull")
+        .expect("join")
+        .expect("a woken pull is not an error");
+    assert!(woken.closed, "close ends the stream with `closed`");
+    let after_close = handle
+        .next_workflow_events(&principal, closing_id)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(after_close, nexus_core::CoreError::Closing),
+        "a closed owner serves no pull: {after_close:?}"
+    );
+    let subscribe_after_close = handle
+        .subscribe_workflow_events(&principal, subscribe_request(BLOCK_RUN, None))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(subscribe_after_close, nexus_core::CoreError::Closing),
+        "a closed owner mints no subscription: {subscribe_after_close:?}"
+    );
+    fixture.core.close().await.expect("core close");
+}
+
+/// Holds a subscribe exactly between its durable-owner check and its ring
+/// attachment, so an owner close can be forced into that window deterministically.
+#[derive(Default)]
+struct SubscribeRaceGate {
+    at_gate: AtomicBool,
+    release: AtomicBool,
+}
+
+#[async_trait]
+impl nexus_core::execution::ExecutionSubscriptionObserver for SubscribeRaceGate {
+    async fn owner_resolved(&self) {
+        self.at_gate.store(true, Ordering::SeqCst);
+        while !self.release.load(Ordering::SeqCst) {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    }
+}
+
+/// A subscribe that INTERSECTS an owner close must neither publish a token nor
+/// keep the ring subscriber permit it had already attached (P1-T1 race).
+///
+/// The seam is the exact window the defect needs: the run's durable ROOT
+/// ownership is resolved (an `await`), and only afterwards is the ring attached
+/// and the token minted. Without a sealed table, a close landing in that window
+/// let the subscribe march past `close_all` and publish a token the close had
+/// already walked past — a token no release could ever withdraw (every entry
+/// point fences on the closed owner) holding a ring permit for the process's
+/// lifetime. The gate makes that interleaving deterministic instead of racy.
+#[tokio::test]
+#[serial_test::serial]
+async fn subscribe_racing_owner_close_never_leaks_a_token_or_ring_permit() {
+    use nexus_core::execution::production::CoreRunEventPort;
+    use nexus_core::execution::run_events::RunEventRegistry;
+    use std::time::Duration;
+
+    const RACE_RUN: &str = "run-subscribe-race";
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let home = tmp.path();
+    prepare_hosted_home(home).await;
+    let core = CoreService::open(CoreOpenOptions {
+        user_home: home.into(),
+        access: CoreAccess::EngineOwner,
+    })
+    .await
+    .expect("engine-owner core open");
+
+    // The REAL production port over a REAL registry, so the permit this case
+    // counts is the one a subscription actually takes.
+    let registry = Arc::new(RunEventRegistry::new());
+    let sinks: nexus_core::execution::run_events::RunEventSinkMap =
+        Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+    let gate = Arc::new(SubscribeRaceGate::default());
+    let handle = core
+        .start_execution(
+            Arc::new(NullProvider) as Arc<dyn ProviderPort>,
+            RunnerDeps {
+                run_events: Some(Arc::new(CoreRunEventPort::new(
+                    Arc::clone(&registry),
+                    sinks,
+                ))),
+                subscription_observer: Some(gate.clone()),
+                ..RunnerDeps::default()
+            },
+        )
+        .await
+        .expect("execution owner starts");
+    let principal = core.active_principal().await.unwrap();
+    stage_run_row(handle.coordinator().pool().as_ref(), RACE_RUN, CREATOR, None).await;
+    let port = handle
+        .coordinator()
+        .run_event_port()
+        .expect("the owner serves the ring port");
+    assert!(
+        port.try_register_live(RACE_RUN).await,
+        "the race needs a live ring to attach to"
+    );
+
+    // ── The subscribe stops inside the window: ownership resolved, ring not
+    //    yet attached. ──
+    let racer = tokio::spawn({
+        let handle = Arc::clone(&handle);
+        let principal = principal.clone();
+        async move {
+            handle
+                .subscribe_workflow_events(&principal, subscribe_request(RACE_RUN, None))
+                .await
+        }
+    });
+    let mut waited = Duration::ZERO;
+    while !gate.at_gate.load(Ordering::SeqCst) {
+        assert!(
+            waited < Duration::from_secs(10),
+            "the subscribe never reached its durable-owner check"
+        );
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        waited += Duration::from_millis(5);
+    }
+    assert_eq!(
+        registry.live_subscriber_count(RACE_RUN),
+        0,
+        "the ring is not attached yet at the seam"
+    );
+
+    // ── The owner closes COMPLETELY while the subscribe sits in the window. ──
+    let report = handle.close().await.expect("owner close");
+    assert!(report.cleanup_confirmed, "close must be confirmed");
+    gate.release.store(true, Ordering::SeqCst);
+
+    let outcome = tokio::time::timeout(Duration::from_secs(5), racer)
+        .await
+        .expect("the race must settle")
+        .expect("join");
+    match outcome {
+        Err(nexus_core::CoreError::Closing) => {}
+        Ok(subscription) => panic!(
+            "a subscribe that raced the close handed out a token: {} ({} ring permit(s) held)",
+            subscription.subscription_id.as_str(),
+            registry.live_subscriber_count(RACE_RUN)
+        ),
+        Err(other) => panic!("a raced subscribe must refuse as Closing, got {other:?}"),
+    }
+    assert_eq!(
+        registry.live_subscriber_count(RACE_RUN),
+        0,
+        "the ring subscriber permit the refused subscribe had attached must be released"
+    );
+    assert!(handle.is_settled(), "the owner stayed closed across the race");
+    core.close().await.expect("core close");
+}
+
 /// Every direct recoverable entrance on a CLOSED manager refuses, typed.
 #[cfg(feature = "test-hooks")]
 async fn assert_direct_entrances_refused(
@@ -5553,4 +6291,851 @@ async fn assert_direct_entrances_refused(
         matches!(sweep, Err(SessionError::AuthorityBusy)),
         "the whole-DB startup recovery after close must fail closed, got {sweep:?}"
     );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Hosted factory restart: recovery truth + the §4 `workspace_commit`
+// projection (v1.195 P1-T2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A declared `workspace.commit` that CANNOT be applied: `workspace.open`
+/// succeeds, the commit names a session that does not exist, so the capability
+/// records `_capability_error` and never writes an output — the durable
+/// "failed" shape the detail projection must never turn into a revision.
+const FAILED_COMMIT_PRESET: &str = "projection-failed-commit";
+
+fn failed_commit_preset_yaml() -> String {
+    format!(
+        r#"
+preset:
+  id: {FAILED_COMMIT_PRESET}
+  version: 1
+  kind: creator
+  description: "projection fixture — a declared workspace.commit that cannot apply"
+  requires_capabilities:
+    - workspace.open
+    - workspace.commit
+  initial: open_scope
+  terminal: done
+states:
+  - id: open_scope
+    description: "open a scope inside the factory-resolved creative root"
+    enter:
+      - kind: capability
+        name: workspace.open
+        args:
+          path: notes
+    exit_when: {{ kind: rule }}
+    next: commit_scope
+  - id: commit_scope
+    description: "a commit that cannot apply: the named session does not exist"
+    enter:
+      - kind: capability
+        name: workspace.commit
+        args:
+          sessionId: "no-such-workspace-session"
+          changes:
+            - path: never.txt
+              op: create
+              contentBase64: "{HOSTED_PAYLOAD_B64}"
+    exit_when: {{ kind: rule }}
+    next: done
+  - id: done
+    terminal: true
+"#
+    )
+}
+
+/// The durable `workspace.commit` checkpoint of one run, read straight out of
+/// the persisted graph context: `(output revision, capability error)`.
+///
+/// This is the fixture's own oracle for "the capability really completed /
+/// really failed", independent of the detail field under test — a negative
+/// projection assertion is only meaningful next to evidence that the failure
+/// path actually ran.
+async fn durable_commit_checkpoint(
+    pool: &sqlx::SqlitePool,
+    run_id: &str,
+) -> (Option<String>, Option<String>) {
+    sqlx::query_as::<_, (Option<String>, Option<String>)>(
+        "SELECT json_extract(context_json, '$.data._capability_output.revision'),
+                json_extract(context_json, '$.data._capability_error')
+         FROM orchestration_sessions WHERE session_id = ?",
+    )
+    .bind(run_id)
+    .fetch_one(pool)
+    .await
+    .expect("the run's durable graph context is readable")
+}
+
+/// The revisions the durable commit intents settled — the commit authority's
+/// own record, never the graph context the projection reads.
+async fn committed_intent_revisions(pool: &sqlx::SqlitePool) -> Vec<String> {
+    sqlx::query_scalar(
+        "SELECT revision FROM workspace_commit_intents WHERE state = 'committed' ORDER BY revision",
+    )
+    .fetch_all(pool)
+    .await
+    .expect("the durable commit intents are readable")
+}
+
+/// Stage one durable root run row with an explicit graph-context blob: the
+/// detail projection's authorization source AND its durable checkpoint, so a
+/// caller can discriminate the shapes the real owner cannot produce on demand.
+async fn stage_context_run_row(
+    pool: &sqlx::SqlitePool,
+    run_id: &str,
+    creator_id: &str,
+    context_json: &str,
+) {
+    sqlx::query(
+        "INSERT INTO orchestration_sessions
+           (session_id, creator_id, preset_id, preset_version, parent_session_id,
+            status, context_json, created_at, updated_at)
+         VALUES (?, ?, 'hosted-schedule-drive', 1, NULL, 'running', ?, 1, 1)",
+    )
+    .bind(run_id)
+    .bind(creator_id)
+    .bind(context_json.as_bytes())
+    .execute(pool)
+    .await
+    .expect("stage a durable run row with an explicit graph context");
+}
+
+/// Wait (bounded) until a run reaches a terminal durable status and return it.
+///
+/// A run whose declared capability failed still finishes its graph (the failure
+/// is a step status, not a drive abort), so the terminal status is read rather
+/// than assumed.
+async fn wait_for_terminal_run(pool: &sqlx::SqlitePool, run_id: &str) -> String {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        let status = durable_record(pool, run_id)
+            .await
+            .status
+            .as_db_str()
+            .to_string();
+        if matches!(status.as_str(), "completed" | "failed" | "cancelled") {
+            return status;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the run never reached a terminal status (still {status})"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+}
+
+/// Wait (bounded) until the run's durable cancel intent is written — the fence
+/// that makes the cancel the durable control winner before the parked prompt
+/// unwinds.
+async fn wait_for_cancel_intent(pool: &sqlx::SqlitePool, run_id: &str) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        if durable_record(pool, run_id)
+            .await
+            .state
+            .as_ref()
+            .is_some_and(|state| state.cancel_requested)
+        {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the cancel intent never became durable"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+}
+
+/// Actual-factory restart truth (S1-3 + the durable half of S1-4).
+///
+/// ONE real `start_hosted_execution` owner drives four schedules to four
+/// different durable outcomes, is closed, and a SECOND factory owner is opened
+/// over the same home. Across that process boundary the durable truth may not
+/// move: the completed effect stays committed exactly once (same bytes, same
+/// settled revision, unchanged run revision, no re-drive, no re-execution), the
+/// confirmed cancel stays `cancelled` instead of being re-driven or relabelled,
+/// an unconfirmed stop stays `interrupted` and actionable instead of
+/// normalizing to `cancelled`, a human wait whose frozen source is gone stays
+/// preserved and answers the continuation signal with the typed reconstruction
+/// refusal (cancel-only, no fresh schedule), and the run's ring — gone with the
+/// old process — is reported as ONE explicit `history_unavailable` control
+/// frame while the W4 detail stays readable.
+#[allow(clippy::too_many_lines)] // one linear restart journey; splitting hides the ordering evidence
+#[tokio::test]
+#[serial_test::serial]
+async fn hosted_restart_keeps_cancel_and_uncertain_effect_truth() {
+    let fixture = hosted_fixture().await;
+    let home = fixture.tmp.path().to_path_buf();
+    let nexus_home = home.join(".nexus42");
+    let principal = fixture.core.active_principal().await.unwrap();
+    let pool = fixture.handle.coordinator().pool();
+    let epoch_a = fixture.handle.engine_epoch();
+    write_preset_bundle(
+        &nexus_home,
+        CANCEL_EFFECT_PRESET,
+        &cancel_effect_preset_yaml(),
+        "Summarize the hosted topic: {{preset.input.topic}}\n",
+    );
+    write_preset_bundle(
+        &nexus_home,
+        CANCEL_WAIT_PRESET,
+        &cancel_wait_preset_yaml(),
+        "Summarize the retained topic: {{preset.input.topic}}\n",
+    );
+
+    // ── 1. The COMPLETED run: its one declared commit is applied inside the
+    //       factory-resolved root, then the prompt releases and the run
+    //       settles terminal. ──
+    let completed_schedule = add_hosted_schedule(&fixture).await;
+    wait_for_prompt_count(&fixture.host, 1).await;
+    let (status, owned) = schedule_row(pool.as_ref(), &completed_schedule).await;
+    assert_eq!(status, "running", "the owned clock claimed the row's run");
+    let completed_run = owned.expect("the admitted schedule owns its run");
+    assert_eq!(
+        std::fs::read(fixture.root.join("notes/hosted.txt")).expect("the committed bytes"),
+        HOSTED_PAYLOAD,
+        "the declared commit must be applied inside the canonical root"
+    );
+    let settled = committed_intent_revisions(pool.as_ref()).await;
+    assert_eq!(
+        settled.len(),
+        1,
+        "exactly one commit may have settled: {settled:?}"
+    );
+    let committed_revision = settled[0].clone();
+    fixture.host.release_parked();
+    wait_for_run_status(pool.as_ref(), &completed_run, "completed").await;
+    let completed_before = durable_record(pool.as_ref(), &completed_run).await;
+
+    // ── 2. The CANCELLED run: the cancel lands while the prompt is in flight,
+    //       so the authorized commit AFTER it never runs. ──
+    let cancelled_schedule = add_parallel_any_schedule(
+        &fixture.handle,
+        &principal,
+        CANCEL_EFFECT_PRESET,
+        "restart-cancelled",
+    )
+    .await;
+    let cancelled_run = wait_for_schedule_run(pool.as_ref(), &cancelled_schedule).await;
+    wait_for_prompt_count(&fixture.host, 2).await;
+    let cancellation = tokio::spawn({
+        let handle = Arc::clone(&fixture.handle);
+        let principal = principal.clone();
+        let schedule_id = cancelled_schedule.clone();
+        async move { handle.signal_schedule(&principal, schedule_id, signal("cancel")).await }
+    });
+    wait_for_cancel_intent(pool.as_ref(), &cancelled_run).await;
+    fixture.host.release_parked();
+    let cancelled = cancellation
+        .await
+        .expect("the cancel task joins")
+        .expect("a confirmable cancel");
+    assert_eq!(
+        cancelled.status, "cancelled",
+        "only a confirmed stop is a cancel success"
+    );
+    wait_for_run_status(pool.as_ref(), &cancelled_run, "cancelled").await;
+    assert!(
+        !fixture.root.join(CANCEL_EFFECT_FILE).exists(),
+        "the authorized commit AFTER the cancel must never run"
+    );
+    assert_eq!(
+        schedule_row(pool.as_ref(), &cancelled_schedule).await.0,
+        "cancelled",
+        "the schedule row projects the confirmed cancel"
+    );
+
+    // ── 3. The UNCERTAIN stop: the owned teardown cannot be confirmed, so the
+    //       run settles `interrupted` and the row stays non-terminal. ──
+    let interrupted_schedule = add_parallel_any_schedule(
+        &fixture.handle,
+        &principal,
+        CANCEL_EFFECT_PRESET,
+        "restart-interrupted",
+    )
+    .await;
+    let interrupted_run = wait_for_schedule_run(pool.as_ref(), &interrupted_schedule).await;
+    wait_for_prompt_count(&fixture.host, 3).await;
+    fixture.host.fail_session_shutdown();
+    let unconfirmed = tokio::spawn({
+        let handle = Arc::clone(&fixture.handle);
+        let principal = principal.clone();
+        let schedule_id = interrupted_schedule.clone();
+        async move { handle.signal_schedule(&principal, schedule_id, signal("cancel")).await }
+    });
+    wait_for_cancel_intent(pool.as_ref(), &interrupted_run).await;
+    fixture.host.release_parked();
+    let unconfirmed = unconfirmed
+        .await
+        .expect("the cancel task joins")
+        .expect("an unconfirmed stop is still a typed answer");
+    assert_eq!(
+        unconfirmed.status, "interrupted",
+        "unconfirmed cleanup is never reported as `cancelled`"
+    );
+    let interrupted_before = durable_record(pool.as_ref(), &interrupted_run).await;
+    assert_eq!(interrupted_before.status.as_db_str(), "interrupted");
+    assert!(
+        interrupted_before
+            .state
+            .as_ref()
+            .is_some_and(|state| state.cancel_requested),
+        "the uncertain stop keeps its durable cancel intent"
+    );
+    assert_eq!(
+        schedule_row(pool.as_ref(), &interrupted_schedule).await.0,
+        "running",
+        "the row stays non-terminal while the cleanup is unconfirmed"
+    );
+    assert!(
+        fixture
+            .handle
+            .get_workflow_session(&principal, interrupted_run.clone())
+            .await
+            .expect("the interrupted run stays inspectable")
+            .session
+            .failure_reason
+            .is_some(),
+        "an uncertain stop must stay actionable through its durable failure record"
+    );
+
+    // ── 4. The HUMAN WAIT whose frozen source is removed before the restart. ──
+    let wait_schedule = add_parallel_any_schedule(
+        &fixture.handle,
+        &principal,
+        CANCEL_WAIT_PRESET,
+        "restart-wait",
+    )
+    .await;
+    let wait_run = wait_for_schedule_run(pool.as_ref(), &wait_schedule).await;
+    wait_for_prompt_count(&fixture.host, 4).await;
+    fixture.host.release_parked();
+    let wait_id = wait_for_human_wait(pool.as_ref(), &wait_run).await;
+
+    // ── The process boundary. A changed/missing frozen source is
+    //    reconstruction unavailability for the waited run, never a fresh
+    //    schedule. ──
+    std::fs::remove_dir_all(nexus_home.join("presets").join(CANCEL_WAIT_PRESET))
+        .expect("remove the waited run's frozen preset source");
+    let report = fixture.handle.close().await.expect("owner close");
+    assert!(report.cleanup_confirmed, "close must report confirmed cleanup");
+    fixture.core.close().await.expect("core close");
+
+    // ── A SECOND factory owner over the same home: a NEW admission. ──
+    let (core_b, host_b, handle_b) = open_hosted_owner(&home).await;
+    assert!(
+        handle_b.engine_epoch() > epoch_a,
+        "the reopened owner must be a new admission ({epoch_a} -> {})",
+        handle_b.engine_epoch()
+    );
+    let principal_b = core_b.active_principal().await.unwrap();
+    let pool_b = handle_b.coordinator().pool();
+
+    // (a) The completed effect stays committed EXACTLY ONCE: same bytes, same
+    //     settled revision, and NO re-drive (a re-stepped run would move its
+    //     durable revision).
+    let completed_after = durable_record(pool_b.as_ref(), &completed_run).await;
+    assert_eq!(
+        completed_after.status.as_db_str(),
+        "completed",
+        "a completed run stays terminal across the restart"
+    );
+    assert_eq!(
+        completed_after.state_revision, completed_before.state_revision,
+        "recovery must not step a terminal run"
+    );
+    assert_eq!(
+        completed_after.graph_version, completed_before.graph_version,
+        "recovery must not re-drive a terminal run"
+    );
+    assert_eq!(
+        std::fs::read(fixture.root.join("notes/hosted.txt")).expect("the committed bytes"),
+        HOSTED_PAYLOAD,
+        "the committed effect must survive the restart unchanged"
+    );
+    assert_eq!(
+        committed_intent_revisions(pool_b.as_ref()).await,
+        vec![committed_revision.clone()],
+        "the restart must not settle a second commit revision"
+    );
+    let completed_detail = handle_b
+        .get_workflow_session(&principal_b, completed_run.clone())
+        .await
+        .expect("the completed run stays readable after the restart");
+    assert_eq!(completed_detail.session.status, "completed");
+    assert_eq!(
+        completed_detail
+            .workspace_commit
+            .as_ref()
+            .map(|commit| (commit.revision.clone(), commit.committed)),
+        Some((committed_revision.clone(), true)),
+        "the restart still exposes the durable revision without re-running the capability"
+    );
+    assert_eq!(
+        schedule_row(pool_b.as_ref(), &completed_schedule).await,
+        ("completed".to_string(), Some(completed_run.clone())),
+        "the completed schedule keeps the same single run"
+    );
+
+    // (b) The confirmed cancel stays cancelled.
+    let cancelled_after = durable_record(pool_b.as_ref(), &cancelled_run).await;
+    assert_eq!(
+        cancelled_after.status.as_db_str(),
+        "cancelled",
+        "a cancelled run is terminal and must never be re-driven"
+    );
+    let cancelled_detail = handle_b
+        .get_workflow_session(&principal_b, cancelled_run.clone())
+        .await
+        .expect("the cancelled run stays readable");
+    assert_eq!(cancelled_detail.session.status, "cancelled");
+    assert!(
+        cancelled_detail.workspace_commit.is_none(),
+        "a run cancelled before its commit checkpoint exposes no revision"
+    );
+    assert_eq!(
+        schedule_row(pool_b.as_ref(), &cancelled_schedule).await,
+        ("cancelled".to_string(), Some(cancelled_run.clone())),
+        "the cancelled row keeps its own run across the restart"
+    );
+
+    // (c) The uncertain stop stays `interrupted` — never normalized to
+    //     `cancelled` — and is not redispatched.
+    let interrupted_after = durable_record(pool_b.as_ref(), &interrupted_run).await;
+    assert_eq!(
+        interrupted_after.status.as_db_str(),
+        "interrupted",
+        "an unconfirmed stop must not be normalized to `cancelled` by the restart"
+    );
+    assert!(
+        interrupted_after
+            .state
+            .as_ref()
+            .is_some_and(|state| state.cancel_requested),
+        "the uncertain cancel intent survives the restart"
+    );
+    let interrupted_detail = handle_b
+        .get_workflow_session(&principal_b, interrupted_run.clone())
+        .await
+        .expect("the interrupted run stays readable");
+    assert_eq!(interrupted_detail.session.status, "interrupted");
+    assert!(
+        interrupted_detail.session.failure_reason.is_some(),
+        "the interrupted run stays actionable after the restart"
+    );
+    assert_eq!(
+        schedule_row(pool_b.as_ref(), &interrupted_schedule).await.0,
+        "running",
+        "the retryable row stays non-terminal until a confirmed cleanup"
+    );
+
+    // (d) The human wait survives its missing frozen source, and an authorized
+    //     continuation is a TYPED refusal — never a fresh schedule. (`resume`
+    //     is the core continuation seam for an owned run: `continue` itself is
+    //     served by the transport, and the reconstruction gate is evaluated
+    //     before any wait/state mutation.)
+    let wait_after = durable_record(pool_b.as_ref(), &wait_run).await;
+    assert_eq!(
+        wait_after.status.as_db_str(),
+        "waiting_for_input",
+        "a durable human wait is preserved across the restart"
+    );
+    assert_eq!(
+        wait_after
+            .state
+            .as_ref()
+            .and_then(|state| state.wait.as_ref())
+            .map(|wait| wait.wait_id.clone())
+            .as_deref(),
+        Some(wait_id.as_str()),
+        "the exact wait token survives the restart"
+    );
+    assert_eq!(
+        handle_b
+            .get_workflow_session(&principal_b, wait_run.clone())
+            .await
+            .expect("W4 stays readable for a preserved wait")
+            .session
+            .status,
+        "waiting_for_input"
+    );
+    let refused = handle_b
+        .signal_schedule(&principal_b, wait_schedule.clone(), signal("resume"))
+        .await
+        .unwrap_err();
+    match &refused {
+        nexus_core::CoreError::Coded { code, message } => {
+            assert_eq!(
+                code, "workflow_state_conflict",
+                "a missing frozen source is a typed conflict, got {refused:?}"
+            );
+            assert!(
+                message.contains("cannot be reconstructed"),
+                "the refusal must name the missing source: {message}"
+            );
+            assert!(
+                message.contains("cancel-only"),
+                "the refusal must keep the wait actionable (cancel-only): {message}"
+            );
+        }
+        other => panic!("a missing frozen source must refuse the continuation, got {other:?}"),
+    }
+    let wait_still = durable_record(pool_b.as_ref(), &wait_run).await;
+    assert_eq!(
+        wait_still.status.as_db_str(),
+        "waiting_for_input",
+        "a refused continuation must not consume or advance the wait"
+    );
+    assert_eq!(
+        wait_still
+            .state
+            .as_ref()
+            .and_then(|state| state.wait.as_ref())
+            .map(|wait| wait.wait_id.clone())
+            .as_deref(),
+        Some(wait_id.as_str()),
+        "the refused continuation leaves the exact wait token in place"
+    );
+    assert_eq!(
+        schedule_row(pool_b.as_ref(), &wait_schedule).await.0,
+        "running",
+        "the waited row keeps its owned run; no fresh schedule is minted"
+    );
+
+    // (e) The ring is gone with the old process, and that loss is EXPLICIT —
+    //     one control frame naming the run's inspect route — while W4 keeps
+    //     answering for the same run.
+    let subscription = handle_b
+        .subscribe_workflow_events(&principal_b, subscribe_request(&cancelled_run, None))
+        .await
+        .expect("the owned run still opens a subscription");
+    let control = handle_b
+        .next_workflow_events(&principal_b, subscription_token(&subscription))
+        .await
+        .expect("the control frame");
+    assert!(control.closed, "the lost ring closes the stream");
+    assert_eq!(control.events.len(), 1, "exactly one control frame");
+    assert_eq!(
+        control.events[0].event.as_str(),
+        "history_unavailable",
+        "ring loss must be explicit, never fabricated history: {:?}",
+        control.events[0]
+    );
+    assert_eq!(
+        control.events[0].id, "",
+        "the control frame carries no cursor"
+    );
+    let wire = frame_json(&control.events[0]);
+    assert_eq!(wire["run_id"], cancelled_run);
+    assert_eq!(
+        wire["inspect_url"],
+        format!("/v1/daemon/orchestration/sessions/{cancelled_run}"),
+        "the control frame names the run's public inspect route"
+    );
+    assert_eq!(
+        handle_b
+            .get_workflow_session(&principal_b, cancelled_run.clone())
+            .await
+            .expect("W4 stays readable while the ring is gone")
+            .session
+            .status,
+        "cancelled",
+        "the durable detail outlives the in-memory ring"
+    );
+
+    // The whole restart performed no work of its own.
+    assert_eq!(
+        host_b.prompt_count(),
+        0,
+        "a restart must not redispatch a single prompt"
+    );
+    assert_eq!(
+        root_run_count(pool_b.as_ref()).await,
+        4,
+        "a restart must never mint a run"
+    );
+
+    let report = handle_b.close().await.expect("the reopened owner closes");
+    assert!(report.cleanup_confirmed, "close must report confirmed cleanup");
+    core_b.close().await.expect("core close");
+}
+
+/// The §4 `workspace_commit` projection: a narrowly scoped read of ONE durable
+/// checkpoint, exposed once and unchanged across a restart.
+///
+/// Discriminations: a completed `workspace.commit` is exposed (with the exact
+/// settled revision read from the commit authority, not from the context), a
+/// run with no commit exposes nothing, a run whose declared commit FAILED
+/// exposes nothing while leaving durable failure evidence, an identical
+/// checkpoint under another Creator is not readable at all, and the malformed
+/// matrix (wrong type, empty revision, `committed` not true, missing member,
+/// extra member, another capability's pair, corrupt blob) exposes nothing.
+#[allow(clippy::too_many_lines)] // one contract; splitting hides the shape matrix
+#[tokio::test]
+#[serial_test::serial]
+async fn hosted_workspace_commit_projection_is_authorized_and_survives_restart() {
+    let fixture = hosted_fixture().await;
+    let home = fixture.tmp.path().to_path_buf();
+    let nexus_home = home.join(".nexus42");
+    let principal = fixture.core.active_principal().await.unwrap();
+    let pool = fixture.handle.coordinator().pool();
+    let epoch_a = fixture.handle.engine_epoch();
+    write_preset_bundle(
+        &nexus_home,
+        CANCEL_WAIT_PRESET,
+        &cancel_wait_preset_yaml(),
+        "unused by this preset\n",
+    );
+    write_preset_bundle(
+        &nexus_home,
+        FAILED_COMMIT_PRESET,
+        &failed_commit_preset_yaml(),
+        "unused by this preset\n",
+    );
+
+    // ── A committed run exposes its own settled revision — while it is still
+    //    parked (non-terminal) at its prompt. ──
+    let committed_schedule = add_hosted_schedule(&fixture).await;
+    wait_for_prompt_count(&fixture.host, 1).await;
+    let (_, owned) = schedule_row(pool.as_ref(), &committed_schedule).await;
+    let committed_run = owned.expect("the clock claimed the committed schedule's run");
+    let settled = committed_intent_revisions(pool.as_ref()).await;
+    assert_eq!(
+        settled.len(),
+        1,
+        "exactly one commit may have settled: {settled:?}"
+    );
+    let committed_revision = settled[0].clone();
+    let (checkpoint_revision, checkpoint_error) =
+        durable_commit_checkpoint(pool.as_ref(), &committed_run).await;
+    assert_eq!(
+        checkpoint_revision.as_deref(),
+        Some(committed_revision.as_str()),
+        "the durable checkpoint carries the settled revision"
+    );
+    assert!(
+        checkpoint_error.is_none(),
+        "a completed capability records no error: {checkpoint_error:?}"
+    );
+    let live = fixture
+        .handle
+        .get_workflow_session(&principal, committed_run.clone())
+        .await
+        .expect("the committed run's detail");
+    assert_eq!(
+        live.workspace_commit
+            .as_ref()
+            .map(|commit| (commit.revision.clone(), commit.committed)),
+        Some((committed_revision.clone(), true)),
+        "the committed run exposes its own durable revision"
+    );
+    fixture.host.release_parked();
+    wait_for_run_status(pool.as_ref(), &committed_run, "completed").await;
+
+    // ── A run with NO commit checkpoint exposes nothing. ──
+    let wait_schedule = add_parallel_any_schedule(
+        &fixture.handle,
+        &principal,
+        CANCEL_WAIT_PRESET,
+        "projection-no-commit",
+    )
+    .await;
+    let no_commit_run = wait_for_schedule_run(pool.as_ref(), &wait_schedule).await;
+    wait_for_prompt_count(&fixture.host, 2).await;
+    fixture.host.release_parked();
+    wait_for_human_wait(pool.as_ref(), &no_commit_run).await;
+    assert!(
+        fixture
+            .handle
+            .get_workflow_session(&principal, no_commit_run.clone())
+            .await
+            .expect("the waiting run's detail")
+            .workspace_commit
+            .is_none(),
+        "a run that never committed exposes no revision"
+    );
+
+    // ── A run whose declared commit FAILED: durable failure evidence, no
+    //    output, no effect — and nothing projected. ──
+    let failed_schedule = add_parallel_any_schedule(
+        &fixture.handle,
+        &principal,
+        FAILED_COMMIT_PRESET,
+        "projection-failed",
+    )
+    .await;
+    let failed_run = wait_for_schedule_run(pool.as_ref(), &failed_schedule).await;
+    assert_eq!(
+        wait_for_terminal_run(pool.as_ref(), &failed_run).await,
+        "completed",
+        "the graph finishes; a capability failure is a step status"
+    );
+    let (failed_output, failed_error) =
+        durable_commit_checkpoint(pool.as_ref(), &failed_run).await;
+    assert!(
+        failed_error.is_some(),
+        "the declared commit must have failed durably: {failed_error:?}"
+    );
+    assert!(
+        failed_output.is_none(),
+        "a failed commit writes no capability output: {failed_output:?}"
+    );
+    assert!(
+        !fixture.root.join("notes/never.txt").exists(),
+        "a failed commit applies nothing"
+    );
+    assert!(
+        fixture
+            .handle
+            .get_workflow_session(&principal, failed_run.clone())
+            .await
+            .expect("the failed-commit run's detail")
+            .workspace_commit
+            .is_none(),
+        "a failed commit must never yield a revision"
+    );
+
+    // ── The restart: the same revision, once. ──
+    fixture.host.release_all();
+    let report = fixture.handle.close().await.expect("owner close");
+    assert!(report.cleanup_confirmed, "close must report confirmed cleanup");
+    fixture.core.close().await.expect("core close");
+    let (core_b, _host_b, handle_b) = open_hosted_owner(&home).await;
+    assert!(
+        handle_b.engine_epoch() > epoch_a,
+        "the reopened owner must be a new admission ({epoch_a} -> {})",
+        handle_b.engine_epoch()
+    );
+    let principal_b = core_b.active_principal().await.unwrap();
+    let pool_b = handle_b.coordinator().pool();
+
+    let after = handle_b
+        .get_workflow_session(&principal_b, committed_run.clone())
+        .await
+        .expect("the committed run's detail after the restart");
+    assert_eq!(
+        after
+            .workspace_commit
+            .as_ref()
+            .map(|commit| (commit.revision.clone(), commit.committed)),
+        Some((committed_revision.clone(), true)),
+        "the restart exposes the SAME durable revision, not a fresh one"
+    );
+    assert_eq!(
+        committed_intent_revisions(pool_b.as_ref()).await,
+        vec![committed_revision.clone()],
+        "the restart settles no second commit revision"
+    );
+    assert!(
+        handle_b
+            .get_workflow_session(&principal_b, no_commit_run.clone())
+            .await
+            .expect("the waiting run's detail after the restart")
+            .workspace_commit
+            .is_none(),
+        "a run with no commit still exposes nothing after the restart"
+    );
+    assert!(
+        handle_b
+            .get_workflow_session(&principal_b, failed_run.clone())
+            .await
+            .expect("the failed-commit run's detail after the restart")
+            .workspace_commit
+            .is_none(),
+        "a failed commit still exposes nothing after the restart"
+    );
+
+    // ── The shape matrix on the live owner. A staged context is the
+    //    authorization source AND the checkpoint, so ownership and shape are
+    //    discriminated independently of the real owner's own runs. ──
+    let committed_context = r#"{"data":{"_capability_name":"workspace.commit","_capability_output":{"revision":"rev_staged","committed":true}}}"#;
+    stage_context_run_row(pool_b.as_ref(), "proj-owned-control", CREATOR, committed_context).await;
+    stage_context_run_row(
+        pool_b.as_ref(),
+        "proj-foreign",
+        "projection-foreign-creator",
+        committed_context,
+    )
+    .await;
+    let unbacked: [(&str, &str); 8] = [
+        (
+            "proj-absent-output",
+            r#"{"data":{"_capability_name":"workspace.commit"}}"#,
+        ),
+        (
+            "proj-other-capability",
+            r#"{"data":{"_capability_name":"workspace.open","_capability_output":{"revision":"rev_staged","committed":true}}}"#,
+        ),
+        (
+            "proj-wrong-type",
+            r#"{"data":{"_capability_name":"workspace.commit","_capability_output":{"revision":7,"committed":true}}}"#,
+        ),
+        (
+            "proj-empty-revision",
+            r#"{"data":{"_capability_name":"workspace.commit","_capability_output":{"revision":"","committed":true}}}"#,
+        ),
+        (
+            "proj-not-committed",
+            r#"{"data":{"_capability_name":"workspace.commit","_capability_output":{"revision":"rev_staged","committed":false}}}"#,
+        ),
+        (
+            "proj-missing-committed",
+            r#"{"data":{"_capability_name":"workspace.commit","_capability_output":{"revision":"rev_staged"}}}"#,
+        ),
+        (
+            "proj-extra-member",
+            r#"{"data":{"_capability_name":"workspace.commit","_capability_output":{"revision":"rev_staged","committed":true,"note":"not the output shape"}}}"#,
+        ),
+        ("proj-corrupt", "not json at all"),
+    ];
+    for (run_id, context) in unbacked {
+        stage_context_run_row(pool_b.as_ref(), run_id, CREATOR, context).await;
+        let detail = handle_b
+            .get_workflow_session(&principal_b, run_id.to_string())
+            .await
+            .unwrap_or_else(|err| panic!("{run_id} must stay readable: {err:?}"));
+        assert_eq!(
+            detail.session.session_id, run_id,
+            "the unbacked row is still the requested session"
+        );
+        assert!(
+            detail.workspace_commit.is_none(),
+            "{run_id} must project nothing: {:?}",
+            detail.workspace_commit
+        );
+    }
+
+    // The control: the IDENTICAL context under the admitted Creator IS
+    // projected, so the negatives above are about the checkpoint shape and the
+    // stored owner — never a vacuous always-absent field.
+    let control = handle_b
+        .get_workflow_session(&principal_b, "proj-owned-control".to_string())
+        .await
+        .expect("the control row's detail");
+    assert_eq!(
+        control
+            .workspace_commit
+            .map(|commit| (commit.revision, commit.committed)),
+        Some(("rev_staged".to_string(), true)),
+        "an exact successful output under the admitted Creator is projected"
+    );
+    // The same checkpoint under another Creator is not readable at all: the
+    // root row and its stored owner are authorized BEFORE the context is read.
+    match handle_b
+        .get_workflow_session(&principal_b, "proj-foreign".to_string())
+        .await
+        .unwrap_err()
+    {
+        nexus_core::CoreError::NotFound { resource } => assert_eq!(
+            resource, "workflow session proj-foreign",
+            "a foreign run closes as absent"
+        ),
+        other => panic!("a foreign checkpoint must not be readable, got {other:?}"),
+    }
+
+    let report = handle_b.close().await.expect("the reopened owner closes");
+    assert!(report.cleanup_confirmed, "close must report confirmed cleanup");
+    core_b.close().await.expect("core close");
 }

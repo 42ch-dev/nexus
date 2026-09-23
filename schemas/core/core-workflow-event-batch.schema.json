@@ -1,0 +1,41 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-workflow-event-batch.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CoreWorkflowEventBatch",
+  "description": "One bounded pull from a workflow event subscription: at most 16 frames and 1 MiB, already encoded, in ring order. Frames keep the existing run-event vocabulary (`run_state`, `host_event`, `gap`, `history_unavailable`) and the existing `<UUID epoch>:<decimal sequence>` cursor; the transport writes `id`/`event`/`data` verbatim and never resequences.",
+  "type": "object",
+  "required": ["events", "closed"],
+  "additionalProperties": false,
+  "properties": {
+    "events": {
+      "type": "array",
+      "maxItems": 16,
+      "description": "Frames strictly after the subscription's current cursor, in ring order.",
+      "items": {
+        "type": "object",
+        "required": ["id", "event", "data"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "SSE cursor `<UUID epoch>:<decimal sequence>`, or the empty string for a control frame that carries no cursor (a history_unavailable close)."
+          },
+          "event": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Event name discriminated from the frame payload."
+          },
+          "data": {
+            "type": "string",
+            "description": "Frame payload, already serialized by the core; the transport must not re-encode it."
+          }
+        }
+      }
+    },
+    "closed": {
+      "type": "boolean",
+      "description": "True when the stream ended AT this batch: the run reached its durable terminal frame, the ring is gone, or the subscription was released or the owner closed. No further pull is served for a closed subscription."
+    }
+  }
+}
