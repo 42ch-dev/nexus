@@ -158,7 +158,10 @@ export class OperationEventHub {
   }
 
   private buildFrame(sequence: number, event: string, data: string, isTerminal: boolean): StoredFrame {
-    return wireFrame(`${this.epoch}:${sequence}`, event, data, isTerminal);
+    // A Host terminal is BOTH a control frame (not charged to the data
+    // budget) and the frame that ends its stream; the two flags must travel
+    // separately or the replay loop walks past the terminal.
+    return wireFrame(`${this.epoch}:${sequence}`, event, data, isTerminal, isTerminal);
   }
 
   planReplay(cursor: string | undefined): ReplayPlan {
@@ -290,17 +293,24 @@ function formatSse(id: string, event: string, data: string): string {
  * replays them verbatim never renumbers, re-encodes or reorders. A frame with
  * an EMPTY `id` (the `history_unavailable` control frame) writes no `id:`
  * line at all: an empty `id:` field would reset the client's last-event-id
- * instead of leaving it alone, so it must not be emitted.
+ * instead of leaving it alone.
+ *
+ * `isControl` and `isTerminal` are independent and BOTH must travel: a Host
+ * terminal is a control frame (not charged to the data budget) AND the frame
+ * that ends its stream, while a retention gap is only the first. A frame the
+ * ceiling cannot mark terminal lets the replay loop walk past it and write
+ * whatever the hub retained behind it.
  */
 export function wireFrame(
   id: string,
   event: string,
   data: string,
   isControl: boolean,
+  isTerminal = false,
 ): StoredFrame {
   const text = id.length === 0 ? `event: ${event}\ndata: ${data}\n\n` : formatSse(id, event, data);
   const buffer = Buffer.from(text, 'utf8');
-  return { id, event, buffer, wireBytes: buffer.length, isControl, isTerminal: false };
+  return { id, event, buffer, wireBytes: buffer.length, isControl, isTerminal };
 }
 
 /**
