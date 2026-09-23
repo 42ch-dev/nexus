@@ -28,6 +28,7 @@ use crate::run_state::{
     ChildCheckpoint, RunCheckpoint, RunDescriptorV1, RunFailure, RunRecord, RunStateV1,
     SettlementResult, TerminalSettlementTarget, WorkflowStateStore,
 };
+use nexus_contracts::local::schedule::CoreContextPayload;
 use nexus_preset::source_identity::PresetSourceIdentity;
 
 /// Context key that effectful tasks set when they perform an external effect
@@ -52,6 +53,20 @@ pub const EXTERNAL_EFFECT_MARKER: &str = "__external_effect_ran";
 /// nothing.
 pub const CORE_CONTEXT_VERSION_KEY: &str = "core_context.version";
 
+/// Context key carrying the FLAT core-context body.
+///
+/// Bound only while the run's committed payload kind is
+/// [`CoreContextPayload::Text`] (creator-schedule master §6.4:
+/// `{{core_context.text}}` — "the text body (if payload kind is `Text`)").
+pub const CORE_CONTEXT_TEXT_KEY: &str = "core_context.text";
+
+/// Context key carrying the STRUCTURED core-context body.
+///
+/// Bound only while the run's committed payload kind is
+/// [`CoreContextPayload::Struct`] (§6.4: `{{core_context.struct.<path>}}` —
+/// "dotted-path lookup (if payload kind is `Struct`)").
+pub const CORE_CONTEXT_STRUCT_KEY: &str = "core_context.struct";
+
 /// Upper bound on cancel-intent fence reload/retry attempts (Finding 1).
 ///
 /// A cancel that loses the phase-1 revision CAS to a concurrent transition
@@ -65,14 +80,62 @@ pub const CANCEL_FENCE_RETRY_BOUND: u32 = 8;
 ///
 /// Admission writes [`CORE_CONTEXT_VERSION_KEY`] with the schedule pointer the
 /// run was frozen against; the boundary refresh advances it. A run that
-/// predates the version binding reads as version 0 — its schedule pointer then
-/// decides whether a refresh is due, which is exactly the pre-binding admission
-/// semantics.
-fn applied_core_context_version(context: &graph_flow::Context) -> u32 {
-    context
-        .get::<String>(CORE_CONTEXT_VERSION_KEY)
-        .and_then(|raw| raw.parse::<u32>().ok())
-        .unwrap_or(0)
+/// predates the version binding has NO marker and reads as version 0 — its
+/// schedule pointer then decides whether a refresh is due, which is exactly
+/// the pre-binding admission semantics.
+///
+/// A marker that is PRESENT but is not the decimal string every writer emits
+/// is corrupt metadata, not a legacy run: reinterpreting it as "no marker"
+/// would silently compare `0` against the committed pointer and skip a
+/// refresh the pointer demands. The caller therefore fails the boundary
+/// closed instead.
+///
+/// # Errors
+/// Returns the refusal reason when the marker exists with an unexpected shape.
+fn applied_core_context_version(context: &graph_flow::Context) -> Result<u32, String> {
+    let Some(marker) = context.get::<serde_json::Value>(CORE_CONTEXT_VERSION_KEY) else {
+        return Ok(0);
+    };
+    match marker {
+        serde_json::Value::String(raw) => raw.parse::<u32>().map_err(|_| {
+            format!("core-context version marker '{raw}' is not a decimal version")
+        }),
+        other => Err(format!(
+            "core-context version marker has unexpected JSON type ({other}); \
+             expected a decimal version string"
+        )),
+    }
+}
+
+/// Bind one committed `core_context` payload into a run's context under the
+/// namespace its KIND owns (§6.4), dropping the other kind's binding.
+///
+/// The two bindings are mutually exclusive by contract: `{{core_context.text}}`
+/// resolves only while the payload is [`CoreContextPayload::Text`], and
+/// `{{core_context.struct.<path>}}` only while it is
+/// [`CoreContextPayload::Struct`]. Leaving the previous kind bound would let a
+/// payload the run no longer owns satisfy a template — and serializing a
+/// structured body into the text namespace (or the reverse) would name a value
+/// no contract promises. Both admission and the boundary refresh bind through
+/// this one function so the two paths cannot drift (v1.195 P0-T6).
+///
+/// # Errors
+/// Returns the context write error (an unserializable value) unchanged.
+fn bind_core_context_payload(
+    context: &graph_flow::Context,
+    payload: &CoreContextPayload,
+) -> Result<(), graph_flow::GraphError> {
+    match payload {
+        CoreContextPayload::Text { body } => {
+            context.set(CORE_CONTEXT_TEXT_KEY, body.clone())?;
+            context.remove(CORE_CONTEXT_STRUCT_KEY);
+        }
+        CoreContextPayload::Struct { body } => {
+            context.set(CORE_CONTEXT_STRUCT_KEY, body.clone())?;
+            context.remove(CORE_CONTEXT_TEXT_KEY);
+        }
+    }
+    Ok(())
 }
 
 /// Whether the post-step root context carries the [`EXTERNAL_EFFECT_MARKER`],
@@ -1770,12 +1833,15 @@ impl EngineSharedState {
     ///   through [`CoreContextManager::head_for_run`] — never the newest row,
     ///   never an in-memory or test substitute.
     /// - A store failure, an unreadable/missing named version, a corrupt
-    ///   payload, or a run marker ahead of the committed pointer FAILS CLOSED:
-    ///   the boundary is refused rather than rendered from a stale or guessed
-    ///   snapshot.
-    /// - Only `core_context.text` and the applied-version marker are rewritten,
-    ///   and only while the run sits at a boundary (no step in flight). An
-    ///   unchanged pointer writes nothing at all.
+    ///   payload, a corrupt applied-version marker, or a run marker ahead of
+    ///   the committed pointer FAILS CLOSED: the boundary is refused rather
+    ///   than rendered from a stale or guessed snapshot.
+    /// - Exactly one payload namespace is (re)bound — `core_context.text` for
+    ///   a `Text` version, `core_context.struct` for a `Struct` version — plus
+    ///   the applied-version marker, and only while the run sits at a boundary
+    ///   (no step in flight). The other kind's binding is dropped so a template
+    ///   can never read a payload the run no longer owns. An unchanged pointer
+    ///   writes nothing at all.
     ///
     /// # Errors
     /// Returns [`EngineError`] when the committed snapshot cannot be read or
@@ -1784,8 +1850,6 @@ impl EngineSharedState {
         &self,
         session_id: &SessionId,
     ) -> Result<(), EngineError> {
-        use nexus_contracts::local::schedule::CoreContextPayload;
-
         let Some(store) = &self.core_context_store else {
             return Ok(());
         };
@@ -1805,7 +1869,12 @@ impl EngineSharedState {
             .await
             .map_err(EngineError::GraphFlow)?
             .ok_or_else(|| EngineError::SessionNotFound(session_id.0.clone()))?;
-        let applied = applied_core_context_version(&session.context);
+        let applied = applied_core_context_version(&session.context).map_err(|reason| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "run '{}': {reason}; refusing the boundary (corrupt version metadata)",
+                session_id.0
+            )))
+        })?;
         let committed_version = committed.version.0;
         // Ownership guard: a run can never render a version NEWER than the
         // pointer of the schedule that owns it — that shape means the marker
@@ -1825,18 +1894,11 @@ impl EngineSharedState {
             return Ok(());
         }
 
-        let body = match committed.content {
-            CoreContextPayload::Text { body } => body,
-            CoreContextPayload::Struct { body } => serde_json::to_string(&body).map_err(|e| {
-                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
-                    "run '{}': core-context struct payload serialization failed: {e}",
-                    session_id.0
-                )))
-            })?,
-        };
-        session
-            .context
-            .set("core_context.text", body)
+        // The committed payload kind decides the namespace (§6.4): a run
+        // moving to a `Struct` version must render `{{core_context.struct.*}}`
+        // and lose the stale text binding, and the reverse. Both admission and
+        // this refresh bind through the one helper so they cannot drift.
+        bind_core_context_payload(&session.context, &committed.content)
             .map_err(EngineError::GraphFlow)?;
         session
             .context
@@ -1851,6 +1913,10 @@ impl EngineSharedState {
             schedule_id = %committed.schedule_id,
             from_version = applied,
             to_version = committed_version,
+            payload_kind = match &committed.content {
+                CoreContextPayload::Text { .. } => "text",
+                CoreContextPayload::Struct { .. } => "struct",
+            },
             "outer state boundary refreshed core context from the committed pointer"
         );
         Ok(())
@@ -4136,10 +4202,12 @@ impl GraphFlowEngine {
     ///
     /// Mirrors [`start_preset_run`] but freezes the schedule admission's
     /// input map, agent bindings and work id into the descriptor AND seeds
-    /// the session context (`preset.input.*`, `core_context.text`) before
-    /// the initial checkpoint is persisted — so the first step renders real
-    /// input and the descriptor/core seed are durable before eligibility is
-    /// published (A3: persist descriptor/core seed before enqueue).
+    /// the session context (`preset.input.*`, the core-context payload under
+    /// the namespace its KIND owns — `core_context.text` for `Text`,
+    /// `core_context.struct` for `Struct`) before the initial checkpoint is
+    /// persisted — so the first step renders real input and the descriptor/
+    /// core seed are durable before eligibility is published (A3: persist
+    /// descriptor/core seed before enqueue).
     ///
     /// `session_id` is caller-minted: the schedule admission claims the
     /// schedule row with this exact id BEFORE the run is created, so a
@@ -4157,7 +4225,7 @@ impl GraphFlowEngine {
         creator_id: &str,
         work_id: Option<String>,
         input: serde_json::Map<String, serde_json::Value>,
-        core_context: Option<&str>,
+        core_context: Option<&CoreContextPayload>,
         agent_bindings: std::collections::HashMap<String, crate::run_state::AgentBinding>,
         graph: Arc<Graph>,
     ) -> Result<SessionId, EngineError> {
@@ -4180,8 +4248,8 @@ impl GraphFlowEngine {
                     .context
                     .set(format!("preset.input.{key}"), value.clone())?;
             }
-            if let Some(cc) = core_context {
-                session.context.set("core_context.text", cc.to_string())?;
+            if let Some(payload) = core_context {
+                bind_core_context_payload(&session.context, payload)?;
             }
             let checkpoint = RunCheckpoint {
                 root: &session,
@@ -4256,7 +4324,7 @@ impl GraphFlowEngine {
         creator_id: &str,
         work_id: Option<String>,
         input: serde_json::Map<String, serde_json::Value>,
-        core_context: Option<&str>,
+        core_context: Option<&CoreContextPayload>,
         core_context_version: u32,
         expected_core_context_version: u32,
         agent_bindings: std::collections::HashMap<String, crate::run_state::AgentBinding>,
@@ -4311,8 +4379,8 @@ impl GraphFlowEngine {
                 .context
                 .set(format!("preset.input.{key}"), value.clone())?;
         }
-        if let Some(cc) = core_context {
-            session.context.set("core_context.text", cc.to_string())?;
+        if let Some(payload) = core_context {
+            bind_core_context_payload(&session.context, payload)?;
         }
         // The frozen version this run renders until its next outer state
         // boundary: the boundary refresh compares the schedule's committed
@@ -5536,6 +5604,94 @@ mod tests {
             CapabilityRegistry::with_builtins(),
         ));
         GraphFlowEngine::new_with_storage(storage, caps)
+    }
+
+    /// v1.195 P0-T6: the applied-version marker distinguishes a LEGACY run
+    /// (no marker → the pre-binding version 0, where the schedule pointer
+    /// decides whether a refresh is due) from CORRUPT metadata, which is
+    /// refused instead of silently read as version 0.
+    ///
+    /// The corrupt arm is the dangerous one: with a committed pointer at 0 the
+    /// equality path would return without refreshing AND without refusing, so
+    /// a malformed marker would silently keep a stale snapshot.
+    #[test]
+    fn applied_version_marker_is_fail_closed_when_present_but_malformed() {
+        let context = graph_flow::Context::new();
+        assert_eq!(
+            applied_core_context_version(&context),
+            Ok(0),
+            "an absent marker is the legacy pre-binding run"
+        );
+
+        context.set(CORE_CONTEXT_VERSION_KEY, "7").unwrap();
+        assert_eq!(applied_core_context_version(&context), Ok(7));
+
+        context.set(CORE_CONTEXT_VERSION_KEY, "not-a-version").unwrap();
+        let err = applied_core_context_version(&context)
+            .expect_err("a non-decimal marker must refuse, never read as version 0");
+        assert!(err.contains("not-a-version"), "got {err}");
+
+        context.set(CORE_CONTEXT_VERSION_KEY, 7u32).unwrap();
+        let err = applied_core_context_version(&context)
+            .expect_err("a wrong-typed marker must refuse, never read as version 0");
+        assert!(err.contains("unexpected JSON type"), "got {err}");
+    }
+
+    /// v1.195 P0-T6: one committed payload binds exactly ONE namespace — the
+    /// one its kind owns — and drops the other kind's binding, so a template
+    /// can never resolve a payload the run no longer carries.
+    #[test]
+    fn binding_a_payload_owns_exactly_one_namespace() {
+        let context = graph_flow::Context::new();
+
+        bind_core_context_payload(
+            &context,
+            &CoreContextPayload::Text {
+                body: "flat body".to_string(),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            context.get::<String>(CORE_CONTEXT_TEXT_KEY).as_deref(),
+            Some("flat body")
+        );
+        assert!(context.get::<serde_json::Value>(CORE_CONTEXT_STRUCT_KEY).is_none());
+
+        bind_core_context_payload(
+            &context,
+            &CoreContextPayload::Struct {
+                body: serde_json::json!({ "idea": "structured body" }),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            context
+                .get::<serde_json::Value>(CORE_CONTEXT_STRUCT_KEY)
+                .and_then(|value| value.get("idea").and_then(|field| field.as_str()).map(str::to_string))
+                .as_deref(),
+            Some("structured body"),
+            "a struct payload resolves under the dotted struct namespace"
+        );
+        assert!(
+            context.get::<serde_json::Value>(CORE_CONTEXT_TEXT_KEY).is_none(),
+            "the stale text binding must be dropped when the run moves to a struct version"
+        );
+
+        bind_core_context_payload(
+            &context,
+            &CoreContextPayload::Text {
+                body: "back to text".to_string(),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            context.get::<String>(CORE_CONTEXT_TEXT_KEY).as_deref(),
+            Some("back to text")
+        );
+        assert!(
+            context.get::<serde_json::Value>(CORE_CONTEXT_STRUCT_KEY).is_none(),
+            "the stale struct binding must be dropped when the run moves back to text"
+        );
     }
 
     /// P3 T1 rereview-4 P1 (A7 rule 2): a NON-TERMINAL descendant must name

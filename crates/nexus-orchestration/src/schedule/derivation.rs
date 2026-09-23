@@ -38,6 +38,19 @@ pub enum CoreContextError {
         "core context version race on schedule {0}: the pointer no longer names version {1}"
     )]
     VersionRace(String, u32),
+    /// More than one schedule names the same run as its
+    /// `current_session_id`, so "the schedule that owns this run" has no
+    /// single answer.
+    ///
+    /// Duplicate ownership is not a DB constraint, so the run's context
+    /// schedule would otherwise be whichever row the query happened to
+    /// return — a silent cross-wiring of one run's prompt. Refused instead of
+    /// picked: the caller must not render a snapshot it cannot attribute.
+    #[error(
+        "run {0} is named as current_session_id by {1} schedules ({2}); \
+         refusing to choose one"
+    )]
+    AmbiguousOwnership(String, usize, String),
     #[error("serde error: {0}")]
     Serde(#[from] serde_json::Error),
 }
@@ -611,23 +624,42 @@ impl CoreContextManager {
     /// storage/serde failure its own variant) so the caller fails closed
     /// instead of rendering an unverified snapshot.
     ///
+    /// Exactly one schedule must name the run. `creator_schedules.
+    /// current_session_id` carries no uniqueness constraint, so a duplicate or
+    /// corrupt association would otherwise resolve to an arbitrary row and
+    /// cross-wire one run's prompt: two matches are
+    /// [`CoreContextError::AmbiguousOwnership`], never a silent pick.
+    ///
     /// # Errors
     /// Returns [`CoreContextError`] on a database/deserialization failure, on a
-    /// pointer outside the version range, or when the named version row is
-    /// absent.
+    /// pointer outside the version range, when the named version row is
+    /// absent, or when more than one schedule owns the run.
     pub async fn head_for_run(
         &self,
         session_id: &str,
     ) -> Result<Option<CoreContextRecord>, CoreContextError> {
-        let row: Option<(String, i64)> = sqlx::query_as(
+        let mut rows: Vec<(String, i64)> = sqlx::query_as(
             "SELECT schedule_id, current_core_context_version
              FROM creator_schedules WHERE current_session_id = ?",
         )
         .bind(session_id)
-        .fetch_optional(&*self.pool)
+        .fetch_all(&*self.pool)
         .await?;
-        let Some((schedule_id, version)) = row else {
-            return Ok(None);
+        let (schedule_id, version) = match rows.len() {
+            // No owning schedule: the run carries no core-context contract.
+            0 => return Ok(None),
+            1 => rows.remove(0),
+            owners => {
+                rows.sort_unstable();
+                return Err(CoreContextError::AmbiguousOwnership(
+                    session_id.to_string(),
+                    owners,
+                    rows.iter()
+                        .map(|(schedule_id, _)| schedule_id.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                ));
+            }
         };
         let version = u32::try_from(version).map_err(|_| {
             CoreContextError::Serde(serde_json::Error::custom(format!(
@@ -1161,6 +1193,89 @@ mod tests {
         assert_eq!(merged["a"], 1);
         assert_eq!(merged["b"], 3);
         assert_eq!(merged["c"], 4);
+    }
+
+    // ---------- head_for_run: run → owning schedule resolution ----------
+
+    /// Helper: name `session_id` as `schedule_id`'s owned run.
+    ///
+    /// `creator_schedules.current_session_id` is a real FK, so the session row
+    /// exists first — the same shape a durable run has when a schedule owns it.
+    async fn claim_run(pool: &SqlitePool, schedule_id: &str, session_id: &str) {
+        let now = chrono::Utc::now().timestamp();
+        // SAFETY: test-only — DML helpers for a durable run + its claim.
+        sqlx::query(
+            "INSERT OR IGNORE INTO orchestration_sessions
+               (session_id, creator_id, preset_id, preset_version, status,
+                context_json, created_at, updated_at)
+             VALUES (?, 'test-creator', 'test-preset', 1, 'running', ?, ?, ?)",
+        )
+        .bind(session_id)
+        .bind(b"{}".as_slice())
+        .bind(now)
+        .bind(now)
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "UPDATE creator_schedules SET current_session_id = ?, status = 'running'
+             WHERE schedule_id = ?",
+        )
+        .bind(session_id)
+        .bind(schedule_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    /// `head_for_run` resolves the exact committed version of the ONE schedule
+    /// that names the run, reports `None` when no schedule does, and REFUSES
+    /// when two schedules claim the same run: the ownership the whole
+    /// core-context contract rests on has no single answer, so picking the row
+    /// the query happened to return would cross-wire one run's prompt.
+    #[tokio::test]
+    async fn head_for_run_refuses_ambiguous_ownership() {
+        let (pool, _db) = fresh_pool().await;
+        let mgr = CoreContextManager::new(pool);
+        let owned = ScheduleId("HEAD-OWNED".to_string());
+        insert_test_schedule(&mgr.pool, &owned.0).await;
+        mgr.apply_seed(&owned, "owned context", CoreContextAuthor::System)
+            .await
+            .unwrap();
+        claim_run(&mgr.pool, &owned.0, "run-head-1").await;
+
+        let record = mgr
+            .head_for_run("run-head-1")
+            .await
+            .expect("one owner must resolve")
+            .expect("the owning schedule yields its committed version");
+        assert_eq!(record.schedule_id, owned.0);
+        assert_eq!(record.version, CoreContextVersion(0));
+        assert!(matches!(
+            record.content,
+            CoreContextPayload::Text { ref body } if body == "owned context"
+        ));
+
+        assert!(
+            mgr.head_for_run("run-nobody-owns").await.unwrap().is_none(),
+            "a run no schedule names carries no core-context contract"
+        );
+
+        // A second schedule naming the SAME run: the context schedule is
+        // ambiguous, so the lookup must fail closed rather than choose one.
+        let second = ScheduleId("HEAD-SECOND".to_string());
+        insert_test_schedule(&mgr.pool, &second.0).await;
+        claim_run(&mgr.pool, &second.0, "run-head-1").await;
+
+        let ambiguous = mgr.head_for_run("run-head-1").await;
+        assert!(
+            ambiguous.is_err(),
+            "two schedules naming one run must refuse, got {ambiguous:?}"
+        );
+        let reason = ambiguous.unwrap_err().to_string();
+        assert!(reason.contains("run-head-1"), "names the run: {reason}");
+        assert!(reason.contains("HEAD-OWNED"), "names both owners: {reason}");
+        assert!(reason.contains("HEAD-SECOND"), "names both owners: {reason}");
     }
 
     // ---------- R6: Per-schedule version bump race ----------

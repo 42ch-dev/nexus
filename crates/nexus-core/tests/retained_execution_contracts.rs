@@ -4300,7 +4300,10 @@ async fn wait_for_signalable_gate_park(pool: &sqlx::SqlitePool, run_id: &str) {
 /// row still owning its parked run), resumes the SAME run, and then asserts the
 /// durable row follows the run: list AND inspect show the post-resume status,
 /// the identity is unchanged (one root run, same `current_session_id`), and a
-/// cancel that races the resume leaves the TERMINAL winner standing.
+/// cancel that races the resume leaves the TERMINAL winner standing. The
+/// resume also re-drives that same root (P0-T6), so the case additionally pins
+/// the re-drive: the parked run is stepped again and re-parks, instead of
+/// sitting at `running` with nobody driving it.
 #[allow(clippy::too_many_lines)] // one linear public journey; splitting hides the ordering evidence
 #[tokio::test]
 #[serial_test::serial]
@@ -4362,7 +4365,10 @@ async fn public_resume_reconciles_the_paused_schedule_row() {
     );
 
     // ── 2. Resume the SAME run: the durable row must follow the run it owns —
-    //       never the other way round (no fabricated `running`). ──
+    //       never the other way round (no fabricated `running`). The resume
+    //       also RE-DRIVES that same root (P0-T6): the status mutation alone
+    //       would leave the parked run's driver unrestarted, so `running`
+    //       would name a run nobody drives. ──
     let resumed = fixture
         .handle
         .signal_schedule(&principal, paused_schedule.clone(), signal("resume"))
@@ -4372,10 +4378,16 @@ async fn public_resume_reconciles_the_paused_schedule_row() {
         resumed.status, "running",
         "the response carries the durable RUN status"
     );
+    // The re-drive is the difference between a status flip and a driven run:
+    // this gate can never be satisfied, so the honest post-resume outcome is
+    // the SAME run parking again — which only a driver that really stepped it
+    // can produce (without the re-drive the run would sit at `running` with no
+    // owner, and this wait would time out).
+    wait_for_signalable_gate_park(pool.as_ref(), &run_id).await;
     assert_eq!(
         durable_record(pool.as_ref(), &run_id).await.status.as_db_str(),
-        "running",
-        "the owned run is durably running after the resume"
+        "paused",
+        "the re-driven run settles back on the unsatisfiable gate, same run"
     );
     let (status, owned) = schedule_row(pool.as_ref(), &paused_schedule).await;
     assert_eq!(

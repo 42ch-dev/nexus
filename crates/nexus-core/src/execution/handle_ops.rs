@@ -492,7 +492,10 @@ impl ExecutionHandle {
     ///   and the signal closes with the exact `workflow_state_conflict`. A
     ///   successful resume then reconciles the durable row to the run it owns
     ///   (see [`Self::reconcile_resumed_row`]) so list/inspect never keep
-    ///   reading a stale `paused`.
+    ///   reading a stale `paused`, and re-drives that SAME run through the
+    ///   coordinator's single-flight owner — the status mutation alone would
+    ///   leave a run whose driver already stopped (a converge/merge park)
+    ///   claiming `running` with nobody driving it (v1.195 P0-T6).
     /// - `cancel` on an admitted schedule cancels that owned run through the
     ///   coordinator's single cancel owner (durable cancel-intent fence →
     ///   run token → bounded owned-Host teardown → terminal `cancelled`, or
@@ -551,6 +554,23 @@ impl ExecutionHandle {
                         // list/inspect projection claiming `paused`.
                         self.reconcile_resumed_row(principal, &schedule_id, &run_id)
                             .await?;
+                        // The status mutation alone leaves the run with NO
+                        // owner: the driver that stopped on a converge/merge
+                        // park does not come back, so `running` would name a
+                        // run nothing is driving. Re-drive THIS SAME root
+                        // through the single coordinator owner (v1.195 P0-T6).
+                        //
+                        // Left LAST, after the row followed the run, so the
+                        // reconciliation fences against the resumed status
+                        // instead of racing the fresh driver. `ensure_driving`
+                        // is single-flight and its durable-state gate still
+                        // refuses terminal/interrupted/human-wait states, so
+                        // a manual wait is never implicitly continued and no
+                        // second driver is ever spawned.
+                        self.coordinator()
+                            .ensure_driving(&SessionId(run_id.clone()))
+                            .await
+                            .map_err(map_run_control_error)?;
                         return Ok(SignalScheduleResponse {
                             schedule_id,
                             status: result.status,
@@ -1613,6 +1633,16 @@ fn map_context_error(err: nexus_orchestration::schedule::derivation::CoreContext
             message: format!(
                 "core-context version race on schedule {schedule_id}: the pointer no longer \
                  names version {version}"
+            ),
+        },
+        // More than one schedule names the run: the ownership the whole
+        // core-context contract rests on is ambiguous, so the request is a
+        // state conflict rather than a silent pick of one schedule's context.
+        E::AmbiguousOwnership(run_id, owners, schedules) => CoreError::Coded {
+            code: "workflow_state_conflict".to_string(),
+            message: format!(
+                "run {run_id} is named as current_session_id by {owners} schedules \
+                 ({schedules}); refusing to choose one"
             ),
         },
         E::Serde(e) => CoreError::InvalidInput {

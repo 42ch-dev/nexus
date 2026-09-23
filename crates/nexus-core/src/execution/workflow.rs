@@ -1580,12 +1580,18 @@ impl WorkflowRunCoordinator {
         validate_agent_bindings(&loaded, &agent_bindings, self.provider_catalog.as_ref()).await?;
 
         // Freeze the supplied seed: JSON object → structured `preset.input.*`;
-        // anything else → core-context text.
+        // anything else → the core-context TEXT payload (the kind a bare seed
+        // is), bound under `core_context.text` at admission.
         let (input, core_context) = seed.map_or_else(
             || (serde_json::Map::new(), None),
             |seed_text| match serde_json::from_str::<serde_json::Value>(seed_text) {
                 Ok(serde_json::Value::Object(map)) => (map, None),
-                _ => (serde_json::Map::new(), Some(seed_text.to_string())),
+                _ => (
+                    serde_json::Map::new(),
+                    Some(nexus_contracts::local::schedule::CoreContextPayload::Text {
+                        body: seed_text.to_string(),
+                    }),
+                ),
             },
         );
 
@@ -1608,7 +1614,7 @@ impl WorkflowRunCoordinator {
                 creator_id,
                 None,
                 input,
-                core_context.as_deref(),
+                core_context.as_ref(),
                 agent_bindings,
                 Arc::new(wired),
             )
@@ -2786,17 +2792,13 @@ impl WorkflowRunCoordinator {
             {
                 Ok(record) => {
                     let version = record.version.0;
-                    let body = match record.content {
-                        nexus_contracts::local::schedule::CoreContextPayload::Text { body } => body,
-                        nexus_contracts::local::schedule::CoreContextPayload::Struct { body } => {
-                            serde_json::to_string(&body).map_err(|e| {
-                                RunControlError::Admission(format!(
-                                    "core-context struct serialization failed: {e}"
-                                ))
-                            })?
-                        }
-                    };
-                    (Some(body), version)
+                    // The frozen payload keeps its KIND: admission binds it
+                    // under the namespace its kind owns (§6.4), so the run's
+                    // FIRST state renders `{{core_context.struct.<path>}}` for a
+                    // struct version exactly as a later boundary does — never
+                    // the structured body serialized into the text namespace
+                    // (v1.195 P0-T6).
+                    (Some(record.content), version)
                 }
                 Err(
                     nexus_orchestration::schedule::derivation::CoreContextError::VersionNotFound(
@@ -2879,7 +2881,7 @@ impl WorkflowRunCoordinator {
                 &row.creator_id,
                 work_id,
                 input,
-                core_context.as_deref(),
+                core_context.as_ref(),
                 core_context_version,
                 core_context_version,
                 agent_bindings,
@@ -3005,14 +3007,18 @@ impl WorkflowRunCoordinator {
         // other reconstruction failure surfaces `reconstruction_unavailable`
         // BEFORE any signal mutates the durable wait: the human wait stays
         // preserved and legal actions become cancel-only. The gate is
-        // evaluated only for Continue (the only signal that would drive a
-        // recovered session); Cancel/Pause/Resume do not require a runner.
+        // evaluated for Continue AND Resume — the two signals that make a run
+        // runnable and are therefore re-driven. Continue is re-driven at the
+        // tail of this function; Resume is re-driven by the schedule resume
+        // seam AFTER it has reconciled the owning row
+        // (`ExecutionHandle::signal_schedule`), so the row can never race the
+        // fresh driver. Cancel/Pause only stop a run and need no runner.
         //
         // The gate is idempotent and race-safe: a session already being
         // driven (or reconstructed) by another caller has a runner present
         // and passes immediately; the durable continue CAS below is still
         // the single linearization point for consuming the wait.
-        if matches!(signal, RunSignal::Continue { .. }) {
+        if matches!(signal, RunSignal::Continue { .. } | RunSignal::Resume) {
             if let Err(e) = self.engine.ensure_recovered_runner_inner(session_id).await {
                 return Err(RunControlError::ReconstructionUnavailable {
                     session_id: session_id.0.clone(),

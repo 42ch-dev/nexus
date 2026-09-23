@@ -617,6 +617,153 @@ states:
 }
 
 /**
+ * The P0-T6 STRUCT-BINDING fixture (Critical): three boundaries whose prompts
+ * render the core-context payload under the namespace its KIND owns.
+ *
+ * `first` renders `{{core_context.text}}` (the version-0 text seed), `second`
+ * renders `{{core_context.struct.idea}}` — reachable only if the boundary
+ * refresh bound a committed `Struct` version under `core_context.struct` — and
+ * `third` renders both struct fields, which is reachable only if the SECOND
+ * committed struct version was re-read at that boundary. Each state's `enter`
+ * is the real `acp.prompt` capability with `tool_policy: deny_all`, and the
+ * fixture peer records the prompt it received, so the peer's request log is the
+ * boundary's own evidence. The capability-arg renderer is strict: a placeholder
+ * the run cannot resolve REFUSES the state (never a literal `{{...}}` prompt),
+ * which is exactly how the old namespace bug surfaces.
+ */
+const STRUCT_CONTEXT_PRESET = 'p0t6-struct-context';
+const STRUCT_CONTEXT_MARKER = 'P0T6-STRUCT';
+const STRUCT_CONTEXT_IDEA = 'P0-T6 struct idea: the next boundary renders this field';
+const STRUCT_CONTEXT_LATE = 'P0-T6 struct late field: it lands one boundary later';
+
+function structContextPresetYaml() {
+  return `preset:
+  id: ${STRUCT_CONTEXT_PRESET}
+  version: 1
+  kind: creator
+  description: "P0-T6 struct binding fixture — the next boundary renders the committed STRUCT payload"
+  requires_capabilities: [acp.prompt]
+  initial: first
+  terminal: done
+states:
+  - id: first
+    enter:
+      - kind: capability
+        name: acp.prompt
+        args:
+          prompt: "${STRUCT_CONTEXT_MARKER}:first|{{core_context.text}}|END"
+          tool_policy: deny_all
+    next: second
+  - id: second
+    enter:
+      - kind: capability
+        name: acp.prompt
+        args:
+          prompt: "${STRUCT_CONTEXT_MARKER}:second|{{core_context.struct.idea}}|END"
+          tool_policy: deny_all
+    next: third
+  - id: third
+    enter:
+      - kind: capability
+        name: acp.prompt
+        args:
+          prompt: "${STRUCT_CONTEXT_MARKER}:third|{{core_context.struct.idea}}|{{core_context.struct.late}}|END"
+          tool_policy: deny_all
+    next: done
+  - id: done
+    terminal: true
+`;
+}
+
+/**
+ * The P0-T6 ADMISSION-STRUCT fixture: ONE boundary that renders the structured
+ * payload the run was ADMITTED against.
+ *
+ * A schedule with no owned run can be structurally edited (the public PATCH
+ * refuses only terminal rows), so resuming such a row admits the run against
+ * the committed `Struct` version — the run's FIRST state must resolve
+ * `{{core_context.struct.idea}}` from that frozen snapshot, the same namespace
+ * contract the boundary refresh serves for later states.
+ */
+const STRUCT_ADMIT_PRESET = 'p0t6-struct-admit';
+const STRUCT_ADMIT_MARKER = 'P0T6-STRUCT-ADMIT';
+
+function structAdmitPresetYaml() {
+  return `preset:
+  id: ${STRUCT_ADMIT_PRESET}
+  version: 1
+  kind: creator
+  description: "P0-T6 struct admission fixture — the first boundary renders the frozen STRUCT payload"
+  requires_capabilities: [acp.prompt]
+  initial: only
+  terminal: done
+states:
+  - id: only
+    enter:
+      - kind: capability
+        name: acp.prompt
+        args:
+          prompt: "${STRUCT_ADMIT_MARKER}:only|{{core_context.struct.idea}}|END"
+          tool_policy: deny_all
+    next: done
+  - id: done
+    terminal: true
+`;
+}
+
+/**
+ * The P0-T6 RE-DRIVE fixture: the SAME unreachable-branch park as the W6 case,
+ * but with the DR-06 bounded-join deadline and a `timed_out` reroute state.
+ *
+ * The admitted run still parks at `join` (1/2 arrivals, no human wait, no
+ * in-flight marker) and its driver still stops — but the deadline gives that
+ * parked run a REACHABLE next step: a re-drive past `timeout_ms` reroutes to
+ * `timed_out`, whose real `acp.prompt` boundary is the observable next step.
+ * Without a re-drive the deadline is never evaluated again and the run stays
+ * durably `running` with nobody driving it.
+ */
+const RESUME_TIMEOUT_PRESET = 'p0t6-resume-timeout';
+const RESUME_TIMEOUT_MARKER = 'P0T6-RESUME-TIMEOUT';
+const RESUME_TIMEOUT_MS = 400;
+
+function resumeTimeoutPresetYaml() {
+  return `preset:
+  id: ${RESUME_TIMEOUT_PRESET}
+  version: 1
+  kind: creator
+  description: "P0-T6 re-drive fixture — a bounded join parks, then resumes onto its next state"
+  requires_capabilities: [acp.prompt]
+  initial: start
+  terminal: done
+states:
+  - id: start
+    next: branch_a
+  - id: branch_a
+    next:
+      branches: []
+      default: join
+  - id: branch_b
+    description: "Hanging upstream edge — never walked, never arrives"
+    next: join
+  - id: join
+    converge: { strategy: wait_for_all }
+    timeout_ms: ${RESUME_TIMEOUT_MS}
+    on_timeout: timed_out
+    next: done
+  - id: timed_out
+    enter:
+      - kind: capability
+        name: acp.prompt
+        args:
+          prompt: "${RESUME_TIMEOUT_MARKER}:next|END"
+          tool_policy: deny_all
+    next: done
+  - id: done
+    terminal: true
+`;
+}
+
+/**
  * The W5 boundary graph (S0-3): one state whose `enter` action is the real
  * `acp.prompt` capability, with the frozen `core_context.text` rendered into the
  * prompt payload. The engine renders capability args against the run's context
@@ -1147,7 +1294,10 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', () 
    * row flips while the run it owns keeps its identity), the resume signals
    * that SAME run over HTTP, the response carries the durable RUN status, and
    * both public projections read the reconciled row — with no second run
-   * minted.
+   * minted. The resume also RE-DRIVES that same root (single-flight), so the
+   * parked driver is restarted: on this unsatisfiable gate the run re-parks,
+   * which is what makes the difference between "an owner is driving it" and a
+   * `running` status nobody is driving observable from the outside.
    *
    * The graph is authored through the PUBLIC preset surface (scaffold →
    * validated PATCH of its YAML), so the preset, the schedule, its admission
@@ -1206,11 +1356,23 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', () 
         { label: `schedule ${scheduleId} owned run identity` },
       );
       const runId = admitted.schedule.current_session_id;
-      const parked = await waitFor(
-        () => inspectSession(runId),
-        (payload) => payload.session.status === 'paused',
-        { label: `run ${runId} converge-gate park` },
+      // The run projection cannot tell a committed converge-gate park from an
+      // inter-task boundary pause the drive loop is about to step past, so the
+      // park is confirmed by a quiet window: a still-driving run shows itself
+      // as `running` (or as a fresh prompt-free step) inside it, and only the
+      // gate park stays put.
+      await waitFor(
+        async () => {
+          const first = await inspectSession(runId);
+          if (first.session.status !== 'paused') return false;
+          await delay(500);
+          const second = await inspectSession(runId);
+          return second.session.status === 'paused';
+        },
+        (steady) => steady === true,
+        { label: `run ${runId} steady converge-gate park`, timeout: 20_000 },
       );
+      const parked = await inspectSession(runId);
       assert.equal(parked.session.session_id, runId, JSON.stringify(parked));
       assert.equal(parked.session.creator_id, CREATOR, JSON.stringify(parked));
       assert.equal(parked.session.preset_id, RESUME_PARK_PRESET, JSON.stringify(parked));
@@ -1244,8 +1406,20 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', () 
       const afterResume = await inspectSchedule(scheduleId);
       assert.equal(afterResume.schedule.status, 'running', JSON.stringify(afterResume));
       assert.equal(afterResume.schedule.current_session_id, runId, JSON.stringify(afterResume));
-      const resumedSession = await inspectSession(runId);
-      assert.equal(resumedSession.session.status, 'running', JSON.stringify(resumedSession));
+
+      // P0-T6: the status mutation alone would leave this run with NO owner
+      // (its driver already stopped on the park), so the resume also RE-DRIVES
+      // the same root through the coordinator's single-flight owner. This
+      // graph's gate can never be satisfied, so the honest post-resume outcome
+      // is the SAME run parking again — observable ONLY if a driver really
+      // stepped it: without the re-drive the run would sit at `running`
+      // forever with nobody driving it.
+      const reParked = await waitFor(
+        () => inspectSession(runId),
+        (payload) => payload.session.status === 'paused',
+        { label: `run ${runId} re-park after the resume`, timeout: 20_000 },
+      );
+      assert.equal(reParked.session.session_id, runId, JSON.stringify(reParked));
 
       const listed = await jsonFetch(schedulesUrl);
       assert.equal(listed.status, 200, listed.text);
@@ -1783,6 +1957,417 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', () 
       );
       const confirmedSession = await inspectSession(runId);
       assert.equal(confirmedSession.session.status, 'cancelled', JSON.stringify(confirmedSession));
+    } finally {
+      await service.close();
+    }
+  });
+
+  /**
+   * P0-T6 CRITICAL: a `Struct` version committed over HTTP while a run is
+   * already ADMITTED and mid-execution must resolve under the STRUCTURED
+   * namespace at that same run's next outer state boundary.
+   *
+   * The master binds `{{core_context.struct.<path>}}` "from the current
+   * `core_context` snapshot at the start of the state" (§6.4). Binding a
+   * struct body into `core_context.text` — or not binding it at all — leaves
+   * the documented binding unresolvable, and the capability-arg renderer is
+   * strict, so the state REFUSES instead of prompting with a guess. The
+   * observation is again each boundary's own output: the fixture peer's request
+   * log is what the boundary actually rendered, so state `second` proves the
+   * committed struct version was bound by KIND and state `third` proves the
+   * pointer is re-read for the NEXT struct version (with the second state's own
+   * snapshot unchanged).
+   */
+  test('control steer: a struct_merge committed during an admitted run resolves at its next state boundary', async () => {
+    const fixtureLogName = 'acp-struct-context.jsonl';
+    const gateDirName = 'acp-struct-gate';
+    const home = seededHome((dir) => {
+      mkdirSync(join(dir, gateDirName), { recursive: true });
+      return acpProviderConfig({
+        fixtureLog: join(dir, fixtureLogName),
+        env: { ACP_FIXTURE_PROMPT_GATE_DIR: join(dir, gateDirName) },
+      });
+    });
+    const fixtureLog = join(home, fixtureLogName);
+    const gateDir = join(home, gateDirName);
+    const readPrompts = () =>
+      existsSync(fixtureLog)
+        ? readFileSync(fixtureLog, 'utf8')
+            .split('\n')
+            .filter((line) => line.trim().length > 0)
+            .map((line) => JSON.parse(line))
+            .filter((entry) => entry.event === 'prompt')
+            .map((entry) => entry.prompt)
+        : [];
+    const releasePrompt = (n) => writeFileSync(join(gateDir, `release-${n}`), 'release');
+
+    const service = await startServiceOn(home);
+    try {
+      const base = service.url;
+      const schedulesUrl = `${base}/v1/daemon/orchestration/schedules`;
+      const scheduleUrl = (id) => `${schedulesUrl}/${id}`;
+      const inspectSchedule = async (id) => {
+        const response = await jsonFetch(scheduleUrl(id));
+        assert.equal(response.status, 200, response.text);
+        return response.payload;
+      };
+      const inspectSession = async (id) => {
+        const response = await jsonFetch(`${base}/v1/daemon/orchestration/sessions/${id}`);
+        assert.equal(response.status, 200, response.text);
+        return response.payload;
+      };
+      const mergeStruct = async (id, patch) =>
+        jsonFetch(`${scheduleUrl(id)}/core-context`, {
+          method: 'PATCH',
+          body: { op: 'struct_merge', patch },
+        });
+
+      const scaffolded = await jsonFetch(`${base}/v1/daemon/presets`, {
+        method: 'POST',
+        body: { name: STRUCT_CONTEXT_PRESET },
+      });
+      assert.equal(scaffolded.status, 201, scaffolded.text);
+      const patched = await jsonFetch(`${base}/v1/daemon/presets/${STRUCT_CONTEXT_PRESET}`, {
+        method: 'PATCH',
+        body: { yaml: structContextPresetYaml() },
+      });
+      assert.equal(patched.status, 200, patched.text);
+      assert.equal(patched.payload.updated, true, patched.text);
+
+      const created = await jsonFetch(schedulesUrl, {
+        method: 'POST',
+        body: {
+          creator_id: CREATOR,
+          preset_id: STRUCT_CONTEXT_PRESET,
+          agent_bindings: { default: { provider_id: 'mock-acp' } },
+        },
+      });
+      assert.equal(created.status, 201, created.text);
+      assert.equal(created.payload.core_context_version, 0, created.text);
+      const scheduleId = created.payload.schedule_id;
+
+      // Admission: the first boundary renders the version-0 TEXT seed.
+      const admitted = await waitFor(
+        () => inspectSchedule(scheduleId),
+        (payload) => Boolean(payload.schedule.current_session_id),
+        { label: `schedule ${scheduleId} owned run identity` },
+      );
+      const runId = admitted.schedule.current_session_id;
+      const firstPrompt = `${STRUCT_CONTEXT_MARKER}:first||END`;
+      await waitFor(readPrompts, (entries) => entries.length >= 1, {
+        label: `run ${runId} first state boundary prompt`,
+        timeout: 20_000,
+      });
+      assert.deepEqual(readPrompts(), [firstPrompt], 'state first renders the text seed');
+
+      // The struct commit lands while state `first` is IN FLIGHT.
+      const merged = await mergeStruct(scheduleId, { idea: STRUCT_CONTEXT_IDEA });
+      assert.equal(merged.status, 200, merged.text);
+      assert.equal(merged.payload.new_version, 1, merged.text);
+      assert.deepEqual(readPrompts(), [firstPrompt], 'the in-flight state is not re-rendered');
+
+      // THE OBSERVATION: the next boundary renders the committed STRUCT field.
+      releasePrompt(1);
+      const secondPrompt = `${STRUCT_CONTEXT_MARKER}:second|${STRUCT_CONTEXT_IDEA}|END`;
+      const afterFirst = await waitFor(
+        async () => ({
+          prompts: readPrompts(),
+          status: (await inspectSession(runId)).session.status,
+        }),
+        (value) => value.prompts.length >= 2 || value.status === 'failed',
+        { label: `run ${runId} second state boundary`, timeout: 20_000 },
+      );
+      assert.deepEqual(
+        afterFirst.prompts,
+        [firstPrompt, secondPrompt],
+        `the committed struct payload must resolve at the next boundary (run settled '${afterFirst.status}')`,
+      );
+
+      // A second struct commit while state `second` is in flight is consumed by
+      // the boundary AFTER it — the pointer is re-read per boundary.
+      const late = await mergeStruct(scheduleId, { late: STRUCT_CONTEXT_LATE });
+      assert.equal(late.status, 200, late.text);
+      assert.equal(late.payload.new_version, 2, late.text);
+      // The run sits AT the state whose prompt is still held, so its snapshot
+      // for this step is frozen: the second commit must not reach it. (The
+      // durable STATUS stays the inter-task boundary value while a step is in
+      // flight, so the durable POSITION is the observation.)
+      const midSecond = await inspectSession(runId);
+      assert.equal(midSecond.session.current_task_id, 'second', JSON.stringify(midSecond));
+      assert.notEqual(midSecond.session.status, 'failed', JSON.stringify(midSecond));
+      releasePrompt(2);
+      const thirdPrompt = `${STRUCT_CONTEXT_MARKER}:third|${STRUCT_CONTEXT_IDEA}|${STRUCT_CONTEXT_LATE}|END`;
+      const thirdPrompts = await waitFor(readPrompts, (entries) => entries.length >= 3, {
+        label: `run ${runId} third state boundary prompt`,
+        timeout: 20_000,
+      });
+      assert.deepEqual(
+        thirdPrompts,
+        [firstPrompt, secondPrompt, thirdPrompt],
+        `state second keeps its own snapshot and the newest struct lands at third: ${JSON.stringify(thirdPrompts)}`,
+      );
+
+      releasePrompt(3);
+      const settled = await waitFor(
+        () => inspectSchedule(scheduleId),
+        (payload) => payload.schedule.status === 'completed',
+        { label: `schedule ${scheduleId} completion` },
+      );
+      assert.equal(settled.schedule.current_session_id, runId, JSON.stringify(settled));
+      assert.equal(settled.schedule.current_core_context_version, 2, JSON.stringify(settled));
+      assert.deepEqual(
+        readPrompts(),
+        [firstPrompt, secondPrompt, thirdPrompt],
+        'no boundary rendered twice and no version was re-appended',
+      );
+
+      const sessions = await jsonFetch(`${base}/v1/daemon/orchestration/sessions`);
+      assert.equal(sessions.status, 200, sessions.text);
+      const runs = sessions.payload.items.filter((row) => row.preset_id === STRUCT_CONTEXT_PRESET);
+      assert.equal(runs.length, 1, `the schedule owns exactly one run: ${sessions.text}`);
+      assert.equal(runs[0].session_id, runId, sessions.text);
+    } finally {
+      await service.close();
+    }
+  });
+
+  /**
+   * P0-T6: a `Struct` version FROZEN AT ADMISSION must resolve at the run's
+   * FIRST state boundary.
+   *
+   * A row with no owned run may be structurally edited (the public PATCH
+   * refuses only terminal rows), so the resume admits that schedule's ONE run
+   * against the committed `Struct` version. The admission seeding binds the
+   * payload under the namespace its kind owns, so `{{core_context.struct.idea}}`
+   * resolves from the frozen snapshot — a run admitted against a struct version
+   * never has to survive a text-namespaced body first.
+   */
+  test('control steer: a struct version frozen at admission resolves at the first state boundary', async () => {
+    const fixtureLogName = 'acp-struct-admit.jsonl';
+    const home = seededHome((dir) => acpProviderConfig({ fixtureLog: join(dir, fixtureLogName) }));
+    const fixtureLog = join(home, fixtureLogName);
+    const readPrompts = () =>
+      existsSync(fixtureLog)
+        ? readFileSync(fixtureLog, 'utf8')
+            .split('\n')
+            .filter((line) => line.trim().length > 0)
+            .map((line) => JSON.parse(line))
+            .filter((entry) => entry.event === 'prompt')
+            .map((entry) => entry.prompt)
+        : [];
+
+    const service = await startServiceOn(home);
+    try {
+      const base = service.url;
+      const schedulesUrl = `${base}/v1/daemon/orchestration/schedules`;
+      const scheduleUrl = (id) => `${schedulesUrl}/${id}`;
+      const inspectSchedule = async (id) => {
+        const response = await jsonFetch(scheduleUrl(id));
+        assert.equal(response.status, 200, response.text);
+        return response.payload;
+      };
+
+      const scaffolded = await jsonFetch(`${base}/v1/daemon/presets`, {
+        method: 'POST',
+        body: { name: STRUCT_ADMIT_PRESET },
+      });
+      assert.equal(scaffolded.status, 201, scaffolded.text);
+      const patched = await jsonFetch(`${base}/v1/daemon/presets/${STRUCT_ADMIT_PRESET}`, {
+        method: 'PATCH',
+        body: { yaml: structAdmitPresetYaml() },
+      });
+      assert.equal(patched.status, 200, patched.text);
+
+      const created = await jsonFetch(schedulesUrl, {
+        method: 'POST',
+        body: {
+          creator_id: CREATOR,
+          preset_id: STRUCT_ADMIT_PRESET,
+          agent_bindings: { default: { provider_id: 'mock-acp' } },
+        },
+      });
+      assert.equal(created.status, 201, created.text);
+      const scheduleId = created.payload.schedule_id;
+
+      // A LEGAL structural edit on a row that owns no run yet (the PATCH
+      // refuses terminal rows; a parked row is editable): version 1 is the
+      // STRUCT payload the resumed run is admitted against.
+      const paused = await jsonFetch(`${scheduleUrl(scheduleId)}/signal`, {
+        method: 'POST',
+        body: { signal: 'pause' },
+      });
+      assert.equal(paused.status, 200, paused.text);
+      assert.equal(paused.payload.status, 'paused', paused.text);
+
+      const merged = await jsonFetch(`${scheduleUrl(scheduleId)}/core-context`, {
+        method: 'PATCH',
+        body: { op: 'struct_merge', patch: { idea: STRUCT_CONTEXT_IDEA } },
+      });
+      assert.equal(merged.status, 200, merged.text);
+      assert.equal(merged.payload.new_version, 1, merged.text);
+
+      const resumed = await jsonFetch(`${scheduleUrl(scheduleId)}/signal`, {
+        method: 'POST',
+        body: { signal: 'resume' },
+      });
+      assert.equal(resumed.status, 200, resumed.text);
+
+      const expected = `${STRUCT_ADMIT_MARKER}:only|${STRUCT_CONTEXT_IDEA}|END`;
+      const observed = await waitFor(
+        async () => ({
+          prompts: readPrompts(),
+          status: (await inspectSchedule(scheduleId)).schedule.status,
+        }),
+        (value) => value.prompts.length >= 1 || value.status === 'failed',
+        { label: `schedule ${scheduleId} first boundary prompt`, timeout: 20_000 },
+      );
+      assert.deepEqual(
+        observed.prompts,
+        [expected],
+        `the frozen struct payload must resolve at the FIRST boundary (schedule settled '${observed.status}')`,
+      );
+
+      const settled = await waitFor(
+        () => inspectSchedule(scheduleId),
+        (payload) => payload.schedule.status === 'completed',
+        { label: `schedule ${scheduleId} completion` },
+      );
+      assert.equal(settled.schedule.current_core_context_version, 1, JSON.stringify(settled));
+      assert.deepEqual(readPrompts(), [expected], 'no boundary rendered twice');
+    } finally {
+      await service.close();
+    }
+  });
+
+  /**
+   * P0-T6 IMPORTANT: a legal pause → resume of an already-admitted row must
+   * RE-DRIVE the run it owns onto its next state.
+   *
+   * The run parks at the bounded join (1/2 arrivals) and its driver stops, so
+   * the durable `Resume` status mutation alone would leave `running` with NO
+   * owner. The deadline is crossed while the run is parked (nothing re-steps a
+   * parked run: only a driver evaluates the deadline), and the resume is what
+   * restarts that same root — the run then crosses its next boundary
+   * (`timed_out`, whose real prompt is the observable next step) and settles
+   * `completed`, on the SAME run id, with no second run minted.
+   */
+  test('control resume: a resume re-drives the parked run onto its next state', async () => {
+    const fixtureLogName = 'acp-resume-redrive.jsonl';
+    const home = seededHome((dir) => acpProviderConfig({ fixtureLog: join(dir, fixtureLogName) }));
+    const fixtureLog = join(home, fixtureLogName);
+    const readPrompts = () =>
+      existsSync(fixtureLog)
+        ? readFileSync(fixtureLog, 'utf8')
+            .split('\n')
+            .filter((line) => line.trim().length > 0)
+            .map((line) => JSON.parse(line))
+            .filter((entry) => entry.event === 'prompt')
+            .map((entry) => entry.prompt)
+        : [];
+
+    const service = await startServiceOn(home);
+    try {
+      const base = service.url;
+      const schedulesUrl = `${base}/v1/daemon/orchestration/schedules`;
+      const scheduleUrl = (id) => `${schedulesUrl}/${id}`;
+      const inspectSchedule = async (id) => {
+        const response = await jsonFetch(scheduleUrl(id));
+        assert.equal(response.status, 200, response.text);
+        return response.payload;
+      };
+      const inspectSession = async (id) => {
+        const response = await jsonFetch(`${base}/v1/daemon/orchestration/sessions/${id}`);
+        assert.equal(response.status, 200, response.text);
+        return response.payload;
+      };
+
+      const scaffolded = await jsonFetch(`${base}/v1/daemon/presets`, {
+        method: 'POST',
+        body: { name: RESUME_TIMEOUT_PRESET },
+      });
+      assert.equal(scaffolded.status, 201, scaffolded.text);
+      const patched = await jsonFetch(`${base}/v1/daemon/presets/${RESUME_TIMEOUT_PRESET}`, {
+        method: 'PATCH',
+        body: { yaml: resumeTimeoutPresetYaml() },
+      });
+      assert.equal(patched.status, 200, patched.text);
+
+      const created = await jsonFetch(schedulesUrl, {
+        method: 'POST',
+        body: {
+          creator_id: CREATOR,
+          preset_id: RESUME_TIMEOUT_PRESET,
+          agent_bindings: { default: { provider_id: 'mock-acp' } },
+        },
+      });
+      assert.equal(created.status, 201, created.text);
+      const scheduleId = created.payload.schedule_id;
+
+      const admitted = await waitFor(
+        () => inspectSchedule(scheduleId),
+        (payload) => Boolean(payload.schedule.current_session_id),
+        { label: `schedule ${scheduleId} owned run identity` },
+      );
+      const runId = admitted.schedule.current_session_id;
+      // Confirm a STEADY park (see the W6 case): only the gate park stays put,
+      // so the deadline below is genuinely waiting on a run nobody drives.
+      await waitFor(
+        async () => {
+          const first = await inspectSession(runId);
+          if (first.session.status !== 'paused') return false;
+          await delay(500);
+          const second = await inspectSession(runId);
+          return second.session.status === 'paused';
+        },
+        (steady) => steady === true,
+        { label: `run ${runId} steady bounded-join park`, timeout: 20_000 },
+      );
+      const parked = await inspectSession(runId);
+      assert.equal(parked.session.session_id, runId, JSON.stringify(parked));
+      assert.deepEqual(readPrompts(), [], 'the join park renders no prompt');
+
+      // Cross the join deadline WHILE nothing drives the run: only a driver
+      // evaluates `timeout_ms`, so the park cannot advance on its own.
+      await delay(RESUME_TIMEOUT_MS + 400);
+
+      const paused = await jsonFetch(`${scheduleUrl(scheduleId)}/signal`, {
+        method: 'POST',
+        body: { signal: 'pause' },
+      });
+      assert.equal(paused.status, 200, paused.text);
+      assert.equal(paused.payload.status, 'paused', paused.text);
+
+      const resumed = await jsonFetch(`${scheduleUrl(scheduleId)}/signal`, {
+        method: 'POST',
+        body: { signal: 'resume' },
+      });
+      assert.equal(resumed.status, 200, resumed.text);
+      assert.equal(resumed.payload.status, 'running', resumed.text);
+
+      // THE OBSERVATION: the SAME run leaves the park and crosses its next
+      // boundary. Without the re-drive this never happens — the run would sit
+      // at `running` with no owner and the schedule would never settle.
+      const settled = await waitFor(
+        () => inspectSchedule(scheduleId),
+        (payload) => payload.schedule.status === 'completed',
+        { label: `schedule ${scheduleId} completion after the resume`, timeout: 20_000 },
+      );
+      assert.equal(settled.schedule.current_session_id, runId, JSON.stringify(settled));
+      assert.deepEqual(
+        readPrompts(),
+        [`${RESUME_TIMEOUT_MARKER}:next|END`],
+        'the re-driven run crosses exactly its next boundary',
+      );
+      const finished = await inspectSession(runId);
+      assert.equal(finished.session.status, 'completed', JSON.stringify(finished));
+
+      const sessions = await jsonFetch(`${base}/v1/daemon/orchestration/sessions`);
+      assert.equal(sessions.status, 200, sessions.text);
+      const runs = sessions.payload.items.filter(
+        (row) => row.preset_id === RESUME_TIMEOUT_PRESET,
+      );
+      assert.equal(runs.length, 1, `a resume must never mint a second workflow: ${sessions.text}`);
+      assert.equal(runs[0].session_id, runId, sessions.text);
     } finally {
       await service.close();
     }
