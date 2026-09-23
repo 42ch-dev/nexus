@@ -23,12 +23,24 @@
 //! rows this owner already owns. Core-context HISTORY browsing stays
 //! unrouted — no producer exists for it on this owner, and this surface does
 //! not invent one.
+//!
+//! The same-run observation family (v1.195 P1-T3) is the third lane: one
+//! authorized subscription to a durable run's bounded ring plus its bounded
+//! pull and its release. All three delegate to the `ExecutionHandle`
+//! subscription authority — the token, the ring attachment and every cap stay
+//! in Rust; nothing durable, no SQL pool and no Host handle crosses napi, and
+//! no second event dialect is minted here. The frames travel exactly as the
+//! ring encoded them (`id`/`event`/`data`), so the service transport may write
+//! them verbatim and never renumbers.
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use nexus_agent_host::config::AgentHostConfig;
 use nexus_agent_host::discovery::ProviderCatalog;
 use nexus_agent_host::{HostFacade, HostManager};
+use nexus_contracts::generated::core::{
+    CoreWorkflowEventBatch, CoreWorkflowSubscribeRequest, CoreWorkflowSubscription,
+};
 use nexus_contracts::generated::daemon_api::orchestration::sessions::list_sessions_query::ListSessionsQuery;
 use nexus_contracts::generated::daemon_api::orchestration::sessions::list_sessions_response::ListSessionsResponse;
 use nexus_contracts::generated::daemon_api::orchestration::sessions::session_detail_response::SessionDetailResponse;
@@ -320,6 +332,84 @@ impl NativeCore {
                 .edit_core_context(&principal, schedule_id, request)
                 .await?;
             Ok(response)
+        })
+        .await
+    }
+
+    // ── Same-run event subscriptions (P1-T3) ────────────────────────────────
+
+    /// `GET /v1/daemon/orchestration/sessions/{run_id}/events` — open ONE
+    /// authorized subscription to a durable root run's bounded event stream.
+    ///
+    /// The generated request DTO crosses as an owned buffer (`deny_unknown_fields`:
+    /// a key outside the schema is a typed client refusal) and carries the
+    /// `Last-Event-ID` cursor verbatim — the transport forwards the header, it
+    /// never parses or renumbers it. The core resolves the run's STORED
+    /// ownership before any ring, epoch or cursor is consulted, so an absent,
+    /// foreign or child run closes with `not_found` (the adapter's 404 before
+    /// any SSE header) and a malformed/future cursor with `invalid_input`.
+    ///
+    /// An unresumable history (prior epoch, evicted ring, restart) is NOT an
+    /// error: the returned subscription carries the single `history_unavailable`
+    /// control frame and reports `closed` on its first pull.
+    #[napi]
+    pub async fn subscribe_workflow_events(
+        &self,
+        principal_handle: String,
+        request_json: Buffer,
+    ) -> Result<Buffer> {
+        let request: CoreWorkflowSubscribeRequest = decode(request_json, "request")?;
+        let handle = self.execution_handle()?;
+        self.json_call(principal_handle, async move |core, principal| {
+            let _ = &core;
+            let response: CoreWorkflowSubscription =
+                handle.subscribe_workflow_events(&principal, request).await?;
+            Ok(response)
+        })
+        .await
+    }
+
+    /// Take the next bounded batch (`<= 16` frames / 1 MiB) of a subscribed
+    /// run's stream. One pull may be outstanding per subscription, and a
+    /// released, foreign or stale-generation token refuses as `not_found`.
+    /// `closed` reports that the stream ended at this batch.
+    #[napi]
+    pub async fn next_workflow_events(
+        &self,
+        principal_handle: String,
+        subscription_id: String,
+    ) -> Result<Buffer> {
+        let handle = self.execution_handle()?;
+        self.json_call(principal_handle, async move |core, principal| {
+            let _ = &core;
+            let response: CoreWorkflowEventBatch = handle
+                .next_workflow_events(&principal, subscription_id)
+                .await?;
+            Ok(response)
+        })
+        .await
+    }
+
+    /// Release one subscription — the transport's disconnect/exit cleanup.
+    ///
+    /// A pull blocked on the released token wakes with `closed`, so a
+    /// disconnect can never leave the run's subscriber permit held. Releasing
+    /// twice (the transport's `close` handler plus its `finally`) is not an
+    /// error the caller must handle: the second call closes with `not_found`,
+    /// exactly like any other released token.
+    #[napi]
+    pub async fn release_workflow_events(
+        &self,
+        principal_handle: String,
+        subscription_id: String,
+    ) -> Result<Buffer> {
+        let handle = self.execution_handle()?;
+        self.json_call(principal_handle, async move |core, principal| {
+            let _ = &core;
+            handle
+                .release_workflow_events(&principal, subscription_id)
+                .await?;
+            Ok(serde_json::Value::Null)
         })
         .await
     }

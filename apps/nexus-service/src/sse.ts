@@ -158,16 +158,7 @@ export class OperationEventHub {
   }
 
   private buildFrame(sequence: number, event: string, data: string, isTerminal: boolean): StoredFrame {
-    const id = `${this.epoch}:${sequence}`;
-    const buffer = Buffer.from(formatSse(id, event, data), 'utf8');
-    return {
-      id,
-      event,
-      buffer,
-      wireBytes: buffer.length,
-      isControl: isTerminal,
-      isTerminal,
-    };
+    return wireFrame(`${this.epoch}:${sequence}`, event, data, isTerminal);
   }
 
   planReplay(cursor: string | undefined): ReplayPlan {
@@ -291,6 +282,41 @@ function formatSse(id: string, event: string, data: string): string {
   return `id: ${id}\nevent: ${event}\ndata: ${data}\n\n`;
 }
 
+/**
+ * One SSE wire frame from an ALREADY-ENCODED producer frame.
+ *
+ * `id`/`event`/`data` are written exactly as the producer encoded them — the
+ * run-event ring owns the `<epoch>:<sequence>` cursor, so a transport that
+ * replays them verbatim never renumbers, re-encodes or reorders. A frame with
+ * an EMPTY `id` (the `history_unavailable` control frame) writes no `id:`
+ * line at all: an empty `id:` field would reset the client's last-event-id
+ * instead of leaving it alone, so it must not be emitted.
+ */
+export function wireFrame(
+  id: string,
+  event: string,
+  data: string,
+  isControl: boolean,
+): StoredFrame {
+  const text = id.length === 0 ? `event: ${event}\ndata: ${data}\n\n` : formatSse(id, event, data);
+  const buffer = Buffer.from(text, 'utf8');
+  return { id, event, buffer, wireBytes: buffer.length, isControl, isTerminal: false };
+}
+
+/**
+ * The writer-side stream-end hook: `SseWriter` owns only the socket's
+ * backpressure, and reports a written TERMINAL frame to whoever owns the
+ * stream's state. The Host SSE transport owns an `OperationEventHub`; the
+ * workflow observation transport's stream end is the core's own `closed` flag
+ * and passes {@link NO_STREAM_END}.
+ */
+export interface SseStreamEnd {
+  markClosed(): void;
+}
+
+/** For a producer that owns its stream end itself: the writer marks nothing. */
+export const NO_STREAM_END: SseStreamEnd = { markClosed: () => undefined };
+
 function inspectUrl(operationId: string): string {
   return `/v1/daemon/agent-host/operations/${operationId}`;
 }
@@ -300,9 +326,24 @@ export const sseTestHooks = {
   writeBlockedCount: 0,
 };
 
+/** How a writer treats repeated control frames. */
+export interface SseWriterOptions {
+  /**
+   * Collapse a repeated `gap`/terminal control frame into one write. TRUE is
+   * the Host transport's model: its hub keeps exactly ONE gap slot and ONE
+   * terminal slot, so re-presenting a slot is not a new wire fact. A producer
+   * that streams frames straight from a run ring can legitimately deliver MORE
+   * than one explicit `gap` record in a single stream (a stored oversize-gap
+   * record plus the retention gap), so it opts out and every frame it is given
+   * is written, in order, exactly once.
+   */
+  readonly collapseControlFrames?: boolean;
+}
+
 /** Exported so scoped tests can drive backpressure deterministically. */
 export class SseWriter {
   outboundBackpressured = false;
+  private readonly collapseControlFrames: boolean;
   private pendingDataFrames = 0;
   private pendingDataBytes = 0;
   private terminalWritten = false;
@@ -310,8 +351,10 @@ export class SseWriter {
 
   constructor(
     private readonly res: ServerResponse,
-    private readonly hub: OperationEventHub,
+    private readonly streamEnd: SseStreamEnd,
+    options: SseWriterOptions = {},
   ) {
+    this.collapseControlFrames = options.collapseControlFrames ?? true;
     if (this.res.socket) this.res.socket.setNoDelay(true);
   }
 
@@ -344,8 +387,8 @@ export class SseWriter {
 
   async writeFrame(frame: StoredFrame): Promise<'ok' | 'overflow' | 'disconnect'> {
     if (this.res.writableEnded || this.res.destroyed) return 'disconnect';
-    if (frame.isTerminal && this.terminalWritten) return 'ok';
-    if (frame.event === 'gap' && this.gapWritten) return 'ok';
+    if (this.collapseControlFrames && frame.isTerminal && this.terminalWritten) return 'ok';
+    if (this.collapseControlFrames && frame.event === 'gap' && this.gapWritten) return 'ok';
     if (!this.reserveFrame(frame)) return 'overflow';
 
     const payload = frame.buffer;
@@ -376,7 +419,7 @@ export class SseWriter {
     this.releaseFrame(frame);
     if (frame.isTerminal) {
       this.terminalWritten = true;
-      this.hub.markClosed();
+      this.streamEnd.markClosed();
     }
     if (frame.event === 'gap') {
       this.gapWritten = true;
@@ -389,16 +432,29 @@ export class SseWriter {
   }
 }
 
+/**
+ * Wait for the socket to accept more bytes, the stream to end, or the drain
+ * deadline. Every listener is detached when the wait settles: a long-lived SSE
+ * response takes MANY of these waits, and leaving the losing `once` listeners
+ * attached would accumulate them on one emitter until Node's listener limit
+ * (which is a leak, not a bound).
+ */
 function waitForDrain(res: ServerResponse, timeoutMs: number): Promise<boolean> {
   const { promise, resolve } = Promise.withResolvers<boolean>();
-  const timer = setTimeout(() => resolve(false), timeoutMs);
-  const done = (ok: boolean) => {
+  const settle = (ok: boolean) => {
     clearTimeout(timer);
+    res.off('drain', onDrain);
+    res.off('close', onClose);
+    res.off('error', onError);
     resolve(ok);
   };
-  res.once('drain', () => done(true));
-  res.once('close', () => done(false));
-  res.once('error', () => done(false));
+  const onDrain = () => settle(true);
+  const onClose = () => settle(false);
+  const onError = () => settle(false);
+  const timer = setTimeout(() => settle(false), timeoutMs);
+  res.once('drain', onDrain);
+  res.once('close', onClose);
+  res.once('error', onError);
   return promise;
 }
 
@@ -421,16 +477,21 @@ export function releaseSessionSubscriber(sessionId: string): void {
   else sessionSubscriberCounts.set(sessionId, count - 1);
 }
 
-function clientDisconnected(res: ServerResponse): boolean {
+export function clientDisconnected(res: ServerResponse): boolean {
   return res.writableEnded || res.destroyed || res.socket?.destroyed === true;
 }
 
-interface PullGateState {
+export interface PullGateState {
   initialReleased: boolean;
 }
 
-/** Do not pull provider events until the TCP reader has caught up. */
-async function gatePullUntilDrain(
+/**
+ * Do not pull events until the TCP reader has caught up: the first pull waits
+ * out `pauseImmediately` clients so their pause lands before any frame is
+ * written, and every later pull waits for a pending drain. `false` means the
+ * socket went away or never drained — the caller must stop pulling.
+ */
+export async function gatePullUntilDrain(
   res: ServerResponse,
   pullGate: PullGateState,
   writer: SseWriter,
