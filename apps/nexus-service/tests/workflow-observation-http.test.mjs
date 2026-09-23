@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -344,11 +345,9 @@ class EventReader {
   }
 }
 
-/**
- * Subscribe and fail loudly on anything but an admitted SSE stream. The resume
+/** Subscribe and fail loudly on anything but an admitted SSE stream. The resume
  * cursor is the retained `Last-Event-ID` header — the ONLY place this transport
- * reads a cursor from.
- */
+ * reads a cursor from. */
 async function openEvents(base, runId, lastEventId) {
   const response = await fetch(eventsUrl(base, runId), {
     ...(lastEventId === undefined ? {} : { headers: { 'Last-Event-ID': lastEventId } }),
@@ -362,6 +361,109 @@ async function openEvents(base, runId, lastEventId) {
   return new EventReader(response);
 }
 
+/**
+ * Open one SSE request on a RAW socket and STOP READING the moment the status
+ * line and headers have arrived.
+ *
+ * A paused TCP reader is the only way a test can hold a real socket closed: the
+ * client's receive window stops advancing, the server's own `write()` eventually
+ * returns `false`, and the transport's drain wait becomes the thing under test —
+ * not a simulation of it.
+ */
+function openStalledEvents(url) {
+  return new Promise((resolveOpen, rejectOpen) => {
+    const target = new URL(url);
+    const socket = net.connect(Number(target.port), target.hostname);
+    const chunks = [];
+    const onHeaders = (chunk) => {
+      chunks.push(chunk);
+      const head = Buffer.concat(chunks);
+      if (head.indexOf('\r\n\r\n') < 0) return;
+      socket.off('data', onHeaders);
+      socket.pause();
+      resolveOpen({ socket, head });
+    };
+    socket.on('error', rejectOpen);
+    socket.on('data', onHeaders);
+    socket.write(
+      [
+        `GET ${target.pathname} HTTP/1.1`,
+        `Host: ${target.host}`,
+        'Accept: text/event-stream',
+        '',
+        '',
+      ].join('\r\n'),
+    );
+  });
+}
+
+/**
+ * Decode HTTP/1.1 chunked framing.
+ *
+ * A response with no `Content-Length` is streamed as `Transfer-Encoding:
+ * chunked`, so the raw bytes carry size lines an SSE parser must not see. A
+ * body cut short by the fault under test is decoded up to its last COMPLETE
+ * chunk (a partial chunk is returned as-is, and its incomplete frame is dropped
+ * by the frame splitter below — a frame only reaches a consumer when its blank
+ * line arrived).
+ */
+function decodeChunkedBody(buffer) {
+  const payloads = [];
+  let offset = 0;
+  while (offset < buffer.length) {
+    const sizeEnd = buffer.indexOf('\r\n', offset);
+    if (sizeEnd < 0) break;
+    const size = Number.parseInt(buffer.toString('utf8', offset, sizeEnd).split(';')[0].trim(), 16);
+    if (!Number.isSafeInteger(size) || size < 0) break;
+    const dataStart = sizeEnd + 2;
+    if (size === 0) break;
+    if (dataStart + size > buffer.length) {
+      payloads.push(buffer.subarray(dataStart));
+      break;
+    }
+    payloads.push(buffer.subarray(dataStart, dataStart + size));
+    offset = dataStart + size + 2;
+  }
+  return Buffer.concat(payloads);
+}
+
+/** Every COMPLETE SSE block in an already-decoded body, in delivery order. */
+function splitSseFrames(text) {
+  const end = text.lastIndexOf('\n\n');
+  if (end < 0) return [];
+  return text
+    .slice(0, end)
+    .split('\n\n')
+    .filter((block) => block.trim().length > 0)
+    .map((block) => frameOf(parseSseFields(block)));
+}
+
+/**
+ * Resume a stalled reader and collect everything the server still holds, until
+ * the connection ends. `ended: false` means the server never closed it inside
+ * the window — itself an observable outcome, not a timeout to ignore.
+ */
+function collectToEof(socket, timeoutMs) {
+  return new Promise((resolveCollect) => {
+    const chunks = [];
+    const finish = (ended) => {
+      clearTimeout(timer);
+      socket.off('end', onEnd);
+      socket.off('close', onClose);
+      socket.off('error', onEnd);
+      resolveCollect({ body: Buffer.concat(chunks), ended });
+    };
+    const onEnd = () => finish(true);
+    const onClose = () => finish(true);
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    socket.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+    socket.on('end', onEnd);
+    socket.on('close', onClose);
+    socket.on('error', onEnd);
+    socket.resume();
+  });
+}
+
 describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () => {
   let home;
   let service;
@@ -369,6 +471,9 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
   let parkScheduleId;
   let parkRunId;
   let capRunId;
+  let trimRunId;
+  let sseTestHooks;
+  let drainTimeoutMs;
 
   /**
    * Author one preset through the public surface, create one schedule of it and
@@ -457,6 +562,11 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
     // The first-pull gate defaults to 450 ms; this file holds many streams, so
     // it takes the retained test-only override to its smallest legal value.
     process.env.NEXUS_SSE_FIRST_PULL_DELAY_MS = '1';
+    // The transport and its writer are loaded from the SAME compiled modules the
+    // in-process service uses, so the drain hook counter and the frozen drain
+    // deadline below are the running transport's own, not a copy.
+    ({ sseTestHooks } = await import(join(serviceRoot, 'dist/sse.js')));
+    ({ SSE_DRAIN_TIMEOUT_MS: drainTimeoutMs } = await import(join(serviceRoot, 'dist/config.js')));
     home = seededHome();
     seedForeignRun(home);
     service = await startServiceOn(home);
@@ -672,6 +782,7 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
       yaml: ringTrimPresetYaml,
       concurrency: 'parallel_any',
     });
+    trimRunId = runId;
 
     // The run reaches its declared terminal state through its own engine; its
     // ring then closes and stays readable as a terminal ring.
@@ -740,6 +851,93 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
       }
     } finally {
       await stream.disconnect();
+    }
+  });
+
+  /**
+   * S-003: the HTTP layer's `write() === false` → drain path, driven for real.
+   *
+   * The retained replay of the trim run is ~800 KiB across a handful of frames,
+   * so a reader that STOPS READING (a paused raw TCP socket — the only way a test
+   * can hold a real connection closed) forces the writer's `write()` to return
+   * `false` and its drain wait to run for real. The counter below proves that
+   * happened; a platform that swallowed the whole replay would leave it at zero
+   * and fail this case loudly instead of passing hollow.
+   *
+   * How the stall then ends depends on how much the two kernels buffer:
+   *
+   * - if drain resumes (this platform: the client's receive buffer plus the
+   *   server's send buffer hold ~800 KiB), the SAME stream must deliver the
+   *   retained replay EXACTLY ONCE — the chunk a `write(false)` accepted must not
+   *   be re-written and no frame may be dropped;
+   * - if the 2 s drain deadline expires first, the transport must stop there: a
+   *   strict ordered prefix, nothing fabricated, and the durable final frame
+   *   never delivered.
+   *
+   * Reaching the deadline branch deterministically needs a payload larger than
+   * those kernel buffers; the ring's own cap keeps a run's replay at ~1 MiB and
+   * Node's `net` API exposes no receive-buffer knob, so this file asserts
+   * whichever branch the platform produces rather than pretending to force one.
+   */
+  test('same run replay: a stalled socket is bounded by the drain deadline, never a silent replay', async (t) => {
+    // What a healthy reader of this terminal ring receives, for the comparison
+    // below.
+    const complete = await openEvents(base, trimRunId);
+    let retained;
+    try {
+      assert.equal(await complete.readToEnd(30_000), true, 'the terminal stream closes itself');
+      retained = complete.frames.map((frame) => frame.id);
+    } finally {
+      await complete.disconnect();
+    }
+    assert.ok(retained.length >= 3, `the retained replay is what the drain must outlive: ${retained.length}`);
+
+    const blockedBefore = sseTestHooks.writeBlockedCount;
+    const { socket, head } = await openStalledEvents(eventsUrl(base, trimRunId));
+    const headerEnd = head.indexOf('\r\n\r\n') + 4;
+    assert.match(
+      head.toString('utf8'),
+      /^HTTP\/1\.1 200/,
+      `an admitted observation opens on the raw socket: ${head.toString('utf8', 0, 80)}`,
+    );
+    // The reader is paused from here on. Wait past the writer's drain deadline
+    // before looking at the outcome, so a deadline that was going to expire has
+    // expired.
+    await delay(drainTimeoutMs + 1_500);
+    const { body, ended } = await collectToEof(socket, 12_000);
+    socket.destroy();
+
+    const blockedWrites = sseTestHooks.writeBlockedCount - blockedBefore;
+    assert.ok(
+      blockedWrites > 0,
+      'BOUNDARY: this platform absorbed the whole retained replay without a single write(false), so the drain path was NOT exercised here — the harness could not manufacture socket backpressure (not a product result)',
+    );
+    assert.equal(ended, true, 'the transport closed the stalled stream instead of leaving it open');
+
+    const partial = splitSseFrames(
+      decodeChunkedBody(Buffer.concat([head.subarray(headerEnd), body])).toString('utf8'),
+    );
+    t.diagnostic(
+      `stalled socket: ${blockedWrites} blocked write(s); delivered ${partial.length}/${retained.length} retained frames; branch=${partial.length < retained.length ? 'drain-deadline' : 'absorbed-then-drained'}`,
+    );
+    assert.ok(partial.length >= 1, `the socket delivered the frames it had accepted: ${partial.length}`);
+    if (partial.length < retained.length) {
+      assert.deepEqual(
+        partial.map((frame) => frame.id),
+        retained.slice(0, partial.length),
+        'the drain deadline cut the stream at an ordered prefix — nothing fabricated, duplicated or renumbered',
+      );
+      assert.notEqual(
+        partial[partial.length - 1].event,
+        'run_state',
+        'the durable final frame must never reach a reader the deadline cut off',
+      );
+    } else {
+      assert.deepEqual(
+        partial.map((frame) => frame.id),
+        retained,
+        'a stalled reader receives the retained replay exactly once: no chunk is re-written after write(false) and no frame is dropped',
+      );
     }
   });
 
