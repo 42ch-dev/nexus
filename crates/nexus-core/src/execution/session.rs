@@ -357,11 +357,13 @@ async fn compute_content_hashes_inner(
 
 // ── Workspace session manager (DB-backed) ───────────────────────────────────
 
-/// The atomic close/admission boundary for one authority's durable commits.
+/// The atomic close/admission boundary for one authority's recoverable
+/// mutations (durable commits AND recovery passes — both apply or roll back
+/// workspace bytes through this authority).
 ///
-/// A durable commit is admitted by a RETAINED owner task that outlives its
-/// awaiting caller, so no single `JoinHandle` can tell an owner close what it
-/// must wait for — a later commit would overwrite an earlier unfinished one.
+/// A retained durable commit is admitted by a RETAINED owner task that outlives
+/// its awaiting caller, so no single `JoinHandle` can tell an owner close what
+/// it must wait for — a later commit would overwrite an earlier unfinished one.
 /// This counter is that boundary instead: [`Self::admit`] either registers a
 /// commit BEFORE the boundary was closed, or fails closed; [`Self::close`]
 /// stops further admissions; and [`Self::wait_idle`] returns only once every
@@ -426,7 +428,8 @@ impl CommitAdmissions {
     }
 }
 
-/// One admitted durable commit's share of its authority's admission count.
+/// One admitted recoverable mutation's share of its authority's admission
+/// count.
 ///
 /// Held by the RETAINED OWNER TASK for that task's whole lifetime, so a
 /// waiter that disconnects or is cancelled cannot release it and the owning
@@ -558,10 +561,10 @@ impl WorkspaceSessionManager {
         }
     }
 
-    /// Admit one durable commit against this authority's close boundary.
+    /// Admit one recoverable mutation against this authority's close boundary.
     ///
     /// Fails CLOSED once the owning execution handle closed the boundary: a
-    /// commit that would land after a close must never apply beside that
+    /// mutation that would land after a close must never apply beside that
     /// close's authority release. `None` means this manager has no recoverable
     /// authority to fence (such a commit refuses on its own).
     ///
@@ -578,7 +581,7 @@ impl WorkspaceSessionManager {
     /// Close the durable-commit admission boundary.
     ///
     /// The owner's close calls this BEFORE it releases the workspace
-    /// authority: every later admission fails closed, and every commit
+    /// authority: every later admission fails closed, and every mutation
     /// admitted before it is still drained by
     /// [`Self::wait_for_admitted_commits`].
     pub(crate) fn close_commit_admission(&self) {
@@ -587,11 +590,11 @@ impl WorkspaceSessionManager {
         }
     }
 
-    /// Wait until every already-admitted durable commit has finished.
+    /// Wait until every already-admitted recoverable mutation has finished.
     ///
     /// The owner's close calls this before it releases the workspace
-    /// authority, so the released lease can never outlive a commit that is
-    /// still applying through it.
+    /// authority, so the released lease can never outlive a mutation that is
+    /// still applying or rolling back through it.
     pub(crate) async fn wait_for_admitted_commits(&self) {
         if let Some(cfg) = &self.recoverable {
             cfg.admissions.wait_idle().await;
@@ -1031,7 +1034,9 @@ impl WorkspaceSessionManager {
     /// # Errors
     ///
     /// Returns [`SessionError`] if validation fails (hash conflict), the
-    /// session is stale/expired, or the consume loses the single-writer race.
+    /// session is stale/expired, the consume loses the single-writer race, or
+    /// this authority's close boundary is already sealed
+    /// ([`SessionError::AuthorityBusy`]).
     pub async fn commit_session(
         &self,
         session_id: &SessionId,
@@ -1039,6 +1044,11 @@ impl WorkspaceSessionManager {
         active_workspace_root: &str,
     ) -> Result<db::WorkspaceSessionRow, SessionError> {
         if self.recoverable.is_some() {
+            // A recoverable mutation registers in the SAME close boundary the
+            // owning handle drains BEFORE it starts, and holds that place for
+            // its whole duration — see [`CommitAdmissions`]. A sealed boundary
+            // refuses here, before any file or intent work.
+            let _admission = self.admit_commit()?;
             let _outcome = super::session_commit::commit_recoverable(
                 self,
                 session_id,
@@ -1071,12 +1081,16 @@ impl WorkspaceSessionManager {
 
     /// Durable commit returning revision metadata (v1.188 P3).
     ///
+    /// Registers in this authority's close boundary for the whole commit (the
+    /// same boundary `commit_session_durable_owned` and the handle route use),
+    /// so an owning close either drains this commit or refuses it.
+    ///
     /// # Errors
     ///
     /// Returns [`SessionError::Internal`] when this manager has no recoverable
-    /// authority, otherwise whatever
-    /// [`session_commit::commit_recoverable`](super::session_commit::commit_recoverable)
-    /// reports for the manifest.
+    /// authority, [`SessionError::AuthorityBusy`] once the owning close sealed
+    /// the boundary, otherwise whatever
+    /// `session_commit::commit_recoverable` reports for the manifest.
     pub async fn commit_session_durable(
         &self,
         session_id: &SessionId,
@@ -1088,6 +1102,7 @@ impl WorkspaceSessionManager {
                 "recoverable workspace authority required".into(),
             ));
         }
+        let _admission = self.admit_commit()?;
         super::session_commit::commit_recoverable(self, session_id, changes, active_workspace_root)
             .await
     }
@@ -1102,8 +1117,8 @@ impl WorkspaceSessionManager {
     /// # Errors
     ///
     /// Returns whatever
-    /// [`session_commit::commit_recoverable_owned`](super::session_commit::commit_recoverable_owned)
-    /// reports; caller cancellation does not abandon the owned commit.
+    /// `session_commit::commit_recoverable_owned` reports; caller cancellation
+    /// does not abandon the owned commit.
     pub async fn commit_session_durable_owned(
         self_arc: Arc<Self>,
         session_id: SessionId,
@@ -1121,12 +1136,19 @@ impl WorkspaceSessionManager {
 
     /// Run startup recovery for all unsettled intents (call before publishing executor).
     ///
+    /// Registers in this authority's close boundary for the whole pass: a
+    /// recovery pass applies or rolls back workspace bytes exactly like a
+    /// commit, so the owning close must drain it — or the sealed boundary must
+    /// refuse it.
+    ///
     /// # Errors
     ///
-    /// Returns whatever
-    /// [`session_commit::startup_recovery_all`](super::session_commit::startup_recovery_all)
-    /// reports; a corrupt intent row is surfaced rather than skipped.
+    /// Returns [`SessionError::AuthorityBusy`] once the owning close sealed the
+    /// boundary, otherwise whatever
+    /// `session_commit::startup_recovery_all` reports; a corrupt intent row is
+    /// surfaced rather than skipped.
     pub async fn startup_recovery(&self) -> Result<(), SessionError> {
+        let _admission = self.admit_commit()?;
         super::session_commit::startup_recovery_all(self).await
     }
 
@@ -1139,13 +1161,15 @@ impl WorkspaceSessionManager {
     ///
     /// # Errors
     ///
-    /// Returns whatever
-    /// [`session_commit::startup_recovery_for_root`](super::session_commit::startup_recovery_for_root)
-    /// reports for `workspace_root`; another root's rows are never read.
+    /// Returns [`SessionError::AuthorityBusy`] once the owning close sealed the
+    /// boundary, otherwise whatever
+    /// `session_commit::startup_recovery_for_root` reports for `workspace_root`;
+    /// another root's rows are never read.
     pub async fn startup_recovery_for_root(
         &self,
         workspace_root: &str,
     ) -> Result<(), SessionError> {
+        let _admission = self.admit_commit()?;
         super::session_commit::startup_recovery_for_root(self, workspace_root).await
     }
 

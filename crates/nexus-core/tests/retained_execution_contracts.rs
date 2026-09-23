@@ -54,6 +54,8 @@ use nexus_agent_host::{
     HostSessionId, LaunchStrategy, ProviderCatalog, ProviderCatalogEntry, ProviderId, SessionState,
     TrustLevel,
 };
+#[cfg(feature = "test-hooks")]
+use nexus_contracts::local::orchestration::{WorkspaceChangeEntry, WorkspaceChangeOp};
 use nexus_contracts::local::schedule::http::{AddScheduleRequest, AgentBindingDto};
 use nexus_contracts::{
     CoreError as WireCoreError, CoreErrorCode, CoreWorkspaceCommitRequest,
@@ -70,6 +72,8 @@ use nexus_core::execution::schedules::chronology::{
 };
 use nexus_core::execution::schedules::cron;
 use nexus_core::execution::schedules::stale_findings::run_one_sweep;
+#[cfg(feature = "test-hooks")]
+use nexus_core::execution::session::{SessionError, SessionId, WorkspaceSessionManager};
 use nexus_core::execution::workflow::WorkflowRunCoordinator;
 use nexus_core::execution::{
     drive_preset_run, resume_driven_sessions, ExecutionHandle, PresetRunConfig, PresetRunOutcome,
@@ -4768,4 +4772,336 @@ async fn an_interrupted_close_is_retried_honestly() {
     );
     handle_b.close().await.expect("close the next owner");
     core_b.close().await.expect("close the next core");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Close vs. the manager's OWN recoverable entrances (v1.195 P0-T5)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// One create entry in the manager's own manifest shape.
+#[cfg(feature = "test-hooks")]
+fn direct_change(path: &str, content_base64: &str) -> WorkspaceChangeEntry {
+    WorkspaceChangeEntry {
+        path: path.to_string(),
+        op: WorkspaceChangeOp::Create,
+        expected_hash: None,
+        content_base64: Some(content_base64.to_string()),
+    }
+}
+
+/// The retained manager of the fixture's hosted owner, as a caller that keeps
+/// it past the owner's close would hold it.
+#[cfg(feature = "test-hooks")]
+fn retained_manager(fixture: &HostedFixture) -> Arc<WorkspaceSessionManager> {
+    Arc::clone(
+        fixture
+            .handle
+            .workspace_commit_authority()
+            .expect("the hosted owner is bound to a commit authority")
+            .manager(),
+    )
+}
+
+/// Every FILE under the selected root, sorted: `(relative path, bytes)`.
+///
+/// The byte-level half of "nothing was mutated": a refused entrance that still
+/// applied a change would show up here even if the durable rows were ignored.
+#[cfg(feature = "test-hooks")]
+fn root_files(root: &Path) -> Vec<(String, Vec<u8>)> {
+    fn walk(dir: &Path, root: &Path, out: &mut Vec<(String, Vec<u8>)>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, root, out);
+            } else {
+                let relative = path
+                    .strip_prefix(root)
+                    .expect("walked paths stay under the root")
+                    .to_string_lossy()
+                    .into_owned();
+                out.push((relative, std::fs::read(&path).expect("read a root file")));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(root, root, &mut out);
+    out.sort();
+    out
+}
+
+/// The durable workspace-commit state over `pool`: session consumption and
+/// intent rows, as one comparable value.
+#[cfg(feature = "test-hooks")]
+async fn commit_state(pool: &sqlx::SqlitePool) -> Vec<String> {
+    let mut out = Vec::new();
+    let sessions: Vec<(String, i64)> =
+        sqlx::query_as("SELECT session_id, consumed FROM workspace_sessions ORDER BY session_id")
+            .fetch_all(pool)
+            .await
+            .expect("session rows");
+    for (session_id, consumed) in sessions {
+        out.push(format!("session {session_id} consumed={consumed}"));
+    }
+    let intents: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT session_id, revision, state FROM workspace_commit_intents ORDER BY revision",
+    )
+    .fetch_all(pool)
+    .await
+    .expect("intent rows");
+    for (session_id, revision, state) in intents {
+        out.push(format!("intent {session_id} {revision} {state}"));
+    }
+    out
+}
+
+/// The manager's OWN durable commit entrance is covered by the owner close.
+///
+/// `ExecutionHandle::workspace_commit_authority()` hands out the shared
+/// `WorkspaceSessionManager`, so a caller that keeps it can start a recoverable
+/// mutation that never goes through the handle route. Such a mutation must
+/// register in the SAME admission counter the close drains — otherwise the
+/// close can release the workspace lease (and a replacement owner can take the
+/// same root) while this commit is still applying.
+#[cfg(feature = "test-hooks")]
+#[tokio::test]
+#[serial_test::serial]
+async fn a_direct_durable_commit_is_drained_before_the_close_releases_the_authority() {
+    let fixture = hosted_fixture().await;
+    let home = fixture.tmp.path().to_path_buf();
+    let db_path = nexus_home_layout::workspace_state_db_path(&home, CREATOR, SLUG);
+    let epoch_a = fixture.handle.engine_epoch();
+    let manager = retained_manager(&fixture);
+    let root = fixture.root.to_string_lossy().into_owned();
+    let session = manager
+        .open_session(&root, "notes", true)
+        .await
+        .expect("open a commit session");
+    let session_id = session.to_string();
+
+    let gate = Arc::new(test_hooks::OwnerGate::for_session(session_id.clone()));
+    test_hooks::set_owner_gate(Some(Arc::clone(&gate)));
+
+    // The manager's OWN entrance, NOT the handle's `commit_workspace`.
+    let mut direct = {
+        let manager = Arc::clone(&manager);
+        let session = session.clone();
+        let root = root.clone();
+        tokio::spawn(async move {
+            manager
+                .commit_session_durable(
+                    &session,
+                    &[direct_change(DRAINED_PATH, HOSTED_PAYLOAD_B64)],
+                    &root,
+                )
+                .await
+        })
+    };
+    tokio::select! {
+        () = gate.admitted.notified() => {}
+        refused = &mut direct => panic!(
+            "the direct commit was refused before its admission boundary: {refused:?}"
+        ),
+    }
+
+    // Close while the direct commit is parked mid-apply: no settled close, no
+    // released lease and no replacement authority may appear.
+    let mut closer = {
+        let core = fixture.core.clone();
+        tokio::spawn(async move { core.close().await })
+    };
+    assert!(
+        !finished_within(&mut closer, CLOSE_OBSERVATION_WINDOW).await,
+        "close settled while a direct durable commit through the retained manager was still applying"
+    );
+    assert!(
+        !fixture.handle.is_settled(),
+        "the owner settled while a direct durable commit was still applying"
+    );
+    assert!(
+        WorkspaceAuthorityLease::acquire(&db_path).is_err(),
+        "the workspace authority was released before the direct commit settled"
+    );
+
+    // Release the gate: the admitted direct commit reaches its durable
+    // conclusion, and only THEN does the close confirm.
+    gate.proceed.notify_one();
+    let outcome = direct
+        .await
+        .expect("the direct commit task joins")
+        .expect("the admitted direct commit still settles durably");
+    assert!(
+        outcome.committed,
+        "the direct commit reports a durable commit"
+    );
+    let report = closer
+        .await
+        .expect("the close task joins")
+        .expect("a close report");
+    assert_eq!(report.state, nexus_contracts::CoreCloseReportState::Closed);
+    assert!(
+        report.cleanup_confirmed,
+        "the close confirms only after the direct commit settled"
+    );
+    test_hooks::set_owner_gate(None);
+    assert_eq!(
+        std::fs::read(fixture.root.join("notes").join(DRAINED_PATH))
+            .expect("the committed bytes are durable"),
+        HOSTED_PAYLOAD
+    );
+
+    // The next owner over the same home is a NEW admission that reads the
+    // revision the direct commit settled.
+    let (core_b, _host_b, handle_b) = open_hosted_owner(&home).await;
+    assert!(
+        handle_b.engine_epoch() > epoch_a,
+        "the next owner must be a NEW admission ({} -> {})",
+        epoch_a,
+        handle_b.engine_epoch()
+    );
+    let revision = settled_revision(&core_b, &session_id).await;
+    assert!(
+        revision.starts_with("rev_"),
+        "the next owner reads the settled revision, got {revision}"
+    );
+    handle_b.close().await.expect("close the next owner");
+    core_b.close().await.expect("close the next core");
+}
+
+/// After a CONFIRMED close, EVERY direct recoverable entrance on the retained
+/// manager fails closed with a typed refusal and mutates nothing.
+///
+/// The handle route (`commit_workspace`) is only one way in; `commit_session`,
+/// `commit_session_durable`, `startup_recovery` and `startup_recovery_for_root`
+/// are reachable through `WorkspaceCommitAuthority::manager()` and can apply or
+/// roll back workspace bytes. `ExecutionHandle::close()` drains its admitted
+/// work and RELEASES the workspace authority while the service (and its pool)
+/// stays open, so an entrance that is not in the same admission counter can
+/// still write the same root after that release.
+#[cfg(feature = "test-hooks")]
+#[tokio::test]
+#[serial_test::serial]
+async fn every_direct_recoverable_entrance_refuses_after_a_confirmed_close() {
+    let fixture = hosted_fixture().await;
+    let home = fixture.tmp.path().to_path_buf();
+    let db_path = nexus_home_layout::workspace_state_db_path(&home, CREATOR, SLUG);
+    let manager = retained_manager(&fixture);
+    let root = fixture.root.to_string_lossy().into_owned();
+
+    // CONTROL: the same entrances work while the owner is live, so a refusal
+    // below is the close boundary and not a broken call.
+    let live = manager
+        .open_session(&root, "notes", true)
+        .await
+        .expect("open the live control session");
+    let live_outcome = manager
+        .commit_session_durable(
+            &live,
+            &[direct_change("pre-close.txt", HOSTED_PAYLOAD_B64)],
+            &root,
+        )
+        .await
+        .expect("the direct durable entrance works while the owner is live");
+    assert!(
+        live_outcome.committed,
+        "the live control commit is durable before the close"
+    );
+
+    // Sessions prepared for the post-close attempts, plus the durable state the
+    // refusals must leave byte-identical (real rows: the control commit's
+    // session and its settled intent are in it).
+    let durable_session = manager
+        .open_session(&root, "notes", true)
+        .await
+        .expect("open the durable session");
+    let plain_session = manager
+        .open_session(&root, "notes", true)
+        .await
+        .expect("open the plain session");
+    let before_files = root_files(&fixture.root);
+    let before_state = commit_state(fixture.core.pool()).await;
+
+    // The OWNER close: confirmed, drain complete, and the workspace authority
+    // released — while the service keeps its pool open.
+    let report = fixture.handle.close().await.expect("the owner close");
+    assert!(
+        report.cleanup_confirmed,
+        "the owner close is confirmed before the refusals are exercised"
+    );
+    assert!(fixture.handle.is_settled(), "the owner is settled");
+    assert!(
+        WorkspaceAuthorityLease::acquire(&db_path).is_ok(),
+        "a confirmed owner close releases the workspace authority"
+    );
+
+    assert_direct_entrances_refused(&manager, &root, &durable_session, &plain_session).await;
+    assert_eq!(
+        root_files(&fixture.root),
+        before_files,
+        "a refused direct entrance changed the workspace bytes"
+    );
+    assert_eq!(
+        commit_state(fixture.core.pool()).await,
+        before_state,
+        "a refused direct entrance consumed a session or claimed an intent"
+    );
+
+    // The SERVICE close seals the same boundary once more, this time over a
+    // closed pool: the refusal stays the typed one instead of borrowing the
+    // pool's own failure.
+    let core_report = fixture.core.close().await.expect("the core close");
+    assert!(
+        core_report.cleanup_confirmed,
+        "the core close is confirmed before the second refusal pass"
+    );
+    assert_direct_entrances_refused(&manager, &root, &durable_session, &plain_session).await;
+    assert_eq!(
+        root_files(&fixture.root),
+        before_files,
+        "a refused direct entrance changed the workspace bytes after the core close"
+    );
+}
+
+/// Every direct recoverable entrance on a CLOSED manager refuses, typed.
+#[cfg(feature = "test-hooks")]
+async fn assert_direct_entrances_refused(
+    manager: &Arc<WorkspaceSessionManager>,
+    root: &str,
+    durable_session: &SessionId,
+    plain_session: &SessionId,
+) {
+    let durable = manager
+        .commit_session_durable(
+            durable_session,
+            &[direct_change("refused.txt", HOSTED_PAYLOAD_B64)],
+            root,
+        )
+        .await;
+    assert!(
+        matches!(durable, Err(SessionError::AuthorityBusy)),
+        "a direct durable commit after close must fail closed, got {durable:?}"
+    );
+    let plain = manager
+        .commit_session(
+            plain_session,
+            &[direct_change("refused-plain.txt", HOSTED_PAYLOAD_B64)],
+            root,
+        )
+        .await;
+    assert!(
+        matches!(plain, Err(SessionError::AuthorityBusy)),
+        "a direct recoverable commit after close must fail closed, got {plain:?}"
+    );
+    let scoped = manager.startup_recovery_for_root(root).await;
+    assert!(
+        matches!(scoped, Err(SessionError::AuthorityBusy)),
+        "root-scoped startup recovery after close must fail closed, got {scoped:?}"
+    );
+    let sweep = manager.startup_recovery().await;
+    assert!(
+        matches!(sweep, Err(SessionError::AuthorityBusy)),
+        "the whole-DB startup recovery after close must fail closed, got {sweep:?}"
+    );
 }

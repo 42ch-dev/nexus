@@ -90,7 +90,7 @@ pub struct CommitOutcome {
 /// Returns whatever [`recover_unsettled_locked`] reports: a
 /// [`SessionError::Database`] failure while listing or settling rows, or the
 /// recovery-conflict error for an intent another writer already claimed.
-pub async fn recover_unsettled(
+pub(crate) async fn recover_unsettled(
     mgr: &WorkspaceSessionManager,
     workspace_root: &str,
 ) -> Result<(), SessionError> {
@@ -105,7 +105,7 @@ pub async fn recover_unsettled(
 /// Returns a [`SessionError::Database`] failure while listing or settling
 /// rows, or [`SessionError::RecoveryConflict`] when an intent is owned by
 /// another writer.
-pub async fn recover_unsettled_locked(
+pub(crate) async fn recover_unsettled_locked(
     mgr: &WorkspaceSessionManager,
     workspace_root: &str,
 ) -> Result<(), SessionError> {
@@ -686,6 +686,13 @@ async fn committed_replay_outcome(
 /// Apply one recoverable commit: normalize, validate, CAS-verify each entry at
 /// the mutation boundary, persist the durable intent, then settle it.
 ///
+/// Deliberately crate-internal, and lower-level than the close boundary: the
+/// three public entrances (`commit_session`, `commit_session_durable`,
+/// `commit_session_durable_owned`) register in the authority's admission
+/// counter FIRST, and this function must never become reachable without that
+/// admission — a commit that the owning close cannot see may still be applying
+/// when the close releases the workspace authority.
+///
 /// # Errors
 ///
 /// Returns [`SessionError::Internal`] when the manager has no recoverable
@@ -705,7 +712,7 @@ async fn committed_replay_outcome(
 // helpers would scatter the CAS/settlement ordering that makes a partially
 // applied commit recoverable, so the length is deliberate.
 #[allow(clippy::too_many_lines)]
-pub async fn commit_recoverable(
+pub(crate) async fn commit_recoverable(
     mgr: &WorkspaceSessionManager,
     session_id: &SessionId,
     changes: &[WorkspaceChangeEntry],
@@ -983,7 +990,7 @@ fn cleanup_staged_confirmed(
 /// admission is taken BEFORE the owner task is spawned and held BY that task,
 /// so the owning handle's close either sees this commit (and waits for it) or
 /// refuses it — never both, and never neither.
-pub async fn commit_recoverable_owned(
+pub(crate) async fn commit_recoverable_owned(
     mgr: Arc<WorkspaceSessionManager>,
     session_id: SessionId,
     changes: Vec<WorkspaceChangeEntry>,
@@ -1085,12 +1092,16 @@ async fn cleanup_settled_artifacts(mgr: &WorkspaceSessionManager, root_filter: O
 
 /// Startup recovery for every unsettled intent, under the mutation lock.
 ///
+/// Crate-internal: [`WorkspaceSessionManager::startup_recovery`] takes the
+/// authority's admission before calling this, so a recovery pass is either
+/// drained by the owning close or refused by the sealed boundary.
+///
 /// # Errors
 ///
 /// Returns [`SessionError::Database`] when listing unsettled intents fails
 /// (including a corrupt intent payload), or whatever the per-intent recovery
 /// reports.
-pub async fn startup_recovery_all(mgr: &WorkspaceSessionManager) -> Result<(), SessionError> {
+pub(crate) async fn startup_recovery_all(mgr: &WorkspaceSessionManager) -> Result<(), SessionError> {
     let _guard = mgr.lock_mutation().await;
     let intents = match db::list_all_unsettled_intents(mgr.pool().as_ref()).await {
         Ok(rows) => rows,
@@ -1115,10 +1126,14 @@ pub async fn startup_recovery_all(mgr: &WorkspaceSessionManager) -> Result<(), S
 /// the settled-artifact sweep is filtered to the same root; every other root's
 /// rows keep their persisted state and their files untouched.
 ///
+/// Crate-internal, like [`startup_recovery_all`]:
+/// [`WorkspaceSessionManager::startup_recovery_for_root`] takes the authority's
+/// admission before calling this.
+///
 /// # Errors
 ///
 /// As [`startup_recovery_all`], for the selected root only.
-pub async fn startup_recovery_for_root(
+pub(crate) async fn startup_recovery_for_root(
     mgr: &WorkspaceSessionManager,
     workspace_root: &str,
 ) -> Result<(), SessionError> {
