@@ -24,6 +24,7 @@ import type {
 } from '@42ch/nexus-contracts';
 import type { ServiceCore } from './lifecycle.js';
 import type { DomainRoute } from './routes.js';
+import { HttpError } from './errors.js';
 import {
   parseOptionalInteger,
   withPrincipal,
@@ -82,8 +83,13 @@ export function editCoreContext(service: ServiceCore, scheduleId: string, body: 
  * the core owner validates `sort` and the pagination cursor, and the explicit
  * `creator_id` filter is what the core refuses for a foreign creator (a
  * transport-side drop would answer with a silently empty page instead).
+ *
+ * A key outside this schema's own key set is refused, never dropped: the DTO
+ * is assembled here from a fixed set, so an unfiltered drop would answer a
+ * misspelled filter with a broader (and misleading) success page.
  */
 function listSchedulesQuery(search: URLSearchParams): ListSchedulesQuery {
+  refuseUnknownQueryKeys(search, ['creator_id', 'status', 'sort', 'cursor', 'limit']);
   const creator_id = search.get('creator_id');
   const status = search.get('status');
   const sort = search.get('sort');
@@ -100,6 +106,7 @@ function listSchedulesQuery(search: URLSearchParams): ListSchedulesQuery {
 
 /** `ListSessionsQuery` from query-string parameters (same forwarding rules). */
 function listSessionsQuery(search: URLSearchParams): ListSessionsQuery {
+  refuseUnknownQueryKeys(search, ['creator_id', 'sort', 'cursor', 'limit']);
   const creator_id = search.get('creator_id');
   const sort = search.get('sort');
   const cursor = search.get('cursor');
@@ -110,6 +117,26 @@ function listSessionsQuery(search: URLSearchParams): ListSessionsQuery {
     ...(cursor !== null ? { cursor } : {}),
     ...(limit !== null ? { limit: parseOptionalInteger(search, 'limit') } : {}),
   };
+}
+
+/**
+ * Refuse every query key outside `allowed` — this adapter's own schema key set.
+ *
+ * The generated query DTOs declare `additionalProperties: false`, but they are
+ * assembled from a fixed key set here, so an unsupported or misspelled
+ * parameter would be silently discarded before the native decoder could refuse
+ * it: the caller would get a broader unfiltered page instead of the typed
+ * refusal its contract promises. The refusal is the same client error as a bad
+ * value; no supported key is re-parsed, re-validated or re-defaulted here.
+ */
+function refuseUnknownQueryKeys(search: URLSearchParams, allowed: readonly string[]): void {
+  for (const key of search.keys()) {
+    if (!allowed.includes(key)) {
+      throw new HttpError(400, 'invalid_input', `unknown query parameter '${key}'`, {
+        field: key,
+      });
+    }
+  }
 }
 
 /** Exact path/verb/tier identities this family owns (composer input). */

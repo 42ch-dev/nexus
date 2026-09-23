@@ -550,6 +550,42 @@ async function waitFor(read, done, { label, timeout = 30_000 } = {}) {
 }
 
 /**
+ * The W6 success-path graph: `branch_a` routes to the `join` converge gate
+ * whose second upstream (`branch_b`) is never walked, so the admitted run parks
+ * at that gate durably — no human wait token, no deadline, and (unlike a manual
+ * wait) a legal plain resume. The manifest is written through the public preset
+ * PATCH, which validates it structurally before replacing the bundle's YAML.
+ */
+const RESUME_PARK_PRESET = 'p0t6-resume-park';
+
+function resumeParkPresetYaml() {
+  return `preset:
+  id: ${RESUME_PARK_PRESET}
+  version: 1
+  kind: creator
+  description: "P0-T6 W6 resume fixture — an unreachable branch parks the join, no deadline"
+  requires_capabilities: []
+  initial: start
+  terminal: done
+states:
+  - id: start
+    next: branch_a
+  - id: branch_a
+    next:
+      branches: []
+      default: join
+  - id: branch_b
+    description: "Hanging upstream edge — never walked, never arrives"
+    next: join
+  - id: join
+    converge: { strategy: wait_for_all }
+    next: done
+  - id: done
+    terminal: true
+`;
+}
+
+/**
  * Seed the durable rows only ANOTHER creator could have written: one terminal
  * root run and one terminal schedule owned by `other_creator`, inside the same
  * workspace state DB the restored owner serves.
@@ -865,6 +901,34 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', () 
       assert.equal(badSessionSort.status, 400, badSessionSort.text);
       assert.equal(badSessionSort.payload.error.details?.field, 'sort', badSessionSort.text);
 
+      // An UNSUPPORTED or misspelled query key is NOT silently discarded. The
+      // generated query DTOs are `additionalProperties: false`, so a key this
+      // surface does not forward can never be answered as a broader
+      // unfiltered page — that would make a caller believe a filter it asked
+      // for was applied. It closes exactly like any other malformed input:
+      // the typed client refusal, on BOTH list identities.
+      for (const family of ['schedules', 'sessions']) {
+        for (const query of ['preset_id=p0t6-control', 'limt=1', 'staus=running']) {
+          const response = await jsonFetch(
+            `${base}/v1/daemon/orchestration/${family}?${query}`,
+          );
+          assert.equal(response.status, 400, `${family}?${query}: ${response.text}`);
+          assert.equal(response.payload.error.code, 'invalid_input', response.text);
+        }
+      }
+
+      // …while every SUPPORTED key still reaches the core owner: the explicit
+      // own-creator filter is accepted (the foreign-creator refusal above
+      // proves it is forwarded, not dropped), and the page size the owner
+      // echoes is the one that was asked for rather than the default.
+      for (const family of ['schedules', 'sessions']) {
+        const own = await jsonFetch(
+          `${base}/v1/daemon/orchestration/${family}?creator_id=${CREATOR}&limit=1`,
+        );
+        assert.equal(own.status, 200, own.text);
+        assert.equal(own.payload.pagination.limit, 1, own.text);
+      }
+
       // Control on an unknown schedule is the not-found refusal, with no
       // mutation of anything else.
       const unknownSignal = await jsonFetch(`${base}/v1/daemon/orchestration/schedules/SCH_absent_control/signal`, {
@@ -873,6 +937,135 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', () 
       });
       assert.equal(unknownSignal.status, 404, unknownSignal.text);
       assert.equal(unknownSignal.payload.error.code, 'not_found', unknownSignal.text);
+    } finally {
+      await service.close();
+    }
+  });
+
+  /**
+   * W6 (S0-4): the public SUCCESS branch of the resume journey.
+   *
+   * The round-trip case above pins the refusal half — a plain resume must not
+   * bypass a run parked at a MANUAL human wait. This case pins the other half:
+   * a run durably parked at a converge gate carries no human wait, so the
+   * schedule's own run is genuinely resumable. The row is `pause`d first (the
+   * row flips while the run it owns keeps its identity), the resume signals
+   * that SAME run over HTTP, the response carries the durable RUN status, and
+   * both public projections read the reconciled row — with no second run
+   * minted.
+   *
+   * The graph is authored through the PUBLIC preset surface (scaffold →
+   * validated PATCH of its YAML), so the preset, the schedule, its admission
+   * and the run are all producer-made; nothing here seeds the store privately
+   * and no mock acknowledges anything.
+   */
+  test('control resume: a paused schedule row resumes the same parked run over HTTP', async () => {
+    const home = seededHome(acpProviderConfig());
+    const service = await startServiceOn(home);
+    try {
+      const base = service.url;
+      const schedulesUrl = `${base}/v1/daemon/orchestration/schedules`;
+      const scheduleUrl = (id) => `${schedulesUrl}/${id}`;
+      const sessionUrl = (id) => `${base}/v1/daemon/orchestration/sessions/${id}`;
+      const inspectSchedule = async (id) => {
+        const response = await jsonFetch(scheduleUrl(id));
+        assert.equal(response.status, 200, response.text);
+        return response.payload;
+      };
+      const inspectSession = async (id) => {
+        const response = await jsonFetch(sessionUrl(id));
+        assert.equal(response.status, 200, response.text);
+        return response.payload;
+      };
+
+      // W1: author the graph through the public preset surface. The scaffold
+      // creates the user bundle; the validated PATCH replaces its YAML with a
+      // converge gate whose second upstream branch is never walked, so the
+      // admitted run parks durably at that gate (no human wait, no deadline).
+      const scaffolded = await jsonFetch(`${base}/v1/daemon/presets`, {
+        method: 'POST',
+        body: { name: RESUME_PARK_PRESET },
+      });
+      assert.equal(scaffolded.status, 201, scaffolded.text);
+      const patched = await jsonFetch(`${base}/v1/daemon/presets/${RESUME_PARK_PRESET}`, {
+        method: 'PATCH',
+        body: { yaml: resumeParkPresetYaml() },
+      });
+      assert.equal(patched.status, 200, patched.text);
+      assert.equal(patched.payload.updated, true, patched.text);
+
+      const created = await jsonFetch(schedulesUrl, {
+        method: 'POST',
+        body: { creator_id: CREATOR, preset_id: RESUME_PARK_PRESET },
+      });
+      assert.equal(created.status, 201, created.text);
+      assert.equal(created.payload.status, 'pending', created.text);
+      const scheduleId = created.payload.schedule_id;
+      assert.ok(scheduleId, created.text);
+
+      // Admission is asynchronous by contract: the run identity lands on the
+      // durable row, then the run parks at the gate.
+      const admitted = await waitFor(
+        () => inspectSchedule(scheduleId),
+        (payload) => Boolean(payload.schedule.current_session_id),
+        { label: `schedule ${scheduleId} owned run identity` },
+      );
+      const runId = admitted.schedule.current_session_id;
+      const parked = await waitFor(
+        () => inspectSession(runId),
+        (payload) => payload.session.status === 'paused',
+        { label: `run ${runId} converge-gate park` },
+      );
+      assert.equal(parked.session.session_id, runId, JSON.stringify(parked));
+      assert.equal(parked.session.creator_id, CREATOR, JSON.stringify(parked));
+      assert.equal(parked.session.preset_id, RESUME_PARK_PRESET, JSON.stringify(parked));
+
+      // W6 state: `pause` flips the durable schedule ROW while the run it owns
+      // keeps its identity, so the row claims `paused` while the run is still
+      // the parked one this schedule owns.
+      const paused = await jsonFetch(`${scheduleUrl(scheduleId)}/signal`, {
+        method: 'POST',
+        body: { signal: 'pause' },
+      });
+      assert.equal(paused.status, 200, paused.text);
+      assert.equal(paused.payload.status, 'paused', paused.text);
+      const afterPause = await inspectSchedule(scheduleId);
+      assert.equal(afterPause.schedule.status, 'paused', JSON.stringify(afterPause));
+      assert.equal(afterPause.schedule.current_session_id, runId, JSON.stringify(afterPause));
+
+      // W6: the resume reaches that SAME run, and the response carries the
+      // durable RUN status — never a synthesized success.
+      const resumed = await jsonFetch(`${scheduleUrl(scheduleId)}/signal`, {
+        method: 'POST',
+        body: { signal: 'resume' },
+      });
+      assert.equal(resumed.status, 200, resumed.text);
+      assert.equal(resumed.payload.schedule_id, scheduleId, resumed.text);
+      assert.equal(resumed.payload.status, 'running', resumed.text);
+
+      // The durable row follows the run it owns: both public projections read
+      // the reconciled state, the identity is unchanged, and no second
+      // workflow was minted for the schedule.
+      const afterResume = await inspectSchedule(scheduleId);
+      assert.equal(afterResume.schedule.status, 'running', JSON.stringify(afterResume));
+      assert.equal(afterResume.schedule.current_session_id, runId, JSON.stringify(afterResume));
+      const resumedSession = await inspectSession(runId);
+      assert.equal(resumedSession.session.status, 'running', JSON.stringify(resumedSession));
+
+      const listed = await jsonFetch(schedulesUrl);
+      assert.equal(listed.status, 200, listed.text);
+      const listedRow = listed.payload.items.find((row) => row.schedule_id === scheduleId);
+      assert.ok(listedRow, `the resumed schedule stays listed: ${listed.text}`);
+      assert.equal(listedRow.status, 'running', listed.text);
+      assert.equal(listedRow.current_session_id, runId, listed.text);
+
+      const sessions = await jsonFetch(`${base}/v1/daemon/orchestration/sessions`);
+      assert.equal(sessions.status, 200, sessions.text);
+      assert.equal(
+        sessions.payload.items.filter((row) => row.preset_id === RESUME_PARK_PRESET).length,
+        1,
+        `a resume must never mint a second workflow: ${sessions.text}`,
+      );
     } finally {
       await service.close();
     }
