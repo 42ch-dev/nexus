@@ -595,6 +595,51 @@ impl CoreContextManager {
         row.into_record()
     }
 
+    /// Read the COMMITTED `core_context` head of the schedule that owns one run.
+    ///
+    /// `session_id` is a durable root run id; a run is schedule-owned exactly
+    /// while some `creator_schedules` row names it as its `current_session_id`
+    /// (the ownership predicate the coordinator's terminal settlement already
+    /// uses). `Ok(None)` therefore means "this run carries no schedule
+    /// core-context contract" — a session-POST run, or a nested child — and the
+    /// caller applies no refresh.
+    ///
+    /// The record returned is the EXACT version the schedule pointer names,
+    /// never the newest row in `core_context_versions`: an outer state boundary
+    /// may only render a payload a committed pointer names. A pointer that
+    /// names no readable row is [`CoreContextError::VersionNotFound`] (and any
+    /// storage/serde failure its own variant) so the caller fails closed
+    /// instead of rendering an unverified snapshot.
+    ///
+    /// # Errors
+    /// Returns [`CoreContextError`] on a database/deserialization failure, on a
+    /// pointer outside the version range, or when the named version row is
+    /// absent.
+    pub async fn head_for_run(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<CoreContextRecord>, CoreContextError> {
+        let row: Option<(String, i64)> = sqlx::query_as(
+            "SELECT schedule_id, current_core_context_version
+             FROM creator_schedules WHERE current_session_id = ?",
+        )
+        .bind(session_id)
+        .fetch_optional(&*self.pool)
+        .await?;
+        let Some((schedule_id, version)) = row else {
+            return Ok(None);
+        };
+        let version = u32::try_from(version).map_err(|_| {
+            CoreContextError::Serde(serde_json::Error::custom(format!(
+                "schedule {schedule_id} core-context pointer {version} is out of range"
+            )))
+        })?;
+        let record = self
+            .read(&ScheduleId(schedule_id), CoreContextVersion(version))
+            .await?;
+        Ok(Some(record))
+    }
+
     /// Read the current (latest) snapshot of `core_context` for a schedule.
     ///
     /// # Errors

@@ -40,6 +40,18 @@ use nexus_preset::source_identity::PresetSourceIdentity;
 /// deterministic (no marker), a CAS-fenced restore is acceptable (Important 3).
 pub const EXTERNAL_EFFECT_MARKER: &str = "__external_effect_ran";
 
+/// Context key carrying the core-context version a run's snapshot was rendered
+/// from.
+///
+/// This is the `{{core_context.version}}` binding the creator-schedule master
+/// §6.4 names among the variables bound "from the current `core_context`
+/// snapshot at the start of the state". Admission seeds it with the schedule
+/// pointer the run was frozen against; the outer-state boundary refresh
+/// (v1.195 P0-T6, §3.3/§6.4) advances it only when the schedule's committed
+/// pointer has genuinely moved past it, so an unchanged pointer re-renders
+/// nothing.
+pub const CORE_CONTEXT_VERSION_KEY: &str = "core_context.version";
+
 /// Upper bound on cancel-intent fence reload/retry attempts (Finding 1).
 ///
 /// A cancel that loses the phase-1 revision CAS to a concurrent transition
@@ -48,6 +60,20 @@ pub const EXTERNAL_EFFECT_MARKER: &str = "__external_effect_ran";
 /// keeps the retry bounded: after it is exhausted the CAS loss is surfaced
 /// so the caller projects the exact public conflict after reloading.
 pub const CANCEL_FENCE_RETRY_BOUND: u32 = 8;
+
+/// The core-context version a run's context was last rendered from.
+///
+/// Admission writes [`CORE_CONTEXT_VERSION_KEY`] with the schedule pointer the
+/// run was frozen against; the boundary refresh advances it. A run that
+/// predates the version binding reads as version 0 — its schedule pointer then
+/// decides whether a refresh is due, which is exactly the pre-binding admission
+/// semantics.
+fn applied_core_context_version(context: &graph_flow::Context) -> u32 {
+    context
+        .get::<String>(CORE_CONTEXT_VERSION_KEY)
+        .and_then(|raw| raw.parse::<u32>().ok())
+        .unwrap_or(0)
+}
 
 /// Whether the post-step root context carries the [`EXTERNAL_EFFECT_MARKER`],
 /// indicating that one or more external effects executed during the step.
@@ -629,6 +655,15 @@ pub struct EngineSharedState {
     /// `_context.workspace.*` against the daemon's workspace authority.
     pub workspace_state_provider:
         Option<std::sync::Arc<dyn crate::capability::WorkspaceStateProvider>>,
+    /// Creator-DB core-context store (v1.195 P0-T6) — the durable
+    /// `creator_schedules` pointer + immutable `core_context_versions` rows.
+    ///
+    /// When present, every outer state boundary of a schedule-owned run
+    /// re-reads the committed pointer and renders the version it names
+    /// ([`EngineSharedState::refresh_core_context_at_boundary`]). `None` for
+    /// engines with no creator-DB core-context store (in-memory/test engines,
+    /// session-only callers): no boundary refresh is attempted.
+    pub core_context_store: Option<Arc<crate::schedule::derivation::CoreContextManager>>,
 }
 
 impl EngineSharedState {
@@ -645,6 +680,7 @@ impl EngineSharedState {
             )),
             prompt_executor: None,
             workspace_state_provider: None,
+            core_context_store: None,
         }
     }
 
@@ -664,6 +700,7 @@ impl EngineSharedState {
             )),
             prompt_executor: None,
             workspace_state_provider: None,
+            core_context_store: None,
         }
     }
 
@@ -677,6 +714,19 @@ impl EngineSharedState {
         provider: std::sync::Arc<dyn crate::capability::WorkspaceStateProvider>,
     ) {
         self.workspace_state_provider = Some(provider);
+    }
+
+    /// Wire the creator-DB core-context store used by the outer-state boundary
+    /// refresh (v1.195 P0-T6).
+    ///
+    /// Called once at daemon boot with the same Creator DB pool the schedule
+    /// supervisor reads its pointers through. Engines that never wire it keep
+    /// the pre-existing behavior (no boundary refresh).
+    pub fn set_core_context_store(
+        &mut self,
+        store: Arc<crate::schedule::derivation::CoreContextManager>,
+    ) {
+        self.core_context_store = Some(store);
     }
 
     /// Register a run's coordinator cancellation token (A1, fail-closed
@@ -1701,6 +1751,111 @@ impl EngineSharedState {
         Ok(())
     }
 
+    /// Refresh a run's `core_context` snapshot at the OUTER STATE BOUNDARY it
+    /// is about to enter (v1.195 P0-T6; creator-schedule master §3.3/§6.4).
+    ///
+    /// A schedule edit made while its run is mid-execution commits a new
+    /// immutable version and advances the schedule pointer WITHOUT interrupting
+    /// the in-flight state: "the current state finishes on the old snapshot;
+    /// the next state's enter evaluates template bindings against the new
+    /// version". This is that read — it runs immediately BEFORE the boundary's
+    /// step, so the step's `StateCompositeTask` renders whatever the committed
+    /// pointer names.
+    ///
+    /// Scope and failure semantics:
+    ///
+    /// - No wired store, or no schedule owns this run (`session-POST` runs and
+    ///   nested children) ⇒ no-op: those runs carry no core-context contract.
+    /// - The snapshot is the EXACT version the schedule pointer names, read
+    ///   through [`CoreContextManager::head_for_run`] — never the newest row,
+    ///   never an in-memory or test substitute.
+    /// - A store failure, an unreadable/missing named version, a corrupt
+    ///   payload, or a run marker ahead of the committed pointer FAILS CLOSED:
+    ///   the boundary is refused rather than rendered from a stale or guessed
+    ///   snapshot.
+    /// - Only `core_context.text` and the applied-version marker are rewritten,
+    ///   and only while the run sits at a boundary (no step in flight). An
+    ///   unchanged pointer writes nothing at all.
+    ///
+    /// # Errors
+    /// Returns [`EngineError`] when the committed snapshot cannot be read or
+    /// the refreshed context cannot be persisted.
+    async fn refresh_core_context_at_boundary(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), EngineError> {
+        use nexus_contracts::local::schedule::CoreContextPayload;
+
+        let Some(store) = &self.core_context_store else {
+            return Ok(());
+        };
+        let Some(committed) = store.head_for_run(&session_id.0).await.map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "run '{}': core-context boundary read failed: {e}",
+                session_id.0
+            )))
+        })?
+        else {
+            return Ok(());
+        };
+
+        let session = self
+            .storage
+            .get(&session_id.0)
+            .await
+            .map_err(EngineError::GraphFlow)?
+            .ok_or_else(|| EngineError::SessionNotFound(session_id.0.clone()))?;
+        let applied = applied_core_context_version(&session.context);
+        let committed_version = committed.version.0;
+        // Ownership guard: a run can never render a version NEWER than the
+        // pointer of the schedule that owns it — that shape means the marker
+        // and the owning schedule disagree, so the boundary must refuse rather
+        // than pick a winner.
+        if applied > committed_version {
+            return Err(EngineError::GraphFlow(
+                graph_flow::GraphError::StorageError(format!(
+                    "run '{}': applied core-context version {applied} is ahead of the \
+                     committed pointer {committed_version}; refusing the boundary \
+                     (ownership mismatch)",
+                    session_id.0
+                )),
+            ));
+        }
+        if applied == committed_version {
+            return Ok(());
+        }
+
+        let body = match committed.content {
+            CoreContextPayload::Text { body } => body,
+            CoreContextPayload::Struct { body } => serde_json::to_string(&body).map_err(|e| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "run '{}': core-context struct payload serialization failed: {e}",
+                    session_id.0
+                )))
+            })?,
+        };
+        session
+            .context
+            .set("core_context.text", body)
+            .map_err(EngineError::GraphFlow)?;
+        session
+            .context
+            .set(CORE_CONTEXT_VERSION_KEY, committed_version.to_string())
+            .map_err(EngineError::GraphFlow)?;
+        self.storage
+            .save(session)
+            .await
+            .map_err(EngineError::GraphFlow)?;
+        tracing::info!(
+            session_id = %session_id.0,
+            schedule_id = %committed.schedule_id,
+            from_version = applied,
+            to_version = committed_version,
+            "outer state boundary refreshed core context from the committed pointer"
+        );
+        Ok(())
+    }
+
     /// Run a single step for a session, updating status after execution.
     ///
     /// Common logic shared between `GraphFlowEngine` and `EngineProxy`.
@@ -1753,6 +1908,14 @@ impl EngineSharedState {
         };
 
         let mut step_witness: Option<FailedStepWitness> = None;
+
+        // Outer state boundary (v1.195 P0-T6): a schedule edit committed while
+        // this run was mid-execution must render at the NEXT state transition.
+        // This runs BEFORE the pre-step root/revision are read, so the step's
+        // own snapshot, marker CAS and rendered prompts all observe one
+        // consistent (refreshed) context; a failure here refuses the boundary
+        // instead of stepping on a stale snapshot.
+        self.refresh_core_context_at_boundary(session_id).await?;
 
         // Capture the current revision before the step so the transition CAS
         // is anchored to the pre-step state (A2). A `load_run` failure has
@@ -3395,6 +3558,30 @@ impl GraphFlowEngine {
         }
     }
 
+    /// Wire the creator-DB core-context store for the outer-state boundary
+    /// refresh (v1.195 P0-T6).
+    ///
+    /// Called during daemon boot with the same Creator DB pool the schedule
+    /// supervisor reads `creator_schedules.current_core_context_version`
+    /// through, so a run whose schedule was edited mid-execution renders the
+    /// committed version at its next state transition. Mirrors
+    /// `set_workspace_state_provider`: a freshly constructed engine lands the
+    /// store on the ONE shared state every `EngineProxy` clone shares.
+    pub fn set_core_context_store(
+        &mut self,
+        store: std::sync::Arc<crate::schedule::derivation::CoreContextManager>,
+    ) {
+        match std::sync::Arc::get_mut(&mut self.state) {
+            Some(state) => state.set_core_context_store(store),
+            None => {
+                tracing::warn!(
+                    "core-context store not wired: engine shared state is aliased, so \
+                     outer-state boundaries will not refresh from the schedule pointer"
+                );
+            }
+        }
+    }
+
     /// Recover persisted sessions into the in-memory tracker (WS2 R1 + R6).
     ///
     /// Called after engine construction on daemon restart. Queries
@@ -4127,6 +4314,12 @@ impl GraphFlowEngine {
         if let Some(cc) = core_context {
             session.context.set("core_context.text", cc.to_string())?;
         }
+        // The frozen version this run renders until its next outer state
+        // boundary: the boundary refresh compares the schedule's committed
+        // pointer against it (v1.195 P0-T6).
+        session
+            .context
+            .set(CORE_CONTEXT_VERSION_KEY, core_context_version.to_string())?;
         let checkpoint = RunCheckpoint {
             root: &session,
             children: &[],

@@ -843,6 +843,15 @@ impl CoreService {
         if let Some(provider) = &deps.workspace_state_provider {
             engine.set_workspace_state_provider(Arc::clone(provider));
         }
+        // v1.195 P0-T6: outer-state boundaries render the schedule's COMMITTED
+        // core-context version, so an edit committed while a run is
+        // mid-execution lands at that run's next state transition. Same Creator
+        // DB pool the supervisor reads schedule pointers through.
+        engine.set_core_context_store(Arc::new(
+            nexus_orchestration::schedule::derivation::CoreContextManager::new(Arc::new(
+                pool.clone(),
+            )),
+        ));
         let engine = Arc::new(engine);
 
         let mut coordinator = WorkflowRunCoordinator::new(

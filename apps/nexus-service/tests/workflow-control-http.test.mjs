@@ -64,13 +64,22 @@ enabled = true
  * the case's disposable home, so a case can read back the prompt a real engine
  * boundary actually dispatched. It is omitted by default: every existing
  * boot/readiness case keeps the exact provider document it had.
+ *
+ * `env` adds further fixture knobs to the SAME `[providers.env]` table (e.g.
+ * the prompt gate, which holds a boundary's prompt until the case releases it).
  */
-function acpProviderConfig({ fixtureLog } = {}) {
+function acpProviderConfig({ fixtureLog, env = {} } = {}) {
   const python = resolvePython();
+  const envVars = {
+    ...(fixtureLog === undefined ? {} : { ACP_FIXTURE_LOG: fixtureLog }),
+    ...env,
+  };
   const envTable =
-    fixtureLog === undefined
+    Object.keys(envVars).length === 0
       ? ''
-      : `[providers.env]\nACP_FIXTURE_LOG = ${JSON.stringify(fixtureLog)}\n`;
+      : `[providers.env]\n${Object.entries(envVars)
+          .map(([key, value]) => `${key} = ${JSON.stringify(value)}`)
+          .join('\n')}\n`;
   return `
 [[providers]]
 id = "mock-acp"
@@ -647,6 +656,62 @@ states:
 
 /** The capacity holder for the W5 case: the scaffold preset, which parks. */
 const STEER_HOLDER_PRESET = 'p0t6-steer-holder';
+
+/**
+ * The W5 ACTIVE-RUN graph (S0-3): three state boundaries in a row, each of
+ * which renders the run's frozen `core_context.text` through the real
+ * `acp.prompt` capability.
+ *
+ * It is what makes "the NEXT state transition reads the committed version"
+ * observable on an ALREADY ADMITTED run: state `first` is held in flight by the
+ * fixture's prompt gate while the HTTP append commits version 1, so state
+ * `second` is the next execution boundary after that commit, and state `third`
+ * is the next boundary after the second edit. `tool_policy: deny_all` is the
+ * narrowest scope; the ACP adapter serves it without a model request.
+ */
+const ACTIVE_CONTEXT_PRESET = 'p0t6-active-context';
+const ACTIVE_CONTEXT_MARKER = 'P0T6-ACTIVE';
+const ACTIVE_CONTEXT_IDEA = 'P0-T6 active idea: the next boundary must read this';
+const ACTIVE_CONTEXT_IDEA_2 = 'P0-T6 second edit: it must land one boundary later';
+
+function activeContextPresetYaml() {
+  return `preset:
+  id: ${ACTIVE_CONTEXT_PRESET}
+  version: 1
+  kind: creator
+  description: "P0-T6 W5 active-run fixture — every state boundary prompts from the run's frozen core context"
+  requires_capabilities: [acp.prompt]
+  initial: first
+  terminal: done
+states:
+  - id: first
+    enter:
+      - kind: capability
+        name: acp.prompt
+        args:
+          prompt: "${ACTIVE_CONTEXT_MARKER}:first|{{core_context.text}}|END"
+          tool_policy: deny_all
+    next: second
+  - id: second
+    enter:
+      - kind: capability
+        name: acp.prompt
+        args:
+          prompt: "${ACTIVE_CONTEXT_MARKER}:second|{{core_context.text}}|END"
+          tool_policy: deny_all
+    next: third
+  - id: third
+    enter:
+      - kind: capability
+        name: acp.prompt
+        args:
+          prompt: "${ACTIVE_CONTEXT_MARKER}:third|{{core_context.text}}|END"
+          tool_policy: deny_all
+    next: done
+  - id: done
+    terminal: true
+`;
+}
 
 /**
  * The dsh native provider, backed by the repository's scripted SDK-wire mock
@@ -1379,6 +1444,199 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', () 
         `the resumed schedule owns exactly one run: ${sessions.text}`,
       );
       assert.equal(boundaryRuns[0].session_id, runId, sessions.text);
+    } finally {
+      await service.close();
+    }
+  });
+
+  /**
+   * W5 (S0-3) ACTIVE RUN: a version committed over HTTP while a run is already
+   * ADMITTED and mid-execution is consumed at that SAME run's next outer state
+   * transition.
+   *
+   * This is the distinct boundary the admission case above cannot reach: there
+   * the append precedes the schedule's first admission, so the run is frozen
+   * WITH version 1. Here the run is admitted at version 0, its first state
+   * boundary renders the version-0 seed and is held IN FLIGHT by the fixture's
+   * prompt gate (`ACP_FIXTURE_PROMPT_GATE_DIR`), and the append commits version
+   * 1 while that state is still executing. The fixture records the prompt it
+   * received BEFORE it blocks, so the ordering is evidenced rather than slept
+   * on: the append provably lands after admission and after state `first`
+   * started, and before state `second` starts.
+   *
+   * The observation is each boundary's OWN output — the peer's request log
+   * records the prompt it actually received (the snapshot's
+   * `{{core_context.text}}` body) — so a boundary that did not read the
+   * committed pointer renders the empty version-0 seed (`||END`) and fails the
+   * assertion. The case also holds the second edit while state `second` is in
+   * flight, proving a state's snapshot is stable for its own duration while the
+   * NEXT boundary picks the edit up; and it asserts one run, one identity, and
+   * no re-append (the pointer advances exactly once per committed edit).
+   */
+  test('control steer: an append made during an admitted run lands at its next state boundary', async () => {
+    const fixtureLogName = 'acp-active-context.jsonl';
+    const gateDirName = 'acp-active-gate';
+    const home = seededHome((dir) => {
+      mkdirSync(join(dir, gateDirName), { recursive: true });
+      return acpProviderConfig({
+        fixtureLog: join(dir, fixtureLogName),
+        env: { ACP_FIXTURE_PROMPT_GATE_DIR: join(dir, gateDirName) },
+      });
+    });
+    const fixtureLog = join(home, fixtureLogName);
+    const gateDir = join(home, gateDirName);
+    const readPrompts = () =>
+      existsSync(fixtureLog)
+        ? readFileSync(fixtureLog, 'utf8')
+            .split('\n')
+            .filter((line) => line.trim().length > 0)
+            .map((line) => JSON.parse(line))
+            .filter((entry) => entry.event === 'prompt')
+            .map((entry) => entry.prompt)
+        : [];
+    // Release the n-th recorded prompt; the peer resumes that exact step.
+    const releasePrompt = (n) => writeFileSync(join(gateDir, `release-${n}`), 'release');
+
+    const service = await startServiceOn(home);
+    try {
+      const base = service.url;
+      const schedulesUrl = `${base}/v1/daemon/orchestration/schedules`;
+      const scheduleUrl = (id) => `${schedulesUrl}/${id}`;
+      const inspectSchedule = async (id) => {
+        const response = await jsonFetch(scheduleUrl(id));
+        assert.equal(response.status, 200, response.text);
+        return response.payload;
+      };
+      const inspectSession = async (id) => {
+        const response = await jsonFetch(`${base}/v1/daemon/orchestration/sessions/${id}`);
+        assert.equal(response.status, 200, response.text);
+        return response.payload;
+      };
+      const appendContext = async (id, body) =>
+        jsonFetch(`${scheduleUrl(id)}/core-context`, {
+          method: 'PATCH',
+          body: { op: 'append', body },
+        });
+
+      // W1: author the three-boundary graph through the public preset surface.
+      const scaffolded = await jsonFetch(`${base}/v1/daemon/presets`, {
+        method: 'POST',
+        body: { name: ACTIVE_CONTEXT_PRESET },
+      });
+      assert.equal(scaffolded.status, 201, scaffolded.text);
+      const patched = await jsonFetch(`${base}/v1/daemon/presets/${ACTIVE_CONTEXT_PRESET}`, {
+        method: 'PATCH',
+        body: { yaml: activeContextPresetYaml() },
+      });
+      assert.equal(patched.status, 200, patched.text);
+      assert.equal(patched.payload.updated, true, patched.text);
+
+      const created = await jsonFetch(schedulesUrl, {
+        method: 'POST',
+        body: {
+          creator_id: CREATOR,
+          preset_id: ACTIVE_CONTEXT_PRESET,
+          agent_bindings: { default: { provider_id: 'mock-acp' } },
+        },
+      });
+      assert.equal(created.status, 201, created.text);
+      assert.equal(created.payload.core_context_version, 0, created.text);
+      const scheduleId = created.payload.schedule_id;
+
+      // Admission: the run is ADMITTED (its identity lands on the durable row)
+      // and its first state boundary renders the frozen version-0 seed.
+      const admitted = await waitFor(
+        () => inspectSchedule(scheduleId),
+        (payload) => Boolean(payload.schedule.current_session_id),
+        { label: `schedule ${scheduleId} owned run identity` },
+      );
+      const runId = admitted.schedule.current_session_id;
+      const firstPrompt = `${ACTIVE_CONTEXT_MARKER}:first||END`;
+      const firstPrompts = await waitFor(readPrompts, (entries) => entries.length >= 1, {
+        label: `run ${runId} first state boundary prompt`,
+      });
+      assert.deepEqual(
+        firstPrompts,
+        [firstPrompt],
+        `state 'first' renders the frozen version-0 seed: ${JSON.stringify(firstPrompts)}`,
+      );
+
+      // W5: the append commits version 1 while state 'first' is IN FLIGHT. It
+      // must not disturb the admitted run: same identity, same durable
+      // projection, same single prompt (the in-flight state is untouched).
+      const inFlight = await inspectSession(runId);
+      assert.equal(inFlight.session.status, 'running', JSON.stringify(inFlight));
+      const appended = await appendContext(scheduleId, ACTIVE_CONTEXT_IDEA);
+      assert.equal(appended.status, 200, appended.text);
+      assert.equal(appended.payload.new_version, 1, appended.text);
+      const afterAppend = await inspectSchedule(scheduleId);
+      assert.equal(afterAppend.schedule.current_core_context_version, 1, JSON.stringify(afterAppend));
+      assert.equal(afterAppend.schedule.current_session_id, runId, JSON.stringify(afterAppend));
+      assert.equal(afterAppend.schedule.status, 'running', JSON.stringify(afterAppend));
+      const stillInFlight = await inspectSession(runId);
+      assert.deepEqual(
+        stillInFlight,
+        inFlight,
+        'the committed edit must not mutate the in-flight run',
+      );
+      assert.deepEqual(readPrompts(), [firstPrompt], 'the in-flight state is not re-rendered');
+
+      // THE OBSERVATION: release the in-flight state; the SAME run's NEXT
+      // boundary renders the version the append committed.
+      releasePrompt(1);
+      const secondPrompt = `${ACTIVE_CONTEXT_MARKER}:second|${ACTIVE_CONTEXT_IDEA}|END`;
+      const secondPrompts = await waitFor(readPrompts, (entries) => entries.length >= 2, {
+        label: `run ${runId} second state boundary prompt`,
+      });
+      assert.deepEqual(
+        secondPrompts,
+        [firstPrompt, secondPrompt],
+        `the next state boundary reads the committed version: ${JSON.stringify(secondPrompts)}`,
+      );
+
+      // W5: a second edit committed while state 'second' is in flight must not
+      // alter THAT state's snapshot — it lands at the boundary after it.
+      const secondEdit = await appendContext(scheduleId, ACTIVE_CONTEXT_IDEA_2);
+      assert.equal(secondEdit.status, 200, secondEdit.text);
+      assert.equal(secondEdit.payload.new_version, 2, secondEdit.text);
+      const midSecond = await inspectSchedule(scheduleId);
+      assert.equal(midSecond.schedule.current_core_context_version, 2, JSON.stringify(midSecond));
+      assert.equal(midSecond.schedule.current_session_id, runId, JSON.stringify(midSecond));
+
+      releasePrompt(2);
+      const thirdPrompt = `${ACTIVE_CONTEXT_MARKER}:third|${ACTIVE_CONTEXT_IDEA}${ACTIVE_CONTEXT_IDEA_2}|END`;
+      const thirdPrompts = await waitFor(readPrompts, (entries) => entries.length >= 3, {
+        label: `run ${runId} third state boundary prompt`,
+      });
+      assert.deepEqual(
+        thirdPrompts,
+        [firstPrompt, secondPrompt, thirdPrompt],
+        `state 'second' keeps its start-of-state snapshot and the newest edit lands at 'third': ${JSON.stringify(thirdPrompts)}`,
+      );
+
+      // The run settles on the SAME identity: one run, no re-append, no extra
+      // boundary render, and the committed pointer is still the last edit.
+      releasePrompt(3);
+      const settled = await waitFor(
+        () => inspectSchedule(scheduleId),
+        (payload) => payload.schedule.status === 'completed',
+        { label: `schedule ${scheduleId} completion` },
+      );
+      assert.equal(settled.schedule.current_session_id, runId, JSON.stringify(settled));
+      assert.equal(settled.schedule.current_core_context_version, 2, JSON.stringify(settled));
+      assert.deepEqual(
+        readPrompts(),
+        [firstPrompt, secondPrompt, thirdPrompt],
+        'no boundary rendered twice and no version was re-appended',
+      );
+
+      const sessions = await jsonFetch(`${base}/v1/daemon/orchestration/sessions`);
+      assert.equal(sessions.status, 200, sessions.text);
+      const runs = sessions.payload.items.filter((row) => row.preset_id === ACTIVE_CONTEXT_PRESET);
+      assert.equal(runs.length, 1, `the schedule owns exactly one run: ${sessions.text}`);
+      assert.equal(runs[0].session_id, runId, sessions.text);
+      const finalRun = await inspectSession(runId);
+      assert.equal(finalRun.session.status, 'completed', JSON.stringify(finalRun));
     } finally {
       await service.close();
     }
