@@ -770,6 +770,120 @@ mod tests {
         core_b.close().await.expect("close core b");
     }
 
+    /// A settled hosted owner releases its whole composed generation once the
+    /// owner and its service are dropped.
+    ///
+    /// The hosted composition installs a scheduler whose starter admitted back
+    /// into the coordinator that owns it, so a STRONG back-edge from the
+    /// starter closes a `coordinator → supervisor → starter → coordinator`
+    /// cycle. Every member of that cycle — the engine, the capability registry
+    /// (with the workspace executor), the engine's workspace-state provider and
+    /// the prompt executor — then outlives the owner forever, and with them the
+    /// selected home's `WorkspaceSessionManager` and its `state.workspace_
+    /// authority.lock` lease. Only the explicit close-time release made the
+    /// next same-process owner possible; the settled composition itself stayed
+    /// referenced for the rest of the process.
+    ///
+    /// Both halves are asserted, so the fix has to be a NON-OWNING edge rather
+    /// than a shorter-lived owner: while the owner is live the composition is
+    /// retained AND the installed scheduler's admission still reaches that
+    /// same coordinator, and after `close()` + dropping the owner and its
+    /// service every probe must fail to upgrade while the starter refuses
+    /// instead of admitting through a coordinator nobody owns.
+    #[tokio::test]
+    async fn settled_hosted_composition_is_released_when_the_owner_is_dropped() {
+        let fx = fixture().await;
+        let coordinator_probe: std::sync::Weak<
+            crate::execution::workflow::WorkflowRunCoordinator,
+        >;
+        let manager_probe: std::sync::Weak<WorkspaceSessionManager>;
+        {
+            let core = open_core(&fx).await;
+            let mut deps = core.hosted_workspace_deps().await.expect("bundle");
+            // The manager is what the cycle ultimately retained: the engine's
+            // state provider, the registry's workspace executor and the
+            // handle's commit authority each clone this one `Arc`.
+            let manager = Arc::clone(
+                deps.workspace_commit
+                    .as_ref()
+                    .expect("commit authority")
+                    .manager(),
+            );
+            manager_probe = Arc::downgrade(&manager);
+            deps.hosted_scheduler = Some(HostedSchedulerConfig::from_env());
+            let owner = core
+                .start_execution(Arc::new(RejectingProviderPort), deps)
+                .await
+                .expect("hosted owner starts");
+            coordinator_probe = Arc::downgrade(&owner.coordinator());
+            let supervisor = owner
+                .coordinator()
+                .schedule_supervisor()
+                .expect("the hosted owner installs its supervisor");
+            let starter = supervisor
+                .schedule_starter_clone()
+                .expect("the supervisor is coordinator-backed");
+
+            // HELD LIVE: the retained composition is exactly what a live owner
+            // must still hold — the scheduler's admission upgrades back to this
+            // same coordinator, so an unknown row is refused by ITS admission
+            // and not by the missing-owner branch.
+            assert!(
+                coordinator_probe.upgrade().is_some(),
+                "a live hosted owner retains its coordinator"
+            );
+            assert!(
+                manager_probe.upgrade().is_some(),
+                "a live hosted owner retains the home's session manager"
+            );
+            let live_refusal = starter
+                .start("sched_absent")
+                .await
+                .expect_err("an unknown row is refused");
+            assert!(
+                live_refusal.to_string().contains("not found"),
+                "a live tick must reach the owning coordinator's admission: {live_refusal}"
+            );
+
+            let report = core.close().await.expect("confirmed close");
+            assert!(report.cleanup_confirmed, "the close must be confirmed");
+            assert!(
+                owner.owned_tasks_finished(),
+                "the confirmed close joins the owned scheduler clock task"
+            );
+            drop(owner);
+
+            // A clock tick that outlives its owner (the handle was dropped)
+            // must FAIL CLOSED: the row stays pending rather than being
+            // admitted through a coordinator nobody owns.
+            let released_refusal = starter
+                .start("sched_released")
+                .await
+                .expect_err("a released owner must refuse admission");
+            assert!(
+                released_refusal
+                    .to_string()
+                    .contains("no live execution owner"),
+                "the released owner must fail closed (refusal: {released_refusal}, \
+                 coordinator retained: {})",
+                coordinator_probe.upgrade().is_some()
+            );
+            // This test's own handles to the supervisor chain are dropped, so
+            // only the owner's composition can still retain the probes.
+            drop(starter);
+            drop(supervisor);
+        }
+        // The owner, its service and this test's own manager clone are gone.
+        let coordinator_retained = coordinator_probe.upgrade().is_some();
+        let manager_retained = manager_probe.upgrade().is_some();
+        assert!(
+            !coordinator_retained && !manager_retained,
+            "the settled owner's composition must be released when the dropped owner \
+             reported a confirmed close (coordinator retained: {coordinator_retained}, \
+             session manager retained: {manager_retained})"
+        );
+    }
+
     /// A held workspace authority and an unusable lease path must not be
     /// reported alike: the first is a retryable writer conflict, the second is
     /// an environment fault.

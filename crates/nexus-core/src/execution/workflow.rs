@@ -3408,7 +3408,24 @@ async fn schedule_eligible(
 /// — the same place the supervisor and its clock task are installed.
 pub struct CoordinatorScheduleRunStarter {
     /// The ONE coordinator that owns admission and drive single-flight.
-    coordinator: Arc<WorkflowRunCoordinator>,
+    ///
+    /// Held WEAKLY (v1.195 P0-T5 cycle fix). The coordinator owns this
+    /// starter's supervisor, so a strong edge here would close a
+    /// `WorkflowRunCoordinator` → `ScheduleSupervisor` →
+    /// `CoordinatorScheduleRunStarter` → `WorkflowRunCoordinator` reference
+    /// cycle. Nothing in that
+    /// cycle is dropped once the owner settles: the settled engine, capability
+    /// registry (with the workspace executor), engine workspace-state provider
+    /// and prompt executor stay referenced for the life of the process, and
+    /// with them the selected home's `WorkspaceSessionManager` and its
+    /// `state.workspace_authority.lock` lease — a confirmed close could
+    /// release the lease but never the memory.
+    ///
+    /// `start` upgrades per admission and holds the upgrade for the WHOLE
+    /// call, so a live tick still admits through exactly the original
+    /// coordinator, and an owner that no longer exists is refused (the row
+    /// stays pending) rather than driven through a coordinator nobody owns.
+    coordinator: std::sync::Weak<WorkflowRunCoordinator>,
     /// Nexus home the preset is resolved against (the same value the add path
     /// froze the descriptor with).
     nexus_home: PathBuf,
@@ -3435,7 +3452,7 @@ impl CoordinatorScheduleRunStarter {
         prompt_executor: Option<Arc<dyn nexus_orchestration::capability::PromptExecutor>>,
     ) -> Self {
         Self {
-            coordinator,
+            coordinator: Arc::downgrade(&coordinator),
             nexus_home,
             caps,
             daemon_tool_dispatch,
@@ -3450,8 +3467,20 @@ impl ScheduleRunStarter for CoordinatorScheduleRunStarter {
         &self,
         schedule_id: &str,
     ) -> Result<SessionId, SupervisorError> {
-        let pool = self.coordinator.pool();
-        self.coordinator
+        // Upgrade for the WHOLE admission: holding the strong handle across the
+        // claim, the durability checks and the drive start is what lets a
+        // concurrent owner close (which drops the owner's coordinator) never
+        // free it under an in-flight admission. A missing owner fails closed —
+        // the supervisor leaves the row pending for a later owner instead of
+        // admitting through a coordinator nobody owns.
+        let coordinator = self.coordinator.upgrade().ok_or_else(|| {
+            SupervisorError::Database(sqlx::Error::Protocol(format!(
+                "no live execution owner for schedule {schedule_id}: \
+                 the owning coordinator was released"
+            )))
+        })?;
+        let pool = coordinator.pool();
+        coordinator
             .admit_schedule(
                 schedule_id,
                 &pool,
