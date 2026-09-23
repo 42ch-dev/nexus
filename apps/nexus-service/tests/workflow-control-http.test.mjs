@@ -418,6 +418,67 @@ describe('workflow-control-http (v1.195 P0-T5 native boot and truthful readiness
     }
   });
 
+  /**
+   * The admitted root is PINNED. A supported `meta.json.local_root` write —
+   * the exact document `nexus42 creator workspace create --creative-root`
+   * writes — that lands after `openCore` bound its Host probe to the earlier
+   * root must never be joined to that Host: the stale admission is refused
+   * with a typed `auth_required` refusal and publishes no owner/readiness. The
+   * moved root is only admitted by a FRESH open (a new epoch) whose Host and
+   * workspace authority both bind it.
+   */
+  test('hosted readiness and owner: a root that moves after open is refused, never mixed', async () => {
+    const home = seededHome(acpProviderConfig());
+    const metaPath = join(home, '.nexus42', 'creators', CREATOR, 'workspaces', SLUG, 'meta.json');
+    const movedRoot = join(home, 'moved-creative-root');
+    mkdirSync(movedRoot, { recursive: true });
+    const { openCore, isNativeCoreErrorCode } = await import('@42ch/nexus-native');
+    const open = () =>
+      openCore({ user_home: home, access: 'engine_owner', allow_uninitialized: false }, undefined);
+
+    const coreA = await open();
+    try {
+      writeFileSync(metaPath, JSON.stringify({ local_root: movedRoot }));
+
+      // Whatever this admission answers, it must not be a published owner:
+      // the Host probe lane was bound to the root that was selected at open.
+      let established = null;
+      let refusal = null;
+      try {
+        established = await coreA.startExecutionOwner();
+      } catch (error) {
+        refusal = error;
+      }
+      assert.equal(
+        established,
+        null,
+        `a selected root that moved after open must publish no owner, got ${JSON.stringify(established)}`,
+      );
+      assert.ok(
+        isNativeCoreErrorCode(refusal, 'auth_required'),
+        `the stale admission must be refused as a typed failure, got: ${refusal?.message}`,
+      );
+    } finally {
+      const report = await coreA.close();
+      assert.equal(report.state, 'closed', JSON.stringify(report));
+      assert.equal(report.cleanup_confirmed, true, JSON.stringify(report));
+    }
+
+    // Nothing was published and no authority was retained: a FRESH open that
+    // selects the moved root admits a real owner over it.
+    const coreB = await open();
+    try {
+      const ownerB = await coreB.startExecutionOwner();
+      assert.ok(
+        Number.isInteger(ownerB.engine_epoch) && ownerB.engine_epoch > 0,
+        `the fresh open over the moved root must admit a real owner, got ${JSON.stringify(ownerB)}`,
+      );
+      assert.equal(ownerB.provider_ready, true, JSON.stringify(ownerB));
+    } finally {
+      await coreB.close();
+    }
+  });
+
   test('hosted readiness and owner: domain-only access still serves domain state', async () => {
     const service = await startServiceOn(seededHome(BROKEN_SELECTED_PROVIDER), {
       domainOnly: true,

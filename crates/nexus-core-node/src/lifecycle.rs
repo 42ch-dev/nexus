@@ -18,7 +18,7 @@ use nexus_contracts::native_open_options::NativeOpenOptionsAccess;
 use nexus_contracts::{CoreCloseReport, CoreCloseReportState, NativeOpenOptions};
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService};
 use nexus_home_layout::active_context::{try_resolve_state_db_path, CliConfigSnapshot};
-use nexus_home_layout::{nexus_root_from_home, operational_workspace_dir};
+use nexus_home_layout::nexus_root_from_home;
 use nexus_provider_ports::ProviderPort;
 
 use super::admitting_provider_port::AdmittingProviderPort;
@@ -60,53 +60,6 @@ fn is_genuinely_uninitialized(user_home: &Path, access: CoreAccess) -> bool {
         Err(CoreError::Uninitialized) | Err(CoreError::AuthRequired) => true,
         Err(_) => false,
     }
-}
-
-/// The verified owner the engine-owner Host binds its bounded readiness probes
-/// to: the stored Creator plus that Creator's canonical creative workspace root.
-///
-/// The root is read from the SAME `meta.json` `local_root` document the core's
-/// hosted factory resolves its selected root from (no second workspace-root
-/// writer exists), and it is canonicalized so the probe child's cwd, the Host
-/// boundary and the factory's frozen run root compare equal.
-///
-/// A home whose selected workspace registers NO canonical root — absent,
-/// blank, or a root that no longer exists — gets NO probe owner. The Host then
-/// keeps the open boundary it already had and marks every selected candidate
-/// `probe_context_unavailable`, so a selected provider can never be reported
-/// ready off a fabricated boundary while the core's own factory refuses the
-/// missing root (which would publish a ready lane over a null engine epoch).
-/// Probing is bound to the selected creative root or it does not happen.
-fn selected_probe_owner(user_home: &Path) -> Option<SessionOwner> {
-    let nexus_home = nexus_root_from_home(user_home);
-    let cfg = CliConfigSnapshot::load(&nexus_home).ok()?;
-    let creator_id = cfg.active_creator_id.clone()?;
-    let workspace_slug = cfg.workspace_slug_for_creator(&creator_id);
-    if workspace_slug.trim().is_empty() {
-        return None;
-    }
-    let workspace_root = selected_creative_root(user_home, &creator_id, &workspace_slug)?;
-    Some(SessionOwner {
-        creator_id,
-        workspace_root,
-        orchestration_run_id: None,
-    })
-}
-
-/// The canonical creative root the selected workspace registers, if any.
-fn selected_creative_root(
-    user_home: &Path,
-    creator_id: &str,
-    workspace_slug: &str,
-) -> Option<PathBuf> {
-    let meta = operational_workspace_dir(user_home, creator_id, workspace_slug).join("meta.json");
-    let text = std::fs::read_to_string(meta).ok()?;
-    let metadata: serde_json::Value = serde_json::from_str(&text).ok()?;
-    let raw = metadata.get("local_root")?.as_str()?.trim();
-    if raw.is_empty() {
-        return None;
-    }
-    std::fs::canonicalize(raw).ok()
 }
 
 struct ValidatedHostAdmission {
@@ -712,11 +665,14 @@ pub async fn open_core(
         }
     };
 
-    if let Err(err) = core.active_principal().await {
-        let reason = open_err(err);
-        abort_opening(state.clone(), Some(Arc::new(core)), None, js_port.clone()).await;
-        return Err(reason);
-    }
+    let principal = match core.active_principal().await {
+        Ok(principal) => principal,
+        Err(err) => {
+            let reason = open_err(err);
+            abort_opening(state.clone(), Some(Arc::new(core)), None, js_port.clone()).await;
+            return Err(reason);
+        }
+    };
 
     let host = Arc::new(HostManager::new());
     // Only the execution-owner profile carries the runtime edges: it binds the
@@ -724,8 +680,25 @@ pub async fn open_core(
     // the bounded owner-bound readiness probes (the ordinary+sealed no-model
     // recipes) there. A domain-only / read-only open acquires neither that
     // boundary nor any provider probe — it keeps the open boundary it had.
+    //
+    // The root is the CORE'S OPEN-TIME PIN (`admission_creative_root`), not a
+    // second read of the selection: the hosted factory composes its workspace
+    // ports from that same pinned value, so a metadata write landing between
+    // this probe and the owner's composition cannot bind the Host to one root
+    // while the execution/commit authority binds another. An admission with no
+    // usable pinned root gets NO probe owner: the Host keeps the open boundary
+    // it already had and marks every selected candidate
+    // `probe_context_unavailable`, so a selected provider can never be
+    // reported ready off a fabricated boundary while the core's own factory
+    // refuses the missing root (which would publish a ready lane over a null
+    // engine epoch). Probing is bound to the pinned creative root or it does
+    // not happen.
     let probe_owner = if access == CoreAccess::EngineOwner {
-        selected_probe_owner(&user_home)
+        core.admission_creative_root().map(|root| SessionOwner {
+            creator_id: principal.creator_id().to_string(),
+            workspace_root: root.to_path_buf(),
+            orchestration_run_id: None,
+        })
     } else {
         None
     };
@@ -1141,65 +1114,6 @@ mod tests {
         assert_eq!(report.state, CoreCloseReportState::Closed);
         assert!(report.cleanup_confirmed);
         assert!(!state.is_service_only_uninitialized());
-    }
-
-    /// C1: a selected workspace without a canonical registered creative root
-    /// yields NO probe owner — the Host keeps its pre-existing open boundary
-    /// with every selected candidate unprobed, instead of probing selected
-    /// providers under a fabricated whole-home boundary (the shape that let a
-    /// `provider_ready: true` claim ride a null engine epoch). A registered,
-    /// existing root is still the canonical probe owner.
-    #[test]
-    fn no_canonical_selected_root_yields_no_probe_owner() {
-        use crate::wire_fixture::seed_wire_home;
-        use tempfile::tempdir;
-
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("test runtime");
-        runtime.block_on(async {
-            let dir = tempdir().expect("tempdir");
-            seed_wire_home(dir.path()).await;
-            let meta = operational_workspace_dir(dir.path(), "ctr_testcreator", "default")
-                .join("meta.json");
-
-            // No registration at all: no probe owner.
-            assert!(
-                selected_probe_owner(dir.path()).is_none(),
-                "a home with no registered root must not mint a probe owner"
-            );
-
-            // A root that no longer exists is the same fail-closed refusal.
-            std::fs::write(
-                &meta,
-                serde_json::to_vec(&serde_json::json!({
-                    "local_root": "/nonexistent/nexus-t5-root"
-                }))
-                .expect("meta json"),
-            )
-            .expect("write meta");
-            assert!(
-                selected_probe_owner(dir.path()).is_none(),
-                "a root that no longer exists must not mint a probe owner"
-            );
-
-            // A registered, existing root IS the probe owner, canonicalized.
-            let root = dir.path().join("creative-root");
-            std::fs::create_dir_all(&root).expect("creative root");
-            std::fs::write(
-                &meta,
-                serde_json::to_vec(&serde_json::json!({ "local_root": root })).expect("meta json"),
-            )
-            .expect("write meta");
-            let owner = selected_probe_owner(dir.path()).expect("valid root probes");
-            assert_eq!(owner.creator_id, "ctr_testcreator");
-            assert_eq!(
-                owner.workspace_root,
-                std::fs::canonicalize(&root).expect("canonical root"),
-                "the probe owner must carry the canonical registered root"
-            );
-        });
     }
 
     /// R10: a retried settlement is bounded by the SAME outer budget as the

@@ -37,6 +37,7 @@ use nexus_contracts::{
 use nexus_core::execution::ExecutionOpenError;
 use nexus_core::CoreError;
 
+use crate::core_error;
 use crate::NativeCore;
 
 fn decode<T: serde::de::DeserializeOwned>(payload: Buffer, label: &str) -> Result<T> {
@@ -93,8 +94,10 @@ impl NativeCore {
     ///   established owner, or `null` when this profile cannot host one (the
     ///   selected workspace registers no creative root, so the factory's
     ///   workspace composition refuses with `uninitialized`). Every other
-    ///   refusal — not the engine owner, an owner already exists, closing —
-    ///   propagates: a duplicate boot must never look like a quiet success.
+    ///   refusal — not the engine owner, an owner already exists, closing, a
+    ///   selected root that moved after this admission was pinned, a rival
+    ///   commit authority — propagates as its own typed wire error: a duplicate
+    ///   or stale boot must never look like a quiet success.
     /// - `provider_ready` is the native-owned readiness of the providers this
     ///   host configuration SELECTS, read from the SAME Host that ran the
     ///   bounded owner-bound probes at open. Catalog presence is a candidate,
@@ -135,7 +138,18 @@ impl NativeCore {
             .await
         {
             Ok(handle) => Some(handle.engine_epoch()),
+            // A workspace that cannot host an owner is the ONE shape this
+            // profile reports as "no engine epoch": the admission pinned no
+            // usable creative root, so the caller publishes the null sentinel.
             Err(ExecutionOpenError::Workspace(CoreError::Uninitialized)) => None,
+            // Every other workspace refusal — a selected root that moved since
+            // the admission was pinned, a rival commit authority, a storage
+            // fault — keeps its neutral class on the wire instead of decaying
+            // into an unstructured reason the caller can only read as
+            // "internal".
+            Err(ExecutionOpenError::Workspace(err)) => {
+                return Err(core_error::napi_error_from_domain(err));
+            }
             Err(error) => {
                 return Err(Error::from_reason(format!("execution owner: {error}")));
             }

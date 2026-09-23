@@ -684,36 +684,89 @@ impl CoreService {
 
     pub(crate) fn work_workspace_path(&self, principal: &Principal) -> CoreResult<Option<String>> {
         self.verify_principal(principal)?;
-        let meta = self
-            .inner
-            .nexus_home
-            .join("creators")
-            .join(principal.creator_id())
-            .join("workspaces")
-            .join(principal.workspace_slug())
-            .join("meta.json");
-        let text = match std::fs::read_to_string(&meta) {
-            Ok(text) => text,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => {
-                return Err(CoreError::Internal {
-                    category: format!("workspace metadata: {error}"),
-                })
-            }
-        };
-        let metadata: serde_json::Value =
-            serde_json::from_str(&text).map_err(|error| CoreError::Internal {
+        selected_workspace_meta_root(
+            &self.inner.nexus_home,
+            principal.creator_id(),
+            principal.workspace_slug(),
+        )
+    }
+}
+
+/// The raw `local_root` the selected workspace's own `meta.json` registers.
+///
+/// The ONE reader of that document: every consumer that resolves a selected
+/// creative root — the Work family's own paths, the engine-owner admission pin
+/// and that pin's drift check — reads through here, so no two callers can
+/// disagree about what the document says. A workspace with no registration is
+/// `Ok(None)`; an unreadable or malformed document is an environment fault.
+pub(crate) fn selected_workspace_meta_root(
+    nexus_home: &std::path::Path,
+    creator_id: &str,
+    workspace_slug: &str,
+) -> CoreResult<Option<String>> {
+    let meta = nexus_home
+        .join("creators")
+        .join(creator_id)
+        .join("workspaces")
+        .join(workspace_slug)
+        .join("meta.json");
+    let text = match std::fs::read_to_string(&meta) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(CoreError::Internal {
                 category: format!("workspace metadata: {error}"),
-            })?;
-        // The operational meta.json key written by the daemon and CLI
-        // workspace registration (`local_root`; handlers/workspaces.rs and
-        // the CLI legacy_impl both emit it). There is no `creative_root`
-        // writer anywhere — reading it resolved every core filesystem path
-        // against an empty root.
-        Ok(metadata
-            .get("local_root")
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_owned))
+            })
+        }
+    };
+    let metadata: serde_json::Value =
+        serde_json::from_str(&text).map_err(|error| CoreError::Internal {
+            category: format!("workspace metadata: {error}"),
+        })?;
+    // The operational meta.json key written by the daemon and CLI
+    // workspace registration (`local_root`; handlers/workspaces.rs and
+    // the CLI legacy_impl both emit it). There is no `creative_root`
+    // writer anywhere — reading it resolved every core filesystem path
+    // against an empty root.
+    Ok(metadata
+        .get("local_root")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned))
+}
+
+/// The CANONICAL creative root the selected workspace registers, if any.
+///
+/// Canonicalizing is what makes the admission pin, the Host probe boundary,
+/// the frozen run root, the executor's scope root and the commit authority's
+/// active root the same string, so a symlinked or non-normalized selection
+/// cannot produce two roots that compare unequal.
+///
+/// A root that is named but no longer exists is an uninitialized workspace
+/// rather than an environment fault, and a blank registration is the same "no
+/// root" answer; every other failure is reported verbatim.
+///
+/// Only the execution cohort has an admission to pin (§Cohorts: the
+/// default/domain cohort composes no execution owner), so the resolver is part
+/// of that edge rather than dead weight in every other build.
+#[cfg(feature = "execution")]
+pub(crate) fn canonical_selected_workspace_root(
+    nexus_home: &std::path::Path,
+    creator_id: &str,
+    workspace_slug: &str,
+) -> CoreResult<Option<std::path::PathBuf>> {
+    let Some(raw) = selected_workspace_meta_root(nexus_home, creator_id, workspace_slug)? else {
+        return Ok(None);
+    };
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Ok(None);
+    }
+    match std::fs::canonicalize(raw) {
+        Ok(path) => Ok(Some(path)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(CoreError::Internal {
+            category: format!("workspace root {raw}: {error}"),
+        }),
     }
 }
 

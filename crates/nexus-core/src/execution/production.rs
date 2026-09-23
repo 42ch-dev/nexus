@@ -4,22 +4,27 @@
 //! opened against — never from a caller-supplied path. This module owns both
 //! halves of that composition:
 //!
-//! - [`CoreService::hosted_workspace_deps`] (P0-T1) resolves the SELECTED
-//!   creator's canonical creative workspace root from the core's own home
-//!   metadata, constructs the one durable workspace commit/recovery authority
-//!   over the core's pool, settles every interrupted commit BEFORE returning,
-//!   and hands back the [`RunnerDeps`] workspace ports;
+//! - [`CoreService::hosted_workspace_deps`] (P0-T1) takes the canonical
+//!   creative workspace root the engine-owner admission PINNED at open,
+//!   constructs the one durable workspace commit/recovery authority over the
+//!   core's pool, settles every interrupted commit BEFORE returning, and hands
+//!   back the [`RunnerDeps`] workspace ports;
 //! - [`CoreService::start_hosted_execution`] (P0-T2), the public factory of
 //!   current-host contracts §3.1, adds the Host-plane half — prompt executor,
 //!   provider-catalog port, run-event port and the shared maps — plus the
 //!   hosted scheduler, and calls [`CoreService::start_execution`] once.
 //!
-//! Why the root is resolved here rather than accepted as an argument: a
+//! Why the root is the OPEN-TIME PIN rather than a value read here: the native
+//! boot binds its Host probe boundary through
+//! [`CoreService::admission_creative_root`], so a selected-metadata write
+//! landing between that probe and this factory used to hand the same owner a
+//! Host bound to one root and execution/commit authority bound to another. A
 //! caller-supplied root would be a second, unvalidated workspace truth beside
-//! the one the core was admitted for. [`RunnerDeps::workspace_root`] is the
-//! root the engine's `Filesystem` gates resolve against, so it MUST be the same
-//! root the commit authority commits through; building both from one canonical
-//! value in this function is what makes them identical.
+//! the one the core was admitted for, and a fresh read here is the same race
+//! one step later. [`RunnerDeps::workspace_root`] is the root the engine's
+//! `Filesystem` gates resolve against, so it MUST be the same root the commit
+//! authority commits through; taking both from the one pinned value is what
+//! makes them identical.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -43,7 +48,7 @@ use crate::execution::session::{SessionError, WorkspaceSessionManager};
 use crate::execution::state_provider::CoreWorkspaceStateProvider;
 use crate::execution::workflow::{ProviderCatalogPort, RunEventPort};
 use crate::execution::workspace::WorkspaceCommitAuthority;
-use crate::service::CoreService;
+use crate::service::{CoreAccess, CoreService};
 
 impl CoreService {
     /// Start the ONE hosted execution owner for this core (v1.195 P0-T2).
@@ -95,6 +100,13 @@ impl CoreService {
         providers: Arc<dyn ProviderPort>,
         timeouts: TimeoutConfig,
     ) -> Result<Arc<ExecutionHandle>, ExecutionOpenError> {
+        // Refuse a non-owner core BEFORE composing anything: the admission root
+        // is pinned for engine-owner opens only, so a service-only profile must
+        // keep the documented `NotEngineOwner` refusal rather than be answered
+        // with a workspace refusal it would have reached later.
+        if self.inner.access != CoreAccess::EngineOwner {
+            return Err(ExecutionOpenError::NotEngineOwner(self.inner.access));
+        }
         let mut deps = self
             .hosted_workspace_deps()
             .await
@@ -127,27 +139,31 @@ impl CoreService {
         self.start_execution(providers, deps).await
     }
 
-    /// Assemble the selected-root workspace port bundle for hosted production.
+    /// Assemble the workspace port bundle for hosted production.
     ///
     /// The bundle carries the complete workspace half of the hosted owner: a
     /// real `workspace.open`/`workspace.commit` executor, the
     /// `_context.workspace.*` state provider, the durable commit authority and
     /// the recovered manager all three share, plus the frozen root and nexus
-    /// home the engine needs. Every port is bound to ONE canonical root
-    /// resolved from this core's own creator/workspace metadata.
+    /// home the engine needs. Every port is bound to ONE canonical root — the
+    /// engine-owner admission's OPEN-TIME PIN, the same value the native boot
+    /// bound its Host probe to.
     ///
     /// Startup intent recovery runs HERE, before any port is returned: a commit
     /// interrupted by a crash must reach its durable conclusion before the
-    /// hosted owner can admit work. Recovery is scoped to the SELECTED root —
+    /// hosted owner can admit work. Recovery is scoped to the PINNED root —
     /// another root's unsettled intents are left untouched, never settled,
     /// rolled back, failed on or deleted, because this authority was not
     /// admitted for them.
     ///
     /// # Errors
-    /// - [`CoreError::AuthRequired`] when the service is closing or the
-    ///   on-disk creator/workspace selection moved since open;
-    /// - [`CoreError::Uninitialized`] when the selected workspace has no
-    ///   registered creative root, or that root no longer exists;
+    /// - [`CoreError::Closing`] when the service has begun closing, and
+    ///   [`CoreError::AuthRequired`] when the on-disk creator/workspace
+    ///   selection — including the selected `local_root` — no longer matches
+    ///   the pinned admission;
+    /// - [`CoreError::Uninitialized`] when the pinned admission registered no
+    ///   creative root (absent, blank, or a root that no longer existed at
+    ///   open);
     /// - [`CoreError::Busy`] when this DB already has a workspace
     ///   commit/recovery authority (a second bundle must never become a
     ///   duplicate writer), or when the selected root's own recovery state is
@@ -159,11 +175,35 @@ impl CoreService {
         // The selection comes from the core's own config snapshot, so a caller
         // cannot inject a different creator/workspace into the bundle.
         let principal = self.active_principal().await?;
-        let selected_root = self
-            .work_workspace_path(&principal)?
-            .filter(|root| !root.trim().is_empty())
-            .ok_or(CoreError::Uninitialized)?;
-        let canonical_root = canonical_workspace_root(&selected_root).await?;
+        // ONE root for this whole owner: the canonical creative root the
+        // engine-owner admission was PINNED to at open. Resolving the selected
+        // metadata again here is what let a write landing between the Host
+        // probe and this factory publish a Host bound to one root beside
+        // execution/commit authority bound to another, so the pin — not a fresh
+        // read — is the authority every port below is built from.
+        let canonical_root = match &self.inner.admission_root {
+            Ok(Some(root)) => root.clone(),
+            Ok(None) => return Err(CoreError::Uninitialized),
+            Err(err) => return Err(err.clone()),
+        };
+        // The pin stays the authority, but a selection that MOVED away from it
+        // makes this admission stale: refuse BEFORE any authority exists, so
+        // neither the probed root's lane nor a stale root's ports are published
+        // as one owner. The next open (a new epoch) admits the moved root.
+        let selected = crate::works::canonical_selected_workspace_root(
+            &self.inner.nexus_home,
+            principal.creator_id(),
+            principal.workspace_slug(),
+        )?;
+        if selected.as_deref() != Some(canonical_root.as_path()) {
+            tracing::warn!(
+                pinned = %canonical_root.display(),
+                "the selected creative root moved after this engine-owner admission was pinned; \
+                 refusing to compose a workspace bundle for a stale admission"
+            );
+            return Err(CoreError::AuthRequired);
+        }
+        let canonical_root = canonical_root.to_string_lossy().into_owned();
 
         // ONE manager per DB: `new_recoverable` takes the exclusive
         // workspace-authority lease, so a second authority over the same DB
@@ -284,23 +324,6 @@ impl RunEventPort for CoreRunEventPort {
     }
 }
 
-/// Canonicalize the creative root the current selection names.
-///
-/// A root that is named but no longer exists is an uninitialized workspace, not
-/// an internal fault; every other failure is reported verbatim. Canonicalizing
-/// is what makes the frozen run root, the executor's scope root and the commit
-/// authority's active root the same string, so a symlinked or non-normalized
-/// selection cannot produce two roots that compare unequal.
-async fn canonical_workspace_root(selected_root: &str) -> CoreResult<String> {
-    match tokio::fs::canonicalize(selected_root).await {
-        Ok(path) => Ok(path.to_string_lossy().into_owned()),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Err(CoreError::Uninitialized),
-        Err(err) => Err(CoreError::Internal {
-            category: format!("workspace root {selected_root}: {err}"),
-        }),
-    }
-}
-
 /// Map a refused workspace-authority construction onto the neutral taxonomy.
 ///
 /// [`SessionError::AuthorityBusy`] is a WRITER conflict: this DB already has a
@@ -387,14 +410,11 @@ mod tests {
         .expect("config");
         // The core resolves the creative root from the operational meta.json —
         // the same document the daemon/CLI workspace registration writes.
-        let operational = nexus_home_layout::operational_workspace_dir(user_home, CREATOR, SLUG);
-        std::fs::create_dir_all(&operational).expect("operational dir");
-        std::fs::write(
-            operational.join("meta.json"),
-            serde_json::to_vec(&serde_json::json!({ "local_root": creative_root }))
-                .expect("meta json"),
-        )
-        .expect("meta");
+        std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
+            user_home, CREATOR, SLUG,
+        ))
+        .expect("operational dir");
+        register_selected_root(user_home, serde_json::json!(creative_root));
 
         let db_path = nexus_home_layout::workspace_state_db_path(user_home, CREATOR, SLUG);
         // Seed through a temporary admitted pool and RELEASE the writer guard
@@ -426,6 +446,35 @@ mod tests {
         })
         .await
         .expect("engine-owner core open")
+    }
+
+    /// Rewrite the selected workspace's registered `local_root`.
+    ///
+    /// This is the supported operational write the CLI's `creator workspace
+    /// create --creative-root` performs, not a private seed: the same
+    /// document the admission pin and the drift check read.
+    fn register_selected_root(user_home: &std::path::Path, local_root: serde_json::Value) {
+        std::fs::write(
+            nexus_home_layout::operational_workspace_dir(user_home, CREATOR, SLUG)
+                .join("meta.json"),
+            serde_json::to_vec(&serde_json::json!({ "local_root": local_root }))
+                .expect("meta json"),
+        )
+        .expect("write meta");
+    }
+
+    /// The fixture with its selected `local_root` set BEFORE any core opens.
+    async fn fixture_registering(local_root: serde_json::Value) -> Fixture {
+        let fx = fixture().await;
+        register_selected_root(fx.tmp.path(), local_root);
+        fx
+    }
+
+    /// The lease path the workspace commit/recovery authority takes.
+    fn authority_lease_path(core: &CoreService) -> std::path::PathBuf {
+        core.inner
+            .db_path
+            .with_extension("workspace_authority.lock")
     }
 
     fn create_entry(path: &str, content: &[u8]) -> ChangeEntry {
@@ -635,6 +684,85 @@ mod tests {
                 std::fs::read(fx.creative_root.join("notes").join(path)).expect("committed bytes"),
                 PAYLOAD,
                 "{path} must survive recovery"
+            );
+        }
+    }
+
+    /// The admission PIN — not a metadata re-read — is what a Host probe and
+    /// every workspace port of the owner bind.
+    ///
+    /// A supported `local_root` write landing after open moves the SELECTION,
+    /// but it can never move the root this admission was pinned to, so the
+    /// owner refuses the stale admission (typed, before any authority exists)
+    /// instead of publishing a Host bound to one root beside execution/commit
+    /// authority bound to another. Restoring the pinned selection proves the
+    /// refusal retained nothing: the same core composes again.
+    #[tokio::test]
+    async fn admission_root_is_pinned_across_a_moved_selection() {
+        let fx = fixture().await;
+        let core = open_core(&fx).await;
+        let pinned = std::fs::canonicalize(&fx.creative_root).expect("canonical selected root");
+        assert_eq!(
+            core.admission_creative_root(),
+            Some(pinned.as_path()),
+            "the admission must pin the canonical registered creative root"
+        );
+        let lease_path = authority_lease_path(&core);
+
+        // The moved root: a real directory the metadata now selects instead.
+        let moved = fx.tmp.path().join("moved-creative-root");
+        std::fs::create_dir_all(&moved).expect("moved root");
+        register_selected_root(fx.tmp.path(), serde_json::json!(moved));
+
+        assert_eq!(
+            core.admission_creative_root(),
+            Some(pinned.as_path()),
+            "a metadata write after open must not move the pinned admission root"
+        );
+        assert!(
+            matches!(
+                core.hosted_workspace_deps().await.map(|_| ()),
+                Err(CoreError::AuthRequired)
+            ),
+            "a selection that moved away from the pinned root must be refused"
+        );
+        assert!(
+            !lease_path.exists(),
+            "the refusal must land before any workspace authority is composed"
+        );
+
+        // Nothing was retained by the refusal: with the selection back on the
+        // pinned root, the same admission composes the bundle it always would.
+        register_selected_root(fx.tmp.path(), serde_json::json!(fx.creative_root));
+        assert!(
+            core.hosted_workspace_deps().await.is_ok(),
+            "the refusal must not retain the workspace authority"
+        );
+    }
+
+    /// A selected workspace that registers no USABLE canonical root — no
+    /// registration, a blank path, or a root that no longer exists — pins no
+    /// root, so no owner is admissible: the factory answers `Uninitialized`
+    /// rather than composing ports over a fabricated boundary.
+    #[tokio::test]
+    async fn admission_without_a_usable_root_pins_no_owner() {
+        for registered in [
+            serde_json::Value::Null,
+            serde_json::json!("   "),
+            serde_json::json!("/nonexistent/nexus-t5-root"),
+        ] {
+            let fx = fixture_registering(registered.clone()).await;
+            let core = open_core(&fx).await;
+            assert!(
+                core.admission_creative_root().is_none(),
+                "a root registering {registered} must pin nothing"
+            );
+            assert!(
+                matches!(
+                    core.hosted_workspace_deps().await.map(|_| ()),
+                    Err(CoreError::Uninitialized)
+                ),
+                "a pinned-empty admission must refuse with uninitialized"
             );
         }
     }

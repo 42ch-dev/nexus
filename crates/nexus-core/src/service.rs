@@ -118,6 +118,26 @@ pub struct CoreInner {
     /// rejection, never a second engine. Reset only by a confirmed close.
     #[cfg(feature = "provider-host")]
     pub(crate) host_authority_established: Mutex<bool>,
+    /// The canonical creative root this ENGINE-OWNER admission is PINNED to.
+    ///
+    /// Resolved ONCE here at open, from the selected workspace's own
+    /// `meta.json`, so the native boot's Host probe boundary and every
+    /// workspace port the hosted factory composes (`RunnerDeps.workspace_root`,
+    /// the commit executor, the `_context.workspace.*` state provider, the
+    /// durable commit authority and its startup-recovery root filter) all
+    /// derive from ONE immutable value. A metadata write after open can then
+    /// never make the probed root and the execution/commit authority disagree.
+    ///
+    /// The whole OUTCOME is stored, not just the path: a metadata fault must
+    /// stay an `internal` refusal for the hosted factory instead of silently
+    /// degrading into the `uninitialized` "no owner" answer. `Ok(None)` means
+    /// the selected workspace registers no usable canonical root, so no probe
+    /// owner and no execution owner are admissible.
+    ///
+    /// Only an engine-owner open resolves it; every other access mode pins "no
+    /// root" because it composes no execution owner.
+    #[cfg(feature = "execution")]
+    pub(crate) admission_root: CoreResult<Option<PathBuf>>,
     /// The execution owner slot for THIS service (v1.190 P3-T1). Empty until
     /// `start_execution` succeeds.
     ///
@@ -200,6 +220,22 @@ impl CoreService {
             return Err(CoreError::Uninitialized);
         }
 
+        // Pin the admission's canonical creative root HERE, once, before any
+        // pool or owner exists: the native boot's Host probe boundary and the
+        // hosted factory's workspace ports both bind this exact value, so a
+        // selected-metadata write that lands between them cannot publish a
+        // Host bound to one root beside execution authority bound to another.
+        #[cfg(feature = "execution")]
+        let admission_root = if options.access == CoreAccess::EngineOwner {
+            crate::works::canonical_selected_workspace_root(
+                &nexus_home,
+                &creator_id,
+                &workspace_slug,
+            )
+        } else {
+            Ok(None)
+        };
+
         let mut owns_engine_admission = false;
         let (pool, guarded) = match options.access {
             CoreAccess::ReadOnly => {
@@ -249,6 +285,8 @@ impl CoreService {
                 close_settled: tokio::sync::Notify::new(),
                 #[cfg(feature = "provider-host")]
                 host_authority_established: Mutex::new(false),
+                #[cfg(feature = "execution")]
+                admission_root,
                 character_fences: ActorFenceTable::new(&db_path),
                 #[cfg(feature = "execution")]
                 execution: std::sync::Mutex::new(None),
@@ -275,6 +313,27 @@ impl CoreService {
     #[must_use]
     pub fn nexus_home(&self) -> &std::path::Path {
         &self.inner.nexus_home
+    }
+
+    /// The canonical creative root this engine-owner admission is pinned to.
+    ///
+    /// The value resolved ONCE at open from the selected workspace's own
+    /// `meta.json`, exposed so the native boot binds its Host probe boundary to
+    /// the very root the core's hosted factory will compose its workspace ports
+    /// from — instead of resolving the selection a second time and racing it.
+    ///
+    /// `None` means this admission registers no usable canonical root (absent,
+    /// blank, gone, unreadable, or a non-engine-owner open), so no probe owner
+    /// is admissible: the Host then keeps its pre-existing open boundary and
+    /// marks every selected candidate `probe_context_unavailable`.
+    #[must_use]
+    #[cfg(feature = "execution")]
+    pub fn admission_creative_root(&self) -> Option<&Path> {
+        self.inner
+            .admission_root
+            .as_ref()
+            .ok()
+            .and_then(Option::as_deref)
     }
 
     pub(crate) fn ensure_open(&self) -> CoreResult<()> {
