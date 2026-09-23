@@ -32,7 +32,15 @@
 #    verifies against the same fixture (declared manifest content == landed
 #    content).
 # 4. The manual `exit_when` keeps the run non-terminal, which is what makes the
-#    inspect / stream / cancel steps address one live run.
+#    inspect / stream / cancel steps address one live run. The same wait is why
+#    the driver places its Steer (W5/W6) strictly before it: this state runs the
+#    enter actions (prompt, open, commit) and then rests in the manual wait, and
+#    the engine fences `resume` against a durable wait and against in-flight
+#    markers. The driver therefore synchronizes on the routed public inspect
+#    projection (`schedule.execution.recovery_class` / `allowed_actions` / `wait`)
+#    and appends + resumes only at a committed pre-manual execution boundary; at
+#    the wait it stops with the exact observed state rather than bypassing the
+#    human wait or claiming a Steer it could not place.
 preset:
   id: first-workflow
   version: 1

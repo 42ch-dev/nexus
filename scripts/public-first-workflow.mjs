@@ -35,6 +35,22 @@
  *   * the checked-in fixture is the single source of truth for the opened
  *     scope, the committed path and the committed bytes; nothing else is
  *     written into the isolated workspace;
+ *   * the durable run identity is resolved with a bounded admission poll that
+ *     keeps a still-pending asynchronous admission (§3.3) distinct from a
+ *     terminal refusal — a pending admission is never reported as a missing
+ *     producer;
+ *   * W5/W6 (steer) are issued only at a durable pre-manual execution boundary
+ *     read from the public execution projection (`recovery_class`,
+ *     `allowed_actions`, `wait`); a plain resume is refused by the A4 fence at
+ *     a human wait, so the driver never issues it there and never claims a
+ *     Steer it could not place;
+ *   * the receipt must carry a real revision observed on a routed public
+ *     surface (committed revision preferred, durable run-state revision
+ *     otherwise). A missing revision is a failure, never a success, and no
+ *     number is ever invented or derived from the fixture bytes;
+ *   * a failed or unconfirmed owned-service shutdown overrides an otherwise
+ *     successful journey: the receipt stays non-success and the process exits
+ *     non-zero with its evidence retained;
  *   * every child it started is stopped and every path it created is removed
  *     unless `--keep` is given (ownership-scoped cleanup);
  *   * the receipt carries ids, statuses, hashes and ports — never environment
@@ -91,6 +107,40 @@ const CLI_TIMEOUT_MS = 120_000;
 const HTTP_TIMEOUT_MS = 30_000;
 const EVENT_STREAM_TIMEOUT_MS = 20_000;
 const MAX_EVENT_FRAMES = 256;
+/** Bounded admission poll: a W1 success may legitimately still be pending (§3.3). */
+const ADMISSION_POLL_TIMEOUT_MS = 30_000;
+const ADMISSION_POLL_START_INTERVAL_MS = 150;
+const ADMISSION_POLL_MAX_INTERVAL_MS = 1_000;
+/** Bounded synchronization of W5/W6 against the durable execution projection. */
+const STEER_BOUNDARY_TIMEOUT_MS = 15_000;
+const STEER_BOUNDARY_START_INTERVAL_MS = 100;
+const STEER_BOUNDARY_MAX_INTERVAL_MS = 500;
+/** Bounded revision follow-up reads (an O2 reconnect, never a new run). */
+const EFFECT_REVISION_MAX_TAIL_READS = 5;
+const EVENT_TAIL_TIMEOUT_MS = 2_000;
+/** The Idea W5 appends before W6 resumes (S0-3 append-before-resume). */
+const STEER_IDEA = 'public first-workflow steer';
+
+/**
+ * `creator_schedules.status` terminal values (`crates/nexus-orchestration/src/
+ * schedule`). A terminal row without a claimed run can never produce one, so it
+ * is a refusal; anything else without a run id is still pending.
+ */
+const TERMINAL_SCHEDULE_STATUSES = new Set(['cancelled', 'completed', 'failed']);
+
+/**
+ * Durable recovery classes at which `POST …/signal {signal:'resume'}` is legal.
+ * The engine fences `resume` against terminal states, durable human waits and
+ * in-flight/step-in-flight markers (`crates/nexus-orchestration/src/engine.rs`),
+ * so only a fully committed step boundary with no wait token qualifies — the
+ * pre-manual execution boundary W5/W6 must be placed at. Anything else is a
+ * typed STOP, never a guess and never a bypassed human wait.
+ */
+const STEERABLE_RECOVERY_CLASSES = new Set(['safe_boundary']);
+/** Legal-action marker of that boundary (`allowed_actions`, A2/A7 vocabulary). */
+const STEERABLE_ALLOWED_ACTION = 'continue';
+/** Committed revision identifier shape (`crates/nexus-core/src/execution/session_commit.rs`). */
+const COMMIT_REVISION_PATTERN = /^rev_[A-Za-z0-9-]+$/;
 
 /**
  * Credential-shaped environment variable names removed from every child.
@@ -142,8 +192,10 @@ Cleanup: a completed run removes the temporary root it created; a blocked or
 failed run retains it (the printed receipt names it) so the STOP keeps evidence.
 
 Exit codes:
-  0  the journey completed and its declared facts were observed
-  1  unexpected internal failure
+  0  the journey completed, its declared facts were observed and every owned
+     child was confirmed stopped
+  1  unexpected internal failure, a runtime/recovery failure, or an
+     unconfirmed/failed owned-service cleanup
   2  blocked: a prerequisite, runtime or producer required by the journey is missing
   64 usage error
 
@@ -377,10 +429,15 @@ function resolveExecutable(explicit, name) {
 /** Build the child environment: isolated homes, loopback model, no inherited credentials. */
 function buildChildEnv({ home, dshHome, modelPort, dshRuntimeBin }) {
   const env = {};
-  for (const [key, value] of Object.entries(process.env)) {
+  // Key-first filtering (§6.1): the credential-shaped / preload decision is
+  // made on the NAME before the value is ever dereferenced, so an inherited
+  // secret value is never materialized, copied, logged or persisted. Iterating
+  // `Object.entries`/`Object.values` here would read every value first and only
+  // then discard the credential-shaped ones — a credential inspection.
+  for (const key of Object.keys(process.env)) {
+    if (key === NODE_OPTIONS_KEY || isCredentialEnvKey(key)) continue;
+    const value = process.env[key];
     if (value === undefined) continue;
-    if (key === NODE_OPTIONS_KEY) continue;
-    if (isCredentialEnvKey(key)) continue;
     env[key] = value;
   }
   env.HOME = home;
@@ -472,10 +529,17 @@ function httpJson(port, method, path, { body, headers = {}, timeoutMs = HTTP_TIM
 function statusFailure(step, response) {
   const code = response.json?.error?.code ?? response.json?.code ?? null;
   const detail = `${step}: HTTP ${response.status}${code ? ` (${code})` : ''}`;
-  // 501 route_not_migrated / 503 busy-closing-interrupted are producer gaps: the
-  // dependency release that owns the operation is not integrated in this tree.
-  if (response.status === 501 || response.status === 503) {
-    return blocked('unavailable_producer', detail);
+  // §3.4 wire taxonomy (`apps/nexus-service/src/errors.ts`):
+  //   * 501 `route_not_migrated` — the dependency release that owns this
+  //     operation is not integrated in this tree. An unmet prerequisite.
+  //   * 503 `busy` / `closing` / `interrupted` — the mounted producer's own
+  //     runtime/recovery state (admission capacity, a closing owner, an
+  //     interrupted provider operation). Calling that a missing producer would
+  //     relabel a runtime/recovery defect as an unmet dependency (S3-6), so it
+  //     keeps its own outcome category with the safe wire code preserved.
+  if (response.status === 501) return blocked('unavailable_producer', detail);
+  if (response.status === 503) {
+    return failed('runtime_unavailable', `${detail} — mounted runtime/recovery state, not a missing dependency producer`);
   }
   return failed('contract_violation', detail);
 }
@@ -508,6 +572,169 @@ function tailLines(text, limit) {
     .split('\n')
     .filter((line) => line.trim().length > 0)
     .slice(-limit);
+}
+
+// ---------------------------------------------------------------------------
+// Durable state classification (pure) and the two bounded public polls
+// ---------------------------------------------------------------------------
+
+/**
+ * Durable execution projection from a frozen inspect response (A2/A7). The
+ * projection is the only routed surface that carries `recovery_class`,
+ * `allowed_actions` and the human `wait`; `null` means it is not observable.
+ */
+function executionProjectionOf(summary) {
+  const projection = summary?.execution;
+  return projection === null || typeof projection !== 'object' ? null : projection;
+}
+
+/**
+ * Classify one inspect observation. A still-pending asynchronous admission
+ * (§3.3: W1 success means durable descriptor, the run identity may be claimed
+ * after the response) is distinct from a terminal refusal that can never
+ * publish a run identity, and both are distinct from a claimed identity.
+ */
+function classifyAdmissionObservation(summary) {
+  const runId = summary?.current_session_id;
+  const status = typeof summary?.status === 'string' ? summary.status : null;
+  if (typeof runId === 'string' && runId.length > 0) {
+    return { state: 'claimed', run_id: runId, status };
+  }
+  if (status !== null && TERMINAL_SCHEDULE_STATUSES.has(status)) {
+    return { state: 'refused', run_id: null, status };
+  }
+  return { state: 'pending', run_id: null, status };
+}
+
+/** One public W4 inspect, returning both the frozen response and its summary. */
+async function readScheduleInspect(port, scheduleId, step) {
+  const inspected = requireOk(
+    step,
+    await httpJson(port, 'GET', `/v1/daemon/orchestration/schedules/${encodeURIComponent(scheduleId)}`),
+  );
+  return { inspected, summary: scheduleSummary(step, inspected) };
+}
+
+/**
+ * Bounded admission poll: resolve the root run identity after W1 without
+ * treating a pending asynchronous admission as a missing producer, and without
+ * ever fabricating an id.
+ */
+async function awaitRunIdentity(port, scheduleId) {
+  const deadline = Date.now() + ADMISSION_POLL_TIMEOUT_MS;
+  let interval = ADMISSION_POLL_START_INTERVAL_MS;
+  let polls = 0;
+  let last = { state: 'pending', run_id: null, status: null };
+  for (;;) {
+    const { summary } = await readScheduleInspect(port, scheduleId, 'GET /orchestration/schedules/{id}');
+    polls += 1;
+    last = classifyAdmissionObservation(summary);
+    if (last.state === 'claimed') return { ...last, summary, polls };
+    if (last.state === 'refused') {
+      throw failed(
+        'admission_refused',
+        `the admitted schedule settled as ${JSON.stringify(last.status)} without ever claiming a root run identity`,
+      );
+    }
+    if (Date.now() >= deadline) {
+      throw blocked(
+        'admission_pending_timeout',
+        `no current_session_id after ${ADMISSION_POLL_TIMEOUT_MS}ms across ${polls} inspects ` +
+          `(last schedule status ${JSON.stringify(last.status)}) — the run identity is neither claimed nor refused`,
+      );
+    }
+    await sleep(interval);
+    interval = Math.min(interval * 2, ADMISSION_POLL_MAX_INTERVAL_MS);
+  }
+}
+
+/**
+ * Classify a durable execution projection into a Steer placement decision.
+ *
+ * `steerable` is the legal pre-manual execution boundary: a fully committed
+ * step with no durable human wait and no in-flight marker, and the projected
+ * legal actions include the continuation. Every other state is decisive and
+ * the driver must stop instead of writing W5/W6:
+ *
+ *   * `human_wait` — a durable A4 wait exists; a plain `resume` is fenced and
+ *     issuing it would bypass the human wait (§3.3 / §6.1).
+ *   * `terminal` — the run already settled.
+ *   * `not_legal` — in-flight/interrupted/other class, where resume is fenced.
+ *   * `unobservable` — the public surface exposes no projection, so placement
+ *     cannot be established at all.
+ */
+function classifySteerBoundary(projection) {
+  if (projection === null) return { state: 'unobservable', observed: null };
+  const wait = projection.wait ?? null;
+  const recoveryClass = typeof projection.recovery_class === 'string' ? projection.recovery_class : null;
+  const allowed = Array.isArray(projection.allowed_actions)
+    ? projection.allowed_actions.filter((action) => typeof action === 'string')
+    : [];
+  const observed = {
+    recovery_class: recoveryClass,
+    wait_id: wait !== null && typeof wait.wait_id === 'string' ? wait.wait_id : null,
+    wait_kind: wait !== null && typeof wait.kind === 'string' ? wait.kind : null,
+    reason_code: projection.reason_code ?? null,
+    execution_version: projection.execution_version ?? null,
+    state_revision: projection.state_revision ?? null,
+    allowed_actions: allowed,
+  };
+  if (recoveryClass === 'terminal') return { state: 'terminal', observed };
+  if (wait !== null || recoveryClass === 'human_wait') return { state: 'human_wait', observed };
+  if (!STEERABLE_RECOVERY_CLASSES.has(recoveryClass)) return { state: 'not_legal', observed };
+  if (!allowed.includes(STEERABLE_ALLOWED_ACTION)) return { state: 'not_legal', observed };
+  return { state: 'steerable', observed };
+}
+
+/** Turn a non-steerable placement into the exact, typed STOP for that state. */
+function steerBoundaryStop(step, boundary) {
+  const observed = JSON.stringify(boundary.observed);
+  switch (boundary.state) {
+    case 'unobservable':
+      return blocked(
+        'steer_boundary_unobservable',
+        `${step}: the routed inspect response carries no durable execution projection ` +
+          '(recovery_class/allowed_actions/wait), so a legal pre-manual Steer boundary cannot be ' +
+          'established; W5/W6 are not issued and no Steer success is claimed',
+      );
+    case 'human_wait':
+      return failed(
+        'steer_boundary_missed',
+        `${step}: the run already rests in a durable human wait (${observed}); the A4 fence makes a ` +
+          'plain resume illegal there, so W5/W6 are not issued rather than bypassing the wait',
+      );
+    case 'terminal':
+      return failed('steer_run_terminal', `${step}: the run is already terminal (${observed}); W5/W6 are not issued`);
+    default:
+      return failed(
+        'steer_boundary_not_legal',
+        `${step}: the durable state is not a legal pre-manual execution boundary (${observed}); ` +
+          'W5/W6 are not issued',
+      );
+  }
+}
+
+/**
+ * Bounded synchronization of the Steer against durable state. A decisive
+ * observation (a legal boundary, a human wait or a terminal run) returns
+ * immediately; an in-flight/other transient class is re-read until the bound,
+ * after which the last observation is returned so the caller stops with the
+ * exact observed state instead of writing on a timing assumption.
+ */
+async function awaitSteerBoundary(port, scheduleId) {
+  const deadline = Date.now() + STEER_BOUNDARY_TIMEOUT_MS;
+  let interval = STEER_BOUNDARY_START_INTERVAL_MS;
+  let polls = 0;
+  let observation = { state: 'unobservable', observed: null };
+  for (;;) {
+    const { summary } = await readScheduleInspect(port, scheduleId, 'GET /orchestration/schedules/{id} (steer boundary)');
+    polls += 1;
+    observation = classifySteerBoundary(executionProjectionOf(summary));
+    if (observation.state !== 'not_legal') return { ...observation, polls };
+    if (Date.now() >= deadline) return { ...observation, polls };
+    await sleep(interval);
+    interval = Math.min(interval * 2, STEER_BOUNDARY_MAX_INTERVAL_MS);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -627,7 +854,41 @@ async function stopServiceVia(running, label) {
   child.kill('SIGTERM');
   await sleep(500);
   if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
-  return { confirmed: false, code: child.exitCode, signal: child.signalCode ?? null };
+  return {
+    confirmed: false,
+    code: child.exitCode,
+    signal: child.signalCode ?? null,
+    detail: `service ${label} did not exit within the bounded public stop window`,
+  };
+}
+
+/**
+ * Cleanup is part of the success condition (§3.4 cleanup disposition; §6.1
+ * confirmed shutdown; §7 "unconfirmed cleanup is a STOP with retained
+ * evidence"). A confirmed stop leaves the journey outcome untouched; a failed
+ * or unconfirmed stop overrides an earlier `ok` so neither the receipt nor the
+ * process exit code can report success while an owned service may still be
+ * alive. A journey that already failed or blocked keeps its primary blocker —
+ * it exits non-zero either way — and the cleanup failure is recorded beside it.
+ */
+function applyCleanupDisposition(receipt, cleanup) {
+  receipt.cleanup = cleanup;
+  if (cleanup.confirmed === true) return receipt;
+  if (receipt.outcome === 'ok') {
+    receipt.outcome = 'failed';
+    receipt.blocker = {
+      outcome: 'failed',
+      category: cleanup.category ?? 'cleanup_unconfirmed',
+      detail: cleanup.detail ?? 'the owned service shutdown was not confirmed',
+    };
+  }
+  return receipt;
+}
+
+/** Process exit code for a finished receipt (usage errors exit 64 earlier). */
+function exitCodeFor(outcome) {
+  if (outcome === 'ok') return 0;
+  return outcome === 'blocked' ? 2 : 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -828,13 +1089,85 @@ function readEventStream(port, runId, { lastEventId, maxFrames = MAX_EVENT_FRAME
   });
 }
 
-/** Extract the commit revision when a routed surface exposes it; never invent one. */
+/**
+ * The workspace-commit revision identifier when a routed event carries it
+ * (`{"revision":"rev_<uuid>"}`, the `CoreWorkspaceCommitResponse` shape); never
+ * invented and never derived from the fixture bytes.
+ */
 function findCommitRevision(frames) {
   for (const frame of frames) {
-    const match = /"revision"\s*:\s*"(rev_[^"]+)"/.exec(frame.data ?? '');
-    if (match) return match[1];
+    const match = /"revision"\s*:\s*"([^"]+)"/.exec(frame.data ?? '');
+    if (match && COMMIT_REVISION_PATTERN.test(match[1])) return match[1];
   }
   return null;
+}
+
+/** Durable run-state revision from routed `run_state` frames (real projection, never computed). */
+function findRunStateRevision(frames) {
+  let revision = null;
+  for (const frame of frames) {
+    if (frame.event !== 'run_state' || typeof frame.data !== 'string') continue;
+    let payload = null;
+    try {
+      payload = JSON.parse(frame.data);
+    } catch {
+      continue;
+    }
+    const value = payload?.state_revision;
+    if (Number.isInteger(value) && value >= 0) revision = value;
+  }
+  return revision;
+}
+
+/**
+ * Resolve the real revision the receipt must carry (Task 1 requires the
+ * committed file *and* revision; §6.1 requires the revision in the receipt).
+ *
+ * Both candidate sources are routed public surfaces owned by the acted
+ * creator: the workspace-commit identifier when a routed event carries it, and
+ * otherwise the durable run-state revision exposed by the routed `run_state`
+ * frames or the inspect execution projection. Nothing is computed from the
+ * fixture bytes and no identifier is invented.
+ *
+ * An unobservable revision is refused here — it is never represented as an
+ * acceptable result — so a caller cannot record the effect as a success.
+ *
+ * @throws {DriverFailure} `failed`/`missing_commit_revision` when no routed
+ *   public surface exposed a revision.
+ */
+function resolveEffectRevision({ commitRevision, frames, projectionStateRevision }) {
+  const commit =
+    typeof commitRevision === 'string' && COMMIT_REVISION_PATTERN.test(commitRevision) ? commitRevision : null;
+  const streamed = findRunStateRevision(frames);
+  const projected =
+    Number.isInteger(projectionStateRevision) && projectionStateRevision >= 0 ? projectionStateRevision : null;
+  if (commit !== null) {
+    return {
+      commit_revision: commit,
+      durable_state_revision: streamed ?? projected,
+      revision_source: 'run-event-stream-commit-revision',
+    };
+  }
+  if (streamed !== null) {
+    return {
+      commit_revision: null,
+      durable_state_revision: streamed,
+      revision_source: 'run-event-stream-state-revision',
+    };
+  }
+  if (projected !== null) {
+    return {
+      commit_revision: null,
+      durable_state_revision: projected,
+      revision_source: 'execution-projection-state-revision',
+    };
+  }
+  throw failed(
+    'missing_commit_revision',
+    'the declared workspace effect landed, but no committed revision is exposed by the routed public surfaces ' +
+      '(no rev_<id> on the same-run stream and no durable run-state revision through the stream or the inspect ' +
+      'projection); §6.1 and the P3-T1 card require the committed file and revision, so the effect is not a success',
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -1055,31 +1388,99 @@ async function runDeterministic(options) {
     };
     record('admit', 'ok', { schedule_id: admitted.schedule_id });
 
-    // 8. W4 inspect: durable status plus the root orchestration session id.
-    // The frozen response shape is `{schedule, depends_on, concurrency_kind}`
+    // 8. W4 inspect with a bounded admission poll. W1 success means the
+    // descriptor is durable while the root run identity may still be claimed
+    // asynchronously (§3.3), so a pending admission is polled instead of being
+    // reported as a missing producer, and a terminal refusal/timeout are their
+    // own outcomes. The frozen response shape is
+    // `{schedule, depends_on, concurrency_kind}`
     // (`inspect-schedule-response.schema.json` + `schedule-summary.schema.json`).
     const scheduleId = admitted.schedule_id;
-    const inspected = requireOk(
-      'GET /orchestration/schedules/{id}',
-      await httpJson(port, 'GET', `/v1/daemon/orchestration/schedules/${encodeURIComponent(scheduleId)}`),
+    const admission = await awaitRunIdentity(port, scheduleId);
+    const runId = admission.run_id;
+    facts.inspect = {
+      status: admission.summary.status,
+      current_core_context_version: admission.summary.current_core_context_version ?? null,
+      current_session_id: runId,
+      execution_policy: admission.summary.execution_policy ?? null,
+      admission_polls: admission.polls,
+      execution: executionProjectionOf(admission.summary),
+    };
+    record('inspect', 'ok', { status: facts.inspect.status, admission_polls: admission.polls });
+
+    // 9. W5/W6 steer, synchronized on durable state (§6.1: W5/W6 are exercised
+    // before the final manual wait; S0-3: the append is durable before resume
+    // counts as success). Placement comes from the routed execution projection,
+    // never from the preceding bounded read: at a durable human wait the A4
+    // fence refuses a plain resume, so the driver stops with the exact observed
+    // state instead of bypassing the wait or claiming a Steer it did not place.
+    const steerBoundary = await awaitSteerBoundary(port, scheduleId);
+    if (steerBoundary.state !== 'steerable') throw steerBoundaryStop('steer', steerBoundary);
+    const appendResponse = requireOk(
+      'PATCH /orchestration/schedules/{id}/core-context',
+      await httpJson(port, 'PATCH', `/v1/daemon/orchestration/schedules/${encodeURIComponent(scheduleId)}/core-context`, {
+        body: { op: 'append', body: STEER_IDEA },
+      }),
     );
-    const summary = scheduleSummary('GET /orchestration/schedules/{id}', inspected);
-    const runId = summary.current_session_id;
-    if (typeof runId !== 'string' || runId.length === 0) {
-      throw blocked(
-        'producer_missing_session',
-        'inspect did not expose current_session_id; the admitted root run identity is not published',
+    requireFields('PATCH /orchestration/schedules/{id}/core-context', appendResponse, ['new_version']);
+    facts.steer = {
+      boundary: steerBoundary.observed,
+      boundary_polls: steerBoundary.polls,
+      appended_version: appendResponse.new_version,
+      recheck: null,
+      resumed: false,
+      resume: null,
+    };
+    // Re-read the routed boundary before resuming: if the run moved on between
+    // the durable append and the resume, a plain resume would land where it is
+    // fenced. The Steer then stops with the exact observed state; the appended
+    // version stays durable and is never re-appended (S0-3).
+    const steerRecheck = classifySteerBoundary(
+      executionProjectionOf(
+        (await readScheduleInspect(port, scheduleId, 'GET /orchestration/schedules/{id} (steer recheck)')).summary,
+      ),
+    );
+    facts.steer.recheck = steerRecheck.observed;
+    if (steerRecheck.state !== 'steerable') {
+      const stop = steerBoundaryStop('steer recheck', steerRecheck);
+      throw new DriverFailure(
+        stop.outcome,
+        'steer_boundary_lost',
+        `${stop.message} — the appended core-context version ${JSON.stringify(appendResponse.new_version)} remains ` +
+          'durable; resume was not issued and the append is never retried',
       );
     }
-    facts.inspect = {
-      status: summary.status,
-      current_core_context_version: summary.current_core_context_version ?? null,
-      current_session_id: runId,
-      execution_policy: summary.execution_policy ?? null,
+    const resumeResponse = await httpJson(
+      port,
+      'POST',
+      `/v1/daemon/orchestration/schedules/${encodeURIComponent(scheduleId)}/signal`,
+      { body: { signal: 'resume' } },
+    );
+    facts.steer.resume = {
+      status: resumeResponse.status,
+      code: resumeResponse.json?.error?.code ?? resumeResponse.json?.code ?? null,
+      current_wait_id: resumeResponse.json?.current_wait_id ?? null,
     };
-    record('inspect', 'ok', { status: facts.inspect.status });
+    if (resumeResponse.status < 200 || resumeResponse.status >= 300) {
+      // Preserve the exact conflict verbatim (wire status plus coded detail,
+      // e.g. `workflow_wait_conflict`); the appended version remains durable and
+      // there is no automatic re-append and no retry.
+      const refusal = statusFailure('POST /orchestration/schedules/{id}/signal (resume)', resumeResponse);
+      throw new DriverFailure(
+        refusal.outcome,
+        'steer_resume_refused',
+        `${refusal.message} — appended core-context version ${JSON.stringify(appendResponse.new_version)} remains ` +
+          'durable; no re-append and no retry',
+      );
+    }
+    facts.steer.resumed = true;
+    record('steer', 'ok', {
+      boundary_recovery_class: steerBoundary.observed.recovery_class,
+      boundary_polls: steerBoundary.polls,
+      appended_version: appendResponse.new_version,
+    });
 
-    // 9. O1/O2: same-run stream against the inspected root session.
+    // 10. O1/O2: same-run stream against the inspected root session.
     const stream = await readEventStream(port, runId);
     if (stream.status !== 200) {
       throw statusFailure('GET /orchestration/sessions/{run_id}/events', {
@@ -1099,37 +1500,35 @@ async function runDeterministic(options) {
     };
     record('stream', 'ok', { frames: stream.frames.length });
 
-    // 10. W5 steer before the final manual wait: the append is durable first, then resume.
-    requireOk(
-      'PATCH /orchestration/schedules/{id}/core-context',
-      await httpJson(port, 'PATCH', `/v1/daemon/orchestration/schedules/${encodeURIComponent(scheduleId)}/core-context`, {
-        body: { op: 'append', body: 'public first-workflow steer' },
-      }),
-    );
-    requireOk(
-      'POST /orchestration/schedules/{id}/signal (resume)',
-      await httpJson(port, 'POST', `/v1/daemon/orchestration/schedules/${encodeURIComponent(scheduleId)}/signal`, {
-        body: { signal: 'resume' },
-      }),
-    );
-    record('steer', 'ok');
-
-    // 10b. Bounded follow-up read: the commit frame may land after the first
-    // bounded read, and §6.1 requires the committed revision as a recorded fact.
-    // This is a reconnect from the last observed cursor (O2), not a new run.
-    const streamTail = await readEventStream(port, runId, { lastEventId, maxFrames: 64 });
-    if (streamTail.status !== 200) {
-      throw statusFailure('GET /orchestration/sessions/{run_id}/events (tail)', {
-        status: streamTail.status,
-        json: streamTail.json,
-        text: '',
+    // 11. Bounded revision follow-up reads: the commit frame may land after the
+    // first bounded read, and §6.1 requires the committed file *and* revision.
+    // Every follow-up is a reconnect from the last observed cursor (O2), never a
+    // new run.
+    let allFrames = [...stream.frames];
+    let observedRevision = findCommitRevision(allFrames);
+    let tailReads = 0;
+    while (observedRevision === null && tailReads < EFFECT_REVISION_MAX_TAIL_READS) {
+      const tail = await readEventStream(port, runId, {
+        lastEventId: allFrames.map((frame) => frame.id).filter(Boolean).pop() ?? null,
+        maxFrames: 64,
+        timeoutMs: EVENT_TAIL_TIMEOUT_MS,
       });
+      if (tail.status !== 200) {
+        throw statusFailure('GET /orchestration/sessions/{run_id}/events (tail)', {
+          status: tail.status,
+          json: tail.json,
+          text: '',
+        });
+      }
+      tailReads += 1;
+      allFrames = [...allFrames, ...tail.frames];
+      observedRevision = findCommitRevision(allFrames);
     }
-    const allFrames = [...stream.frames, ...streamTail.frames];
-    facts.stream.tail_frame_count = streamTail.frames.length;
-    record('stream_tail', 'ok', { frames: streamTail.frames.length });
+    facts.stream.tail_reads = tailReads;
+    facts.stream.tail_frame_count = allFrames.length - stream.frames.length;
+    record('stream_tail', 'ok', { reads: tailReads, frames: facts.stream.tail_frame_count });
 
-    // 11. §6.1: the declared workspace effect, read back byte-for-byte.
+    // 12. §6.1: the declared workspace effect, read back byte-for-byte.
     const effectPath = join(scopeDir, fixture.changePath);
     if (!existsSync(effectPath)) {
       throw failed(
@@ -1141,18 +1540,39 @@ async function runDeterministic(options) {
     if (!landed.equals(fixture.declaredBytes)) {
       throw failed('contract_violation', 'committed file content does not match the declared fixture manifest content');
     }
-    const observedRevision = findCommitRevision(allFrames);
+    // The receipt must carry a real revision read from a routed public surface
+    // owned by the acted creator — the committed revision when the routed event
+    // carries it, otherwise the durable run-state revision projected by the
+    // same-run stream or the inspect projection. Nothing is computed from the
+    // fixture bytes and no identifier is invented; an unobservable revision is
+    // refused here (missing_commit_revision), never recorded as a success.
+    const effectProjection = executionProjectionOf(
+      (await readScheduleInspect(port, scheduleId, 'GET /orchestration/schedules/{id} (effect)')).summary,
+    );
     facts.effect = {
       relative_path: `${fixture.scopePath}/${fixture.changePath}`,
       bytes: landed.length,
       sha256: sha256(landed),
       declared_content_matches: true,
-      observed_revision: observedRevision,
-      revision_source: observedRevision ? 'run-event-stream' : 'not-observed-in-routed-surfaces',
+      commit_revision: null,
+      durable_state_revision: null,
+      revision_source: null,
     };
-    record('workspace_effect', 'ok', { sha256: facts.effect.sha256, revision: observedRevision });
+    Object.assign(
+      facts.effect,
+      resolveEffectRevision({
+        commitRevision: observedRevision,
+        frames: allFrames,
+        projectionStateRevision: effectProjection?.state_revision ?? null,
+      }),
+    );
+    record('workspace_effect', 'ok', {
+      sha256: facts.effect.sha256,
+      revision: facts.effect.commit_revision ?? facts.effect.durable_state_revision,
+      revision_source: facts.effect.revision_source,
+    });
 
-    // 12. W7 cancel: a durable `cancelled` is the only success.
+    // 13. W7 cancel: a durable `cancelled` is the only success.
     requireOk(
       'POST /orchestration/schedules/{id}/signal (cancel)',
       await httpJson(port, 'POST', `/v1/daemon/orchestration/schedules/${encodeURIComponent(scheduleId)}/signal`, {
@@ -1172,8 +1592,17 @@ async function runDeterministic(options) {
     facts.cancel = { status: afterCancel.status, schedule_id: scheduleId };
     record('cancel', 'ok', { status: afterCancel.status });
 
-    // 13. O3 restart: same home, same schedule/session, preserved effect.
+    // 14. O3 restart: same home, same schedule/session, preserved effect.
     facts.ready_stop = await stopServiceVia(running, 'ready');
+    // §3.4 / §7: a confirmed owned shutdown is required before a successor
+    // process reuses the same home and port.
+    if (facts.ready_stop.confirmed !== true) {
+      throw failed(
+        'cleanup_unconfirmed',
+        'the pre-restart stop of the owned ready service was not confirmed; the restart would reuse a home and ' +
+          'port that a possibly-live predecessor still owns',
+      );
+    }
     running = null;
     running = await startService({ home, port: servicePort, childEnv, evidenceDir, label: 'restart' });
     const restartPort = servicePortOf(running.discovery);
@@ -1237,8 +1666,32 @@ async function runDeterministic(options) {
     if (typeof error?.serviceStderrLog === 'string') receipt.service_stderr_log = error.serviceStderrLog;
   } finally {
     if (running) {
-      const stopped = await stopServiceVia(running, 'cleanup').catch(() => ({ confirmed: false }));
-      record('cleanup_stop', stopped.confirmed ? 'ok' : 'unconfirmed', stopped);
+      // Cleanup disposition: a failed or unconfirmed owned shutdown is retained
+      // as evidence and overrides an otherwise `ok` journey, so the receipt and
+      // the exit code can never report success while an owned service may still
+      // be alive (§3.4 / §7).
+      let cleanup = null;
+      try {
+        const stopped = await stopServiceVia(running, 'cleanup');
+        cleanup = {
+          confirmed: stopped.confirmed === true,
+          code: stopped.code ?? null,
+          signal: stopped.signal ?? null,
+          category: stopped.confirmed === true ? null : 'cleanup_unconfirmed',
+          detail: stopped.detail ?? (stopped.confirmed === true ? null : 'the owned service shutdown was not confirmed'),
+        };
+      } catch (error) {
+        const failure = error instanceof DriverFailure ? error : null;
+        cleanup = {
+          confirmed: false,
+          code: null,
+          signal: null,
+          category: failure?.category ?? 'cleanup_stop_failed',
+          detail: error instanceof Error ? error.message : String(error),
+        };
+      }
+      record('cleanup_stop', cleanup.confirmed ? 'ok' : 'unconfirmed', cleanup);
+      applyCleanupDisposition(receipt, cleanup);
     }
     if (model) {
       await model.close().catch(() => undefined);
@@ -1302,17 +1755,35 @@ async function main() {
   if (options.json) process.stdout.write(`${JSON.stringify(receipt, null, 2)}\n`);
   else printSummary(receipt);
 
-  process.exit(receipt.outcome === 'ok' ? 0 : receipt.outcome === 'blocked' ? 2 : 1);
+  process.exit(exitCodeFor(receipt.outcome));
 }
 
 /**
  * Scoped-check surface: the pure contract helpers of this driver. Importing the
  * module has no side effects; the journey only runs when the script is invoked
  * directly, so a focused authoring check can exercise the fixture extraction,
- * the child-environment isolation rule and the controlled model protocol
- * without starting any service.
+ * the child-environment isolation rule, the controlled model protocol, the
+ * durable admission/boundary classification, the wire refusal classification,
+ * the revision resolution and the cleanup disposition without starting any
+ * service.
  */
-export { buildChildEnv, readFixture, resolveExecutable, startModelEndpoint, summarizeChildEnv };
+export {
+  applyCleanupDisposition,
+  awaitRunIdentity,
+  awaitSteerBoundary,
+  buildChildEnv,
+  classifyAdmissionObservation,
+  classifySteerBoundary,
+  executionProjectionOf,
+  exitCodeFor,
+  readFixture,
+  resolveEffectRevision,
+  resolveExecutable,
+  startModelEndpoint,
+  statusFailure,
+  steerBoundaryStop,
+  summarizeChildEnv,
+};
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === SCRIPT_PATH) {
   await main();
