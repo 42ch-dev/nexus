@@ -374,6 +374,50 @@ describe('workflow-control-http (v1.195 P0-T5 native boot and truthful readiness
     }
   });
 
+  test('hosted readiness and owner: no canonical creative root probes nothing and publishes no owner', async () => {
+    // The same probe-able ACP selection as the positive control, seeded with
+    // its registered creative root first: the valid-root control must report
+    // the REAL owner epoch and a probed-ready provider.
+    const home = seededHome(acpProviderConfig());
+    const control = await startServiceOn(home);
+    try {
+      const { status, discovery } = await observe(control);
+      assert.equal(status.runtime_mode, 'provider_enabled', JSON.stringify(status));
+      assert.equal(control.service.providerReady, true, JSON.stringify(status));
+      assert.ok(
+        Number.isInteger(discovery.engine_epoch) && discovery.engine_epoch > 0,
+        `the valid-root control must publish its real owner epoch, got ${discovery.engine_epoch}`,
+      );
+    } finally {
+      await control.close();
+    }
+
+    // Then invalidate ONLY the selected `meta.json.local_root`. The provider
+    // selection is unchanged and would still probe if it were probed, so a
+    // ready lane here would prove a probe ran outside the selected creative
+    // root. Without a canonical root there must be NO owner-bound probe, NO
+    // published owner epoch, and NO selected-provider ready claim — the exact
+    // `{ engine_epoch: null, provider_ready: true }` shape is the bug.
+    writeFileSync(
+      join(home, '.nexus42', 'creators', CREATOR, 'workspaces', SLUG, 'meta.json'),
+      JSON.stringify({}),
+    );
+
+    const rootless = await startServiceOn(home);
+    try {
+      const { status, discovery } = await observe(rootless);
+      assert.equal(status.workspace_initialized, true, JSON.stringify(status));
+      assert.equal(status.runtime_mode, 'provider_degraded', JSON.stringify(status));
+      assert.equal(rootless.service.providerReady, false, JSON.stringify(status));
+      // No owner was established, so no owner epoch is published: the service
+      // sentinel for "no engine epoch", never a fabricated or null-epoch
+      // ready owner.
+      assert.equal(discovery.engine_epoch, 0, JSON.stringify(discovery));
+    } finally {
+      await rootless.close();
+    }
+  });
+
   test('hosted readiness and owner: domain-only access still serves domain state', async () => {
     const service = await startServiceOn(seededHome(BROKEN_SELECTED_PROVIDER), {
       domainOnly: true,
