@@ -10,6 +10,9 @@
  * - `useAcceptRun` / `useDiscardRun` invalidate the runs lists + that run's
  *   detail so the status flip (Needs review → Applied / Discarded) is
  *   reflected everywhere it is cached.
+ * - `useClearRuns` invalidates the runs lists + every cached run detail so the
+ *   deleted terminal rows leave the mounted views (the World effect they
+ *   already committed stays).
  */
 import { screen, fireEvent, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
@@ -20,6 +23,7 @@ import { BrowserClient } from '@/lib/nexus';
 import {
   flattenPages,
   useAcceptRun,
+  useClearRuns,
   useComputeRun,
   useComputeRuns,
   useDiscardRun,
@@ -346,5 +350,64 @@ describe('useAcceptRun / useDiscardRun — runs-list + run-detail invalidation',
     await waitFor(() => expect(detailSpy).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(timelineSpy).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(worldKbSpy).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe('useClearRuns — cleared rows leave every cached view', () => {
+  /**
+   * The Runs table and the open Run inspector are the two views Clear history
+   * must empty. The mutation is called with a per-call `onSuccess` exactly like
+   * `run-studio.tsx` does (the toast copy), so this also pins that the
+   * hook-level invalidation ordering keeps working at that call site.
+   */
+  function renderClearHarness(status: () => unknown) {
+    function Harness() {
+      const runs = useComputeRuns({ module_id: 'basic-combat', world_id: 'w1' });
+      const run = useComputeRun('run_1');
+      const clearRuns = useClearRuns();
+      return (
+        <div>
+          <span data-testid="runs">{flattenPages(runs.data).length}</span>
+          <span data-testid="run">{run.data?.status ?? 'none'}</span>
+          <button
+            type="button"
+            onClick={() =>
+              clearRuns.mutate(
+                { worldId: 'w1' },
+                { onSuccess: () => status() },
+              )
+            }
+          >
+            Clear
+          </button>
+        </div>
+      );
+    }
+    renderInApp(<Harness />, { client: new BrowserClient() });
+  }
+
+  it('refetches the runs list and the cached run detail after a clear', async () => {
+    const listSpy = vi.fn(() =>
+      HttpResponse.json({ items: [makeRun({ status: 'applied' })], has_more: false }),
+    );
+    const detailSpy = vi.fn(() => HttpResponse.json(makeRun({ status: 'applied' })));
+    const deleteSpy = vi.fn(() => HttpResponse.json({ deleted: 1 }));
+    useHandlers(
+      http.get('/v1/daemon/compute/runs', () => listSpy()),
+      http.get('/v1/daemon/compute/runs/:runId', () => detailSpy()),
+      http.delete('/v1/daemon/compute/runs', () => deleteSpy()),
+    );
+
+    renderClearHarness(() => undefined);
+    expect(await screen.findByText('applied')).toBeInTheDocument();
+    expect(listSpy).toHaveBeenCalledTimes(1);
+    expect(detailSpy).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: /clear/i }));
+    await waitFor(() => expect(deleteSpy).toHaveBeenCalledTimes(1));
+    // Without this refetch the table keeps rendering the rows the server just
+    // deleted (observed as stale Clear-history rows against the real service).
+    await waitFor(() => expect(listSpy).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(detailSpy).toHaveBeenCalledTimes(2));
   });
 });

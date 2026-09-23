@@ -26,7 +26,7 @@
  * shared axis — survives.
  */
 import { http, HttpResponse } from 'msw';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ModuleDetail } from '@42ch/nexus-contracts';
@@ -515,5 +515,73 @@ describe('RunStudio branch pre-fill (`?branch=` — Bugbot 1)', () => {
     expect(body.world_id).toBe('w1');
     expect(body.module_id).toBe('basic-combat');
     expect(body.branch_id).toBeUndefined();
+  });
+});
+
+describe('RunStudio deep-linked Run load failure (P2-T4)', () => {
+  /**
+   * A `?run=` deep link whose detail read fails — e.g. Clear history deleted
+   * the terminal run, or the daemon is unreachable — must report the failure.
+   * Rendering nothing left the author with a blank space where the inspector
+   * belongs and no way to retry.
+   */
+  it('renders the Run error state (with retry) instead of an empty inspector', async () => {
+    const detailSpy = vi.fn(() =>
+      HttpResponse.json(
+        {
+          success: false,
+          error: { code: 'not_found', message: 'run run_gone not found' },
+        },
+        { status: 404 },
+      ),
+    );
+    useHandlers(
+      http.get('/v1/daemon/compute/runs/:runId', () => detailSpy()),
+      http.get('/v1/daemon/compute/runs', () =>
+        HttpResponse.json({ items: [], has_more: false }),
+      ),
+      http.get('/v1/daemon/narrative/worlds', () => HttpResponse.json({ worlds: [] })),
+    );
+
+    renderStudio('run_gone');
+
+    expect(await screen.findByText('Could not load this Run')).toBeInTheDocument();
+    expect(screen.queryByTestId('run-inspector')).not.toBeInTheDocument();
+
+    // Retry is the author's only path back — it must re-issue the read.
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(detailSpy).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe('RunStudio failed-Run review (P2-T4)', () => {
+  /**
+   * A Run that executed and failed is a first-class review state (product
+   * §2/S2-3): the inspector shows the failure and its code, and offers no
+   * Accept/Discard — there are no proposals to apply.
+   */
+  it('renders the failure copy + code and withholds Accept/Discard', async () => {
+    useHandlers(
+      http.get('/v1/daemon/compute/runs/:runId', () =>
+        HttpResponse.json({
+          ...runDetail('run_failed', 'ignored'),
+          status: 'failed',
+          proposals: undefined,
+          error: { code: 'compute_module_error', message: 'module trapped: bad operand' },
+        }),
+      ),
+      http.get('/v1/daemon/compute/runs', () =>
+        HttpResponse.json({ items: [], has_more: false }),
+      ),
+      http.get('/v1/daemon/narrative/worlds', () => HttpResponse.json({ worlds: [] })),
+    );
+
+    renderStudio('run_failed');
+
+    expect(await screen.findByTestId('run-inspector-failed')).toBeInTheDocument();
+    expect(screen.getByText('Run failed')).toBeInTheDocument();
+    expect(screen.getByText(/compute_module_error/)).toBeInTheDocument();
+    expect(screen.queryByTestId('run-inspector-accept')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('run-inspector-discard')).not.toBeInTheDocument();
   });
 });
