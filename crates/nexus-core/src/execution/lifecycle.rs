@@ -463,14 +463,23 @@ impl ExecutionHandle {
     ///
     /// Ordering: fence new drive admission (C2), stop and JOIN the owned
     /// scheduler task, fire every owned cancellation token and join the drive
-    /// loops, THEN mark the handle settled (C1) so the per-DB registry admits a
-    /// replacement only after every owned drive has joined. Repeated calls
-    /// report the already-closed state.
+    /// loops, RELEASE the workspace commit/recovery authority this owner
+    /// composed, THEN mark the handle settled (C1) so the per-DB registry
+    /// admits a replacement only after every owned drive has joined. Repeated
+    /// calls report the already-closed state.
     ///
     /// The scheduler is joined BEFORE the drive drain on purpose: the C2 fence
     /// already refuses an admission once `begin_shutdown` ran, and joining
     /// first guarantees no tick can still be inside `admit_schedule` while the
     /// drives map is being drained.
+    ///
+    /// Releasing the workspace authority HERE (rather than leaving it to the
+    /// last `Arc` drop) is what makes a confirmed close honest: the settled
+    /// owner's engine, registry and commit authority are still referenced by
+    /// this handle, so a drop-based release would keep the OS lease—and with
+    /// it the whole home—fenced after the owner reported `closed`. Everything
+    /// this owner could still write through is fenced at this point
+    /// (`ensure_admitting`), so the lease fences nothing live.
     ///
     /// # Errors
     /// Currently infallible: the report always describes a settled close.
@@ -492,6 +501,9 @@ impl ExecutionHandle {
         self.coordinator.begin_shutdown();
         self.stop_scheduler().await;
         self.coordinator.abort_all_drives().await;
+        if let Some(authority) = &self.workspace_commit {
+            authority.release_authority();
+        }
         self.settled.store(true, Ordering::SeqCst);
         Ok(closed_report())
     }

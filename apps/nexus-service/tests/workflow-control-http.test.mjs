@@ -3,12 +3,14 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { before, describe, test } from 'node:test';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..', '..', '..');
 const serviceRoot = join(__dirname, '..');
+const require = createRequire(import.meta.url);
 const acpFixture = resolve(root, 'crates/nexus-agent-host/tests/fixtures/mock_acp_workflow.py');
 
 const CREATOR = 'ctr_testcreator';
@@ -256,6 +258,119 @@ describe('workflow-control-http (v1.195 P0-T5 native boot and truthful readiness
       );
     } finally {
       await core.close();
+    }
+  });
+
+  test('hosted readiness and owner: a confirmed close releases the workspace authority', async () => {
+    const home = seededHome(BROKEN_SELECTED_PROVIDER);
+    const { openCore } = await import('@42ch/nexus-native');
+    const coreA = await openCore(
+      { user_home: home, access: 'engine_owner', allow_uninitialized: false },
+      undefined,
+    );
+    const ownerA = await coreA.startExecutionOwner();
+    assert.ok(
+      Number.isInteger(ownerA.engine_epoch) && ownerA.engine_epoch > 0,
+      `owner A must be a real owner, got ${JSON.stringify(ownerA)}`,
+    );
+
+    const reportA = await coreA.close();
+    assert.equal(reportA.state, 'closed', JSON.stringify(reportA));
+    assert.equal(reportA.cleanup_confirmed, true, JSON.stringify(reportA));
+
+    // `coreA`/`ownerA` stay referenced for the rest of this case (and the
+    // epoch below is read from `ownerA`): the release must not depend on the
+    // closed owner's references being dropped.
+
+    // The next owner over the SAME home, in the SAME process: the confirmed
+    // close released the workspace authority, so this composes and admits a
+    // NEW engine generation instead of refusing `busy`.
+    const coreB = await openCore(
+      { user_home: home, access: 'engine_owner', allow_uninitialized: false },
+      undefined,
+    );
+    try {
+      const ownerB = await coreB.startExecutionOwner();
+      assert.ok(
+        Number.isInteger(ownerB.engine_epoch) && ownerB.engine_epoch > ownerA.engine_epoch,
+        `the next owner is a new admission (${ownerA.engine_epoch} -> ${ownerB.engine_epoch})`,
+      );
+      // A live duplicate is still refused.
+      await assert.rejects(
+        () => coreB.startExecutionOwner(),
+        (error) => {
+          assert.ok(
+            /already established|busy/i.test(String(error?.message)),
+            `a duplicate owner boot must still be refused, got: ${error?.message}`,
+          );
+          return true;
+        },
+      );
+    } finally {
+      await coreB.close();
+    }
+  });
+
+  test('hosted readiness and owner: an unconfirmed cleanup cannot publish a new owner', async () => {
+    const home = seededHome(BROKEN_SELECTED_PROVIDER);
+    const { openCore } = await import('@42ch/nexus-native');
+    // The forced-unconfirmed seam is a test-only native export, reached the
+    // same way the other focused suites reach it.
+    const { loadNodePath } = await import(
+      join(root, 'packages', 'nexus-native', 'dist', 'loader.js')
+    );
+    const binding = require(loadNodePath());
+    const coreA = await openCore(
+      { user_home: home, access: 'engine_owner', allow_uninitialized: false },
+      undefined,
+    );
+    const ownerA = await coreA.startExecutionOwner();
+
+    binding.forceUnconfirmedCleanup(true);
+    try {
+      // An unconfirmed cleanup reports what it is: never a confirmed close.
+      const reportA = await coreA.close();
+      assert.equal(reportA.state, 'interrupted', JSON.stringify(reportA));
+      assert.equal(reportA.cleanup_confirmed, false, JSON.stringify(reportA));
+
+      // …and it keeps the home fenced: the SAME process cannot publish a new
+      // owner over it while the retained cleanup is unsettled.
+      await assert.rejects(
+        () =>
+          openCore(
+            { user_home: home, access: 'engine_owner', allow_uninitialized: false },
+            undefined,
+          ),
+        (error) => {
+          // The native open rejection for a retained cleanup is a plain reason
+          // ("interrupted: …"), which the binding surfaces as its generic
+          // `open_failed` envelope; what matters is that no owner is published.
+          assert.ok(
+            /open failed|interrupted|busy/i.test(String(error?.message)),
+            `an unconfirmed cleanup must not publish a new owner, got: ${error?.message}`,
+          );
+          return true;
+        },
+      );
+    } finally {
+      binding.forceUnconfirmedCleanup(false);
+    }
+
+    // With the forced failure gone, the retained owner settles on the retried
+    // close and only THEN does the home admit a real new owner — the
+    // unconfirmed attempt never published one.
+    const coreB = await openCore(
+      { user_home: home, access: 'engine_owner', allow_uninitialized: false },
+      undefined,
+    );
+    try {
+      const ownerB = await coreB.startExecutionOwner();
+      assert.ok(
+        Number.isInteger(ownerB.engine_epoch) && ownerB.engine_epoch > ownerA.engine_epoch,
+        `the settled home admits a new generation (${ownerA.engine_epoch} -> ${ownerB.engine_epoch})`,
+      );
+    } finally {
+      await coreB.close();
     }
   });
 

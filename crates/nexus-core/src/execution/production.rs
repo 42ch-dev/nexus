@@ -639,6 +639,137 @@ mod tests {
         }
     }
 
+    /// Deterministic no-model provider port: the owner/close contract is what
+    /// these cases exercise, never a provider effect.
+    struct RejectingProviderPort;
+
+    #[async_trait::async_trait]
+    impl ProviderPort for RejectingProviderPort {
+        async fn call(
+            &self,
+            _request: nexus_contracts::ProviderCall,
+        ) -> nexus_provider_ports::ProviderResult<nexus_contracts::ProviderReply> {
+            Err(nexus_contracts::CoreError {
+                code: nexus_contracts::CoreErrorCode::Internal,
+                message: "no live model in this test".to_string(),
+                details: serde_json::Map::default(),
+                http_status: Some(500),
+            })
+        }
+
+        async fn next(
+            &self,
+            operation_id: String,
+            _max_events: u32,
+            _max_bytes: u32,
+        ) -> nexus_provider_ports::ProviderResult<nexus_contracts::ProviderEventBatch> {
+            Ok(nexus_contracts::ProviderEventBatch {
+                operation_id,
+                events: vec![],
+                has_more: false,
+                gap: None,
+            })
+        }
+    }
+
+    /// A CONFIRMED close releases the workspace commit/recovery authority the
+    /// owner composed, so the next owner over the same home can be established
+    /// in the SAME process — with a real (advanced) engine epoch, i.e. as a new
+    /// admission rather than the settled generation's — even while the closed
+    /// handle (and the manager it still references) is retained.
+    ///
+    /// Before the fix this is `AuthorityBusy`: the settled owner's engine,
+    /// capability registry and commit authority keep the
+    /// `state.workspace_authority.lock` lease open, so the home stays fenced
+    /// after a close that reported `cleanup_confirmed`.
+    ///
+    /// Ordering matters and is asserted: the release happens only AFTER the
+    /// owned scheduler has been joined and every drive has drained, and a LIVE
+    /// owner still fences the home.
+    #[tokio::test]
+    async fn confirmed_close_releases_workspace_authority_to_the_next_same_process_owner() {
+        let fx = fixture().await;
+
+        // ── Owner A, in the production shape: the hosted scheduler clock is
+        // installed, so the retained supervisor/starter/registry chain exists. ──
+        let core_a = open_core(&fx).await;
+        let mut deps = core_a.hosted_workspace_deps().await.expect("bundle a");
+        let manager = Arc::clone(
+            deps.workspace_commit
+                .as_ref()
+                .expect("commit authority")
+                .manager(),
+        );
+        deps.hosted_scheduler = Some(HostedSchedulerConfig::from_env());
+        let owner_a = core_a
+            .start_execution(Arc::new(RejectingProviderPort), deps)
+            .await
+            .expect("owner a starts");
+        let epoch_a = owner_a.engine_epoch();
+        assert!(
+            !owner_a.owned_tasks_finished(),
+            "a live hosted owner still owns its scheduler clock task"
+        );
+
+        // ── A live duplicate is refused: the composed authority is held. ──
+        assert!(
+            matches!(
+                core_a.hosted_workspace_deps().await.map(|_| ()),
+                Err(CoreError::Busy)
+            ),
+            "a live owner still fences the home"
+        );
+
+        let report = core_a.close().await.expect("confirmed close");
+        assert_eq!(
+            report.state,
+            nexus_contracts::CoreCloseReportState::Closed
+        );
+        assert!(report.cleanup_confirmed);
+        assert!(
+            owner_a.is_settled(),
+            "the confirmed close joins the owned scheduler task and drains the drives"
+        );
+        assert!(
+            owner_a.owned_tasks_finished(),
+            "the confirmed close joins the owned scheduler clock task"
+        );
+
+        // `core_a`, `owner_a` and the manager clone are all still referenced
+        // here on purpose: releasing the authority must not depend on any of
+        // them being dropped.
+        assert!(Arc::strong_count(&manager) > 1);
+
+        // ── Owner B over the SAME home, in the SAME process. ──
+        let core_b = open_core(&fx).await;
+        let deps_b = core_b
+            .hosted_workspace_deps()
+            .await
+            .expect("the confirmed close released the home");
+        let owner_b = core_b
+            .start_execution(Arc::new(RejectingProviderPort), deps_b)
+            .await
+            .expect("owner b starts");
+        assert!(
+            owner_b.engine_epoch() > epoch_a,
+            "the next owner is a NEW admission over the home: {} -> {}",
+            epoch_a,
+            owner_b.engine_epoch()
+        );
+
+        // ── And the new owner fences the home again. ──
+        assert!(
+            matches!(
+                core_b.hosted_workspace_deps().await.map(|_| ()),
+                Err(CoreError::Busy)
+            ),
+            "the next owner holds the authority it composed"
+        );
+
+        owner_b.close().await.expect("close b");
+        core_b.close().await.expect("close core b");
+    }
+
     /// A held workspace authority and an unusable lease path must not be
     /// reported alike: the first is a retryable writer conflict, the second is
     /// an environment fault.

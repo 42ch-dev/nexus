@@ -3,9 +3,7 @@
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
-#[cfg(feature = "provider-host")]
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use nexus_contracts::{
     CoreChangesRequest, CoreChangesResponse, CoreCloseReport, WorldKbCandidatesResponse,
@@ -73,7 +71,21 @@ pub struct CoreInner {
     /// registry is keyed by it, so the single-owner fence spans every
     /// `CoreService` opened over the same file in this process.
     pub(crate) db_path: PathBuf,
-    _guarded: Option<GuardedPool>,
+    /// The admitted pool handle this open holds.
+    ///
+    /// Behind a mutex so a CONFIRMED [`CoreService::close`] can give it up:
+    /// a closed service value that is still referenced must not keep the
+    /// pooled connection — or the OS admission lock its `WorkspaceWriterGuard`
+    /// carries — alive after the close reported the service released.
+    guarded: Mutex<Option<GuardedPool>>,
+    /// Whether THIS open CREATED the process's engine admission over
+    /// `db_path`, rather than joining the one a live in-process engine owner
+    /// already holds.
+    ///
+    /// Only the creator releases the admission on a confirmed close: a
+    /// co-hosted joiner (the daemon's transport pool and its execution core
+    /// over one DB) must never release an admission its creator still owns.
+    owns_engine_admission: bool,
     /// Active creator this service was opened against (open-scoped).
     pub(crate) nexus_home: PathBuf,
     creator_id: String,
@@ -176,6 +188,7 @@ impl CoreService {
             return Err(CoreError::Uninitialized);
         }
 
+        let mut owns_engine_admission = false;
         let (pool, guarded) = match options.access {
             CoreAccess::ReadOnly => {
                 let pool = open_pool_read_only(&db_path).await.map_err(local_db_err)?;
@@ -190,16 +203,18 @@ impl CoreService {
             }
             CoreAccess::EngineOwner => {
                 let options = GuardedPoolOptions::default();
-                let guarded =
-                    match nexus_local_db::writer_protocol::join_live_engine_pool(&db_path, options)
+                let joined = nexus_local_db::writer_protocol::join_live_engine_pool(
+                    &db_path, options,
+                )
+                .await
+                .map_err(local_db_err)?;
+                owns_engine_admission = joined.is_none();
+                let guarded = match joined {
+                    Some(guarded) => guarded,
+                    None => init_engine_pool(&db_path, &creator_id, options)
                         .await
-                        .map_err(local_db_err)?
-                    {
-                        Some(guarded) => guarded,
-                        None => init_engine_pool(&db_path, &creator_id, options)
-                            .await
-                            .map_err(local_db_err)?,
-                    };
+                        .map_err(local_db_err)?,
+                };
                 let pool = guarded.clone_pool();
                 (pool, Some(guarded))
             }
@@ -209,7 +224,8 @@ impl CoreService {
             inner: Arc::new(CoreInner {
                 pool,
                 db_path: db_path.clone(),
-                _guarded: guarded,
+                guarded: Mutex::new(guarded),
+                owns_engine_admission,
                 nexus_home,
                 creator_id,
                 workspace_slug,
@@ -508,8 +524,30 @@ impl CoreService {
             handle.shutdown().await;
         }
         self.inner.pool.close().await;
-        if self.inner.access == CoreAccess::DirectWriter {
+        // A confirmed close ends the admission THIS open took over the home.
+        // Both halves are needed for the OS lock to actually go away:
+        //
+        // 1. the retained guard is what a later open would otherwise JOIN — and
+        //    joining a settled generation would republish its epoch while
+        //    claiming a fresh owner, so the next owner must take a new
+        //    admission (a new epoch) instead;
+        // 2. this open's own admitted-pool handle is given up, so a closed
+        //    service value that is still referenced cannot keep the guard
+        //    behind `state.db.engine.lock` alive after the close reported the
+        //    service released.
+        //
+        // `owns_engine_admission` keeps the two accesses apart: an
+        // `EngineOwner` that merely JOINED a live in-process admission (the
+        // daemon's co-host shape) releases nothing, because the creator still
+        // owns it. The `DirectWriter` arm is the pre-existing cooperative
+        // rule (`init_guarded_pool` always creates its own admission).
+        if self.inner.access == CoreAccess::DirectWriter || self.inner.owns_engine_admission {
             release_retained_writer_guards(&self.inner.db_path);
+            self.inner
+                .guarded
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take();
         }
         // `take` returned the handle, so ownership is settled; release the
         // per-DB fence so a later open of the same DB can claim it.

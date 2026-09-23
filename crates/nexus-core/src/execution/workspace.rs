@@ -74,6 +74,22 @@ impl WorkspaceCommitAuthority {
         &self.active_root
     }
 
+    /// Release the workspace commit/recovery authority this composition holds.
+    ///
+    /// The owning execution handle calls this once its close is CONFIRMED
+    /// (admission fenced, owned scheduler joined, drives drained): the
+    /// authority is no longer load-bearing, so the OS lease must not keep
+    /// fencing the next owner of the same home while this composition's
+    /// settled engine and ports are still referenced.
+    ///
+    /// `false` means this authority holds no lease to release (a
+    /// non-recoverable manager) or it was already released.
+    pub fn release_authority(&self) -> bool {
+        self.manager
+            .recoverable_config()
+            .is_some_and(|config| config.authority_lease.release())
+    }
+
     /// Commit through this authority's manager and root.
     ///
     /// # Errors
