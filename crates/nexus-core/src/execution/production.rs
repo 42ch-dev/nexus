@@ -163,28 +163,39 @@ impl CoreService {
         // registry's shipped modules ONCE here, so the run path never compiles
         // per request.
         //
+        // The three deps are installed as ONE bundle, and only when the engine
+        // was constructed AND every shipped module warmed. `warm_embedded`
+        // returns an error on the FIRST module it cannot compile while leaving
+        // the valid ones cached, so installing a partially warmed bundle would
+        // let the run path answer `not_found` for a module the registry still
+        // LISTS — a refusal that blames the caller's module id for an
+        // environment fault. With no bundle installed, module DISCOVERY (a
+        // compiled-in registry) still answers truthfully and every invocation
+        // refuses with the typed missing-runtime error instead.
+        //
         // A build without the `compute` feature compiles none of this: the
-        // domain/default and Connect-only cohorts keep the WASM edge off. An
-        // environment where the engine itself cannot be constructed leaves the
-        // runtime uninstalled rather than failing this owner's boot: module
-        // DISCOVERY (a compiled-in registry) still answers truthfully, and
-        // every invocation path refuses with the typed missing-runtime
-        // refusal — never a fabricated success.
+        // domain/default and Connect-only cohorts keep the WASM edge off.
         #[cfg(feature = "compute")]
         match nexus_wasm_host::WasmEngine::new() {
             Ok(engine) => {
                 let engine = Arc::new(engine);
                 let cache = Arc::new(nexus_wasm_host::ModuleCache::new());
-                if let Err(error) = cache.warm_embedded(&engine) {
-                    tracing::error!(
-                        %error,
-                        "hosted execution: embedded compute modules did not warm; \
-                         an unwarmed module is a not-found refusal, never a fake run"
-                    );
+                match cache.warm_embedded(&engine) {
+                    Ok(_warmed) => {
+                        deps.compute_engine = Some(engine);
+                        deps.compute_cache = Some(cache);
+                        deps.compute_serializer =
+                            Some(Arc::new(tokio::sync::Semaphore::new(1)));
+                    }
+                    Err(error) => {
+                        tracing::error!(
+                            %error,
+                            "hosted execution: embedded compute modules did not warm; \
+                             the compute runtime stays uninstalled and every invocation \
+                             refuses with the missing-runtime error"
+                        );
+                    }
                 }
-                deps.compute_engine = Some(engine);
-                deps.compute_cache = Some(cache);
-                deps.compute_serializer = Some(Arc::new(tokio::sync::Semaphore::new(1)));
             }
             Err(error) => {
                 tracing::error!(
