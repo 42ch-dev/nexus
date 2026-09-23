@@ -1979,10 +1979,16 @@ impl WorkflowRunCoordinator {
         // every prompt consumer that resolves it) and releases its live-ring
         // reservation, so neither a live uncancelled token nor reserved
         // capacity can outlive the refusal.
-        let recheck = store
-            .load_run(session_id)
-            .await
-            .map_err(|e| RunControlError::Drive(e.to_string()))?;
+        let recheck = match store.load_run(session_id).await {
+            Ok(record) => record,
+            Err(error) => {
+                cancel.cancel();
+                if let Some(port) = &self.run_events {
+                    port.remove_live(&session_id.0).await;
+                }
+                return Err(RunControlError::Drive(error.to_string()));
+            }
+        };
         if Self::drive_gate_refuses(recheck.as_ref()) {
             cancel.cancel();
             if let Some(port) = &self.run_events {
