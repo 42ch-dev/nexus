@@ -1856,6 +1856,33 @@ impl WorkflowRunCoordinator {
         }
     }
 
+    /// The durable-state gate for a fresh drive owner (I-2): only an
+    /// explicitly runnable v1 boundary authorizes a drive loop.
+    ///
+    /// Terminal, interrupted (which is also the class of a committed cancel
+    /// intent, an in-flight prompt and an unfinished step marker), durable
+    /// human wait and unreadable metadata all refuse. A v0 row keeps its
+    /// legacy contract and is not gated here.
+    fn drive_gate_refuses(record: Option<&RunRecord>) -> bool {
+        let Some(record) = record else {
+            return false;
+        };
+        if record.execution_version < 1 {
+            return false;
+        }
+        matches!(
+            nexus_orchestration::resume_rules::classify_recovery(
+                &record.status,
+                record.state.as_ref(),
+                false,
+            ),
+            nexus_orchestration::resume_rules::RecoveryClass::Terminal
+                | nexus_orchestration::resume_rules::RecoveryClass::Interrupted
+                | nexus_orchestration::resume_rules::RecoveryClass::HumanWait
+                | nexus_orchestration::resume_rules::RecoveryClass::Unreadable
+        )
+    }
+
     /// Ensure exactly one drive loop is running for `session_id` (A3).
     ///
     /// Single-flight: when a drive is already registered for the session,
@@ -1907,23 +1934,8 @@ impl WorkflowRunCoordinator {
             .load_run(session_id)
             .await
             .map_err(|e| RunControlError::Drive(e.to_string()))?;
-        if let Some(record) = record {
-            if record.execution_version >= 1 {
-                let class = nexus_orchestration::resume_rules::classify_recovery(
-                    &record.status,
-                    record.state.as_ref(),
-                    false,
-                );
-                match class {
-                    nexus_orchestration::resume_rules::RecoveryClass::Terminal
-                    | nexus_orchestration::resume_rules::RecoveryClass::Interrupted
-                    | nexus_orchestration::resume_rules::RecoveryClass::HumanWait
-                    | nexus_orchestration::resume_rules::RecoveryClass::Unreadable => {
-                        return Ok(DriveDisposition::NotDriving);
-                    }
-                    _ => {}
-                }
-            }
+        if Self::drive_gate_refuses(record.as_ref()) {
+            return Ok(DriveDisposition::NotDriving);
         }
         let mut drives = self.drives.lock().await;
         // C2: re-check the fence INSIDE the critical section that registers
@@ -1955,6 +1967,29 @@ impl WorkflowRunCoordinator {
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(session_id.0.clone(), cancel.clone());
+
+        // Publication re-verification (v1.195 P0-T6 Critical). The durable
+        // gate above races a concurrent cancel: the cancel commits its intent
+        // fence and only THEN looks up which run tokens to fire, so a token
+        // published inside that window is never fired. Re-reading the durable
+        // record AFTER the token exists closes the race in both orders —
+        // either the cancel's lookup happens after this publication and fires
+        // this exact token, or this read happens after the fence commit and
+        // sees it. A withdrawn owner fires its own token (fail-closed for
+        // every prompt consumer that resolves it) and releases its live-ring
+        // reservation, so neither a live uncancelled token nor reserved
+        // capacity can outlive the refusal.
+        let recheck = store
+            .load_run(session_id)
+            .await
+            .map_err(|e| RunControlError::Drive(e.to_string()))?;
+        if Self::drive_gate_refuses(recheck.as_ref()) {
+            cancel.cancel();
+            if let Some(port) = &self.run_events {
+                port.remove_live(&session_id.0).await;
+            }
+            return Ok(DriveDisposition::NotDriving);
+        }
 
         let engine = self.engine.clone();
         let storage = self.storage.clone();
@@ -9593,6 +9628,462 @@ mod tests {
             "second public cancel must be idempotent, not generic conflict: {:?}",
             second_cancel.err()
         );
+    }
+
+    /// Deterministic cancel-vs-resume-redrive race (v1.195 P0-T6 Critical).
+    ///
+    /// The re-drive admission is held at the exact vulnerable moment — after
+    /// it loaded the durable state and before it registers a run token
+    /// ("pause before register after state load") — while the cancel commits
+    /// its durable intent fence and is held inside the post-fence descendant
+    /// walk, i.e. before its run-token lookup. Neither leg sleeps on a hope:
+    /// each gate is an observable flag, so the interleaving is forced.
+    ///
+    /// A committed cancel intent therefore exists BEFORE the fresh owner is
+    /// published and BEFORE the cancel decides which tokens to fire. The
+    /// fresh admission must not overtake it: no live uncancelled token, no
+    /// step, no second run, and the cancel remains the durable terminal
+    /// winner.
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)] // Keep the deterministic interleaving and durable observations together.
+    async fn resume_redrive_never_overtakes_committed_cancel_intent() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+        struct CountingTask {
+            dispatches: Arc<AtomicUsize>,
+        }
+        #[async_trait]
+        impl graph_flow::Task for CountingTask {
+            fn id(&self) -> &'static str {
+                "count"
+            }
+            async fn run(
+                &self,
+                _context: graph_flow::Context,
+            ) -> Result<graph_flow::TaskResult, graph_flow::GraphError> {
+                self.dispatches.fetch_add(1, Ordering::SeqCst);
+                Ok(graph_flow::TaskResult::new(
+                    Some("done".into()),
+                    graph_flow::NextAction::Continue,
+                ))
+            }
+        }
+
+        /// Admission gate: the first live-ring reservation of the resume
+        /// re-drive blocks there — after the durable-state load, before the
+        /// run token is published.
+        struct GatedAdmissionPort {
+            at_gate: Arc<AtomicBool>,
+            release: Arc<AtomicBool>,
+            released: Arc<AtomicUsize>,
+        }
+        #[async_trait]
+        impl RunEventPort for GatedAdmissionPort {
+            async fn try_register_live(&self, _run_id: &str) -> bool {
+                self.at_gate.store(true, Ordering::SeqCst);
+                while !self.release.load(Ordering::SeqCst) {
+                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                }
+                true
+            }
+            async fn remove_live(&self, _run_id: &str) {
+                self.released.fetch_add(1, Ordering::SeqCst);
+            }
+            fn publish_run_state(&self, _run_id: &str, _record: &RunRecord) {}
+            fn mark_terminal(&self, _run_id: &str) {}
+            fn read_page(
+                &self,
+                run_id: &str,
+                _after_sequence: Option<u64>,
+                _limit: usize,
+            ) -> Result<crate::execution::run_events::RunPage, crate::execution::run_events::PageError>
+            {
+                Err(crate::execution::run_events::PageError::UnknownRun(
+                    run_id.to_string(),
+                ))
+            }
+        }
+
+        /// Cancel gate: the first persisted-descendant read of the cancel
+        /// path blocks there — after the intent fence is durable, before the
+        /// run-token lookup that decides what to fire.
+        struct CancelWalkBarrierStore {
+            inner: Arc<dyn WorkflowStateStore>,
+            armed: AtomicBool,
+            at_gate: Arc<AtomicBool>,
+            release: Arc<AtomicBool>,
+        }
+        #[async_trait]
+        impl WorkflowStateStore for CancelWalkBarrierStore {
+            async fn load_run(
+                &self,
+                session_id: &SessionId,
+            ) -> Result<Option<nexus_orchestration::run_state::RunRecord>, EngineError>
+            {
+                self.inner.load_run(session_id).await
+            }
+            async fn start_run(
+                &self,
+                session_id: &SessionId,
+                descriptor: &nexus_orchestration::run_state::RunDescriptorV1,
+                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+                next_state: &nexus_orchestration::run_state::RunStateV1,
+            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                self.inner
+                    .start_run(session_id, descriptor, checkpoint, next_state)
+                    .await
+            }
+            #[allow(clippy::too_many_arguments)]
+            async fn admit_schedule_run(
+                &self,
+                schedule_id: &str,
+                session_id: &SessionId,
+                descriptor: &nexus_orchestration::run_state::RunDescriptorV1,
+                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+                next_state: &nexus_orchestration::run_state::RunStateV1,
+                core_context_version: u32,
+                expected_core_context_version: u32,
+                admission_gate: Option<&nexus_orchestration::run_state::ScheduleAdmissionGate>,
+            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                self.inner
+                    .admit_schedule_run(
+                        schedule_id,
+                        session_id,
+                        descriptor,
+                        checkpoint,
+                        next_state,
+                        core_context_version,
+                        expected_core_context_version,
+                        admission_gate,
+                    )
+                    .await
+            }
+            async fn commit_transition(
+                &self,
+                session_id: &SessionId,
+                expected_revision: u64,
+                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+                next_status: SessionStatus,
+                next_state: &nexus_orchestration::run_state::RunStateV1,
+            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                self.inner
+                    .commit_transition(
+                        session_id,
+                        expected_revision,
+                        checkpoint,
+                        next_status,
+                        next_state,
+                    )
+                    .await
+            }
+            async fn commit_transition_with_graph_fence(
+                &self,
+                session_id: &SessionId,
+                expected_revision: u64,
+                expected_graph_version: Option<u64>,
+                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+                next_status: SessionStatus,
+                next_state: &nexus_orchestration::run_state::RunStateV1,
+            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                self.inner
+                    .commit_transition_with_graph_fence(
+                        session_id,
+                        expected_revision,
+                        expected_graph_version,
+                        checkpoint,
+                        next_status,
+                        next_state,
+                    )
+                    .await
+            }
+            async fn settle_run(
+                &self,
+                session_id: &SessionId,
+                expected_revision: u64,
+                expected_graph_version: Option<u64>,
+                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+                next_state: &nexus_orchestration::run_state::RunStateV1,
+                terminal_target: nexus_orchestration::run_state::TerminalSettlementTarget,
+            ) -> Result<nexus_orchestration::run_state::SettlementResult, EngineError> {
+                self.inner
+                    .settle_run(
+                        session_id,
+                        expected_revision,
+                        expected_graph_version,
+                        checkpoint,
+                        next_state,
+                        terminal_target,
+                    )
+                    .await
+            }
+            async fn restore_pre_step(
+                &self,
+                session_id: &SessionId,
+                expected_revision: u64,
+                pre_step: &graph_flow::Session,
+            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                self.inner
+                    .restore_pre_step(session_id, expected_revision, pre_step)
+                    .await
+            }
+            async fn mark_step_in_flight(
+                &self,
+                session_id: &SessionId,
+                expected_revision: u64,
+                expected_graph_version: Option<u64>,
+                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+                step_state: &nexus_orchestration::run_state::RunStateV1,
+            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                self.inner
+                    .mark_step_in_flight(
+                        session_id,
+                        expected_revision,
+                        expected_graph_version,
+                        checkpoint,
+                        step_state,
+                    )
+                    .await
+            }
+            async fn persist_prompt_attempt(
+                &self,
+                session_id: &SessionId,
+                expected_revision: u64,
+                expected_step: Option<&str>,
+                expected_attempt_id: Option<&str>,
+                attempt: &nexus_orchestration::run_state::PromptAttempt,
+            ) -> Result<(), EngineError> {
+                self.inner
+                    .persist_prompt_attempt(
+                        session_id,
+                        expected_revision,
+                        expected_step,
+                        expected_attempt_id,
+                        attempt,
+                    )
+                    .await
+            }
+            async fn clear_prompt_attempt(
+                &self,
+                session_id: &SessionId,
+                expected_revision: u64,
+                expected_step: Option<&str>,
+                attempt_id: &str,
+            ) -> Result<(), EngineError> {
+                self.inner
+                    .clear_prompt_attempt(session_id, expected_revision, expected_step, attempt_id)
+                    .await
+            }
+            async fn load_children(
+                &self,
+                parent_session_id: &SessionId,
+            ) -> Result<Vec<nexus_orchestration::run_state::RunRecord>, EngineError> {
+                if self.armed.swap(false, Ordering::SeqCst) {
+                    self.at_gate.store(true, Ordering::SeqCst);
+                    while !self.release.load(Ordering::SeqCst) {
+                        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                    }
+                }
+                self.inner.load_children(parent_session_id).await
+            }
+        }
+
+        let (_tmp, _nexus_home, db_path) = fixture().await;
+        let pool = Arc::new(
+            nexus_local_db::init_engine_pool(&db_path)
+                .await
+                .expect("pool")
+                .clone_pool(),
+        );
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+        let real_store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+
+        let admission_at_gate = Arc::new(AtomicBool::new(false));
+        let admission_release = Arc::new(AtomicBool::new(false));
+        let released = Arc::new(AtomicUsize::new(0));
+        let cancel_at_gate = Arc::new(AtomicBool::new(false));
+        let cancel_release = Arc::new(AtomicBool::new(false));
+        let walk_store: Arc<dyn WorkflowStateStore> = Arc::new(CancelWalkBarrierStore {
+            inner: real_store.clone(),
+            armed: AtomicBool::new(true),
+            at_gate: cancel_at_gate.clone(),
+            release: cancel_release.clone(),
+        });
+
+        let dispatches = Arc::new(AtomicUsize::new(0));
+        let graph = Arc::new(
+            graph_flow::GraphBuilder::new("resume-cancel-race")
+                .add_task(Arc::new(CountingTask {
+                    dispatches: dispatches.clone(),
+                }))
+                .build()
+                .expect("graph"),
+        );
+        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        ));
+        let engine = Arc::new(
+            nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+                storage.clone(),
+                walk_store.clone(),
+                caps,
+            ),
+        );
+        let session_cancels = Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+        let coordinator = WorkflowRunCoordinator::new(
+            engine.clone(),
+            storage.clone(),
+            pool.clone(),
+            session_cancels.clone(),
+        )
+        .with_workflow_store(walk_store.clone())
+        .with_run_events(Arc::new(GatedAdmissionPort {
+            at_gate: admission_at_gate.clone(),
+            release: admission_release.clone(),
+            released: released.clone(),
+        }));
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start session");
+        let revision_before = real_store
+            .load_run(&session_id)
+            .await
+            .expect("load")
+            .expect("row")
+            .state_revision;
+
+        // (1) Resume re-drive: passes the durable-state gate, then stops at
+        //     the live-ring reservation — after the state load, before the
+        //     run token exists.
+        let admission = tokio::spawn({
+            let coordinator = coordinator.clone();
+            let session_id = session_id.clone();
+            async move { coordinator.ensure_driving(&session_id).await }
+        });
+        wait_until("resume admission reaches the token-publication gate", || {
+            let at_gate = admission_at_gate.clone();
+            async move { at_gate.load(Ordering::SeqCst) }
+        })
+        .await;
+
+        // (2) Cancel: commits the durable intent fence, then is held inside
+        //     the post-fence descendant walk — before its token lookup.
+        let cancel = tokio::spawn({
+            let coordinator = coordinator.clone();
+            let session_id = session_id.clone();
+            async move { coordinator.signal_run(&session_id, RunSignal::Cancel).await }
+        });
+        wait_until("cancel commits its fence and reaches the walk gate", || {
+            let at_gate = cancel_at_gate.clone();
+            async move { at_gate.load(Ordering::SeqCst) }
+        })
+        .await;
+        let fenced = real_store
+            .load_run(&session_id)
+            .await
+            .expect("load")
+            .expect("row");
+        assert!(
+            fenced
+                .state
+                .as_ref()
+                .is_some_and(|s| s.cancel_requested),
+            "the cancel intent must be durable before the admission publishes a token"
+        );
+        assert!(
+            !fenced.status.is_terminal(),
+            "the intent fence keeps the status non-terminal"
+        );
+        assert!(
+            session_cancels
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .get(&session_id.0)
+                .is_none_or(tokio_util::sync::CancellationToken::is_cancelled),
+            "precondition: no live drive token exists before the admission publishes one"
+        );
+
+        // (3) Release the admission with the fence already durable.
+        admission_release.store(true, Ordering::SeqCst);
+        let disposition = admission.await.expect("admission task");
+        assert!(
+            session_cancels
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .get(&session_id.0)
+                .is_none_or(tokio_util::sync::CancellationToken::is_cancelled),
+            "a committed cancel intent must leave no live uncancelled drive token"
+        );
+        assert_eq!(
+            disposition.expect("admission disposition"),
+            DriveDisposition::NotDriving,
+            "a committed cancel intent denies a fresh driver"
+        );
+
+        // (4) Let the cancel finish: the durable winner and the effect
+        //     accounting must be unchanged by the raced admission.
+        cancel_release.store(true, Ordering::SeqCst);
+        let cancel_result = cancel.await.expect("cancel task");
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while coordinator
+                .drives
+                .lock()
+                .await
+                .get(&session_id.0)
+                .is_some_and(|owner| !owner.join.is_finished())
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("no drive owner is left live");
+
+        let final_record = real_store
+            .load_run(&session_id)
+            .await
+            .expect("load")
+            .expect("row");
+        let observed_dispatches = dispatches.load(Ordering::SeqCst);
+        assert_eq!(
+            observed_dispatches, 0,
+            "no step may start after the cancel linearization point"
+        );
+        assert!(
+            final_record
+                .state
+                .as_ref()
+                .is_some_and(|s| s.cancel_requested),
+            "the cancelled run keeps its durable cancel intent"
+        );
+        assert_eq!(
+            final_record.status,
+            SessionStatus::Cancelled,
+            "the cancel remains the durable terminal winner"
+        );
+        assert!(
+            cancel_result.is_ok() || classify_cancel_outcome(&final_record).is_some(),
+            "the public cancel must not surface a generic conflict: {:?}",
+            cancel_result.err()
+        );
+        assert!(
+            final_record.state_revision > revision_before,
+            "the cancel fence/recovery advanced the durable revision"
+        );
+        assert!(
+            !coordinator.is_fenced(&session_id).await,
+            "a lost admission must not fence the run as a failed owner"
+        );
+        assert_eq!(
+            released.load(Ordering::SeqCst),
+            1,
+            "the withdrawn admission must release its live-ring reservation"
+        );
+        let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM orchestration_sessions")
+            .fetch_one(pool.as_ref())
+            .await
+            .expect("count run rows");
+        assert_eq!(rows, 1, "the same run id is re-driven, never a second run");
     }
 
     /// A port double that refuses every reservation, standing in for a

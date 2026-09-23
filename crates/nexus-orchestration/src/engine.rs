@@ -2091,7 +2091,17 @@ impl EngineSharedState {
                 )
                 .await
             {
-                Err(e @ (EngineError::RevisionMismatch { .. } | EngineError::TerminalState(_))) => {
+                Err(
+                    e @ (EngineError::RevisionMismatch { .. }
+                    | EngineError::TerminalState(_)
+                    | EngineError::GraphFlow(graph_flow::GraphError::SessionConflict(_))),
+                ) => {
+                    // A marker refusal that names the concurrent authoritative
+                    // winner (revision/graph ownership loss, terminal state,
+                    // or the durable cancel-intent fence) owns no failure
+                    // authority: it must reach the drive loop as the losing
+                    // writer's own disposition, never wrapped into a
+                    // fabricated step-failure settlement.
                     return Err(e);
                 }
                 Err(e) => {
@@ -6169,6 +6179,159 @@ mod tests {
                 .as_ref()
                 .is_some_and(|s| s.cancel_requested),
             "cancelled run must carry cancel_requested"
+        );
+    }
+
+    /// Deterministic cancel-intent-v-step race (v1.195 P0-T6 Critical): the
+    /// cancel winner's durable linearization point — the phase-1 intent fence
+    /// committed while the status stays non-terminal — is EXACTLY the
+    /// revision a later step's pre-step load anchors to, so the marker's
+    /// revision CAS cannot catch it. The marker rewrites `run_state_json`
+    /// wholesale from the step's fresh state, so without a durable fence it
+    /// erases the committed intent and the external effect dispatches after
+    /// the cancel linearization point.
+    ///
+    /// The step must lose to the cancel winner, the effect must never start,
+    /// and the committed intent must survive untouched.
+    #[tokio::test]
+    async fn step_marker_cannot_erase_committed_cancel_intent() {
+        use graph_flow::{NextAction, Task, TaskResult};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct CountingTask {
+            dispatches: Arc<AtomicUsize>,
+        }
+        #[async_trait]
+        impl Task for CountingTask {
+            fn id(&self) -> &'static str {
+                "count"
+            }
+            async fn run(
+                &self,
+                _context: graph_flow::Context,
+            ) -> Result<TaskResult, graph_flow::GraphError> {
+                self.dispatches.fetch_add(1, Ordering::SeqCst);
+                Ok(TaskResult::new(Some("done".into()), NextAction::Continue))
+            }
+        }
+
+        let db = tempfile::NamedTempFile::new().unwrap();
+        let guarded = nexus_local_db::init_engine_pool(db.path())
+            .await
+            .expect("open pool");
+        let pool = guarded.clone_pool();
+        let pool = Arc::new(pool);
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+
+        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            CapabilityRegistry::with_builtins(),
+        ));
+        let engine = GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+
+        let dispatches = Arc::new(AtomicUsize::new(0));
+        let graph = Arc::new(
+            graph_flow::GraphBuilder::new("cancel-intent-step")
+                .add_task(Arc::new(CountingTask {
+                    dispatches: dispatches.clone(),
+                }))
+                .build()
+                .expect("test graph"),
+        );
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        // The cancel winner's durable linearization point: the phase-1
+        // intent fence, committed while the status deliberately stays
+        // non-terminal (the run is not yet a confirmed cancellation).
+        let record = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        assert!(
+            !record.status.is_terminal(),
+            "the intent fence must keep the status non-terminal"
+        );
+        let root = storage
+            .get(&session_id.0)
+            .await
+            .expect("get root")
+            .expect("root exists");
+        let mut fenced_state = record.state.clone().unwrap_or_default();
+        fenced_state.cancel_requested = true;
+        store
+            .commit_transition_with_graph_fence(
+                &session_id,
+                record.state_revision,
+                Some(root.version),
+                RunCheckpoint {
+                    root: &root,
+                    children: &[],
+                },
+                record.status.clone(),
+                &fenced_state,
+            )
+            .await
+            .expect("the cancel-intent fence commits");
+        let fenced = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        assert!(
+            fenced
+                .state
+                .as_ref()
+                .is_some_and(|s| s.cancel_requested),
+            "precondition: the durable cancel intent is committed"
+        );
+
+        // The step's own pre-step load anchors on the fence revision, so the
+        // step must not be able to start or commit anything.
+        let step_result = engine.run_step(&session_id).await;
+        if let Err(err) = &step_result {
+            let conflict = match err {
+                EngineError::StepFailed { source, .. } => source.as_ref(),
+                other => other,
+            };
+            assert!(
+                matches!(
+                    conflict,
+                    EngineError::GraphFlow(graph_flow::GraphError::SessionConflict(_))
+                ),
+                "the cancel winner owns the row, so the step must lose to it, got {err:?}"
+            );
+        }
+        let after = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        let observed_dispatches = dispatches.load(Ordering::SeqCst);
+        assert!(
+            after.state.as_ref().is_some_and(|s| s.cancel_requested),
+            "the step marker must not erase the committed cancel intent \
+             (observed external-effect dispatches = {observed_dispatches})"
+        );
+        assert_eq!(
+            observed_dispatches, 0,
+            "no external effect may start after the cancel linearization point"
+        );
+        assert_eq!(
+            after.state_revision, fenced.state_revision,
+            "the refused step must not advance the durable revision"
+        );
+        assert_eq!(
+            after.graph_version, fenced.graph_version,
+            "the refused step must not advance the durable graph clock"
         );
     }
 
