@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,6 +12,10 @@ const root = join(__dirname, '..', '..', '..');
 const serviceRoot = join(__dirname, '..');
 const require = createRequire(import.meta.url);
 const acpFixture = resolve(root, 'crates/nexus-agent-host/tests/fixtures/mock_acp_workflow.py');
+const dshFixture = resolve(
+  root,
+  'crates/nexus-agent-host/tests/fixtures/native_protocol/mock_dsh_agent.py',
+);
 
 const CREATOR = 'ctr_testcreator';
 const SLUG = 'default';
@@ -53,8 +57,20 @@ command = "/nonexistent/nexus-t5-dsh"
 enabled = true
 `;
 
-function acpProviderConfig() {
+/**
+ * The selected ACP provider (the deterministic test-protocol fixture peer).
+ *
+ * `fixtureLog` points the fixture's own request log at an absolute path inside
+ * the case's disposable home, so a case can read back the prompt a real engine
+ * boundary actually dispatched. It is omitted by default: every existing
+ * boot/readiness case keeps the exact provider document it had.
+ */
+function acpProviderConfig({ fixtureLog } = {}) {
   const python = resolvePython();
+  const envTable =
+    fixtureLog === undefined
+      ? ''
+      : `[providers.env]\nACP_FIXTURE_LOG = ${JSON.stringify(fixtureLog)}\n`;
   return `
 [[providers]]
 id = "mock-acp"
@@ -62,7 +78,7 @@ protocol = "acp"
 command = ${JSON.stringify(python)}
 args = [${JSON.stringify(acpFixture)}]
 enabled = true
-`;
+${envTable}`;
 }
 
 /**
@@ -74,6 +90,9 @@ enabled = true
  * `meta.json`'s `local_root` is the exact document `nexus42 creator workspace
  * create --creative-root <abs>` writes and the only workspace-root writer; it
  * is not a private DB seed.
+ *
+ * `providerConfig` is the config document, or a factory of the seeded home when
+ * the document must name an absolute path inside it (a fixture request log).
  */
 function seededHome(providerConfig) {
   const home = mkdtempSync(join(tmpdir(), 'nexus-t5-'));
@@ -85,7 +104,10 @@ function seededHome(providerConfig) {
   assert.equal(seed.status, 0, seed.stderr?.toString());
   const agentHostDir = join(home, '.nexus42', 'agent-host');
   mkdirSync(agentHostDir, { recursive: true });
-  writeFileSync(join(agentHostDir, 'config.toml'), providerConfig);
+  writeFileSync(
+    join(agentHostDir, 'config.toml'),
+    typeof providerConfig === 'function' ? providerConfig(home) : providerConfig,
+  );
   const creativeRoot = join(home, 'creative-root');
   mkdirSync(creativeRoot, { recursive: true });
   writeFileSync(
@@ -586,6 +608,114 @@ states:
 }
 
 /**
+ * The W5 boundary graph (S0-3): one state whose `enter` action is the real
+ * `acp.prompt` capability, with the frozen `core_context.text` rendered into the
+ * prompt payload. The engine renders capability args against the run's context
+ * snapshot at the state boundary, and the fixture peer logs the exact prompt it
+ * received — so the fixture's request log IS the boundary's own evidence that
+ * it consumed the committed version, not an inspect increment or a UI mock.
+ *
+ * `tool_policy: deny_all` is the narrowest scope; the ACP adapter serves it
+ * without a model request.
+ */
+const STEER_BOUNDARY_PRESET = 'p0t6-steer-boundary';
+const STEER_BOUNDARY_MARKER = 'P0T6-BOUNDARY';
+const STEER_IDEA = 'P0-T6 steer idea: the next boundary must read this';
+
+function steerBoundaryPresetYaml() {
+  return `preset:
+  id: ${STEER_BOUNDARY_PRESET}
+  version: 1
+  kind: creator
+  description: "P0-T6 W5 fixture — the first execution boundary renders the frozen core context"
+  requires_capabilities: [acp.prompt]
+  initial: start
+  terminal: done
+states:
+  - id: start
+    enter:
+      - kind: capability
+        name: acp.prompt
+        args:
+          prompt: "${STEER_BOUNDARY_MARKER}|{{core_context.text}}|END"
+          tool_policy: deny_all
+    next: done
+  - id: done
+    terminal: true
+`;
+}
+
+/** The capacity holder for the W5 case: the scaffold preset, which parks. */
+const STEER_HOLDER_PRESET = 'p0t6-steer-holder';
+
+/**
+ * The dsh native provider, backed by the repository's scripted SDK-wire mock
+ * runtime (the existing `native_protocol/mock_dsh_agent.py` fixture).
+ *
+ * `env` carries the fixture's own documented knobs: `REQ_LOG` (its request
+ * log), `DSH_HOME`, and `SHUTDOWN_DELAY_MS` — the fixture's
+ * unconfirmed-close arm, which delays the `shutdown` reply so the provider's
+ * close-waiter deadline fires while the retained cleanup owner is still
+ * running. `shutdown_ms` is the per-close waiter budget; keeping it below the
+ * delay is what makes an owned-session close genuinely unconfirmable inside
+ * the budget.
+ */
+const DSH_SHUTDOWN_BUDGET_MS = 1000;
+const DSH_SHUTDOWN_DELAY_MS = 8000;
+
+function dshNativeProviderConfig(env) {
+  const envTable = Object.entries(env)
+    .map(([key, value]) => `${key} = ${JSON.stringify(value)}`)
+    .join('\n');
+  return `
+[timeouts]
+shutdown_ms = ${DSH_SHUTDOWN_BUDGET_MS}
+
+[[providers]]
+id = "dsh-native"
+protocol = "native_cli"
+command = ${JSON.stringify(dshFixture)}
+enabled = true
+[providers.env]
+${envTable}
+`;
+}
+
+/**
+ * The W7 preset (S0-6): one prompt state, then a manual wait so the run is
+ * non-terminal while the boundary that owns the session is still alive.
+ * `deny_all` is the only narrowed scope the dsh native provider can serve for
+ * an orchestration prompt (it selects the sealed deny-all recipe); the mock
+ * runtime never reaches the wire, so no model request is involved.
+ */
+const UNCONFIRMED_CANCEL_PRESET = 'p0t6-unconfirmed-cancel';
+
+function unconfirmedCancelPresetYaml() {
+  return `preset:
+  id: ${UNCONFIRMED_CANCEL_PRESET}
+  version: 1
+  kind: creator
+  description: "P0-T6 W7 fixture — a prompt boundary whose owned session cannot be confirmed closed"
+  requires_capabilities: [acp.prompt]
+  initial: start
+  terminal: done
+states:
+  - id: start
+    enter:
+      - kind: capability
+        name: acp.prompt
+        args:
+          prompt: "P0-T6 unconfirmed cancel boundary"
+          tool_policy: deny_all
+    exit_when:
+      kind: manual
+    next: done
+  - id: done
+    terminal: true
+`;
+}
+
+/**
  * Seed the durable rows only ANOTHER creator could have written: one terminal
  * root run and one terminal schedule owned by `other_creator`, inside the same
  * workspace state DB the restored owner serves.
@@ -1066,6 +1196,335 @@ describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', () 
         1,
         `a resume must never mint a second workflow: ${sessions.text}`,
       );
+    } finally {
+      await service.close();
+    }
+  });
+
+  /**
+   * W5 (S0-3): the next execution boundary reads the HTTP-appended version.
+   *
+   * The append is made over the public HTTP surface against a schedule parked
+   * at a LEGAL boundary (the row is `paused` — it owns no run yet), and the
+   * resume is what mints/drives that schedule's one run. The next execution
+   * boundary is therefore the admission claim, which re-reads the committed
+   * pointer and freezes the version's payload into the run — the exact boundary
+   * the contract names. The observation is the boundary's OWN output: the real
+   * `acp.prompt` capability renders `{{core_context.text}}` from the run's
+   * frozen context and the fixture peer logs the prompt it received, so the
+   * fixture log distinguishes "consumed version 1" from "kept the version-0
+   * seed" (an empty body) rather than re-reading the version counter.
+   *
+   * The capacity holder is what makes the ordering deterministic: a running
+   * serial predecessor holds the creator's capacity, so the boundary schedule
+   * cannot be admitted early and the append is unambiguously before its first
+   * boundary.
+   */
+  test('control steer: the next execution boundary consumes the HTTP-appended context version', async () => {
+    const fixtureLogName = 'acp-boundary.jsonl';
+    const home = seededHome((dir) =>
+      acpProviderConfig({ fixtureLog: join(dir, fixtureLogName) }),
+    );
+    const fixtureLog = join(home, fixtureLogName);
+    const readBoundaryPrompts = () =>
+      existsSync(fixtureLog)
+        ? readFileSync(fixtureLog, 'utf8')
+            .split('\n')
+            .filter((line) => line.trim().length > 0)
+            .map((line) => JSON.parse(line))
+            .filter((entry) => entry.event === 'prompt')
+            .map((entry) => entry.prompt)
+        : [];
+
+    const service = await startServiceOn(home);
+    try {
+      const base = service.url;
+      const schedulesUrl = `${base}/v1/daemon/orchestration/schedules`;
+      const scheduleUrl = (id) => `${schedulesUrl}/${id}`;
+      const inspectSchedule = async (id) => {
+        const response = await jsonFetch(scheduleUrl(id));
+        assert.equal(response.status, 200, response.text);
+        return response.payload;
+      };
+
+      // The capacity holder: the scaffold graph opens the workspace and parks
+      // at its manual wait, so it owns the creator's serial capacity without
+      // any model request.
+      const holderScaffold = await jsonFetch(`${base}/v1/daemon/presets`, {
+        method: 'POST',
+        body: { name: STEER_HOLDER_PRESET },
+      });
+      assert.equal(holderScaffold.status, 201, holderScaffold.text);
+      const holderCreated = await jsonFetch(schedulesUrl, {
+        method: 'POST',
+        body: { creator_id: CREATOR, preset_id: STEER_HOLDER_PRESET },
+      });
+      assert.equal(holderCreated.status, 201, holderCreated.text);
+      const holderId = holderCreated.payload.schedule_id;
+      await waitFor(
+        () => inspectSchedule(holderId),
+        (payload) => Boolean(payload.schedule.current_session_id),
+        { label: `holder schedule ${holderId} admission` },
+      );
+
+      // W1: author the boundary graph through the public preset surface.
+      const scaffolded = await jsonFetch(`${base}/v1/daemon/presets`, {
+        method: 'POST',
+        body: { name: STEER_BOUNDARY_PRESET },
+      });
+      assert.equal(scaffolded.status, 201, scaffolded.text);
+      const patched = await jsonFetch(`${base}/v1/daemon/presets/${STEER_BOUNDARY_PRESET}`, {
+        method: 'PATCH',
+        body: { yaml: steerBoundaryPresetYaml() },
+      });
+      assert.equal(patched.status, 200, patched.text);
+      assert.equal(patched.payload.updated, true, patched.text);
+
+      const created = await jsonFetch(schedulesUrl, {
+        method: 'POST',
+        body: {
+          creator_id: CREATOR,
+          preset_id: STEER_BOUNDARY_PRESET,
+          concurrency: 'serial',
+          agent_bindings: { default: { provider_id: 'mock-acp' } },
+        },
+      });
+      assert.equal(created.status, 201, created.text);
+      assert.equal(created.payload.status, 'pending', created.text);
+      assert.equal(created.payload.core_context_version, 0, created.text);
+      const scheduleId = created.payload.schedule_id;
+
+      // The serial gate holds the boundary row unadmitted, so the parked row
+      // below is the row's REAL state rather than a winning race: it owns no
+      // run, and no boundary prompt has run yet.
+      await delay(1_500);
+      const blocked = await inspectSchedule(scheduleId);
+      assert.equal(blocked.schedule.status, 'pending', JSON.stringify(blocked));
+      assert.equal(
+        blocked.schedule.current_session_id,
+        undefined,
+        `the serial gate must hold the row unadmitted: ${JSON.stringify(blocked)}`,
+      );
+      assert.deepEqual(
+        readBoundaryPrompts(),
+        [],
+        'no execution boundary may run before the append',
+      );
+
+      // W5 boundary: the row is parked at a legal boundary (paused, no run).
+      const paused = await jsonFetch(`${scheduleUrl(scheduleId)}/signal`, {
+        method: 'POST',
+        body: { signal: 'pause' },
+      });
+      assert.equal(paused.status, 200, paused.text);
+      assert.equal(paused.payload.status, 'paused', paused.text);
+
+      // W5: the HTTP append commits the next immutable version.
+      const appended = await jsonFetch(`${scheduleUrl(scheduleId)}/core-context`, {
+        method: 'PATCH',
+        body: { op: 'append', body: STEER_IDEA },
+      });
+      assert.equal(appended.status, 200, appended.text);
+      assert.equal(appended.payload.new_version, 1, appended.text);
+      const afterAppend = await inspectSchedule(scheduleId);
+      assert.equal(afterAppend.schedule.current_core_context_version, 1, JSON.stringify(afterAppend));
+      assert.equal(afterAppend.schedule.current_session_id, undefined, JSON.stringify(afterAppend));
+
+      // Free the capacity, then resume: the resume crosses the next execution
+      // boundary — the admission claim of this schedule's ONE run.
+      const holderCancelled = await jsonFetch(`${scheduleUrl(holderId)}/signal`, {
+        method: 'POST',
+        body: { signal: 'cancel' },
+      });
+      assert.equal(holderCancelled.status, 200, holderCancelled.text);
+      const resumed = await jsonFetch(`${scheduleUrl(scheduleId)}/signal`, {
+        method: 'POST',
+        body: { signal: 'resume' },
+      });
+      assert.equal(resumed.status, 200, resumed.text);
+      assert.equal(resumed.payload.status, 'running', resumed.text);
+
+      // THE OBSERVATION: the boundary's own rendered prompt. A boundary that
+      // did not read the committed version renders the empty version-0 seed
+      // (`<marker>||END`), so this equality is the discriminating assertion.
+      const prompts = await waitFor(readBoundaryPrompts, (entries) => entries.length > 0, {
+        label: 'the resumed schedule boundary prompt',
+      });
+      assert.deepEqual(
+        prompts,
+        [`${STEER_BOUNDARY_MARKER}|${STEER_IDEA}|END`],
+        `the next execution boundary must render the committed version: ${JSON.stringify(prompts)}`,
+      );
+
+      // The run identity is the schedule's own and stays single: the resume
+      // minted no second workflow, and inspect still reads the committed
+      // version.
+      const settled = await waitFor(
+        () => inspectSchedule(scheduleId),
+        (payload) => payload.schedule.status === 'completed',
+        { label: `schedule ${scheduleId} completion` },
+      );
+      const runId = settled.schedule.current_session_id;
+      assert.ok(runId, JSON.stringify(settled));
+      assert.equal(settled.schedule.current_core_context_version, 1, JSON.stringify(settled));
+
+      const sessions = await jsonFetch(`${base}/v1/daemon/orchestration/sessions`);
+      assert.equal(sessions.status, 200, sessions.text);
+      const boundaryRuns = sessions.payload.items.filter(
+        (row) => row.preset_id === STEER_BOUNDARY_PRESET,
+      );
+      assert.equal(
+        boundaryRuns.length,
+        1,
+        `the resumed schedule owns exactly one run: ${sessions.text}`,
+      );
+      assert.equal(boundaryRuns[0].session_id, runId, sessions.text);
+    } finally {
+      await service.close();
+    }
+  });
+
+  /**
+   * W7 (S0-6): an unconfirmed stop is durable `interrupted`, never a cancel
+   * success.
+   *
+   * The run's owned Host session is made genuinely unconfirmable INSIDE the
+   * close budget: the mock runtime delays its `shutdown` reply past the
+   * configured per-close waiter deadline (`SHUTDOWN_DELAY_MS` above
+   * `shutdown_ms`), which is the fixture's documented unconfirmed-close arm.
+   * The prompt boundary still runs for real — the sealed deny-all recipe is the
+   * only narrowed scope the dsh native provider serves for an orchestration
+   * prompt, and its ordinary-harness close is the first close the budget
+   * cannot confirm, so the boundary really does own a Host session whose
+   * cleanup stays unconfirmable.
+   *
+   * The case then drives the ACTUAL public cancel path and asserts the durable
+   * winner and the wire disposition: the response must carry the truthful
+   * `interrupted` disposition — never `cancelled` — the run must be durably
+   * `interrupted` with the actionable cleanup reason, and the schedule row must
+   * NOT be promoted to `cancelled`.
+   */
+  test('control cancel: an unconfirmable owned cleanup stays durable interrupted, never cancelled', async () => {
+    const home = seededHome((dir) =>
+      dshNativeProviderConfig({
+        REQ_LOG: join(dir, 'dsh-requests.jsonl'),
+        DSH_HOME: join(dir, 'dsh-home'),
+        SHUTDOWN_DELAY_MS: String(DSH_SHUTDOWN_DELAY_MS),
+      }),
+    );
+    mkdirSync(join(home, 'dsh-home'), { recursive: true });
+
+    const service = await startServiceOn(home);
+    try {
+      const base = service.url;
+      const schedulesUrl = `${base}/v1/daemon/orchestration/schedules`;
+      const scheduleUrl = (id) => `${schedulesUrl}/${id}`;
+      const inspectSchedule = async (id) => {
+        const response = await jsonFetch(scheduleUrl(id));
+        assert.equal(response.status, 200, response.text);
+        return response.payload;
+      };
+      const inspectSession = async (id) => {
+        const response = await jsonFetch(`${base}/v1/daemon/orchestration/sessions/${id}`);
+        assert.equal(response.status, 200, response.text);
+        return response.payload;
+      };
+
+      const scaffolded = await jsonFetch(`${base}/v1/daemon/presets`, {
+        method: 'POST',
+        body: { name: UNCONFIRMED_CANCEL_PRESET },
+      });
+      assert.equal(scaffolded.status, 201, scaffolded.text);
+      const patched = await jsonFetch(`${base}/v1/daemon/presets/${UNCONFIRMED_CANCEL_PRESET}`, {
+        method: 'PATCH',
+        body: { yaml: unconfirmedCancelPresetYaml() },
+      });
+      assert.equal(patched.status, 200, patched.text);
+
+      const created = await jsonFetch(schedulesUrl, {
+        method: 'POST',
+        body: {
+          creator_id: CREATOR,
+          preset_id: UNCONFIRMED_CANCEL_PRESET,
+          agent_bindings: { default: { provider_id: 'dsh-native' } },
+        },
+      });
+      assert.equal(created.status, 201, created.text);
+      const scheduleId = created.payload.schedule_id;
+
+      // The boundary really ran and its owned session is retained: the run
+      // parks at this preset's manual wait, which is only reached after the
+      // prompt attempt settled. Cancelling from that state is the public
+      // cancel of a non-terminal admitted workflow.
+      const admitted = await waitFor(
+        () => inspectSchedule(scheduleId),
+        (payload) => Boolean(payload.schedule.current_session_id),
+        { label: `schedule ${scheduleId} admission` },
+      );
+      const runId = admitted.schedule.current_session_id;
+      const parked = await waitFor(
+        () => inspectSession(runId),
+        (payload) => payload.session.status === 'waiting_for_input',
+        { label: `run ${runId} manual-wait park` },
+      );
+      assert.equal(parked.session.session_id, runId, JSON.stringify(parked));
+
+      const cancelled = await jsonFetch(`${scheduleUrl(scheduleId)}/signal`, {
+        method: 'POST',
+        body: { signal: 'cancel' },
+      });
+      assert.equal(cancelled.status, 200, cancelled.text);
+      // Never a success: the unconfirmed stop is reported as `interrupted`,
+      // and specifically NOT as `cancelled`.
+      assert.equal(cancelled.payload.status, 'interrupted', cancelled.text);
+      assert.notEqual(cancelled.payload.status, 'cancelled', cancelled.text);
+
+      // The durable winner is the interrupted run with its actionable cleanup
+      // reason — not a fabricated cancelled row.
+      const settledSession = await inspectSession(runId);
+      assert.equal(settledSession.session.status, 'interrupted', JSON.stringify(settledSession));
+      assert.match(
+        String(settledSession.session.failure_reason),
+        /unconfirmed/i,
+        `the unconfirmed cleanup must stay actionable: ${JSON.stringify(settledSession)}`,
+      );
+
+      // The owning schedule row is NOT promoted to `cancelled` (the settlement
+      // is a deliberate no-op for an unconfirmed cleanup) and keeps its run.
+      const afterCancel = await inspectSchedule(scheduleId);
+      assert.notEqual(afterCancel.schedule.status, 'cancelled', JSON.stringify(afterCancel));
+      assert.equal(
+        afterCancel.schedule.current_session_id,
+        runId,
+        JSON.stringify(afterCancel),
+      );
+
+      const listed = await jsonFetch(schedulesUrl);
+      assert.equal(listed.status, 200, listed.text);
+      const listedRow = listed.payload.items.find((row) => row.schedule_id === scheduleId);
+      assert.ok(listedRow, `the interrupted schedule stays listed: ${listed.text}`);
+      assert.notEqual(listedRow.status, 'cancelled', listed.text);
+
+      // The unconfirmed outcome is ACTIONABLE, not a dead end (§3.4): the
+      // retained cleanup owner is retried by a further cancel. Once the
+      // provider's delayed close finally completes, the same public signal
+      // confirms the stop and settles `cancelled` — which also releases the
+      // owned Host session (and its process) instead of leaving a retained
+      // cleanup running after the case ends.
+      await waitFor(
+        async () => {
+          const retry = await jsonFetch(`${scheduleUrl(scheduleId)}/signal`, {
+            method: 'POST',
+            body: { signal: 'cancel' },
+          });
+          assert.equal(retry.status, 200, retry.text);
+          return retry.payload.status;
+        },
+        (status) => status === 'cancelled',
+        { label: `run ${runId} confirmed cancel retry`, timeout: 30_000 },
+      );
+      const confirmedSession = await inspectSession(runId);
+      assert.equal(confirmedSession.session.status, 'cancelled', JSON.stringify(confirmedSession));
     } finally {
       await service.close();
     }
