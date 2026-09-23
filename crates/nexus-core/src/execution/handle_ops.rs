@@ -489,7 +489,10 @@ impl ExecutionHandle {
     /// - `resume` on an ADMITTED schedule signals `Resume` to that owned run —
     ///   never a second admission, never a second workflow. A plain resume
     ///   does not continue a human wait: the run keeps its durable wait token
-    ///   and the signal closes with the exact `workflow_state_conflict`.
+    ///   and the signal closes with the exact `workflow_state_conflict`. A
+    ///   successful resume then reconciles the durable row to the run it owns
+    ///   (see [`Self::reconcile_resumed_row`]) so list/inspect never keep
+    ///   reading a stale `paused`.
     /// - `cancel` on an admitted schedule cancels that owned run through the
     ///   coordinator's single cancel owner (durable cancel-intent fence →
     ///   run token → bounded owned-Host teardown → terminal `cancelled`, or
@@ -539,9 +542,15 @@ impl ExecutionHandle {
                     Some(run_id) => {
                         let result = self
                             .coordinator()
-                            .signal_run(&SessionId(run_id), RunSignal::Resume)
+                            .signal_run(&SessionId(run_id.clone()), RunSignal::Resume)
                             .await
                             .map_err(map_run_control_error)?;
+                        // The durable row must follow the run it owns: `pause`
+                        // writes `paused` to the row without touching the run,
+                        // so a successful resume must not leave the public
+                        // list/inspect projection claiming `paused`.
+                        self.reconcile_resumed_row(principal, &schedule_id, &run_id)
+                            .await?;
                         return Ok(SignalScheduleResponse {
                             schedule_id,
                             status: result.status,
@@ -632,6 +641,57 @@ impl ExecutionHandle {
             status: status.to_string(),
             current_wait_id: None,
         })
+    }
+
+    /// Reconcile the owning schedule row after an admitted same-run resume.
+    ///
+    /// `pause` writes `paused` to the schedule row WITHOUT touching the run it
+    /// owns, so a successful resume of that same run must not leave the durable
+    /// row claiming `paused`: both public projections (list/inspect) read this
+    /// row, and the run's durable status is the authority.
+    ///
+    /// The write is ONE conditional UPDATE, fenced on the SAME identity the
+    /// admission claim froze (`schedule_id` + `creator_id` +
+    /// `current_session_id`) and on the row still reading `paused`, and it
+    /// applies only while the owned run is DURABLY running — the run's status
+    /// is read inside the same statement, so there is no read-then-write
+    /// window. An intervening cancel, settlement or ownership change therefore
+    /// wins the row and is left untouched: a terminal winner is never
+    /// overwritten, and nothing is fabricated when the run's authoritative
+    /// status is anything else (that row belongs to the terminal settlement
+    /// path).
+    ///
+    /// # Errors
+    /// `Internal` for a storage fault.
+    async fn reconcile_resumed_row(
+        &self,
+        principal: &Principal,
+        schedule_id: &str,
+        run_id: &str,
+    ) -> CoreResult<()> {
+        let pool = self.coordinator().pool();
+        let now = chrono::Utc::now().timestamp();
+        // SAFETY: dynamic SQL — one conditional UPDATE; every value is bound
+        // and the interpolated text is constant.
+        sqlx::query(
+            "UPDATE creator_schedules
+                SET status = 'running', updated_at = ?
+              WHERE schedule_id = ? AND creator_id = ?
+                AND current_session_id = ?
+                AND status = 'paused'
+                AND EXISTS (
+                    SELECT 1 FROM orchestration_sessions
+                     WHERE session_id = creator_schedules.current_session_id
+                       AND status = 'running')",
+        )
+        .bind(now)
+        .bind(schedule_id)
+        .bind(principal.creator_id())
+        .bind(run_id)
+        .execute(pool.as_ref())
+        .await
+        .map_err(|e| crate::error::db_err(&e))?;
+        Ok(())
     }
 
     /// Dispatch one host tool through the spine.

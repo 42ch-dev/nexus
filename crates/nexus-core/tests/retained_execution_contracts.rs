@@ -4140,3 +4140,333 @@ async fn public_cancel_fences_late_workspace_commit() {
     assert!(report.cleanup_confirmed, "close must report confirmed cleanup");
     hosted.core.close().await.expect("core close");
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Paused-row reconciliation on a successful same-run resume (v1.195 P0-T4 C1)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The C1 fixture: an unreachable second branch parks the converge join at
+/// 1/2 arrivals with NO deadline, so the run settles durably `paused`
+/// (tokenless, no human wait, no in-flight marker) and no driver survives it —
+/// the one durable shape on which a plain `resume` may legally move the run
+/// back to `running`.
+const RESUME_PARK_PRESET: &str = "resume-park-guard";
+
+fn resume_park_preset_yaml() -> String {
+    format!(
+        r#"
+preset:
+  id: {RESUME_PARK_PRESET}
+  version: 1
+  kind: creator
+  description: "resume fixture — an unreachable branch parks the join, no deadline"
+  requires_capabilities: []
+  initial: start
+  terminal: done
+states:
+  - id: start
+    next: branch_a
+  - id: branch_a
+    next:
+      branches: []
+      default: join
+  - id: branch_b
+    description: "Hanging upstream edge — never walked, never arrives"
+    next: join
+  - id: join
+    converge: {{ strategy: wait_for_all }}
+    next: done
+  - id: done
+    terminal: true
+"#
+    )
+}
+
+/// Add one `driven_v1` pending schedule for `preset_id` that may run
+/// CONCURRENTLY with the creator's other rows (`parallel_any`), so the race
+/// below is not gated by the serial capacity an earlier live row still holds.
+async fn add_parallel_any_schedule(
+    handle: &ExecutionHandle,
+    principal: &Principal,
+    preset_id: &str,
+    label: &str,
+) -> String {
+    use nexus_contracts::local::schedule::http::ScheduleConcurrencyRequest;
+
+    handle
+        .add_schedule(
+            principal,
+            AddScheduleRequest {
+                creator_id: CREATOR.to_string(),
+                preset_id: preset_id.to_string(),
+                seed: None,
+                label: Some(label.to_string()),
+                depends_on: None,
+                concurrency: Some(ScheduleConcurrencyRequest::ParallelAny),
+                scheduled_at: None,
+                input: Some(json!({ "topic": "retained-cancel" })),
+                force_gates: false,
+                reason: None,
+                agent_bindings: Some(default_bindings()),
+            },
+        )
+        .await
+        .expect("schedule insert")
+        .schedule_id
+}
+
+/// Wait (bounded) until the run sits in a SIGNALABLE converge-gate park.
+///
+/// The durable `paused` status alone is not enough: a mid-drive inter-task
+/// boundary pause is also stored as `paused`, and there the NEXT step is
+/// already marked in flight (a plain resume would be fenced, correctly). The
+/// steady park is the one the gated task writes its state-scoped
+/// `_gate_park_<state>` marker for (the engine's exact park evidence) while the
+/// run carries no wait and no in-flight marker, and the drive loop has stopped
+/// on it.
+async fn wait_for_signalable_gate_park(pool: &sqlx::SqlitePool, run_id: &str) {
+    use graph_flow::SessionStorage as _;
+
+    let store = SqliteSessionStorage::new(Arc::new(pool.clone()));
+    let session_id = nexus_orchestration::engine::SessionId(run_id.to_string());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        let record = store
+            .load_run(&session_id)
+            .await
+            .expect("durable run load")
+            .expect("the admitted run row exists");
+        let idle = record.state.as_ref().is_none_or(|state| {
+            state.wait.is_none() && state.step_in_flight.is_none() && state.in_flight.is_none()
+        });
+        if record.status.as_db_str() == "paused" && idle {
+            let parked = store
+                .get(run_id)
+                .await
+                .expect("session load")
+                .is_some_and(|session| {
+                    session
+                        .context
+                        .get::<bool>(&format!("_gate_park_{}", session.current_task_id))
+                        .is_some_and(|live| live)
+                });
+            if parked {
+                return;
+            }
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the run never reached a signalable converge-gate park: status {} state {:?}",
+            record.status.as_db_str(),
+            record.state,
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+}
+
+/// C1 regression: a successful same-run resume reconciles the owning schedule
+/// row (S0-4/W6).
+///
+/// `pause` flips the durable row to `paused` without touching the run it owns,
+/// so before the fix an admitted resume returned the run's durable `running`
+/// while `creator_schedules.status` — the column BOTH public projections read
+/// — kept claiming `paused`. The journey below stages exactly that (a paused
+/// row still owning its parked run), resumes the SAME run, and then asserts the
+/// durable row follows the run: list AND inspect show the post-resume status,
+/// the identity is unchanged (one root run, same `current_session_id`), and a
+/// cancel that races the resume leaves the TERMINAL winner standing.
+#[allow(clippy::too_many_lines)] // one linear public journey; splitting hides the ordering evidence
+#[tokio::test]
+#[serial_test::serial]
+async fn public_resume_reconciles_the_paused_schedule_row() {
+    use nexus_contracts::generated::daemon_api::schedule::list_schedules_query::ListSchedulesQuery;
+
+    let fixture = owner_fixture().await;
+    let principal = fixture.core.active_principal().await.unwrap();
+    let pool = fixture.pool();
+    let coordinator = fixture.coordinator();
+    let caps = fixture.handle.capability_holder();
+    let home = fixture.nexus_home();
+    let executor =
+        fixture.executor.clone() as Arc<dyn nexus_orchestration::capability::PromptExecutor>;
+    write_preset_bundle(
+        &home,
+        RESUME_PARK_PRESET,
+        &resume_park_preset_yaml(),
+        "unused by this preset\n",
+    );
+
+    // ── 1. Stage the C1 state through PUBLIC paths: an admitted schedule that
+    //       owns its parked run, then `pause` — the row reads `paused` while
+    //       the run it owns is still live. ──
+    let paused_schedule = add_schedule_preset(
+        &fixture.handle,
+        &principal,
+        RESUME_PARK_PRESET,
+        "resume-paused-row",
+    )
+    .await;
+    let run_id = coordinator
+        .admit_schedule(
+            &paused_schedule,
+            pool.as_ref(),
+            &home,
+            &caps,
+            None,
+            Some(executor.clone()),
+        )
+        .await
+        .expect("admission")
+        .0;
+    wait_for_signalable_gate_park(pool.as_ref(), &run_id).await;
+    let (status, owned) = schedule_row(pool.as_ref(), &paused_schedule).await;
+    assert_eq!(status, "running", "the admission claim owns its live run");
+    assert_eq!(owned.as_deref(), Some(run_id.as_str()));
+
+    let paused = fixture
+        .handle
+        .signal_schedule(&principal, paused_schedule.clone(), signal("pause"))
+        .await
+        .expect("pause the admitted row");
+    assert_eq!(paused.status, "paused", "pause flips the durable row");
+    assert_eq!(
+        schedule_row(pool.as_ref(), &paused_schedule).await.0,
+        "paused",
+        "the row is durably paused before the resume"
+    );
+
+    // ── 2. Resume the SAME run: the durable row must follow the run it owns —
+    //       never the other way round (no fabricated `running`). ──
+    let resumed = fixture
+        .handle
+        .signal_schedule(&principal, paused_schedule.clone(), signal("resume"))
+        .await
+        .expect("resume the paused row's own run");
+    assert_eq!(
+        resumed.status, "running",
+        "the response carries the durable RUN status"
+    );
+    assert_eq!(
+        durable_record(pool.as_ref(), &run_id).await.status.as_db_str(),
+        "running",
+        "the owned run is durably running after the resume"
+    );
+    let (status, owned) = schedule_row(pool.as_ref(), &paused_schedule).await;
+    assert_eq!(
+        status, "running",
+        "the paused row is reconciled to the run that resumed"
+    );
+    assert_eq!(
+        owned.as_deref(),
+        Some(run_id.as_str()),
+        "the same run is still the one this schedule owns"
+    );
+    assert_eq!(
+        root_run_count(pool.as_ref()).await,
+        1,
+        "a resume must never mint a second workflow"
+    );
+
+    // ── 3. Both public projections read the reconciled durable row. ──
+    let listed = fixture
+        .handle
+        .list_schedules(&principal, ListSchedulesQuery::default())
+        .await
+        .expect("list schedules")
+        .items
+        .into_iter()
+        .find(|item| item.schedule_id == paused_schedule)
+        .expect("the resumed schedule is listed");
+    assert_eq!(
+        listed.status, "running",
+        "list must show the post-resume durable state, not the stale `paused`"
+    );
+    assert_eq!(listed.current_session_id.as_deref(), Some(run_id.as_str()));
+
+    let inspected = fixture
+        .handle
+        .inspect_schedule(&principal, paused_schedule.clone())
+        .await
+        .expect("inspect the resumed schedule");
+    assert_eq!(
+        inspected.schedule.status, "running",
+        "inspect must show the same post-resume durable state"
+    );
+    assert_eq!(
+        inspected.schedule.current_session_id.as_deref(),
+        Some(run_id.as_str())
+    );
+
+    // ── 4. The reconciliation is fenced: a cancel racing the resume wins the
+    //       row, and the terminal winner is never overwritten. ──
+    let raced = add_parallel_any_schedule(
+        &fixture.handle,
+        &principal,
+        RESUME_PARK_PRESET,
+        "resume-raced-cancel",
+    )
+    .await;
+    let raced_run = coordinator
+        .admit_schedule(
+            &raced,
+            pool.as_ref(),
+            &home,
+            &caps,
+            None,
+            Some(executor.clone()),
+        )
+        .await
+        .expect("admission")
+        .0;
+    wait_for_signalable_gate_park(pool.as_ref(), &raced_run).await;
+    fixture
+        .handle
+        .signal_schedule(&principal, raced.clone(), signal("pause"))
+        .await
+        .expect("pause the raced row");
+    assert_eq!(schedule_row(pool.as_ref(), &raced).await.0, "paused");
+
+    let (resumed_race, cancelled_race) = tokio::join!(
+        fixture
+            .handle
+            .signal_schedule(&principal, raced.clone(), signal("resume")),
+        fixture
+            .handle
+            .signal_schedule(&principal, raced.clone(), signal("cancel")),
+    );
+    match &resumed_race {
+        // The resume won the run first: its response still carries a durable
+        // run status (the cancel may already have moved the run on).
+        Ok(r) => assert!(
+            matches!(r.status.as_str(), "running" | "cancelled"),
+            "a resume response carries a durable run status, got {r:?}"
+        ),
+        // The cancel landed first: the resume is a typed conflict, never a
+        // fabricated success.
+        Err(e) => assert!(
+            matches!(e, nexus_core::CoreError::Coded { .. }),
+            "a resume that lost the run to the cancel must be a typed conflict, got {e:?}"
+        ),
+    }
+    let cancelled_race = cancelled_race.expect("the cancel is the terminal winner");
+    assert_eq!(cancelled_race.status, "cancelled");
+    assert_eq!(
+        schedule_row(pool.as_ref(), &raced).await.0,
+        "cancelled",
+        "the raced terminal winner must never be overwritten as `running`"
+    );
+    assert_eq!(
+        durable_record(pool.as_ref(), &raced_run).await.status.as_db_str(),
+        "cancelled",
+        "the raced run is durably cancelled"
+    );
+    assert_eq!(
+        root_run_count(pool.as_ref()).await,
+        2,
+        "the race minted no extra run"
+    );
+
+    let report = fixture.handle.close().await.expect("owner close");
+    assert!(report.cleanup_confirmed, "close must report confirmed cleanup");
+    fixture.core.close().await.expect("core close");
+}
