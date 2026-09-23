@@ -1692,9 +1692,34 @@ impl WorkflowRunCoordinator {
     /// Settle the schedule whose `current_session_id` equals a terminal run
     /// (T3, A3).
     ///
-    /// Durable session terminal status is truth: the drive outcome only
-    /// gates whether settlement is attempted; the terminal status is read
-    /// from the durable v1 record and mapped to the supervisor's transition:
+    /// The drive outcome only gates WHETHER settlement is attempted; the
+    /// terminal status itself always comes from the durable record (see
+    /// [`Self::settle_owning_schedule`]).
+    async fn settle_terminal_schedule(&self, session_id: &SessionId, outcome: &PresetRunOutcome) {
+        // Only terminal outcomes settle.
+        if !matches!(
+            outcome,
+            PresetRunOutcome::Completed { .. }
+                | PresetRunOutcome::Failed { .. }
+                | PresetRunOutcome::Cancelled { .. }
+        ) {
+            return;
+        }
+        self.settle_owning_schedule(session_id).await;
+    }
+
+    /// Settle the schedule that owns `session_id` from the run's DURABLE
+    /// terminal status (T3, A3).
+    ///
+    /// This is the ONE settlement implementation: the drive loop reaches it
+    /// through [`Self::settle_terminal_schedule`], and a public cancel
+    /// reaches it from [`Self::cancel_run`] — so the schedule row projects the
+    /// same durable winner whether or not a drive loop is still alive to
+    /// settle it (a run cancelled while no driver owns it, e.g. after a
+    /// restart, must not leave its schedule reading `running`).
+    ///
+    /// Durable session terminal status is truth, mapped to the supervisor's
+    /// transition:
     /// - `Completed` → `ScheduleStatus::Completed`
     /// - `Failed` → `ScheduleStatus::Failed`
     /// - `Cancelled` → `ScheduleStatus::Cancelled`
@@ -1706,6 +1731,7 @@ impl WorkflowRunCoordinator {
     ///   non-terminal and public inspect projects the run's
     ///   `execution.recovery_class: "interrupted"` from the durable session.
     ///   Boot reconciliation skips the same class.
+    /// - non-terminal (or unreadable) → **no settlement**.
     ///
     /// Schedule and session inspect use the same durable terminal cause;
     /// execution failure never becomes a satisfied cancellation dependency.
@@ -1714,23 +1740,15 @@ impl WorkflowRunCoordinator {
     /// updated — a different schedule (or none) is left untouched. The
     /// supervisor's `on_schedule_terminal` flips the row, releases the
     /// runtime lock, fires the terminal hooks (review findings, auto-chain
-    /// continuation), and ticks the next eligible schedule.
+    /// continuation), and ticks the next eligible schedule. Re-settling an
+    /// already-terminal row is idempotent (terminal rows are excluded from
+    /// its source flip and completion hooks never re-run).
     ///
     /// Settlement is best-effort: a missing supervisor handle (tests /
     /// standalone coordinator) or a DB error is logged, never fatal to the
-    /// drive loop. A checkpoint-before-settlement crash is reconciled at
-    /// boot (`reconcile_terminal_schedules`).
-    async fn settle_terminal_schedule(&self, session_id: &SessionId, outcome: &PresetRunOutcome) {
-        // Only terminal outcomes settle.
-        if !matches!(
-            outcome,
-            PresetRunOutcome::Completed { .. }
-                | PresetRunOutcome::Failed { .. }
-                | PresetRunOutcome::Cancelled { .. }
-        ) {
-            return;
-        }
-
+    /// caller. A checkpoint-before-settlement crash is reconciled at boot
+    /// (`reconcile_terminal_schedules`).
+    async fn settle_owning_schedule(&self, session_id: &SessionId) {
         let Some(supervisor) = self
             .schedule_supervisor
             .read()
@@ -2890,18 +2908,36 @@ impl WorkflowRunCoordinator {
                     || msg.contains("already owns run")
                     || msg.contains("status is 'running'")
                 {
-                    let winner: Option<String> = sqlx::query_scalar!(
-                        "SELECT current_session_id FROM creator_schedules WHERE schedule_id = ?",
-                        schedule_id
+                    let winner: Option<(String, Option<String>)> = sqlx::query_as(
+                        "SELECT status, current_session_id FROM creator_schedules
+                          WHERE schedule_id = ?",
                     )
+                    .bind(schedule_id)
                     .fetch_optional(pool)
                     .await
-                    .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?
-                    .flatten();
-                    if let Some(sid) = winner {
-                        let sid = SessionId(sid);
-                        self.ensure_driving(&sid).await?;
-                        return Ok(sid);
+                    .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?;
+                    match winner {
+                        Some((_status, Some(sid))) => {
+                            let sid = SessionId(sid);
+                            self.ensure_driving(&sid).await?;
+                            return Ok(sid);
+                        }
+                        // The fence was won by a CANCEL rather than by
+                        // another admission (v1.195 P0-T4): the row is
+                        // durably terminal with no owned run, so this
+                        // admission legitimately lost and no run may be
+                        // minted. Reporting `Admission` would project a 500
+                        // for a control race the store settled by design.
+                        Some((status, None)) => {
+                            return Err(RunControlError::NotEligible(
+                                schedule_id.to_string(),
+                                format!(
+                                    "schedule {schedule_id} moved to '{status}' while this \
+                                     admission was in flight; no run was minted"
+                                ),
+                            ));
+                        }
+                        None => {}
                     }
                 }
                 // The row settled TERMINAL between our preflight read and
@@ -3116,10 +3152,32 @@ impl WorkflowRunCoordinator {
     /// It never inspects an error message and never fabricates success for a
     /// run that did not actually stop.
     ///
+    /// The owning schedule row is settled from the SAME durable record
+    /// afterwards, so the schedule projection and the public cancel answer
+    /// can never disagree.
+    ///
     /// # Errors
     /// Returns [`RunControlError`] for the typed conflict envelopes and for
     /// storage failures.
     pub async fn cancel_run(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<RunControlResult, RunControlError> {
+        let result = self.cancel_run_inner(session_id).await;
+        // §3.4 [reload durable winner → publish projection]: the owning
+        // schedule projects that same winner. This runs whether or not a
+        // drive loop is still alive to settle it — a run cancelled while no
+        // driver owns it (post-restart, or already parked) must not leave its
+        // schedule reading `running`. A no-op for a non-terminal or
+        // `Interrupted` record, so an unconfirmed cleanup never promotes its
+        // schedule to `cancelled`.
+        self.settle_owning_schedule(session_id).await;
+        result
+    }
+
+    /// The cancel itself: signal the engine, then project whatever the
+    /// durable record says (see [`Self::cancel_run`]).
+    async fn cancel_run_inner(
         &self,
         session_id: &SessionId,
     ) -> Result<RunControlResult, RunControlError> {

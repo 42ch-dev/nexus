@@ -55,10 +55,12 @@ use nexus_contracts::local::schedule::{
     ScheduleStatus,
 };
 use nexus_contracts::CoreRunEventsRequest;
+use nexus_orchestration::engine::SessionId;
 use nexus_orchestration::preset_gates::{
     evaluate_gates, GateEvalError, PresetInput, PreviousPresetLookup, PreviousPresetResult,
     WorkSnapshot,
 };
+use nexus_orchestration::schedule::supervisor::ScheduleCancelDisposition;
 
 use crate::error::{CoreError, CoreResult};
 use crate::execution::capabilities::{ToolContext, ToolExecuteRequest};
@@ -66,7 +68,7 @@ use crate::execution::capabilities::{ToolContext, ToolExecuteRequest};
 use crate::execution::compute::ComputeContext;
 use crate::execution::lifecycle::ExecutionHandle;
 use crate::execution::run_events::PageError;
-use crate::execution::workflow::RunEventPort;
+use crate::execution::workflow::{RunControlError, RunEventPort, RunSignal};
 use crate::principal::Principal;
 use crate::PresetError;
 use nexus_contracts::generated::core::core_tool_execute_response::CoreToolExecuteResponse;
@@ -477,18 +479,35 @@ impl ExecutionHandle {
     /// Apply a lifecycle signal to an existing schedule.
     ///
     /// Ownership is enforced BEFORE mutation: the durable row's `creator_id`
-    /// must equal the admitted principal's creator, so a caller cannot pause or
-    /// resume a foreign schedule by guessing its id. `pause`/`resume` then flip
-    /// the durable row through the supervisor, which re-reads that row's
-    /// status. The remaining signals are the transport's own admission/cancel
-    /// orchestration and are refused here rather than half-implemented as a
-    /// second admission path.
+    /// must equal the admitted principal's creator, so a caller cannot pause,
+    /// resume or cancel a foreign schedule by guessing its id.
+    ///
+    /// `resume` and `cancel` are routed to the SAME run the schedule already
+    /// owns (v1.195 P0-T4, §3.4):
+    ///
+    /// - `pause` flips the durable row through the supervisor.
+    /// - `resume` on an ADMITTED schedule signals `Resume` to that owned run —
+    ///   never a second admission, never a second workflow. A plain resume
+    ///   does not continue a human wait: the run keeps its durable wait token
+    ///   and the signal closes with the exact `workflow_state_conflict`.
+    /// - `cancel` on an admitted schedule cancels that owned run through the
+    ///   coordinator's single cancel owner (durable cancel-intent fence →
+    ///   run token → bounded owned-Host teardown → terminal `cancelled`, or
+    ///   `interrupted` when cleanup cannot be confirmed). A schedule that owns
+    ///   NO run is cancelled by one CAS on the same fence the admission claim
+    ///   writes on, so a concurrent admission either loses that fence or
+    ///   supplies the run this cancel then reaches. The response carries the
+    ///   DURABLE outcome — a provider acknowledgement is never cancel success,
+    ///   and an unconfirmed cleanup is reported as `interrupted`.
+    /// - `start`/`advance`/`continue` stay refused: no selected operation uses
+    ///   them, and the vocabulary is not extended with invented journeys.
     ///
     /// # Errors
     /// `Closing` when the owner is shutting down, `NotFound` when the schedule
     /// is absent or owned by another creator, `Busy` for an ineligible
-    /// transition, `InvalidInput` for a signal this seam does not serve,
-    /// `Internal` for a storage fault.
+    /// transition, `Coded` `workflow_state_conflict`/`workflow_wait_conflict`
+    /// when the run's durable state refuses the signal, `InvalidInput` for a
+    /// signal this seam does not serve, `Internal` for a storage fault.
     pub async fn signal_schedule(
         &self,
         principal: &Principal,
@@ -511,20 +530,87 @@ impl ExecutionHandle {
                 "paused"
             }
             "resume" => {
-                // Smart resume reports the ACTUAL persisted status (it may fall
-                // back to `pending` when admission is not yet possible), so the
-                // response carries the store's answer rather than an assumption.
-                let outcome = supervisor
-                    .resume_schedule(&schedule_id)
+                let row = self.owned_schedule(principal, &schedule_id).await?;
+                match row.current_session_id {
+                    // Admitted: the signal goes to the run this schedule
+                    // already owns. A manual wait is never implicitly
+                    // continued — the engine's wait/in-flight fence refuses
+                    // the plain resume with its exact durable conflict.
+                    Some(run_id) => {
+                        let result = self
+                            .coordinator()
+                            .signal_run(&SessionId(run_id), RunSignal::Resume)
+                            .await
+                            .map_err(map_run_control_error)?;
+                        return Ok(SignalScheduleResponse {
+                            schedule_id,
+                            status: result.status,
+                            current_wait_id: result.current_wait_id,
+                        });
+                    }
+                    // No run yet: the smart resume admits the row's ONE run
+                    // exactly as the clock tick would (it reports `pending`
+                    // when admission is not yet possible), so the response
+                    // carries the store's answer rather than an assumption.
+                    None => {
+                        let outcome = supervisor
+                            .resume_schedule(&schedule_id)
+                            .await
+                            .map_err(map_supervisor_error)?;
+                        return Ok(SignalScheduleResponse {
+                            schedule_id,
+                            status: outcome,
+                            current_wait_id: None,
+                        });
+                    }
+                }
+            }
+            "cancel" => {
+                // ONE CAS against the admission fence: a row that owns no run
+                // is durably `cancelled` here; a row that owns a run (already,
+                // or claimed by the concurrent admission that won the fence)
+                // supplies that run for the coordinator's cancel.
+                let disposition = supervisor
+                    .cancel_schedule(&schedule_id, principal.creator_id())
                     .await
                     .map_err(map_supervisor_error)?;
-                return Ok(SignalScheduleResponse {
-                    schedule_id,
-                    status: outcome,
-                    current_wait_id: None,
-                });
+                match disposition {
+                    ScheduleCancelDisposition::Cancelled => "cancelled",
+                    ScheduleCancelDisposition::Admitted(run_id) => {
+                        let result = self
+                            .coordinator()
+                            .cancel_run(&SessionId(run_id))
+                            .await
+                            .map_err(map_run_control_error)?;
+                        // The durable winner: `cancelled` only when stop is
+                        // confirmed, `interrupted` when cleanup is not. A
+                        // provider acknowledgement alone never reaches here.
+                        return Ok(SignalScheduleResponse {
+                            schedule_id,
+                            status: result.status,
+                            current_wait_id: result.current_wait_id,
+                        });
+                    }
+                    // Nothing was written: the row is already terminal (or
+                    // otherwise not cancellable). A completed winner is never
+                    // relabelled cancelled.
+                    ScheduleCancelDisposition::NotCancelled(durable_status) => {
+                        return Err(CoreError::Coded {
+                            code: "workflow_state_conflict".to_string(),
+                            message: format!(
+                                "cannot cancel schedule {schedule_id}: durable status is \
+                                 '{durable_status}'"
+                            ),
+                        });
+                    }
+                    ScheduleCancelDisposition::Absent => {
+                        return Err(CoreError::NotFound {
+                            resource: format!("schedule {schedule_id}"),
+                        });
+                    }
+                }
             }
-            "start" | "advance" | "continue" | "cancel" => {
+            "start" | "advance" | "continue" => {
                 return Err(CoreError::InvalidInput {
                     field: "signal".into(),
                     reason: format!(
@@ -1692,5 +1778,63 @@ fn map_supervisor_error(
         },
         E::InvalidTransition(..) | E::DuplicateSchedule { .. } => CoreError::Busy,
         E::Database(e) => crate::error::db_err(&e),
+    }
+}
+
+/// Map a coordinator control refusal onto the neutral taxonomy (§3.4).
+///
+/// The two control conflicts keep their retained lowercase wire codes and
+/// their durable detail (the current status / the exact wait token) so the
+/// adapter renders a 409 instead of a 500 for a legitimate control race:
+///
+/// - a lost/stale human-wait token is `workflow_wait_conflict` (the wait is
+///   NOT consumed and no second driver starts);
+/// - a run in a state that refuses the signal — terminal, interrupted, still
+///   waiting, or mid-step — is `workflow_state_conflict`.
+fn map_run_control_error(err: RunControlError) -> CoreError {
+    match err {
+        RunControlError::ScheduleNotFound(session_id) => CoreError::NotFound {
+            resource: format!("workflow session {session_id}"),
+        },
+        RunControlError::WaitConflict {
+            session_id,
+            status,
+            current_wait_id,
+        } => CoreError::Coded {
+            code: "workflow_wait_conflict".to_string(),
+            message: format!(
+                "run {session_id} is waiting (status {status}, current_wait_id \
+                 {current_wait_id:?}); the exact durable wait token is required"
+            ),
+        },
+        RunControlError::StateConflict(session_id, reason) => CoreError::Coded {
+            code: "workflow_state_conflict".to_string(),
+            message: format!("run {session_id} refuses the signal: {reason}"),
+        },
+        RunControlError::ReconstructionUnavailable {
+            session_id,
+            reason,
+        } => CoreError::Coded {
+            code: "workflow_state_conflict".to_string(),
+            message: format!(
+                "run {session_id} cannot be reconstructed ({reason}); the human wait is \
+                 preserved and legal actions are cancel-only"
+            ),
+        },
+        RunControlError::NotEligible(schedule_id, reason) => CoreError::Coded {
+            code: "workflow_state_conflict".to_string(),
+            message: format!("schedule {schedule_id} is not eligible: {reason}"),
+        },
+        RunControlError::Closing => CoreError::Closing,
+        // Retryable capacity refusal (never a 500): no drive started and no
+        // durable work was touched.
+        RunControlError::RunEventCapacity(_) => CoreError::Busy,
+        RunControlError::NoWorkspace(reason) => CoreError::ServiceUnavailable(reason),
+        other @ (RunControlError::PresetLoad(..)
+        | RunControlError::Admission(_)
+        | RunControlError::Drive(_)
+        | RunControlError::ScheduleUpdate(_)) => CoreError::Internal {
+            category: other.to_string(),
+        },
     }
 }

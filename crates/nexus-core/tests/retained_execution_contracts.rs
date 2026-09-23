@@ -70,7 +70,7 @@ use nexus_core::execution::{
     drive_preset_run, resume_driven_sessions, ExecutionHandle, PresetRunConfig, PresetRunOutcome,
     ResumeDecision, RunControlError, RunnerDeps,
 };
-use nexus_core::{CoreAccess, CoreOpenOptions, CoreService};
+use nexus_core::{CoreAccess, CoreOpenOptions, CoreService, Principal};
 use nexus_local_db::findings::{create_finding, Finding};
 use nexus_local_db::works::{create_work_atomic, WorkRecord};
 use nexus_local_db::writer_protocol::init_guarded_pool;
@@ -157,6 +157,10 @@ struct ParkedHost {
     /// When set, a prompt's event stream closes (EOF) after its deltas
     /// without ever emitting a terminal event.
     stream_eof: AtomicBool,
+    /// When set, every owned session shutdown FAILS: the exact owned process
+    /// cleanup cannot be confirmed, so a cancel must settle `interrupted` —
+    /// never a false successful `cancelled`.
+    shutdown_unconfirmed: AtomicBool,
 }
 
 impl ParkedHost {
@@ -170,6 +174,7 @@ impl ParkedHost {
             non_end_turn: AtomicBool::new(false),
             launch_fails: AtomicBool::new(false),
             stream_eof: AtomicBool::new(false),
+            shutdown_unconfirmed: AtomicBool::new(false),
         })
     }
 
@@ -206,6 +211,30 @@ impl ParkedHost {
         for sender in self.parked.lock().expect("parked").drain(..) {
             let _ = sender.send(());
         }
+    }
+
+    /// Release the prompts parked RIGHT NOW, WITHOUT arming the permanent
+    /// [`Self::release_all`] flag: a later prompt parks again, so a test can
+    /// unblock one owned operation and still keep the next one in flight.
+    ///
+    /// `exec` registers its release sender and bumps the prompt counter in the
+    /// same synchronous step, so a caller that observed `prompt_count() >= 1`
+    /// through [`wait_for_prompt`] is guaranteed a parked sender to release.
+    fn release_parked(&self) {
+        for sender in self.parked.lock().expect("parked").drain(..) {
+            let _ = sender.send(());
+        }
+    }
+
+    /// Make every owned-session shutdown unconfirmable (see the field doc).
+    fn fail_session_shutdown(&self) {
+        self.shutdown_unconfirmed.store(true, Ordering::SeqCst);
+    }
+
+    /// Restore a confirmable owned-session shutdown — the retry that must
+    /// confirm the unconfirmed cancellation.
+    fn confirm_session_shutdown(&self) {
+        self.shutdown_unconfirmed.store(false, Ordering::SeqCst);
     }
 }
 
@@ -322,6 +351,13 @@ impl HostFacade for ParkedHost {
     }
 
     async fn shutdown_session(&self, session_id: HostSessionId) -> HostResult<()> {
+        // Unconfirmed cleanup: the session is deliberately LEFT in the map so
+        // the run stays visibly interrupted and a retry can still reap it.
+        if self.shutdown_unconfirmed.load(Ordering::SeqCst) {
+            return Err(HostError::internal(
+                "retained parked host: owned session shutdown unconfirmed",
+            ));
+        }
         self.sessions.lock().expect("sessions").remove(&session_id);
         Ok(())
     }
@@ -521,11 +557,35 @@ async fn add_pending_schedule(fixture: &OwnerFixture, label: &str) -> String {
 /// Wait (bounded) until the parked Host has recorded at least one prompt —
 /// the drive runs in a spawned task, so the first prompt is asynchronous.
 async fn wait_for_prompt(host: &ParkedHost) {
+    wait_for_prompt_count(host, 1).await;
+}
+
+/// Wait (bounded) until the parked Host has recorded at least `min` prompts —
+/// `exec` bumps the counter and registers its release sender in the same
+/// synchronous step, so a caller returning from here owns a parked prompt.
+async fn wait_for_prompt_count(host: &ParkedHost, min: usize) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    while host.prompt_count() == 0 {
+    while host.prompt_count() < min {
         assert!(
             std::time::Instant::now() < deadline,
             "the admitted run never reached the prompt port"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+}
+
+/// Wait (bounded) until the owned clock has claimed `schedule_id`'s run and
+/// return that run id.
+async fn wait_for_schedule_run(pool: &sqlx::SqlitePool, schedule_id: &str) -> String {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        let (_, owned) = schedule_row(pool, schedule_id).await;
+        if let Some(run_id) = owned {
+            return run_id;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the owned clock never admitted {schedule_id}"
         );
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
@@ -539,6 +599,106 @@ async fn schedule_row(pool: &sqlx::SqlitePool, schedule_id: &str) -> (String, Op
     .fetch_one(pool)
     .await
     .expect("schedule row")
+}
+
+/// Insert one `driven_v1` pending schedule for `preset_id` through the PUBLIC
+/// add path (frozen descriptor + version-0 seed), as every admission-ready
+/// row is created.
+async fn add_schedule_preset(
+    handle: &ExecutionHandle,
+    principal: &Principal,
+    preset_id: &str,
+    label: &str,
+) -> String {
+    let request = AddScheduleRequest {
+        creator_id: CREATOR.to_string(),
+        preset_id: preset_id.to_string(),
+        seed: None,
+        label: Some(label.to_string()),
+        depends_on: None,
+        concurrency: None,
+        scheduled_at: None,
+        input: Some(json!({ "topic": "retained-cancel" })),
+        force_gates: false,
+        reason: None,
+        agent_bindings: Some(default_bindings()),
+    };
+    handle
+        .add_schedule(principal, request)
+        .await
+        .expect("schedule insert")
+        .schedule_id
+}
+
+/// Write a directory preset bundle into the fixture's nexus home (the same
+/// place `hosted_fixture` freezes `hosted-schedule-drive`), so the public add
+/// path and admission resolve it from disk.
+fn write_preset_bundle(nexus_home: &Path, preset_id: &str, yaml: &str, prompt_body: &str) {
+    let bundle = nexus_home.join("presets").join(preset_id);
+    std::fs::create_dir_all(bundle.join("prompts")).expect("preset bundle");
+    std::fs::write(bundle.join("preset.yaml"), yaml).expect("preset yaml");
+    std::fs::write(bundle.join("prompts/generate.md"), prompt_body).expect("prompt template");
+}
+
+fn signal(name: &str) -> nexus_contracts::local::schedule::http::SignalScheduleRequest {
+    nexus_contracts::local::schedule::http::SignalScheduleRequest {
+        signal: name.to_string(),
+        wait_id: None,
+    }
+}
+
+/// Count the creator's ROOT runs (`parent_session_id IS NULL`) — one run per
+/// schedule, ever: inner-graph child rows are descendants of that one root.
+async fn root_run_count(pool: &sqlx::SqlitePool) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM orchestration_sessions WHERE parent_session_id IS NULL")
+        .fetch_one(pool)
+        .await
+        .expect("root run count")
+}
+
+/// The durable v1 record of one run (status + durable state).
+async fn durable_record(
+    pool: &sqlx::SqlitePool,
+    run_id: &str,
+) -> nexus_orchestration::run_state::RunRecord {
+    SqliteSessionStorage::new(Arc::new(pool.clone()))
+        .load_run(&nexus_orchestration::engine::SessionId(run_id.to_string()))
+        .await
+        .expect("durable run load")
+        .expect("the admitted run row exists")
+}
+
+/// Wait (bounded) until the run is parked at its manual human wait, and
+/// return that run's exact durable wait token.
+async fn wait_for_human_wait(pool: &sqlx::SqlitePool, run_id: &str) -> String {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        let record = durable_record(pool, run_id).await;
+        if let Some(wait) = record.state.as_ref().and_then(|s| s.wait.as_ref()) {
+            return wait.wait_id.clone();
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the run never reached its manual human wait (status {:?})",
+            record.status
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+}
+
+/// Wait (bounded) until the run reaches a durable status.
+async fn wait_for_run_status(pool: &sqlx::SqlitePool, run_id: &str, status: &str) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        if durable_record(pool, run_id).await.status.as_db_str() == status {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the run never reached {status}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3415,4 +3575,568 @@ async fn public_schedule_reads_and_context_are_owned() {
     let report = fixture.handle.close().await.expect("owner close");
     assert!(report.cleanup_confirmed, "close must report confirmed cleanup");
     fixture.core.close().await.expect("core close");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Public cancel/resume closure (v1.195 P0-T4)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Owner-fixture preset for the cancel/resume seam: one prompt (so an
+/// admission can be parked mid-step) followed by a MANUAL human wait (so the
+/// run can never reach `Completed` on its own, and a plain resume has a real
+/// wait it must refuse to continue).
+const CANCEL_WAIT_PRESET: &str = "cancel-wait-guard";
+
+fn cancel_wait_preset_yaml() -> String {
+    format!(
+        r#"
+preset:
+  id: {CANCEL_WAIT_PRESET}
+  version: 1
+  kind: creator
+  description: "cancel/resume fixture — prompt then a manual human wait"
+  requires_capabilities:
+    - acp.prompt
+  initial: parked_prompt
+  terminal: done
+states:
+  - id: parked_prompt
+    description: "prompt the parked host so the run is mid-step"
+    enter:
+      - kind: inner_graph
+        name: prompt_graph
+    exit_when: {{ kind: graph_complete }}
+    next: human_wait
+  - id: human_wait
+    description: "manual wait: only its exact wait token may continue it"
+    exit_when: {{ kind: manual }}
+    next: done
+  - id: done
+    terminal: true
+
+inner_graphs:
+  prompt_graph:
+    nodes:
+      - id: guarded_prompt
+        kind: acp_prompt
+        template_file: prompts/generate.md
+        tool_policy: deny_all
+    output_binding: guarded_prompt.text
+"#
+    )
+}
+
+/// Hosted preset for the effect race: the prompt comes FIRST and the
+/// authorized workspace commit LAST, so a cancel that lands while the prompt
+/// is in flight must leave the commit unexecuted — the exact "late commit is
+/// refused" ordering.
+const CANCEL_EFFECT_PRESET: &str = "cancel-effect-guard";
+/// The committed file, relative to the canonical creative root (the preset's
+/// `workspace.open` scope is `notes`).
+const CANCEL_EFFECT_FILE: &str = "notes/cancel-effect.txt";
+const CANCEL_EFFECT_B64: &str = "Y2FuY2VsLWVmZmVjdCBwYXlsb2FkCg==";
+
+fn cancel_effect_preset_yaml() -> String {
+    format!(
+        r#"
+preset:
+  id: {CANCEL_EFFECT_PRESET}
+  version: 1
+  kind: creator
+  description: "cancel/effect fixture — prompt first, authorized commit last"
+  requires_capabilities:
+    - workspace.open
+    - workspace.commit
+    - acp.prompt
+  initial: parked_prompt
+  terminal: done
+states:
+  - id: parked_prompt
+    description: "prompt the parked host so the run is mid-step before any effect"
+    enter:
+      - kind: inner_graph
+        name: prompt_graph
+    exit_when: {{ kind: graph_complete }}
+    next: open_scope
+  - id: open_scope
+    description: "open a scope inside the factory-resolved creative root"
+    enter:
+      - kind: capability
+        name: workspace.open
+        args:
+          path: notes
+    exit_when: {{ kind: rule }}
+    next: commit_scope
+  - id: commit_scope
+    description: "one declared create through the bound commit authority"
+    enter:
+      - kind: capability
+        name: workspace.commit
+        args:
+          sessionId: "{{{{_capability_output.sessionId}}}}"
+          changes:
+            - path: cancel-effect.txt
+              op: create
+              contentBase64: "{CANCEL_EFFECT_B64}"
+    exit_when: {{ kind: rule }}
+    next: done
+  - id: done
+    terminal: true
+
+inner_graphs:
+  prompt_graph:
+    nodes:
+      - id: guarded_prompt
+        kind: acp_prompt
+        template_file: prompts/generate.md
+        tool_policy: deny_all
+    output_binding: guarded_prompt.text
+"#
+    )
+}
+
+/// The public cancel/resume closure (S0-3/S0-4/S0-6).
+///
+/// A cancel on a schedule that owns NO run is ONE CAS on the SAME fence the
+/// admission claim writes on — so a later admission is refused and nothing is
+/// minted, and a cancel that lands while an admission is in flight converges
+/// on the durable winner either way. A cancel on an ADMITTED schedule routes
+/// to the SAME owned run: a manual human wait is never implicitly continued
+/// (the plain resume refuses and the exact wait token survives), the confirmed
+/// cancel is the durable winner (never a provider acknowledgement), and the
+/// LAST step of the preset — an authorized workspace commit — is refused once
+/// the run is cancelled. A completed winner stays completed, and an
+/// unconfirmed cleanup settles `interrupted` with the schedule row left
+/// non-terminal until a retry confirms it.
+#[allow(clippy::too_many_lines)] // one linear public journey; splitting hides the ordering evidence
+#[tokio::test]
+#[serial_test::serial]
+async fn public_cancel_fences_late_workspace_commit() {
+    // ═══ Part 1 — the admission fence, on an owner with NO owned clock, so
+    //         every claim below is explicit and no tick can race the CAS. ═══
+    let fixture = owner_fixture().await;
+    let principal = fixture.core.active_principal().await.unwrap();
+    let pool = fixture.pool();
+    let coordinator = fixture.coordinator();
+    let caps = fixture.handle.capability_holder();
+    let home = fixture.nexus_home();
+    let executor =
+        fixture.executor.clone() as Arc<dyn nexus_orchestration::capability::PromptExecutor>;
+    write_preset_bundle(
+        &home,
+        CANCEL_WAIT_PRESET,
+        &cancel_wait_preset_yaml(),
+        "Summarize the retained topic: {{preset.input.topic}}\n",
+    );
+
+    // ── 1. A pending row that owns NO run: the cancel is the fence, the row is
+    //       durably cancelled with nothing behind it, and the LATER admission
+    //       (the late commit) is refused without minting a run. ──
+    let unowned = add_schedule_preset(
+        &fixture.handle,
+        &principal,
+        CANCEL_WAIT_PRESET,
+        "cancel-unowned",
+    )
+    .await;
+    let cancelled = fixture
+        .handle
+        .signal_schedule(&principal, unowned.clone(), signal("cancel"))
+        .await
+        .expect("cancel the unowned row");
+    assert_eq!(
+        cancelled.status, "cancelled",
+        "the response must carry the durable winner"
+    );
+    let (status, owned) = schedule_row(pool.as_ref(), &unowned).await;
+    assert_eq!(status, "cancelled", "the row itself is durably cancelled");
+    assert!(owned.is_none(), "a cancelled unowned row claims no run");
+    assert_eq!(
+        root_run_count(pool.as_ref()).await,
+        0,
+        "a cancelled unowned row must mint no run at all"
+    );
+
+    // The late commit: a cancelled row is no longer claimable, so the
+    // admission that arrives after the cancel is refused — and minted nothing.
+    let late_admission = coordinator
+        .admit_schedule(
+            &unowned,
+            pool.as_ref(),
+            &home,
+            &caps,
+            None,
+            Some(executor.clone()),
+        )
+        .await;
+    match late_admission {
+        Err(RunControlError::NotEligible(id, reason)) => {
+            assert_eq!(id, unowned, "the refusal names the row");
+            assert!(
+                reason.contains("cancelled"),
+                "the refusal must name the durable cancel: {reason}"
+            );
+        }
+        other => panic!("a cancelled row must refuse a later admission, got {other:?}"),
+    }
+    assert_eq!(
+        root_run_count(pool.as_ref()).await,
+        0,
+        "a refused admission must leave no run row"
+    );
+    assert_eq!(
+        fixture.host.prompt_count(),
+        0,
+        "no refused admission may reach the prompt port"
+    );
+
+    // ── 2. An ADMITTED schedule: the signal goes to the SAME owned run. A
+    //       plain resume must NOT continue its manual human wait; the cancel
+    //       settles it durably and the schedule never gains a second run. ──
+    let admitted = add_schedule_preset(
+        &fixture.handle,
+        &principal,
+        CANCEL_WAIT_PRESET,
+        "cancel-admitted",
+    )
+    .await;
+    let run_id = coordinator
+        .admit_schedule(
+            &admitted,
+            pool.as_ref(),
+            &home,
+            &caps,
+            None,
+            Some(executor.clone()),
+        )
+        .await
+        .expect("admission")
+        .0;
+    wait_for_prompt(&fixture.host).await;
+    fixture.host.release_parked();
+    let wait_id = wait_for_human_wait(pool.as_ref(), run_id.as_str()).await;
+    let (status, owned) = schedule_row(pool.as_ref(), &admitted).await;
+    assert_eq!(status, "running", "the admitted row owns its live run");
+    assert_eq!(owned.as_deref(), Some(run_id.as_str()));
+
+    // 2a. Manual waits are not implicitly continued: a plain resume refuses
+    //     with the exact state conflict and the wait token SURVIVES.
+    let refused = fixture
+        .handle
+        .signal_schedule(&principal, admitted.clone(), signal("resume"))
+        .await
+        .unwrap_err();
+    match &refused {
+        nexus_core::CoreError::Coded { code, message } => {
+            assert_eq!(
+                code, "workflow_state_conflict",
+                "a plain resume on a human wait must be a state conflict, got {refused:?}"
+            );
+            assert!(
+                message.contains("refuses the signal"),
+                "the conflict must be the run's typed refusal: {message}"
+            );
+        }
+        other => panic!("a plain resume must refuse, got {other:?}"),
+    }
+    let record = durable_record(pool.as_ref(), run_id.as_str()).await;
+    let surviving_wait = record
+        .state
+        .as_ref()
+        .and_then(|s| s.wait.as_ref())
+        .map(|w| w.wait_id.clone());
+    assert_eq!(
+        surviving_wait.as_deref(),
+        Some(wait_id.as_str()),
+        "the manual wait must keep its exact token"
+    );
+    assert_eq!(root_run_count(pool.as_ref()).await, 1, "no second run");
+
+    // 2b. The cancel reaches the SAME run and returns the durable winner.
+    let cancelled = fixture
+        .handle
+        .signal_schedule(&principal, admitted.clone(), signal("cancel"))
+        .await
+        .expect("cancel the admitted row");
+    assert_eq!(
+        cancelled.status, "cancelled",
+        "only a confirmed stop is a cancel success"
+    );
+    assert_eq!(
+        durable_record(pool.as_ref(), run_id.as_str())
+            .await
+            .status
+            .as_db_str(),
+        "cancelled",
+        "the owned run is durably cancelled"
+    );
+    let (status, owned) = schedule_row(pool.as_ref(), &admitted).await;
+    assert_eq!(status, "cancelled", "the schedule projects the same winner");
+    assert_eq!(
+        owned.as_deref(),
+        Some(run_id.as_str()),
+        "the cancelled schedule still names the run it owned"
+    );
+    assert_eq!(
+        root_run_count(pool.as_ref()).await,
+        1,
+        "cancel must not open a second workflow"
+    );
+
+    // ── 3. Cancel and admission contend for ONE unowned row. The CAS and the
+    //       store's claim write on the SAME `current_session_id IS NULL`
+    //       fence, so exactly one of them wins the row; whichever does, the
+    //       cancel converges on a durable `cancelled` and the run behind a
+    //       claim is terminal — never a cancelled row driving a live run. ──
+    let racing = add_schedule_preset(
+        &fixture.handle,
+        &principal,
+        CANCEL_WAIT_PRESET,
+        "cancel-race",
+    )
+    .await;
+    // The winner's run parks at the preset's prompt, and the cancel's bounded
+    // teardown waits on that parked operation: release everything (permanently
+    // armed) once the racing writers have started, so neither outcome can hang.
+    let host = fixture.host.clone();
+    let releaser = tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        host.release_all();
+    });
+    let admission = coordinator.admit_schedule(
+        &racing,
+        pool.as_ref(),
+        &home,
+        &caps,
+        None,
+        Some(executor.clone()),
+    );
+    let cancellation = fixture
+        .handle
+        .signal_schedule(&principal, racing.clone(), signal("cancel"));
+    let (admitted_result, cancelled_result) = tokio::join!(admission, cancellation);
+    let _ = releaser.await;
+    assert_eq!(
+        root_run_count(pool.as_ref()).await,
+        2,
+        "the race minted at most ONE further run"
+    );
+    match (&admitted_result, &cancelled_result) {
+        // The cancel won the fence: the admission legitimately lost.
+        (Err(RunControlError::NotEligible(id, _)), Ok(cancelled)) => {
+            assert_eq!(id, &racing);
+            assert_eq!(cancelled.status, "cancelled");
+        }
+        // The admission won the claim: the cancel reaches THAT claimed run.
+        (Ok(_), Ok(cancelled)) => {
+            assert_eq!(
+                cancelled.status, "cancelled",
+                "the claimed run's cancel converges on the durable winner"
+            );
+        }
+        other => panic!(
+            "a cancel/admission race must converge on one truthful winner, got {other:?}"
+        ),
+    }
+    let (status, owned) = schedule_row(pool.as_ref(), &racing).await;
+    assert_eq!(
+        status, "cancelled",
+        "the raced row is durably cancelled whichever side won the fence"
+    );
+    if let Some(run_id) = &owned {
+        assert_eq!(
+            durable_record(pool.as_ref(), run_id).await.status.as_db_str(),
+            "cancelled",
+            "a cancelled row must never be driving a live run"
+        );
+    }
+
+    // Cleanup: release anything still parked, then close the owner.
+    fixture.host.release_all();
+    let report = fixture.handle.close().await.expect("owner close");
+    assert!(report.cleanup_confirmed, "close must report confirmed cleanup");
+    fixture.core.close().await.expect("core close");
+
+    // ═══ Part 2 — the effect race, on the production hosted owner whose
+    //         authorized commit runs AFTER the prompt. ═══
+    let hosted = hosted_fixture().await;
+    let principal = hosted.core.active_principal().await.unwrap();
+    let pool = hosted.handle.coordinator().pool();
+    let nexus_home = hosted.tmp.path().join(".nexus42");
+    write_preset_bundle(
+        &nexus_home,
+        CANCEL_EFFECT_PRESET,
+        &cancel_effect_preset_yaml(),
+        "Summarize the hosted topic: {{preset.input.topic}}\n",
+    );
+
+    // ── 4. Cancel/effect race: the cancel lands while the prompt is in flight,
+    //       so the LAST step — the authorized workspace commit — never runs. ──
+    let prompts_before = hosted.host.prompt_count();
+    let fenced = add_schedule_preset(
+        &hosted.handle,
+        &principal,
+        CANCEL_EFFECT_PRESET,
+        "cancel-effect-fenced",
+    )
+    .await;
+    let fenced_run = wait_for_schedule_run(pool.as_ref(), &fenced).await;
+    wait_for_prompt_count(&hosted.host, prompts_before + 1).await;
+    let cancelled = tokio::spawn({
+        let handle = hosted.handle.clone();
+        let principal = principal.clone();
+        let schedule_id = fenced.clone();
+        async move { handle.signal_schedule(&principal, schedule_id, signal("cancel")).await }
+    });
+    // The engine persists the durable cancel intent BEFORE it fires the run
+    // token: once that fence is durable the cancel is already the durable
+    // control winner, and the parked prompt is only unwinding.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        let record = durable_record(pool.as_ref(), &fenced_run).await;
+        if record
+            .state
+            .as_ref()
+            .is_some_and(|s| s.cancel_requested)
+        {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the cancel intent never became durable"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    hosted.host.release_parked();
+    let cancelled = cancelled
+        .await
+        .expect("cancel task joins")
+        .expect("a confirmed cancel");
+    assert_eq!(
+        cancelled.status, "cancelled",
+        "the in-flight prompt's teardown confirms the stop"
+    );
+    // The late commit: the cancelled run never reaches the commit state, the
+    // run is durably cancelled, and the schedule projects the same winner.
+    assert!(
+        !hosted.root.join(CANCEL_EFFECT_FILE).exists(),
+        "the authorized commit AFTER the cancel must be refused"
+    );
+    wait_for_run_status(pool.as_ref(), &fenced_run, "cancelled").await;
+    assert_eq!(
+        schedule_row(pool.as_ref(), &fenced).await.0,
+        "cancelled",
+        "the schedule row projects the durable cancel"
+    );
+
+    // ── 5. Unconfirmed cleanup is NOT a cancel success: the run settles
+    //       `interrupted`, the schedule row stays non-terminal, and a retry
+    //       cancel (with the owned shutdown confirmable again) settles it. ──
+    let prompts_before = hosted.host.prompt_count();
+    let unconfirmed = add_schedule_preset(
+        &hosted.handle,
+        &principal,
+        CANCEL_EFFECT_PRESET,
+        "cancel-unconfirmed",
+    )
+    .await;
+    let unconfirmed_run = wait_for_schedule_run(pool.as_ref(), &unconfirmed).await;
+    wait_for_prompt_count(&hosted.host, prompts_before + 1).await;
+    hosted.host.fail_session_shutdown();
+    let interrupted = tokio::spawn({
+        let handle = hosted.handle.clone();
+        let principal = principal.clone();
+        let schedule_id = unconfirmed.clone();
+        async move { handle.signal_schedule(&principal, schedule_id, signal("cancel")).await }
+    });
+    hosted.host.release_parked();
+    let interrupted = interrupted
+        .await
+        .expect("cancel task joins")
+        .expect("the unconfirmed cancel is still a typed answer");
+    assert_eq!(
+        interrupted.status, "interrupted",
+        "unconfirmed cleanup must never report `cancelled`"
+    );
+    let record = durable_record(pool.as_ref(), &unconfirmed_run).await;
+    assert_eq!(
+        record.status.as_db_str(),
+        "interrupted",
+        "the durable winner is the unconfirmed cleanup"
+    );
+    assert!(
+        record.state.as_ref().is_some_and(|s| s.cancel_requested),
+        "the interrupted run keeps its durable cancel intent"
+    );
+    assert_eq!(
+        schedule_row(pool.as_ref(), &unconfirmed).await.0,
+        "running",
+        "the schedule row stays non-terminal while cleanup is unconfirmed"
+    );
+
+    // The retry: the same signal confirms the owned teardown and settles.
+    hosted.host.confirm_session_shutdown();
+    let confirmed = hosted
+        .handle
+        .signal_schedule(&principal, unconfirmed.clone(), signal("cancel"))
+        .await
+        .expect("the retry cancel confirms");
+    assert_eq!(confirmed.status, "cancelled", "the retry is the confirmation");
+    assert_eq!(
+        schedule_row(pool.as_ref(), &unconfirmed).await.0,
+        "cancelled",
+        "the schedule row settles only on the confirmed cancel"
+    );
+
+    // ── 6. A completed winner stays completed: the cancel of a settled run is
+    //       a typed conflict and relabels nothing. ──
+    let prompts_before = hosted.host.prompt_count();
+    let completed = add_schedule_preset(
+        &hosted.handle,
+        &principal,
+        CANCEL_EFFECT_PRESET,
+        "cancel-completed",
+    )
+    .await;
+    let completed_run = wait_for_schedule_run(pool.as_ref(), &completed).await;
+    wait_for_prompt_count(&hosted.host, prompts_before + 1).await;
+    hosted.host.release_parked();
+    wait_for_run_status(pool.as_ref(), &completed_run, "completed").await;
+    // The effect that linearized BEFORE the cancel stays committed.
+    let committed = hosted.root.join(CANCEL_EFFECT_FILE);
+    assert_eq!(
+        std::fs::read(&committed).expect("the committed bytes"),
+        b"cancel-effect payload\n".as_slice(),
+        "a completed effect that linearized before the cancel remains committed"
+    );
+    let late_cancel = hosted
+        .handle
+        .signal_schedule(&principal, completed.clone(), signal("cancel"))
+        .await
+        .unwrap_err();
+    match &late_cancel {
+        nexus_core::CoreError::Coded { code, message } => {
+            assert_eq!(
+                code, "workflow_state_conflict",
+                "a raced completion is never relabelled cancelled, got {late_cancel:?}"
+            );
+            let _ = message; // the durable detail is asserted on the row below
+        }
+        other => panic!("a completed winner must refuse the cancel, got {other:?}"),
+    }
+    assert_eq!(
+        schedule_row(pool.as_ref(), &completed).await.0,
+        "completed",
+        "the completed winner stays completed"
+    );
+    assert_eq!(
+        durable_record(pool.as_ref(), &completed_run).await.status.as_db_str(),
+        "completed"
+    );
+
+    // Cleanup: release anything parked, then close the hosted owner.
+    hosted.host.release_all();
+    let report = hosted.handle.close().await.expect("owner close");
+    assert!(report.cleanup_confirmed, "close must report confirmed cleanup");
+    hosted.core.close().await.expect("core close");
 }
