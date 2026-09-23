@@ -368,7 +368,10 @@ describe('useClearRuns — cleared rows leave every cached view', () => {
       return (
         <div>
           <span data-testid="runs">{flattenPages(runs.data).length}</span>
-          <span data-testid="run">{run.data?.status ?? 'none'}</span>
+          {/* The cleared Run's detail read fails (404). React Query keeps the
+              last successful `data` through an error, so the honest consumer
+              signal — and what the real studio renders from — is `isError`. */}
+          <span data-testid="run">{run.isError ? 'error' : (run.data?.status ?? 'none')}</span>
           <button
             type="button"
             onClick={() =>
@@ -386,28 +389,45 @@ describe('useClearRuns — cleared rows leave every cached view', () => {
     renderInApp(<Harness />, { client: new BrowserClient() });
   }
 
-  it('refetches the runs list and the cached run detail after a clear', async () => {
-    const listSpy = vi.fn(() =>
-      HttpResponse.json({ items: [makeRun({ status: 'applied' })], has_more: false }),
-    );
-    const detailSpy = vi.fn(() => HttpResponse.json(makeRun({ status: 'applied' })));
-    const deleteSpy = vi.fn(() => HttpResponse.json({ deleted: 1 }));
+  it('drops the cleared row from the mounted runs list and run detail', async () => {
+    // Server-side state the DELETE flips: the post-clear reads must disagree
+    // with the pre-clear ones, so only a real refetch can move the mounted
+    // consumers (call counting would pass on a spy echo).
+    let cleared = false;
     useHandlers(
-      http.get('/v1/daemon/compute/runs', () => listSpy()),
-      http.get('/v1/daemon/compute/runs/:runId', () => detailSpy()),
-      http.delete('/v1/daemon/compute/runs', () => deleteSpy()),
+      http.get('/v1/daemon/compute/runs', () =>
+        HttpResponse.json(
+          cleared
+            ? { items: [], has_more: false }
+            : { items: [makeRun({ status: 'applied' })], has_more: false },
+        ),
+      ),
+      http.get('/v1/daemon/compute/runs/:runId', () =>
+        cleared
+          ? HttpResponse.json(
+              { success: false, error: { code: 'not_found', message: 'run run_1 not found' } },
+              { status: 404 },
+            )
+          : HttpResponse.json(makeRun({ status: 'applied' })),
+      ),
+      http.delete('/v1/daemon/compute/runs', () => {
+        cleared = true;
+        return HttpResponse.json({ deleted: 1 });
+      }),
     );
 
     renderClearHarness(() => undefined);
-    expect(await screen.findByText('applied')).toBeInTheDocument();
-    expect(listSpy).toHaveBeenCalledTimes(1);
-    expect(detailSpy).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.getByTestId('runs')).toHaveTextContent('1'));
+    await waitFor(() => expect(screen.getByTestId('run')).toHaveTextContent('applied'));
 
     fireEvent.click(screen.getByRole('button', { name: /clear/i }));
-    await waitFor(() => expect(deleteSpy).toHaveBeenCalledTimes(1));
-    // Without this refetch the table keeps rendering the rows the server just
-    // deleted (observed as stale Clear-history rows against the real service).
-    await waitFor(() => expect(listSpy).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(detailSpy).toHaveBeenCalledTimes(2));
+
+    // Without the invalidation the mounted views keep rendering the row the
+    // server just deleted (observed against the real service: DOM kept both
+    // rows while `GET /compute/runs` already returned `items: []`).
+    await waitFor(() => expect(screen.getByTestId('runs')).toHaveTextContent('0'));
+    // The refetched detail is a 404 now: the open Run's read is in its error
+    // state (the real studio renders "Could not load this Run" from it).
+    await waitFor(() => expect(screen.getByTestId('run')).toHaveTextContent('error'));
   });
 });
