@@ -820,7 +820,7 @@ async fn await_settled_close(state: &Arc<EnvState>) -> CoreCloseReport {
 }
 
 /// The close body: release the JS sessions, then run ONE bounded cleanup over
-/// the retained owners. The caller owns the close's publication.
+/// the retained owners. The settlement owner publishes the result.
 async fn run_close(state: Arc<EnvState>) -> CoreCloseReport {
     let started = Instant::now();
     let deadline = started + close_budget();
@@ -877,32 +877,12 @@ async fn run_close(state: Arc<EnvState>) -> CoreCloseReport {
     }
 }
 
-/// Close the environment with a 5s phased budget and one concurrent settlement.
-pub async fn close_core(state: Arc<EnvState>) -> CoreCloseReport {
-    // A confirmed close is idempotent: nothing is left to retry.
-    let cached = state.settled_close.lock().await.clone();
-    if let Some(report) = cached {
-        if report.cleanup_confirmed {
-            return report;
-        }
-    }
-    // ONE close owner at a time — for a fresh close AND for a retry of a
-    // retained Interrupted verdict. A rival retry running concurrently could
-    // find the core slot already emptied by the owner and read that absence as
-    // "already closed", publishing a confirmed report over a settlement that is
-    // still running.
-    {
-        let mut in_flight = state.close_in_flight.lock().await;
-        if *in_flight {
-            drop(in_flight);
-            return await_settled_close(&state).await;
-        }
-        *in_flight = true;
-    }
-
+/// The claimed settlement: replay a settled confirmed verdict, retry what a
+/// previous close retained, otherwise close for the first time.
+async fn settle_claimed(state: Arc<EnvState>) -> CoreCloseReport {
     let retained = state.settled_close.lock().await.clone();
-    let report = match retained {
-        // A settlement landed while this caller acquired ownership: report it
+    match retained {
+        // A settlement landed while this close acquired ownership: report it
         // rather than re-run cleanup over an already settled environment.
         Some(settled) if settled.cleanup_confirmed => settled,
         // A previously interrupted close retained owners and possibly live JS
@@ -917,15 +897,84 @@ pub async fn close_core(state: Arc<EnvState>) -> CoreCloseReport {
             }
         }
         None => run_close(state.clone()).await,
-    };
+    }
+}
 
+/// Publish a settlement: the report first, then the boundary, then the waiters.
+///
+/// A waiter re-checks `close_in_flight` before it reads `settled_close`, so the
+/// report must be visible by the time the boundary is released.
+async fn publish_settled_close(state: &Arc<EnvState>, report: CoreCloseReport) {
     *state.settled_close.lock().await = Some(report.clone());
     *state.close_in_flight.lock().await = false;
     if !report.cleanup_confirmed {
         state.mark_interrupted();
     }
     state.close_notify_settled.notify_waiters();
-    report
+}
+
+/// The retained close owner: the ONE settlement of a claimed boundary.
+///
+/// It is a task of its own, so the caller that claimed the boundary can be
+/// cancelled without cancelling the settlement: the retained owners stay
+/// claimed by a live future until the cleanup really runs, and the boundary is
+/// always released with a report for the waiters.
+///
+/// The settlement runs in its own task too, so a panic inside the cleanup (a
+/// poisoned owner lock, a provider release that unwinds) is observed here as a
+/// failed join — after the runtime has unwound it and its guards have handed
+/// every claimed owner back. It publishes an unconfirmed Interrupted close: a
+/// failed settlement never fabricates a confirmed one, and it never strands the
+/// boundary or the waiters.
+async fn own_close(state: Arc<EnvState>) {
+    let report = match tokio::spawn(settle_claimed(state.clone())).await {
+        Ok(report) => report,
+        Err(_) => {
+            let mut pending = state.pending_operations_snapshot().await;
+            if state.owner_slots_present() {
+                pending.push("cleanup-owners-retained".to_string());
+            }
+            interrupted_report(pending)
+        }
+    };
+    publish_settled_close(&state, report).await;
+}
+
+/// Claim the close boundary and hand the settlement to its retained owner.
+///
+/// The claim and the handoff sit in ONE synchronous region of the boundary
+/// lock: nothing is awaited between setting `close_in_flight` and spawning the
+/// task that owns publication, so no cancellation can land in between and leave
+/// the boundary claimed with nobody left to settle it.
+async fn claim_close(state: &Arc<EnvState>) {
+    let mut in_flight = state.close_in_flight.lock().await;
+    if !*in_flight {
+        *in_flight = true;
+        tokio::spawn(own_close(state.clone()));
+    }
+}
+
+/// Close the environment with a 5s phased budget and one concurrent settlement.
+///
+/// Requires a Tokio runtime context: the claimed settlement is owned by a
+/// retained task rather than by this caller.
+pub async fn close_core(state: Arc<EnvState>) -> CoreCloseReport {
+    // A confirmed close is idempotent: nothing is left to retry.
+    let cached = state.settled_close.lock().await.clone();
+    if let Some(report) = cached {
+        if report.cleanup_confirmed {
+            return report;
+        }
+    }
+    // ONE close owner at a time — for a fresh close AND for a retry of a
+    // retained Interrupted verdict. A rival retry running concurrently could
+    // find the core slot already emptied by the owner and read that absence as
+    // "already closed", publishing a confirmed report over a settlement that is
+    // still running.
+    claim_close(&state).await;
+    // Every caller — the one that claimed the settlement and every waiter that
+    // arrived while it was in flight — is handed the report its owner published.
+    await_settled_close(&state).await
 }
 
 #[cfg(test)]
@@ -1327,6 +1376,241 @@ mod tests {
         assert!(!state.owner_slots_present());
         assert!(state.core.lock().expect("core mutex poisoned").is_none());
         assert!(state.host.lock().expect("host mutex poisoned").is_none());
+    }
+
+    /// The frozen L2 Critical: the boundary belongs to the claimed settlement,
+    /// not to the caller that claimed it.
+    ///
+    /// A caller cancelled after the claim must not strand the environment: the
+    /// settlement still runs to publication, later closers are handed that real
+    /// report inside their own budget, and an interrupted open is released with
+    /// the honest verdict instead of hanging on a boundary nobody will release.
+    #[tokio::test]
+    async fn cancelled_outer_close_keeps_the_settlement_owner() {
+        use crate::wire_fixture::seed_wire_home;
+        use nexus_contracts::native_open_options::NativeOpenOptionsAccess;
+        use nexus_contracts::NativeOpenOptions;
+        use tempfile::tempdir;
+
+        // The forcing seams are process-global: hold their lock for the whole
+        // case so no concurrent close test can reset the block mid-phase.
+        let _seams = forcing::seam_lock::acquire().await;
+        let dir = tempdir().expect("tempdir");
+        seed_wire_home(dir.path()).await;
+        let state = Arc::new(EnvState::new());
+        let options = || NativeOpenOptions {
+            user_home: dir.path().to_string_lossy().to_string(),
+            access: NativeOpenOptionsAccess::EngineOwner,
+            allow_uninitialized: false,
+        };
+        // A short deterministic budget (the production value stays 5 s) with a
+        // cleanup block far past it: the claimed close cannot finish by itself.
+        set_force_close_budget_ms(300);
+        set_force_cleanup_delay_ms(10_000);
+        open_core(state.clone(), options(), None)
+            .await
+            .expect("open");
+        assert!(state.owner_slots_present());
+
+        // Claim, then cancel the OUTER caller. The rendezvous is the claim
+        // itself, so the cancellation lands with the boundary already taken and
+        // no report published yet.
+        let caller = tokio::spawn(close_core(state.clone()));
+        let claim_deadline = Instant::now() + Duration::from_secs(5);
+        while !*state.close_in_flight.lock().await {
+            assert!(
+                Instant::now() < claim_deadline,
+                "the close never claimed the boundary"
+            );
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        caller.abort();
+        assert!(
+            caller.await.is_err(),
+            "the outer caller must really have been cancelled, not completed"
+        );
+
+        // The settlement owner publishes on its own: the boundary is released
+        // without the cancelled caller.
+        let settle_deadline = Instant::now() + Duration::from_secs(2);
+        while *state.close_in_flight.lock().await {
+            assert!(
+                Instant::now() < settle_deadline,
+                "a cancelled caller stranded the close boundary"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let published = state
+            .settled_close
+            .lock()
+            .await
+            .clone()
+            .expect("the surviving settlement must publish a report");
+        assert_eq!(
+            published.state,
+            CoreCloseReportState::Interrupted,
+            "the blocked cleanup must publish the honest verdict: {published:?}"
+        );
+        assert!(!published.cleanup_confirmed);
+        assert!(
+            state.owner_slots_present(),
+            "an interrupted settlement retains its owners"
+        );
+
+        // A later closer is handed that report inside its own budget instead of
+        // waiting on a boundary nobody will ever release.
+        let second = tokio::time::timeout(Duration::from_secs(3), close_core(state.clone()))
+            .await
+            .expect("a cancelled caller must not strand a later closer");
+        assert_eq!(
+            second.state,
+            CoreCloseReportState::Interrupted,
+            "{second:?}"
+        );
+        assert!(
+            !second.cleanup_confirmed,
+            "no caller may confirm a cleanup that never ran: {second:?}"
+        );
+        assert!(state.owner_slots_present());
+
+        // An interrupted open routes through the same settlement owner and is
+        // released with the verdict rather than hung on the boundary.
+        let interrupted_open = tokio::time::timeout(
+            Duration::from_secs(3),
+            open_core(state.clone(), options(), None),
+        )
+        .await
+        .expect("an interrupted open must not hang on the close boundary");
+        assert!(
+            interrupted_open.is_err(),
+            "an unconfirmed cleanup must not admit a new owner"
+        );
+
+        // Only the settlement that really ran may confirm, and the settled
+        // environment admits a new owner again.
+        set_force_cleanup_delay_ms(0);
+        set_force_close_budget_ms(0);
+        let settled = close_core(state.clone()).await;
+        assert_eq!(settled.state, CoreCloseReportState::Closed, "{settled:?}");
+        assert!(settled.cleanup_confirmed);
+        assert!(!state.owner_slots_present());
+        open_core(state.clone(), options(), None)
+            .await
+            .expect("a settled environment admits a new owner");
+        let reopened = close_core(state.clone()).await;
+        assert_eq!(reopened.state, CoreCloseReportState::Closed, "{reopened:?}");
+        assert!(reopened.cleanup_confirmed);
+    }
+
+    /// A panic inside the cleanup is not a licence to fabricate a close or to
+    /// strand the boundary: the retained owner publishes an unconfirmed verdict
+    /// with every owner still retained, and a later close confirms only the
+    /// cleanup that really ran.
+    #[tokio::test]
+    async fn panicking_settlement_owner_publishes_unconfirmed() {
+        use crate::wire_fixture::seed_wire_home;
+        use async_trait::async_trait;
+        use nexus_contracts::native_open_options::NativeOpenOptionsAccess;
+        use nexus_contracts::{
+            CoreError, CoreErrorCode, NativeOpenOptions, ProviderCall, ProviderEventBatch,
+            ProviderReply,
+        };
+        use nexus_provider_ports::{ProviderPort, ProviderResult};
+        use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
+        use tempfile::tempdir;
+
+        /// A provider whose release unwinds: the shape of an adapter that panics
+        /// inside the close's release window. It stops unwinding once disarmed,
+        /// so the retry can settle the session it left behind.
+        struct PanickingReleasePort {
+            armed: AtomicBool,
+        }
+
+        #[async_trait]
+        impl ProviderPort for PanickingReleasePort {
+            async fn call(&self, request: ProviderCall) -> ProviderResult<ProviderReply> {
+                if self.armed.load(AtomicOrdering::SeqCst) {
+                    panic!("provider release panics while armed");
+                }
+                Ok(ProviderReply {
+                    request_id: request.request_id.clone(),
+                    ok: true,
+                    session_id: request.session_id.clone(),
+                    operation_id: None,
+                    health: None,
+                    error: None,
+                })
+            }
+
+            async fn next(
+                &self,
+                _operation_id: String,
+                _max_events: u32,
+                _max_bytes: u32,
+            ) -> ProviderResult<ProviderEventBatch> {
+                Err(CoreError {
+                    code: CoreErrorCode::Internal,
+                    message: "not used".into(),
+                    details: Default::default(),
+                    http_status: Some(500),
+                })
+            }
+        }
+
+        let _seams = forcing::seam_lock::acquire().await;
+        let dir = tempdir().expect("tempdir");
+        seed_wire_home(dir.path()).await;
+        let state = Arc::new(EnvState::new());
+        let options = || NativeOpenOptions {
+            user_home: dir.path().to_string_lossy().to_string(),
+            access: NativeOpenOptionsAccess::EngineOwner,
+            allow_uninitialized: false,
+        };
+        let port = Arc::new(PanickingReleasePort {
+            armed: AtomicBool::new(true),
+        });
+        open_core(state.clone(), options(), Some(port.clone()))
+            .await
+            .expect("open");
+        state.record_js_session("sess-panic".to_string(), "mock-provider".to_string());
+        assert!(state.owner_slots_present());
+
+        let report = tokio::time::timeout(Duration::from_secs(5), close_core(state.clone()))
+            .await
+            .expect("a panicking settlement must still publish");
+        assert_eq!(
+            report.state,
+            CoreCloseReportState::Interrupted,
+            "a panic must fail unconfirmed, never closed: {report:?}"
+        );
+        assert!(!report.cleanup_confirmed);
+        assert!(
+            !*state.close_in_flight.lock().await,
+            "a panicking settlement must still release the boundary"
+        );
+        assert!(
+            state.owner_slots_present(),
+            "a panicked cleanup retains the core/host owners"
+        );
+        assert_eq!(
+            state.js_session_ids(),
+            vec!["sess-panic".to_string()],
+            "the session whose release panicked stays registered"
+        );
+
+        // Disarm the port: only the cleanup that really runs may confirm.
+        port.armed.store(false, AtomicOrdering::SeqCst);
+        let settled = tokio::time::timeout(Duration::from_secs(5), close_core(state.clone()))
+            .await
+            .expect("the retry must not hang");
+        assert_eq!(settled.state, CoreCloseReportState::Closed, "{settled:?}");
+        assert!(settled.cleanup_confirmed);
+        assert!(state.js_session_ids().is_empty());
+        assert!(!state.owner_slots_present());
+        open_core(state.clone(), options(), None)
+            .await
+            .expect("a settled environment admits a new owner");
+        let _ = close_core(state.clone()).await;
     }
 
     #[tokio::test]
