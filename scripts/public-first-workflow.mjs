@@ -44,13 +44,18 @@
  *     `allowed_actions`, `wait`); a plain resume is refused by the A4 fence at
  *     a human wait, so the driver never issues it there and never claims a
  *     Steer it could not place;
- *   * the receipt must carry a real revision observed on a routed public
- *     surface (committed revision preferred, durable run-state revision
- *     otherwise). A missing revision is a failure, never a success, and no
- *     number is ever invented or derived from the fixture bytes;
- *   * a failed or unconfirmed owned-service shutdown overrides an otherwise
- *     successful journey: the receipt stays non-success and the process exits
- *     non-zero with its evidence retained;
+ *   * the receipt must carry the real **commit** revision of the declared
+ *     workspace commit, read from a routed same-run frame that carries the
+ *     canonical workspace-commit response shape (`rev_<id>`). The durable
+ *     run-state revision is recorded beside it as an explicitly labeled
+ *     informational fact and never substitutes for it: a run-state revision
+ *     proves run state, not the committed workspace. A missing commit revision
+ *     is a failure, never a success, and no number is ever invented or derived
+ *     from the fixture bytes;
+ *   * a failed or unconfirmed shutdown of any owned child — the service or the
+ *     loopback model endpoint — overrides an otherwise successful journey: the
+ *     receipt stays non-success and the process exits non-zero with its
+ *     evidence retained;
  *   * every child it started is stopped and every path it created is removed
  *     unless `--keep` is given (ownership-scoped cleanup);
  *   * the receipt carries ids, statuses, hashes and ports — never environment
@@ -103,6 +108,8 @@ const WORKSPACE_DISPLAY_NAME = 'First workflow';
 
 const SERVICE_READY_TIMEOUT_MS = 120_000;
 const SERVICE_STOP_TIMEOUT_MS = 30_000;
+/** Bounded confirmation window for the owned loopback model endpoint shutdown. */
+const MODEL_ENDPOINT_CLOSE_TIMEOUT_MS = 5_000;
 const CLI_TIMEOUT_MS = 120_000;
 const HTTP_TIMEOUT_MS = 30_000;
 const EVENT_STREAM_TIMEOUT_MS = 20_000;
@@ -863,23 +870,76 @@ async function stopServiceVia(running, label) {
 }
 
 /**
+ * Close one owned Node HTTP server with a checked, bounded confirmation.
+ *
+ * Node's `server.close(callback)` reports a callback error when the server was
+ * not open and otherwise waits for every open connection, so a rejected,
+ * throwing or never-calling close must not leave the driver without a verdict.
+ * The result is always a resolved `{confirmed, detail}` — never a rejection and
+ * never a throw — so a failing shutdown is routed into the cleanup disposition
+ * instead of being swallowed. Only the handle passed in is touched: no other
+ * process, socket or path is ever signalled or removed.
+ */
+function boundedServerClose(server, timeoutMs = MODEL_ENDPOINT_CLOSE_TIMEOUT_MS) {
+  return new Promise((resolvePromise) => {
+    let settled = false;
+    const settle = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolvePromise(result);
+    };
+    const dropIdleConnections = () => {
+      try {
+        server.closeAllConnections?.();
+      } catch {
+        // best effort: the callback verdict and the bound stay authoritative
+      }
+    };
+    const timer = setTimeout(() => {
+      dropIdleConnections();
+      settle({ confirmed: false, detail: `the owned server did not confirm shutdown within ${timeoutMs}ms` });
+    }, timeoutMs);
+    try {
+      server.close((error) => {
+        if (settled) return;
+        if (error) settle({ confirmed: false, detail: `the owned server close callback reported: ${error.message}` });
+        else settle({ confirmed: true, detail: null });
+      });
+    } catch (error) {
+      settle({
+        confirmed: false,
+        detail: `the owned server close threw: ${error instanceof Error ? error.message : String(error)}`,
+      });
+      return;
+    }
+    // Release any idle/keep-alive socket the endpoint still holds, so a genuine
+    // close is not parked behind a connection nobody is using.
+    dropIdleConnections();
+  });
+}
+
+/**
  * Cleanup is part of the success condition (§3.4 cleanup disposition; §6.1
  * confirmed shutdown; §7 "unconfirmed cleanup is a STOP with retained
- * evidence"). A confirmed stop leaves the journey outcome untouched; a failed
- * or unconfirmed stop overrides an earlier `ok` so neither the receipt nor the
- * process exit code can report success while an owned service may still be
+ * evidence"). Every owned child contributes one cleanup record; a confirmed
+ * shutdown leaves the journey outcome untouched, while any failed or
+ * unconfirmed one overrides an earlier `ok` so neither the receipt nor the
+ * process exit code can report success while an owned child may still be
  * alive. A journey that already failed or blocked keeps its primary blocker —
  * it exits non-zero either way — and the cleanup failure is recorded beside it.
  */
-function applyCleanupDisposition(receipt, cleanup) {
-  receipt.cleanup = cleanup;
-  if (cleanup.confirmed === true) return receipt;
+function applyCleanupDisposition(receipt, cleanups) {
+  const records = Array.isArray(cleanups) ? cleanups : [cleanups];
+  receipt.cleanup = records;
+  const unconfirmed = records.find((entry) => entry.confirmed !== true);
+  if (unconfirmed === undefined) return receipt;
   if (receipt.outcome === 'ok') {
     receipt.outcome = 'failed';
     receipt.blocker = {
       outcome: 'failed',
-      category: cleanup.category ?? 'cleanup_unconfirmed',
-      detail: cleanup.detail ?? 'the owned service shutdown was not confirmed',
+      category: unconfirmed.category ?? 'cleanup_unconfirmed',
+      detail: unconfirmed.detail ?? 'the owned child shutdown was not confirmed',
     };
   }
   return receipt;
@@ -956,11 +1016,7 @@ function startModelEndpoint() {
       resolvePromise({
         port,
         observations,
-        close: () =>
-          new Promise((done) => {
-            server.close(() => done());
-            server.closeAllConnections?.();
-          }),
+        close: () => boundedServerClose(server),
       });
     });
   });
@@ -1120,20 +1176,25 @@ function findRunStateRevision(frames) {
 }
 
 /**
- * Resolve the real revision the receipt must carry (Task 1 requires the
- * committed file *and* revision; §6.1 requires the revision in the receipt).
+ * Resolve the revision the receipt must carry (Task 1 requires the committed
+ * file *and* its commit revision; §6.1 requires the commit revision in the
+ * receipt).
  *
- * Both candidate sources are routed public surfaces owned by the acted
- * creator: the workspace-commit identifier when a routed event carries it, and
- * otherwise the durable run-state revision exposed by the routed `run_state`
- * frames or the inspect execution projection. Nothing is computed from the
- * fixture bytes and no identifier is invented.
+ * The only accepted source is a routed same-run frame carrying the canonical
+ * workspace-commit response shape (`{"revision":"rev_<id>","committed":…}`,
+ * `schemas/core/core-workspace-commit-response.schema.json`) — the identifier
+ * the durable workspace-commit authority returned for this run. Nothing is
+ * computed from the fixture bytes and no identifier is invented.
  *
- * An unobservable revision is refused here — it is never represented as an
- * acceptable result — so a caller cannot record the effect as a success.
+ * The durable run-state revision (`RunStateWire.state_revision`, from routed
+ * `run_state` frames or the inspect execution projection) proves run state, not
+ * the committed workspace, so it is returned as an explicitly labeled
+ * informational field and NEVER substituted for the commit revision. A missing
+ * commit revision is refused here — it is never represented as an acceptable
+ * result — so a caller cannot record the effect as a success.
  *
  * @throws {DriverFailure} `failed`/`missing_commit_revision` when no routed
- *   public surface exposed a revision.
+ *   frame exposed the workspace commit revision.
  */
 function resolveEffectRevision({ commitRevision, frames, projectionStateRevision }) {
   const commit =
@@ -1141,33 +1202,22 @@ function resolveEffectRevision({ commitRevision, frames, projectionStateRevision
   const streamed = findRunStateRevision(frames);
   const projected =
     Number.isInteger(projectionStateRevision) && projectionStateRevision >= 0 ? projectionStateRevision : null;
-  if (commit !== null) {
-    return {
-      commit_revision: commit,
-      durable_state_revision: streamed ?? projected,
-      revision_source: 'run-event-stream-commit-revision',
-    };
+  const durableStateRevision = streamed ?? projected;
+  if (commit === null) {
+    throw failed(
+      'missing_commit_revision',
+      'the declared workspace effect landed, but no routed same-run frame exposed the workspace commit revision ' +
+        '(no rev_<id> in a CoreWorkspaceCommitResponse-shaped payload; ' +
+        `durable run-state revision ${durableStateRevision === null ? 'none observed' : durableStateRevision} ` +
+        'proves run state, not the committed workspace and is never substituted); §6.1 and the P3-T1 card require ' +
+        'the committed file and its commit revision, so the effect is not a success',
+    );
   }
-  if (streamed !== null) {
-    return {
-      commit_revision: null,
-      durable_state_revision: streamed,
-      revision_source: 'run-event-stream-state-revision',
-    };
-  }
-  if (projected !== null) {
-    return {
-      commit_revision: null,
-      durable_state_revision: projected,
-      revision_source: 'execution-projection-state-revision',
-    };
-  }
-  throw failed(
-    'missing_commit_revision',
-    'the declared workspace effect landed, but no committed revision is exposed by the routed public surfaces ' +
-      '(no rev_<id> on the same-run stream and no durable run-state revision through the stream or the inspect ' +
-      'projection); §6.1 and the P3-T1 card require the committed file and revision, so the effect is not a success',
-  );
+  return {
+    commit_revision: commit,
+    durable_state_revision: durableStateRevision,
+    revision_source: 'run-event-stream-commit-revision',
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1540,12 +1590,13 @@ async function runDeterministic(options) {
     if (!landed.equals(fixture.declaredBytes)) {
       throw failed('contract_violation', 'committed file content does not match the declared fixture manifest content');
     }
-    // The receipt must carry a real revision read from a routed public surface
-    // owned by the acted creator — the committed revision when the routed event
-    // carries it, otherwise the durable run-state revision projected by the
-    // same-run stream or the inspect projection. Nothing is computed from the
-    // fixture bytes and no identifier is invented; an unobservable revision is
-    // refused here (missing_commit_revision), never recorded as a success.
+    // The receipt must carry the **commit** revision read from a routed
+    // same-run frame carrying the canonical workspace-commit response. The
+    // durable run-state revision is recorded beside it as information only and
+    // never substitutes: it proves run state, not the committed workspace.
+    // Nothing is computed from the fixture bytes and no identifier is invented;
+    // a missing commit revision refuses the effect (missing_commit_revision),
+    // never a success.
     const effectProjection = executionProjectionOf(
       (await readScheduleInspect(port, scheduleId, 'GET /orchestration/schedules/{id} (effect)')).summary,
     );
@@ -1568,7 +1619,8 @@ async function runDeterministic(options) {
     );
     record('workspace_effect', 'ok', {
       sha256: facts.effect.sha256,
-      revision: facts.effect.commit_revision ?? facts.effect.durable_state_revision,
+      commit_revision: facts.effect.commit_revision,
+      durable_state_revision: facts.effect.durable_state_revision,
       revision_source: facts.effect.revision_source,
     });
 
@@ -1665,6 +1717,7 @@ async function runDeterministic(options) {
     };
     if (typeof error?.serviceStderrLog === 'string') receipt.service_stderr_log = error.serviceStderrLog;
   } finally {
+    const cleanups = [];
     if (running) {
       // Cleanup disposition: a failed or unconfirmed owned shutdown is retained
       // as evidence and overrides an otherwise `ok` journey, so the receipt and
@@ -1674,6 +1727,7 @@ async function runDeterministic(options) {
       try {
         const stopped = await stopServiceVia(running, 'cleanup');
         cleanup = {
+          subject: 'service',
           confirmed: stopped.confirmed === true,
           code: stopped.code ?? null,
           signal: stopped.signal ?? null,
@@ -1683,6 +1737,7 @@ async function runDeterministic(options) {
       } catch (error) {
         const failure = error instanceof DriverFailure ? error : null;
         cleanup = {
+          subject: 'service',
           confirmed: false,
           code: null,
           signal: null,
@@ -1691,12 +1746,27 @@ async function runDeterministic(options) {
         };
       }
       record('cleanup_stop', cleanup.confirmed ? 'ok' : 'unconfirmed', cleanup);
-      applyCleanupDisposition(receipt, cleanup);
+      cleanups.push(cleanup);
     }
     if (model) {
-      await model.close().catch(() => undefined);
-      record('cleanup_model_endpoint', 'ok');
+      // The loopback model endpoint is an owned child too (§6.1 confirmed
+      // shutdown; §7: unconfirmed cleanup is a STOP with retained evidence).
+      // `close()` always resolves with a checked, bounded verdict — a rejected
+      // or throwing close, a close callback error and a close that never calls
+      // back inside the bound all arrive here as unconfirmed and take the same
+      // disposition as the service stop instead of being swallowed.
+      const closed = await model.close();
+      const cleanup = {
+        subject: 'model_endpoint',
+        confirmed: closed.confirmed === true,
+        category: closed.confirmed === true ? null : 'cleanup_unconfirmed',
+        detail:
+          closed.detail ?? (closed.confirmed === true ? null : 'the loopback model endpoint shutdown was not confirmed'),
+      };
+      record('cleanup_model_endpoint', cleanup.confirmed ? 'ok' : 'unconfirmed', cleanup);
+      cleanups.push(cleanup);
     }
+    if (cleanups.length > 0) applyCleanupDisposition(receipt, cleanups);
     for (const child of owned.children) child.kill('SIGTERM');
     owned.children.clear();
     receipt.finished_at = new Date().toISOString();
@@ -1764,18 +1834,20 @@ async function main() {
  * directly, so a focused authoring check can exercise the fixture extraction,
  * the child-environment isolation rule, the controlled model protocol, the
  * durable admission/boundary classification, the wire refusal classification,
- * the revision resolution and the cleanup disposition without starting any
- * service.
+ * the revision resolution, the bounded server close and the cleanup disposition
+ * without starting any service.
  */
 export {
   applyCleanupDisposition,
   awaitRunIdentity,
   awaitSteerBoundary,
+  boundedServerClose,
   buildChildEnv,
   classifyAdmissionObservation,
   classifySteerBoundary,
   executionProjectionOf,
   exitCodeFor,
+  findCommitRevision,
   readFixture,
   resolveEffectRevision,
   resolveExecutable,
