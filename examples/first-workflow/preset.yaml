@@ -1,0 +1,76 @@
+# Public first-workflow example preset (P3-T1).
+#
+# This is the checked-in fixture `scripts/public-first-workflow.mjs` authors into
+# a clean, child-isolated home over the public preset HTTP surface
+# (`POST /v1/daemon/presets` then `PATCH /v1/daemon/presets/{id}`), after the
+# Creator/workspace were created through the public CLI. It uses only supported
+# preset grammar from `.mstar/iterations/v1.195/specs/current-host-contracts.md`
+# §6.1:
+#
+#   * a deny-all prompt — `acp.prompt` with `tool_policy: deny_all`, the sealed
+#     no-tools scope, so no model tool can produce an effect;
+#   * `workspace.open` on a scope inside the canonical creative workspace;
+#   * exactly one declared `workspace.commit`, whose manifest content is the only
+#     authorized workspace effect of this preset;
+#   * a manual wait, so W4 inspect / O1 stream / W7 cancel address the same
+#     non-terminal run.
+#
+# Driver-coupled facts (change them only together with the driver):
+#
+# 1. The run's only prompt role is `default` — the `acp.prompt` capability
+#    dispatches with `agent_ref: None`, so the binding resolved is `default`.
+#    The driver binds it explicitly to the real runtime through the schedule's
+#    `agent_bindings`: `{"default": {"provider_id": "dsh-native"}}`. The runtime
+#    is reached through `DshNativeProvider`; this preset never names an
+#    executable and never talks to a provider directly.
+# 2. `workspace.open` takes a workspace-relative directory that MUST already
+#    exist inside the canonical creative workspace: the commit applier walks the
+#    opened scope with `O_DIRECTORY` and creates nothing. The driver creates
+#    `<workspace>/notes` before the run starts.
+# 3. `workspace.commit` change paths are scope-relative. `contentBase64` is the
+#    canonical base64 of the file the driver reads back byte-for-byte and
+#    verifies against the same fixture (declared manifest content == landed
+#    content).
+# 4. The manual `exit_when` keeps the run non-terminal, which is what makes the
+#    inspect / stream / cancel steps address one live run.
+preset:
+  id: first-workflow
+  version: 1
+  kind: creator
+  description: "Public first workflow: one sealed deny-all prompt, one declared workspace commit, one manual wait"
+  requires_capabilities:
+    - acp.prompt
+    - workspace.open
+    - workspace.commit
+  run_intents:
+    - work_init
+  initial: first_run
+  terminal: done
+states:
+  - id: first_run
+    description: "Deny-all prompt, then the declared workspace commit, then a manual wait"
+    enter:
+      - kind: capability
+        name: acp.prompt
+        args:
+          prompt: "Reply with the single word READY. Do not call any tool."
+          tool_policy: deny_all
+      - kind: capability
+        name: workspace.open
+        args:
+          path: notes
+      - kind: capability
+        name: workspace.commit
+        args:
+          # The session id is the workspace.open output of the previous enter
+          # action, rendered into this manifest before the commit is dispatched.
+          sessionId: "{{_capability_output.sessionId}}"
+          changes:
+            - path: first-workflow.md
+              op: create
+              contentBase64: "IyBGaXJzdCB3b3JrZmxvdwoKQ29tbWl0dGVkIGJ5IHRoZSBwdWJsaWMgZmlyc3Qtd29ya2Zsb3cgZXhhbXBsZSB0aHJvdWdoIHRoZSBwcmVzZXQKZGVjbGFyZWQgd29ya3NwYWNlLmNvbW1pdCBjYXBhYmlsaXR5Lgo="
+    exit_when:
+      kind: manual
+    next: done
+  - id: done
+    terminal: true
