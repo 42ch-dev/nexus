@@ -964,7 +964,7 @@ fn json_merge(base: &serde_json::Value, patch: &serde_json::Value) -> serde_json
 ///
 /// The same three values the Core pre-check names, and the same set the
 /// supervisor's own admission queries exclude (`status NOT IN ('completed',
-/// 'failed', 'cancelled')`); the strings are the stored snake_case form of
+/// 'failed', 'cancelled')`); the strings are the stored `snake_case` form of
 /// `ScheduleStatus`'s terminal variants.
 fn terminal_status(status: &str) -> bool {
     matches!(status, "completed" | "cancelled" | "failed")
@@ -1241,7 +1241,7 @@ mod tests {
     // ---------- P1: terminal admission for USER edits ----------
 
     /// Settle a schedule exactly as the supervisor does: the stored status is
-    /// the lowercase snake_case name, and the three terminal values are the
+    /// the lowercase `snake_case` name, and the three terminal values are the
     /// ones the user-edit admission refuses.
     async fn settle_schedule(pool: &SqlitePool, schedule_id: &str, status: &str) {
         let now = chrono::Utc::now().timestamp();
