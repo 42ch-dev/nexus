@@ -1287,6 +1287,121 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     }
   });
 
+  test('a record retired while a pull is in flight still ends the stream with its outcome', async () => {
+    // The mirror's Actor arm is aged out from the authority's own truth on every
+    // admission (`ageSettledActorOperations` -> `retireActorOperation` ->
+    // `disposeOperation`). Retiring a record WHILE a stream's pull is in flight
+    // used to remove the record and close its hub under that reader: the fetched
+    // terminal was dropped (`ingestEvents` finds no record), the loop then read a
+    // closed hub, and the stream ended with neither a terminal frame nor a resync
+    // gap — the client could not tell a finished run from a truncated one.
+    const session = await jsonFetch('/v1/daemon/agent-host/sessions', { method: 'POST', body: actorBody() });
+    assert.equal(session.status, 200, session.text);
+    const sessionId = session.payload.session_id;
+    const prompt = await jsonFetch(`/v1/daemon/agent-host/sessions/${sessionId}/operations`, {
+      method: 'POST',
+      body: { kind: 'prompt', content: 'retired-mid-pull' },
+    });
+    assert.equal(prompt.status, 200, prompt.text);
+    const operationId = prompt.payload.operation_id;
+    const outcome = await waitForCharacterOutcome(operationId);
+    assert.equal(outcome.run_status, 'succeeded', 'the authority settled the run and retains its observation');
+
+    // Deterministic interleave: hold this stream's first Actor pull open, retire
+    // the mirror record exactly while that pull is in flight, then let the pull
+    // return the retained terminal. No timing luck: the retirement provably
+    // happens between the pull request and the batch the loop ingests.
+    const core = service.service.core;
+    const realNextHostEvents = core.nextHostEvents.bind(core);
+    let pullStarted;
+    const started = new Promise((resolve) => { pullStarted = resolve; });
+    let releasePull;
+    const gate = new Promise((resolve) => { releasePull = resolve; });
+    let gated = false;
+    core.nextHostEvents = async (...args) => {
+      if (!gated) {
+        gated = true;
+        pullStarted();
+        await gate;
+      }
+      return realNextHostEvents(...args);
+    };
+    try {
+      const streaming = sseBody(sessionId, operationId);
+      await started;
+      assert.equal(
+        service.service.providerRegistry.operationRecord(operationId)?.actorBacked,
+        true,
+        'precondition: the stream is reading the Actor record the retirement targets',
+      );
+      service.service.providerRegistry.retireActorOperation(operationId);
+      releasePull();
+      const stream = await streaming;
+      assert.equal(stream.status, 200);
+      const endings = stream.frames.filter(
+        (frame) =>
+          frame.event === 'gap' ||
+          (frame.event === 'provider_event' &&
+            (frame.data?.OpFinished !== undefined ||
+              frame.data?.OpFailed !== undefined ||
+              frame.data?.SessionStopped !== undefined)),
+      );
+      assert.equal(
+        endings.length,
+        1,
+        `a retirement that raced an in-flight pull must end the stream with the terminal or a resync gap, never a bare close: ${JSON.stringify(stream.frames)}`,
+      );
+      assert.equal(endings[0].event, 'provider_event', 'the fetched outcome is delivered, not replaced by a gap');
+      assert.equal(endings[0].data.OpFinished.reason, 'end_turn');
+      assert.equal(stream.frames.at(-1), endings[0], 'nothing may follow the stream ending');
+
+      // The deferral is a handshake, not a leak: the record outlives only its
+      // reader, and the retirement lands as soon as that reader is gone.
+      const deadline = Date.now() + 5_000;
+      while (service.service.providerRegistry.operationRecord(operationId) !== undefined) {
+        assert.ok(Date.now() < deadline, 'the deferred retirement must be applied when the stream detaches');
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      assert.equal(
+        service.service.providerRegistry.hubForOperation(operationId),
+        undefined,
+        'the retired operation must release its hub once its reader is gone',
+      );
+    } finally {
+      core.nextHostEvents = realNextHostEvents;
+    }
+  });
+
+  test('a retirement deferred by a stream lands when its last reader leaves', async () => {
+    const { ProviderRegistry } = await import(join(serviceRoot, 'dist/provider-registry.js'));
+    const { OperationEventHub } = await import(join(serviceRoot, 'dist/sse.js'));
+    const registry = new ProviderRegistry();
+    const sessionId = randomUUID();
+    const operationId = randomUUID();
+    registry.registerOperation({
+      operationId,
+      sessionId,
+      providerId: MAIN_PROVIDER,
+      status: 'started',
+      terminalEvent: null,
+      terminalTranscript: null,
+      actorBacked: true,
+    });
+    registry.ensureHub(operationId, () => new OperationEventHub(operationId, sessionId));
+
+    // Two readers, one retirement: neither the retirement nor the first detach
+    // may take the record away from a stream that is still reading it.
+    registry.attachOperationStream(operationId);
+    registry.attachOperationStream(operationId);
+    registry.retireActorOperation(operationId);
+    assert.ok(registry.operationRecord(operationId), 'a retirement must never land under a live reader');
+    registry.detachOperationStream(operationId);
+    assert.ok(registry.operationRecord(operationId), 'the first detach must not drop what the second reader reads');
+    registry.detachOperationStream(operationId);
+    assert.equal(registry.operationRecord(operationId), undefined, 'the last detach applies the deferred retirement');
+    assert.equal(registry.hubForOperation(operationId), undefined, 'and releases the hub with it');
+  });
+
   test('session create stays API-key and Origin guarded, with zero launch', async () => {
     // One process holds one core Host authority, so the journey service must be
     // down before the keyed service opens; it is restored either way.

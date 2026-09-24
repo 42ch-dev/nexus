@@ -77,6 +77,10 @@ export class ProviderRegistry {
   private operations = new Map<string, ProviderOperationRecord>();
   private hubs = new Map<string, OperationEventHub>();
   private terminalOrder: string[] = [];
+  /** Live SSE readers per operation: a hub with one is never disposed under it. */
+  private attachedStreams = new Map<string, number>();
+  /** Operations whose disposal was requested while a stream was attached. */
+  private retirePending = new Set<string>();
 
   sessionRecord(sessionId: string): ProviderSessionRecord | undefined {
     return this.sessions.get(sessionId);
@@ -97,6 +101,37 @@ export class ProviderRegistry {
       this.hubs.set(operationId, hub);
     }
     return hub;
+  }
+
+  /**
+   * Register one live SSE reader of an operation's hub, before that stream can
+   * start pulling.
+   *
+   * A reader is already inside its delivery loop, so the record and the hub it
+   * reads must outlive that loop. Disposal under it loses the outcome twice: the
+   * record is gone, so `ingestEvents` drops the batch it had in flight, and the
+   * hub reads as closed, so the loop ends the stream with neither a terminal
+   * frame nor a resync gap. While a stream is attached, disposal is deferred to
+   * the detach of the LAST reader instead of executed under it.
+   */
+  attachOperationStream(operationId: string): void {
+    this.attachedStreams.set(operationId, (this.attachedStreams.get(operationId) ?? 0) + 1);
+  }
+
+  /**
+   * Release one live SSE reader. The last detach applies any disposal that was
+   * deferred while it read, so a retirement requested mid-stream still lands —
+   * after the stream, never inside it.
+   */
+  detachOperationStream(operationId: string): void {
+    const count = this.attachedStreams.get(operationId);
+    if (count === undefined) return;
+    if (count > 1) {
+      this.attachedStreams.set(operationId, count - 1);
+      return;
+    }
+    this.attachedStreams.delete(operationId);
+    if (this.retirePending.delete(operationId)) this.disposeNow(operationId);
   }
 
   /**
@@ -150,7 +185,9 @@ export class ProviderRegistry {
    * hub together. The authority's detailed outcome and bounded observation live
    * in core (technical contract §5), so retiring transport bookkeeping here can
    * never lose a result; it only stops the mirror outliving the retention the
-   * authority itself bounds. A provider-only record is never touched.
+   * authority itself bounds. A live stream reading the operation defers the
+   * release to its own detach, so no pull can be left holding a retired hub. A
+   * provider-only record is never touched.
    */
   retireActorOperation(operationId: string): void {
     if (this.operations.get(operationId)?.actorBacked !== true) return;
@@ -244,6 +281,17 @@ export class ProviderRegistry {
   }
 
   private disposeOperation(operationId: string): void {
+    // Never dispose a hub a live stream is reading (`attachOperationStream`):
+    // the reader would observe the closed hub mid-pull and lose the outcome it
+    // has in flight. Defer to that stream's detach instead.
+    if ((this.attachedStreams.get(operationId) ?? 0) > 0) {
+      this.retirePending.add(operationId);
+      return;
+    }
+    this.disposeNow(operationId);
+  }
+
+  private disposeNow(operationId: string): void {
     const hub = this.hubs.get(operationId);
     if (hub) {
       hub.dispose();
@@ -251,6 +299,7 @@ export class ProviderRegistry {
     }
     this.operations.delete(operationId);
     this.terminalOrder = this.terminalOrder.filter((id) => id !== operationId);
+    this.retirePending.delete(operationId);
   }
 
   private evictTerminalOperationsIfNeeded(): void {

@@ -246,6 +246,11 @@ export class OperationEventHub {
     return this.terminalSlot !== null;
   }
 
+  /** A resync gap is retained — the stream's closing frame when no terminal is. */
+  hasGap(): boolean {
+    return this.gapSlot !== null;
+  }
+
   dispose(): void {
     releaseEnvironmentBytes(this.dataFrameBytes);
     let controlFreed = 0;
@@ -642,6 +647,25 @@ async function emitInterruptedGap(
   if (frame) await writer.writeFrame(frame);
 }
 
+/**
+ * End a stream that left its loop without writing a closing frame.
+ *
+ * A stream must always end with either a terminal or a typed resync gap, so a
+ * hub that closed out of band — the mirror retired the record while this loop's
+ * pull was in flight, or a fail-close could not retain its own gap — ends with
+ * the bounded `interrupted` resync marker instead of closing bare. A hub still
+ * retaining its ending (a terminal, or the gap the loop just wrote) is left
+ * exactly as it is: this only fills a missing ending, never replaces one.
+ */
+async function endStreamWithoutEnding(
+  writer: SseWriter,
+  hub: OperationEventHub,
+  operationId: string,
+): Promise<void> {
+  if (hub.hasTerminal() || hub.hasGap()) return;
+  await emitInterruptedGap(writer, hub, operationId);
+}
+
 /** Exported so scoped tests can drive terminal acceptance exactly as the SSE loops do. */
 export function ingestEvents(service: ServiceCore, operationId: string, events: ProviderHostEvent[]): void {
   const op = service.providerRegistry.operationRecord(operationId);
@@ -878,6 +902,7 @@ async function runEventStream(
     }
 
     if (hub.isClosed()) {
+      await endStreamWithoutEnding(writer, hub, operationId);
       return;
     }
 
@@ -959,18 +984,28 @@ export async function streamSessionEvents(
   // The Actor KIND then decides which authority arm serves it: a Character
   // operation has the authority's detailed outcome and its retained observation,
   // while a Creator Actor prompt keeps the generic observation.
-  const source = session.actorRef
-    ? session.actorRef.actor_kind === 'creator'
-      ? await creatorActorEventSource(service, session, sessionId, operationId)
-      : await actorEventSource(service, session, sessionId, operationId)
-    : providerEventSource(
-        service,
-        await requireProviderOperation(service, sessionId, operationId),
-        operationId,
-        service.providerRegistry.hubForOperation(operationId),
-      );
+  //
+  // This request is a live reader of `operationId`'s hub from here on, so it
+  // registers BEFORE the source (and its hub) is built and releases only when
+  // the stream is over: retiring the record must never dispose the hub under the
+  // pull this stream has in flight (`ProviderRegistry.attachOperationStream`).
+  service.providerRegistry.attachOperationStream(operationId);
+  try {
+    const source = session.actorRef
+      ? session.actorRef.actor_kind === 'creator'
+        ? await creatorActorEventSource(service, session, sessionId, operationId)
+        : await actorEventSource(service, session, sessionId, operationId)
+      : providerEventSource(
+          service,
+          await requireProviderOperation(service, sessionId, operationId),
+          operationId,
+          service.providerRegistry.hubForOperation(operationId),
+        );
 
-  await runEventStream(service, source, operationId, searchParams, res);
+    await runEventStream(service, source, operationId, searchParams, res);
+  } finally {
+    service.providerRegistry.detachOperationStream(operationId);
+  }
 }
 
 /** Provider-only admission kept exactly as it was: hydrate, associate, retain. */
@@ -1086,6 +1121,7 @@ async function waitForTerminal(
       await sleep(25);
     }
   }
+  await endStreamWithoutEnding(writer, hub, operationId);
 }
 
 async function liveEventLoop(
@@ -1156,11 +1192,12 @@ async function liveEventLoop(
       if (frame.isTerminal) return;
     }
 
-    if (!batch.has_more && hub.isClosed()) return;
+    if (!batch.has_more && hub.isClosed()) break;
     if (!batch.has_more && (batch.events?.length ?? 0) === 0) {
       await sleep(25);
     }
   }
+  await endStreamWithoutEnding(writer, hub, operationId);
 }
 
 function sleep(ms: number): Promise<void> {
