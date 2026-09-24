@@ -16,7 +16,11 @@ use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use nexus_agent_host::capability::model::{FinishReason, HostEvent};
 use nexus_agent_host::{HostFacade, HostOperationId, HostSession, HostSessionId, SessionState};
+use nexus_contracts::generated::core::core_host_query_response::{
+    NexusActorRef as QueryActorRef, NexusSessionViewpoint as QueryViewpoint,
+};
 use nexus_contracts::generated::daemon_api::agent_host::character_operation_result::{
     CharacterOperationResult, CharacterOperationResultFinishReason,
     CharacterOperationResultRunStatus, NexusCharacterRunCaptureOutcome,
@@ -114,14 +118,16 @@ enum OperationPhase {
 }
 
 /// Immutable admission snapshot for one Character Host operation.
+///
+/// Character capture is refused before reservation (technical contract §5), so
+/// a snapshot describes only an uncaptured run: there is no `remember` request
+/// and no prompt digest to carry.
 #[derive(Debug, Clone)]
 pub struct CharacterOperationSnapshot {
     pub owner_creator_id: String,
     pub ctx: AdmittedActorContext,
     pub session_id: HostSessionId,
     pub operation_id: HostOperationId,
-    pub remember: bool,
-    pub raw_prompt: String,
 }
 
 struct CharacterOperationRecord {
@@ -135,26 +141,127 @@ struct CharacterOperationRecord {
 const MAX_NONTERMINAL_OPERATIONS: usize = 128;
 const MAX_TERMINAL_OPERATIONS: usize = 1024;
 
+/// The reserved, still-running outcome of one Character operation.
+///
+/// Capture is always `disabled` (technical contract §5): a Character
+/// `remember:true` prompt is refused before reservation, so no reservation can
+/// describe a pending capture and no result may claim one.
 fn running_outcome(snapshot: &CharacterOperationSnapshot) -> CharacterOperationResult {
-    let capture = if snapshot.remember {
-        NexusCharacterRunCaptureOutcome {
-            status: NexusCharacterRunCaptureOutcomeStatus::Pending,
-            pending_id: None,
-            code: None,
-        }
-    } else {
-        NexusCharacterRunCaptureOutcome {
-            status: NexusCharacterRunCaptureOutcomeStatus::Disabled,
-            pending_id: None,
-            code: None,
-        }
-    };
     CharacterOperationResult {
         operation_id: snapshot.operation_id.to_string(),
         session_id: snapshot.session_id.to_string(),
         run_status: CharacterOperationResultRunStatus::Running,
         finish_reason: None,
-        capture,
+        capture: NexusCharacterRunCaptureOutcome {
+            status: NexusCharacterRunCaptureOutcomeStatus::Disabled,
+            pending_id: None,
+            code: None,
+        },
+    }
+}
+
+/// Authoritative terminal truth of one Character exec stream (technical
+/// contract §5): what the FIRST matching observation of the original
+/// `HostFacade::exec` stream says about the run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum CharacterTerminal {
+    /// A matching `OpFinished`: the provider named the stop reason.
+    Finished(FinishReason),
+    /// A matching fault: a matching `OpFailed` without a named stop reason, a
+    /// stream error, a matching `SessionStopped`, or EOF before any terminal.
+    Fault,
+}
+
+/// Fold one host event into this operation's terminal truth.
+///
+/// `None` means the observation is not about the exact
+/// `(session_id, operation_id)` pair — an unrelated operation or session event,
+/// which contract §5 requires the drain to ignore — or is a non-terminal
+/// progress event of this operation.
+pub(crate) fn character_terminal_for(
+    event: &HostEvent,
+    session_id: &HostSessionId,
+    operation_id: &HostOperationId,
+) -> Option<CharacterTerminal> {
+    match event {
+        HostEvent::OpFinished(finished)
+            if &finished.session_id == session_id && &finished.op_id == operation_id =>
+        {
+            Some(CharacterTerminal::Finished(finished.reason.clone()))
+        }
+        // ACP and the native CLI adapters report the non-`EndTurn` stop reasons
+        // the provider vocabulary names as a typed `OpFailed`
+        // (`providers/acp.rs`): the reason is still authoritative, so those
+        // categories keep their §5 classification instead of collapsing into a
+        // generic failure. Every other category is a real failure.
+        HostEvent::OpFailed(failed)
+            if &failed.session_id == session_id && &failed.op_id == operation_id =>
+        {
+            Some(
+                finish_reason_from_error_category(&failed.error_category)
+                    .map_or(CharacterTerminal::Fault, CharacterTerminal::Finished),
+            )
+        }
+        // The session this operation runs on stopped before a terminal: the run
+        // can no longer complete honestly, so it is a fault.
+        HostEvent::SessionStopped(stopped) if &stopped.session_id == session_id => {
+            Some(CharacterTerminal::Fault)
+        }
+        _ => None,
+    }
+}
+
+/// The stop reason an `OpFailed` category names, when the provider vocabulary
+/// has one (`max_tokens` / `max_turn_requests` / `refusal`).
+fn finish_reason_from_error_category(category: &str) -> Option<FinishReason> {
+    match category {
+        "max_tokens" => Some(FinishReason::MaxTokens),
+        "max_turn_requests" => Some(FinishReason::MaxTurnRequests),
+        "refusal" => Some(FinishReason::Refusal),
+        _ => None,
+    }
+}
+
+/// Contract §5 classification of a drained terminal, honouring a cancellation
+/// that won the phase race (the finalizing transition found `CancelRequested`):
+/// an accepted local cancel is the operation's truth, never a rollback claim
+/// about provider effects.
+#[must_use]
+pub(crate) const fn character_terminal_outcome(
+    terminal: &CharacterTerminal,
+    cancel_won_the_race: bool,
+) -> (
+    CharacterOperationResultRunStatus,
+    Option<CharacterOperationResultFinishReason>,
+) {
+    if cancel_won_the_race {
+        return (
+            CharacterOperationResultRunStatus::Cancelled,
+            Some(CharacterOperationResultFinishReason::Cancelled),
+        );
+    }
+    match terminal {
+        CharacterTerminal::Finished(FinishReason::EndTurn) => (
+            CharacterOperationResultRunStatus::Succeeded,
+            Some(CharacterOperationResultFinishReason::EndTurn),
+        ),
+        CharacterTerminal::Finished(FinishReason::MaxTokens) => (
+            CharacterOperationResultRunStatus::Incomplete,
+            Some(CharacterOperationResultFinishReason::MaxTokens),
+        ),
+        CharacterTerminal::Finished(FinishReason::MaxTurnRequests) => (
+            CharacterOperationResultRunStatus::Incomplete,
+            Some(CharacterOperationResultFinishReason::MaxTurnRequests),
+        ),
+        CharacterTerminal::Finished(FinishReason::Refusal) => (
+            CharacterOperationResultRunStatus::Incomplete,
+            Some(CharacterOperationResultFinishReason::Refusal),
+        ),
+        CharacterTerminal::Finished(FinishReason::Cancelled) => (
+            CharacterOperationResultRunStatus::Cancelled,
+            Some(CharacterOperationResultFinishReason::Cancelled),
+        ),
+        CharacterTerminal::Fault => (CharacterOperationResultRunStatus::Failed, None),
     }
 }
 
@@ -196,6 +303,31 @@ const fn shutting_down() -> CoreError {
 fn host_err(err: &nexus_agent_host::HostError) -> CoreError {
     CoreError::Internal {
         category: format!("agent_host: {err}"),
+    }
+}
+
+/// Settle one reserved Character operation exactly once, under the registry
+/// lock: the first writer records the terminal phase, the outcome update and
+/// the retention slot; every later settlement is a no-op, so the recorded truth
+/// is immutable and the terminal FIFO never sees a duplicate.
+fn settle_terminal_locked(
+    maps: &mut RegistryMaps,
+    operation_id: &HostOperationId,
+    update: impl FnOnce(&mut CharacterOperationRecord),
+) {
+    let Some(record) = maps.character_operations.get_mut(operation_id) else {
+        return;
+    };
+    if matches!(record.phase, OperationPhase::Terminal) {
+        return;
+    }
+    update(record);
+    record.phase = OperationPhase::Terminal;
+    maps.terminal_fifo.push_back(operation_id.clone());
+    while maps.terminal_fifo.len() > MAX_TERMINAL_OPERATIONS {
+        if let Some(evicted) = maps.terminal_fifo.pop_front() {
+            maps.character_operations.remove(&evicted);
+        }
     }
 }
 
@@ -499,29 +631,28 @@ impl ActorSessionRegistry {
     }
 
     /// Commit terminal outcome and enforce terminal FIFO retention.
+    ///
+    /// The FIRST terminal/fault settlement wins: a later settlement of the same
+    /// operation (a duplicate terminal, a trailing producer fault, or a cancel
+    /// that lost the phase race) leaves the recorded truth untouched and never
+    /// re-enters the retention FIFO.
     pub fn commit_operation_terminal(
         &self,
         operation_id: &HostOperationId,
         outcome: CharacterOperationResult,
     ) {
         let mut maps = self.maps();
-        if let Some(record) = maps.character_operations.get_mut(operation_id) {
-            record.phase = OperationPhase::Terminal;
+        settle_terminal_locked(&mut maps, operation_id, |record| {
             record.outcome = outcome;
-            maps.terminal_fifo.push_back(operation_id.clone());
-            while maps.terminal_fifo.len() > MAX_TERMINAL_OPERATIONS {
-                if let Some(evicted) = maps.terminal_fifo.pop_front() {
-                    maps.character_operations.remove(&evicted);
-                }
-            }
-        }
-        drop(maps);
+        });
     }
 
     /// Commit a drained Host operation's terminal run status against the
-    /// reserved record (authority-owned drain). The capture half of the
-    /// outcome stays as reserved (`pending`/`disabled`) until a durable
-    /// capture writer settles it.
+    /// reserved record (authority-owned drain). The capture half stays the
+    /// reserved `disabled` value: this batch has no capture writer to settle it
+    /// (technical contract §5).
+    ///
+    /// Settles once, like [`Self::commit_operation_terminal`].
     pub fn settle_operation_terminal(
         &self,
         operation_id: &HostOperationId,
@@ -529,18 +660,10 @@ impl ActorSessionRegistry {
         finish_reason: Option<CharacterOperationResultFinishReason>,
     ) {
         let mut maps = self.maps();
-        if let Some(record) = maps.character_operations.get_mut(operation_id) {
-            record.phase = OperationPhase::Terminal;
+        settle_terminal_locked(&mut maps, operation_id, |record| {
             record.outcome.run_status = run_status;
             record.outcome.finish_reason = finish_reason;
-            maps.terminal_fifo.push_back(operation_id.clone());
-            while maps.terminal_fifo.len() > MAX_TERMINAL_OPERATIONS {
-                if let Some(evicted) = maps.terminal_fifo.pop_front() {
-                    maps.character_operations.remove(&evicted);
-                }
-            }
-        }
-        drop(maps);
+        });
     }
 
     #[must_use]
@@ -564,8 +687,13 @@ impl ActorSessionRegistry {
         self.maps().indexed_operations.remove(op_id);
     }
 
-    /// Overlay `actor_ref/viewpoint` for list/get: live indexed context first,
-    /// then retired tombstones so leftover Host rows stay Actor-shaped.
+    /// Overlay `actor_ref/viewpoint` for the native list/get rows: the live
+    /// indexed context first, then its retired tombstone, so a leftover Host
+    /// row stays recognizable as an Actor session.
+    ///
+    /// The core-query DTO family carries its own generated `ActorRef` /
+    /// `Viewpoint` types, so the authority's wire echo is re-created through
+    /// their checked constructors instead of being reinterpreted.
     ///
     /// # Errors
     ///
@@ -573,14 +701,21 @@ impl ActorSessionRegistry {
     pub fn echo_actor_pair_for_session(
         &self,
         session_id: &HostSessionId,
-    ) -> CoreResult<(Option<NexusActorRef>, Option<NexusSessionViewpoint>)> {
-        if let Some(ctx) = self.context_for(session_id) {
-            return echo_actor_pair(&ctx);
-        }
-        if let Some(tombstone) = self.retired_tombstone(session_id) {
-            return echo_retired_pair(&tombstone);
-        }
-        Ok((None, None))
+    ) -> CoreResult<(Option<QueryActorRef>, Option<QueryViewpoint>)> {
+        let echoed = if let Some(ctx) = self.context_for(session_id) {
+            echo_actor_pair(&ctx)?
+        } else if let Some(tombstone) = self.retired_tombstone(session_id) {
+            echo_retired_pair(&tombstone)?
+        } else {
+            return Ok((None, None));
+        };
+        Ok((
+            echoed.0.map(query_actor_ref).transpose()?,
+            echoed
+                .1
+                .map(|viewpoint| query_viewpoint(&viewpoint))
+                .transpose()?,
+        ))
     }
 
     /// True once the process-lifetime maps are closed (authority shutdown).
@@ -699,6 +834,14 @@ impl ActorSessionRegistry {
     #[must_use]
     pub fn len(&self) -> usize {
         self.maps().by_key.len()
+    }
+
+    /// Count reserved and retained Character operation records (tests /
+    /// diagnostics): running reservations plus the terminal records still
+    /// inside the retention window.
+    #[must_use]
+    pub fn character_operation_count(&self) -> usize {
+        self.maps().character_operations.len()
     }
 
     /// True when no Actor sessions are indexed.
@@ -955,6 +1098,68 @@ fn echo_conversion(code: &str, e: impl std::fmt::Display) -> CoreError {
     CoreError::Internal {
         category: format!("{code}: {e}"),
     }
+}
+
+/// Re-parse one echoed wire id through a core-query DTO checked constructor.
+///
+/// # Errors
+///
+/// Returns `internal` when the id fails the query family's pattern check.
+fn query_id<T>(id: &str) -> CoreResult<T>
+where
+    T: std::str::FromStr,
+    T::Err: std::fmt::Display,
+{
+    id.parse().map_err(|e| echo_conversion("QUERY_ECHO", e))
+}
+
+/// Re-create the core-query `ActorRef` sum from the authority's echo.
+///
+/// # Errors
+///
+/// Returns `internal` when an id fails the query family's pattern check.
+fn query_actor_ref(actor_ref: NexusActorRef) -> CoreResult<QueryActorRef> {
+    match actor_ref {
+        NexusActorRef::CreatorActorRef { creator_id, .. } => Ok(QueryActorRef::CreatorActorRef {
+            actor_kind: query_id("creator")?,
+            creator_id: query_id(creator_id.as_str())?,
+        }),
+        NexusActorRef::CharacterActorRef { character_id, .. } => {
+            Ok(QueryActorRef::CharacterActorRef {
+                actor_kind: query_id("character")?,
+                character_id: query_id(character_id.as_str())?,
+            })
+        }
+    }
+}
+
+/// Re-create the core-query `Viewpoint` from the authority's echo.
+///
+/// # Errors
+///
+/// Returns `internal` when an id fails the query family's pattern check.
+fn query_viewpoint(viewpoint: &NexusSessionViewpoint) -> CoreResult<QueryViewpoint> {
+    let binding_id = viewpoint
+        .binding_id
+        .as_ref()
+        .map(|id| query_id(id.as_str()))
+        .transpose()?;
+    let branch_id = viewpoint
+        .branch_id
+        .as_ref()
+        .map(|id| query_id(id.as_str()))
+        .transpose()?;
+    let event_id = viewpoint
+        .event_id
+        .as_ref()
+        .map(|id| query_id(id.as_str()))
+        .transpose()?;
+    Ok(QueryViewpoint {
+        world_id: query_id(viewpoint.world_id.as_str())?,
+        binding_id,
+        branch_id,
+        event_id,
+    })
 }
 
 /// Map a retired-session tombstone onto generated session response optionals

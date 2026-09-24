@@ -15,7 +15,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use nexus_agent_host::capability::model::HostOperation;
-use nexus_agent_host::capability::model::{HostStartConfig, SessionOwner};
+use nexus_agent_host::capability::model::{
+    HostEvent, HostEventStream, HostStartConfig, SessionOwner,
+};
 use nexus_agent_host::capability::CreateSessionRequest as HostCreateRequest;
 use nexus_agent_host::config::{
     agent_host_config_path, load_config_from_path, validate_workspace_path, AgentHostConfig,
@@ -32,6 +34,7 @@ use nexus_contracts::core_host_query_response::{
     NexusAgentHostSessionListResponse, NexusAgentHostSessionResponse, NexusAgentScanEntry,
     NexusPaginationInfo,
 };
+use nexus_contracts::generated::daemon_api::agent_host::character_operation_result::CharacterOperationResult;
 use nexus_contracts::generated::daemon_api::agent_host::{
     CreateSessionRequest, ExecuteOperationRequest, OperationResponse, SessionResponse,
 };
@@ -47,8 +50,9 @@ use nexus_spoke_adapter::SpokeBackedKbStore;
 use uuid::Uuid;
 
 use crate::actor_sessions::{
-    actor_session_stale, echo_actor_pair, ActorSessionKey, ActorSessionRegistry,
-    CharacterOperationSnapshot, KnowledgeReuse,
+    actor_session_stale, character_terminal_for, character_terminal_outcome, echo_actor_pair,
+    ActorSessionKey, ActorSessionRegistry, CharacterOperationSnapshot, CharacterTerminal,
+    KnowledgeReuse,
 };
 use crate::actors::{
     classify_pair, ActorPairMode, ActorViewpoint, AdmittedActor, CoreActorAdmission,
@@ -349,6 +353,34 @@ impl HostHandle {
         self.host.clone()
     }
 
+    /// The owner-scoped authoritative outcome of one Character operation.
+    ///
+    /// Detailed outcomes are process-lifetime (technical contract §5): a
+    /// foreign, unknown, evicted or post-restart id is a MISSING outcome, never
+    /// an inferred success from a generic session state or a provider journal
+    /// row.
+    ///
+    /// # Errors
+    /// Returns `auth_required` for a foreign or drifted principal,
+    /// `invalid_input` for a malformed id, [`CoreError::Closing`] on a closed
+    /// authority, and `not_found` for a missing or foreign operation. The
+    /// registry lookup itself is synchronous; the signature is async to match
+    /// the authority's other reads.
+    #[allow(clippy::unused_async_trait_impl)] // async matches the authority's other reads; the body has no await today
+    #[allow(clippy::unused_async)] // async is the await-symmetric public signature; the body is a map read today
+    pub async fn character_operation(
+        &self,
+        principal: &Principal,
+        operation_id: String,
+    ) -> CoreResult<CharacterOperationResult> {
+        self.ensure_authority_open()?;
+        self.core.verify_principal(principal)?;
+        let uuid = Uuid::parse_str(&operation_id)
+            .map_err(|_| invalid("operation_id", "operation_id must be a valid UUID"))?;
+        self.registry
+            .character_operation_result(principal.creator_id(), &HostOperationId(uuid))
+    }
+
     /// The authority-level open gate: the service is open AND this handle's
     /// own authority has not begun closing. A handle retired by `close` stays
     /// refused even after another authority opens over the same service.
@@ -540,7 +572,6 @@ impl HostHandle {
         match request {
             ExecuteOperationRequest::Prompt { content, remember } => {
                 let remember = remember.unwrap_or(false);
-                let raw_prompt = content.clone();
                 let indexed = self.registry.context_for(&sid);
                 let is_character = indexed.as_ref().map_or_else(
                     || self.registry.is_actor_session(&sid),
@@ -551,6 +582,17 @@ impl HostHandle {
                         "remember",
                         "remember requires an admitted stored Character session with an active binding",
                     ));
+                }
+                if remember {
+                    // Contract §5: this Host has no complete run-capture
+                    // writer, so a Character capture is refused as a typed
+                    // `not_supported` BEFORE the operation reserves an outcome,
+                    // admits an activity/knowledge context or reaches the
+                    // provider. No pending or captured result may be promised.
+                    return Err(CoreError::Coded {
+                        code: "not_supported".into(),
+                        message: "character run capture is not supported by this host".into(),
+                    });
                 }
                 let (assembled, fenced) = match indexed {
                     None => {
@@ -626,8 +668,6 @@ impl HostHandle {
                         ctx,
                         session_id: sid.clone(),
                         operation_id: op_id.clone(),
-                        remember,
-                        raw_prompt: raw_prompt.clone(),
                     };
                     self.registry.reserve_character_operation(&snap)?;
                     self.registry
@@ -815,7 +855,7 @@ impl HostHandle {
                     .map_or(50, std::num::NonZero::get)
                     .clamp(1, 250);
                 let limit_us = usize::try_from(limit).unwrap_or(250);
-                let items: Vec<NexusAgentHostSessionResponse> = native
+                let owner_scoped: CoreResult<Vec<NexusAgentHostSessionResponse>> = native
                     .iter()
                     // Owner-scoped listing: a foreign indexed/retired Actor
                     // session is invisible to this principal (legacy sessions
@@ -825,7 +865,10 @@ impl HostHandle {
                             .stored_session_owner(&s.id)
                             .is_none_or(|(owner, _, _)| owner == principal.creator_id())
                     })
-                    .map(session_response_wire)
+                    .map(|s| self.session_response_wire(s))
+                    .collect();
+                let items: Vec<NexusAgentHostSessionResponse> = owner_scoped?
+                    .into_iter()
                     .skip_while(|s| {
                         request
                             .cursor
@@ -871,7 +914,7 @@ impl HostHandle {
                                 .is_none_or(|(owner, _, _)| owner == principal.creator_id())
                     }) {
                         return Ok(CoreHostQueryResponse {
-                            session: Some(session_response_wire(session)),
+                            session: Some(self.session_response_wire(session)?),
                             health: None,
                             catalog: None,
                             sessions: None,
@@ -938,6 +981,22 @@ impl HostHandle {
                 })
             }
         }
+    }
+
+    /// Integration seam (`#[doc(hidden)]`, the same convention as
+    /// [`ActorSessionRegistry::insert_indexed_entry`]): run the authority-owned
+    /// Character drain over a supplied host event stream — the exact settlement
+    /// `execute` spawns — with no provider process. Production drains are
+    /// spawned by `execute`; this entry proves the terminal contract (§5)
+    /// against real streams.
+    #[doc(hidden)]
+    pub async fn settle_character_stream(
+        &self,
+        snapshot: CharacterOperationSnapshot,
+        stream: HostEventStream,
+        fenced: Option<crate::actor_knowledge::AdmittedKnowledgeContext>,
+    ) {
+        drain_character_operation(self.registry.clone(), stream, snapshot, fenced).await;
     }
 
     /// Close the authority. Retired Actor sessions get one bounded shutdown
@@ -1023,6 +1082,32 @@ impl HostHandle {
         let mut sessions = self.host.list_sessions().await.map_err(host_err)?;
         sessions.sort_by_key(|a| a.id.to_string());
         Ok(sessions)
+    }
+
+    /// Session list/get row: the Host row plus the Actor pair this authority
+    /// indexes for it — the live admitted context first, the retired tombstone
+    /// second — so a cached or native read never turns an Actor session into a
+    /// provider-only session.
+    ///
+    /// # Errors
+    /// Returns `internal` when a stored id fails its generated pattern check.
+    fn session_response_wire(
+        &self,
+        session: &RegistryHostSession,
+    ) -> CoreResult<NexusAgentHostSessionResponse> {
+        let (actor_ref, viewpoint) = self.registry.echo_actor_pair_for_session(&session.id)?;
+        Ok(NexusAgentHostSessionResponse {
+            session_id: session.id.to_string(),
+            provider_id: session.provider_id.to_string(),
+            state: format!("{:?}", session.state),
+            active_op_id: session
+                .active_op_id
+                .as_ref()
+                .map(std::string::ToString::to_string),
+            model: None,
+            actor_ref,
+            viewpoint,
+        })
     }
 
     fn host_create_request(
@@ -1153,52 +1238,46 @@ const fn session_wire(
     }
 }
 
-fn session_response_wire(session: &RegistryHostSession) -> NexusAgentHostSessionResponse {
-    NexusAgentHostSessionResponse {
-        session_id: session.id.to_string(),
-        provider_id: session.provider_id.to_string(),
-        state: format!("{:?}", session.state),
-        active_op_id: session
-            .active_op_id
-            .as_ref()
-            .map(std::string::ToString::to_string),
-        model: None,
-        actor_ref: None,
-        viewpoint: None,
-    }
-}
-
 /// Server-owned drain for a Character operation: the admitted knowledge
-/// context is held through the whole stream (terminal capture) — its Character
-/// activity lease and its World/Character shared knowledge leases (durable
-/// §4.3) — and dropped only after the registry settles the terminal.
+/// context is held until settlement — its Character activity lease and its
+/// World/Character shared knowledge leases (durable §4.3) — and released at the
+/// FIRST matching terminal/fault (technical contract §5), never after unrelated
+/// trailing producer events.
 async fn drain_character_operation(
     registry: ActorSessionRegistry,
-    mut stream: impl futures_util::Stream<
-            Item = Result<
-                nexus_agent_host::capability::model::HostEvent,
-                nexus_agent_host::HostError,
-            >,
-        > + Unpin,
+    mut stream: impl futures_util::Stream<Item = Result<HostEvent, nexus_agent_host::HostError>> + Unpin,
     snapshot: CharacterOperationSnapshot,
-    _fenced: Option<crate::actor_knowledge::AdmittedKnowledgeContext>,
+    fenced: Option<crate::actor_knowledge::AdmittedKnowledgeContext>,
 ) {
     use futures_util::StreamExt;
-    let cancel_requested = {
-        let mut drained = false;
-        while let Some(_result) = stream.next().await {
-            drained = true;
+    // Authoritative terminal: the first observation of the ORIGINAL exec stream
+    // about this exact `(session_id, operation_id)` pair. Unrelated
+    // operation/session events are ignored, and EOF (or a stream error) before
+    // any terminal is a fault — never an inferred success.
+    let terminal = loop {
+        match stream.next().await {
+            Some(Ok(event)) => {
+                if let Some(terminal) =
+                    character_terminal_for(&event, &snapshot.session_id, &snapshot.operation_id)
+                {
+                    break terminal;
+                }
+            }
+            // A stream error item and an exhausted stream are the same fault:
+            // the run ended without this operation's observed terminal.
+            Some(Err(_)) | None => break CharacterTerminal::Fault,
         }
-        let _ = drained;
-        registry.begin_operation_finalizing(&snapshot.operation_id)
     };
-    let _ = cancel_requested;
-    registry.settle_operation_terminal(
-        &snapshot.operation_id,
-        nexus_contracts::generated::daemon_api::agent_host::character_operation_result::
-            CharacterOperationResultRunStatus::Succeeded,
-        Some(nexus_contracts::generated::daemon_api::agent_host::character_operation_result::CharacterOperationResultFinishReason::EndTurn),
-    );
+    // Finalizing is where the cancel/terminal race is decided under the
+    // registry lock: a cancel that latched first won the race and is the
+    // operation's truth.
+    let cancel_won_the_race = registry.begin_operation_finalizing(&snapshot.operation_id);
+    let (run_status, finish_reason) = character_terminal_outcome(&terminal, cancel_won_the_race);
+    registry.settle_operation_terminal(&snapshot.operation_id, run_status, finish_reason);
+    // The fences are released AT settlement: the activity guard and the shared
+    // knowledge leases must not outlive the recorded outcome waiting for
+    // trailing producer events.
+    drop(fenced);
 }
 
 /// Server-owned drain for non-capture operations; events are broadcast by the

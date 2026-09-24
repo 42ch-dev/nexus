@@ -25,12 +25,23 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures_util::Stream;
 use nexus_agent_host::capability::model::HostStartConfig;
-use nexus_agent_host::{HostFacade, HostManager};
+use nexus_agent_host::capability::model::{
+    FinishReason, HostEvent, HostEventStream, OperationFailedEvent, OperationFinishedEvent,
+    SessionStopReason, SessionStoppedEvent,
+};
+use nexus_agent_host::{HostFacade, HostManager, HostOperationId, HostSessionId};
+use nexus_contracts::generated::daemon_api::agent_host::character_operation_result::{
+    CharacterOperationResult, CharacterOperationResultFinishReason,
+    CharacterOperationResultRunStatus, NexusCharacterRunCaptureOutcomeStatus,
+};
+use nexus_contracts::generated::daemon_api::agent_host::ExecuteOperationRequest;
 use nexus_contracts::{CoreCloseReportState, ProviderCall, ProviderEventBatch, ProviderReply};
 use nexus_core::{
-    ActorSessionKey, ActorSessionRegistry, ActorViewpoint, AdmittedActor, CoreAccess,
-    CoreActorAdmission, CoreError, CoreOpenOptions, CoreService, HostHandle,
+    ActorSessionKey, ActorSessionRegistry, ActorViewpoint, AdmittedActor, AdmittedKnowledgeContext,
+    CharacterOperationSnapshot, CoreAccess, CoreActorAdmission, CoreError, CoreOpenOptions,
+    CoreService, HostHandle,
 };
 use nexus_local_db::writer_protocol::{init_engine_pool, GuardedPoolOptions};
 use nexus_local_db::{ensure_creator_row, CreateCharacterParams};
@@ -883,106 +894,753 @@ async fn retained_same_state_transition_no_op_keeps_the_indexed_session_reusable
     drop(character_lease);
 }
 
-/// Remembered capture is a **durable writer** boundary at the core authority
-/// (v1.193 P0-T11): `remember` is admitted only for an indexed Character
-/// session — a legacy session's request is refused before any provider effect
-/// — and the reserved operation settles its **run** status while the
-/// **capture** half stays `pending` with no fabricated `run_…` id. The core
-/// never claims a capture it did not perform: only a separate durable capture
-/// writer settles that half.
-#[tokio::test]
-async fn remembered_capture_stays_reserved_for_the_durable_capture_writer() {
-    use nexus_contracts::generated::daemon_api::agent_host::character_operation_result::{
-        CharacterOperationResultFinishReason, CharacterOperationResultRunStatus,
-        NexusCharacterRunCaptureOutcomeStatus,
-    };
+// ── v1.196 P0-T2 — authoritative Character terminal outcomes ─────────────
+//
+// Durable contract: `.mstar/iterations/v1.196/specs/current-host-actor-contract.md`
+// §5 (D8/D9). The core drain of the ORIGINAL `HostFacade::exec` stream settles
+// the FIRST matching terminal/fault of the exact `(session_id, operation_id)`,
+// releases that operation's knowledge fences at settlement — not at unrelated
+// trailing producer events — and never infers success from EOF, a generic
+// session state or a coarse provider journal row. Character `remember:true` is
+// a typed pre-effect refusal because this Host has no run-capture writer.
 
+/// One item of a host exec stream.
+type HostItem = nexus_agent_host::HostResult<HostEvent>;
+
+/// The matching observations contract §5 classifies, as they reach the drain
+/// from a real provider stream.
+enum CharacterObservation {
+    /// `OpFinished` carrying the provider's stop reason.
+    Finished(FinishReason),
+    /// `OpFailed` carrying an error category (`max_tokens`, `refusal`,
+    /// `provider_error`, `stream_closed`, …).
+    Failed(String),
+    /// A stream error item.
+    StreamError,
+    /// A session stop for this operation's session, before any terminal.
+    SessionStopped,
+    /// EOF with no terminal at all.
+    Eof,
+}
+
+impl CharacterObservation {
+    fn events(&self, session_id: &HostSessionId, operation_id: &HostOperationId) -> Vec<HostItem> {
+        match self {
+            Self::Finished(reason) => vec![Ok(HostEvent::OpFinished(OperationFinishedEvent {
+                session_id: session_id.clone(),
+                op_id: operation_id.clone(),
+                reason: reason.clone(),
+            }))],
+            Self::Failed(category) => vec![Ok(HostEvent::OpFailed(OperationFailedEvent {
+                session_id: session_id.clone(),
+                op_id: operation_id.clone(),
+                error_category: category.clone(),
+                error_message: format!("{category} from the provider"),
+            }))],
+            Self::StreamError => vec![Err(nexus_agent_host::HostError::internal("stream fault"))],
+            Self::SessionStopped => vec![Ok(HostEvent::SessionStopped(SessionStoppedEvent {
+                session_id: session_id.clone(),
+                reason: SessionStopReason::ProviderExit,
+            }))],
+            Self::Eof => vec![],
+        }
+    }
+}
+
+/// A deterministic exec-stream stand-in.
+///
+/// Once it has yielded an item, a poll that finds the stream exhausted PANICS:
+/// reaching EOF after a terminal means the drain waited for unrelated trailing
+/// producer events instead of settling on the first match (contract §5). An
+/// empty item list is a genuine empty stream, whose EOF must instead settle the
+/// operation as failed.
+fn exec_stream(items: Vec<HostItem>) -> HostEventStream {
+    let mut inner = futures_util::stream::iter(items);
+    let mut yielded = false;
+    Box::pin(futures_util::stream::poll_fn(
+        move |cx| match std::pin::Pin::new(&mut inner).poll_next(cx) {
+            std::task::Poll::Ready(Some(item)) => {
+                yielded = true;
+                std::task::Poll::Ready(Some(item))
+            }
+            std::task::Poll::Ready(None) if yielded => {
+                panic!("the Character drain read past its settled terminal to EOF")
+            }
+            std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
+            std::task::Poll::Pending => std::task::Poll::Pending,
+        },
+    ))
+}
+
+/// Reserve one Character operation the way `execute` does, drive the
+/// authority-owned drain over the events `build` produces for that exact
+/// `(session_id, operation_id)`, and return the settled owner-scoped outcome.
+async fn settle_character_operation(
+    core: &CoreService,
+    handle: &HostHandle,
+    principal: &nexus_core::Principal,
+    env: &Env,
+    build: impl FnOnce(&HostSessionId, &HostOperationId) -> Vec<HostItem>,
+    fenced: Option<AdmittedKnowledgeContext>,
+) -> (CharacterOperationResult, HostOperationId) {
+    let ctx = admit_character(core, principal, env).await;
+    let operation_id = HostOperationId(Uuid::new_v4());
+    let session_id = HostSessionId(Uuid::new_v4());
+    let snapshot = CharacterOperationSnapshot {
+        owner_creator_id: principal.creator_id().to_string(),
+        ctx,
+        session_id: session_id.clone(),
+        operation_id: operation_id.clone(),
+    };
+    handle
+        .actor_sessions()
+        .reserve_character_operation(&snapshot)
+        .expect("a Character operation reserves an outcome");
+    let events = build(&session_id, &operation_id);
+    handle
+        .settle_character_stream(snapshot, exec_stream(events), fenced)
+        .await;
+    let outcome = handle
+        .character_operation(principal, operation_id.to_string())
+        .await
+        .expect("the settled outcome is owner-readable");
+    (outcome, operation_id)
+}
+
+fn finished(
+    session_id: &HostSessionId,
+    operation_id: &HostOperationId,
+    reason: FinishReason,
+) -> HostEvent {
+    HostEvent::OpFinished(OperationFinishedEvent {
+        session_id: session_id.clone(),
+        op_id: operation_id.clone(),
+        reason,
+    })
+}
+
+/// A generated execute request from its JSON body.
+fn execute_request(body: serde_json::Value) -> ExecuteOperationRequest {
+    serde_json::from_value(body).expect("the request body is wire-valid")
+}
+
+/// Contract §5 table: every matching observation settles the run status and
+/// finish reason the table promises, every Character result stays uncaptured,
+/// and an unrelated observation never decides the outcome.
+#[allow(clippy::too_many_lines)] // one exhaustive terminal table + the filtering round
+#[tokio::test]
+async fn character_terminal_contract_table_settles_every_run_status() {
     let env = seed_env().await;
     let (core, principal) = open_core(&env).await;
     let port = CountingPort::new();
     let handle: HostHandle = core.open_host(port.clone()).await.unwrap();
 
-    // A never-indexed (legacy) session can never request a remembered capture,
-    // and the refusal lands before any provider effect.
-    let request =
-        serde_json::from_value::<
-            nexus_contracts::generated::daemon_api::agent_host::ExecuteOperationRequest,
-        >(serde_json::json!({ "kind": "prompt", "content": "hello", "remember": true }))
-        .unwrap();
-    let err = handle
-        .execute(&principal, Uuid::new_v4().to_string(), request)
-        .await
-        .expect_err("remember on a non-Character session must be refused");
-    match &err {
-        CoreError::InvalidInput { field, .. } => assert_eq!(field, "remember"),
-        other => panic!("expected an invalid `remember` refusal, got {other:?}"),
-    }
-    assert_eq!(
-        port.call_count(),
-        0,
-        "the refusal lands before any provider effect"
-    );
+    let cases: Vec<(
+        &str,
+        CharacterObservation,
+        CharacterOperationResultRunStatus,
+        Option<CharacterOperationResultFinishReason>,
+    )> = vec![
+        (
+            "end_turn",
+            CharacterObservation::Finished(FinishReason::EndTurn),
+            CharacterOperationResultRunStatus::Succeeded,
+            Some(CharacterOperationResultFinishReason::EndTurn),
+        ),
+        (
+            "max_tokens",
+            CharacterObservation::Finished(FinishReason::MaxTokens),
+            CharacterOperationResultRunStatus::Incomplete,
+            Some(CharacterOperationResultFinishReason::MaxTokens),
+        ),
+        (
+            "max_turn_requests",
+            CharacterObservation::Finished(FinishReason::MaxTurnRequests),
+            CharacterOperationResultRunStatus::Incomplete,
+            Some(CharacterOperationResultFinishReason::MaxTurnRequests),
+        ),
+        (
+            "refusal",
+            CharacterObservation::Finished(FinishReason::Refusal),
+            CharacterOperationResultRunStatus::Incomplete,
+            Some(CharacterOperationResultFinishReason::Refusal),
+        ),
+        (
+            "cancelled",
+            CharacterObservation::Finished(FinishReason::Cancelled),
+            CharacterOperationResultRunStatus::Cancelled,
+            Some(CharacterOperationResultFinishReason::Cancelled),
+        ),
+        // The adapters report the non-`EndTurn` stop reasons as an `OpFailed`
+        // category (`providers/acp.rs`): the named reason still classifies the
+        // run, and only an unnamed category is a plain failure.
+        (
+            "acp max_tokens",
+            CharacterObservation::Failed("max_tokens".to_string()),
+            CharacterOperationResultRunStatus::Incomplete,
+            Some(CharacterOperationResultFinishReason::MaxTokens),
+        ),
+        (
+            "acp max_turn_requests",
+            CharacterObservation::Failed("max_turn_requests".to_string()),
+            CharacterOperationResultRunStatus::Incomplete,
+            Some(CharacterOperationResultFinishReason::MaxTurnRequests),
+        ),
+        (
+            "acp refusal",
+            CharacterObservation::Failed("refusal".to_string()),
+            CharacterOperationResultRunStatus::Incomplete,
+            Some(CharacterOperationResultFinishReason::Refusal),
+        ),
+        (
+            "provider_error",
+            CharacterObservation::Failed("provider_error".to_string()),
+            CharacterOperationResultRunStatus::Failed,
+            None,
+        ),
+        (
+            "stream_closed",
+            CharacterObservation::Failed("stream_closed".to_string()),
+            CharacterOperationResultRunStatus::Failed,
+            None,
+        ),
+        (
+            "stream error",
+            CharacterObservation::StreamError,
+            CharacterOperationResultRunStatus::Failed,
+            None,
+        ),
+        (
+            "session stopped before terminal",
+            CharacterObservation::SessionStopped,
+            CharacterOperationResultRunStatus::Failed,
+            None,
+        ),
+        (
+            "eof without terminal",
+            CharacterObservation::Eof,
+            CharacterOperationResultRunStatus::Failed,
+            None,
+        ),
+    ];
 
-    // The reserved Character operation: `remember` reserves a `pending`
-    // capture, the opt-out reserves `disabled`, and the authority-owned drain
-    // settles the run half only — a reserved capture is never rewritten into a
-    // captured status nor given a fabricated pending id.
-    let ctx = admit_character(&core, &principal, &env).await;
-    for (remember, expected) in [
-        (true, NexusCharacterRunCaptureOutcomeStatus::Pending),
-        (false, NexusCharacterRunCaptureOutcomeStatus::Disabled),
-    ] {
-        let operation_id = nexus_agent_host::HostOperationId(Uuid::new_v4());
-        handle
-            .actor_sessions()
-            .reserve_character_operation(&nexus_core::CharacterOperationSnapshot {
-                owner_creator_id: principal.creator_id().to_string(),
-                ctx: ctx.clone(),
-                session_id: nexus_agent_host::HostSessionId(Uuid::new_v4()),
-                operation_id: operation_id.clone(),
-                remember,
-                raw_prompt: "hello".to_string(),
-            })
-            .expect("a Character operation reserves an outcome");
-
-        let running = handle
-            .actor_sessions()
-            .character_operation_result(principal.creator_id(), &operation_id)
-            .expect("the reserved outcome is owner-readable");
+    for (label, observation, expected_status, expected_finish) in cases {
+        let (outcome, operation_id) = settle_character_operation(
+            &core,
+            &handle,
+            &principal,
+            &env,
+            |session_id, operation_id| observation.events(session_id, operation_id),
+            None,
+        )
+        .await;
+        assert_eq!(outcome.run_status, expected_status, "{label}: run status");
         assert_eq!(
-            running.run_status,
-            CharacterOperationResultRunStatus::Running,
-            "a reserved operation is still running"
+            outcome.finish_reason, expected_finish,
+            "{label}: finish reason"
         );
         assert_eq!(
-            running.capture.status, expected,
-            "remember reserves a pending capture, the opt-out a disabled one"
+            outcome.capture.status,
+            NexusCharacterRunCaptureOutcomeStatus::Disabled,
+            "{label}: this batch never captures a Character run"
         );
         assert!(
-            running.capture.pending_id.is_none(),
-            "a reserved capture never carries a fabricated pending id"
+            outcome.capture.pending_id.is_none() && outcome.capture.code.is_none(),
+            "{label}: no fabricated capture id or code"
         );
+        assert_eq!(
+            outcome.operation_id,
+            operation_id.to_string(),
+            "{label}: the outcome names the operation it settled"
+        );
+    }
+    assert_eq!(port.call_count(), 0, "the drain settles no provider effect");
 
+    // An unrelated operation's terminal, another session's fault and a stop of
+    // a different session never decide this operation's outcome.
+    let other_op = HostOperationId(Uuid::new_v4());
+    let other_session = HostSessionId(Uuid::new_v4());
+    let (outcome, _) = settle_character_operation(
+        &core,
+        &handle,
+        &principal,
+        &env,
+        move |session_id, operation_id| {
+            vec![
+                Ok(finished(session_id, &other_op, FinishReason::Cancelled)),
+                Ok(HostEvent::OpFailed(OperationFailedEvent {
+                    session_id: session_id.clone(),
+                    op_id: other_op.clone(),
+                    error_category: "provider_error".to_string(),
+                    error_message: "another operation failed".to_string(),
+                })),
+                Ok(finished(
+                    &other_session,
+                    operation_id,
+                    FinishReason::Refusal,
+                )),
+                Ok(HostEvent::SessionStopped(SessionStoppedEvent {
+                    session_id: other_session.clone(),
+                    reason: SessionStopReason::GracefulShutdown,
+                })),
+                Ok(finished(session_id, operation_id, FinishReason::EndTurn)),
+            ]
+        },
+        None,
+    )
+    .await;
+    assert_eq!(
+        outcome.run_status,
+        CharacterOperationResultRunStatus::Succeeded,
+        "only this (session, operation) decides the outcome"
+    );
+    assert_eq!(
+        outcome.finish_reason,
+        Some(CharacterOperationResultFinishReason::EndTurn)
+    );
+}
+
+/// Contract §5: the first matching terminal/fault is immutable — a trailing
+/// duplicate fault and a later success cannot replace it — and the drain
+/// settles on that first match instead of waiting for the producer's trailing
+/// events (`exec_stream` panics if it reads to EOF).
+#[tokio::test]
+async fn character_terminal_first_match_is_immutable_and_stops_the_drain() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let port = CountingPort::new();
+    let handle: HostHandle = core.open_host(port.clone()).await.unwrap();
+
+    let (outcome, operation_id) = settle_character_operation(
+        &core,
+        &handle,
+        &principal,
+        &env,
+        |session_id, operation_id| {
+            let other_op = HostOperationId(Uuid::new_v4());
+            vec![
+                // Unrelated operations first: neither matches.
+                Ok(finished(session_id, &other_op, FinishReason::Refusal)),
+                // The first MATCHING observation is this operation's truth.
+                Ok(finished(session_id, operation_id, FinishReason::MaxTokens)),
+                // Trailing duplicates/faults must not replace it, and must not
+                // even be consumed.
+                Ok(HostEvent::OpFailed(OperationFailedEvent {
+                    session_id: session_id.clone(),
+                    op_id: operation_id.clone(),
+                    error_category: "provider_error".to_string(),
+                    error_message: "a duplicate trailing fault".to_string(),
+                })),
+                Ok(finished(session_id, operation_id, FinishReason::EndTurn)),
+            ]
+        },
+        None,
+    )
+    .await;
+    assert_eq!(
+        outcome.run_status,
+        CharacterOperationResultRunStatus::Incomplete,
+        "the first matching terminal is the truth"
+    );
+    assert_eq!(
+        outcome.finish_reason,
+        Some(CharacterOperationResultFinishReason::MaxTokens)
+    );
+
+    // A later settlement of the same operation (a trailing producer fault or a
+    // cancel that lost the phase race) is a no-op: the settlement is immutable
+    // and never re-enters the retention FIFO.
+    handle.actor_sessions().settle_operation_terminal(
+        &operation_id,
+        CharacterOperationResultRunStatus::Succeeded,
+        Some(CharacterOperationResultFinishReason::EndTurn),
+    );
+    let reread = handle
+        .character_operation(&principal, operation_id.to_string())
+        .await
+        .expect("the settled outcome stays owner-readable");
+    assert_eq!(
+        reread.run_status,
+        CharacterOperationResultRunStatus::Incomplete,
+        "a duplicate settlement cannot replace the recorded truth"
+    );
+    assert_eq!(
+        reread.finish_reason,
+        Some(CharacterOperationResultFinishReason::MaxTokens)
+    );
+    assert_eq!(
+        handle.actor_sessions().character_operation_count(),
+        1,
+        "the duplicate settlement was not retained a second time"
+    );
+}
+
+/// Contract §5: an accepted cancellation that won the phase race is the
+/// operation's truth — the provider terminal that follows cannot turn it back
+/// into a success — and a later cancel is the typed 409 conflict.
+#[tokio::test]
+async fn character_terminal_accepted_cancel_beats_the_provider_terminal() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let port = CountingPort::new();
+    let handle: HostHandle = core.open_host(port.clone()).await.unwrap();
+
+    let ctx = admit_character(&core, &principal, &env).await;
+    let operation_id = HostOperationId(Uuid::new_v4());
+    let session_id = HostSessionId(Uuid::new_v4());
+    let snapshot = CharacterOperationSnapshot {
+        owner_creator_id: principal.creator_id().to_string(),
+        ctx,
+        session_id: session_id.clone(),
+        operation_id: operation_id.clone(),
+    };
+    handle
+        .actor_sessions()
+        .reserve_character_operation(&snapshot)
+        .expect("a Character operation reserves an outcome");
+    handle
+        .actor_sessions()
+        .request_operation_cancel(principal.creator_id(), &operation_id)
+        .expect("the cancel intent latches before the drain finalizes");
+
+    // The provider then reports a clean end of turn; the accepted local cancel
+    // already won the race and stays the recorded outcome.
+    handle
+        .settle_character_stream(
+            snapshot,
+            exec_stream(vec![Ok(finished(
+                &session_id,
+                &operation_id,
+                FinishReason::EndTurn,
+            ))]),
+            None,
+        )
+        .await;
+    let outcome = handle
+        .character_operation(&principal, operation_id.to_string())
+        .await
+        .expect("the settled outcome is owner-readable");
+    assert_eq!(
+        outcome.run_status,
+        CharacterOperationResultRunStatus::Cancelled,
+        "an accepted cancel is never rewritten into a provider success"
+    );
+    assert_eq!(
+        outcome.finish_reason,
+        Some(CharacterOperationResultFinishReason::Cancelled)
+    );
+
+    // Once terminal, a later cancel is the 409 conflict, never an override.
+    let err = handle
+        .actor_sessions()
+        .request_operation_cancel(principal.creator_id(), &operation_id)
+        .expect_err("a finished operation refuses cancel");
+    match &err {
+        CoreError::ActorConflict { code, .. } => {
+            assert_eq!(code, "actor_operation_finished", "finished cancel code");
+        }
+        other => panic!("expected actor_operation_finished, got {other:?}"),
+    }
+}
+
+/// Contract §5: the operation's activity guard and shared knowledge leases are
+/// released AT settlement, not after unrelated trailing producer events. The
+/// stream here stops at the terminal (it panics on a later poll), and the
+/// exclusive World/Character disclosure edits land immediately after.
+#[tokio::test]
+async fn character_terminal_settlement_releases_the_knowledge_fences() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let port = CountingPort::new();
+    let handle: HostHandle = core.open_host(port.clone()).await.unwrap();
+
+    // The admitted context a running Character effect holds.
+    let knowledge = admitted_knowledge(&core, &principal, &env).await;
+    let busy = core
+        .acquire_knowledge_governance(
+            &principal,
+            nexus_core::ActorFenceKind::World,
+            WORLD.to_string(),
+        )
+        .await
+        .expect_err("a held effect blocks the disclosure edit");
+    match &busy {
+        CoreError::ActorConflict { code, .. } => assert_eq!(code, "world_busy"),
+        other => panic!("expected world_busy, got {other:?}"),
+    }
+
+    let (outcome, _) = settle_character_operation(
+        &core,
+        &handle,
+        &principal,
+        &env,
+        |session_id, operation_id| {
+            vec![Ok(finished(
+                session_id,
+                operation_id,
+                FinishReason::EndTurn,
+            ))]
+        },
+        Some(knowledge),
+    )
+    .await;
+    assert_eq!(
+        outcome.run_status,
+        CharacterOperationResultRunStatus::Succeeded
+    );
+
+    let world_lease = core
+        .acquire_knowledge_governance(
+            &principal,
+            nexus_core::ActorFenceKind::World,
+            WORLD.to_string(),
+        )
+        .await
+        .expect("the settlement released the World knowledge fence");
+    let character_lease = core
+        .acquire_knowledge_governance(
+            &principal,
+            nexus_core::ActorFenceKind::Character,
+            env.character_id.clone(),
+        )
+        .await
+        .expect("the settlement released the Character knowledge fence");
+    drop(world_lease);
+    drop(character_lease);
+}
+
+/// Contract §5: detailed outcomes are process-lifetime and bounded — an evicted
+/// outcome and an outcome of a reopened authority are MISSING (`not_found`),
+/// never an inferred success — and they stay owner-scoped.
+#[tokio::test]
+async fn character_terminal_eviction_and_reopen_have_no_detailed_outcome() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let port = CountingPort::new();
+    let handle: HostHandle = core.open_host(port.clone()).await.unwrap();
+
+    // 1025 terminal settlements: the retention window keeps the newest 1024 and
+    // drops the oldest instead of answering an evicted id from memory.
+    let ctx = admit_character(&core, &principal, &env).await;
+    let mut oldest = None;
+    let mut newest = None;
+    for _ in 0..1025 {
+        let operation_id = HostOperationId(Uuid::new_v4());
+        handle
+            .actor_sessions()
+            .reserve_character_operation(&CharacterOperationSnapshot {
+                owner_creator_id: principal.creator_id().to_string(),
+                ctx: ctx.clone(),
+                session_id: HostSessionId(Uuid::new_v4()),
+                operation_id: operation_id.clone(),
+            })
+            .expect("a Character operation reserves an outcome");
         handle.actor_sessions().settle_operation_terminal(
             &operation_id,
             CharacterOperationResultRunStatus::Succeeded,
             Some(CharacterOperationResultFinishReason::EndTurn),
         );
-        let settled = handle
-            .actor_sessions()
-            .character_operation_result(principal.creator_id(), &operation_id)
-            .expect("the settled outcome stays owner-readable");
-        assert_eq!(
-            settled.run_status,
-            CharacterOperationResultRunStatus::Succeeded,
-            "the authority-owned drain settles the run status"
-        );
-        assert_eq!(
-            settled.capture.status, expected,
-            "the drain never settles the capture half"
-        );
-        assert!(settled.capture.pending_id.is_none());
+        oldest.get_or_insert_with(|| operation_id.clone());
+        newest = Some(operation_id);
     }
+    assert_eq!(
+        handle.actor_sessions().character_operation_count(),
+        1024,
+        "the terminal retention window stays bounded"
+    );
+    let oldest = oldest.expect("the first settled operation");
+    let newest = newest.expect("the last settled operation");
+    let err = handle
+        .character_operation(&principal, oldest.to_string())
+        .await
+        .expect_err("an evicted detailed outcome is missing");
+    assert!(
+        matches!(err, CoreError::NotFound { .. }),
+        "eviction is not_found, got {err:?}"
+    );
+    let retained = handle
+        .character_operation(&principal, newest.to_string())
+        .await
+        .expect("a retained outcome stays readable");
+    assert_eq!(
+        retained.run_status,
+        CharacterOperationResultRunStatus::Succeeded
+    );
+
+    // A fresh authority over the same open service has no detailed outcome for
+    // a previous operation: nothing is replayed or inferred after reopen.
+    let report = handle.close().await.expect("close returns a report");
+    assert!(report.cleanup_confirmed, "{report:?}");
+    let reopened = core.open_host(CountingPort::new()).await.unwrap();
+    let err = reopened
+        .character_operation(&principal, newest.to_string())
+        .await
+        .expect_err("a reopened authority never replays a detailed outcome");
+    assert!(
+        matches!(err, CoreError::NotFound { .. }),
+        "reopen is not_found, got {err:?}"
+    );
+
+    // Owner-scoped: a foreign principal cannot read an outcome at all.
+    let foreign = seed_env_as("ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").await;
+    let (_, foreign_principal) = open_core(&foreign).await;
+    let err = reopened
+        .character_operation(&foreign_principal, newest.to_string())
+        .await
+        .expect_err("a foreign principal is refused");
+    assert!(
+        matches!(err, CoreError::AuthRequired),
+        "foreign read is auth_required, got {err:?}"
+    );
+}
+
+/// Contract §5 / D9: a Character `remember:true` prompt is refused with the
+/// typed `not_supported` envelope BEFORE the operation reserves an outcome,
+/// admits an activity/knowledge context or reaches the provider — no capture
+/// writer exists to fulfil it. The legacy/Creator refusal is preserved.
+#[tokio::test]
+async fn character_terminal_remember_refusal_precedes_reservation_and_effects() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let port = CountingPort::new();
+    let handle: HostHandle = core.open_host(port.clone()).await.unwrap();
+
+    let ctx = admit_character(&core, &principal, &env).await;
+    let knowledge = admitted_knowledge(&core, &principal, &env).await.identity();
+    let key = registry_key(handle.actor_sessions(), &ctx, knowledge, &env.user_home);
+    let session_id = Uuid::new_v4();
+    handle
+        .actor_sessions()
+        .insert_indexed_entry(key, ctx, HostSessionId(session_id));
+
+    let err = handle
+        .execute(
+            &principal,
+            session_id.to_string(),
+            execute_request(
+                serde_json::json!({ "kind": "prompt", "content": "hello", "remember": true }),
+            ),
+        )
+        .await
+        .expect_err("a Character capture request is refused");
+    match &err {
+        CoreError::Coded { code, .. } => assert_eq!(code, "not_supported"),
+        other => panic!("expected the not_supported envelope, got {other:?}"),
+    }
+    assert_eq!(
+        port.call_count(),
+        0,
+        "the refusal precedes any provider effect"
+    );
+    assert_eq!(
+        handle.actor_sessions().character_operation_count(),
+        0,
+        "the refusal precedes the operation reservation"
+    );
+    // Zero memory effects: no activity or knowledge context was admitted, so
+    // the exclusive disclosure edit lands at once.
+    let lease = core
+        .acquire_knowledge_governance(
+            &principal,
+            nexus_core::ActorFenceKind::World,
+            WORLD.to_string(),
+        )
+        .await
+        .expect("the refused prompt admitted no knowledge context");
+    drop(lease);
+
+    // The non-Character refusal is unchanged: `remember` on a never-indexed
+    // session stays the 422 `invalid_input` refusal.
+    let err = handle
+        .execute(
+            &principal,
+            Uuid::new_v4().to_string(),
+            execute_request(
+                serde_json::json!({ "kind": "prompt", "content": "hello", "remember": true }),
+            ),
+        )
+        .await
+        .expect_err("remember on a non-Character session stays invalid_input");
+    match &err {
+        CoreError::InvalidInput { field, .. } => assert_eq!(field, "remember"),
+        other => panic!("expected the invalid `remember` refusal, got {other:?}"),
+    }
+    assert_eq!(port.call_count(), 0, "the legacy refusal has no effects");
+}
+
+/// Contract §5 / §4: a native list/get row keeps its Actor pair — the live
+/// admitted context first, then the owner-retaining tombstone — so a native or
+/// cached read never downgrades an Actor session into a provider-only one. The
+/// `HostHandle::query` rows render exactly the pair this overlay returns.
+#[tokio::test]
+async fn actor_echo_keeps_the_actor_pair_for_live_and_retired_sessions() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let handle: HostHandle = core.open_host(CountingPort::new()).await.unwrap();
+    let ctx = admit_character(&core, &principal, &env).await;
+    let knowledge = admitted_knowledge(&core, &principal, &env).await.identity();
+    let key = registry_key(handle.actor_sessions(), &ctx, knowledge, &env.user_home);
+    let session_id = HostSessionId(Uuid::new_v4());
+    handle
+        .actor_sessions()
+        .insert_indexed_entry(key, ctx, session_id.clone());
+
+    // A never-indexed (legacy/provider-only) row carries no Actor pair.
+    assert!(
+        matches!(
+            handle
+                .actor_sessions()
+                .echo_actor_pair_for_session(&HostSessionId(Uuid::new_v4()))
+                .expect("an unknown id echoes nothing"),
+            (None, None)
+        ),
+        "a provider-only row is not Actor-shaped"
+    );
+
+    for (label, expected_retired) in [("live indexed context", false), ("retired tombstone", true)]
+    {
+        let (actor_ref, viewpoint) = handle
+            .actor_sessions()
+            .echo_actor_pair_for_session(&session_id)
+            .expect("the row echoes its Actor pair");
+        match actor_ref.expect("an Actor row echoes its identity") {
+            nexus_contracts::core_host_query_response::NexusActorRef::CharacterActorRef {
+                character_id,
+                ..
+            } => assert_eq!(
+                character_id.as_str(),
+                env.character_id,
+                "{label}: the Character bearer id survives"
+            ),
+            ref other @ nexus_contracts::core_host_query_response::NexusActorRef::CreatorActorRef {
+                ..
+            } => panic!("{label}: expected a Character actor ref, got {other:?}"),
+        }
+        let viewpoint = viewpoint.expect("an Actor row echoes its viewpoint");
+        assert_eq!(viewpoint.world_id.as_str(), WORLD, "{label}: world id");
+        assert_eq!(
+            viewpoint
+                .binding_id
+                .as_ref()
+                .map(|id| id.as_str().to_string()),
+            Some(env.binding_id.clone()),
+            "{label}: binding id"
+        );
+        if !expected_retired {
+            let retired = handle
+                .actor_sessions()
+                .retire_character_sessions(&env.character_id);
+            assert_eq!(retired, vec![session_id.clone()], "the id retires once");
+        }
+    }
+    assert_eq!(
+        handle
+            .actor_sessions()
+            .stored_session_owner(&session_id)
+            .map(|(owner, _, retired)| (owner, retired)),
+        Some((CREATOR.to_string(), true)),
+        "the echoed pair comes from the owner-retaining tombstone"
+    );
 }
 
 // ── v1.196 P0-T1 — attached core authority lifetime ──────────────────────
