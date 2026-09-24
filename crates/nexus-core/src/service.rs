@@ -148,6 +148,31 @@ pub struct CoreInner {
     /// second core over the same file build a second engine.
     #[cfg(feature = "execution")]
     pub(crate) execution: std::sync::Mutex<Option<Arc<crate::execution::ExecutionHandle>>>,
+    /// Per-service start fence (v1.195 P1-T2): the retained start task holds a
+    /// SHARED guard for its whole start, and the close drain takes the EXCLUSIVE
+    /// guard before it takes the execution slot and releases the pool, the
+    /// writer admission and the per-DB owner fence.
+    ///
+    /// The install-time double check alone cannot close this window: a close
+    /// that lands mid-build finds the per-service slot EMPTY, so it used to
+    /// release the pool/admission and publish `cleanup_confirmed` while the
+    /// registered build (and the recovery pass it ran) was still in flight —
+    /// and the next open over the same home could re-admit beside it. The fence
+    /// makes the drain WAIT for every registered start to settle (finish or
+    /// abandon) first, so a confirmed report can never precede a registered
+    /// builder's shutdown.
+    ///
+    /// The lock is behind an `Arc` because it uses OWNED guards: the retained
+    /// start task (see `CoreService::start_execution`) holds the shared half for
+    /// its whole duration — reservation, build, recovery, install, and the
+    /// settlement of an owner whose caller went away.
+    ///
+    /// Cancellation-safe by construction: the guard is held by that retained
+    /// task, so a caller that is cancelled stops waiting but cannot interrupt
+    /// the start, and can neither strand the close nor release the DB under
+    /// drives that are still running.
+    #[cfg(feature = "execution")]
+    pub(crate) start_fence: Arc<tokio::sync::RwLock<()>>,
 }
 
 /// Cloneable handle: `inner` is already shared, so a clone is the same open
@@ -290,6 +315,8 @@ impl CoreService {
                 character_fences: ActorFenceTable::new(&db_path),
                 #[cfg(feature = "execution")]
                 execution: std::sync::Mutex::new(None),
+                #[cfg(feature = "execution")]
+                start_fence: Arc::new(tokio::sync::RwLock::new(())),
             }),
         })
     }
@@ -573,6 +600,12 @@ impl CoreService {
     /// interrupted caller retains the pool, the writer admission and the
     /// execution owner it did not settle.
     ///
+    /// A close also FENCES new `start_execution` calls and waits for the
+    /// registered in-flight ones to settle before it takes the execution slot
+    /// and releases the pool, the writer admission and the per-DB owner fence
+    /// (see [`CoreInner::start_fence`]) — so `cleanup_confirmed` can never
+    /// precede a registered builder's shutdown.
+    ///
     /// # Errors
     /// Currently infallible: the report describes a settled close, or the
     /// unconfirmed report of a drain that could not run.
@@ -630,6 +663,20 @@ impl CoreService {
 /// pool closes, because drive cancellation, the bounded join and every final
 /// durable settlement run against a LIVE pool.
 async fn close_drain(inner: Arc<CoreInner>) {
+    // Close the start barrier BEFORE taking the slot. The retained start task
+    // holds the shared half for the whole start (engine construction, recovery,
+    // the install, or the settlement of an owner whose caller went away), so
+    // this waits out every registered start instead of releasing the pool, the
+    // writer admission and the per-DB owner fence under a registered builder.
+    // `closing` was raised in the caller's step, so a start arriving from here
+    // on is refused by `ensure_open` and never builds at all.
+    //
+    // Lock order (fence, then slot) matches `start_execution`'s install, which
+    // holds the fence while taking the slot mutex — so the two cannot
+    // deadlock, and the drain only ever takes the slot of a start that has
+    // already published it or abandoned it.
+    #[cfg(feature = "execution")]
+    let _starts_settled = Arc::clone(&inner.start_fence).write_owned().await;
     #[cfg(feature = "execution")]
     let execution_handle = inner
         .execution

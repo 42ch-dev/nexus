@@ -723,11 +723,25 @@ impl CoreService {
     /// supplies the implementation); it is required so a handle can never be
     /// created without a provider seam.
     ///
+    /// The start runs on a **retained task**, not on the caller's future: a
+    /// caller that is cancelled (a boot budget, a dropped client) must not
+    /// interrupt a half-built owner. `build_execution` spawns the hosted clock
+    /// and the drives `recovery` re-drives, and dropping an
+    /// [`ExecutionHandle`] stops NONE of them — so a cancellation mid-build
+    /// would lose the clock's `JoinHandle` and leave live drives behind, while
+    /// freeing the reservation a later close would trust. The task holds the
+    /// per-service START fence for the whole start and settles an owner nobody
+    /// received, so the close drain waits for that settlement too (see
+    /// [`Self::run_retained_start`]).
+    ///
     /// # Errors
     /// Returns [`ExecutionOpenError::NotEngineOwner`] when the core was not
     /// opened under [`CoreAccess::EngineOwner`],
     /// [`ExecutionOpenError::AlreadyOwned`] when an owner already exists, and
-    /// [`ExecutionOpenError::Closing`] when the service is closing.
+    /// [`ExecutionOpenError::Closing`] when the service is closing — including
+    /// a start that arrives while a close is already draining, which is refused
+    /// once that drain has settled (both register on the same per-service
+    /// fence).
     pub async fn start_execution(
         &self,
         _providers: Arc<dyn ProviderPort>,
@@ -738,6 +752,102 @@ impl CoreService {
         if self.inner.access != CoreAccess::EngineOwner {
             return Err(ExecutionOpenError::NotEngineOwner(self.inner.access));
         }
+        // The build-phase barrier is consumed HERE, not by the builder: it
+        // gates the install, so it must outlive `build_execution`.
+        let build_observer = deps.build_observer.take();
+        // Two channels, because they mean different things:
+        //
+        // - `handoff` carries the outcome of the start;
+        // - `receipt` carries the caller's acknowledgement that it RECEIVED
+        //   that outcome.
+        //
+        // Both are needed because a `send` only queues the value: a caller
+        // dropped before it is polled takes the queued owner with it, so the
+        // retained task may not treat a successful send as a hand-over.
+        let (handoff_tx, handoff_rx) = tokio::sync::oneshot::channel();
+        let (receipt_tx, receipt_rx) = tokio::sync::oneshot::channel();
+        let service = self.clone();
+        let task = tokio::spawn(async move {
+            service
+                .run_retained_start(deps, build_observer, handoff_tx, receipt_rx)
+                .await;
+        });
+        match handoff_rx.await {
+            Ok(outcome) => {
+                // Acknowledge BEFORE returning, with NO await in between: only
+                // a caller that already holds the outcome gets here, so the
+                // receipt is exactly the proof the task needs. (Dropping this
+                // future instead closes the receipt, which tells the task to
+                // settle the owner it published.)
+                let _ = receipt_tx.send(());
+                outcome
+            }
+            // The retained task sends before it returns, so a vanished sender
+            // means it panicked: propagate that panic instead of relabelling a
+            // build bug as a well-behaved closing service.
+            Err(_) => match task.await {
+                Err(err) if err.is_panic() => std::panic::resume_unwind(err.into_panic()),
+                // Not reachable in practice: the task is never aborted, so a
+                // cancelled join can only mean the runtime is going away.
+                _ => Err(ExecutionOpenError::Closing),
+            },
+        }
+    }
+
+    /// The retained start: reservation, build, recovery, install — and the
+    /// settlement of an owner nobody received — fenced end to end.
+    ///
+    /// Runs on its own task, so the caller's cancellation cannot reach into a
+    /// half-built owner. Holds the per-service START fence for its WHOLE
+    /// duration, including the wait for the hand-off `receipt`: the close drain
+    /// takes the exclusive half before it takes the per-service slot and
+    /// releases the pool, the writer admission and the per-DB owner fence, so a
+    /// confirmed `cleanup_confirmed` can never precede this start's own
+    /// settlement — the owner it published and had to withdraw included.
+    async fn run_retained_start(
+        &self,
+        deps: RunnerDeps,
+        build_observer: Option<Arc<dyn ExecutionBuildObserver>>,
+        handoff: tokio::sync::oneshot::Sender<Result<Arc<ExecutionHandle>, ExecutionOpenError>>,
+        receipt: tokio::sync::oneshot::Receiver<()>,
+    ) {
+        let _start = Arc::clone(&self.inner.start_fence).read_owned().await;
+        match self.start_execution_fenced(deps, build_observer, &handoff).await {
+            Ok(handle) => {
+                // A successful `send` only QUEUES the owner, and a caller that
+                // is dropped before its next poll drops it again — so the owner
+                // is only handed over once the caller acknowledges receipt.
+                // Until then this task keeps the fence (a close waits) and,
+                // when the acknowledgement can never come, settles the owner
+                // itself instead of leaving an engine and its drives running
+                // for a start nobody received.
+                let queued = handoff.send(Ok(Arc::clone(&handle))).is_ok();
+                if !queued || receipt.await.is_err() {
+                    self.withdraw_and_settle(&handle).await;
+                }
+            }
+            Err(err) => {
+                let _ = handoff.send(Err(err));
+            }
+        }
+    }
+
+    /// The fenced start body (see [`Self::run_retained_start`] for the fence
+    /// and cancellation contract).
+    async fn start_execution_fenced(
+        &self,
+        deps: RunnerDeps,
+        build_observer: Option<Arc<dyn ExecutionBuildObserver>>,
+        handoff: &tokio::sync::oneshot::Sender<Result<Arc<ExecutionHandle>, ExecutionOpenError>>,
+    ) -> Result<Arc<ExecutionHandle>, ExecutionOpenError> {
+        // A close that began before this task took the fence has already raised
+        // `closing` and queued its drain on the exclusive half, so this start
+        // must refuse rather than build into a service that is releasing its
+        // admission. (Today's `RwLock` is write-preferring, so a start arriving
+        // behind a queued drain acquires AFTER the drain finished — the refusal
+        // covers exactly that ordering too.)
+        self.ensure_open()
+            .map_err(|_| ExecutionOpenError::Closing)?;
         // Single owner. The fence cannot be the per-service slot alone:
         // `CoreService::open` under `EngineOwner` deliberately JOINS this
         // process's retained engine admission (the daemon's transport pool and
@@ -755,9 +865,6 @@ impl CoreService {
         // build cannot fence its own DB. A closed or dropped owner frees its
         // slot on the next claim.
         let reservation = OwnerReservation::claim(&self.inner.db_path)?;
-        // The build-phase barrier is consumed HERE, not by the builder: it
-        // gates the install, so it must outlive `build_execution`.
-        let build_observer = deps.build_observer.take();
         let handle = self.build_execution(deps).await?;
         // C3 barrier (diagnostic seam): the build is complete (engine +
         // recovery) but nothing is published yet. A test holds this exact
@@ -766,18 +873,25 @@ impl CoreService {
         if let Some(observer) = build_observer {
             observer.built().await;
         }
-        // C3: install-time double check. Close sets `closing` BEFORE it takes
-        // the per-service slot, and this check+install is atomic under the
-        // SAME slot mutex — so either close observes the installed handle
-        // and settles it, or the build abandons it. Neither path leaves an
-        // owner behind after close returns.
+        // C3: install-time double check. Close raises `closing` before its
+        // drain takes the START fence exclusively, and this check+install runs
+        // under that fence's shared half — so either the install published the
+        // handle before the drain took the fence (the drain then observes the
+        // installed handle and settles it), or the drain already owns the fence
+        // and `closing` is visible here, so the build abandons its handle. The
+        // per-service slot mutex still makes the check+install itself atomic;
+        // the fence is what keeps the drain from releasing the pool and
+        // reporting a confirmed cleanup while this build is in flight.
+        //
+        // A caller that is already gone is refused the same way: publishing an
+        // owner nobody waits for only to withdraw it again is wasted work.
         let installing = {
             let mut slot = self
                 .inner
                 .execution
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if self.ensure_open().is_err() {
+            if self.ensure_open().is_err() || handoff.is_closed() {
                 false
             } else {
                 *slot = Some(Arc::clone(&handle));
@@ -785,15 +899,47 @@ impl CoreService {
             }
         };
         if !installing {
-            // The service began closing while this build ran. The build ran
-            // recovery (which spawns drives), so settle the freshly built
-            // owner before abandoning it — a dropped handle must not leak
-            // live drives.
+            // The service began closing — or the caller went away — while this
+            // build ran. The build ran recovery (which spawns drives), so
+            // settle the freshly built owner before abandoning it: a dropped
+            // handle must not leak live drives.
             handle.shutdown().await;
             return Err(ExecutionOpenError::Closing);
         }
         reservation.install(&handle);
         Ok(handle)
+    }
+
+    /// Withdraw a published owner and settle it.
+    ///
+    /// Used when the caller of a start was cancelled after its owner had been
+    /// installed: nobody exists to close it, so leaving it live would keep an
+    /// engine and its drives running for a start nobody is waiting for. The
+    /// owner is taken out of the per-service slot first; the only other taker is
+    /// [`Self::retire_execution`], which settles the handle it took on its own
+    /// path.
+    async fn withdraw_and_settle(&self, handle: &Arc<ExecutionHandle>) {
+        let withdrawn = {
+            let mut slot = self
+                .inner
+                .execution
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if slot
+                .as_ref()
+                .is_some_and(|current| Arc::ptr_eq(current, handle))
+            {
+                slot.take();
+                true
+            } else {
+                false
+            }
+        };
+        if !withdrawn {
+            return;
+        }
+        handle.shutdown().await;
+        release_owner_slot(&self.inner.db_path, handle);
     }
 
     /// The established execution handle, if any.

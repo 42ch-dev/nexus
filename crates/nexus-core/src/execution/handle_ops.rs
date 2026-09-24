@@ -1977,6 +1977,17 @@ fn map_context_error(err: nexus_orchestration::schedule::derivation::CoreContext
                  ({schedules}); refusing to choose one"
             ),
         },
+        // A user edit that lost the race with the schedule's settlement: the
+        // admission is checked inside the append transaction, so no version
+        // row and no pointer advance survived it. Same code as the pre-check
+        // above, which is UX-only — this is the authoritative refusal.
+        E::TerminalSchedule(schedule_id, status) => CoreError::Coded {
+            code: "workflow_state_conflict".to_string(),
+            message: format!(
+                "schedule {schedule_id} is in terminal status '{status}'; \
+                 core-context edits are not allowed"
+            ),
+        },
         E::Serde(e) => CoreError::InvalidInput {
             field: "op".into(),
             reason: e.to_string(),
