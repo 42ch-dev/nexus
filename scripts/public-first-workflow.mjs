@@ -318,7 +318,7 @@ const CREDENTIAL_ENV_KEYS = [
   'XAI_API_KEY',
 ];
 /** Segment rule that catches the same class of name without a list edit. */
-const CREDENTIAL_ENV_PATTERN = /(^|_)(API_KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|CREDENTIALS)(_|$)/i;
+const CREDENTIAL_ENV_PATTERN = /(^|_)(API_KEY|ACCESS_KEY_ID|TOKEN|SECRET|PASSWORD|CREDENTIAL|CREDENTIALS)(_|$)/i;
 /** A foreign preload would run inside the deterministic child; never inherit it. */
 const NODE_OPTIONS_KEY = 'NODE_OPTIONS';
 /** The guard's own interface, published to the guarded child environment (§6.3). */

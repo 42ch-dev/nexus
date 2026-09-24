@@ -217,17 +217,19 @@ test('an explicit post-cursor gap cannot be certified as complete successor repl
 });
 
 test('deterministic children drop mixed-case credential names before reading their values', () => {
-  const key = 'nexus_Fixture_aPi_KeY';
-  process.env[key] = 'synthetic-test-only';
+  const keys = ['nexus_Fixture_aPi_KeY', 'aws_access_key_id'];
+  for (const key of keys) process.env[key] = 'synthetic-test-only';
   try {
     const inherited = Object.keys(process.env);
     const child = buildChildEnv({ home: '/tmp/isolated-home', dshHome: '/tmp/isolated-dsh', modelPort: 12345, guardEnv: {} });
-    assert.equal(Object.hasOwn(child, key), false);
     const summary = summarizeChildEnv(inherited, child);
-    assert.equal(summary.inherited_credential_keys_forwarded.includes(key), false);
-    assert.ok(summary.removed_credential_key_count > 0);
+    for (const key of keys) {
+      assert.equal(Object.hasOwn(child, key), false, `${key} must not reach the child`);
+      assert.equal(summary.inherited_credential_keys_forwarded.includes(key), false);
+    }
+    assert.ok(summary.removed_credential_key_count >= keys.length);
   } finally {
-    delete process.env[key];
+    for (const key of keys) delete process.env[key];
   }
 });
 
