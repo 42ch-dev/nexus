@@ -1013,9 +1013,7 @@ fn host_config_path(env: &Env) -> PathBuf {
 /// already-started manager an `attach_host` call must adopt rather than start
 /// again.
 async fn start_host_manager(env: &Env) -> Arc<HostManager> {
-    use nexus_agent_host::config::{
-        load_config_from_path, validate_workspace_path,
-    };
+    use nexus_agent_host::config::{load_config_from_path, validate_workspace_path};
     use nexus_agent_host::core::readiness::discover_provider_catalog;
 
     let workspace_root = nexus_home_layout::nexus_root_from_home(&env.user_home);
@@ -1077,7 +1075,10 @@ async fn attached_host_adopts_the_supplied_manager_and_shares_owner_admission() 
     let err = core
         .attach_host(manager.clone(), CountingPort::new())
         .expect_err("a second attach must be rejected");
-    assert!(matches!(err, CoreError::OwnerBusy), "second attach: {err:?}");
+    assert!(
+        matches!(err, CoreError::OwnerBusy),
+        "second attach: {err:?}"
+    );
     let err = core
         .open_host(CountingPort::new())
         .await
@@ -1098,7 +1099,10 @@ async fn attached_host_adopts_the_supplied_manager_and_shares_owner_admission() 
         .open_host(CountingPort::new())
         .await
         .expect_err("the failed attempts never released the slot");
-    assert!(matches!(err, CoreError::OwnerBusy), "slot retained: {err:?}");
+    assert!(
+        matches!(err, CoreError::OwnerBusy),
+        "slot retained: {err:?}"
+    );
 }
 
 /// A construction that fails after claiming the shared admission releases it:
@@ -1275,7 +1279,10 @@ async fn attached_host_unconfirmed_close_retains_slot_and_owned_drains() {
     let err = core
         .attach_host(manager.clone(), CountingPort::new())
         .expect_err("an unconfirmed close retains the authority slot");
-    assert!(matches!(err, CoreError::OwnerBusy), "slot retained: {err:?}");
+    assert!(
+        matches!(err, CoreError::OwnerBusy),
+        "slot retained: {err:?}"
+    );
     // And the handle that could not settle is itself closing.
     let err = attached
         .query(
