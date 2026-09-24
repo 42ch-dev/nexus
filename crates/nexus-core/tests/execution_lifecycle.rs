@@ -148,6 +148,20 @@ async fn open_engine_owner(f: &Fixture) -> CoreService {
         .expect("engine-owner core open")
 }
 
+/// A fully retired owner releases both the home admission and the per-DB
+/// execution reservation, allowing a new generation to start.
+async fn assert_fresh_owner_can_start(f: &Fixture) {
+    let fresh = open_engine_owner(f).await;
+    fresh
+        .start_execution(
+            Arc::clone(&NullProvider::new()) as Arc<dyn ProviderPort>,
+            RunnerDeps::default(),
+        )
+        .await
+        .expect("the retired owner must not fence its DB");
+    fresh.close().await.unwrap();
+}
+
 /// Seed a durable v1 run through the REAL store API, not hand-written SQL.
 ///
 /// `start_run` is the single path that writes an authoritative v1 row: the
@@ -933,15 +947,7 @@ async fn a_caller_dropped_before_receiving_the_owner_settles_it() {
         owner.close().await.unwrap().cleanup_confirmed,
         "a settled unreceived owner must not block a confirmed close"
     );
-    let fresh = open_engine_owner(&f).await;
-    fresh
-        .start_execution(
-            Arc::clone(&NullProvider::new()) as Arc<dyn ProviderPort>,
-            RunnerDeps::default(),
-        )
-        .await
-        .expect("the unreceived owner must have released the DB");
-    fresh.close().await.unwrap();
+    assert_fresh_owner_can_start(&f).await;
 }
 
 /// P1 (retired owner during the receipt wait): an owner RETIRED while the
@@ -1100,15 +1106,7 @@ async fn close_waits_for_a_retired_owner_during_the_receipt_wait() {
     owner.close().await.unwrap();
     // The fence is genuinely released: a fresh owner over the same home is
     // admitted and can start.
-    let fresh = open_engine_owner(&f).await;
-    fresh
-        .start_execution(
-            Arc::clone(&NullProvider::new()) as Arc<dyn ProviderPort>,
-            RunnerDeps::default(),
-        )
-        .await
-        .expect("a retired owner must not fence its DB");
-    fresh.close().await.unwrap();
+    assert_fresh_owner_can_start(&f).await;
 }
 
 // ── Close / admission ownership (v1.195 P0-T5 close findings) ───────────────
