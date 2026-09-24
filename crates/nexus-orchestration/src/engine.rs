@@ -97,9 +97,9 @@ fn applied_core_context_version(context: &graph_flow::Context) -> Result<u32, St
         return Ok(0);
     };
     match marker {
-        serde_json::Value::String(raw) => raw.parse::<u32>().map_err(|_| {
-            format!("core-context version marker '{raw}' is not a decimal version")
-        }),
+        serde_json::Value::String(raw) => raw
+            .parse::<u32>()
+            .map_err(|_| format!("core-context version marker '{raw}' is not a decimal version")),
         other => Err(format!(
             "core-context version marker has unexpected JSON type ({other}); \
              expected a decimal version string"
@@ -5636,7 +5636,9 @@ mod tests {
         context.set(CORE_CONTEXT_VERSION_KEY, "7").unwrap();
         assert_eq!(applied_core_context_version(&context), Ok(7));
 
-        context.set(CORE_CONTEXT_VERSION_KEY, "not-a-version").unwrap();
+        context
+            .set(CORE_CONTEXT_VERSION_KEY, "not-a-version")
+            .unwrap();
         let err = applied_core_context_version(&context)
             .expect_err("a non-decimal marker must refuse, never read as version 0");
         assert!(err.contains("not-a-version"), "got {err}");
@@ -5665,7 +5667,9 @@ mod tests {
             context.get::<String>(CORE_CONTEXT_TEXT_KEY).as_deref(),
             Some("flat body")
         );
-        assert!(context.get::<serde_json::Value>(CORE_CONTEXT_STRUCT_KEY).is_none());
+        assert!(context
+            .get::<serde_json::Value>(CORE_CONTEXT_STRUCT_KEY)
+            .is_none());
 
         bind_core_context_payload(
             &context,
@@ -5677,13 +5681,18 @@ mod tests {
         assert_eq!(
             context
                 .get::<serde_json::Value>(CORE_CONTEXT_STRUCT_KEY)
-                .and_then(|value| value.get("idea").and_then(|field| field.as_str()).map(str::to_string))
+                .and_then(|value| value
+                    .get("idea")
+                    .and_then(|field| field.as_str())
+                    .map(str::to_string))
                 .as_deref(),
             Some("structured body"),
             "a struct payload resolves under the dotted struct namespace"
         );
         assert!(
-            context.get::<serde_json::Value>(CORE_CONTEXT_TEXT_KEY).is_none(),
+            context
+                .get::<serde_json::Value>(CORE_CONTEXT_TEXT_KEY)
+                .is_none(),
             "the stale text binding must be dropped when the run moves to a struct version"
         );
 
@@ -5699,7 +5708,9 @@ mod tests {
             Some("back to text")
         );
         assert!(
-            context.get::<serde_json::Value>(CORE_CONTEXT_STRUCT_KEY).is_none(),
+            context
+                .get::<serde_json::Value>(CORE_CONTEXT_STRUCT_KEY)
+                .is_none(),
             "the stale struct binding must be dropped when the run moves back to text"
         );
     }
@@ -6287,10 +6298,7 @@ mod tests {
             .expect("load run")
             .expect("run exists");
         assert!(
-            fenced
-                .state
-                .as_ref()
-                .is_some_and(|s| s.cancel_requested),
+            fenced.state.as_ref().is_some_and(|s| s.cancel_requested),
             "precondition: the durable cancel intent is committed"
         );
 

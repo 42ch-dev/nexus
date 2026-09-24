@@ -54,6 +54,11 @@ use nexus_agent_host::{
     HostSessionId, LaunchStrategy, ProviderCatalog, ProviderCatalogEntry, ProviderId, SessionState,
     TrustLevel,
 };
+use nexus_contracts::generated::core::{
+    CoreWorkflowEventBatchEventsItem, CoreWorkflowSubscribeRequest,
+    CoreWorkflowSubscribeRequestLastEventId, CoreWorkflowSubscribeRequestRunId,
+    CoreWorkflowSubscription,
+};
 #[cfg(feature = "test-hooks")]
 use nexus_contracts::local::orchestration::{WorkspaceChangeEntry, WorkspaceChangeOp};
 use nexus_contracts::local::schedule::http::{AddScheduleRequest, AgentBindingDto};
@@ -62,15 +67,9 @@ use nexus_contracts::{
     CoreWorkspaceCommitRequestChangesItem, CoreWorkspaceCommitRequestChangesItemOp, ProviderCall,
     ProviderEventBatch, ProviderReply,
 };
-use nexus_contracts::generated::core::{
-    CoreWorkflowEventBatchEventsItem, CoreWorkflowSubscribeRequest,
-    CoreWorkflowSubscribeRequestLastEventId, CoreWorkflowSubscribeRequestRunId,
-    CoreWorkflowSubscription,
-};
 use nexus_core::execution::authority::WorkspaceAuthorityLease;
 use nexus_core::execution::prompt_executor::HostPromptExecutor;
-#[cfg(feature = "test-hooks")]
-use nexus_core::execution::test_hooks;
+use nexus_core::execution::run_events::{MAX_RECORDS_PER_RUN, MAX_SUBSCRIBERS_PER_RUN};
 use nexus_core::execution::schedules::chronology::{
     parse_interval_secs, run_one_tick as chronology_run_one_tick, AutoChronologyConfig,
     DEFAULT_AUTO_CHRONOLOGY_INTERVAL_SECS, ENV_AUTO_CHRONOLOGY_INTERVAL_MIN,
@@ -79,7 +78,8 @@ use nexus_core::execution::schedules::cron;
 use nexus_core::execution::schedules::stale_findings::run_one_sweep;
 #[cfg(feature = "test-hooks")]
 use nexus_core::execution::session::{SessionError, SessionId, WorkspaceSessionManager};
-use nexus_core::execution::run_events::{MAX_RECORDS_PER_RUN, MAX_SUBSCRIBERS_PER_RUN};
+#[cfg(feature = "test-hooks")]
+use nexus_core::execution::test_hooks;
 use nexus_core::execution::workflow::{RunEventPort, WorkflowRunCoordinator};
 use nexus_core::execution::{
     drive_preset_run, resume_driven_sessions, ExecutionHandle, PresetRunConfig, PresetRunOutcome,
@@ -666,10 +666,12 @@ fn signal(name: &str) -> nexus_contracts::local::schedule::http::SignalScheduleR
 /// Count the creator's ROOT runs (`parent_session_id IS NULL`) — one run per
 /// schedule, ever: inner-graph child rows are descendants of that one root.
 async fn root_run_count(pool: &sqlx::SqlitePool) -> i64 {
-    sqlx::query_scalar("SELECT COUNT(*) FROM orchestration_sessions WHERE parent_session_id IS NULL")
-        .fetch_one(pool)
-        .await
-        .expect("root run count")
+    sqlx::query_scalar(
+        "SELECT COUNT(*) FROM orchestration_sessions WHERE parent_session_id IS NULL",
+    )
+    .fetch_one(pool)
+    .await
+    .expect("root run count")
 }
 
 /// The durable v1 record of one run (status + durable state).
@@ -2845,7 +2847,10 @@ async fn hosted_schedule_drives_once_and_closes() {
     // ── Close JOINS the owned scheduler task. ──
     fixture.host.release_all();
     let report = fixture.handle.close().await.expect("owner close");
-    assert!(report.cleanup_confirmed, "close must report confirmed cleanup");
+    assert!(
+        report.cleanup_confirmed,
+        "close must report confirmed cleanup"
+    );
     assert!(
         fixture.handle.owned_tasks_finished(),
         "close must join the owned scheduler task"
@@ -2982,9 +2987,7 @@ async fn public_schedule_reads_and_context_are_owned() {
     use nexus_contracts::generated::daemon_api::orchestration::sessions::list_sessions_query::ListSessionsQuery;
     use nexus_contracts::generated::daemon_api::schedule::edit_core_context_request::EditCoreContextRequest;
     use nexus_contracts::generated::daemon_api::schedule::list_schedules_query::ListSchedulesQuery;
-    use nexus_contracts::local::schedule::{
-        CoreContextPayload, CoreContextVersion, ScheduleId,
-    };
+    use nexus_contracts::local::schedule::{CoreContextPayload, CoreContextVersion, ScheduleId};
 
     /// The generated PATCH body for one append.
     fn append(body: &str) -> EditCoreContextRequest {
@@ -3149,7 +3152,10 @@ async fn public_schedule_reads_and_context_are_owned() {
         .edit_core_context(&principal, "SCH-foreign".to_string(), append("nope"))
         .await
         .unwrap_err();
-    for (id, err) in [("SCH-missing", &unknown_edit), ("SCH-foreign", &foreign_edit)] {
+    for (id, err) in [
+        ("SCH-missing", &unknown_edit),
+        ("SCH-foreign", &foreign_edit),
+    ] {
         match err {
             nexus_core::CoreError::NotFound { resource } => assert_eq!(
                 resource,
@@ -3191,7 +3197,10 @@ async fn public_schedule_reads_and_context_are_owned() {
     }
     committed.sort_unstable_by_key(|(version, _)| *version);
     assert_eq!(
-        committed.iter().map(|(version, _)| *version).collect::<Vec<_>>(),
+        committed
+            .iter()
+            .map(|(version, _)| *version)
+            .collect::<Vec<_>>(),
         vec![1, 2, 3, 4, 5],
         "concurrent appends must claim one distinct, monotonic version each"
     );
@@ -3224,7 +3233,10 @@ async fn public_schedule_reads_and_context_are_owned() {
     for (version, body) in &committed {
         expected.push_str(body);
         let record = manager
-            .read(&sid, CoreContextVersion(u32::try_from(*version).expect("version fits")))
+            .read(
+                &sid,
+                CoreContextVersion(u32::try_from(*version).expect("version fits")),
+            )
             .await
             .unwrap_or_else(|e| panic!("version {version} must be durable: {e}"));
         let CoreContextPayload::Text { body: durable } = record.content else {
@@ -3262,7 +3274,13 @@ async fn public_schedule_reads_and_context_are_owned() {
     let frozen = context["data"]["core_context.text"]
         .as_str()
         .expect("the boundary freezes core_context.text into the run");
-    for body in ["idea-one", "idea-two", "idea-three", "idea-four", "idea-five"] {
+    for body in [
+        "idea-one",
+        "idea-two",
+        "idea-three",
+        "idea-four",
+        "idea-five",
+    ] {
         assert_eq!(
             frozen.matches(body).count(),
             1,
@@ -3535,11 +3553,7 @@ async fn public_schedule_reads_and_context_are_owned() {
         .collect::<Vec<_>>();
     assert_eq!(
         session_ids,
-        vec![
-            run_id.clone(),
-            "run-aaa".to_string(),
-            "run-zzz".to_string()
-        ],
+        vec![run_id.clone(), "run-aaa".to_string(), "run-zzz".to_string()],
         "the session default must be the schema's `session_id` ASCENDING default, \
          not the schedule default"
     );
@@ -3588,11 +3602,7 @@ async fn public_schedule_reads_and_context_are_owned() {
     // schedule default would have produced here is visibly different.
     assert_ne!(
         session_ids,
-        vec![
-            "run-aaa".to_string(),
-            run_id.clone(),
-            "run-zzz".to_string()
-        ],
+        vec!["run-aaa".to_string(), run_id.clone(), "run-zzz".to_string()],
         "the session default must not be a `created_at` ordering"
     );
     assert!(
@@ -3606,7 +3616,10 @@ async fn public_schedule_reads_and_context_are_owned() {
     wait_for_prompt(&fixture.host).await;
     fixture.host.release_all();
     let report = fixture.handle.close().await.expect("owner close");
-    assert!(report.cleanup_confirmed, "close must report confirmed cleanup");
+    assert!(
+        report.cleanup_confirmed,
+        "close must report confirmed cleanup"
+    );
     fixture.core.close().await.expect("core close");
 }
 
@@ -3967,9 +3980,9 @@ async fn public_cancel_fences_late_workspace_commit() {
                 "the claimed run's cancel converges on the durable winner"
             );
         }
-        other => panic!(
-            "a cancel/admission race must converge on one truthful winner, got {other:?}"
-        ),
+        other => {
+            panic!("a cancel/admission race must converge on one truthful winner, got {other:?}")
+        }
     }
     let (status, owned) = schedule_row(pool.as_ref(), &racing).await;
     assert_eq!(
@@ -3978,7 +3991,10 @@ async fn public_cancel_fences_late_workspace_commit() {
     );
     if let Some(run_id) = &owned {
         assert_eq!(
-            durable_record(pool.as_ref(), run_id).await.status.as_db_str(),
+            durable_record(pool.as_ref(), run_id)
+                .await
+                .status
+                .as_db_str(),
             "cancelled",
             "a cancelled row must never be driving a live run"
         );
@@ -3987,7 +4003,10 @@ async fn public_cancel_fences_late_workspace_commit() {
     // Cleanup: release anything still parked, then close the owner.
     fixture.host.release_all();
     let report = fixture.handle.close().await.expect("owner close");
-    assert!(report.cleanup_confirmed, "close must report confirmed cleanup");
+    assert!(
+        report.cleanup_confirmed,
+        "close must report confirmed cleanup"
+    );
     fixture.core.close().await.expect("core close");
 
     // ═══ Part 2 — the effect race, on the production hosted owner whose
@@ -4019,7 +4038,11 @@ async fn public_cancel_fences_late_workspace_commit() {
         let handle = hosted.handle.clone();
         let principal = principal.clone();
         let schedule_id = fenced.clone();
-        async move { handle.signal_schedule(&principal, schedule_id, signal("cancel")).await }
+        async move {
+            handle
+                .signal_schedule(&principal, schedule_id, signal("cancel"))
+                .await
+        }
     });
     // The engine persists the durable cancel intent BEFORE it fires the run
     // token: once that fence is durable the cancel is already the durable
@@ -4027,11 +4050,7 @@ async fn public_cancel_fences_late_workspace_commit() {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     loop {
         let record = durable_record(pool.as_ref(), &fenced_run).await;
-        if record
-            .state
-            .as_ref()
-            .is_some_and(|s| s.cancel_requested)
-        {
+        if record.state.as_ref().is_some_and(|s| s.cancel_requested) {
             break;
         }
         assert!(
@@ -4080,7 +4099,11 @@ async fn public_cancel_fences_late_workspace_commit() {
         let handle = hosted.handle.clone();
         let principal = principal.clone();
         let schedule_id = unconfirmed.clone();
-        async move { handle.signal_schedule(&principal, schedule_id, signal("cancel")).await }
+        async move {
+            handle
+                .signal_schedule(&principal, schedule_id, signal("cancel"))
+                .await
+        }
     });
     hosted.host.release_parked();
     let interrupted = interrupted
@@ -4114,7 +4137,10 @@ async fn public_cancel_fences_late_workspace_commit() {
         .signal_schedule(&principal, unconfirmed.clone(), signal("cancel"))
         .await
         .expect("the retry cancel confirms");
-    assert_eq!(confirmed.status, "cancelled", "the retry is the confirmation");
+    assert_eq!(
+        confirmed.status, "cancelled",
+        "the retry is the confirmation"
+    );
     assert_eq!(
         schedule_row(pool.as_ref(), &unconfirmed).await.0,
         "cancelled",
@@ -4163,14 +4189,20 @@ async fn public_cancel_fences_late_workspace_commit() {
         "the completed winner stays completed"
     );
     assert_eq!(
-        durable_record(pool.as_ref(), &completed_run).await.status.as_db_str(),
+        durable_record(pool.as_ref(), &completed_run)
+            .await
+            .status
+            .as_db_str(),
         "completed"
     );
 
     // Cleanup: release anything parked, then close the hosted owner.
     hosted.host.release_all();
     let report = hosted.handle.close().await.expect("owner close");
-    assert!(report.cleanup_confirmed, "close must report confirmed cleanup");
+    assert!(
+        report.cleanup_confirmed,
+        "close must report confirmed cleanup"
+    );
     hosted.core.close().await.expect("core close");
 }
 
@@ -4392,7 +4424,10 @@ async fn public_resume_reconciles_the_paused_schedule_row() {
     // owner, and this wait would time out).
     wait_for_signalable_gate_park(pool.as_ref(), &run_id).await;
     assert_eq!(
-        durable_record(pool.as_ref(), &run_id).await.status.as_db_str(),
+        durable_record(pool.as_ref(), &run_id)
+            .await
+            .status
+            .as_db_str(),
         "paused",
         "the re-driven run settles back on the unsatisfiable gate, same run"
     );
@@ -4501,7 +4536,10 @@ async fn public_resume_reconciles_the_paused_schedule_row() {
         "the raced terminal winner must never be overwritten as `running`"
     );
     assert_eq!(
-        durable_record(pool.as_ref(), &raced_run).await.status.as_db_str(),
+        durable_record(pool.as_ref(), &raced_run)
+            .await
+            .status
+            .as_db_str(),
         "cancelled",
         "the raced run is durably cancelled"
     );
@@ -4512,7 +4550,10 @@ async fn public_resume_reconciles_the_paused_schedule_row() {
     );
 
     let report = fixture.handle.close().await.expect("owner close");
-    assert!(report.cleanup_confirmed, "close must report confirmed cleanup");
+    assert!(
+        report.cleanup_confirmed,
+        "close must report confirmed cleanup"
+    );
     fixture.core.close().await.expect("core close");
 }
 
@@ -4727,8 +4768,7 @@ async fn an_interrupted_close_is_retried_honestly() {
 
     // The caller's cleanup budget expires with the commit still applying: the
     // close future is DROPPED, exactly as the native close wrapper drops it.
-    let interrupted =
-        tokio::time::timeout(CALLER_CLEANUP_BUDGET, fixture.core.close()).await;
+    let interrupted = tokio::time::timeout(CALLER_CLEANUP_BUDGET, fixture.core.close()).await;
     assert!(
         interrupted.is_err(),
         "close must not settle while an admitted durable commit is still applying"
@@ -5227,10 +5267,7 @@ impl RecoveryEntrance {
 /// clears an inherited crash seam at spawn — so the seam is armed from inside
 /// its admission rendezvous (no sleeps, no races).
 #[cfg(feature = "test-hooks")]
-async fn leave_unsettled_after_apply(
-    manager: &Arc<WorkspaceSessionManager>,
-    root: &str,
-) -> String {
+async fn leave_unsettled_after_apply(manager: &Arc<WorkspaceSessionManager>, root: &str) -> String {
     let session = manager
         .open_session(root, "notes", true)
         .await
@@ -5815,7 +5852,10 @@ async fn authorized_subscription_preserves_epoch_and_gap() {
     // and retained, but its history cannot be resumed.
     let stale_cursor = format!("{}:3", uuid::Uuid::nil());
     let stale = handle
-        .subscribe_workflow_events(&principal, subscribe_request(SUBSCRIBE_RUN, Some(&stale_cursor)))
+        .subscribe_workflow_events(
+            &principal,
+            subscribe_request(SUBSCRIBE_RUN, Some(&stale_cursor)),
+        )
         .await
         .expect("a prior-epoch cursor still opens a subscription");
     let stale_id = subscription_token(&stale);
@@ -5902,7 +5942,9 @@ async fn authorized_subscription_preserves_epoch_and_gap() {
         "delivered frames stay in published order: {delivered:?}"
     );
     assert!(
-        delivered.iter().all(|revision| (100..100 + published).contains(revision)),
+        delivered
+            .iter()
+            .all(|revision| (100..100 + published).contains(revision)),
         "only frames the ring actually retained are delivered: {delivered:?}"
     );
     assert!(
@@ -5929,7 +5971,11 @@ async fn authorized_subscription_preserves_epoch_and_gap() {
         .await
         .expect("seed pull");
     let slow_cursor = seed_batch.events.last().expect("a seed frame").id.clone();
-    assert_eq!(frame_sequence(&slow_cursor), 1, "the ring starts at sequence 1");
+    assert_eq!(
+        frame_sequence(&slow_cursor),
+        1,
+        "the ring starts at sequence 1"
+    );
     handle
         .release_workflow_events(&principal, seed_id)
         .await
@@ -6092,9 +6138,15 @@ async fn authorized_subscription_preserves_epoch_and_gap() {
         async move { handle.next_workflow_events(&principal, token).await }
     });
     tokio::time::sleep(Duration::from_millis(50)).await;
-    assert!(!puller.is_finished(), "the pull is blocked when close begins");
+    assert!(
+        !puller.is_finished(),
+        "the pull is blocked when close begins"
+    );
     let report = handle.close().await.expect("owner close");
-    assert!(report.cleanup_confirmed, "close must report confirmed cleanup");
+    assert!(
+        report.cleanup_confirmed,
+        "close must report confirmed cleanup"
+    );
     let woken = tokio::time::timeout(Duration::from_secs(5), puller)
         .await
         .expect("close must wake the blocked pull")
@@ -6188,7 +6240,13 @@ async fn subscribe_racing_owner_close_never_leaks_a_token_or_ring_permit() {
         .await
         .expect("execution owner starts");
     let principal = core.active_principal().await.unwrap();
-    stage_run_row(handle.coordinator().pool().as_ref(), RACE_RUN, CREATOR, None).await;
+    stage_run_row(
+        handle.coordinator().pool().as_ref(),
+        RACE_RUN,
+        CREATOR,
+        None,
+    )
+    .await;
     let port = handle
         .coordinator()
         .run_event_port()
@@ -6247,7 +6305,10 @@ async fn subscribe_racing_owner_close_never_leaks_a_token_or_ring_permit() {
         0,
         "the ring subscriber permit the refused subscribe had attached must be released"
     );
-    assert!(handle.is_settled(), "the owner stayed closed across the race");
+    assert!(
+        handle.is_settled(),
+        "the owner stayed closed across the race"
+    );
     core.close().await.expect("core close");
 }
 
@@ -6587,7 +6648,11 @@ async fn hosted_restart_keeps_cancel_and_uncertain_effect_truth() {
         let handle = Arc::clone(&fixture.handle);
         let principal = principal.clone();
         let schedule_id = cancelled_schedule.clone();
-        async move { handle.signal_schedule(&principal, schedule_id, signal("cancel")).await }
+        async move {
+            handle
+                .signal_schedule(&principal, schedule_id, signal("cancel"))
+                .await
+        }
     });
     wait_for_cancel_intent(pool.as_ref(), &cancelled_run).await;
     fixture.host.release_parked();
@@ -6626,7 +6691,11 @@ async fn hosted_restart_keeps_cancel_and_uncertain_effect_truth() {
         let handle = Arc::clone(&fixture.handle);
         let principal = principal.clone();
         let schedule_id = interrupted_schedule.clone();
-        async move { handle.signal_schedule(&principal, schedule_id, signal("cancel")).await }
+        async move {
+            handle
+                .signal_schedule(&principal, schedule_id, signal("cancel"))
+                .await
+        }
     });
     wait_for_cancel_intent(pool.as_ref(), &interrupted_run).await;
     fixture.host.release_parked();
@@ -6683,7 +6752,10 @@ async fn hosted_restart_keeps_cancel_and_uncertain_effect_truth() {
     std::fs::remove_dir_all(nexus_home.join("presets").join(CANCEL_WAIT_PRESET))
         .expect("remove the waited run's frozen preset source");
     let report = fixture.handle.close().await.expect("owner close");
-    assert!(report.cleanup_confirmed, "close must report confirmed cleanup");
+    assert!(
+        report.cleanup_confirmed,
+        "close must report confirmed cleanup"
+    );
     fixture.core.close().await.expect("core close");
 
     // ── A SECOND factory owner over the same home: a NEW admission. ──
@@ -6921,7 +6993,10 @@ async fn hosted_restart_keeps_cancel_and_uncertain_effect_truth() {
     );
 
     let report = handle_b.close().await.expect("the reopened owner closes");
-    assert!(report.cleanup_confirmed, "close must report confirmed cleanup");
+    assert!(
+        report.cleanup_confirmed,
+        "close must report confirmed cleanup"
+    );
     core_b.close().await.expect("core close");
 }
 
@@ -7035,8 +7110,7 @@ async fn hosted_workspace_commit_projection_is_authorized_and_survives_restart()
         "completed",
         "the graph finishes; a capability failure is a step status"
     );
-    let (failed_output, failed_error) =
-        durable_commit_checkpoint(pool.as_ref(), &failed_run).await;
+    let (failed_output, failed_error) = durable_commit_checkpoint(pool.as_ref(), &failed_run).await;
     assert!(
         failed_error.is_some(),
         "the declared commit must have failed durably: {failed_error:?}"
@@ -7106,8 +7180,7 @@ async fn hosted_workspace_commit_projection_is_authorized_and_survives_restart()
             .all(|revision| settled_after_double.contains(revision)),
         "the earlier settled revision stays durable: {settled_after_double:?}"
     );
-    let (double_output, double_error) =
-        durable_commit_checkpoint(pool.as_ref(), &double_run).await;
+    let (double_output, double_error) = durable_commit_checkpoint(pool.as_ref(), &double_run).await;
     assert!(
         fixture
             .handle
@@ -7130,7 +7203,10 @@ async fn hosted_workspace_commit_projection_is_authorized_and_survives_restart()
     // ── The restart: the same revision, once. ──
     fixture.host.release_all();
     let report = fixture.handle.close().await.expect("owner close");
-    assert!(report.cleanup_confirmed, "close must report confirmed cleanup");
+    assert!(
+        report.cleanup_confirmed,
+        "close must report confirmed cleanup"
+    );
     fixture.core.close().await.expect("core close");
     let (core_b, _host_b, handle_b) = open_hosted_owner(&home).await;
     assert!(
@@ -7195,7 +7271,13 @@ async fn hosted_workspace_commit_projection_is_authorized_and_survives_restart()
     //    authorization source AND the checkpoint, so ownership and shape are
     //    discriminated independently of the real owner's own runs. ──
     let committed_context = r#"{"data":{"_capability_name":"workspace.commit","_capability_output":{"revision":"rev_staged","committed":true}}}"#;
-    stage_context_run_row(pool_b.as_ref(), "proj-owned-control", CREATOR, committed_context).await;
+    stage_context_run_row(
+        pool_b.as_ref(),
+        "proj-owned-control",
+        CREATOR,
+        committed_context,
+    )
+    .await;
     stage_context_run_row(
         pool_b.as_ref(),
         "proj-foreign",
@@ -7280,6 +7362,9 @@ async fn hosted_workspace_commit_projection_is_authorized_and_survives_restart()
     }
 
     let report = handle_b.close().await.expect("the reopened owner closes");
-    assert!(report.cleanup_confirmed, "close must report confirmed cleanup");
+    assert!(
+        report.cleanup_confirmed,
+        "close must report confirmed cleanup"
+    );
     core_b.close().await.expect("core close");
 }

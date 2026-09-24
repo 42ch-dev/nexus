@@ -398,9 +398,7 @@ impl ExecutionHandle {
     /// `None` in production: only a test that must force the subscribe/close
     /// interleaving supplies one (see [`RunnerDeps::subscription_observer`]).
     #[must_use]
-    pub(crate) fn subscription_observer(
-        &self,
-    ) -> Option<Arc<dyn ExecutionSubscriptionObserver>> {
+    pub(crate) fn subscription_observer(&self) -> Option<Arc<dyn ExecutionSubscriptionObserver>> {
         self.subscription_observer.clone()
     }
 
@@ -812,7 +810,10 @@ impl CoreService {
         receipt: tokio::sync::oneshot::Receiver<()>,
     ) {
         let _start = Arc::clone(&self.inner.start_fence).read_owned().await;
-        match self.start_execution_fenced(deps, build_observer, &handoff).await {
+        match self
+            .start_execution_fenced(deps, build_observer, &handoff)
+            .await
+        {
             Ok(handle) => {
                 // A successful `send` only QUEUES the owner, and a caller that
                 // is dropped before its next poll drops it again — so the owner
@@ -1157,8 +1158,8 @@ impl CoreService {
             scheduler_shutdown,
             #[cfg(feature = "connect-client")]
             peer_control: std::sync::Mutex::new(None),
-            workflow_subscriptions:
-                crate::execution::run_events::WorkflowSubscriptionRegistry::new(),
+            workflow_subscriptions: crate::execution::run_events::WorkflowSubscriptionRegistry::new(
+            ),
             subscription_observer: deps.subscription_observer,
         }))
     }

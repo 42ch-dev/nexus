@@ -33,8 +33,7 @@ use nexus_contracts::generated::core::{
     CoreRunEventsResponse, CoreRunEventsResponseEventsItem, CoreRunEventsResponseEventsItemKind,
     CoreRunEventsResponseNextSequence, CoreRunEventsResponseRunId, CoreWorkflowEventBatch,
     CoreWorkflowEventBatchEventsItem, CoreWorkflowEventBatchEventsItemEvent,
-    CoreWorkflowSubscribeRequest, CoreWorkflowSubscription,
-    CoreWorkflowSubscriptionSubscriptionId,
+    CoreWorkflowSubscribeRequest, CoreWorkflowSubscription, CoreWorkflowSubscriptionSubscriptionId,
 };
 use nexus_contracts::generated::daemon_api::orchestration::sessions::list_sessions_query::ListSessionsQuery;
 use nexus_contracts::generated::daemon_api::orchestration::sessions::list_sessions_response::{
@@ -77,9 +76,7 @@ use crate::execution::capabilities::{ToolContext, ToolExecuteRequest};
 #[cfg(feature = "compute")]
 use crate::execution::compute::ComputeContext;
 use crate::execution::lifecycle::ExecutionHandle;
-use crate::execution::run_events::{
-    PageError, PullOutcome, SubscribeError, WorkflowSubscription,
-};
+use crate::execution::run_events::{PageError, PullOutcome, SubscribeError, WorkflowSubscription};
 use crate::execution::workflow::{RunControlError, RunEventPort, RunSignal};
 use crate::principal::Principal;
 use crate::PresetError;
@@ -984,7 +981,10 @@ impl ExecutionHandle {
         }
         let port = self.run_event_port()?;
         let inspect_url = run_inspect_url(&run_id);
-        let cursor = request.last_event_id.as_ref().map(|c| c.as_str().to_string());
+        let cursor = request
+            .last_event_id
+            .as_ref()
+            .map(|c| c.as_str().to_string());
         let creator_id = principal.creator_id().to_string();
         let generation = self.engine_epoch();
         let subscription = match port.subscribe_live(&run_id, cursor.as_deref(), inspect_url) {
@@ -1060,10 +1060,11 @@ impl ExecutionHandle {
         let events = frames
             .into_iter()
             .map(|frame| {
-                let event = CoreWorkflowEventBatchEventsItemEvent::try_from(frame.event)
-                    .map_err(|err| CoreError::Internal {
+                let event = CoreWorkflowEventBatchEventsItemEvent::try_from(frame.event).map_err(
+                    |err| CoreError::Internal {
                         category: format!("run-event name encode: {err}"),
-                    })?;
+                    },
+                )?;
                 Ok(CoreWorkflowEventBatchEventsItem {
                     id: frame.id,
                     event,
@@ -1139,11 +1140,9 @@ impl ExecutionHandle {
         .fetch_optional(pool.as_ref())
         .await
         .map_err(|e| crate::error::db_err(&e))?;
-        owned
-            .map(|_| ())
-            .ok_or_else(|| CoreError::NotFound {
-                resource: format!("workflow session {run_id}"),
-            })
+        owned.map(|_| ()).ok_or_else(|| CoreError::NotFound {
+            resource: format!("workflow session {run_id}"),
+        })
     }
 
     /// Resolve a token this owner still serves AND that was minted for this
@@ -1200,7 +1199,11 @@ impl ExecutionHandle {
     ///
     /// # Errors
     /// `NotFound` for an absent or foreign row; the mapped storage error.
-    async fn owned_schedule(&self, principal: &Principal, schedule_id: &str) -> CoreResult<ScheduleRow> {
+    async fn owned_schedule(
+        &self,
+        principal: &Principal,
+        schedule_id: &str,
+    ) -> CoreResult<ScheduleRow> {
         let pool = self.coordinator().pool();
         sqlx::query_as::<_, ScheduleRow>(
             "SELECT schedule_id, creator_id, preset_id, status, execution_policy,
@@ -1230,7 +1233,9 @@ impl ExecutionHandle {
         principal: &Principal,
         schedule_id: &str,
     ) -> CoreResult<()> {
-        self.owned_schedule(principal, schedule_id).await.map(|_| ())
+        self.owned_schedule(principal, schedule_id)
+            .await
+            .map(|_| ())
     }
 
     /// Write the audited `force_gates` bypass row.
@@ -1770,11 +1775,7 @@ fn failure_reason(row: &SessionRow) -> Option<String> {
 ///
 /// # Errors
 /// `Forbidden` naming both creators.
-fn refuse_foreign_filter(
-    filter: Option<&str>,
-    creator_id: &str,
-    resource: &str,
-) -> CoreResult<()> {
+fn refuse_foreign_filter(filter: Option<&str>, creator_id: &str, resource: &str) -> CoreResult<()> {
     match filter {
         Some(other) if other != creator_id => Err(CoreError::Forbidden {
             resource: format!("{resource} for creator {other} (principal owns {creator_id})"),
@@ -1944,7 +1945,9 @@ fn required_field<'a, T>(value: Option<&'a T>, op: &str, field: &str) -> CoreRes
 }
 
 /// Map a core-context refusal onto the neutral taxonomy.
-fn map_context_error(err: nexus_orchestration::schedule::derivation::CoreContextError) -> CoreError {
+fn map_context_error(
+    err: nexus_orchestration::schedule::derivation::CoreContextError,
+) -> CoreError {
     use nexus_orchestration::schedule::derivation::CoreContextError as E;
     match err {
         E::NotFound(schedule_id) => CoreError::NotFound {
@@ -1953,10 +1956,12 @@ fn map_context_error(err: nexus_orchestration::schedule::derivation::CoreContext
         E::VersionNotFound(schedule_id, version) => CoreError::NotFound {
             resource: format!("core-context version {version} of schedule {schedule_id}"),
         },
-        E::UserEditValidation(reason) | E::PresetHookValidation(reason) => CoreError::InvalidInput {
-            field: "op".into(),
-            reason,
-        },
+        E::UserEditValidation(reason) | E::PresetHookValidation(reason) => {
+            CoreError::InvalidInput {
+                field: "op".into(),
+                reason,
+            }
+        }
         // A lost pointer advance: the append and its version row were rolled
         // back, so this is a state conflict (the caller re-reads and retries),
         // never a successful version.
@@ -2244,10 +2249,7 @@ fn map_run_control_error(err: RunControlError) -> CoreError {
             code: "workflow_state_conflict".to_string(),
             message: format!("run {session_id} refuses the signal: {reason}"),
         },
-        RunControlError::ReconstructionUnavailable {
-            session_id,
-            reason,
-        } => CoreError::Coded {
+        RunControlError::ReconstructionUnavailable { session_id, reason } => CoreError::Coded {
             code: "workflow_state_conflict".to_string(),
             message: format!(
                 "run {session_id} cannot be reconstructed ({reason}); the human wait is \

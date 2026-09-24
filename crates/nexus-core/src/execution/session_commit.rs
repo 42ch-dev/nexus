@@ -1156,8 +1156,11 @@ pub(crate) async fn startup_recovery_owned(
         test_recovery_gate_settled();
         let _ = tx.send(result);
     });
-    rx.await
-        .unwrap_or_else(|_| Err(SessionError::Internal("recovery owner channel closed".into())))
+    rx.await.unwrap_or_else(|_| {
+        Err(SessionError::Internal(
+            "recovery owner channel closed".into(),
+        ))
+    })
 }
 
 /// The selected recovery pass, lower-level than the close boundary above.
@@ -1182,7 +1185,9 @@ async fn run_recovery(
 /// Returns [`SessionError::Database`] when listing unsettled intents fails
 /// (including a corrupt intent payload), or whatever the per-intent recovery
 /// reports.
-pub(crate) async fn startup_recovery_all(mgr: &WorkspaceSessionManager) -> Result<(), SessionError> {
+pub(crate) async fn startup_recovery_all(
+    mgr: &WorkspaceSessionManager,
+) -> Result<(), SessionError> {
     let _guard = mgr.lock_mutation().await;
     let intents = match db::list_all_unsettled_intents(mgr.pool().as_ref()).await {
         Ok(rows) => rows,

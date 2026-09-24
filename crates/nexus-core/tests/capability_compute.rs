@@ -2609,7 +2609,10 @@ async fn clear_owned_terminal_history_preserves_effects_and_pending() {
     )
     .await
     .expect("clear succeeds");
-    assert_eq!(cleared.deleted, 1, "the applied row was the last terminal one");
+    assert_eq!(
+        cleared.deleted, 1,
+        "the applied row was the last terminal one"
+    );
     assert!(!run_row_survives(f.core.pool(), &applied).await);
     assert!(
         run_row_survives(f.core.pool(), &pending).await,

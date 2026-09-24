@@ -176,10 +176,7 @@ impl NativeCore {
             .await
             .map_err(|error| Error::from_reason(format!("provider readiness: {error}")))?;
         let timeouts = host.agent_config().await.timeouts;
-        let engine_epoch = match core
-            .start_hosted_execution(host, providers, timeouts)
-            .await
-        {
+        let engine_epoch = match core.start_hosted_execution(host, providers, timeouts).await {
             Ok(handle) => Some(handle.engine_epoch()),
             // A workspace that cannot host an owner is the ONE shape this
             // profile reports as "no engine epoch": the admission pinned no
@@ -537,8 +534,9 @@ impl NativeCore {
         let handle = self.execution_handle()?;
         self.json_call(principal_handle, async move |core, principal| {
             let _ = &core;
-            let response: CoreWorkflowSubscription =
-                handle.subscribe_workflow_events(&principal, request).await?;
+            let response: CoreWorkflowSubscription = handle
+                .subscribe_workflow_events(&principal, request)
+                .await?;
             Ok(response)
         })
         .await
@@ -755,7 +753,7 @@ impl NativeCore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nexus_agent_host::capability::model::{ProviderHealth, ProtocolKind};
+    use nexus_agent_host::capability::model::{ProtocolKind, ProviderHealth};
     use nexus_agent_host::config::ProviderConfig;
     use nexus_agent_host::{DiscoverySource, LaunchStrategy, ProviderId, TrustLevel};
 
