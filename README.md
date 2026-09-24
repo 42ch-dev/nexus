@@ -59,16 +59,18 @@ NEXUS42_BIN="$PWD/target/debug/nexus42" node scripts/public-first-workflow.mjs -
 
 A successful run exits `0` and reports every step `ok`: fixture, preflight, isolation, service start/stop, Creator/workspace/preset setup, admission, inspect, steer, stream/replay/refusals, sealed tool denial, the committed workspace file and its revision, cancel, restart, the request-budget guard's `loaded`/`admitted`/`denied`/`spent` evidence, and confirmed cleanup of both owned children. Exactly one admitted model request reaches the driver's own loopback endpoint, so the run performs no egress and spends no credential.
 
-### Optional live model request (currently blocked)
+### Optional live model request (explicit authorization only)
 
-The driver also has a `--mode live` path that replays the same journey against the single authorized official HTTPS model origin:
+The driver also has a `--mode live` path that replays the same journey against the single pinned official HTTPS model origin (`https://api.deepseek.com/chat/completions`):
 
 ```bash
 NEXUS42_BIN="$PWD/target/debug/nexus42" node scripts/public-first-workflow.mjs --mode live \
   --deterministic-receipt /tmp/pfw-receipt.json --attempt-dir /tmp/pfw-attempt-<fresh>
 ```
 
-That mode is not part of this Quick Start and **cannot dispatch today**. It first verifies that the deterministic receipt matches the current artifacts and runtime, then establishes the credential channel **by name only** — the driver never reads, copies, prints or persists the secret. A channel that merely exists is not a proven usable credential, and usability cannot be established without inspecting the value, so the current implementation stops with `blocked/credentials_unavailable` (exit `2`) before allocating anything or dispatching: no live request is made and none is pending. There is no key fallback, no retry and no second attempt. A transport or authentication failure **after** an admission would consume that authorization and only a new explicit user grant could retry — a runtime/transport failure is a different outcome from this zero-admission credential blocker. This example never creates, rotates, copies or inspects credentials.
+This mode is **not** part of the Quick Start and must never be run without the user's explicit authorization for that one attempt. It first verifies that the deterministic receipt matches the current artifacts and runtime, then observes the inherited credential channel **by name only** — the driver never reads, copies, prints or persists the secret, and the value stays entirely with the sealed runtime's normal credential resolver. It refuses an inherited model-origin override rather than silently stripping it. If the environment does not name the channel at all, the run stops with `blocked/credentials_unavailable` (exit `2`) before allocating anything or dispatching: zero admissions, no request. There is no key fallback, no retry and no second attempt; a transport or authentication failure **after** an admission consumes that authorization and only a new explicit user grant could retry. This example never creates, rotates, copies or inspects credentials.
+
+**Status (2026-09-24):** the project's single user-authorized live request has been exercised once — one admitted request against the official origin, `outcome: ok`, 25 steps `ok`, guard `loaded_dsh 6` / `admitted 1` / `denied 0` / `spent` / `evidence_integrity: complete`, same-run replay 4/4, committed revision, restart without repeating the commit, and confirmed service cleanup. That authorization is **spent**: the live mode must not be run again, and a further live attempt needs a new explicit user authorization. Live is not a general model-spend lane, and it is not part of any shipped release claim.
 
 ---
 

@@ -59,16 +59,18 @@ NEXUS42_BIN="$PWD/target/debug/nexus42" node scripts/public-first-workflow.mjs -
 
 成功的运行退出码为 `0`，且每一步都是 `ok`：fixture、preflight、隔离、service 启停、Creator/workspace/preset 建立、admission、inspect、steer、stream/replay/refusals、sealed 工具拒绝、已提交的 workspace 文件与其 revision、cancel、restart、请求预算 guard 的 `loaded`/`admitted`/`denied`/`spent` 证据，以及两个自有子进程的确认清理。恰好一次被准入的模型请求发往驱动自有的 loopback 端点，因此整个过程不出网、不消耗凭据。
 
-### 可选的 live 模型请求（当前被阻断）
+### 可选的 live 模型请求（仅限明确授权）
 
-驱动还有 `--mode live` 路径，会把同一套流程打到唯一被授权的官方 HTTPS 模型源：
+驱动还有 `--mode live` 路径，会把同一套流程打到唯一固定的官方 HTTPS 模型源（`https://api.deepseek.com/chat/completions`）：
 
 ```bash
 NEXUS42_BIN="$PWD/target/debug/nexus42" node scripts/public-first-workflow.mjs --mode live \
   --deterministic-receipt /tmp/pfw-receipt.json --attempt-dir /tmp/pfw-attempt-<fresh>
 ```
 
-该模式不属于本快速开始，而且 **当前无法发起请求**。它会先核验 deterministic receipt 与当前构建产物/运行时一致，然后 **仅按名称** 确认凭据通道 —— 驱动从不读取、复制、打印或持久化密钥。通道存在不等于凭据可用，而在不检查其取值的前提下无法证明可用性，因此当前实现会在分配任何资源或发起请求之前以 `blocked/credentials_unavailable`（退出码 `2`）停下：不会发出 live 请求，也没有待发的请求。没有密钥回退、没有重试、没有第二次尝试。若在准入之后出现传输或认证失败，该次授权即被消耗，只有用户再次明确授权才可重试 —— 这种运行时/传输失败与上述零准入的凭据阻断是两种不同结果。本示例不会创建、轮换、复制或检查任何凭据。
+该模式 **不属于** 本快速开始，且没有用户针对该次尝试的明确授权时绝不能运行。它会先核验 deterministic receipt 与当前构建产物/运行时一致，然后 **仅按名称** 观察继承来的凭据通道 —— 驱动从不读取、复制、打印或持久化密钥，取值完全交给 sealed 运行时正常的凭据解析器。遇到继承来的模型源覆盖它只会拒绝，不会悄悄剥离。若环境完全没有命名该通道，运行会在分配任何资源或发起请求之前以 `blocked/credentials_unavailable`（退出码 `2`）停下：零准入、不发请求。没有密钥回退、没有重试、没有第二次尝试；若在准入之后出现传输或认证失败，该次授权即被消耗，只有用户再次明确授权才可重试。本示例不会创建、轮换、复制或检查任何凭据。
+
+**状态（2026-09-24）：** 项目唯一一次用户授权的 live 请求已经执行完毕 —— 对官方源恰好 1 次被准入的请求，`outcome: ok`、25 步 `ok`、guard `loaded_dsh 6` / `admitted 1` / `denied 0` / `spent` / `evidence_integrity: complete`、同 run 回放 4/4、提交 revision、重启不重复提交、service 清理确认。该授权已 **用尽**：不应再次运行 live 模式，后续 live 尝试需要用户新的明确授权。live 不是通用的模型消耗通道，也不构成任何已发布版本的声明。
 
 ---
 
