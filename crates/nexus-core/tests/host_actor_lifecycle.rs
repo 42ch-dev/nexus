@@ -1322,17 +1322,17 @@ async fn attached_host_close_accounts_for_an_admitted_execute() {
         ctx,
         nexus_agent_host::HostSessionId(session_id),
     );
-    let prompt = serde_json::from_value::<
-        nexus_contracts::generated::daemon_api::agent_host::ExecuteOperationRequest,
-    >(serde_json::json!({ "kind": "prompt", "content": "close races the admission" }))
-    .unwrap();
+    let prompt =
+        serde_json::from_value::<
+            nexus_contracts::generated::daemon_api::agent_host::ExecuteOperationRequest,
+        >(serde_json::json!({ "kind": "prompt", "content": "close races the admission" }))
+        .unwrap();
 
     // Poll the operation exactly once: it is admitted (the barrier is taken
     // before the first await, so no close can slip in ahead of it) and
     // suspended at its first await, i.e. the registered-drain view is still
     // empty — the exact window the finding describes.
-    let mut execute =
-        std::pin::pin!(attached.execute(&principal, session_id.to_string(), prompt));
+    let mut execute = std::pin::pin!(attached.execute(&principal, session_id.to_string(), prompt));
     let first = {
         let mut cx = Context::from_waker(Waker::noop());
         execute.as_mut().poll(&mut cx)
@@ -1365,7 +1365,10 @@ async fn attached_host_close_accounts_for_an_admitted_execute() {
     let err = core
         .attach_host(manager.clone(), CountingPort::new())
         .expect_err("an unaccounted admission retains the authority slot");
-    assert!(matches!(err, CoreError::OwnerBusy), "slot retained: {err:?}");
+    assert!(
+        matches!(err, CoreError::OwnerBusy),
+        "slot retained: {err:?}"
+    );
     assert_eq!(port.call_count(), 0, "the race produced no provider effect");
 
     // The admitted operation settles. Here it fails BEFORE creating a drain:
@@ -1412,5 +1415,8 @@ async fn attached_host_close_accounts_for_an_admitted_execute() {
     let err = core
         .attach_host(manager.clone(), CountingPort::new())
         .expect_err("retained cleanup keeps the authority slot");
-    assert!(matches!(err, CoreError::OwnerBusy), "slot retained: {err:?}");
+    assert!(
+        matches!(err, CoreError::OwnerBusy),
+        "slot retained: {err:?}"
+    );
 }
