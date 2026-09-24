@@ -107,18 +107,78 @@
  * belongs to the §6.2 adapter controls (a rejected unsolicited call is answered
  * with a follow-up model request, and a second request of the admitted prompt
  * fails this journey by contract), so this driver records which adapter control
- * owns that attempt instead of re-driving it. The separately authorized
- * one-request live action and its fetch guard are P3-T3.
+ * owns that attempt instead of re-driving it.
+ *
+ * Request-budget guard (§6.3, P3-T3). Every owned Node child is started with the
+ * checked-in preload handler (`scripts/public-first-workflow-request-guard.mjs`)
+ * attached through `NODE_OPTIONS=--import=<absolute path>`, and with the guard's
+ * own interface in the child environment:
+ *
+ *   NEXUS_WORKFLOW_ATTEMPT_DIR   one fresh owner-only (0700) attempt directory,
+ *                                allocated once per attempt and never reset;
+ *   NEXUS_WORKFLOW_ALLOWED_URL   the ONE preselected model URL of this mode;
+ *   NEXUS_WORKFLOW_DSH_REALPATH  the canonical real installed dsh entry, so the
+ *                                guard can tell a dsh child from any other Node
+ *                                runtime in the same tree.
+ *
+ * The dsh child itself is spawned by the service, so the interface is set on the
+ * service's own child environment (the SDK merges that environment into the dsh
+ * spawn). The guard owns its evidence inside the attempt directory: a `spent`
+ * token acquired with an exclusive create **before** the original fetch, and one
+ * `events/<kind>-<pid>-<counter>-<hex>.json` record per `loaded`/`admitted`/
+ * `denied` event. This driver never inspects a credential, a header, a body or
+ * an environment dump; it reads those credential-free records back and refuses
+ * the run unless the dsh child produced the preload handshake, exactly one
+ * request was admitted and nothing was denied. Any unexpected denied attempt
+ * fails qualification even when the admitted count is still one.
+ *
+ * The attempt directory is the durable evidence of an authorized attempt. A
+ * deterministic run allocates a fresh one per run and retains it (it is small
+ * and credential-free) so the proof named in the receipt survives the isolated
+ * root cleanup; a live run uses the operator-supplied `--attempt-dir`, which
+ * must not exist yet, so a second launch can never recreate or reset `spent`.
+ *
+ * Modes:
+ *   * `--mode deterministic` (default) — loopback model endpoint, no egress;
+ *   * `--mode live --deterministic-receipt <path> --attempt-dir <fresh dir>` —
+ *     the SAME journey against the one authorized official HTTPS origin
+ *     (`https://api.deepseek.com/chat/completions`), only after the prior
+ *     deterministic receipt is verified against the CURRENT artifact/runtime
+ *     identities and its guard proof. This mode is never invoked by tooling or
+ *     by a leaf seat; it exists so the PM can run the single user-authorized
+ *     invocation explicitly.
+ *
+ * Live credentials (§6.3 item 6), the two hard rules this driver obeys:
+ *
+ *   1. **No value is ever read, and no value is ever copied.** The live child
+ *      environment is the parent environment seen through a shadowing prototype
+ *      (`Object.create(process.env)` plus this driver's own non-secret keys), so
+ *      the inherited environment — credential included — reaches the child
+ *      through Node's ordinary env inheritance. The driver enumerates nothing
+ *      and dereferences nothing inherited; its live summary uses `Object.hasOwn`
+ *      so even the summary cannot read an inherited value.
+ *   2. **Uncertain availability is a STOP, not a dispatch.** The only permitted
+ *      observation is whether the inherited environment NAMES a channel
+ *      (`Object.keys`). A named channel is not a usable credential, and an empty
+ *      or stale value cannot be told from a good one without inspecting the
+ *      value, which the driver never does. Both `absent` and
+ *      `present_unverifiable` therefore stop with `blocked`/`credentials_unavailable`
+ *      and ZERO admissions, before anything is allocated or spawned, and are
+ *      reported as a credential blocker (never as a runtime/policy/recovery
+ *      failure). There is no retry of any kind and no key fallback, and the
+ *      driver never discovers, copies or invents a credential.
  */
 
 import { createHash } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -264,6 +324,10 @@ const CREDENTIAL_ENV_KEYS = [
 const CREDENTIAL_ENV_PATTERN = /(^|_)(API_KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|CREDENTIALS)(_|$)/;
 /** A foreign preload would run inside the deterministic child; never inherit it. */
 const NODE_OPTIONS_KEY = 'NODE_OPTIONS';
+/** The guard's own interface, published to the guarded child environment (§6.3). */
+const GUARD_ATTEMPT_DIR_ENV = 'NEXUS_WORKFLOW_ATTEMPT_DIR';
+const GUARD_ALLOWED_URL_ENV = 'NEXUS_WORKFLOW_ALLOWED_URL';
+const GUARD_DSH_REALPATH_ENV = 'NEXUS_WORKFLOW_DSH_REALPATH';
 /** Variables this driver always sets on its own children (never inherited values). */
 const DRIVER_ENV_OVERRIDES = [
   'HOME',
@@ -272,15 +336,71 @@ const DRIVER_ENV_OVERRIDES = [
   'DEEPSEEK_API_KEY',
   'DSH_TELEMETRY_DISABLED',
   'DSH_RUNTIME_BIN',
+  NODE_OPTIONS_KEY,
+  GUARD_ATTEMPT_DIR_ENV,
+  GUARD_ALLOWED_URL_ENV,
+  GUARD_DSH_REALPATH_ENV,
 ];
+
+/**
+ * The checked-in fetch guard every owned Node child is started with (§6.3).
+ * `NODE_OPTIONS=--import=<this path>` is the preload contract; the guard is not
+ * imported by this driver, it is loaded by the child's own Node runtime.
+ */
+const GUARD_PATH = join(REPO_ROOT, 'scripts', 'public-first-workflow-request-guard.mjs');
+/** The one officially authorized live model URL (§6.3: exact origin + path). */
+const OFFICIAL_MODEL_URL = 'https://api.deepseek.com/chat/completions';
+/** Guard evidence inside one attempt directory. */
+const GUARD_SPENT_FILENAME = 'spent';
+const GUARD_EVENTS_DIRNAME = 'events';
+/** The guard's own record schemas (its event/spend contract, read back here). */
+const GUARD_EVENT_SCHEMA = 'nexus-request-guard-event/1';
+const GUARD_SPENT_SCHEMA = 'nexus-request-guard-spent/1';
+/** The only event kinds and runtimes the guard contract defines. */
+const GUARD_EVENT_KINDS = ['loaded', 'admitted', 'denied'];
+const GUARD_EVENT_RUNTIMES = ['dsh', 'other'];
+/** A guard record is a small JSON object, never a body/env dump. */
+const GUARD_RECORD_MAX_BYTES = 8_192;
+/**
+ * Consumer-side leak check of the guard's own records (§6.3: the guard never
+ * records a URL, a header, a body, an environment dump or a secret). A string
+ * value that looks like a URL, spans lines, is long enough to be content, or
+ * sits under a credential-shaped key refuses the record, so a leak can never
+ * pass as evidence.
+ */
+const GUARD_UNSAFE_VALUE_PATTERN = /:\/\/|\n|\r/;
+const GUARD_UNSAFE_KEY_PATTERN = /authorization|api[_-]?key|secret|password|bearer|(^|_)body$|headers/i;
+const GUARD_SAFE_STRING_MAX_LENGTH = 200;
+/** Credential channel the live action inherits — checked by NAME only (§6.3). */
+const LIVE_CREDENTIAL_ENV_KEYS = ['DEEPSEEK_API_KEY'];
+/** Inherited variables that would move the live request off the pinned origin. */
+const LIVE_ENDPOINT_OVERRIDE_ENV_KEYS = ['DEEPSEEK_BASE_URL'];
+/** Local preparation identity recorded in the receipt and required to match for live. */
+const ARTIFACT_HASH_MAX_BYTES = 8 * 1024 * 1024;
+/** A receipt is a bounded JSON document; anything larger is not one. */
+const RECEIPT_READ_MAX_BYTES = 4 * 1024 * 1024;
 
 const USAGE = `Usage: node scripts/public-first-workflow.mjs [options]
 
 Options:
   --mode deterministic   Run the public clean-home deterministic journey (default).
+  --mode live            Run the SAME journey against the one authorized official
+                         HTTPS model origin. Requires --deterministic-receipt and
+                         --attempt-dir; never run without PM/user authorization.
+  --deterministic-receipt <path>
+                         Live only: the JSON receipt of the accepted deterministic
+                         run whose artifacts, runtime and guard proof authorize it.
+  --attempt-dir <path>   Live only: a directory that MUST NOT exist yet. It
+                         becomes the guard's attempt evidence for this one action.
   --keep                 Keep the isolated temporary root for inspection.
   --json                 Print the machine receipt instead of the summary.
   --help                 Print this help and exit.
+
+Guard evidence: every owned Node child is started with the §6.3 request-budget
+guard preloaded, so each attempt keeps a fresh owner-only attempt directory
+holding the guard's \`spent\` token and its credential-free event records. That
+directory is deliberately retained (a deterministic run prints its path) because
+a second launch must never be able to recreate or reset it.
 
 Cleanup: a completed run removes the temporary root it created; a blocked or
 failed run retains it (the printed receipt names it) so the STOP keeps evidence.
@@ -289,17 +409,36 @@ Exit codes:
   0  the journey completed, its declared facts were observed and every owned
      child was confirmed stopped
   1  unexpected internal failure, a runtime/recovery failure, a failed
-     same-run replay/refusal assertion, or an unconfirmed/failed owned-service
+     same-run replay/refusal assertion, a guard violation (an unexpected denied
+     attempt or a missing handshake), or an unconfirmed/failed owned-service
      cleanup
-  2  blocked: a prerequisite, runtime or producer required by the journey is missing
+  2  blocked: a prerequisite, runtime or producer required by the journey is
+     missing, or (live) the deterministic receipt, runtime identity or
+     credential channel does not authorize the action — including
+     \`credentials_unavailable\`, which is reported before any dispatch
   64 usage error
 
 Preconditions (never installed or built by this driver): prepared native
-artifact / contracts / service dist, a prepared nexus42 binary, and a real
-supported dsh runtime on PATH or in DSH_RUNTIME_BIN.
+artifact / contracts / service dist, a prepared nexus42 binary, a real supported
+dsh runtime on PATH or in DSH_RUNTIME_BIN, and the checked-in guard module.
 
 The driver never builds, installs, seeds the product database, reads the
-operator's homes/credentials, or performs non-loopback network traffic.`;
+operator's homes/credentials, or performs non-loopback network traffic. In
+deterministic mode the request-budget guard admits only the owned loopback
+endpoint; in live mode it admits only
+  ${OFFICIAL_MODEL_URL}
+and the credential channel is established by NAME only (\`Object.keys\`), never
+read or copied. If a usable credential cannot be established without inspecting
+its value, the live action stops with \`credentials_unavailable\` before anything
+is allocated or dispatched. There is no retry, no fallback key and no second
+attempt.
+
+The live action consumes a deterministic receipt as a FILE, so capture it:
+
+  node scripts/public-first-workflow.mjs --mode deterministic --json > /tmp/pfw-receipt.json
+  node scripts/public-first-workflow.mjs --mode live \\
+    --deterministic-receipt /tmp/pfw-receipt.json --attempt-dir /tmp/pfw-attempt-<fresh>
+`;
 
 class DriverFailure extends Error {
   /**
@@ -318,17 +457,53 @@ class DriverFailure extends Error {
 const blocked = (category, detail) => new DriverFailure('blocked', category, detail);
 const failed = (category, detail) => new DriverFailure('failed', category, detail);
 
+/**
+ * The two modes this driver has: the offline loopback journey and the one
+ * explicitly authorized live action. There is no third mode and no implicit
+ * escalation between them (§6.3 item 7).
+ */
+const DRIVER_MODES = ['deterministic', 'live'];
+
+/**
+ * Parse and VALIDATE the invocation before anything is created or spawned: a
+ * live action requires both of its authorization inputs, and the live-only
+ * options are refused in deterministic mode, so no invocation can reach the
+ * live journey by accident or with a half-specified authorization.
+ */
 function parseArgs(argv) {
-  const options = { mode: 'deterministic', keep: false, json: false, help: false };
+  const options = {
+    mode: 'deterministic',
+    keep: false,
+    json: false,
+    help: false,
+    deterministicReceipt: null,
+    attemptDir: null,
+  };
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
     switch (token) {
       case '--mode': {
         const value = argv[++index];
-        if (value !== 'deterministic') {
+        if (!DRIVER_MODES.includes(value)) {
           throw new DriverFailure('failed', 'usage', `unsupported --mode ${JSON.stringify(value)}`);
         }
         options.mode = value;
+        break;
+      }
+      case '--deterministic-receipt': {
+        const value = argv[++index];
+        if (typeof value !== 'string' || value.length === 0 || value.startsWith('--')) {
+          throw new DriverFailure('failed', 'usage', '--deterministic-receipt requires a path');
+        }
+        options.deterministicReceipt = value;
+        break;
+      }
+      case '--attempt-dir': {
+        const value = argv[++index];
+        if (typeof value !== 'string' || value.length === 0 || value.startsWith('--')) {
+          throw new DriverFailure('failed', 'usage', '--attempt-dir requires a path');
+        }
+        options.attemptDir = value;
         break;
       }
       case '--keep':
@@ -344,6 +519,29 @@ function parseArgs(argv) {
       default:
         throw new DriverFailure('failed', 'usage', `unknown argument: ${token}`);
     }
+  }
+  if (options.help) return options;
+  if (options.mode === 'live') {
+    if (options.deterministicReceipt === null) {
+      throw new DriverFailure(
+        'failed',
+        'usage',
+        '--mode live requires --deterministic-receipt <path> (the accepted deterministic receipt that authorizes it)',
+      );
+    }
+    if (options.attemptDir === null) {
+      throw new DriverFailure(
+        'failed',
+        'usage',
+        '--mode live requires --attempt-dir <fresh directory> (it must not exist yet)',
+      );
+    }
+  } else if (options.deterministicReceipt !== null || options.attemptDir !== null) {
+    throw new DriverFailure(
+      'failed',
+      'usage',
+      '--deterministic-receipt and --attempt-dir are live-only; the deterministic journey allocates its own attempt directory',
+    );
   }
   return options;
 }
@@ -693,8 +891,11 @@ function resolveExecutable(explicit, name) {
   return null;
 }
 
-/** Build the child environment: isolated homes, loopback model, no inherited credentials. */
-function buildChildEnv({ home, dshHome, modelPort, dshRuntimeBin }) {
+/**
+ * Build the deterministic child environment: isolated homes, loopback model,
+ * the §6.3 guard interface, and no inherited credentials.
+ */
+function buildChildEnv({ home, dshHome, modelPort, dshRuntimeBin, guardEnv }) {
   const env = {};
   // Key-first filtering (§6.1): the credential-shaped / preload decision is
   // made on the NAME before the value is ever dereferenced, so an inherited
@@ -713,7 +914,50 @@ function buildChildEnv({ home, dshHome, modelPort, dshRuntimeBin }) {
   env.DEEPSEEK_API_KEY = DUMMY_MODEL_KEY;
   env.DSH_TELEMETRY_DISABLED = '1';
   if (dshRuntimeBin) env.DSH_RUNTIME_BIN = dshRuntimeBin;
-  return env;
+  return Object.assign(env, guardEnv);
+}
+
+/**
+ * Build the LIVE child environment: the same isolated homes and the same guard
+ * interface, with the inherited environment passed through by REFERENCE.
+ *
+ * This is the only shape that satisfies §6.3 item 6 literally: the driver never
+ * enumerates the inherited environment, never dereferences an inherited value
+ * and never copies any value into a store of its own. `spawn` walks the object
+ * it is given (own keys, then the prototype chain), so the child inherits the
+ * parent environment — credentials included — through Node's ordinary env
+ * inheritance, exactly as it would if no `env` were passed at all, while the
+ * driver's own non-secret keys shadow the inherited ones.
+ *
+ * Consequences, by construction: the inherited `NODE_OPTIONS` is replaced by the
+ * guard preload (shadowed, never merged with a foreign preload), the transport
+ * keeps the official default origin because no `DEEPSEEK_BASE_URL` is set and
+ * none would be read, and the inherited credential is forwarded untouched —
+ * nothing in this driver can print, log or persist it, because nothing in this
+ * driver reads it.
+ */
+function buildLiveChildEnv({ home, dshHome, guardEnv }) {
+  const env = Object.create(process.env);
+  env.HOME = home;
+  env.DSH_HOME = dshHome;
+  env.DSH_TELEMETRY_DISABLED = '1';
+  return Object.assign(env, guardEnv);
+}
+
+/**
+ * Name-only summary of the LIVE child environment. Unlike
+ * {@link summarizeChildEnv} this never dereferences an inherited key:
+ * `Object.hasOwn` answers "did this driver set this key itself?" without
+ * touching the prototype, so the inherited credential (and every other
+ * inherited value) is never read, compared or reported here.
+ */
+function summarizeLiveChildEnv(env, inheritedKeys) {
+  return {
+    overrides: DRIVER_ENV_OVERRIDES.filter((key) => Object.hasOwn(env, key)),
+    inherited_node_options_replaced: inheritedKeys.includes(NODE_OPTIONS_KEY),
+    inherited_credential_channel_named: LIVE_CREDENTIAL_ENV_KEYS.filter((key) => inheritedKeys.includes(key)),
+    inherited_values_read: false,
+  };
 }
 
 /** Is this a credential-shaped variable name (by name only — never its value)? */
@@ -726,6 +970,10 @@ function isCredentialEnvKey(key) {
  * overrides are set, how many inherited credential-shaped names were dropped,
  * and whether any inherited credential-shaped name survived. Names only; no
  * value of an inherited variable is ever read.
+ *
+ * `NODE_OPTIONS` is counted as the guard preload it now is (the driver always
+ * replaces an inherited value with its own absolute `--import`), so the count
+ * says what actually happened instead of implying an inherited preload ran.
  */
 function summarizeChildEnv(inheritedKeys, env) {
   const removed = inheritedKeys.filter((key) => isCredentialEnvKey(key) && env[key] === undefined);
@@ -734,9 +982,549 @@ function summarizeChildEnv(inheritedKeys, env) {
   );
   return {
     overrides: DRIVER_ENV_OVERRIDES.filter((key) => env[key] !== undefined),
-    removed_credential_key_count: removed.length + (inheritedKeys.includes(NODE_OPTIONS_KEY) ? 1 : 0),
+    removed_credential_key_count: removed.length,
+    inherited_node_options_replaced: inheritedKeys.includes(NODE_OPTIONS_KEY),
     inherited_credential_keys_forwarded: forwarded,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Request-budget guard interface (§6.3)
+//
+// The guard itself lives in `scripts/public-first-workflow-request-guard.mjs`
+// and runs inside each owned Node child; this driver only (a) hands it the fixed
+// interface, (b) allocates the one attempt directory, and (c) reads its
+// credential-free records back and refuses the run unless they prove the
+// intended request and nothing else.
+// ---------------------------------------------------------------------------
+
+/** Canonical (symlink-free) absolute path of the real installed dsh entry. */
+function canonicalRealPath(path, name) {
+  try {
+    return realpathSync(path);
+  } catch (error) {
+    throw blocked(
+      'missing_prerequisite',
+      `cannot canonicalize the ${name} path ${JSON.stringify(path)}: ${error.message}`,
+    );
+  }
+}
+
+/** Is `value` an absolute http/https URL with no userinfo, query or fragment? */
+function isAbsoluteHttpUrl(value) {
+  if (typeof value !== 'string') return false;
+  let url = null;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  return (
+    (url.protocol === 'http:' || url.protocol === 'https:') &&
+    url.username === '' &&
+    url.password === '' &&
+    url.search === '' &&
+    url.hash === '' &&
+    url.host !== ''
+  );
+}
+
+/**
+ * The §6.3 interface handed to the guarded child. Every value is validated here
+ * so a malformed driver-side interface is a typed STOP before any child exists
+ * — the guard's own fail-closed check is the second line of defence, not the
+ * first.
+ */
+function guardChildEnv({ attemptDir, allowedUrl, dshRealpath }) {
+  if (!existsSync(GUARD_PATH) || !statSync(GUARD_PATH).isFile()) {
+    throw blocked(
+      'missing_prerequisite',
+      `the §6.3 request-budget guard is missing at ${GUARD_PATH}; it is a checked-in module and is never generated`,
+    );
+  }
+  if (typeof attemptDir !== 'string' || !isAbsolute(attemptDir)) {
+    throw failed('guard_interface', `the attempt directory ${JSON.stringify(attemptDir)} is not an absolute path`);
+  }
+  if (typeof dshRealpath !== 'string' || !isAbsolute(dshRealpath)) {
+    throw failed('guard_interface', `the dsh realpath ${JSON.stringify(dshRealpath)} is not an absolute path`);
+  }
+  if (!isAbsoluteHttpUrl(allowedUrl)) {
+    throw failed(
+      'guard_interface',
+      `the allowed model URL ${JSON.stringify(allowedUrl)} is not an absolute http/https URL without userinfo, ` +
+        'query or fragment',
+    );
+  }
+  return {
+    [NODE_OPTIONS_KEY]: `--import=${GUARD_PATH}`,
+    [GUARD_ATTEMPT_DIR_ENV]: attemptDir,
+    [GUARD_ALLOWED_URL_ENV]: allowedUrl,
+    [GUARD_DSH_REALPATH_ENV]: dshRealpath,
+  };
+}
+
+/**
+ * Allocate the ONE attempt directory of a deterministic run: a fresh owner-only
+ * (0700) directory that no other process knows about. The guard's evidence
+ * lives in it, so it is deliberately NOT removed with the isolated root — a
+ * `spent` token must survive the run that consumed it.
+ */
+function createAttemptDir() {
+  const dir = mkdtempSync(join(tmpdir(), 'nexus-workflow-attempt-'));
+  chmodSync(dir, 0o700);
+  return dir;
+}
+
+/**
+ * Take ownership of the operator-supplied attempt directory of the authorized
+ * live action. The directory MUST NOT exist: exclusive creation is what makes
+ * "a second launch can never recreate or reset `spent`" true, so an existing
+ * path is a refusal, never a reset, an overwrite or a reuse.
+ */
+function takeAttemptDir(path) {
+  if (typeof path !== 'string' || !isAbsolute(path)) {
+    throw blocked('attempt_dir_unavailable', `--attempt-dir ${JSON.stringify(path)} is not an absolute path`);
+  }
+  try {
+    mkdirSync(path, { mode: 0o700 });
+  } catch (error) {
+    throw blocked(
+      'attempt_dir_unavailable',
+      `--attempt-dir ${path} cannot be taken exclusively (${error.code ?? error.message}); it must be a fresh path ` +
+        'that does not exist yet, and the guard evidence of an earlier attempt is never reset',
+    );
+  }
+  chmodSync(path, 0o700);
+  return path;
+}
+
+/** Read one guard record from the attempt directory, refusing anything unsafe. */
+function readGuardRecord(path) {
+  const stat = statSync(path);
+  if (stat.size > GUARD_RECORD_MAX_BYTES) {
+    throw failed(
+      'guard_event_malformed',
+      `guard record ${basenameOf(path)} is ${stat.size} bytes; the guard contract records a small JSON object`,
+    );
+  }
+  return { text: readFileSync(path, 'utf8'), bytes: stat.size };
+}
+
+/**
+ * Assert one guard record is credential-free (§6.3: never a URL, a header, a
+ * body, an environment dump or a secret). Deep string walk; the first unsafe
+ * key or value refuses the whole record, so a leaky guard can never pass as
+ * evidence even when its counts look right.
+ */
+function assertGuardRecordSafe(value, path) {
+  const walk = (node, key) => {
+    if (key !== null && GUARD_UNSAFE_KEY_PATTERN.test(key)) {
+      throw failed(
+        'guard_event_unsafe',
+        `guard record ${basenameOf(path)} carries a credential-shaped key ${JSON.stringify(key)}`,
+      );
+    }
+    if (typeof node === 'string') {
+      if (node.length > GUARD_SAFE_STRING_MAX_LENGTH || GUARD_UNSAFE_VALUE_PATTERN.test(node)) {
+        throw failed(
+          'guard_event_unsafe',
+          `guard record ${basenameOf(path)} carries a string under ${JSON.stringify(key)} that is not a bounded label`,
+        );
+      }
+      return;
+    }
+    if (node === null || typeof node === 'number' || typeof node === 'boolean') return;
+    if (Array.isArray(node)) {
+      for (const item of node) walk(item, key);
+      return;
+    }
+    if (typeof node === 'object') {
+      for (const [childKey, child] of Object.entries(node)) walk(child, childKey);
+      return;
+    }
+    throw failed('guard_event_malformed', `guard record ${basenameOf(path)} carries a ${typeof node} value`);
+  };
+  walk(value, null);
+}
+
+/**
+ * Read the guard's attempt evidence. Counts are derived from the guard's own
+ * records and never from this driver's expectations: an absent `events/`
+ * directory, an unreadable record or an unknown kind/runtime is a failure, not
+ * an empty result. A zero-length file is the only intermediate state a single
+ * exclusive-create write can leave (skipped as in-progress); a non-empty
+ * unparseable file is a real failure because nothing is ever rewritten.
+ */
+function readAttemptDir(dir) {
+  const eventsDir = join(dir, GUARD_EVENTS_DIRNAME);
+  const spentPath = join(dir, GUARD_SPENT_FILENAME);
+  const state = {
+    dir,
+    spent_present: existsSync(spentPath),
+    event_files: 0,
+    loaded: 0,
+    loaded_dsh: 0,
+    loaded_other: 0,
+    admitted: 0,
+    denied: 0,
+    denied_categories: [],
+    problems: [],
+  };
+  if (!existsSync(dir) || !statSync(dir).isDirectory()) {
+    throw failed('guard_attempt_missing', `the attempt directory ${dir} does not exist`);
+  }
+  if (!existsSync(eventsDir)) return state;
+  const names = readdirSync(eventsDir).filter((name) => name.endsWith('.json')).sort();
+  for (const name of names) {
+    const path = join(eventsDir, name);
+    const { text, bytes } = readGuardRecord(path);
+    if (bytes === 0) continue;
+    let record = null;
+    try {
+      record = JSON.parse(text);
+    } catch (error) {
+      throw failed('guard_event_malformed', `guard record ${name} is not JSON: ${error.message}`);
+    }
+    assertGuardRecordSafe(record, path);
+    if (record === null || typeof record !== 'object' || Array.isArray(record)) {
+      throw failed('guard_event_malformed', `guard record ${name} is not an object`);
+    }
+    if (record.schema !== GUARD_EVENT_SCHEMA) {
+      throw failed('guard_event_malformed', `guard record ${name} declares schema ${JSON.stringify(record.schema)}`);
+    }
+    if (!GUARD_EVENT_KINDS.includes(record.kind) || !GUARD_EVENT_RUNTIMES.includes(record.runtime)) {
+      throw failed(
+        'guard_event_malformed',
+        `guard record ${name} carries kind/runtime ${JSON.stringify(record.kind)}/${JSON.stringify(record.runtime)}`,
+      );
+    }
+    if (!name.startsWith(`${record.kind}-`)) {
+      throw failed(
+        'guard_event_malformed',
+        `guard record ${name} does not match its own kind ${JSON.stringify(record.kind)}`,
+      );
+    }
+    if (typeof record.at !== 'string' || record.at.length === 0) {
+      throw failed('guard_event_malformed', `guard record ${name} carries no timestamp`);
+    }
+    if (typeof record.category !== 'string' || record.category.length === 0) {
+      throw failed('guard_event_malformed', `guard record ${name} carries no category`);
+    }
+    state.event_files += 1;
+    if (record.kind === 'loaded') {
+      state.loaded += 1;
+      if (record.runtime === 'dsh') state.loaded_dsh += 1;
+      else state.loaded_other += 1;
+      if (Array.isArray(record.problems) && record.problems.length > 0) {
+        state.problems.push(`${record.runtime}:${record.problems.join(',')}`);
+      }
+    } else if (record.kind === 'admitted') {
+      state.admitted += 1;
+    } else {
+      state.denied += 1;
+      state.denied_categories.push(`${record.runtime}:${record.category}`);
+    }
+  }
+  return state;
+}
+
+/** The `spent` payload, strictly parsed (the token that can never be reset). */
+function readSpentToken(dir) {
+  const path = join(dir, GUARD_SPENT_FILENAME);
+  if (!existsSync(path)) {
+    throw failed(
+      'guard_spent_missing',
+      `the attempt directory ${dir} carries no '${GUARD_SPENT_FILENAME}' token; the guard acquires it before every ` +
+        'dispatch, so a missing token means the intended request never happened',
+    );
+  }
+  const { text } = readGuardRecord(path);
+  let token = null;
+  try {
+    token = JSON.parse(text);
+  } catch (error) {
+    throw failed('guard_spent_malformed', `the '${GUARD_SPENT_FILENAME}' token is not JSON: ${error.message}`);
+  }
+  assertGuardRecordSafe(token, path);
+  if (token === null || typeof token !== 'object' || token.schema !== GUARD_SPENT_SCHEMA) {
+    throw failed('guard_spent_malformed', `the '${GUARD_SPENT_FILENAME}' token does not declare ${GUARD_SPENT_SCHEMA}`);
+  }
+  if (typeof token.category !== 'string' || token.category.length === 0) {
+    throw failed('guard_spent_malformed', "the 'spent' token carries no category");
+  }
+  return { category: token.category, at: token.at ?? null };
+}
+
+/**
+ * The guard half of the success condition (§6.3 items 1–4): dsh really loaded
+ * the preload, exactly one request was admitted, nothing was denied, and the
+ * spend token survives. Any unexpected denied attempt fails qualification even
+ * when the admitted count is still one — a denial means some part of the owned
+ * tree tried something the authorization does not cover.
+ *
+ * @throws {DriverFailure} `failed` when the evidence contradicts the one-request
+ *   budget; the receipt keeps the raw counts either way.
+ */
+function assertGuardAttempt(state, spent) {
+  if (state.denied > 0) {
+    throw failed(
+      'guard_denied_attempt',
+      `${state.denied} model/transport attempt(s) were denied before dispatch ` +
+        `(${state.denied_categories.join(', ')}); the owned tree must perform exactly the one admitted request`,
+    );
+  }
+  if (state.loaded_dsh < 1) {
+    throw failed(
+      'guard_handshake_missing',
+      `${state.event_files} guard record(s) were written but none is a 'loaded' record for the dsh runtime ` +
+        `(${state.loaded} loaded record(s), ${state.loaded_other} of them from another Node runtime); the preload ` +
+        'handshake for the supported transport did not happen',
+    );
+  }
+  if (state.admitted !== 1) {
+    throw failed(
+      state.admitted === 0 ? 'guard_admission_missing' : 'guard_second_request',
+      `the guard admitted ${state.admitted} model request(s); the authorized attempt is exactly one`,
+    );
+  }
+  return {
+    event_files: state.event_files,
+    loaded: state.loaded,
+    loaded_dsh: state.loaded_dsh,
+    loaded_other: state.loaded_other,
+    admitted: state.admitted,
+    denied: state.denied,
+    spent: spent.category,
+    spent_at: spent.at,
+    problems: state.problems,
+  };
+}
+
+/**
+ * Best-effort guard evidence for a run that did NOT reach its success path: the
+ * receipt must still say what the guard observed, and reading it must never
+ * replace the real blocker with a secondary failure.
+ */
+function captureGuardAttempt(dir) {
+  try {
+    return readAttemptDir(dir);
+  } catch (error) {
+    return { dir, unreadable: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
+ * One prepared-artifact identity in the receipt: canonical absolute path, byte
+ * size, and a content hash when the file is small enough that hashing it is
+ * cheap. A large file (a debug CLI binary is ~175 MB) is identified by path,
+ * size and mtime instead — the identity is still comparable across the
+ * deterministic run and the live action, which is all the live gate needs.
+ */
+function artifactIdentity(path, { required = true } = {}) {
+  if (!existsSync(path)) {
+    if (required) throw blocked('missing_prerequisite', `prepared artifact missing at ${path}`);
+    return { path, present: false };
+  }
+  const stat = statSync(path);
+  return {
+    path,
+    present: true,
+    bytes: stat.size,
+    mtime_ms: Math.floor(stat.mtimeMs),
+    sha256: stat.size <= ARTIFACT_HASH_MAX_BYTES ? sha256(readFileSync(path)) : null,
+  };
+}
+
+/** Does the live action's CURRENT artifact match the one the receipt recorded? */
+function sameArtifact(recorded, current) {
+  if (recorded === null || typeof recorded !== 'object') return false;
+  if (current === null || typeof current !== 'object') return false;
+  if (recorded.path !== current.path || recorded.present !== current.present) return false;
+  if (!current.present) return true;
+  if (recorded.bytes !== current.bytes) return false;
+  if (recorded.sha256 !== current.sha256) return false;
+  // Only the un-hashed (large) identities fall back to mtime, and only then.
+  if (recorded.sha256 === null && recorded.mtime_ms !== current.mtime_ms) return false;
+  return true;
+}
+
+/**
+ * Every local input the deterministic proof depends on, as identities the live
+ * gate can re-check: the driver (which produced the receipt), the guard (which
+ * bounds the request), the fixture (the graph), the prepared service entry and
+ * CLI, the installed dsh entry (the guarded process identity) and — when it is
+ * derivable — the installed transport module whose `fetch` dispatch is the
+ * guard's whole premise.
+ */
+function localArtifactIdentities({ cliBinary, dshRealpath }) {
+  const dshLibDir = dirname(dshRealpath);
+  return {
+    driver: artifactIdentity(SCRIPT_PATH),
+    guard: artifactIdentity(GUARD_PATH),
+    fixture: artifactIdentity(FIXTURE_PATH),
+    service_entry: artifactIdentity(SERVICE_ENTRY),
+    cli: artifactIdentity(cliBinary),
+    dsh: artifactIdentity(dshRealpath),
+    dsh_transport: artifactIdentity(
+      join(dirname(dshLibDir), 'node_modules', '@deepseek-ai', 'dsh-llm-deepseek', 'lib', 'index.js'),
+      { required: false },
+    ),
+    runtime: { node: process.versions.node, platform: process.platform, arch: process.arch },
+  };
+}
+
+/**
+ * Validate the live action's authorization: the prior deterministic receipt must
+ * describe the artifacts and runtime that are on disk NOW, and its own guard
+ * proof must be a clean one-request attempt. A stale, foreign, blocked,
+ * incomplete or unreadable receipt never authorizes a live request (§6.3 item 7).
+ *
+ * @throws {DriverFailure} `blocked`/`receipt_mismatch` — before any child exists
+ *   and therefore with zero admissions.
+ */
+function assertDeterministicReceipt(receiptPath, { current }) {
+  if (typeof receiptPath !== 'string' || !isAbsolute(receiptPath)) {
+    throw blocked('receipt_mismatch', `--deterministic-receipt ${JSON.stringify(receiptPath)} is not an absolute path`);
+  }
+  if (!existsSync(receiptPath)) {
+    throw blocked('receipt_mismatch', `--deterministic-receipt ${receiptPath} does not exist`);
+  }
+  const size = statSync(receiptPath).size;
+  if (size > RECEIPT_READ_MAX_BYTES) {
+    throw blocked(
+      'receipt_mismatch',
+      `--deterministic-receipt ${receiptPath} is ${size} bytes, which is not a receipt`,
+    );
+  }
+  let receipt = null;
+  try {
+    receipt = JSON.parse(readFileSync(receiptPath, 'utf8'));
+  } catch (error) {
+    throw blocked('receipt_mismatch', `--deterministic-receipt ${receiptPath} is not JSON: ${error.message}`);
+  }
+  if (receipt === null || typeof receipt !== 'object' || Array.isArray(receipt)) {
+    throw blocked('receipt_mismatch', `--deterministic-receipt ${receiptPath} is not a receipt object`);
+  }
+  if (receipt.schema !== 'public-first-workflow-receipt/1') {
+    throw blocked('receipt_mismatch', `--deterministic-receipt ${receiptPath} is not a public first-workflow receipt`);
+  }
+  if (receipt.mode !== 'deterministic' || receipt.outcome !== 'ok') {
+    throw blocked(
+      'receipt_mismatch',
+      `--deterministic-receipt ${receiptPath} is not a successful deterministic receipt ` +
+        `(mode=${JSON.stringify(receipt.mode)} outcome=${JSON.stringify(receipt.outcome)})`,
+    );
+  }
+  const recorded = receipt.facts?.artifacts;
+  if (recorded === null || typeof recorded !== 'object') {
+    throw blocked('receipt_mismatch', 'the deterministic receipt carries no artifact identities to re-check');
+  }
+  const mismatched = Object.keys(current)
+    .filter((key) => key !== 'runtime' && !sameArtifact(recorded[key], current[key]))
+    .map((key) => key);
+  if (mismatched.length > 0) {
+    throw blocked(
+      'receipt_mismatch',
+      `the deterministic receipt was produced against different prepared artifacts (${mismatched.join(', ')}); ` +
+        're-run --mode deterministic before authorizing a live request',
+    );
+  }
+  if (JSON.stringify(recorded.runtime) !== JSON.stringify(current.runtime)) {
+    throw blocked(
+      'receipt_mismatch',
+      `the deterministic receipt was produced on ${JSON.stringify(recorded.runtime)} but this runtime is ` +
+        `${JSON.stringify(current.runtime)}`,
+    );
+  }
+  const guard = receipt.facts?.guard;
+  if (
+    guard === null ||
+    typeof guard !== 'object' ||
+    guard.admitted !== 1 ||
+    guard.denied !== 0 ||
+    !(guard.loaded_dsh >= 1) ||
+    typeof guard.spent !== 'string'
+  ) {
+    throw blocked(
+      'receipt_mismatch',
+      `the deterministic receipt carries no clean one-request guard proof (${JSON.stringify(guard ?? null)})`,
+    );
+  }
+  return { receipt, guard, receipt_sha256: sha256(readFileSync(receiptPath)) };
+}
+
+/**
+ * Observe the live credential channel WITHOUT reading any value (§6.3 item 6).
+ *
+ * The only observation this driver is permitted to make is whether the inherited
+ * environment NAMES a credential channel — `Object.keys(process.env)`, never
+ * `process.env[key]`, never a length, truthiness or blank test. A named channel
+ * is not a usable credential: an empty, revoked or stale value is
+ * indistinguishable from a good one except by inspecting the value, which this
+ * driver never does. So the observation is deliberately reported as
+ * "`present_unverifiable`", never as "available" or "usable".
+ *
+ * An inherited origin override is refused here as well, because it would move
+ * the live request off the one pinned official origin; the driver never silently
+ * strips a credential channel to make itself work.
+ *
+ * @returns {{key: string|null, observation: 'absent'|'present_unverifiable', values_read: false}}
+ * @throws {DriverFailure} `blocked`/`live_endpoint_override_present` when the
+ *   inherited environment carries an origin override for the model transport.
+ */
+function observeLiveCredentialChannel(inheritedKeys = Object.keys(process.env)) {
+  const overrides = LIVE_ENDPOINT_OVERRIDE_ENV_KEYS.filter((key) => inheritedKeys.includes(key));
+  if (overrides.length > 0) {
+    throw blocked(
+      'live_endpoint_override_present',
+      `the inherited environment carries ${overrides.join(', ')}, which would move the live request off the one ` +
+        `authorized origin ${OFFICIAL_MODEL_URL}; the driver never silently strips a credential channel`,
+    );
+  }
+  const key = LIVE_CREDENTIAL_ENV_KEYS.find((candidate) => inheritedKeys.includes(candidate)) ?? null;
+  return { key, observation: key === null ? 'absent' : 'present_unverifiable', values_read: false };
+}
+
+/**
+ * The live dispatch gate: uncertain availability is a STOP, never a dispatch.
+ *
+ * This never returns. Both observable outcomes stop here with zero admissions and
+ * nothing allocated:
+ *
+ *   * `absent` — the inherited environment does not even name the channel;
+ *   * `present_unverifiable` — the name exists, but whether it carries a usable
+ *     credential cannot be established without inspecting the value, so
+ *     availability is UNCERTAIN. §6.3 item 6: "If credential availability
+ *     cannot be established without inspecting secrets, leave the live item
+ *     blocked"; the task contract: "uncertain availability STOP". Proceeding on
+ *     the name alone would be claiming a usable credential the driver cannot
+ *     verify, and would spend the single authorized request on a guess.
+ *
+ * Both are reported as `credentials_unavailable` (the contract's category for a
+ * credential blocker) with a stable machine-readable marker in the detail, and
+ * neither is ever classified as a runtime, policy, replay or recovery failure.
+ * Resolving `present_unverifiable` into a dispatch is a PM-level decision about
+ * how credential availability is established — see the task report §5; the
+ * driver does not invent it.
+ *
+ * @throws {DriverFailure} `blocked`/`credentials_unavailable` — always.
+ */
+function assertLiveCredentialChannel(channel) {
+  if (channel.key === null) {
+    throw blocked(
+      'credentials_unavailable',
+      '[channel_absent] the inherited environment does not name a ' +
+        `${LIVE_CREDENTIAL_ENV_KEYS.join('/')} channel for the normal credential resolver (checked by NAME only — ` +
+        'no credential store is inspected and no value is read); no live request was dispatched (0 admissions)',
+    );
+  }
+  throw blocked(
+    'credentials_unavailable',
+    `[channel_unverifiable] the inherited environment names ${channel.key}, but whether that name carries a usable ` +
+      'credential cannot be established without inspecting its value, which this driver never reads; availability is ' +
+      'therefore uncertain, and uncertain availability is a STOP — no live request was dispatched (0 admissions). ' +
+      'This is a policy STOP, not an observed absence, and never a runtime, policy or recovery failure',
+  );
 }
 
 /** Reserve one free loopback port (bind, read, release). */
@@ -1255,7 +2043,7 @@ function preEffectGateStop(step, boundary, gateStateId) {
  * not evidence that the active run stayed at one durable revision, which is
  * exactly what "quiet" claims.
  */
-async function awaitPreEffectGate({ readPlacement, runId, gate, model }) {
+async function awaitPreEffectGate({ readPlacement, runId, gate, countRequests }) {
   const deadline = Date.now() + GATE_BOUNDARY_TIMEOUT_MS;
   let interval = GATE_BOUNDARY_START_INTERVAL_MS;
   let polls = 0;
@@ -1287,11 +2075,15 @@ async function awaitPreEffectGate({ readPlacement, runId, gate, model }) {
     polls += 1;
     observation = classifyPreEffectGate(placement, gate.stateId);
     if (observation.state === 'gate') {
-      if (model.observations.requests !== 0) {
+      // The pre-effect property is asserted against the request-budget guard's
+      // own admission record (§6.3), which is transport-independent: a gate
+      // that already dispatched a request is not pre-effect in either mode.
+      const requests = countRequests();
+      if (requests !== 0) {
         throw failed(
           'gate_not_pre_effect',
-          `gate: the run already dispatched ${model.observations.requests} model request(s) before the bounded gate ` +
-            'was confirmed; the fixture gate must be pre-effect',
+          `gate: the run already dispatched ${requests} model request(s) before the bounded gate was confirmed; ` +
+            'the fixture gate must be pre-effect',
         );
       }
       if (!Number.isInteger(observation.observed.state_revision) || observation.observed.state_revision < 0) {
@@ -2833,7 +3625,20 @@ function resolveEffectRevision({
 // Journey
 // ---------------------------------------------------------------------------
 
-async function runDeterministic(options) {
+/**
+ * The whole public journey, in the mode `options.mode` selects.
+ *
+ * `deterministic` runs it against the owned loopback model endpoint and proves
+ * the prompt's own non-secret structure; `live` runs the identical journey
+ * against the one authorized official origin, where the request-budget guard's
+ * records are the only admissible request evidence (a real endpoint records
+ * nothing this driver may read). Everything else — isolation, public setup,
+ * admission, W5/W6 placement, the declared workspace effect, the sealed
+ * absence-of-side-effects checks, cancel and restart — is the same code path in
+ * both modes, so the live action cannot drift from the proof that authorized it.
+ */
+async function runJourney(options) {
+  const live = options.mode === 'live';
   const receipt = {
     schema: 'public-first-workflow-receipt/1',
     mode: options.mode,
@@ -2842,6 +3647,7 @@ async function runDeterministic(options) {
     started_at: new Date().toISOString(),
     finished_at: null,
     isolated_root: null,
+    attempt_dir: null,
     ports: null,
     steps: [],
     facts: {},
@@ -2852,6 +3658,7 @@ async function runDeterministic(options) {
 
   let model = null;
   let running = null;
+  let attemptDir = null;
   try {
     // 1. Prerequisites — fail, never skip. The fixture is a static input, so
     // it is validated before any temporary directory or child process exists.
@@ -2889,7 +3696,49 @@ async function runDeterministic(options) {
     if (!dshBinary) {
       throw blocked('missing_prerequisite', 'no real dsh runtime on PATH (set DSH_RUNTIME_BIN to the installed runtime)');
     }
+    // §6.3: the guard identifies the dsh child by the canonical real path of
+    // this entry, so a symlinked launcher resolves to the installed module.
+    const dshRealpath = canonicalRealPath(dshBinary, 'dsh runtime');
     record('preflight', 'ok', { node: process.versions.node, cli: basenameOf(cliBinary), dsh: basenameOf(dshBinary) });
+
+    // 1b. Preparation identity (§6.3 item 7). Both modes record it; the live
+    // mode REQUIRES the prior deterministic receipt to name the very same
+    // artifacts and runtime, so a stale receipt can never authorize a request;
+    // and it establishes the inherited credential channel by NAME before any
+    // child exists.
+    const artifacts = localArtifactIdentities({ cliBinary, dshRealpath });
+    facts.artifacts = artifacts;
+    if (live) {
+      const authorized = assertDeterministicReceipt(options.deterministicReceipt, { current: artifacts });
+      // The credential channel is OBSERVED by name only and then evaluated by the
+      // dispatch gate: an unverifiable channel is a STOP with zero admissions,
+      // recorded as evidence before the STOP rather than inferred later.
+      const channel = observeLiveCredentialChannel();
+      facts.credential_channel = channel;
+      assertLiveCredentialChannel(channel);
+      attemptDir = takeAttemptDir(options.attemptDir);
+      // The durable marker of the ONE authorized attempt: an attempt directory
+      // that already existed is refused above, so this run cannot inherit,
+      // reset or reuse the spend record of an earlier attempt.
+      facts.live = {
+        official_url: OFFICIAL_MODEL_URL,
+        deterministic_receipt: { path: options.deterministicReceipt, sha256: authorized.receipt_sha256 },
+        deterministic_guard: authorized.guard,
+        credential_channel: channel,
+        attempt_dir: attemptDir,
+        retry: 'none',
+      };
+      receipt.attempt_dir = attemptDir;
+      record('live_authorization', 'ok', {
+        deterministic_receipt: options.deterministicReceipt,
+        credential_channel: channel.key,
+        attempt_dir: attemptDir,
+      });
+    } else {
+      attemptDir = createAttemptDir();
+      receipt.attempt_dir = attemptDir;
+      record('attempt_dir', 'ok', { attempt_dir: attemptDir });
+    }
 
     // 2. Isolated root, fixture-derived scope.
     const root = mkdtempSync(join(tmpdir(), 'nexus-public-first-workflow-'));
@@ -2907,18 +3756,38 @@ async function runDeterministic(options) {
     mkdirSync(scopeDir, { recursive: true });
     record('isolate', 'ok', { scope: `${basenameOf(workspace)}/${fixture.scopePath}` });
 
-    model = await startModelEndpoint();
+    if (!live) model = await startModelEndpoint();
     const servicePort = await reserveLoopbackPort();
-    receipt.ports = { service: servicePort, model: model.port };
-    const childEnv = buildChildEnv({ home, dshHome, modelPort: model.port, dshRuntimeBin: dshBinary });
-    facts.child_env = summarizeChildEnv(Object.keys(process.env), childEnv);
-    if (facts.child_env.inherited_credential_keys_forwarded.length > 0) {
-      throw failed(
-        'contract_violation',
-        `an inherited credential-shaped variable survived into the deterministic child: ${facts.child_env.inherited_credential_keys_forwarded.join(', ')}`,
-      );
+    const guardEnv = guardChildEnv({
+      attemptDir,
+      allowedUrl: live ? OFFICIAL_MODEL_URL : `http://127.0.0.1:${model.port}/chat/completions`,
+      dshRealpath,
+    });
+    receipt.ports = { service: servicePort, model: live ? null : model.port };
+    const childEnv = live
+      ? buildLiveChildEnv({ home, dshHome, guardEnv })
+      : buildChildEnv({ home, dshHome, modelPort: model.port, dshRuntimeBin: dshBinary, guardEnv });
+    const childEnvSummary = live
+      ? summarizeLiveChildEnv(childEnv, Object.keys(process.env))
+      : summarizeChildEnv(Object.keys(process.env), childEnv);
+    if (live) {
+      // Name-only summary: live inherits the credential by construction, and the
+      // driver read no inherited value to say so.
+      facts.live.child_env = childEnvSummary;
+    } else {
+      facts.child_env = childEnvSummary;
+      if (childEnvSummary.inherited_credential_keys_forwarded.length > 0) {
+        throw failed(
+          'contract_violation',
+          `an inherited credential-shaped variable survived into the deterministic child: ${childEnvSummary.inherited_credential_keys_forwarded.join(', ')}`,
+        );
+      }
     }
-    record('owned_children', 'ok', { model_port: model.port, service_port: servicePort, child_env: facts.child_env });
+    record('owned_children', 'ok', {
+      model_port: live ? null : model.port,
+      service_port: servicePort,
+      child_env: childEnvSummary,
+    });
 
     // 3. First start on an empty home must be explicit and uninitialized.
     running = await startService({ home, port: servicePort, childEnv, evidenceDir, label: 'boot' });
@@ -3118,7 +3987,13 @@ async function runDeterministic(options) {
     // root run the W4 read resolved; a durable human wait (where the A4 fence
     // refuses a plain resume) or any other placement is a typed STOP, never a
     // bypassed wait and never a Steer claimed on a timing assumption.
-    const gateBoundary = await awaitPreEffectGate({ readPlacement, runId, gate: fixture.gate, model });
+    // The request-budget guard's own admission record is the transport-
+    // independent request counter of this attempt (§6.3): the gate, the
+    // post-deadline re-check and the effect facts all read it, so "pre-effect"
+    // means the same thing in both modes and can never be asserted from an
+    // expected count.
+    const countRequests = () => readAttemptDir(attemptDir).admitted;
+    const gateBoundary = await awaitPreEffectGate({ readPlacement, runId, gate: fixture.gate, countRequests });
     // Nobody drives a parked gate: the deadline is only evaluated by a driver
     // (`join_timeout_tick`), so waiting it out HERE, with no signal issued, is
     // what makes the W6 resume deterministic instead of a race with the
@@ -3139,10 +4014,11 @@ async function runDeterministic(options) {
     if (afterDeadlineBoundary.state !== 'gate') {
       throw preEffectGateStop('gate after deadline', afterDeadlineBoundary, fixture.gate.stateId);
     }
-    if (model.observations.requests !== 0) {
+    const afterDeadlineRequests = countRequests();
+    if (afterDeadlineRequests !== 0) {
       throw failed(
         'gate_not_pre_effect',
-        `gate after deadline: ${model.observations.requests} model request(s) were dispatched across the gate ` +
+        `gate after deadline: ${afterDeadlineRequests} model request(s) were dispatched across the gate ` +
           'deadline; the fixture gate must stay pre-effect until the W6 resume',
       );
     }
@@ -3155,7 +4031,7 @@ async function runDeterministic(options) {
       gate_observed: gateBoundary.observed,
       deadline_waited_ms: deadlineWaitedMs,
       after_deadline: afterDeadlineBoundary.observed,
-      pre_effect_requests: model.observations.requests,
+      pre_effect_requests: afterDeadlineRequests,
       appended_version: null,
       recheck: null,
       resumed: false,
@@ -3324,8 +4200,14 @@ async function runDeterministic(options) {
     // carrying the appended Idea, and no second dispatch. Its sealed no-tools
     // policy is asserted on the same real request, and the isolated root is
     // checked for unsolicited tool side effects.
-    const sealedPolicy = assertSealedToolPolicy(model.observations);
-    assertSealedPromptCardinality(model.observations);
+    //
+    // In live mode the model endpoint belongs to the authorised upstream, so
+    // the prompt's own structure is not readable by this driver: the cardinality
+    // and the tool policy of the request are then the guard's records (§6.3 —
+    // one admitted request, nothing denied), and the absence-of-side-effects
+    // checks below stay exactly the same, since they are transport-independent.
+    const sealedPolicy = live ? null : assertSealedToolPolicy(model.observations);
+    if (!live) assertSealedPromptCardinality(model.observations);
     const markers = assertNoHostileMarkers(receipt.isolated_root);
     const effectPath = join(scopeDir, fixture.changePath);
     if (!existsSync(effectPath)) {
@@ -3340,17 +4222,18 @@ async function runDeterministic(options) {
     }
     const scopeInventory = assertScopeEffectOnly(scopeDir, fixture);
     facts.sealed_denial = {
-      network: 'loopback-only',
+      network: live ? 'one-authorized-official-https-request' : 'loopback-only',
       prompt_tool_policy: fixture.promptToolPolicy,
       driven_unsolicited_tool_calls: 0,
       driven_attempt_owner: 'real_dsh_sealed_deny_all_rejects_unsolicited_tools_without_side_effects',
       sealed_policy: sealedPolicy,
+      prompt_structure_source: live ? 'request-budget-guard (live endpoint records nothing)' : 'owned loopback endpoint',
       hostile_markers: markers,
       scope_entries: scopeInventory.map((entry) => entry.path),
       side_effect_marker: null,
     };
     record('sealed_denial', 'ok', {
-      advertised_tools: sealedPolicy.advertised_tools,
+      advertised_tools: sealedPolicy === null ? null : sealedPolicy.advertised_tools,
       hostile_markers: markers.present.length,
       scope_entries: scopeInventory.length,
     });
@@ -3370,13 +4253,15 @@ async function runDeterministic(options) {
     const placementAtEffect = await readPlacement(runId, 'effect');
     const sessionCommitRevision = parseSessionWorkspaceCommit(effectObservation.detail);
     const detailWorkspaceCommit = effectObservation.detail?.workspace_commit ?? null;
+    const effectRequests = countRequests();
     facts.effect = {
       relative_path: `${fixture.scopePath}/${fixture.changePath}`,
       bytes: landed.length,
       sha256: sha256(landed),
       declared_content_matches: true,
-      prompt_requests: model.observations.requests,
-      prompt_with_idea: model.observations.prompt_with_idea,
+      prompt_requests: effectRequests,
+      prompt_requests_source: 'request-budget-guard admission record',
+      prompt_with_idea: live ? null : model.observations.prompt_with_idea,
       session_detail_workspace_commit: detailWorkspaceCommit,
       session_commit_revision_accepted: sessionCommitRevision,
       commit_revision: null,
@@ -3514,17 +4399,48 @@ async function runDeterministic(options) {
       history_loss: historyLoss.control_frame,
     });
 
-    facts.model_endpoint = {
-      port: model.port,
-      requests: model.observations.requests,
-      paths: [...new Set(model.observations.paths)],
-      unexpected_requests: model.observations.unexpected,
-      authorization_header_present: model.observations.authorization_header_present,
-      prompt_with_idea: model.observations.prompt_with_idea,
-    };
-    record('model_endpoint', 'ok', {
-      requests: model.observations.requests,
-      unexpected: model.observations.unexpected,
+    if (live) {
+      // Live has no owned endpoint to report: the endpoint belongs to the
+      // authorized upstream. What the driver records instead of a request body
+      // structure is the guard's own credential-free evidence (§6.3 item 7:
+      // safe model/runtime identity, request count, outcome category, cleanup).
+      facts.model_endpoint = {
+        kind: 'official-https',
+        url: OFFICIAL_MODEL_URL,
+        requests: countRequests(),
+        recorded_by: 'request-budget-guard',
+      };
+      record('model_endpoint', 'ok', { kind: 'official-https', requests: facts.model_endpoint.requests });
+    } else {
+      facts.model_endpoint = {
+        kind: 'owned-loopback',
+        port: model.port,
+        requests: model.observations.requests,
+        paths: [...new Set(model.observations.paths)],
+        unexpected_requests: model.observations.unexpected,
+        authorization_header_present: model.observations.authorization_header_present,
+        prompt_with_idea: model.observations.prompt_with_idea,
+      };
+      record('model_endpoint', 'ok', {
+        requests: model.observations.requests,
+        unexpected: model.observations.unexpected,
+      });
+    }
+
+    // 15. The request-budget guard's own verdict on this attempt (§6.3 items
+    // 1–4). Read AFTER every owned child has run — including the restarted
+    // service and any dsh probe it spawned — so the counts describe the whole
+    // attempt and not just its first half. The guard's records are the single
+    // authority for "how many upstream requests happened"; the journey fails
+    // when the dsh preload handshake is missing, when anything was denied, or
+    // when the admitted count is not exactly one.
+    const guardState = readAttemptDir(attemptDir);
+    facts.guard = assertGuardAttempt(guardState, readSpentToken(attemptDir));
+    record('request_guard', 'ok', {
+      admitted: facts.guard.admitted,
+      denied: facts.guard.denied,
+      loaded_dsh: facts.guard.loaded_dsh,
+      spent: facts.guard.spent,
     });
   } catch (error) {
     const isDriverFailure = error instanceof DriverFailure;
@@ -3534,6 +4450,11 @@ async function runDeterministic(options) {
       category: isDriverFailure ? error.category : 'internal',
       detail: error instanceof Error ? error.message : String(error),
     };
+    // A run that stopped early still reports what the guard observed: the raw
+    // counts are evidence, and reading them must never mask the real blocker.
+    if (attemptDir !== null && facts.guard === undefined) {
+      facts.guard = captureGuardAttempt(attemptDir);
+    }
     if (typeof error?.serviceStderrLog === 'string') receipt.service_stderr_log = error.serviceStderrLog;
   } finally {
     const cleanups = [];
@@ -3600,7 +4521,10 @@ function printSummary(receipt) {
   const lines = [
     `public first-workflow — mode=${receipt.mode} outcome=${receipt.outcome}`,
     `isolated root: ${receipt.isolated_root ?? '(not created)'}`,
-    `ports: ${receipt.ports ? `service=${receipt.ports.service} model=${receipt.ports.model}` : '(not allocated)'}`,
+    `attempt dir: ${receipt.attempt_dir ?? '(not allocated)'} (request-budget guard evidence; retained)`,
+    receipt.ports
+      ? `ports: service=${receipt.ports.service} model=${receipt.ports.model ?? '(live: official HTTPS)'}`
+      : 'ports: (not allocated)',
   ];
   for (const step of receipt.steps) lines.push(`  [${step.status}] ${step.step}`);
   if (receipt.blocker) {
@@ -3624,7 +4548,7 @@ async function main() {
     return;
   }
 
-  const receipt = await runDeterministic(options);
+  const receipt = await runJourney(options);
 
   if (receipt.isolated_root) {
     try {
@@ -3635,7 +4559,9 @@ async function main() {
     // Cleanup is ownership-scoped: a completed run removes its own temporary
     // root unless `--keep` was given, while a blocked or failed run retains its
     // evidence directory (and the printed receipt names it) so the STOP can be
-    // diagnosed instead of erased.
+    // diagnosed instead of erased. The attempt directory is NEVER removed: it
+    // holds the guard's `spent` token, and a later launch must not be able to
+    // recreate or reset the spend record of this attempt.
     const keepRoot = options.keep || receipt.outcome !== 'ok';
     if (!keepRoot) {
       for (const path of owned.paths) rmSync(path, { recursive: true, force: true });
@@ -3664,7 +4590,11 @@ async function main() {
  */
 export {
   applyCleanupDisposition,
+  artifactIdentity,
+  assertDeterministicReceipt,
+  assertGuardAttempt,
   assertHistoryLossExplicit,
+  assertLiveCredentialChannel,
   assertNoHostileMarkers,
   assertScopeEffectOnly,
   assertSealedPromptCardinality,
@@ -3676,24 +4606,34 @@ export {
   boundedObservation,
   boundedServerClose,
   buildChildEnv,
+  buildLiveChildEnv,
+  canonicalRealPath,
+  captureGuardAttempt,
   classifyAdmissionObservation,
   classifyManualWaitBoundary,
   classifyPreEffectGate,
   classifySameRunReplay,
   collectStreamRefusals,
+  createAttemptDir,
   directoryInventory,
   encodePathSegment,
+  guardChildEnv,
   hostileMarkersPresent,
+  localArtifactIdentities,
   mergeObservedFrames,
   modelRequestStructure,
+  observeLiveCredentialChannel,
+  parseArgs,
   parseEventCursor,
   parseGapFrame,
   parseHistoryUnavailableFrame,
   parsePlacementDto,
   proveSameRunReplay,
+  readAttemptDir,
   readEventStream,
   readEventStreamOrStop,
   readPlacementViaCli,
+  readSpentToken,
   requireEventStreamStatus,
   exitCodeFor,
   findCommitRevision,
@@ -3705,9 +4645,12 @@ export {
   readFixture,
   resolveEffectRevision,
   resolveExecutable,
+  sameArtifact,
   startModelEndpoint,
   statusFailure,
   summarizeChildEnv,
+  summarizeLiveChildEnv,
+  takeAttemptDir,
 };
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === SCRIPT_PATH) {
