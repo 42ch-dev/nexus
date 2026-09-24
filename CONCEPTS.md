@@ -185,6 +185,15 @@ The standard protocol for agent-to-agent communication. Nexus is an **ACP client
 ### Agent Host
 The adapter layer that translates between Nexus's internal capability model and external ACP agents. Allows Nexus to ask any ACP-compliant agent to perform tasks without being tied to a specific provider.
 
+### Hosted Execution Owner
+The single admitted runtime owner of **one workspace** on the current host: it holds that workspace's engine, effect/commit authority, Host and run-observation resources, and it is what a service boot publishes readiness for. Exactly one may exist per workspace — a second open is **refused**, never silently joined — and its lifetime ends in a close that either confirms that every retained owner released its authority or reports the retained set as interrupted.
+
+### Engine epoch
+The monotonic generation counter of a workspace's engine/owner lifetime. It identifies which owner generation a handle, session token or event cursor belongs to, so a reference minted before a close or restart is refused instead of silently resolving against the new owner. A streaming cursor carries the epoch it was minted in; a cursor from a prior epoch is answered as lost history, not replayed.
+
+### Confirmed close
+A close in which every retained owner has released its authority, so a fresh owner may take the home. The other outcome is **interrupted**: owners stay retained, the lease stays held, the pending set is reported, and a later close retries the settlement. A close that cannot verify release reports interrupted — it never claims a confirmation it cannot establish.
+
 ### Daemon Runtime
 The local background process within `nexus42` that manages the World KB SQLite database, schedules quality/knowledge loops, serves the **Daemon API** HTTP surface (Axum), and coordinates with the agent host. Starts with `nexus42 daemon start`. The surface was historically called "Daemon API" before V1.90.
 
@@ -282,6 +291,9 @@ Paths are relative to the repo root. Each entry links the term to its authoritat
 |------|-----------------|----------|
 | ACP | Agent Host, Daemon Runtime | [acp-client-tech-spec.md](.mstar/specs/acp-client-tech-spec.md) |
 | Agent Host | ACP, Capability, Daemon Runtime | [agent-host.md](.mstar/specs/agent-host.md) |
+| Hosted Execution Owner | Engine epoch, Confirmed close, Agent Host, Local Database | [rust-core-service-boundary.md](.mstar/specs/rust-core-service-boundary.md) |
+| Engine epoch | Hosted Execution Owner, Confirmed close, Run (run identity) | [orchestration-engine.md](.mstar/specs/orchestration-engine.md) |
+| Confirmed close | Hosted Execution Owner, Engine epoch, Local Database | [rust-core-service-boundary.md](.mstar/specs/rust-core-service-boundary.md) |
 | Daemon Runtime | Local Database, Agent Host, Daemon API | [daemon-runtime.md](.mstar/specs/daemon-runtime.md) |
 | Daemon API | Daemon Runtime, Web UI, CLI, JSON Schema | [daemon-api-surface-conventions.md](.mstar/specs/daemon-api-surface-conventions.md) |
 | Connect Host | Daemon API, ACP, FL-R / DF-72 | [spoke-adapter-architecture.md](.mstar/specs/spoke-adapter-architecture.md) |
@@ -294,3 +306,9 @@ Paths are relative to the repo root. Each entry links the term to its authoritat
 | Setup Wizard | Desktop Shell, Daemon Runtime, ACP Agent Detection | [desktop-shell.md](.mstar/specs/desktop-shell.md) |
 | ACP Agent Detection | Desktop Shell, Daemon API, ACP | [desktop-shell.md](.mstar/specs/desktop-shell.md) |
 | Profile Switcher | Web UI, Creator | [web-ui.md](.mstar/specs/web-ui.md) |
+
+---
+
+## Flagged ambiguities
+
+- **Counter vocabulary.** Three different counters meet in current-host workflows and are **not** interchangeable: the *engine epoch* (which owner generation a handle or cursor belongs to), a durable run's *state revision* (the workflow graph's own revision fence), and a preset's *core-context version* (the immutable context version a schedule points at). A consumer that needs one of them must read that one — for example a commit receipt is projected from the recorded commit output, never from a state revision standing in for it.
