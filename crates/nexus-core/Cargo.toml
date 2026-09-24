@@ -39,16 +39,16 @@ execution = [
 # dev-dependency self-reference, exactly as the daemon did before the move.
 test-hooks = []
 compute = ["execution", "dep:nexus-wasm-host", "nexus-spoke-adapter/compute"]
-# Reverse-invoke/peer-control edge attaches with its owning cohort task; the
-# bounded rmcp protocol adapter is the embedded-mcp edge (§Cohorts).
 # Reverse-invoke/peer-control edge (v1.190 P4-T3): the peer/MCP session,
 # visibility, bounded WS transport and watcher ownership moved here; the
-# spoke remote adapter types the WS transport implements. rmcp stays the
-# embedded-mcp edge.
+# spoke remote adapter types the WS transport implements. This cohort's
+# public peer API is execution-owned (peer-tool types, capability and
+# async-trait), so `execution` is an explicit prerequisite; the rmcp bridge
+# is a direct edge whose embedded server additionally needs `embedded-mcp`.
 connect-client = [
+    "execution",
     "dep:spoke-connect",
     "dep:tokio-tungstenite",
-    "dep:nexus-orchestration",
     "dep:futures-util",
     # mcp_bridge's rmcp server surface compiles with connect-client; only
     # the embedded server (Model B) additionally needs embedded-mcp.
