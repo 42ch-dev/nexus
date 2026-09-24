@@ -157,16 +157,13 @@
  *      through Node's ordinary env inheritance. The driver enumerates nothing
  *      and dereferences nothing inherited; its live summary uses `Object.hasOwn`
  *      so even the summary cannot read an inherited value.
- *   2. **Uncertain availability is a STOP, not a dispatch.** The only permitted
- *      observation is whether the inherited environment NAMES a channel
- *      (`Object.keys`). A named channel is not a usable credential, and an empty
- *      or stale value cannot be told from a good one without inspecting the
- *      value, which the driver never does. Both `absent` and
- *      `present_unverifiable` therefore stop with `blocked`/`credentials_unavailable`
- *      and ZERO admissions, before anything is allocated or spawned, and are
- *      reported as a credential blocker (never as a runtime/policy/recovery
- *      failure). There is no retry of any kind and no key fallback, and the
- *      driver never discovers, copies or invents a credential.
+ *   2. **An absent channel blocks before dispatch.** The only permitted
+ *      observation is whether the inherited environment names a credential
+ *      channel (`Object.keys`). A name cannot prove the value is valid, so a
+ *      user-authorized live attempt may consume its single request even if the
+ *      upstream later rejects authentication. An absent name stops with
+ *      `blocked`/`credentials_unavailable` and zero admissions. No retry, key
+ *      fallback, credential discovery or inspection is performed.
  */
 
 import { createHash } from 'node:crypto';
@@ -428,16 +425,15 @@ Preconditions (never installed or built by this driver): prepared native
 artifact / contracts / service dist, a prepared nexus42 binary, a real supported
 dsh runtime on PATH or in DSH_RUNTIME_BIN, and the checked-in guard module.
 
-The driver never builds, installs, seeds the product database, reads the
-operator's homes/credentials, or performs non-loopback network traffic. In
-deterministic mode the request-budget guard admits only the owned loopback
-endpoint; in live mode it admits only
+The driver never builds, installs, seeds the product database, or reads the
+operator's homes or credentials. Deterministic mode makes no non-loopback
+request; live mode permits only the user-authorized official model origin
   ${OFFICIAL_MODEL_URL}
-and the credential channel is established by NAME only (\`Object.keys\`), never
-read or copied. If a usable credential cannot be established without inspecting
-its value, the live action stops with \`credentials_unavailable\` before anything
-is allocated or dispatched. There is no retry, no fallback key and no second
-attempt.
+and observes the inherited credential channel by NAME only (\`Object.keys\`),
+never its value. An absent channel stops with \`credentials_unavailable\`
+before allocation or dispatch. A named channel does not prove the credential
+valid; an authentication or transport failure after admission consumes the
+single authorization. No retry, fallback key or second attempt occurs.
 
 The live action consumes a deterministic receipt as a FILE, so capture it:
 
