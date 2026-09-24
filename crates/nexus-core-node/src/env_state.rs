@@ -4,10 +4,8 @@ use std::sync::{Arc, Mutex as StdMutex};
 
 use napi::bindgen_prelude::Error;
 use napi::Env;
-use nexus_agent_host::HostFacade;
-use nexus_agent_host::HostManager;
 use nexus_contracts::{CoreCloseReport, CoreError, CoreErrorCode};
-use nexus_core::CoreService;
+use nexus_core::{CoreService, HostHandle};
 use nexus_provider_ports::ProviderPort;
 use tokio::sync::{Mutex, Notify};
 
@@ -109,7 +107,11 @@ impl Drop for PendingBudgetGuard<'_> {
 pub struct EnvState {
     pub generation: AtomicU64,
     pub core: StdMutex<Option<Arc<CoreService>>>,
-    pub host: StdMutex<Option<Arc<HostManager>>>,
+    /// The Host lifetime slot: the ONE attached core authority (its manager,
+    /// Actor registry and composed provider port), never a bare manager. The
+    /// core authority owns every Actor effect/observation/close path; native
+    /// only borrows its manager for readiness and hosted execution.
+    pub host: StdMutex<Option<Arc<HostHandle>>>,
     pub provider_port: StdMutex<Option<Arc<dyn ProviderPort>>>,
     pub pending_budget: PendingBudget,
     /// One-shot close signal used by cancellation paths that can afford to miss
@@ -675,30 +677,14 @@ impl EnvState {
             .store(false, Ordering::SeqCst);
     }
 
-    /// A host cleanup is only ever confirmed by a successful `HostResult`.
-    ///
-    /// `Err` (including `cleanup_unconfirmed`) and an outer deadline timeout
-    /// both mean the owned sessions were not proven clean, so the environment
-    /// keeps the owner and stays interrupted rather than reporting success.
-    #[must_use]
-    pub fn host_shutdown_confirmed(
-        result: &Result<nexus_agent_host::HostResult<()>, tokio::time::error::Elapsed>,
-    ) -> bool {
-        matches!(result, Ok(Ok(())))
-    }
-
-    /// Whether a bounded native finalize may release the host owner.
-    ///
-    /// Release requires BOTH halves: the LocalSet bridge *settled* (a clean join
-    /// with no live work — `!thread_alive` alone is not settlement, because a
-    /// thread that panicked also reports `thread_alive == false`) *and* the host
-    /// reported a confirmed shutdown.
-    #[must_use]
-    pub const fn finalize_owner_released(bridge_settled: bool, host_confirmed: bool) -> bool {
-        bridge_settled && host_confirmed
-    }
-
     /// NAPI8 environment cleanup: tombstone and run bounded native-only teardown.
+    ///
+    /// The Host leg runs the attached authority's single `close_before`
+    /// settlement (Actor drains + manager/`LocalSet`), and the core leg requires
+    /// a confirmed `CoreService::close` report: `cleanup_confirmed` needs all
+    /// three settlements (technical contract §3), so neither leg releases its
+    /// owner off an unconfirmed result. Dead-environment cleanup never enters
+    /// the Actor cancel path — the only path that could call a dead JS callback.
     pub fn run_bounded_native_finalize(state: Arc<EnvState>) {
         state.tombstone_env();
         let deadline = std::time::Instant::now() + FINALIZE_BUDGET;
@@ -715,96 +701,132 @@ impl EnvState {
                             || deadline.saturating_duration_since(std::time::Instant::now());
 
                         let core = work_state.take_core();
-                        if let Some(service) = core {
-                            if budget().is_zero() {
-                                work_state.restore_core(service);
-                            } else {
-                                match tokio::time::timeout_at(
-                                    tokio::time::Instant::from_std(deadline),
-                                    service.close(),
-                                )
-                                .await
-                                {
-                                    Ok(_) => {}
-                                    Err(_) => work_state.restore_core(service),
+                        let mut core_pending: Vec<String> = Vec::new();
+                        let core_released = match core {
+                            None => true,
+                            Some(service) => {
+                                if budget().is_zero() {
+                                    work_state.restore_core(service);
+                                    false
+                                } else {
+                                    let settled = tokio::time::timeout_at(
+                                        tokio::time::Instant::from_std(deadline),
+                                        service.close(),
+                                    )
+                                    .await;
+                                    // `cleanup_confirmed` needs the existing
+                                    // core/JS-owner settlement too (contract
+                                    // §3): an unconfirmed report retains the
+                                    // owner instead of reading `Ok` as success.
+                                    let confirmed = match settled {
+                                        Ok(Ok(report)) => {
+                                            let confirmed = report.cleanup_confirmed;
+                                            core_pending.extend(report.pending_operations);
+                                            confirmed
+                                        }
+                                        Ok(Err(err)) => {
+                                            core_pending.push(format!("core-close: {err}"));
+                                            false
+                                        }
+                                        Err(_) => {
+                                            core_pending.push("core-close-deadline".to_string());
+                                            false
+                                        }
+                                    };
+                                    if confirmed {
+                                        true
+                                    } else {
+                                        work_state.restore_core(service);
+                                        false
+                                    }
                                 }
                             }
-                        }
+                        };
 
-                        let host = work_state.take_host();
-                        if let Some(host) = host {
-                            if budget().is_zero() {
-                                work_state.mark_interrupted();
-                                work_state.restore_host(host);
-                            } else {
-                                host.localset_bridge().begin_drain();
-                                let bridge_evidence =
-                                    host.localset_bridge().shutdown_sync_with_deadline(deadline);
+                        let mut host_pending: Vec<String> = Vec::new();
+                        let host_released = match work_state.take_host() {
+                            None => true,
+                            Some(authority) => {
+                                let released = if budget().is_zero() {
+                                    host_pending.push("host-close-deadline".to_string());
+                                    false
+                                } else {
+                                    // The attached authority settles the Actor
+                                    // drains and the manager/`LocalSet` ONCE
+                                    // (contract §3): the finalizer never runs a
+                                    // second shutdown of that manager, and it
+                                    // never enters the Actor cancel path that
+                                    // could call a dead JS callback.
+                                    //
+                                    // Not wrapped in an outer timeout: the
+                                    // settlement honors this same absolute
+                                    // deadline itself, and wrapping it would let
+                                    // the wrapper cancel a join that has already
+                                    // taken the `LocalSet` thread handle — which
+                                    // would detach the thread instead of handing
+                                    // it to tracked cleanup.
+                                    match authority.close_before(deadline).await {
+                                        Ok(report) => {
+                                            let confirmed = report.cleanup_confirmed;
+                                            host_pending.extend(report.pending_operations);
+                                            confirmed
+                                        }
+                                        Err(err) => {
+                                            host_pending.push(format!("host-close: {err}"));
+                                            false
+                                        }
+                                    }
+                                };
                                 // A join that could not settle inside the budget
                                 // hands its `JoinHandle` to tracked cleanup
-                                // straight away, so the owner stays retained even
-                                // if the host shutdown below consumes the rest of
-                                // the deadline. Never detached.
-                                if bridge_evidence.thread_alive {
-                                    if let Some(handle) =
-                                        host.localset_bridge().take_retained_runtime_thread()
-                                    {
-                                        super::cleanup_registry::register_localset_thread(
-                                            handle,
-                                            work_state.clone(),
-                                        );
-                                    }
+                                // straight away, so a retained authority never
+                                // leaves a detached `LocalSet` thread behind.
+                                if let Some(handle) = authority
+                                    .manager()
+                                    .localset_bridge()
+                                    .take_retained_runtime_thread()
+                                {
+                                    super::cleanup_registry::register_localset_thread(
+                                        handle,
+                                        work_state.clone(),
+                                    );
                                 }
-                                // The typed `HostResult` inside the timeout is
-                                // authoritative, and it only counts once the
-                                // bridge itself settled: a panicked or still-live
-                                // LocalSet thread is never a clean cleanup.
-                                let host_confirmed =
-                                    if bridge_evidence.is_settled() && !budget().is_zero() {
-                                        let result = tokio::time::timeout_at(
-                                            tokio::time::Instant::from_std(deadline),
-                                            host.shutdown(),
-                                        )
-                                        .await;
-                                        Self::host_shutdown_confirmed(&result)
-                                    } else {
-                                        false
-                                    };
-                                if Self::finalize_owner_released(
-                                    bridge_evidence.is_settled(),
-                                    host_confirmed,
-                                ) {
-                                    // Owned sessions confirmed clean: the host is
-                                    // released with the worker, and the process
-                                    // reaper is stopped inside the remaining
-                                    // budget so it cannot outlive this finalize.
-                                    let stop = super::cleanup_registry::stop_reaper(deadline);
-                                    if !stop.joined || stop.pending_entries > 0 {
-                                        let mut pending =
-                                            work_state.pending_operations_snapshot().await;
-                                        if !stop.joined {
-                                            pending.push("cleanup-reaper-unjoined".to_string());
-                                        }
-                                        if stop.pending_entries > 0 {
-                                            pending.push(format!(
-                                                "cleanup-registry-pending:{}",
-                                                stop.pending_entries
-                                            ));
-                                        }
-                                        work_state.record_pending_operations(pending).await;
-                                    }
+                                if released {
+                                    true
                                 } else {
-                                    let mut pending =
-                                        work_state.pending_operations_snapshot().await;
-                                    pending.extend(bridge_evidence.unsettled_pending());
-                                    if !host_confirmed {
-                                        pending.push("host-shutdown-unconfirmed".to_string());
-                                    }
-                                    work_state.record_pending_operations(pending).await;
-                                    work_state.mark_interrupted();
-                                    work_state.restore_host(host);
+                                    work_state.restore_host(authority);
+                                    false
                                 }
                             }
+                        };
+
+                        if core_released && host_released {
+                            // Owned sessions confirmed clean: the process
+                            // reaper is stopped inside the remaining budget so
+                            // it cannot outlive this finalize.
+                            let stop = super::cleanup_registry::stop_reaper(deadline);
+                            if !stop.joined || stop.pending_entries > 0 {
+                                let mut pending = work_state.pending_operations_snapshot().await;
+                                if !stop.joined {
+                                    pending.push("cleanup-reaper-unjoined".to_string());
+                                }
+                                if stop.pending_entries > 0 {
+                                    pending.push(format!(
+                                        "cleanup-registry-pending:{}",
+                                        stop.pending_entries
+                                    ));
+                                }
+                                work_state.record_pending_operations(pending).await;
+                            }
+                        } else {
+                            let mut pending = work_state.pending_operations_snapshot().await;
+                            if !core_released {
+                                pending.push("core-close-unconfirmed".to_string());
+                            }
+                            pending.extend(core_pending);
+                            pending.extend(host_pending);
+                            work_state.record_pending_operations(pending).await;
+                            work_state.mark_interrupted();
                         }
 
                         let port = work_state.take_provider_port();
@@ -842,16 +864,23 @@ impl EnvState {
         }
     }
 
-    pub fn take_host(&self) -> Option<Arc<HostManager>> {
+    pub fn take_host(&self) -> Option<Arc<HostHandle>> {
         self.host.lock().ok()?.take()
     }
 
-    pub fn restore_host(&self, value: Arc<HostManager>) {
+    pub fn restore_host(&self, value: Arc<HostHandle>) {
         if let Ok(mut slot) = self.host.lock() {
             if slot.is_none() {
                 *slot = Some(value);
             }
         }
+    }
+
+    /// The attached Host authority retained as this environment's Host
+    /// lifetime slot, or `None` when no owner is established.
+    #[must_use]
+    pub fn host_authority(&self) -> Option<Arc<HostHandle>> {
+        self.host.lock().ok()?.clone()
     }
 
     pub fn take_provider_port(&self) -> Option<Arc<dyn ProviderPort>> {

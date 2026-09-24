@@ -16,7 +16,7 @@ use nexus_agent_host::core::readiness::discover_provider_catalog;
 use nexus_agent_host::{HostError, HostFacade, HostManager, ProviderCatalogEntry};
 use nexus_contracts::native_open_options::NativeOpenOptionsAccess;
 use nexus_contracts::{CoreCloseReport, CoreCloseReportState, NativeOpenOptions};
-use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService};
+use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService, HostHandle};
 use nexus_home_layout::active_context::{try_resolve_state_db_path, CliConfigSnapshot};
 use nexus_home_layout::nexus_root_from_home;
 use nexus_provider_ports::ProviderPort;
@@ -86,10 +86,32 @@ fn validate_host_admission(
     })
 }
 
+/// The Host lifetime a close or a rollback claims.
+///
+/// An adopted open attaches the core Host authority (technical contract §3), so
+/// the normal case is the attached authority: its `close_before` is the ONE
+/// manager + `LocalSet` settlement and its `quiesce_actor_sessions` owns the
+/// Actor drains. The unattached case exists only for a failed open whose manager
+/// was never adopted — there is no authority to quiesce, so that rollback
+/// settles the manager it started.
+enum HostOwner {
+    Attached(Arc<HostHandle>),
+    Unattached(Arc<HostManager>),
+}
+
+/// A `LocalSet` thread a bounded settle could not join hands its handle to
+/// tracked cleanup straight away, so a retained owner is never left with a
+/// detached thread.
+fn retain_unsettled_localset_thread(manager: &HostManager, state: &Arc<EnvState>) {
+    if let Some(handle) = manager.localset_bridge().take_retained_runtime_thread() {
+        super::cleanup_registry::register_localset_thread(handle, state.clone());
+    }
+}
+
 async fn abort_opening(
     state: Arc<EnvState>,
     core: Option<Arc<CoreService>>,
-    host: Option<Arc<HostManager>>,
+    host: Option<HostOwner>,
     js_port: Option<Arc<dyn ProviderPort>>,
 ) {
     if core.is_some() || host.is_some() || js_port.is_some() {
@@ -160,6 +182,23 @@ mod forcing {
         }
     }
 
+    /// Test-only forcing of a failed Host attach, so the open rollback owner is
+    /// exercised without forging an unadoptable core service.
+    #[cfg(test)]
+    pub mod attach {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        static FORCE_ATTACH_FAILURE: AtomicBool = AtomicBool::new(false);
+
+        pub fn set(enable: bool) {
+            FORCE_ATTACH_FAILURE.store(enable, Ordering::SeqCst);
+        }
+
+        pub fn get() -> bool {
+            FORCE_ATTACH_FAILURE.load(Ordering::SeqCst)
+        }
+    }
+
     /// Both forcing seams above are process-global, so the tests that arm them
     /// must not interleave: this lock is their single serialization point.
     #[cfg(test)]
@@ -189,6 +228,12 @@ pub fn set_force_cleanup_delay_ms(ms: u64) {
 #[cfg(test)]
 pub fn set_force_close_budget_ms(ms: u64) {
     forcing::budget::set(ms);
+}
+
+/// Test-only: force the next Host attach to fail.
+#[cfg(test)]
+pub fn set_force_attach_failure(enable: bool) {
+    forcing::attach::set(enable);
 }
 
 /// The close budget: the frozen production value unless a test build overrides
@@ -236,7 +281,7 @@ impl Drop for RestoreCore {
 }
 
 struct RestoreHost {
-    value: Option<Arc<HostManager>>,
+    value: Option<HostOwner>,
     state: Arc<EnvState>,
     disarmed: bool,
 }
@@ -254,9 +299,23 @@ impl Drop for RestoreHost {
             return;
         }
         if let Some(v) = self.value.take() {
-            let mut guard = self.state.host.lock().expect("core mutex poisoned");
-            if guard.is_none() {
-                *guard = Some(v);
+            match v {
+                HostOwner::Attached(authority) => {
+                    let mut guard = self.state.host.lock().expect("core mutex poisoned");
+                    if guard.is_none() {
+                        *guard = Some(authority);
+                    }
+                }
+                HostOwner::Unattached(manager) => {
+                    // A manager the open never adopted has no Actor side and no
+                    // published session, and there is no second slot that could
+                    // retry it (that would be a second close owner). Its single
+                    // settlement ran here; a thread it could not join is already
+                    // in tracked cleanup, and the environment stays interrupted
+                    // rather than reading an unconfirmed teardown as clean.
+                    retain_unsettled_localset_thread(&manager, &self.state);
+                    self.state.mark_interrupted();
+                }
             }
         }
     }
@@ -406,14 +465,49 @@ async fn release_js_provider_sessions(state: &Arc<EnvState>, deadline: Instant) 
 
 /// Attempt cleanup over the retained owners, using the same ownership discipline
 /// for a rollback, an explicit close, and an admission-fence settlement.
+///
+/// The order is technical contract §3: the attached authority quiesces its Actor
+/// sessions while the core is still open, the existing core/execution owner
+/// closes, and the SAME authority then settles the manager + `LocalSet` once
+/// through `close_before` — never a second shutdown of that manager.
 async fn cleanup_owners(
     state: Arc<EnvState>,
     inject_core: Option<Arc<CoreService>>,
-    inject_host: Option<Arc<HostManager>>,
+    inject_host: Option<HostOwner>,
     inject_port: Option<Arc<dyn ProviderPort>>,
     deadline: Instant,
 ) -> (bool, CoreCloseReport) {
     let forced = forced_unconfirmed();
+    let mut pending: Vec<String> = Vec::new();
+
+    // Claim the Host lifetime first: the Actor quiesce runs BEFORE the core
+    // owner closes, so the authority is still open while it joins its drains.
+    let host_taken = match inject_host {
+        Some(host) => Some(host),
+        None => state.take_host().map(HostOwner::Attached),
+    };
+    let mut host_guard = RestoreHost {
+        value: host_taken,
+        state: state.clone(),
+        disarmed: false,
+    };
+
+    if let Some(HostOwner::Attached(authority)) = host_guard.value.as_ref() {
+        // Bounded by the close's outer deadline: the join itself is deliberately
+        // unbounded (the authority retains its drain ownership), so an expired
+        // budget cancels this caller and keeps the whole authority instead of
+        // detaching live work.
+        match tokio::time::timeout_at(
+            tokio::time::Instant::from_std(deadline),
+            authority.quiesce_actor_sessions(),
+        )
+        .await
+        {
+            Ok(Ok(report)) => pending.extend(report.pending_operations),
+            Ok(Err(err)) => pending.push(format!("actor-quiesce: {err}")),
+            Err(_) => pending.push("actor-quiesce-deadline".to_string()),
+        }
+    }
 
     let core_taken = match inject_core {
         Some(core) => Some(core),
@@ -439,7 +533,10 @@ async fn cleanup_owners(
                 }
             }
             match service.close().await {
-                Ok(report) => report,
+                Ok(report) => {
+                    pending.extend(report.pending_operations.iter().cloned());
+                    report
+                }
                 Err(_) => interrupted_report(vec![]),
             }
         }
@@ -450,24 +547,44 @@ async fn cleanup_owners(
         core_guard.disarm();
     }
 
-    let host_taken = match inject_host {
-        Some(host) => Some(host),
-        None => state.host.lock().expect("host mutex poisoned").take(),
-    };
-    let mut host_guard = RestoreHost {
-        value: host_taken,
-        state: state.clone(),
-        disarmed: false,
-    };
-
-    let host_released = match host_guard.value.as_ref().map(Arc::clone) {
-        Some(manager) => {
-            // Closing stops new work and freezes the queue immediately: the
-            // queue snapshot below is the state the close actually drains.
+    let host_released = match host_guard.value.as_ref() {
+        Some(HostOwner::Attached(authority)) => {
+            // ONE settlement of the attached manager + `LocalSet`, inside the
+            // close's deadline, reporting its own unsettled work.
+            //
+            // Not wrapped in an inner timeout: `close_before` honors this same
+            // absolute deadline itself, and an inner wrapper could cancel a
+            // join that had already taken the `LocalSet` thread handle —
+            // detaching the thread instead of handing it to tracked cleanup.
+            // The whole cleanup stays bounded by the close's outer budget.
+            let confirmed = match authority.close_before(deadline).await {
+                Ok(report) => {
+                    let confirmed = report.cleanup_confirmed;
+                    pending.extend(report.pending_operations);
+                    confirmed
+                }
+                Err(err) => {
+                    pending.push(format!("host-close: {err}"));
+                    false
+                }
+            };
+            if !forced && confirmed {
+                host_guard.disarm();
+                true
+            } else {
+                let manager = authority.manager();
+                retain_unsettled_localset_thread(&manager, &state);
+                false
+            }
+        }
+        Some(HostOwner::Unattached(manager)) => {
+            // A failed open's manager: never adopted, so there is no authority
+            // to quiesce and no Actor drain to settle. Freeze and settle the
+            // `LocalSet` it started, then shut the manager down.
             manager.localset_bridge().begin_drain();
             let at_close = manager.localset_bridge().stats();
-            let pending = manager.pending_lifecycle_snapshot().await;
-            state.record_pending_operations(pending).await;
+            let host_pending = manager.pending_lifecycle_snapshot().await;
+            pending.extend(host_pending);
             let shutdown_ok = manager.shutdown().await.is_ok();
             let bridge_evidence = manager.localset_bridge().shutdown_before(deadline).await;
             // Settlement is a clean join with no live work — never `!thread_alive`
@@ -477,30 +594,30 @@ async fn cleanup_owners(
                 .localset_bridge()
                 .close_entries(&at_close, &bridge_evidence);
             if !forced && shutdown_ok && bridge_settled {
-                state.record_pending_operations(bridge_entries).await;
+                pending.extend(bridge_entries);
                 host_guard.disarm();
                 true
             } else {
                 // A join that could not settle inside the budget hands its
                 // handle to tracked cleanup; a failed join has none to retain
                 // but is still never released.
-                if bridge_evidence.thread_alive {
-                    if let Some(handle) = manager.localset_bridge().take_retained_runtime_thread() {
-                        super::cleanup_registry::register_localset_thread(handle, state.clone());
-                    }
-                }
-                let mut pending = state.pending_operations_snapshot().await;
+                retain_unsettled_localset_thread(manager, &state);
                 pending.extend(bridge_entries);
                 pending.extend(bridge_evidence.unsettled_pending());
                 if !shutdown_ok {
                     pending.push("host-shutdown-unconfirmed".to_string());
                 }
-                state.record_pending_operations(pending).await;
                 false
             }
         }
         None => true,
     };
+
+    if !pending.is_empty() {
+        let mut recorded = state.pending_operations_snapshot().await;
+        recorded.extend(pending);
+        state.record_pending_operations(recorded).await;
+    }
 
     let port_taken = match inject_port {
         Some(port) => Some(port),
@@ -720,7 +837,7 @@ pub async fn open_core(
         abort_opening(
             state.clone(),
             Some(Arc::new(core)),
-            Some(host),
+            Some(HostOwner::Unattached(host)),
             js_port.clone(),
         )
         .await;
@@ -738,16 +855,44 @@ pub async fn open_core(
     };
 
     let core = Arc::new(core);
+    // Adopt the started manager as the ONE core Host authority (contract §3
+    // Open). The exact manager and port are retained: attach starts no second
+    // Host and runs no second readiness probe, so the admitted pinned-root
+    // configuration, the recipe admission over that manager, and the
+    // provider-only JS tracking all stay the same instances. A failed attach
+    // enters the same rollback owner as every other open failure.
+    let authority = match attach_adopted_host(&core, host.clone(), provider_port.clone()) {
+        Ok(authority) => Arc::new(authority),
+        Err(err) => {
+            let reason = open_err(err);
+            abort_opening(
+                state.clone(),
+                Some(core),
+                Some(HostOwner::Unattached(host)),
+                js_port.clone(),
+            )
+            .await;
+            return Err(reason);
+        }
+    };
+
     state.clear_service_only_uninitialized();
     // Settle any operation orphaned by the predecessor process's exit as
     // `interrupted` (LIFE-3) through the CoreService-owned journal before the
     // host accepts new work, so a restarted process never re-dispatches a
     // journaled op and the prior active op is queryable immediately. A failed
     // settlement cannot prove that recovery, so the open fails instead of
-    // publishing a settled journal it does not have.
+    // publishing a settled journal it does not have — and the rollback carries
+    // the whole attached authority, not just its manager.
     if let Err(err) = core.settle_provider_orphans().await {
         let reason = format!("journal settlement failed: {err}");
-        abort_opening(state.clone(), Some(core), Some(host), js_port.clone()).await;
+        abort_opening(
+            state.clone(),
+            Some(core),
+            Some(HostOwner::Attached(authority)),
+            js_port.clone(),
+        )
+        .await;
         return Err(reason);
     }
     state
@@ -759,7 +904,7 @@ pub async fn open_core(
         .host
         .lock()
         .expect("host mutex poisoned")
-        .replace(host);
+        .replace(authority);
     state
         .provider_port
         .lock()
@@ -767,6 +912,25 @@ pub async fn open_core(
         .replace(provider_port);
     state.publish_open().await;
     Ok(())
+}
+
+/// Adopt the started manager as the core Host authority.
+///
+/// The attach is the open's one adoption step; a test build can force it to fail
+/// so the rollback owner is exercised end to end (the forced path performs no
+/// adoption at all, which is exactly the shape the rollback must handle).
+fn attach_adopted_host(
+    core: &Arc<CoreService>,
+    host: Arc<HostManager>,
+    port: Arc<dyn ProviderPort>,
+) -> Result<HostHandle, CoreError> {
+    #[cfg(test)]
+    if forcing::attach::get() {
+        return Err(CoreError::Internal {
+            category: "forced_attach_failure".into(),
+        });
+    }
+    core.attach_host(host, port)
 }
 
 /// Wait for the close currently in flight to publish its report.
@@ -819,9 +983,9 @@ async fn run_close(state: Arc<EnvState>) -> CoreCloseReport {
     state.begin_closing_phase().await;
 
     let host_snapshot = state.host.lock().expect("host mutex poisoned").clone();
-    if let Some(host) = host_snapshot {
+    if let Some(authority) = host_snapshot {
         state
-            .record_pending_operations(host.pending_lifecycle_snapshot().await)
+            .record_pending_operations(authority.manager().pending_lifecycle_snapshot().await)
             .await;
     }
 
@@ -1070,8 +1234,12 @@ mod tests {
         .await
         .expect("open");
 
-        let host = state.host.lock().expect("host slot").clone().expect("host");
-        let catalog = host.provider_catalog().await.expect("catalog");
+        let authority = state.host_authority().expect("host authority");
+        let catalog = authority
+            .manager()
+            .provider_catalog()
+            .await
+            .expect("catalog");
         assert_eq!(catalog.entries.len(), expected.len());
         let expected_ids = expected
             .iter()
@@ -1295,12 +1463,14 @@ mod tests {
     /// The frozen L2 Critical: the boundary belongs to the claimed settlement,
     /// not to the caller that claimed it.
     ///
-    /// A caller cancelled after the claim must not strand the environment: the
-    /// settlement still runs to publication, later closers are handed that real
-    /// report inside their own budget, and an interrupted open is released with
-    /// the honest verdict instead of hanging on a boundary nobody will release.
+    /// A close caller DROPPED after the claim (the waiter is cancelled) must not
+    /// strand the environment: the settlement still runs to publication, later
+    /// closers are handed that real report inside their own budget, and an
+    /// interrupted open is released with the honest verdict instead of hanging on
+    /// a boundary nobody will release. An unsettled close retains the whole
+    /// attached authority, never a bare manager.
     #[tokio::test]
-    async fn cancelled_outer_close_keeps_the_settlement_owner() {
+    async fn native_actor_owner_dropped_close_waiter_keeps_the_settlement_owner() {
         use crate::wire_fixture::seed_wire_home;
         use nexus_contracts::native_open_options::NativeOpenOptionsAccess;
         use nexus_contracts::NativeOpenOptions;
@@ -1369,6 +1539,10 @@ mod tests {
         assert!(
             state.owner_slots_present(),
             "an interrupted settlement retains its owners"
+        );
+        assert!(
+            state.host_authority().is_some(),
+            "and it retains the ATTACHED authority, never a bare manager"
         );
 
         // A later closer is handed that report inside its own budget instead of
@@ -1706,41 +1880,306 @@ mod tests {
         );
     }
 
-    #[test]
-    fn finalize_release_requires_a_settled_bridge_and_a_confirmed_host() {
-        // Release is a conjunction. In particular a LocalSet thread that
-        // panicked reports thread_alive == false, so a decision keyed off
-        // `!thread_alive` would release an owner whose join actually failed.
-        assert!(EnvState::finalize_owner_released(true, true));
-        assert!(
-            !EnvState::finalize_owner_released(false, true),
-            "an unsettled bridge (live OR join-failed) must never release the owner"
-        );
-        assert!(
-            !EnvState::finalize_owner_released(true, false),
-            "a confirmed host cannot stand in for a settled bridge alone"
-        );
-        assert!(!EnvState::finalize_owner_released(false, false));
+    // ── `native_actor_owner_`: native adoption of the attached Host authority.
+    //
+    // One manager/epoch, rollback on a failed attach, Actor + provider-only
+    // close, a timed-out close retained then retried, and the dropped-waiter /
+    // environment-finalizer guards — all over the REAL native open/close paths.
+
+    /// A JS-provider fixture that records every adapter call and acknowledges
+    /// each one — the shape of a live TS adapter at the native boundary.
+    #[derive(Default)]
+    struct RecordingJsPort {
+        calls: std::sync::Mutex<Vec<nexus_contracts::provider_call::ProviderCallMethod>>,
     }
 
-    #[test]
-    fn host_shutdown_error_never_counts_as_finalize_success() {
-        use nexus_agent_host::HostError;
+    impl RecordingJsPort {
+        fn calls(&self) -> Vec<nexus_contracts::provider_call::ProviderCallMethod> {
+            self.calls.lock().expect("calls").clone()
+        }
+    }
 
-        assert!(
-            EnvState::host_shutdown_confirmed(&Ok(Ok(()))),
-            "a confirmed host shutdown releases the owner"
+    #[async_trait::async_trait]
+    impl ProviderPort for RecordingJsPort {
+        async fn call(
+            &self,
+            request: nexus_contracts::ProviderCall,
+        ) -> nexus_provider_ports::ProviderResult<nexus_contracts::ProviderReply> {
+            self.calls.lock().expect("calls").push(request.method);
+            Ok(nexus_contracts::ProviderReply {
+                request_id: request.request_id.clone(),
+                ok: true,
+                session_id: request.session_id.clone(),
+                operation_id: None,
+                health: None,
+                error: None,
+            })
+        }
+
+        async fn next(
+            &self,
+            _operation_id: String,
+            _max_events: u32,
+            _max_bytes: u32,
+        ) -> nexus_provider_ports::ProviderResult<nexus_contracts::ProviderEventBatch> {
+            Err(nexus_contracts::CoreError {
+                code: nexus_contracts::CoreErrorCode::Internal,
+                message: "not used".into(),
+                details: Default::default(),
+                http_status: Some(500),
+            })
+        }
+    }
+
+    /// Open `state` as the engine owner over a seeded disposable home.
+    async fn open_seeded(
+        state: &Arc<EnvState>,
+        home: &Path,
+        js_port: Option<Arc<dyn ProviderPort>>,
+    ) -> Result<(), String> {
+        open_core(
+            state.clone(),
+            NativeOpenOptions {
+                user_home: home.to_string_lossy().to_string(),
+                access: NativeOpenOptionsAccess::EngineOwner,
+                allow_uninitialized: false,
+            },
+            js_port,
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn native_actor_owner_open_adopts_one_configured_manager() {
+        use crate::wire_fixture::seed_wire_home;
+        use nexus_agent_host::config::{agent_host_config_path, load_config_from_path};
+        use nexus_agent_host::core::readiness::discover_provider_catalog;
+        use tempfile::tempdir;
+
+        let _seams = forcing::seam_lock::acquire().await;
+        let dir = tempdir().expect("tempdir");
+        seed_wire_home(dir.path()).await;
+        // A distinctive ADMITTED document: the manager in the slot must be the
+        // one this open started and configured, never a second, defaulted Host.
+        let config_path = agent_host_config_path(dir.path());
+        std::fs::create_dir_all(config_path.parent().expect("config dir")).expect("agent-host dir");
+        std::fs::write(&config_path, "max_sessions = 7\n").expect("write host config");
+        let expected =
+            discover_provider_catalog(&load_config_from_path(&config_path).expect("host config"))
+                .expect("admit catalog");
+
+        let state = Arc::new(EnvState::new());
+        open_seeded(&state, dir.path(), None).await.expect("open");
+
+        let authority = state.host_authority().expect("attached authority");
+        let manager = authority.manager();
+        assert_eq!(
+            manager.agent_config().await.max_sessions,
+            7,
+            "the Host slot holds the manager this open started with the admitted document"
+        );
+        assert_eq!(
+            manager
+                .provider_catalog()
+                .await
+                .expect("catalog")
+                .entries
+                .len(),
+            expected.len(),
+            "the admitted pinned-root catalog survives adoption unchanged"
         );
         assert!(
-            !EnvState::host_shutdown_confirmed(&Ok(Err(HostError::cleanup_unconfirmed(
-                "session retained"
-            )))),
-            "a typed host error must retain the owner, never report success"
+            manager.health().await.expect("health").running,
+            "the adopted manager is the started one"
+        );
+
+        // ONE owner and ONE settlement: a confirmed close releases the Host slot
+        // and stops that manager; a repeated close replays the settled verdict.
+        let first = close_core(state.clone()).await;
+        assert_eq!(first.state, CoreCloseReportState::Closed, "{first:?}");
+        assert!(first.cleanup_confirmed, "{first:?}");
+        assert!(
+            state.host_authority().is_none(),
+            "a confirmed close releases the Host authority slot"
+        );
+        assert!(
+            !manager.health().await.expect("health").running,
+            "the ONE adopted manager was settled"
+        );
+        let second = close_core(state.clone()).await;
+        assert_eq!(second.state, CoreCloseReportState::Closed, "{second:?}");
+        assert!(second.cleanup_confirmed);
+    }
+
+    #[tokio::test]
+    async fn native_actor_owner_failed_attach_rolls_back_to_closed() {
+        use crate::cleanup_registry;
+        use crate::env_state::EnvLifecyclePhase;
+        use crate::wire_fixture::seed_wire_home;
+        use tempfile::tempdir;
+
+        let _seams = forcing::seam_lock::acquire().await;
+        let dir = tempdir().expect("tempdir");
+        seed_wire_home(dir.path()).await;
+        let state = Arc::new(EnvState::new());
+
+        // The attach is the open's one adoption step; force it to fail so the
+        // rollback owner runs over the manager the open already started.
+        set_force_attach_failure(true);
+        let failed = open_seeded(&state, dir.path(), None).await;
+        set_force_attach_failure(false);
+        assert!(failed.is_err(), "a failed attach fails the open");
+        assert_eq!(state.lifecycle_phase(), EnvLifecyclePhase::Closed);
+        assert!(
+            !state.owner_slots_present(),
+            "the rollback retains no owner: {failed:?}"
+        );
+        assert!(
+            !state.is_interrupted(),
+            "a rollback whose settlement confirmed is not interrupted"
+        );
+        assert_eq!(
+            cleanup_registry::registry_snapshot().0,
+            0,
+            "the rolled-back manager leaves no tracked LocalSet thread"
+        );
+
+        // The rolled-back environment admits a real owner again.
+        open_seeded(&state, dir.path(), None)
+            .await
+            .expect("reopen after a rolled-back attach");
+        assert!(state.host_authority().is_some());
+        let closed = close_core(state.clone()).await;
+        assert_eq!(closed.state, CoreCloseReportState::Closed, "{closed:?}");
+        assert!(closed.cleanup_confirmed);
+    }
+
+    #[tokio::test]
+    async fn native_actor_owner_close_settles_actor_and_provider_only_owners() {
+        use crate::wire_fixture::seed_wire_home;
+        use nexus_contracts::provider_call::ProviderCallMethod;
+        use tempfile::tempdir;
+
+        let _seams = forcing::seam_lock::acquire().await;
+        let dir = tempdir().expect("tempdir");
+        seed_wire_home(dir.path()).await;
+        let state = Arc::new(EnvState::new());
+        let js = Arc::new(RecordingJsPort::default());
+        open_seeded(&state, dir.path(), Some(js.clone()))
+            .await
+            .expect("open");
+        let authority = state.host_authority().expect("authority");
+        let manager = authority.manager();
+        let principal = state
+            .journal_core()
+            .expect("core")
+            .active_principal()
+            .await
+            .expect("principal");
+
+        // Provider-only tracking: a launched JS session with a live operation,
+        // recorded at the one seam the admitting port writes.
+        state.record_js_session("sess-js".to_string(), "mock-acp".to_string());
+        state.record_js_session_operation("sess-js", "op-js".to_string());
+        assert_eq!(state.js_session_ids(), vec!["sess-js".to_string()]);
+
+        let report = close_core(state.clone()).await;
+        assert_eq!(report.state, CoreCloseReportState::Closed, "{report:?}");
+        assert!(report.cleanup_confirmed, "{report:?}");
+
+        // Provider-only half: the adapter was driven (cancel for the live
+        // operation, then the release) and the session is forgotten.
+        let calls = js.calls();
+        assert!(
+            calls.contains(&ProviderCallMethod::Cancel),
+            "the live JS operation was cancelled: {calls:?}"
+        );
+        assert!(
+            calls.contains(&ProviderCallMethod::Shutdown),
+            "the JS-owned child was released: {calls:?}"
+        );
+        assert!(
+            state.js_session_ids().is_empty(),
+            "a confirmed close forgets the released JS session"
+        );
+        assert!(
+            state.provider_port.lock().expect("port").is_none(),
+            "the provider-only owner is released"
+        );
+
+        // Actor half: the Host authority slot is released, its manager settled,
+        // and no Actor effect is admitted any more.
+        assert!(
+            state.host_authority().is_none(),
+            "the Actor authority is released"
+        );
+        assert!(
+            !manager.health().await.expect("health").running,
+            "the Actor manager is settled"
+        );
+        let refused = authority
+            .character_operation(
+                &principal,
+                "00000000-0000-0000-0000-0000000000aa".to_string(),
+            )
+            .await;
+        assert!(
+            matches!(refused, Err(nexus_core::CoreError::Closing)),
+            "a closed authority refuses Actor reads: {refused:?}"
         );
     }
 
+    #[tokio::test]
+    async fn native_actor_owner_timed_out_close_retains_then_retries() {
+        use crate::wire_fixture::seed_wire_home;
+        use tempfile::tempdir;
+
+        let _seams = forcing::seam_lock::acquire().await;
+        let dir = tempdir().expect("tempdir");
+        seed_wire_home(dir.path()).await;
+        let state = Arc::new(EnvState::new());
+        set_force_close_budget_ms(300);
+        set_force_cleanup_delay_ms(10_000);
+        open_seeded(&state, dir.path(), None).await.expect("open");
+        let manager = state.host_authority().expect("authority").manager();
+
+        let timed_out = close_core(state.clone()).await;
+        assert_eq!(
+            timed_out.state,
+            CoreCloseReportState::Interrupted,
+            "{timed_out:?}"
+        );
+        assert!(!timed_out.cleanup_confirmed);
+        assert!(
+            state.host_authority().is_some(),
+            "an expired close retains the WHOLE authority, never a bare manager"
+        );
+        assert!(
+            state.core.lock().expect("core mutex poisoned").is_some(),
+            "and the existing core owner with it"
+        );
+        assert!(
+            manager.health().await.expect("health").running,
+            "the retained authority keeps its manager running"
+        );
+
+        // Only the settlement that really ran may confirm.
+        set_force_cleanup_delay_ms(0);
+        set_force_close_budget_ms(0);
+        let settled = close_core(state.clone()).await;
+        assert_eq!(settled.state, CoreCloseReportState::Closed, "{settled:?}");
+        assert!(settled.cleanup_confirmed);
+        assert!(!state.owner_slots_present());
+        assert!(!manager.health().await.expect("health").running);
+    }
+
+    /// The environment-finalizer path retains its guards on the ATTACHED
+    /// authority: an unsettled `LocalSet` teardown keeps the authority (and its
+    /// manager/Actor drains) instead of reporting a clean close, the unjoinable
+    /// thread moves into tracked cleanup rather than staying detached, and — the
+    /// dead-environment rule — the finalize never invokes a JS callback.
     #[test]
-    fn bounded_native_finalize_retains_live_localset_thread_owner() {
+    fn native_actor_owner_finalizer_retains_guards_without_invoking_js() {
         use crate::cleanup_registry;
 
         // The registry is process-global; hold the test lock for the whole
@@ -1760,11 +2199,20 @@ mod tests {
     /// lock is held by its synchronous wrapper.
     async fn bounded_native_finalize_body() {
         use crate::cleanup_registry;
+        use crate::wire_fixture::seed_wire_home;
+        use tempfile::tempdir;
 
+        let dir = tempdir().expect("tempdir");
+        seed_wire_home(dir.path()).await;
         let state = Arc::new(EnvState::new());
-        let host = Arc::new(HostManager::new());
-        let bridge = host.localset_bridge();
-        *state.host.lock().expect("host slot") = Some(host);
+        let js = Arc::new(RecordingJsPort::default());
+        open_seeded(&state, dir.path(), Some(js.clone()))
+            .await
+            .expect("open");
+        // The finalize must carry the ATTACHED authority, so the blocked
+        // `LocalSet` is the one the authority's manager owns.
+        let authority = state.host_authority().expect("attached authority");
+        let bridge = authority.manager().localset_bridge();
 
         // Block the LocalSet thread *synchronously* past the finalize budget:
         // the bounded inner join cannot settle inside the deadline, so the
@@ -1807,6 +2255,15 @@ mod tests {
         assert!(
             state.owner_slots_present(),
             "the host owner must be retained, never dropped as if cleanup succeeded"
+        );
+        assert!(
+            state.host_authority().is_some(),
+            "the finalize retains the ATTACHED authority, not a detached manager"
+        );
+        assert!(
+            js.calls().is_empty(),
+            "dead-environment cleanup must never invoke a JS callback: {:?}",
+            js.calls()
         );
         assert!(
             !bridge.has_retained_runtime_thread(),
