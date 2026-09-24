@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import { ComputeRunStudioFixtures } from '@/fixtures/compute-run-studio';
@@ -17,6 +17,7 @@ describe('ComputeRunStudioFixtures', () => {
       'run-studio-variant-inspector-success',
       'run-studio-variant-inspector-truncated',
       'run-studio-variant-inspector-failed',
+      'run-studio-variant-inspector-detail-error',
       'run-studio-variant-runs-populated',
       'run-studio-variant-runs-overflow',
       'run-studio-variant-runs-empty',
@@ -97,6 +98,25 @@ describe('ComputeRunStudioFixtures', () => {
       'data-status',
       'failed',
     );
+  });
+
+  it('renders the Run detail read error with production copy and an interactable Retry', () => {
+    render(<ComputeRunStudioFixtures />);
+    const variant = screen.getByTestId('run-studio-inspector-detail-error');
+
+    // App-copy parity with the run.runErrorTitle / run.runErrorDescription
+    // branch — a read error, not a compute failure.
+    expect(variant).toHaveTextContent('Could not load this Run');
+    expect(variant).toHaveTextContent(
+      'Run detail is unavailable right now — the Run may have been cleared, or the daemon is unreachable. Try again.',
+    );
+    expect(within(variant).queryByTestId('run-status-badge')).not.toBeInTheDocument();
+
+    const retry = within(variant).getByRole('button', { name: 'Retry' });
+    fireEvent.click(retry);
+    expect(
+      within(variant).getByTestId('run-studio-detail-error-retry-count'),
+    ).toHaveTextContent('Retry requested 1 time');
   });
 
   it('renders Runs rows for every lifecycle status, newest first, plus empty state', () => {
