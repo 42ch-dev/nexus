@@ -343,6 +343,15 @@ export interface NativeCoreBinding {
   subscribeWorkflowEvents(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
   nextWorkflowEvents(principal: string, subscriptionId: string): Promise<Uint8Array>;
   releaseWorkflowEvents(principal: string, subscriptionId: string): Promise<Uint8Array>;
+  // ── P2-T3 Compute module/run/transaction surface ───────────────────────────
+  listComputeModules(principal: string): Promise<Uint8Array>;
+  getComputeModule(principal: string, moduleId: string): Promise<Uint8Array>;
+  computeRun(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
+  getComputeRun(principal: string, runId: string): Promise<Uint8Array>;
+  listComputeRuns(principal: string, queryJson: Uint8Array): Promise<Uint8Array>;
+  acceptComputeRun(principal: string, runId: string, requestJson: Uint8Array): Promise<Uint8Array>;
+  discardComputeRun(principal: string, runId: string): Promise<Uint8Array>;
+  clearComputeRuns(principal: string, queryJson: Uint8Array): Promise<Uint8Array>;
 }
 
 export interface NativeBinding {

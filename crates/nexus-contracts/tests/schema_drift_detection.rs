@@ -446,6 +446,29 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             ListModulesResponse
         ),
+        // v1.195 P2-T1 (current-host-contracts §5): the query/response shapes
+        // the native/service Compute facade transports, promoted from the
+        // app-local declarations.
+        entry!(
+            "schemas/daemon-api/compute/list-runs-query.schema.json",
+            Strict,
+            ListRunsQuery
+        ),
+        entry!(
+            "schemas/daemon-api/compute/discard-run-response.schema.json",
+            Strict,
+            DiscardRunResponse
+        ),
+        entry!(
+            "schemas/daemon-api/compute/clear-runs-query.schema.json",
+            Strict,
+            ClearRunsQuery
+        ),
+        entry!(
+            "schemas/daemon-api/compute/clear-runs-response.schema.json",
+            Strict,
+            ClearRunsResponse
+        ),
         // ── daemon-api/works/ (V1.63 P1) ──────────────────────────────────
         entry!(
             "schemas/daemon-api/works/create-work-request.schema.json",

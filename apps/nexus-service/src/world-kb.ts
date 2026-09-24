@@ -183,6 +183,34 @@ export function parseOptionalInteger(
 }
 
 /**
+ * Refuse every query key outside `allowed` — the calling adapter's own schema
+ * key set.
+ *
+ * The generated query DTOs declare `additionalProperties: false`, but a route
+ * adapter assembles them from a fixed key set, so an unsupported or misspelled
+ * parameter would be DISCARDED before the native decoder could refuse it: the
+ * caller would receive a broader unfiltered page, or (on Clear) a wider delete,
+ * instead of the typed refusal its contract promises. `status` is the caller's
+ * own malformed-query status: the retained 400 for a read filter, and the
+ * retained 422 `invalid_input` where the route's contract names that pair.
+ *
+ * No supported key is re-parsed, re-validated or re-defaulted here.
+ */
+export function refuseUnknownQueryKeys(
+  search: URLSearchParams,
+  allowed: readonly string[],
+  status = 400,
+): void {
+  for (const key of search.keys()) {
+    if (!allowed.includes(key)) {
+      throw new HttpError(status, 'invalid_input', `unknown query parameter '${key}'`, {
+        field: key,
+      });
+    }
+  }
+}
+
+/**
  * A family handler body/query payload is an already-`JSON.parse`d value; the
  * native layer re-parses it into the generated DTO, so this cast only carries
  * the transport contract (the schema stays the shape authority).

@@ -4,9 +4,13 @@
  * Generator: json-schema-to-typescript (tooling/codegen/src/ts-gen.ts)
  */
 
+export type { ClearRunsQuery } from './clear-runs-query';
+export type { ClearRunsResponse } from './clear-runs-response';
 export type { ComputeInput } from './compute-input';
 export type { ComputeOutput } from './compute-output';
+export type { DiscardRunResponse } from './discard-run-response';
 export type { ListModulesResponse } from './list-modules-response';
+export type { ListRunsQuery } from './list-runs-query';
 export type { ModuleDetail } from './module-detail';
 export type { ModuleSummary } from './module-summary';
 export type { RunAcceptRequest } from './run-accept-request';

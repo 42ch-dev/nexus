@@ -14,9 +14,10 @@
  * default/cap, so the two surfaces cannot disagree about a page size.
  *
  * Deliberately NOT routed on this surface (no core authority exists): the
- * core-context HISTORY reads and the schedule label/delete mutations, plus
- * the compute run family (a daemon-cohort capability). Those identities keep
- * their truthful `route_not_migrated` refusal rather than a degraded fake.
+ * core-context HISTORY reads and the schedule label/delete mutations. Those
+ * identities keep their truthful `route_not_migrated` refusal rather than a
+ * degraded fake. The Compute run family is a family of its own (`compute.ts`)
+ * over the same hosted owner, not part of this surface.
  */
 import type {
   ListSchedulesQuery,
@@ -24,9 +25,9 @@ import type {
 } from '@42ch/nexus-contracts';
 import type { ServiceCore } from './lifecycle.js';
 import type { DomainRoute } from './routes.js';
-import { HttpError } from './errors.js';
 import {
   parseOptionalInteger,
+  refuseUnknownQueryKeys,
   withPrincipal,
   wirePayload,
 } from './world-kb.js';
@@ -117,26 +118,6 @@ function listSessionsQuery(search: URLSearchParams): ListSessionsQuery {
     ...(cursor !== null ? { cursor } : {}),
     ...(limit !== null ? { limit: parseOptionalInteger(search, 'limit') } : {}),
   };
-}
-
-/**
- * Refuse every query key outside `allowed` — this adapter's own schema key set.
- *
- * The generated query DTOs declare `additionalProperties: false`, but they are
- * assembled from a fixed key set here, so an unsupported or misspelled
- * parameter would be silently discarded before the native decoder could refuse
- * it: the caller would get a broader unfiltered page instead of the typed
- * refusal its contract promises. The refusal is the same client error as a bad
- * value; no supported key is re-parsed, re-validated or re-defaulted here.
- */
-function refuseUnknownQueryKeys(search: URLSearchParams, allowed: readonly string[]): void {
-  for (const key of search.keys()) {
-    if (!allowed.includes(key)) {
-      throw new HttpError(400, 'invalid_input', `unknown query parameter '${key}'`, {
-        field: key,
-      });
-    }
-  }
 }
 
 /** Exact path/verb/tier identities this family owns (composer input). */

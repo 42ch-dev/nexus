@@ -30,7 +30,6 @@ import type { ServerResponse } from 'node:http';
 import type { CoreWorkflowEventBatch } from '@42ch/nexus-contracts';
 import type { ServiceCore } from './lifecycle.js';
 import type { DomainRoute, RouteRequestContext } from './routes.js';
-import { HttpError } from './errors.js';
 import {
   NO_STREAM_END,
   SseWriter,
@@ -38,24 +37,10 @@ import {
   gatePullUntilDrain,
   wireFrame,
 } from './sse.js';
-import { withPrincipal } from './world-kb.js';
+import { refuseUnknownQueryKeys, withPrincipal } from './world-kb.js';
 
 /** The run-event control frames: no data frame, no terminal run state. */
 const CONTROL_EVENTS: Record<string, true> = { gap: true, history_unavailable: true };
-
-/**
- * No query parameter belongs to this identity: the resume cursor is the
- * retained `Last-Event-ID` header (contract §4), and the run id is the path
- * parameter. An unexpected key is refused rather than dropped, so a caller who
- * guessed an unsupported resume parameter is told instead of silently
- * receiving a full replay.
- */
-function refuseUnknownQueryKeys(search: URLSearchParams): void {
-  const [key] = search.keys();
-  if (key !== undefined) {
-    throw new HttpError(400, 'invalid_input', `unknown query parameter '${key}'`, { field: key });
-  }
-}
 
 /**
  * Stream one root run's authorized events as SSE.
@@ -143,7 +128,7 @@ export const WORKFLOW_OBSERVATION_ROUTES: readonly DomainRoute[] = [
       _body: unknown,
       request: RouteRequestContext,
     ) => {
-      refuseUnknownQueryKeys(search);
+      refuseUnknownQueryKeys(search, []);
       const runId = params[0];
       const lastEventId = request.lastEventId;
       return {
