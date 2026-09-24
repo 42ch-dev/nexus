@@ -84,6 +84,7 @@ impl WorkspaceCommitAuthority {
     ///
     /// `false` means this authority holds no lease to release (a
     /// non-recoverable manager) or it was already released.
+    #[must_use]
     pub fn release_authority(&self) -> bool {
         self.manager
             .recoverable_config()

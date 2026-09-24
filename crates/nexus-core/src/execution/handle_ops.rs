@@ -33,8 +33,7 @@ use nexus_contracts::generated::core::{
     CoreRunEventsResponse, CoreRunEventsResponseEventsItem, CoreRunEventsResponseEventsItemKind,
     CoreRunEventsResponseNextSequence, CoreRunEventsResponseRunId, CoreWorkflowEventBatch,
     CoreWorkflowEventBatchEventsItem, CoreWorkflowEventBatchEventsItemEvent,
-    CoreWorkflowSubscribeRequest, CoreWorkflowSubscription,
-    CoreWorkflowSubscriptionSubscriptionId,
+    CoreWorkflowSubscribeRequest, CoreWorkflowSubscription, CoreWorkflowSubscriptionSubscriptionId,
 };
 use nexus_contracts::generated::daemon_api::orchestration::sessions::list_sessions_query::ListSessionsQuery;
 use nexus_contracts::generated::daemon_api::orchestration::sessions::list_sessions_response::{
@@ -77,9 +76,7 @@ use crate::execution::capabilities::{ToolContext, ToolExecuteRequest};
 #[cfg(feature = "compute")]
 use crate::execution::compute::ComputeContext;
 use crate::execution::lifecycle::ExecutionHandle;
-use crate::execution::run_events::{
-    PageError, PullOutcome, SubscribeError, WorkflowSubscription,
-};
+use crate::execution::run_events::{PageError, PullOutcome, SubscribeError, WorkflowSubscription};
 use crate::execution::workflow::{RunControlError, RunEventPort, RunSignal};
 use crate::principal::Principal;
 use crate::PresetError;
@@ -185,7 +182,7 @@ impl ExecutionHandle {
     /// The scope is the STORED ownership: the query is bound to the principal's
     /// creator, and an explicit foreign `creator_id` filter is refused BEFORE
     /// any query runs — never answered with a silently empty page. The response
-    /// is the generated snake_case public DTO (the legacy `camelCase` local
+    /// is the generated `snake_case` public DTO (the legacy `camelCase` local
     /// summary is not a public read shape).
     ///
     /// # Errors
@@ -601,63 +598,9 @@ impl ExecutionHandle {
                 "paused"
             }
             "resume" => {
-                let row = self.owned_schedule(principal, &schedule_id).await?;
-                match row.current_session_id {
-                    // Admitted: the signal goes to the run this schedule
-                    // already owns. A manual wait is never implicitly
-                    // continued — the engine's wait/in-flight fence refuses
-                    // the plain resume with its exact durable conflict.
-                    Some(run_id) => {
-                        let result = self
-                            .coordinator()
-                            .signal_run(&SessionId(run_id.clone()), RunSignal::Resume)
-                            .await
-                            .map_err(map_run_control_error)?;
-                        // The durable row must follow the run it owns: `pause`
-                        // writes `paused` to the row without touching the run,
-                        // so a successful resume must not leave the public
-                        // list/inspect projection claiming `paused`.
-                        self.reconcile_resumed_row(principal, &schedule_id, &run_id)
-                            .await?;
-                        // The status mutation alone leaves the run with NO
-                        // owner: the driver that stopped on a converge/merge
-                        // park does not come back, so `running` would name a
-                        // run nothing is driving. Re-drive THIS SAME root
-                        // through the single coordinator owner (v1.195 P0-T6).
-                        //
-                        // Left LAST, after the row followed the run, so the
-                        // reconciliation fences against the resumed status
-                        // instead of racing the fresh driver. `ensure_driving`
-                        // is single-flight and its durable-state gate still
-                        // refuses terminal/interrupted/human-wait states, so
-                        // a manual wait is never implicitly continued and no
-                        // second driver is ever spawned.
-                        self.coordinator()
-                            .ensure_driving(&SessionId(run_id.clone()))
-                            .await
-                            .map_err(map_run_control_error)?;
-                        return Ok(SignalScheduleResponse {
-                            schedule_id,
-                            status: result.status,
-                            current_wait_id: result.current_wait_id,
-                        });
-                    }
-                    // No run yet: the smart resume admits the row's ONE run
-                    // exactly as the clock tick would (it reports `pending`
-                    // when admission is not yet possible), so the response
-                    // carries the store's answer rather than an assumption.
-                    None => {
-                        let outcome = supervisor
-                            .resume_schedule(&schedule_id)
-                            .await
-                            .map_err(map_supervisor_error)?;
-                        return Ok(SignalScheduleResponse {
-                            schedule_id,
-                            status: outcome,
-                            current_wait_id: None,
-                        });
-                    }
-                }
+                return self
+                    .resume_owned_schedule(principal, schedule_id, &supervisor)
+                    .await;
             }
             "cancel" => {
                 // ONE CAS against the admission fence: a row that owns no run
@@ -725,6 +668,72 @@ impl ExecutionHandle {
             schedule_id,
             status: status.to_string(),
             current_wait_id: None,
+        })
+    }
+
+    /// Continue the run an admitted schedule already owns (`resume` signal).
+    ///
+    /// Admitted (the durable row carries a `current_session_id`): the signal
+    /// goes to the run this schedule already owns. A manual wait is never
+    /// implicitly continued — the engine's wait/in-flight fence refuses the
+    /// plain resume with its exact durable conflict. The durable row must then
+    /// follow the run it owns (`pause` writes `paused` to the row without
+    /// touching the run, so a successful resume must not leave the public
+    /// list/inspect projection claiming `paused`), and the SAME root is
+    /// re-driven through the single coordinator owner (v1.195 P0-T6): the
+    /// status mutation alone leaves the run with NO owner, because the driver
+    /// that stopped on a converge/merge park does not come back, so `running`
+    /// would name a run nothing is driving.
+    ///
+    /// The re-drive is left LAST, after the row followed the run, so the
+    /// reconciliation fences against the resumed status instead of racing the
+    /// fresh driver. `ensure_driving` is single-flight and its durable-state
+    /// gate still refuses terminal/interrupted/human-wait states, so a manual
+    /// wait is never implicitly continued and no second driver is ever spawned.
+    ///
+    /// No run yet: the smart resume admits the row's ONE run exactly as the
+    /// clock tick would (it reports `pending` when admission is not yet
+    /// possible), so the response carries the store's answer rather than an
+    /// assumption.
+    ///
+    /// # Errors
+    /// `NotFound` for a row this principal's creator does not own, `Coded`
+    /// `workflow_state_conflict`/`workflow_wait_conflict` when the run's durable
+    /// state refuses the signal, and the mapped coordinator, supervisor or
+    /// storage error otherwise.
+    async fn resume_owned_schedule(
+        &self,
+        principal: &Principal,
+        schedule_id: String,
+        supervisor: &nexus_orchestration::schedule::supervisor::ScheduleSupervisor,
+    ) -> CoreResult<SignalScheduleResponse> {
+        let row = self.owned_schedule(principal, &schedule_id).await?;
+        let Some(run_id) = row.current_session_id else {
+            let outcome = supervisor
+                .resume_schedule(&schedule_id)
+                .await
+                .map_err(map_supervisor_error)?;
+            return Ok(SignalScheduleResponse {
+                schedule_id,
+                status: outcome,
+                current_wait_id: None,
+            });
+        };
+        let result = self
+            .coordinator()
+            .signal_run(&SessionId(run_id.clone()), RunSignal::Resume)
+            .await
+            .map_err(map_run_control_error)?;
+        self.reconcile_resumed_row(principal, &schedule_id, &run_id)
+            .await?;
+        self.coordinator()
+            .ensure_driving(&SessionId(run_id.clone()))
+            .await
+            .map_err(map_run_control_error)?;
+        Ok(SignalScheduleResponse {
+            schedule_id,
+            status: result.status,
+            current_wait_id: result.current_wait_id,
         })
     }
 
@@ -984,7 +993,10 @@ impl ExecutionHandle {
         }
         let port = self.run_event_port()?;
         let inspect_url = run_inspect_url(&run_id);
-        let cursor = request.last_event_id.as_ref().map(|c| c.as_str().to_string());
+        let cursor = request
+            .last_event_id
+            .as_ref()
+            .map(|c| c.as_str().to_string());
         let creator_id = principal.creator_id().to_string();
         let generation = self.engine_epoch();
         let subscription = match port.subscribe_live(&run_id, cursor.as_deref(), inspect_url) {
@@ -1060,10 +1072,11 @@ impl ExecutionHandle {
         let events = frames
             .into_iter()
             .map(|frame| {
-                let event = CoreWorkflowEventBatchEventsItemEvent::try_from(frame.event)
-                    .map_err(|err| CoreError::Internal {
+                let event = CoreWorkflowEventBatchEventsItemEvent::try_from(frame.event).map_err(
+                    |err| CoreError::Internal {
                         category: format!("run-event name encode: {err}"),
-                    })?;
+                    },
+                )?;
                 Ok(CoreWorkflowEventBatchEventsItem {
                     id: frame.id,
                     event,
@@ -1089,15 +1102,15 @@ impl ExecutionHandle {
     /// # Errors
     /// `Closing` when the owner is shutting down, `AuthRequired` for a foreign
     /// principal, `NotFound` for a released, foreign or stale-generation token.
-    pub async fn release_workflow_events(
+    pub fn release_workflow_events(
         &self,
         principal: &Principal,
-        subscription_id: String,
+        subscription_id: &str,
     ) -> CoreResult<()> {
         self.ensure_admitting()?;
         self.linked_core()?.verify_principal(principal)?;
-        let subscription = self.owned_subscription(principal, &subscription_id)?;
-        if self.workflow_subscriptions.take(&subscription_id).is_none() {
+        let subscription = self.owned_subscription(principal, subscription_id)?;
+        if self.workflow_subscriptions.take(subscription_id).is_none() {
             // A concurrent release won the withdrawal: the token is gone, so
             // this call refuses exactly like any other released one.
             return Err(CoreError::NotFound {
@@ -1139,11 +1152,9 @@ impl ExecutionHandle {
         .fetch_optional(pool.as_ref())
         .await
         .map_err(|e| crate::error::db_err(&e))?;
-        owned
-            .map(|_| ())
-            .ok_or_else(|| CoreError::NotFound {
-                resource: format!("workflow session {run_id}"),
-            })
+        owned.map(|_| ()).ok_or_else(|| CoreError::NotFound {
+            resource: format!("workflow session {run_id}"),
+        })
     }
 
     /// Resolve a token this owner still serves AND that was minted for this
@@ -1200,7 +1211,11 @@ impl ExecutionHandle {
     ///
     /// # Errors
     /// `NotFound` for an absent or foreign row; the mapped storage error.
-    async fn owned_schedule(&self, principal: &Principal, schedule_id: &str) -> CoreResult<ScheduleRow> {
+    async fn owned_schedule(
+        &self,
+        principal: &Principal,
+        schedule_id: &str,
+    ) -> CoreResult<ScheduleRow> {
         let pool = self.coordinator().pool();
         sqlx::query_as::<_, ScheduleRow>(
             "SELECT schedule_id, creator_id, preset_id, status, execution_policy,
@@ -1230,7 +1245,9 @@ impl ExecutionHandle {
         principal: &Principal,
         schedule_id: &str,
     ) -> CoreResult<()> {
-        self.owned_schedule(principal, schedule_id).await.map(|_| ())
+        self.owned_schedule(principal, schedule_id)
+            .await
+            .map(|_| ())
     }
 
     /// Write the audited `force_gates` bypass row.
@@ -1770,11 +1787,7 @@ fn failure_reason(row: &SessionRow) -> Option<String> {
 ///
 /// # Errors
 /// `Forbidden` naming both creators.
-fn refuse_foreign_filter(
-    filter: Option<&str>,
-    creator_id: &str,
-    resource: &str,
-) -> CoreResult<()> {
+fn refuse_foreign_filter(filter: Option<&str>, creator_id: &str, resource: &str) -> CoreResult<()> {
     match filter {
         Some(other) if other != creator_id => Err(CoreError::Forbidden {
             resource: format!("{resource} for creator {other} (principal owns {creator_id})"),
@@ -1944,7 +1957,9 @@ fn required_field<'a, T>(value: Option<&'a T>, op: &str, field: &str) -> CoreRes
 }
 
 /// Map a core-context refusal onto the neutral taxonomy.
-fn map_context_error(err: nexus_orchestration::schedule::derivation::CoreContextError) -> CoreError {
+fn map_context_error(
+    err: nexus_orchestration::schedule::derivation::CoreContextError,
+) -> CoreError {
     use nexus_orchestration::schedule::derivation::CoreContextError as E;
     match err {
         E::NotFound(schedule_id) => CoreError::NotFound {
@@ -1953,10 +1968,12 @@ fn map_context_error(err: nexus_orchestration::schedule::derivation::CoreContext
         E::VersionNotFound(schedule_id, version) => CoreError::NotFound {
             resource: format!("core-context version {version} of schedule {schedule_id}"),
         },
-        E::UserEditValidation(reason) | E::PresetHookValidation(reason) => CoreError::InvalidInput {
-            field: "op".into(),
-            reason,
-        },
+        E::UserEditValidation(reason) | E::PresetHookValidation(reason) => {
+            CoreError::InvalidInput {
+                field: "op".into(),
+                reason,
+            }
+        }
         // A lost pointer advance: the append and its version row were rolled
         // back, so this is a state conflict (the caller re-reads and retries),
         // never a successful version.
@@ -2244,10 +2261,7 @@ fn map_run_control_error(err: RunControlError) -> CoreError {
             code: "workflow_state_conflict".to_string(),
             message: format!("run {session_id} refuses the signal: {reason}"),
         },
-        RunControlError::ReconstructionUnavailable {
-            session_id,
-            reason,
-        } => CoreError::Coded {
+        RunControlError::ReconstructionUnavailable { session_id, reason } => CoreError::Coded {
             code: "workflow_state_conflict".to_string(),
             message: format!(
                 "run {session_id} cannot be reconstructed ({reason}); the human wait is \

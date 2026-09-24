@@ -88,7 +88,10 @@ pub trait RunEventPort: Send + Sync {
         run_id: &str,
         last_event_id: Option<&str>,
         inspect_url: String,
-    ) -> Result<crate::execution::run_events::LiveSubscription, crate::execution::run_events::SubscribeError>;
+    ) -> Result<
+        crate::execution::run_events::LiveSubscription,
+        crate::execution::run_events::SubscribeError,
+    >;
     /// Read a bounded page of the run's retained frames.
     ///
     /// The ring's item/byte caps and the explicit-gap semantics are the
@@ -1880,7 +1883,7 @@ impl WorkflowRunCoordinator {
     /// intent, an in-flight prompt and an unfinished step marker), durable
     /// human wait and unreadable metadata all refuse. A v0 row keeps its
     /// legacy contract and is not gated here.
-    fn drive_gate_refuses(record: Option<&RunRecord>) -> bool {
+    const fn drive_gate_refuses(record: Option<&RunRecord>) -> bool {
         let Some(record) = record else {
             return false;
         };
@@ -3497,8 +3500,7 @@ pub struct CoordinatorScheduleRunStarter {
     /// the SAME holder the engine reads through.
     caps: nexus_orchestration::CapabilityRegistryHolder,
     /// Optional daemon-side tool dispatch for the admitted graph.
-    daemon_tool_dispatch:
-        Option<Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>>,
+    daemon_tool_dispatch: Option<Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>>,
     /// The production prompt executor (Host plane) for the admitted graph.
     prompt_executor: Option<Arc<dyn nexus_orchestration::capability::PromptExecutor>>,
 }
@@ -3507,16 +3509,14 @@ impl CoordinatorScheduleRunStarter {
     /// Build the starter over the owning coordinator and its admission inputs.
     #[must_use]
     pub fn new(
-        coordinator: Arc<WorkflowRunCoordinator>,
+        coordinator: &Arc<WorkflowRunCoordinator>,
         nexus_home: PathBuf,
         caps: nexus_orchestration::CapabilityRegistryHolder,
-        daemon_tool_dispatch: Option<
-            Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>,
-        >,
+        daemon_tool_dispatch: Option<Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>>,
         prompt_executor: Option<Arc<dyn nexus_orchestration::capability::PromptExecutor>>,
     ) -> Self {
         Self {
-            coordinator: Arc::downgrade(&coordinator),
+            coordinator: Arc::downgrade(coordinator),
             nexus_home,
             caps,
             daemon_tool_dispatch,
@@ -3527,10 +3527,7 @@ impl CoordinatorScheduleRunStarter {
 
 #[async_trait::async_trait]
 impl ScheduleRunStarter for CoordinatorScheduleRunStarter {
-    async fn start(
-        &self,
-        schedule_id: &str,
-    ) -> Result<SessionId, SupervisorError> {
+    async fn start(&self, schedule_id: &str) -> Result<SessionId, SupervisorError> {
         // Upgrade for the WHOLE admission: holding the strong handle across the
         // claim, the durability checks and the drive start is what lets a
         // concurrent owner close (which drops the owner's coordinator) never
@@ -9724,20 +9721,24 @@ mod tests {
                 crate::execution::run_events::SubscribeError,
             > {
                 // No ring is ever registered by this double.
-                Err(crate::execution::run_events::SubscribeError::HistoryUnavailable(
-                    crate::execution::run_events::HistoryUnavailableWire {
-                        run_id: run_id.to_string(),
-                        inspect_url,
-                    },
-                ))
+                Err(
+                    crate::execution::run_events::SubscribeError::HistoryUnavailable(
+                        crate::execution::run_events::HistoryUnavailableWire {
+                            run_id: run_id.to_string(),
+                            inspect_url,
+                        },
+                    ),
+                )
             }
             fn read_page(
                 &self,
                 run_id: &str,
                 _after_sequence: Option<u64>,
                 _limit: usize,
-            ) -> Result<crate::execution::run_events::RunPage, crate::execution::run_events::PageError>
-            {
+            ) -> Result<
+                crate::execution::run_events::RunPage,
+                crate::execution::run_events::PageError,
+            > {
                 Err(crate::execution::run_events::PageError::UnknownRun(
                     run_id.to_string(),
                 ))
@@ -10001,10 +10002,13 @@ mod tests {
             let session_id = session_id.clone();
             async move { coordinator.ensure_driving(&session_id).await }
         });
-        wait_until("resume admission reaches the token-publication gate", || {
-            let at_gate = admission_at_gate.clone();
-            async move { at_gate.load(Ordering::SeqCst) }
-        })
+        wait_until(
+            "resume admission reaches the token-publication gate",
+            || {
+                let at_gate = admission_at_gate.clone();
+                async move { at_gate.load(Ordering::SeqCst) }
+            },
+        )
         .await;
 
         // (2) Cancel: commits the durable intent fence, then is held inside
@@ -10025,10 +10029,7 @@ mod tests {
             .expect("load")
             .expect("row");
         assert!(
-            fenced
-                .state
-                .as_ref()
-                .is_some_and(|s| s.cancel_requested),
+            fenced.state.as_ref().is_some_and(|s| s.cancel_requested),
             "the cancel intent must be durable before the admission publishes a token"
         );
         assert!(
@@ -10148,12 +10149,14 @@ mod tests {
             crate::execution::run_events::SubscribeError,
         > {
             // The quota-refused port never registered a ring.
-            Err(crate::execution::run_events::SubscribeError::HistoryUnavailable(
-                crate::execution::run_events::HistoryUnavailableWire {
-                    run_id: run_id.to_string(),
-                    inspect_url,
-                },
-            ))
+            Err(
+                crate::execution::run_events::SubscribeError::HistoryUnavailable(
+                    crate::execution::run_events::HistoryUnavailableWire {
+                        run_id: run_id.to_string(),
+                        inspect_url,
+                    },
+                ),
+            )
         }
         fn read_page(
             &self,
@@ -10303,12 +10306,14 @@ mod tests {
             crate::execution::run_events::SubscribeError,
         > {
             // This double only records publishes; it owns no ring to replay.
-            Err(crate::execution::run_events::SubscribeError::HistoryUnavailable(
-                crate::execution::run_events::HistoryUnavailableWire {
-                    run_id: run_id.to_string(),
-                    inspect_url,
-                },
-            ))
+            Err(
+                crate::execution::run_events::SubscribeError::HistoryUnavailable(
+                    crate::execution::run_events::HistoryUnavailableWire {
+                        run_id: run_id.to_string(),
+                        inspect_url,
+                    },
+                ),
+            )
         }
         fn read_page(
             &self,

@@ -18,6 +18,7 @@ import {
   type RunsTableCopy,
   type RunTableRow,
 } from '@42ch/nexus-ui';
+import { ErrorState } from '@web-ui/states'; // transitional — keep-web (lucide-react asset boundary; product copy & app-composition callbacks)
 
 /**
  * Studio fixture for the Compute Run Studio primitives (V1.147 P1 T2).
@@ -25,15 +26,18 @@ import {
  * Renders the promoted `@42ch/nexus-ui` primitives across their variant
  * matrix — form derivation (basic-combat pickers, kitchen-sink controls,
  * missing-schema empty state), proposal inspector (success / truncated /
- * failed), and Runs history (all statuses / empty) — plus the fixture-level
- * chrome the app will own in Task 3 (module summary, World selector,
- * Advanced JSON disclosure, Accept/Discard row, filter selects).
+ * failed), Run detail read error + retry, and Runs history (all statuses /
+ * empty) — plus the fixture-level chrome the app will own in Task 3
+ * (module summary, World selector, Advanced JSON disclosure, Accept/Discard
+ * row, filter selects).
  *
- * Boundary: imports only promoted primitives from `@42ch/nexus-ui`. All copy
- * is literal English caller-owned strings (studio is developer-auxiliary and
- * excluded from i18n catalogs); all data is fake. No daemon, no routing, no
- * contracts, no `react-i18next`. Toggle the shell theme to verify light +
- * dark — every class is token-backed.
+ * Boundary: imports promoted primitives from `@42ch/nexus-ui` plus the
+ * transitional `@web-ui/states` ErrorState (inline annotation on the import)
+ * so the Run detail read-error variant matches production presentation
+ * exactly. All copy is literal English caller-owned strings (studio is
+ * developer-auxiliary and excluded from i18n catalogs); all data is fake.
+ * No daemon, no routing, no contracts, no `react-i18next`. Toggle the shell
+ * theme to verify light + dark — every class is token-backed.
  */
 
 /* ------------------------------------------------------------------ */
@@ -374,6 +378,31 @@ function InspectorFailedVariant() {
   );
 }
 
+function InspectorDetailErrorVariant() {
+  const [retries, setRetries] = useState(0);
+
+  return (
+    <div data-testid="run-studio-inspector-detail-error" className="grid max-w-2xl gap-3">
+      {/* A deep-linked Run whose detail read fails (cleared, deleted, or
+          transport down) must SAY so — copy mirrors the app ErrorState
+          branch (run.runErrorTitle / run.runErrorDescription). This is a
+          read error, not a compute failure — no Run status badge here. */}
+      <ErrorState
+        title="Could not load this Run"
+        description="Run detail is unavailable right now — the Run may have been cleared, or the daemon is unreachable. Try again."
+        onRetry={() => setRetries((n) => n + 1)}
+        retryLabel="Retry"
+      />
+      {retries > 0 && (
+        <p data-testid="run-studio-detail-error-retry-count" className="text-copy-13 text-gray-700">
+          Retry requested {retries} {retries === 1 ? 'time' : 'times'} — nothing to refetch in this
+          fixture.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function RunsFilterChrome() {
   return (
     <div data-testid="run-studio-runs-filters" className="flex flex-wrap items-end gap-4">
@@ -544,6 +573,14 @@ export function ComputeRunStudioFixtures() {
         testId="run-studio-variant-inspector-failed"
       >
         <InspectorFailedVariant />
+      </VariantBlock>
+
+      <VariantBlock
+        title="Inspector — Run detail read error + Retry"
+        note="Detail fetch failed (Run cleared or daemon unreachable) — mirrors the app ErrorState branch with production copy. A read error, not a compute failure. Retry is fixture-local and acknowledges visibly."
+        testId="run-studio-variant-inspector-detail-error"
+      >
+        <InspectorDetailErrorVariant />
       </VariantBlock>
 
       <VariantBlock

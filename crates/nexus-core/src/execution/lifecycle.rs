@@ -398,9 +398,7 @@ impl ExecutionHandle {
     /// `None` in production: only a test that must force the subscribe/close
     /// interleaving supplies one (see [`RunnerDeps::subscription_observer`]).
     #[must_use]
-    pub(crate) fn subscription_observer(
-        &self,
-    ) -> Option<Arc<dyn ExecutionSubscriptionObserver>> {
+    pub(crate) fn subscription_observer(&self) -> Option<Arc<dyn ExecutionSubscriptionObserver>> {
         self.subscription_observer.clone()
     }
 
@@ -479,15 +477,11 @@ impl ExecutionHandle {
     /// checkable rather than assumed.
     #[must_use]
     pub fn owned_tasks_finished(&self) -> bool {
-        match self
-            .scheduler_task
+        self.scheduler_task
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .as_ref()
-        {
-            Some(task) => task.is_finished(),
-            None => true,
-        }
+            .is_none_or(tokio::task::JoinHandle::is_finished)
     }
 
     /// Stop and JOIN the owned supervisor wake/clock task, if one was
@@ -569,7 +563,10 @@ impl ExecutionHandle {
         self.coordinator.abort_all_drives().await;
         if let Some(authority) = &self.workspace_commit {
             authority.manager().wait_for_admitted_commits().await;
-            authority.release_authority();
+            // A confirmed close is the whole contract here: `false` would only
+            // mean this authority held no recoverable lease (or released it
+            // already), so the answer is deliberately not acted on.
+            let _released = authority.release_authority();
         }
         self.settled.store(true, Ordering::SeqCst);
         self.settled_notify.notify_waiters();
@@ -812,7 +809,10 @@ impl CoreService {
         receipt: tokio::sync::oneshot::Receiver<()>,
     ) {
         let _start = Arc::clone(&self.inner.start_fence).read_owned().await;
-        match self.start_execution_fenced(deps, build_observer, &handoff).await {
+        match self
+            .start_execution_fenced(deps, build_observer, &handoff)
+            .await
+        {
             Ok(handle) => {
                 // A successful `send` only QUEUES the owner, and a caller that
                 // is dropped before its next poll drops it again — so the owner
@@ -1072,7 +1072,7 @@ impl CoreService {
             if let Some(config) = deps.hosted_scheduler {
                 let starter: Arc<dyn ScheduleRunStarter> =
                     Arc::new(CoordinatorScheduleRunStarter::new(
-                        Arc::clone(&coordinator),
+                        &coordinator,
                         deps.nexus_home.clone().unwrap_or_default(),
                         capability_holder.clone(),
                         deps.daemon_tool_dispatch.clone(),
@@ -1157,8 +1157,8 @@ impl CoreService {
             scheduler_shutdown,
             #[cfg(feature = "connect-client")]
             peer_control: std::sync::Mutex::new(None),
-            workflow_subscriptions:
-                crate::execution::run_events::WorkflowSubscriptionRegistry::new(),
+            workflow_subscriptions: crate::execution::run_events::WorkflowSubscriptionRegistry::new(
+            ),
             subscription_observer: deps.subscription_observer,
         }))
     }

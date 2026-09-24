@@ -34,9 +34,7 @@ pub enum CoreContextError {
     ///
     /// A version race never produces an orphan successful version: the caller
     /// re-reads the pointer and retries against the committed winner.
-    #[error(
-        "core context version race on schedule {0}: the pointer no longer names version {1}"
-    )]
+    #[error("core context version race on schedule {0}: the pointer no longer names version {1}")]
     VersionRace(String, u32),
     /// More than one schedule names the same run as its
     /// `current_session_id`, so "the schedule that owns this run" has no
@@ -300,8 +298,11 @@ impl CoreContextManager {
         let new_version = CoreContextVersion(current_version.0 + 1);
 
         // Compute new payload from the previous (pointed-at) content.
-        let previous_payload =
-            Some(read_version_in_tx(&mut tx, &schedule_id_owned, current_version).await?.content);
+        let previous_payload = Some(
+            read_version_in_tx(&mut tx, &schedule_id_owned, current_version)
+                .await?
+                .content,
+        );
 
         let new_payload = apply_step(previous_payload.as_ref(), &step, &author)?;
 
@@ -1246,13 +1247,15 @@ mod tests {
     async fn settle_schedule(pool: &SqlitePool, schedule_id: &str, status: &str) {
         let now = chrono::Utc::now().timestamp();
         // SAFETY: test-only — DML helper for test state setup.
-        sqlx::query("UPDATE creator_schedules SET status = ?, updated_at = ? WHERE schedule_id = ?")
-            .bind(status)
-            .bind(now)
-            .bind(schedule_id)
-            .execute(pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            "UPDATE creator_schedules SET status = ?, updated_at = ? WHERE schedule_id = ?",
+        )
+        .bind(status)
+        .bind(now)
+        .bind(schedule_id)
+        .execute(pool)
+        .await
+        .unwrap();
     }
 
     /// How many immutable `core_context_versions` rows `schedule_id` owns.
@@ -1302,7 +1305,10 @@ mod tests {
                 "{status}: expected a terminal refusal, got {err:?}"
             );
             let reason = err.to_string();
-            assert!(reason.contains(status), "{status}: names the status: {reason}");
+            assert!(
+                reason.contains(status),
+                "{status}: names the status: {reason}"
+            );
             assert!(
                 reason.contains("terminal"),
                 "{status}: names the refusal: {reason}"
@@ -1428,7 +1434,10 @@ mod tests {
         let reason = ambiguous.unwrap_err().to_string();
         assert!(reason.contains("run-head-1"), "names the run: {reason}");
         assert!(reason.contains("HEAD-OWNED"), "names both owners: {reason}");
-        assert!(reason.contains("HEAD-SECOND"), "names both owners: {reason}");
+        assert!(
+            reason.contains("HEAD-SECOND"),
+            "names both owners: {reason}"
+        );
     }
 
     // ---------- R6: Per-schedule version bump race ----------

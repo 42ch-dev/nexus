@@ -276,11 +276,10 @@ impl CoreService {
             }
             CoreAccess::EngineOwner => {
                 let options = GuardedPoolOptions::default();
-                let joined = nexus_local_db::writer_protocol::join_live_engine_pool(
-                    &db_path, options,
-                )
-                .await
-                .map_err(local_db_err)?;
+                let joined =
+                    nexus_local_db::writer_protocol::join_live_engine_pool(&db_path, options)
+                        .await
+                        .map_err(local_db_err)?;
                 owns_engine_admission = joined.is_none();
                 let guarded = match joined {
                     Some(guarded) => guarded,

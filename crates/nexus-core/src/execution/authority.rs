@@ -74,14 +74,14 @@ impl WorkspaceAuthorityLease {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take();
-        match file {
-            Some(file) => {
-                unlock(&file);
-                drop(file);
-                true
-            }
-            None => false,
-        }
+        // Explicit `flock` unlock, then the close: releasing here leaves the
+        // same state as the dropped-lease path.
+        let Some(file) = file else {
+            return false;
+        };
+        unlock(&file);
+        drop(file);
+        true
     }
 }
 

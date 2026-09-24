@@ -699,7 +699,7 @@ impl CoreService {
 /// and that pin's drift check — reads through here, so no two callers can
 /// disagree about what the document says. A workspace with no registration is
 /// `Ok(None)`; an unreadable or malformed document is an environment fault.
-pub(crate) fn selected_workspace_meta_root(
+fn selected_workspace_meta_root(
     nexus_home: &std::path::Path,
     creator_id: &str,
     workspace_slug: &str,
@@ -762,7 +762,7 @@ pub(crate) fn selected_workspace_meta_root(
 /// factory runs later compares SELECTIONS and must not apply it — see
 /// [`selection_matches_pinned_root`].
 #[cfg(feature = "execution")]
-pub(crate) fn canonical_selected_workspace_root(
+pub fn canonical_selected_workspace_root(
     nexus_home: &std::path::Path,
     creator_id: &str,
     workspace_slug: &str,
@@ -802,7 +802,7 @@ pub(crate) fn canonical_selected_workspace_root(
 /// the execution+Host edge), so a build without the Host plane carries no dead
 /// comparison.
 #[cfg(all(feature = "execution", feature = "provider-host"))]
-pub(crate) fn selection_matches_pinned_root(
+pub fn selection_matches_pinned_root(
     nexus_home: &std::path::Path,
     creator_id: &str,
     workspace_slug: &str,
@@ -871,7 +871,7 @@ fn selected_canonical_workspace_root(
 /// [`CoreWorkspaceStateProvider`]: crate::execution::state_provider::CoreWorkspaceStateProvider
 /// [`WorkspaceCommitAuthority`]: crate::execution::workspace::WorkspaceCommitAuthority
 #[cfg(feature = "execution")]
-pub(crate) fn lossless_root_str(canonical: &std::path::Path) -> CoreResult<&str> {
+pub fn lossless_root_str(canonical: &std::path::Path) -> CoreResult<&str> {
     canonical.to_str().ok_or_else(|| CoreError::Internal {
         category: format!(
             "workspace root {}: the canonical creative root is not valid UTF-8, so the \

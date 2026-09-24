@@ -444,7 +444,13 @@ impl WorkflowSubscription {
         root_run_id: String,
         control: SseFrame,
     ) -> Self {
-        Self::new(creator_id, core_generation, root_run_id, None, Some(control))
+        Self::new(
+            creator_id,
+            core_generation,
+            root_run_id,
+            None,
+            Some(control),
+        )
     }
 
     #[must_use]
@@ -481,54 +487,52 @@ impl WorkflowSubscription {
         let mut bytes = 0usize;
         let mut closed = false;
         loop {
-            let frame = match state.pending.take() {
-                Some(frame) => frame,
-                None => {
-                    let Some(live) = state.live.as_mut() else {
-                        // Only a control frame was ever queued (already taken).
+            let frame = if let Some(frame) = state.pending.take() {
+                frame
+            } else {
+                let Some(live) = state.live.as_mut() else {
+                    // Only a control frame was ever queued (already taken).
+                    closed = true;
+                    break;
+                };
+                match live.poll() {
+                    PolledFrame::Frame(frame) => frame,
+                    // The ring closed: an authoritative terminal state was
+                    // published, or the owner released the ring.
+                    PolledFrame::Closed => {
                         closed = true;
                         break;
-                    };
-                    match live.poll() {
-                        PolledFrame::Frame(frame) => frame,
-                        // The ring closed: an authoritative terminal state was
-                        // published, or the owner released the ring.
-                        PolledFrame::Closed => {
+                    }
+                    PolledFrame::Empty => {
+                        // Drain-and-return: what is already buffered is
+                        // returned NOW, so the transport flushes each frame
+                        // as it arrives. Only an otherwise empty pull waits
+                        // for the next one.
+                        if !frames.is_empty() {
+                            break;
+                        }
+                        // Register BEFORE the closed check and the await: a
+                        // release landing in between must not be lost, and
+                        // `notify_waiters` stores no permit for a later
+                        // waiter.
+                        let notified = self.wake.notified();
+                        tokio::pin!(notified);
+                        notified.as_mut().enable();
+                        if self.closed.load(Ordering::SeqCst) {
                             closed = true;
                             break;
                         }
-                        PolledFrame::Empty => {
-                            // Drain-and-return: what is already buffered is
-                            // returned NOW, so the transport flushes each frame
-                            // as it arrives. Only an otherwise empty pull waits
-                            // for the next one.
-                            if !frames.is_empty() {
-                                break;
-                            }
-                            // Register BEFORE the closed check and the await: a
-                            // release landing in between must not be lost, and
-                            // `notify_waiters` stores no permit for a later
-                            // waiter.
-                            let notified = self.wake.notified();
-                            tokio::pin!(notified);
-                            notified.as_mut().enable();
-                            if self.closed.load(Ordering::SeqCst) {
+                        tokio::select! {
+                            () = &mut notified => {
                                 closed = true;
                                 break;
                             }
-                            tokio::select! {
-                                () = &mut notified => {
-                                    closed = true;
-                                    break;
-                                }
-                                received = live.recv() => match received {
-                                    Some(frame) => frame,
-                                    None => {
-                                        closed = true;
-                                        break;
-                                    }
-                                },
-                            }
+                            received = live.recv() => if let Some(frame) = received {
+                                frame
+                            } else {
+                                closed = true;
+                                break;
+                            },
                         }
                     }
                 }
@@ -600,6 +604,9 @@ impl WorkflowSubscriptionRegistry {
         }
         let entry = Arc::new(subscription);
         entries.insert(entry.id.clone(), Arc::clone(&entry));
+        // The critical section ends WITH the insert: the table lock is done
+        // there and is released before the published entry is handed back.
+        drop(entries);
         Some(entry)
     }
 
@@ -650,6 +657,15 @@ impl WorkflowSubscriptionRegistry {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .len()
+    }
+
+    /// Whether this owner serves no token at all (test/diagnostic).
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty()
     }
 
     /// Whether the table is sealed (test/diagnostic).
