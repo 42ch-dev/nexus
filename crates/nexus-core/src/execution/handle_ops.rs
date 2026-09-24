@@ -1179,7 +1179,13 @@ impl ExecutionHandle {
     /// Reuses the coordinator's T1 admission barrier (the same predicate
     /// `ensure_driving`/`admit_schedule` gate on), so an operation reaching a
     /// closing owner cannot install an effect beside the in-flight drain.
-    fn ensure_admitting(&self) -> CoreResult<()> {
+    ///
+    /// Crate-visible because the Compute facade on this same handle
+    /// (`execution/compute.rs`) is a second entry-point set over the same
+    /// owner: it must ask the SAME predicate, and inherent methods share one
+    /// crate-wide namespace, so a second local copy could only drift from this
+    /// one.
+    pub(crate) fn ensure_admitting(&self) -> CoreResult<()> {
         if self.coordinator().is_draining() {
             return Err(CoreError::Closing);
         }

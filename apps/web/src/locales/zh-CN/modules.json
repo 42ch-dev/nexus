@@ -86,6 +86,8 @@
     "worldGraphErrorDescription": "角色条目暂时不可用，请重试。",
     "kbGraphLoading": "正在加载角色…",
     "runLoadingDetail": "正在加载运行…",
+    "runErrorTitle": "无法加载该运行",
+    "runErrorDescription": "运行详情暂时不可用——该运行可能已被清除，或服务不可达。请重试。",
     "runsStatus": {
       "running": "运行中",
       "needsReview": "待审阅",

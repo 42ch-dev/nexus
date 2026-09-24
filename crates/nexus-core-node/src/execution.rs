@@ -1,21 +1,18 @@
 //! Execution / Host control native family surface (P5-T3).
 //!
-//! Two lanes, both thin napi adapters over the single core authority:
+//! Four lanes, all thin napi adapters over the single core authority:
 //!
 //! 1. **Preset authoring + Strategy edits** — the P3 `CoreService` authority
 //!    (`presets.rs`). Owned JSON payloads in, generated wire DTOs out; no
-//!    SQL, no second engine, no policy. Compute is deliberately NOT routed:
-//!    the WASM edge is a daemon-cohort capability (architecture §Cohorts,
-//!    `compute` feature never enabled on the default/domain/Connect-host
-//!    cohort), so the compute run family stays an explicit 501
-//!    route_not_migrated on this surface instead of a degraded fake.
+//!    SQL, no second engine, no policy.
 //! 2. **Execution owner establishment + schedule mutations** — the P3
 //!    `ExecutionHandle` (`start_execution` / `add_schedule` /
-//!    `signal_schedule`). The standalone service builds `RunnerDeps` from
-//!    core-side defaults (bare builtin capability registry, no daemon tool
-//!    dispatch, no WASM compute runtime). The provider port is the env's
-//!    injected JS-provider port: a handle can never exist without a provider
-//!    contract.
+//!    `signal_schedule`). The hosted factory composes the owner's runtime
+//!    edges (workspace ports, Host prompt executor, catalog, run-event
+//!    registry, scheduler) including, under the `compute` cohort feature, the
+//!    ONE shared WASM engine/cache/serializer bundle. The provider port is the
+//!    env's injected JS-provider port: a handle can never exist without a
+//!    provider contract.
 //!
 //! The control reads and the core-context edit (v1.195 P0-T6) are the SAME
 //! `ExecutionHandle` authority as the mutations: schedule list/inspect, the
@@ -32,6 +29,14 @@
 //! no second event dialect is minted here. The frames travel exactly as the
 //! ring encoded them (`id`/`event`/`data`), so the service transport may write
 //! them verbatim and never renumbers.
+//!
+//! The Compute family (v1.195 P2-T3) is the fourth: the C1–C8 public
+//! operations of current-host contracts §5 over the SAME owner. Discovery and
+//! module detail read the compiled-in registry, run/detail/history/discard/
+//! clear delegate to the existing compute authority on this handle, and the
+//! WASM engine/cache/serializer are the ONE bundle the hosted factory
+//! installed at boot — nothing here compiles a module, mints a run id or
+//! touches a run row itself.
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
@@ -41,6 +46,18 @@ use nexus_agent_host::{HostFacade, HostManager};
 use nexus_contracts::generated::core::{
     CoreWorkflowEventBatch, CoreWorkflowSubscribeRequest, CoreWorkflowSubscription,
 };
+use nexus_contracts::generated::daemon_api::compute::clear_runs_query::ClearRunsQuery;
+use nexus_contracts::generated::daemon_api::compute::clear_runs_response::ClearRunsResponse;
+use nexus_contracts::generated::daemon_api::compute::discard_run_response::DiscardRunResponse;
+use nexus_contracts::generated::daemon_api::compute::list_modules_response::ListModulesResponse;
+use nexus_contracts::generated::daemon_api::compute::list_runs_query::ListRunsQuery;
+use nexus_contracts::generated::daemon_api::compute::module_detail::ModuleDetail;
+use nexus_contracts::generated::daemon_api::compute::run_accept_request::RunAcceptRequest;
+use nexus_contracts::generated::daemon_api::compute::run_accept_response::RunAcceptResponse;
+use nexus_contracts::generated::daemon_api::compute::run_detail::RunDetail;
+use nexus_contracts::generated::daemon_api::compute::run_list_response::RunListResponse;
+use nexus_contracts::generated::daemon_api::compute::run_request::RunRequest;
+use nexus_contracts::generated::daemon_api::compute::run_response::RunResponse;
 use nexus_contracts::generated::daemon_api::orchestration::sessions::list_sessions_query::ListSessionsQuery;
 use nexus_contracts::generated::daemon_api::orchestration::sessions::list_sessions_response::ListSessionsResponse;
 use nexus_contracts::generated::daemon_api::orchestration::sessions::session_detail_response::SessionDetailResponse;
@@ -331,6 +348,164 @@ impl NativeCore {
             let response: EditCoreContextResponse = handle
                 .edit_core_context(&principal, schedule_id, request)
                 .await?;
+            Ok(response)
+        })
+        .await
+    }
+
+    // ── Compute module/run/transaction surface (v1.195 P2-T3) ───────────────
+
+    /// `GET /v1/daemon/compute/modules` — the installed module registry (C1).
+    ///
+    /// Machine capability rather than creator state, so there is no
+    /// per-creator filter — but the principal is still verified, and the
+    /// module DETAIL this lists carries the invocation schema Run Studio
+    /// renders straight from the shipped manifest (TS never manufactures one).
+    #[napi]
+    pub async fn list_compute_modules(&self, principal_handle: String) -> Result<Buffer> {
+        let handle = self.execution_handle()?;
+        self.json_call(principal_handle, async move |core, principal| {
+            let _ = &core;
+            let response: ListModulesResponse = handle.list_compute_modules(&principal)?;
+            Ok(response)
+        })
+        .await
+    }
+
+    /// `GET /v1/daemon/compute/modules/{module_id}` — one module's manifest (C2).
+    #[napi]
+    pub async fn get_compute_module(
+        &self,
+        principal_handle: String,
+        module_id: String,
+    ) -> Result<Buffer> {
+        let handle = self.execution_handle()?;
+        self.json_call(principal_handle, async move |core, principal| {
+            let _ = &core;
+            let response: ModuleDetail = handle.get_compute_module(&principal, module_id)?;
+            Ok(response)
+        })
+        .await
+    }
+
+    /// `POST /v1/daemon/compute/run` — invoke a module against an owned World (C3).
+    ///
+    /// The run reaches the WASM authority the hosted factory installed, applies
+    /// the existing input/fuel/memory/wall-clock limits, and persists proposals
+    /// (or the honest failure) WITHOUT mutating the World — the caller reviews
+    /// and then accepts or discards.
+    #[napi]
+    pub async fn compute_run(
+        &self,
+        principal_handle: String,
+        request_json: Buffer,
+    ) -> Result<Buffer> {
+        let request: RunRequest = decode(request_json, "request")?;
+        let handle = self.execution_handle()?;
+        self.json_call(principal_handle, async move |core, principal| {
+            let _ = &core;
+            let response: RunResponse = handle.compute_run(&principal, request).await?;
+            Ok(response)
+        })
+        .await
+    }
+
+    /// `GET /v1/daemon/compute/runs/{run_id}` — one run's proposals or error (C4).
+    #[napi]
+    pub async fn get_compute_run(
+        &self,
+        principal_handle: String,
+        run_id: String,
+    ) -> Result<Buffer> {
+        let handle = self.execution_handle()?;
+        self.json_call(principal_handle, async move |core, principal| {
+            let _ = &core;
+            let response: RunDetail = handle.get_compute_run(&principal, run_id).await?;
+            Ok(response)
+        })
+        .await
+    }
+
+    /// `GET /v1/daemon/compute/runs` — the creator's run history page (C5).
+    ///
+    /// The query crosses as the generated DTO (`deny_unknown_fields` plus the
+    /// closed status enum: a key or value outside the schema is a typed client
+    /// refusal), and scope stays the core owner's — this adapter adds no filter
+    /// and no default.
+    #[napi]
+    pub async fn list_compute_runs(
+        &self,
+        principal_handle: String,
+        query_json: Buffer,
+    ) -> Result<Buffer> {
+        let query: ListRunsQuery = decode(query_json, "query")?;
+        let handle = self.execution_handle()?;
+        self.json_call(principal_handle, async move |core, principal| {
+            let _ = &core;
+            let response: RunListResponse = handle.list_compute_runs(&principal, query).await?;
+            Ok(response)
+        })
+        .await
+    }
+
+    /// `POST /v1/daemon/compute/runs/{run_id}/accept` — commit once (C6).
+    ///
+    /// The generated request carries the optional `evt_<index>` selection; the
+    /// ONE domain transaction, its CAS and its rollback stay in the core.
+    #[napi]
+    pub async fn accept_compute_run(
+        &self,
+        principal_handle: String,
+        run_id: String,
+        request_json: Buffer,
+    ) -> Result<Buffer> {
+        let request: RunAcceptRequest = decode(request_json, "request")?;
+        let handle = self.execution_handle()?;
+        self.json_call(principal_handle, async move |core, principal| {
+            let _ = &core;
+            let response: RunAcceptResponse = handle
+                .accept_compute_run(&principal, run_id, request)
+                .await?;
+            Ok(response)
+        })
+        .await
+    }
+
+    /// `POST /v1/daemon/compute/runs/{run_id}/discard` — drop the proposals (C7).
+    #[napi]
+    pub async fn discard_compute_run(
+        &self,
+        principal_handle: String,
+        run_id: String,
+    ) -> Result<Buffer> {
+        let handle = self.execution_handle()?;
+        self.json_call(principal_handle, async move |core, principal| {
+            let _ = &core;
+            let response: DiscardRunResponse =
+                handle.discard_compute_run(&principal, run_id).await?;
+            Ok(response)
+        })
+        .await
+    }
+
+    /// `DELETE /v1/daemon/compute/runs?world_id=…` — World-scoped clear (C8).
+    ///
+    /// The generated query makes `world_id` required and admits only terminal
+    /// status values, so a missing scope or an out-of-vocabulary filter is
+    /// refused at the transport; the terminal-only, direct-lane predicate stays
+    /// the storage authority, and a foreign World refuses before any row is
+    /// touched.
+    #[napi]
+    pub async fn clear_compute_runs(
+        &self,
+        principal_handle: String,
+        query_json: Buffer,
+    ) -> Result<Buffer> {
+        let query: ClearRunsQuery = decode(query_json, "query")?;
+        let handle = self.execution_handle()?;
+        self.json_call(principal_handle, async move |core, principal| {
+            let _ = &core;
+            let response: ClearRunsResponse = handle.clear_compute_runs(&principal, query).await?;
             Ok(response)
         })
         .await

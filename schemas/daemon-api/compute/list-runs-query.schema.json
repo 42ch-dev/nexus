@@ -1,0 +1,32 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/compute/list-runs-query.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ListRunsQuery",
+  "description": "Query parameters for GET /v1/daemon/compute/runs — filters for the active creator's compute-run history (V1.147 P0 direct lane).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "world_id": {
+      "type": "string",
+      "description": "Restrict to runs targeting this World."
+    },
+    "module_id": {
+      "type": "string",
+      "description": "Restrict to runs of this module."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["running", "succeeded", "failed", "applied", "discarded"],
+      "description": "Restrict to one lifecycle status."
+    },
+    "limit": {
+      "type": "integer",
+      "description": "Page size (default 20, max 100)."
+    },
+    "cursor": {
+      "type": "string",
+      "description": "Opaque cursor from a previous page's `next_cursor`. Clients MUST NOT parse it."
+    }
+  }
+}

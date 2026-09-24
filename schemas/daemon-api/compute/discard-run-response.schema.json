@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/compute/discard-run-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus DiscardRunResponse",
+  "description": "Response for POST /v1/daemon/compute/runs/{run_id}/discard — the run's proposals were dropped with no domain effect (V1.147 P0 direct lane).",
+  "type": "object",
+  "required": ["run_id", "status"],
+  "additionalProperties": false,
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "description": "The discarded run."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["discarded"],
+      "description": "Always `discarded` on success."
+    }
+  }
+}
