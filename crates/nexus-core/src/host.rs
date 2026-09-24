@@ -38,6 +38,13 @@ use nexus_contracts::core_host_query_response::{
     NexusPaginationInfo,
 };
 use nexus_contracts::generated::daemon_api::agent_host::character_operation_result::CharacterOperationResult;
+// Only the `test-hooks`-gated direct-settlement seam names these, so they are
+// gated with it: a production build carries no unused import
+// (see `HostHandle::settle_character_terminal`).
+#[cfg(any(test, feature = "test-hooks"))]
+use nexus_contracts::generated::daemon_api::agent_host::character_operation_result::{
+    CharacterOperationResultFinishReason, CharacterOperationResultRunStatus,
+};
 use nexus_contracts::generated::daemon_api::agent_host::{
     CreateSessionRequest, ExecuteOperationRequest, OperationResponse, SessionResponse,
 };
@@ -1005,6 +1012,27 @@ impl HostHandle {
         fenced: Option<crate::actor_knowledge::AdmittedKnowledgeContext>,
     ) {
         drain_character_operation(self.registry.clone(), stream, snapshot, fenced).await;
+    }
+
+    /// Test-only settlement seam: record a Character operation's terminal
+    /// status/reason directly, with no provider stream — the duplicate
+    /// settlement the first-writer rule turns into a no-op and the bounded
+    /// terminal retention window both need a terminal that already exists.
+    ///
+    /// Compiled out of the production build for the same reason as
+    /// [`Self::settle_character_stream`]: the registry's own writer is
+    /// crate-visible, so this is the test build's only entry into it and a
+    /// production caller has none — not even through
+    /// [`Self::actor_sessions`].
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub fn settle_character_terminal(
+        &self,
+        operation_id: &HostOperationId,
+        run_status: CharacterOperationResultRunStatus,
+        finish_reason: Option<CharacterOperationResultFinishReason>,
+    ) {
+        self.registry
+            .settle_operation_terminal(operation_id, run_status, finish_reason);
     }
 
     /// Close the authority. Retired Actor sessions get one bounded shutdown

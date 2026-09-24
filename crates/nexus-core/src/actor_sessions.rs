@@ -620,11 +620,26 @@ impl ActorSessionRegistry {
 
     /// Commit terminal outcome and enforce terminal FIFO retention.
     ///
+    /// Crate-visible because terminal truth is written only from inside the
+    /// authority that owns the original exec stream ([`crate::host`]): the
+    /// `execute`-spawned drain and the owner-authorized cancel path. Outside
+    /// this crate the public [`ActorSessionRegistry`] accessor
+    /// ([`crate::HostHandle::actor_sessions`]) therefore exposes no terminal
+    /// writer at all; a test build reaches one only through the
+    /// `test-hooks`-gated seam on [`crate::HostHandle`].
+    ///
+    /// No authority-owned caller exists yet in this batch: the owner-authorized
+    /// cancel path that commits the terminal it wins (plan P0-T3) is this
+    /// writer's intended in-crate consumer, so the crate-visible surface is kept
+    /// for it and the not-yet-used state is stated here instead of the method
+    /// staying reachable from outside the crate.
+    ///
     /// The FIRST terminal/fault settlement wins: a later settlement of the same
     /// operation (a duplicate terminal, a trailing producer fault, or a cancel
     /// that lost the phase race) leaves the recorded truth untouched and never
     /// re-enters the retention FIFO.
-    pub fn commit_operation_terminal(
+    #[allow(dead_code)]
+    pub(crate) fn commit_operation_terminal(
         &self,
         operation_id: &HostOperationId,
         outcome: CharacterOperationResult,
@@ -640,8 +655,13 @@ impl ActorSessionRegistry {
     /// reserved `disabled` value: this batch has no capture writer to settle it
     /// (technical contract §5).
     ///
+    /// Crate-visible for the same reason as
+    /// [`Self::commit_operation_terminal`]: the authority-owned drain is the
+    /// only production writer, so a caller outside this crate cannot record
+    /// terminal status/reason through the public registry accessor.
+    ///
     /// Settles once, like [`Self::commit_operation_terminal`].
-    pub fn settle_operation_terminal(
+    pub(crate) fn settle_operation_terminal(
         &self,
         operation_id: &HostOperationId,
         run_status: CharacterOperationResultRunStatus,

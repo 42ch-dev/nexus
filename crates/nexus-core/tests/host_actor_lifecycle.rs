@@ -1262,8 +1262,10 @@ async fn character_terminal_first_match_is_immutable_and_stops_the_drain() {
 
     // A later settlement of the same operation (a trailing producer fault or a
     // cancel that lost the phase race) is a no-op: the settlement is immutable
-    // and never re-enters the retention FIFO.
-    handle.actor_sessions().settle_operation_terminal(
+    // and never re-enters the retention FIFO. The registry's own writer is
+    // crate-visible, so this test build drives it through the authority's gated
+    // seam.
+    handle.settle_character_terminal(
         &operation_id,
         CharacterOperationResultRunStatus::Succeeded,
         Some(CharacterOperationResultFinishReason::EndTurn),
@@ -1448,7 +1450,7 @@ async fn character_terminal_eviction_and_reopen_have_no_detailed_outcome() {
                 operation_id: operation_id.clone(),
             })
             .expect("a Character operation reserves an outcome");
-        handle.actor_sessions().settle_operation_terminal(
+        handle.settle_character_terminal(
             &operation_id,
             CharacterOperationResultRunStatus::Succeeded,
             Some(CharacterOperationResultFinishReason::EndTurn),
