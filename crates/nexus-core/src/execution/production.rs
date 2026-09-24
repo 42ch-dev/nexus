@@ -526,7 +526,7 @@ mod tests {
             user_home, CREATOR, SLUG,
         ))
         .expect("operational dir");
-        register_selected_root(user_home, serde_json::json!(creative_root));
+        register_selected_root(user_home, &serde_json::json!(creative_root));
 
         let db_path = nexus_home_layout::workspace_state_db_path(user_home, CREATOR, SLUG);
         // Seed through a temporary admitted pool and RELEASE the writer guard
@@ -565,7 +565,7 @@ mod tests {
     /// This is the supported operational write the CLI's `creator workspace
     /// create --creative-root` performs, not a private seed: the same
     /// document the admission pin and the drift check read.
-    fn register_selected_root(user_home: &std::path::Path, local_root: serde_json::Value) {
+    fn register_selected_root(user_home: &std::path::Path, local_root: &serde_json::Value) {
         std::fs::write(
             nexus_home_layout::operational_workspace_dir(user_home, CREATOR, SLUG)
                 .join("meta.json"),
@@ -576,7 +576,7 @@ mod tests {
     }
 
     /// The fixture with its selected `local_root` set BEFORE any core opens.
-    async fn fixture_registering(local_root: serde_json::Value) -> Fixture {
+    async fn fixture_registering(local_root: &serde_json::Value) -> Fixture {
         let fx = fixture().await;
         register_selected_root(fx.tmp.path(), local_root);
         fx
@@ -874,7 +874,7 @@ mod tests {
         // The moved root: a real directory the metadata now selects instead.
         let moved = fx.tmp.path().join("moved-creative-root");
         std::fs::create_dir_all(&moved).expect("moved root");
-        register_selected_root(fx.tmp.path(), serde_json::json!(moved));
+        register_selected_root(fx.tmp.path(), &serde_json::json!(moved));
 
         assert_eq!(
             core.admission_creative_root(),
@@ -895,7 +895,7 @@ mod tests {
 
         // Nothing was retained by the refusal: with the selection back on the
         // pinned root, the same admission composes the bundle it always would.
-        register_selected_root(fx.tmp.path(), serde_json::json!(fx.creative_root));
+        register_selected_root(fx.tmp.path(), &serde_json::json!(fx.creative_root));
         assert!(
             core.hosted_workspace_deps().await.is_ok(),
             "the refusal must not retain the workspace authority"
@@ -913,7 +913,7 @@ mod tests {
             serde_json::json!("   "),
             serde_json::json!("/nonexistent/nexus-t5-root"),
         ] {
-            let fx = fixture_registering(registered.clone()).await;
+            let fx = fixture_registering(&registered).await;
             let core = open_core(&fx).await;
             assert!(
                 core.admission_creative_root().is_none(),
@@ -1018,7 +1018,7 @@ mod tests {
             pinned.to_str().is_none(),
             "the fixture must resolve to a non-UTF-8 canonical root, got {pinned:?}"
         );
-        register_selected_root(fx.tmp.path(), serde_json::json!(link));
+        register_selected_root(fx.tmp.path(), &serde_json::json!(link));
         let core = open_core(&fx).await;
 
         match core.hosted_workspace_deps().await {
@@ -1130,7 +1130,7 @@ mod tests {
             "the moved root must resolve to non-UTF-8 bytes, got {moved:?}"
         );
         assert_ne!(moved, pinned, "the moved root must differ from the pin");
-        register_selected_root(fx.tmp.path(), serde_json::json!(link));
+        register_selected_root(fx.tmp.path(), &serde_json::json!(link));
 
         assert_eq!(
             core.admission_creative_root(),
@@ -1165,7 +1165,7 @@ mod tests {
 
         // Nothing was retained by the refusal: the pinned selection composes the
         // bundle it always would, so no manager or port survived it.
-        register_selected_root(fx.tmp.path(), serde_json::json!(fx.creative_root));
+        register_selected_root(fx.tmp.path(), &serde_json::json!(fx.creative_root));
         assert!(
             core.hosted_workspace_deps().await.is_ok(),
             "the refusal must retain no workspace authority"
@@ -1200,7 +1200,7 @@ mod tests {
             .expect("fixture file");
         register_selected_root(
             fx.tmp.path(),
-            serde_json::json!(fx.creative_root.join("notes/plain.txt/inner")),
+            &serde_json::json!(fx.creative_root.join("notes/plain.txt/inner")),
         );
         match core.hosted_workspace_deps().await.map(|_| ()) {
             Err(CoreError::Internal { .. }) => {}
@@ -1216,7 +1216,7 @@ mod tests {
             !authority_lease_path(&core).exists(),
             "neither refusal may reach the workspace authority"
         );
-        register_selected_root(fx.tmp.path(), serde_json::json!(fx.creative_root));
+        register_selected_root(fx.tmp.path(), &serde_json::json!(fx.creative_root));
         assert!(
             core.hosted_workspace_deps().await.is_ok(),
             "a valid registration must still compose the pinned bundle"

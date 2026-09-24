@@ -1850,6 +1850,7 @@ mod tests {
                 ring.records.iter().all(|r| r.frame.event == "host_event"),
                 "an over-cap frame would have been published as a gap record instead"
             );
+            drop(state);
         }
 
         let live = registry
