@@ -87,6 +87,8 @@
     "worldGraphErrorDescription": "Character entries are unavailable right now. Try again.",
     "kbGraphLoading": "Loading characters…",
     "runLoadingDetail": "Loading Run…",
+    "runErrorTitle": "Could not load this Run",
+    "runErrorDescription": "Run detail is unavailable right now — the Run may have been cleared, or the daemon is unreachable. Try again.",
     "runsStatus": {
       "running": "Running",
       "needsReview": "Needs review",

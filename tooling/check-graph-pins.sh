@@ -51,7 +51,11 @@
 #   in-process embedded server; implies connect-client):
 #     same pins as connect-client
 #   -p nexus-core-node (native/TS host): nexus-core resolves
-#     feats=[default,execution] — the node-owned selection is unchanged.
+#     feats=[compute,default,execution,provider-host] — the node-owned selection
+#     gains the hosted production factory's Host-plane half (v1.195 P0-T5) and
+#     the WASM compute runtime its factory installs (v1.195 P2-T3). The
+#     default/domain and Connect cohorts below keep nexus-agent-host and
+#     nexus-wasm-host absent.
 #
 # Feature evidence (resolved feature set on the inverted probe row):
 #   graph-flow MUST resolve with an EMPTY feature set everywhere.
@@ -234,7 +238,13 @@ done
 
 # --- native/TS host (nexus-core-node) ---------------------------------------
 
-assert_features nexus-core-node "" nexus-core "default,execution"
+# v1.195 P0-T5: the native cohort resolves the hosted production factory's
+# both halves (`execution` + `provider-host`); v1.195 P2-T3 adds the `compute`
+# runtime that same factory installs (ONE WASM engine/cache/serializer).
+assert_features nexus-core-node "" nexus-core "compute,default,execution,provider-host"
+# The cohort edge is real, not a feature-flag claim: the Host plane the hosted
+# factory composes resolves in the node cohort.
+assert_exactly_one nexus-core-node "" nexus-agent-host
 
 # --- selected-edge feature evidence -----------------------------------------
 

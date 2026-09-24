@@ -4,6 +4,7 @@ date: 2026-08-25
 problem_type: convention
 category: conventions
 severity: medium
+last_updated: 2026-09-24
 tags: 
   - cargo-tree
   - feature-gate
@@ -63,10 +64,10 @@ Version values are asserted nowhere — see Guidance §5.
   `client` dev-dep, `agent-client-protocol` as a dev-dep) never count — but
   do not assume `-i` queries behave the same; verify the edge mode in the
   actual probe.
-- **Graph presence ≠ protocol use.** `libp2p =0.56.0` appears in the
+- **Graph presence ≠ protocol use.** `libp2p` (the pinned lockstep value — currently whatever `spoke-connect` requires) appears in the
   `connect-client` graph via spoke-connect's **non-optional base dep** even
   though the remote layer never dials libp2p. The pin is single-version
-  lockstep, not "no libp2p anywhere".
+  lockstep, not "no libp2p anywhere". The pin's *value* is the manifest's business and moves on every upstream lockstep (the companion `libp2p` pin moves with `spoke-connect`); do not restate it in this doc or in a probe.
 
 ### 2. Formulate pins as honest obligations, not absolute absence
 
@@ -74,11 +75,12 @@ Version values are asserted nowhere — see Guidance §5.
 |-----------------|---------|
 | **No new default-graph package** (delta) | "V1.174 adds no new default-graph package" — instead of "graph free of X" |
 | **Exactly-one-version lockstep** in every feature combination | `cargo tree -i rmcp` → ABSENT under default, exactly one `rmcp 3.2.0` under `-F connect-client`, `-F embedded-mcp`, and `-F connect-client,connect-host`; the `=3.2.0` direct pins prevent a second copy when another dep lands |
-| **Feature-combination matrix** with expected package sets per combination | default: no `spoke-connect`, no `libp2p`; `-F connect-client`: spoke-connect + spoke-operations appear, libp2p single 0.56.x |
+| **Feature-combination matrix** with expected package sets per combination | default: no `spoke-connect`, no `libp2p`; `-F connect-client`: spoke-connect + spoke-operations appear, and `libp2p` resolves to exactly one version (the pinned lockstep value) |
 | **Both graphs `--all-targets`** when lockstep upgrades surface extra literal sites | V1.169 spoke-lockstep practice (feature-gated examples expose literal sites) |
 
 ### 3. Probe scripts must not false-green
 
+- **Probe the build shape the obligation is about.** A lib-only `cargo check -p <crate>` can fail while every CI job is green: CI builds tests, and a test build activates the crate's **own dev-dependency**, which unifies a feature the lib-only shape never enables. So "CI is green" and "this check shape compiles" are different facts — name the shape in the obligation (`cargo check -p X`, `cargo check -p X --features Y`, `cargo test -p X`), and when a gate is meant to protect a shape, run that shape rather than a neighbour that happens to pass. When a shape genuinely fails and CI does not, that is a feature-lattice decision (make the shape self-sufficient or retire the cohort), not a probe bug.
 - **The `assert_empty` trap:** `cmd 2>&1 || true` followed by a zero-count
   check turns a **failed `cargo tree`** (nonzero exit) into an empty pin —
   a broken probe reads green. Propagate the cargo-tree exit status; only

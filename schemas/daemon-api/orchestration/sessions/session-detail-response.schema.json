@@ -1,13 +1,1 @@
-{
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://nexus42.invalid/schemas/daemon-api/orchestration/sessions/session-detail-response.schema.json",
-  "schema_version": 1,
-  "title": "Nexus OrchestrationSessionDetailResponse",
-  "description": "Response for GET /v1/daemon/orchestration/sessions/{session_id} — full session detail with status.",
-  "type": "object",
-  "required": ["session"],
-  "properties": {
-    "session": { "$ref": "https://nexus42.invalid/schemas/daemon-api/orchestration/sessions/session-summary.schema.json" }
-  },
-  "additionalProperties": false
-}
+{"$schema":"http://json-schema.org/draft-07/schema#","$id":"https://nexus42.invalid/schemas/daemon-api/orchestration/sessions/session-detail-response.schema.json","schema_version":1,"title":"Nexus OrchestrationSessionDetailResponse","description":"Response for GET /v1/daemon/orchestration/sessions/{session_id} — full session detail with status.","type":"object","required":["session"],"properties":{"session":{"$ref":"https://nexus42.invalid/schemas/daemon-api/orchestration/sessions/session-summary.schema.json"},"workspace_commit":{"description":"Durable workspace-commit revision of this RUN's own checkpointed `workspace.commit` capability output (contract §4). Present only when the run's durable graph context holds that capability's exact successful output, read after the root row and its stored Creator are authorized; absent for a run with no such checkpoint (never synthesized from run state, file bytes or other context data). Survives restart without re-running the capability.","type":"object","required":["revision","committed"],"properties":{"revision":{"type":"string"},"committed":{"type":"boolean","const":true}},"additionalProperties":false}},"additionalProperties":false}

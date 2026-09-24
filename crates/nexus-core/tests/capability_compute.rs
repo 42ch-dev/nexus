@@ -19,15 +19,18 @@
 #![allow(clippy::unwrap_used)]
 
 use nexus_contracts::generated::daemon_api::compute::{
-    run_accept_request::RunAcceptRequest, run_request::RunRequest,
+    clear_runs_query::{ClearRunsQuery, ClearRunsQueryStatus},
+    list_runs_query::{ListRunsQuery, ListRunsQueryStatus},
+    run_accept_request::RunAcceptRequest,
+    run_request::RunRequest,
 };
 use nexus_contracts::CreateWorkRequest;
 use nexus_core::execution::capabilities::{
     execute_tool, ToolContext, ToolExecuteRequest, ToolRuntimeFacts,
 };
 use nexus_core::execution::compute::{
-    accept_compute_run, compute_run, discard_compute_run, get_compute_run, list_compute_runs,
-    ComputeContext, ComputeRunListQuery,
+    accept_compute_run, clear_compute_runs, compute_run, discard_compute_run, get_compute_run,
+    list_compute_runs, ComputeContext,
 };
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService, WorkPatchRequest};
 use nexus_wasm_host::{CachedModule, ModuleCache, ModuleManifest, SandboxConfig, WasmEngine};
@@ -2028,9 +2031,9 @@ async fn list_compute_runs_pages_and_scopes_to_owned_worlds() {
     let page1 = list_compute_runs(
         &f.core,
         &principal,
-        ComputeRunListQuery {
+        ListRunsQuery {
             limit: Some(2),
-            ..ComputeRunListQuery::default()
+            ..ListRunsQuery::default()
         },
     )
     .await
@@ -2051,10 +2054,10 @@ async fn list_compute_runs_pages_and_scopes_to_owned_worlds() {
     let page2 = list_compute_runs(
         &f.core,
         &principal,
-        ComputeRunListQuery {
+        ListRunsQuery {
             limit: Some(2),
             cursor: Some(cursor),
-            ..ComputeRunListQuery::default()
+            ..ListRunsQuery::default()
         },
     )
     .await
@@ -2109,9 +2112,9 @@ async fn list_compute_runs_orders_newest_first() {
     let page1 = list_compute_runs(
         &f.core,
         &principal,
-        ComputeRunListQuery {
+        ListRunsQuery {
             limit: Some(2),
-            ..ComputeRunListQuery::default()
+            ..ListRunsQuery::default()
         },
     )
     .await
@@ -2129,10 +2132,10 @@ async fn list_compute_runs_orders_newest_first() {
     let page2 = list_compute_runs(
         &f.core,
         &principal,
-        ComputeRunListQuery {
+        ListRunsQuery {
             limit: Some(2),
             cursor: Some(cursor),
-            ..ComputeRunListQuery::default()
+            ..ListRunsQuery::default()
         },
     )
     .await
@@ -2472,5 +2475,505 @@ async fn compute_module_registry_lists_embedded_modules() {
     assert!(
         matches!(unknown, Err(CoreError::NotFound { .. })),
         "an unknown module must be not_found, got {unknown:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// v1.195 P2-T2 — terminal history clear (C8 / S2-5)
+// ---------------------------------------------------------------------------
+
+/// Whether a direct-lane run row is still durable.
+///
+/// Clear DELETES rows, so an absence claim is read back through the
+/// authority's own point lookup instead of being inferred from a list page.
+async fn run_row_survives(pool: &sqlx::SqlitePool, run_id: &str) -> bool {
+    nexus_local_db::compute_runs::get_run(pool, run_id)
+        .await
+        .expect("run row read")
+        .is_some()
+}
+
+/// Clear removes a World's TERMINAL run rows — and nothing else.
+///
+/// The three ways a clear can go wrong are each asserted:
+///
+/// - **It eats work that is not history.** A `succeeded` run still awaits
+///   review and a `running` run is not terminal: both must survive, by the
+///   storage predicate rather than by the caller's discipline.
+/// - **It reaches past the World.** Another creator's TERMINAL row is never
+///   touched, and clearing that World is refused as an ownership denial.
+/// - **It undoes an accepted effect.** The applied state delta and the CANON
+///   `compute_result` event are World truth, not run-row state, so they are
+///   still there after the row that produced them is gone.
+///
+/// `query.status` narrows Clear to ONE terminal state and never widens it, and
+/// the owner door (`ExecutionHandle::clear_compute_runs`) consumes the SAME
+/// authority.
+#[tokio::test]
+#[serial_test::serial]
+async fn clear_owned_terminal_history_preserves_effects_and_pending() {
+    let f = fixture().await;
+    let principal = f.core.active_principal().await.unwrap();
+    seed_foreign_world(f.core.pool()).await;
+
+    // ACCEPTED: terminal, and its effect is committed World truth.
+    let applied = run_succeeded(&f, &f.compute).await;
+    accept_compute_run(&f.core, &principal, &applied, accept_request(json!({})))
+        .await
+        .expect("accept succeeds");
+    // Damage = max(0, 20 − 5); the event is canon.
+    assert_eq!(defender_hp(f.core.pool(), "kb_def").await, 15);
+    let effects_before = timeline_rows(f.core.pool()).await;
+    assert_eq!(effects_before.len(), 1);
+
+    // DISCARDED: terminal and clearable, but it never had an effect.
+    let discarded = run_succeeded(&f, &f.compute).await;
+    discard_compute_run(&f.core, &principal, &discarded)
+        .await
+        .expect("discard succeeds");
+
+    // SUCCEEDED: terminal-capable only after review — never clearable yet.
+    let pending = run_succeeded(&f, &f.compute).await;
+
+    // RUNNING: not terminal.
+    let running = nexus_local_db::compute_runs::insert_run(
+        f.core.pool(),
+        WORLD,
+        MODULE,
+        Some("1.0.0"),
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+
+    // Another creator's World, holding a TERMINAL row of its own.
+    let foreign = nexus_local_db::compute_runs::insert_run(
+        f.core.pool(),
+        FOREIGN_WORLD,
+        MODULE,
+        Some("1.0.0"),
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    nexus_local_db::compute_runs::set_run_succeeded(f.core.pool(), &foreign, "{}")
+        .await
+        .unwrap();
+    nexus_local_db::compute_runs::set_run_discarded(f.core.pool(), &foreign)
+        .await
+        .unwrap();
+
+    // A terminal filter matches only its own state: nothing here is `failed`,
+    // and the applied/discarded rows are still standing afterwards.
+    let none_failed = clear_compute_runs(
+        &f.core,
+        &principal,
+        ClearRunsQuery {
+            status: Some(ClearRunsQueryStatus::Failed),
+            world_id: WORLD.to_string(),
+        },
+    )
+    .await
+    .expect("clear with a terminal filter succeeds");
+    assert_eq!(none_failed.deleted, 0, "no run of this World is failed");
+    assert!(run_row_survives(f.core.pool(), &applied).await);
+    assert!(run_row_survives(f.core.pool(), &discarded).await);
+
+    // The `discarded` filter takes exactly that row.
+    let cleared_discarded = clear_compute_runs(
+        &f.core,
+        &principal,
+        ClearRunsQuery {
+            status: Some(ClearRunsQueryStatus::Discarded),
+            world_id: WORLD.to_string(),
+        },
+    )
+    .await
+    .expect("clear succeeds");
+    assert_eq!(cleared_discarded.deleted, 1);
+    assert!(!run_row_survives(f.core.pool(), &discarded).await);
+    assert!(run_row_survives(f.core.pool(), &applied).await);
+
+    // Unfiltered: every terminal row of the World goes — and only those.
+    let cleared = clear_compute_runs(
+        &f.core,
+        &principal,
+        ClearRunsQuery {
+            status: None,
+            world_id: WORLD.to_string(),
+        },
+    )
+    .await
+    .expect("clear succeeds");
+    assert_eq!(
+        cleared.deleted, 1,
+        "the applied row was the last terminal one"
+    );
+    assert!(!run_row_survives(f.core.pool(), &applied).await);
+    assert!(
+        run_row_survives(f.core.pool(), &pending).await,
+        "a succeeded run still needs review"
+    );
+    assert!(
+        run_row_survives(f.core.pool(), &running).await,
+        "a running run is not history"
+    );
+    assert!(
+        run_row_survives(f.core.pool(), &foreign).await,
+        "another World's terminal row is out of scope"
+    );
+
+    // The accepted effect outlived the run row that produced it.
+    assert_eq!(defender_hp(f.core.pool(), "kb_def").await, 15);
+    assert_eq!(timeline_rows(f.core.pool()).await, effects_before);
+
+    // The pending run is still readable AS the succeeded run it was, with its
+    // proposals intact.
+    let detail = get_compute_run(&f.core, &principal, &pending)
+        .await
+        .expect("pending detail read");
+    let detail = serde_json::to_value(&detail).unwrap();
+    assert_eq!(detail["status"], "succeeded");
+    assert!(detail["proposals"].is_object());
+
+    // The owner door reaches the same authority: nothing terminal is left for
+    // this World, and the pending/foreign rows still survive it.
+    let handle = open_compute_handle(&f).await;
+    let door = handle
+        .clear_compute_runs(
+            &principal,
+            ClearRunsQuery {
+                status: None,
+                world_id: WORLD.to_string(),
+            },
+        )
+        .await
+        .expect("facade clear");
+    assert_eq!(door.deleted, 0);
+    assert!(run_row_survives(f.core.pool(), &pending).await);
+    assert!(run_row_survives(f.core.pool(), &foreign).await);
+
+    // ... and is refused for a World the creator does not own; that World's
+    // terminal row is untouched.
+    let refused = handle
+        .clear_compute_runs(
+            &principal,
+            ClearRunsQuery {
+                status: None,
+                world_id: FOREIGN_WORLD.to_string(),
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(refused, CoreError::WorldOwnerDenied { .. }),
+        "a foreign World must be refused as ownership, got {refused:?}"
+    );
+    assert!(run_row_survives(f.core.pool(), &foreign).await);
+}
+
+// ---------------------------------------------------------------------------
+// Generated-DTO facade on the execution owner (v1.195 P2-T1)
+// ---------------------------------------------------------------------------
+
+/// Establish the real execution owner over the fixture's core, with compute
+/// wired from the SAME engine, cache and serializer the free authority uses —
+/// so a facade call and a direct authority call are two doors into ONE owner.
+async fn open_compute_handle(f: &Fixture) -> Arc<nexus_core::execution::ExecutionHandle> {
+    f.core
+        .start_execution(
+            Arc::new(NullProvider) as Arc<dyn nexus_provider_ports::ProviderPort>,
+            nexus_core::execution::RunnerDeps {
+                nexus_home: Some(f.tmp.path().join(".nexus42")),
+                compute_engine: f.compute.engine.clone(),
+                compute_cache: f.compute.cache.clone(),
+                compute_serializer: Some(Arc::clone(&f.compute.serializer)),
+                ..nexus_core::execution::RunnerDeps::default()
+            },
+        )
+        .await
+        .expect("execution owner starts")
+}
+
+/// The facade's discovery surface serves the REAL registry: the same module
+/// rows, the same manifest detail (including the invocation schema Run Studio
+/// renders) and the same `not_found` for an unknown module.
+///
+/// An empty or placeholder catalog is the failure this guards: the assertion
+/// is against the authority's own listing, so a facade that returned a stub
+/// would disagree with it rather than merely look plausible.
+#[tokio::test]
+#[serial_test::serial]
+async fn compute_facade_discovery_serves_the_real_module_registry() {
+    let f = fixture().await;
+    let handle = open_compute_handle(&f).await;
+    let principal = f.core.active_principal().await.unwrap();
+
+    let listed = handle
+        .list_compute_modules(&principal)
+        .expect("the facade lists the registry");
+    assert!(
+        !listed.has_more,
+        "the embedded registry is one complete page, never a truncated one"
+    );
+
+    let authority = nexus_core::execution::compute::list_compute_modules().expect("registry");
+    let row = listed
+        .items
+        .iter()
+        .find(|m| m.module_id == MODULE)
+        .unwrap_or_else(|| panic!("{MODULE} must be listed by the facade: {listed:?}"));
+    let expected = authority
+        .iter()
+        .find(|m| m.module_id == MODULE)
+        .expect("the authority lists the embedded module");
+    assert_eq!(row.name, expected.name);
+    assert_eq!(row.version, expected.version);
+    assert_eq!(row.description, expected.description);
+    assert_eq!(row.battle_report_kind, expected.battle_report_kind);
+    assert_eq!(
+        row.required_key_block_types,
+        expected.required_key_block_types
+    );
+    assert_eq!(row.status.to_string(), expected.status.to_string());
+
+    let detail = handle
+        .get_compute_module(&principal, MODULE)
+        .expect("the facade returns the module detail");
+    let expected_detail =
+        nexus_core::execution::compute::get_compute_module(MODULE).expect("authority detail");
+    assert_eq!(detail.module_id, expected_detail.module_id);
+    assert_eq!(detail.nexus_abi_version, expected_detail.nexus_abi_version);
+    assert_eq!(
+        serde_json::to_value(&detail.schemas).unwrap(),
+        serde_json::to_value(&expected_detail.schemas).unwrap(),
+        "the detail must carry the real manifest schemas, not a placeholder"
+    );
+    assert!(
+        detail
+            .schemas
+            .as_ref()
+            .is_some_and(|schemas| !schemas.invocation.is_empty()),
+        "the invocation schema Run Studio renders must be present: {detail:?}"
+    );
+
+    let unknown = handle
+        .get_compute_module(&principal, "no-such-module")
+        .unwrap_err();
+    assert!(
+        matches!(unknown, CoreError::NotFound { .. }),
+        "an unknown module must stay not_found through the facade, got {unknown:?}"
+    );
+}
+
+/// The facade's run detail is the authority's own row: the run produced
+/// through the owner is returned with the SAME id, status and stored
+/// proposals, and it is listed under its World/module/status filters.
+#[tokio::test]
+#[serial_test::serial]
+async fn compute_facade_run_detail_and_history_are_the_authority_rows() {
+    let f = fixture().await;
+    let handle = open_compute_handle(&f).await;
+    let principal = f.core.active_principal().await.unwrap();
+
+    let run_id = handle
+        .compute_run(&principal, run_request(WORLD, MODULE))
+        .await
+        .expect("the owner runs the module")
+        .run_id;
+
+    // Running is not accepting: the proposals are persisted, the World is not
+    // touched.
+    assert_eq!(defender_hp(f.core.pool(), "kb_def").await, 30);
+    assert_eq!(timeline_event_count(f.core.pool()).await, 0);
+
+    let detail = handle
+        .get_compute_run(&principal, run_id.clone())
+        .await
+        .expect("facade run detail");
+    let authority = get_compute_run(&f.core, &principal, &run_id)
+        .await
+        .expect("authority run detail");
+    assert_eq!(detail.run_id, authority.run_id, "same run id");
+    assert_eq!(detail.module_id, authority.module_id);
+    assert_eq!(detail.status.to_string(), authority.status.to_string());
+    assert_eq!(
+        serde_json::to_value(&detail.proposals).unwrap(),
+        serde_json::to_value(&authority.proposals).unwrap(),
+        "the facade detail must be the authority's stored proposals"
+    );
+    assert!(
+        detail.proposals.is_some(),
+        "a succeeded run's detail carries its proposals: {detail:?}"
+    );
+
+    let page = handle
+        .list_compute_runs(
+            &principal,
+            ListRunsQuery {
+                world_id: Some(WORLD.to_string()),
+                module_id: Some(MODULE.to_string()),
+                status: Some(ListRunsQueryStatus::Succeeded),
+                ..ListRunsQuery::default()
+            },
+        )
+        .await
+        .expect("facade history");
+    assert!(
+        page.items.iter().any(|r| r.run_id == run_id),
+        "the run must be listed under its World/module/status filters: {page:?}"
+    );
+}
+
+/// History scope and query validation: another creator's World is neither
+/// readable nor listable through the facade, and the generated query's integer
+/// bound is validated rather than coerced into a page size nobody asked for.
+#[tokio::test]
+#[serial_test::serial]
+async fn compute_facade_history_scopes_to_owned_worlds_and_validates_limit() {
+    let f = fixture().await;
+    let handle = open_compute_handle(&f).await;
+    let principal = f.core.active_principal().await.unwrap();
+    let run_id = run_succeeded(&f, &f.compute).await;
+
+    seed_foreign_world(f.core.pool()).await;
+    let foreign = nexus_local_db::compute_runs::insert_run(
+        f.core.pool(),
+        FOREIGN_WORLD,
+        MODULE,
+        Some("1.0.0"),
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    let refused = handle
+        .get_compute_run(&principal, foreign.clone())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(refused, CoreError::WorldOwnerDenied { .. }),
+        "a foreign run must be refused as ownership, got {refused:?}"
+    );
+
+    let unscoped = handle
+        .list_compute_runs(
+            &principal,
+            ListRunsQuery {
+                limit: Some(100),
+                ..ListRunsQuery::default()
+            },
+        )
+        .await
+        .expect("facade history without a World filter");
+    assert!(
+        !unscoped.items.iter().any(|r| r.run_id == foreign),
+        "a foreign-world run must never be listed: {unscoped:?}"
+    );
+    assert!(unscoped.items.iter().any(|r| r.run_id == run_id));
+
+    let negative = handle
+        .list_compute_runs(
+            &principal,
+            ListRunsQuery {
+                limit: Some(-1),
+                ..ListRunsQuery::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(negative, CoreError::Coded { ref code, .. } if code == "invalid_input"),
+        "a negative limit must be invalid_input, got {negative:?}"
+    );
+}
+
+/// The facade's discard returns the generated response, consumes the SAME CAS
+/// the authority uses, and leaves the World exactly as it was.
+#[tokio::test]
+#[serial_test::serial]
+async fn compute_facade_discard_uses_the_shared_cas_and_touches_no_world_state() {
+    let f = fixture().await;
+    let handle = open_compute_handle(&f).await;
+    let principal = f.core.active_principal().await.unwrap();
+    let run_id = run_succeeded(&f, &f.compute).await;
+
+    let response = handle
+        .discard_compute_run(&principal, run_id.clone())
+        .await
+        .expect("facade discard");
+    assert_eq!(response.run_id, run_id);
+    assert_eq!(response.status.to_string(), "discarded");
+
+    // The World keeps the pre-run state and gains no timeline event.
+    assert_eq!(defender_hp(f.core.pool(), "kb_def").await, 30);
+    assert_eq!(timeline_event_count(f.core.pool()).await, 0);
+
+    // The durable row is the authority's row, flipped by the shared CAS.
+    let detail = handle
+        .get_compute_run(&principal, run_id.clone())
+        .await
+        .expect("facade detail after discard");
+    assert_eq!(detail.status.to_string(), "discarded");
+    let second = handle
+        .discard_compute_run(&principal, run_id)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(second, CoreError::Coded { ref code, .. } if code == "conflict"),
+        "a second discard must lose the CAS, got {second:?}"
+    );
+}
+
+/// The facade honours the owner fence: a draining owner refuses every entry
+/// point instead of reading beside its own drain.
+#[tokio::test]
+#[serial_test::serial]
+async fn compute_facade_is_fenced_once_the_owner_closes() {
+    let f = fixture().await;
+    let handle = open_compute_handle(&f).await;
+    let principal = f.core.active_principal().await.unwrap();
+
+    handle.close().await.expect("close");
+    assert!(handle.is_draining(), "close must set the draining barrier");
+
+    let discovery = handle.list_compute_modules(&principal).unwrap_err();
+    assert!(
+        matches!(discovery, CoreError::Closing),
+        "module discovery must be fenced after close, got {discovery:?}"
+    );
+    let detail = handle.get_compute_module(&principal, MODULE).unwrap_err();
+    assert!(
+        matches!(detail, CoreError::Closing),
+        "module detail must be fenced after close, got {detail:?}"
+    );
+    let history = handle
+        .list_compute_runs(&principal, ListRunsQuery::default())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(history, CoreError::Closing),
+        "run history must be fenced after close, got {history:?}"
+    );
+    let run = handle
+        .get_compute_run(&principal, "run-any".to_string())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(run, CoreError::Closing),
+        "run detail must be fenced after close, got {run:?}"
+    );
+    let discard = handle
+        .discard_compute_run(&principal, "run-any".to_string())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(discard, CoreError::Closing),
+        "discard must be fenced after close, got {discard:?}"
     );
 }

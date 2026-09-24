@@ -70,14 +70,15 @@ describe('route-inventory (P5-T5)', () => {
 
     // ── Mounted set exactly matches the normalized live inventory. ──────────
     // Independent authority: a hardcoded normalized snapshot of the daemon
-    // create_router + P0–P4 family identities (NOT derived from the composer
-    // under test). Divergence is a real reconciliation bug, in either
-    // direction.
+    // create_router + P0–P4 family identities plus the v1.195 P2-T3 Compute
+    // family (NOT derived from the composer under test). Divergence is a real
+    // reconciliation bug, in either direction.
     const LIVE_INVENTORY = [
   ['DELETE', '/v1/daemon/agent-host/sessions/([^/]+)', 'provider_stream', 'host'],
   ['DELETE', '/v1/daemon/characters/([^/]+)/bindings/([^/]+)', 'tier2', 'actors'],
   ['DELETE', '/v1/daemon/characters/([^/]+)/knowledge/([^/]+)', 'tier2', 'actors'],
   ['DELETE', '/v1/daemon/characters/([^/]+)/memory/pending-review/([^/]+)', 'tier2', 'memory'],
+  ['DELETE', '/v1/daemon/compute/runs', 'tier2', 'compute'],
   ['DELETE', '/v1/daemon/kb/entries/([^/]+)', 'tier2', 'knowledge'],
   ['DELETE', '/v1/daemon/memory/pending-review/([^/]+)', 'tier2', 'memory'],
   ['DELETE', '/v1/daemon/presets/([^/]+)', 'tier2', 'presets'],
@@ -102,6 +103,10 @@ describe('route-inventory (P5-T5)', () => {
   ['GET', '/v1/daemon/characters/([^/]+)/memory/pending-review', 'tier2', 'memory'],
   ['GET', '/v1/daemon/characters/([^/]+)/memory/pending-review/count', 'tier2', 'memory'],
   ['GET', '/v1/daemon/characters/([^/]+)/tom', 'tier2', 'memory'],
+  ['GET', '/v1/daemon/compute/modules', 'tier2', 'compute'],
+  ['GET', '/v1/daemon/compute/modules/([^/]+)', 'tier2', 'compute'],
+  ['GET', '/v1/daemon/compute/runs', 'tier2', 'compute'],
+  ['GET', '/v1/daemon/compute/runs/([^/]+)', 'tier2', 'compute'],
   ['GET', '/v1/daemon/core/changes', 'tier2', 'world_kb'],
   ['GET', '/v1/daemon/creators', 'tier1', 'actors'],
   ['GET', '/v1/daemon/creators/([^/]+)', 'tier1', 'actors'],
@@ -118,6 +123,11 @@ describe('route-inventory (P5-T5)', () => {
   ['GET', '/v1/daemon/narrative/worlds/([^/]+)', 'tier2', 'worlds'],
   ['GET', '/v1/daemon/orchestration/presets', 'tier2', 'presets'],
   ['GET', '/v1/daemon/orchestration/presets/([^/]+)/profile', 'tier2', 'presets'],
+  ['GET', '/v1/daemon/orchestration/schedules', 'tier2', 'execution'],
+  ['GET', '/v1/daemon/orchestration/schedules/([^/]+)', 'tier2', 'execution'],
+  ['GET', '/v1/daemon/orchestration/sessions', 'tier2', 'execution'],
+  ['GET', '/v1/daemon/orchestration/sessions/([^/]+)', 'tier2', 'execution'],
+  ['GET', '/v1/daemon/orchestration/sessions/([^/]+)/events', 'tier2', 'workflow_observation'],
   ['GET', '/v1/daemon/presets', 'tier2', 'presets'],
   ['GET', '/v1/daemon/presets/([^/]+)', 'tier2', 'presets'],
   ['GET', '/v1/daemon/reading/annotations', 'tier2', 'knowledge'],
@@ -150,6 +160,7 @@ describe('route-inventory (P5-T5)', () => {
   ['PATCH', '/v1/daemon/characters/([^/]+)/knowledge/([^/]+)', 'tier2', 'actors'],
   ['PATCH', '/v1/daemon/creators/([^/]+)', 'tier1', 'actors'],
   ['PATCH', '/v1/daemon/findings/batch', 'tier2', 'knowledge'],
+  ['PATCH', '/v1/daemon/orchestration/schedules/([^/]+)/core-context', 'tier2', 'execution'],
   ['PATCH', '/v1/daemon/presets/([^/]+)', 'tier2', 'presets'],
   ['PATCH', '/v1/daemon/reading/annotations/([^/]+)', 'tier2', 'knowledge'],
   ['PATCH', '/v1/daemon/works/([^/]+)', 'tier2', 'works'],
@@ -171,6 +182,9 @@ describe('route-inventory (P5-T5)', () => {
   ['POST', '/v1/daemon/characters/([^/]+)/restore', 'tier2', 'actors'],
   ['POST', '/v1/daemon/characters/([^/]+)/soul/reflect', 'tier2', 'memory'],
   ['POST', '/v1/daemon/characters/([^/]+)/tom', 'tier2', 'memory'],
+  ['POST', '/v1/daemon/compute/run', 'tier2', 'compute'],
+  ['POST', '/v1/daemon/compute/runs/([^/]+)/accept', 'tier2', 'compute'],
+  ['POST', '/v1/daemon/compute/runs/([^/]+)/discard', 'tier2', 'compute'],
   ['POST', '/v1/daemon/creators', 'tier1', 'actors'],
   ['POST', '/v1/daemon/creators/([^/]+)', 'tier1', 'actors'],
   ['POST', '/v1/daemon/findings/prune', 'tier2', 'knowledge'],

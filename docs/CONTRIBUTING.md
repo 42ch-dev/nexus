@@ -62,7 +62,7 @@ Root [`package.json`](../package.json) exposes shortcuts for common tasks. Run f
 
 | Task | Command |
 |------|---------|
-| CLI + web dev (one command) | `pnpm run dev` → builds `nexus42`, ensures the daemon on 127.0.0.1:8420, then Vite dev server in the foreground (`scripts/dev-cli-web.sh`) |
+| CLI + web dev (one command) | `pnpm run dev` → validates the prepared `nexus42` artifact, starts or attaches the standalone TS service on 127.0.0.1:8420 (detached when it is not already running), then runs the Vite dev server in the foreground (`scripts/dev-cli-web.sh`). It never runs Cargo |
 | Desktop dev | `pnpm run dev:desktop` (Electron host over the built web dist) · `pnpm run dev:desktop:web` (Vite HMR + host) |
 | TS workspaces build | `pnpm run build` (all TS workspaces; desktop packaging is a separate command) |
 | Web / Studio build | `pnpm run build:web`, `pnpm run build:design-studio` |
@@ -78,6 +78,8 @@ Build individual npm packages when needed:
 pnpm -F @42ch/nexus-contracts build
 pnpm -F @42ch/nexus-ui build
 ```
+
+The dev shortcut runs the **standalone TypeScript service** (`node apps/nexus-service/dist/main.js --home <home> --host 127.0.0.1 --port <port>`, started detached by `scripts/dev-cli-web.sh` when the endpoint is idle). It requires an already-built native addon plus a compatible `nexus42` artifact and manifest, and it never runs Cargo: a missing or incompatible artifact fails fast with `pnpm dev:backend:refresh`. The retired `nexus42 daemon` composition is gone, so no CLI command starts, stops, statuses or proxies the service. `pnpm run dev:backend:refresh` is the only ordinary DX path that runs Cargo or codegen, and only after Rust or contract edits; frontend-only and TS route/provider edits with an unchanged native/schema contract run zero Cargo. To exercise the whole public path against a real `dsh` runtime — Creator/workspace setup, one admitted workflow, the authorized workspace effect, cancel and restart — use the root [README Quick Start](../README.md#quick-start).
 
 ### Iteration vs pre-PR scope
 
@@ -210,7 +212,7 @@ CI ignores pushes that only touch paths such as `docs/**` or certain `README.md`
 
 ## Where to put documentation
 
-- **Stable, clone-ready docs** (install, architecture, codegen, contributing): `docs/` and root `README.md` (**Development** section for maintainer commands; **Quick Start** is reserved for end-user docs).
+- **Stable, clone-ready docs** (install, architecture, codegen, contributing): `docs/` and root `README.md` (**Development** section for maintainer commands; **Quick Start** is the clone-from-source first workflow, since no end-user install flow is published yet).
 - **Plan-specific design notes and review artifacts**: `.mstar/knowledge/` — see [`AGENTS.md`](../AGENTS.md).
 
 ## Questions

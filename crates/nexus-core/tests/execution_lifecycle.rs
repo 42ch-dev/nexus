@@ -15,7 +15,7 @@ use async_trait::async_trait;
 use nexus_contracts::{
     CoreError as WireCoreError, CoreErrorCode, ProviderCall, ProviderEventBatch, ProviderReply,
 };
-use nexus_core::execution::RunControlError;
+use nexus_core::execution::{ExecutionOpenError, RunControlError};
 use nexus_core::{CoreAccess, CoreOpenOptions, CoreService, ExecutionBuildObserver, RunnerDeps};
 use nexus_orchestration::capability::{
     CapabilityError, PromptExecutor, PromptRequest, PromptResult,
@@ -146,6 +146,20 @@ async fn open_engine_owner(f: &Fixture) -> CoreService {
     CoreService::open(open_options(f, CoreAccess::EngineOwner))
         .await
         .expect("engine-owner core open")
+}
+
+/// A fully retired owner releases both the home admission and the per-DB
+/// execution reservation, allowing a new generation to start.
+async fn assert_fresh_owner_can_start(f: &Fixture) {
+    let fresh = open_engine_owner(f).await;
+    fresh
+        .start_execution(
+            Arc::clone(&NullProvider::new()) as Arc<dyn ProviderPort>,
+            RunnerDeps::default(),
+        )
+        .await
+        .expect("the retired owner must not fence its DB");
+    fresh.close().await.unwrap();
 }
 
 /// Seed a durable v1 run through the REAL store API, not hand-written SQL.
@@ -657,6 +671,11 @@ impl ExecutionBuildObserver for BuildGate {
 /// the build install an owner into the closed service. Either close observes
 /// the installed owner and settles it, or the build abandons it — never an
 /// orphan owner, and never an owner surviving the close.
+///
+/// It also pins the WAIT itself: while the registered build is held, the close
+/// may not report a settled cleanup and may not release the pool — the drain is
+/// fenced behind the start, so `cleanup_confirmed` can never precede the
+/// builder's own shutdown.
 #[tokio::test]
 async fn concurrent_close_and_start_never_leave_an_owner() {
     let f = fixture().await;
@@ -689,29 +708,39 @@ async fn concurrent_close_and_start_never_leave_an_owner() {
             let owner = Arc::clone(&owner);
             async move { owner.close().await }
         });
-        // Deterministic ordering: close must have BEGUN (`closing`, C2) and
-        // fully completed its slot take BEFORE the build is allowed to
-        // attempt its install. Awaiting the close task here removes the last
-        // scheduling dependence — the pre-fix install ran unconditionally,
-        // so it would publish an owner into an already-closed service on
-        // every round, while the install-time double check refuses it.
-        let report = close.await.expect("close task joins");
+        // `closing` is raised by the close in the caller's own step, so seeing
+        // it proves this close has begun. Finishing, though, requires the drain
+        // — and the drain takes the start fence exclusively, which this
+        // registered build still holds. So "not finished" is not a race here:
+        // it is the invariant under test.
+        let closing_probe = Arc::clone(&owner);
+        wait_until("close begins", move || {
+            let closing_probe = Arc::clone(&closing_probe);
+            async move { closing_probe.is_closing() }
+        })
+        .await;
         assert!(
-            owner.is_closing(),
-            "round {round}: close must have begun before the install window"
+            !close.is_finished(),
+            "round {round}: close reported a settled cleanup while the registered build was \
+             still in flight"
+        );
+        assert!(
+            !owner.pool().is_closed(),
+            "round {round}: close released the SQL pool under a registered build"
         );
         gate.release();
 
+        let report = close.await.expect("close task joins");
         let started = start.await.expect("start task joins");
         assert!(
             report.unwrap().cleanup_confirmed,
             "round {round}: close must report a confirmed cleanup"
         );
-        // The build was refused (install-time double check) — it may not have
-        // installed anything into the closed service.
+        // The build was refused by the install-time double check — it may not
+        // have installed anything into the closed service.
         assert!(
-            started.is_err(),
-            "round {round}: a start racing a completed close must be refused"
+            matches!(started, Err(ExecutionOpenError::Closing)),
+            "round {round}: a start racing a completed close must be refused as Closing"
         );
         assert!(
             owner.execution().is_none(),
@@ -719,4 +748,425 @@ async fn concurrent_close_and_start_never_leave_an_owner() {
         );
         owner.close().await.unwrap();
     }
+}
+
+/// C3 (canceled build): a start whose caller is cancelled must not leave that
+/// build's LIVE drives behind a confirmed close.
+///
+/// `build_execution` spawns the hosted clock and the drives `recovery`
+/// re-drives, and dropping an `ExecutionHandle` stops none of them. The start
+/// therefore runs on a retained task: the caller's cancellation only stops
+/// waiting, and the task settles the owner it built — under the per-service
+/// fence — when nobody is left to receive it.
+///
+/// The test drives that chain: it parks a recovered drive inside the gated
+/// prompt executor, cancels the caller, then releases the build barrier so the
+/// task's own settlement is the ONLY thing left. The close must stay
+/// unconfirmed and the per-DB reservation held until the parked drive is
+/// released — i.e. until the abandoned owner's drives really joined.
+#[tokio::test]
+async fn close_waits_for_a_canceled_builds_live_drives() {
+    let f = fixture().await;
+    // A run parked inside the `generate` LLM step: recovery re-drives it and
+    // the gated executor holds that drive open.
+    seed_run_at(
+        &f.db_path,
+        "test-preset:canceled",
+        CREATOR,
+        nexus_orchestration::RunStateV1::default(),
+        "generate",
+    )
+    .await;
+
+    let owner = Arc::new(open_engine_owner(&f).await);
+    // A second core over the same DB (the daemon's co-host shape): it JOINS the
+    // live engine admission, so it can observe the per-DB owner reservation
+    // without disturbing the owner under test.
+    let competitor = open_engine_owner(&f).await;
+    let gate = GatedPromptExecutor::new();
+    let build_gate = BuildGate::new();
+    let start = tokio::spawn({
+        let owner = Arc::clone(&owner);
+        let gate = gate.clone();
+        let build_gate = build_gate.clone();
+        async move {
+            owner
+                .start_execution(
+                    Arc::clone(&NullProvider::new()) as Arc<dyn ProviderPort>,
+                    RunnerDeps {
+                        prompt_executor: Some(Arc::new(gate)),
+                        build_observer: Some(Arc::new(build_gate)),
+                        ..RunnerDeps::default()
+                    },
+                )
+                .await
+        }
+    });
+
+    // The build is complete (recovery ran, the drive is parked) and nothing has
+    // been published into the per-service slot yet.
+    build_gate.wait_entered().await;
+    gate.wait_entered().await;
+
+    let close = tokio::spawn({
+        let owner = Arc::clone(&owner);
+        async move { owner.close().await }
+    });
+    let closing_probe = Arc::clone(&owner);
+    wait_until("close begins", move || {
+        let closing_probe = Arc::clone(&closing_probe);
+        async move { closing_probe.is_closing() }
+    })
+    .await;
+    assert!(
+        !close.is_finished(),
+        "close must stay fenced behind the registered build"
+    );
+
+    // Cancel the caller: it stops waiting, and the retained start task is now
+    // the only owner of what the build produced.
+    start.abort();
+    let _ = start.await;
+    assert!(
+        owner.execution().is_none(),
+        "an abandoned build must not publish an owner into the closed service"
+    );
+
+    // Let the retained start finish its build: with no caller waiting, it
+    // refuses the install and settles the owner it built — which joins the
+    // parked drive, so its settlement is the ONLY thing left to finish.
+    build_gate.release();
+    // `wait_until` on a positive observable would need a probe inside the
+    // settlement; the negative observation below is what the fence guarantees:
+    // while the drive is parked, neither the close nor the DB may be released.
+    assert!(
+        !close.is_finished(),
+        "close confirmed while the abandoned owner's drive was still parked"
+    );
+    let refused = competitor
+        .start_execution(
+            Arc::clone(&NullProvider::new()) as Arc<dyn ProviderPort>,
+            RunnerDeps::default(),
+        )
+        .await;
+    assert!(
+        matches!(refused, Err(ExecutionOpenError::AlreadyOwned)),
+        "the abandoned owner must hold the per-DB reservation until its drives join"
+    );
+
+    // Release the parked drive: NOW the abandoned owner settles, and only then
+    // does the close confirm the cleanup and the DB open again.
+    gate.release();
+    let report = tokio::time::timeout(Duration::from_secs(10), close)
+        .await
+        .expect("close must confirm once the abandoned owner's drive joined")
+        .expect("the close task joins")
+        .expect("a close report");
+    assert!(
+        report.cleanup_confirmed,
+        "the canceled build must not strand the close"
+    );
+    competitor.close().await.unwrap();
+    // The DB is genuinely free: a fresh owner is admitted and can start.
+    let fresh = open_engine_owner(&f).await;
+    fresh
+        .start_execution(
+            Arc::clone(&NullProvider::new()) as Arc<dyn ProviderPort>,
+            RunnerDeps::default(),
+        )
+        .await
+        .expect("a canceled build must not fence its DB");
+    fresh.close().await.unwrap();
+    owner.close().await.unwrap();
+}
+
+/// C3 (unreceived hand-off): a caller dropped AFTER the owner was published but
+/// BEFORE it ever polled the hand-off must leave no live owner behind.
+///
+/// A queued value is not a hand-over: the retained start publishes the owner and
+/// queues it, but a caller dropped before its next poll takes that value with it
+/// — and nobody would ever close that owner. The task therefore keeps the fence
+/// until the caller ACKNOWLEDGES receipt, and settles the owner itself when the
+/// acknowledgement can never come.
+///
+/// The ordering is forced deterministically with a caller future the runtime
+/// does NOT own: it is polled exactly once (which spawns the retained start and
+/// parks it on the hand-off), never polled again, and then dropped. A
+/// current-thread runtime is pinned because the install and the queuing happen
+/// in ONE poll of the retained task, and this test can only run once that poll
+/// yielded (the task parks on the receipt) — so observing a published owner
+/// while this caller is still unpolled PROVES the value is queued and
+/// unreceived.
+#[tokio::test(flavor = "current_thread")]
+async fn a_caller_dropped_before_receiving_the_owner_settles_it() {
+    let f = fixture().await;
+    let owner = Arc::new(open_engine_owner(&f).await);
+    // The caller side of the start: a local future, not a task, so this test
+    // alone decides when — and whether — it is polled.
+    let caller_core = (*owner).clone();
+    let build_gate = BuildGate::new();
+    let mut caller = Box::pin(caller_core.start_execution(
+        Arc::clone(&NullProvider::new()) as Arc<dyn ProviderPort>,
+        RunnerDeps {
+            build_observer: Some(Arc::new(build_gate.clone())),
+            ..RunnerDeps::default()
+        },
+    ));
+
+    assert!(
+        tokio::time::timeout(Duration::from_millis(20), &mut caller)
+            .await
+            .is_err(),
+        "the caller must park on the hand-off while the build is held"
+    );
+    build_gate.wait_entered().await;
+    assert!(
+        owner.execution().is_none(),
+        "nothing may be published before the install"
+    );
+
+    build_gate.release();
+    let published = Arc::clone(&owner);
+    wait_until("the owner is published", move || {
+        let published = Arc::clone(&published);
+        async move { published.execution().is_some() }
+    })
+    .await;
+
+    // Drop the caller without ever taking the owner the start wanted to hand it.
+    drop(caller);
+    let withdrawn = Arc::clone(&owner);
+    wait_until("the unreceived owner is withdrawn and settled", move || {
+        let withdrawn = Arc::clone(&withdrawn);
+        async move { withdrawn.execution().is_none() }
+    })
+    .await;
+
+    // The settlement is what the close waited for, and the DB is free again.
+    assert!(
+        owner.close().await.unwrap().cleanup_confirmed,
+        "a settled unreceived owner must not block a confirmed close"
+    );
+    assert_fresh_owner_can_start(&f).await;
+}
+
+/// P1 (retired owner during the receipt wait): an owner RETIRED while the
+/// retained start was still waiting for its receipt must keep the close fenced
+/// until its drives really joined.
+///
+/// `retire_execution` takes the per-service slot and settles the handle it took,
+/// and that slot never comes back. The receipt-failure settlement in the
+/// retained start used to return the moment the slot no longer held ITS handle,
+/// so the start fence dropped while the retirement was still joining drives — a
+/// close that landed there drained an EMPTY slot and closed the pool over a
+/// live owner whose per-DB reservation was still held. The retirement now holds
+/// the SAME shared start fence for its whole duration and the receipt-failure
+/// settlement JOINS that idempotent shutdown, so the close drain — exclusive
+/// half of the fence — cannot report a confirmed cleanup before the drives are
+/// gone.
+///
+/// Deterministic ordering, no timing assumption about who wins a race: the
+/// caller is a local future polled exactly ONCE (so no receipt can ever
+/// arrive), the recovered drive is parked inside the gated prompt executor, and
+/// the test waits for the published owner to LEAVE the slot while the caller is
+/// still unpolled — which proves the retirement, not the withdrawal, took it.
+/// The pre-fix failure is then observable on a synchronous state: `Pool::close`
+/// raises `is_closed` as its FIRST act, so an early drain shows a closed pool
+/// without having waited for the parked drive.
+#[tokio::test(flavor = "current_thread")]
+async fn close_waits_for_a_retired_owner_during_the_receipt_wait() {
+    let f = fixture().await;
+    // A run parked inside the `generate` LLM step: recovery re-drives it and
+    // the gated executor holds the drive open.
+    seed_run_at(
+        &f.db_path,
+        "test-preset:retired",
+        CREATOR,
+        nexus_orchestration::RunStateV1::default(),
+        "generate",
+    )
+    .await;
+
+    let owner = Arc::new(open_engine_owner(&f).await);
+    // A second core over the same DB (the daemon's co-host shape): it JOINS the
+    // live engine admission, so it can probe the per-DB owner reservation
+    // without disturbing the owner under test.
+    let competitor = open_engine_owner(&f).await;
+    let gate = GatedPromptExecutor::new();
+    let build_gate = BuildGate::new();
+    // The caller side of the start: a local future, not a task, so this test
+    // alone decides when — and whether — it is polled. Its next poll would
+    // acknowledge receipt, so it is never polled again.
+    let caller_core = (*owner).clone();
+    let mut caller = Box::pin(caller_core.start_execution(
+        Arc::clone(&NullProvider::new()) as Arc<dyn ProviderPort>,
+        RunnerDeps {
+            prompt_executor: Some(Arc::new(gate.clone())),
+            build_observer: Some(Arc::new(build_gate.clone())),
+            ..RunnerDeps::default()
+        },
+    ));
+
+    assert!(
+        tokio::time::timeout(Duration::from_millis(20), &mut caller)
+            .await
+            .is_err(),
+        "the caller must park on the hand-off while the build is held"
+    );
+    build_gate.wait_entered().await;
+    gate.wait_entered().await;
+
+    // Install: release the build so the retained start publishes the owner and
+    // parks on the receipt nobody will ever send.
+    build_gate.release();
+    let published = Arc::clone(&owner);
+    wait_until("the owner is published", move || {
+        let published = Arc::clone(&published);
+        async move { published.execution().is_some() }
+    })
+    .await;
+
+    // Retire it. The caller is still unpolled, so the ONLY taker of the slot is
+    // the retirement — and its shutdown parks on the gated drive.
+    let retire = tokio::spawn({
+        let owner = Arc::clone(&owner);
+        async move { owner.retire_execution().await }
+    });
+    let retired = Arc::clone(&owner);
+    wait_until("the retirement takes the per-service slot", move || {
+        let retired = Arc::clone(&retired);
+        async move { retired.execution().is_none() }
+    })
+    .await;
+
+    // Drop the caller: the receipt can never come, so the retained start
+    // settles the owner it published — the very handle the retirement took.
+    drop(caller);
+
+    let close = tokio::spawn({
+        let owner = Arc::clone(&owner);
+        async move { owner.close().await }
+    });
+    let closing_probe = Arc::clone(&owner);
+    wait_until("close begins", move || {
+        let closing_probe = Arc::clone(&closing_probe);
+        async move { closing_probe.is_closing() }
+    })
+    .await;
+
+    // Outlast the interleaving this regression is about. Every task involved
+    // runs on THIS runtime, so a drain that could still run (the pre-fix
+    // retirement held no fence; the pre-fix withdrawal returned the fence
+    // early) reaches `Pool::close` — and raises `is_closed` — well inside this
+    // budget, without ever waiting for the parked drive.
+    let budget = tokio::time::Instant::now() + Duration::from_secs(5);
+    while !owner.pool().is_closed() && tokio::time::Instant::now() < budget {
+        tokio::task::yield_now().await;
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    assert!(
+        !owner.pool().is_closed(),
+        "close released the SQL pool while the retired owner's drive was still parked"
+    );
+    assert!(
+        !close.is_finished(),
+        "close published a settled cleanup while the retired owner's drive was still parked"
+    );
+    assert!(
+        !retire.is_finished(),
+        "the retirement must still be joining the parked drive (deterministic hold)"
+    );
+    // The per-DB OWNER fence is still held: the retired owner is not settled.
+    let refused = competitor
+        .start_execution(
+            Arc::clone(&NullProvider::new()) as Arc<dyn ProviderPort>,
+            RunnerDeps::default(),
+        )
+        .await;
+    assert!(
+        matches!(refused, Err(ExecutionOpenError::AlreadyOwned)),
+        "a retired-but-unsettled owner must keep the per-DB reservation"
+    );
+
+    // Release the parked drive: the retirement settles, the retained start's
+    // settlement returns, and ONLY THEN may the close confirm.
+    gate.release();
+    let report = tokio::time::timeout(Duration::from_secs(10), close)
+        .await
+        .expect("close must confirm once the retired owner's drive joined")
+        .expect("the close task joins")
+        .expect("a close report");
+    assert!(
+        report.cleanup_confirmed,
+        "the close must report a confirmed cleanup once the retired owner settled"
+    );
+    retire.await.expect("the retirement task joins");
+
+    competitor.close().await.unwrap();
+    owner.close().await.unwrap();
+    // The fence is genuinely released: a fresh owner over the same home is
+    // admitted and can start.
+    assert_fresh_owner_can_start(&f).await;
+}
+
+// ── Close / admission ownership (v1.195 P0-T5 close findings) ───────────────
+
+/// The durable engine epoch this open's admission was granted.
+///
+/// `nexus_engine_epoch()` is installed per connection by the writer protocol
+/// from the admitting context, so it reports the generation THIS pool was
+/// admitted with — the same generation the execution handle publishes.
+async fn admission_engine_epoch(core: &CoreService) -> i64 {
+    let epoch: Option<i64> = sqlx::query_scalar("SELECT nexus_engine_epoch()")
+        .fetch_one(core.pool())
+        .await
+        .expect("the admitted pool carries an engine epoch");
+    epoch.expect("an admitted engine pool reports a non-null epoch")
+}
+
+/// A confirmed close gives up the closing core's OWN admitted-pool handle.
+///
+/// A cooperative `EngineOwner` joiner holds a CLONE of the creator's
+/// `WorkspaceWriterGuard`, so that guard — and the `state.db.engine.lock` file
+/// it keeps open — stays alive until every clone is gone. Closing the retained
+/// registry entry and the creator's own handle is not enough: a
+/// closed-but-still-referenced joiner would keep the home fenced, and a fresh
+/// same-process open would fail `OwnerBusy` with no live owner at all. Only
+/// the admission creator removes the retained entry; every closing core drops
+/// its own handle.
+#[tokio::test]
+async fn closed_joiner_does_not_keep_the_engine_admission_alive() {
+    let f = fixture().await;
+
+    // ── The creator takes the engine admission. ──
+    let creator = open_engine_owner(&f).await;
+    let epoch = admission_engine_epoch(&creator).await;
+
+    // ── A cooperating open JOINS that live admission: a live peer still fences
+    //    a duplicate, so the joiner is the SAME generation, never a second
+    //    owner admitted with a new epoch. ──
+    let joiner = open_engine_owner(&f).await;
+    assert_eq!(
+        admission_engine_epoch(&joiner).await,
+        epoch,
+        "a live peer still fences a new admission"
+    );
+
+    // ── Close the JOINER first, then the CREATOR. Both closed values stay
+    //    referenced for the rest of the test. ──
+    joiner.close().await.expect("close the joiner");
+    creator.close().await.expect("close the creator");
+    assert!(joiner.is_closing() && creator.is_closing());
+
+    // ── A fresh owner over the same home must genuinely RE-ADMIT: a new engine
+    //    epoch, not the settled generation's. ──
+    let fresh = CoreService::open(open_options(&f, CoreAccess::EngineOwner))
+        .await
+        .expect("a fresh owner must reopen the home after both closures");
+    let fresh_epoch = admission_engine_epoch(&fresh).await;
+    assert!(
+        fresh_epoch > epoch,
+        "the fresh owner must take a NEW engine admission ({epoch} -> {fresh_epoch})"
+    );
+    fresh.close().await.expect("close the fresh owner");
 }

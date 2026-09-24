@@ -95,21 +95,22 @@ nexus-knowledge = { path = "../../crates/nexus-knowledge", optional = true }
 nexus-spoke-adapter = { path = "../../crates/nexus-spoke-adapter", default-features = false, optional = true }
 nexus-module-manifest = { path = "../../modules/nexus-module-manifest", optional = true }
 # V1.148 P3 N-C0 (DF-72): Connect Host facade, opt-in via feature
-# `connect-host` below. spoke-connect pulls libp2p 0.56 transitively — the
+# `connect-host` below. spoke-connect pulls libp2p 0.57 transitively — the
 # default build must stay libp2p-free, so this dep is
 # `optional` and only `connect start` links it. spoke-connect exposes no
 # `mdns` feature (removed upstream in 0.9.2); hickory/libp2p-mdns stay
-# lockfile-only via libp2p 0.56 optional deps, never compiled.
+# lockfile-only via libp2p 0.57 optional deps, never compiled.
 spoke-connect = { workspace = true, optional = true }
 # V1.153 P1 N-C1: the connect wire `ErrorEnvelope`
 # (`spoke_schemas::connect::connect_invoke_response::ErrorEnvelope`) the
-# invoke handler returns. Same 0.10.0 pin; optional + feature-gated with
-# `connect-host` (spoke-schemas is a lightweight schema crate, but the
-# connect path is the only consumer).
+# invoke handler returns. Same workspace lockstep pin as `spoke-connect`
+# (the root `Cargo.toml` pin lineage owns the version); optional +
+# feature-gated with `connect-host` (spoke-schemas is a lightweight schema
+# crate, but the connect path is the only consumer).
 spoke-schemas = { workspace = true, optional = true }
 # libp2p identity/PeerId/Multiaddr types for the `connect start` CLI (key
 # generation + protobuf key persistence + allowlist/listen parsing). Same
-# 0.56 pin as spoke-connect's transport; optional + feature-gated with
+# 0.57 pin as spoke-connect's transport; optional + feature-gated with
 # `connect-host` so the default graph stays libp2p-free.
 libp2p = { workspace = true, optional = true }
 clap = { workspace = true }

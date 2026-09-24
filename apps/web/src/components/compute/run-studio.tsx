@@ -564,6 +564,15 @@ export function RunStudio({
 
       {inspectorRunId && runDetail.isLoading ? (
         <LoadingState label={t('run.runLoadingDetail')} />
+      ) : inspectorRunId && runDetail.isError ? (
+        // A deep-linked Run whose detail read fails (cleared by Clear history,
+        // deleted, or transport down) must SAY so — rendering nothing hides the
+        // failure behind an empty space where the inspector should be.
+        <ErrorState
+          title={t('run.runErrorTitle')}
+          description={t('run.runErrorDescription')}
+          onRetry={() => void runDetail.refetch()}
+        />
       ) : (
         inspectorRun && (
           <RunInspector

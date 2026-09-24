@@ -121,3 +121,63 @@ pub(super) fn owner_gate_settled(session_id: &str) {
         gate.settled.notify_one();
     }
 }
+
+/// Rendezvous at a recovery pass's settlement boundary.
+///
+/// The commit seams above are keyed by session id; a recovery pass has no
+/// single session — it settles every unsettled intent of its scope — so this
+/// gate is process-wide and armed by the one test that drives a pass. It lets
+/// that test prove caller-cancellation safety deterministically: the pass
+/// signals `admitted` once it holds its admission and is about to settle an
+/// unsettled intent (the crash-consistent on-disk state), the test cancels the
+/// awaiting caller, then releases `proceed` and awaits `settled`. No sleeps, no
+/// races.
+#[derive(Debug, Default)]
+pub struct RecoveryGate {
+    /// Signalled once the pass is admitted and about to settle an intent.
+    pub admitted: Arc<tokio::sync::Notify>,
+    /// The pass waits for this before touching that intent.
+    pub proceed: Arc<tokio::sync::Notify>,
+    /// Signalled after the retained pass task settles.
+    pub settled: Arc<tokio::sync::Notify>,
+}
+
+impl RecoveryGate {
+    /// An armed gate for one recovery pass.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+static RECOVERY_GATE: Mutex<Option<Arc<RecoveryGate>>> = Mutex::new(None);
+
+/// Install (or clear) the recovery gate.
+///
+/// # Panics
+///
+/// Panics if the recovery-gate mutex was poisoned by a previous panic.
+pub fn set_recovery_gate(gate: Option<Arc<RecoveryGate>>) {
+    *RECOVERY_GATE.lock().expect("recovery gate lock") = gate;
+}
+
+fn current_recovery_gate() -> Option<Arc<RecoveryGate>> {
+    RECOVERY_GATE
+        .lock()
+        .expect("recovery gate lock")
+        .as_ref()
+        .map(Arc::clone)
+}
+
+pub(super) async fn recovery_gate_admitted() {
+    if let Some(gate) = current_recovery_gate() {
+        gate.admitted.notify_one();
+        gate.proceed.notified().await;
+    }
+}
+
+pub(super) fn recovery_gate_settled() {
+    if let Some(gate) = current_recovery_gate() {
+        gate.settled.notify_one();
+    }
+}

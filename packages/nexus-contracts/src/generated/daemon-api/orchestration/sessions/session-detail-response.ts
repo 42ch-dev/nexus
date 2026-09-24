@@ -9,6 +9,13 @@
  */
 export interface SessionDetailResponse {
   session: NexusOrchestrationSessionSummary;
+  /**
+   * Durable workspace-commit revision of this RUN's own checkpointed `workspace.commit` capability output (contract §4). Present only when the run's durable graph context holds that capability's exact successful output, read after the root row and its stored Creator are authorized; absent for a run with no such checkpoint (never synthesized from run state, file bytes or other context data). Survives restart without re-running the capability.
+   */
+  workspace_commit?: {
+    revision: string;
+    committed: true;
+  };
 }
 /**
  * Summary of an active orchestration engine session.

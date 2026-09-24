@@ -226,7 +226,9 @@
     "toast": {
       "runQueued": "预设运行已排队",
       "ideaSent": "想法已发送至预设",
-      "resumed": "预设已恢复"
+      "resumed": "预设已恢复",
+      "steerResumeRefused": "想法已保存为核心上下文版本 {{version}}，但恢复被拒绝",
+      "steerResumeConflict": "想法已保存为核心上下文版本 {{version}}；该计划正在等待人工步骤，因此恢复被作为状态冲突拒绝"
     },
     "draftTransitionLabel": "草稿转换",
     "draftTransitionEditor": "草稿转换编辑器",

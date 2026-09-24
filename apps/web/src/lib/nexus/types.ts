@@ -36,6 +36,8 @@ import type {
   ChapterContentQuery,
   ChapterDetail,
   ChapterOutline,
+  ClearRunsQuery,
+  ClearRunsResponse,
   CountPendingReviewsResponse,
   CreateForkRequest,
   CreateForkResponse,
@@ -46,6 +48,7 @@ import type {
   CreatorDetail,
   DeletePendingReviewResponse,
   DeleteScheduleResponse,
+  DiscardRunResponse,
   EditCoreContextRequest,
   EditCoreContextResponse,
   FindingDetailResponse,
@@ -64,6 +67,7 @@ import type {
   ListPendingReviewsQuery,
   ListPendingReviewsResponse,
   ListPresetsResponse,
+  ListRunsQuery,
   ListSchedulesQuery,
   ListSchedulesResponse,
   ListSessionsQuery,
@@ -93,7 +97,6 @@ import type {
   RunListResponse,
   RunRequest,
   RunResponse,
-  RunSummary,
   ScaffoldPresetRequest,
   ScaffoldPresetResponse,
   ScanRequest,
@@ -155,60 +158,6 @@ export interface DaemonHealth {
   status: string;
   /** Daemon (`nexus42`) package version. */
   version: string;
-}
-
-/**
- * Query params for `GET /v1/daemon/compute/runs` (V1.147 P1). App-side type:
- * P0 shipped no generated schema for this query object; the fields mirror the
- * daemon handler's `ListRunsQuery` (`world_id` / `module_id` / `status` /
- * `limit` / `cursor`). Promote to a generated contract when a schema lands.
- */
-export interface ListRunsQuery {
-  /** Restrict to runs targeting this World. */
-  world_id?: string;
-  /** Restrict to runs of this module. */
-  module_id?: string;
-  /** Restrict to one lifecycle status. */
-  status?: RunSummary['status'];
-  /** Page size (daemon default 20, max 100). */
-  limit?: number;
-  /** Opaque cursor from a previous page's `next_cursor`. */
-  cursor?: string;
-}
-
-/**
- * Response for `POST /v1/daemon/compute/runs/{run_id}/discard` (V1.147 P1).
- * App-side type: the daemon returns an inline `{"run_id", "status"}` JSON
- * object and P0 shipped no generated schema for it.
- */
-export interface DiscardRunResponse {
-  run_id: string;
-  /** Always `"discarded"` on success. */
-  status: 'discarded';
-}
-
-/**
- * Query params for `DELETE /v1/daemon/compute/runs` (V1.147 P3 T2 — Clear
- * history). `world_id` is required: Clear is per-World scope (the daemon 422s
- * without it) and the caller must own the World. `status` narrows Clear to one
- * terminal state (`applied|discarded|failed`) — `running` and `succeeded`
- * (needs-review) rows are never deleted.
- */
-export interface ClearRunsQuery {
-  /** World whose terminal runs are cleared (must be owned). */
-  world_id: string;
-  /** Optional terminal-state filter; absent → all terminal runs of the World. */
-  status?: Extract<RunSummary['status'], 'applied' | 'discarded' | 'failed'>;
-}
-
-/**
- * Response for `DELETE /v1/daemon/compute/runs` (V1.147 P3 T2). App-side
- * type: the daemon returns an inline `{"deleted": n}` object; the plan picked
- * schema-less inline (P1 `DiscardRunResponse` precedent for trivial shapes).
- */
-export interface ClearRunsResponse {
-  /** Number of terminal runs deleted (applied|discarded|failed). */
-  deleted: number;
 }
 
 /**
@@ -815,16 +764,20 @@ export interface NexusClient extends CoreSliceClient {
 /** Re-exported for consumers building query/mutation hooks. */
 export type {
   CapabilityInfo,
+  ClearRunsQuery,
+  ClearRunsResponse,
   CountPendingReviewsResponse,
   CreateForkRequest,
   CreateForkResponse,
   CreatorDetail,
   DeletePendingReviewResponse,
+  DiscardRunResponse,
   FindingDetailResponse,
   ListCreatorsQuery,
   ListCreatorsResponse,
   ListMemoryFragmentsQuery,
   ListPendingReviewsQuery,
+  ListRunsQuery,
   MemoryFragmentInfo,
   PendingReviewInfo,
   ReadingAnnotation,

@@ -10,6 +10,9 @@
  * - `useAcceptRun` / `useDiscardRun` invalidate the runs lists + that run's
  *   detail so the status flip (Needs review → Applied / Discarded) is
  *   reflected everywhere it is cached.
+ * - `useClearRuns` invalidates the runs lists + every cached run detail so the
+ *   deleted terminal rows leave the mounted views (the World effect they
+ *   already committed stays).
  */
 import { screen, fireEvent, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
@@ -20,6 +23,7 @@ import { BrowserClient } from '@/lib/nexus';
 import {
   flattenPages,
   useAcceptRun,
+  useClearRuns,
   useComputeRun,
   useComputeRuns,
   useDiscardRun,
@@ -346,5 +350,84 @@ describe('useAcceptRun / useDiscardRun — runs-list + run-detail invalidation',
     await waitFor(() => expect(detailSpy).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(timelineSpy).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(worldKbSpy).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe('useClearRuns — cleared rows leave every cached view', () => {
+  /**
+   * The Runs table and the open Run inspector are the two views Clear history
+   * must empty. The mutation is called with a per-call `onSuccess` exactly like
+   * `run-studio.tsx` does (the toast copy), so this also pins that the
+   * hook-level invalidation ordering keeps working at that call site.
+   */
+  function renderClearHarness(status: () => unknown) {
+    function Harness() {
+      const runs = useComputeRuns({ module_id: 'basic-combat', world_id: 'w1' });
+      const run = useComputeRun('run_1');
+      const clearRuns = useClearRuns();
+      return (
+        <div>
+          <span data-testid="runs">{flattenPages(runs.data).length}</span>
+          {/* The cleared Run's detail read fails (404). React Query keeps the
+              last successful `data` through an error, so the honest consumer
+              signal — and what the real studio renders from — is `isError`. */}
+          <span data-testid="run">{run.isError ? 'error' : (run.data?.status ?? 'none')}</span>
+          <button
+            type="button"
+            onClick={() =>
+              clearRuns.mutate(
+                { worldId: 'w1' },
+                { onSuccess: () => status() },
+              )
+            }
+          >
+            Clear
+          </button>
+        </div>
+      );
+    }
+    renderInApp(<Harness />, { client: new BrowserClient() });
+  }
+
+  it('drops the cleared row from the mounted runs list and run detail', async () => {
+    // Server-side state the DELETE flips: the post-clear reads must disagree
+    // with the pre-clear ones, so only a real refetch can move the mounted
+    // consumers (call counting would pass on a spy echo).
+    let cleared = false;
+    useHandlers(
+      http.get('/v1/daemon/compute/runs', () =>
+        HttpResponse.json(
+          cleared
+            ? { items: [], has_more: false }
+            : { items: [makeRun({ status: 'applied' })], has_more: false },
+        ),
+      ),
+      http.get('/v1/daemon/compute/runs/:runId', () =>
+        cleared
+          ? HttpResponse.json(
+              { success: false, error: { code: 'not_found', message: 'run run_1 not found' } },
+              { status: 404 },
+            )
+          : HttpResponse.json(makeRun({ status: 'applied' })),
+      ),
+      http.delete('/v1/daemon/compute/runs', () => {
+        cleared = true;
+        return HttpResponse.json({ deleted: 1 });
+      }),
+    );
+
+    renderClearHarness(() => undefined);
+    await waitFor(() => expect(screen.getByTestId('runs')).toHaveTextContent('1'));
+    await waitFor(() => expect(screen.getByTestId('run')).toHaveTextContent('applied'));
+
+    fireEvent.click(screen.getByRole('button', { name: /clear/i }));
+
+    // Without the invalidation the mounted views keep rendering the row the
+    // server just deleted (observed against the real service: DOM kept both
+    // rows while `GET /compute/runs` already returned `items: []`).
+    await waitFor(() => expect(screen.getByTestId('runs')).toHaveTextContent('0'));
+    // The refetched detail is a 404 now: the open Run's read is in its error
+    // state (the real studio renders "Could not load this Run" from it).
+    await waitFor(() => expect(screen.getByTestId('run')).toHaveTextContent('error'));
   });
 });

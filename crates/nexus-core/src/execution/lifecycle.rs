@@ -22,17 +22,26 @@ use nexus_orchestration::capability::{
     PromptExecutor, WorkspaceExecutor, WorkspaceStateProvider,
 };
 use nexus_orchestration::run_state::WorkflowStateStore;
+use nexus_orchestration::schedule::supervisor::{ScheduleRunStarter, ScheduleSupervisor};
 use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
 use nexus_orchestration::{GraphFlowEngine, OrchestrationEngine};
 use nexus_provider_ports::ProviderPort;
 use sqlx::SqlitePool;
 
 use crate::error::CoreResult;
-use crate::execution::workflow::{ProviderCatalogPort, RunEventPort, WorkflowRunCoordinator};
+use crate::execution::schedules::HostedSchedulerConfig;
+use crate::execution::workflow::{
+    CoordinatorScheduleRunStarter, ProviderCatalogPort, RunEventPort, WorkflowRunCoordinator,
+};
 use crate::service::{CoreAccess, CoreService};
 
 /// Why an execution handle could not be established.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+///
+/// `PartialEq`/`Eq` are deliberately NOT derived (v1.195 P0-T2): the hosted
+/// factory's [`ExecutionOpenError::Workspace`] carries the neutral
+/// [`crate::CoreError`], which is not comparable. Nothing in the workspace
+/// compared handles' open errors.
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum ExecutionOpenError {
     /// The service was not opened as [`CoreAccess::EngineOwner`]. Continuing
     /// would create a second effect owner beside the live one.
@@ -49,6 +58,16 @@ pub enum ExecutionOpenError {
     /// The service is closing.
     #[error("core service is closing")]
     Closing,
+    /// The hosted workspace composition the owner must be built from refused.
+    ///
+    /// Only [`CoreService::start_hosted_execution`] produces this: the selected
+    /// creator's canonical creative root is missing/uninitialized, this DB
+    /// already has a workspace commit/recovery authority, or the environment
+    /// refused the authority. The neutral class is carried verbatim so a boot
+    /// caller can tell `Uninitialized` from `Busy` from a storage fault instead
+    /// of string-matching a message.
+    #[error("hosted workspace composition refused: {0}")]
+    Workspace(crate::CoreError),
 }
 
 /// Optional collaborators the daemon composes onto the execution handle.
@@ -125,6 +144,28 @@ pub struct RunnerDeps {
     pub nexus_home: Option<std::path::PathBuf>,
     /// Cancels the bounded recovery re-drive when the transport shuts down.
     pub shutdown_notify: Option<Arc<tokio::sync::Notify>>,
+    /// Cadence for the ONE retained supervisor wake/clock task (v1.195 P0-T2).
+    ///
+    /// `Some` is what makes this a HOSTED owner: `build_execution` constructs
+    /// the production [`nexus_orchestration::schedule::supervisor::ScheduleSupervisor`]
+    /// over this core's pool with the coordinator-backed starter injected, and
+    /// spawns the single clock task that admits eligible durable pending
+    /// schedules through it — all BEFORE recovery runs, with the clock held
+    /// until recovery completes. `None` (domain-only cores, and tests that
+    /// attach their own supervisor) installs neither, so a core-only start
+    /// owns exactly the drives it was given.
+    pub hosted_scheduler: Option<HostedSchedulerConfig>,
+    /// Optional barrier invoked after a subscription's durable ROOT ownership
+    /// check and BEFORE its ring attachment and token mint (P1-T1).
+    ///
+    /// Production supplies `None`. It exists so a test can hold the EXACT
+    /// window the subscribe/owner-close race lives in — a close landing between
+    /// those two steps must neither publish a token nor keep the ring
+    /// subscriber permit — and force that interleaving deterministically
+    /// instead of hoping for it. Like [`ExecutionBuildObserver`] it is a
+    /// diagnostic seam, not a collaborator: it observes no state and its only
+    /// power is to delay its own caller.
+    pub subscription_observer: Option<Arc<dyn ExecutionSubscriptionObserver>>,
     /// Optional barrier invoked once the owner is fully built but BEFORE
     /// [`CoreService::start_execution`] publishes it into the per-service slot.
     ///
@@ -136,6 +177,19 @@ pub struct RunnerDeps {
     /// fires, so a close racing here observes exactly the split the
     /// install-time double check must resolve.
     pub build_observer: Option<Arc<dyn ExecutionBuildObserver>>,
+}
+
+/// Observable point across a subscription's durable-owner check and its ring
+/// attachment.
+///
+/// A single await where the caller may hold that window open (see
+/// [`RunnerDeps::subscription_observer`]). It observes no state and its only
+/// power is to delay its own caller.
+#[async_trait::async_trait]
+pub trait ExecutionSubscriptionObserver: Send + Sync {
+    /// Called once per subscription: after the run's durable ROOT ownership was
+    /// resolved, before the ring is attached and the token minted.
+    async fn owner_resolved(&self);
 }
 
 /// Observable point in [`CoreService::start_execution`]'s build phase.
@@ -216,10 +270,37 @@ pub struct ExecutionHandle {
     /// Set when `close()` has finished: every owned drive was cancelled and
     /// joined (C1). Only a SETTLED owner may be superseded in the registry.
     settled: AtomicBool,
+    /// Set by the FIRST close: the ONE retained close drain was started.
+    ///
+    /// The drain runs on its own task (see [`Self::close`]) so an interrupted
+    /// caller cannot abandon it and a later close observes the real settlement
+    /// instead of waiting forever for a drain that died with its caller.
+    drain_started: AtomicBool,
+    /// Notified when the retained drain publishes [`Self::settled`].
+    settled_notify: Arc<tokio::sync::Notify>,
+    /// The owner's ONE bounded supervisor wake/clock task (v1.195 P0-T2).
+    ///
+    /// `Some` for a hosted owner (`RunnerDeps::hosted_scheduler`), `None` for
+    /// every core-only/test start. `close` takes the handle and JOINS it, so no
+    /// scheduler tick can outlive the drain. Behind a mutex because `close`
+    /// needs the handle by value while other readers may still probe
+    /// [`ExecutionHandle::owned_tasks_finished`].
+    scheduler_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// Fires when `close()` begins so the scheduler loop exits promptly
+    /// instead of waiting out its interval.
+    scheduler_shutdown: Arc<tokio::sync::Notify>,
     /// The peer-control lane this execution owner admits (v1.190 P4-T3).
     /// Empty until `start_peer_control` succeeds; closed with the owner.
     #[cfg(feature = "connect-client")]
     pub(crate) peer_control: std::sync::Mutex<Option<Arc<crate::connect::PeerControlLane>>>,
+    /// The authorized workflow-event subscriptions this owner minted (P1-T1).
+    ///
+    /// Owner-scoped, never process-global: the tokens die with the generation
+    /// that minted them, and `close` wakes and withdraws every one of them.
+    pub(crate) workflow_subscriptions: crate::execution::run_events::WorkflowSubscriptionRegistry,
+    /// Optional diagnostic barrier held across a subscription's durable-owner
+    /// check and its ring attachment (see [`RunnerDeps::subscription_observer`]).
+    subscription_observer: Option<Arc<dyn ExecutionSubscriptionObserver>>,
 }
 
 impl ExecutionHandle {
@@ -312,6 +393,15 @@ impl ExecutionHandle {
         self.closing.load(Ordering::SeqCst)
     }
 
+    /// The subscription observation point this owner was built with, if any.
+    ///
+    /// `None` in production: only a test that must force the subscribe/close
+    /// interleaving supplies one (see [`RunnerDeps::subscription_observer`]).
+    #[must_use]
+    pub(crate) fn subscription_observer(&self) -> Option<Arc<dyn ExecutionSubscriptionObserver>> {
+        self.subscription_observer.clone()
+    }
+
     /// The process-level facts the tool health surface reports.
     #[must_use]
     #[cfg(feature = "execution")]
@@ -377,40 +467,128 @@ impl ExecutionHandle {
         self.settled.load(Ordering::SeqCst)
     }
 
+    /// Whether every background task this owner owns has finished.
+    ///
+    /// The owned supervisor wake/clock task is the observable case: while it is
+    /// installed and parked on its interval this is `false`, and it reports
+    /// `true` once [`Self::close`] has joined it (or when no task was ever
+    /// installed — a core-only start owns none). A dropped `JoinHandle` does
+    /// NOT stop a task, so this probe is what makes "close joins owned tasks"
+    /// checkable rather than assumed.
+    #[must_use]
+    pub fn owned_tasks_finished(&self) -> bool {
+        self.scheduler_task
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .is_none_or(tokio::task::JoinHandle::is_finished)
+    }
+
+    /// Stop and JOIN the owned supervisor wake/clock task, if one was
+    /// installed.
+    ///
+    /// Idempotent: `close` is the only caller and it owns the drain, so the
+    /// handle is taken exactly once. `notify_one` (not `notify_waiters`) stores
+    /// a permit when the loop is mid-tick, so a tick that is already running
+    /// cannot swallow the shutdown signal.
+    async fn stop_scheduler(&self) {
+        self.scheduler_shutdown.notify_one();
+        let task = self
+            .scheduler_task
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if let Some(task) = task {
+            let _ = task.await;
+        }
+    }
+
     /// Abort every owned drive and settle the handle's cleanup in the
     /// documented order.
     ///
-    /// Ordering: fence new drive admission (C2), fire every owned
-    /// cancellation token and join the drive loops, THEN mark the handle
-    /// settled (C1) so the per-DB registry admits a replacement only after
-    /// every owned drive has joined. Repeated calls report the
-    /// already-closed state.
+    /// Ordering: fence new drive admission (C2), close the durable-commit
+    /// admission boundary so no further commit can be admitted, stop and JOIN
+    /// the owned scheduler task, fire every owned cancellation token and join
+    /// the drive loops, WAIT for every already-admitted durable commit (a
+    /// retained owner outlives its awaiting caller, so the drive drain alone
+    /// does not cover it) and RELEASE the workspace commit/recovery authority
+    /// this owner composed, THEN mark the handle settled (C1) so the per-DB
+    /// registry admits a replacement only after every owned operation joined.
+    ///
+    /// The scheduler is joined BEFORE the drive drain on purpose: the C2 fence
+    /// already refuses an admission once `begin_shutdown` ran, and joining
+    /// first guarantees no tick can still be inside `admit_schedule` while the
+    /// drives map is being drained.
+    ///
+    /// Releasing the workspace authority HERE (rather than leaving it to the
+    /// last `Arc` drop) is what makes a confirmed close honest: the settled
+    /// owner's engine, registry and commit authority are still referenced by
+    /// this handle, so a drop-based release would keep the OS lease—and with
+    /// it the whole home—fenced after the owner reported `closed`. Everything
+    /// this owner could still write through is fenced at this point
+    /// (`ensure_admitting`), and every admitted commit has joined, so the lease
+    /// fences nothing live.
+    ///
+    /// The drain runs on its OWN task, started by the first close: an
+    /// interrupted caller (the native cleanup budget cancels this future) must
+    /// not abandon a half-drained owner, and a later close must observe the
+    /// real settlement rather than wait forever for a drain nobody runs.
     ///
     /// # Errors
     /// Currently infallible: the report always describes a settled close.
-    pub async fn close(&self) -> CoreResult<CoreCloseReport> {
+    pub async fn close(self: &Arc<Self>) -> CoreResult<CoreCloseReport> {
         if self
-            .closing
+            .drain_started
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-            .is_err()
+            .is_ok()
         {
-            // Another close owns the drain (C2). It reports `confirmed` only
-            // AFTER the drives have joined — wait for that settle rather than
-            // returning a false confirmed report from a close that did
-            // nothing.
-            while !self.is_settled() {
-                tokio::time::sleep(std::time::Duration::from_millis(2)).await;
-            }
-            return Ok(closed_report());
+            self.closing.store(true, Ordering::SeqCst);
+            tokio::spawn(Self::run_close(Arc::clone(self)));
         }
-        self.coordinator.begin_shutdown();
-        self.coordinator.abort_all_drives().await;
-        self.settled.store(true, Ordering::SeqCst);
+        self.await_settled().await;
         Ok(closed_report())
     }
 
+    /// The retained drain body (see [`Self::close`] for the ordering contract).
+    async fn run_close(self: Arc<Self>) {
+        self.coordinator.begin_shutdown();
+        // Every authorized subscription this owner minted ends HERE: a pull
+        // blocked on a silent run wakes with `closed` instead of hanging past
+        // the close, and no token survives the generation that minted it.
+        self.workflow_subscriptions.close_all();
+        if let Some(authority) = &self.workspace_commit {
+            authority.manager().close_commit_admission();
+        }
+        self.stop_scheduler().await;
+        self.coordinator.abort_all_drives().await;
+        if let Some(authority) = &self.workspace_commit {
+            authority.manager().wait_for_admitted_commits().await;
+            // A confirmed close is the whole contract here: `false` would only
+            // mean this authority held no recoverable lease (or released it
+            // already), so the answer is deliberately not acted on.
+            let _released = authority.release_authority();
+        }
+        self.settled.store(true, Ordering::SeqCst);
+        self.settled_notify.notify_waiters();
+    }
+
+    /// Wait until the retained drain has published the settlement.
+    async fn await_settled(&self) {
+        loop {
+            let notified = self.settled_notify.notified();
+            tokio::pin!(notified);
+            // Register BEFORE the check so a settlement that lands in between
+            // cannot be missed.
+            notified.as_mut().enable();
+            if self.is_settled() {
+                return;
+            }
+            notified.await;
+        }
+    }
+
     /// Close without owning the report (used by [`CoreService::close`]).
-    pub(crate) async fn shutdown(&self) {
+    pub(crate) async fn shutdown(self: &Arc<Self>) {
         let _ = self.close().await;
     }
 }
@@ -542,11 +720,25 @@ impl CoreService {
     /// supplies the implementation); it is required so a handle can never be
     /// created without a provider seam.
     ///
+    /// The start runs on a **retained task**, not on the caller's future: a
+    /// caller that is cancelled (a boot budget, a dropped client) must not
+    /// interrupt a half-built owner. `build_execution` spawns the hosted clock
+    /// and the drives `recovery` re-drives, and dropping an
+    /// [`ExecutionHandle`] stops NONE of them — so a cancellation mid-build
+    /// would lose the clock's `JoinHandle` and leave live drives behind, while
+    /// freeing the reservation a later close would trust. The task holds the
+    /// per-service START fence for the whole start and settles an owner nobody
+    /// received, so the close drain waits for that settlement too (see
+    /// [`Self::run_retained_start`]).
+    ///
     /// # Errors
     /// Returns [`ExecutionOpenError::NotEngineOwner`] when the core was not
     /// opened under [`CoreAccess::EngineOwner`],
     /// [`ExecutionOpenError::AlreadyOwned`] when an owner already exists, and
-    /// [`ExecutionOpenError::Closing`] when the service is closing.
+    /// [`ExecutionOpenError::Closing`] when the service is closing — including
+    /// a start that arrives while a close is already draining, which is refused
+    /// once that drain has settled (both register on the same per-service
+    /// fence).
     pub async fn start_execution(
         &self,
         _providers: Arc<dyn ProviderPort>,
@@ -557,6 +749,105 @@ impl CoreService {
         if self.inner.access != CoreAccess::EngineOwner {
             return Err(ExecutionOpenError::NotEngineOwner(self.inner.access));
         }
+        // The build-phase barrier is consumed HERE, not by the builder: it
+        // gates the install, so it must outlive `build_execution`.
+        let build_observer = deps.build_observer.take();
+        // Two channels, because they mean different things:
+        //
+        // - `handoff` carries the outcome of the start;
+        // - `receipt` carries the caller's acknowledgement that it RECEIVED
+        //   that outcome.
+        //
+        // Both are needed because a `send` only queues the value: a caller
+        // dropped before it is polled takes the queued owner with it, so the
+        // retained task may not treat a successful send as a hand-over.
+        let (handoff_tx, handoff_rx) = tokio::sync::oneshot::channel();
+        let (receipt_tx, receipt_rx) = tokio::sync::oneshot::channel();
+        let service = self.clone();
+        let task = tokio::spawn(async move {
+            service
+                .run_retained_start(deps, build_observer, handoff_tx, receipt_rx)
+                .await;
+        });
+        match handoff_rx.await {
+            Ok(outcome) => {
+                // Acknowledge BEFORE returning, with NO await in between: only
+                // a caller that already holds the outcome gets here, so the
+                // receipt is exactly the proof the task needs. (Dropping this
+                // future instead closes the receipt, which tells the task to
+                // settle the owner it published.)
+                let _ = receipt_tx.send(());
+                outcome
+            }
+            // The retained task sends before it returns, so a vanished sender
+            // means it panicked: propagate that panic instead of relabelling a
+            // build bug as a well-behaved closing service.
+            Err(_) => match task.await {
+                Err(err) if err.is_panic() => std::panic::resume_unwind(err.into_panic()),
+                // Not reachable in practice: the task is never aborted, so a
+                // cancelled join can only mean the runtime is going away.
+                _ => Err(ExecutionOpenError::Closing),
+            },
+        }
+    }
+
+    /// The retained start: reservation, build, recovery, install — and the
+    /// settlement of an owner nobody received — fenced end to end.
+    ///
+    /// Runs on its own task, so the caller's cancellation cannot reach into a
+    /// half-built owner. Holds the per-service START fence for its WHOLE
+    /// duration, including the wait for the hand-off `receipt`: the close drain
+    /// takes the exclusive half before it takes the per-service slot and
+    /// releases the pool, the writer admission and the per-DB owner fence, so a
+    /// confirmed `cleanup_confirmed` can never precede this start's own
+    /// settlement — the owner it published and had to withdraw included.
+    async fn run_retained_start(
+        &self,
+        deps: RunnerDeps,
+        build_observer: Option<Arc<dyn ExecutionBuildObserver>>,
+        handoff: tokio::sync::oneshot::Sender<Result<Arc<ExecutionHandle>, ExecutionOpenError>>,
+        receipt: tokio::sync::oneshot::Receiver<()>,
+    ) {
+        let _start = Arc::clone(&self.inner.start_fence).read_owned().await;
+        match self
+            .start_execution_fenced(deps, build_observer, &handoff)
+            .await
+        {
+            Ok(handle) => {
+                // A successful `send` only QUEUES the owner, and a caller that
+                // is dropped before its next poll drops it again — so the owner
+                // is only handed over once the caller acknowledges receipt.
+                // Until then this task keeps the fence (a close waits) and,
+                // when the acknowledgement can never come, settles the owner
+                // itself instead of leaving an engine and its drives running
+                // for a start nobody received.
+                let queued = handoff.send(Ok(Arc::clone(&handle))).is_ok();
+                if !queued || receipt.await.is_err() {
+                    self.withdraw_and_settle(&handle).await;
+                }
+            }
+            Err(err) => {
+                let _ = handoff.send(Err(err));
+            }
+        }
+    }
+
+    /// The fenced start body (see [`Self::run_retained_start`] for the fence
+    /// and cancellation contract).
+    async fn start_execution_fenced(
+        &self,
+        deps: RunnerDeps,
+        build_observer: Option<Arc<dyn ExecutionBuildObserver>>,
+        handoff: &tokio::sync::oneshot::Sender<Result<Arc<ExecutionHandle>, ExecutionOpenError>>,
+    ) -> Result<Arc<ExecutionHandle>, ExecutionOpenError> {
+        // A close that began before this task took the fence has already raised
+        // `closing` and queued its drain on the exclusive half, so this start
+        // must refuse rather than build into a service that is releasing its
+        // admission. (Today's `RwLock` is write-preferring, so a start arriving
+        // behind a queued drain acquires AFTER the drain finished — the refusal
+        // covers exactly that ordering too.)
+        self.ensure_open()
+            .map_err(|_| ExecutionOpenError::Closing)?;
         // Single owner. The fence cannot be the per-service slot alone:
         // `CoreService::open` under `EngineOwner` deliberately JOINS this
         // process's retained engine admission (the daemon's transport pool and
@@ -574,9 +865,6 @@ impl CoreService {
         // build cannot fence its own DB. A closed or dropped owner frees its
         // slot on the next claim.
         let reservation = OwnerReservation::claim(&self.inner.db_path)?;
-        // The build-phase barrier is consumed HERE, not by the builder: it
-        // gates the install, so it must outlive `build_execution`.
-        let build_observer = deps.build_observer.take();
         let handle = self.build_execution(deps).await?;
         // C3 barrier (diagnostic seam): the build is complete (engine +
         // recovery) but nothing is published yet. A test holds this exact
@@ -585,18 +873,25 @@ impl CoreService {
         if let Some(observer) = build_observer {
             observer.built().await;
         }
-        // C3: install-time double check. Close sets `closing` BEFORE it takes
-        // the per-service slot, and this check+install is atomic under the
-        // SAME slot mutex — so either close observes the installed handle
-        // and settles it, or the build abandons it. Neither path leaves an
-        // owner behind after close returns.
+        // C3: install-time double check. Close raises `closing` before its
+        // drain takes the START fence exclusively, and this check+install runs
+        // under that fence's shared half — so either the install published the
+        // handle before the drain took the fence (the drain then observes the
+        // installed handle and settles it), or the drain already owns the fence
+        // and `closing` is visible here, so the build abandons its handle. The
+        // per-service slot mutex still makes the check+install itself atomic;
+        // the fence is what keeps the drain from releasing the pool and
+        // reporting a confirmed cleanup while this build is in flight.
+        //
+        // A caller that is already gone is refused the same way: publishing an
+        // owner nobody waits for only to withdraw it again is wasted work.
         let installing = {
             let mut slot = self
                 .inner
                 .execution
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if self.ensure_open().is_err() {
+            if self.ensure_open().is_err() || handoff.is_closed() {
                 false
             } else {
                 *slot = Some(Arc::clone(&handle));
@@ -604,15 +899,58 @@ impl CoreService {
             }
         };
         if !installing {
-            // The service began closing while this build ran. The build ran
-            // recovery (which spawns drives), so settle the freshly built
-            // owner before abandoning it — a dropped handle must not leak
-            // live drives.
+            // The service began closing — or the caller went away — while this
+            // build ran. The build ran recovery (which spawns drives), so
+            // settle the freshly built owner before abandoning it: a dropped
+            // handle must not leak live drives.
             handle.shutdown().await;
             return Err(ExecutionOpenError::Closing);
         }
         reservation.install(&handle);
         Ok(handle)
+    }
+
+    /// Withdraw a published owner and settle it.
+    ///
+    /// Used when the caller of a start was cancelled after its owner had been
+    /// installed: nobody exists to close it, so leaving it live would keep an
+    /// engine and its drives running for a start nobody is waiting for. The
+    /// owner is taken out of the per-service slot first; the only other taker is
+    /// [`Self::retire_execution`], which settles the handle it took on its own
+    /// path.
+    ///
+    /// The settlement is AWAITED on BOTH paths — whether or not this task took
+    /// the slot. This task's caller holds the per-service start fence for the
+    /// whole start (see [`Self::run_retained_start`]), and the close drain
+    /// trusts that fence for the claim "every owner this start published is
+    /// gone": an early return leaves the drain to find an EMPTY slot, so it
+    /// closes the pool and publishes `cleanup_confirmed` while the retirement
+    /// that took the slot is still joining this handle's drives — and while the
+    /// per-DB owner fence is still held. `shutdown` is idempotent (one retained
+    /// drain per handle), so the path that did not take the slot only JOINS the
+    /// settlement the taker started. The per-DB fence stays the slot taker's to
+    /// release, so a settlement never releases it twice.
+    async fn withdraw_and_settle(&self, handle: &Arc<ExecutionHandle>) {
+        let withdrawn = {
+            let mut slot = self
+                .inner
+                .execution
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if slot
+                .as_ref()
+                .is_some_and(|current| Arc::ptr_eq(current, handle))
+            {
+                slot.take();
+                true
+            } else {
+                false
+            }
+        };
+        handle.shutdown().await;
+        if withdrawn {
+            release_owner_slot(&self.inner.db_path, handle);
+        }
     }
 
     /// The established execution handle, if any.
@@ -634,9 +972,25 @@ impl CoreService {
     /// the slot released after, so the fence is never dropped while a build
     /// that supersedes this owner is still in flight.
     ///
+    /// A retirement holds the per-service START fence for its WHOLE duration:
+    /// the slot take, the settlement of the handle it took, and the release of
+    /// the per-DB owner fence. The close drain takes that SAME fence
+    /// exclusively before it takes the slot and releases the pool, the writer
+    /// admission and the per-DB owner fence, so a confirmed `cleanup_confirmed`
+    /// can never precede a retirement that is still settling the owner it took.
+    /// Without it the drain finds the slot already empty and confirms a cleanup
+    /// over drives that are still joining.
+    ///
+    /// The SHARED half is the right one: a retirement is not a start and must
+    /// not fence concurrent starts out (the per-DB owner reservation already
+    /// serializes those), it only has to be WAITED FOR by the exclusive close.
+    /// Lock order (fence, then slot) matches the start's own install and
+    /// `close_drain`, so no path can deadlock.
+    ///
     /// A service that never established an owner (domain-only cores) is a
     /// no-op.
     pub async fn retire_execution(&self) {
+        let _retiring = Arc::clone(&self.inner.start_fence).read_owned().await;
         let handle = self
             .inner
             .execution
@@ -709,6 +1063,15 @@ impl CoreService {
         if let Some(provider) = &deps.workspace_state_provider {
             engine.set_workspace_state_provider(Arc::clone(provider));
         }
+        // v1.195 P0-T6: outer-state boundaries render the schedule's COMMITTED
+        // core-context version, so an edit committed while a run is
+        // mid-execution lands at that run's next state transition. Same Creator
+        // DB pool the supervisor reads schedule pointers through.
+        engine.set_core_context_store(Arc::new(
+            nexus_orchestration::schedule::derivation::CoreContextManager::new(Arc::new(
+                pool.clone(),
+            )),
+        ));
         let engine = Arc::new(engine);
 
         let mut coordinator = WorkflowRunCoordinator::new(
@@ -728,6 +1091,45 @@ impl CoreService {
         }
         let coordinator = Arc::new(coordinator);
 
+        // Hosted composition (v1.195 P0-T2): install the supervisor, its
+        // coordinator-backed starter and the ONE clock task BEFORE recovery.
+        // A recovered terminal run settles through this supervisor, and the
+        // clock is installed-but-held until recovery completed below.
+        let (scheduler_task, scheduler_shutdown, scheduler_start) =
+            if let Some(config) = deps.hosted_scheduler {
+                let starter: Arc<dyn ScheduleRunStarter> =
+                    Arc::new(CoordinatorScheduleRunStarter::new(
+                        &coordinator,
+                        deps.nexus_home.clone().unwrap_or_default(),
+                        capability_holder.clone(),
+                        deps.daemon_tool_dispatch.clone(),
+                        deps.prompt_executor.clone(),
+                    ));
+                let mut supervisor = ScheduleSupervisor::new_with_workspace(
+                    Arc::new(pool.clone()),
+                    deps.workspace_root.clone(),
+                )
+                .with_schedule_starter(starter);
+                if let Some(registry) = capability_holder.get() {
+                    supervisor = supervisor.with_capability_registry(registry);
+                }
+                let supervisor = Arc::new(supervisor);
+                // The coordinator settles terminal runs through the SAME
+                // supervisor the clock drives.
+                coordinator.set_schedule_supervisor(Arc::clone(&supervisor));
+                let start = Arc::new(tokio::sync::Notify::new());
+                let shutdown = Arc::new(tokio::sync::Notify::new());
+                let task = crate::execution::schedules::hosted_scheduler::spawn(
+                    supervisor,
+                    Arc::clone(&start),
+                    Arc::clone(&shutdown),
+                    config,
+                );
+                (Some(task), shutdown, Some(start))
+            } else {
+                (None, Arc::new(tokio::sync::Notify::new()), None)
+            };
+
         // A7 recovery: reconstruct runners from the frozen source identity and
         // re-drive only the eligible converge/merge class through this owner.
         let decisions = coordinator
@@ -735,6 +1137,12 @@ impl CoreService {
             .await;
         for d in &decisions {
             tracing::info!(decision = ?d, "execution start: recovery re-drive decision");
+        }
+        // Recovery is complete: start the clock. Until this signal the owned
+        // scheduler task cannot tick, so an admission sweep can never race the
+        // recovery pass above.
+        if let Some(start) = scheduler_start {
+            start.notify_one();
         }
 
         let deps_runtime_facts = deps.runtime_facts.unwrap_or_default();
@@ -770,8 +1178,15 @@ impl CoreService {
             engine_epoch,
             closing: AtomicBool::new(false),
             settled: AtomicBool::new(false),
+            drain_started: AtomicBool::new(false),
+            settled_notify: Arc::new(tokio::sync::Notify::new()),
+            scheduler_task: Mutex::new(scheduler_task),
+            scheduler_shutdown,
             #[cfg(feature = "connect-client")]
             peer_control: std::sync::Mutex::new(None),
+            workflow_subscriptions: crate::execution::run_events::WorkflowSubscriptionRegistry::new(
+            ),
+            subscription_observer: deps.subscription_observer,
         }))
     }
 }

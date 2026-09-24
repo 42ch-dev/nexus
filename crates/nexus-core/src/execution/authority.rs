@@ -3,13 +3,21 @@
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 /// Shared exclusive OS advisory lock held for the process lifetime of a workspace authority.
 #[derive(Debug)]
 pub struct WorkspaceAuthorityLease {
     path: PathBuf,
-    file: Option<File>,
+    /// The held lock file, taken exactly ONCE — by [`Self::release`] (a
+    /// confirmed owner close) or by `Drop` (the last reference going away).
+    ///
+    /// Behind a mutex because the authority is shared: the owner that
+    /// established the composition releases the lease at the END of its
+    /// confirmed close, when the lock is no longer load-bearing, instead of
+    /// waiting for every `Arc` clone — including the ones a settled owner's
+    /// engine and ports still reference — to drop.
+    file: Mutex<Option<File>>,
 }
 
 impl WorkspaceAuthorityLease {
@@ -43,7 +51,7 @@ impl WorkspaceAuthorityLease {
         }
         Ok(Arc::new(Self {
             path,
-            file: Some(file),
+            file: Mutex::new(Some(file)),
         }))
     }
 
@@ -51,7 +59,45 @@ impl WorkspaceAuthorityLease {
     pub fn path(&self) -> &Path {
         &self.path
     }
+
+    /// Close the held lock file now, releasing the OS lease even while other
+    /// handles to this lease are still referenced.
+    ///
+    /// A CONFIRMED owner close is the point where the composition that took
+    /// the lease is over: its admission is fenced and every owned drive has
+    /// joined, so the lock no longer fences a live writer and must not keep
+    /// fencing the next owner of the same home. Idempotent: `false` means the
+    /// lease was already released (or was never held).
+    pub fn release(&self) -> bool {
+        let file = self
+            .file
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        // Explicit `flock` unlock, then the close: releasing here leaves the
+        // same state as the dropped-lease path.
+        let Some(file) = file else {
+            return false;
+        };
+        unlock(&file);
+        drop(file);
+        true
+    }
 }
+
+/// Release the OS lock a held lock file carries.
+///
+/// Closing the file descriptor is what releases the `flock`; the explicit
+/// unlock keeps the released-by-us path identical to the dropped-lease path.
+#[cfg(unix)]
+fn unlock(file: &File) {
+    use std::os::unix::io::AsRawFd;
+    #[allow(deprecated)]
+    let _ = nix::fcntl::flock(file.as_raw_fd(), nix::fcntl::FlockArg::Unlock);
+}
+
+#[cfg(not(unix))]
+fn unlock(_file: &File) {}
 
 /// Classify a non-blocking `flock` failure as a held lease.
 ///
@@ -77,15 +123,16 @@ fn lock_conflict_error(err: nix::errno::Errno) -> io::Error {
 
 impl Drop for WorkspaceAuthorityLease {
     fn drop(&mut self) {
-        if let Some(file) = self.file.take() {
-            #[cfg(unix)]
-            {
-                use std::os::unix::io::AsRawFd;
-                #[allow(deprecated)]
-                {
-                    let _ = nix::fcntl::flock(file.as_raw_fd(), nix::fcntl::FlockArg::Unlock);
-                }
-            }
+        // The last reference going away is the OTHER release path: the file
+        // still held here is closed (and its lock released) only when nothing
+        // can use the lease any more.
+        if let Some(file) = self
+            .file
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+        {
+            unlock(&file);
             drop(file);
         }
     }

@@ -6,6 +6,16 @@
 //! service, an independent product) drives the SAME authority instead of
 //! re-implementing the accept transaction.
 //!
+//! # Facade surface (v1.195 P2-T1)
+//!
+//! The free functions below are the authority. [`ExecutionHandle`] exposes the
+//! generated `daemon-api/compute` DTOs on top of them (current-host-contracts
+//! §5), so the native/service boundary decodes and encodes exactly what
+//! `schemas/` declares instead of hand-written request shapes. Each facade
+//! method applies the same owner fence and principal binding as the
+//! neighbouring `handle_ops` entry points and then delegates — it re-implements
+//! nothing, so there is still ONE discovery/detail/history authority.
+//!
 //! # Why the accept path is the anchor
 //!
 //! Accept is the only compute operation with a domain effect. It applies the
@@ -38,9 +48,19 @@
 use crate::actor_knowledge::ActorKnowledgeViewService;
 use crate::actors::AdmittedActor;
 use crate::error::{CoreError, CoreResult};
+use crate::execution::lifecycle::ExecutionHandle;
 use crate::principal::Principal;
 use crate::service::CoreService;
 use nexus_contracts::generated::daemon_api::compute::{
+    clear_runs_query::ClearRunsQuery,
+    clear_runs_response::ClearRunsResponse,
+    discard_run_response::{DiscardRunResponse, DiscardRunResponseStatus},
+    list_modules_response::{
+        ListModulesResponse, NexusComputeModuleSummary, NexusComputeModuleSummaryStatus,
+    },
+    list_runs_query::ListRunsQuery,
+    module_detail::ModuleDetail,
+    module_summary::{ModuleSummary, ModuleSummaryStatus},
     run_accept_request::RunAcceptRequest,
     run_accept_response::RunAcceptResponse,
     run_detail::RunDetail,
@@ -58,6 +78,12 @@ use std::sync::Arc;
 /// The untruncated output stays durable on the run row, so a truncated
 /// response is a read-path limit, never data loss.
 const RESPONSE_BYTE_CAP: usize = 1024 * 1024;
+
+/// Run-list page size when the caller omits `limit`.
+const DEFAULT_RUN_LIST_LIMIT: u32 = 20;
+
+/// Hard cap on the run-list page size.
+const MAX_RUN_LIST_LIMIT: u32 = 100;
 
 /// The daemon-wide compute serialization permit, acquired before every
 /// invocation.
@@ -108,12 +134,14 @@ impl ComputeContext {
 /// List installed compute modules.
 ///
 /// Reads the compiled-in module registry, so it requires no pool and no
-/// owner: a module listing is machine capability, not domain state.
+/// owner: a module listing is machine capability, not domain state. The
+/// return type is the generated `module-summary` DTO (the wasm-host registry
+/// re-exports the same generated type).
 ///
 /// # Errors
 /// Currently infallible; returns `Result` so the transport surface stays
 /// uniform with the other compute operations.
-pub fn list_compute_modules() -> CoreResult<Vec<nexus_wasm_host::ModuleSummary>> {
+pub fn list_compute_modules() -> CoreResult<Vec<ModuleSummary>> {
     Ok(nexus_wasm_host::list_modules())
 }
 
@@ -122,7 +150,7 @@ pub fn list_compute_modules() -> CoreResult<Vec<nexus_wasm_host::ModuleSummary>>
 /// # Errors
 /// `NotFound` when no module with `module_id` is installed; `Internal` when
 /// an installed module's manifest is present but unparsable.
-pub fn get_compute_module(module_id: &str) -> CoreResult<nexus_wasm_host::ModuleDetail> {
+pub fn get_compute_module(module_id: &str) -> CoreResult<ModuleDetail> {
     match nexus_wasm_host::get_module(module_id) {
         Ok(Some(detail)) => Ok(detail),
         Ok(None) => Err(CoreError::NotFound {
@@ -577,28 +605,105 @@ pub async fn discard_compute_run(
     Ok(())
 }
 
-/// List runs for the creator's owned Worlds, cursor-paginated.
+/// Clear a World's TERMINAL run history, returning how many rows went (C8).
+///
+/// Clear is World-scoped, never a world-wide purge: `query.world_id` is
+/// required by the generated query, and ownership is verified BEFORE any row
+/// is touched, so a foreign World is refused (and its history never disclosed)
+/// rather than cleared.
+///
+/// Deleting a run row is not an UNDO. An accepted run's effect — the applied
+/// state delta, the new key blocks, the CANON `compute_result` timeline
+/// events — lives in the World, not on the run row, so Clear drops history
+/// without reverting anything its owner accepted (retained C8: "does not undo
+/// an already accepted World effect"). The same reason keeps `running` and
+/// `succeeded` rows: a succeeded run still needs review.
+///
+/// # Retention
+/// [`nexus_local_db::compute_runs::delete_terminal_runs`] owns the predicate.
+/// Only `applied` | `discarded` | `failed` are matched, and the `run_id IS NOT
+/// NULL` clause keeps Clear inside the direct lane, so peer/spoke adapter rows
+/// cannot be reached at all. `query.status` narrows Clear to ONE terminal
+/// state; the generated `clear-runs-query` schema admits only terminal values,
+/// and the storage predicate re-validates as defense in depth — a
+/// status/CAS-suppressing "clear everything" is not expressible here.
 ///
 /// # Errors
+/// `WorldOwnerDenied` when the principal's creator does not own the World;
 /// `Internal` for storage faults.
+pub async fn clear_compute_runs(
+    core: &CoreService,
+    principal: &Principal,
+    query: ClearRunsQuery,
+) -> CoreResult<ClearRunsResponse> {
+    let pool = &core.inner.pool;
+    let ClearRunsQuery { status, world_id } = query;
+
+    ensure_world_owned(pool, principal.creator_id(), &world_id).await?;
+
+    let status = status.map(|status| status.to_string());
+    let deleted = compute_runs::delete_terminal_runs(pool, &world_id, status.as_deref())
+        .await
+        .map_err(crate::error::local_db_err)?;
+
+    // The wire field is `i64` (the generated schema's integer) while SQLite
+    // reports a `u64`. A row count is bounded by the table, so the conversion
+    // is total in practice; refuse rather than truncate if it ever is not.
+    let deleted = i64::try_from(deleted).map_err(|_| CoreError::Internal {
+        category: format!("cleared run count {deleted} does not fit the response field"),
+    })?;
+
+    Ok(ClearRunsResponse { deleted })
+}
+
+/// List runs for the creator's owned Worlds, cursor-paginated.
+///
+/// The query is the generated `list-runs-query` DTO, so the native/service
+/// boundary and this authority agree on one query shape instead of two
+/// structurally identical Rust declarations.
+///
+/// # Errors
+/// `InvalidInput` for a negative `limit`; `Internal` for storage faults.
 pub async fn list_compute_runs(
     core: &CoreService,
     principal: &Principal,
-    query: ComputeRunListQuery,
+    query: ListRunsQuery,
 ) -> CoreResult<RunListResponse> {
     let pool = &core.inner.pool;
     let creator_id = principal.creator_id();
 
+    let ListRunsQuery {
+        world_id,
+        module_id,
+        status,
+        cursor,
+        limit,
+    } = query;
+
     let owned_worlds = list_owned_world_ids(pool, creator_id).await?;
 
+    // The wire carries an unbounded integer while the durable reader takes a
+    // `u32`. A negative value is a client-input fault and is refused rather
+    // than coerced into a page size the caller never asked for.
+    let requested = limit.unwrap_or_else(|| i64::from(DEFAULT_RUN_LIST_LIMIT));
+    let limit = u32::try_from(requested)
+        .map_err(|_| {
+            coded_refusal(
+                "invalid_input",
+                format!("limit must be a non-negative integer, got {requested}"),
+            )
+        })?
+        .min(MAX_RUN_LIST_LIMIT);
+
     let filters = RunListFilters {
-        world_id: query.world_id,
-        module_id: query.module_id,
-        status: query.status,
+        world_id,
+        module_id,
+        // The generated status enum renders its exact wire spelling, which is
+        // the durable column's vocabulary.
+        status: status.map(|status| status.to_string()),
         creator_world_ids: Some(owned_worlds),
     };
-    let limit = query.limit.unwrap_or(20).min(100);
-    let (items, next_cursor) = list_runs(pool, &filters, query.cursor.as_deref(), limit)
+    let (items, next_cursor) = list_runs(pool, &filters, cursor.as_deref(), limit)
         .await
         .map_err(crate::error::local_db_err)?;
 
@@ -670,24 +775,166 @@ pub async fn get_compute_run(
     })
 }
 
-/// Query params for the run list.
-#[derive(Debug, Clone, Default, serde::Deserialize)]
-pub struct ComputeRunListQuery {
-    /// Restrict to one World.
-    pub world_id: Option<String>,
-    /// Restrict to one module.
-    pub module_id: Option<String>,
-    /// Restrict to one status.
-    pub status: Option<String>,
-    /// Opaque pagination cursor.
-    pub cursor: Option<String>,
-    /// Page size (defaults to 20, capped at 100).
-    pub limit: Option<u32>,
+// ---------------------------------------------------------------------------
+// Generated-DTO facade on the execution owner
+// ---------------------------------------------------------------------------
+
+/// The Compute operation surface the native/service boundary drives.
+///
+/// Each method is a typed entry point over the authority functions above: the
+/// owner fence and the principal binding are applied EXACTLY as the
+/// neighbouring `handle_ops` entry points apply them, and the operation is
+/// then delegated, so a non-HTTP caller cannot reach a second implementation
+/// of discovery, run detail, history or clear. Nothing here inspects the pool,
+/// the registry or the run rows directly — a missing authority is a typed
+/// refusal from the authority, never an empty success.
+///
+/// `compute_run` and `accept_compute_run` already exist in `handle_ops` with
+/// the retained signatures (current-host-contracts §5) and are not duplicated.
+impl ExecutionHandle {
+    /// List the installed compute modules (C1).
+    ///
+    /// The registry is compiled in, so the list is machine capability rather
+    /// than domain state: there is no per-creator filter. The principal is
+    /// still verified, so this surface cannot be driven through a foreign or
+    /// stale principal handle.
+    ///
+    /// # Errors
+    /// `Closing` when the owner is shutting down; `AuthRequired` when the
+    /// principal does not belong to this owner's service.
+    pub fn list_compute_modules(&self, principal: &Principal) -> CoreResult<ListModulesResponse> {
+        self.ensure_admitting()?;
+        self.linked_core()?.verify_principal(principal)?;
+        let items = crate::execution::compute::list_compute_modules()?
+            .into_iter()
+            .map(module_summary_row)
+            .collect();
+        // The registry is compiled in and complete: there is no page 2.
+        Ok(ListModulesResponse {
+            items,
+            has_more: false,
+        })
+    }
+
+    /// Read one installed module's manifest detail — the invocation schema Run
+    /// Studio renders (C2).
+    ///
+    /// # Errors
+    /// `Closing` when the owner is shutting down; `AuthRequired` when the
+    /// principal does not belong to this owner's service; `NotFound` for an
+    /// unknown module; `Internal` for an unparsable embedded manifest.
+    pub fn get_compute_module(
+        &self,
+        principal: &Principal,
+        module_id: &str,
+    ) -> CoreResult<ModuleDetail> {
+        self.ensure_admitting()?;
+        self.linked_core()?.verify_principal(principal)?;
+        crate::execution::compute::get_compute_module(module_id)
+    }
+
+    /// Read one run's detail: its proposals, or the recorded failure (C4).
+    ///
+    /// # Errors
+    /// `Closing` when the owner is shutting down; `AuthRequired` when the
+    /// principal does not belong to this owner's service; `Forbidden` for a
+    /// run of a World the principal's creator does not own; `NotFound` for an
+    /// unknown run; `Internal` for storage faults.
+    pub async fn get_compute_run(
+        &self,
+        principal: &Principal,
+        run_id: String,
+    ) -> CoreResult<RunDetail> {
+        self.ensure_admitting()?;
+        let core = self.linked_core()?;
+        core.verify_principal(principal)?;
+        crate::execution::compute::get_compute_run(core.as_ref(), principal, &run_id).await
+    }
+
+    /// List the principal creator's runs, cursor-paginated (C5).
+    ///
+    /// # Errors
+    /// `Closing` when the owner is shutting down; `AuthRequired` when the
+    /// principal does not belong to this owner's service; `InvalidInput` for a
+    /// negative `limit`; `Internal` for storage faults.
+    pub async fn list_compute_runs(
+        &self,
+        principal: &Principal,
+        query: ListRunsQuery,
+    ) -> CoreResult<RunListResponse> {
+        self.ensure_admitting()?;
+        let core = self.linked_core()?;
+        core.verify_principal(principal)?;
+        crate::execution::compute::list_compute_runs(core.as_ref(), principal, query).await
+    }
+
+    /// Discard a succeeded run's proposals; the World is left untouched (C7).
+    ///
+    /// # Errors
+    /// `Closing` when the owner is shutting down; `AuthRequired` when the
+    /// principal does not belong to this owner's service; `Forbidden` for a
+    /// foreign World; `NotFound` for an unknown run; a coded conflict when the
+    /// row is not `succeeded`; `Internal` for storage faults.
+    pub async fn discard_compute_run(
+        &self,
+        principal: &Principal,
+        run_id: String,
+    ) -> CoreResult<DiscardRunResponse> {
+        self.ensure_admitting()?;
+        let core = self.linked_core()?;
+        core.verify_principal(principal)?;
+        crate::execution::compute::discard_compute_run(core.as_ref(), principal, &run_id).await?;
+        Ok(DiscardRunResponse {
+            run_id,
+            status: DiscardRunResponseStatus::Discarded,
+        })
+    }
+
+    /// Clear the creator's TERMINAL run history for ONE owned World (C8),
+    /// returning the generated `{deleted}` count.
+    ///
+    /// # Errors
+    /// `Closing` when the owner is shutting down; `AuthRequired` when the
+    /// principal does not belong to this owner's service; `WorldOwnerDenied`
+    /// for a World the principal's creator does not own; `Internal` for
+    /// storage faults.
+    pub async fn clear_compute_runs(
+        &self,
+        principal: &Principal,
+        query: ClearRunsQuery,
+    ) -> CoreResult<ClearRunsResponse> {
+        self.ensure_admitting()?;
+        let core = self.linked_core()?;
+        core.verify_principal(principal)?;
+        crate::execution::compute::clear_compute_runs(core.as_ref(), principal, query).await
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Internals
 // ---------------------------------------------------------------------------
+
+/// Convert one registry summary into a list-response row.
+///
+/// `list-modules-response.schema.json` references the summary shape, which
+/// codegen inlines into a second generated struct. The two are structurally
+/// identical but nominally distinct, so the mapping is written out: a field
+/// added to either schema then fails to compile here instead of being
+/// silently dropped from the wire.
+fn module_summary_row(summary: ModuleSummary) -> NexusComputeModuleSummary {
+    NexusComputeModuleSummary {
+        module_id: summary.module_id,
+        name: summary.name,
+        version: summary.version,
+        description: summary.description,
+        required_key_block_types: summary.required_key_block_types,
+        battle_report_kind: summary.battle_report_kind,
+        status: match summary.status {
+            ModuleSummaryStatus::Ok => NexusComputeModuleSummaryStatus::Ok,
+            ModuleSummaryStatus::Broken => NexusComputeModuleSummaryStatus::Broken,
+        },
+    }
+}
 
 /// A coded refusal: the transport renders the retained lowercase wire code.
 ///

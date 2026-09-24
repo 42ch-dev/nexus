@@ -91,13 +91,18 @@ export function useDerivedCreatorId(presetId: string | undefined): string | unde
 function useErrorToast() {
   const { toast } = useToast();
   const { t } = useTranslation('common');
-  return (error: unknown, key: string) => {
+  /**
+   * `descriptionOverride` replaces the error's own message when the mutation
+   * knows more than the raw failure (Steer's partial append, W5).
+   */
+  return (error: unknown, key: string, descriptionOverride?: string) => {
     const description =
-      error instanceof NexusClientError
+      descriptionOverride ??
+      (error instanceof NexusClientError
         ? error.message
         : error instanceof Error
           ? error.message
-          : t('error.unexpected');
+          : t('error.unexpected'));
     toast({ variant: 'error', title: t(key, { defaultValue: key }), description });
   };
 }
@@ -139,7 +144,44 @@ export interface SteerIdeaArgs {
   idea: string;
 }
 
-/** Idea → Steer: signal resume first, then append the Idea to core context. */
+/**
+ * Steer partial failure (W5, `current-host-contracts.md` §3.3): the Idea was
+ * committed as a durable core context version, but the follow-up resume signal
+ * was refused. The committed version is never rolled back or re-appended, so
+ * the caller must report the resume refusal and refresh the visible version.
+ */
+class SteerResumeRefusedError extends Error {
+  readonly appendedVersion: number;
+  readonly refusal: unknown;
+
+  constructor(appendedVersion: number, refusal: unknown) {
+    super(`Core context version ${appendedVersion} was appended, but resume was refused`);
+    this.name = 'SteerResumeRefusedError';
+    this.appendedVersion = appendedVersion;
+    this.refusal = refusal;
+  }
+}
+
+/**
+ * True if the schedule refused the signal as its own wait/state conflict (409).
+ *
+ * The core carries those codes in `details.wire_code` — the public `code` stays
+ * the generic `invalid_input` (crates/nexus-core-node/src/core_error.rs,
+ * `DomainError::Coded`) — so the coded detail is what the UI must read to
+ * present a lawful manual-wait conflict as a conflict.
+ */
+function isScheduleConflictRefusal(error: unknown): boolean {
+  if (!(error instanceof NexusClientError)) return false;
+  const wireCode = (error.details as { wire_code?: unknown } | null | undefined)?.wire_code;
+  return (
+    error.code === 'workflow_wait_conflict'
+    || error.code === 'workflow_state_conflict'
+    || wireCode === 'workflow_wait_conflict'
+    || wireCode === 'workflow_state_conflict'
+  );
+}
+
+/** Idea → Steer: append the Idea to core context, then signal resume (W5). */
 export function useSteerStrategy() {
   const client = useNexusClient();
   const qc = useQueryClient();
@@ -148,15 +190,44 @@ export function useSteerStrategy() {
   const { toast } = useToast();
   return useMutation({
     mutationFn: async (args: SteerIdeaArgs) => {
-      await client.signalSchedule(args.scheduleId, { signal: 'resume' });
-      return client.editCoreContext(args.scheduleId, { op: 'append', body: args.idea });
+      // Append first: the Idea must be durable before resume counts as success.
+      // These are two sequential calls, not one transaction — a refused resume
+      // leaves this committed version in place and is never retried.
+      const appended = await client.editCoreContext(args.scheduleId, {
+        op: 'append',
+        body: args.idea,
+      });
+      try {
+        await client.signalSchedule(args.scheduleId, { signal: 'resume' });
+      } catch (refusal) {
+        throw new SteerResumeRefusedError(appended.new_version, refusal);
+      }
+      return appended;
     },
     onSuccess: (_data, args) => {
       toast({ variant: 'success', title: t('strategy.toast.ideaSent'), description: args.scheduleId });
       void qc.invalidateQueries({ queryKey: queryKeys.schedules.all });
       void qc.invalidateQueries({ queryKey: queryKeys.sessions.all });
     },
-    onError: (error) => errorToast(error, 'error.couldNotSteerStrategy'),
+    onError: (error, args) => {
+      if (error instanceof SteerResumeRefusedError) {
+        // The append is durable: refresh the schedule rows so the visible core
+        // context version is not stale. The Idea is not re-appended.
+        void qc.invalidateQueries({ queryKey: queryKeys.schedules.all });
+        errorToast(
+          error,
+          'error.couldNotSteerStrategy',
+          t(
+            isScheduleConflictRefusal(error.refusal)
+              ? 'strategy.toast.steerResumeConflict'
+              : 'strategy.toast.steerResumeRefused',
+            { version: error.appendedVersion, scheduleId: args.scheduleId },
+          ),
+        );
+        return;
+      }
+      errorToast(error, 'error.couldNotSteerStrategy');
+    },
   });
 }
 

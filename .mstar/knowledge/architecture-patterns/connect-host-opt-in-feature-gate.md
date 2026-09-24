@@ -1,19 +1,30 @@
 ---
 module: nexus-spoke-adapter, nexus-daemon-runtime, apps/nexus42
 date: 2026-08-04
-problem_type: knowledge
+problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
-tags: [spoke-connect, connect-host, feature-gate, libp2p, host-capability-manifest, op-refusal, fl-r, n-c0]
-last_updated: 2026-08-08
-applies_when: adopting a heavy optional transport/network dependency behind a feature gate; building an honest capability manifest; landing a "handshake-only, no-write-ops" host surface
+tags:
+  - spoke-connect
+  - connect-host
+  - feature-gate
+  - libp2p
+  - host-capability-manifest
+  - op-refusal
+  - fl-r
+  - n-c0
+last_updated: 2026-09-24
+applies_when:
+  - "Adopting a heavy optional transport/network dependency behind a feature gate"
+  - "Building an honest capability manifest for a peer-facing surface"
+  - "Landing a 'handshake-only, no-write-ops' host surface"
 ---
 
 # Connect Host — opt-in feature gate for a heavy transport dep (N-C0 pattern)
 
 ## Context
 
-V1.148 P3 adopted `spoke-connect` (libp2p 0.56 + noise + yamux + Ed25519 signed-hello) into a CLI product whose default build must stay small and network-surface-free. The Connect Host surface (DF-72 **N-C0**) is the first external-adjacent peer surface: it must handshake + present an honest `HostCapabilityManifest`, but **refuse every inbound write op** (N-C1 write-op exchange was a deliberate later milestone). The pattern below is what made that safe and maintainable.
+V1.148 P3 adopted `spoke-connect` (libp2p + noise + yamux + Ed25519 signed-hello) into a CLI product whose default build must stay small and network-surface-free. The Connect Host surface (DF-72 **N-C0**) is the first external-adjacent peer surface: it must handshake + present an honest `HostCapabilityManifest`, but **refuse every inbound write op** (N-C1 write-op exchange was a deliberate later milestone). The pattern below is what made that safe and maintainable. The libp2p version is not part of the pattern: it moves with the `spoke-connect` pin (the CLI shares libp2p identity types with that public API), so probes assert graph *structure* — absent by default, exactly one version feature-on — never a version value.
 
 ## Guidance
 

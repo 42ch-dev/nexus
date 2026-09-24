@@ -65,6 +65,7 @@ DELETE `/v1/daemon/characters/{character_id}/knowledge/{entry_id}` requires `exp
 
 - For query-parameter positions with wire-contract semantics (required CAS tokens, closed param sets), parse the raw query string when you need envelope-consistent errors; do not rely on the extractor's default rejection.
 - Error `details` remain a closed vocabulary mapped 1:1 onto what a caller can fix (`field`/`reason` or `invalid_entries`); no raw framework text.
+- **Never pre-filter a caller's members before a strict decode.** A transport that quietly drops unknown query keys (or unknown body members) before handing the payload to a strict decoder converts a rejection into a confident wrong answer: an unsupported filter or a typo returns a page that *looks* correctly filtered, and the strict decoder never sees the key it exists to refuse. Refuse unknown members explicitly at the boundary where the closed key set is known (`refuseUnknownQueryKeys(search, allowed, status)` is the current shape), and pick the status deliberately instead of inheriting the helper's default — the canonical mapping for `invalid_input` is 422, so a 400 in that position is a constructor choice, not a different code.
 
 ### 5. Spec-prose drift reconciliation: check the table against errors.rs
 
