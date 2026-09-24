@@ -13,14 +13,12 @@
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use nexus_agent_host::capability::model::HostOperation;
-use nexus_agent_host::capability::model::{HostEvent, HostStartConfig, SessionOwner};
-// Only the `test-hooks`-gated settlement seam consumes a caller-supplied
-// stream, so the import is gated with it: a production build carries neither
-// an unused import nor that entry (see `HostHandle::settle_character_stream`).
-#[cfg(any(test, feature = "test-hooks"))]
-use nexus_agent_host::capability::model::HostEventStream;
+use nexus_agent_host::capability::model::{
+    HostEvent, HostEventStream, HostStartConfig, SessionOwner,
+};
 use nexus_agent_host::capability::CreateSessionRequest as HostCreateRequest;
 use nexus_agent_host::config::{
     agent_host_config_path, load_config_from_path, validate_workspace_path, AgentHostConfig,
@@ -28,7 +26,9 @@ use nexus_agent_host::config::{
 use nexus_agent_host::core::readiness::discover_provider_catalog;
 use nexus_agent_host::core::session::HostSession as RegistryHostSession;
 use nexus_agent_host::discovery::path_scan;
-use nexus_agent_host::providers::port::{operation_status_wire, protocol_kind_wire};
+use nexus_agent_host::providers::port::{
+    operation_status_wire, protocol_kind_wire, ProviderEventReader,
+};
 use nexus_agent_host::{HostFacade, HostManager, HostOperationId, HostSessionId, LaunchStrategy};
 use nexus_contracts::core_host_query::{CoreHostQuery, CoreHostQueryFormat, CoreHostQueryQuery};
 use nexus_contracts::core_host_query_response::{
@@ -46,9 +46,10 @@ use nexus_contracts::generated::daemon_api::agent_host::character_operation_resu
     CharacterOperationResultFinishReason, CharacterOperationResultRunStatus,
 };
 use nexus_contracts::generated::daemon_api::agent_host::{
-    CreateSessionRequest, ExecuteOperationRequest, OperationResponse, SessionResponse,
+    CancelOperationResponse, CreateSessionRequest, ExecuteOperationRequest, OperationResponse,
+    SessionResponse, ShutdownSessionResponse,
 };
-use nexus_contracts::{CoreCloseReport, CoreCloseReportState};
+use nexus_contracts::{CoreCloseReport, CoreCloseReportState, ProviderEventBatch};
 use nexus_local_db::narrative_gateway::SqliteNarrativeGateway;
 use nexus_local_db::SqliteKnowledgeStore;
 use nexus_moment_context_assembly::{
@@ -60,9 +61,9 @@ use nexus_spoke_adapter::SpokeBackedKbStore;
 use uuid::Uuid;
 
 use crate::actor_sessions::{
-    actor_session_stale, character_terminal_for, character_terminal_outcome, echo_actor_pair,
-    ActorSessionKey, ActorSessionRegistry, CharacterOperationSnapshot, CharacterTerminal,
-    KnowledgeReuse,
+    actor_session_stale, cancelled_outcome, character_terminal_for, character_terminal_outcome,
+    echo_actor_pair, ActorSessionKey, ActorSessionRegistry, CharacterOperationSnapshot,
+    CharacterTerminal, KnowledgeReuse,
 };
 use crate::actors::{
     classify_pair, ActorPairMode, ActorViewpoint, AdmittedActor, CoreActorAdmission,
@@ -391,6 +392,275 @@ impl HostHandle {
             .character_operation_result(principal.creator_id(), &HostOperationId(uuid))
     }
 
+    /// Observe one Character operation started by this authority: the NEXT
+    /// bounded batch of events and the authoritative status they belong to
+    /// (technical contract §5, "Delivery versus authority").
+    ///
+    /// The source is the SAME Host's event broadcast, selected to the exact
+    /// `(session_id, operation_id)` pair, so the authority's own drain of the
+    /// original exec stream is untouched: a consumer that never calls this (or
+    /// one that lags it) blocks neither settlement nor another delivery. Core
+    /// status stays independent of the HTTP consumer's backpressure.
+    ///
+    /// Detailed observation is process-lifetime like the outcome itself: an
+    /// unknown, foreign, cross-session, evicted or post-reopen operation is
+    /// `not_found`, and a lost observation source is a typed `lagging` resync
+    /// gap (never a fabricated completion), so a consumer re-reads
+    /// [`Self::character_operation`] instead of inferring a terminal.
+    ///
+    /// # Errors
+    /// `auth_required` for a foreign/drifted principal, `invalid_input` for a
+    /// malformed id or a non-positive bound, `closing` on a closed authority,
+    /// and `not_found` for a missing/foreign/cross-session operation or an
+    /// operation with no retained observation.
+    pub async fn next_events(
+        &self,
+        principal: &Principal,
+        session_id: String,
+        operation_id: String,
+        max_events: u32,
+        max_bytes: u32,
+    ) -> CoreResult<ProviderEventBatch> {
+        self.ensure_authority_open()?;
+        self.core.verify_principal(principal)?;
+        let sid = HostSessionId(
+            Uuid::parse_str(&session_id)
+                .map_err(|_| invalid("session_id", "session_id must be a valid UUID"))?,
+        );
+        let op_id = HostOperationId(
+            Uuid::parse_str(&operation_id)
+                .map_err(|_| invalid("operation_id", "operation_id must be a valid UUID"))?,
+        );
+        if max_events == 0 {
+            return Err(invalid("max_events", "max_events must be positive"));
+        }
+        if max_bytes == 0 {
+            return Err(invalid("max_bytes", "max_bytes must be positive"));
+        }
+        // Owner + session/operation association BEFORE any read: an operation
+        // that this authority did not record, or one recorded for a different
+        // session, is `not_found` — observation is never a cross-session leak.
+        let recorded_session = self
+            .registry
+            .operation_session_id(&op_id)
+            .ok_or_else(|| operation_not_found(&op_id))?;
+        if recorded_session != sid {
+            return Err(CoreError::NotFound {
+                resource: format!("operation {op_id}"),
+            });
+        }
+        if !self
+            .registry
+            .operation_owned_by(principal.creator_id(), &op_id)
+        {
+            return Err(operation_not_found(&op_id));
+        }
+        if self
+            .registry
+            .stored_session_owner(&sid)
+            .is_some_and(|(owner, _, _)| owner != principal.creator_id())
+        {
+            return Err(CoreError::NotFound {
+                resource: format!("session {sid}"),
+            });
+        }
+        let reader = self
+            .registry
+            .observation(&op_id)
+            .ok_or_else(|| CoreError::NotFound {
+                resource: format!("operation {op_id} observation"),
+            })?;
+        reader
+            .next(op_id.to_string(), max_events, max_bytes)
+            .await
+            .map_err(port_err)
+    }
+
+    /// Cancel one owner-authorized Character operation through the SAME
+    /// manager (technical contract §2/§3).
+    ///
+    /// Order is the contract: the stored owner and the session/operation
+    /// association are verified, the provider's negotiated cancellation
+    /// capability is checked BEFORE any intent is latched (an unsupported
+    /// provider — DSH — is refused `not_supported` and never records cancel
+    /// intent), the cancellation is then latched under the existing phase lock,
+    /// and only that same manager's `cancel` is invoked. A provider refusal
+    /// rolls the latched intent back and is reported honestly: success is never
+    /// fabricated after a refusal.
+    ///
+    /// # Errors
+    /// `auth_required` for a foreign/drifted principal, `invalid_input` for a
+    /// malformed id, `closing` on a closed authority, `not_found` for a
+    /// missing/foreign operation or one whose session is no longer on the
+    /// manager, `not_supported` for a provider that cannot cancel, and
+    /// `actor_conflict actor_operation_finished` once the operation is
+    /// finalizing or terminal.
+    pub async fn cancel_operation(
+        &self,
+        principal: &Principal,
+        operation_id: String,
+    ) -> CoreResult<CancelOperationResponse> {
+        self.ensure_authority_open()?;
+        self.core.verify_principal(principal)?;
+        let op_id = HostOperationId(
+            Uuid::parse_str(&operation_id)
+                .map_err(|_| invalid("operation_id", "operation_id must be a valid UUID"))?,
+        );
+        let session_id = self
+            .registry
+            .operation_session_id(&op_id)
+            .ok_or_else(|| operation_not_found(&op_id))?;
+        if !self
+            .registry
+            .operation_owned_by(principal.creator_id(), &op_id)
+        {
+            return Err(operation_not_found(&op_id));
+        }
+        if self
+            .registry
+            .stored_session_owner(&session_id)
+            .is_some_and(|(owner, _, _)| owner != principal.creator_id())
+        {
+            return Err(CoreError::NotFound {
+                resource: format!("session {session_id}"),
+            });
+        }
+        self.request_cancel(&op_id).await?;
+        Ok(CancelOperationResponse {
+            operation_id: op_id.to_string(),
+            status: "cancelled".to_string(),
+        })
+    }
+
+    /// Shut one session down under the stored-owner gate (technical contract
+    /// §2/§3): the session's active Actor work is cancelled through the same
+    /// manager, the manager's per-session shutdown is called, and the Actor
+    /// reuse state is retired while the terminal/tombstone observation stays
+    /// bounded. Success is reported only after the manager confirmed the
+    /// release; an unconfirmed cleanup surfaces as an error, never as a
+    /// shutdown.
+    ///
+    /// # Errors
+    /// `auth_required` for a foreign/drifted principal, `invalid_input` for a
+    /// malformed id, `closing` on a closed authority, `not_found` for a
+    /// foreign Actor session or an unknown session, and the mapped host error
+    /// when the manager cannot confirm the session's release.
+    ///
+    /// A provider that cannot cancel leaves its run's record at the phase the
+    /// authority last observed: terminal truth stays the drain's, so no
+    /// synthetic outcome is written for a session whose own stream has not (or
+    /// may never) report one.
+    pub async fn shutdown_session(
+        &self,
+        principal: &Principal,
+        session_id: String,
+    ) -> CoreResult<ShutdownSessionResponse> {
+        self.ensure_authority_open()?;
+        self.core.verify_principal(principal)?;
+        let sid = HostSessionId(
+            Uuid::parse_str(&session_id)
+                .map_err(|_| invalid("session_id", "session_id must be a valid UUID"))?,
+        );
+        // Owner scoping first, then existence: a foreign Actor session and a
+        // session unknown to BOTH the Actor index and the manager are the same
+        // `not_found`, never an internal host failure.
+        let missing_session = || CoreError::NotFound {
+            resource: format!("session {sid}"),
+        };
+        let known_to_index = match self.registry.stored_session_owner(&sid) {
+            Some((owner, _, _)) => {
+                if owner != principal.creator_id() {
+                    return Err(missing_session());
+                }
+                true
+            }
+            None => false,
+        };
+        if !known_to_index && self.session_cancellation_supported(&sid).await?.is_none() {
+            return Err(missing_session());
+        }
+        // Cancel the session's active work first. A provider that cannot
+        // cancel is never asked and never latches intent; any other refusal is
+        // irrelevant to the teardown that follows, which is the authoritative
+        // release this method reports.
+        for op_id in self.registry.nonterminal_operations_for_session(&sid) {
+            let _ = self.request_cancel(&op_id).await;
+        }
+        self.registry
+            .shutdown_session(sid.clone(), self.host.as_ref())
+            .await?;
+        Ok(ShutdownSessionResponse {
+            session_id: sid.to_string(),
+            status: "shutdown".to_string(),
+        })
+    }
+
+    /// Request cancellation for one RECORDED operation: capability refusal
+    /// before intent, latch under the phase lock, the same manager's cancel,
+    /// and — on an accepted cancel — the §5 terminal the cancel won.
+    ///
+    /// Shared by the owner-authorized [`Self::cancel_operation`], the session
+    /// shutdown and the Actor-only quiesce so all three control paths share ONE
+    /// refusal/race/commit order.
+    async fn request_cancel(&self, operation_id: &HostOperationId) -> CoreResult<()> {
+        let session_id = self
+            .registry
+            .operation_session_id(operation_id)
+            .ok_or_else(|| operation_not_found(operation_id))?;
+        let owner = self
+            .registry
+            .operation_owner(operation_id)
+            .ok_or_else(|| operation_not_found(operation_id))?;
+        match self.session_cancellation_supported(&session_id).await? {
+            // An unsupported provider is refused BEFORE any intent: DSH's
+            // adapter-level no-op is not a cancellation, and it must never
+            // latch cancel intent.
+            Some(false) => {
+                return Err(CoreError::Coded {
+                    code: "not_supported".into(),
+                    message: "provider does not support cancellation".into(),
+                });
+            }
+            Some(true) => {}
+            None => {
+                return Err(CoreError::NotFound {
+                    resource: format!("session {session_id}"),
+                });
+            }
+        }
+        // Latch under the registry lock: the phase race (a drain that finalizes
+        // first) is decided here, and a finished operation refuses `409`.
+        self.registry
+            .request_operation_cancel(&owner, operation_id)?;
+        if let Err(err) = self.host.cancel(operation_id.clone()).await {
+            // The provider refused: undo the intent so a refusal can never be
+            // recorded as an accepted cancellation.
+            self.registry.rollback_operation_cancel(operation_id);
+            return Err(host_err(err));
+        }
+        // Accepted: the §5 cancelled row IS this operation's truth, recorded
+        // even if no drain ever settles it. A drain that settled first stays
+        // authoritative (first-writer-wins at the registry).
+        self.registry
+            .commit_operation_terminal(operation_id, cancelled_outcome(&session_id, operation_id));
+        self.registry.clear_indexed_operation(operation_id);
+        Ok(())
+    }
+
+    /// The negotiated cancellation capability of an operation's session;
+    /// `None` when the session is no longer on the manager (nothing left to
+    /// cancel there).
+    async fn session_cancellation_supported(
+        &self,
+        session_id: &HostSessionId,
+    ) -> CoreResult<Option<bool>> {
+        let sessions = self.host.list_sessions().await.map_err(host_err)?;
+        Ok(sessions
+            .iter()
+            .find(|session| &session.id == session_id)
+            .map(|session| session.negotiated_capabilities.cancellation))
+    }
+
     /// The authority-level open gate: the service is open AND this handle's
     /// own authority has not begun closing. A handle retired by `close` stays
     /// refused even after another authority opens over the same service.
@@ -695,6 +965,14 @@ impl HostHandle {
                     ],
                     permission_scope: None,
                 };
+                // Observation is subscribed BEFORE Host execution (technical
+                // contract §5): a Character operation is observed over the SAME
+                // manager's event broadcast, so the observation can miss no
+                // event of it, while the original exec stream below stays this
+                // authority's own drain — observation never consumes it, and a
+                // consumer that never pulls the observation (or lags it) blocks
+                // nothing.
+                let observation = self.host.subscribe(&sid);
                 let stream = match self.host.exec(sid.clone(), host_op).await {
                     Ok(stream) => stream,
                     Err(err) => {
@@ -707,6 +985,17 @@ impl HostHandle {
                 };
                 if let Some(snapshot) = snapshot {
                     let registry = self.registry.clone();
+                    // One bounded reader per reserved Character operation: the
+                    // reader owns only the selected observation source, and the
+                    // registry's own active/terminal bounds (128/1024) bound it.
+                    self.registry.retain_observation(
+                        op_id.clone(),
+                        ProviderEventReader::observe(observation_stream(
+                            observation,
+                            sid.clone(),
+                            op_id.clone(),
+                        )),
+                    );
                     // Authority-owned drain: the handle stays with the
                     // registry, so close never drops live lease/drain
                     // ownership on the floor.
@@ -1077,9 +1366,9 @@ impl HostHandle {
             pending.push(format!("actor-session-drain: {err}"));
         }
         self.registry.close();
-        if let Err(err) = self.host.shutdown().await {
-            pending.push(format!("host-shutdown: {err}"));
-        }
+        // The MANAGER + LocalSet settlement is one shared implementation, used
+        // by this standalone close and by the native-ordered `close_before`.
+        pending.extend(self.settle_shared_host(None).await);
         // Actor drains this authority minted stay owned here: settled handles
         // are dropped, an unsettled drain keeps the authority — and the
         // knowledge leases it holds — instead of being detached and forgotten.
@@ -1087,31 +1376,143 @@ impl HostHandle {
         if unsettled_drains > 0 {
             pending.push(format!("actor-drains: {unsettled_drains} unsettled"));
         }
-        let report = if pending.is_empty() {
+        let report = close_report(pending);
+        if report.cleanup_confirmed {
             // Close/release coordination with the established-owner slot: a
             // confirmed close frees the authority for a later open/attach; an
             // unconfirmed close keeps the slot held.
             self.core.release_host_authority();
-            CoreCloseReport {
-                state: CoreCloseReportState::Closed,
-                cleanup_confirmed: true,
-                pending_operations: vec![],
-                reason: None,
-            }
-        } else {
-            CoreCloseReport {
-                state: CoreCloseReportState::Interrupted,
-                cleanup_confirmed: false,
-                pending_operations: pending,
-                // CoreCloseReportReason has no unconfirmed/drain-failure
-                // variant (UserRequested/EngineReplaced/SchemaMismatch/
-                // WriterFenced); omitting `reason` instead of mislabelling
-                // the cause — the gap is reported to PM.
-                reason: None,
-            }
-        };
+        }
         self.authority.retain_close_report(&report);
         Ok(report)
+    }
+
+    /// Actor-only quiesce of the close order (technical contract §3): close
+    /// Actor admission, request supported cancellation for every active Actor
+    /// operation, and join the retained Actor drains.
+    ///
+    /// It deliberately settles NOTHING outside the Actor side: it does not shut
+    /// the manager used by workflows, does not settle the shared `LocalSet`, and
+    /// does not release the Host authority slot. The native close owner runs it
+    /// while the core authority is still open, then closes the existing core
+    /// execution/service owner, and only then calls [`Self::close_before`] with
+    /// the same outer deadline.
+    ///
+    /// The join is deliberately unbounded here — the native owner bounds it
+    /// with its own deadline — and it never closes storage out from under a
+    /// live drain: the handles stay owned by the registry, so a caller that
+    /// runs out of budget retains the whole authority and retries instead of
+    /// detaching live work.
+    ///
+    /// # Errors
+    ///
+    /// Never returns an error for an unsupported provider (its session is torn
+    /// down by the settlement that follows); other cancellation failures are
+    /// reported in the returned report's pending entries.
+    pub async fn quiesce_actor_sessions(&self) -> CoreResult<CoreCloseReport> {
+        let mut pending: Vec<String> = Vec::new();
+        // Latch Actor admission first: no create, execute or observation can be
+        // admitted (or repopulate the maps) while the quiesce runs.
+        self.registry.close();
+        for operation_id in self.registry.nonterminal_operations() {
+            if let Err(err) = self.request_cancel(&operation_id).await {
+                // Neither an unsupported provider (DSH) nor an operation whose
+                // session is already gone is a quiesce failure: nothing latched
+                // intent in either case, and the manager settlement that
+                // follows is the authoritative teardown.
+                if !is_unsupported_cancellation(&err) && !is_missing_session(&err) {
+                    pending.push(format!("actor-cancel: {operation_id}: {err}"));
+                }
+            }
+        }
+        let unsettled = self.registry.join_actor_drains().await;
+        if unsettled > 0 {
+            pending.push(format!("actor-drains: {unsettled} unsettled"));
+        }
+        Ok(close_report(pending))
+    }
+
+    /// Settle the shared manager and its `LocalSet` inside `deadline`, releasing
+    /// the Host authority slot only on confirmed settlement (technical
+    /// contract §3).
+    ///
+    /// This is the native close owner's step after the core service closed —
+    /// so, unlike [`Self::close`], it never calls `ensure_open`: a closed
+    /// service must not turn a legitimate cleanup into a `closing` refusal.
+    /// It performs no second native shutdown; it settles the manager this
+    /// authority was opened or attached over, once.
+    ///
+    /// # Errors
+    ///
+    /// Returns the report; unfinished work keeps the authority (slot + drain
+    /// ownership) and reports `interrupted` rather than confirming a cleanup it
+    /// cannot prove.
+    pub async fn close_before(&self, deadline: Instant) -> CoreResult<CoreCloseReport> {
+        if let Some(report) = self
+            .authority
+            .retained_close_report()
+            .filter(|report| report.cleanup_confirmed)
+        {
+            return Ok(report);
+        }
+        let in_flight = self.authority.latch_closing();
+        let mut pending: Vec<String> = Vec::new();
+        if in_flight > 0 {
+            pending.push(format!("actor-admissions: {in_flight} in flight"));
+        }
+        pending.extend(self.settle_shared_host(Some(deadline)).await);
+        let unsettled_drains = self.registry.prune_settled_drains();
+        if unsettled_drains > 0 {
+            pending.push(format!("actor-drains: {unsettled_drains} unsettled"));
+        }
+        let report = close_report(pending);
+        if report.cleanup_confirmed {
+            self.core.release_host_authority();
+        }
+        self.authority.retain_close_report(&report);
+        Ok(report)
+    }
+
+    /// The ONE manager + `LocalSet` settlement shared by [`Self::close`] and
+    /// [`Self::close_before`]; returns the pending entries that keep the
+    /// cleanup unconfirmed.
+    ///
+    /// Order: freeze the shared `LocalSet` and settle it first, then shut the
+    /// manager down. A live or panicking `LocalSet` thread is never a clean
+    /// cleanup (a thread that panicked also reports `thread_alive == false`), so
+    /// the manager shutdown behind it is not attempted — a shutdown behind a
+    /// full `LocalSet` queue would block instead of settling. `None` keeps the
+    /// standalone close's existing unbounded settle (the bridge's own join
+    /// budget and the manager's per-session shutdown timeout stay the only
+    /// policies); `Some(deadline)` is the native close's outer deadline.
+    async fn settle_shared_host(&self, deadline: Option<Instant>) -> Vec<String> {
+        let mut pending: Vec<String> = Vec::new();
+        let bridge = self.host.localset_bridge();
+        bridge.begin_drain();
+        let evidence = match deadline {
+            Some(deadline) => bridge.shutdown_before(deadline).await,
+            None => bridge.shutdown().await,
+        };
+        if !evidence.is_settled() {
+            pending.extend(evidence.unsettled_pending());
+            return pending;
+        }
+        let shutdown = match deadline {
+            Some(deadline) if Instant::now() >= deadline => None,
+            Some(deadline) => tokio::time::timeout_at(
+                tokio::time::Instant::from_std(deadline),
+                self.host.shutdown(),
+            )
+            .await
+            .ok(),
+            None => Some(self.host.shutdown().await),
+        };
+        match shutdown {
+            Some(Ok(())) => {}
+            Some(Err(err)) => pending.push(format!("host-shutdown: {err}")),
+            None => pending.push("host-shutdown-deadline".to_string()),
+        }
+        pending
     }
 
     async fn sorted_sessions(&self) -> CoreResult<Vec<RegistryHostSession>> {
@@ -1235,6 +1636,70 @@ fn internal(category: impl Into<String>) -> CoreError {
     }
 }
 
+/// The NOT-FOUND refusal of an operation this authority did not record (or
+/// recorded for another owner): one shape, so a foreign id and a missing one
+/// stay indistinguishable.
+fn operation_not_found(operation_id: &HostOperationId) -> CoreError {
+    CoreError::NotFound {
+        resource: format!("operation {operation_id}"),
+    }
+}
+
+/// Whether a cancel refusal is the `not_supported` capability refusal — a
+/// provider (DSH) that cannot cancel at all, which is not a quiesce failure.
+fn is_unsupported_cancellation(err: &CoreError) -> bool {
+    matches!(err, CoreError::Coded { code, .. } if code == "not_supported")
+}
+
+/// Whether a cancel refusal is an operation whose session already left the
+/// manager: nothing is left to cancel there, so the quiesce is not incomplete.
+const fn is_missing_session(err: &CoreError) -> bool {
+    matches!(err, CoreError::NotFound { .. })
+}
+
+/// The one `CoreCloseReport` shape every close path shares: a report only
+/// claims a confirmed cleanup when it has no pending entries. Releasing the
+/// established-owner slot stays with the caller, so the Actor-only quiesce can
+/// report Actor-side settlement without touching the Host lifetime.
+fn close_report(pending: Vec<String>) -> CoreCloseReport {
+    if pending.is_empty() {
+        CoreCloseReport {
+            state: CoreCloseReportState::Closed,
+            cleanup_confirmed: true,
+            pending_operations: vec![],
+            reason: None,
+        }
+    } else {
+        CoreCloseReport {
+            state: CoreCloseReportState::Interrupted,
+            cleanup_confirmed: false,
+            pending_operations: pending,
+            // CoreCloseReportReason has no unconfirmed/drain-failure variant
+            // (UserRequested/EngineReplaced/SchemaMismatch/WriterFenced);
+            // omitting `reason` instead of mislabelling the cause.
+            reason: None,
+        }
+    }
+}
+
+/// Map one provider-port wire error onto the core taxonomy.
+///
+/// The bounded observation reader is the only wire-typed component the
+/// authority calls; its failures are transport-shaped (a concurrent pull or a
+/// lost stream slot), so the taxonomy keeps `busy`/`not_found` and reports
+/// anything else as an internal host-port failure.
+fn port_err(err: nexus_contracts::CoreError) -> CoreError {
+    match err.code {
+        nexus_contracts::CoreErrorCode::NotFound => CoreError::NotFound {
+            resource: err.message,
+        },
+        nexus_contracts::CoreErrorCode::Busy => CoreError::Busy,
+        code => CoreError::Internal {
+            category: format!("agent_host_port: {code:?}: {}", err.message),
+        },
+    }
+}
+
 fn session_cwd(request: &CreateSessionRequest, core: &CoreService) -> CoreResult<PathBuf> {
     // The request body never supplies the workspace root: the canonical open
     // boundary is the fallback.
@@ -1272,6 +1737,104 @@ const fn session_wire(
         actor_ref,
         viewpoint,
     }
+}
+
+/// Whether a broadcast event of the SAME Host belongs to this operation.
+///
+/// The manager broadcasts one session's events to every subscriber, so the
+/// observation source is selected down to the exact `(session_id,
+/// operation_id)` pair (technical contract §5) before the bounded reader ever
+/// sees it: an unrelated operation or session event is dropped by the filter,
+/// never deferred into the reader's pending window.
+fn observation_matches(
+    event: &HostEvent,
+    session_id: &HostSessionId,
+    operation_id: &HostOperationId,
+) -> bool {
+    // An operation-scoped event is selected by its exact operation id; a
+    // session-scoped event (no operation id at all — session created/stopped
+    // and status) is selected by the session the observation came from.
+    event_operation_id(event).map_or_else(
+        || event_session_id(event) == Some(session_id),
+        |event_operation| event_operation == operation_id,
+    )
+}
+
+/// The operation an event belongs to, when it carries one.
+// The arms cannot be merged: each one binds its OWN payload type, so an
+// or-pattern would not type-check even though the bodies read alike.
+#[allow(clippy::match_same_arms)]
+const fn event_operation_id(event: &HostEvent) -> Option<&HostOperationId> {
+    match event {
+        HostEvent::OpStarted(event) => Some(&event.op_id),
+        HostEvent::ThoughtDelta(event) => Some(&event.op_id),
+        HostEvent::MessageDelta(event) => Some(&event.op_id),
+        HostEvent::ToolCall(event) => Some(&event.op_id),
+        HostEvent::ToolCallUpdate(event) => Some(&event.op_id),
+        HostEvent::PlanUpdate(event) => Some(&event.op_id),
+        HostEvent::OpFinished(event) => Some(&event.op_id),
+        HostEvent::OpFailed(event) => Some(&event.op_id),
+        HostEvent::SessionCreated(_) | HostEvent::SessionStopped(_) | HostEvent::Status(_) => None,
+    }
+}
+
+/// The session an event is scoped to, when it carries one.
+#[allow(clippy::match_same_arms)] // one distinct payload type per arm, as above
+const fn event_session_id(event: &HostEvent) -> Option<&HostSessionId> {
+    match event {
+        HostEvent::SessionCreated(event) => Some(&event.session_id),
+        HostEvent::SessionStopped(event) => Some(&event.session_id),
+        HostEvent::Status(event) => event.session_id.as_ref(),
+        HostEvent::OpStarted(_)
+        | HostEvent::ThoughtDelta(_)
+        | HostEvent::MessageDelta(_)
+        | HostEvent::ToolCall(_)
+        | HostEvent::ToolCallUpdate(_)
+        | HostEvent::PlanUpdate(_)
+        | HostEvent::OpFinished(_)
+        | HostEvent::OpFailed(_) => None,
+    }
+}
+
+/// The observation source for one operation: the SAME Host's event broadcast,
+/// selected to this exact `(session_id, operation_id)` pair.
+///
+/// A broadcast receiver lag or the loss of the broadcaster reaches the reader
+/// as a source error / end, which the reader (in observation mode) reports as
+/// the typed `lagging` resync gap — never as an EOF that a consumer could read
+/// as a terminal. Nothing here reads the operation's own exec stream: that
+/// stream stays the authority's drain, so observation and settlement are
+/// independent.
+fn observation_stream(
+    receiver: tokio::sync::broadcast::Receiver<HostEvent>,
+    session_id: HostSessionId,
+    operation_id: HostOperationId,
+) -> HostEventStream {
+    Box::pin(futures_util::stream::unfold(
+        (receiver, session_id, operation_id),
+        |(mut receiver, session_id, operation_id)| async move {
+            loop {
+                match receiver.recv().await {
+                    Ok(event) => {
+                        if observation_matches(&event, &session_id, &operation_id) {
+                            return Some((Ok(event), (receiver, session_id, operation_id)));
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        return Some((
+                            Err(nexus_agent_host::HostError::internal(
+                                "host event observation lagged",
+                            )),
+                            (receiver, session_id, operation_id),
+                        ));
+                    }
+                    // The broadcaster is gone: the source ends. The reader
+                    // turns that into the typed resync gap.
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
+                }
+            }
+        },
+    ))
 }
 
 /// Server-owned drain for a Character operation: the admitted knowledge

@@ -22,22 +22,31 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use async_trait::async_trait;
-use futures_util::Stream;
+use futures_util::{Stream, StreamExt};
 use nexus_agent_host::capability::model::HostStartConfig;
 use nexus_agent_host::capability::model::{
-    FinishReason, HostEvent, HostEventStream, OperationFailedEvent, OperationFinishedEvent,
-    SessionStopReason, SessionStoppedEvent,
+    CapabilityDescriptor, FinishReason, HostEvent, HostEventStream, HostOperation, LaunchSpec,
+    ManagedSessionHandle, OperationFailedEvent, OperationFinishedEvent, ProbeRequest, ProtocolKind,
+    ProviderDescriptor, ProviderHealth, SessionOwner, SessionStopReason, SessionStoppedEvent,
+    StatusEvent, StatusLevel,
 };
-use nexus_agent_host::{HostFacade, HostManager, HostOperationId, HostSessionId};
+use nexus_agent_host::{
+    HostFacade, HostManager, HostOperationId, HostSessionId, LaunchStrategy, ProviderAdapter,
+    ProviderId,
+};
 use nexus_contracts::generated::daemon_api::agent_host::character_operation_result::{
     CharacterOperationResult, CharacterOperationResultFinishReason,
     CharacterOperationResultRunStatus, NexusCharacterRunCaptureOutcomeStatus,
 };
 use nexus_contracts::generated::daemon_api::agent_host::ExecuteOperationRequest;
-use nexus_contracts::{CoreCloseReportState, ProviderCall, ProviderEventBatch, ProviderReply};
+use nexus_contracts::{
+    CoreCloseReportState, ProviderCall, ProviderEventBatch, ProviderEventBatchGapReason,
+    ProviderReply,
+};
 use nexus_core::{
     ActorSessionKey, ActorSessionRegistry, ActorViewpoint, AdmittedActor, AdmittedKnowledgeContext,
     CharacterOperationSnapshot, CoreAccess, CoreActorAdmission, CoreError, CoreOpenOptions,
@@ -2098,5 +2107,914 @@ async fn attached_host_close_accounts_for_an_admitted_execute() {
     assert!(
         matches!(err, CoreError::OwnerBusy),
         "slot retained: {err:?}"
+    );
+}
+
+// ── v1.196 P0-T3 — close observation, cancel and shutdown ─────────────────
+//
+// Durable contract: `.mstar/iterations/v1.196/specs/current-host-actor-contract.md`
+// §2 (control methods), §3 (one lifecycle owner, including the close order) and
+// §5 (delivery versus authority). The authority observes the SAME Host it
+// executes on (its own drain keeps the original exec stream), cancels through
+// that same manager only after the stored owner and the session/operation
+// association are verified and the provider's negotiated capability allows it,
+// and settles the manager/LocalSet exactly once in the ordered close — which
+// stays legal after the core service closed.
+
+const CONTROL_PROVIDER: &str = "control-fixture";
+
+/// One in-process provider adapter for the control cases: a real manager
+/// session plane whose events the test drives, so the cancel/terminal races are
+/// OBSERVED instead of timed.
+struct ControlProvider {
+    /// Negotiated cancellation capability (`false` is the DSH shape).
+    cancellation: bool,
+    /// Advertises cancellation but fails the `cancel` call.
+    cancel_fails: bool,
+    /// Events the provider publishes by itself at exec time (the observation-lag
+    /// case); always the same session-scoped status event.
+    burst: usize,
+    cancels: Arc<AtomicUsize>,
+    shutdowns: Arc<AtomicUsize>,
+    polled: Arc<AtomicUsize>,
+    outbox: Mutex<Option<tokio::sync::mpsc::UnboundedSender<HostItem>>>,
+}
+
+fn control_provider(cancellation: bool, burst: usize, cancel_fails: bool) -> Arc<ControlProvider> {
+    Arc::new(ControlProvider {
+        cancellation,
+        cancel_fails,
+        burst,
+        cancels: Arc::new(AtomicUsize::new(0)),
+        shutdowns: Arc::new(AtomicUsize::new(0)),
+        polled: Arc::new(AtomicUsize::new(0)),
+        outbox: Mutex::new(None),
+    })
+}
+
+impl ControlProvider {
+    const fn negotiated_capabilities(&self) -> CapabilityDescriptor {
+        CapabilityDescriptor {
+            cancellation: self.cancellation,
+            ..CapabilityDescriptor::acp_full()
+        }
+    }
+
+    fn provider_id() -> ProviderId {
+        ProviderId::new(CONTROL_PROVIDER)
+    }
+
+    /// Publish one event on the executing operation's stream.
+    fn push(&self, event: HostEvent) {
+        self.outbox
+            .lock()
+            .unwrap()
+            .as_ref()
+            .expect("the provider is executing")
+            .send(Ok(event))
+            .expect("the drain is alive");
+    }
+
+    /// End the executing stream without a terminal (stream loss).
+    fn close_stream(&self) {
+        drop(self.outbox.lock().unwrap().take());
+    }
+
+    fn cancels(&self) -> usize {
+        self.cancels.load(Ordering::SeqCst)
+    }
+
+    fn shutdowns(&self) -> usize {
+        self.shutdowns.load(Ordering::SeqCst)
+    }
+
+    /// Host events the provider actually produced (polled off its stream).
+    fn polled(&self) -> usize {
+        self.polled.load(Ordering::SeqCst)
+    }
+}
+
+#[async_trait]
+impl ProviderAdapter for ControlProvider {
+    fn descriptor(&self) -> ProviderDescriptor {
+        ProviderDescriptor {
+            provider_id: Self::provider_id(),
+            display_name: "Control fixture".to_string(),
+            protocol_kind: ProtocolKind::NativeCli,
+            capabilities: self.negotiated_capabilities(),
+        }
+    }
+
+    async fn probe(&self, _request: ProbeRequest) -> nexus_agent_host::HostResult<ProviderHealth> {
+        Ok(ProviderHealth {
+            provider_id: Self::provider_id(),
+            available: true,
+            latency_ms: None,
+            message: Some("control fixture".to_string()),
+        })
+    }
+
+    async fn launch(
+        &self,
+        _spec: LaunchSpec,
+    ) -> nexus_agent_host::HostResult<ManagedSessionHandle> {
+        Ok(ManagedSessionHandle {
+            provider_id: Self::provider_id(),
+            session_id: HostSessionId::new(),
+            capabilities: self.negotiated_capabilities(),
+            process_identity: None,
+        })
+    }
+
+    async fn execute(
+        &self,
+        session: &ManagedSessionHandle,
+        _op: HostOperation,
+    ) -> nexus_agent_host::HostResult<HostEventStream> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<HostItem>();
+        *self.outbox.lock().unwrap() = Some(tx);
+        let sid = session.session_id.clone();
+        let burst: Vec<HostItem> = (0..self.burst)
+            .map(|index| {
+                Ok(HostEvent::Status(StatusEvent {
+                    session_id: Some(sid.clone()),
+                    level: StatusLevel::Info,
+                    message: format!("burst {index}"),
+                }))
+            })
+            .collect();
+        let polled = Arc::clone(&self.polled);
+        let stream = futures_util::stream::iter(burst)
+            .chain(futures_util::stream::unfold(rx, |mut rx| async move {
+                rx.recv().await.map(|item| (item, rx))
+            }))
+            .inspect(move |_| {
+                polled.fetch_add(1, Ordering::SeqCst);
+            });
+        Ok(Box::pin(stream))
+    }
+
+    async fn cancel(
+        &self,
+        _session: &ManagedSessionHandle,
+        _op_id: HostOperationId,
+    ) -> nexus_agent_host::HostResult<()> {
+        self.cancels.fetch_add(1, Ordering::SeqCst);
+        if self.cancel_fails {
+            return Err(nexus_agent_host::HostError::internal(
+                "cancel refused by the control fixture",
+            ));
+        }
+        Ok(())
+    }
+
+    async fn shutdown(&self, _session: ManagedSessionHandle) -> nexus_agent_host::HostResult<()> {
+        self.shutdowns.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn capabilities(&self) -> CapabilityDescriptor {
+        self.negotiated_capabilities()
+    }
+}
+
+/// Poll a condition until it holds, bounded by a generous deadline: the fixture
+/// waits for the observable effect the next assertion depends on instead of
+/// guessing with a sleep.
+async fn wait_until(mut condition: impl FnMut() -> bool, what: &str) {
+    tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        while !condition() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("timed out waiting for {what}"));
+}
+
+/// Start a real manager whose single provider is the test-driven control
+/// adapter, the way the native open composes one (registered before start, so
+/// the registered candidate is admitted and probed available).
+async fn control_manager(env: &Env, provider: Arc<ControlProvider>) -> Arc<HostManager> {
+    use nexus_agent_host::config::{load_config_from_path, validate_workspace_path};
+
+    let workspace_root = nexus_home_layout::nexus_root_from_home(&env.user_home);
+    validate_workspace_path(&workspace_root).unwrap();
+    let config_path = host_config_path(env);
+    let mut host_config = load_config_from_path(&config_path).unwrap();
+    host_config.max_sessions = ATTACHED_MANAGER_MAX_SESSIONS;
+    let host = Arc::new(HostManager::new());
+    host.register_provider(
+        provider,
+        LaunchStrategy::NativeCli {
+            command: "control-fixture".to_string(),
+            args: Vec::new(),
+            env: std::collections::HashMap::new(),
+        },
+    )
+    .await;
+    host.start(HostStartConfig {
+        config_path,
+        workspace_root: workspace_root.clone(),
+        max_sessions: host_config.max_sessions,
+        max_ops_per_session: host_config.max_ops_per_session,
+        timeouts: host_config.timeouts.clone(),
+        host_config: Some(host_config),
+        admitted_catalog: None,
+        probe_owner: Some(SessionOwner {
+            creator_id: CREATOR.to_string(),
+            workspace_root,
+            orchestration_run_id: None,
+        }),
+    })
+    .await
+    .unwrap();
+    host
+}
+
+/// Create the one control session through the manager's own create path.
+async fn control_session(manager: &Arc<HostManager>, env: &Env) -> HostSessionId {
+    let workspace_root = nexus_home_layout::nexus_root_from_home(&env.user_home);
+    manager
+        .create_session(nexus_agent_host::capability::model::CreateSessionRequest {
+            provider_id: ControlProvider::provider_id(),
+            cwd: workspace_root.clone(),
+            model: None,
+            mode: None,
+            mcp_servers: vec![],
+            metadata: serde_json::Value::Null,
+            owner: SessionOwner {
+                creator_id: CREATOR.to_string(),
+                workspace_root,
+                orchestration_run_id: None,
+            },
+        })
+        .await
+        .expect("the control session is created")
+        .id
+}
+
+/// The full control fixture: one core authority attached to a real started
+/// manager with one control provider, one created session on that same manager
+/// and that session indexed as an Actor Character session.
+async fn control_fixture(
+    env: &Env,
+    provider: Arc<ControlProvider>,
+) -> (
+    CoreService,
+    nexus_core::Principal,
+    Arc<HostManager>,
+    HostHandle,
+    HostSessionId,
+) {
+    let (core, principal) = open_core(env).await;
+    let manager = control_manager(env, Arc::clone(&provider)).await;
+    let handle = core
+        .attach_host(manager.clone(), CountingPort::new())
+        .expect("the supplied manager attaches");
+    let session_id = control_session(&manager, env).await;
+    let ctx = admit_character(&core, &principal, env).await;
+    let knowledge = admitted_knowledge(&core, &principal, env).await.identity();
+    let key = ActorSessionRegistry::key_for(
+        CONTROL_PROVIDER,
+        &env.user_home,
+        None,
+        None,
+        &ctx,
+        knowledge,
+    )
+    .unwrap();
+    handle
+        .actor_sessions()
+        .insert_indexed_entry(key, ctx, session_id.clone());
+    (core, principal, manager, handle, session_id)
+}
+
+/// Prompt the control session and return the operation the authority started.
+async fn control_prompt(
+    handle: &HostHandle,
+    principal: &nexus_core::Principal,
+    session_id: &HostSessionId,
+) -> HostOperationId {
+    let response = handle
+        .execute(
+            principal,
+            session_id.to_string(),
+            execute_request(serde_json::json!({ "kind": "prompt", "content": "control prompt" })),
+        )
+        .await
+        .expect("the control prompt is dispatched to the Host");
+    HostOperationId(Uuid::parse_str(&response.operation_id).expect("the operation id is a UUID"))
+}
+
+async fn control_status(
+    handle: &HostHandle,
+    principal: &nexus_core::Principal,
+    operation_id: &HostOperationId,
+) -> CharacterOperationResult {
+    handle
+        .character_operation(principal, operation_id.to_string())
+        .await
+        .expect("the recorded outcome is owner-readable")
+}
+
+/// The accepted cancel is the operation's truth (§5) and it is recorded ONCE:
+/// the provider's later clean terminal cannot rewrite it, and a later cancel is
+/// the typed 409 conflict.
+#[tokio::test]
+async fn actor_control_cancel_wins_the_phase_race_and_settles_once() {
+    let env = seed_env().await;
+    let provider = control_provider(true, 0, false);
+    let (_core, principal, _manager, handle, session_id) =
+        control_fixture(&env, Arc::clone(&provider)).await;
+    let operation_id = control_prompt(&handle, &principal, &session_id).await;
+
+    // The cancel is accepted through the SAME manager the prompt ran on.
+    let cancel = handle
+        .cancel_operation(&principal, operation_id.to_string())
+        .await
+        .expect("an owner-authorized cancel is accepted");
+    assert_eq!(cancel.operation_id, operation_id.to_string());
+    assert_eq!(cancel.status, "cancelled");
+    assert_eq!(
+        provider.cancels(),
+        1,
+        "the manager's own cancel was invoked"
+    );
+    let recorded = control_status(&handle, &principal, &operation_id).await;
+    assert_eq!(
+        recorded.run_status,
+        CharacterOperationResultRunStatus::Cancelled
+    );
+    assert_eq!(
+        recorded.finish_reason,
+        Some(CharacterOperationResultFinishReason::Cancelled)
+    );
+
+    // The provider then reports its own clean end of turn — and then ends the
+    // stream. The accepted cancel already won the phase race, so the drain
+    // settlement is a no-op rather than a second terminal.
+    provider.push(finished(&session_id, &operation_id, FinishReason::EndTurn));
+    provider.close_stream();
+    wait_until(
+        || handle.actor_sessions().unsettled_drain_count() == 0,
+        "the operation drain to settle",
+    )
+    .await;
+    let after_drain = control_status(&handle, &principal, &operation_id).await;
+    assert_eq!(
+        after_drain.run_status,
+        CharacterOperationResultRunStatus::Cancelled,
+        "a provider success after an accepted cancel is never the truth"
+    );
+    assert_eq!(
+        handle.actor_sessions().character_operation_count(),
+        1,
+        "the cancel and the drain settled the operation exactly once"
+    );
+
+    // A later cancel of a finished operation is the typed 409 conflict.
+    let err = handle
+        .cancel_operation(&principal, operation_id.to_string())
+        .await
+        .expect_err("a finished operation refuses cancel");
+    match &err {
+        CoreError::ActorConflict { code, .. } => {
+            assert_eq!(code, "actor_operation_finished", "finished cancel code");
+        }
+        other => panic!("expected actor_operation_finished, got {other:?}"),
+    }
+}
+
+/// DSH: a provider whose session does not negotiate cancellation is refused
+/// `not_supported` BEFORE any intent — the provider is never asked, no cancel
+/// intent is latched, and the run's own terminal decides the outcome.
+#[tokio::test]
+async fn actor_control_unsupported_cancel_never_latches_intent() {
+    let env = seed_env().await;
+    let provider = control_provider(false, 0, false);
+    let (_core, principal, _manager, handle, session_id) =
+        control_fixture(&env, Arc::clone(&provider)).await;
+    let operation_id = control_prompt(&handle, &principal, &session_id).await;
+
+    let err = handle
+        .cancel_operation(&principal, operation_id.to_string())
+        .await
+        .expect_err("an unsupported provider is refused");
+    match &err {
+        CoreError::Coded { code, .. } => assert_eq!(code, "not_supported", "DSH refusal code"),
+        other => panic!("expected not_supported, got {other:?}"),
+    }
+    assert_eq!(
+        provider.cancels(),
+        0,
+        "an unsupported request never reaches the provider"
+    );
+
+    // No intent was latched: the provider's own terminal is the truth, not a
+    // fabricated cancellation.
+    provider.push(finished(&session_id, &operation_id, FinishReason::EndTurn));
+    provider.close_stream();
+    wait_until(
+        || handle.actor_sessions().unsettled_drain_count() == 0,
+        "the operation drain to settle",
+    )
+    .await;
+    let outcome = control_status(&handle, &principal, &operation_id).await;
+    assert_eq!(
+        outcome.run_status,
+        CharacterOperationResultRunStatus::Succeeded,
+        "an unsupported cancel never latches cancellation intent"
+    );
+    assert_eq!(
+        outcome.finish_reason,
+        Some(CharacterOperationResultFinishReason::EndTurn)
+    );
+}
+
+/// A provider that advertises cancellation but REFUSES the call: the refusal is
+/// reported honestly, the latched intent is rolled back, and the operation's
+/// own terminal still decides.
+#[tokio::test]
+async fn actor_control_provider_refusal_is_never_recorded_as_cancelled() {
+    let env = seed_env().await;
+    let provider = control_provider(true, 0, true);
+    let (_core, principal, _manager, handle, session_id) =
+        control_fixture(&env, Arc::clone(&provider)).await;
+    let operation_id = control_prompt(&handle, &principal, &session_id).await;
+
+    let err = handle
+        .cancel_operation(&principal, operation_id.to_string())
+        .await
+        .expect_err("a provider refusal is reported, never fabricated as success");
+    assert!(
+        matches!(err, CoreError::Internal { .. }),
+        "the refusal surfaces as an error, got {err:?}"
+    );
+    assert_eq!(provider.cancels(), 1, "the provider was asked once");
+    let rolled_back = control_status(&handle, &principal, &operation_id).await;
+    assert_eq!(
+        rolled_back.run_status,
+        CharacterOperationResultRunStatus::Running,
+        "a refused cancel leaves no latched intent behind"
+    );
+
+    provider.push(finished(&session_id, &operation_id, FinishReason::EndTurn));
+    provider.close_stream();
+    wait_until(
+        || handle.actor_sessions().unsettled_drain_count() == 0,
+        "the operation drain to settle",
+    )
+    .await;
+    let outcome = control_status(&handle, &principal, &operation_id).await;
+    assert_eq!(
+        outcome.run_status,
+        CharacterOperationResultRunStatus::Succeeded,
+        "the provider's own terminal decides after a refused cancel"
+    );
+}
+
+/// Owner scoping: a foreign principal is `auth_required` on every control
+/// method, and a cross-session or unknown operation is `not_found` — never a
+/// leak of another session's work.
+#[tokio::test]
+async fn actor_control_foreign_and_cross_session_requests_are_denied() {
+    let env = seed_env().await;
+    let provider = control_provider(true, 0, false);
+    let (_core, principal, manager, handle, session_id) =
+        control_fixture(&env, Arc::clone(&provider)).await;
+    let operation_id = control_prompt(&handle, &principal, &session_id).await;
+    let other_session = control_session(&manager, &env).await;
+
+    let foreign = seed_env_as("ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").await;
+    let (_, foreign_principal) = open_core(&foreign).await;
+    for err in [
+        handle
+            .cancel_operation(&foreign_principal, operation_id.to_string())
+            .await
+            .unwrap_err(),
+        handle
+            .shutdown_session(&foreign_principal, session_id.to_string())
+            .await
+            .unwrap_err(),
+        handle
+            .next_events(
+                &foreign_principal,
+                session_id.to_string(),
+                operation_id.to_string(),
+                16,
+                4096,
+            )
+            .await
+            .unwrap_err(),
+    ] {
+        assert!(
+            matches!(err, CoreError::AuthRequired),
+            "a foreign principal is auth_required, got {err:?}"
+        );
+    }
+
+    // Cross-session: the operation exists, but not for the session the caller
+    // claims, so observation is refused indistinguishably from unknown.
+    let err = handle
+        .next_events(
+            &principal,
+            other_session.to_string(),
+            operation_id.to_string(),
+            16,
+            4096,
+        )
+        .await
+        .expect_err("a cross-session observation is refused");
+    assert!(matches!(err, CoreError::NotFound { .. }), "got {err:?}");
+
+    // Unknown operation, in both directions.
+    let unknown = HostOperationId(Uuid::new_v4());
+    let err = handle
+        .next_events(
+            &principal,
+            session_id.to_string(),
+            unknown.to_string(),
+            16,
+            4096,
+        )
+        .await
+        .expect_err("an unknown operation is refused");
+    assert!(matches!(err, CoreError::NotFound { .. }), "got {err:?}");
+    let err = handle
+        .cancel_operation(&principal, unknown.to_string())
+        .await
+        .expect_err("an unknown operation refuses cancel");
+    assert!(matches!(err, CoreError::NotFound { .. }), "got {err:?}");
+    let err = handle
+        .shutdown_session(&principal, Uuid::new_v4().to_string())
+        .await
+        .expect_err("a session unknown to the index and the manager is not_found");
+    assert!(matches!(err, CoreError::NotFound { .. }), "got {err:?}");
+    assert_eq!(
+        provider.cancels(),
+        0,
+        "no denial reached the provider's cancel"
+    );
+}
+
+/// Contract §5 "Delivery versus authority": the server-owned drain settles the
+/// operation with ZERO subscribers, and the retained observation reader replays
+/// from its own bounded buffer without ever touching the original exec stream.
+#[tokio::test]
+async fn actor_control_observation_settles_without_a_subscriber() {
+    let env = seed_env().await;
+    let provider = control_provider(true, 0, false);
+    let (_core, principal, _manager, handle, session_id) =
+        control_fixture(&env, Arc::clone(&provider)).await;
+    let operation_id = control_prompt(&handle, &principal, &session_id).await;
+    assert_eq!(
+        handle.actor_sessions().observation_count(),
+        1,
+        "one bounded observation reader per reserved Character operation"
+    );
+
+    // No `next_events` call at all: the drain still observes and settles.
+    provider.push(finished(&session_id, &operation_id, FinishReason::EndTurn));
+    provider.close_stream();
+    wait_until(
+        || handle.actor_sessions().unsettled_drain_count() == 0,
+        "the operation drain to settle",
+    )
+    .await;
+    let outcome = control_status(&handle, &principal, &operation_id).await;
+    assert_eq!(
+        outcome.run_status,
+        CharacterOperationResultRunStatus::Succeeded,
+        "settlement never waits for an observation subscriber"
+    );
+    assert_eq!(
+        provider.polled(),
+        1,
+        "the authority's own exec stream was consumed exactly once"
+    );
+
+    // The observation is a SEPARATE source: pulling it now still delivers this
+    // operation's own terminal without re-reading the exec stream.
+    let batch = handle
+        .next_events(
+            &principal,
+            session_id.to_string(),
+            operation_id.to_string(),
+            16,
+            64 * 1024,
+        )
+        .await
+        .expect("the retained observation is readable");
+    assert_eq!(batch.operation_id, operation_id.to_string());
+    assert!(batch.gap.is_none(), "an intact observation is not a gap");
+    assert!(!batch.has_more);
+    assert!(
+        batch.events.iter().any(|event| matches!(
+            event,
+            nexus_contracts::generated::core::provider_event_batch::NexusProviderHostEvent::OpFinished { .. }
+        )),
+        "the observation carries this operation's terminal: {:?}",
+        batch.events
+    );
+    assert_eq!(
+        provider.polled(),
+        1,
+        "observation never consumes the authority's own stream"
+    );
+}
+
+/// A cap overflow and a lost broadcast source are TYPED resync gaps: a consumer
+/// re-reads authoritative status instead of reading either as completion.
+#[tokio::test]
+async fn actor_control_observation_gaps_are_typed_and_never_complete() {
+    let env = seed_env().await;
+    let provider = control_provider(true, 0, false);
+    let (_core, principal, _manager, handle, session_id) =
+        control_fixture(&env, Arc::clone(&provider)).await;
+    let operation_id = control_prompt(&handle, &principal, &session_id).await;
+
+    // One session-scoped event, delivered to the observation source.
+    provider.push(HostEvent::Status(StatusEvent {
+        session_id: Some(session_id.clone()),
+        level: StatusLevel::Info,
+        message: "observation payload".to_string(),
+    }));
+    wait_until(
+        || provider.polled() == 1,
+        "the fixture event to be produced",
+    )
+    .await;
+
+    // A byte cap too small for a single event is the typed overflow gap.
+    let overflow = handle
+        .next_events(
+            &principal,
+            session_id.to_string(),
+            operation_id.to_string(),
+            16,
+            64,
+        )
+        .await
+        .expect("an over-budget observation returns a gap batch");
+    assert!(
+        overflow.events.is_empty(),
+        "nothing over budget is delivered"
+    );
+    assert_eq!(
+        overflow.gap.map(|gap| (gap.reason, gap.resync_required)),
+        Some((ProviderEventBatchGapReason::Oversized, true))
+    );
+
+    provider.close_stream();
+    wait_until(
+        || handle.actor_sessions().unsettled_drain_count() == 0,
+        "the operation drain to settle",
+    )
+    .await;
+    let _ = control_status(&handle, &principal, &operation_id).await;
+}
+
+/// A broadcast lag is the typed LAGGING gap: the observation never turns lost
+/// data into a clean completion, and the authoritative status stays readable.
+#[tokio::test]
+async fn actor_control_observation_lag_is_a_resync_gap() {
+    let env = seed_env().await;
+    // More events than the manager's broadcast capacity (1024): the idle
+    // observation subscriber falls behind and the channel reports the lag.
+    let provider = control_provider(true, 2_100, false);
+    let (_core, principal, _manager, handle, session_id) =
+        control_fixture(&env, Arc::clone(&provider)).await;
+    let operation_id = control_prompt(&handle, &principal, &session_id).await;
+    wait_until(
+        || provider.polled() >= 2_100,
+        "the provider burst to be produced",
+    )
+    .await;
+
+    let batch = handle
+        .next_events(
+            &principal,
+            session_id.to_string(),
+            operation_id.to_string(),
+            16,
+            256 * 1024,
+        )
+        .await
+        .expect("a lagged observation returns a typed gap");
+    assert!(!batch.has_more, "a lost observation never claims more data");
+    let gap = batch
+        .gap
+        .expect("a lagged observation must report a gap, never an EOF");
+    assert_eq!(gap.reason, ProviderEventBatchGapReason::Lagging);
+    assert!(gap.resync_required);
+    let outcome = control_status(&handle, &principal, &operation_id).await;
+    assert_eq!(
+        outcome.run_status,
+        CharacterOperationResultRunStatus::Running,
+        "the authoritative status stays readable through the observation gap"
+    );
+
+    provider.push(finished(&session_id, &operation_id, FinishReason::EndTurn));
+    provider.close_stream();
+    wait_until(
+        || handle.actor_sessions().unsettled_drain_count() == 0,
+        "the operation drain to settle",
+    )
+    .await;
+}
+
+/// Session shutdown cancels the session's active work through the same manager,
+/// releases the session, and retires the Actor reuse state — reporting success
+/// only after the manager confirmed the release.
+#[tokio::test]
+async fn actor_control_session_shutdown_cancels_then_releases() {
+    let env = seed_env().await;
+    let provider = control_provider(true, 0, false);
+    let (_core, principal, _manager, handle, session_id) =
+        control_fixture(&env, Arc::clone(&provider)).await;
+    let operation_id = control_prompt(&handle, &principal, &session_id).await;
+
+    let response = handle
+        .shutdown_session(&principal, session_id.to_string())
+        .await
+        .expect("an owner-authorized shutdown is confirmed");
+    assert_eq!(response.session_id, session_id.to_string());
+    assert_eq!(response.status, "shutdown");
+    assert_eq!(
+        provider.cancels(),
+        1,
+        "the session's active operation was cancelled through the same manager"
+    );
+    assert_eq!(provider.shutdowns(), 1, "the session was released once");
+    let outcome = control_status(&handle, &principal, &operation_id).await;
+    assert_eq!(
+        outcome.run_status,
+        CharacterOperationResultRunStatus::Cancelled,
+        "the shutdown's accepted cancel is the operation's truth"
+    );
+    assert_eq!(
+        handle
+            .actor_sessions()
+            .stored_session_owner(&session_id)
+            .map(|(owner, _, retired)| (owner, retired)),
+        Some((CREATOR.to_string(), true)),
+        "the released session is retired, not reusable"
+    );
+
+    // The operation's session is gone from the manager: a later cancel is
+    // refused instead of reaching a nonexistent session.
+    let err = handle
+        .cancel_operation(&principal, operation_id.to_string())
+        .await
+        .expect_err("a finished operation refuses cancel");
+    assert!(
+        matches!(
+            err,
+            CoreError::ActorConflict { .. } | CoreError::NotFound { .. }
+        ),
+        "got {err:?}"
+    );
+    assert_eq!(provider.cancels(), 1, "no second cancel was attempted");
+}
+
+/// Contract §3: `quiesce_actor_sessions` closes the Actor side only — it
+/// cancels active work, joins the retained drains and leaves the manager (and
+/// the Host authority slot) alone for the ordered settlement that follows.
+#[tokio::test]
+async fn actor_control_quiesce_is_actor_only_and_joins_drains() {
+    let env = seed_env().await;
+    let provider = control_provider(true, 0, false);
+    let (core, principal, manager, handle, session_id) =
+        control_fixture(&env, Arc::clone(&provider)).await;
+    let operation_id = control_prompt(&handle, &principal, &session_id).await;
+
+    // Quiesce blocks on the retained drain until it settles: end the stream
+    // from the fixture while the quiesce is running.
+    let quiescing = tokio::spawn({
+        let handle = handle.clone();
+        async move { handle.quiesce_actor_sessions().await }
+    });
+    wait_until(|| provider.cancels() == 1, "the quiesce cancel").await;
+    provider.push(finished(
+        &session_id,
+        &operation_id,
+        FinishReason::Cancelled,
+    ));
+    provider.close_stream();
+    let report = tokio::time::timeout(std::time::Duration::from_secs(20), quiescing)
+        .await
+        .expect("the Actor-side join settles")
+        .expect("the quiesce task joins")
+        .expect("the Actor side settles");
+    assert!(
+        report.cleanup_confirmed,
+        "Actor-only quiesce report: {report:?}"
+    );
+    assert_eq!(
+        handle.actor_sessions().observation_count(),
+        0,
+        "quiesce closes Actor admission and drops the observation readers"
+    );
+    assert_eq!(
+        handle.actor_sessions().unsettled_drain_count(),
+        0,
+        "the retained drains were joined"
+    );
+    assert!(
+        manager.health().await.unwrap().running,
+        "quiesce never shuts the manager used by workflows"
+    );
+    let recorded = control_status(&handle, &principal, &operation_id).await;
+    assert_eq!(
+        recorded.run_status,
+        CharacterOperationResultRunStatus::Cancelled
+    );
+    // The Host authority slot is still held: the ordered close owns its
+    // release, not the quiesce.
+    let err = core
+        .attach_host(manager.clone(), CountingPort::new())
+        .expect_err("the quiesce never releases the authority slot");
+    assert!(
+        matches!(err, CoreError::OwnerBusy),
+        "slot retained: {err:?}"
+    );
+}
+
+/// Contract §3: an unsettled Actor drain keeps the authority (slot + drain
+/// ownership) across a `close_before`, and the retry stays legal after the core
+/// service itself closed.
+#[tokio::test]
+async fn actor_control_retained_close_before_retries_after_the_service_closed() {
+    let env = seed_env().await;
+    let provider = control_provider(true, 0, false);
+    let (core, _principal, manager, handle, _session_id) =
+        control_fixture(&env, Arc::clone(&provider)).await;
+
+    // A live drain the authority still owns.
+    handle
+        .actor_sessions()
+        .spawn_actor_drain(std::future::pending::<()>());
+
+    let report = handle
+        .close_before(Instant::now() + std::time::Duration::from_secs(20))
+        .await
+        .expect("close_before returns a report");
+    assert!(
+        !report.cleanup_confirmed,
+        "an unsettled drain is never a confirmed cleanup: {report:?}"
+    );
+    assert!(
+        report
+            .pending_operations
+            .iter()
+            .any(|pending| pending.starts_with("actor-drains:")),
+        "the report names the drain it still owns: {report:?}"
+    );
+    let err = core
+        .attach_host(manager.clone(), CountingPort::new())
+        .expect_err("retained work keeps the authority slot");
+    assert!(
+        matches!(err, CoreError::OwnerBusy),
+        "slot retained: {err:?}"
+    );
+
+    // The native owner closes the core service BEFORE the Host settlement, so
+    // the retry must not turn into a `closing` refusal.
+    core.close().await.expect("the core service closes");
+    let retried = handle
+        .close_before(Instant::now() + std::time::Duration::from_secs(20))
+        .await
+        .expect("close_before stays legal on a closed service");
+    assert!(
+        !retried.cleanup_confirmed,
+        "the retained drain still blocks confirmation: {retried:?}"
+    );
+}
+
+/// Contract §3: `close_before` settles the shared manager and `LocalSet`, stays
+/// legal after the core service closed, and releases the authority slot only on
+/// the confirmed settlement — a repeated call then reports the retained report.
+#[tokio::test]
+async fn actor_control_close_before_settles_once_after_the_service_closed() {
+    let env = seed_env().await;
+    let provider = control_provider(true, 0, false);
+    let (core, _principal, _manager, handle, _session_id) =
+        control_fixture(&env, Arc::clone(&provider)).await;
+
+    core.close().await.expect("the core service closes");
+    let report = handle
+        .close_before(Instant::now() + std::time::Duration::from_secs(20))
+        .await
+        .expect("close_before stays legal on a closed service");
+    assert!(report.cleanup_confirmed, "settled close report: {report:?}");
+    assert_eq!(report.state, CoreCloseReportState::Closed);
+    let repeated = handle
+        .close_before(Instant::now() + std::time::Duration::from_secs(20))
+        .await
+        .expect("a repeated close_before returns");
+    assert!(repeated.cleanup_confirmed);
+    assert_eq!(
+        repeated.pending_operations, report.pending_operations,
+        "a repeated close reports the retained settlement instead of settling twice"
     );
 }
