@@ -918,6 +918,18 @@ impl CoreService {
     /// owner is taken out of the per-service slot first; the only other taker is
     /// [`Self::retire_execution`], which settles the handle it took on its own
     /// path.
+    ///
+    /// The settlement is AWAITED on BOTH paths — whether or not this task took
+    /// the slot. This task's caller holds the per-service start fence for the
+    /// whole start (see [`Self::run_retained_start`]), and the close drain
+    /// trusts that fence for the claim "every owner this start published is
+    /// gone": an early return leaves the drain to find an EMPTY slot, so it
+    /// closes the pool and publishes `cleanup_confirmed` while the retirement
+    /// that took the slot is still joining this handle's drives — and while the
+    /// per-DB owner fence is still held. `shutdown` is idempotent (one retained
+    /// drain per handle), so the path that did not take the slot only JOINS the
+    /// settlement the taker started. The per-DB fence stays the slot taker's to
+    /// release, so a settlement never releases it twice.
     async fn withdraw_and_settle(&self, handle: &Arc<ExecutionHandle>) {
         let withdrawn = {
             let mut slot = self
@@ -935,11 +947,10 @@ impl CoreService {
                 false
             }
         };
-        if !withdrawn {
-            return;
-        }
         handle.shutdown().await;
-        release_owner_slot(&self.inner.db_path, handle);
+        if withdrawn {
+            release_owner_slot(&self.inner.db_path, handle);
+        }
     }
 
     /// The established execution handle, if any.
@@ -961,9 +972,25 @@ impl CoreService {
     /// the slot released after, so the fence is never dropped while a build
     /// that supersedes this owner is still in flight.
     ///
+    /// A retirement holds the per-service START fence for its WHOLE duration:
+    /// the slot take, the settlement of the handle it took, and the release of
+    /// the per-DB owner fence. The close drain takes that SAME fence
+    /// exclusively before it takes the slot and releases the pool, the writer
+    /// admission and the per-DB owner fence, so a confirmed `cleanup_confirmed`
+    /// can never precede a retirement that is still settling the owner it took.
+    /// Without it the drain finds the slot already empty and confirms a cleanup
+    /// over drives that are still joining.
+    ///
+    /// The SHARED half is the right one: a retirement is not a start and must
+    /// not fence concurrent starts out (the per-DB owner reservation already
+    /// serializes those), it only has to be WAITED FOR by the exclusive close.
+    /// Lock order (fence, then slot) matches the start's own install and
+    /// `close_drain`, so no path can deadlock.
+    ///
     /// A service that never established an owner (domain-only cores) is a
     /// no-op.
     pub async fn retire_execution(&self) {
+        let _retiring = Arc::clone(&self.inner.start_fence).read_owned().await;
         let handle = self
             .inner
             .execution
