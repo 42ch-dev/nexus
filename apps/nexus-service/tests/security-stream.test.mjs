@@ -1145,11 +1145,11 @@ describe('security-stream (P4-T2)', () => {
     } finally { await closeServiceBounded(local); await startSharedService(homeCtx.home, 0); }
   });
 
-  test('a valid prompt with remember forwards the flag to the provider', async () => {
+  test('legacy prompt cannot claim Character memory capture', async () => {
     const { sessionId } = await providerFlow(baseUrl);
     const res = await jsonFetch(`${baseUrl}/v1/daemon/agent-host/sessions/${sessionId}/operations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { kind: 'prompt', content: 'hi', remember: true } });
-    assert.equal(res.status, 200);
-    assert.ok(res.payload.operation_id);
+    assert.equal(res.status, 422);
+    assert.equal(res.payload.error.code, 'invalid_input');
   });
 
   test('native interrupted operation is terminal for hydrate, cancel, and active count', async () => {

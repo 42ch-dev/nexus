@@ -159,6 +159,13 @@ describe('execution-http (P5-T3)', () => {
     assert.equal(created.status, 200, created.text);
     const sessionId = created.payload.session_id;
     assert.ok(sessionId, created.text);
+    // Legacy sessions have no admitted Character binding for memory capture.
+    const rememberDenied = await jsonFetch(
+      `${baseUrl}/v1/daemon/agent-host/sessions/${sessionId}/operations`,
+      { method: 'POST', body: { kind: 'prompt', content: 'hello', remember: true } },
+    );
+    assert.equal(rememberDenied.status, 422, rememberDenied.text);
+    assert.equal(rememberDenied.payload.error.code, 'invalid_input');
 
     // 2. Graceful close cancels the in-flight operation — `cancelled` is the
     //    true settled semantic for an op orphaned by an orderly shutdown.

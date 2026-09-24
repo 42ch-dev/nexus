@@ -261,8 +261,18 @@ export async function executeProviderOperation(service: ServiceCore, sessionId: 
   if (service.providerRegistry.activeOperationCount() >= MAX_ACTIVE_PROVIDER_OPERATIONS) {
     throw new HttpError(503, 'busy', 'too many active provider operations');
   }
-  const executePayload: Record<string, unknown> = { kind: 'prompt', content: req.content };
-  if (req.remember !== undefined) executePayload.remember = req.remember;
+  // The provider protocol accepts the Rust HostOperation wire shape, not the
+  // public HTTP request. A legacy session cannot authorize memory capture.
+  if (req.remember === true) {
+    throw new HttpError(422, 'invalid_input', 'remember requires an admitted Character session');
+  }
+  const executePayload = {
+    Prompt: {
+      op_id: randomUUID(),
+      content: [{ Text: { text: req.content } }],
+      permission_scope: null,
+    },
+  };
   const reply = await providerCall(service, {
     method: 'execute',
     request_id: randomUUID(),
