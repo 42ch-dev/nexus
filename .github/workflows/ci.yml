@@ -720,6 +720,19 @@ jobs:
           workspaces: .
           cache-all-crates: false
           cache-on-failure: false
+      - name: Core library feature cohorts (no dev-target unification)
+        # R-V1195P4-001 (v1.196 P1-T2): `cargo test` builds activate
+        # nexus-core's own dev-dependencies, and that unification supplies
+        # `execution` to a lib-only graph that never selected it — so a green
+        # test leg below can hide an uncompilable library cohort. These four
+        # `--lib` checks pin the shape that must compile on its own. Separate
+        # invocations are intentional: no multi-package selection, no
+        # `--all-targets`, no `--workspace`, no cargo test.
+        run: |
+          cargo check -p nexus-core --lib --no-default-features --locked
+          cargo check -p nexus-core --lib --no-default-features --features execution --locked
+          cargo check -p nexus-core --lib --no-default-features --features connect-client --locked
+          cargo check -p nexus-core --lib --no-default-features --features connect-client,embedded-mcp --locked
       - name: Core domain owners (no optional features)
         run: >-
           cargo test -p nexus-core
