@@ -1,0 +1,328 @@
+#!/usr/bin/env node
+/**
+ * Focused contract tests for the P3 public first-workflow driver (P3-T2).
+ *
+ * Scope: the driver's own observable contracts, exercised against loopback
+ * servers and temporary directories it creates itself. Nothing here needs the
+ * prepared service/native artifacts, a real `dsh`, an upstream model or the
+ * product database — the composed journey belongs to the driver run, not to
+ * this file.
+ *
+ *   node --test scripts/public-first-workflow.test.mjs
+ *
+ * Every case fails on a plausible regression of the contract it names:
+ *   * the bounded read must end on ITS OWN window (a returning socket-idle
+ *     timer reported an ordinary idle reconnect as `ECONNRESET`/
+ *     `socket hang up`), and a real mid-stream reset must stay a failure
+ *     instead of being read as a short stream;
+ *   * a cursor reconnect must replay exactly the successors the cursor
+ *     promised, exclusively (off-by-one → duplicate handoff), and neither an
+ *     empty idle window nor an uncovered gap may be accepted as a replay;
+ *   * a lost retained history must be the explicit `history_unavailable`
+ *     control frame and nothing else;
+ *   * the sealed request structure must be checked (a request that advertises
+ *     tools refuses) and the endpoint must not retain request content;
+ *   * an unsolicited tool side effect — a hostile marker or any scope entry the
+ *     fixture never declared — must be detected rather than ignored.
+ */
+import { strict as assert } from 'node:assert';
+import { createServer } from 'node:http';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { test } from 'node:test';
+
+import {
+  assertHistoryLossExplicit,
+  assertNoHostileMarkers,
+  assertScopeEffectOnly,
+  assertSealedToolPolicy,
+  classifySameRunReplay,
+  readEventStream,
+  readEventStreamOrStop,
+  startModelEndpoint,
+} from './public-first-workflow.mjs';
+
+const RUN_ID = 'first-workflow:test-run';
+const EPOCH = '11111111-2222-3333-4444-555555555555';
+const READ_WINDOW_MS = 300;
+
+/** One SSE `run_state` frame carrying the ring's own `<epoch>:<sequence>` cursor. */
+function stateFrame(sequence, epoch = EPOCH) {
+  return `id: ${epoch}:${sequence}\nevent: run_state\ndata: ${JSON.stringify({ state_revision: sequence })}\n\n`;
+}
+
+/** Frame identity list `1..count` of the test epoch. */
+function observedIds(count, epoch = EPOCH) {
+  return Array.from({ length: count }, (_, index) => `${epoch}:${index + 1}`);
+}
+
+/**
+ * One owned loopback SSE server. `mode` selects the transport behaviour, not a
+ * data fixture: `no-response` accepts the connection and answers nothing at all
+ * (the live run's own shape — the workflow transport writes its headers with the
+ * first frame, so a run with nothing new to send has not flushed any yet),
+ * `idle` answers headers and then says nothing, `replay` answers the given frame
+ * text and then idles, `reset` aborts the connection after writing its frames,
+ * `close` ends the stream, `json-404` is a pre-header refusal.
+ */
+function startSseServer(mode, frames = '') {
+  const server = createServer((request, response) => {
+    if (mode === 'no-response') return;
+    if (mode === 'json-404') {
+      response.writeHead(404, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ error: { code: 'not_found', message: 'no such run' } }));
+      return;
+    }
+    response.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8' });
+    response.flushHeaders();
+    if (mode === 'idle') return;
+    response.write(frames);
+    if (mode === 'reset') {
+      setTimeout(() => response.socket?.destroy(), 10);
+      return;
+    }
+    if (mode === 'close') response.end();
+  });
+  return new Promise((resolvePromise) => {
+    server.listen(0, '127.0.0.1', () => {
+      resolvePromise({
+        port: server.address().port,
+        close: () => new Promise((done) => server.close(done)),
+      });
+    });
+  });
+}
+
+/** Run `body` against one owned server and always release it. */
+async function withSseServer(mode, frames, body) {
+  const server = await startSseServer(mode, frames);
+  try {
+    return await body(server.port);
+  } finally {
+    await server.close();
+  }
+}
+
+/** Assert a driver refusal by its stable outcome/category. */
+function assertDriverFailure(error, outcome, category) {
+  assert.equal(error?.name, 'DriverFailure', `expected DriverFailure, got ${error?.name}: ${error?.message}`);
+  assert.equal(error.outcome, outcome);
+  assert.equal(error.category, category);
+}
+
+/** The classified results of `classifySameRunReplay` for one replayed frame set. */
+function classifyReplay(replayFrames, { cursor = observedIds(5)[0], observed = observedIds(5) } = {}) {
+  return classifySameRunReplay({
+    runId: RUN_ID,
+    cursor,
+    observedIds: observed,
+    read: { status: 200, json: null, frames: replayFrames, closed: false, timed_out: true },
+  });
+}
+
+test('a silent same-run stream ends as the driver window, never as a connection failure', async () => {
+  const silent = await withSseServer('no-response', '', (port) =>
+    readEventStream(port, RUN_ID, { maxFrames: 16, timeoutMs: READ_WINDOW_MS }),
+  );
+  assert.equal(silent.timed_out, true);
+  assert.equal(silent.closed, false);
+  assert.deepEqual(silent.frames, []);
+
+  const idle = await withSseServer('idle', '', (port) =>
+    readEventStream(port, RUN_ID, { maxFrames: 16, timeoutMs: READ_WINDOW_MS }),
+  );
+  assert.equal(idle.status, 200);
+  assert.equal(idle.timed_out, true);
+  assert.equal(idle.closed, false);
+  assert.deepEqual(idle.frames, []);
+});
+
+test('a connection reset mid-stream stays a transport failure, not a short read', async () => {
+  const reset = await withSseServer('reset', stateFrame(1) + stateFrame(2), (port) =>
+    readEventStreamOrStop('test read', () => readEventStream(port, RUN_ID, { maxFrames: 16, timeoutMs: READ_WINDOW_MS })),
+  ).catch((error) => error);
+  assertDriverFailure(reset, 'failed', 'event_stream_transport');
+});
+
+test('a cursor reconnect replays exactly the successors the cursor promised, exclusively', async () => {
+  const observed = observedIds(5);
+  const cursor = observed[0];
+  const replay = await withSseServer('replay', stateFrame(2) + stateFrame(3) + stateFrame(4) + stateFrame(5), (port) =>
+    readEventStream(port, RUN_ID, { lastEventId: cursor, maxFrames: 16, timeoutMs: READ_WINDOW_MS }),
+  );
+  const facts = classifySameRunReplay({ runId: RUN_ID, cursor, observedIds: observed, read: replay });
+  assert.equal(facts.kind, 'successors');
+  assert.deepEqual(facts.replayed_ids, observed.slice(1));
+  assert.deepEqual(facts.missing_successors, []);
+  assert.deepEqual(facts.gaps, []);
+  assert.equal(facts.exclusive, true);
+  assert.equal(facts.duplicate_handoff, false);
+});
+
+test('an idle reconnect and a single-frame read are never accepted as a replay proof', async () => {
+  const idle = await withSseServer('idle', '', (port) =>
+    readEventStream(port, RUN_ID, { lastEventId: observedIds(5)[0], maxFrames: 16, timeoutMs: READ_WINDOW_MS }),
+  );
+  assert.throws(
+    () => classifySameRunReplay({ runId: RUN_ID, cursor: observedIds(5)[0], observedIds: observedIds(5), read: idle }),
+    (error) => {
+      assertDriverFailure(error, 'failed', 'replay_incomplete');
+      return true;
+    },
+  );
+  assert.throws(
+    () => classifyReplay([], { cursor: observedIds(1)[0], observed: observedIds(1) }),
+    (error) => {
+      assertDriverFailure(error, 'failed', 'replay_unprovable');
+      return true;
+    },
+  );
+});
+
+test('an explicit covering gap is recorded as one, and an uncovered gap is refused', () => {
+  const gapFrame = {
+    id: `${EPOCH}:5`,
+    event: 'gap',
+    data: JSON.stringify({ run_id: RUN_ID, epoch: EPOCH, from_sequence: 2, to_sequence: 5 }),
+  };
+  const covered = classifyReplay([gapFrame]);
+  assert.equal(covered.kind, 'gap');
+  assert.deepEqual(covered.gaps, [{ from_sequence: 2, to_sequence: 5 }]);
+  assert.deepEqual(covered.missing_successors, observedIds(5).slice(1));
+  assert.throws(
+    () =>
+      classifyReplay([
+        { ...gapFrame, data: JSON.stringify({ run_id: RUN_ID, epoch: EPOCH, from_sequence: 2, to_sequence: 3 }) },
+      ]),
+    (error) => {
+      assertDriverFailure(error, 'failed', 'replay_incomplete');
+      return true;
+    },
+  );
+});
+
+test('a lost retained history is the explicit control frame, and any other answer is refused', () => {
+  const lossFrame = {
+    id: null,
+    event: 'history_unavailable',
+    data: JSON.stringify({ run_id: RUN_ID, inspect_url: `/v1/daemon/orchestration/sessions/${RUN_ID}` }),
+  };
+  const explicit = assertHistoryLossExplicit({
+    runId: RUN_ID,
+    cursor: observedIds(5).at(-1),
+    read: { frames: [lossFrame], closed: true, timed_out: false },
+  });
+  assert.equal(explicit.control_frame, 'history_unavailable');
+  assert.equal(explicit.data_frames, 0);
+  assert.throws(
+    () =>
+      assertHistoryLossExplicit({
+        runId: RUN_ID,
+        cursor: observedIds(5).at(-1),
+        read: {
+          frames: observedIds(3).map((id) => ({ id, event: 'run_state', data: '{"state_revision":1}' })),
+          closed: true,
+          timed_out: false,
+        },
+      }),
+    (error) => {
+      assertDriverFailure(error, 'failed', 'history_loss_not_explicit');
+      return true;
+    },
+  );
+  assert.throws(
+    () =>
+      assertHistoryLossExplicit({
+        runId: RUN_ID,
+        cursor: observedIds(5).at(-1),
+        read: {
+          frames: [{ ...lossFrame, data: JSON.stringify({ run_id: 'other-run', inspect_url: '/x' }) }],
+          closed: true,
+          timed_out: false,
+        },
+      }),
+    (error) => {
+      assertDriverFailure(error, 'failed', 'history_loss_not_explicit');
+      return true;
+    },
+  );
+});
+
+test('the sealed request structure is checked, and an advertised-tools request is refused', async () => {
+  const prompt = 'sealed prompt body that must never be retained';
+  const sealed = await startModelEndpoint();
+  const toolsAdvertised = await startModelEndpoint();
+  try {
+    const post = async (endpoint, body) => {
+      const response = await fetch(`http://127.0.0.1:${endpoint.port}/chat/completions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      await response.text();
+    };
+    await post(sealed, { model: 'loopback-test', messages: [{ role: 'system' }, { role: 'user', content: prompt }] });
+    await post(toolsAdvertised, {
+      model: 'loopback-test',
+      messages: [{ role: 'system' }, { role: 'user', content: prompt }],
+      tools: [{ type: 'function', function: { name: 'shell' } }],
+    });
+
+    const policy = assertSealedToolPolicy(sealed.observations);
+    assert.equal(policy.advertised_tools, false);
+    assert.deepEqual(policy.first_request_roles, ['system', 'user']);
+    assert.throws(
+      () => assertSealedToolPolicy(toolsAdvertised.observations),
+      (error) => {
+        assertDriverFailure(error, 'failed', 'sealed_policy_violation');
+        return true;
+      },
+    );
+    assert.ok(
+      !JSON.stringify(sealed.observations).includes(prompt),
+      'the endpoint must record structure only, never the request body',
+    );
+  } finally {
+    assert.equal((await sealed.close()).confirmed, true);
+    assert.equal((await toolsAdvertised.close()).confirmed, true);
+  }
+});
+
+test('an unsolicited tool side effect is detected in the isolated root and the opened scope', () => {
+  const root = mkdtempSync(join(tmpdir(), 'public-first-workflow-test-'));
+  const scope = join(root, 'workspace', 'notes');
+  const fixture = { changePath: 'first-workflow.md' };
+  try {
+    mkdirSync(scope, { recursive: true });
+    writeFileSync(join(scope, fixture.changePath), 'committed');
+    assert.deepEqual(assertNoHostileMarkers(root).present, []);
+    const inventory = assertScopeEffectOnly(scope, fixture);
+    assert.deepEqual(
+      inventory.map((entry) => entry.path),
+      [fixture.changePath],
+    );
+
+    mkdirSync(join(root, 'markers'), { recursive: true });
+    writeFileSync(join(root, 'markers', 'editor-marker'), 'side effect');
+    assert.throws(
+      () => assertNoHostileMarkers(root),
+      (error) => {
+        assertDriverFailure(error, 'failed', 'unsolicited_side_effect');
+        return true;
+      },
+    );
+    rmSync(join(root, 'markers'), { recursive: true, force: true });
+
+    writeFileSync(join(scope, 'pwned.txt'), 'side effect');
+    assert.throws(
+      () => assertScopeEffectOnly(scope, fixture),
+      (error) => {
+        assertDriverFailure(error, 'failed', 'unsolicited_side_effect');
+        return true;
+      },
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
