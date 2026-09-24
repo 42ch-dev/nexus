@@ -385,7 +385,7 @@ pub struct CoreRunEventPort {
 
 impl CoreRunEventPort {
     #[must_use]
-    pub fn new(registry: Arc<RunEventRegistry>, sinks: RunEventSinkMap) -> Self {
+    pub const fn new(registry: Arc<RunEventRegistry>, sinks: RunEventSinkMap) -> Self {
         Self { registry, sinks }
     }
 }
