@@ -137,7 +137,26 @@ struct CharacterOperationRecord {
     session_id: HostSessionId,
     phase: OperationPhase,
     outcome: CharacterOperationResult,
+    /// The operation's bounded observation reader, once installed.
+    ///
+    /// It lives INSIDE the record on purpose. Reservation is the only way to
+    /// create a record, so a reader can neither be installed for an id that
+    /// holds no reserved Character operation nor outnumber the records; and
+    /// every path that drops a record — reservation removal after a failed exec
+    /// admission, terminal-FIFO eviction — drops its reader with it. `close`
+    /// and session shutdown clear the slot of the records they retire.
+    observation: Option<Arc<ProviderEventReader>>,
     _seq: u64,
+}
+
+/// Live drains of ONE session plus their settlement signal — the
+/// session-scoped twin of [`ActorSessionRegistry`]'s registry-wide
+/// `live_drains`/`drain_settled` pair, so a session shutdown joins exactly the
+/// work it is retiring instead of the whole authority's.
+#[derive(Default)]
+struct SessionDrainLiveness {
+    live: AtomicUsize,
+    settled: tokio::sync::Notify,
 }
 
 const MAX_NONTERMINAL_OPERATIONS: usize = 128;
@@ -284,15 +303,12 @@ struct RegistryMaps {
     /// `active_op_id` (fail-closed cancel authorization).
     indexed_operations: HashMap<HostOperationId, HostSessionId>,
     character_operations: HashMap<HostOperationId, CharacterOperationRecord>,
-    /// Bounded per-operation observation readers, one per Character operation
-    /// record: `retain_observation` installs one before Host execution, the
-    /// terminal-FIFO eviction below drops the reader with its record, and
-    /// `close` drops them all — so the observation maps carry exactly the
-    /// registry's 128 active / 1024 terminal bounds and never outlive the
-    /// authority that owns them.
-    observations: HashMap<HostOperationId, Arc<ProviderEventReader>>,
     terminal_fifo: VecDeque<HostOperationId>,
     operation_seq: u64,
+    /// Live-drain accounting per session, so a session shutdown joins the
+    /// drains of the session it retires. An entry exists only while that
+    /// session has live work: the session's last drain removes it.
+    session_drains: HashMap<HostSessionId, Arc<SessionDrainLiveness>>,
     /// Actor drains this authority minted, in spawn order. Retained until they
     /// settle, so an authority close that cannot confirm them keeps owning
     /// them — and the knowledge leases they hold — instead of detaching live
@@ -351,10 +367,9 @@ fn settle_terminal_locked(
     maps.terminal_fifo.push_back(operation_id.clone());
     while maps.terminal_fifo.len() > MAX_TERMINAL_OPERATIONS {
         if let Some(evicted) = maps.terminal_fifo.pop_front() {
+            // Removing the record drops its observation reader with it: an
+            // evicted operation has no detailed outcome left to observe.
             maps.character_operations.remove(&evicted);
-            // Eviction drops the reader with the record: an evicted operation
-            // has no detailed outcome left to observe.
-            maps.observations.remove(&evicted);
         }
     }
 }
@@ -371,9 +386,9 @@ impl ActorSessionRegistry {
                 retired: HashMap::new(),
                 indexed_operations: HashMap::new(),
                 character_operations: HashMap::new(),
-                observations: HashMap::new(),
                 terminal_fifo: VecDeque::new(),
                 operation_seq: 0,
+                session_drains: HashMap::new(),
                 drains: Vec::new(),
                 closed: false,
             })),
@@ -533,35 +548,54 @@ impl ActorSessionRegistry {
         self.maps().indexed_operations.get(op_id).cloned()
     }
 
-    /// Install the bounded observation reader for a reserved Character
+    /// Install the bounded observation reader ON an already-reserved Character
     /// operation, before the Host starts executing it.
     ///
-    /// One reader per reserved operation, so the observation window is bounded
-    /// by exactly the registry's active reservations; a registration that
-    /// lands after [`Self::close`] is refused (the maps are closing), and the
-    /// reader is dropped with its record on eviction or close.
+    /// The reader is a field of the operation record, so retention cannot be
+    /// minted for an id that holds no reservation nor outnumber the records:
+    /// an unknown (unreserved, foreign or already evicted) id is `not_found`
+    /// and a closing registry is `interrupted`, instead of a silent arbitrary
+    /// insert. One reader per reserved operation, dropped with its record on
+    /// reservation removal, terminal eviction, session shutdown or close.
     ///
-    /// `#[doc(hidden)]`-free on purpose: the core Host authority installs it
-    /// from `nexus-core`, while the reader itself is crate-visible only
-    /// through this accessor — a transport cannot reach the stream.
-    pub fn retain_observation(&self, operation_id: HostOperationId, reader: ProviderEventReader) {
+    /// # Errors
+    ///
+    /// Returns `not_found` when no record holds the id, and `interrupted` once
+    /// the registry is closing.
+    pub fn retain_observation(
+        &self,
+        operation_id: &HostOperationId,
+        reader: ProviderEventReader,
+    ) -> CoreResult<()> {
         let mut maps = self.maps();
-        if maps.closed {
-            return;
-        }
-        maps.observations.insert(operation_id, Arc::new(reader));
+        Self::reject_if_closed(&maps)?;
+        let Some(record) = maps.character_operations.get_mut(operation_id) else {
+            return Err(CoreError::NotFound {
+                resource: format!("operation {operation_id} reservation"),
+            });
+        };
+        record.observation = Some(Arc::new(reader));
+        Ok(())
     }
 
     /// The observation reader of one operation, if it is still retained.
     #[must_use]
     pub fn observation(&self, operation_id: &HostOperationId) -> Option<Arc<ProviderEventReader>> {
-        self.maps().observations.get(operation_id).cloned()
+        self.maps()
+            .character_operations
+            .get(operation_id)
+            .and_then(|record| record.observation.clone())
     }
 
-    /// Bounded observation-window occupancy (tests / diagnostics).
+    /// Bounded observation-window occupancy (tests / diagnostics): the records
+    /// that carry a reader, which can never outnumber the operation records.
     #[must_use]
     pub fn observation_count(&self) -> usize {
-        self.maps().observations.len()
+        self.maps()
+            .character_operations
+            .values()
+            .filter(|record| record.observation.is_some())
+            .count()
     }
 
     /// Reserve a Character operation outcome before Host exec.
@@ -592,6 +626,7 @@ impl ActorSessionRegistry {
                 session_id: snapshot.session_id.clone(),
                 phase: OperationPhase::Running,
                 outcome: running_outcome(snapshot),
+                observation: None,
                 _seq: seq,
             },
         );
@@ -672,7 +707,8 @@ impl ActorSessionRegistry {
             .collect()
     }
 
-    /// Remove an unstarted reservation after exec admission failure.
+    /// Remove an unstarted reservation after exec admission failure, dropping
+    /// the reader it had already installed with the record.
     pub fn remove_operation_reservation(&self, operation_id: &HostOperationId) {
         self.maps().character_operations.remove(operation_id);
     }
@@ -910,8 +946,12 @@ impl ActorSessionRegistry {
         maps.key_locks.clear();
         maps.indexed_operations.clear();
         // The observation readers die with the authority's Actor side: a
-        // closed registry exposes no stream to pull.
-        maps.observations.clear();
+        // closed registry exposes no stream to pull. The records themselves
+        // stay (their terminal outcomes are read owner-scoped until the
+        // authority is gone), so the reader slot is what is cleared.
+        for record in maps.character_operations.values_mut() {
+            record.observation = None;
+        }
     }
 
     /// Spawn an authority-owned Actor drain.
@@ -932,14 +972,29 @@ impl ActorSessionRegistry {
     ///
     /// `#[doc(hidden)]` integration seam, the same convention as
     /// [`Self::insert_indexed_entry`].
+    ///
+    /// The drain is also accounted to the `session_id` it runs for, so a
+    /// session shutdown can join exactly the work it is retiring with
+    /// [`Self::join_session_drains`] instead of the whole authority's drains.
     #[doc(hidden)]
-    pub fn spawn_actor_drain<F>(&self, drain: F)
+    pub fn spawn_actor_drain<F>(&self, session_id: HostSessionId, drain: F)
     where
         F: Future<Output = ()> + Send + 'static,
     {
         self.live_drains.fetch_add(1, Ordering::AcqRel);
         let live = Arc::clone(&self.live_drains);
         let settled = Arc::clone(&self.drain_settled);
+        // The session entry and its increment are taken under the maps lock, so
+        // a joiner observes either this drain or an entry that already counts
+        // it — an entry is never removed while an increment is in flight.
+        let session = {
+            let mut maps = self.maps();
+            let session = Arc::clone(maps.session_drains.entry(session_id.clone()).or_default());
+            session.live.fetch_add(1, Ordering::AcqRel);
+            session
+        };
+        let session_settled = Arc::clone(&session);
+        let maps_handle = Arc::clone(&self.maps);
         let handle = tokio::spawn(async move {
             drain.await;
             // Publication order matters: the count drops BEFORE the wakeup, so
@@ -947,6 +1002,21 @@ impl ActorSessionRegistry {
             // count still gets the permit this drain publishes.
             live.fetch_sub(1, Ordering::AcqRel);
             settled.notify_one();
+            session_settled.live.fetch_sub(1, Ordering::AcqRel);
+            session_settled.settled.notify_one();
+            // The session's accounting entry dies with its last drain, so the
+            // map carries sessions with live work only.
+            let mut maps = maps_handle
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if session_settled.live.load(Ordering::Acquire) == 0
+                && maps
+                    .session_drains
+                    .get(&session_id)
+                    .is_some_and(|stored| Arc::ptr_eq(stored, &session_settled))
+            {
+                maps.session_drains.remove(&session_id);
+            }
         });
         let mut maps = self.maps();
         maps.drains.retain(|settled| !settled.is_finished());
@@ -970,6 +1040,33 @@ impl ActorSessionRegistry {
             let live = self.live_drains.load(Ordering::Acquire);
             if live == 0 {
                 return 0;
+            }
+            settled.await;
+        }
+    }
+
+    /// Await every retained drain of ONE session — the join a session shutdown
+    /// runs before it retires that session and before it reports success.
+    ///
+    /// Cancellation-safe like [`Self::join_actor_drains`]: the handles stay
+    /// owned by the registry, so a caller that runs out of budget loses nothing
+    /// and a retry joins the same drains. An entry that is gone is that
+    /// session's last drain settling, so the join returns.
+    pub async fn join_session_drains(&self, session_id: &HostSessionId) {
+        loop {
+            let session = {
+                let maps = self.maps();
+                maps.session_drains.get(session_id).cloned()
+            };
+            let Some(session) = session else {
+                return;
+            };
+            // Arm the notification BEFORE reading the count, exactly like the
+            // authority-wide join: a drain that settles in between leaves a
+            // permit, so the wait can never miss its only wakeup.
+            let settled = session.settled.notified();
+            if session.live.load(Ordering::Acquire) == 0 {
+                return;
             }
             settled.await;
         }
@@ -1097,6 +1194,15 @@ impl ActorSessionRegistry {
 
     /// Shut down a host session under the Actor key lock when indexed.
     ///
+    /// The manager release does not settle this authority's own drain of that
+    /// session's exec stream, so the session's retained drains are JOINED here —
+    /// after the release, before the session is retired and before this call
+    /// reports success (technical contract §3, "no success before confirmed
+    /// release"). An unsettled drain therefore keeps the session indexed and
+    /// keeps the call in flight instead of reporting a shutdown it cannot
+    /// confirm. The join is deliberately unbounded: contract §3 adds no timeout
+    /// policy, so no fabricated deadline decides when a live run is retired.
+    ///
     /// # Errors
     ///
     /// Host shutdown errors are surfaced as `internal` with the host reason.
@@ -1123,21 +1229,36 @@ impl ActorSessionRegistry {
                 self.reclaim(&key, &lock);
                 return Err(host_err(&err));
             }
+            // Settle the session's own drains before anything about it is
+            // retired: the manager released the session, while the drain of the
+            // session's original exec stream — and the knowledge leases it
+            // holds — is still this authority's to join.
+            self.join_session_drains(&session_id).await;
             if still_indexed {
                 let mut maps = self.maps();
                 Self::evict_locked(&mut maps, &key, &session_id);
                 // The shutdown removes the session: its indexed-operation
                 // fallback entries go with it (a later cancel must not resolve
-                // a session that no longer exists).
+                // a session that no longer exists), and so do the observation
+                // readers of its operations — a released session exposes no
+                // stream, while its recorded outcomes stay readable until the
+                // terminal retention drops them.
                 maps.indexed_operations.retain(|_, sid| sid != &session_id);
+                for record in maps.character_operations.values_mut() {
+                    if record.session_id == session_id {
+                        record.observation = None;
+                    }
+                }
             }
             drop(guard);
             self.reclaim(&key, &lock);
             Ok(())
         } else {
-            host.shutdown_session(session_id)
+            host.shutdown_session(session_id.clone())
                 .await
-                .map_err(|e| host_err(&e))
+                .map_err(|e| host_err(&e))?;
+            self.join_session_drains(&session_id).await;
+            Ok(())
         }
     }
 

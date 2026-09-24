@@ -34,6 +34,7 @@ use nexus_agent_host::capability::model::{
     ProviderDescriptor, ProviderHealth, SessionOwner, SessionStopReason, SessionStoppedEvent,
     StatusEvent, StatusLevel,
 };
+use nexus_agent_host::providers::port::ProviderEventReader;
 use nexus_agent_host::{
     HostFacade, HostManager, HostOperationId, HostSessionId, LaunchStrategy, ProviderAdapter,
     ProviderId,
@@ -1936,7 +1937,7 @@ async fn attached_host_unconfirmed_close_retains_slot_and_owned_drains() {
     // run).
     attached
         .actor_sessions()
-        .spawn_actor_drain(std::future::pending::<()>());
+        .spawn_actor_drain(HostSessionId::new(), std::future::pending::<()>());
 
     let report = attached.close().await.expect("close returns a report");
     assert!(
@@ -2075,7 +2076,7 @@ async fn attached_host_close_accounts_for_an_admitted_execute() {
     // retained, so it still owns the cleanup and still blocks the slot.
     attached
         .actor_sessions()
-        .spawn_actor_drain(std::future::pending::<()>());
+        .spawn_actor_drain(HostSessionId::new(), std::future::pending::<()>());
 
     let retried = attached.close().await.expect("the repeated close returns");
     assert!(
@@ -2823,9 +2824,111 @@ async fn actor_control_observation_lag_is_a_resync_gap() {
     .await;
 }
 
+/// A-1: the observation reader is retained BY its reserved Character operation
+/// record, so retention cannot escape the operation registry — an id with no
+/// reservation has no observation slot, the readers stay in lockstep with the
+/// records through every retirement path, and the terminal retention window
+/// drops each reader with the record it evicts.
+#[tokio::test]
+async fn actor_control_observation_retention_is_bounded_by_its_reserved_operation() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let handle: HostHandle = core.open_host(CountingPort::new()).await.unwrap();
+    let registry = handle.actor_sessions();
+
+    // An id with no reserved Character operation has no observation slot: an
+    // arbitrary caller-supplied id can no longer mint an orphaned reader.
+    let orphan = HostOperationId(Uuid::new_v4());
+    let err = registry
+        .retain_observation(&orphan, ProviderEventReader::observe(exec_stream(vec![])))
+        .expect_err("an unreserved id cannot be observed");
+    assert!(matches!(err, CoreError::NotFound { .. }), "got {err:?}");
+    assert_eq!(registry.observation_count(), 0);
+    assert!(registry.observation(&orphan).is_none());
+
+    // A reserved Character operation takes one reader, one-for-one, and
+    // removing the unstarted reservation drops the reader with its record.
+    let ctx = admit_character(&core, &principal, &env).await;
+    let operation_id = HostOperationId(Uuid::new_v4());
+    registry
+        .reserve_character_operation(&CharacterOperationSnapshot {
+            owner_creator_id: principal.creator_id().to_string(),
+            ctx: ctx.clone(),
+            session_id: HostSessionId(Uuid::new_v4()),
+            operation_id: operation_id.clone(),
+        })
+        .expect("a Character operation reserves an outcome");
+    registry
+        .retain_observation(
+            &operation_id,
+            ProviderEventReader::observe(exec_stream(vec![])),
+        )
+        .expect("the reserved record carries its observation");
+    assert_eq!(registry.observation_count(), 1);
+    assert_eq!(registry.character_operation_count(), 1);
+    registry.remove_operation_reservation(&operation_id);
+    assert_eq!(
+        registry.observation_count(),
+        0,
+        "removing the reservation drops the reader with its record"
+    );
+    assert!(registry.observation(&operation_id).is_none());
+
+    // The retention window is the records': past 1024 terminals the oldest
+    // record is evicted with its reader, so readers never outnumber or outlive
+    // the operations they belong to.
+    let mut oldest = None;
+    let mut newest = None;
+    for _ in 0..1025 {
+        let operation_id = HostOperationId(Uuid::new_v4());
+        registry
+            .reserve_character_operation(&CharacterOperationSnapshot {
+                owner_creator_id: principal.creator_id().to_string(),
+                ctx: ctx.clone(),
+                session_id: HostSessionId(Uuid::new_v4()),
+                operation_id: operation_id.clone(),
+            })
+            .expect("a Character operation reserves an outcome");
+        registry
+            .retain_observation(
+                &operation_id,
+                ProviderEventReader::observe(exec_stream(vec![])),
+            )
+            .expect("the reserved record carries its observation");
+        handle.settle_character_terminal(
+            &operation_id,
+            CharacterOperationResultRunStatus::Succeeded,
+            Some(CharacterOperationResultFinishReason::EndTurn),
+        );
+        oldest.get_or_insert_with(|| operation_id.clone());
+        newest = Some(operation_id);
+    }
+    assert_eq!(
+        registry.character_operation_count(),
+        1024,
+        "the terminal retention window stays bounded"
+    );
+    assert_eq!(
+        registry.observation_count(),
+        1024,
+        "the readers stay in lockstep with the retained records"
+    );
+    let oldest = oldest.expect("the first settled operation");
+    let newest = newest.expect("the last settled operation");
+    assert!(
+        registry.observation(&oldest).is_none(),
+        "the evicted record took its observation with it"
+    );
+    assert!(
+        registry.observation(&newest).is_some(),
+        "a retained record keeps its observation"
+    );
+}
+
 /// Session shutdown cancels the session's active work through the same manager,
 /// releases the session, and retires the Actor reuse state — reporting success
-/// only after the manager confirmed the release.
+/// only after the manager confirmed the release AND the session's own drain
+/// settled.
 #[tokio::test]
 async fn actor_control_session_shutdown_cancels_then_releases() {
     let env = seed_env().await;
@@ -2834,9 +2937,22 @@ async fn actor_control_session_shutdown_cancels_then_releases() {
         control_fixture(&env, Arc::clone(&provider)).await;
     let operation_id = control_prompt(&handle, &principal, &session_id).await;
 
-    let response = handle
-        .shutdown_session(&principal, session_id.to_string())
+    // The shutdown joins the session's own drain before it confirms, and this
+    // fixture's provider `shutdown` deliberately returns without ending its
+    // exec stream, so the run ends when the test ends the stream — after the
+    // cancel, so the accepted cancel still wins the phase race.
+    let shutdown = tokio::spawn({
+        let handle = handle.clone();
+        let principal = principal.clone();
+        let session_id = session_id.to_string();
+        async move { handle.shutdown_session(&principal, session_id).await }
+    });
+    wait_until(|| provider.cancels() == 1, "the session's cancel").await;
+    provider.close_stream();
+    let response = tokio::time::timeout(std::time::Duration::from_secs(20), shutdown)
         .await
+        .expect("the session shutdown settles with its drain")
+        .expect("the shutdown task joins")
         .expect("an owner-authorized shutdown is confirmed");
     assert_eq!(response.session_id, session_id.to_string());
     assert_eq!(response.status, "shutdown");
@@ -2846,6 +2962,11 @@ async fn actor_control_session_shutdown_cancels_then_releases() {
         "the session's active operation was cancelled through the same manager"
     );
     assert_eq!(provider.shutdowns(), 1, "the session was released once");
+    assert_eq!(
+        handle.actor_sessions().unsettled_drain_count(),
+        0,
+        "the shutdown confirmed only after its own drain settled"
+    );
     let outcome = control_status(&handle, &principal, &operation_id).await;
     assert_eq!(
         outcome.run_status,
@@ -2875,6 +2996,78 @@ async fn actor_control_session_shutdown_cancels_then_releases() {
         "got {err:?}"
     );
     assert_eq!(provider.cancels(), 1, "no second cancel was attempted");
+}
+
+/// B-1 regression: the manager release does NOT settle this authority's own
+/// drain of the session's exec stream — this fixture's provider `shutdown`
+/// returns `Ok` and leaves its stream open. A session shutdown must therefore
+/// join that drain before it retires the indexed session and before it reports
+/// success; confirming a teardown while the work it owns is still running is
+/// the pre-fix behavior this pins.
+#[tokio::test]
+async fn actor_control_session_shutdown_joins_its_own_drain_before_success() {
+    let env = seed_env().await;
+    let provider = control_provider(true, 0, false);
+    let (_core, principal, _manager, handle, session_id) =
+        control_fixture(&env, Arc::clone(&provider)).await;
+    let operation_id = control_prompt(&handle, &principal, &session_id).await;
+
+    let mut shutdown = tokio::spawn({
+        let handle = handle.clone();
+        let principal = principal.clone();
+        let session_id = session_id.to_string();
+        async move { handle.shutdown_session(&principal, session_id).await }
+    });
+    // The manager released the session and returned, while the authority's
+    // drain of that same exec stream is still live (nothing ended the stream).
+    wait_until(|| provider.shutdowns() == 1, "the manager session release").await;
+    wait_until(
+        || handle.actor_sessions().unsettled_drain_count() == 1,
+        "the authority's own drain to stay live",
+    )
+    .await;
+    assert!(
+        handle
+            .actor_sessions()
+            .stored_session_owner(&session_id)
+            .is_some_and(|(_, _, retired)| !retired),
+        "the indexed session is retired before its own drain settled"
+    );
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(500), &mut shutdown)
+            .await
+            .is_err(),
+        "the shutdown confirmed a teardown while its session's drain was unsettled"
+    );
+
+    // The run ends: the drain settles, and only then is the shutdown confirmed.
+    provider.close_stream();
+    let response = tokio::time::timeout(std::time::Duration::from_secs(20), shutdown)
+        .await
+        .expect("the shutdown settles with its drain")
+        .expect("the shutdown task joins")
+        .expect("the confirmed shutdown");
+    assert_eq!(response.status, "shutdown");
+    assert_eq!(
+        handle.actor_sessions().unsettled_drain_count(),
+        0,
+        "the confirmed shutdown left no unsettled drain behind"
+    );
+    assert_eq!(
+        handle
+            .actor_sessions()
+            .stored_session_owner(&session_id)
+            .map(|(_, _, retired)| retired),
+        Some(true),
+        "the session is retired once its drain settled"
+    );
+    assert_eq!(
+        control_status(&handle, &principal, &operation_id)
+            .await
+            .run_status,
+        CharacterOperationResultRunStatus::Cancelled,
+        "the shutdown's accepted cancel is still the operation's truth"
+    );
 }
 
 /// Contract §3: `quiesce_actor_sessions` closes the Actor side only — it
@@ -2953,7 +3146,7 @@ async fn actor_control_retained_close_before_retries_after_the_service_closed() 
     // A live drain the authority still owns.
     handle
         .actor_sessions()
-        .spawn_actor_drain(std::future::pending::<()>());
+        .spawn_actor_drain(HostSessionId::new(), std::future::pending::<()>());
 
     let report = handle
         .close_before(Instant::now() + std::time::Duration::from_secs(20))

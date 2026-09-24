@@ -534,17 +534,19 @@ impl HostHandle {
 
     /// Shut one session down under the stored-owner gate (technical contract
     /// §2/§3): the session's active Actor work is cancelled through the same
-    /// manager, the manager's per-session shutdown is called, and the Actor
-    /// reuse state is retired while the terminal/tombstone observation stays
-    /// bounded. Success is reported only after the manager confirmed the
-    /// release; an unconfirmed cleanup surfaces as an error, never as a
+    /// manager, the manager's per-session shutdown is called, and only then is
+    /// the Actor reuse state retired — after the session's own drains have
+    /// settled, because the manager release does not settle this authority's
+    /// drain of that session's exec stream. Success is reported only once all
+    /// three hold; an unconfirmed cleanup surfaces as an error, never as a
     /// shutdown.
     ///
     /// # Errors
     /// `auth_required` for a foreign/drifted principal, `invalid_input` for a
     /// malformed id, `closing` on a closed authority, `not_found` for a
-    /// foreign Actor session or an unknown session, and the mapped host error
-    /// when the manager cannot confirm the session's release.
+    /// foreign Actor session or an unknown session, the mapped refusal of a
+    /// cancellation the provider did not accept (see below), and the mapped
+    /// host error when the manager cannot confirm the session's release.
     ///
     /// A provider that cannot cancel leaves its run's record at the phase the
     /// authority last observed: terminal truth stays the drain's, so no
@@ -579,12 +581,28 @@ impl HostHandle {
         if !known_to_index && self.session_cancellation_supported(&sid).await?.is_none() {
             return Err(missing_session());
         }
-        // Cancel the session's active work first. A provider that cannot
-        // cancel is never asked and never latches intent; any other refusal is
-        // irrelevant to the teardown that follows, which is the authoritative
-        // release this method reports.
+        // Cancel the session's active work first. Every refusal is ACCOUNTED,
+        // never discarded: a provider that cannot cancel, a session the manager
+        // no longer knows, and an operation that finalized before the cancel
+        // landed all latch no intent, so the manager release below stays the
+        // authoritative teardown. Any OTHER refusal — a provider that
+        // advertised cancellation and then failed it — is surfaced, because
+        // this call must not report a teardown whose active work is still
+        // running.
+        let mut refusal: Option<CoreError> = None;
         for op_id in self.registry.nonterminal_operations_for_session(&sid) {
-            let _ = self.request_cancel(&op_id).await;
+            if let Err(err) = self.request_cancel(&op_id).await {
+                if is_unsupported_cancellation(&err)
+                    || is_missing_session(&err)
+                    || is_finished_operation(&err)
+                {
+                    continue;
+                }
+                refusal.get_or_insert(err);
+            }
+        }
+        if let Some(err) = refusal {
+            return Err(err);
         }
         self.registry
             .shutdown_session(sid.clone(), self.host.as_ref())
@@ -952,6 +970,28 @@ impl HostHandle {
                     self.registry.reserve_character_operation(&snap)?;
                     self.registry
                         .register_indexed_operation(op_id.clone(), sid.clone());
+                    // Observation is subscribed BEFORE Host execution and
+                    // retained ON the reserved record (technical contract §5):
+                    // a Character operation is observed over the SAME manager's
+                    // event broadcast, so the observation can miss no event of
+                    // it, while the original exec stream below stays this
+                    // authority's own drain — observation never consumes it, and
+                    // a consumer that never pulls the observation (or lags it)
+                    // blocks nothing. One bounded reader per reserved operation,
+                    // dropped with its record.
+                    let observation = self.host.subscribe(&sid);
+                    if let Err(err) = self.registry.retain_observation(
+                        &op_id,
+                        ProviderEventReader::observe(observation_stream(
+                            observation,
+                            sid.clone(),
+                            op_id.clone(),
+                        )),
+                    ) {
+                        self.registry.remove_operation_reservation(&op_id);
+                        self.registry.clear_indexed_operation(&op_id);
+                        return Err(err);
+                    }
                     Some(snap)
                 } else {
                     None
@@ -965,14 +1005,6 @@ impl HostHandle {
                     ],
                     permission_scope: None,
                 };
-                // Observation is subscribed BEFORE Host execution (technical
-                // contract §5): a Character operation is observed over the SAME
-                // manager's event broadcast, so the observation can miss no
-                // event of it, while the original exec stream below stays this
-                // authority's own drain — observation never consumes it, and a
-                // consumer that never pulls the observation (or lags it) blocks
-                // nothing.
-                let observation = self.host.subscribe(&sid);
                 let stream = match self.host.exec(sid.clone(), host_op).await {
                     Ok(stream) => stream,
                     Err(err) => {
@@ -985,25 +1017,17 @@ impl HostHandle {
                 };
                 if let Some(snapshot) = snapshot {
                     let registry = self.registry.clone();
-                    // One bounded reader per reserved Character operation: the
-                    // reader owns only the selected observation source, and the
-                    // registry's own active/terminal bounds (128/1024) bound it.
-                    self.registry.retain_observation(
-                        op_id.clone(),
-                        ProviderEventReader::observe(observation_stream(
-                            observation,
-                            sid.clone(),
-                            op_id.clone(),
-                        )),
-                    );
-                    // Authority-owned drain: the handle stays with the
-                    // registry, so close never drops live lease/drain
-                    // ownership on the floor.
-                    self.registry.spawn_actor_drain(async move {
+                    let session_id = snapshot.session_id.clone();
+                    // Authority-owned drain: the handle stays with the registry
+                    // — accounted to its session, so a session shutdown joins
+                    // the work it retires — so close never drops live
+                    // lease/drain ownership on the floor.
+                    self.registry.spawn_actor_drain(session_id, async move {
                         drain_character_operation(registry, stream, snapshot, fenced).await;
                     });
                 } else {
-                    self.registry.spawn_actor_drain(drain_plain(stream, fenced));
+                    self.registry
+                        .spawn_actor_drain(sid.clone(), drain_plain(stream, fenced));
                 }
                 Ok(OperationResponse {
                     operation_id: op_id.to_string(),
@@ -1034,7 +1058,8 @@ impl HostHandle {
             .exec(sid.clone(), host_op)
             .await
             .map_err(host_err)?;
-        self.registry.spawn_actor_drain(drain_plain(stream, None));
+        self.registry
+            .spawn_actor_drain(sid.clone(), drain_plain(stream, None));
         Ok(OperationResponse {
             operation_id: op_id.to_string(),
             session_id: sid.to_string(),
@@ -1655,6 +1680,14 @@ fn is_unsupported_cancellation(err: &CoreError) -> bool {
 /// manager: nothing is left to cancel there, so the quiesce is not incomplete.
 const fn is_missing_session(err: &CoreError) -> bool {
     matches!(err, CoreError::NotFound { .. })
+}
+
+/// Whether a cancel refusal is the `409 actor_operation_finished` phase race —
+/// the operation finalized between the caller's nonterminal snapshot and the
+/// cancel latch. Its recorded terminal is already its truth, so nothing is left
+/// to cancel and the teardown is not incomplete.
+fn is_finished_operation(err: &CoreError) -> bool {
+    matches!(err, CoreError::ActorConflict { code, .. } if code == "actor_operation_finished")
 }
 
 /// The one `CoreCloseReport` shape every close path shares: a report only
