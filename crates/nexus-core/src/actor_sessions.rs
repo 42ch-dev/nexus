@@ -636,6 +636,7 @@ impl ActorSessionRegistry {
             });
         };
         record.observation = Some(Arc::new(reader));
+        drop(maps);
         Ok(())
     }
 
@@ -1054,6 +1055,7 @@ impl ActorSessionRegistry {
             let mut maps = self.maps();
             let session = Arc::clone(maps.session_liveness.entry(session_id.clone()).or_default());
             session.live.fetch_add(1, Ordering::AcqRel);
+            drop(maps);
             session
         };
         let session_settled = Arc::clone(&session);
@@ -1340,14 +1342,13 @@ impl ActorSessionRegistry {
             }
             drop(guard);
             self.reclaim(&key, &lock);
-            Ok(())
         } else {
             host.shutdown_session(session_id.clone())
                 .await
                 .map_err(|e| host_err(&e))?;
             self.join_session_drains(&session_id).await;
-            Ok(())
         }
+        Ok(())
     }
 
     /// Reuse a `Ready` exact match, reject `Busy`, or mint a replacement after
