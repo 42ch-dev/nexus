@@ -34,6 +34,7 @@ import { test } from 'node:test';
 
 import {
   assertDeterministicReceipt,
+  assertLiveCredentialChannel,
   assertGuardAttempt,
   assertHistoryLossExplicit,
   assertNoHostileMarkers,
@@ -587,4 +588,16 @@ test('the live receipt gate refuses a guard proof that is degraded, incomplete o
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('an explicitly selected live attempt requires an inherited channel name without reading a credential', () => {
+  assert.throws(
+    () => assertLiveCredentialChannel({ key: null, observation: 'absent', values_read: false }),
+    (error) => {
+      assertDriverFailure(error, 'blocked', 'credentials_unavailable');
+      return true;
+    },
+  );
+  const named = { key: 'DEEPSEEK_API_KEY', observation: 'present_unverifiable', values_read: false };
+  assert.equal(assertLiveCredentialChannel(named), named);
 });

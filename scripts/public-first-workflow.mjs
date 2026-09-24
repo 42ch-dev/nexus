@@ -1622,28 +1622,15 @@ function observeLiveCredentialChannel(inheritedKeys = Object.keys(process.env)) 
 }
 
 /**
- * The live dispatch gate: uncertain availability is a STOP, never a dispatch.
+ * A user-authorized live attempt may use the existing inherited credential
+ * channel without reading its value. A name is not proof that the credential is
+ * valid: authentication or transport failure after admission consumes the
+ * single request and is never retried. The caller explicitly selects live mode,
+ * supplies a fresh attempt directory, and must have a current deterministic
+ * receipt before reaching this gate.
  *
- * This never returns. Both observable outcomes stop here with zero admissions and
- * nothing allocated:
- *
- *   * `absent` — the inherited environment does not even name the channel;
- *   * `present_unverifiable` — the name exists, but whether it carries a usable
- *     credential cannot be established without inspecting the value, so
- *     availability is UNCERTAIN. §6.3 item 6: "If credential availability
- *     cannot be established without inspecting secrets, leave the live item
- *     blocked"; the task contract: "uncertain availability STOP". Proceeding on
- *     the name alone would be claiming a usable credential the driver cannot
- *     verify, and would spend the single authorized request on a guess.
- *
- * Both are reported as `credentials_unavailable` (the contract's category for a
- * credential blocker) with a stable machine-readable marker in the detail, and
- * neither is ever classified as a runtime, policy, replay or recovery failure.
- * Resolving `present_unverifiable` into a dispatch is a PM-level decision about
- * how credential availability is established — see the task report §5; the
- * driver does not invent it.
- *
- * @throws {DriverFailure} `blocked`/`credentials_unavailable` — always.
+ * An absent channel still blocks before allocating anything. The channel's
+ * value is left entirely to the normal inherited dsh credential resolver.
  */
 function assertLiveCredentialChannel(channel) {
   if (channel.key === null) {
@@ -1654,13 +1641,7 @@ function assertLiveCredentialChannel(channel) {
         'no credential store is inspected and no value is read); no live request was dispatched (0 admissions)',
     );
   }
-  throw blocked(
-    'credentials_unavailable',
-    `[channel_unverifiable] the inherited environment names ${channel.key}, but whether that name carries a usable ` +
-      'credential cannot be established without inspecting its value, which this driver never reads; availability is ' +
-      'therefore uncertain, and uncertain availability is a STOP — no live request was dispatched (0 admissions). ' +
-      'This is a policy STOP, not an observed absence, and never a runtime, policy or recovery failure',
-  );
+  return channel;
 }
 
 /** Reserve one free loopback port (bind, read, release). */
@@ -3846,9 +3827,8 @@ async function runJourney(options) {
     facts.artifacts = artifacts;
     if (live) {
       const authorized = assertDeterministicReceipt(options.deterministicReceipt, { current: artifacts });
-      // The credential channel is OBSERVED by name only and then evaluated by the
-      // dispatch gate: an unverifiable channel is a STOP with zero admissions,
-      // recorded as evidence before the STOP rather than inferred later.
+      // The user explicitly authorized one attempt with this inherited channel.
+      // Its name is observed, never its value; an auth failure spends the slot.
       const channel = observeLiveCredentialChannel();
       facts.credential_channel = channel;
       assertLiveCredentialChannel(channel);
