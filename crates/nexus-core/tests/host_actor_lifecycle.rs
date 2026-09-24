@@ -21,7 +21,7 @@
 //! expectation is re-pinned here.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -2135,6 +2135,15 @@ struct ControlProvider {
     /// Events the provider publishes by itself at exec time (the observation-lag
     /// case); always the same session-scoped status event.
     burst: usize,
+    /// Executions that reached the provider, i.e. that passed the manager's own
+    /// session lookup. The session-shutdown race parks one here: the operation
+    /// is admitted and the manager resolved its session, while the authority
+    /// has not registered a drain yet.
+    executions: Arc<AtomicUsize>,
+    /// Park executing provider calls until [`Self::release_parked_executions`].
+    park: Arc<AtomicBool>,
+    /// The release signal for a parked execution.
+    exec_gate: Arc<tokio::sync::Notify>,
     cancels: Arc<AtomicUsize>,
     shutdowns: Arc<AtomicUsize>,
     polled: Arc<AtomicUsize>,
@@ -2146,6 +2155,9 @@ fn control_provider(cancellation: bool, burst: usize, cancel_fails: bool) -> Arc
         cancellation,
         cancel_fails,
         burst,
+        executions: Arc::new(AtomicUsize::new(0)),
+        park: Arc::new(AtomicBool::new(false)),
+        exec_gate: Arc::new(tokio::sync::Notify::new()),
         cancels: Arc::new(AtomicUsize::new(0)),
         shutdowns: Arc::new(AtomicUsize::new(0)),
         polled: Arc::new(AtomicUsize::new(0)),
@@ -2183,6 +2195,22 @@ impl ControlProvider {
 
     fn cancels(&self) -> usize {
         self.cancels.load(Ordering::SeqCst)
+    }
+
+    /// Park executing provider calls until [`Self::release_parked_executions`].
+    fn park_executions(&self) {
+        self.park.store(true, Ordering::SeqCst);
+    }
+
+    /// Release the parked execution (later calls run unparked).
+    fn release_parked_executions(&self) {
+        self.park.store(false, Ordering::SeqCst);
+        self.exec_gate.notify_one();
+    }
+
+    /// Executions that reached the provider.
+    fn executions(&self) -> usize {
+        self.executions.load(Ordering::SeqCst)
     }
 
     fn shutdowns(&self) -> usize {
@@ -2232,6 +2260,13 @@ impl ProviderAdapter for ControlProvider {
         session: &ManagedSessionHandle,
         _op: HostOperation,
     ) -> nexus_agent_host::HostResult<HostEventStream> {
+        self.executions.fetch_add(1, Ordering::SeqCst);
+        // The session-shutdown race parks here: the manager has resolved this
+        // session for the operation, and the authority has not returned from
+        // `exec` yet, so no drain is registered.
+        if self.park.load(Ordering::SeqCst) {
+            self.exec_gate.notified().await;
+        }
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<HostItem>();
         *self.outbox.lock().unwrap() = Some(tx);
         let sid = session.session_id.clone();
@@ -3068,6 +3103,113 @@ async fn actor_control_session_shutdown_joins_its_own_drain_before_success() {
         CharacterOperationResultRunStatus::Cancelled,
         "the shutdown's accepted cancel is still the operation's truth"
     );
+}
+
+/// B-1 (remaining race): the registered drains are not the whole proof a
+/// session shutdown needs. `execute` crosses asynchronous admission and Host
+/// execution BEFORE it registers its drain, so a shutdown that only joined the
+/// drains it could already see would retire the session — and report success —
+/// while an operation admitted for that session was still in flight and about
+/// to register one. The session's live work must therefore be accounted for
+/// from admission, not from registration: the join a shutdown runs waits on an
+/// admitted execute exactly as it waits on a live drain.
+#[tokio::test]
+async fn actor_control_session_shutdown_waits_for_an_admitted_execute() {
+    let env = seed_env().await;
+    let provider = control_provider(true, 0, false);
+    let (_core, principal, _manager, handle, session_id) =
+        control_fixture(&env, Arc::clone(&provider)).await;
+
+    // Park the admitted execute inside the provider's own `execute`: admitted,
+    // past every registry gate and the manager's session lookup, with no drain
+    // registered yet — the window the finding describes.
+    provider.park_executions();
+    let execute = tokio::spawn({
+        let handle = handle.clone();
+        let principal = principal.clone();
+        let session_id = session_id.to_string();
+        async move {
+            handle
+                .execute(
+                    &principal,
+                    session_id,
+                    execute_request(serde_json::json!({
+                        "kind": "prompt",
+                        "content": "race the session shutdown",
+                    })),
+                )
+                .await
+        }
+    });
+    wait_until(
+        || provider.executions() == 1,
+        "the admitted execute to reach the provider",
+    )
+    .await;
+    assert_eq!(
+        handle.actor_sessions().unsettled_drain_count(),
+        0,
+        "the admitted execute has registered no drain yet"
+    );
+
+    // The concurrent session shutdown releases the session at the manager while
+    // that admitted execute is still in flight.
+    let shutdown = tokio::spawn({
+        let handle = handle.clone();
+        let principal = principal.clone();
+        let session_id = session_id.to_string();
+        async move { handle.shutdown_session(&principal, session_id).await }
+    });
+    wait_until(|| provider.shutdowns() == 1, "the session release").await;
+    assert!(
+        !handle
+            .actor_sessions()
+            .stored_session_owner(&session_id)
+            .is_some_and(|(_, _, retired)| retired),
+        "the shutdown retired the session while an admitted execute for it was still in flight"
+    );
+
+    // The admitted execute registers its drain. The shutdown may confirm only
+    // after that drain settles — it is the work this teardown owns.
+    provider.release_parked_executions();
+    let started = execute
+        .await
+        .expect("the execute task joins")
+        .expect("the admitted execute is dispatched");
+    assert_eq!(started.session_id, session_id.to_string());
+    wait_until(
+        || handle.actor_sessions().unsettled_drain_count() == 1,
+        "the admitted execute to register its drain",
+    )
+    .await;
+    assert!(
+        !shutdown.is_finished(),
+        "the shutdown confirmed a teardown before the drain its session registered had settled"
+    );
+
+    // The run ends: the drain settles, and only then is the shutdown confirmed.
+    provider.close_stream();
+    let response = tokio::time::timeout(std::time::Duration::from_secs(20), shutdown)
+        .await
+        .expect("the shutdown settles with the late drain")
+        .expect("the shutdown task joins")
+        .expect("the confirmed shutdown");
+    assert_eq!(response.session_id, session_id.to_string());
+    assert_eq!(response.status, "shutdown");
+    assert_eq!(
+        handle.actor_sessions().unsettled_drain_count(),
+        0,
+        "the confirmed shutdown left no unsettled drain behind"
+    );
+    assert_eq!(
+        handle
+            .actor_sessions()
+            .stored_session_owner(&session_id)
+            .map(|(_, _, retired)| retired),
+        Some(true),
+        "the session is retired only once the work it owned settled"
+    );
+    assert_eq!(provider.shutdowns(), 1, "the session was released once");
 }
 
 /// Contract §3: `quiesce_actor_sessions` closes the Actor side only — it

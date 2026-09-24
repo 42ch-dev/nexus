@@ -149,14 +149,43 @@ struct CharacterOperationRecord {
     _seq: u64,
 }
 
-/// Live drains of ONE session plus their settlement signal — the
-/// session-scoped twin of [`ActorSessionRegistry`]'s registry-wide
-/// `live_drains`/`drain_settled` pair, so a session shutdown joins exactly the
-/// work it is retiring instead of the whole authority's.
+/// Live work of ONE session plus its settlement signal — the session-scoped
+/// twin of [`ActorSessionRegistry`]'s registry-wide `live_drains`/`drain_settled`
+/// pair, so a session shutdown joins exactly the work it is retiring instead of
+/// the whole authority's.
+///
+/// `live` counts BOTH halves of the authority's admission/close barrier, at
+/// session scope: the retained drains of the session, and the operations
+/// ADMITTED for it ([`SessionAdmission`]) whose drain has not transferred to
+/// the registry yet. The authority-wide barrier keeps the two apart because
+/// `close` REPORTS them apart; a session join only has to wait for both, so
+/// they share one counter. An entry exists only while that session has live
+/// work: the session's last live unit removes it.
 #[derive(Default)]
-struct SessionDrainLiveness {
+struct SessionLiveness {
     live: AtomicUsize,
     settled: tokio::sync::Notify,
+}
+
+/// One admitted operation's slot in its SESSION's live-work accounting — the
+/// session-scoped arm of the same barrier the Host handle's `AuthorityAdmission`
+/// holds authority-wide.
+///
+/// The guard is taken before the operation's first await and retired only after
+/// its drain has transferred to this same accounting (or after it failed before
+/// creating one), so a joiner observes either the admission or the drain it
+/// became: no window remains in which a session reads as having no live work
+/// while an operation admitted for it can still register a drain.
+pub(crate) struct SessionAdmission {
+    maps: Arc<Mutex<RegistryMaps>>,
+    session_id: HostSessionId,
+    liveness: Arc<SessionLiveness>,
+}
+
+impl Drop for SessionAdmission {
+    fn drop(&mut self) {
+        retire_session_liveness(&self.maps, &self.session_id, &self.liveness);
+    }
 }
 
 const MAX_NONTERMINAL_OPERATIONS: usize = 128;
@@ -305,10 +334,13 @@ struct RegistryMaps {
     character_operations: HashMap<HostOperationId, CharacterOperationRecord>,
     terminal_fifo: VecDeque<HostOperationId>,
     operation_seq: u64,
-    /// Live-drain accounting per session, so a session shutdown joins the
-    /// drains of the session it retires. An entry exists only while that
-    /// session has live work: the session's last drain removes it.
-    session_drains: HashMap<HostSessionId, Arc<SessionDrainLiveness>>,
+    /// Live-work accounting per session, so a session shutdown joins the
+    /// drains AND the admitted operations of the session it retires — the
+    /// registered drains alone are not that proof, because an operation
+    /// registers its drain only after asynchronous admission. An entry exists
+    /// only while that session has live work: the session's last live unit
+    /// removes it.
+    session_liveness: HashMap<HostSessionId, Arc<SessionLiveness>>,
     /// Actor drains this authority minted, in spawn order. Retained until they
     /// settle, so an authority close that cannot confirm them keeps owning
     /// them — and the knowledge leases they hold — instead of detaching live
@@ -344,6 +376,35 @@ const fn shutting_down() -> CoreError {
 fn host_err(err: &nexus_agent_host::HostError) -> CoreError {
     CoreError::Internal {
         category: format!("agent_host: {err}"),
+    }
+}
+
+/// Publish ONE unit of a session's live work settling: drop its count, wake the
+/// joiners, and let the session's accounting entry die with its last unit.
+///
+/// Both live units of a session — a settling drain and a retired admission —
+/// retire through this one path, so they cannot disagree about publication
+/// order: the count drops BEFORE the wakeup, so a joiner that armed its
+/// notification and then read a non-zero count still gets the permit this
+/// retirement publishes.
+fn retire_session_liveness(
+    maps: &Mutex<RegistryMaps>,
+    session_id: &HostSessionId,
+    liveness: &Arc<SessionLiveness>,
+) {
+    liveness.live.fetch_sub(1, Ordering::AcqRel);
+    liveness.settled.notify_one();
+    let mut maps = maps.lock().unwrap_or_else(|poisoned| {
+        tracing::warn!("actor_sessions mutex poisoned, recovering");
+        poisoned.into_inner()
+    });
+    if liveness.live.load(Ordering::Acquire) == 0
+        && maps
+            .session_liveness
+            .get(session_id)
+            .is_some_and(|stored| Arc::ptr_eq(stored, liveness))
+    {
+        maps.session_liveness.remove(session_id);
     }
 }
 
@@ -388,7 +449,7 @@ impl ActorSessionRegistry {
                 character_operations: HashMap::new(),
                 terminal_fifo: VecDeque::new(),
                 operation_seq: 0,
-                session_drains: HashMap::new(),
+                session_liveness: HashMap::new(),
                 drains: Vec::new(),
                 closed: false,
             })),
@@ -973,9 +1034,11 @@ impl ActorSessionRegistry {
     /// `#[doc(hidden)]` integration seam, the same convention as
     /// [`Self::insert_indexed_entry`].
     ///
-    /// The drain is also accounted to the `session_id` it runs for, so a
-    /// session shutdown can join exactly the work it is retiring with
-    /// [`Self::join_session_drains`] instead of the whole authority's drains.
+    /// The drain is also accounted to the `session_id` it runs for — in the
+    /// same live-work entry an admitted operation holds before it transfers a
+    /// drain ([`Self::admit_session_operation`]) — so a session shutdown joins
+    /// exactly the work it is retiring with [`Self::join_session_drains`]
+    /// instead of the whole authority's drains.
     #[doc(hidden)]
     pub fn spawn_actor_drain<F>(&self, session_id: HostSessionId, drain: F)
     where
@@ -989,7 +1052,7 @@ impl ActorSessionRegistry {
         // it — an entry is never removed while an increment is in flight.
         let session = {
             let mut maps = self.maps();
-            let session = Arc::clone(maps.session_drains.entry(session_id.clone()).or_default());
+            let session = Arc::clone(maps.session_liveness.entry(session_id.clone()).or_default());
             session.live.fetch_add(1, Ordering::AcqRel);
             session
         };
@@ -1002,21 +1065,9 @@ impl ActorSessionRegistry {
             // count still gets the permit this drain publishes.
             live.fetch_sub(1, Ordering::AcqRel);
             settled.notify_one();
-            session_settled.live.fetch_sub(1, Ordering::AcqRel);
-            session_settled.settled.notify_one();
-            // The session's accounting entry dies with its last drain, so the
-            // map carries sessions with live work only.
-            let mut maps = maps_handle
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            if session_settled.live.load(Ordering::Acquire) == 0
-                && maps
-                    .session_drains
-                    .get(&session_id)
-                    .is_some_and(|stored| Arc::ptr_eq(stored, &session_settled))
-            {
-                maps.session_drains.remove(&session_id);
-            }
+            // The session's accounting entry dies with its last live unit —
+            // which is this drain, or an admission that has not retired yet.
+            retire_session_liveness(&maps_handle, &session_id, &session_settled);
         });
         let mut maps = self.maps();
         maps.drains.retain(|settled| !settled.is_finished());
@@ -1045,18 +1096,51 @@ impl ActorSessionRegistry {
         }
     }
 
+    /// Admit one operation against its SESSION's live-work accounting.
+    ///
+    /// The count is taken under the maps lock before the operation's first
+    /// await — so a joiner observes either this admission or an entry that
+    /// already counts it — and stays live until the returned guard drops, which
+    /// happens only after the operation's drain has transferred to the same
+    /// accounting (or after it failed before creating one). That is the
+    /// session-scoped half of the authority's admission/close barrier, and it
+    /// is what makes [`Self::join_session_drains`] a proof instead of a
+    /// snapshot: an operation registers its drain only after asynchronous
+    /// admission and Host execution, so a join that trusted the registered
+    /// drains ALONE could read "this session has no live work" in that window
+    /// and let the session retire before the drain it is about to own.
+    ///
+    /// Crate-internal by construction: the accounting is the Host handle's to
+    /// participate in, not a new public surface.
+    pub(crate) fn admit_session_operation(&self, session_id: HostSessionId) -> SessionAdmission {
+        let mut maps = self.maps();
+        let liveness = Arc::clone(maps.session_liveness.entry(session_id.clone()).or_default());
+        liveness.live.fetch_add(1, Ordering::AcqRel);
+        drop(maps);
+        SessionAdmission {
+            maps: Arc::clone(&self.maps),
+            session_id,
+            liveness,
+        }
+    }
+
     /// Await every retained drain of ONE session — the join a session shutdown
     /// runs before it retires that session and before it reports success.
     ///
     /// Cancellation-safe like [`Self::join_actor_drains`]: the handles stay
     /// owned by the registry, so a caller that runs out of budget loses nothing
     /// and a retry joins the same drains. An entry that is gone is that
-    /// session's last drain settling, so the join returns.
+    /// session's last live unit settling, so the join returns.
+    ///
+    /// The entry it waits on carries the session's ADMITTED operations as well
+    /// as its drains ([`Self::admit_session_operation`]), so this join cannot
+    /// conclude in the window between "no drain registered yet" and the drain
+    /// registration of an operation already admitted for this session.
     pub async fn join_session_drains(&self, session_id: &HostSessionId) {
         loop {
             let session = {
                 let maps = self.maps();
-                maps.session_drains.get(session_id).cloned()
+                maps.session_liveness.get(session_id).cloned()
             };
             let Some(session) = session else {
                 return;
@@ -1198,10 +1282,14 @@ impl ActorSessionRegistry {
     /// session's exec stream, so the session's retained drains are JOINED here —
     /// after the release, before the session is retired and before this call
     /// reports success (technical contract §3, "no success before confirmed
-    /// release"). An unsettled drain therefore keeps the session indexed and
-    /// keeps the call in flight instead of reporting a shutdown it cannot
-    /// confirm. The join is deliberately unbounded: contract §3 adds no timeout
-    /// policy, so no fabricated deadline decides when a live run is retired.
+    /// release"). The join waits on the session's live-work entry, which counts
+    /// the operations ADMITTED for the session as well as its drains, so it
+    /// cannot conclude in the window between an admitted operation and the
+    /// drain registration that operation is still to make. An unsettled drain
+    /// therefore keeps the session indexed and keeps the call in flight instead
+    /// of reporting a shutdown it cannot confirm. The join is deliberately
+    /// unbounded: contract §3 adds no timeout policy, so no fabricated deadline
+    /// decides when a live run is retired.
     ///
     /// # Errors
     ///

@@ -846,6 +846,16 @@ impl HostHandle {
         let uuid = Uuid::parse_str(&session_id)
             .map_err(|_| invalid("session_id", "session_id must be a valid UUID"))?;
         let sid = HostSessionId(uuid);
+        // The SESSION-scoped half of the admission above, and the counterpart
+        // of the registry transfer below: taken under the registry's own lock
+        // before this operation's first await, and retired only after its drain
+        // has been registered. A concurrent session shutdown joins through that
+        // same live-work accounting, so it cannot observe "this session has no
+        // work" while this admitted operation can still register the drain that
+        // shutdown is retiring — the registered drains alone are not that proof,
+        // because registration happens after asynchronous admission and Host
+        // execution.
+        let _session_admission = self.registry.admit_session_operation(sid.clone());
         // Stored owner/tombstone gate: an indexed or retired Actor session is
         // owner-scoped before any Host access, whatever the operation kind.
         if let Some((owner, _, _)) = self.registry.stored_session_owner(&sid) {
