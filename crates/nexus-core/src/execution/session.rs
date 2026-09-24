@@ -572,10 +572,9 @@ impl WorkspaceSessionManager {
     ///
     /// [`SessionError::AuthorityBusy`] when the boundary is already closed.
     pub(crate) fn admit_commit(&self) -> Result<Option<CommitAdmission>, SessionError> {
-        match &self.recoverable {
-            Some(cfg) => cfg.admissions.admit().map(Some),
-            None => Ok(None),
-        }
+        self.recoverable
+            .as_ref()
+            .map_or_else(|| Ok(None), |cfg| cfg.admissions.admit().map(Some))
     }
 
     /// Close the durable-commit admission boundary.

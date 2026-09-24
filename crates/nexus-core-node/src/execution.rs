@@ -379,7 +379,7 @@ impl NativeCore {
         let handle = self.execution_handle()?;
         self.json_call(principal_handle, async move |core, principal| {
             let _ = &core;
-            let response: ModuleDetail = handle.get_compute_module(&principal, module_id)?;
+            let response: ModuleDetail = handle.get_compute_module(&principal, &module_id)?;
             Ok(response)
         })
         .await
@@ -579,9 +579,7 @@ impl NativeCore {
         let handle = self.execution_handle()?;
         self.json_call(principal_handle, async move |core, principal| {
             let _ = &core;
-            handle
-                .release_workflow_events(&principal, subscription_id)
-                .await?;
+            handle.release_workflow_events(&principal, subscription_id)?;
             Ok(serde_json::Value::Null)
         })
         .await
