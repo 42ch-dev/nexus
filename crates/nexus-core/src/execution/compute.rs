@@ -685,7 +685,7 @@ pub async fn list_compute_runs(
     // The wire carries an unbounded integer while the durable reader takes a
     // `u32`. A negative value is a client-input fault and is refused rather
     // than coerced into a page size the caller never asked for.
-    let requested = limit.unwrap_or(i64::from(DEFAULT_RUN_LIST_LIMIT));
+    let requested = limit.unwrap_or_else(|| i64::from(DEFAULT_RUN_LIST_LIMIT));
     let limit = u32::try_from(requested)
         .map_err(|_| {
             coded_refusal(
@@ -826,11 +826,11 @@ impl ExecutionHandle {
     pub fn get_compute_module(
         &self,
         principal: &Principal,
-        module_id: String,
+        module_id: &str,
     ) -> CoreResult<ModuleDetail> {
         self.ensure_admitting()?;
         self.linked_core()?.verify_principal(principal)?;
-        crate::execution::compute::get_compute_module(&module_id)
+        crate::execution::compute::get_compute_module(module_id)
     }
 
     /// Read one run's detail: its proposals, or the recorded failure (C4).

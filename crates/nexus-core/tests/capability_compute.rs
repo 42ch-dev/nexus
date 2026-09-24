@@ -2742,7 +2742,7 @@ async fn compute_facade_discovery_serves_the_real_module_registry() {
     assert_eq!(row.status.to_string(), expected.status.to_string());
 
     let detail = handle
-        .get_compute_module(&principal, MODULE.to_string())
+        .get_compute_module(&principal, MODULE)
         .expect("the facade returns the module detail");
     let expected_detail =
         nexus_core::execution::compute::get_compute_module(MODULE).expect("authority detail");
@@ -2762,7 +2762,7 @@ async fn compute_facade_discovery_serves_the_real_module_registry() {
     );
 
     let unknown = handle
-        .get_compute_module(&principal, "no-such-module".to_string())
+        .get_compute_module(&principal, "no-such-module")
         .unwrap_err();
     assert!(
         matches!(unknown, CoreError::NotFound { .. }),
@@ -2948,7 +2948,7 @@ async fn compute_facade_is_fenced_once_the_owner_closes() {
         "module discovery must be fenced after close, got {discovery:?}"
     );
     let detail = handle
-        .get_compute_module(&principal, MODULE.to_string())
+        .get_compute_module(&principal, MODULE)
         .unwrap_err();
     assert!(
         matches!(detail, CoreError::Closing),
