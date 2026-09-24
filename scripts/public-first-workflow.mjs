@@ -318,7 +318,7 @@ const CREDENTIAL_ENV_KEYS = [
   'XAI_API_KEY',
 ];
 /** Segment rule that catches the same class of name without a list edit. */
-const CREDENTIAL_ENV_PATTERN = /(^|_)(API_KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|CREDENTIALS)(_|$)/;
+const CREDENTIAL_ENV_PATTERN = /(^|_)(API_KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|CREDENTIALS)(_|$)/i;
 /** A foreign preload would run inside the deterministic child; never inherit it. */
 const NODE_OPTIONS_KEY = 'NODE_OPTIONS';
 /** The guard's own interface, published to the guarded child environment (§6.3). */
@@ -2645,7 +2645,11 @@ async function stopServiceVia(running, label) {
   }
   child.kill('SIGTERM');
   await sleep(500);
-  if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+  if (child.exitCode !== null || child.signalCode !== null) {
+    owned.children.delete(child);
+    return { confirmed: true, code: child.exitCode, signal: child.signalCode ?? null };
+  }
+  child.kill('SIGKILL');
   return {
     confirmed: false,
     code: child.exitCode,
@@ -3210,6 +3214,13 @@ function classifySameRunReplay({ runId, cursor, observedIds, read }) {
             `run's ${JSON.stringify(runId)} / ${JSON.stringify(origin.epoch)}`,
         );
       }
+      if (gap.from_sequence <= origin.sequence) {
+        throw failed(
+          'replay_contract_violation',
+          `a gap ${gap.from_sequence}..${gap.to_sequence} includes or precedes cursor ${cursor}; ` +
+            'a reconnect can only lose post-cursor frames',
+        );
+      }
       gaps.push(gap);
       continue;
     }
@@ -3304,7 +3315,7 @@ function classifySameRunReplay({ runId, cursor, observedIds, read }) {
     );
   }
   return {
-    kind: missing.length === 0 ? 'successors' : 'gap',
+    kind: gaps.length === 0 ? 'successors' : 'gap',
     cursor,
     epoch: origin.epoch,
     observed_successors: expected.length,

@@ -33,6 +33,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 
 import {
+  applyCleanupDisposition,
   assertDeterministicReceipt,
   assertLiveCredentialChannel,
   assertGuardAttempt,
@@ -40,6 +41,8 @@ import {
   assertNoHostileMarkers,
   assertScopeEffectOnly,
   assertSealedToolPolicy,
+  boundedServerClose,
+  buildChildEnv,
   classifySameRunReplay,
   parseGapFrame,
   readAttemptDir,
@@ -47,6 +50,7 @@ import {
   readEventStreamOrStop,
   readSpentToken,
   startModelEndpoint,
+  summarizeChildEnv,
 } from './public-first-workflow.mjs';
 
 const RUN_ID = 'first-workflow:test-run';
@@ -196,6 +200,48 @@ test('a cursor reconnect replays exactly the promised successors, in order, and 
       return true;
     },
   );
+});
+
+test('an explicit post-cursor gap cannot be certified as complete successor replay', () => {
+  const cursor = `${EPOCH}:1`;
+  const observed = observedIds(2);
+  const facts = classifyReplay([
+    { id: `${EPOCH}:4`, event: 'gap', data: JSON.stringify({
+      run_id: RUN_ID, epoch: EPOCH, from_sequence: 3, to_sequence: 4,
+    }) },
+    { id: `${EPOCH}:2`, event: 'run_state', data: '{}' },
+  ], { cursor, observed, read: { closed: false, timed_out: true } });
+  assert.equal(facts.kind, 'gap');
+  assert.deepEqual(facts.missing_successors, []);
+  assert.deepEqual(facts.gaps, [{ from_sequence: 3, to_sequence: 4 }]);
+});
+
+test('deterministic children drop mixed-case credential names before reading their values', () => {
+  const key = 'nexus_Fixture_aPi_KeY';
+  process.env[key] = 'synthetic-test-only';
+  try {
+    const inherited = Object.keys(process.env);
+    const child = buildChildEnv({ home: '/tmp/isolated-home', dshHome: '/tmp/isolated-dsh', modelPort: 12345, guardEnv: {} });
+    assert.equal(Object.hasOwn(child, key), false);
+    const summary = summarizeChildEnv(inherited, child);
+    assert.equal(summary.inherited_credential_keys_forwarded.includes(key), false);
+    assert.ok(summary.removed_credential_key_count > 0);
+  } finally {
+    delete process.env[key];
+  }
+});
+
+test('unconfirmed owned cleanup overrides an otherwise successful journey receipt', () => {
+  const receipt = { outcome: 'ok', blocker: null };
+  applyCleanupDisposition(receipt, [{ confirmed: false, category: 'cleanup_unconfirmed', detail: 'owned service still alive' }]);
+  assert.equal(receipt.outcome, 'failed');
+  assert.equal(receipt.blocker.category, 'cleanup_unconfirmed');
+});
+
+test('a throwing owned-server close records an unconfirmed cleanup without rejecting', async () => {
+  const result = await boundedServerClose({ close() { throw new Error('close failed'); } }, 50);
+  assert.equal(result.confirmed, false);
+  assert.match(result.detail, /close failed/);
 });
 
 test('an idle reconnect and a single-frame read are never accepted as a replay proof', async () => {
