@@ -5807,7 +5807,7 @@ async fn authorized_subscription_preserves_epoch_and_gap() {
 
     for token in [first_id.clone(), resumed_id.clone()] {
         handle
-            .release_workflow_events(&principal, token)
+            .release_workflow_events(&principal, &token)
             .expect("release");
     }
     assert!(
@@ -5951,7 +5951,7 @@ async fn authorized_subscription_preserves_epoch_and_gap() {
         "a pull is capped at {MAX_PULL_FRAMES} frames"
     );
     handle
-        .release_workflow_events(&principal, trimmed_id)
+        .release_workflow_events(&principal, &trimmed_id)
         .expect("release");
 
     // ── 6. A lagging subscriber is EVICTED with an explicit terminal gap on
@@ -5975,7 +5975,7 @@ async fn authorized_subscription_preserves_epoch_and_gap() {
         "the ring starts at sequence 1"
     );
     handle
-        .release_workflow_events(&principal, seed_id)
+        .release_workflow_events(&principal, &seed_id)
         .expect("release the seed");
 
     let slow = handle
@@ -6056,7 +6056,7 @@ async fn authorized_subscription_preserves_epoch_and_gap() {
     );
     let freed = holders.pop().expect("a held permit");
     handle
-        .release_workflow_events(&principal, freed)
+        .release_workflow_events(&principal, &freed)
         .expect("release");
     let admitted = handle
         .subscribe_workflow_events(&principal, subscribe_request(BLOCK_RUN, None))
@@ -6065,7 +6065,7 @@ async fn authorized_subscription_preserves_epoch_and_gap() {
     holders.push(subscription_token(&admitted));
     for token in holders {
         handle
-            .release_workflow_events(&principal, token)
+            .release_workflow_events(&principal, &token)
             .expect("release");
     }
 
@@ -6096,7 +6096,7 @@ async fn authorized_subscription_preserves_epoch_and_gap() {
         "a second pull on the same subscription must refuse as busy: {concurrent:?}"
     );
     handle
-        .release_workflow_events(&principal, blocked_id.clone())
+        .release_workflow_events(&principal, &blocked_id)
         .expect("release");
     let woken = tokio::time::timeout(Duration::from_secs(5), puller)
         .await

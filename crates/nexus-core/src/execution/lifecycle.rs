@@ -481,7 +481,7 @@ impl ExecutionHandle {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .as_ref()
-            .is_none_or(|task| task.is_finished())
+            .is_none_or(tokio::task::JoinHandle::is_finished)
     }
 
     /// Stop and JOIN the owned supervisor wake/clock task, if one was

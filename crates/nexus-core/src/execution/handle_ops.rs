@@ -1105,12 +1105,12 @@ impl ExecutionHandle {
     pub fn release_workflow_events(
         &self,
         principal: &Principal,
-        subscription_id: String,
+        subscription_id: &str,
     ) -> CoreResult<()> {
         self.ensure_admitting()?;
         self.linked_core()?.verify_principal(principal)?;
-        let subscription = self.owned_subscription(principal, &subscription_id)?;
-        if self.workflow_subscriptions.take(&subscription_id).is_none() {
+        let subscription = self.owned_subscription(principal, subscription_id)?;
+        if self.workflow_subscriptions.take(subscription_id).is_none() {
             // A concurrent release won the withdrawal: the token is gone, so
             // this call refuses exactly like any other released one.
             return Err(CoreError::NotFound {
