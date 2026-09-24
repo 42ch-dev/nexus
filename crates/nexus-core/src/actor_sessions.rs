@@ -169,6 +169,11 @@ struct RegistryMaps {
     character_operations: HashMap<HostOperationId, CharacterOperationRecord>,
     terminal_fifo: VecDeque<HostOperationId>,
     operation_seq: u64,
+    /// Actor drains this authority minted, in spawn order. Retained until they
+    /// settle, so an authority close that cannot confirm them keeps owning
+    /// them — and the knowledge leases they hold — instead of detaching live
+    /// work and forgetting it.
+    drains: Vec<tokio::task::JoinHandle<()>>,
     closed: bool,
 }
 
@@ -208,6 +213,7 @@ impl ActorSessionRegistry {
                 character_operations: HashMap::new(),
                 terminal_fifo: VecDeque::new(),
                 operation_seq: 0,
+                drains: Vec::new(),
                 closed: false,
             })),
         }
@@ -625,6 +631,36 @@ impl ActorSessionRegistry {
         maps.by_session.clear();
         maps.key_locks.clear();
         maps.indexed_operations.clear();
+    }
+
+    /// Spawn an authority-owned Actor drain.
+    ///
+    /// This is the ONE spawn path for core-owned Actor drains: the spawned
+    /// task's handle is retained in the authority's registry instead of being
+    /// dropped on the floor, so a close that cannot settle it keeps owning the
+    /// live drain (and the admitted knowledge leases it holds) rather than
+    /// detaching it and reporting a cleanup it cannot confirm.
+    ///
+    /// `#[doc(hidden)]` integration seam, the same convention as
+    /// [`Self::insert_indexed_entry`].
+    #[doc(hidden)]
+    pub fn spawn_actor_drain<F>(&self, drain: F)
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let handle = tokio::spawn(drain);
+        let mut maps = self.maps();
+        maps.drains.retain(|settled| !settled.is_finished());
+        maps.drains.push(handle);
+    }
+
+    /// Drop settled drain handles, retain unsettled ones, and report how many
+    /// remain live — the drain ownership an unsettled authority close keeps.
+    #[must_use]
+    pub fn prune_settled_drains(&self) -> usize {
+        let mut maps = self.maps();
+        maps.drains.retain(|drain| !drain.is_finished());
+        maps.drains.len()
     }
 
     /// Shut down every retired Actor host session (authority drain).

@@ -2,7 +2,9 @@
 //! [`HostManager`], admitting Actor effects against stored ownership and
 //! holding the P2 activity lease through terminal capture.
 //!
-//! `CoreService::open_host` composes the authority once per open; the
+//! `CoreService::open_host` composes the authority once per open;
+//! `CoreService::attach_host` adopts an already-started manager instead of
+//! starting a second Host, and both share the one established-owner slot. The
 //! transport layers (napi addon, daemon HTTP handlers, TS service) route
 //! session create/execute/query/close through [`HostHandle`] instead of
 //! speaking to the `HostManager` or the provider port directly. Valid
@@ -10,7 +12,8 @@
 //! the real Host authority here — there is no `not_migrated` fallback.
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use nexus_agent_host::capability::model::HostOperation;
 use nexus_agent_host::capability::model::{HostStartConfig, SessionOwner};
@@ -78,6 +81,54 @@ fn config_err(err: nexus_agent_host::HostError) -> CoreError {
     }
 }
 
+/// Lifecycle identity of ONE open Host authority.
+///
+/// Cloning a [`HostHandle`] shares this state; every open/attach mints a fresh
+/// one. That identity — not the shared slot boolean — is what makes a closed
+/// handle dead: after `close` it can neither act on nor observe a later
+/// authority that took the established-owner slot.
+struct AuthorityState {
+    /// Latched by the first [`HostHandle::close`]: this authority is closing
+    /// and stays closed, so every later call on the handle is `closing`
+    /// instead of reaching a shared slot, registry or Host.
+    closed: AtomicBool,
+    /// The retained report of the last close attempt: a confirmed cleanup
+    /// makes a repeated close idempotent, an unsettled one is re-attempted.
+    close_report: Mutex<Option<CoreCloseReport>>,
+}
+
+impl AuthorityState {
+    const fn new() -> Self {
+        Self {
+            closed: AtomicBool::new(false),
+            close_report: Mutex::new(None),
+        }
+    }
+
+    fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::SeqCst)
+    }
+
+    /// Latch the closing identity: this authority is closing and stays closed.
+    fn latch_closing(&self) {
+        self.closed.store(true, Ordering::SeqCst);
+    }
+
+    fn retained_close_report(&self) -> Option<CoreCloseReport> {
+        self.close_report
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    fn retain_close_report(&self, report: &CoreCloseReport) {
+        *self
+            .close_report
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(report.clone());
+    }
+}
+
 /// One open Host authority: the started [`HostManager`], its composed
 /// provider port, and the process-lifetime Actor session registry. Cloning
 /// shares the same authority.
@@ -87,6 +138,7 @@ pub struct HostHandle {
     host: Arc<HostManager>,
     port: Arc<dyn ProviderPort>,
     registry: ActorSessionRegistry,
+    authority: Arc<AuthorityState>,
 }
 
 impl CoreService {
@@ -100,30 +152,76 @@ impl CoreService {
     /// catalog cannot be discovered, or the [`HostManager`] fails to start.
     pub async fn open_host(&self, port: Arc<dyn ProviderPort>) -> CoreResult<HostHandle> {
         self.ensure_open()?;
-        {
-            // Established-owner admission: at most one authority per open
-            // service; a second start is a typed busy rejection, never a
-            // second engine.
-            let mut established = self
-                .inner
-                .host_authority_established
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if *established {
-                return Err(CoreError::OwnerBusy);
+        // Established-owner admission: at most one authority per open
+        // service; a second start is a typed busy rejection, never a
+        // second engine.
+        self.claim_host_authority()?;
+        match self.open_host_inner(port).await {
+            Ok(handle) => Ok(handle),
+            Err(err) => {
+                // A failed start never owns the slot: retry is allowed.
+                self.release_host_authority();
+                Err(err)
             }
-            *established = true;
         }
-        let started = self.open_host_inner(port).await;
-        if started.is_err() {
-            // A failed start never owns the slot: retry is allowed.
-            *self
-                .inner
-                .host_authority_established
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = false;
+    }
+
+    /// Adopt an **already started** [`HostManager`] as this service's Host
+    /// authority. The exact supplied manager and provider port are retained:
+    /// attach never loads a config, discovers a catalog, starts a Host or
+    /// probes readiness, so the native open keeps its single manager, its
+    /// pinned-root readiness and its provider-only lane.
+    ///
+    /// The supplied manager is the authority's effect boundary once this
+    /// returns; the standalone [`Self::open_host`] constructor stays the
+    /// library-only entry.
+    ///
+    /// # Errors
+    /// Returns [`CoreError::Closing`] when the service is closing (the
+    /// established-owner slot is never claimed on that path) and
+    /// [`CoreError::OwnerBusy`] when an authority is already established for
+    /// this open — the identical typed rejection [`Self::open_host`] gives.
+    pub fn attach_host(
+        &self,
+        host: Arc<HostManager>,
+        port: Arc<dyn ProviderPort>,
+    ) -> CoreResult<HostHandle> {
+        self.ensure_open()?;
+        self.claim_host_authority()?;
+        Ok(HostHandle {
+            core: self.clone(),
+            host,
+            port,
+            registry: ActorSessionRegistry::new(),
+            authority: Arc::new(AuthorityState::new()),
+        })
+    }
+
+    /// Claim the one established-owner Host authority slot for this open
+    /// service. Shared by the standalone and the adopting constructor, so
+    /// both reject a second owner identically.
+    fn claim_host_authority(&self) -> CoreResult<()> {
+        let mut established = self
+            .inner
+            .host_authority_established
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if *established {
+            return Err(CoreError::OwnerBusy);
         }
-        started
+        *established = true;
+        drop(established);
+        Ok(())
+    }
+
+    /// Free a claimed slot: only a failed open or a confirmed close releases
+    /// the authority for a later open/attach.
+    fn release_host_authority(&self) {
+        *self
+            .inner
+            .host_authority_established
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = false;
     }
 
     async fn open_host_inner(&self, port: Arc<dyn ProviderPort>) -> CoreResult<HostHandle> {
@@ -151,6 +249,7 @@ impl CoreService {
             host,
             port,
             registry: ActorSessionRegistry::new(),
+            authority: Arc::new(AuthorityState::new()),
         })
     }
 }
@@ -168,6 +267,26 @@ impl HostHandle {
     #[must_use]
     pub fn provider_port(&self) -> Arc<dyn ProviderPort> {
         self.port.clone()
+    }
+
+    /// The exact [`HostManager`] this authority was opened or attached over.
+    ///
+    /// Internal Rust composition access for the single lifetime owner — never
+    /// a transport/napi handle, and never a second Host.
+    #[must_use]
+    pub fn manager(&self) -> Arc<HostManager> {
+        self.host.clone()
+    }
+
+    /// The authority-level open gate: the service is open AND this handle's
+    /// own authority has not begun closing. A handle retired by `close` stays
+    /// refused even after another authority opens over the same service.
+    fn ensure_authority_open(&self) -> CoreResult<()> {
+        self.core.ensure_open()?;
+        if self.authority.is_closed() {
+            return Err(CoreError::Closing);
+        }
+        Ok(())
     }
 
     /// The Actor session registry (owner/tombstone/epoch index).
@@ -189,7 +308,7 @@ impl HostHandle {
         principal: &Principal,
         request: CreateSessionRequest,
     ) -> CoreResult<SessionResponse> {
-        self.core.ensure_open()?;
+        self.ensure_authority_open()?;
         self.core.verify_principal(principal)?;
         let pair = classify_pair(request.actor_ref.is_some(), request.viewpoint.is_some())?;
         let creator_id = principal.creator_id().to_string();
@@ -305,7 +424,7 @@ impl HostHandle {
         session_id: String,
         request: ExecuteOperationRequest,
     ) -> CoreResult<OperationResponse> {
-        self.core.ensure_open()?;
+        self.ensure_authority_open()?;
         self.core.verify_principal(principal)?;
         let uuid = Uuid::parse_str(&session_id)
             .map_err(|_| invalid("session_id", "session_id must be a valid UUID"))?;
@@ -451,11 +570,14 @@ impl HostHandle {
                 };
                 if let Some(snapshot) = snapshot {
                     let registry = self.registry.clone();
-                    tokio::spawn(async move {
+                    // Authority-owned drain: the handle stays with the
+                    // registry, so close never drops live lease/drain
+                    // ownership on the floor.
+                    self.registry.spawn_actor_drain(async move {
                         drain_character_operation(registry, stream, snapshot, fenced).await;
                     });
                 } else {
-                    tokio::spawn(drain_plain(stream, fenced));
+                    self.registry.spawn_actor_drain(drain_plain(stream, fenced));
                 }
                 Ok(OperationResponse {
                     operation_id: op_id.to_string(),
@@ -486,7 +608,7 @@ impl HostHandle {
             .exec(sid.clone(), host_op)
             .await
             .map_err(host_err)?;
-        tokio::spawn(drain_plain(stream, None));
+        self.registry.spawn_actor_drain(drain_plain(stream, None));
         Ok(OperationResponse {
             operation_id: op_id.to_string(),
             session_id: sid.to_string(),
@@ -516,7 +638,7 @@ impl HostHandle {
         principal: &Principal,
         request: CoreHostQuery,
     ) -> CoreResult<CoreHostQueryResponse> {
-        self.core.ensure_open()?;
+        self.ensure_authority_open()?;
         self.core.verify_principal(principal)?;
         match request.query {
             CoreHostQueryQuery::Health => {
@@ -731,17 +853,31 @@ impl HostHandle {
         }
     }
 
-    /// # Errors
-    ///
-    /// Returns `CoreError` when the Host is not opened, the port rejects the
-    /// request, or the session handle is stale.
     /// Close the authority. Retired Actor sessions get one bounded shutdown
     /// attempt each; the registry maps close (in-flight creates cannot
     /// repopulate). Cleanup ownership is only released on a confirmed close:
-    /// any unconfirmed drain keeps the guards and reports `interrupted`, and
-    /// a dead JS callback bridge is never awaited.
+    /// any unconfirmed drain — Host session or a still-running Actor drain —
+    /// keeps the guards *and* the authority slot, and reports `interrupted`.
+    /// A dead JS callback bridge is never awaited.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Closing`] when the service is already closing. A
+    /// repeated close on this handle is idempotent after a confirmed cleanup
+    /// and re-attempts an unsettled one.
     pub async fn close(&self) -> CoreResult<CoreCloseReport> {
+        if let Some(report) = self
+            .authority
+            .retained_close_report()
+            .filter(|report| report.cleanup_confirmed)
+        {
+            return Ok(report);
+        }
         self.core.ensure_open()?;
+        // Closing identity latches before the first await: later calls on THIS
+        // handle are refused even while the cleanup is still settling, and a
+        // later authority over the same service cannot be mistaken for it.
+        self.authority.latch_closing();
         let mut pending: Vec<String> = Vec::new();
         if let Err(err) = self.registry.drain_host_sessions(self.host.as_ref()).await {
             pending.push(format!("actor-session-drain: {err}"));
@@ -750,24 +886,26 @@ impl HostHandle {
         if let Err(err) = self.host.shutdown().await {
             pending.push(format!("host-shutdown: {err}"));
         }
-        if pending.is_empty() {
+        // Actor drains this authority minted stay owned here: settled handles
+        // are dropped, an unsettled drain keeps the authority — and the
+        // knowledge leases it holds — instead of being detached and forgotten.
+        let unsettled_drains = self.registry.prune_settled_drains();
+        if unsettled_drains > 0 {
+            pending.push(format!("actor-drains: {unsettled_drains} unsettled"));
+        }
+        let report = if pending.is_empty() {
             // Close/release coordination with the established-owner slot: a
-            // confirmed close frees the authority for a later open; an
+            // confirmed close frees the authority for a later open/attach; an
             // unconfirmed close keeps the slot held.
-            *self
-                .core
-                .inner
-                .host_authority_established
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = false;
-            Ok(CoreCloseReport {
+            self.core.release_host_authority();
+            CoreCloseReport {
                 state: CoreCloseReportState::Closed,
                 cleanup_confirmed: true,
                 pending_operations: vec![],
                 reason: None,
-            })
+            }
         } else {
-            Ok(CoreCloseReport {
+            CoreCloseReport {
                 state: CoreCloseReportState::Interrupted,
                 cleanup_confirmed: false,
                 pending_operations: pending,
@@ -776,8 +914,10 @@ impl HostHandle {
                 // WriterFenced); omitting `reason` instead of mislabelling
                 // the cause — the gap is reported to PM.
                 reason: None,
-            })
-        }
+            }
+        };
+        self.authority.retain_close_report(&report);
+        Ok(report)
     }
 
     async fn sorted_sessions(&self) -> CoreResult<Vec<RegistryHostSession>> {

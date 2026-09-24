@@ -25,7 +25,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use nexus_contracts::{ProviderCall, ProviderEventBatch, ProviderReply};
+use nexus_agent_host::capability::model::HostStartConfig;
+use nexus_agent_host::{HostFacade, HostManager};
+use nexus_contracts::{CoreCloseReportState, ProviderCall, ProviderEventBatch, ProviderReply};
 use nexus_core::{
     ActorSessionKey, ActorSessionRegistry, ActorViewpoint, AdmittedActor, CoreAccess,
     CoreActorAdmission, CoreError, CoreOpenOptions, CoreService, HostHandle,
@@ -981,4 +983,306 @@ async fn remembered_capture_stays_reserved_for_the_durable_capture_writer() {
         );
         assert!(settled.capture.pending_id.is_none());
     }
+}
+
+// ── v1.196 P0-T1 — attached core authority lifetime ──────────────────────
+//
+// Durable contract: `.mstar/iterations/v1.196/specs/current-host-actor-contract.md`
+// §2/§3 (D8). The core authority attaches ONCE to an already-started native
+// `HostManager` (the manager the native open owns) instead of constructing a
+// second Host. Both constructors share the single established-owner slot, the
+// exact supplied manager/port are retained, every authority carries its own
+// closed identity, and the Actor drains it mints stay owned instead of being
+// detached and forgotten.
+
+/// The `max_sessions` the attach fixtures bake into their manager: a manager
+/// started by `open_host_inner` would carry the on-disk default instead, so a
+/// matching value proves the supplied instance — not a fresh Host — is the one
+/// the authority acts on.
+const ATTACHED_MANAGER_MAX_SESSIONS: usize = 4242;
+
+/// The agent-host config path the standalone `open_host` reads for this env
+/// (same home argument `CoreService::open_host_inner` passes).
+fn host_config_path(env: &Env) -> PathBuf {
+    nexus_agent_host::config::agent_host_config_path(&nexus_home_layout::nexus_root_from_home(
+        &env.user_home,
+    ))
+}
+
+/// Start a native manager the way the native open composes one — the
+/// already-started manager an `attach_host` call must adopt rather than start
+/// again.
+async fn start_host_manager(env: &Env) -> Arc<HostManager> {
+    use nexus_agent_host::config::{
+        load_config_from_path, validate_workspace_path,
+    };
+    use nexus_agent_host::core::readiness::discover_provider_catalog;
+
+    let workspace_root = nexus_home_layout::nexus_root_from_home(&env.user_home);
+    validate_workspace_path(&workspace_root).unwrap();
+    let config_path = host_config_path(env);
+    let mut host_config = load_config_from_path(&config_path).unwrap();
+    host_config.max_sessions = ATTACHED_MANAGER_MAX_SESSIONS;
+    let admitted_catalog = discover_provider_catalog(&host_config).unwrap();
+    let host = Arc::new(HostManager::new());
+    host.start(HostStartConfig {
+        config_path,
+        workspace_root,
+        max_sessions: host_config.max_sessions,
+        max_ops_per_session: host_config.max_ops_per_session,
+        timeouts: host_config.timeouts.clone(),
+        host_config: Some(host_config),
+        admitted_catalog: Some(admitted_catalog),
+        probe_owner: None,
+    })
+    .await
+    .unwrap();
+    host
+}
+
+/// Contract §2 `attach_host`: the authority retains the EXACT supplied
+/// already-started manager and port (no second Host start), and the standalone
+/// and attaching constructors share one established-owner slot, so both
+/// reject a second owner identically — while a rejected attempt never
+/// disturbs the incumbent.
+#[tokio::test]
+async fn attached_host_adopts_the_supplied_manager_and_shares_owner_admission() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let manager = start_host_manager(&env).await;
+    let port = CountingPort::new();
+
+    let attached = core
+        .attach_host(manager.clone(), port.clone())
+        .expect("an already-started manager attaches");
+    // The exact supplied instance is retained: same allocation, and the
+    // distinct configuration it was started with (not the on-disk default a
+    // fresh `HostManager::start` would have loaded).
+    assert!(
+        Arc::ptr_eq(&attached.manager(), &manager),
+        "the authority retains the supplied manager"
+    );
+    assert_eq!(
+        attached.manager().agent_config().await.max_sessions,
+        ATTACHED_MANAGER_MAX_SESSIONS,
+        "the authority acts on the supplied, distinctly configured manager"
+    );
+    assert!(
+        attached.manager().health().await.unwrap().running,
+        "the supplied manager was already started; attach starts no second Host"
+    );
+
+    // One authority per open: a second attach and a standalone open are the
+    // identical typed busy rejection.
+    let err = core
+        .attach_host(manager.clone(), CountingPort::new())
+        .expect_err("a second attach must be rejected");
+    assert!(matches!(err, CoreError::OwnerBusy), "second attach: {err:?}");
+    let err = core
+        .open_host(CountingPort::new())
+        .await
+        .expect_err("a standalone open is rejected identically");
+    assert!(matches!(err, CoreError::OwnerBusy), "second open: {err:?}");
+
+    // Neither rejected attempt freed the incumbent's claim: the slot is still
+    // held and the attached authority still answers over the supplied manager.
+    let health = attached
+        .query(
+            &principal,
+            serde_json::from_value(serde_json::json!({ "query": "health" })).unwrap(),
+        )
+        .await
+        .expect("the attached authority stays usable");
+    assert!(health.health.expect("health payload").running);
+    let err = core
+        .open_host(CountingPort::new())
+        .await
+        .expect_err("the failed attempts never released the slot");
+    assert!(matches!(err, CoreError::OwnerBusy), "slot retained: {err:?}");
+}
+
+/// A construction that fails after claiming the shared admission releases it:
+/// the standalone path's failed `open_host` leaves the slot free, so the
+/// attaching path still admits, and only a confirmed close frees it again.
+#[tokio::test]
+async fn attached_host_failed_open_releases_the_shared_admission() {
+    let env = seed_env().await;
+    let (core, _principal) = open_core(&env).await;
+    let manager = start_host_manager(&env).await;
+
+    // A malformed agent-host config fails `open_host_inner` AFTER the slot was
+    // claimed.
+    let config_path = host_config_path(&env);
+    std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+    std::fs::write(&config_path, "max_sessions = \"not-a-number\"\n").unwrap();
+    let err = core
+        .open_host(CountingPort::new())
+        .await
+        .expect_err("a malformed host config fails the open");
+    assert!(
+        matches!(err, CoreError::Internal { .. }),
+        "the failed start is an internal refusal, got {err:?}"
+    );
+
+    // The claim did not survive the failure: attach still admits.
+    let attached = core
+        .attach_host(manager.clone(), CountingPort::new())
+        .expect("a failed open releases the shared admission");
+    assert!(Arc::ptr_eq(&attached.manager(), &manager));
+    let err = core
+        .attach_host(manager.clone(), CountingPort::new())
+        .expect_err("the successful attach now owns the slot");
+    assert!(matches!(err, CoreError::OwnerBusy), "single owner: {err:?}");
+}
+
+/// An attaching open on a service that is already closing is refused BEFORE
+/// any claim: attach has no `ensure_open` bypass, so it can never take the
+/// established-owner slot of a closing service.
+#[tokio::test]
+async fn attached_host_closing_service_refuses_before_claiming_the_slot() {
+    let env = seed_env().await;
+    let manager = start_host_manager(&env).await;
+    let (core, _principal) = open_core(&env).await;
+    core.close().await.expect("the service closes");
+
+    let err = core
+        .attach_host(manager, CountingPort::new())
+        .expect_err("a closing service never attaches");
+    assert!(
+        matches!(err, CoreError::Closing),
+        "attach on a closing service is typed: {err:?}"
+    );
+}
+
+/// Contract §3 close identity: a confirmed close frees the slot for a later
+/// authority, and the closed handle is refused on every method afterwards —
+/// including after that later authority opens over the same service.
+#[tokio::test]
+async fn attached_host_confirmed_close_releases_slot_and_refuses_the_old_handle() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let manager = start_host_manager(&env).await;
+    let port = CountingPort::new();
+    let attached = core
+        .attach_host(manager.clone(), port.clone())
+        .expect("an already-started manager attaches");
+
+    let report = attached.close().await.expect("close returns a report");
+    assert!(
+        report.cleanup_confirmed,
+        "a settled close confirms cleanup: {report:?}"
+    );
+    assert_eq!(report.state, CoreCloseReportState::Closed);
+    // Idempotent: a repeated close reports the retained confirmed cleanup
+    // rather than shutting the manager down a second time.
+    let repeated = attached.close().await.expect("repeated close returns");
+    assert!(repeated.cleanup_confirmed);
+    assert_eq!(repeated.pending_operations, report.pending_operations);
+
+    // Refused on every authority method, with zero provider effects.
+    let create = serde_json::from_value::<
+        nexus_contracts::generated::daemon_api::agent_host::CreateSessionRequest,
+    >(serde_json::json!({ "provider_id": "mock-acp" }))
+    .unwrap();
+    let err = attached
+        .create_session(&principal, create)
+        .await
+        .expect_err("a closed handle never creates a session");
+    assert!(matches!(err, CoreError::Closing), "closed create: {err:?}");
+    let prompt = serde_json::from_value::<
+        nexus_contracts::generated::daemon_api::agent_host::ExecuteOperationRequest,
+    >(serde_json::json!({ "kind": "prompt", "content": "hello" }))
+    .unwrap();
+    let err = attached
+        .execute(&principal, Uuid::new_v4().to_string(), prompt)
+        .await
+        .expect_err("a closed handle never executes");
+    assert!(matches!(err, CoreError::Closing), "closed execute: {err:?}");
+    let err = attached
+        .query(
+            &principal,
+            serde_json::from_value(serde_json::json!({ "query": "health" })).unwrap(),
+        )
+        .await
+        .expect_err("a closed handle never observes");
+    assert!(matches!(err, CoreError::Closing), "closed query: {err:?}");
+    assert_eq!(port.call_count(), 0, "a closed handle has zero effects");
+
+    // A later authority over the same service is a DIFFERENT identity: it
+    // admits, while the old handle stays refused.
+    let reopened = core
+        .attach_host(manager.clone(), CountingPort::new())
+        .expect("a confirmed close frees the slot");
+    assert!(
+        reopened
+            .query(
+                &principal,
+                serde_json::from_value(serde_json::json!({ "query": "health" })).unwrap(),
+            )
+            .await
+            .is_ok(),
+        "the new authority is usable"
+    );
+    let err = attached
+        .query(
+            &principal,
+            serde_json::from_value(serde_json::json!({ "query": "health" })).unwrap(),
+        )
+        .await
+        .expect_err("a closed handle cannot act after another authority opens");
+    assert!(matches!(err, CoreError::Closing), "old handle: {err:?}");
+}
+
+/// Contract §3 drain ownership: an authority close that cannot settle a live
+/// Actor drain reports it and RETAINS the authority (slot + drain handle)
+/// instead of detaching live work and claiming a cleanup it cannot confirm.
+#[tokio::test]
+async fn attached_host_unconfirmed_close_retains_slot_and_owned_drains() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let manager = start_host_manager(&env).await;
+    let attached = core
+        .attach_host(manager.clone(), CountingPort::new())
+        .expect("an already-started manager attaches");
+
+    // A live drain minted through the same authority-owned spawn path
+    // `execute` uses (it holds the admitted knowledge leases for its whole
+    // run).
+    attached
+        .actor_sessions()
+        .spawn_actor_drain(std::future::pending::<()>());
+
+    let report = attached.close().await.expect("close returns a report");
+    assert!(
+        !report.cleanup_confirmed,
+        "an unsettled drain is never a confirmed cleanup: {report:?}"
+    );
+    assert_eq!(report.state, CoreCloseReportState::Interrupted);
+    assert!(
+        report
+            .pending_operations
+            .iter()
+            .any(|pending| pending.starts_with("actor-drains:")),
+        "the close reports the drain it still owns: {report:?}"
+    );
+    // Retained, not forgotten: the authority still owns the live drain.
+    assert_eq!(
+        attached.actor_sessions().prune_settled_drains(),
+        1,
+        "the unsettled drain stays owned by the authority"
+    );
+    // Ownership retained ⇒ the slot is never freed for another authority.
+    let err = core
+        .attach_host(manager.clone(), CountingPort::new())
+        .expect_err("an unconfirmed close retains the authority slot");
+    assert!(matches!(err, CoreError::OwnerBusy), "slot retained: {err:?}");
+    // And the handle that could not settle is itself closing.
+    let err = attached
+        .query(
+            &principal,
+            serde_json::from_value(serde_json::json!({ "query": "health" })).unwrap(),
+        )
+        .await
+        .expect_err("the closing handle is refused");
+    assert!(matches!(err, CoreError::Closing), "closing handle: {err:?}");
 }
