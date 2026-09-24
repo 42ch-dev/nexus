@@ -2947,9 +2947,7 @@ async fn compute_facade_is_fenced_once_the_owner_closes() {
         matches!(discovery, CoreError::Closing),
         "module discovery must be fenced after close, got {discovery:?}"
     );
-    let detail = handle
-        .get_compute_module(&principal, MODULE)
-        .unwrap_err();
+    let detail = handle.get_compute_module(&principal, MODULE).unwrap_err();
     assert!(
         matches!(detail, CoreError::Closing),
         "module detail must be fenced after close, got {detail:?}"
