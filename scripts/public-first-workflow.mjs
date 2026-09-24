@@ -1043,7 +1043,13 @@ function runPlacementCli(cliBinary, args, childEnv, timeoutMs) {
     child.once('error', (error) =>
       finish({ status: null, signal: null, stdout, stderr, timedOut: false, spawnError: error.message }),
     );
-    child.once('exit', (code, signal) =>
+    // Settle on `close`, NOT `exit`: `exit` fires when the process ends, while
+    // its stdio streams may still be delivering buffered data, so a DTO larger
+    // than the pipe buffer could be parsed from a truncated string. `close`
+    // fires only after stdout/stderr are drained and closed, so the captured
+    // output is complete before anything reads it. The timeout path above still
+    // wins when the child (or a process holding its pipe) never closes.
+    child.once('close', (code, signal) =>
       finish({ status: code, signal, stdout, stderr, timedOut: false, spawnError: null }),
     );
   });
