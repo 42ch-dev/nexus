@@ -5,7 +5,7 @@
 [![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg?logo=nodedotjs&logoColor=white)](package.json)
 [![pnpm](https://img.shields.io/badge/pnpm-%3E%3D11-F69220.svg?logo=pnpm&logoColor=white)](package.json)
 [![TypeScript](https://img.shields.io/badge/TypeScript-contracts-3178C6.svg?logo=typescript&logoColor=white)](packages/nexus-contracts)
-[![Rust](https://img.shields.io/badge/Rust-CLI%20%2B%20daemon-DEA584.svg?logo=rust&logoColor=black)](apps/nexus42)
+[![Rust](https://img.shields.io/badge/Rust-CLI-DEA584.svg?logo=rust&logoColor=black)](apps/nexus42)
 [![Electron](https://img.shields.io/badge/Electron-desktop%20host-47848F.svg?logo=electron&logoColor=white)](apps/desktop-electron)
 [![Schema](https://img.shields.io/badge/JSON%20Schema-SSOT-0B7285.svg)](schemas)
 [![npm](https://img.shields.io/npm/v/@42ch/nexus-contracts.svg?logo=npm&logoColor=white)](https://www.npmjs.com/package/@42ch/nexus-contracts)
@@ -18,7 +18,57 @@ Nexus is a local-first, AI-driven narrative orchestration engine.
 
 ## Quick Start
 
-> **TBD** — end-user install, first run, and everyday usage.
+Nexus has no published end-user install or update flow yet — this first run is the current product, built from a source checkout. It is the public first-workflow example: a clean isolated home, a real `dsh` runtime and a controlled loopback model protocol prove one admitted workflow end to end — same-run streaming and replay, one authorized `workspace.commit` effect, inspect, cancel, and a restart that preserves the effect without repeating it.
+
+### Prerequisites
+
+- **Node.js 22.22 or newer** (`node --version`)
+- **pnpm** 11 or newer
+- **Rust** stable toolchain (the prepare step builds the CLI and the native addon)
+- a **supported `dsh` runtime** on `PATH`, or `DSH_RUNTIME_BIN=/absolute/path/to/dsh`
+
+### Prepare the artifacts (once, and after Rust or contract edits)
+
+Existing project commands — the example builds and installs nothing itself:
+
+```bash
+pnpm install
+pnpm -F @42ch/nexus-contracts build
+pnpm -F @42ch/nexus-native build
+pnpm -F @42ch/nexus-provider-acp build
+pnpm --dir apps/nexus-service run build         # → apps/nexus-service/dist/main.js
+pnpm run build:cli                              # → target/debug/nexus42
+node packages/nexus-native/scripts/build.mjs    # → packages/nexus-native-<platform>/native/nexus_core_node.node
+```
+
+The example never builds, installs or seeds anything itself. A missing prepared artifact, a missing `nexus42`, or no usable `dsh` runtime stops the run (exit `2`, `missing_prerequisite`) instead of skipping it.
+
+### Run it
+
+```bash
+NEXUS42_BIN="$PWD/target/debug/nexus42" node scripts/public-first-workflow.mjs --mode deterministic
+```
+
+Add `--json` for the redacted machine receipt (redirect it to a file to keep it), and `--keep` to retain the temporary isolated root for inspection:
+
+```bash
+NEXUS42_BIN="$PWD/target/debug/nexus42" node scripts/public-first-workflow.mjs --mode deterministic --json > /tmp/pfw-receipt.json
+```
+
+`NEXUS42_BIN` points at the prepared binary and must be an absolute path; `target/debug/nexus42` is the default Cargo location, so use your own `CARGO_TARGET_DIR` path if you set one. Without it, the driver looks for `nexus42` on `PATH` — the same lookup it uses for `dsh`, which `DSH_RUNTIME_BIN` overrides. The driver creates its own temporary root with separate `home/`, `dsh-home/`, `workspace/` and evidence directories, allocates the service and model ports, and creates the Creator, workspace and preset through the public CLI/HTTP surface. It never touches your real homes, never seeds the product database and makes no non-loopback network request; credential-shaped inherited variables are dropped from the child environment **by name**, without reading their values.
+
+A successful run exits `0` and reports every step `ok`: fixture, preflight, isolation, service start/stop, Creator/workspace/preset setup, admission, inspect, steer, stream/replay/refusals, sealed tool denial, the committed workspace file and its revision, cancel, restart, the request-budget guard's `loaded`/`admitted`/`denied`/`spent` evidence, and confirmed cleanup of both owned children. Exactly one admitted model request reaches the driver's own loopback endpoint, so the run performs no egress and spends no credential.
+
+### Optional live model request (currently blocked)
+
+The driver also has a `--mode live` path that replays the same journey against the single authorized official HTTPS model origin:
+
+```bash
+NEXUS42_BIN="$PWD/target/debug/nexus42" node scripts/public-first-workflow.mjs --mode live \
+  --deterministic-receipt /tmp/pfw-receipt.json --attempt-dir /tmp/pfw-attempt-<fresh>
+```
+
+That mode is not part of this Quick Start and **cannot dispatch today**. It first verifies that the deterministic receipt matches the current artifacts and runtime, then establishes the credential channel **by name only** — the driver never reads, copies, prints or persists the secret. A channel that merely exists is not a proven usable credential, and usability cannot be established without inspecting the value, so the current implementation stops with `blocked/credentials_unavailable` (exit `2`) before allocating anything or dispatching: no live request is made and none is pending. There is no key fallback, no retry and no second attempt. A transport or authentication failure **after** an admission would consume that authorization and only a new explicit user grant could retry — a runtime/transport failure is a different outcome from this zero-admission credential blocker. This example never creates, rotates, copies or inspects credentials.
 
 ---
 
@@ -40,12 +90,14 @@ Prerequisites and the full pre-PR checklist: [`docs/CONTRIBUTING.md`](docs/CONTR
 
 | Command | What it does |
 |---------|----------------|
-| `pnpm run dev` | CLI + web local dev — reuses a compatible `nexus42` artifact when manifest/hash/protocol match, ensures daemon on the selected loopback endpoint (default 127.0.0.1:8420; starts detached if not), validates health, then runs Vite in the foreground (`scripts/dev-cli-web.sh`). Incompatible or missing artifacts fail fast with `pnpm dev:backend:refresh`. |
+| `pnpm run dev` | CLI + web local dev — reuses a compatible `nexus42` artifact when manifest/hash/protocol match, ensures the standalone TS service is running on the selected loopback endpoint (default 127.0.0.1:8420; starts it detached when it is not), validates service health and identity, then runs Vite in the foreground (`scripts/dev-cli-web.sh`). There is no daemon fallback; missing or incompatible artifacts fail fast with `pnpm dev:backend:refresh`. |
 | `pnpm run dev:backend:refresh` | Explicit backend refresh — the only ordinary DX path that may run Cargo build/codegen after Rust/contract edits (`scripts/refresh-dev-backend.mjs`). |
 | `pnpm run dev:desktop:web` | Desktop dev with Vite HMR — the Electron host runs against the Vite dev origin instead of the built web dist. |
 | `pnpm run dev:desktop` | Electron desktop dev — the host serves the built `apps/web` dist; the driver builds the TS closure and host itself (prepared native payload required). |
 
 Warm Vite HMR for web/Studio/shared UI predates the stable-artifact path; P0 records it as baseline rather than a new speedup claim.
+
+The dev shortcut talks to the **standalone TypeScript service** (`apps/nexus-service/dist/main.js`, normally started with `--home <home> --host 127.0.0.1 --port <port>`). The retired `nexus42 daemon` composition is gone, so no CLI command starts, stops, statuses or proxies the service — that lifecycle belongs to the dev shortcut and to the desktop host. `pnpm run dev:backend:refresh` is the only ordinary DX path that runs Cargo or codegen, and only after Rust or contract edits. The full public first-workflow example, with its real `dsh` and prepared-artifact prerequisites, is in [Quick Start](#quick-start).
 
 ### Build
 
