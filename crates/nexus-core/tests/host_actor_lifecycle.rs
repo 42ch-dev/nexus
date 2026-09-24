@@ -1286,3 +1286,131 @@ async fn attached_host_unconfirmed_close_retains_slot_and_owned_drains() {
         .expect_err("the closing handle is refused");
     assert!(matches!(err, CoreError::Closing), "closing handle: {err:?}");
 }
+
+/// Contract §3 close/admission barrier: a `close` that races an ADMITTED
+/// `execute` may not confirm a cleanup nor release the established-owner slot
+/// while that operation has not registered its drain yet. The registered
+/// drain handles are not that proof — `execute` crosses asynchronous
+/// admission and Host execution before it registers one — so the authority
+/// counts the operation itself and reports it instead of claiming a cleanup
+/// it cannot confirm. Once the operation has settled (here: it fails before
+/// creating a drain) and a drain has transferred to the registry, the
+/// repeated close owns that drain and still refuses.
+#[allow(clippy::too_many_lines)] // one admission/transfer/close lifecycle
+#[tokio::test]
+async fn attached_host_close_accounts_for_an_admitted_execute() {
+    use std::future::Future;
+    use std::task::{Context, Poll, Waker};
+
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let manager = start_host_manager(&env).await;
+    let port = CountingPort::new();
+    let attached = core
+        .attach_host(manager.clone(), port.clone())
+        .expect("an already-started manager attaches");
+
+    // An indexed Character session, so `execute` takes the admitted Actor path
+    // (knowledge re-admission before any Host effect) whose drain registration
+    // is the transfer under test.
+    let ctx = admit_character(&core, &principal, &env).await;
+    let knowledge = admitted_knowledge(&core, &principal, &env).await.identity();
+    let key = registry_key(attached.actor_sessions(), &ctx, knowledge, &env.user_home);
+    let session_id = Uuid::new_v4();
+    attached.actor_sessions().insert_indexed_entry(
+        key,
+        ctx,
+        nexus_agent_host::HostSessionId(session_id),
+    );
+    let prompt = serde_json::from_value::<
+        nexus_contracts::generated::daemon_api::agent_host::ExecuteOperationRequest,
+    >(serde_json::json!({ "kind": "prompt", "content": "close races the admission" }))
+    .unwrap();
+
+    // Poll the operation exactly once: it is admitted (the barrier is taken
+    // before the first await, so no close can slip in ahead of it) and
+    // suspended at its first await, i.e. the registered-drain view is still
+    // empty — the exact window the finding describes.
+    let mut execute =
+        std::pin::pin!(attached.execute(&principal, session_id.to_string(), prompt));
+    let first = {
+        let mut cx = Context::from_waker(Waker::noop());
+        execute.as_mut().poll(&mut cx)
+    };
+    assert!(
+        matches!(first, Poll::Pending),
+        "the admitted operation must be suspended before it registers its drain, got {first:?}"
+    );
+    assert_eq!(
+        attached.actor_sessions().prune_settled_drains(),
+        0,
+        "the admitted operation has registered no drain handle yet"
+    );
+
+    // The concurrent close. An unaccounted admitted operation keeps BOTH the
+    // cleanup ownership and the slot.
+    let report = attached.close().await.expect("close returns a report");
+    assert!(
+        !report.cleanup_confirmed,
+        "a close that raced an admitted operation never confirms cleanup: {report:?}"
+    );
+    assert_eq!(report.state, CoreCloseReportState::Interrupted);
+    assert!(
+        report
+            .pending_operations
+            .iter()
+            .any(|pending| pending.starts_with("actor-admissions:")),
+        "the close reports the admitted operation it still owns: {report:?}"
+    );
+    let err = core
+        .attach_host(manager.clone(), CountingPort::new())
+        .expect_err("an unaccounted admission retains the authority slot");
+    assert!(matches!(err, CoreError::OwnerBusy), "slot retained: {err:?}");
+    assert_eq!(port.call_count(), 0, "the race produced no provider effect");
+
+    // The admitted operation settles. Here it fails BEFORE creating a drain:
+    // this fixture indexes the session without a Host create, so the Host
+    // plane refuses it — the accounted-for outcome the barrier must accept
+    // instead of a fabricated success.
+    let settled = execute.await;
+    assert!(
+        settled.is_err(),
+        "the admitted operation settles against the closed authority: {settled:?}"
+    );
+
+    // The transfer half: a drain registered through the same authority-owned
+    // spawn path `execute` uses, landing AFTER the closing latch. It is
+    // retained, so it still owns the cleanup and still blocks the slot.
+    attached
+        .actor_sessions()
+        .spawn_actor_drain(std::future::pending::<()>());
+
+    let retried = attached.close().await.expect("the repeated close returns");
+    assert!(
+        !retried.cleanup_confirmed,
+        "a late drain transfer keeps the cleanup unconfirmed: {retried:?}"
+    );
+    assert!(
+        !retried
+            .pending_operations
+            .iter()
+            .any(|pending| pending.starts_with("actor-admissions:")),
+        "the settled admission is no longer pending: {retried:?}"
+    );
+    assert!(
+        retried
+            .pending_operations
+            .iter()
+            .any(|pending| pending.starts_with("actor-drains:")),
+        "the drain transferred to the registry is reported: {retried:?}"
+    );
+    assert_eq!(
+        attached.actor_sessions().prune_settled_drains(),
+        1,
+        "the authority still owns the drain it retained"
+    );
+    let err = core
+        .attach_host(manager.clone(), CountingPort::new())
+        .expect_err("retained cleanup keeps the authority slot");
+    assert!(matches!(err, CoreError::OwnerBusy), "slot retained: {err:?}");
+}

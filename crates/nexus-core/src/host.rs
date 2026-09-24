@@ -12,7 +12,6 @@
 //! the real Host authority here — there is no `not_migrated` fallback.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use nexus_agent_host::capability::model::HostOperation;
@@ -81,37 +80,109 @@ fn config_err(err: nexus_agent_host::HostError) -> CoreError {
     }
 }
 
-/// Lifecycle identity of ONE open Host authority.
+/// Lifecycle identity and admission barrier of ONE open Host authority.
 ///
 /// Cloning a [`HostHandle`] shares this state; every open/attach mints a fresh
 /// one. That identity — not the shared slot boolean — is what makes a closed
 /// handle dead: after `close` it can neither act on nor observe a later
 /// authority that took the established-owner slot.
+///
+/// The same identity carries the close/admission barrier: closing and
+/// admitting are decided under one lock, and the admission count is what
+/// `close` reads to prove that every operation it admitted is accounted for —
+/// either failed before creating a drain or transferred that drain to the
+/// registry. A drain handle alone is not that proof: an operation reaches
+/// registration only after asynchronous admission and Host execution, so a
+/// `close` that trusted the registered handles would release the established
+/// slot while admitted work was still in flight.
 struct AuthorityState {
-    /// Latched by the first [`HostHandle::close`]: this authority is closing
-    /// and stays closed, so every later call on the handle is `closing`
-    /// instead of reaching a shared slot, registry or Host.
-    closed: AtomicBool,
+    gate: Mutex<AuthorityGate>,
     /// The retained report of the last close attempt: a confirmed cleanup
     /// makes a repeated close idempotent, an unsettled one is re-attempted.
     close_report: Mutex<Option<CoreCloseReport>>,
 }
 
+/// The authority's close/admission gate.
+struct AuthorityGate {
+    /// Latched by the first [`HostHandle::close`]: this authority is closing
+    /// and stays closed, so every later call on the handle is `closing`
+    /// instead of reaching a shared slot, registry or Host.
+    closing: bool,
+    /// Operations admitted against this authority and not yet retired: neither
+    /// failed before creating a drain nor finished transferring one to the
+    /// registry. Frozen by the closing latch (nothing can be admitted after
+    /// it), then only decreasing, so the value `close` reads under the latch
+    /// bounds every operation it must account for.
+    in_flight: usize,
+}
+
+/// One admitted operation's slot in the authority barrier.
+///
+/// Retiring the admission is what lets a close confirm; the operation must
+/// have transferred its drain to the registry (or failed before creating one)
+/// by then, so the guard is held across the whole operation and dropped last.
+struct AuthorityAdmission<'a> {
+    state: &'a AuthorityState,
+}
+
+impl Drop for AuthorityAdmission<'_> {
+    fn drop(&mut self) {
+        self.state.retire_admission();
+    }
+}
+
 impl AuthorityState {
     const fn new() -> Self {
         Self {
-            closed: AtomicBool::new(false),
+            gate: Mutex::new(AuthorityGate {
+                closing: false,
+                in_flight: 0,
+            }),
             close_report: Mutex::new(None),
         }
     }
 
-    fn is_closed(&self) -> bool {
-        self.closed.load(Ordering::SeqCst)
+    fn gate(&self) -> std::sync::MutexGuard<'_, AuthorityGate> {
+        self.gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Latch the closing identity: this authority is closing and stays closed.
-    fn latch_closing(&self) {
-        self.closed.store(true, Ordering::SeqCst);
+    fn is_closed(&self) -> bool {
+        self.gate().closing
+    }
+
+    /// Admit one operation: refused once this authority is closing, otherwise
+    /// counted until the returned guard is dropped.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Closing`] when this authority has begun closing.
+    fn admit(&self) -> CoreResult<AuthorityAdmission<'_>> {
+        let mut gate = self.gate();
+        if gate.closing {
+            return Err(CoreError::Closing);
+        }
+        gate.in_flight += 1;
+        drop(gate);
+        Ok(AuthorityAdmission { state: self })
+    }
+
+    /// Latch the closing identity and report how many operations were admitted
+    /// and not yet retired at that instant — the admission accounting `close`
+    /// must settle before it may confirm a cleanup.
+    fn latch_closing(&self) -> usize {
+        let mut gate = self.gate();
+        gate.closing = true;
+        gate.in_flight
+    }
+
+    fn retire_admission(&self) {
+        let mut gate = self.gate();
+        // A double retire would under-count and let a `close` confirm around
+        // live work, so this fails loudly (debug/tests) or wraps far away from
+        // zero (release) — never silently to a confirmable state.
+        gate.in_flight -= 1;
     }
 
     fn retained_close_report(&self) -> Option<CoreCloseReport> {
@@ -289,6 +360,18 @@ impl HostHandle {
         Ok(())
     }
 
+    /// Admit one Host operation against this authority's close barrier: the
+    /// service must be open and this authority must not be closing, and the
+    /// admission stays counted until the returned guard drops — which happens
+    /// only after the operation has either failed before creating a drain or
+    /// transferred its drain to the registry. A `close` that latches in
+    /// between therefore observes the admission instead of releasing the
+    /// established-owner slot over unaccounted work.
+    fn admit_operation(&self) -> CoreResult<AuthorityAdmission<'_>> {
+        self.core.ensure_open()?;
+        self.authority.admit()
+    }
+
     /// The Actor session registry (owner/tombstone/epoch index).
     #[must_use]
     pub const fn actor_sessions(&self) -> &ActorSessionRegistry {
@@ -424,7 +507,11 @@ impl HostHandle {
         session_id: String,
         request: ExecuteOperationRequest,
     ) -> CoreResult<OperationResponse> {
-        self.ensure_authority_open()?;
+        // The barrier admission is taken here, before the first await, and held
+        // until the operation returns: by then it has either failed before
+        // creating a drain or handed its drain to the registry, so a `close`
+        // that latches in between can never confirm around it.
+        let _admission = self.admit_operation()?;
         self.core.verify_principal(principal)?;
         let uuid = Uuid::parse_str(&session_id)
             .map_err(|_| invalid("session_id", "session_id must be a valid UUID"))?;
@@ -856,8 +943,9 @@ impl HostHandle {
     /// Close the authority. Retired Actor sessions get one bounded shutdown
     /// attempt each; the registry maps close (in-flight creates cannot
     /// repopulate). Cleanup ownership is only released on a confirmed close:
-    /// any unconfirmed drain — Host session or a still-running Actor drain —
-    /// keeps the guards *and* the authority slot, and reports `interrupted`.
+    /// any unconfirmed drain — Host session, still-running Actor drain, or an
+    /// admitted operation that has not transferred its drain yet — keeps the
+    /// guards *and* the authority slot, and reports `interrupted`.
     /// A dead JS callback bridge is never awaited.
     ///
     /// # Errors
@@ -876,9 +964,20 @@ impl HostHandle {
         self.core.ensure_open()?;
         // Closing identity latches before the first await: later calls on THIS
         // handle are refused even while the cleanup is still settling, and a
-        // later authority over the same service cannot be mistaken for it.
-        self.authority.latch_closing();
+        // later authority over the same service cannot be mistaken for it. The
+        // same latch freezes admission, so the count it returns is every
+        // admitted operation this close must account for.
+        let in_flight = self.authority.latch_closing();
         let mut pending: Vec<String> = Vec::new();
+        if in_flight > 0 {
+            // An admitted operation that has not transferred its drain yet is
+            // unaccounted cleanup: report it and keep the authority instead of
+            // releasing the slot over work still in flight. Not waiting for it
+            // here is deliberate — `quiesce_actor_sessions`/`close_before`
+            // (contract §3) own the bounded join, and a repeated close
+            // re-attempts this report.
+            pending.push(format!("actor-admissions: {in_flight} in flight"));
+        }
         if let Err(err) = self.registry.drain_host_sessions(self.host.as_ref()).await {
             pending.push(format!("actor-session-drain: {err}"));
         }

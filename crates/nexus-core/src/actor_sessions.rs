@@ -641,6 +641,14 @@ impl ActorSessionRegistry {
     /// live drain (and the admitted knowledge leases it holds) rather than
     /// detaching it and reporting a cleanup it cannot confirm.
     ///
+    /// Registration is the *transfer* half of the authority's admission/close
+    /// barrier: an operation retires its admission only after its drain is
+    /// registered here, so a concurrent `close` observes either the admission
+    /// still in flight or this retained handle. A registration that lands
+    /// after the closing latch is retained all the same — which is why a
+    /// drained operation can never be dropped on the floor and why the
+    /// repeated close still refuses to confirm while one is unsettled.
+    ///
     /// `#[doc(hidden)]` integration seam, the same convention as
     /// [`Self::insert_indexed_entry`].
     #[doc(hidden)]
