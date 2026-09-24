@@ -238,7 +238,7 @@ function classifyRuntime(dshCanonical) {
   }
   const packageRoot = dshCanonical === null ? null : packageRootOf(dshCanonical);
   const withinInstalledPackage =
-    packageRoot !== null && observed !== null && observed.startsWith(packageRoot + sep);
+    packageRoot !== null && observed?.startsWith(packageRoot + sep);
   return {
     runtime: 'other',
     foreignCategory: withinInstalledPackage ? DENY.packageChildRuntime : DENY.foreignRuntime,

@@ -34,9 +34,7 @@ pub enum CoreContextError {
     ///
     /// A version race never produces an orphan successful version: the caller
     /// re-reads the pointer and retries against the committed winner.
-    #[error(
-        "core context version race on schedule {0}: the pointer no longer names version {1}"
-    )]
+    #[error("core context version race on schedule {0}: the pointer no longer names version {1}")]
     VersionRace(String, u32),
     /// More than one schedule names the same run as its
     /// `current_session_id`, so "the schedule that owns this run" has no
@@ -51,6 +49,20 @@ pub enum CoreContextError {
          refusing to choose one"
     )]
     AmbiguousOwnership(String, usize, String),
+    /// A USER edit reached the writer for a schedule that had already settled.
+    ///
+    /// Admitted INSIDE the append transaction (see [`CoreContextManager::apply`]),
+    /// so it covers the whole window between a caller's pre-check and this
+    /// writer's turn: a settlement that committed earlier is visible here, and
+    /// one that commits later cannot (the `BEGIN IMMEDIATE` writer lock is held
+    /// until this transaction ends). No immutable version row and no pointer
+    /// advance survive the refusal.
+    ///
+    /// Only user-authored steps are fenced: system derivations (`apply_seed`,
+    /// `apply_preset_hook`, `apply_llm_summarize`) still write the final context
+    /// of a terminal schedule.
+    #[error("schedule {0} is in terminal status '{1}'; core-context edits are not allowed")]
+    TerminalSchedule(String, String),
     #[error("serde error: {0}")]
     Serde(#[from] serde_json::Error),
 }
@@ -216,13 +228,22 @@ impl CoreContextManager {
     /// whole transaction back: a version row is never committed while the
     /// pointer still names an older one, and no append body is lost.
     ///
+    /// A USER-authored step additionally admits the schedule's `status` in that
+    /// same transaction: a schedule that settled (`completed`, `cancelled`,
+    /// `failed`) refuses the edit with [`CoreContextError::TerminalSchedule`]
+    /// and rolls back, so no immutable version row and no pointer advance can
+    /// land on it — even when the settlement committed after a caller's
+    /// pre-check. System derivations are deliberately exempt.
+    ///
     /// Returns the new [`CoreContextRecord`].
     ///
     /// # Errors
     /// Returns [`CoreContextError`] if step application fails,
-    /// [`CoreContextError::NotFound`] when the schedule row is absent, and
+    /// [`CoreContextError::NotFound`] when the schedule row is absent,
     /// [`CoreContextError::VersionRace`] when the pointer no longer named the
-    /// version this step derived from.
+    /// version this step derived from, and
+    /// [`CoreContextError::TerminalSchedule`] when a user edit targets a
+    /// terminal schedule.
     pub async fn apply(
         &self,
         schedule_id: &ScheduleId,
@@ -245,20 +266,43 @@ impl CoreContextManager {
             .await
             .map_err(|e| CoreContextError::Database(begin_error(e)))?;
 
-        // The schedule row's pointer is the version authority.
-        let current = sqlx::query_scalar::<_, i64>(
-            "SELECT current_core_context_version FROM creator_schedules WHERE schedule_id = ?",
+        // The schedule row's pointer is the version authority. `status` is read
+        // in the SAME statement — and the same `BEGIN IMMEDIATE` transaction —
+        // because the USER-edit admission below must be atomic with the append:
+        // a settlement that committed before this transaction took the writer
+        // lock is visible to this read, and one that commits afterwards cannot
+        // (the writer lock is ours until this transaction ends).
+        let (current, status) = sqlx::query_as::<_, (i64, String)>(
+            "SELECT current_core_context_version, status FROM creator_schedules \
+             WHERE schedule_id = ?",
         )
         .bind(&schedule_id_owned)
         .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| CoreContextError::NotFound(schedule_id.0.clone()))?;
+
+        // Terminal admission for USER edits: an edit must not land on a
+        // schedule that already settled. Gated on the author, so every system
+        // derivation keeps writing (a terminal schedule still receives its
+        // final context). The whole transaction rolls back — no immutable
+        // version row, no pointer advance.
+        if matches!(&author, CoreContextAuthor::User { .. }) && terminal_status(&status) {
+            tx.rollback().await?;
+            return Err(CoreContextError::TerminalSchedule(
+                schedule_id.0.clone(),
+                status,
+            ));
+        }
+
         let current_version = CoreContextVersion(u32::try_from(current).unwrap_or_default());
         let new_version = CoreContextVersion(current_version.0 + 1);
 
         // Compute new payload from the previous (pointed-at) content.
-        let previous_payload =
-            Some(read_version_in_tx(&mut tx, &schedule_id_owned, current_version).await?.content);
+        let previous_payload = Some(
+            read_version_in_tx(&mut tx, &schedule_id_owned, current_version)
+                .await?
+                .content,
+        );
 
         let new_payload = apply_step(previous_payload.as_ref(), &step, &author)?;
 
@@ -917,6 +961,16 @@ fn json_merge(base: &serde_json::Value, patch: &serde_json::Value) -> serde_json
     }
 }
 
+/// Whether a stored `creator_schedules.status` is terminal for USER edits.
+///
+/// The same three values the Core pre-check names, and the same set the
+/// supervisor's own admission queries exclude (`status NOT IN ('completed',
+/// 'failed', 'cancelled')`); the strings are the stored snake_case form of
+/// `ScheduleStatus`'s terminal variants.
+fn terminal_status(status: &str) -> bool {
+    matches!(status, "completed" | "cancelled" | "failed")
+}
+
 /// Map a [`DerivationStep`] to its storage string tag.
 const fn derivation_kind_str(step: &DerivationStep) -> &'static str {
     match step {
@@ -1185,6 +1239,111 @@ mod tests {
         assert_eq!(record.version, CoreContextVersion(1));
     }
 
+    // ---------- P1: terminal admission for USER edits ----------
+
+    /// Settle a schedule exactly as the supervisor does: the stored status is
+    /// the lowercase snake_case name, and the three terminal values are the
+    /// ones the user-edit admission refuses.
+    async fn settle_schedule(pool: &SqlitePool, schedule_id: &str, status: &str) {
+        let now = chrono::Utc::now().timestamp();
+        // SAFETY: test-only — DML helper for test state setup.
+        sqlx::query(
+            "UPDATE creator_schedules SET status = ?, updated_at = ? WHERE schedule_id = ?",
+        )
+        .bind(status)
+        .bind(now)
+        .bind(schedule_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    /// How many immutable `core_context_versions` rows `schedule_id` owns.
+    async fn version_row_count(pool: &SqlitePool, schedule_id: &str) -> i64 {
+        sqlx::query_scalar("SELECT COUNT(*) FROM core_context_versions WHERE schedule_id = ?")
+            .bind(schedule_id)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    /// A user edit that reaches the writer AFTER the schedule settled must be
+    /// refused by the append transaction itself — the status admission lives in
+    /// the same `BEGIN IMMEDIATE` transaction as the insert and the conditional
+    /// pointer advance, so the settlement cannot slip into the window between a
+    /// caller's pre-check and this writer's turn.
+    ///
+    /// The observable contract: the refused edit leaves NO extra immutable row
+    /// and NO pointer advance, for every terminal status; a SYSTEM derivation on
+    /// the same terminal schedule still writes.
+    #[tokio::test]
+    async fn user_edit_on_a_terminal_schedule_inserts_no_version() {
+        let (pool, _db) = fresh_pool().await;
+        let mgr = CoreContextManager::new(pool);
+
+        for status in ["completed", "cancelled", "failed"] {
+            let sid = ScheduleId(format!("TERM-{status}"));
+            insert_test_schedule(&mgr.pool, &sid.0).await;
+            mgr.apply_seed(&sid, "seeded", CoreContextAuthor::System)
+                .await
+                .unwrap();
+            settle_schedule(&mgr.pool, &sid.0, status).await;
+            let before = version_row_count(&mgr.pool, &sid.0).await;
+
+            let err = mgr
+                .apply_user_edit(
+                    &sid,
+                    EditOp::Append {
+                        body: " too late".to_string(),
+                    },
+                    Some("u1".to_string()),
+                )
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(err, CoreContextError::TerminalSchedule(_, _)),
+                "{status}: expected a terminal refusal, got {err:?}"
+            );
+            let reason = err.to_string();
+            assert!(
+                reason.contains(status),
+                "{status}: names the status: {reason}"
+            );
+            assert!(
+                reason.contains("terminal"),
+                "{status}: names the refusal: {reason}"
+            );
+
+            assert_eq!(
+                version_row_count(&mgr.pool, &sid.0).await,
+                before,
+                "{status}: the refused edit must not insert a version row"
+            );
+            assert_eq!(
+                mgr.current_version(&sid).await.unwrap(),
+                CoreContextVersion(0),
+                "{status}: the refused edit must not advance the pointer"
+            );
+            let snapshot = mgr.current_snapshot(&sid).await.unwrap();
+            assert!(
+                matches!(snapshot.content, CoreContextPayload::Text { ref body } if body == "seeded"),
+                "{status}: the committed payload is untouched"
+            );
+
+            // The exemption is deliberate: a system derivation still writes the
+            // terminal schedule's final context — only the USER edit is fenced.
+            let record = mgr
+                .apply_llm_summarize(&sid, "final summary", [0u8; 32], "context.summarize")
+                .await
+                .unwrap();
+            assert_eq!(
+                record.version,
+                CoreContextVersion(1),
+                "{status}: a system derivation must keep writing"
+            );
+        }
+    }
+
     #[test]
     fn json_merge_shallow() {
         let base = serde_json::json!({"a": 1, "b": 2});
@@ -1275,7 +1434,10 @@ mod tests {
         let reason = ambiguous.unwrap_err().to_string();
         assert!(reason.contains("run-head-1"), "names the run: {reason}");
         assert!(reason.contains("HEAD-OWNED"), "names both owners: {reason}");
-        assert!(reason.contains("HEAD-SECOND"), "names both owners: {reason}");
+        assert!(
+            reason.contains("HEAD-SECOND"),
+            "names both owners: {reason}"
+        );
     }
 
     // ---------- R6: Per-schedule version bump race ----------

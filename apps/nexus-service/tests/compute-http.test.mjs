@@ -221,7 +221,7 @@ describe('compute-http (v1.195 P2-T3)', () => {
     for (const [method, path] of required) {
       assert.ok(
         mounted.has(`${method} ${path}`),
-        `missing mounted identity: ${method} ${path}\nmounted:\n${[...mounted].sort().join('\n')}`,
+        `missing mounted identity: ${method} ${path}\nmounted:\n${[...mounted].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).join('\n')}`,
       );
     }
     // Every Compute identity is creator-tier: the WASM edge is never reachable

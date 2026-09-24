@@ -184,8 +184,7 @@ impl CoreService {
                     Ok(_warmed) => {
                         deps.compute_engine = Some(engine);
                         deps.compute_cache = Some(cache);
-                        deps.compute_serializer =
-                            Some(Arc::new(tokio::sync::Semaphore::new(1)));
+                        deps.compute_serializer = Some(Arc::new(tokio::sync::Semaphore::new(1)));
                     }
                     Err(error) => {
                         tracing::error!(
@@ -714,7 +713,10 @@ mod tests {
         let recovered_session: SessionId;
 
         {
-            let deps = core.hosted_workspace_deps().await.expect("workspace bundle");
+            let deps = core
+                .hosted_workspace_deps()
+                .await
+                .expect("workspace bundle");
 
             // ── The bundle is bound to the selected root, not a caller path. ──
             assert_eq!(
@@ -939,7 +941,9 @@ mod tests {
         use std::os::unix::ffi::OsStrExt as _;
 
         let home = tempfile::tempdir().expect("sentinel home");
-        let raw = home.path().join(std::ffi::OsStr::from_bytes(b"creative-\xff"));
+        let raw = home
+            .path()
+            .join(std::ffi::OsStr::from_bytes(b"creative-\xff"));
         assert!(raw.to_str().is_none(), "the fixture must not be UTF-8");
         // The name a lossy conversion would substitute exists as a real
         // directory — the wrong root those ports must never commit through.
@@ -1042,7 +1046,10 @@ mod tests {
         );
         for dir in [&sentinel, &target] {
             assert!(
-                std::fs::read_dir(dir).expect("fixture dir").next().is_none(),
+                std::fs::read_dir(dir)
+                    .expect("fixture dir")
+                    .next()
+                    .is_none(),
                 "the refusal must not touch {}",
                 dir.display()
             );
@@ -1147,7 +1154,10 @@ mod tests {
         );
         for dir in [&sentinel, &target] {
             assert!(
-                std::fs::read_dir(dir).expect("fixture dir").next().is_none(),
+                std::fs::read_dir(dir)
+                    .expect("fixture dir")
+                    .next()
+                    .is_none(),
                 "the refusal must not touch {}",
                 dir.display()
             );
@@ -1295,10 +1305,7 @@ mod tests {
         );
 
         let report = core_a.close().await.expect("confirmed close");
-        assert_eq!(
-            report.state,
-            nexus_contracts::CoreCloseReportState::Closed
-        );
+        assert_eq!(report.state, nexus_contracts::CoreCloseReportState::Closed);
         assert!(report.cleanup_confirmed);
         assert!(
             owner_a.is_settled(),
@@ -1367,9 +1374,7 @@ mod tests {
     #[tokio::test]
     async fn settled_hosted_composition_is_released_when_the_owner_is_dropped() {
         let fx = fixture().await;
-        let coordinator_probe: std::sync::Weak<
-            crate::execution::workflow::WorkflowRunCoordinator,
-        >;
+        let coordinator_probe: std::sync::Weak<crate::execution::workflow::WorkflowRunCoordinator>;
         let manager_probe: std::sync::Weak<WorkspaceSessionManager>;
         {
             let core = open_core(&fx).await;
@@ -1521,7 +1526,10 @@ mod tests {
         let selected_session: SessionId;
 
         {
-            let deps = core.hosted_workspace_deps().await.expect("workspace bundle");
+            let deps = core
+                .hosted_workspace_deps()
+                .await
+                .expect("workspace bundle");
             let executor = deps.workspace_executor.clone().expect("workspace executor");
             let authority = deps.workspace_commit.clone().expect("commit authority");
 
@@ -1551,7 +1559,9 @@ mod tests {
                 .open_session(&foreign_root_string, "notes", true)
                 .await
                 .expect("foreign session");
-            let gate = Arc::new(test_hooks::OwnerGate::for_session(foreign_session.to_string()));
+            let gate = Arc::new(test_hooks::OwnerGate::for_session(
+                foreign_session.to_string(),
+            ));
             test_hooks::set_owner_gate(Some(Arc::clone(&gate)));
             let foreign_commit = {
                 let manager = Arc::clone(&manager);
@@ -1581,7 +1591,8 @@ mod tests {
                 "the armed crash point must interrupt the foreign root's apply"
             );
             assert_eq!(
-                std::fs::read(foreign_root.join("notes/foreign.txt")).expect("foreign applied bytes"),
+                std::fs::read(foreign_root.join("notes/foreign.txt"))
+                    .expect("foreign applied bytes"),
                 PAYLOAD
             );
         }

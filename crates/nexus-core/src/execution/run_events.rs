@@ -444,7 +444,13 @@ impl WorkflowSubscription {
         root_run_id: String,
         control: SseFrame,
     ) -> Self {
-        Self::new(creator_id, core_generation, root_run_id, None, Some(control))
+        Self::new(
+            creator_id,
+            core_generation,
+            root_run_id,
+            None,
+            Some(control),
+        )
     }
 
     #[must_use]

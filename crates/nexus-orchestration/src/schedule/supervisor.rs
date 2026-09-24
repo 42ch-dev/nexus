@@ -1905,7 +1905,8 @@ impl ScheduleSupervisor {
         if cancelled.rows_affected() == 1 {
             // A cancelled row owns no run, so it can never be in the running
             // set; drop any stale cache entry all the same.
-            self.remove_from_running_cache(schedule_id, creator_id).await;
+            self.remove_from_running_cache(schedule_id, creator_id)
+                .await;
             return Ok(ScheduleCancelDisposition::Cancelled);
         }
 
