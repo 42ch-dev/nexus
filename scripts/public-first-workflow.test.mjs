@@ -247,6 +247,36 @@ test('a covering gap is accepted only as the closed eviction outcome, and unsafe
   assert.deepEqual(trimmed.missing_successors, [`${EPOCH}:2`, `${EPOCH}:3`]);
   assert.deepEqual(trimmed.replayed_ids, [`${EPOCH}:4`, `${EPOCH}:5`]);
 
+  // A gap may not contradict the very frames the same replay delivered: it
+  // states they are gone, so its range and the delivered frames must be
+  // disjoint. Adjacent (2..3 + :4/:5, above) is the legal trim shape; the two
+  // shapes below deliver a frame the gap claims was lost.
+  assert.throws(
+    () =>
+      classifyReplay([
+        { id: `${EPOCH}:5`, event: 'gap', data: gapData(2, 5) },
+        { id: `${EPOCH}:4`, event: 'run_state', data: '{}' },
+        { id: `${EPOCH}:5`, event: 'run_state', data: '{}' },
+      ]),
+    (error) => {
+      assertDriverFailure(error, 'failed', 'replay_gap_overlaps_delivered');
+      return true;
+    },
+  );
+  assert.throws(
+    () =>
+      classifyReplay([
+        { id: `${EPOCH}:3`, event: 'gap', data: gapData(2, 3) },
+        { id: `${EPOCH}:3`, event: 'run_state', data: '{}' },
+        { id: `${EPOCH}:4`, event: 'run_state', data: '{}' },
+        { id: `${EPOCH}:5`, event: 'run_state', data: '{}' },
+      ]),
+    (error) => {
+      assertDriverFailure(error, 'failed', 'replay_gap_overlaps_delivered');
+      return true;
+    },
+  );
+
   // Unsafe / out-of-vocabulary bounds are not a bounded gap at all.
   assert.equal(parseGapFrame({ event: 'gap', data: gapData(0, 1e100) }), null);
   assert.equal(parseGapFrame({ event: 'gap', data: gapData(2, 1e100) }), null);

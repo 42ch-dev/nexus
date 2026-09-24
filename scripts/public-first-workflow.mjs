@@ -2241,18 +2241,21 @@ function parseHistoryUnavailableFrame(frame) {
  *     no explicit gap narrowing the record;
  *   * `gap` — the ring answered with an explicit bounded `gap` (safe-integer,
  *     1-based range) whose range covers every successor the cursor promised:
- *     recorded verbatim (run/epoch/from/to) instead of an invented history. When
- *     the gap is the WHOLE answer, §4's eviction close applies: the server must
- *     have closed the stream on it (`closed` and not the driver's own window),
- *     so a gap followed by an idle window is refused rather than reported as an
- *     honest history. A retention gap that arrives together with the retained
- *     successors is the live replay case and keeps its bounded record.
+ *     recorded verbatim (run/epoch/from/to) instead of an invented history. Its
+ *     range must be DISJOINT from the data frames the same replay delivered (a
+ *     gap states those frames are gone), otherwise the response contradicts
+ *     itself. When the gap is the WHOLE answer, §4's eviction close applies: the
+ *     server must have closed the stream on it (`closed` and not the driver's own
+ *     window), so a gap followed by an idle window is refused rather than
+ *     reported as an honest history. A retention gap that arrives together with
+ *     the retained successors is the live replay case and keeps its bounded
+ *     record.
  *
  * Everything else refuses: a replayed frame outside the cursor's epoch, a
  * cursor-less data frame, a repeated or reordered successor, a
  * `history_unavailable` close for a run whose ring is live, a malformed or
- * unsafe `gap`, a covering gap that did not close, or successors the replay
- * silently dropped.
+ * unsafe `gap`, a gap overlapping frames the replay delivered, a covering gap
+ * that did not close, or successors the replay silently dropped.
  *
  * @throws {DriverFailure} `failed`/<replay category> on any other outcome.
  */
@@ -2337,6 +2340,24 @@ function classifySameRunReplay({ runId, cursor, observedIds, read }) {
     }
     lastReplayedSequence = parsed.sequence;
     replayed.push({ id: frame.id, event: frame.event ?? null, sequence: parsed.sequence });
+  }
+  // A gap and a delivered data frame cannot describe the same sequence: the gap
+  // states those frames are gone, so the two sets must be DISJOINT. Without this
+  // check a `gap 2..5` alongside delivered `…:4, …:5` passed as a bounded gap —
+  // a response that contradicts itself about 4 and 5 — because only the MISSING
+  // successors were compared against the range.
+  for (const gap of gaps) {
+    const contradicted = replayed.filter(
+      (frame) => frame.sequence >= gap.from_sequence && frame.sequence <= gap.to_sequence,
+    );
+    if (contradicted.length > 0) {
+      throw failed(
+        'replay_gap_overlaps_delivered',
+        `the gap ${gap.from_sequence}..${gap.to_sequence} covers frame(s) this same replay DELIVERED ` +
+          `(${contradicted.map((frame) => frame.id).join(', ')}); a gap states those frames are gone, so its range ` +
+          'and the delivered frames must be disjoint',
+      );
+    }
   }
   const replayedIds = new Set(replayed.map((frame) => frame.id));
   // Delivery-order reconciliation: the successors the reconnect replayed must
