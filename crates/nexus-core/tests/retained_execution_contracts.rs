@@ -4586,7 +4586,7 @@ const CLOSE_OBSERVATION_WINDOW: std::time::Duration = std::time::Duration::from_
 /// Whether `task` finished within `window` (checked without consuming it).
 #[cfg(feature = "test-hooks")]
 async fn finished_within<T>(
-    task: &mut tokio::task::JoinHandle<T>,
+    task: &tokio::task::JoinHandle<T>,
     window: std::time::Duration,
 ) -> bool {
     tokio::time::timeout(window, async {
@@ -4673,6 +4673,34 @@ async fn settled_revision(core: &CoreService, session_id: &str) -> String {
         .revision
 }
 
+/// The next owner over the same home must be a NEW admission that reads the
+/// revision the drained work settled.
+///
+/// The shared tail of the close-vs-commit regressions: call it AFTER the close
+/// under test has confirmed, so the reopened workspace proves the boundary the
+/// close sealed is the one the next admission starts from.
+#[cfg(feature = "test-hooks")]
+async fn assert_a_new_admission_reads_the_settled_revision(
+    fixture: &HostedFixture,
+    epoch_a: i64,
+    session_id: &str,
+) {
+    let (core_b, _host_b, handle_b) = open_hosted_owner(fixture.tmp.path()).await;
+    assert!(
+        handle_b.engine_epoch() > epoch_a,
+        "the next owner must be a NEW admission ({} -> {})",
+        epoch_a,
+        handle_b.engine_epoch()
+    );
+    let revision = settled_revision(&core_b, session_id).await;
+    assert!(
+        revision.starts_with("rev_"),
+        "the next owner reads the settled revision, got {revision}"
+    );
+    handle_b.close().await.expect("close the next owner");
+    core_b.close().await.expect("close the next core");
+}
+
 /// A confirmed close WAITS for every already-admitted durable workspace commit.
 ///
 /// `handle.commit_workspace` runs on a RETAINED owner task that outlives its
@@ -4693,12 +4721,12 @@ async fn close_drains_an_admitted_durable_commit_before_releasing_the_authority(
 
     // Close now. While the admitted commit is still applying, NO confirmed
     // close, NO released lease and NO replacement owner may appear.
-    let mut closer = {
+    let closer = {
         let core = fixture.core.clone();
         tokio::spawn(async move { core.close().await })
     };
     assert!(
-        !finished_within(&mut closer, CLOSE_OBSERVATION_WINDOW).await,
+        !finished_within(&closer, CLOSE_OBSERVATION_WINDOW).await,
         "close reported a settled state while an admitted durable commit was still applying"
     );
     assert!(
@@ -4733,20 +4761,7 @@ async fn close_drains_an_admitted_durable_commit_before_releasing_the_authority(
 
     // ... and the NEXT owner over the same home is a NEW admission (advanced
     // engine epoch) that reads that commit's durable revision.
-    let (core_b, _host_b, handle_b) = open_hosted_owner(&home).await;
-    assert!(
-        handle_b.engine_epoch() > epoch_a,
-        "the next owner must be a NEW admission ({} -> {})",
-        epoch_a,
-        handle_b.engine_epoch()
-    );
-    let revision = settled_revision(&core_b, &session_id).await;
-    assert!(
-        revision.starts_with("rev_"),
-        "the next owner reads the settled revision, got {revision}"
-    );
-    handle_b.close().await.expect("close the next owner");
-    core_b.close().await.expect("close the next core");
+    assert_a_new_admission_reads_the_settled_revision(&fixture, epoch_a, &session_id).await;
 }
 
 /// An INTERRUPTED close neither confirms nor releases anything, and the retry
@@ -4817,20 +4832,7 @@ async fn an_interrupted_close_is_retried_honestly() {
     );
 
     // The home is free again: a fresh owner takes a NEW admission.
-    let (core_b, _host_b, handle_b) = open_hosted_owner(&home).await;
-    assert!(
-        handle_b.engine_epoch() > epoch_a,
-        "the next owner must be a NEW admission ({} -> {})",
-        epoch_a,
-        handle_b.engine_epoch()
-    );
-    let revision = settled_revision(&core_b, &session_id).await;
-    assert!(
-        revision.starts_with("rev_"),
-        "the next owner reads the settled revision, got {revision}"
-    );
-    handle_b.close().await.expect("close the next owner");
-    core_b.close().await.expect("close the next core");
+    assert_a_new_admission_reads_the_settled_revision(&fixture, epoch_a, &session_id).await;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4967,12 +4969,12 @@ async fn a_direct_durable_commit_is_drained_before_the_close_releases_the_author
 
     // Close while the direct commit is parked mid-apply: no settled close, no
     // released lease and no replacement authority may appear.
-    let mut closer = {
+    let closer = {
         let core = fixture.core.clone();
         tokio::spawn(async move { core.close().await })
     };
     assert!(
-        !finished_within(&mut closer, CLOSE_OBSERVATION_WINDOW).await,
+        !finished_within(&closer, CLOSE_OBSERVATION_WINDOW).await,
         "close settled while a direct durable commit through the retained manager was still applying"
     );
     assert!(
@@ -5013,20 +5015,7 @@ async fn a_direct_durable_commit_is_drained_before_the_close_releases_the_author
 
     // The next owner over the same home is a NEW admission that reads the
     // revision the direct commit settled.
-    let (core_b, _host_b, handle_b) = open_hosted_owner(&home).await;
-    assert!(
-        handle_b.engine_epoch() > epoch_a,
-        "the next owner must be a NEW admission ({} -> {})",
-        epoch_a,
-        handle_b.engine_epoch()
-    );
-    let revision = settled_revision(&core_b, &session_id).await;
-    assert!(
-        revision.starts_with("rev_"),
-        "the next owner reads the settled revision, got {revision}"
-    );
-    handle_b.close().await.expect("close the next owner");
-    core_b.close().await.expect("close the next core");
+    assert_a_new_admission_reads_the_settled_revision(&fixture, epoch_a, &session_id).await;
 }
 
 /// Which direct recoverable entrance a caller-cancellation regression drives.
@@ -5137,12 +5126,12 @@ async fn cancelled_direct_caller_is_drained_by_the_close(entrance: DirectEntranc
     // re-read after the confirmation). While the commit the cancelled caller
     // left behind is still applying, NO confirmed close, NO released lease and
     // NO replacement owner may appear.
-    let mut closer = {
+    let closer = {
         let handle = Arc::clone(&fixture.handle);
         tokio::spawn(async move { handle.close().await })
     };
     assert!(
-        !finished_within(&mut closer, CLOSE_OBSERVATION_WINDOW).await,
+        !finished_within(&closer, CLOSE_OBSERVATION_WINDOW).await,
         "close settled after a cancelled direct caller left its admitted commit in flight"
     );
     assert!(
@@ -5198,20 +5187,7 @@ async fn cancelled_direct_caller_is_drained_by_the_close(entrance: DirectEntranc
     // the next owner over the same home is a NEW admission that reads the
     // revision the drained commit settled.
     fixture.core.close().await.expect("the core close");
-    let (core_b, _host_b, handle_b) = open_hosted_owner(&home).await;
-    assert!(
-        handle_b.engine_epoch() > epoch_a,
-        "the next owner must be a NEW admission ({} -> {})",
-        epoch_a,
-        handle_b.engine_epoch()
-    );
-    let revision = settled_revision(&core_b, &session_id).await;
-    assert!(
-        revision.starts_with("rev_"),
-        "the next owner reads the settled revision, got {revision}"
-    );
-    handle_b.close().await.expect("close the next owner");
-    core_b.close().await.expect("close the next core");
+    assert_a_new_admission_reads_the_settled_revision(&fixture, epoch_a, &session_id).await;
 }
 
 /// `commit_session_durable` through the manager: a cancelled caller keeps the
@@ -5368,12 +5344,12 @@ async fn cancelled_recovery_caller_is_drained_by_the_close(entrance: RecoveryEnt
     // re-read after the confirmation). While the pass the cancelled caller left
     // behind is still running, NO confirmed close, NO released lease and NO
     // replacement owner may appear.
-    let mut closer = {
+    let closer = {
         let handle = Arc::clone(&fixture.handle);
         tokio::spawn(async move { handle.close().await })
     };
     assert!(
-        !finished_within(&mut closer, CLOSE_OBSERVATION_WINDOW).await,
+        !finished_within(&closer, CLOSE_OBSERVATION_WINDOW).await,
         "close settled after a cancelled recovery caller left its admitted pass in flight"
     );
     assert!(
@@ -5429,20 +5405,7 @@ async fn cancelled_recovery_caller_is_drained_by_the_close(entrance: RecoveryEnt
     // the next owner over the same home is a NEW admission that reads the
     // revision the recovered commit settled.
     fixture.core.close().await.expect("the core close");
-    let (core_b, _host_b, handle_b) = open_hosted_owner(&home).await;
-    assert!(
-        handle_b.engine_epoch() > epoch_a,
-        "the next owner must be a NEW admission ({} -> {})",
-        epoch_a,
-        handle_b.engine_epoch()
-    );
-    let revision = settled_revision(&core_b, &session_id).await;
-    assert!(
-        revision.starts_with("rev_"),
-        "the next owner reads the recovered revision, got {revision}"
-    );
-    handle_b.close().await.expect("close the next owner");
-    core_b.close().await.expect("close the next core");
+    assert_a_new_admission_reads_the_settled_revision(&fixture, epoch_a, &session_id).await;
 }
 
 /// Whole-DB `startup_recovery` through the manager: a cancelled caller keeps
