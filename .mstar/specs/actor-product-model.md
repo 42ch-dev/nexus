@@ -128,6 +128,16 @@ One stable service-managed holder KE belongs to each Creator and Character ident
 - The ACP session (`HostSessionId`) is a pipe: isolation boundary, not identity (§2.1).
 - Actor identity in Moment context is optional and additive; the Creator-only execution path is byte-stable (§8).
 
+### 6.1 Current-host HTTP completion (accepted target, not yet delivered)
+
+The supported completion target is the existing `POST /v1/daemon/agent-host/sessions` and `POST /v1/daemon/agent-host/sessions/{session_id}/operations` surface. A well-formed Actor/viewpoint pair must reach the existing core Actor authority instead of the current `501 route_not_migrated` refusal. Retired `creator character run` and `creator character soul reflect` CLI entrances are not restored.
+
+The native service attaches that authority once to its already admitted HostManager; it must not start another Host, provider factory, runtime or engine. Stored Creator/Character/World/binding and holder/knowledge admission remains Rust-owned at create and every effect. Native list/get echoes the Actor pair, and cache eviction must not turn an Actor session into a provider-only session. Prompt, operation inspection, bounded SSE, cancellation, shutdown and confirmed service close all use the same admitted owner. A raw native provider call is not an Actor-authorization bypass. Provider-only bodies omitting both pair members retain their existing path.
+
+Core, not an SSE subscriber, owns the original execution drain. A matching `end_turn` is successful; `max_tokens`, `max_turn_requests` and `refusal` are incomplete; accepted cancellation is cancelled; matching failure, stream fault, session stop or EOF before terminal is failed. The first matching terminal/fault is immutable. Delivery gaps are not successful transcripts. Character detailed status uses the existing `CharacterOperationResult`; generic/recovered provider journal status is not proof of Character success. Detailed outcomes remain bounded/process-lifetime (§11.6), with no automatic replay on restart.
+
+**Current-host capture limit:** the current core Host has a reservation but no complete run-capture writer. This completion target executes `remember` absent/false with capture disabled. Character `remember:true` is explicitly refused before provider/memory effects (HTTP `501 route_not_migrated`; native/core typed `not_supported`). Non-Character `remember:true` retains the existing HTTP `422 invalid_input`. It must never return a permanently pending or fabricated captured result. Historical v1.185 capture behavior below is not a claim that this newer Host entrance implements capture. Reintroducing capture requires a separately accepted complete integration of the existing memory owner, not a second pipeline.
+
 ## 7. Viewpoint — subordinate execution context
 
 **Viewpoint** is subordinate **execution context** paired with an `ActorRef` — logically `{world_id, optional binding_id/branch_id/event_id}` — describing *from where* that Actor acts or reads within a session. Character execution requires the binding id; Creator execution omits it. Viewpoint does not repeat an actor id, is **not** identity, is **not** an Actor kind, and is **not** the name of any Character↔World association. The earlier Viewpoint-as-identity direction is superseded (§0).
@@ -290,6 +300,8 @@ Updates/deletes require a live row (not `deleted|merged|deprecated`) and active 
 Any referent gives `knowledge_entry_in_use`, no counts/foreign ids disclosed. Invalid JSON in a reference-bearing document prevents proving absence: `knowledge_reference_state_invalid`, zero mutation. SQL `EXISTS`/JSON traversal, not unbounded Rust materialization; unknown modules are preserved and conservatively protected when they contain an exact id. Free-text summary/proposition mentions are not inferred references; the id must be an entire JSON string value, not text containing it. Do not scan unrelated text files or invent a generic reference index. FK constraints remain a final defense; live-scope ToM CAS + derivative insertion remains atomic. Existing World-owned relation/participant writers do not gain Character-owner support.
 
 ### 11.6 Successful run → pending candidate
+
+**Historical scope:** this section describes the v1.185 entrance. The retired CLI and the current-host capture exclusion in §6.1 must not be presented as currently supported by the standalone-service Host. Its reusable identity, bounded observation and terminal/cancellation invariants remain requirements; the new entrance does not claim the historical run-capture integration.
 
 `schemas/daemon-api/agent-host/execute-operation-request.schema.json` adds optional boolean `remember` **only to Prompt**; absent/false keeps current execution and performs no memory capture. `remember:true` requires a stored admitted Character session with an exact binding; Creator/legacy sessions reject HTTP 422 `invalid_input` before Host execution. No actor, binding, digest or operation id supplied in the Prompt request can claim capture authority.
 
