@@ -560,6 +560,27 @@ async function hydrateSessionRecord(
 }
 
 /**
+ * The authority's own generic operation row for one id, or `null` when it serves
+ * none. Deliberately not cache-first: an Actor arm must never take the
+ * provider-only mirror as its canonical observation, and an expired Actor
+ * observation is absent rather than resurrected from a stale row.
+ */
+async function authorityOperationRow(
+  service: ServiceCore,
+  operationId: string,
+): Promise<{ operation_id: string; session_id: string; status: string } | null> {
+  try {
+    const response = await hostQuery(service, { query: 'get_operation', operation_id: operationId });
+    return response.operation ?? null;
+  } catch (error) {
+    const mapped = mapNativeError(error);
+    if (mapped.code === 'not_found') return null;
+    if (mapped.code === 'invalid_input' && mapped.message === 'host not started') return null;
+    throw mapped;
+  }
+}
+
+/**
  * Hydrate an operation from native truth, preserving the native status so a
  * terminal operation is never mistaken for a cancellable one.
  */
@@ -569,27 +590,19 @@ async function hydrateOperationRecord(
 ): Promise<ProviderOperationRecord | null> {
   const cached = service.providerRegistry.operationRecord(operationId);
   if (cached) return cached;
-  try {
-    const response = await hostQuery(service, { query: 'get_operation', operation_id: operationId });
-    const operation = response.operation;
-    if (!operation) return null;
-    const session = await hydrateSessionRecord(service, operation.session_id);
-    const record: ProviderOperationRecord = {
-      operationId: operation.operation_id,
-      sessionId: operation.session_id,
-      providerId: session?.providerId ?? '',
-      status: operation.status,
-      terminalEvent: null,
-      terminalTranscript: null,
-    };
-    service.providerRegistry.registerOperation(record);
-    return record;
-  } catch (error) {
-    const mapped = mapNativeError(error);
-    if (mapped.code === 'not_found') return null;
-    if (mapped.code === 'invalid_input' && mapped.message === 'host not started') return null;
-    throw mapped;
-  }
+  const operation = await authorityOperationRow(service, operationId);
+  if (!operation) return null;
+  const session = await hydrateSessionRecord(service, operation.session_id);
+  const record: ProviderOperationRecord = {
+    operationId: operation.operation_id,
+    sessionId: operation.session_id,
+    providerId: session?.providerId ?? '',
+    status: operation.status,
+    terminalEvent: null,
+    terminalTranscript: null,
+  };
+  service.providerRegistry.registerOperation(record);
+  return record;
 }
 
 /**
@@ -724,9 +737,11 @@ function providerEventSource(
 
 /**
  * The Actor authority arm: fresh native truth re-authorizes the `(session,
- * operation)` association and supplies the canonical run status, while the
+ * operation)` association — an id the authority does not own as a Character
+ * operation is absent, and one owned by another session is forbidden — while the
  * bounded observation of that same operation is pulled with the authority's own
- * `nextHostEvents` — never the downgraded provider lane.
+ * `nextHostEvents`, never the downgraded provider lane. The run's outcome stays
+ * the authority's on-demand read; the mirror only keeps the association.
  */
 async function actorEventSource(
   service: ServiceCore,
@@ -746,15 +761,7 @@ async function actorEventSource(
     });
   }
   const existingHub = service.providerRegistry.hubForOperation(operationId);
-  service.providerRegistry.registerOperation({
-    operationId,
-    sessionId,
-    providerId: actor.providerId,
-    status: character.run_status === 'running' ? 'running' : character.run_status,
-    terminalEvent: null,
-    terminalTranscript: null,
-    actorBacked: true,
-  });
+  service.providerRegistry.markActorOperation(operationId, sessionId, actor.providerId);
   const hub =
     existingHub ??
     service.providerRegistry.ensureHub(
@@ -880,6 +887,56 @@ async function runEventStream(
   }
 }
 
+/**
+ * The Creator Actor arm: the authority owns the operation and answers for it,
+ * but retains no event stream for a Creator prompt — its observation is the
+ * generic operation row, not a Character result (technical contract §5). The
+ * stream therefore reports the bounded `history_unavailable` resync gap that
+ * points a consumer at that canonical read, instead of 404-ing an operation the
+ * authority does own or narrowing the Actor id into the provider-only lane.
+ */
+async function creatorActorEventSource(
+  service: ServiceCore,
+  actor: ProviderSessionRecord,
+  sessionId: string,
+  operationId: string,
+): Promise<OperationEventSource> {
+  // The authority's own row is what authorizes this stream: a Creator Actor
+  // operation the authority no longer serves is absent, exactly like an expired
+  // Character observation.
+  const operation = await authorityOperationRow(service, operationId);
+  if (!operation) {
+    throw new HttpError(404, 'not_found', `operation ${operationId} not found`, {
+      resource: `operation:${operationId}`,
+    });
+  }
+  if (operation.session_id !== sessionId) {
+    throw new HttpError(403, 'forbidden', 'operation does not belong to session', {
+      resource: `operation:${operationId}`,
+    });
+  }
+  service.providerRegistry.markActorOperation(operationId, sessionId, actor.providerId);
+  const hub = service.providerRegistry.ensureHub(
+    operationId,
+    () => new OperationEventHub(operationId, sessionId),
+  );
+  return {
+    hub,
+    initialTruthGap: () =>
+      hub.recordGap({
+        reason: 'history_unavailable',
+        operation_id: operationId,
+        resync_required: true,
+        inspect_url: inspectUrl(operationId),
+      }),
+    canonicalGap: async () => null,
+    // Unreachable while the gap above can be recorded; when the control reserve
+    // cannot hold even that frame the shared loop turns this into the same
+    // truthful interrupted resync ending.
+    pull: () => Promise.reject(new Error('a Creator Actor operation retains no event stream')),
+  };
+}
+
 export async function streamSessionEvents(
   service: ServiceCore,
   sessionId: string,
@@ -899,8 +956,13 @@ export async function streamSessionEvents(
 
   // Actor-versus-provider-only is decided by the session's native echo, so an
   // Actor operation is never served by the provider lane even on a cold mirror.
+  // The Actor KIND then decides which authority arm serves it: a Character
+  // operation has the authority's detailed outcome and its retained observation,
+  // while a Creator Actor prompt keeps the generic observation.
   const source = session.actorRef
-    ? await actorEventSource(service, session, sessionId, operationId)
+    ? session.actorRef.actor_kind === 'creator'
+      ? await creatorActorEventSource(service, session, sessionId, operationId)
+      : await actorEventSource(service, session, sessionId, operationId)
     : providerEventSource(
         service,
         await requireProviderOperation(service, sessionId, operationId),

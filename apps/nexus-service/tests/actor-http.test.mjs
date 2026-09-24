@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -542,6 +543,17 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     }
   }
 
+  /** Poll the authority's session row until its live operation is retired. */
+  async function waitForIdleSession(sessionId) {
+    const deadline = Date.now() + 30_000;
+    for (;;) {
+      const got = await jsonFetch(`/v1/daemon/agent-host/sessions/${sessionId}`);
+      if (got.status === 200 && !got.payload.active_op_id) return;
+      assert.ok(Date.now() < deadline, `session ${sessionId} never went idle: ${got.text}`);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+
   async function sseBody(sessionId, operationId) {
     const response = await fetch(
       `${url}/v1/daemon/agent-host/sessions/${sessionId}/events?operation_id=${operationId}`,
@@ -1063,6 +1075,215 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
       });
       assert.equal(refused.status, 501, refused.text);
       assert.equal(refused.payload.error.code, 'route_not_migrated');
+    }
+  });
+
+  test('a valid Creator Actor session takes the core arm for prompt, cancel and observation', async () => {
+    const creatorBody = (providerId) => ({
+      provider_id: providerId,
+      cwd: creativeRoot,
+      actor_ref: { actor_kind: 'creator', creator_id: JOURNEY_CREATOR },
+      viewpoint: { world_id: JOURNEY_WORLD },
+    });
+    const cancelsBefore = readLog(acpLog).filter((entry) => entry.event === 'cancel').length;
+
+    // 1. Both Actor kinds are admitted by the ONE core Host authority: a stored
+    //    Creator ref forbids a binding and echoes the pair (contract §4).
+    const blocked = await jsonFetch('/v1/daemon/agent-host/sessions', {
+      method: 'POST',
+      body: creatorBody(BLOCK_PROVIDER),
+    });
+    assert.equal(blocked.status, 200, blocked.text);
+    assert.deepEqual(blocked.payload.actor_ref, { actor_kind: 'creator', creator_id: JOURNEY_CREATOR });
+    assert.deepEqual(blocked.payload.viewpoint, { world_id: JOURNEY_WORLD });
+    const blockedSessionId = blocked.payload.session_id;
+
+    // 2. The prompt is a core Actor effect, and while it is the session's live
+    //    work a Creator Actor operation keeps the GENERIC observation
+    //    (contract §5): the authority's own operation row — never a Character
+    //    result and never the provider-only mirror.
+    const blockedPrompt = await jsonFetch(`/v1/daemon/agent-host/sessions/${blockedSessionId}/operations`, {
+      method: 'POST',
+      body: { kind: 'prompt', content: 'creator-cancel' },
+    });
+    assert.equal(blockedPrompt.status, 200, blockedPrompt.text);
+    const blockedOperationId = blockedPrompt.payload.operation_id;
+    const live = await jsonFetch(`/v1/daemon/agent-host/operations/${blockedOperationId}`);
+    assert.equal(live.status, 200, live.text);
+    assert.deepEqual(Object.keys(live.payload).sort(), ['operation_id', 'session_id', 'status']);
+    assert.equal(live.payload.session_id, blockedSessionId);
+    assert.equal(live.payload.status, 'running');
+
+    // 3. Cancel reaches the AUTHORITY. This host's core retains no cancellable
+    //    Creator row, so its own `not_found` is the answer — not the raw provider
+    //    cancel lane (which answered 500/internal before this fix) and not a
+    //    provider cancel the peer would have observed.
+    const cancelLive = await jsonFetch(`/v1/daemon/agent-host/operations/${blockedOperationId}`, {
+      method: 'POST',
+      body: {},
+    });
+    assert.equal(cancelLive.status, 404, cancelLive.text);
+    assert.equal(cancelLive.payload.error.code, 'not_found');
+    assert.equal(
+      readLog(acpLog).filter((entry) => entry.event === 'cancel').length,
+      cancelsBefore,
+      'an Actor operation id must never reach the provider-only cancel lane',
+    );
+
+    // 4. Observation: the authority retains no event stream for a Creator Actor
+    //    prompt, so the Actor arm answers with its bounded resync gap to
+    //    canonical truth — not the 404 the Character-only narrowing produced,
+    //    and without ever pulling the provider-only stream.
+    const { sseTestHooks } = await import(join(serviceRoot, 'dist/sse.js'));
+    const pullsBefore = sseTestHooks.providerPullCount;
+    const stream = await sseBody(blockedSessionId, blockedOperationId);
+    assert.equal(stream.status, 200);
+    const gap = stream.frames.find((frame) => frame.event === 'gap');
+    assert.ok(gap, `the Creator Actor arm must report a bounded resync gap: ${JSON.stringify(stream.frames)}`);
+    assert.equal(gap.data.reason, 'history_unavailable');
+    assert.equal(gap.data.resync_required, true);
+    assert.equal(gap.data.inspect_url, `/v1/daemon/agent-host/operations/${blockedOperationId}`);
+    assert.equal(sseTestHooks.providerPullCount, pullsBefore, 'the Actor lane must not pull the provider stream');
+
+    // 5. Once the authority stops serving its row the operation is absent (404),
+    //    never the mirror's stale `started` admission row.
+    const settledSession = await jsonFetch('/v1/daemon/agent-host/sessions', {
+      method: 'POST',
+      body: creatorBody(MAIN_PROVIDER),
+    });
+    assert.equal(settledSession.status, 200, settledSession.text);
+    const settledPrompt = await jsonFetch(
+      `/v1/daemon/agent-host/sessions/${settledSession.payload.session_id}/operations`,
+      { method: 'POST', body: { kind: 'prompt', content: 'creator-echo' } },
+    );
+    assert.equal(settledPrompt.status, 200, settledPrompt.text);
+    await waitForIdleSession(settledSession.payload.session_id);
+    const settled = await jsonFetch(`/v1/daemon/agent-host/operations/${settledPrompt.payload.operation_id}`);
+    assert.equal(settled.status, 404, settled.text);
+    assert.equal(settled.payload.error.code, 'not_found');
+    // The observe path is the same absence: no retained stream exists for an
+    // operation the authority no longer serves, so the stream is refused before
+    // headers instead of hanging or fabricating frames.
+    const settledStream = await fetch(
+      `${url}/v1/daemon/agent-host/sessions/${settledSession.payload.session_id}/events?operation_id=${settledPrompt.payload.operation_id}`,
+      { headers: { Accept: 'text/event-stream' } },
+    );
+    assert.equal(settledStream.status, 404);
+    await settledStream.body?.cancel();
+
+    await jsonFetch(`/v1/daemon/agent-host/sessions/${blockedSessionId}`, { method: 'DELETE' });
+    await jsonFetch(`/v1/daemon/agent-host/sessions/${settledSession.payload.session_id}`, { method: 'DELETE' });
+  });
+
+  test('an Actor operation the authority no longer retains is refused, never downgraded to the provider-only lane', async () => {
+    const cancelsBefore = readLog(acpLog).filter((entry) => entry.event === 'cancel').length;
+    const { hostQuery } = await import(join(serviceRoot, 'dist/world-kb.js'));
+
+    // 1. A real Creator Actor operation the authority answers for only while it
+    //    is the session's live work: once it settles, the authority retains no
+    //    row of any kind for it (no Character outcome, no operation row) while
+    //    the mirror keeps its Actor mark. That is the aged state under test.
+    const created = await jsonFetch('/v1/daemon/agent-host/sessions', {
+      method: 'POST',
+      body: {
+        provider_id: MAIN_PROVIDER,
+        cwd: creativeRoot,
+        actor_ref: { actor_kind: 'creator', creator_id: JOURNEY_CREATOR },
+        viewpoint: { world_id: JOURNEY_WORLD },
+      },
+    });
+    assert.equal(created.status, 200, created.text);
+    const sessionId = created.payload.session_id;
+    const prompt = await jsonFetch(`/v1/daemon/agent-host/sessions/${sessionId}/operations`, {
+      method: 'POST',
+      body: { kind: 'prompt', content: 'aged-out-actor' },
+    });
+    assert.equal(prompt.status, 200, prompt.text);
+    const operationId = prompt.payload.operation_id;
+    await waitForIdleSession(sessionId);
+
+    // Precondition, observed through the authority itself: nothing is retained.
+    const nativeRow = await hostQuery(service.service, { query: 'get_operation', operation_id: operationId })
+      .then((response) => response.operation ?? null)
+      .catch((error) => (error?.code === 'not_found' ? null : Promise.reject(error)));
+    assert.equal(nativeRow, null, 'precondition: the authority retains no operation row');
+    assert.equal(
+      service.service.providerRegistry.operationRecord(operationId)?.actorBacked,
+      true,
+      'precondition: the mirror still carries the Actor mark',
+    );
+
+    // 2. Fresh native absence must NOT read as provider-only ownership: the
+    //    stale Actor record is refused on both the inspect and cancel paths.
+    const got = await jsonFetch(`/v1/daemon/agent-host/operations/${operationId}`);
+    assert.equal(got.status, 404, got.text);
+    assert.equal(got.payload.error.code, 'not_found');
+    const cancel = await jsonFetch(`/v1/daemon/agent-host/operations/${operationId}`, { method: 'POST', body: {} });
+    assert.equal(cancel.status, 404, cancel.text);
+    assert.equal(cancel.payload.error.code, 'not_found');
+
+    // 3. The same rule for a Character Actor record core's bounded terminal index
+    //    has already evicted: the eviction is simulated with an id the authority
+    //    never saw (driving 1024 terminal operations is not a fixture), and the
+    //    endpoint behaviour under test does not depend on how the record aged.
+    const session = await jsonFetch('/v1/daemon/agent-host/sessions', { method: 'POST', body: actorBody() });
+    assert.equal(session.status, 200, session.text);
+    const evictedOperationId = randomUUID();
+    service.service.providerRegistry.registerOperation({
+      operationId: evictedOperationId,
+      sessionId: session.payload.session_id,
+      providerId: MAIN_PROVIDER,
+      status: 'started',
+      terminalEvent: null,
+      terminalTranscript: null,
+      actorBacked: true,
+    });
+    const evictedGot = await jsonFetch(`/v1/daemon/agent-host/operations/${evictedOperationId}`);
+    assert.equal(evictedGot.status, 404, evictedGot.text);
+    const evictedCancel = await jsonFetch(`/v1/daemon/agent-host/operations/${evictedOperationId}`, {
+      method: 'POST',
+      body: {},
+    });
+    assert.equal(evictedCancel.status, 404, evictedCancel.text);
+    assert.equal(
+      readLog(acpLog).filter((entry) => entry.event === 'cancel').length,
+      cancelsBefore,
+      'an expired Actor operation must never reach the provider-only cancel lane',
+    );
+  });
+
+  test('settled-but-unobserved Actor operations are aged out of the transport mirror', async () => {
+    const session = await jsonFetch('/v1/daemon/agent-host/sessions', { method: 'POST', body: actorBody() });
+    assert.equal(session.status, 200, session.text);
+    const sessionId = session.payload.session_id;
+    const tracked = [];
+    const retained = () => tracked.filter((id) => service.service.providerRegistry.operationRecord(id) !== undefined).length;
+
+    for (let index = 0; index < 6; index += 1) {
+      const prompt = await jsonFetch(`/v1/daemon/agent-host/sessions/${sessionId}/operations`, {
+        method: 'POST',
+        body: { kind: 'prompt', content: `unobserved-${index}` },
+      });
+      assert.equal(prompt.status, 200, prompt.text);
+      tracked.push(prompt.payload.operation_id);
+      // No SSE subscriber anywhere: the authority's own drain still settles the
+      // run, and nothing else can tell the mirror it is over.
+      assert.equal((await waitForCharacterOutcome(prompt.payload.operation_id)).run_status, 'succeeded');
+      for (const earlier of tracked.slice(0, -1)) {
+        assert.equal(
+          service.service.providerRegistry.operationRecord(earlier),
+          undefined,
+          `settled unobserved Actor operation ${earlier} must not outlive the core's retention`,
+        );
+      }
+      assert.ok(retained() <= 2, `the Actor arm must stay bounded: ${retained()} records after ${index + 1} prompts`);
+    }
+    for (const earlier of tracked.slice(0, -1)) {
+      assert.equal(
+        service.service.providerRegistry.hubForOperation(earlier),
+        undefined,
+        `a retired Actor operation must release its transport hub: ${earlier}`,
+      );
     }
   });
 

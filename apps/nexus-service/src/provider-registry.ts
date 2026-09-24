@@ -49,20 +49,27 @@ export interface ProviderOperationRecord {
  * `stopped`), the native wire statuses transcribed from `operation_status_wire`
  * in `crates/nexus-agent-host/src/providers/port.rs` (`completed` for Ready/
  * Stopped, `failed` for the error terminals), the cancel acknowledgment
- * (`cancelled`), and the native `interrupted` terminal produced when a
+ * (`cancelled`), the native `interrupted` terminal produced when a
  * `SessionStopped` settles an active JS-provider operation.
+ *
+ * The core authority's own run statuses are deliberately NOT part of this set:
+ * an Actor operation's cancellability and outcome are the authority's, read on
+ * demand, and marking a settled Actor run terminal here would make the mirror
+ * refuse the terminal frame the authority's retained observation still replays.
+ * The Actor arm is aged out from the authority's own truth instead
+ * (`retireActorOperation`).
  */
-const TERMINAL_OPERATION_STATUSES = new Set([
-  'finished',
-  'failed',
-  'stopped',
-  'completed',
-  'cancelled',
-  'interrupted',
-]);
+const TERMINAL_OPERATION_STATUS: Record<string, true> = {
+  finished: true,
+  failed: true,
+  stopped: true,
+  completed: true,
+  cancelled: true,
+  interrupted: true,
+};
 
 export function isTerminalOperationStatus(status: string): boolean {
-  return TERMINAL_OPERATION_STATUSES.has(status);
+  return TERMINAL_OPERATION_STATUS[status] === true;
 }
 
 export class ProviderRegistry {
@@ -106,6 +113,48 @@ export class ProviderRegistry {
       if (!op.terminalEvent && !isTerminalOperationStatus(op.status)) count += 1;
     }
     return count;
+  }
+
+  /**
+   * The Actor-backed records the mirror still holds. The Actor arm is bookkeeping
+   * only — the authority owns the outcome and the observation — so it is aged out
+   * by the authority's own truth (see `retireActorOperation`).
+   */
+  actorBackedOperations(): ProviderOperationRecord[] {
+    return [...this.operations.values()].filter((op) => op.actorBacked === true);
+  }
+
+  /**
+   * Mark one Actor operation on the transport mirror: its Actor ownership and
+   * its session association, and nothing else. The authority owns the run's
+   * status and outcome (read on demand through its own Character/generic
+   * observation), so the mirror must not transcribe a status into a
+   * cancellability claim here — nor leave a settled Actor run's session marked
+   * busy by a transport cache.
+   */
+  markActorOperation(operationId: string, sessionId: string, providerId: string): void {
+    this.operations.set(operationId, {
+      operationId,
+      sessionId,
+      providerId,
+      status: 'started',
+      terminalEvent: null,
+      terminalTranscript: null,
+      actorBacked: true,
+    });
+    this.evictTerminalOperationsIfNeeded();
+  }
+
+  /**
+   * Release the mirror's retention for one Actor operation — its record and its
+   * hub together. The authority's detailed outcome and bounded observation live
+   * in core (technical contract §5), so retiring transport bookkeeping here can
+   * never lose a result; it only stops the mirror outliving the retention the
+   * authority itself bounds. A provider-only record is never touched.
+   */
+  retireActorOperation(operationId: string): void {
+    if (this.operations.get(operationId)?.actorBacked !== true) return;
+    this.disposeOperation(operationId);
   }
 
   registerSession(record: ProviderSessionRecord): void {

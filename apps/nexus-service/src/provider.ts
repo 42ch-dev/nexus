@@ -287,23 +287,73 @@ async function resolveSessionPlacement(
 }
 
 /**
- * Whether the core authority owns this id as a Character operation. `false`
- * means the authority has no record of it — so it is not an Actor operation and
- * the caller serves it on the provider-only lane. Any other native rejection
- * propagates: an Actor error never falls through to raw provider execution.
+ * The authority's own generic operation row for one id, or `null` when it serves
+ * none. The mirror is never consulted: it is not authoritative for an Actor
+ * operation, and its cache must not resurrect one the authority has aged out
+ * (technical contract §5: an expired Actor observation is absent, never
+ * re-created as provider-only state).
  */
-async function isCoreCharacterOperation(
+async function nativeOperationRow(
   service: ServiceCore,
   operationId: string,
-): Promise<boolean> {
+): Promise<{ operation_id: string; session_id: string; status: string } | null> {
   try {
-    await withPrincipal(service, (principal) =>
-      service.core.hostCharacterOperation(principal, operationId),
-    );
-    return true;
+    const response = await hostQuery(service, { query: 'get_operation', operation_id: operationId });
+    return response.operation ?? null;
   } catch (error) {
-    if (isAbsentHostError(error)) return false;
-    throw mapNativeError(error);
+    const mapped = mapNativeError(error);
+    if (mapped.code !== 'not_found') throw mapped;
+    return null;
+  }
+}
+
+/**
+ * Whether the core authority owns this id as an Actor operation.
+ *
+ * Ownership is resolved from the mirror's own Actor mark — copied from native
+ * admission, or from the authority's own read — and, when the mirror holds no
+ * row, from fresh native identity: the operation's row names its session and
+ * that session's native echo says whether the authority owns it as an Actor
+ * session. The absence of a Character result is NEVER the discriminator: by
+ * contract (§5) a Creator Actor prompt has no Character result and is still an
+ * Actor operation. `false` is therefore a positive statement — the id is proven
+ * provider-only — and never an inference from an Actor read that came back
+ * empty.
+ */
+async function isActorOwnedOperation(service: ServiceCore, operationId: string): Promise<boolean> {
+  const cached = service.providerRegistry.operationRecord(operationId);
+  if (cached) return cached.actorBacked === true;
+  if (await lookupCharacterOperation(service, operationId)) return true;
+  const owner = (await nativeOperationRow(service, operationId))?.session_id;
+  if (!owner) return false;
+  const session = await tryNativeSession(service, owner);
+  return session?.actor_ref !== undefined;
+}
+
+/**
+ * Age the mirror's Actor arm before another Actor operation is admitted.
+ *
+ * The authority settles an Actor run on its own drain, with or without an HTTP
+ * subscriber, and owns both the detailed outcome and the bounded observation
+ * (technical contract §5). The mirror therefore cannot wait for a subscriber's
+ * pull to learn that a run is over: it asks the authority what it already knows
+ * and retires every Actor record the authority no longer serves. Running on each
+ * admission, the sweep keeps the Actor arm from outliving the core's own
+ * retention by more than the operation being admitted — with the existing caps
+ * and with no change to the no-subscriber settlement the authority already has.
+ */
+async function ageSettledActorOperations(service: ServiceCore): Promise<void> {
+  for (const record of service.providerRegistry.actorBackedOperations()) {
+    const character = await lookupCharacterOperation(service, record.operationId);
+    if (character) {
+      // A Character operation's own outcome is its liveness.
+      if (character.run_status === 'running') continue;
+    } else if (await nativeOperationRow(service, record.operationId)) {
+      // A Creator Actor operation keeps the generic observation: its own
+      // authority row is what makes it live.
+      continue;
+    }
+    service.providerRegistry.retireActorOperation(record.operationId);
   }
 }
 
@@ -416,7 +466,11 @@ export async function executeProviderOperation(service: ServiceCore, sessionId: 
     );
     // The mirror keeps delivery bookkeeping only (the hub and the bounded
     // terminal retention); terminal truth stays the authority's
-    // `character_operation` read, never a guess from the mirror.
+    // `character_operation` read, never a guess from the mirror. Age the arm
+    // first: the authority settles Actor runs with or without a subscriber, so
+    // this admission is where the mirror learns which of its Actor records the
+    // authority no longer serves.
+    await ageSettledActorOperations(service);
     service.providerRegistry.registerOperation({
       operationId: reply.operation_id,
       sessionId,
@@ -473,11 +527,13 @@ export async function executeProviderOperation(service: ServiceCore, sessionId: 
 export async function cancelProviderOperation(service: ServiceCore, operationId: string): Promise<CancelOperationResponse> {
   if (service.domainOnly) throw routeNotMigrated(`POST /v1/daemon/agent-host/operations/${operationId}`);
   parseUuid(operationId, 'operation_id');
-  // Actor ownership is decided by fresh native truth BEFORE any provider
-  // mutation: a core-indexed Character operation is cancelled through the same
-  // core authority (owner scope, phase race, first-terminal-wins), and a core
-  // refusal is never retried as a raw provider call.
-  if (await isCoreCharacterOperation(service, operationId)) {
+  // Every Actor kind is cancelled by the AUTHORITY, decided from the Actor
+  // mark or from fresh native identity BEFORE any provider mutation: this host's
+  // core retains no cancellable row for a Creator Actor operation and none for
+  // an aged-out id, so its own refusal is the answer. A core refusal is never
+  // retried as a raw provider call — the provider-only lane is not an authority
+  // bypass (technical contract §2/§4).
+  if (await isActorOwnedOperation(service, operationId)) {
     const reply = await withPrincipal(service, (principal) =>
       service.core.hostCancelOperation(principal, operationId),
     );
@@ -537,21 +593,13 @@ export async function lookupProviderOperation(
   operationId: string,
 ): Promise<{ operation_id: string; session_id: string; status: string } | null> {
   parseUuid(operationId, 'operation_id');
-  try {
-    const response = await hostQuery(service, { query: 'get_operation', operation_id: operationId });
-    if (response.operation) {
-      return {
-        operation_id: response.operation.operation_id,
-        session_id: response.operation.session_id,
-        status: response.operation.status,
-      };
-    }
-  } catch (error) {
-    const mapped = mapNativeError(error);
-    if (mapped.code !== 'not_found') throw mapped;
-  }
+  const native = await nativeOperationRow(service, operationId);
+  if (native) return native;
   const cached = service.providerRegistry.operationRecord(operationId);
-  if (!cached) return null;
+  // The mirror speaks only for provider-only operations. An Actor operation's
+  // truth is the authority's own, so with no native row it is absent — never a
+  // stale mirror row served as a generic provider-only observation.
+  if (!cached || cached.actorBacked === true) return null;
   return { operation_id: cached.operationId, session_id: cached.sessionId, status: cached.status };
 }
 
