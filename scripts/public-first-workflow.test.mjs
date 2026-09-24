@@ -38,6 +38,7 @@ import {
   assertScopeEffectOnly,
   assertSealedToolPolicy,
   classifySameRunReplay,
+  parseGapFrame,
   readEventStream,
   readEventStreamOrStop,
   startModelEndpoint,
@@ -111,13 +112,17 @@ function assertDriverFailure(error, outcome, category) {
   assert.equal(error.category, category);
 }
 
-/** The classified results of `classifySameRunReplay` for one replayed frame set. */
-function classifyReplay(replayFrames, { cursor = observedIds(5)[0], observed = observedIds(5) } = {}) {
+/**
+ * The classified results of `classifySameRunReplay` for one replayed frame set.
+ * The default read shape is the CLOSED one (`closed`, not the driver's window):
+ * the §4 outcome a gap-carrying reconnect must have.
+ */
+function classifyReplay(replayFrames, { cursor = observedIds(5)[0], observed = observedIds(5), read = {} } = {}) {
   return classifySameRunReplay({
     runId: RUN_ID,
     cursor,
     observedIds: observed,
-    read: { status: 200, json: null, frames: replayFrames, closed: false, timed_out: true },
+    read: { status: 200, json: null, frames: replayFrames, closed: true, timed_out: false, ...read },
   });
 }
 
@@ -145,7 +150,7 @@ test('a connection reset mid-stream stays a transport failure, not a short read'
   assertDriverFailure(reset, 'failed', 'event_stream_transport');
 });
 
-test('a cursor reconnect replays exactly the successors the cursor promised, exclusively', async () => {
+test('a cursor reconnect replays exactly the promised successors, in order, and refuses a repeat or reorder', async () => {
   const observed = observedIds(5);
   const cursor = observed[0];
   const replay = await withSseServer('replay', stateFrame(2) + stateFrame(3) + stateFrame(4) + stateFrame(5), (port) =>
@@ -158,6 +163,34 @@ test('a cursor reconnect replays exactly the successors the cursor promised, exc
   assert.deepEqual(facts.gaps, []);
   assert.equal(facts.exclusive, true);
   assert.equal(facts.duplicate_handoff, false);
+
+  // A repeated successor and a reordered pair are both duplicated/replayed
+  // events: every promised ID is present, so set membership alone would call
+  // them a faithful replay.
+  const repeated = [
+    { id: `${EPOCH}:2`, event: 'run_state', data: '{}' },
+    { id: `${EPOCH}:2`, event: 'run_state', data: '{}' },
+    { id: `${EPOCH}:3`, event: 'run_state', data: '{}' },
+  ];
+  assert.throws(
+    () => classifyReplay(repeated, { cursor: observedIds(3)[0], observed: observedIds(3) }),
+    (error) => {
+      assertDriverFailure(error, 'failed', 'replay_out_of_order');
+      return true;
+    },
+  );
+  const reordered = [
+    { id: `${EPOCH}:3`, event: 'run_state', data: '{}' },
+    { id: `${EPOCH}:2`, event: 'run_state', data: '{}' },
+    { id: `${EPOCH}:2`, event: 'run_state', data: '{}' },
+  ];
+  assert.throws(
+    () => classifyReplay(reordered, { cursor: observedIds(3)[0], observed: observedIds(3) }),
+    (error) => {
+      assertDriverFailure(error, 'failed', 'replay_out_of_order');
+      return true;
+    },
+  );
 });
 
 test('an idle reconnect and a single-frame read are never accepted as a replay proof', async () => {
@@ -180,21 +213,57 @@ test('an idle reconnect and a single-frame read are never accepted as a replay p
   );
 });
 
-test('an explicit covering gap is recorded as one, and an uncovered gap is refused', () => {
-  const gapFrame = {
-    id: `${EPOCH}:5`,
-    event: 'gap',
-    data: JSON.stringify({ run_id: RUN_ID, epoch: EPOCH, from_sequence: 2, to_sequence: 5 }),
-  };
+test('a covering gap is accepted only as the closed eviction outcome, and unsafe or uncovered gaps are refused', () => {
+  const gapData = (from, to) => JSON.stringify({ run_id: RUN_ID, epoch: EPOCH, from_sequence: from, to_sequence: to });
+  const gapFrame = { id: `${EPOCH}:5`, event: 'gap', data: gapData(2, 5) };
+
+  // §4 eviction close: the gap is the whole answer and the server closed on it.
   const covered = classifyReplay([gapFrame]);
   assert.equal(covered.kind, 'gap');
   assert.deepEqual(covered.gaps, [{ from_sequence: 2, to_sequence: 5 }]);
   assert.deepEqual(covered.missing_successors, observedIds(5).slice(1));
+  assert.equal(covered.closed, true);
+  assert.equal(covered.timed_out, false);
+
+  // The same gap on a stream that then idles until the driver's window expires
+  // is NOT the contract's outcome — it must not be reported as an honest gap.
   assert.throws(
-    () =>
-      classifyReplay([
-        { ...gapFrame, data: JSON.stringify({ run_id: RUN_ID, epoch: EPOCH, from_sequence: 2, to_sequence: 3 }) },
-      ]),
+    () => classifyReplay([gapFrame], { read: { closed: false, timed_out: true } }),
+    (error) => {
+      assertDriverFailure(error, 'failed', 'replay_gap_not_closed');
+      return true;
+    },
+  );
+
+  // A retention gap that arrives WITH the retained successors is the live replay
+  // case: bounded record, gap plus the replayed tail, no fabricated content.
+  const trimmed = classifyReplay([
+    { id: `${EPOCH}:3`, event: 'gap', data: gapData(2, 3) },
+    { id: `${EPOCH}:4`, event: 'run_state', data: '{}' },
+    { id: `${EPOCH}:5`, event: 'run_state', data: '{}' },
+  ], { read: { closed: false, timed_out: true } });
+  assert.equal(trimmed.kind, 'gap');
+  assert.deepEqual(trimmed.gaps, [{ from_sequence: 2, to_sequence: 3 }]);
+  assert.deepEqual(trimmed.missing_successors, [`${EPOCH}:2`, `${EPOCH}:3`]);
+  assert.deepEqual(trimmed.replayed_ids, [`${EPOCH}:4`, `${EPOCH}:5`]);
+
+  // Unsafe / out-of-vocabulary bounds are not a bounded gap at all.
+  assert.equal(parseGapFrame({ event: 'gap', data: gapData(0, 1e100) }), null);
+  assert.equal(parseGapFrame({ event: 'gap', data: gapData(2, 1e100) }), null);
+  assert.equal(parseGapFrame({ event: 'gap', data: gapData(2.5, 5) }), null);
+  assert.equal(parseGapFrame({ event: 'gap', data: gapData(5, 2) }), null);
+  assert.throws(
+    () => classifyReplay([{ ...gapFrame, data: gapData(0, 1e100) }]),
+    (error) => {
+      assertDriverFailure(error, 'failed', 'replay_contract_violation');
+      return true;
+    },
+  );
+
+  // A gap that does not reach the successors the cursor promised leaves them
+  // uncovered.
+  assert.throws(
+    () => classifyReplay([{ ...gapFrame, data: gapData(2, 3) }]),
     (error) => {
       assertDriverFailure(error, 'failed', 'replay_incomplete');
       return true;

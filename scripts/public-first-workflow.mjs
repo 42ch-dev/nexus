@@ -2198,8 +2198,13 @@ function parseGapFrame(frame) {
   if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return null;
   if (typeof payload.run_id !== 'string' || payload.run_id.length === 0) return null;
   if (typeof payload.epoch !== 'string' || payload.epoch.length === 0) return null;
-  if (!Number.isInteger(payload.from_sequence) || payload.from_sequence < 0) return null;
-  if (!Number.isInteger(payload.to_sequence) || payload.to_sequence < payload.from_sequence) return null;
+  // Safe integers from the ring's own 1-based sequence space: `Number.isInteger`
+  // alone would accept an out-of-range literal such as `1e100`, whose range
+  // would then "cover" real successors (cursor sequences are safe integers by
+  // `parseEventCursor`), and a 0-based range is outside the vocabulary the ring
+  // emits (`<after_sequence + 1>..<first_retained - 1>` / `<sequence>..<sequence>`).
+  if (!Number.isSafeInteger(payload.from_sequence) || payload.from_sequence < 1) return null;
+  if (!Number.isSafeInteger(payload.to_sequence) || payload.to_sequence < payload.from_sequence) return null;
   return {
     run_id: payload.run_id,
     epoch: payload.epoch,
@@ -2230,16 +2235,24 @@ function parseHistoryUnavailableFrame(frame) {
  * idle window with no successor frame is NOT one of them:
  *
  *   * `successors` — every successor the cursor promised replayed, each from the
- *     cursor's own epoch and strictly AFTER it (a frame at or before the cursor
- *     would be the duplicate handoff the contract forbids), with no explicit gap
- *     narrowing the record;
- *   * `gap` — the ring answered with an explicit bounded `gap` whose range
- *     covers every successor the cursor promised: recorded verbatim
- *     (run/epoch/from/to) instead of an invented history.
+ *     cursor's own epoch, strictly AFTER the cursor, UNIQUE and strictly
+ *     increasing in sequence, and in the delivery order the driver already
+ *     observed (a set-membership check alone would accept `…:3, …:2, …:2`), with
+ *     no explicit gap narrowing the record;
+ *   * `gap` — the ring answered with an explicit bounded `gap` (safe-integer,
+ *     1-based range) whose range covers every successor the cursor promised:
+ *     recorded verbatim (run/epoch/from/to) instead of an invented history. When
+ *     the gap is the WHOLE answer, §4's eviction close applies: the server must
+ *     have closed the stream on it (`closed` and not the driver's own window),
+ *     so a gap followed by an idle window is refused rather than reported as an
+ *     honest history. A retention gap that arrives together with the retained
+ *     successors is the live replay case and keeps its bounded record.
  *
  * Everything else refuses: a replayed frame outside the cursor's epoch, a
- * cursor-less data frame, a `history_unavailable` close for a run whose ring is
- * live, a malformed `gap`, or successors the replay silently dropped.
+ * cursor-less data frame, a repeated or reordered successor, a
+ * `history_unavailable` close for a run whose ring is live, a malformed or
+ * unsafe `gap`, a covering gap that did not close, or successors the replay
+ * silently dropped.
  *
  * @throws {DriverFailure} `failed`/<replay category> on any other outcome.
  */
@@ -2268,6 +2281,7 @@ function classifySameRunReplay({ runId, cursor, observedIds, read }) {
   const sequences = new Map(expected.map((id) => [id, parseEventCursor(id).sequence]));
   const replayed = [];
   const gaps = [];
+  let lastReplayedSequence = origin.sequence;
   for (const frame of read.frames) {
     if (frame.event === 'history_unavailable') {
       throw failed(
@@ -2311,9 +2325,33 @@ function classifySameRunReplay({ runId, cursor, observedIds, read }) {
         `replayed frame ${JSON.stringify(frame.id)} is at or before the cursor ${cursor}: the replay must be exclusive`,
       );
     }
+    // Exclusive ORDERED replay: the ring's cursor is strictly increasing, so a
+    // repeated or reordered successor is a duplicated/replayed event, not a
+    // replay proof — the set-membership check alone would accept `…:3, …:2, …:2`.
+    if (parsed.sequence <= lastReplayedSequence) {
+      throw failed(
+        'replay_out_of_order',
+        `replayed frame ${JSON.stringify(frame.id)} is not after the previously replayed sequence ` +
+          `${lastReplayedSequence}: the exclusive replay must be unique and strictly increasing`,
+      );
+    }
+    lastReplayedSequence = parsed.sequence;
     replayed.push({ id: frame.id, event: frame.event ?? null, sequence: parsed.sequence });
   }
   const replayedIds = new Set(replayed.map((frame) => frame.id));
+  // Delivery-order reconciliation: the successors the reconnect replayed must
+  // arrive in the same relative order as the frames this driver already
+  // OBSERVED, so a response that reorders them can never be read as a faithful
+  // replay of the observed stream.
+  const replayedInObservedOrder = replayed.map((frame) => frame.id).filter((id) => sequences.has(id));
+  const observedInReplayedOrder = expected.filter((id) => replayedIds.has(id));
+  if (replayedInObservedOrder.join(' ') !== observedInReplayedOrder.join(' ')) {
+    throw failed(
+      'replay_out_of_order',
+      `the reconnect replayed observed successors in the order ${JSON.stringify(replayedInObservedOrder)}, not the ` +
+        `delivery order of the observed stream ${JSON.stringify(observedInReplayedOrder)}`,
+    );
+  }
   const missing = expected.filter((id) => !replayedIds.has(id));
   const uncovered = missing.filter(
     (id) => !gaps.some((gap) => gap.from_sequence <= sequences.get(id) && gap.to_sequence >= sequences.get(id)),
@@ -2323,6 +2361,20 @@ function classifySameRunReplay({ runId, cursor, observedIds, read }) {
       'replay_incomplete',
       `the cursor reconnect did not replay ${uncovered.length} observed successor frame(s) of ${cursor} ` +
         `(${uncovered.join(', ')}) and no explicit gap covers them`,
+    );
+  }
+  // §4: the explicit gap is the EVICTION close. When the gap alone answers the
+  // reconnect — nothing else could be replayed — the server must close the
+  // stream with it; a stream that emits the gap and then idles until the
+  // driver's window expires is not the contract's outcome. A retention gap that
+  // arrives WITH the retained successors is the live replay case and is recorded
+  // as a bounded gap below.
+  if (gaps.length > 0 && replayed.length === 0 && (read.closed !== true || read.timed_out === true)) {
+    throw failed(
+      'replay_gap_not_closed',
+      `the ring answered the cursor with an explicit gap and nothing else, but the stream did not close on it ` +
+        `(closed=${read.closed === true}, timed_out=${read.timed_out === true}); §4 closes a lagging/evicted ` +
+        'subscription with its gap',
     );
   }
   return {
