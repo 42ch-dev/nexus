@@ -1667,8 +1667,11 @@ function reserveLoopbackPort() {
  * own value.
  */
 function encodePathSegment(value) {
-  return String(value).replace(/[%\/?#\s\u0000-\u001f\u007f]/g, (char) => {
+  return String(value).replace(/[%/?#\s\p{Cc}]/gu, (char) => {
     const code = char.codePointAt(0);
+    // `\p{Cc}` also covers the C1 block (U+0080-U+009F), which the core owner
+    // reads verbatim; those code points pass through untouched as before.
+    if (code >= 0x80 && code <= 0x9f) return char;
     return `%${code.toString(16).toUpperCase().padStart(2, '0')}`;
   });
 }
@@ -2922,7 +2925,7 @@ function readActiveCreator(binary, childEnv) {
     throw failed('contract_violation', `creator list --json is not JSON: ${error.message}`);
   }
   if (!Array.isArray(rows)) throw failed('contract_violation', 'creator list --json is not an array');
-  const active = rows.filter((row) => row && row.active === true);
+  const active = rows.filter((row) => row?.active === true);
   if (active.length !== 1) {
     throw failed('contract_violation', `expected exactly one active Creator, found ${active.length}`);
   }

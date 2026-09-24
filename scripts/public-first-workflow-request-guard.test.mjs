@@ -654,7 +654,7 @@ test('two child processes racing on one attempt admit exactly one', async () => 
     assert.equal(endpoint.requests.length, 1);
     // The loser never dispatched at all.
     assert.deepEqual(
-      [a.result.transport.dispatches, b.result.transport.dispatches].sort(),
+      [a.result.transport.dispatches, b.result.transport.dispatches].sort((x, y) => x - y),
       [0, 1],
     );
 
