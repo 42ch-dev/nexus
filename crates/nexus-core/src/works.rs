@@ -699,7 +699,7 @@ impl CoreService {
 /// and that pin's drift check — reads through here, so no two callers can
 /// disagree about what the document says. A workspace with no registration is
 /// `Ok(None)`; an unreadable or malformed document is an environment fault.
-pub(crate) fn selected_workspace_meta_root(
+fn selected_workspace_meta_root(
     nexus_home: &std::path::Path,
     creator_id: &str,
     workspace_slug: &str,
