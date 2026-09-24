@@ -167,8 +167,8 @@ fn running_outcome(snapshot: &CharacterOperationSnapshot) -> CharacterOperationR
 pub(crate) enum CharacterTerminal {
     /// A matching `OpFinished`: the provider named the stop reason.
     Finished(FinishReason),
-    /// A matching fault: a matching `OpFailed` without a named stop reason, a
-    /// stream error, a matching `SessionStopped`, or EOF before any terminal.
+    /// A matching fault: a matching `OpFailed` of ANY error category, a stream
+    /// error, a matching `SessionStopped`, or EOF before any terminal.
     Fault,
 }
 
@@ -189,35 +189,23 @@ pub(crate) fn character_terminal_for(
         {
             Some(CharacterTerminal::Finished(finished.reason.clone()))
         }
-        // ACP and the native CLI adapters report the non-`EndTurn` stop reasons
-        // the provider vocabulary names as a typed `OpFailed`
-        // (`providers/acp.rs`): the reason is still authoritative, so those
-        // categories keep their §5 classification instead of collapsing into a
-        // generic failure. Every other category is a real failure.
+        // Contract §5 has ONE row for `OpFailed` — failed with no finish
+        // reason — and no error-category exception. A named provider stop
+        // reason reaches the `incomplete` row only as an explicit
+        // `OpFinished(MaxTokens | MaxTurnRequests | Refusal)`. An adapter that
+        // reports such a reason as an `OpFailed` category (e.g.
+        // `providers/acp.rs`) is therefore read as the failure it is: the
+        // adapter's representation may not amend the terminal table.
         HostEvent::OpFailed(failed)
             if &failed.session_id == session_id && &failed.op_id == operation_id =>
         {
-            Some(
-                finish_reason_from_error_category(&failed.error_category)
-                    .map_or(CharacterTerminal::Fault, CharacterTerminal::Finished),
-            )
+            Some(CharacterTerminal::Fault)
         }
         // The session this operation runs on stopped before a terminal: the run
         // can no longer complete honestly, so it is a fault.
         HostEvent::SessionStopped(stopped) if &stopped.session_id == session_id => {
             Some(CharacterTerminal::Fault)
         }
-        _ => None,
-    }
-}
-
-/// The stop reason an `OpFailed` category names, when the provider vocabulary
-/// has one (`max_tokens` / `max_turn_requests` / `refusal`).
-fn finish_reason_from_error_category(category: &str) -> Option<FinishReason> {
-    match category {
-        "max_tokens" => Some(FinishReason::MaxTokens),
-        "max_turn_requests" => Some(FinishReason::MaxTurnRequests),
-        "refusal" => Some(FinishReason::Refusal),
         _ => None,
     }
 }

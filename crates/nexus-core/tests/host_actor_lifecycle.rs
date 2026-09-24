@@ -912,8 +912,10 @@ type HostItem = nexus_agent_host::HostResult<HostEvent>;
 enum CharacterObservation {
     /// `OpFinished` carrying the provider's stop reason.
     Finished(FinishReason),
-    /// `OpFailed` carrying an error category (`max_tokens`, `refusal`,
-    /// `provider_error`, `stream_closed`, …).
+    /// `OpFailed` carrying an error category (`max_tokens`, `max_turn_requests`,
+    /// `refusal`, `provider_error`, `stream_closed`, …). Contract §5 classifies
+    /// every one of them as the fault row; the category is carried so the case
+    /// mirrors a real provider stream, never so the drain may reinterpret it.
     Failed(String),
     /// A stream error item.
     StreamError,
@@ -975,6 +977,11 @@ fn exec_stream(items: Vec<HostItem>) -> HostEventStream {
 /// Reserve one Character operation the way `execute` does, drive the
 /// authority-owned drain over the events `build` produces for that exact
 /// `(session_id, operation_id)`, and return the settled owner-scoped outcome.
+///
+/// The seam it drives (`HostHandle::settle_character_stream`) is
+/// `test-hooks`-gated, so it does not exist in a production build: production
+/// settlement consumes only the stream `execute` owns. The drain under test is
+/// the same production `drain_character_operation`, not a reimplementation.
 async fn settle_character_operation(
     core: &CoreService,
     handle: &HostHandle,
@@ -1047,20 +1054,23 @@ async fn character_terminal_contract_table_settles_every_run_status() {
             CharacterOperationResultRunStatus::Succeeded,
             Some(CharacterOperationResultFinishReason::EndTurn),
         ),
+        // The `incomplete` row is reachable ONLY through an explicit
+        // `OpFinished(MaxTokens | MaxTurnRequests | Refusal)` — the provider
+        // named the stop reason in the finished event itself.
         (
-            "max_tokens",
+            "opfinished max_tokens",
             CharacterObservation::Finished(FinishReason::MaxTokens),
             CharacterOperationResultRunStatus::Incomplete,
             Some(CharacterOperationResultFinishReason::MaxTokens),
         ),
         (
-            "max_turn_requests",
+            "opfinished max_turn_requests",
             CharacterObservation::Finished(FinishReason::MaxTurnRequests),
             CharacterOperationResultRunStatus::Incomplete,
             Some(CharacterOperationResultFinishReason::MaxTurnRequests),
         ),
         (
-            "refusal",
+            "opfinished refusal",
             CharacterObservation::Finished(FinishReason::Refusal),
             CharacterOperationResultRunStatus::Incomplete,
             Some(CharacterOperationResultFinishReason::Refusal),
@@ -1071,26 +1081,29 @@ async fn character_terminal_contract_table_settles_every_run_status() {
             CharacterOperationResultRunStatus::Cancelled,
             Some(CharacterOperationResultFinishReason::Cancelled),
         ),
-        // The adapters report the non-`EndTurn` stop reasons as an `OpFailed`
-        // category (`providers/acp.rs`): the named reason still classifies the
-        // run, and only an unnamed category is a plain failure.
+        // Contract §5 gives `OpFailed` ONE row — failed, finish_reason=null —
+        // with no error-category exception. The three categories the adapters
+        // use for the non-`EndTurn` stop reasons (`providers/acp.rs`) are
+        // therefore faults, NOT the `incomplete` rows above: an adapter's
+        // representation cannot amend the terminal table. These three cases are
+        // what keeps the strict row asserted for the second event form.
         (
             "acp max_tokens",
             CharacterObservation::Failed("max_tokens".to_string()),
-            CharacterOperationResultRunStatus::Incomplete,
-            Some(CharacterOperationResultFinishReason::MaxTokens),
+            CharacterOperationResultRunStatus::Failed,
+            None,
         ),
         (
             "acp max_turn_requests",
             CharacterObservation::Failed("max_turn_requests".to_string()),
-            CharacterOperationResultRunStatus::Incomplete,
-            Some(CharacterOperationResultFinishReason::MaxTurnRequests),
+            CharacterOperationResultRunStatus::Failed,
+            None,
         ),
         (
             "acp refusal",
             CharacterObservation::Failed("refusal".to_string()),
-            CharacterOperationResultRunStatus::Incomplete,
-            Some(CharacterOperationResultFinishReason::Refusal),
+            CharacterOperationResultRunStatus::Failed,
+            None,
         ),
         (
             "provider_error",

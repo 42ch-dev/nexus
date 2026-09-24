@@ -15,9 +15,12 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use nexus_agent_host::capability::model::HostOperation;
-use nexus_agent_host::capability::model::{
-    HostEvent, HostEventStream, HostStartConfig, SessionOwner,
-};
+use nexus_agent_host::capability::model::{HostEvent, HostStartConfig, SessionOwner};
+// Only the `test-hooks`-gated settlement seam consumes a caller-supplied
+// stream, so the import is gated with it: a production build carries neither
+// an unused import nor that entry (see `HostHandle::settle_character_stream`).
+#[cfg(any(test, feature = "test-hooks"))]
+use nexus_agent_host::capability::model::HostEventStream;
 use nexus_agent_host::capability::CreateSessionRequest as HostCreateRequest;
 use nexus_agent_host::config::{
     agent_host_config_path, load_config_from_path, validate_workspace_path, AgentHostConfig,
@@ -983,13 +986,18 @@ impl HostHandle {
         }
     }
 
-    /// Integration seam (`#[doc(hidden)]`, the same convention as
-    /// [`ActorSessionRegistry::insert_indexed_entry`]): run the authority-owned
-    /// Character drain over a supplied host event stream — the exact settlement
-    /// `execute` spawns — with no provider process. Production drains are
-    /// spawned by `execute`; this entry proves the terminal contract (§5)
+    /// Test-only settlement seam: run the authority-owned Character drain over
+    /// a supplied host event stream — the exact settlement `execute` spawns —
+    /// with no provider process, so the terminal contract (§5) is provable
     /// against real streams.
-    #[doc(hidden)]
+    ///
+    /// Compiled out of the production build: `test-hooks` is default-off and is
+    /// enabled only by this package's dev-dependency self-reference, the same
+    /// rule as `execution::test_hooks` and `CoreService::pool`. Production
+    /// settlement therefore consumes only the stream `execute` owns — a
+    /// production build has no entry that accepts a caller-supplied stream, so
+    /// no caller can fabricate terminal truth through one.
+    #[cfg(any(test, feature = "test-hooks"))]
     pub async fn settle_character_stream(
         &self,
         snapshot: CharacterOperationSnapshot,
