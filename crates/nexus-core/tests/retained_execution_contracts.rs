@@ -3541,7 +3541,7 @@ async fn public_schedule_reads_and_context_are_owned() {
             "run-zzz".to_string()
         ],
         "the session default must be the schema's `session_id` ASCENDING default, \
-         not the schedule default: {session_ids:?}"
+         not the schedule default"
     );
     let by_session_id = fixture
         .handle
@@ -3599,7 +3599,7 @@ async fn public_schedule_reads_and_context_are_owned() {
         session_ids
             .iter()
             .all(|id| id != "run-foreign" && id != "run-child"),
-        "the default order must still exclude foreign and child runs: {session_ids:?}"
+        "the default order must still exclude foreign and child runs"
     );
 
     // ── 8. Cleanup: release the parked prompt, then close the owner. ──
