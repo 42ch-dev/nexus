@@ -33,14 +33,18 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 
 import {
+  assertDeterministicReceipt,
+  assertGuardAttempt,
   assertHistoryLossExplicit,
   assertNoHostileMarkers,
   assertScopeEffectOnly,
   assertSealedToolPolicy,
   classifySameRunReplay,
   parseGapFrame,
+  readAttemptDir,
   readEventStream,
   readEventStreamOrStop,
+  readSpentToken,
   startModelEndpoint,
 } from './public-first-workflow.mjs';
 
@@ -423,5 +427,164 @@ test('an unsolicited tool side effect is detected in the isolated root and the o
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/**
+ * One attempt directory populated in the guard's own record shape, so these
+ * cases exercise the driver's consumer-side contract rather than a fixture.
+ * `mutate` receives the attempt directory after the clean attempt is written.
+ */
+function withAttemptDir(mutate) {
+  const dir = mkdtempSync(join(tmpdir(), 'pfw-guard-evidence-'));
+  const events = join(dir, 'events');
+  mkdirSync(events, { recursive: true, mode: 0o700 });
+  const event = (kind, runtime, category, extra = {}) =>
+    writeFileSync(
+      join(events, `${kind}-${process.pid}-${Math.random().toString(16).slice(2, 10)}-abcdef12.json`),
+      JSON.stringify({ schema: 'nexus-request-guard-event/1', kind, runtime, category, at: '2026-09-24T01:00:00.000Z', ...extra }),
+      { mode: 0o600 },
+    );
+  event('loaded', 'other', 'guard_loaded', { problems: [] });
+  event('loaded', 'dsh', 'guard_loaded', { problems: [] });
+  event('admitted', 'dsh', 'model_request_admitted');
+  writeFileSync(
+    join(dir, 'spent'),
+    JSON.stringify({ schema: 'nexus-request-guard-spent/1', pid: process.pid, at: '2026-09-24T01:00:00.000Z', category: 'model_request_admitted' }),
+    { mode: 0o600 },
+  );
+  try {
+    mutate(dir, events);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('a clean attempt is accepted and carries an explicit evidence-integrity condition', () => {
+  withAttemptDir((dir) => {
+    const facts = assertGuardAttempt(readAttemptDir(dir, { final: true }), readSpentToken(dir));
+    assert.equal(facts.admitted, 1);
+    assert.equal(facts.denied, 0);
+    assert.equal(facts.loaded_dsh, 1);
+    assert.equal(facts.evidence_integrity, 'complete');
+    assert.equal(facts.evidence_failed_marker, null);
+    assert.deepEqual(facts.problems, []);
+  });
+});
+
+test("the guard's evidence-failed marker disqualifies an otherwise clean attempt", () => {
+  withAttemptDir((dir) => {
+    // The guard's own marker shape (`nexus-request-guard-evidence-failed/1`): a
+    // denied record could not be persisted, so the attempt's counts cannot be
+    // believed even though they look perfect.
+    writeFileSync(
+      join(dir, 'evidence-failed'),
+      JSON.stringify({
+        schema: 'nexus-request-guard-evidence-failed/1',
+        reason: 'event_write_failed',
+        kind: 'denied',
+        pid: process.pid,
+        at: '2026-09-24T01:00:05.000Z',
+      }),
+    );
+    assert.throws(
+      () => assertGuardAttempt(readAttemptDir(dir, { final: true }), readSpentToken(dir)),
+      (error) => {
+        assertDriverFailure(error, 'failed', 'guard_evidence_failed');
+        assert.match(error.message, /denied/);
+        assert.match(error.message, /event_write_failed/);
+        return true;
+      },
+    );
+    // A foreign or unreadable payload still reports as present — presence is the
+    // signal, never the decodability of the marker.
+    writeFileSync(join(dir, 'evidence-failed'), 'not json');
+    assert.throws(
+      () => assertGuardAttempt(readAttemptDir(dir, { final: true }), readSpentToken(dir)),
+      (error) => {
+        assertDriverFailure(error, 'failed', 'guard_evidence_failed');
+        return true;
+      },
+    );
+  });
+});
+
+test('a degraded preload (non-empty problems, e.g. a replaceable fetch) disqualifies the attempt', () => {
+  withAttemptDir((dir, events) => {
+    writeFileSync(
+      join(events, `loaded-${process.pid}-9-abcdef13.json`),
+      JSON.stringify({
+        schema: 'nexus-request-guard-event/1',
+        kind: 'loaded',
+        runtime: 'dsh',
+        category: 'guard_loaded',
+        at: '2026-09-24T01:00:00.000Z',
+        problems: ['unsupported_transport'],
+      }),
+      { mode: 0o600 },
+    );
+    assert.throws(
+      () => assertGuardAttempt(readAttemptDir(dir, { final: true }), readSpentToken(dir)),
+      (error) => {
+        assertDriverFailure(error, 'failed', 'guard_evidence_degraded');
+        assert.match(error.message, /unsupported_transport/);
+        return true;
+      },
+    );
+  });
+});
+
+test('a truncated record is skipped while the attempt runs and disqualifies it at rest', () => {
+  withAttemptDir((dir, events) => {
+    writeFileSync(join(events, `denied-${process.pid}-8-abcdef14.json`), '');
+    // Mid-run: the only in-progress state a single exclusive write can leave.
+    assert.equal(readAttemptDir(dir).admitted, 1);
+    assert.throws(
+      () => readAttemptDir(dir, { final: true }),
+      (error) => {
+        assertDriverFailure(error, 'failed', 'guard_event_truncated');
+        return true;
+      },
+    );
+  });
+});
+
+test('the live receipt gate refuses a guard proof that is degraded, incomplete or missing integrity', () => {
+  const recorded = { path: '/tmp/artifact', present: true, bytes: 1, mtime_ms: 1, sha256: 'aa' };
+  const artifacts = {
+    driver: { ...recorded },
+    guard: { ...recorded },
+    fixture: { ...recorded },
+    service_entry: { ...recorded },
+    cli: { ...recorded },
+    dsh: { ...recorded },
+    dsh_transport: { ...recorded },
+    runtime: { node: '22.0.0', platform: 'darwin', arch: 'arm64' },
+  };
+  const clean = { admitted: 1, denied: 0, loaded_dsh: 1, event_files: 3, spent: 'model_request_admitted', problems: [], evidence_integrity: 'complete', evidence_failed_marker: null };
+  const current = { ...artifacts, runtime: artifacts.runtime };
+  const dir = mkdtempSync(join(tmpdir(), 'pfw-receipt-gate-'));
+  const write = (guard) => {
+    const path = join(dir, `receipt-${Math.random().toString(16).slice(2, 8)}.json`);
+    writeFileSync(path, JSON.stringify({ schema: 'public-first-workflow-receipt/1', mode: 'deterministic', outcome: 'ok', facts: { artifacts, guard } }));
+    return path;
+  };
+  const refuse = (guard) =>
+    assert.throws(
+      () => assertDeterministicReceipt(write(guard), { current }),
+      (error) => {
+        assertDriverFailure(error, 'blocked', 'receipt_mismatch');
+        return true;
+      },
+    );
+  try {
+    assert.equal(assertDeterministicReceipt(write(clean), { current }).guard.admitted, 1);
+    refuse({ ...clean, problems: ['dsh:unsupported_transport'] });
+    refuse({ ...clean, evidence_failed_marker: { present: true, category: 'evidence_write_failed' } });
+    refuse({ ...clean, evidence_integrity: 'partial' });
+    refuse({ admitted: 1, denied: 0, loaded_dsh: 1, spent: 'model_request_admitted' });
+    refuse({ ...clean, denied: 1 });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });

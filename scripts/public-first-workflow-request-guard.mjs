@@ -41,6 +41,16 @@
  *     objects (same references, uninspected, unmodified); only `redirect` is
  *     forced to `error`, so a redirect answer cannot become a second request.
  *     Nothing is retried — the guard never calls the transport twice.
+ *  6. Evidence failures are terminal and never silent. If any event cannot be
+ *     persisted (loaded, denied or admitted) the attempt is tainted: the
+ *     `<attempt-dir>/evidence-failed` marker is written, every later request is
+ *     denied before dispatch, and an admission whose own record could not be
+ *     written is never dispatched. A run whose records are incomplete therefore
+ *     cannot be read as a qualified one by counting events. If even the marker
+ *     cannot be written, or if the ceiling cannot be **locked** (a pre-existing
+ *     non-configurable `fetch`), the guard terminates the child with exit code
+ *     78 instead of continuing — a replaceable wrapper or an unrecorded
+ *     attempt must never be able to leave a green result behind.
  *
  * Evidence (credential-free, in the attempt directory the driver allocates
  * once and never resets):
@@ -53,6 +63,13 @@
  *       "denied","runtime":"dsh"|"other","category":<short enum>,
  *       "at":<iso>}` plus, on `loaded`, `"problems":[<fixed labels>]`.
  *     One file per event, written with `wx`, never rewritten.
+ *   <attempt-dir>/evidence-failed
+ *     `{"schema":"nexus-request-guard-evidence-failed/1","reason":<fixed enum>,
+ *       "kind":<failed event kind or null>,"pid":<pid>,"at":<iso>}` — the
+ *     terminal marker of an attempt whose evidence could not be persisted. Its
+ *     mere presence disqualifies the attempt, whatever the event counts say.
+ *     Written once with `wx`, never rewritten; `reason` is `event_write_failed`
+ *     or `fetch_not_replaceable`.
  *
  * The guard reads only the three `NEXUS_WORKFLOW_*` variables below, plus
  * `process.argv[1]`. It never reads, copies, logs or persists a credential, a
@@ -77,6 +94,17 @@ const EVENT_SCHEMA = 'nexus-request-guard-event/1';
 const SPENT_SCHEMA = 'nexus-request-guard-spent/1';
 /** Fixed basename of the consumed slot inside the attempt directory. */
 const SPENT_NAME = 'spent';
+/** Marker file schema written when evidence could not be persisted. */
+const MARKER_SCHEMA = 'nexus-request-guard-evidence-failed/1';
+/** Fixed basename of the terminal evidence-failure marker. */
+const MARKER_NAME = 'evidence-failed';
+/** Exit code used when the child must die rather than continue unrecorded. */
+const UNRECORDABLE_EXIT_CODE = 78;
+/** Marker `reason` labels (fixed vocabulary). */
+const MARKER_REASONS = Object.freeze({
+  eventWriteFailed: 'event_write_failed',
+  fetchNotReplaceable: 'fetch_not_replaceable',
+});
 /** The only model path this guard ever admits (contract §6.3 item 2). */
 const MODEL_PATH = '/chat/completions';
 /** Category recorded with the single admitted request. */
@@ -303,6 +331,9 @@ function initialize() {
     configError: null,
     transportOk: false,
     eventCounter: 0,
+    tainted: false,
+    taintReason: null,
+    markerWritten: false,
   };
 
   if (!IS_NODE) {
@@ -368,8 +399,7 @@ function initialize() {
 
 /**
  * Write one event file. Returns whether the evidence exists; the caller decides
- * what a failure means (a load/deny record is best effort, an admission record
- * is required before dispatch).
+ * what a failure means. An event is written once with `wx` and never rewritten.
  */
 function writeEvent(state, kind, category, problems = null) {
   if (state.eventsDir === null) return false;
@@ -389,6 +419,78 @@ function writeEvent(state, kind, category, problems = null) {
   } catch {
     return false;
   }
+}
+
+/**
+ * Best-effort terminal marker. Its presence is what disqualifies the attempt,
+ * so it is written once with `wx` (an existing marker already says exactly this)
+ * and it never carries anything derived from a request. Returns false when no
+ * marker exists and none could be written — the caller must then stop the child.
+ */
+function writeMarker(state, kind, reason) {
+  if (state.markerWritten) return true;
+  if (state.attemptDir === null) return false;
+  const record = {
+    schema: MARKER_SCHEMA,
+    reason,
+    kind: kind ?? null,
+    pid: process.pid,
+    at: new Date().toISOString(),
+  };
+  try {
+    writeFileSync(join(state.attemptDir, MARKER_NAME), JSON.stringify(record), { flag: 'wx', mode: 0o600 });
+    state.markerWritten = true;
+    return true;
+  } catch (error) {
+    if (error !== null && typeof error === 'object' && error.code === 'EEXIST') {
+      state.markerWritten = true;
+      return true;
+    }
+    return false;
+  }
+}
+
+/**
+ * Stop the child when the guard can neither record the attempt nor hold the
+ * ceiling. Nothing here may be catchable: `process.exit` cannot be intercepted
+ * by the runtime, and the signal fallback covers the case where it returns.
+ */
+function terminateUnrecordable() {
+  try {
+    process.exit(UNRECORDABLE_EXIT_CODE);
+  } catch {
+    // fall through to the unconditional signal
+  }
+  try {
+    process.kill(process.pid, 'SIGKILL');
+  } catch {
+    // nothing further is available; the exit above is the last resort
+  }
+}
+
+/**
+ * Terminal tainted state: this attempt can never be qualified and no further
+ * request may be dispatched. The marker is the durable signal the consumer
+ * checks; when even the marker cannot be written the child is terminated, so a
+ * rejection the runtime catches can never leave a run looking green.
+ */
+function taint(state, kind, reason) {
+  if (state.tainted) return;
+  state.tainted = true;
+  state.taintReason = reason;
+  if (!writeMarker(state, kind, reason)) terminateUnrecordable();
+}
+
+/**
+ * Persist one event, treating a real write failure as terminal for the attempt.
+ * A missing evidence channel is not a write failure: it only happens when the
+ * configuration was already refused (no admission is possible then, because an
+ * admission requires this very write to succeed).
+ */
+function persistEvent(state, kind, category, problems = null) {
+  const written = writeEvent(state, kind, category, problems);
+  if (!written && state.eventsDir !== null) taint(state, kind, MARKER_REASONS.eventWriteFailed);
+  return written;
 }
 
 /**
@@ -484,10 +586,13 @@ function installGuard(state) {
 
   const guarded = async (input, init) => {
     const deny = (category) => {
-      writeEvent(state, 'denied', category);
+      persistEvent(state, 'denied', category);
       return new RequestGuardDenied(category);
     };
     if (!state.transportOk) throw deny(DENY.unsupportedTransport);
+    // Once evidence is broken nothing may be dispatched again: the attempt is
+    // already disqualified, and an admission could no longer be recorded.
+    if (state.tainted) throw deny(DENY.evidenceWriteFailed);
     if (state.configError === DENY.malformedEnv) throw deny(DENY.malformedEnv);
     if (state.runtime !== 'dsh') throw deny(state.foreignCategory);
     if (state.configError !== null) throw deny(state.configError);
@@ -495,7 +600,9 @@ function installGuard(state) {
     if (requestDenial !== null) throw deny(requestDenial);
     const spendFailure = spend(state);
     if (spendFailure !== null) throw deny(spendFailure);
-    if (!writeEvent(state, 'admitted', ADMITTED_CATEGORY)) throw deny(DENY.evidenceWriteFailed);
+    // No dispatch without a persisted admission record: a run whose evidence is
+    // incomplete must never be readable as a qualified one.
+    if (!persistEvent(state, 'admitted', ADMITTED_CATEGORY)) throw deny(DENY.evidenceWriteFailed);
     return captured(input, forwardedInit(init));
   };
 
@@ -506,23 +613,22 @@ function installGuard(state) {
       get: () => guarded,
       set: () => {},
     });
-    return;
   } catch {
-    // Something already installed `fetch` as a non-configurable property (only
-    // a pre-existing preload can do that — this guard runs before dsh imports).
-    // A plain assignment still installs the ceiling whenever the property
-    // stayed writable, at the cost of a later assignment being able to replace
-    // it again; both outcomes are recorded so the weaker guarantee is never
-    // silent.
-    try {
-      globalThis.fetch = guarded;
-      state.problems.push('fetch_replaced_by_assignment');
-    } catch {
-      state.problems.push('fetch_not_replaceable');
-    }
+    // Something already installed `fetch` as a non-configurable property, so
+    // the ceiling cannot be locked. An installable-but-replaceable wrapper would
+    // be a silent bypass: a later assignment would drop the guard entirely, and
+    // a run could then be authorized by evidence produced before the drop. The
+    // only fail-closed answer is to record the integrity failure and stop the
+    // child — this is a preload/configuration failure, not a request decision.
+    state.problems.push(MARKER_REASONS.fetchNotReplaceable);
+    taint(state, null, MARKER_REASONS.fetchNotReplaceable);
+    terminateUnrecordable();
   }
 }
 
 const guardState = initialize();
 installGuard(guardState);
-writeEvent(guardState, 'loaded', LOADED_CATEGORY, guardState.problems);
+// The loaded handshake is part of the evidence: if it cannot be persisted the
+// attempt is tainted (and the child terminated when the marker cannot be
+// written either), so a missing handshake can never be mistaken for a clean run.
+persistEvent(guardState, 'loaded', LOADED_CATEGORY, guardState.problems);

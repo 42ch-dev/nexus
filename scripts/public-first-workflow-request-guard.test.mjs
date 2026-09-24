@@ -30,9 +30,15 @@
  *     including a guard that recreates the evidence directory it was denied;
  *   * a non-dsh runtime or a missing `fetch` being treated as an exemption,
  *     including a grandchild of the installed runtime doing the fetch (which
- *     must be visible as a denial, not invisible) and a `fetch` that the guard
- *     could not install a ceiling over (which must produce no admission
- *     evidence at all);
+ *     must be visible as a denial, not invisible);
+ *   * *evidence* that could not be persisted passing as a clean run: an
+ *     unrecordable denial must leave the attempt disqualified rather than
+ *     reading as one admitted / zero denied, an unrecordable handshake must
+ *     block every dispatch, and when neither an event nor the marker can be
+ *     written the child must die instead of returning a catchable rejection;
+ *   * the ceiling being installed where it cannot be locked (a pre-existing
+ *     non-configurable `fetch`), which would leave a replaceable wrapper that a
+ *     later assignment can bypass — the guard must refuse to run at all;
  *   * the ceiling being replaceable by a later `fetch = …` assignment;
  *   * a secret, a URL or a header leaking into the guard's own evidence.
  */
@@ -66,6 +72,7 @@ const MODEL_TARGET = '/chat/completions';
 /** Evidence contract identifiers this file asserts literally. */
 const EVENT_SCHEMA = 'nexus-request-guard-event/1';
 const SPENT_SCHEMA = 'nexus-request-guard-spent/1';
+const MARKER_SCHEMA = 'nexus-request-guard-evidence-failed/1';
 const ADMITTED_CATEGORY = 'model_request_admitted';
 const LOADED_CATEGORY = 'guard_loaded';
 const DENIED_CATEGORIES = new Set([
@@ -94,7 +101,10 @@ const CHILD_TIMEOUT_MS = 30_000;
  * what happened, including the identity of what the guard forwarded. It never
  * prints anything but its single JSON result line.
  */
-const ENTRY_SOURCE = `const spec = JSON.parse(process.env.GUARD_TEST_SPEC ?? '{}');
+const ENTRY_SOURCE = `import { chmodSync } from 'node:fs';
+import { join } from 'node:path';
+
+const spec = JSON.parse(process.env.GUARD_TEST_SPEC ?? '{}');
 const probeKey = '__nexusGuardProbe';
 const records = () => {
   const probe = globalThis[probeKey];
@@ -134,6 +144,18 @@ if (spec.mode === 'single' || spec.mode === 'sequence') {
   await call('method', spec.url, { method: spec.method ?? 'GET', headers });
 } else if (spec.mode === 'url') {
   await call('foreign', spec.otherUrl, init);
+} else if (spec.mode === 'sequence-chmod-events') {
+  await call('first', spec.url, init);
+  chmodSync(join(process.env.NEXUS_WORKFLOW_ATTEMPT_DIR, 'events'), 0o500);
+  await call('second', spec.url, init);
+} else if (spec.mode === 'chmod-events-then-fetch') {
+  chmodSync(join(process.env.NEXUS_WORKFLOW_ATTEMPT_DIR, 'events'), 0o500);
+  await call('blocked', spec.url, init);
+} else if (spec.mode === 'chmod-attempt-then-fetch') {
+  const attemptDir = process.env.NEXUS_WORKFLOW_ATTEMPT_DIR;
+  chmodSync(join(attemptDir, 'events'), 0o500);
+  chmodSync(attemptDir, 0o500);
+  await call('locked', spec.url, init);
 } else if (spec.mode === 'tamper') {
   let assignThrew = null;
   try {
@@ -208,6 +230,12 @@ const STRIP_SOURCE = `delete globalThis.fetch;
 globalThis.__nexusFetchStripped = typeof globalThis.fetch;
 `;
 
+/** Preload that makes the event channel unwritable before the guard loads. */
+const LOCK_EVENTS_SOURCE = `import { chmodSync } from 'node:fs';
+import { join } from 'node:path';
+chmodSync(join(process.env.NEXUS_WORKFLOW_ATTEMPT_DIR, 'events'), 0o500);
+`;
+
 /** Preloads that pre-empt the guard's own install, at both permission levels. */
 const LOCK_FETCH_SOURCE = `Object.defineProperty(globalThis, 'fetch', {
   value: globalThis.fetch,
@@ -236,6 +264,7 @@ const STRIP_PATH = join(FIXTURE_ROOT, 'strip-fetch.mjs');
 const SHEBANG_ENTRY_PATH = join(FIXTURE_ROOT, 'shebang-entry.mjs');
 const LOCK_FETCH_PATH = join(FIXTURE_ROOT, 'lock-fetch.mjs');
 const FREEZE_FETCH_PATH = join(FIXTURE_ROOT, 'freeze-fetch.mjs');
+const LOCK_EVENTS_PATH = join(FIXTURE_ROOT, 'lock-events.mjs');
 /**
  * A stand-in installed runtime tree: a package root with the recorded entry and
  * a second entry inside it, so the in-package drift label can be exercised
@@ -258,12 +287,22 @@ writeFileSync(SPY_PATH, SPY_SOURCE);
 writeFileSync(STRIP_PATH, STRIP_SOURCE);
 writeFileSync(LOCK_FETCH_PATH, LOCK_FETCH_SOURCE);
 writeFileSync(FREEZE_FETCH_PATH, FREEZE_FETCH_SOURCE);
+writeFileSync(LOCK_EVENTS_PATH, LOCK_EVENTS_SOURCE);
 symlinkSync(ENTRY_PATH, LINKED_ENTRY_PATH);
 
 /** Attempt directories and the fixture root created by this file, cleaned once. */
 const ownedAttemptDirs = [];
 after(() => {
-  for (const dir of ownedAttemptDirs) rmSync(dir, { recursive: true, force: true });
+  for (const dir of ownedAttemptDirs) {
+    try {
+      const eventsDir = join(dir, 'events');
+      if (existsSync(eventsDir)) chmodSync(eventsDir, 0o700);
+      chmodSync(dir, 0o700);
+    } catch {
+      // already removable
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
   rmSync(FIXTURE_ROOT, { recursive: true, force: true });
 });
 
@@ -437,6 +476,23 @@ function summarize(events) {
     admitted: events.filter((event) => event.kind === 'admitted'),
     denied: events.filter((event) => event.kind === 'denied'),
   };
+}
+
+/** The terminal integrity marker, or null when the guard never wrote one. */
+function readMarker(attemptDir) {
+  const markerPath = join(attemptDir, 'evidence-failed');
+  if (!existsSync(markerPath)) return null;
+  return JSON.parse(readFileSync(markerPath, 'utf8'));
+}
+
+/**
+ * Restore the permissions the evidence-fault cases removed, so cleanup can
+ * remove the attempt directory and later reads work normally.
+ */
+function restoreAttemptDir(attemptDir) {
+  const eventsDir = join(attemptDir, 'events');
+  if (existsSync(eventsDir)) chmodSync(eventsDir, 0o700);
+  chmodSync(attemptDir, 0o700);
 }
 
 /** Every file under one attempt directory (the slot plus the events). */
@@ -915,51 +971,165 @@ test('a child process inside the installed package tree is denied as package_chi
   });
 });
 
-test('an already-installed fetch is either replaced with recorded degradation or refuses to be replaced', async () => {
+test('the guard refuses to run when the ceiling cannot be locked', async () => {
   await withEndpoint('ok', async (endpoint) => {
-    // (a) Non-configurable but writable: the ceiling still installs through the
-    // fallback, and the weaker (later-replaceable) guarantee is recorded.
-    const replaceableDir = makeAttemptDir();
-    const replaceable = await runGuardChild({
-      attemptDir: replaceableDir,
-      allowedUrl: endpoint.url,
-      dshRealpath: ENTRY_PATH,
-      spec: singleSpec(endpoint.url),
-      preloads: [SPY_PATH, LOCK_FETCH_PATH, GUARD_PATH],
-    });
-    assertChildRan(replaceable, 'locked-writable-fetch');
-    assert.equal(firstAttempt(replaceable).status, 200);
-    assert.equal(replaceable.result.transport.dispatches, 1);
-    assert.equal(endpoint.requests.length, 1);
-    const replaceableEvents = summarize(readEvents(replaceableDir));
-    assert.equal(replaceableEvents.admitted.length, 1);
-    assert.ok(
-      replaceableEvents.loaded[0].problems.includes('fetch_replaced_by_assignment'),
-      JSON.stringify(replaceableEvents.loaded[0].problems),
-    );
+    // A pre-existing non-configurable `fetch` (writable or not) cannot be turned
+    // into the locked accessor. A replaceable wrapper would be a silent bypass —
+    // a later assignment would drop the guard and the evidence produced before
+    // the drop could still authorize the run — so the child fails closed.
+    for (const [label, lockPreload] of [
+      ['nonconfigurable-writable', LOCK_FETCH_PATH],
+      ['frozen', FREEZE_FETCH_PATH],
+    ]) {
+      const attemptDir = makeAttemptDir();
+      const child = await runGuardChild({
+        attemptDir,
+        allowedUrl: endpoint.url,
+        dshRealpath: ENTRY_PATH,
+        spec: singleSpec(endpoint.url),
+        preloads: [SPY_PATH, lockPreload, GUARD_PATH],
+      });
+      assert.equal(child.result, null, `${label}: the guard let the child run`);
+      assert.equal(child.code, 78, `${label}: exit ${child.code} (signal ${child.signal})`);
+      assert.equal(endpoint.requests.length, 0, `${label}: something was dispatched`);
 
-    // (b) Frozen: the ceiling cannot be installed at all, so the request goes
-    // out unguarded and there is NO admission evidence — the guard cannot
-    // report a qualified attempt it did not actually control.
-    const frozenDir = makeAttemptDir();
-    const frozen = await runGuardChild({
-      attemptDir: frozenDir,
+      const marker = readMarker(attemptDir);
+      assert.notEqual(marker, null, `${label}: no integrity marker`);
+      assert.equal(marker.schema, MARKER_SCHEMA, label);
+      assert.equal(marker.reason, 'fetch_not_replaceable', label);
+      assert.equal(marker.kind, null, label);
+
+      const events = summarize(readEvents(attemptDir));
+      assert.equal(events.admitted.length, 0, label);
+      assert.equal(existsSync(join(attemptDir, 'spent')), false, label);
+    }
+  });
+});
+
+test('an unrecordable denial is terminal for the attempt, not a silent zero-denial pass', async () => {
+  await withEndpoint('ok', async (endpoint) => {
+    const attemptDir = makeAttemptDir();
+    const child = await runGuardChild({
+      attemptDir,
+      allowedUrl: endpoint.url,
+      dshRealpath: ENTRY_PATH,
+      spec: { ...singleSpec(endpoint.url), mode: 'sequence-chmod-events' },
+    });
+    restoreAttemptDir(attemptDir);
+    assertChildRan(child, 'unrecordable-denial');
+
+    // The first request is admitted normally and the slot is consumed.
+    assert.equal(firstAttempt(child).status, 200);
+    assert.equal(endpoint.requests.length, 1);
+    assert.equal(child.result.transport.dispatches, 1);
+    // The second is denied before dispatch, exactly as it should be...
+    assert.equal(child.result.attempts[1].error?.code, 'attempt_already_spent');
+
+    // ...but that denial could not be persisted, so the counts alone would read
+    // as one admitted / zero denied with a spent slot — a clean-looking receipt
+    // for an attempt in which an unexpected call was in fact refused. The marker
+    // is what disqualifies it.
+    const events = summarize(readEvents(attemptDir));
+    assert.equal(events.admitted.length, 1);
+    assert.equal(events.denied.length, 0);
+    assert.equal(existsSync(join(attemptDir, 'spent')), true);
+    const marker = readMarker(attemptDir);
+    assert.notEqual(marker, null, 'a refused call left no trace at all');
+    assert.equal(marker.schema, MARKER_SCHEMA);
+    assert.equal(marker.reason, 'event_write_failed');
+    assert.equal(marker.kind, 'denied');
+    assert.equal(typeof marker.pid, 'number');
+    assert.equal(typeof marker.at, 'string');
+    // The marker is evidence readers parse: safe keys only, nothing derived
+    // from the request.
+    assert.deepEqual(Object.keys(marker).sort(), ['at', 'kind', 'pid', 'reason', 'schema']);
+    const markerText = readFileSync(join(attemptDir, 'evidence-failed'), 'utf8');
+    for (const needle of [endpoint.url, endpoint.origin, '127.0.0.1', MODEL_TARGET, 'authorization']) {
+      assert.equal(markerText.includes(needle), false, `marker contains ${needle}`);
+    }
+  });
+});
+
+test('when neither an event nor the marker can be written the child is terminated', async () => {
+  await withEndpoint('ok', async (endpoint) => {
+    const attemptDir = makeAttemptDir();
+    const child = await runGuardChild({
+      attemptDir,
+      allowedUrl: endpoint.url,
+      dshRealpath: ENTRY_PATH,
+      spec: { ...singleSpec(endpoint.url), mode: 'chmod-attempt-then-fetch' },
+    });
+    const marker = readMarker(attemptDir);
+    restoreAttemptDir(attemptDir);
+
+    // No marker channel either: the guard must not return a rejection the
+    // runtime could catch and continue from, so the child dies.
+    assert.equal(marker, null, 'a marker should have been impossible here');
+    assert.equal(child.result, null, 'the guard let the child continue');
+    assert.equal(child.code, 78, `exit ${child.code} (signal ${child.signal})`);
+    assert.equal(endpoint.requests.length, 0);
+    assert.equal(existsSync(join(attemptDir, 'spent')), false);
+  });
+});
+
+test('an unrecordable admission is never dispatched', async () => {
+  await withEndpoint('ok', async (endpoint) => {
+    const attemptDir = makeAttemptDir();
+    const child = await runGuardChild({
+      attemptDir,
+      allowedUrl: endpoint.url,
+      dshRealpath: ENTRY_PATH,
+      spec: { ...singleSpec(endpoint.url), mode: 'chmod-events-then-fetch' },
+    });
+    restoreAttemptDir(attemptDir);
+    assertChildRan(child, 'unrecordable-admission');
+
+    // The request was admissible, but its admission could not be persisted, so
+    // it must not reach the transport at all.
+    assert.equal(firstAttempt(child).error?.code, 'evidence_write_failed');
+    assert.equal(child.result.transport.dispatches, 0);
+    assert.equal(endpoint.requests.length, 0);
+
+    const events = summarize(readEvents(attemptDir));
+    assert.equal(events.loaded.length, 1);
+    assert.equal(events.admitted.length, 0);
+    // The slot was taken before the record attempt, and the attempt is
+    // disqualified by the marker rather than by a missing event.
+    assert.equal(existsSync(join(attemptDir, 'spent')), true);
+    const marker = readMarker(attemptDir);
+    assert.notEqual(marker, null, 'the unrecordable admission left no trace');
+    assert.equal(marker.reason, 'event_write_failed');
+    assert.equal(marker.kind, 'admitted');
+  });
+});
+
+test('a loaded record that cannot be persisted taints the attempt and blocks dispatch', async () => {
+  await withEndpoint('ok', async (endpoint) => {
+    const attemptDir = makeAttemptDir();
+    mkdirSync(join(attemptDir, 'events'), { mode: 0o700 });
+    const child = await runGuardChild({
+      attemptDir,
       allowedUrl: endpoint.url,
       dshRealpath: ENTRY_PATH,
       spec: singleSpec(endpoint.url),
-      preloads: [SPY_PATH, FREEZE_FETCH_PATH, GUARD_PATH],
+      preloads: [SPY_PATH, LOCK_EVENTS_PATH, GUARD_PATH],
     });
-    assertChildRan(frozen, 'frozen-fetch');
-    assert.equal(firstAttempt(frozen).status, 200);
-    assert.equal(endpoint.requests.length, 2);
-    const frozenEvents = summarize(readEvents(frozenDir));
-    assert.equal(frozenEvents.admitted.length, 0);
-    assert.equal(frozenEvents.denied.length, 0);
-    assert.equal(existsSync(join(frozenDir, 'spent')), false);
-    assert.ok(
-      frozenEvents.loaded[0].problems.includes('fetch_not_replaceable'),
-      JSON.stringify(frozenEvents.loaded[0].problems),
-    );
+    restoreAttemptDir(attemptDir);
+    assertChildRan(child, 'locked-events');
+
+    // The handshake could not be recorded, so nothing may be dispatched and the
+    // attempt is disqualified by the marker rather than by a missing event.
+    assert.equal(firstAttempt(child).error?.code, 'evidence_write_failed');
+    assert.equal(child.result.transport.dispatches, 0);
+    assert.equal(endpoint.requests.length, 0);
+    assert.equal(existsSync(join(attemptDir, 'spent')), false);
+    const events = summarize(readEvents(attemptDir));
+    assert.equal(events.loaded.length, 0);
+    assert.equal(events.admitted.length, 0);
+    const marker = readMarker(attemptDir);
+    assert.notEqual(marker, null, 'the unrecordable handshake left no trace');
+    assert.equal(marker.reason, 'event_write_failed');
+    assert.equal(marker.kind, 'loaded');
   });
 });
 

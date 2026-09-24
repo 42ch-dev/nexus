@@ -353,6 +353,12 @@ const OFFICIAL_MODEL_URL = 'https://api.deepseek.com/chat/completions';
 /** Guard evidence inside one attempt directory. */
 const GUARD_SPENT_FILENAME = 'spent';
 const GUARD_EVENTS_DIRNAME = 'events';
+/**
+ * The guard's own marker that an event record could not be persisted. Its mere
+ * presence disqualifies the attempt: a lost denial record is indistinguishable
+ * from no denial at all, so "zero denials" may never be inferred from it.
+ */
+const GUARD_EVIDENCE_FAILED_FILENAME = 'evidence-failed';
 /** The guard's own record schemas (its event/spend contract, read back here). */
 const GUARD_EVENT_SCHEMA = 'nexus-request-guard-event/1';
 const GUARD_SPENT_SCHEMA = 'nexus-request-guard-spent/1';
@@ -1151,17 +1157,33 @@ function assertGuardRecordSafe(value, path) {
  * Read the guard's attempt evidence. Counts are derived from the guard's own
  * records and never from this driver's expectations: an absent `events/`
  * directory, an unreadable record or an unknown kind/runtime is a failure, not
- * an empty result. A zero-length file is the only intermediate state a single
- * exclusive-create write can leave (skipped as in-progress); a non-empty
- * unparseable file is a real failure because nothing is ever rewritten.
+ * an empty result.
+ *
+ * Evidence integrity is part of the read, not a decoration on it (§6.3 item 4:
+ * a denied attempt must disqualify the run even when the admitted count is still
+ * one, so "zero denials" may never be inferred from records that were never
+ * persisted):
+ *
+ *   * `<attemptDir>/evidence-failed` — the guard's own marker that an event
+ *     write failed — is read here; its PRESENCE is the failure signal, whatever
+ *     it contains, because a lost record is indistinguishable from a record
+ *     that never had to exist;
+ *   * `final` mode (used after every owned child has run) treats a zero-length
+ *     `events/*.json` as a failure instead of skipping it: nothing is ever
+ *     rewritten, so a truncated record at rest means the evidence is partial.
+ *     Mid-run polls keep skipping it, because that is the only intermediate
+ *     state a single exclusive-create write can be observed in.
  */
-function readAttemptDir(dir) {
+function readAttemptDir(dir, { final = false } = {}) {
   const eventsDir = join(dir, GUARD_EVENTS_DIRNAME);
   const spentPath = join(dir, GUARD_SPENT_FILENAME);
+  const evidenceFailedPath = join(dir, GUARD_EVIDENCE_FAILED_FILENAME);
   const state = {
     dir,
     spent_present: existsSync(spentPath),
+    evidence_failed: readEvidenceFailedMarker(evidenceFailedPath),
     event_files: 0,
+    truncated_events: [],
     loaded: 0,
     loaded_dsh: 0,
     loaded_other: 0,
@@ -1178,7 +1200,19 @@ function readAttemptDir(dir) {
   for (const name of names) {
     const path = join(eventsDir, name);
     const { text, bytes } = readGuardRecord(path);
-    if (bytes === 0) continue;
+    if (bytes === 0) {
+      // The only in-progress state of a single exclusive-create write. At rest
+      // (final) it means the write never completed, so it disqualifies.
+      state.truncated_events.push(name);
+      if (final) {
+        throw failed(
+          'guard_event_truncated',
+          `guard record ${name} is zero bytes after the attempt ended; the write never completed, so the evidence ` +
+            'is partial and neither a denial nor an admission can be counted',
+        );
+      }
+      continue;
+    }
     let record = null;
     try {
       record = JSON.parse(text);
@@ -1215,8 +1249,10 @@ function readAttemptDir(dir) {
       state.loaded += 1;
       if (record.runtime === 'dsh') state.loaded_dsh += 1;
       else state.loaded_other += 1;
-      if (Array.isArray(record.problems) && record.problems.length > 0) {
-        state.problems.push(`${record.runtime}:${record.problems.join(',')}`);
+      if (Array.isArray(record.problems)) {
+        for (const problem of record.problems) {
+          state.problems.push(`${record.runtime}:${problem}`);
+        }
       }
     } else if (record.kind === 'admitted') {
       state.admitted += 1;
@@ -1226,6 +1262,41 @@ function readAttemptDir(dir) {
     }
   }
   return state;
+}
+
+/**
+ * Read the guard's `evidence-failed` marker, if any. Presence is the signal, so
+ * an unreadable, empty or foreign payload still reports as present — the driver
+ * only enriches the refusal when the payload really is the guard's own JSON
+ * (`nexus-request-guard-evidence-failed/1`: `reason`, `kind`, `pid`, `at`) and
+ * passes the same leak check as every other record.
+ */
+function readEvidenceFailedMarker(path) {
+  if (!existsSync(path)) return null;
+  const marker = { present: true, reason: null, kind: null };
+  marker.detail = 'the guard recorded a failed evidence write for this attempt';
+  try {
+    const { text, bytes } = readGuardRecord(path);
+    if (bytes === 0) {
+      marker.detail = 'the guard recorded a failed evidence write (marker is empty)';
+      return marker;
+    }
+    const record = JSON.parse(text);
+    assertGuardRecordSafe(record, path);
+    if (record === null || typeof record !== 'object' || Array.isArray(record)) {
+      marker.detail = 'the guard recorded a failed evidence write (marker is not an object)';
+      return marker;
+    }
+    if (typeof record.reason === 'string' && record.reason.length > 0) marker.reason = record.reason;
+    if (typeof record.kind === 'string' && record.kind.length > 0) marker.kind = record.kind;
+    const subject = marker.kind === null ? 'an event record' : `a ${marker.kind} record`;
+    marker.detail = `the guard could not persist ${subject}${marker.reason === null ? '' : ` (${marker.reason})`}`;
+  } catch (error) {
+    marker.detail = `the guard recorded a failed evidence write (${
+      error instanceof DriverFailure ? error.message : 'unreadable marker'
+    })`;
+  }
+  return marker;
 }
 
 /** The `spent` payload, strictly parsed (the token that can never be reset). */
@@ -1257,15 +1328,56 @@ function readSpentToken(dir) {
 
 /**
  * The guard half of the success condition (§6.3 items 1–4): dsh really loaded
- * the preload, exactly one request was admitted, nothing was denied, and the
- * spend token survives. Any unexpected denied attempt fails qualification even
- * when the admitted count is still one — a denial means some part of the owned
- * tree tried something the authorization does not cover.
+ * the preload, exactly one request was admitted, nothing was denied, the spend
+ * token survives — AND the evidence that says so is complete.
  *
+ * Evidence integrity is checked FIRST, because every count below is derived from
+ * persisted records: a failed `denied` write would otherwise read as "zero
+ * denials" and qualify exactly the attempt §6.3 item 4 requires it to refuse, and
+ * a degraded preload (a `fetch` that could be replaced, an unusable environment,
+ * an events directory that never worked) would otherwise read as a clean one:
+ *
+ *   1. the guard's `evidence-failed` marker (present) disqualifies the attempt;
+ *   2. any non-empty `loaded.problems` disqualifies it — every label the guard
+ *      can record there is a degradation of its own ceiling (an unusable
+ *      environment, an unusable attempt/events directory, a missing or
+ *      unreplaceable `fetch`);
+ *   3. a zero-length event record at rest disqualifies it (`readAttemptDir` in
+ *      final mode);
+ *   4. only then: zero denials, at least one `loaded` record for the dsh runtime,
+ *      exactly one admission, and a `spent` token.
+ *
+ * Any unexpected denied attempt fails qualification even when the admitted count
+ * is still one — a denial means some part of the owned tree tried something the
+ * authorization does not cover.
+ *
+ * @returns the guard facts recorded in the receipt, including the explicit
+ *   `evidence_integrity` condition the live gate re-checks.
  * @throws {DriverFailure} `failed` when the evidence contradicts the one-request
- *   budget; the receipt keeps the raw counts either way.
+ *   budget or is incomplete; the receipt keeps the raw counts either way.
  */
 function assertGuardAttempt(state, spent) {
+  if (state.evidence_failed !== null) {
+    throw failed(
+      'guard_evidence_failed',
+      `${state.evidence_failed.detail}; the attempt's evidence is incomplete, so its counts cannot show what was ` +
+        'attempted — a lost record is indistinguishable from no attempt at all',
+    );
+  }
+  if (state.problems.length > 0) {
+    throw failed(
+      'guard_evidence_degraded',
+      `the guard recorded degradation of its own ceiling (${state.problems.join(', ')}); a degraded preload cannot ` +
+        'prove the one-request budget, so it never qualifies an attempt',
+    );
+  }
+  if (state.truncated_events.length > 0) {
+    throw failed(
+      'guard_event_truncated',
+      `${state.truncated_events.length} event record(s) are zero bytes at rest (${state.truncated_events.join(', ')}); ` +
+        'the evidence is partial',
+    );
+  }
   if (state.denied > 0) {
     throw failed(
       'guard_denied_attempt',
@@ -1296,7 +1408,13 @@ function assertGuardAttempt(state, spent) {
     denied: state.denied,
     spent: spent.category,
     spent_at: spent.at,
-    problems: state.problems,
+    problems: [],
+    // The explicit condition the live gate re-checks: 'complete' means the marker
+    // was absent, no record was truncated, every record parsed, and the guard
+    // reported no degradation of its own ceiling. It is asserted here, not
+    // inferred, so a receipt that lacks it can never authorize a live request.
+    evidence_integrity: 'complete',
+    evidence_failed_marker: null,
   };
 }
 
@@ -1307,6 +1425,10 @@ function assertGuardAttempt(state, spent) {
  */
 function captureGuardAttempt(dir) {
   try {
+    // Tolerant read on purpose: a run that stopped mid-flight may legitimately
+    // have an in-progress (zero-length) record, and the raw counts plus the
+    // evidence-failed marker are the evidence here. The strict FINAL read and the
+    // integrity assertion belong to the success path.
     return readAttemptDir(dir);
   } catch (error) {
     return { dir, unreadable: error instanceof Error ? error.message : String(error) };
@@ -1437,17 +1559,31 @@ function assertDeterministicReceipt(receiptPath, { current }) {
     );
   }
   const guard = receipt.facts?.guard;
+  // Counts alone never authorize: the receipt must also carry the explicit
+  // evidence-integrity condition this driver asserts at the end of the
+  // deterministic run. A receipt that lacks it (an older receipt), that reports
+  // guard degradation, or that reports a failed evidence write is refused, so a
+  // degraded or partial guard proof can never become a live authorization.
+  const integrityFailure =
+    guard === null || typeof guard !== 'object'
+      ? 'no guard proof'
+      : guard.evidence_integrity !== 'complete' || guard.evidence_failed_marker !== null
+        ? 'the guard evidence is not recorded as complete'
+        : !Array.isArray(guard.problems) || guard.problems.length !== 0
+          ? 'the guard reported degradation of its own ceiling'
+          : null;
   if (
-    guard === null ||
-    typeof guard !== 'object' ||
+    integrityFailure !== null ||
     guard.admitted !== 1 ||
     guard.denied !== 0 ||
     !(guard.loaded_dsh >= 1) ||
+    !(guard.event_files >= 1) ||
     typeof guard.spent !== 'string'
   ) {
     throw blocked(
       'receipt_mismatch',
-      `the deterministic receipt carries no clean one-request guard proof (${JSON.stringify(guard ?? null)})`,
+      `the deterministic receipt carries no clean, complete one-request guard proof (${integrityFailure ?? 'counts'}): ` +
+        `${JSON.stringify(guard ?? null)}`,
     );
   }
   return { receipt, guard, receipt_sha256: sha256(readFileSync(receiptPath)) };
@@ -4429,18 +4565,21 @@ async function runJourney(options) {
 
     // 15. The request-budget guard's own verdict on this attempt (§6.3 items
     // 1–4). Read AFTER every owned child has run — including the restarted
-    // service and any dsh probe it spawned — so the counts describe the whole
-    // attempt and not just its first half. The guard's records are the single
-    // authority for "how many upstream requests happened"; the journey fails
-    // when the dsh preload handshake is missing, when anything was denied, or
-    // when the admitted count is not exactly one.
-    const guardState = readAttemptDir(attemptDir);
+    // service and any dsh probe it spawned — in FINAL mode, so the counts
+    // describe the whole attempt, a truncated record cannot be skipped, and the
+    // guard's own evidence-failed marker is part of the verdict rather than
+    // decoration. The guard's records are the single authority for "how many
+    // upstream requests happened"; the journey fails when the evidence is
+    // incomplete or degraded, when the dsh preload handshake is missing, when
+    // anything was denied, or when the admitted count is not exactly one.
+    const guardState = readAttemptDir(attemptDir, { final: true });
     facts.guard = assertGuardAttempt(guardState, readSpentToken(attemptDir));
     record('request_guard', 'ok', {
       admitted: facts.guard.admitted,
       denied: facts.guard.denied,
       loaded_dsh: facts.guard.loaded_dsh,
       spent: facts.guard.spent,
+      evidence_integrity: facts.guard.evidence_integrity,
     });
   } catch (error) {
     const isDriverFailure = error instanceof DriverFailure;
@@ -4630,6 +4769,7 @@ export {
   parsePlacementDto,
   proveSameRunReplay,
   readAttemptDir,
+  readEvidenceFailedMarker,
   readEventStream,
   readEventStreamOrStop,
   readPlacementViaCli,
