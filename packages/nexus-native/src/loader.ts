@@ -31,6 +31,25 @@ export interface NativeCoreBinding {
   changes(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
   providerCall(requestJson: Uint8Array): Promise<Uint8Array>;
   nextProviderEvents(operationId: string, maxEvents: number, maxBytes: number): Promise<Uint8Array>;
+  // ── Actor Host authority surface (P0-T5) ─────────────────────────────────
+  // Raw napi signatures; the typed facade lives in `index.ts`. `principal` is
+  // the encoded handle the native side re-verifies on every call.
+  hostCreateSession(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
+  hostExecuteOperation(
+    principal: string,
+    sessionId: string,
+    requestJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  hostCharacterOperation(principal: string, operationId: string): Promise<Uint8Array>;
+  hostCancelOperation(principal: string, operationId: string): Promise<Uint8Array>;
+  hostShutdownSession(principal: string, sessionId: string): Promise<Uint8Array>;
+  nextHostEvents(
+    principal: string,
+    sessionId: string,
+    operationId: string,
+    maxEvents: number,
+    maxBytes: number,
+  ): Promise<Uint8Array>;
   close(): Promise<Uint8Array>;
   // ── P5-T1 World / Work / content / knowledge family surface ──────────────
   // Raw napi signatures; the typed facade lives in `index.ts`.

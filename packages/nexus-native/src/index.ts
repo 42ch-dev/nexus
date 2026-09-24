@@ -202,6 +202,13 @@ import type {
   ListSchedulesResponse,
   ListSessionsQuery,
   ListSessionsResponse,
+  CancelOperationResponse,
+  CharacterOperationResult,
+  CreateSessionRequest,
+  ExecuteOperationRequest,
+  OperationResponse,
+  SessionResponse,
+  ShutdownSessionResponse,
   SessionDetailResponse,
 } from '@42ch/nexus-contracts';
 import { isAbsolute } from 'node:path';
@@ -265,6 +272,38 @@ export interface NativeCore {
   changes(principal: PrincipalHandle, request: CoreChangesRequest): Promise<CoreChangesResponse>;
   providerCall(request: ProviderCall): Promise<ProviderReply>;
   nextProviderEvents(
+    operationId: string,
+    maxEvents: number,
+    maxBytes: number,
+  ): Promise<ProviderEventBatch>;
+  // ── Actor Host authority surface (P0-T5) ─────────────────────────────────
+  // The core's Actor-aware session/effect/observation/control methods. The
+  // principal is resolved and verified natively on every call; the raw
+  // providerCall/nextProviderEvents lane above refuses Actor ids.
+  hostCreateSession(
+    principal: PrincipalHandle,
+    request: CreateSessionRequest,
+  ): Promise<SessionResponse>;
+  hostExecuteOperation(
+    principal: PrincipalHandle,
+    sessionId: string,
+    request: ExecuteOperationRequest,
+  ): Promise<OperationResponse>;
+  hostCharacterOperation(
+    principal: PrincipalHandle,
+    operationId: string,
+  ): Promise<CharacterOperationResult>;
+  hostCancelOperation(
+    principal: PrincipalHandle,
+    operationId: string,
+  ): Promise<CancelOperationResponse>;
+  hostShutdownSession(
+    principal: PrincipalHandle,
+    sessionId: string,
+  ): Promise<ShutdownSessionResponse>;
+  nextHostEvents(
+    principal: PrincipalHandle,
+    sessionId: string,
     operationId: string,
     maxEvents: number,
     maxBytes: number,
@@ -834,6 +873,38 @@ function wrapCore(inner: NativeCoreBinding): NativeCore {
     },
     async nextProviderEvents(operationId, maxEvents, maxBytes) {
       return parseJsonBuffer(await inner.nextProviderEvents(operationId, maxEvents, maxBytes));
+    },
+    // The generated request types bind every call site and the native side
+    // re-parses each buffer into the same generated DTO (`deny_unknown_fields`),
+    // so the schema stays the shape authority — no handwritten shape table
+    // (the same rule the domain surface below documents).
+    async hostCreateSession(principal, request) {
+      return parseJsonBuffer(
+        await inner.hostCreateSession(principal, encodeWireBuffer(request, undefined, 'request')),
+      );
+    },
+    async hostExecuteOperation(principal, sessionId, request) {
+      return parseJsonBuffer(
+        await inner.hostExecuteOperation(
+          principal,
+          sessionId,
+          encodeWireBuffer(request, undefined, 'request'),
+        ),
+      );
+    },
+    async hostCharacterOperation(principal, operationId) {
+      return parseJsonBuffer(await inner.hostCharacterOperation(principal, operationId));
+    },
+    async hostCancelOperation(principal, operationId) {
+      return parseJsonBuffer(await inner.hostCancelOperation(principal, operationId));
+    },
+    async hostShutdownSession(principal, sessionId) {
+      return parseJsonBuffer(await inner.hostShutdownSession(principal, sessionId));
+    },
+    async nextHostEvents(principal, sessionId, operationId, maxEvents, maxBytes) {
+      return parseJsonBuffer(
+        await inner.nextHostEvents(principal, sessionId, operationId, maxEvents, maxBytes),
+      );
     },
     async close() {
       return parseJsonBuffer(await inner.close());

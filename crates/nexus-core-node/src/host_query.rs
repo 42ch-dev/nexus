@@ -8,7 +8,7 @@
 //! holds the provider-only JS view, which is merged after the native rows and
 //! paged after the merge.
 
-use nexus_agent_host::ids::HostOperationId;
+use nexus_agent_host::ids::{HostOperationId, HostSessionId};
 use nexus_agent_host::providers::port::operation_status_wire;
 use nexus_agent_host::HostFacade;
 use nexus_contracts::core_host_query::{CoreHostQueryFormat, CoreHostQueryQuery};
@@ -17,7 +17,7 @@ use nexus_contracts::core_host_query_response::{
     NexusAgentHostSessionListResponse, NexusAgentHostSessionResponse, NexusPaginationInfo,
 };
 use nexus_contracts::CoreHostQuery;
-use nexus_core::{HostHandle, Principal};
+use nexus_core::{CoreError, HostHandle, Principal};
 use uuid::Uuid;
 
 use super::core_error;
@@ -50,6 +50,69 @@ fn js_session_wire(record: &JsSessionRecord) -> NexusAgentHostSessionResponse {
 /// report after both branches miss. Every other error propagates.
 fn not_found(reason: &str) -> String {
     core_error::open_reason_not_found(reason)
+}
+
+/// Refuse a raw provider id that this authority owns as an Actor id.
+///
+/// `providerCall`/`nextProviderEvents` are the lower-level provider-only lane;
+/// technical contract §4 forbids that lane from serving a core-indexed or
+/// tombstoned Actor id, so a native consumer (or an HTTP caller switched to
+/// another endpoint) cannot bypass the core's admission, terminal and control
+/// ownership. The check is the authority's own index — native keeps no second
+/// registry — and it is a pure read.
+///
+/// An id the core never indexed is NOT refused: provider-only session and
+/// operation ids are arbitrary strings, so they are compared as strings and
+/// never UUID-parsed into a false positive, and their semantics stay exactly as
+/// they were.
+///
+/// # Errors
+///
+/// Returns `forbidden` naming the Actor id when the id is indexed (live) or
+/// retired (tombstoned). Without an attached authority there is no Actor index
+/// to protect and nothing is refused — the provider-port lookup behind the
+/// caller reports its own unavailability.
+pub fn deny_actor_provider_ids(
+    state: &EnvState,
+    session_id: Option<&str>,
+    operation_id: Option<&str>,
+) -> Result<(), CoreError> {
+    let Some(authority) = state.host_authority() else {
+        return Ok(());
+    };
+    let registry = authority.actor_sessions();
+    if let Some(raw) = session_id {
+        if let Ok(uuid) = Uuid::parse_str(raw) {
+            if registry.is_actor_session(&HostSessionId(uuid)) {
+                return Err(forbidden_actor_id("session", raw));
+            }
+        }
+    }
+    if let Some(raw) = operation_id {
+        if let Ok(uuid) = Uuid::parse_str(raw) {
+            let op_id = HostOperationId(uuid);
+            // Either index: an operation reserved with a recorded Character
+            // outcome, or one registered before the Host bound it to its
+            // session. The retired-session case is covered by the session
+            // check, and a terminal record keeps its operation id until the
+            // core's bounded eviction.
+            if registry.operation_session_id(&op_id).is_some()
+                || registry.resolve_indexed_operation_session(&op_id).is_some()
+            {
+                return Err(forbidden_actor_id("operation", raw));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// One refusal shape for both raw entry points: the LANE is the reason (the id
+/// did nothing wrong here), so the caller is told to use the Actor Host methods
+/// rather than retry the provider-only path.
+fn forbidden_actor_id(kind: &str, raw: &str) -> CoreError {
+    CoreError::Forbidden {
+        resource: format!("actor {kind} {raw} on the provider-only lane"),
+    }
 }
 
 /// Deterministic merged session list: native (authority) entries share one sort
