@@ -1,6 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import type { ServerResponse } from 'node:http';
-import type { ProviderEventBatch, ProviderHostEvent } from '@42ch/nexus-contracts';
+import type {
+  CharacterOperationResult,
+  ProviderEventBatch,
+  ProviderHostEvent,
+} from '@42ch/nexus-contracts';
 import type { ServiceCore } from './lifecycle.js';
 import type { ProviderOperationRecord, ProviderSessionRecord } from './provider-registry.js';
 import { isTerminalOperationStatus } from './provider-registry.js';
@@ -27,7 +31,7 @@ import {
   tryReserveEnvironmentBytes,
 } from './environment-budget.js';
 import { HttpError, mapNativeError } from './errors.js';
-import { hostQuery } from './world-kb.js';
+import { hostQuery, withPrincipal } from './world-kb.js';
 
 type CoreStreamGap = NonNullable<ProviderEventBatch['gap']>;
 
@@ -541,6 +545,10 @@ async function hydrateSessionRecord(
       activeOpId: session.active_op_id ?? null,
       model: session.model,
     };
+    // Preserve the Actor echo in the cold/warm mirror: SSE must decide
+    // Actor-versus-provider-only from this row, not from a launch payload.
+    if (session.actor_ref !== undefined) record.actorRef = session.actor_ref;
+    if (session.viewpoint !== undefined) record.viewpoint = session.viewpoint;
     service.providerRegistry.registerSession(record);
     return record;
   } catch (error) {
@@ -576,6 +584,28 @@ async function hydrateOperationRecord(
     };
     service.providerRegistry.registerOperation(record);
     return record;
+  } catch (error) {
+    const mapped = mapNativeError(error);
+    if (mapped.code === 'not_found') return null;
+    if (mapped.code === 'invalid_input' && mapped.message === 'host not started') return null;
+    throw mapped;
+  }
+}
+
+/**
+ * Fresh native truth for one Character operation, or `null` when the core
+ * authority does not own the id (an unknown/evicted id, or no attached
+ * authority at all). Same hydration shape as the two readers above: the mirror
+ * is never the source of an Actor decision.
+ */
+async function hydrateCharacterOperation(
+  service: ServiceCore,
+  operationId: string,
+): Promise<CharacterOperationResult | null> {
+  try {
+    return await withPrincipal(service, (principal) =>
+      service.core.hostCharacterOperation(principal, operationId),
+    );
   } catch (error) {
     const mapped = mapNativeError(error);
     if (mapped.code === 'not_found') return null;
@@ -637,40 +667,142 @@ export function ingestEvents(service: ServiceCore, operationId: string, events: 
   }
 }
 
-export async function streamSessionEvents(
-  service: ServiceCore,
-  sessionId: string,
-  searchParams: URLSearchParams,
-  res: ServerResponse,
-): Promise<void> {
-  const session = await hydrateSessionRecord(service, sessionId);
-  if (!session) {
-    throw new HttpError(404, 'not_found', `session ${sessionId} not found`, {
-      resource: `session:${sessionId}`,
-    });
-  }
-  const operationId = searchParams.get('operation_id') ?? session.activeOpId;
-  if (!operationId) {
-    throw new HttpError(400, 'invalid_input', 'operation_id is required for session events');
-  }
+/**
+ * The one transport-side source of an operation's frames.
+ *
+ * Both legal owners of an operation — the provider-only lane and the core Actor
+ * authority — deliver the same generated event batches under the same bounded
+ * caps; only the pull call and the canonical-terminal read differ. One source
+ * per stream keeps the SSE loops a single implementation, so the Actor path can
+ * never drift into a second delivery policy (and vice versa).
+ */
+interface OperationEventSource {
+  readonly hub: OperationEventHub;
+  /** Frames the contract says to replay before any pull (or a truthful gap). */
+  initialTruthGap(): StoredFrame | null;
+  /** Canonical truth is terminal while the hub retains no terminal frame. */
+  canonicalGap(): Promise<StoredFrame | null>;
+  /** One bounded batch from the owner authorized to serve this operation. */
+  pull(): Promise<ProviderEventBatch>;
+}
 
-  const operation = await hydrateOperationRecord(service, operationId);
-  if (!operation) {
+/** The provider-only lane: canonical truth is the mirror record it hydrates. */
+function providerEventSource(
+  service: ServiceCore,
+  operation: ProviderOperationRecord,
+  operationId: string,
+  existingHub: OperationEventHub | undefined,
+): OperationEventSource {
+  const hub =
+    existingHub ??
+    service.providerRegistry.ensureHub(
+      operationId,
+      () => new OperationEventHub(operationId, operation.sessionId),
+    );
+  return {
+    hub,
+    initialTruthGap: () =>
+      existingHub === undefined &&
+      isTerminalOperationStatus(operation.status) &&
+      !hub.hasTerminal()
+        ? hub.recordGap({
+            reason: 'history_unavailable',
+            operation_id: operationId,
+            resync_required: true,
+            inspect_url: inspectUrl(operationId),
+          })
+        : null,
+    canonicalGap: async () => canonicalTerminalGap(service, hub, operationId),
+    pull: () =>
+      service.core.nextProviderEvents(
+        operationId,
+        PROVIDER_PULL_MAX_EVENTS,
+        PROVIDER_PULL_MAX_BYTES,
+      ),
+  };
+}
+
+/**
+ * The Actor authority arm: fresh native truth re-authorizes the `(session,
+ * operation)` association and supplies the canonical run status, while the
+ * bounded observation of that same operation is pulled with the authority's own
+ * `nextHostEvents` — never the downgraded provider lane.
+ */
+async function actorEventSource(
+  service: ServiceCore,
+  actor: ProviderSessionRecord,
+  sessionId: string,
+  operationId: string,
+): Promise<OperationEventSource> {
+  const character = await hydrateCharacterOperation(service, operationId);
+  if (!character) {
     throw new HttpError(404, 'not_found', `operation ${operationId} not found`, {
       resource: `operation:${operationId}`,
     });
   }
-  if (operation.sessionId !== sessionId) {
+  if (character.session_id !== sessionId) {
     throw new HttpError(403, 'forbidden', 'operation does not belong to session', {
       resource: `operation:${operationId}`,
     });
   }
-
   const existingHub = service.providerRegistry.hubForOperation(operationId);
+  service.providerRegistry.registerOperation({
+    operationId,
+    sessionId,
+    providerId: actor.providerId,
+    status: character.run_status === 'running' ? 'running' : character.run_status,
+    terminalEvent: null,
+    terminalTranscript: null,
+    actorBacked: true,
+  });
   const hub =
     existingHub ??
-    service.providerRegistry.ensureHub(operationId, () => new OperationEventHub(operationId, sessionId));
+    service.providerRegistry.ensureHub(
+      operationId,
+      () => new OperationEventHub(operationId, sessionId),
+    );
+  return {
+    hub,
+    // No cold/terminal shortcut for the Actor lane: the authority's observation
+    // is retained until it is pulled, so this stream delivers the real frames it
+    // still has (including a terminal that already settled) and only reports a
+    // resync gap when the observation truly has nothing left — see `pull`.
+    initialTruthGap: () => null,
+    canonicalGap: async () => null,
+    pull: async () => {
+      const batch = await withPrincipal(service, (principal) =>
+        service.core.nextHostEvents(
+          principal,
+          sessionId,
+          operationId,
+          PROVIDER_PULL_MAX_EVENTS,
+          PROVIDER_PULL_MAX_BYTES,
+        ),
+      );
+      // Nothing left to deliver: the observation is exhausted, and the
+      // authority has already settled the run (an accepted cancel whose
+      // provider confirmation never arrived, or a terminal that this stream
+      // never saw). End with the bounded resync gap instead of polling a stream
+      // that can never produce another frame or fabricating a terminal.
+      if ((batch.events?.length ?? 0) === 0 && !batch.has_more && batch.gap === undefined) {
+        const latest = await hydrateCharacterOperation(service, operationId);
+        if (latest && latest.run_status !== 'running') {
+          throw new Error('actor observation exhausted after settlement');
+        }
+      }
+      return batch;
+    },
+  };
+}
 
+async function runEventStream(
+  service: ServiceCore,
+  source: OperationEventSource,
+  operationId: string,
+  searchParams: URLSearchParams,
+  res: ServerResponse,
+): Promise<void> {
+  const hub = source.hub;
   const cursor = searchParams.get('cursor') ?? searchParams.get('last_event_id') ?? undefined;
   const plan = hub.planReplay(cursor);
 
@@ -690,16 +822,11 @@ export async function streamSessionEvents(
   }
 
   try {
-    // Cold registry + already-terminal native op: no retained stream to replay.
+    // Cold registry + already-terminal operation: no retained stream to replay.
     // A bounded resync gap is the truthful answer, never a fabricated terminal.
-    if (!existingHub && isTerminalOperationStatus(operation.status) && !hub.hasTerminal()) {
-      const gapFrame = hub.recordGap({
-        reason: 'history_unavailable',
-        operation_id: operationId,
-        resync_required: true,
-        inspect_url: inspectUrl(operationId),
-      });
-      if (gapFrame) await writer.writeFrame(gapFrame);
+    const truthGap = source.initialTruthGap();
+    if (truthGap) {
+      await writer.writeFrame(truthGap);
       return;
     }
 
@@ -737,7 +864,7 @@ export async function streamSessionEvents(
         if (op?.terminalEvent) {
           hub.recordEvent(op.terminalEvent);
         } else {
-          await waitForTerminal(service, hub, writer, operationId, res, deliveredSequence, pullGate);
+          await waitForTerminal(service, source, writer, operationId, res, deliveredSequence, pullGate);
         }
       }
       return;
@@ -747,10 +874,61 @@ export async function streamSessionEvents(
       return;
     }
 
-    await liveEventLoop(service, hub, writer, operationId, res, deliveredSequence, pullGate);
+    await liveEventLoop(service, source, writer, operationId, res, deliveredSequence, pullGate);
   } finally {
     writer.end();
   }
+}
+
+export async function streamSessionEvents(
+  service: ServiceCore,
+  sessionId: string,
+  searchParams: URLSearchParams,
+  res: ServerResponse,
+): Promise<void> {
+  const session = await hydrateSessionRecord(service, sessionId);
+  if (!session) {
+    throw new HttpError(404, 'not_found', `session ${sessionId} not found`, {
+      resource: `session:${sessionId}`,
+    });
+  }
+  const operationId = searchParams.get('operation_id') ?? session.activeOpId;
+  if (!operationId) {
+    throw new HttpError(400, 'invalid_input', 'operation_id is required for session events');
+  }
+
+  // Actor-versus-provider-only is decided by the session's native echo, so an
+  // Actor operation is never served by the provider lane even on a cold mirror.
+  const source = session.actorRef
+    ? await actorEventSource(service, session, sessionId, operationId)
+    : providerEventSource(
+        service,
+        await requireProviderOperation(service, sessionId, operationId),
+        operationId,
+        service.providerRegistry.hubForOperation(operationId),
+      );
+
+  await runEventStream(service, source, operationId, searchParams, res);
+}
+
+/** Provider-only admission kept exactly as it was: hydrate, associate, retain. */
+async function requireProviderOperation(
+  service: ServiceCore,
+  sessionId: string,
+  operationId: string,
+): Promise<ProviderOperationRecord> {
+  const operation = await hydrateOperationRecord(service, operationId);
+  if (!operation) {
+    throw new HttpError(404, 'not_found', `operation ${operationId} not found`, {
+      resource: `operation:${operationId}`,
+    });
+  }
+  if (operation.sessionId !== sessionId) {
+    throw new HttpError(403, 'forbidden', 'operation does not belong to session', {
+      resource: `operation:${operationId}`,
+    });
+  }
+  return operation;
 }
 
 /**
@@ -775,20 +953,21 @@ function canonicalTerminalGap(
 
 async function waitForTerminal(
   service: ServiceCore,
-  hub: OperationEventHub,
+  source: OperationEventSource,
   writer: SseWriter,
   operationId: string,
   res: ServerResponse,
   deliveredSequence: number,
   pullGate: PullGateState,
 ): Promise<void> {
+  const hub = source.hub;
   let sequence = deliveredSequence;
   while (!hub.isClosed()) {
     if (clientDisconnected(res)) return;
 
     // Canonical truth already terminal with no stream terminal: end the
     // stream with one truthful resync gap instead of hanging or fabricating.
-    const canonicalGap = canonicalTerminalGap(service, hub, operationId);
+    const canonicalGap = await source.canonicalGap();
     if (canonicalGap) {
       const result = await writer.writeFrame(canonicalGap);
       if (result === 'overflow' || result === 'disconnect') {
@@ -806,11 +985,7 @@ async function waitForTerminal(
     let batch: ProviderEventBatch;
     try {
       sseTestHooks.providerPullCount += 1;
-      batch = await service.core.nextProviderEvents(
-        operationId,
-        PROVIDER_PULL_MAX_EVENTS,
-        PROVIDER_PULL_MAX_BYTES,
-      );
+      batch = await source.pull();
     } catch {
       await emitInterruptedGap(writer, hub, operationId);
       return;
@@ -853,20 +1028,21 @@ async function waitForTerminal(
 
 async function liveEventLoop(
   service: ServiceCore,
-  hub: OperationEventHub,
+  source: OperationEventSource,
   writer: SseWriter,
   operationId: string,
   res: ServerResponse,
   deliveredSequence: number,
   pullGate: PullGateState,
 ): Promise<void> {
+  const hub = source.hub;
   let sequence = deliveredSequence;
   while (!hub.isClosed()) {
     if (clientDisconnected(res)) return;
 
     // Canonical truth already terminal with no stream terminal: end the
     // stream with one truthful resync gap instead of hanging or fabricating.
-    const canonicalGap = canonicalTerminalGap(service, hub, operationId);
+    const canonicalGap = await source.canonicalGap();
     if (canonicalGap) {
       const result = await writer.writeFrame(canonicalGap);
       if (result === 'overflow' || result === 'disconnect') {
@@ -884,11 +1060,7 @@ async function liveEventLoop(
     let batch: ProviderEventBatch;
     try {
       sseTestHooks.providerPullCount += 1;
-      batch = await service.core.nextProviderEvents(
-        operationId,
-        PROVIDER_PULL_MAX_EVENTS,
-        PROVIDER_PULL_MAX_BYTES,
-      );
+      batch = await source.pull();
     } catch {
       await emitInterruptedGap(writer, hub, operationId);
       return;

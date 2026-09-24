@@ -1,4 +1,8 @@
-import type { ProviderHostEvent } from '@42ch/nexus-contracts';
+import type {
+  ActorRef,
+  SessionViewpoint,
+  ProviderHostEvent,
+} from '@42ch/nexus-contracts';
 import { REGISTRY_MAX_TERMINAL_OPERATIONS } from './config.js';
 import type { OperationEventHub } from './sse.js';
 
@@ -8,6 +12,14 @@ export interface ProviderSessionRecord {
   state: string;
   activeOpId: string | null;
   model?: string;
+  /**
+   * The stored Actor pair echoed by native truth for a core-owned Actor
+   * session. Its presence is what routes a command to the Actor Host authority
+   * instead of the provider-only lane, so it is never inferred from a payload:
+   * it is copied from the native create/query row the authority returned.
+   */
+  actorRef?: ActorRef;
+  viewpoint?: SessionViewpoint;
 }
 
 export interface ProviderOperationRecord {
@@ -22,6 +34,13 @@ export interface ProviderOperationRecord {
   status: string;
   terminalEvent: ProviderHostEvent | null;
   terminalTranscript: string | null;
+  /**
+   * True when this operation belongs to a stored Actor session: its terminal
+   * truth and its live/terminal bounds are the core authority's (128 active /
+   * 1024 terminal), not this transport mirror's, so it never charges the
+   * provider-only live-operation cap.
+   */
+  actorBacked?: boolean;
 }
 
 /**
@@ -74,13 +93,16 @@ export class ProviderRegistry {
   }
 
   /**
-   * Live (non-terminal) provider operations. The transport admission cap reads
-   * this before dispatching a provider effect, so a stalled/hung operation
-   * population cannot grow without bound.
+   * Live (non-terminal) provider-only operations. The transport admission cap
+   * reads this before dispatching a provider effect, so a stalled/hung
+   * provider population cannot grow without bound. Actor-backed operations are
+   * excluded: the core authority owns their live bound, so this cap keeps
+   * meaning exactly what it meant before Actor sessions were served here.
    */
   activeOperationCount(): number {
     let count = 0;
     for (const op of this.operations.values()) {
+      if (op.actorBacked) continue;
       if (!op.terminalEvent && !isTerminalOperationStatus(op.status)) count += 1;
     }
     return count;

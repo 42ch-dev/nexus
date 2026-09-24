@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import type {
   CancelOperationResponse,
+  CharacterOperationResult,
   CreateSessionRequest,
+  ExecuteOperationRequest,
+  ActorRef,
+  SessionViewpoint,
   OperationResponse,
   ProviderCall,
   ProviderReply,
@@ -17,7 +21,7 @@ import {
   type ProviderSessionRecord,
 } from './provider-registry.js';
 import { OperationEventHub } from './sse.js';
-import { hostQuery } from './world-kb.js';
+import { hostQuery, withPrincipal } from './world-kb.js';
 
 export { ProviderRegistry } from './provider-registry.js';
 export type { ProviderOperationRecord, ProviderSessionRecord } from './provider-registry.js';
@@ -68,48 +72,55 @@ function expectPattern(value: string, pattern: RegExp, field: string): void {
 }
 
 /**
- * Validate an `actor_ref` against the generated closed sum. A malformed value is
- * `invalid_input`; only a *valid* Actor ref becomes `not_migrated`.
+ * Validate an `actor_ref` against the generated closed sum and return the
+ * admitted generated value. A malformed value is `invalid_input`; a valid one
+ * is dispatched to the native Host authority unchanged.
  */
-function validateActorRef(value: unknown): boolean {
+function validateActorRef(value: unknown): ActorRef {
   const ref = requirePlainObject(value, 'actor_ref');
   const kind = ref.actor_kind;
   if (kind === 'creator') {
     rejectUnknownKeys(ref, ['actor_kind', 'creator_id'], 'actor_ref');
     expectPattern(expectString(ref.creator_id, 'actor_ref.creator_id'), /^ctr_[a-zA-Z0-9]+$/, 'actor_ref.creator_id');
-    return true;
+    return { actor_kind: 'creator', creator_id: ref.creator_id as string };
   }
   if (kind === 'character') {
     rejectUnknownKeys(ref, ['actor_kind', 'character_id'], 'actor_ref');
     expectPattern(expectString(ref.character_id, 'actor_ref.character_id'), /^chr_[0-9a-f]{32}$/, 'actor_ref.character_id');
-    return true;
+    return { actor_kind: 'character', character_id: ref.character_id as string };
   }
   throw new HttpError(400, 'invalid_input', 'actor_ref.actor_kind must be creator or character', { field: 'actor_ref.actor_kind' });
 }
 
-/** Validate a `viewpoint` shape against the generated schema. */
-function validateViewpoint(value: unknown): boolean {
+/** Validate a `viewpoint` shape and return the admitted generated value. */
+function validateViewpoint(value: unknown): SessionViewpoint {
   const vp = requirePlainObject(value, 'viewpoint');
   rejectUnknownKeys(vp, ['world_id', 'binding_id', 'branch_id', 'event_id'], 'viewpoint');
   expectPattern(expectString(vp.world_id, 'viewpoint.world_id'), /^wld_[a-zA-Z0-9]+$/, 'viewpoint.world_id');
+  const viewpoint: SessionViewpoint = { world_id: vp.world_id as string };
   // An own property must be a valid string; only absence is legal, never null.
   if (hasOwn(vp, 'binding_id')) {
     expectPattern(expectString(vp.binding_id, 'viewpoint.binding_id'), /^awb_[0-9a-f]{32}$/, 'viewpoint.binding_id');
+    viewpoint.binding_id = vp.binding_id as string;
   }
   if (hasOwn(vp, 'branch_id')) {
     expectPattern(expectString(vp.branch_id, 'viewpoint.branch_id'), /^fbk_[a-zA-Z0-9]+$/, 'viewpoint.branch_id');
+    viewpoint.branch_id = vp.branch_id as string;
   }
   if (hasOwn(vp, 'event_id')) {
     expectPattern(expectString(vp.event_id, 'viewpoint.event_id'), /^evt_[a-zA-Z0-9]+$/, 'viewpoint.event_id');
+    viewpoint.event_id = vp.event_id as string;
   }
-  return true;
+  return viewpoint;
 }
 
 /**
- * Enforce the generated `CreateSessionRequest` shape before any provider effect:
- * plain object only, required/typed optional fields, a valid actor/viewpoint
- * pair, and no unknown keys. Malformed values are `invalid_input` (400); a
- * well-formed but unsupported Actor-mode request is `not_migrated` (501).
+ * Enforce the generated `CreateSessionRequest` shape before any Host/provider
+ * effect: plain object only, required/typed optional fields, a valid
+ * actor/viewpoint pair, and no unknown keys. Malformed values are
+ * `invalid_input` (400). A valid pair is returned as the admitted generated
+ * request, because both Actor modes are served by the native Host authority —
+ * admission, binding and World ownership are decided there, never here.
  */
 function validateCreateSessionRequest(body: unknown): CreateSessionRequest {
   const req = requirePlainObject(body, 'session create body');
@@ -127,17 +138,16 @@ function validateCreateSessionRequest(body: unknown): CreateSessionRequest {
   if (hasActor !== hasViewpoint) {
     throw new HttpError(400, 'invalid_input', 'actor_ref and viewpoint must both be present or both absent');
   }
-  if (hasActor) {
-    // Validate shape first: a malformed ref is invalid_input, not not_migrated.
-    // `requirePlainObject` rejects null with 400.
-    validateActorRef(req.actor_ref);
-    validateViewpoint(req.viewpoint);
-    throw routeNotMigrated('POST /v1/daemon/agent-host/sessions (actor/viewpoint)');
-  }
   const validated: CreateSessionRequest = { provider_id: req.provider_id };
   if (cwd !== undefined) validated.cwd = cwd;
   if (model !== undefined) validated.model = model;
   if (mode !== undefined) validated.mode = mode;
+  if (hasActor) {
+    // Validate shape first: a malformed ref is invalid_input. `requirePlainObject`
+    // rejects null with 400, and only the admitted generated values are kept.
+    validated.actor_ref = validateActorRef(req.actor_ref);
+    validated.viewpoint = validateViewpoint(req.viewpoint);
+  }
   return validated;
 }
 
@@ -205,9 +215,133 @@ async function providerCall(service: ServiceCore, request: ProviderCall): Promis
   }
 }
 
+/** A missing session/operation, or no attached Host authority, is absence — not a fault. */
+function isAbsentHostError(error: unknown): boolean {
+  const mapped = mapNativeError(error);
+  return (
+    mapped.code === 'not_found' ||
+    (mapped.code === 'invalid_input' && mapped.message === 'host not started')
+  );
+}
+
+/**
+ * Fresh native truth for one session, or `null` when the Host authority has no
+ * row for it (unknown id, or no attached authority at all). Every session
+ * command resolves its placement here first: an Actor session is recognized
+ * from the authority's own row, never from a request payload or a cache guess.
+ */
+async function tryNativeSession(
+  service: ServiceCore,
+  sessionId: string,
+): Promise<SessionResponse | null> {
+  try {
+    const response = await hostQuery(service, { query: 'get_session', session_id: sessionId });
+    return response.session ?? null;
+  } catch (error) {
+    if (isAbsentHostError(error)) return null;
+    throw mapNativeError(error);
+  }
+}
+
+/** One resolved session: the mirror record plus the native Actor pair, if any. */
+interface SessionPlacement {
+  record: ProviderSessionRecord;
+  /** Native truth reports a stored Actor pair, so the authority owns the session. */
+  actorBacked: boolean;
+}
+
+function recordFromSession(session: SessionResponse): ProviderSessionRecord {
+  const record: ProviderSessionRecord = {
+    sessionId: session.session_id,
+    providerId: session.provider_id,
+    state: session.state,
+    activeOpId: session.active_op_id ?? null,
+    model: session.model,
+  };
+  if (session.actor_ref !== undefined) record.actorRef = session.actor_ref;
+  if (session.viewpoint !== undefined) record.viewpoint = session.viewpoint;
+  return record;
+}
+
+/**
+ * Resolve one session's placement before any effect. Fresh native truth decides
+ * Actor versus provider-only; the mirror is consulted only when the authority
+ * has no row at all, and even then its Actor marker was copied from native
+ * truth when the session was created or hydrated.
+ */
+async function resolveSessionPlacement(
+  service: ServiceCore,
+  sessionId: string,
+): Promise<SessionPlacement> {
+  const native = await tryNativeSession(service, sessionId);
+  if (native) {
+    const record = recordFromSession(native);
+    service.providerRegistry.registerSession(record);
+    return { record, actorBacked: native.actor_ref !== undefined };
+  }
+  const cached = service.providerRegistry.sessionRecord(sessionId);
+  if (cached) return { record: cached, actorBacked: cached.actorRef !== undefined };
+  throw new HttpError(404, 'not_found', `session ${sessionId} not found`, {
+    resource: `session:${sessionId}`,
+  });
+}
+
+/**
+ * Whether the core authority owns this id as a Character operation. `false`
+ * means the authority has no record of it — so it is not an Actor operation and
+ * the caller serves it on the provider-only lane. Any other native rejection
+ * propagates: an Actor error never falls through to raw provider execution.
+ */
+async function isCoreCharacterOperation(
+  service: ServiceCore,
+  operationId: string,
+): Promise<boolean> {
+  try {
+    await withPrincipal(service, (principal) =>
+      service.core.hostCharacterOperation(principal, operationId),
+    );
+    return true;
+  } catch (error) {
+    if (isAbsentHostError(error)) return false;
+    throw mapNativeError(error);
+  }
+}
+
+/**
+ * `GET /v1/daemon/agent-host/operations/{operation_id}` Character arm: the
+ * authority's own `CharacterOperationResult`, or `null` when the id is not a
+ * live/retained core-indexed Character operation (the caller then keeps the
+ * generic provider-only/recovered-journal answer).
+ */
+export async function lookupCharacterOperation(
+  service: ServiceCore,
+  operationId: string,
+): Promise<CharacterOperationResult | null> {
+  parseUuid(operationId, 'operation_id');
+  try {
+    return await withPrincipal(service, (principal) =>
+      service.core.hostCharacterOperation(principal, operationId),
+    );
+  } catch (error) {
+    if (isAbsentHostError(error)) return null;
+    throw mapNativeError(error);
+  }
+}
+
 export async function createProviderSession(service: ServiceCore, body: unknown): Promise<SessionResponse> {
   if (service.domainOnly) throw routeNotMigrated('POST /v1/daemon/agent-host/sessions');
   const req = validateCreateSessionRequest(body);
+  // Actor mode is served by the ONE core Host authority: it admits the stored
+  // Actor/binding/World, owns the session identity and echoes the pair. The
+  // provider-only lane below never sees an Actor request, so a failed admission
+  // can never degrade into a legacy provider session.
+  if (req.actor_ref !== undefined) {
+    const session = await withPrincipal(service, (principal) =>
+      service.core.hostCreateSession(principal, req),
+    );
+    service.providerRegistry.registerSession(recordFromSession(session));
+    return session;
+  }
   const payload: Record<string, unknown> = { provider_id: req.provider_id };
   if (req.cwd !== undefined) payload.cwd = req.cwd;
   if (req.model !== undefined) payload.model = req.model;
@@ -239,6 +373,17 @@ export async function createProviderSession(service: ServiceCore, body: unknown)
 export async function shutdownProviderSession(service: ServiceCore, sessionId: string): Promise<ShutdownSessionResponse> {
   if (service.domainOnly) throw routeNotMigrated(`DELETE /v1/daemon/agent-host/sessions/${sessionId}`);
   parseUuid(sessionId, 'session_id');
+  const placement = await resolveSessionPlacement(service, sessionId);
+  if (placement.actorBacked) {
+    // The authority owns the release: it cancels the session's live Actor work
+    // through the same manager and confirms the session shutdown before it
+    // reports success, then retires the Actor reuse state.
+    const reply = await withPrincipal(service, (principal) =>
+      service.core.hostShutdownSession(principal, sessionId),
+    );
+    service.providerRegistry.removeSession(sessionId);
+    return reply;
+  }
   await assertKnownSession(service, sessionId);
   await providerCall(service, {
     method: 'shutdown',
@@ -254,8 +399,39 @@ export async function shutdownProviderSession(service: ServiceCore, sessionId: s
 export async function executeProviderOperation(service: ServiceCore, sessionId: string, body: unknown): Promise<OperationResponse> {
   if (service.domainOnly) throw routeNotMigrated(`POST /v1/daemon/agent-host/sessions/${sessionId}/operations`);
   parseUuid(sessionId, 'session_id');
-  const session = await assertKnownSession(service, sessionId);
+  const placement = await resolveSessionPlacement(service, sessionId);
   const req = validateExecuteOperationRequest(body);
+  if (placement.actorBacked) {
+    // Contract §1/§5: this Host has no complete run-capture writer, so a
+    // Character `remember:true` is refused BEFORE any effect — no reservation,
+    // no provider work, no pending/captured result. Absent/false captures
+    // nothing and executes normally with the authority's disabled capture.
+    if (req.remember === true) {
+      throw routeNotMigrated('character prompt remember is not supported by this host');
+    }
+    const request: ExecuteOperationRequest = { kind: 'prompt', content: req.content };
+    if (req.remember !== undefined) request.remember = req.remember;
+    const reply = await withPrincipal(service, (principal) =>
+      service.core.hostExecuteOperation(principal, sessionId, request),
+    );
+    // The mirror keeps delivery bookkeeping only (the hub and the bounded
+    // terminal retention); terminal truth stays the authority's
+    // `character_operation` read, never a guess from the mirror.
+    service.providerRegistry.registerOperation({
+      operationId: reply.operation_id,
+      sessionId,
+      providerId: placement.record.providerId,
+      status: 'started',
+      terminalEvent: null,
+      terminalTranscript: null,
+      actorBacked: true,
+    });
+    service.providerRegistry.ensureHub(
+      reply.operation_id,
+      () => new OperationEventHub(reply.operation_id, sessionId),
+    );
+    return reply;
+  }
   // Transport admission: cap live operations *before* the provider effect so a
   // stalled/hung population cannot grow without bound (architecture §7).
   if (service.providerRegistry.activeOperationCount() >= MAX_ACTIVE_PROVIDER_OPERATIONS) {
@@ -285,7 +461,7 @@ export async function executeProviderOperation(service: ServiceCore, sessionId: 
   service.providerRegistry.registerOperation({
     operationId,
     sessionId,
-    providerId: session.providerId,
+    providerId: placement.record.providerId,
     status: 'started',
     terminalEvent: null,
     terminalTranscript: null,
@@ -297,6 +473,17 @@ export async function executeProviderOperation(service: ServiceCore, sessionId: 
 export async function cancelProviderOperation(service: ServiceCore, operationId: string): Promise<CancelOperationResponse> {
   if (service.domainOnly) throw routeNotMigrated(`POST /v1/daemon/agent-host/operations/${operationId}`);
   parseUuid(operationId, 'operation_id');
+  // Actor ownership is decided by fresh native truth BEFORE any provider
+  // mutation: a core-indexed Character operation is cancelled through the same
+  // core authority (owner scope, phase race, first-terminal-wins), and a core
+  // refusal is never retried as a raw provider call.
+  if (await isCoreCharacterOperation(service, operationId)) {
+    const reply = await withPrincipal(service, (principal) =>
+      service.core.hostCancelOperation(principal, operationId),
+    );
+    service.providerRegistry.settleOperationStatus(operationId, 'cancelled');
+    return reply;
+  }
   const op = await assertKnownOperation(service, operationId);
   if (op.providerId === DSH_PROVIDER_ID) {
     throw new HttpError(501, 'route_not_migrated', 'DSH provider does not support cancellation');
@@ -330,13 +517,19 @@ export async function lookupProviderSession(service: ServiceCore, sessionId: str
   }
   const cached = service.providerRegistry.sessionRecord(sessionId);
   if (!cached) return null;
-  return {
+  const response: SessionResponse = {
     session_id: cached.sessionId,
     provider_id: cached.providerId,
     state: cached.state,
     active_op_id: cached.activeOpId ?? undefined,
     model: cached.model,
   };
+  // The mirror is a cache of native truth: an Actor session keeps its echoed
+  // pair (copied from the authority when it was created or hydrated) so a cold
+  // or restart-level read never downgrades it to a provider-only session.
+  if (cached.actorRef !== undefined) response.actor_ref = cached.actorRef;
+  if (cached.viewpoint !== undefined) response.viewpoint = cached.viewpoint;
+  return response;
 }
 
 export async function lookupProviderOperation(

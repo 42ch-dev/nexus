@@ -13,6 +13,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..', '..', '..');
 const serviceRoot = join(__dirname, '..');
 const fixture = resolve(root, 'crates/nexus-agent-host/tests/fixtures/mock_acp_workflow.py');
+/** The Creator/workspace the seed binary materializes (`wire_fixture.rs`). */
+const SEEDED_CREATOR = 'ctr_testcreator';
 
 const RAW_SSE_HARD_TIMEOUT_MS = 30_000;
 const SERVICE_CLOSE_TIMEOUT_MS = 8_000;
@@ -93,6 +95,26 @@ function seedHome(extraEnv = {}, extraProviders = '') {
   const home = mkdtempSync(join(tmpdir(), 'nexus-security-stream-'));
   const seed = spawnSync('cargo', ['run', '-q', '-p', 'nexus-core-node', '--bin', 'native-wire-fixture-seed', '--', home], { stdio: 'inherit' });
   assert.equal(seed.status, 0, seed.stderr?.toString());
+  // The selected-workspace registration the product's create path writes: an
+  // engine-owner open pins this root as the Host's workspace boundary and probes
+  // the catalog there. Without it every provider stays `probe_context_unavailable`
+  // and the service reports `provider_degraded` — the provider-only lane keeps
+  // working either way, which is what made the missing registration invisible.
+  const creativeRoot = join(home, 'creative', SEEDED_CREATOR, 'default');
+  mkdirSync(creativeRoot, { recursive: true });
+  const operational = join(home, '.nexus42', 'creators', SEEDED_CREATOR, 'workspaces', 'default');
+  mkdirSync(operational, { recursive: true });
+  writeFileSync(
+    join(operational, 'meta.json'),
+    JSON.stringify({
+      schema_version: 1,
+      creator_id: SEEDED_CREATOR,
+      workspace_slug: 'default',
+      local_root: creativeRoot,
+      workspace_id: null,
+      created_at: '2020-01-01T00:00:00Z',
+    }),
+  );
   const agentHostDir = join(home, '.nexus42', 'agent-host');
   mkdirSync(agentHostDir, { recursive: true });
   const log = join(home, 'fixture.log');
@@ -100,7 +122,7 @@ function seedHome(extraEnv = {}, extraProviders = '') {
   const envLines = Object.entries({ ACP_FIXTURE_LOG: log, ...extraEnv }).map(([k, v]) => `${k} = ${JSON.stringify(v)}`).join('\n');
   const config = `[[providers]]\nid = "mock-acp"\nprotocol = "acp"\ncommand = ${JSON.stringify(python)}\nargs = [${JSON.stringify(fixture)}]\nenabled = true\n${extraProviders}\n[providers.env]\n${envLines}\n`;
   writeFileSync(join(agentHostDir, 'config.toml'), config);
-  return { home, log };
+  return { home, log, creativeRoot };
 }
 
 async function jsonFetch(url, { method = 'GET', headers = {}, body, ca } = {}) {
@@ -1078,10 +1100,20 @@ describe('security-stream (P4-T2)', () => {
     assert.ok(SSE_MAX_AGGREGATE_PENDING_BYTES <= SSE_MAX_AGGREGATE_PENDING_BYTES_CEILING);
   });
 
-  test('actor/viewpoint create is explicit not_migrated', async () => {
-    const res = await jsonFetch(`${baseUrl}/v1/daemon/agent-host/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { provider_id: 'mock-acp', actor_ref: { actor_kind: 'creator', creator_id: 'ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }, viewpoint: { world_id: 'wld_owned' } } });
-    assert.equal(res.status, 501);
-    assert.equal(res.payload.error.code, 'route_not_migrated');
+  test('actor/viewpoint create reaches the core authority instead of a blanket not_migrated', async () => {
+    // The former blanket `501 route_not_migrated` is gone: a well-formed pair
+    // now reaches the Actor Host authority, whose stored admission refuses an
+    // unowned Actor/World before any Host or provider effect. This home has no
+    // Character fixture, so both denials below are store-level `not_found`s —
+    // never a route denial and never a fabricated provider session. The `cwd`
+    // is the registered creative root, which is the wire field's own documented
+    // meaning for an Actor session.
+    const character = await jsonFetch(`${baseUrl}/v1/daemon/agent-host/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { provider_id: 'mock-acp', cwd: homeCtx.creativeRoot, actor_ref: { actor_kind: 'character', character_id: `chr_${'a'.repeat(32)}` }, viewpoint: { world_id: 'wld_owned', binding_id: `awb_${'b'.repeat(32)}` } } });
+    assert.equal(character.status, 404, character.text);
+    assert.equal(character.payload.error.code, 'not_found');
+    const creator = await jsonFetch(`${baseUrl}/v1/daemon/agent-host/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { provider_id: 'mock-acp', cwd: homeCtx.creativeRoot, actor_ref: { actor_kind: 'creator', creator_id: 'ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }, viewpoint: { world_id: 'wld_owned' } } });
+    assert.equal(creator.status, 404, creator.text);
+    assert.equal(creator.payload.error.code, 'not_found');
   });
 
   test('malformed create/execute bodies are typed invalid_input before any provider effect', async () => {

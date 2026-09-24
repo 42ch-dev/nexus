@@ -6,6 +6,7 @@ import {
   cancelProviderOperation,
   createProviderSession,
   executeProviderOperation,
+  lookupCharacterOperation,
   lookupProviderOperation,
   lookupProviderSession,
   shutdownProviderSession,
@@ -353,6 +354,11 @@ export const HOST_ROUTES: readonly DomainRoute[] = [
     family: 'host',
     capture: 'operationId',
     handle: async (service, params) => {
+      // A live or retained core-indexed Character operation answers with the
+      // authority's own CharacterOperationResult; every other id keeps the
+      // generic provider-only / recovered-journal answer below.
+      const character = await lookupCharacterOperation(service, params[0]);
+      if (character) return { body: character };
       const operation = await lookupProviderOperation(service, params[0]);
       if (!operation) {
         throw new HttpError(404, 'not_found', `operation ${params[0]} not found`, {
