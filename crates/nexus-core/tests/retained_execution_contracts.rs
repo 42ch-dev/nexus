@@ -5808,7 +5808,6 @@ async fn authorized_subscription_preserves_epoch_and_gap() {
     for token in [first_id.clone(), resumed_id.clone()] {
         handle
             .release_workflow_events(&principal, token)
-            .await
             .expect("release");
     }
     assert!(
@@ -5953,7 +5952,6 @@ async fn authorized_subscription_preserves_epoch_and_gap() {
     );
     handle
         .release_workflow_events(&principal, trimmed_id)
-        .await
         .expect("release");
 
     // ── 6. A lagging subscriber is EVICTED with an explicit terminal gap on
@@ -5978,7 +5976,6 @@ async fn authorized_subscription_preserves_epoch_and_gap() {
     );
     handle
         .release_workflow_events(&principal, seed_id)
-        .await
         .expect("release the seed");
 
     let slow = handle
@@ -6060,7 +6057,6 @@ async fn authorized_subscription_preserves_epoch_and_gap() {
     let freed = holders.pop().expect("a held permit");
     handle
         .release_workflow_events(&principal, freed)
-        .await
         .expect("release");
     let admitted = handle
         .subscribe_workflow_events(&principal, subscribe_request(BLOCK_RUN, None))
@@ -6070,7 +6066,6 @@ async fn authorized_subscription_preserves_epoch_and_gap() {
     for token in holders {
         handle
             .release_workflow_events(&principal, token)
-            .await
             .expect("release");
     }
 
@@ -6102,7 +6097,6 @@ async fn authorized_subscription_preserves_epoch_and_gap() {
     );
     handle
         .release_workflow_events(&principal, blocked_id.clone())
-        .await
         .expect("release");
     let woken = tokio::time::timeout(Duration::from_secs(5), puller)
         .await

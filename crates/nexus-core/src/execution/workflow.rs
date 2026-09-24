@@ -1883,7 +1883,7 @@ impl WorkflowRunCoordinator {
     /// intent, an in-flight prompt and an unfinished step marker), durable
     /// human wait and unreadable metadata all refuse. A v0 row keeps its
     /// legacy contract and is not gated here.
-    fn drive_gate_refuses(record: Option<&RunRecord>) -> bool {
+    const fn drive_gate_refuses(record: Option<&RunRecord>) -> bool {
         let Some(record) = record else {
             return false;
         };
@@ -3509,14 +3509,14 @@ impl CoordinatorScheduleRunStarter {
     /// Build the starter over the owning coordinator and its admission inputs.
     #[must_use]
     pub fn new(
-        coordinator: Arc<WorkflowRunCoordinator>,
+        coordinator: &Arc<WorkflowRunCoordinator>,
         nexus_home: PathBuf,
         caps: nexus_orchestration::CapabilityRegistryHolder,
         daemon_tool_dispatch: Option<Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>>,
         prompt_executor: Option<Arc<dyn nexus_orchestration::capability::PromptExecutor>>,
     ) -> Self {
         Self {
-            coordinator: Arc::downgrade(&coordinator),
+            coordinator: Arc::downgrade(coordinator),
             nexus_home,
             caps,
             daemon_tool_dispatch,

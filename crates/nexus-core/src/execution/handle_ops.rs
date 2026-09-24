@@ -182,7 +182,7 @@ impl ExecutionHandle {
     /// The scope is the STORED ownership: the query is bound to the principal's
     /// creator, and an explicit foreign `creator_id` filter is refused BEFORE
     /// any query runs — never answered with a silently empty page. The response
-    /// is the generated snake_case public DTO (the legacy `camelCase` local
+    /// is the generated `snake_case` public DTO (the legacy `camelCase` local
     /// summary is not a public read shape).
     ///
     /// # Errors
@@ -598,63 +598,9 @@ impl ExecutionHandle {
                 "paused"
             }
             "resume" => {
-                let row = self.owned_schedule(principal, &schedule_id).await?;
-                match row.current_session_id {
-                    // Admitted: the signal goes to the run this schedule
-                    // already owns. A manual wait is never implicitly
-                    // continued — the engine's wait/in-flight fence refuses
-                    // the plain resume with its exact durable conflict.
-                    Some(run_id) => {
-                        let result = self
-                            .coordinator()
-                            .signal_run(&SessionId(run_id.clone()), RunSignal::Resume)
-                            .await
-                            .map_err(map_run_control_error)?;
-                        // The durable row must follow the run it owns: `pause`
-                        // writes `paused` to the row without touching the run,
-                        // so a successful resume must not leave the public
-                        // list/inspect projection claiming `paused`.
-                        self.reconcile_resumed_row(principal, &schedule_id, &run_id)
-                            .await?;
-                        // The status mutation alone leaves the run with NO
-                        // owner: the driver that stopped on a converge/merge
-                        // park does not come back, so `running` would name a
-                        // run nothing is driving. Re-drive THIS SAME root
-                        // through the single coordinator owner (v1.195 P0-T6).
-                        //
-                        // Left LAST, after the row followed the run, so the
-                        // reconciliation fences against the resumed status
-                        // instead of racing the fresh driver. `ensure_driving`
-                        // is single-flight and its durable-state gate still
-                        // refuses terminal/interrupted/human-wait states, so
-                        // a manual wait is never implicitly continued and no
-                        // second driver is ever spawned.
-                        self.coordinator()
-                            .ensure_driving(&SessionId(run_id.clone()))
-                            .await
-                            .map_err(map_run_control_error)?;
-                        return Ok(SignalScheduleResponse {
-                            schedule_id,
-                            status: result.status,
-                            current_wait_id: result.current_wait_id,
-                        });
-                    }
-                    // No run yet: the smart resume admits the row's ONE run
-                    // exactly as the clock tick would (it reports `pending`
-                    // when admission is not yet possible), so the response
-                    // carries the store's answer rather than an assumption.
-                    None => {
-                        let outcome = supervisor
-                            .resume_schedule(&schedule_id)
-                            .await
-                            .map_err(map_supervisor_error)?;
-                        return Ok(SignalScheduleResponse {
-                            schedule_id,
-                            status: outcome,
-                            current_wait_id: None,
-                        });
-                    }
-                }
+                return self
+                    .resume_owned_schedule(principal, schedule_id, &supervisor)
+                    .await;
             }
             "cancel" => {
                 // ONE CAS against the admission fence: a row that owns no run
@@ -722,6 +668,72 @@ impl ExecutionHandle {
             schedule_id,
             status: status.to_string(),
             current_wait_id: None,
+        })
+    }
+
+    /// Continue the run an admitted schedule already owns (`resume` signal).
+    ///
+    /// Admitted (the durable row carries a `current_session_id`): the signal
+    /// goes to the run this schedule already owns. A manual wait is never
+    /// implicitly continued — the engine's wait/in-flight fence refuses the
+    /// plain resume with its exact durable conflict. The durable row must then
+    /// follow the run it owns (`pause` writes `paused` to the row without
+    /// touching the run, so a successful resume must not leave the public
+    /// list/inspect projection claiming `paused`), and the SAME root is
+    /// re-driven through the single coordinator owner (v1.195 P0-T6): the
+    /// status mutation alone leaves the run with NO owner, because the driver
+    /// that stopped on a converge/merge park does not come back, so `running`
+    /// would name a run nothing is driving.
+    ///
+    /// The re-drive is left LAST, after the row followed the run, so the
+    /// reconciliation fences against the resumed status instead of racing the
+    /// fresh driver. `ensure_driving` is single-flight and its durable-state
+    /// gate still refuses terminal/interrupted/human-wait states, so a manual
+    /// wait is never implicitly continued and no second driver is ever spawned.
+    ///
+    /// No run yet: the smart resume admits the row's ONE run exactly as the
+    /// clock tick would (it reports `pending` when admission is not yet
+    /// possible), so the response carries the store's answer rather than an
+    /// assumption.
+    ///
+    /// # Errors
+    /// `NotFound` for a row this principal's creator does not own, `Coded`
+    /// `workflow_state_conflict`/`workflow_wait_conflict` when the run's durable
+    /// state refuses the signal, and the mapped coordinator, supervisor or
+    /// storage error otherwise.
+    async fn resume_owned_schedule(
+        &self,
+        principal: &Principal,
+        schedule_id: String,
+        supervisor: &nexus_orchestration::schedule::supervisor::ScheduleSupervisor,
+    ) -> CoreResult<SignalScheduleResponse> {
+        let row = self.owned_schedule(principal, &schedule_id).await?;
+        let Some(run_id) = row.current_session_id else {
+            let outcome = supervisor
+                .resume_schedule(&schedule_id)
+                .await
+                .map_err(map_supervisor_error)?;
+            return Ok(SignalScheduleResponse {
+                schedule_id,
+                status: outcome,
+                current_wait_id: None,
+            });
+        };
+        let result = self
+            .coordinator()
+            .signal_run(&SessionId(run_id.clone()), RunSignal::Resume)
+            .await
+            .map_err(map_run_control_error)?;
+        self.reconcile_resumed_row(principal, &schedule_id, &run_id)
+            .await?;
+        self.coordinator()
+            .ensure_driving(&SessionId(run_id.clone()))
+            .await
+            .map_err(map_run_control_error)?;
+        Ok(SignalScheduleResponse {
+            schedule_id,
+            status: result.status,
+            current_wait_id: result.current_wait_id,
         })
     }
 
@@ -1090,7 +1102,7 @@ impl ExecutionHandle {
     /// # Errors
     /// `Closing` when the owner is shutting down, `AuthRequired` for a foreign
     /// principal, `NotFound` for a released, foreign or stale-generation token.
-    pub async fn release_workflow_events(
+    pub fn release_workflow_events(
         &self,
         principal: &Principal,
         subscription_id: String,
