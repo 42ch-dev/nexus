@@ -56,10 +56,20 @@
  *   * the first real prompt of the run must observe the appended Idea at that
  *     next execution boundary: the fixture prompt renders
  *     `{{core_context.text}}`, and the driver's own loopback model endpoint
- *     records ONE non-secret boolean per request — whether the prompt body
- *     carried the appended Idea — never the body, its headers or its key. Zero
- *     requests, a second request or a prompt without the Idea all fail the
- *     journey;
+ *     records, per request, only non-secret structure — whether the prompt body
+ *     carried the appended Idea, the message role sequence, the message count
+ *     and whether the caller advertised tools — never the body, its headers or
+ *     its key. Zero requests, a second request or a prompt without the Idea all
+ *     fail the journey, and the recorded structure is what makes the sealed
+ *     deny-all policy checkable on that same real request;
+ *   * the same-run stream is read twice with distinct, asserted meanings: the
+ *     bounded initial read (O1) and ONE reconnect from an earlier cursor of the
+ *     SAME run (O2), which must replay the successors that cursor promised or
+ *     answer with an explicit bounded `gap`. A read that merely idles out its
+ *     window is never recorded as a replay, and only the driver's own window
+ *     ends a read — a real transport failure rejects as itself. The public
+ *     refusals of that route (absent run, malformed cursor, future cursor, a
+ *     cursor from another epoch) are asserted case by case;
  *   * the receipt must carry the real **commit** revision of the declared
  *     workspace commit. It is taken from the authorized root session detail's
  *     schema-owned `workspace_commit` projection (contract §4, P1-T2): the
@@ -91,10 +101,14 @@
  *
  * Scope split (P3-T1 vs P3-T2/T3): this driver implements the full callable
  * deterministic path — clean setup, preset authoring, admission, inspect,
- * stream, steer, cancel, restart and the declared workspace effect. Adversarial
- * protocol cases, sealed hostile-tool denial and restart/gap assertion
- * expansion are P3-T2; the separately authorized one-request live action and
- * its fetch guard are P3-T3.
+ * stream, same-run cursor replay and refusal controls, steer, cancel, restart,
+ * the declared workspace effect and the sealed no-tools policy/absence-of-side-
+ * effects checks. The DRIVEN unsolicited `shell`/`editor`/`run_code` denial
+ * belongs to the §6.2 adapter controls (a rejected unsolicited call is answered
+ * with a follow-up model request, and a second request of the admitted prompt
+ * fails this journey by contract), so this driver records which adapter control
+ * owns that attempt instead of re-driving it. The separately authorized
+ * one-request live action and its fetch guard are P3-T3.
  */
 
 import { createHash } from 'node:crypto';
@@ -104,6 +118,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -162,15 +177,35 @@ const GATE_TIMEOUT_MS_MAX = 60_000;
 const EFFECT_BOUNDARY_TIMEOUT_MS = 30_000;
 const EFFECT_BOUNDARY_START_INTERVAL_MS = 100;
 const EFFECT_BOUNDARY_MAX_INTERVAL_MS = 500;
-/** Bounded revision follow-up reads (an O2 reconnect, never a new run). */
-const EFFECT_REVISION_MAX_TAIL_READS = 5;
-const EVENT_TAIL_TIMEOUT_MS = 2_000;
+/**
+ * Bound of ONE same-run cursor reconnect read (O2/O3). The exclusive successor
+ * replay, the refusal controls and the post-restart `history_unavailable` close
+ * are all answered inside this window; a live run with nothing new to send
+ * simply idles until it elapses — an explicit window of this driver's own, never
+ * a socket-timeout race and never reported as a transport failure
+ * (see `readEventStream`).
+ */
+const EVENT_REPLAY_TIMEOUT_MS = 2_000;
+/**
+ * Hostile-tool marker file NAMES under `<isolated root>/markers/` (the §6.2
+ * adapter fixture's paths). `hostile_bodies_create_their_evidence_when_directly_run`
+ * is the positive control proving an actually-executed unsolicited
+ * `shell`/`str_replace_editor`/`run_code` body creates exactly these markers, so
+ * their absence under this driver's isolated root is the end-to-end counterpart
+ * of the sealed `deny_all` dispatch rejection
+ * (`real_dsh_sealed_deny_all_rejects_unsolicited_tools_without_side_effects`).
+ * Only names are compared; nothing is read out of any marker.
+ */
+const HOSTILE_MARKER_DIR = 'markers';
+const HOSTILE_MARKER_NAMES = ['shell-marker', 'shell-marker.pid', 'editor-marker', 'run-code-marker'];
 /** The Idea W5 appends before W6 resumes (S0-3 append-before-resume). */
 const STEER_IDEA = 'public first-workflow steer';
 /** Template the sealed prompt must render so the appended Idea reaches the boundary. */
 const CORE_CONTEXT_TEMPLATE = '{{core_context.text}}';
 /** Cap on the prompt body the loopback endpoint reads for its non-secret marker check. */
 const MODEL_PROMPT_READ_CAP_BYTES = 262_144;
+/** Cap on the recorded per-request structures (the journey authorizes ONE prompt request). */
+const MODEL_REQUEST_STRUCTURE_CAP = 8;
 /**
  * Ceiling for ONE placement observation taken outside a poll (the polls clamp
  * their reads to what is left of their own absolute bound). Same order as
@@ -253,8 +288,9 @@ failed run retains it (the printed receipt names it) so the STOP keeps evidence.
 Exit codes:
   0  the journey completed, its declared facts were observed and every owned
      child was confirmed stopped
-  1  unexpected internal failure, a runtime/recovery failure, or an
-     unconfirmed/failed owned-service cleanup
+  1  unexpected internal failure, a runtime/recovery failure, a failed
+     same-run replay/refusal assertion, or an unconfirmed/failed owned-service
+     cleanup
   2  blocked: a prerequisite, runtime or producer required by the journey is missing
   64 usage error
 
@@ -1340,6 +1376,190 @@ async function awaitEffectBoundary({ readPlacement, runId, effectStateId }) {
 }
 
 /**
+ * The sealed no-tools policy must govern the observed prompt of the REAL
+ * installed runtime (S3-3 as this driver can see it end-to-end): every model
+ * request the sealed composition made advertised NO tools (the `tools` key
+ * absent, not an empty array — the dispatch-level mechanism §6.2's adapter
+ * control asserts), the admitted turn carried no tool result and no assistant
+ * tool call, and its first request was the sealed `[system, user]` shape.
+ *
+ * The driven unsolicited-tool-call attempt itself belongs to the §6.2 adapter
+ * controls (`real_dsh_sealed_deny_all_rejects_unsolicited_tools_without_side_effects`
+ * scripts three hostile calls and asserts the rejections plus the marker
+ * absence). This driver deliberately does NOT re-drive it: an unsolicited call
+ * is rejected at dispatch and answered with a follow-up model request, and a
+ * second request of the admitted prompt fails the journey by contract
+ * ("Zero requests, a second request … fail the journey"). What it proves here
+ * instead is the other half of the same claim — the policy really is sealed,
+ * and no unsolicited tool side effect exists anywhere in the isolated root
+ * ({@link assertNoHostileMarkers}, {@link assertScopeEffectOnly}).
+ *
+ * @throws {DriverFailure} `failed`/`sealed_policy_violation` when any request
+ *   of the admitted prompt advertised or carried tool traffic.
+ */
+function assertSealedToolPolicy(observations) {
+  const structures = Array.isArray(observations?.structures) ? observations.structures : [];
+  if (structures.length !== observations?.requests) {
+    throw failed(
+      'sealed_policy_unrecorded',
+      `the loopback endpoint recorded ${structures.length} request structure(s) for ${observations?.requests} ` +
+        'request(s); the sealed-policy check would be partial',
+    );
+  }
+  if (structures.length === 0) {
+    throw failed('sealed_policy_unrecorded', 'the sealed prompt made no model request, so its tool policy is unproven');
+  }
+  for (const [index, structure] of structures.entries()) {
+    const request = index + 1;
+    if (structure.parsed !== true) {
+      throw failed('sealed_policy_unrecorded', `model request ${request} was not a parseable JSON body`);
+    }
+    if (structure.has_tools_key !== false || structure.tools_len !== null) {
+      throw failed(
+        'sealed_policy_violation',
+        `model request ${request} advertised tools (has_tools_key=${structure.has_tools_key}, ` +
+          `tools_len=${structure.tools_len}); the sealed deny_all scope must advertise no tools at all`,
+      );
+    }
+    if (structure.tool_role_messages !== 0 || structure.assistant_tool_calls !== 0) {
+      throw failed(
+        'sealed_policy_violation',
+        `model request ${request} carried tool traffic (tool role messages=${structure.tool_role_messages}, ` +
+          `assistant tool calls=${structure.assistant_tool_calls})`,
+      );
+    }
+  }
+  const first = structures[0];
+  if (first.roles.length !== 2 || first.roles[0] !== 'system' || first.roles[1] !== 'user') {
+    throw failed(
+      'sealed_policy_violation',
+      `the admitted prompt's first model request must be the sealed [system, user] shape, got ` +
+        `${JSON.stringify(first.roles)}`,
+    );
+  }
+  return {
+    model_requests: structures.length,
+    advertised_tools: false,
+    tool_role_messages: 0,
+    assistant_tool_calls: 0,
+    first_request_roles: first.roles,
+    model: first.model,
+  };
+}
+
+/**
+ * The bounded inventory of one directory tree: relative path, kind, byte size
+ * and SHA-256 for files. No file content is retained, the walk is depth- and
+ * entry-capped, and the order is sorted so a receipt is comparable across runs.
+ * `truncated` reports that a cap stopped the walk, so a caller that asserts
+ * "nothing else exists" can refuse instead of reading a partial listing as a
+ * clean one.
+ *
+ * @returns {{entries: Array<{path: string, kind: string, bytes?: number, sha256?: string}>, truncated: boolean}}
+ */
+function directoryInventory(root, { maxDepth = 3, maxEntries = 64 } = {}) {
+  const entries = [];
+  let truncated = false;
+  const walk = (dir, prefix, depth) => {
+    if (entries.length >= maxEntries) {
+      truncated = true;
+      return;
+    }
+    if (depth > maxDepth) {
+      truncated = true;
+      return;
+    }
+    let dirents = [];
+    try {
+      dirents = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      truncated = true;
+      return;
+    }
+    const sorted = [...dirents].sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
+    for (const dirent of sorted) {
+      if (entries.length >= maxEntries) {
+        truncated = true;
+        return;
+      }
+      const relative = prefix === '' ? dirent.name : `${prefix}/${dirent.name}`;
+      if (dirent.isDirectory()) {
+        entries.push({ path: relative, kind: 'dir' });
+        walk(join(dir, dirent.name), relative, depth + 1);
+      } else if (dirent.isFile()) {
+        const bytes = readFileSync(join(dir, dirent.name));
+        entries.push({ path: relative, kind: 'file', bytes: bytes.length, sha256: sha256(bytes) });
+      } else {
+        entries.push({ path: relative, kind: 'other' });
+      }
+    }
+  };
+  walk(root, '', 1);
+  return { entries, truncated };
+}
+
+/**
+ * Marker files that would exist if an unsolicited `shell`/`str_replace_editor`/
+ * `run_code` body had actually executed against this isolated root (§6.2's
+ * hostile-marker paths). Only presence is checked; no marker is read.
+ */
+function hostileMarkersPresent(isolatedRoot) {
+  const dir = join(isolatedRoot, HOSTILE_MARKER_DIR);
+  const present = [];
+  for (const name of HOSTILE_MARKER_NAMES) {
+    if (existsSync(join(dir, name))) present.push(name);
+  }
+  return { checked: [...HOSTILE_MARKER_NAMES], present, directory: HOSTILE_MARKER_DIR };
+}
+
+/**
+ * @throws {DriverFailure} `failed`/`unsolicited_side_effect` when a hostile
+ *   marker exists — an executed unsolicited tool body, never an acceptable
+ *   result.
+ */
+function assertNoHostileMarkers(isolatedRoot) {
+  const markers = hostileMarkersPresent(isolatedRoot);
+  if (markers.present.length > 0) {
+    throw failed(
+      'unsolicited_side_effect',
+      `the sealed run left hostile tool marker(s) ${JSON.stringify(markers.present)} under ` +
+        `${HOSTILE_MARKER_DIR}/: an unsolicited shell/editor/run_code body really executed`,
+    );
+  }
+  return markers;
+}
+
+/**
+ * The opened scope must carry EXACTLY the changes the checked-in fixture
+ * declares — nothing else. This is the driver's end-to-end side-effect check on
+ * the real admitted run: a tool that had produced any unsolicited write inside
+ * the scope would appear here as an entry no fixture change declares, and the
+ * declared file's bytes/sha are already compared against the same fixture in
+ * step 12.
+ */
+function assertScopeEffectOnly(scopeDir, fixture) {
+  const { entries: inventory, truncated } = directoryInventory(scopeDir, { maxDepth: 2, maxEntries: 32 });
+  if (truncated) {
+    throw failed(
+      'side_effect_inventory_incomplete',
+      `the inventory of the opened scope ${JSON.stringify(scopeDir)} hit its depth/entry cap, so "nothing else was ` +
+        'written" cannot be asserted from it',
+    );
+  }
+  const expected = fixture.changePath;
+  const unexpected = inventory.filter((entry) => entry.kind !== 'file' || entry.path !== expected);
+  if (unexpected.length > 0) {
+    throw failed(
+      'unsolicited_side_effect',
+      `the opened scope carries ${unexpected.length} entry/entries the checked-in fixture never declared ` +
+        `(${unexpected.map((entry) => `${entry.path}:${entry.kind}`).join(', ')}); the only authorized effect is ` +
+        JSON.stringify(expected),
+    );
+  }
+  return inventory;
+}
+
+/**
  * The sealed-prompt cardinality contract of the effect boundary: the ONE
  * admitted schedule/run crosses the effect state exactly once, so exactly one
  * model request is authorized, it must carry the Idea W5 appended (the
@@ -1616,14 +1836,65 @@ function exitCodeFor(outcome) {
 // ---------------------------------------------------------------------------
 
 /**
+ * Non-secret STRUCTURE of one model request body: the message role sequence,
+ * the message count, whether the caller advertised tools at all and how many,
+ * whether a tool result or an assistant tool call is already in the
+ * conversation, and the model name the runtime named. Nothing else is derived
+ * from the body: no content, no header and no key is retained, echoed or written
+ * anywhere, and no value out of the body is compared except the driver's own
+ * non-secret Steer Idea (checked by the caller).
+ *
+ * These are the facts that make the sealed no-tools policy checkable on the
+ * real admitted run: §6.2's adapter control asserts exactly this shape for the
+ * sealed composition's first request (roles `[system, user]`, the `tools` key
+ * ABSENT, `tools_len == 0`).
+ */
+function modelRequestStructure(text) {
+  const empty = {
+    parsed: false,
+    roles: [],
+    message_count: 0,
+    has_tools_key: null,
+    tools_len: null,
+    tool_role_messages: 0,
+    assistant_tool_calls: 0,
+    model: null,
+  };
+  let payload = null;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    return empty;
+  }
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return empty;
+  const messages = Array.isArray(payload.messages) ? payload.messages : [];
+  const roles = messages.map((message) =>
+    message !== null && typeof message === 'object' && typeof message.role === 'string' ? message.role : '<missing>',
+  );
+  const toolRoleMessages = roles.filter((role) => role === 'tool').length;
+  const assistantToolCalls = messages.filter(
+    (message) => Array.isArray(message?.tool_calls) && message.tool_calls.length > 0,
+  ).length;
+  return {
+    parsed: true,
+    roles,
+    message_count: messages.length,
+    has_tools_key: Object.hasOwn(payload, 'tools'),
+    tools_len: Array.isArray(payload.tools) ? payload.tools.length : null,
+    tool_role_messages: toolRoleMessages,
+    assistant_tool_calls: assistantToolCalls,
+    model: typeof payload.model === 'string' ? payload.model : null,
+  };
+}
+
+/**
  * DeepSeek-compatible loopback endpoint. It answers one SSE completion for
- * `POST /chat/completions` and records only non-secret request structure —
- * never bodies, headers or keys. The single non-structural fact it derives is
- * one boolean per request: whether the prompt body carried the appended Steer
- * Idea, which is the boundary's own evidence that the first real prompt of the
- * run consumed the committed core-context version (W5). The body is read into a
- * bounded buffer for that comparison only and is never stored, echoed or
- * written anywhere.
+ * `POST /chat/completions` and records only the non-secret STRUCTURE of each
+ * request ({@link modelRequestStructure}) plus one boolean per request: whether
+ * the prompt body carried the appended Steer Idea, which is the boundary's own
+ * evidence that the first real prompt of the run consumed the committed
+ * core-context version (W5). The body is read into a bounded buffer for those
+ * comparisons only and is never stored, echoed or written anywhere.
  */
 function startModelEndpoint() {
   const observations = {
@@ -1632,6 +1903,7 @@ function startModelEndpoint() {
     unexpected: 0,
     authorization_header_present: false,
     prompt_with_idea: 0,
+    structures: [],
   };
   const server = createServer((req, res) => {
     observations.requests += 1;
@@ -1645,6 +1917,7 @@ function startModelEndpoint() {
     }
     let promptBytes = 0;
     let promptHasIdea = false;
+    const chunks = [];
     req.on('data', (chunk) => {
       if (promptBytes >= MODEL_PROMPT_READ_CAP_BYTES) return;
       promptBytes += chunk.length;
@@ -1652,9 +1925,15 @@ function startModelEndpoint() {
       // matched substring is the driver's own non-secret Idea, and nothing is
       // retained beyond this boolean.
       if (!promptHasIdea && chunk.includes(STEER_IDEA)) promptHasIdea = true;
+      chunks.push(chunk);
     });
     req.on('end', () => {
       if (promptHasIdea) observations.prompt_with_idea += 1;
+      // Bounded: the journey authorizes ONE prompt request, so the cap only
+      // keeps a misbehaving runtime from growing the receipt.
+      if (observations.structures.length < MODEL_REQUEST_STRUCTURE_CAP) {
+        observations.structures.push(modelRequestStructure(Buffer.concat(chunks).toString('utf8')));
+      }
       const chunk = (delta, finishReason) =>
         `data: ${JSON.stringify({
           id: 'chatcmpl-public-first-workflow',
@@ -1753,42 +2032,75 @@ function readActiveCreator(binary, childEnv) {
 // ---------------------------------------------------------------------------
 
 /**
- * Read a bounded slice of a same-run SSE stream. A non-2xx answer is surfaced
- * with its status so the caller can classify a missing producer.
+ * Read a bounded slice of a same-run SSE stream.
+ *
+ * The read window is this driver's OWN timer and the only authority for it: the
+ * socket is closed by the driver when the window elapses, so a live run with
+ * nothing new to send can never be read as a transport failure. (The previous
+ * shape armed `request.setTimeout(timeoutMs, request.destroy)` as well, which is
+ * a socket-idle timer: on an idle reconnect — no frame after the response
+ * headers — that timer fires BEFORE the response-armed window, the destroy
+ * surfaces as `ECONNRESET` / `socket hang up`, and an ordinary no-new-frame
+ * window was reported as a failure.)
+ *
+ * The three outcomes are exact and mutually exclusive:
+ *
+ *   * `timed_out: true`, `closed: false` — the window elapsed with the stream
+ *     still open: a normal no-new-frame window;
+ *   * `closed: true`, `timed_out: false` — the SERVER ended the stream (terminal
+ *     ring, the `history_unavailable` close, subscriber eviction);
+ *   * a rejected promise — a REAL transport failure (a refused connection, an
+ *     aborted/reset response) surfaced as itself instead of being read as an
+ *     ordinary short stream.
+ *
+ * The read settles BEFORE it destroys the socket, so its own teardown can never
+ * be reported as a transport failure. A non-2xx answer is surfaced with its
+ * status so the caller can classify a refusal.
  */
 function readEventStream(port, runId, { lastEventId, maxFrames = MAX_EVENT_FRAMES, timeoutMs = EVENT_STREAM_TIMEOUT_MS } = {}) {
   return new Promise((resolvePromise, rejectPromise) => {
     const headers = { accept: 'text/event-stream' };
     if (lastEventId) headers['last-event-id'] = lastEventId;
     const path = `/v1/daemon/orchestration/sessions/${encodePathSegment(runId)}/events`;
+    const frames = [];
+    let buffer = '';
+    let status = 0;
+    let json = null;
+    let closed = false;
+    let settled = false;
+    let timer = null;
+    const settle = (timedOut) => {
+      if (settled) return false;
+      settled = true;
+      clearTimeout(timer);
+      resolvePromise({ status, json, frames, closed, timed_out: timedOut });
+      return true;
+    };
+    const refuse = (error) => {
+      if (settled) return false;
+      settled = true;
+      clearTimeout(timer);
+      rejectPromise(error);
+      return true;
+    };
     const request = httpRequest({ host: '127.0.0.1', port, path, method: 'GET', headers }, (response) => {
-      if (response.statusCode !== 200) {
+      status = response.statusCode ?? 0;
+      if (status !== 200) {
         const chunks = [];
         response.on('data', (chunk) => chunks.push(chunk));
         response.on('end', () => {
           const text = Buffer.concat(chunks).toString('utf8');
-          let json = null;
           try {
             json = text.length > 0 ? JSON.parse(text) : null;
           } catch {
             json = null;
           }
-          resolvePromise({ status: response.statusCode ?? 0, json, frames: [], closed: true });
+          closed = true;
+          settle(false);
         });
+        response.on('error', (error) => refuse(error));
         return;
       }
-      const frames = [];
-      let buffer = '';
-      let closed = false;
-      let settled = false;
-      const finish = () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        request.destroy();
-        resolvePromise({ status: 200, json: null, frames, closed });
-      };
-      const timer = setTimeout(finish, timeoutMs);
       response.setEncoding('utf8');
       response.on('data', (chunk) => {
         buffer += chunk;
@@ -1805,7 +2117,7 @@ function readEventStream(port, runId, { lastEventId, maxFrames = MAX_EVENT_FRAME
           if (frame.id !== null || frame.event !== null || frame.data !== null) frames.push(frame);
           if (frames.length >= maxFrames) {
             closed = true;
-            finish();
+            if (settle(false)) request.destroy();
             return;
           }
           separator = buffer.indexOf('\n\n');
@@ -1813,17 +2125,451 @@ function readEventStream(port, runId, { lastEventId, maxFrames = MAX_EVENT_FRAME
       });
       response.on('end', () => {
         closed = true;
-        finish();
+        settle(false);
       });
-      response.on('error', () => {
-        closed = true;
-        finish();
-      });
+      // A response-level failure is the transport's own and is surfaced, unless
+      // this read already ended on its own window (which settles first).
+      response.on('error', (error) => refuse(error));
     });
-    request.setTimeout(timeoutMs, () => request.destroy());
-    request.on('error', rejectPromise);
+    timer = setTimeout(() => {
+      if (settle(true)) request.destroy();
+    }, timeoutMs);
+    request.on('error', (error) => refuse(error));
     request.end();
   });
+}
+
+/**
+ * ONE bounded SSE read with a real transport failure reported as its own typed
+ * STOP, so a broken connection can never be mistaken for an idle window (the
+ * `timed_out` shape an ordinary no-new-frame read returns).
+ */
+async function readEventStreamOrStop(step, attempt) {
+  try {
+    return await attempt();
+  } catch (error) {
+    throw failed(
+      'event_stream_transport',
+      `${step}: the same-run SSE read failed at the transport level: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+/** Require a 2xx SSE answer; anything else is the public refusal it is. */
+function requireEventStreamStatus(step, read) {
+  if (read.status < 200 || read.status >= 300) {
+    if (read.timed_out === true && read.status === 0) {
+      throw failed('event_stream_unavailable', `${step}: no SSE response inside the read window`);
+    }
+    throw statusFailure(step, { status: read.status, json: read.json, text: '' });
+  }
+  return read;
+}
+
+/**
+ * The `<UUID epoch>:<decimal sequence>` cursor of one SSE frame id (contract §4:
+ * the run-event ring owns it; this driver never renumbers or re-derives it).
+ *
+ * @returns {{epoch: string, sequence: number}|null} `null` for anything that is
+ *   not a cursor — including the empty id the `history_unavailable` control
+ *   frame deliberately carries.
+ */
+function parseEventCursor(id) {
+  if (typeof id !== 'string' || id.length === 0) return null;
+  const separator = id.lastIndexOf(':');
+  if (separator <= 0) return null;
+  const epoch = id.slice(0, separator);
+  const sequence = id.slice(separator + 1);
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(epoch)) return null;
+  if (!/^\d+$/.test(sequence)) return null;
+  const value = Number.parseInt(sequence, 10);
+  return Number.isSafeInteger(value) ? { epoch, sequence: value } : null;
+}
+
+/** The bounded `GapWire` payload of one `gap` control frame (contract §4). */
+function parseGapFrame(frame) {
+  if (frame?.event !== 'gap' || typeof frame.data !== 'string') return null;
+  let payload = null;
+  try {
+    payload = JSON.parse(frame.data);
+  } catch {
+    return null;
+  }
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  if (typeof payload.run_id !== 'string' || payload.run_id.length === 0) return null;
+  if (typeof payload.epoch !== 'string' || payload.epoch.length === 0) return null;
+  if (!Number.isInteger(payload.from_sequence) || payload.from_sequence < 0) return null;
+  if (!Number.isInteger(payload.to_sequence) || payload.to_sequence < payload.from_sequence) return null;
+  return {
+    run_id: payload.run_id,
+    epoch: payload.epoch,
+    from_sequence: payload.from_sequence,
+    to_sequence: payload.to_sequence,
+  };
+}
+
+/** The bounded `HistoryUnavailableWire` payload of one `history_unavailable` control frame. */
+function parseHistoryUnavailableFrame(frame) {
+  if (frame?.event !== 'history_unavailable' || typeof frame.data !== 'string') return null;
+  let payload = null;
+  try {
+    payload = JSON.parse(frame.data);
+  } catch {
+    return null;
+  }
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  if (typeof payload.run_id !== 'string' || payload.run_id.length === 0) return null;
+  if (typeof payload.inspect_url !== 'string' || payload.inspect_url.length === 0) return null;
+  return { run_id: payload.run_id, inspect_url: payload.inspect_url };
+}
+
+/**
+ * Classify ONE same-run cursor reconnect against the frames this driver already
+ * observed (§4: "same epoch, retained cursor → exclusive replay then tail
+ * without duplicate handoff"). Exactly two honest outcomes are accepted, and an
+ * idle window with no successor frame is NOT one of them:
+ *
+ *   * `successors` — every successor the cursor promised replayed, each from the
+ *     cursor's own epoch and strictly AFTER it (a frame at or before the cursor
+ *     would be the duplicate handoff the contract forbids), with no explicit gap
+ *     narrowing the record;
+ *   * `gap` — the ring answered with an explicit bounded `gap` whose range
+ *     covers every successor the cursor promised: recorded verbatim
+ *     (run/epoch/from/to) instead of an invented history.
+ *
+ * Everything else refuses: a replayed frame outside the cursor's epoch, a
+ * cursor-less data frame, a `history_unavailable` close for a run whose ring is
+ * live, a malformed `gap`, or successors the replay silently dropped.
+ *
+ * @throws {DriverFailure} `failed`/<replay category> on any other outcome.
+ */
+function classifySameRunReplay({ runId, cursor, observedIds, read }) {
+  const origin = parseEventCursor(cursor);
+  if (origin === null) {
+    throw failed(
+      'replay_unprovable',
+      `the observed cursor ${JSON.stringify(cursor)} is not a <UUID epoch>:<decimal sequence> cursor, so no ` +
+        'same-run replay can be addressed from it',
+    );
+  }
+  const expected = [];
+  for (const id of observedIds) {
+    const parsed = parseEventCursor(id);
+    if (parsed === null || parsed.epoch !== origin.epoch || parsed.sequence <= origin.sequence) continue;
+    if (!expected.includes(id)) expected.push(id);
+  }
+  if (expected.length === 0) {
+    throw failed(
+      'replay_unprovable',
+      `cursor ${cursor} has no successor among the ${observedIds.length} observed frame(s); a same-run replay proof ` +
+        'needs the frames the cursor promised, and an empty read is never evidence that they replayed',
+    );
+  }
+  const sequences = new Map(expected.map((id) => [id, parseEventCursor(id).sequence]));
+  const replayed = [];
+  const gaps = [];
+  for (const frame of read.frames) {
+    if (frame.event === 'history_unavailable') {
+      throw failed(
+        'replay_history_unavailable',
+        'the cursor reconnect answered `history_unavailable` for a run whose ring this driver just read; the ' +
+          'retained history was not lost and its loss must not be claimed',
+      );
+    }
+    if (frame.event === 'gap') {
+      const gap = parseGapFrame(frame);
+      if (gap === null) {
+        throw failed('replay_contract_violation', 'a `gap` frame did not carry {run_id, epoch, from_sequence, to_sequence}');
+      }
+      if (gap.run_id !== runId || gap.epoch !== origin.epoch) {
+        throw failed(
+          'replay_foreign_gap',
+          `a \`gap\` frame named run ${JSON.stringify(gap.run_id)} / epoch ${JSON.stringify(gap.epoch)}, not this ` +
+            `run's ${JSON.stringify(runId)} / ${JSON.stringify(origin.epoch)}`,
+        );
+      }
+      gaps.push(gap);
+      continue;
+    }
+    const parsed = parseEventCursor(frame.id);
+    if (parsed === null) {
+      throw failed(
+        'replay_contract_violation',
+        `a replayed data frame carries no <epoch>:<sequence> cursor: ${JSON.stringify(frame.id)}`,
+      );
+    }
+    if (parsed.epoch !== origin.epoch) {
+      throw failed(
+        'replay_foreign_epoch',
+        `a replayed frame belongs to epoch ${JSON.stringify(parsed.epoch)}, not the cursor's ` +
+          `${JSON.stringify(origin.epoch)}`,
+      );
+    }
+    if (parsed.sequence <= origin.sequence) {
+      throw failed(
+        'replay_duplicate_handoff',
+        `replayed frame ${JSON.stringify(frame.id)} is at or before the cursor ${cursor}: the replay must be exclusive`,
+      );
+    }
+    replayed.push({ id: frame.id, event: frame.event ?? null, sequence: parsed.sequence });
+  }
+  const replayedIds = new Set(replayed.map((frame) => frame.id));
+  const missing = expected.filter((id) => !replayedIds.has(id));
+  const uncovered = missing.filter(
+    (id) => !gaps.some((gap) => gap.from_sequence <= sequences.get(id) && gap.to_sequence >= sequences.get(id)),
+  );
+  if (uncovered.length > 0) {
+    throw failed(
+      'replay_incomplete',
+      `the cursor reconnect did not replay ${uncovered.length} observed successor frame(s) of ${cursor} ` +
+        `(${uncovered.join(', ')}) and no explicit gap covers them`,
+    );
+  }
+  return {
+    kind: missing.length === 0 ? 'successors' : 'gap',
+    cursor,
+    epoch: origin.epoch,
+    observed_successors: expected.length,
+    replayed_frames: replayed.length,
+    replayed_ids: replayed.map((frame) => frame.id),
+    new_frames: replayed.filter((frame) => !sequences.has(frame.id)).map((frame) => frame.id),
+    missing_successors: missing,
+    gaps: gaps.map((gap) => ({ from_sequence: gap.from_sequence, to_sequence: gap.to_sequence })),
+    exclusive: true,
+    duplicate_handoff: false,
+    closed: read.closed === true,
+    timed_out: read.timed_out === true,
+  };
+}
+
+/**
+ * Prove the same-run cursor reconnect over the public route: read the frames the
+ * earliest observed cursor promised and classify them
+ * ({@link classifySameRunReplay}). Fails closed when the stream read carried
+ * fewer than two cursor-bearing frames — the run is an admitted, gated, steered
+ * and prompted one, so a single-frame read is itself the defect that makes a
+ * replay unprovable, never a reason to record an idle window as a pass.
+ */
+async function proveSameRunReplay({ port, runId, observed }) {
+  const observedIds = [];
+  for (const frame of observed) {
+    if (typeof frame.id === 'string' && frame.id.length > 0) observedIds.push(frame.id);
+  }
+  if (observedIds.length < 2) {
+    throw failed(
+      'replay_unprovable',
+      `the same-run stream read observed ${observedIds.length} cursor-bearing frame(s); the exclusive successor ` +
+        'replay cannot be proved from fewer than two, and an idle window is not a replay proof',
+    );
+  }
+  const cursor = observedIds[0];
+  const step = 'GET /orchestration/sessions/{run_id}/events (cursor replay)';
+  const read = requireEventStreamStatus(
+    step,
+    await readEventStreamOrStop(step, () =>
+      readEventStream(port, runId, { lastEventId: cursor, maxFrames: MAX_EVENT_FRAMES, timeoutMs: EVENT_REPLAY_TIMEOUT_MS }),
+    ),
+  );
+  return { replay: classifySameRunReplay({ runId, cursor, observedIds, read }), frames: read.frames };
+}
+
+/**
+ * The union of the observed frame sets, de-duplicated by identity and kept in
+ * delivery order (the initial read's frames first, then the cursor reconnect's).
+ * The receipt carries only ids and control-frame names — this union exists to be
+ * scanned for an admissible workspace-commit response and is never printed.
+ */
+function mergeObservedFrames(observed, replayed) {
+  const merged = [];
+  const seen = new Set();
+  for (const frame of [...observed, ...replayed]) {
+    const key = `${frame.id ?? ''}|${frame.event ?? ''}|${frame.data ?? ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(frame);
+  }
+  return merged;
+}
+
+/**
+ * The public refusal controls of the same-run stream (contract §4). Every case
+ * is asserted against its exact wire answer — never tolerated approximately —
+ * and recorded verbatim (status, code, frame count), so the receipt shows what
+ * the route actually refused:
+ *
+ *   * an ABSENT run is `404 not_found` before any SSE header (the ownership
+ *     check runs before any ring/epoch/cursor lookup, so no existence leaks);
+ *   * a MALFORMED cursor and a FUTURE cursor are `400 invalid_input` before any
+ *     SSE header;
+ *   * a cursor from ANOTHER epoch against a live run is the one
+ *     `history_unavailable` control frame with an empty id (the caller's
+ *     `Last-Event-ID` is never advanced to a sequence that was never retained),
+ *     naming this run and its inspect URL, and the stream closes with it —
+ *     no invented history, no data frame.
+ *
+ * @throws {DriverFailure} `failed`/`refusal_contract_violation` (or the read's
+ *   own typed transport STOP) on any deviation.
+ */
+async function collectStreamRefusals({ port, runId, observedIds }) {
+  const origin = parseEventCursor(observedIds[0]);
+  if (origin === null) {
+    throw failed('refusal_unprovable', `the observed cursor ${JSON.stringify(observedIds[0])} is not a cursor`);
+  }
+  let maxSequence = origin.sequence;
+  for (const id of observedIds) {
+    const parsed = parseEventCursor(id);
+    if (parsed !== null && parsed.epoch === origin.epoch) maxSequence = Math.max(maxSequence, parsed.sequence);
+  }
+  const cases = [
+    { control: 'absent_run', run: 'public-first-workflow-absent-run', expectStatus: 404, expectCode: 'not_found' },
+    { control: 'malformed_cursor', run: runId, cursor: 'not-a-cursor', expectStatus: 400, expectCode: 'invalid_input' },
+    {
+      control: 'future_cursor',
+      run: runId,
+      cursor: `${origin.epoch}:${maxSequence + 1000}`,
+      expectStatus: 400,
+      expectCode: 'invalid_input',
+    },
+  ];
+  const recorded = [];
+  for (const entry of cases) {
+    const step = `GET /orchestration/sessions/{run_id}/events (${entry.control})`;
+    const read = await readEventStreamOrStop(step, () =>
+      readEventStream(port, entry.run, {
+        lastEventId: entry.cursor,
+        maxFrames: 4,
+        timeoutMs: EVENT_REPLAY_TIMEOUT_MS,
+      }),
+    );
+    const code = read.json?.error?.code ?? read.json?.code ?? null;
+    if (read.status !== entry.expectStatus || code !== entry.expectCode) {
+      throw failed(
+        'refusal_contract_violation',
+        `${entry.control}: expected HTTP ${entry.expectStatus} (${entry.expectCode}) before any SSE header, got HTTP ` +
+          `${read.status}${code ? ` (${code})` : ''}`,
+      );
+    }
+    if (read.frames.length > 0) {
+      throw failed(
+        'refusal_contract_violation',
+        `${entry.control}: a refused subscription answered ${read.frames.length} SSE frame(s)`,
+      );
+    }
+    recorded.push({
+      control: entry.control,
+      status: read.status,
+      code,
+      frames: read.frames.length,
+      closed: read.closed === true,
+      timed_out: read.timed_out === true,
+    });
+  }
+  // A cursor whose epoch is not the live ring's: the run IS owned, so this is
+  // not a refusal — it is the explicit history-loss control frame, and reading
+  // it as a short stream or a 400 would both be wrong.
+  const historyStep = 'GET /orchestration/sessions/{run_id}/events (prior epoch cursor)';
+  const historyCursor = `00000000-0000-4000-8000-000000000000:${maxSequence}`;
+  const historyRead = requireEventStreamStatus(
+    historyStep,
+    await readEventStreamOrStop(historyStep, () =>
+      readEventStream(port, runId, {
+        lastEventId: historyCursor,
+        maxFrames: 4,
+        timeoutMs: EVENT_REPLAY_TIMEOUT_MS,
+      }),
+    ),
+  );
+  if (historyRead.frames.length !== 1 || historyRead.frames[0].event !== 'history_unavailable') {
+    throw failed(
+      'refusal_contract_violation',
+      `prior_epoch_cursor: expected exactly one history_unavailable control frame, got ` +
+        `${JSON.stringify(historyRead.frames.map((frame) => frame.event))}`,
+    );
+  }
+  const wire = parseHistoryUnavailableFrame(historyRead.frames[0]);
+  if (wire === null || wire.run_id !== runId) {
+    throw failed(
+      'refusal_contract_violation',
+      `prior_epoch_cursor: the control frame did not name this run (${JSON.stringify(wire?.run_id ?? null)}) with an ` +
+        'inspect URL',
+    );
+  }
+  if (historyRead.frames[0].id !== null && historyRead.frames[0].id !== '') {
+    throw failed(
+      'refusal_contract_violation',
+      `prior_epoch_cursor: the control frame must carry no cursor, got ${JSON.stringify(historyRead.frames[0].id)}`,
+    );
+  }
+  if (historyRead.closed !== true || historyRead.timed_out === true) {
+    throw failed(
+      'refusal_contract_violation',
+      'prior_epoch_cursor: the stream must close with the history_unavailable control frame rather than idle until ' +
+        'the read window elapses',
+    );
+  }
+  recorded.push({
+    control: 'prior_epoch_cursor',
+    status: historyRead.status,
+    code: null,
+    frames: historyRead.frames.length,
+    control_frame: 'history_unavailable',
+    inspect_url: wire.inspect_url,
+    cursor_present: false,
+    closed: true,
+    timed_out: false,
+  });
+  return recorded;
+}
+
+/**
+ * ONE cursor reconnect against a run whose retained history is gone (the
+ * post-restart case, contract §4: "retained run, prior epoch or evicted ring /
+ * restart → one `history_unavailable` control frame with the same run id and
+ * inspect URL, then close; no invented historical events").
+ *
+ * The answer is asserted, not merely observed: exactly that one control frame,
+ * carrying THIS run id and an inspect URL, with NO cursor and no data frame,
+ * and the stream closed by the server inside the window. A retained history
+ * replayed as if nothing happened is as much a failure as an idle read.
+ */
+function assertHistoryLossExplicit({ runId, cursor, read }) {
+  const frames = read.frames;
+  if (frames.length !== 1 || frames[0].event !== 'history_unavailable') {
+    throw failed(
+      'history_loss_not_explicit',
+      `${frames.length} frame(s) ${JSON.stringify(frames.map((frame) => frame.event))} answered the pre-restart ` +
+        `cursor ${cursor}; the lost retained history must be stated as one history_unavailable control frame`,
+    );
+  }
+  const wire = parseHistoryUnavailableFrame(frames[0]);
+  if (wire === null || wire.run_id !== runId) {
+    throw failed(
+      'history_loss_not_explicit',
+      `the history_unavailable control frame did not name this run (${JSON.stringify(wire?.run_id ?? null)}) with an ` +
+        'inspect URL',
+    );
+  }
+  if (frames[0].id !== null && frames[0].id !== '') {
+    throw failed(
+      'history_loss_not_explicit',
+      `the history_unavailable control frame must carry no cursor, got ${JSON.stringify(frames[0].id)}`,
+    );
+  }
+  if (read.timed_out === true && read.closed !== true) {
+    throw failed(
+      'history_loss_not_explicit',
+      'the history_unavailable stream idled until the read window elapsed instead of closing with its control frame',
+    );
+  }
+  return {
+    control_frame: 'history_unavailable',
+    run_id: wire.run_id,
+    inspect_url: wire.inspect_url,
+    cursor_present: false,
+    data_frames: 0,
+    closed: read.closed === true,
+    timed_out: read.timed_out === true,
+  };
 }
 
 /**
@@ -2288,7 +3034,7 @@ async function runDeterministic(options) {
       admission_polls: admission.polls,
       placement_source: 'nexus42 ops inspect <run> --json',
     };
-    record('inspect', 'ok', { status: facts.inspect.status, admission_polls: admission.polls });
+    record('inspect', 'ok', { schedule_status: facts.inspect.status, admission_polls: admission.polls });
 
     // 9. W5/W6 on the fixture's bounded pre-effect gate (§6.1: W5/W6 are
     // exercised before the final manual wait; S0-3: the append is durable
@@ -2429,79 +3175,85 @@ async function runDeterministic(options) {
       post_resume_state: effectBoundary.observed.task_id,
     });
 
-    // 10. O1/O2: same-run stream against the inspected root session.
-    const stream = await readEventStream(port, runId);
-    if (stream.status !== 200) {
-      throw statusFailure('GET /orchestration/sessions/{run_id}/events', {
-        status: stream.status,
-        json: stream.json,
-        text: '',
-      });
-    }
-    const lastEventId = stream.frames.map((frame) => frame.id).filter(Boolean).pop() ?? null;
+    // 10. O1/O2: same-run stream against the inspected root session. The read
+    // is bounded by this driver's own window, so `timed_out` (nothing new to
+    // send while the run stays live) and a server-side close are distinct
+    // recorded facts, and a real transport failure rejects instead of being
+    // read as a short stream.
+    const streamStep = 'GET /orchestration/sessions/{run_id}/events';
+    const stream = requireEventStreamStatus(
+      streamStep,
+      await readEventStreamOrStop(streamStep, () => readEventStream(port, runId)),
+    );
+    const observedIds = stream.frames.map((frame) => frame.id).filter((id) => typeof id === 'string' && id.length > 0);
+    const lastEventId = observedIds.at(-1) ?? null;
+    const streamEpoch = parseEventCursor(observedIds[0] ?? null)?.epoch ?? null;
     facts.stream = {
       frame_count: stream.frames.length,
+      ids: observedIds,
+      epoch: streamEpoch,
       last_event_id: lastEventId,
       closed: stream.closed,
+      timed_out: stream.timed_out === true,
       control_frames: stream.frames
         .filter((frame) => ['gap', 'history_unavailable'].includes(frame.event))
         .map((frame) => frame.event),
+      replay: null,
+      refusals: null,
+      commit_frame_producer: null,
     };
-    record('stream', 'ok', { frames: stream.frames.length });
+    record('stream', 'ok', {
+      frames: stream.frames.length,
+      closed: stream.closed,
+      timed_out: stream.timed_out === true,
+    });
 
-    // 11. Bounded revision follow-up reads: a routed commit-response frame may
-    // land after the first bounded read, and §6.1 requires the committed file
-    // *and* revision. Every follow-up is a reconnect from the last observed
-    // cursor (O2), never a new run. This is the SECONDARY source: the primary
-    // revision proof is the authorized root session detail's schema-owned
-    // `workspace_commit` projection (contract §4) read in step 12. Today the
-    // ring routes no commit-response identity at all
-    // (`COMMIT_RESPONSE_EVENT_IDENTITIES`), so these reconnects cannot admit
-    // evidence and the receipt depends on the session-detail projection.
-    let allFrames = [...stream.frames];
-    let observedRevision = findCommitRevision(allFrames);
-    let tailReads = 0;
-    let tailFailure = null;
-    while (observedRevision === null && tailReads < EFFECT_REVISION_MAX_TAIL_READS) {
-      let tail = null;
-      try {
-        tail = await readEventStream(port, runId, {
-          lastEventId: allFrames.map((frame) => frame.id).filter(Boolean).pop() ?? null,
-          maxFrames: 64,
-          timeoutMs: EVENT_TAIL_TIMEOUT_MS,
-        });
-      } catch (error) {
-        // This reconnect is the SECONDARY source of the commit revision (the
-        // authorized session detail is the primary one, read in step 12), so a
-        // transport hiccup on it is recorded as evidence and stops the loop
-        // instead of failing the whole journey with an untyped error. The
-        // receipt still cannot claim a commit revision without one of the two
-        // strictly validated sources.
-        tailFailure = { kind: 'transport', detail: error instanceof Error ? error.message : String(error) };
-        break;
-      }
-      if (tail.status !== 200) {
-        tailFailure = { kind: 'status', status: tail.status, detail: `HTTP ${tail.status}` };
-        break;
-      }
-      tailReads += 1;
-      allFrames = [...allFrames, ...tail.frames];
-      observedRevision = findCommitRevision(allFrames);
-    }
-    facts.stream.tail_reads = tailReads;
-    facts.stream.tail_frame_count = allFrames.length - stream.frames.length;
-    facts.stream.tail_failure = tailFailure;
-    if (tailFailure !== null) {
-      record('stream_tail', 'degraded', { reads: tailReads, failure: tailFailure });
-    } else {
-      record('stream_tail', 'ok', { reads: tailReads, frames: facts.stream.tail_frame_count });
-    }
+    // 11. O2 same-run cursor reconnect: the exclusive successor replay the
+    // cursor contract promises, from the EARLIEST observed cursor of THIS run
+    // (a read that merely idles out its window is never a replay proof), or the
+    // explicit bounded gap the ring answers with when it cannot replay. The one
+    // reconnect also appends to the observed frame set, so a routed
+    // workspace-commit response — the SECONDARY revision source; the primary is
+    // the authorized root session detail read in step 12 — is still scanned
+    // without a second reconnect and without waiting on a frame identity the
+    // current run ring cannot route (`COMMIT_RESPONSE_EVENT_IDENTITIES` is
+    // empty by measurement in `crates/nexus-core/src/execution/run_events.rs`).
+    const { replay, frames: replayedFrames } = await proveSameRunReplay({ port, runId, observed: stream.frames });
+    facts.stream.replay = replay;
+    record('stream_replay', replay.kind === 'successors' ? 'ok' : 'history_gap', {
+      cursor: replay.cursor,
+      replayed: replay.replayed_frames,
+      expected: replay.observed_successors,
+      new_frames: replay.new_frames.length,
+      gaps: replay.gaps.length,
+    });
+    const allFrames = mergeObservedFrames(stream.frames, replayedFrames);
+    const observedRevision = findCommitRevision(allFrames);
+    facts.stream.commit_frame_producer = {
+      admissible_event_identities: [...COMMIT_RESPONSE_EVENT_IDENTITIES],
+      routed_commit_frames: observedRevision === null ? 0 : 1,
+      revision_source: 'authorized-root-session-detail',
+    };
+    facts.stream.replay_added_frames = allFrames.length - stream.frames.length;
+
+    // 11b. Public refusal controls of the same-run stream (§4): an absent run
+    // is refused before any SSE header, a malformed and a future cursor are
+    // typed invalid-input refusals before any SSE header, and a cursor from
+    // another epoch against a live run is the explicit history-loss control
+    // frame. Each is asserted against its exact wire answer.
+    const refusals = await collectStreamRefusals({ port, runId, observedIds });
+    facts.stream.refusals = refusals;
+    record('stream_refusals', 'ok', { controls: refusals.map((entry) => entry.control) });
 
     // 12. §6.1: the declared workspace effect, read back byte-for-byte. The
     // effect is the FIRST real prompt of the run crossing into the effect
     // state, so its cardinality is asserted here: exactly one sealed prompt,
-    // carrying the appended Idea, and no second dispatch.
+    // carrying the appended Idea, and no second dispatch. Its sealed no-tools
+    // policy is asserted on the same real request, and the isolated root is
+    // checked for unsolicited tool side effects.
+    const sealedPolicy = assertSealedToolPolicy(model.observations);
     assertSealedPromptCardinality(model.observations);
+    const markers = assertNoHostileMarkers(receipt.isolated_root);
     const effectPath = join(scopeDir, fixture.changePath);
     if (!existsSync(effectPath)) {
       throw failed(
@@ -2513,6 +3265,22 @@ async function runDeterministic(options) {
     if (!landed.equals(fixture.declaredBytes)) {
       throw failed('contract_violation', 'committed file content does not match the declared fixture manifest content');
     }
+    const scopeInventory = assertScopeEffectOnly(scopeDir, fixture);
+    facts.sealed_denial = {
+      network: 'loopback-only',
+      prompt_tool_policy: fixture.promptToolPolicy,
+      driven_unsolicited_tool_calls: 0,
+      driven_attempt_owner: 'real_dsh_sealed_deny_all_rejects_unsolicited_tools_without_side_effects',
+      sealed_policy: sealedPolicy,
+      hostile_markers: markers,
+      scope_entries: scopeInventory.map((entry) => entry.path),
+      side_effect_marker: null,
+    };
+    record('sealed_denial', 'ok', {
+      advertised_tools: sealedPolicy.advertised_tools,
+      hostile_markers: markers.present.length,
+      scope_entries: scopeInventory.length,
+    });
     // The receipt must carry the **commit** revision of this run: the
     // authorized root session detail's projected `workspace_commit` (contract
     // §4, P1-T2), strictly parsed here, or — if that projection is absent — a
@@ -2560,27 +3328,46 @@ async function runDeterministic(options) {
       revision_source: facts.effect.revision_source,
     });
 
-    // 13. W7 cancel: a durable `cancelled` is the only success.
+    // 13. W7 cancel: a durable `cancelled` is the only success, and the cancel
+    // must not have committed anything: the authorized root detail still
+    // projects the SAME commit revision and the opened scope is byte-identical.
     requireOk(
       'POST /orchestration/schedules/{id}/signal (cancel)',
       await httpJson(port, 'POST', `/v1/daemon/orchestration/schedules/${encodePathSegment(scheduleId)}/signal`, {
         body: { signal: 'cancel' },
       }),
     );
-    const afterCancel = scheduleSummary(
-      'GET /orchestration/schedules/{id}',
-      requireOk(
-        'GET /orchestration/schedules/{id}',
-        await httpJson(port, 'GET', `/v1/daemon/orchestration/schedules/${encodePathSegment(scheduleId)}`),
-      ),
-    );
-    if (afterCancel.status !== 'cancelled') {
-      throw failed('contract_violation', `cancel did not settle durably: inspect reports ${JSON.stringify(afterCancel.status)}`);
+    const cancelObservation = await readDurableObservation(port, scheduleId, runId, 'cancel');
+    if (cancelObservation.summary.status !== 'cancelled') {
+      throw failed(
+        'contract_violation',
+        `cancel did not settle durably: inspect reports ${JSON.stringify(cancelObservation.summary.status)}`,
+      );
     }
-    facts.cancel = { status: afterCancel.status, schedule_id: scheduleId };
-    record('cancel', 'ok', { status: afterCancel.status });
+    const cancelCommitRevision = parseSessionWorkspaceCommit(cancelObservation.detail);
+    if (cancelCommitRevision !== facts.effect.commit_revision) {
+      throw failed(
+        'duplicate_effect',
+        `the cancelled run projects workspace-commit revision ${JSON.stringify(cancelCommitRevision)} instead of the ` +
+          `observed effect revision ${JSON.stringify(facts.effect.commit_revision)}; cancellation must not commit again`,
+      );
+    }
+    const scopeAfterCancel = assertScopeEffectOnly(scopeDir, fixture);
+    facts.cancel = {
+      status: cancelObservation.summary.status,
+      schedule_id: scheduleId,
+      commit_revision: cancelCommitRevision,
+      scope_entries: scopeAfterCancel.map((entry) => entry.path),
+    };
+    record('cancel', 'ok', { schedule_status: facts.cancel.status });
 
-    // 14. O3 restart: same home, same schedule/session, preserved effect.
+    // 14. O3 restart: same home, same schedule/session, preserved effect, no
+    // repeated effect, and the LOST retained history stated explicitly. Every
+    // half is asserted: the restarted producer must answer the pre-restart
+    // cursor with exactly the one `history_unavailable` control frame (no
+    // invented history, no silent empty stream), the same root run must still
+    // own exactly this preset's ONE run, the effect bytes and ITS commit
+    // revision must be identical, and the scope must carry nothing new.
     facts.ready_stop = await stopServiceVia(running, 'ready');
     // §3.4 / §7: a confirmed owned shutdown is required before a successor
     // process reuses the same home and port.
@@ -2614,23 +3401,45 @@ async function runDeterministic(options) {
     if (!landedAfterRestart.equals(fixture.declaredBytes)) {
       throw failed('contract_violation', 'committed workspace effect did not survive the restart');
     }
-    const replay = await readEventStream(restartPort, runId, { lastEventId, maxFrames: 16 });
-    if (replay.status !== 200) {
-      throw statusFailure('GET /orchestration/sessions/{run_id}/events (restart)', {
-        status: replay.status,
-        json: replay.json,
-        text: '',
-      });
+    const restartObservation = await readDurableObservation(restartPort, scheduleId, runId, 'restart');
+    const restartCommitRevision = parseSessionWorkspaceCommit(restartObservation.detail);
+    if (restartCommitRevision !== facts.effect.commit_revision) {
+      throw failed(
+        'duplicate_effect',
+        `the restarted run projects workspace-commit revision ${JSON.stringify(restartCommitRevision)} instead of the ` +
+          `observed effect revision ${JSON.stringify(facts.effect.commit_revision)}; the restart must not repeat the effect`,
+      );
     }
+    const scopeAfterRestart = assertScopeEffectOnly(scopeDir, fixture);
+    const restartSessions = requireOk(
+      'GET /orchestration/sessions (restart)',
+      await httpJson(restartPort, 'GET', '/v1/daemon/orchestration/sessions'),
+    );
+    const restartRuns = assertSingleRun(restartSessions.items, fixture.presetId, runId);
+    const historyStep = 'GET /orchestration/sessions/{run_id}/events (restart)';
+    const historyLoss = assertHistoryLossExplicit({
+      runId,
+      cursor: lastEventId,
+      read: await readEventStreamOrStop(historyStep, () =>
+        readEventStream(restartPort, runId, { lastEventId, maxFrames: 16, timeoutMs: EVENT_REPLAY_TIMEOUT_MS }),
+      ),
+    });
     facts.restart = {
       schedule_status: afterRestart.status,
       current_session_id: runId,
       effect_sha256: sha256(landedAfterRestart),
       effect_preserved: true,
-      history_frames: replay.frames.map((frame) => frame.event).filter(Boolean),
-      history_unavailable: replay.frames.some((frame) => frame.event === 'history_unavailable'),
+      commit_revision: restartCommitRevision,
+      commit_revision_repeated: false,
+      scope_entries: scopeAfterRestart.map((entry) => entry.path),
+      preset_runs: restartRuns.runs,
+      history_loss: historyLoss,
     };
-    record('restart', 'ok', { status: afterRestart.status });
+    record('restart', 'ok', {
+      schedule_status: afterRestart.status,
+      commit_revision: restartCommitRevision,
+      history_loss: historyLoss.control_frame,
+    });
 
     facts.model_endpoint = {
       port: model.port,
@@ -2773,14 +3582,20 @@ async function main() {
  * module has no side effects; the journey only runs when the script is invoked
  * directly, so a focused authoring check can exercise the fixture extraction
  * (including the bounded pre-effect gate facts), the child-environment
- * isolation rule, the controlled model protocol, the durable
- * admission/boundary classification, the wire refusal classification, the
- * revision resolution, the bounded server close and the cleanup disposition
- * without starting any service.
+ * isolation rule, the controlled model protocol and its request structure, the
+ * durable admission/boundary classification, the wire refusal classification,
+ * the cursor/frame classification of the same-run replay and refusal controls,
+ * the bounded SSE read, the side-effect inventory, the revision resolution, the
+ * bounded server close and the cleanup disposition without starting any
+ * service.
  */
 export {
   applyCleanupDisposition,
+  assertHistoryLossExplicit,
+  assertNoHostileMarkers,
+  assertScopeEffectOnly,
   assertSealedPromptCardinality,
+  assertSealedToolPolicy,
   assertSingleRun,
   awaitEffectBoundary,
   awaitPreEffectGate,
@@ -2791,9 +3606,22 @@ export {
   classifyAdmissionObservation,
   classifyManualWaitBoundary,
   classifyPreEffectGate,
+  classifySameRunReplay,
+  collectStreamRefusals,
+  directoryInventory,
   encodePathSegment,
+  hostileMarkersPresent,
+  mergeObservedFrames,
+  modelRequestStructure,
+  parseEventCursor,
+  parseGapFrame,
+  parseHistoryUnavailableFrame,
   parsePlacementDto,
+  proveSameRunReplay,
+  readEventStream,
+  readEventStreamOrStop,
   readPlacementViaCli,
+  requireEventStreamStatus,
   exitCodeFor,
   findCommitRevision,
   parseCommitResponseRevision,
