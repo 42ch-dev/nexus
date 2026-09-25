@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, realpathSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -91,7 +91,7 @@ function resolvePython() {
   return realpathSync(which);
 }
 
-function seedHome(extraEnv = {}, extraProviders = '') {
+function seedHome(extraEnv = {}, extraProviders = '', maxSessions = 0) {
   const home = mkdtempSync(join(tmpdir(), 'nexus-security-stream-'));
   const seed = spawnSync('cargo', ['run', '-q', '-p', 'nexus-core-node', '--bin', 'native-wire-fixture-seed', '--', home], { stdio: 'inherit' });
   assert.equal(seed.status, 0, seed.stderr?.toString());
@@ -120,7 +120,14 @@ function seedHome(extraEnv = {}, extraProviders = '') {
   const log = join(home, 'fixture.log');
   const python = resolvePython();
   const envLines = Object.entries({ ACP_FIXTURE_LOG: log, ...extraEnv }).map(([k, v]) => `${k} = ${JSON.stringify(v)}`).join('\n');
-  const config = `[[providers]]\nid = "mock-acp"\nprotocol = "acp"\ncommand = ${JSON.stringify(python)}\nargs = [${JSON.stringify(fixture)}]\nenabled = true\n${extraProviders}\n[providers.env]\n${envLines}\n`;
+  // `max_sessions` is the Host's own live-session budget and must precede every
+  // table header; a multi-row journey legitimately needs more live sessions than
+  // the default, and the budget itself is not what such a test is asserting.
+  // The base provider is written out completely — table AND env — before any
+  // extra provider: a `[providers.env]` header binds to the most recently
+  // opened `[[providers]]` element, so emitting the base env last would hand it
+  // to the last extra provider and duplicate its table.
+  const config = `${maxSessions > 0 ? `max_sessions = ${maxSessions}\n` : ''}[[providers]]\nid = "mock-acp"\nprotocol = "acp"\ncommand = ${JSON.stringify(python)}\nargs = [${JSON.stringify(fixture)}]\nenabled = true\n[providers.env]\n${envLines}\n${extraProviders}\n`;
   writeFileSync(join(agentHostDir, 'config.toml'), config);
   return { home, log, creativeRoot };
 }
@@ -250,6 +257,50 @@ async function providerFlow(url, headers = {}) {
   const executed = await jsonFetch(`${url}/v1/daemon/agent-host/sessions/${created.payload.session_id}/operations`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: { kind: 'prompt', content: 'hello' } });
   assert.equal(executed.status, 200, executed.text);
   return { sessionId: created.payload.session_id, operationId: executed.payload.operation_id };
+}
+
+/**
+ * The ACP families the Character journey drives — one provider per wire stop
+ * reason, using the fixture's own `ACP_FIXTURE_STOP_REASON` knob (default
+ * `end_turn`) plus `ACP_FIXTURE_PROMPT_ERROR` for the deterministic JSON-RPC
+ * prompt failure. The provider ids are distinct because the Host keys a session
+ * by provider, so each row gets its own real session. Every peer logs to one
+ * file, so a single read observes the cwd each of them was really launched with.
+ */
+const CHARACTER_PROVIDERS = [
+  ['mock-acp-end-turn', {}],
+  ['mock-acp-max-tokens', { ACP_FIXTURE_STOP_REASON: 'max_tokens' }],
+  ['mock-acp-max-turn-requests', { ACP_FIXTURE_STOP_REASON: 'max_turn_requests' }],
+  ['mock-acp-refusal', { ACP_FIXTURE_STOP_REASON: 'refusal' }],
+  ['mock-acp-cancelled', { ACP_FIXTURE_STOP_REASON: 'cancelled' }],
+  ['mock-acp-prompt-error', { ACP_FIXTURE_PROMPT_ERROR: '1' }],
+];
+
+function characterProviderConfig(logPath) {
+  const python = resolvePython();
+  return CHARACTER_PROVIDERS
+    .map(([id, env]) => {
+      const envLines = Object.entries({ ACP_FIXTURE_LOG: logPath, ...env })
+        .map(([key, value]) => `${key} = ${JSON.stringify(value)}`)
+        .join('\n');
+      return `\n[[providers]]\nid = ${JSON.stringify(id)}\nprotocol = "acp"\ncommand = ${JSON.stringify(python)}\nargs = [${JSON.stringify(fixture)}]\nenabled = true\n[providers.env]\n${envLines}\n`;
+    })
+    .join('');
+}
+
+/**
+ * Poll the authority's own Character read until the run leaves `running`. This
+ * is the core's truth, not the transport mirror's: the row it returns is the
+ * `CharacterOperationResult` the adapter→Host→core→native path settled.
+ */
+async function waitForCharacterOutcome(url, operationId, timeoutMs = 30_000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const got = await jsonFetch(`${url}/v1/daemon/agent-host/operations/${operationId}`);
+    if (got.payload?.run_status && got.payload.run_status !== 'running') return got.payload;
+    assert.ok(Date.now() < deadline, `operation ${operationId} never settled: ${got.text}`);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
 }
 
 describe('security-stream (P4-T2)', () => {
@@ -1015,7 +1066,13 @@ describe('security-stream (P4-T2)', () => {
         }
         return true;
       },
+      // The real response is an emitter: the writer's drain wait attaches three
+      // one-shot listeners and detaches all three when it settles, so the stub
+      // must remove the listener it was given — a name-keyed `off` that removes
+      // the attached callback, exactly what `once` would undo. A missing `off`
+      // is not a stub detail: the writer's cleanup would throw mid-frame.
       once(event, cb) { listeners.set(event, cb); },
+      off(event, cb) { if (listeners.get(event) === cb) listeners.delete(event); },
       end() {},
     };
     const before = sseTestHooks.writeBlockedCount;
@@ -1027,6 +1084,7 @@ describe('security-stream (P4-T2)', () => {
     // once, as slices of the serialized Buffer (no UTF-16 slicing).
     assert.equal(Buffer.concat(written).toString('utf8'), frame.buffer.toString('utf8'));
     assert.equal(writer.outboundBackpressured, false, 'backpressure flag clears after drain');
+    assert.equal(listeners.size, 0, 'the settled drain wait must detach every listener it attached');
   });
 
   test('control frames never consume the data pool', async () => {
@@ -1249,5 +1307,332 @@ describe('security-stream (P4-T2)', () => {
     validateCdnUrl('https://8.8.8.8/x');
     validateCdnUrl('https://172.32.0.1/x');
     validateCdnUrl('https://[2606:4700::6810:85e5]/x');
+  });
+
+  test('Character journey uses pinned cwd and truthful ACP outcomes', async () => {
+    await stopSharedService();
+    const journeyDir = mkdtempSync(join(tmpdir(), 'nexus-character-journey-'));
+    const journeyLog = join(journeyDir, 'fixture.log');
+    const home = seedHome({}, characterProviderConfig(journeyLog), 16);
+    const local = await startProviderService(home.home, 0);
+    const fetchJson = (path, options) => jsonFetch(`${local.url}${path}`, options);
+    const jsonHeaders = { 'Content-Type': 'application/json' };
+    try {
+      const runtime = await fetchJson('/v1/daemon/runtime/status');
+      assert.equal(runtime.payload.runtime_mode, 'provider_enabled');
+
+      // The World registration is the fixture's; the Character and its binding
+      // are created through the surface itself, so the admission below is the
+      // stored one the authority really serves.
+      const created = await fetchJson('/v1/daemon/characters', {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: { world_id: 'wld_owned', display_name: 'Journey Character', persona: { voice: 'plain' } },
+      });
+      assert.equal(created.status, 201, created.text);
+      const characterId = created.payload.character.character_id;
+      const bindingId = created.payload.binding.binding_id;
+
+      // One row per outcome this adapter can really produce. `end_turn` is the
+      // only row allowed to keep a successful transcript; `mirror: null` marks
+      // the row whose terminal may not reach the transport lane at all (the
+      // JSON-RPC prompt failure tears the transport down), where only "never a
+      // success" is asserted.
+      const rows = [
+        { provider: 'mock-acp-end-turn', terminal: 'OpFinished', reason: 'end_turn', run: 'succeeded', finish: 'end_turn', mirror: 'finished', successful: true },
+        { provider: 'mock-acp-max-tokens', terminal: 'OpFinished', reason: 'max_tokens', run: 'incomplete', finish: 'max_tokens', mirror: 'incomplete', successful: false },
+        { provider: 'mock-acp-max-turn-requests', terminal: 'OpFinished', reason: 'max_turn_requests', run: 'incomplete', finish: 'max_turn_requests', mirror: 'incomplete', successful: false },
+        { provider: 'mock-acp-refusal', terminal: 'OpFailed', run: 'failed', finish: null, mirror: 'failed', successful: false },
+        { provider: 'mock-acp-prompt-error', terminal: 'OpFailed', run: 'failed', finish: null, mirror: null, successful: false },
+        { provider: 'mock-acp-cancelled', terminal: 'OpFinished', reason: 'cancelled', run: 'cancelled', finish: 'cancelled', mirror: 'cancelled', successful: false },
+      ];
+
+      const results = [];
+      for (const row of rows) {
+        // `cwd` is deliberately omitted: the admitted creative-root pin governs
+        // the Host session and, through it, the provider launch below.
+        const session = await fetchJson('/v1/daemon/agent-host/sessions', {
+          method: 'POST',
+          headers: jsonHeaders,
+          body: {
+            provider_id: row.provider,
+            actor_ref: { actor_kind: 'character', character_id: characterId },
+            viewpoint: { world_id: 'wld_owned', binding_id: bindingId },
+          },
+        });
+        assert.equal(session.status, 200, `${row.provider}: ${session.text}`);
+        const sessionId = session.payload.session_id;
+
+        const executed = await fetchJson(`/v1/daemon/agent-host/sessions/${sessionId}/operations`, {
+          method: 'POST',
+          headers: jsonHeaders,
+          body: { kind: 'prompt', content: `journey-${row.provider}` },
+        });
+        assert.equal(executed.status, 200, `${row.provider}: ${executed.text}`);
+        const operationId = executed.payload.operation_id;
+
+        // The real adapter → Host → core → native → SSE path: the raw stream is
+        // read over TCP while the authority's own Character read settles.
+        const sse = rawSseGet(local.url, `/v1/daemon/agent-host/sessions/${sessionId}/events?operation_id=${operationId}`);
+        const outcome = await waitForCharacterOutcome(local.url, operationId);
+        const frames = parseSseChunks((await sse).raw);
+
+        assert.equal(outcome.run_status, row.run, `${row.provider} run_status`);
+        assert.equal(outcome.finish_reason ?? null, row.finish, `${row.provider} finish_reason`);
+        assert.equal(outcome.operation_id, operationId, `${row.provider} operation echo`);
+        assert.equal(outcome.session_id, sessionId, `${row.provider} session echo`);
+        assert.equal(outcome.capture.status, 'disabled', `${row.provider} must not capture`);
+        assert.equal(outcome.capture.pending_id, null, `${row.provider} must reserve no capture`);
+        results.push({ row, sessionId, operationId, run: outcome.run_status, finish: outcome.finish_reason ?? null });
+
+        const finishedFrames = frames.filter((frame) => frame.data?.OpFinished);
+        const failedFrames = frames.filter((frame) => frame.data?.OpFailed);
+        assert.equal(finishedFrames.length, row.terminal === 'OpFinished' ? 1 : 0, `${row.provider} OpFinished frames`);
+        if (row.terminal === 'OpFinished') {
+          assert.equal(finishedFrames[0].data.OpFinished.reason, row.reason, `${row.provider} must reach SSE with its own reason`);
+        } else {
+          // The JSON-RPC failure can surface as `provider_eof` or
+          // `protocol_error`, so the failure row is pinned rather than a racy
+          // category; the bounded resync gap is the same row's other truthful
+          // shape. What may never appear is a success frame.
+          assert.ok(failedFrames.length <= 1, `${row.provider} at most one OpFailed frame`);
+          assert.ok(failedFrames.length === 1 || frames.some((frame) => frame.event === 'gap'), `${row.provider} must end in the failure row or its resync gap`);
+        }
+
+        // The transport mirror must agree with the authority: no non-success
+        // row may read as `finished` or keep a successful transcript.
+        const record = local.service.providerRegistry.operationRecord(operationId);
+        assert.ok(record, `${row.provider} mirror record`);
+        assert.equal(
+          record.terminalTranscript,
+          row.successful ? JSON.stringify(record.terminalEvent.OpFinished) : null,
+          `${row.provider} mirror transcript`,
+        );
+        if (row.mirror === null) assert.notEqual(record.status, 'finished', `${row.provider} mirror status`);
+        else assert.equal(record.status, row.mirror, `${row.provider} mirror status`);
+      }
+
+      // Five acceptance rows, pairwise distinct: succeeded, both limit reasons
+      // kept as their own `incomplete` row, failed, and cancelled.
+      assert.deepEqual(
+        [...new Set(results.map((result) => `${result.run}/${result.finish ?? ''}`))].sort(),
+        [
+          'cancelled/cancelled',
+          'failed/',
+          'incomplete/max_tokens',
+          'incomplete/max_turn_requests',
+          'succeeded/end_turn',
+        ],
+      );
+
+      // The omitted `cwd` really became the admitted pin: every peer process —
+      // the catalog probes and the row sessions alike — records the directory it
+      // was created in, and every row's own prompt really reached a peer.
+      const pin = realpathSync(home.creativeRoot);
+      const entries = readFixtureLog(journeyLog);
+      const peerSessions = entries.filter((entry) => entry.event === 'session_new');
+      assert.ok(peerSessions.length >= rows.length, 'every row must reach a real peer session');
+      for (const launch of peerSessions) assert.equal(launch.cwd, pin, 'a Character launch cwd must be the admitted pin');
+      const prompts = entries.filter((entry) => entry.event === 'prompt');
+      for (const row of rows) {
+        assert.equal(
+          prompts.filter((entry) => entry.prompt.startsWith(`journey-${row.provider}`)).length,
+          1,
+          `${row.provider} must reach exactly one real peer prompt`,
+        );
+      }
+
+      // A cold transport mirror still answers with the authority's own truth:
+      // drop the mirror's session (and with it the operation record) and re-read.
+      const cold = results.find((result) => result.row.provider === 'mock-acp-max-tokens');
+      local.service.providerRegistry.removeSession(cold.sessionId);
+      assert.equal(local.service.providerRegistry.operationRecord(cold.operationId), undefined, 'the mirror must be cold');
+      const reread = await fetchJson(`/v1/daemon/agent-host/operations/${cold.operationId}`);
+      assert.equal(reread.status, 200, reread.text);
+      assert.equal(reread.payload.run_status, 'incomplete');
+      assert.equal(reread.payload.finish_reason, 'max_tokens');
+      assert.equal(reread.payload.capture.status, 'disabled');
+    } finally {
+      await closeServiceBounded(local);
+      // The journey's own fixtures (its log dir and its seeded home) are this
+      // slice's; the peer processes above are already reaped by the close.
+      rmSync(journeyDir, { recursive: true, force: true });
+      rmSync(home.home, { recursive: true, force: true });
+      await startSharedService(homeCtx.home, 0);
+    }
+  });
+
+  test('Character admission and remember refusal have zero effects', async () => {
+    await stopSharedService();
+    const home = seedHome({}, '', 8);
+    const local = await startProviderService(home.home, 0);
+    const registry = local.service.providerRegistry;
+    const fetchJson = (path, options) => jsonFetch(`${local.url}${path}`, options);
+    const jsonHeaders = { 'Content-Type': 'application/json' };
+    try {
+      const created = await fetchJson('/v1/daemon/characters', {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: { world_id: 'wld_owned', display_name: 'Refusal Character', persona: { voice: 'plain' } },
+      });
+      assert.equal(created.status, 201, created.text);
+      const characterId = created.payload.character.character_id;
+      const bindingId = created.payload.binding.binding_id;
+      const actorRef = { actor_kind: 'character', character_id: characterId };
+      const viewpoint = { world_id: 'wld_owned', binding_id: bindingId };
+
+      const session = await fetchJson('/v1/daemon/agent-host/sessions', {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: { provider_id: 'mock-acp', actor_ref: actorRef, viewpoint },
+      });
+      assert.equal(session.status, 200, session.text);
+      const sessionId = session.payload.session_id;
+
+      const launchesBefore = readFixtureLog(home.log).length;
+      const nativeSessionsBefore = (await local.service.core.hostQuery({ query: 'list_sessions' })).sessions.items.length;
+      const pendingBefore = (await fetchJson(`/v1/daemon/characters/${characterId}/memory/pending-review/count`)).payload.count;
+      assert.equal(pendingBefore, 0);
+
+      // Admission refusals, all before any Host/provider effect: a Character
+      // this creator does not own, a foreign World, and a cwd outside the
+      // admitted pin (the Nexus root the pre-T2 default used to resolve to).
+      const admissions = [
+        [{ provider_id: 'mock-acp', actor_ref: { actor_kind: 'character', character_id: `chr_${'f'.repeat(32)}` }, viewpoint }, 404, 'not_found'],
+        [{ provider_id: 'mock-acp', actor_ref: actorRef, viewpoint: { world_id: 'wld_foreign', binding_id: bindingId } }, 404, 'not_found'],
+        [{ provider_id: 'mock-acp', cwd: join(home.home, '.nexus42'), actor_ref: actorRef, viewpoint }, 400, 'invalid_input'],
+      ];
+      for (const [body, status, code] of admissions) {
+        const refused = await fetchJson('/v1/daemon/agent-host/sessions', { method: 'POST', headers: jsonHeaders, body });
+        assert.equal(refused.status, status, JSON.stringify(body));
+        assert.equal(refused.payload.error.code, code, refused.text);
+      }
+
+      // A Character `remember:true` is refused before any effect: no
+      // reservation, no provider work, no pending capture.
+      const remember = await fetchJson(`/v1/daemon/agent-host/sessions/${sessionId}/operations`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: { kind: 'prompt', content: 'remember this', remember: true },
+      });
+      assert.equal(remember.status, 501, remember.text);
+      assert.equal(remember.payload.error.code, 'route_not_migrated');
+
+      // Zero Host effects: no new session, no busy session, no charged
+      // live operation.
+      const nativeSessionsAfter = (await local.service.core.hostQuery({ query: 'list_sessions' })).sessions.items.length;
+      assert.equal(nativeSessionsAfter, nativeSessionsBefore, 'a refusal must not create a Host session');
+      const mirror = registry.sessionRecord(sessionId);
+      assert.equal(mirror.activeOpId, null, 'the refused prompt must not mark the session busy');
+      assert.equal(mirror.state, 'Ready');
+      assert.equal(registry.activeOperationCount(), 0, 'a refusal must never hold the live-operation cap');
+      // Zero provider effects: not one launch or prompt reached a peer.
+      assert.equal(readFixtureLog(home.log).length, launchesBefore, 'a refusal must not launch a provider');
+      // Zero memory effects: nothing pending, nothing written.
+      const pendingAfter = (await fetchJson(`/v1/daemon/characters/${characterId}/memory/pending-review/count`)).payload.count;
+      assert.equal(pendingAfter, pendingBefore);
+      const fragments = await fetchJson(`/v1/daemon/characters/${characterId}/memory/fragments`);
+      assert.equal(fragments.payload.fragments.length, 0, 'a refusal must not write a memory fragment');
+
+      // Liveness control: the same admission and pin still run a normal prompt,
+      // so the zeros above are the refusals' doing, not a dead fixture.
+      const control = await fetchJson(`/v1/daemon/agent-host/sessions/${sessionId}/operations`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: { kind: 'prompt', content: 'control' },
+      });
+      assert.equal(control.status, 200, control.text);
+      const outcome = await waitForCharacterOutcome(local.url, control.payload.operation_id);
+      assert.equal(outcome.run_status, 'succeeded');
+      assert.equal(outcome.capture.status, 'disabled');
+      assert.ok(readFixtureLog(home.log).length > launchesBefore, 'the admitted session must really reach a peer');
+    } finally {
+      await closeServiceBounded(local);
+      rmSync(home.home, { recursive: true, force: true });
+      await startSharedService(homeCtx.home, 0);
+    }
+  });
+
+  test('terminal reasons never create successful mirror transcripts', async () => {
+    const { ProviderRegistry } = await import(join(serviceRoot, 'dist/provider-registry.js'));
+    const { ingestEvents } = await import(join(serviceRoot, 'dist/sse.js'));
+    const registry = new ProviderRegistry();
+    const serviceStub = { providerRegistry: registry };
+    const sessionOf = (index) => `00000000-0000-4000-8000-${String(7000 + index).padStart(12, '0')}`;
+    const operationOf = (index) => `00000000-0000-4000-8000-${String(7100 + index).padStart(12, '0')}`;
+    const startOperation = (index) => {
+      registry.registerSession({ sessionId: sessionOf(index), providerId: 'mock-acp', state: 'Running', activeOpId: operationOf(index) });
+      registry.registerOperation({ operationId: operationOf(index), sessionId: sessionOf(index), providerId: 'mock-acp', status: 'started', terminalEvent: null, terminalTranscript: null });
+    };
+    const opFinished = (index, reason) => ({ OpFinished: { session_id: sessionOf(index), op_id: operationOf(index), reason } });
+
+    // Every reason the wire can carry, through the real ingest path, judged on
+    // the consumer-visible operation record.
+    const projection = [
+      ['end_turn', 'finished', true],
+      ['max_tokens', 'incomplete', false],
+      ['max_turn_requests', 'incomplete', false],
+      ['refusal', 'failed', false],
+      ['cancelled', 'cancelled', false],
+    ];
+    projection.forEach(([reason, expectedStatus, successful], position) => {
+      const index = position + 1;
+      startOperation(index);
+      ingestEvents(serviceStub, operationOf(index), [opFinished(index, reason)]);
+      const record = registry.operationRecord(operationOf(index));
+      assert.equal(record.status, expectedStatus, `reason ${reason} must project ${expectedStatus}`);
+      assert.ok(record.terminalEvent, `reason ${reason} keeps its terminal event for the stream`);
+      if (successful) {
+        assert.equal(record.terminalTranscript, JSON.stringify(record.terminalEvent.OpFinished), 'an end_turn turn keeps its successful transcript');
+      } else {
+        assert.equal(record.terminalTranscript, null, `reason ${reason} must not retain a successful transcript`);
+      }
+      assert.equal(registry.sessionRecord(sessionOf(index)).activeOpId, null, `reason ${reason} must release the session`);
+      assert.equal(registry.activeOperationCount(), 0, `reason ${reason} is terminal, not live work`);
+    });
+
+    // First terminal wins: an `incomplete` run that later hears `end_turn` keeps
+    // its own reason — and therefore still has no successful transcript.
+    const late = projection.length + 1;
+    startOperation(late);
+    ingestEvents(serviceStub, operationOf(late), [opFinished(late, 'max_tokens')]);
+    ingestEvents(serviceStub, operationOf(late), [opFinished(late, 'end_turn')]);
+    const pinned = registry.operationRecord(operationOf(late));
+    assert.equal(pinned.status, 'incomplete');
+    assert.equal(pinned.terminalEvent.OpFinished.reason, 'max_tokens', 'the first terminal is not rewritten');
+    assert.equal(pinned.terminalTranscript, null, 'a late success cannot add a successful transcript');
+
+    // An accepted cancel stays authoritative, exactly as before.
+    const settled = late + 1;
+    startOperation(settled);
+    registry.settleOperationStatus(operationOf(settled), 'cancelled');
+    ingestEvents(serviceStub, operationOf(settled), [opFinished(settled, 'end_turn')]);
+    const cancelled = registry.operationRecord(operationOf(settled));
+    assert.equal(cancelled.status, 'cancelled');
+    assert.equal(cancelled.terminalEvent, null);
+    assert.equal(cancelled.terminalTranscript, null);
+
+    // Fail closed: a terminal whose reason is missing, or outside the wire set,
+    // is a failure — never a completed turn with a successful transcript.
+    const unusable = [
+      ['a terminal with no reason', (index) => ({ session_id: sessionOf(index), op_id: operationOf(index) })],
+      ['a reason outside the wire set', (index) => ({ session_id: sessionOf(index), op_id: operationOf(index), reason: 'exhausted' })],
+    ];
+    unusable.forEach(([label, finished], position) => {
+      const index = 90 + position;
+      startOperation(index);
+      ingestEvents(serviceStub, operationOf(index), [{ OpFinished: finished(index) }]);
+      const record = registry.operationRecord(operationOf(index));
+      assert.equal(record.status, 'failed', `${label} must fail closed`);
+      assert.equal(record.terminalTranscript, null, `${label} must not retain a successful transcript`);
+    });
+
+    // `SessionStopped` stays the `stopped` terminal it always was.
+    const stoppedIndex = 95;
+    startOperation(stoppedIndex);
+    ingestEvents(serviceStub, operationOf(stoppedIndex), [{ SessionStopped: { session_id: sessionOf(stoppedIndex), reason: 'graceful_shutdown' } }]);
+    const stopped = registry.operationRecord(operationOf(stoppedIndex));
+    assert.equal(stopped.status, 'stopped');
+    assert.equal(stopped.terminalTranscript, null, 'a stopped session has no successful transcript');
   });
 });
