@@ -8,7 +8,7 @@
  * snapshot document (never the live workflow snapshot) and a fixture cache root. No product
  * state, no network, no live harness write and no credential is involved.
  *
- *   node --test --test-name-pattern='inventory protects|check-exit distinguishes|capacity watermarks|unreadable or stale' scripts/worktree-sweep.test.mjs
+ *   node --test scripts/worktree-sweep.test.mjs
  *
  * Every case fails on a plausible regression of the contract it names:
  *   * the canonical shared target (and the active peer's footprint) must never be proposed for
@@ -28,15 +28,49 @@
  *   * a receipt that names an in-root path through an alias of the temp root stays owned, while a
  *     receipt traversing a link inside that root is still refused — including an alias chain that
  *     leaves the root and enters it again, and a receipt whose `..` would be resolved against such
- *     a link.
+ *     a link;
+ *   * `--apply` reclaims exactly the exact target/temporary footprint and the engine-released
+ *     worktree/branch of a completed, merged, released, producer-stopped track, re-observing every
+ *     fact afterwards, and leaves an active peer and the shared canonical cache untouched;
+ *   * `--apply` refuses — with explicit reasons and zero mutation — a dirty worktree, a live lease,
+ *     and an unmerged branch, preserving their bytes;
+ *   * an idempotent retry re-reads the partial state (it never replays the old action list) and
+ *     finishes only the owned remainder, never touching a peer;
+ *   * against the T1 native topology the ACTUAL installed CLI enumerates the freshly initialized
+ *     linked worktrees without the historic gitdir traversal fatal, and the measured submodule
+ *     removal refusal is reported truthfully and routed around with the exact-path non-force
+ *     `rm -rf` + `git worktree prune` route — never `--force`, never `git submodule deinit`;
+ *   * a completed track whose declared branch the engine could not release keeps the apply exit at 1
+ *     with `exit_clean: false` while still reporting the `retained` row truthfully — the sweeper
+ *     never deletes a branch itself, so the residual is reported, not silently certified reclaimed;
+ *   * the mandatory re-verification gate is re-run immediately before every mutating step, so a fact
+ *     that moves between two mutations aborts the later one — and every one after it — with zero
+ *     further mutation, whether the change lands before the engine handover or during `--apply`
+ *     before the non-force fallback;
+ *   * an engine `cleanup.refuse.dirty-worktree` caused purely by an ignored-only build-output
+ *     footprint is reported as `blocked` with each exact ignored path and its measured size and then
+ *     reclaimed through the documented exact-path route, while tracked dirt and untracked non-ignored
+ *     paths still refuse with zero mutation;
+ *   * a track's mutations are a chain of steps that each report whether they completed, and the first
+ *     step that did not (a refusal or a failed gate) ends that track there: no later receipt is
+ *     removed, the engine is never handed the worktree and no prune runs, with the refusal row naming
+ *     the step that stopped it;
+ *   * the ignored-only classification is re-derived immediately before the non-force fallback
+ *     removal, so tracked or untracked non-ignored dirt that arrives after the first classification
+ *     aborts that removal fail-closed with the facts just measured;
+ *   * the ignored footprint enumeration is truthful: it reads the NUL-delimited porcelain form (which
+ *     Git never C-quotes) and requires every enumerated path to exist, so a quoted name is reported as
+ *     the real path with its real size and a vanished entry refuses instead of reading as zero bytes;
+ *   * the canonical `<repo>/.worktrees/<name>` feature-path requirement is part of the contract text
+ *     this tool documents, and `--apply` enforces it at action time.
  */
 import { strict as assert } from 'node:assert';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, readlinkSync, readdirSync, realpathSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { cpus, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -45,11 +79,28 @@ import { computeAvailableK, evaluateWatermarks } from './worktree-sweep.mjs';
 
 const exec = promisify(execFile);
 const SCRIPT = fileURLToPath(new URL('./worktree-sweep.mjs', import.meta.url));
+const INITIALIZER = fileURLToPath(new URL('./init-worktree-submodules.mjs', import.meta.url));
 const WORKFLOW = 'fixture-wf';
 const GIB = 1024 ** 3;
 const BUDGET = 120 * GIB;
 const ESTIMATE = 20 * GIB;
 const SIBLING_ID = 'fixture-sibling';
+
+/**
+ * Fixture-local ssh transport (T1's convention): the fixture's submodule origins are reached as
+ * `ssh://localhost/<path>` and this shim runs the remote git command on this machine, so the
+ * fixture needs no protocol override and touches no global Git configuration.
+ */
+const SSH_SHIM = `#!/bin/sh
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o|-p|-i|-F|-l|-c|-m|-e|-b|-E|-I|-L|-R|-Q|-S|-W|-w) shift 2 ;;
+    -*) shift ;;
+    *) shift; break ;;
+  esac
+done
+exec sh -c "$*"
+`;
 
 const GIT_ENV = {
   ...process.env,
@@ -76,6 +127,9 @@ async function gitTolerant(args, cwd) {
 
 async function makeFixture(options = {}) {
   const shape = options.shape ?? 'leased';
+  const planStatus = options.planStatus ?? (shape === 'released' || shape === 'partial' ? 'Done' : 'InProgress');
+  const leased = options.leased ?? shape === 'leased';
+  const orphans = options.orphans !== false;
   const root = await mkdtemp(join(tmpdir(), 'v1197-p1-t2-'));
   const main = join(root, 'main');
   const cache = join(root, 'cache');
@@ -84,9 +138,11 @@ async function makeFixture(options = {}) {
   const ownerWorktree = join(root, '.worktrees', 'fixture-owner');
   const peerWorktree = join(root, '.worktrees', 'fixture-peer');
   const integrationWorktree = join(root, '.worktrees', 'iteration-fixture');
+  const detachedWorktree = join(root, 'elsewhere', 'fixture-detached');
   const ownerTarget = join(cache, 'nexus-target-fixture-owner');
   const peerTarget = join(cache, 'nexus-target-fixture-peer');
   const canonicalTarget = join(cache, 'nexus-target');
+  const detachedTarget = join(cache, 'nexus-target-fixture-detached');
   const paths = { root, main, cache, ownerWorktree, peerWorktree, integrationWorktree, ownerTarget, peerTarget, canonicalTarget };
 
   await mkdir(main, { recursive: true });
@@ -109,11 +165,44 @@ async function makeFixture(options = {}) {
     await git(['-c', 'protocol.file.allow=always', 'submodule', 'add', origin, 'vendor/fixture-sub'], main);
     await git(['commit', '-m', 'add submodule'], main);
   }
+  const ignoreRules = [
+    ...(options.ignoredOutputs === true ? ['node_modules/', 'dist/'] : []),
+    ...(options.ignoredPatterns ?? []),
+  ];
+  if (ignoreRules.length > 0) {
+    // Committed before any worktree exists so every linked checkout sees the same ignore rule.
+    await writeFile(join(main, '.gitignore'), `${ignoreRules.join('\n')}\n`);
+    await git(['add', '.gitignore'], main);
+    await git(['commit', '-m', 'ignore build outputs'], main);
+  }
   await git(['worktree', 'add', '-b', 'iteration/fixture', integrationWorktree], main);
   await git(['worktree', 'add', '-b', 'feat/fixture-owner', ownerWorktree], main);
   await git(['worktree', 'add', '-b', 'feat/fixture-peer', peerWorktree], main);
-  await git(['worktree', 'add', '--detach', join(root, '.worktrees', 'fixture-orphan')], main);
+  if (orphans) await git(['worktree', 'add', '--detach', join(root, '.worktrees', 'fixture-orphan')], main);
+  if (options.nonCanonicalTrack === true) {
+    // A linked checkout outside the mandated `<dir>/.worktrees/<name>` shape: the dry run may still
+    // propose it, but `--apply` must refuse to act on a path it cannot re-prove.
+    await mkdir(join(root, 'elsewhere'), { recursive: true });
+    await git(['worktree', 'add', '-b', 'feat/fixture-detached', detachedWorktree], main);
+  }
+  if (options.ignoredOutputs === true) {
+    // Ignored build outputs inside the feature worktree: the second measured cleanup obstacle, where
+    // the engine reports the worktree dirty although nothing tracked changed. Directory-level sizes
+    // are what the fixture can assert against the enumerated footprint.
+    await mkdir(join(ownerWorktree, 'node_modules', 'pkg'), { recursive: true });
+    await writeFile(join(ownerWorktree, 'node_modules', 'pkg', 'index.js'), 'x'.repeat(4096));
+    await mkdir(join(ownerWorktree, 'dist'), { recursive: true });
+    await writeFile(join(ownerWorktree, 'dist', 'out.js'), 'y'.repeat(1024));
+  }
+  if (options.dirty === true) await writeFile(join(ownerWorktree, 'README.md'), 'dirty tracked change\n');
+  if (options.unmerged === true) {
+    await writeFile(join(ownerWorktree, 'unmerged.txt'), 'unmerged work\n');
+    await git(['add', 'unmerged.txt'], ownerWorktree);
+    await git(['commit', '-m', 'unmerged work'], ownerWorktree);
+  }
 
+  const trackBranches = ['feat/fixture-owner', 'feat/fixture-peer'];
+  if (options.nonCanonicalTrack === true) trackBranches.push('feat/fixture-detached');
   const snapshot = {
     schema_version: 1,
     id: options.snapshotId ?? WORKFLOW,
@@ -128,9 +217,9 @@ async function makeFixture(options = {}) {
         id: 'fixture-plan',
         title: 'Fixture plan',
         file: 'plans/fixture.md',
-        status: shape === 'released' ? 'Done' : 'InProgress',
-        metadata: { track_branches: ['feat/fixture-owner', 'feat/fixture-peer'] },
-        ...(shape === 'leased'
+        status: planStatus,
+        metadata: { track_branches: trackBranches },
+        ...(leased
           ? {
             execution_lease: {
               holder: '00000000-0000-0000-0000-000000000000',
@@ -160,8 +249,14 @@ async function makeFixture(options = {}) {
   await writeFile(join(ownerTarget, 'target.bin'), 'owner target\n');
   await mkdir(peerTarget, { recursive: true });
   await writeFile(join(peerTarget, 'target.bin'), 'peer target\n');
-  await mkdir(join(cache, 'nexus-target-orphan-leftover'), { recursive: true });
-  await writeFile(join(cache, 'nexus-target-orphan-leftover', 'junk.bin'), 'orphan\n');
+  if (options.nonCanonicalTrack === true) {
+    await mkdir(detachedTarget, { recursive: true });
+    await writeFile(join(detachedTarget, 'target.bin'), 'detached target\n');
+  }
+  if (orphans) {
+    await mkdir(join(cache, 'nexus-target-orphan-leftover'), { recursive: true });
+    await writeFile(join(cache, 'nexus-target-orphan-leftover', 'junk.bin'), 'orphan\n');
+  }
 
   let inventory = {
     version: 1,
@@ -191,15 +286,31 @@ async function makeFixture(options = {}) {
       },
     ],
   };
+  if (options.nonCanonicalTrack === true) {
+    inventory.tracks.push({
+      track_id: 'fixture-detached',
+      plan_id: 'fixture-plan',
+      worktree: detachedWorktree,
+      branch: 'feat/fixture-detached',
+      target: detachedTarget,
+      temporary_paths: [],
+      producer_stopped: true,
+      state: 'completed',
+    });
+  }
   if (options.mutateInventory !== undefined) inventory = options.mutateInventory(inventory, paths);
   const inventoryPath = join(root, 'inventory.json');
   await writeFile(inventoryPath, `${JSON.stringify(inventory, null, 2)}\n`);
 
-  if (shape === 'reclaimed') {
+  if (shape === 'reclaimed' || shape === 'partial') {
+    // A merged slice the engine already released, with no worktree left. `reclaimed` also drops the
+    // owned target (the fully clean shape); `partial` keeps it, plus whatever temporary receipts the
+    // caller lists, so an idempotent retry has real leftover to reclaim. `keepBranch` models the
+    // measured case where the engine released the worktree but not the track's branch.
     await git(['worktree', 'remove', ownerWorktree], main);
-    await git(['branch', '-d', 'feat/fixture-owner'], main);
-    await rm(ownerTarget, { recursive: true, force: true });
+    if (options.keepBranch !== true) await git(['branch', '-d', 'feat/fixture-owner'], main);
   }
+  if (shape === 'reclaimed') await rm(ownerTarget, { recursive: true, force: true });
 
   const fixture = {
     root,
@@ -214,7 +325,12 @@ async function makeFixture(options = {}) {
     ownerTarget,
     peerTarget,
     canonicalTarget,
+    detachedWorktree,
+    detachedTarget,
     env: { ...process.env, HOME: home, XDG_CACHE_HOME: cache },
+    git(args, cwd = main) {
+      return git(args, cwd);
+    },
     async run(args = []) {
       const argv = ['--repo', main, '--harness', harness, '--workflow', WORKFLOW, '--inventory', inventoryPath, ...args];
       try {
@@ -235,7 +351,12 @@ async function makeFixture(options = {}) {
       return fingerprint(fixture);
     },
     async teardown() {
-      for (const path of [ownerWorktree, peerWorktree, integrationWorktree, join(root, '.worktrees', 'fixture-orphan')]) {
+      // T1's merge-first fixture policy: the fixture's own branches are merged into its integration
+      // checkout before anything is deleted, so `git branch -d` is the lawful, non-force teardown.
+      for (const branch of ['feat/fixture-owner', 'feat/fixture-peer', 'feat/fixture-detached']) {
+        await gitTolerant(['merge', '--no-edit', '--ff-only', branch], integrationWorktree);
+      }
+      for (const path of [ownerWorktree, peerWorktree, detachedWorktree, integrationWorktree, join(root, '.worktrees', 'fixture-orphan')]) {
         if (!existsSync(path)) continue;
         await gitTolerant(['worktree', 'remove', path], main);
         // Test-owned disposable trees only: Git refuses to remove a worktree holding submodule
@@ -243,10 +364,11 @@ async function makeFixture(options = {}) {
         if (existsSync(path)) await rm(path, { recursive: true, force: true });
       }
       await gitTolerant(['worktree', 'prune'], main);
-      for (const branch of ['feat/fixture-owner', 'feat/fixture-peer', 'iteration/fixture']) {
+      for (const branch of ['feat/fixture-owner', 'feat/fixture-peer', 'feat/fixture-detached', 'iteration/fixture']) {
         await gitTolerant(['branch', '-d', branch], main);
       }
       await rm(root, { recursive: true, force: true });
+      assert.equal(existsSync(root), false, `fixture root ${root} was not removed`);
     },
   };
   return fixture;
@@ -326,6 +448,91 @@ function aliasTempRoot(paths) {
   mkdirSync(realTemp, { recursive: true });
   symlinkSync(realTemp, aliasTemp, 'dir');
   return { realTemp, aliasTemp };
+}
+
+/**
+ * A fixture-local `rm` shim: it runs the real `/bin/rm` and then, once, when it removed the given
+ * path, injects one fact change. The change therefore lands strictly BETWEEN two of the sweep's
+ * mutating steps, which is exactly what the mandatory re-verification gate has to notice.
+ */
+async function rmShim(root, { after, mutate }) {
+  const directory = join(root, 'rm-shim');
+  const marker = join(root, 'rm-shim-fired');
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, 'rm'), `#!/bin/sh
+/bin/rm "$@"
+status=$?
+if [ $status -eq 0 ] && [ ! -f ${JSON.stringify(marker)} ]; then
+  for arg in "$@"; do
+    if [ "$arg" = ${JSON.stringify(after)} ]; then
+      touch ${JSON.stringify(marker)}
+      ( ${mutate} ) >/dev/null 2>&1
+    fi
+  done
+fi
+exit $status
+`, { mode: 0o755 });
+  return { directory, marker };
+}
+
+/**
+ * A fixture-local `git` shim: it delegates every invocation to the real binary verbatim and, once,
+ * right AFTER the invocation whose argv carries `when`, injects one fact change. For a `git status`
+ * call that means the change lands after Git reported the fact and before the caller measures it —
+ * the window in which an enumerated path can vanish.
+ */
+async function gitShim(root, { when, mutate }) {
+  const directory = join(root, 'git-shim');
+  const marker = join(root, 'git-shim-fired');
+  const git = (await exec('sh', ['-c', 'command -v git'], { env: process.env })).stdout.trim();
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, 'git'), `#!/bin/sh
+fire=0
+for arg in "$@"; do
+  if [ "$arg" = ${JSON.stringify(when)} ] && [ ! -f ${JSON.stringify(marker)} ]; then
+    fire=1
+    touch ${JSON.stringify(marker)}
+  fi
+done
+${JSON.stringify(git)} "$@"
+status=$?
+if [ "$fire" = 1 ]; then ( ${mutate} ) >/dev/null 2>&1; fi
+exit $status
+`, { mode: 0o755 });
+  return { directory, marker };
+}
+
+/**
+ * A PATH wrapper for the ACTUAL installed CLI: every invocation is delegated to the real binary
+ * verbatim, and one fact change is injected immediately before the first `--apply` handover — that
+ * is, while the engine is running: after the gate that allowed the handover and before the non-force
+ * fallback that follows it. The engine's own output is never rewritten or faked.
+ */
+async function engineApplyWrapper(root, { mutate }) {
+  const directory = join(root, 'engine-wrapper');
+  const marker = join(root, 'engine-wrapper-fired');
+  const engine = (await exec('sh', ['-c', 'command -v mstar-harness'], { env: process.env })).stdout.trim();
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, 'mstar-harness'), `#!/bin/sh
+for arg in "$@"; do
+  if [ "$arg" = "--apply" ] && [ ! -f ${JSON.stringify(marker)} ]; then
+    touch ${JSON.stringify(marker)}
+    ( ${mutate} ) >/dev/null 2>&1
+  fi
+done
+exec ${JSON.stringify(engine)} "$@"
+`, { mode: 0o755 });
+  return { directory, marker };
+}
+
+/** Run the sweeper itself, outside any fixture, so a usage/contract probe keeps its exit code. */
+async function runScript(args) {
+  try {
+    const { stdout, stderr } = await exec(process.execPath, [SCRIPT, ...args], { cwd: process.cwd(), env: process.env, maxBuffer: 8 * 1024 * 1024 });
+    return { code: 0, stdout, stderr };
+  } catch (error) {
+    return { code: error.code, stdout: String(error.stdout ?? ''), stderr: String(error.stderr ?? '') };
+  }
 }
 
 /** A sibling plan declaration claiming one worktree path — and therefore one feature target. */
@@ -515,13 +722,11 @@ test('check-exit distinguishes own completion from peer activity', async t => {
   assert.equal(conflicting.document, null);
   assert.match(conflicting.stderr, /mutually exclusive/);
 
-  const apply = await reclaimed.run(['--apply']);
-  assert.equal(apply.code, 2);
-  assert.equal(apply.document, null);
-  assert.match(apply.stderr, /--apply is unavailable/);
-
+  // `--apply` is a real mode now (covered by the apply tests); the argument-level refusal that
+  // survives is its mutual exclusion with the read-only check modes.
   const applyWithCheck = await reclaimed.run(['--apply', '--check-convergence']);
   assert.equal(applyWithCheck.code, 2);
+  assert.equal(applyWithCheck.document, null);
   assert.match(applyWithCheck.stderr, /mutually exclusive/);
 });
 
@@ -934,4 +1139,996 @@ test('unreadable or stale receipt aliases stay owned', async t => {
   assert.deepEqual(proposedRefs(dotDotRun.document), []);
   assert.deepEqual(dotDotRun.document.commands, []);
   assert.equal(await dotDot.fingerprint(), dotDotBefore);
+});
+
+// --- P1-T3: guarded apply + the real installed cleanup ---------------------------------------
+
+function actionPairs(track) {
+  return track.actions.map(action => [action.kind, action.verdict]);
+}
+
+/**
+ * T1's native topology in its own disposable repository: a real superproject with a real local
+ * submodule (reached through the fixture's own ssh shim, so no global protocol or config is
+ * touched) and feature worktrees under `<main>/.worktrees/<name>` initialized by T1's script. This
+ * is the shape whose historic main-only pointer made a linked checkout fatal to traverse; the test
+ * proves the ACTUAL installed CLI enumerates these trees instead.
+ */
+async function makeNativeFixture() {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'v1197-p1-t3-native-')));
+  const main = join(root, 'main');
+  const cache = join(root, 'cache');
+  const harness = join(root, 'harness');
+  const home = join(root, 'home');
+  const shim = join(root, 'fixture-ssh.sh');
+  const origin = join(root, 'sub-origin');
+  const worktrees = { 'fixture-a': join(main, '.worktrees', 'feature-a'), 'fixture-b': join(main, '.worktrees', 'feature-b') };
+  const branches = { 'fixture-a': 'feat/fixture-a', 'fixture-b': 'feat/fixture-b' };
+  const targets = { 'fixture-a': join(cache, 'nexus-target-feature-a'), 'fixture-b': join(cache, 'nexus-target-feature-b') };
+  const integration = join(main, '.worktrees', 'iteration-fixture');
+  const canonicalTarget = join(cache, 'nexus-target');
+  const env = { ...GIT_ENV, HOME: home, XDG_CACHE_HOME: cache, GIT_SSH_COMMAND: shim };
+  // Hermetic and clean: the fixture's own ssh transport, no user git config, no protocol override.
+  const gitEnv = (args, cwd = root) => exec('git', ['-c', 'user.name=fixture', '-c', 'user.email=fixture@example.com', ...args], { cwd, env, maxBuffer: 8 * 1024 * 1024 });
+  const tolerant = async (args, cwd) => {
+    try {
+      return await gitEnv(args, cwd);
+    } catch (error) {
+      return { stdout: String(error.stdout ?? ''), stderr: String(error.stderr ?? error.message ?? '') };
+    }
+  };
+
+  await mkdir(join(main, '.worktrees'), { recursive: true });
+  await mkdir(join(harness, 'workflows', WORKFLOW), { recursive: true });
+  await mkdir(cache, { recursive: true });
+  await mkdir(home, { recursive: true });
+  await writeFile(shim, SSH_SHIM, { mode: 0o755 });
+
+  await gitEnv(['init', '-q', '--initial-branch=main', origin]);
+  await writeFile(join(origin, 'sub.txt'), 'submodule\n');
+  await gitEnv(['add', 'sub.txt'], origin);
+  await gitEnv(['commit', '-q', '-m', 'sub'], origin);
+
+  await gitEnv(['init', '-q', '--initial-branch=main', main]);
+  await writeFile(join(main, 'README.md'), 'fixture\n');
+  await gitEnv(['add', 'README.md'], main);
+  await gitEnv(['commit', '-q', '-m', 'init'], main);
+  await writeFile(join(main, '.gitmodules'), `[submodule "sub"]\n\tpath = sub\n\turl = ssh://localhost${origin}\n`);
+  const subHead = (await gitEnv(['-C', origin, 'rev-parse', 'HEAD'])).stdout.trim();
+  await gitEnv(['update-index', '--add', '--cacheinfo', `160000,${subHead},sub`], main);
+  await gitEnv(['add', '.gitmodules'], main);
+  await gitEnv(['commit', '-q', '-m', 'register submodule'], main);
+  await gitEnv(['submodule', 'update', '--init', '--recursive'], main);
+  await gitEnv(['worktree', 'add', '-q', '-b', branches['fixture-a'], worktrees['fixture-a']], main);
+  await gitEnv(['worktree', 'add', '-q', '-b', branches['fixture-b'], worktrees['fixture-b']], main);
+  await gitEnv(['worktree', 'add', '-q', '-b', 'iteration/fixture', integration], main);
+  // T1's own tool establishes the per-worktree metadata; a failure here fails the test loudly.
+  for (const path of Object.values(worktrees)) {
+    await exec(process.execPath, [INITIALIZER, '--worktree', path], { cwd: root, env });
+  }
+
+  await writeFile(join(harness, 'workflows', WORKFLOW, 'snapshot.json'), `${JSON.stringify({
+    schema_version: 1,
+    id: WORKFLOW,
+    type: 'iteration',
+    status: 'running',
+    started_at: '2026-01-01T00:00:00.000Z',
+    updated_at: '2026-01-01T00:00:00.000Z',
+    branch: { base: 'main', integration: 'iteration/fixture', target: 'main' },
+    integration_worktree_path: integration,
+    plans: [{
+      id: 'fixture-plan',
+      title: 'Fixture plan',
+      file: 'plans/fixture.md',
+      status: 'Done',
+      metadata: { track_branches: [branches['fixture-a'], branches['fixture-b']] },
+    }],
+  }, null, 2)}\n`);
+  await mkdir(canonicalTarget, { recursive: true });
+  await writeFile(join(canonicalTarget, 'canonical.bin'), 'canonical\n');
+  for (const trackId of ['fixture-a', 'fixture-b']) {
+    await mkdir(targets[trackId], { recursive: true });
+    await writeFile(join(targets[trackId], 'target.bin'), `${trackId} target\n`);
+  }
+  const inventoryPath = join(root, 'inventory.json');
+  await writeFile(inventoryPath, `${JSON.stringify({
+    version: 1,
+    workflow_id: WORKFLOW,
+    active_plan_ids: ['fixture-plan'],
+    scheduling: { ready_independent_tasks: 2, disk_budget_bytes: BUDGET, per_track_target_estimate_bytes: ESTIMATE },
+    tracks: ['fixture-a', 'fixture-b'].map(trackId => ({
+      track_id: trackId,
+      plan_id: 'fixture-plan',
+      worktree: worktrees[trackId],
+      branch: branches[trackId],
+      target: targets[trackId],
+      temporary_paths: [],
+      producer_stopped: true,
+      state: 'completed',
+    })),
+  }, null, 2)}\n`);
+
+  const fixture = {
+    root,
+    main,
+    cache,
+    harness,
+    integration,
+    inventory: inventoryPath,
+    worktrees,
+    branches,
+    targets,
+    canonicalTarget,
+    env,
+    git: async (args, cwd) => (await gitEnv(args, cwd)).stdout,
+    async run(args = []) {
+      const argv = ['--repo', main, '--harness', harness, '--workflow', WORKFLOW, '--inventory', inventoryPath, ...args];
+      try {
+        const { stdout, stderr } = await exec(process.execPath, [SCRIPT, ...argv], { cwd: root, env, maxBuffer: 16 * 1024 * 1024 });
+        return { code: 0, stdout, stderr, document: JSON.parse(stdout) };
+      } catch (error) {
+        const stdout = String(error.stdout ?? '');
+        let document = null;
+        try {
+          document = JSON.parse(stdout);
+        } catch {
+          document = null;
+        }
+        return { code: typeof error.code === 'number' ? error.code : null, stdout, stderr: String(error.stderr ?? ''), document };
+      }
+    },
+    async teardown() {
+      // Merge-first fixture policy: both feature branches already sit at the integration head; the
+      // explicit merge keeps the non-force `branch -d` below lawful, and any teardown failure is
+      // reported instead of masked.
+      const failures = [];
+      for (const branch of Object.values(branches)) {
+        if (!existsSync(integration)) continue;
+        const merged = await tolerant(['merge', '--no-edit', '--ff-only', branch], integration);
+        if (merged.stderr !== undefined && /fatal|error/i.test(merged.stderr)) failures.push(`merge ${branch}: ${merged.stderr.trim()}`);
+      }
+      for (const path of [...Object.values(worktrees), integration]) {
+        if (!existsSync(path)) continue;
+        await tolerant(['worktree', 'remove', path], main);
+        // Fixture-owned disposable tree only: Git refuses to remove a submodule-bearing worktree,
+        // so drop the fixture's own bytes and let the prune below forget the record.
+        if (existsSync(path)) await rm(path, { recursive: true, force: true });
+        if (existsSync(path)) failures.push(`worktree path ${path} survived teardown`);
+      }
+      await tolerant(['worktree', 'prune'], main);
+      for (const branch of [...Object.values(branches), 'iteration/fixture']) {
+        await tolerant(['branch', '-d', branch], main);
+      }
+      await rm(root, { recursive: true, force: true });
+      if (existsSync(root)) failures.push(`fixture root ${root} survives`);
+      assert.deepEqual(failures, [], `native fixture teardown: ${failures.join(' | ')}`);
+    },
+  };
+  return fixture;
+}
+
+test('apply reclaims only released merged slice', async t => {
+  const fixture = await makeFixture({ shape: 'released', orphans: false });
+  t.after(() => fixture.teardown());
+
+  const peerBytesBefore = directoryBytes(fixture.peerTarget);
+  const canonicalBytesBefore = directoryBytes(fixture.canonicalTarget);
+  const before = await fixture.fingerprint();
+
+  // The dry run is a proposal only: it deletes nothing and still defers to the engine's own permit.
+  const dry = await fixture.run();
+  assert.equal(dry.code, 0);
+  assert.equal(dry.document.mode, 'dry-run');
+  assert.equal(trackOf(dry.document, 'fixture-owner').actions.find(action => action.kind === 'engine-worktree-removal').verdict, 'propose');
+  assert.equal(await fixture.fingerprint(), before, 'the planning pass must not mutate anything');
+
+  const apply = await fixture.run(['--apply']);
+  assert.equal(apply.code, 0, apply.stdout);
+  assert.equal(apply.document.mode, 'apply');
+  assert.equal(apply.document.ok, true);
+  assert.deepEqual(apply.document.refusals, []);
+
+  const owner = trackOf(apply.document, 'fixture-owner');
+  assert.deepEqual(actionPairs(owner), [
+    ['reclaim-target', 'executed'],
+    ['engine-worktree-removal', 'executed'],
+    ['prune', 'absent'],
+  ], JSON.stringify(owner.actions));
+  assert.equal(owner.exit_clean, true);
+  assert.equal(owner.target.exists, false);
+  assert.equal(owner.worktree.listed, false);
+  assert.equal(owner.worktree.exists, false);
+
+  // Engine-first: exactly one `--apply` call for the exact path, and the engine is the thing that
+  // removed the worktree and deleted the merged branch.
+  const applied = apply.document.commands.filter(record => record.argv.includes('--apply'));
+  assert.equal(applied.length, 1);
+  assert.deepEqual(applied[0].argv, [
+    'mstar-harness', 'worktree', 'cleanup',
+    '--workflow', WORKFLOW,
+    '--harness', fixture.harness,
+    '--worktree', fixture.ownerWorktree,
+    '--apply',
+  ]);
+  assert.equal(applied[0].exit_code, 0);
+  assert.match(applied[0].stdout, /apply: removed worktree /);
+  assert.match(applied[0].stdout, /apply: deleted branch feat\/fixture-owner/);
+
+  // Re-observed, not assumed: the exact paths are gone, Git no longer lists the worktree, and the
+  // branch the engine released is gone too.
+  assert.equal(existsSync(fixture.ownerWorktree), false);
+  assert.equal(existsSync(fixture.ownerTarget), false);
+  assert.equal((await fixture.git(['worktree', 'list', '--porcelain'])).includes(fixture.ownerWorktree), false);
+  assert.equal((await fixture.git(['for-each-ref', '--format=%(refname)'])).includes('feat/fixture-owner'), false);
+
+  // The active peer and the shared canonical cache are untouched.
+  const peer = trackOf(apply.document, 'fixture-peer');
+  assert.deepEqual(peer.actions.map(action => action.verdict), ['protected']);
+  assert.equal(peer.target.exists, true);
+  assert.equal(existsSync(fixture.peerWorktree), true);
+  assert.equal(directoryBytes(fixture.peerTarget), peerBytesBefore);
+  assert.equal(directoryBytes(fixture.canonicalTarget), canonicalBytesBefore);
+
+  // The own exit gate passes; global convergence still fails while the peer is live.
+  const checkExit = await fixture.run(['--check-exit', 'fixture-owner']);
+  assert.equal(checkExit.code, 0);
+  assert.equal(checkExit.document.checks.passed, true);
+  const convergence = await fixture.run(['--check-convergence']);
+  assert.equal(convergence.code, 1);
+  assert.equal(convergence.document.checks.passed, false);
+
+  // Idempotent retry: nothing remains, nothing runs, nothing is touched.
+  const retry = await fixture.run(['--apply']);
+  assert.equal(retry.code, 0, retry.stdout);
+  assert.deepEqual(retry.document.commands, []);
+  assert.deepEqual(actionPairs(trackOf(retry.document, 'fixture-owner')), [
+    ['reclaim-target', 'absent'],
+    ['engine-worktree-removal', 'absent'],
+  ]);
+  assert.equal(directoryBytes(fixture.canonicalTarget), canonicalBytesBefore);
+});
+
+test('apply refusal preserves dirty active unmerged and canonical data', async t => {
+  const cases = [
+    ['dirty worktree', { dirty: true }, 'cleanup.refuse.dirty-worktree'],
+    ['live lease', { shape: 'leased' }, 'sweeper.refuse.not-released'],
+    ['unmerged branch', { unmerged: true }, 'sweeper.refuse.unmerged-track'],
+  ];
+  for (const [name, options, expectedReason] of cases) {
+    const fixture = await makeFixture({ shape: 'released', orphans: false, ...options });
+    t.after(() => fixture.teardown());
+
+    const canonicalBytesBefore = directoryBytes(fixture.canonicalTarget);
+    const canonicalHashBefore = createHash('sha256').update(readFileSync(join(fixture.canonicalTarget, 'canonical.bin'))).digest('hex');
+    const before = await fixture.fingerprint();
+
+    const apply = await fixture.run(['--apply']);
+    assert.equal(apply.code, 1, `${name}: ${apply.stdout}`);
+    assert.equal(apply.document.ok, false, name);
+    const owner = trackOf(apply.document, 'fixture-owner');
+    assert.deepEqual(actionPairs(owner), [['reclaim-footprint', 'refuse']], `${name}: ${JSON.stringify(owner.actions)}`);
+    assert.equal(owner.actions[0].reason, expectedReason, name);
+    assert.equal(owner.actions[0].detail.length > 0, true, `${name}: the refusal carries its reason`);
+    assert.equal(owner.exit_clean, false, name);
+
+    // A refused track loses nothing: its worktree, its dirt, its owned target, the shared canonical
+    // cache and the peer's live footprint are all byte-identical.
+    assert.equal(existsSync(fixture.ownerWorktree), true, name);
+    assert.equal(existsSync(fixture.ownerTarget), true, name);
+    assert.equal(existsSync(fixture.peerWorktree), true, name);
+    assert.equal(directoryBytes(fixture.canonicalTarget), canonicalBytesBefore, name);
+    assert.equal(createHash('sha256').update(readFileSync(join(fixture.canonicalTarget, 'canonical.bin'))).digest('hex'), canonicalHashBefore, name);
+    assert.equal(await fixture.fingerprint(), before, `${name}: nothing may change`);
+    // No `--apply` was ever handed to the engine for a refused track.
+    assert.equal(apply.document.commands.some(record => record.argv.includes('--apply')), false, name);
+  }
+
+  // The unmerged slice keeps its unmerged commit, not only its directory.
+  const unmerged = await makeFixture({ shape: 'released', orphans: false, unmerged: true });
+  t.after(() => unmerged.teardown());
+  const unmergedApply = await unmerged.run(['--apply']);
+  assert.equal(unmergedApply.code, 1);
+  assert.equal(trackOf(unmergedApply.document, 'fixture-owner').actions[0].reason, 'sweeper.refuse.unmerged-track');
+  const ownerCommits = (await unmerged.git(['log', '--oneline', 'feat/fixture-owner'])).trim().split('\n');
+  const mainCommits = (await unmerged.git(['log', '--oneline', 'main'])).trim().split('\n');
+  assert.equal(ownerCommits.length, mainCommits.length + 1, 'the unmerged commit must be preserved');
+  assert.equal(existsSync(join(unmerged.ownerWorktree, 'unmerged.txt')), true);
+
+  // A dry-run proposal is never authorization: the exact worktree has to still be a
+  // `<dir>/.worktrees/<name>` linked checkout when the action runs, so a checkout recorded outside
+  // that shape is refused at action time with zero mutation — even though the dry run proposed it.
+  const detached = await makeFixture({ shape: 'reclaimed', planStatus: 'Done', orphans: false, nonCanonicalTrack: true });
+  t.after(() => detached.teardown());
+  const detachedBefore = await detached.fingerprint();
+  const detachedDry = await detached.run();
+  assert.equal(detachedDry.code, 0);
+  const proposedDetached = trackOf(detachedDry.document, 'fixture-detached');
+  assert.deepEqual(actionPairs(proposedDetached), [
+    ['reclaim-target', 'propose'],
+    ['engine-worktree-removal', 'propose'],
+    ['prune-dry-run', 'propose'],
+  ], JSON.stringify(proposedDetached.actions));
+  const detachedApply = await detached.run(['--apply']);
+  assert.equal(detachedApply.code, 1, detachedApply.stdout);
+  const detachedTrack = trackOf(detachedApply.document, 'fixture-detached');
+  assert.deepEqual(actionPairs(detachedTrack), [['engine-worktree-removal', 'refuse']], JSON.stringify(detachedTrack.actions));
+  assert.equal(detachedTrack.actions[0].reason, 'sweeper.refuse.reverify-worktree');
+  assert.equal(detachedTrack.exit_clean, false);
+  assert.equal(existsSync(detached.detachedWorktree), true);
+  assert.equal(existsSync(detached.detachedTarget), true);
+  assert.equal(await detached.fingerprint(), detachedBefore, 'the re-verification gate must not mutate');
+
+  // A refused inventory never mutates under `--apply` either: the same fail-closed input that
+  // withholds every proposal withholds every action, and the whole fixture stays byte-identical.
+  const refusedInventory = await makeFixture({
+    shape: 'released',
+    orphans: false,
+    mutateInventory: document => {
+      document.tracks[0].branch = 'feat/fixture-unclaimed';
+      return document;
+    },
+  });
+  t.after(() => refusedInventory.teardown());
+  const refusedBefore = await refusedInventory.fingerprint();
+  const refusedApply = await refusedInventory.run(['--apply']);
+  assert.equal(refusedApply.code, 2);
+  assert.equal(refusalCodes(refusedApply).includes('sweeper.refuse.stale-branch-claim'), true);
+  assert.deepEqual(refusedApply.document.commands, []);
+  assert.equal(refusedApply.document.tracks.every(track => track.actions.every(action => action.verdict !== 'executed')), true);
+  assert.equal(await refusedInventory.fingerprint(), refusedBefore);
+});
+
+test('retry observes partial cleanup and does not touch peers', async t => {
+  let receipt = null;
+  const fixture = await makeFixture({
+    shape: 'partial',
+    orphans: false,
+    mutateInventory: (document, paths) => {
+      receipt = join(receiptBase(paths), 'partial');
+      mkdirSync(receipt, { recursive: true });
+      writeFileSync(join(receipt, 'payload.bin'), 'partial receipt\n');
+      document.tracks[0].temporary_paths = [receipt];
+      return document;
+    },
+  });
+  t.after(() => fixture.teardown());
+
+  const peerBytesBefore = directoryBytes(fixture.peerTarget);
+  const canonicalBytesBefore = directoryBytes(fixture.canonicalTarget);
+  // The engine already released this track's worktree and branch; only the owned cache target and
+  // the recorded temporary receipt remain — exactly the partial state a retry has to finish.
+  assert.equal(existsSync(fixture.ownerWorktree), false);
+  assert.equal(existsSync(receipt), true);
+
+  const apply = await fixture.run(['--apply']);
+  assert.equal(apply.code, 0, apply.stdout);
+  assert.deepEqual(apply.document.refusals, []);
+  const owner = trackOf(apply.document, 'fixture-owner');
+  assert.deepEqual(actionPairs(owner), [
+    ['reclaim-target', 'executed'],
+    ['reclaim-temporary', 'executed'],
+    ['engine-worktree-removal', 'absent'],
+  ], JSON.stringify(owner.actions));
+  assert.equal(owner.exit_clean, true);
+  assert.equal(existsSync(fixture.ownerTarget), false);
+  assert.equal(existsSync(receipt), false);
+  // A retry re-observes instead of replaying: with no listed worktree it never invokes the engine.
+  assert.equal(apply.document.commands.some(record => record.argv.includes('cleanup')), false);
+  assert.deepEqual(apply.document.commands.map(record => record.argv), [
+    ['rm', '-rf', fixture.ownerTarget],
+    ['rm', '-rf', receipt],
+  ]);
+
+  // The peer keeps its worktree, its target and its bytes.
+  assert.equal(trackOf(apply.document, 'fixture-peer').actions.every(action => action.verdict === 'protected'), true);
+  assert.equal(existsSync(fixture.peerWorktree), true);
+  assert.equal(directoryBytes(fixture.peerTarget), peerBytesBefore);
+
+  // Second retry: every fact reads absent, so nothing runs and nothing changes.
+  const retry = await fixture.run(['--apply']);
+  assert.equal(retry.code, 0, retry.stdout);
+  assert.deepEqual(actionPairs(trackOf(retry.document, 'fixture-owner')), [
+    ['reclaim-target', 'absent'],
+    ['reclaim-temporary', 'absent'],
+    ['engine-worktree-removal', 'absent'],
+  ]);
+  assert.deepEqual(retry.document.commands, []);
+  assert.equal(directoryBytes(fixture.peerTarget), peerBytesBefore);
+  assert.equal(directoryBytes(fixture.canonicalTarget), canonicalBytesBefore);
+  const checkExit = await fixture.run(['--check-exit', 'fixture-owner']);
+  assert.equal(checkExit.code, 0);
+});
+
+test('actual cleanup dry-run enumerates initialized worktrees', async t => {
+  const fixture = await makeNativeFixture();
+  t.after(() => fixture.teardown());
+  const paths = [['fixture-a', fixture.worktrees['fixture-a']], ['fixture-b', fixture.worktrees['fixture-b']]];
+
+  // Phase 1 — the ACTUAL installed engine, driven by the sweeper's dry run, enumerates both freshly
+  // initialized linked worktrees as removable without the historic gitdir traversal fatal.
+  const dry = await fixture.run();
+  assert.equal(dry.code, 0, dry.stdout);
+  assert.deepEqual(dry.document.refusals, []);
+  assert.equal(dry.document.commands.length, 2);
+  for (const [trackId, path] of paths) {
+    const record = dry.document.commands.find(candidate => candidate.argv.includes(path));
+    assert.ok(record, `${trackId}: the engine was probed for the exact path`);
+    assert.deepEqual(record.argv.slice(-2), ['--worktree', path]);
+    assert.equal(record.exit_code, 0, `${trackId}: ${record.stderr}`);
+    assert.equal(record.spawn_error, null);
+    assert.equal(
+      record.stdout.split('\n').some(line => line === `remove | worktree | ${path} | cleanup.remove.merged`),
+      true,
+      `${trackId}: ${record.stdout}`,
+    );
+    assert.equal(/fatal:|not a git repository|submodule/.test(`${record.stdout}${record.stderr}`), false, `${trackId}: ${record.stderr}`);
+    // The measured reason the engine's own removal is inadmissible here is already reported.
+    const probed = trackOf(dry.document, trackId);
+    assert.equal(probed.worktree.submodule_gitlinks >= 1, true);
+    assert.equal(probed.worktree.removal_blocked_by_submodules, true);
+    // T1's native metadata is real and resolves per checkout: the historic shape was a pointer into
+    // the main-only module directory, which made traversal from a linked checkout fatal.
+    assert.equal(
+      (await fixture.git(['-C', join(path, 'sub'), 'rev-parse', '--absolute-git-dir'])).trim(),
+      join(fixture.main, '.git', 'worktrees', basename(path), 'modules', 'sub'),
+    );
+    assert.equal((await fixture.git(['-C', path, 'status', '--porcelain'], fixture.root)).trim(), '');
+  }
+
+  // Phase 2 — guarded apply on the same topology: the measured submodule refusal is reported
+  // verbatim and routed around with the documented exact-path non-force route. The retained branch
+  // keeps this apply INCOMPLETE (exit 1): exit 0 means every requested completed track was fully
+  // reclaimed, and a branch the engine could not release is unreclaimed state — reported truthfully,
+  // never deleted by this tool.
+  const apply = await fixture.run(['--apply']);
+  assert.equal(apply.code, 1, apply.stdout);
+  assert.equal(apply.document.ok, false);
+  assert.deepEqual(apply.document.refusals, []);
+  for (const [trackId, path] of paths) {
+    const track = trackOf(apply.document, trackId);
+    assert.deepEqual(actionPairs(track), [
+      ['reclaim-target', 'executed'],
+      ['engine-worktree-removal', 'blocked'],
+      ['fallback-worktree-removal', 'executed'],
+      ['prune', 'executed'],
+      ['engine-branch-removal', 'retained'],
+    ], `${trackId}: ${JSON.stringify(track.actions)}`);
+    assert.equal(track.exit_clean, false);
+    assert.equal(track.worktree.branch_present, true);
+    const blocked = track.actions.find(action => action.verdict === 'blocked');
+    assert.equal(blocked.reason, 'sweeper.blocked.submodule-gitlinks');
+    assert.match(blocked.detail, /working trees containing submodules cannot be moved or removed/);
+    assert.equal(track.worktree.listed, false);
+    assert.equal(track.worktree.exists, false);
+    assert.equal(track.target.exists, false);
+  }
+  // The branch rows are truthful for the moment each track's own re-observation measured them, and
+  // this tool deletes no branch itself (no branch command is ever run). Measured engine side effect
+  // worth naming: the engine's later workflow-scoped `--apply` for the sibling deletes the merged
+  // branch it can now reach once this track's worktree record is pruned, so only the last track's
+  // branch survives to the end of the run.
+  assert.deepEqual(
+    (await fixture.git(['for-each-ref', '--format=%(refname)'], fixture.main)).trim().split('\n').sort(),
+    ['refs/heads/feat/fixture-b', 'refs/heads/iteration/fixture', 'refs/heads/main'],
+  );
+  assert.equal(apply.document.commands.some(record => record.argv.includes('branch')), false);
+
+  // The refusal is never suppressed: both `--apply` invocations failed with the measured message,
+  // and the fallback ran only after that refusal.
+  const refused = apply.document.commands.filter(record => record.argv.includes('--apply') && record.exit_code === 1);
+  assert.equal(refused.length, 2);
+  for (const record of refused) {
+    assert.match(record.stderr, /apply: failed worktree .*: fatal: working trees containing submodules cannot be moved or removed/);
+  }
+  // Never a force flag, never `git submodule deinit` (which unregisters the SHARED superproject
+  // configuration), never a wildcard.
+  for (const record of apply.document.commands) {
+    assert.equal(record.argv.includes('--force'), false, record.argv.join(' '));
+    assert.equal(record.argv.includes('-f'), false, record.argv.join(' '));
+    assert.equal(record.argv.some(argument => argument.includes('deinit')), false, record.argv.join(' '));
+    assert.equal(record.argv.some(argument => argument.includes('*')), false, record.argv.join(' '));
+  }
+  // Exactly the scoped, exact-path removals: each owned target and each of the two worktree paths.
+  assert.deepEqual(
+    apply.document.commands.filter(record => record.argv[0] === 'rm').map(record => record.argv),
+    [
+      ['rm', '-rf', fixture.targets['fixture-a']],
+      ['rm', '-rf', fixture.worktrees['fixture-a']],
+      ['rm', '-rf', fixture.targets['fixture-b']],
+      ['rm', '-rf', fixture.worktrees['fixture-b']],
+    ],
+  );
+  // The scoped prune dry run named only this track's record before the actual prune ran.
+  const pruneDrys = apply.document.commands.filter(record => record.argv.join(' ') === 'git worktree prune --dry-run --verbose');
+  assert.equal(pruneDrys.length, 2);
+  for (const record of pruneDrys) {
+    assert.equal(/Removing worktrees\/feature-[ab]: /.test(`${record.stdout}${record.stderr}`), true, `${record.stdout}${record.stderr}`);
+  }
+
+  // Raw re-observation: exact paths absent, no record left, main submodule registration intact.
+  for (const [, path] of paths) assert.equal(existsSync(path), false);
+  const listed = await fixture.git(['worktree', 'list', '--porcelain'], fixture.main);
+  assert.equal(listed.includes('feature-a'), false);
+  assert.equal(listed.includes('feature-b'), false);
+  assert.equal(listed.includes('iteration-fixture'), true);
+  assert.equal(existsSync(join(fixture.main, '.git', 'worktrees', 'feature-a')), false);
+  assert.equal(existsSync(join(fixture.main, '.git', 'worktrees', 'feature-b')), false);
+  assert.equal((await fixture.git(['config', '--get', 'submodule.sub.active'], fixture.main)).trim(), 'true');
+  const submoduleStatus = (await fixture.git(['submodule', 'status'], fixture.main)).trim();
+  assert.equal(submoduleStatus.startsWith('-'), false, `submodule unregistered: ${submoduleStatus}`);
+  assert.match(submoduleStatus, / sub /);
+  assert.equal(existsSync(join(fixture.main, 'sub', 'sub.txt')), true);
+  assert.equal(directoryBytes(fixture.canonicalTarget) > 0, true);
+
+  // Own exit and the convergence checkpoint both report the branch the engine could not release as
+  // the residual, with it named, instead of certifying the slice reclaimed.
+  const checkExit = await fixture.run(['--check-exit', 'fixture-b']);
+  assert.equal(checkExit.code, 1, checkExit.stdout);
+  assert.equal(checkExit.document.checks.passed, false);
+  assert.deepEqual(checkExit.document.checks.reasons.map(reason => reason.code), ['sweeper.check.branch-present']);
+  assert.match(checkExit.document.checks.reasons[0].detail, /feat\/fixture-b still exists/);
+  const convergence = await fixture.run(['--check-convergence']);
+  assert.equal(convergence.code, 1, JSON.stringify(convergence.document.checks));
+  assert.deepEqual(convergence.document.checks.reasons.map(reason => reason.code), ['sweeper.check.branch-present']);
+
+  // No fixture orphan remains, and teardown reports rather than masks a leftover.
+  await fixture.teardown();
+});
+
+// --- P1-T3 fix round 1: retained branch, per-mutation gate, ignored-only footprint, contract text --
+
+test('a retained branch keeps the apply exit incomplete', async t => {
+  // The measured shape: the engine released this slice's worktree but the track's branch survives.
+  // Before this fix the aggregate ignored the branch, so this fixture exited 0 with
+  // `exit_clean: true` — a successful apply for state that was never reclaimed.
+  const fixture = await makeFixture({ shape: 'partial', keepBranch: true, orphans: false });
+  t.after(() => fixture.teardown());
+
+  const apply = await fixture.run(['--apply']);
+  assert.equal(apply.code, 1, apply.stdout);
+  assert.equal(apply.document.ok, false);
+  // The residual is reported, not a refusal: nothing about this run was inadmissible.
+  assert.deepEqual(apply.document.refusals, []);
+  const owner = trackOf(apply.document, 'fixture-owner');
+  assert.deepEqual(actionPairs(owner), [
+    ['reclaim-target', 'executed'],
+    ['engine-worktree-removal', 'absent'],
+  ], JSON.stringify(owner.actions));
+  assert.equal(owner.exit_clean, false);
+  assert.equal(owner.worktree.branch_present, true);
+  assert.equal(owner.worktree.listed, false);
+  assert.equal(owner.target.exists, false);
+
+  // The branch is untouched and no branch deletion was ever attempted — the boundary stays with the
+  // PM's workflow-level checkpoint.
+  assert.equal(
+    (await fixture.git(['for-each-ref', '--format=%(refname)', 'refs/heads/feat/fixture-owner'])).trim(),
+    'refs/heads/feat/fixture-owner',
+  );
+  assert.equal(apply.document.commands.some(record => record.argv.includes('branch')), false);
+
+  // The read-only exit gate reports the very same residual, and the reason names the branch.
+  const checkExit = await fixture.run(['--check-exit', 'fixture-owner']);
+  assert.equal(checkExit.code, 1);
+  assert.equal(checkExit.document.checks.passed, false);
+  assert.deepEqual(checkExit.document.checks.reasons.map(reason => reason.code), ['sweeper.check.branch-present']);
+  assert.match(checkExit.document.checks.reasons[0].detail, /feat\/fixture-owner still exists/);
+});
+
+test('the re-verification gate stops the receipt removal on a changed worktree fact', async t => {
+  // A fact moves between the target removal and the receipt removal. The receipt's own check is not
+  // enough: the whole footprint is re-proved immediately before that mutation, and the first step
+  // that does not complete ENDS the track's mutation chain — so the receipt, the engine handover and
+  // the fallback are not merely refused, they are never attempted, and nothing later is even probed.
+  let receipt = null;
+  const fixture = await makeFixture({
+    shape: 'released',
+    orphans: false,
+    mutateInventory: (document, paths) => {
+      receipt = join(receiptBase(paths), 'gate-round');
+      mkdirSync(receipt, { recursive: true });
+      writeFileSync(join(receipt, 'payload.bin'), 'gate receipt\n');
+      document.tracks[0].temporary_paths = [receipt];
+      return document;
+    },
+  });
+  t.after(() => fixture.teardown());
+  const shim = await rmShim(fixture.root, {
+    after: fixture.ownerTarget,
+    mutate: `git -C ${JSON.stringify(fixture.ownerWorktree)} checkout --quiet --detach`,
+  });
+  fixture.env.PATH = `${shim.directory}:${process.env.PATH}`;
+
+  const apply = await fixture.run(['--apply']);
+  assert.equal(apply.code, 1, apply.stdout);
+  assert.equal(existsSync(shim.marker), true, 'the injected fact change must have fired');
+  const owner = trackOf(apply.document, 'fixture-owner');
+  assert.deepEqual(actionPairs(owner), [
+    ['reclaim-target', 'executed'],
+    ['reclaim-temporary', 'refuse'],
+  ], JSON.stringify(owner.actions));
+  const refusal = owner.actions.find(action => action.verdict === 'refuse');
+  assert.equal(refusal.reason, 'sweeper.refuse.reverify-worktree');
+  assert.equal(refusal.ref, receipt, 'the refusal names the step it stopped at');
+  // Zero further mutation: the receipt keeps its bytes, the worktree keeps its branch, and only the
+  // already-finished target removal sits in the command log — no `--apply` was ever handed over.
+  assert.equal(existsSync(receipt), true);
+  assert.equal(existsSync(fixture.ownerWorktree), true);
+  assert.equal((await fixture.git(['rev-parse', '--abbrev-ref', 'HEAD'], fixture.ownerWorktree)).trim(), 'HEAD');
+  assert.equal(
+    (await fixture.git(['for-each-ref', '--format=%(refname)', 'refs/heads/feat/fixture-owner'], fixture.main)).trim(),
+    'refs/heads/feat/fixture-owner',
+  );
+  assert.deepEqual(
+    apply.document.commands.filter(record => record.argv[0] === 'rm').map(record => record.argv),
+    [['rm', '-rf', fixture.ownerTarget]],
+  );
+  assert.equal(apply.document.commands.some(record => record.argv.includes('--apply')), false);
+});
+
+test('the re-verification gate stops the non-force fallback on a changed fact', async t => {
+  // A fact moves while the engine is running: the change lands after the gate that allowed the
+  // handover and reaches the gate inside the non-force fallback, so the fallback's `rm -rf` never
+  // runs. The wrapper delegates every invocation to the actual installed CLI, whose measured
+  // submodule refusal is what routes the run into that fallback.
+  const native = await makeNativeFixture();
+  t.after(() => native.teardown());
+  const decoy = join(native.root, 'decoy-target');
+  await mkdir(join(decoy, 'sub'), { recursive: true });
+  const wrapper = await engineApplyWrapper(native.root, {
+    mutate: `/bin/rm -rf ${JSON.stringify(native.targets['fixture-a'])} && ln -s ${JSON.stringify(decoy)} ${JSON.stringify(native.targets['fixture-a'])}`,
+  });
+  native.env.PATH = `${wrapper.directory}:${process.env.PATH}`;
+
+  const injected = await native.run(['--apply']);
+  assert.equal(existsSync(wrapper.marker), true, 'the injected fact change must have fired');
+  assert.equal(injected.code, 1, injected.stdout);
+  assert.equal(injected.document.ok, false);
+  const trackA = trackOf(injected.document, 'fixture-a');
+  assert.deepEqual(actionPairs(trackA), [
+    ['reclaim-target', 'executed'],
+    ['engine-worktree-removal', 'blocked'],
+    ['fallback-worktree-removal', 'refuse'],
+  ], JSON.stringify(trackA.actions));
+  assert.equal(trackA.actions[2].reason, 'sweeper.refuse.reverify-target');
+  // The engine WAS handed this exact path — the change happened after that gate — and it refused it
+  // with the measured submodule message.
+  const handovers = injected.document.commands.filter(record => record.argv.includes('--apply'));
+  assert.equal(handovers.some(record => record.argv.includes(native.worktrees['fixture-a']) && record.exit_code === 1), true);
+  // Zero further mutation for the affected track: worktree, checked-out submodule content and the
+  // Git record all survive, with no fallback removal and no prune.
+  assert.equal(existsSync(join(native.worktrees['fixture-a'], 'sub', 'sub.txt')), true);
+  assert.equal((await native.git(['worktree', 'list', '--porcelain'], native.main)).includes('feature-a'), true);
+  assert.deepEqual(
+    injected.document.commands.filter(record => record.argv[0] === 'rm' && record.argv[2] === native.worktrees['fixture-a']),
+    [],
+  );
+  // No prune ever touched the affected track's record (the sibling's own scoped prune still runs).
+  assert.equal(
+    injected.document.commands.some(record => record.argv[0] === 'git' && record.argv[1] === 'worktree' && record.argv[2] === 'prune' && `${record.stdout}${record.stderr}`.includes('feature-a')),
+    false,
+  );
+  // The unaffected sibling track still completed its own reclamation in the same run.
+  assert.deepEqual(actionPairs(trackOf(injected.document, 'fixture-b')), [
+    ['reclaim-target', 'executed'],
+    ['engine-worktree-removal', 'blocked'],
+    ['fallback-worktree-removal', 'executed'],
+    ['prune', 'executed'],
+    ['engine-branch-removal', 'retained'],
+  ], JSON.stringify(trackOf(injected.document, 'fixture-b').actions));
+  await native.teardown();
+});
+
+test('apply routes around an ignored-only footprint and refuses real dirt', async t => {
+  // The second measured cleanup obstacle: the engine reports the worktree dirty although the tracked
+  // tree is clean, because build preparation left ignored outputs inside it. Exception before the
+  // fix: a permanent refusal. Now the exact ignored paths and sizes are enumerated and reported, and
+  // the documented exact-path non-force route reclaims the slice.
+  const ignored = await makeFixture({ shape: 'released', orphans: false, ignoredOutputs: true });
+  t.after(() => ignored.teardown());
+  const nodeModulesBytes = directoryBytes(join(ignored.ownerWorktree, 'node_modules'));
+  const distBytes = directoryBytes(join(ignored.ownerWorktree, 'dist'));
+  assert.equal((await ignored.git(['status', '--porcelain', '--untracked-files=no'], ignored.ownerWorktree)).trim(), '', 'the tracked tree must be clean');
+  const canonicalWorktree = realpathSync(ignored.ownerWorktree);
+
+  const apply = await ignored.run(['--apply']);
+  // The reclamation happens, so the only residual is the branch the engine could not release (the
+  // engine declines branch candidates for a pruned exact path) — which is exactly the exit-1 rule.
+  assert.equal(apply.code, 1, apply.stdout);
+  assert.equal(apply.document.ok, false);
+  assert.deepEqual(apply.document.refusals, []);
+  const owner = trackOf(apply.document, 'fixture-owner');
+  // Reclaimed through the documented route: the exact target and the exact worktree path are gone,
+  // the record is pruned, and the engine's dirt refusal is reported as `blocked` rather than as the
+  // permanent refusal it used to be.
+  assert.deepEqual(actionPairs(owner), [
+    ['reclaim-target', 'executed'],
+    ['engine-worktree-removal', 'blocked'],
+    ['fallback-worktree-removal', 'executed'],
+    ['prune', 'executed'],
+    ['engine-branch-removal', 'retained'],
+  ], JSON.stringify(owner.actions));
+  const blocked = owner.actions.find(action => action.verdict === 'blocked');
+  assert.equal(blocked.reason, 'sweeper.blocked.ignored-outputs');
+  assert.equal(blocked.kind, 'engine-worktree-removal');
+  assert.match(blocked.detail, /cleanup\.refuse\.dirty-worktree/);
+  assert.deepEqual(blocked.ignored_footprint, {
+    paths: [
+      { path: join(ignored.ownerWorktree, 'dist'), bytes: distBytes },
+      { path: join(ignored.ownerWorktree, 'node_modules'), bytes: nodeModulesBytes },
+    ],
+    total_bytes: distBytes + nodeModulesBytes,
+  });
+  // The engine's own refusal is in the recorded evidence verbatim, not summarised away. The engine
+  // prints its canonical path, so the check uses the fixture's real path.
+  assert.equal(
+    apply.document.commands.some(record => record.stdout.includes(`refuse | worktree | ${canonicalWorktree} | cleanup.refuse.dirty-worktree`)),
+    true,
+  );
+  // Reclaimed through the documented route: the exact target and the exact worktree path are gone,
+  // the record is pruned, and nothing was forced, deinitialized or wildcarded.
+  assert.equal(existsSync(ignored.ownerWorktree), false);
+  assert.equal(existsSync(ignored.ownerTarget), false);
+  assert.equal(owner.worktree.listed, false);
+  assert.equal(owner.worktree.branch_present, true);
+  assert.equal(owner.exit_clean, false);
+  for (const record of apply.document.commands) {
+    assert.equal(record.argv.includes('--force'), false, record.argv.join(' '));
+    assert.equal(record.argv.some(argument => argument.includes('deinit')), false, record.argv.join(' '));
+    assert.equal(record.argv.some(argument => argument.includes('*')), false, record.argv.join(' '));
+  }
+
+  // Tracked dirt is still a refusal with zero mutation, ignored outputs next to it or not.
+  for (const [name, extra] of [['tracked dirt', {}], ['tracked dirt beside ignored outputs', { ignoredOutputs: true }]]) {
+    const dirty = await makeFixture({ shape: 'released', orphans: false, dirty: true, ...extra });
+    t.after(() => dirty.teardown());
+    const before = await dirty.fingerprint();
+    const dirtyApply = await dirty.run(['--apply']);
+    assert.equal(dirtyApply.code, 1, `${name}: ${dirtyApply.stdout}`);
+    assert.deepEqual(actionPairs(trackOf(dirtyApply.document, 'fixture-owner')), [['reclaim-footprint', 'refuse']], name);
+    assert.equal(trackOf(dirtyApply.document, 'fixture-owner').actions[0].reason, 'cleanup.refuse.dirty-worktree', name);
+    assert.equal(existsSync(dirty.ownerTarget), true, name);
+    assert.equal(existsSync(dirty.ownerWorktree), true, name);
+    assert.equal(await dirty.fingerprint(), before, `${name}: nothing may change`);
+  }
+
+  // An untracked path that is NOT ignored is real dirt too: the ignored-only route never reaches it.
+  const loose = await makeFixture({
+    shape: 'released',
+    orphans: false,
+    ignoredOutputs: true,
+    mutateInventory: (document, paths) => {
+      writeFileSync(join(paths.ownerWorktree, 'loose.txt'), 'untracked and not ignored\n');
+      return document;
+    },
+  });
+  t.after(() => loose.teardown());
+  const looseBefore = await loose.fingerprint();
+  const looseApply = await loose.run(['--apply']);
+  assert.equal(looseApply.code, 1, looseApply.stdout);
+  assert.deepEqual(actionPairs(trackOf(looseApply.document, 'fixture-owner')), [['reclaim-footprint', 'refuse']]);
+  assert.equal(trackOf(looseApply.document, 'fixture-owner').actions[0].reason, 'cleanup.refuse.dirty-worktree');
+  assert.equal(existsSync(join(loose.ownerWorktree, 'loose.txt')), true);
+  assert.equal(await loose.fingerprint(), looseBefore);
+});
+
+test('the documented inventory contract requires canonical feature paths', async t => {
+  // G2's inventory wording has to say what the apply-time shape check enforces: recorded feature
+  // worktree paths are canonical `<repo>/.worktrees/<name>` linked checkouts. `--help` is the
+  // contract text this tool documents.
+  const help = await runScript(['--help']);
+  assert.equal(help.code, 0, help.stderr);
+  assert.match(help.stdout, /canonical `<repo>\/\.worktrees\/<name>` linked checkout/);
+  assert.match(help.stdout, /is not a reclaimable\s+feature path/);
+  // The dry run still reports another shape; the action-time refusal is covered by the non-canonical
+  // regression in 'apply refusal preserves dirty active unmerged and canonical data'.
+  assert.match(help.stdout, /sweeper\.refuse\.reverify-worktree/);
+});
+
+// --- P1-T3 fix round 2: the step chain, the ignored-only re-derivation, truthful enumeration ------
+
+test('the first refusing step stops every later mutation of the track', async t => {
+  // Two receipts on one completed, merged, released slice. The FIRST receipt's own check refuses
+  // (its path is replaced by a symlink right after the target removal) while the worktree and target
+  // portions of the footprint gate still pass. Before this fix `reclaimOwnedPath` appended a refusal
+  // and returned, so the caller went on: the second receipt was still deleted and the engine was
+  // still handed the worktree.
+  let receipts = null;
+  const fixture = await makeFixture({
+    shape: 'released',
+    orphans: false,
+    mutateInventory: (document, paths) => {
+      receipts = {
+        first: join(receiptBase(paths), 'step-chain-first'),
+        second: join(receiptBase(paths), 'step-chain-second'),
+      };
+      mkdirSync(receipts.first, { recursive: true });
+      writeFileSync(join(receipts.first, 'payload.bin'), 'first receipt\n');
+      mkdirSync(receipts.second, { recursive: true });
+      writeFileSync(join(receipts.second, 'payload.bin'), 'second receipt\n');
+      document.tracks[0].temporary_paths = [receipts.first, receipts.second];
+      return document;
+    },
+  });
+  t.after(() => fixture.teardown());
+  const shim = await rmShim(fixture.root, {
+    after: fixture.ownerTarget,
+    mutate: `/bin/rm -rf ${JSON.stringify(receipts.first)} && /bin/ln -s ${JSON.stringify(fixture.ownerWorktree)} ${JSON.stringify(receipts.first)}`,
+  });
+  fixture.env.PATH = `${shim.directory}:${process.env.PATH}`;
+
+  const apply = await fixture.run(['--apply']);
+  assert.equal(apply.code, 1, apply.stdout);
+  assert.equal(apply.document.ok, false);
+  assert.equal(existsSync(shim.marker), true, 'the injected receipt change must have fired');
+  const owner = trackOf(apply.document, 'fixture-owner');
+  // Zero further mutation is the criterion: the later receipt keeps its bytes, the engine never
+  // received this track's worktree, and only the already-finished target removal ran.
+  assert.equal(existsSync(receipts.second), true, `the later receipt must keep its bytes; actions ${JSON.stringify(owner.actions)}`);
+  assert.equal(readFileSync(join(receipts.second, 'payload.bin'), 'utf8'), 'second receipt\n');
+  assert.deepEqual(
+    apply.document.commands.filter(record => record.argv[0] === 'rm').map(record => record.argv),
+    [['rm', '-rf', fixture.ownerTarget]],
+    `only the target removal may run; actions ${JSON.stringify(owner.actions)}`,
+  );
+  assert.equal(apply.document.commands.some(record => record.argv.includes('--apply')), false, 'the engine must never be handed a track whose step refused');
+  assert.equal(
+    apply.document.commands.some(record => record.argv[0] === 'git' && record.argv[1] === 'worktree' && record.argv[2] === 'prune'),
+    false,
+  );
+  // The chain ends at the first receipt: the second receipt is never attempted, so the aggregate has
+  // no row for it, none for the engine handover and none for the prune — and the refusal row names
+  // the step (kind + ref) and the fact it refused with.
+  assert.deepEqual(actionPairs(owner), [
+    ['reclaim-target', 'executed'],
+    ['reclaim-temporary', 'refuse'],
+  ], JSON.stringify(owner.actions));
+  const stopping = owner.actions.find(action => action.verdict === 'refuse');
+  assert.equal(stopping.reason, 'sweeper.refuse.reverify-temporary');
+  assert.equal(stopping.ref, receipts.first);
+  assert.equal(owner.exit_clean, false);
+  // The worktree keeps its branch and its Git record, and the peer is untouched as always.
+  assert.equal(existsSync(fixture.ownerWorktree), true);
+  assert.equal((await fixture.git(['rev-parse', '--abbrev-ref', 'HEAD'], fixture.ownerWorktree)).trim(), 'feat/fixture-owner');
+  assert.equal(
+    (await fixture.git(['for-each-ref', '--format=%(refname)', 'refs/heads/feat/fixture-owner'], fixture.main)).trim(),
+    'refs/heads/feat/fixture-owner',
+  );
+  assert.equal((await fixture.git(['worktree', 'list', '--porcelain'], fixture.main)).includes('fixture-owner'), true);
+  assert.equal(existsSync(fixture.peerWorktree), true);
+});
+
+test('dirt that arrives after the ignored-only classification aborts the fallback', async t => {
+  // The ignored-only classification is measured once, before the target removal; the engine's own
+  // `--apply` attempt runs last before the non-force `rm -rf` of the WHOLE worktree. Dirt that lands
+  // in that window must not be deleted, so the classification is re-derived immediately before the
+  // fallback removal: the engine is asked again and the tracked tree, the untracked/ignored paths and
+  // every enumerated path are measured again.
+  const cases = [
+    ['a tracked modification', worktree => `echo late >> ${JSON.stringify(join(worktree, 'README.md'))}`, /tracked tree/],
+    ['an untracked non-ignored path', worktree => `echo late > ${JSON.stringify(join(worktree, 'late.txt'))}`, /non-ignored porcelain entry/],
+  ];
+  for (const [name, mutateOf, expectedDetail] of cases) {
+    const fixture = await makeFixture({ shape: 'released', orphans: false, ignoredOutputs: true });
+    t.after(() => fixture.teardown());
+    const wrapper = await engineApplyWrapper(fixture.root, { mutate: mutateOf(fixture.ownerWorktree) });
+    fixture.env.PATH = `${wrapper.directory}:${process.env.PATH}`;
+
+    const apply = await fixture.run(['--apply']);
+    assert.equal(existsSync(wrapper.marker), true, `${name}: the injected dirt must have been created`);
+    assert.equal(apply.code, 1, `${name}: ${apply.stdout}`);
+    assert.equal(apply.document.ok, false, name);
+    const owner = trackOf(apply.document, 'fixture-owner');
+    // Zero mutation is the criterion: the worktree and the dirt that arrived are still there, the
+    // fallback never ran, and no prune or branch handover happened.
+    assert.equal(
+      existsSync(fixture.ownerWorktree),
+      true,
+      `${name}: the worktree holding arrived dirt must survive; actions ${JSON.stringify(owner.actions)}`,
+    );
+    if (name === 'a tracked modification') assert.match(readFileSync(join(fixture.ownerWorktree, 'README.md'), 'utf8'), /late/);
+    else assert.equal(readFileSync(join(fixture.ownerWorktree, 'late.txt'), 'utf8').includes('late'), true, name);
+    assert.deepEqual(
+      apply.document.commands.filter(record => record.argv[0] === 'rm').map(record => record.argv),
+      [['rm', '-rf', fixture.ownerTarget]],
+      `${name}: only the target removal may run; actions ${JSON.stringify(owner.actions)}`,
+    );
+    assert.equal(
+      apply.document.commands.some(record => record.argv[0] === 'git' && record.argv[1] === 'worktree' && record.argv[2] === 'prune'),
+      false,
+      name,
+    );
+    assert.equal(
+      apply.document.commands.filter(record => record.argv.includes('--apply')).length,
+      1,
+      `${name}: the engine's single attempt is recorded and never retried with a removal`,
+    );
+    assert.deepEqual(actionPairs(owner), [
+      ['reclaim-target', 'executed'],
+      ['engine-worktree-removal', 'blocked'],
+      ['fallback-worktree-removal', 'refuse'],
+    ], `${name}: ${JSON.stringify(owner.actions)}`);
+    const refusal = owner.actions.find(action => action.verdict === 'refuse');
+    assert.equal(refusal.reason, 'sweeper.refuse.reverify-ignored-only', name);
+    assert.match(refusal.detail, expectedDetail, name);
+    assert.match(refusal.detail, /cleanup\.refuse\.dirty-worktree|no longer holds/, name);
+    assert.equal(owner.worktree.listed, true, name);
+    assert.equal(owner.exit_clean, false, name);
+  }
+});
+
+test('the ignored enumeration reports the real path and size of a quoted name', async t => {
+  // Git's line-oriented porcelain form C-quotes a pathname carrying a special character — `!! "trail
+  // .log"` for a trailing space, `!! "we\"ird.log"` for an embedded quote — and the old parser passed
+  // that spelling on as if it were the path, and the missing-file result on as zero bytes. Both made
+  // the evidence false. The enumeration now uses the NUL-delimited form, in which Git never quotes.
+  const quoted = await makeFixture({ shape: 'released', orphans: false, ignoredOutputs: true, ignoredPatterns: ['*.log'] });
+  t.after(() => quoted.teardown());
+  const odd = join(quoted.ownerWorktree, 'we"ird.log');
+  const spaced = join(quoted.ownerWorktree, 'trail .log');
+  writeFileSync(odd, 'quote\n');
+  writeFileSync(spaced, 'trail \n');
+  const nodeModulesBytes = directoryBytes(join(quoted.ownerWorktree, 'node_modules'));
+  const distBytes = directoryBytes(join(quoted.ownerWorktree, 'dist'));
+  const quotedReal = realpathSync(quoted.ownerWorktree);
+  assert.equal((await quoted.git(['status', '--porcelain', '--untracked-files=no'], quoted.ownerWorktree)).trim(), '', 'the tracked tree must be clean');
+
+  const apply = await quoted.run(['--apply']);
+  assert.equal(apply.code, 1, apply.stdout);
+  assert.deepEqual(apply.document.refusals, []);
+  const owner = trackOf(apply.document, 'fixture-owner');
+  const blocked = owner.actions.find(action => action.verdict === 'blocked');
+  assert.equal(blocked.reason, 'sweeper.blocked.ignored-outputs');
+  // Every path is the real path with its real size — the two special-character names included.
+  assert.deepEqual(blocked.ignored_footprint, {
+    paths: [
+      { path: join(quoted.ownerWorktree, 'dist'), bytes: distBytes },
+      { path: join(quoted.ownerWorktree, 'node_modules'), bytes: nodeModulesBytes },
+      { path: spaced, bytes: 7 },
+      { path: odd, bytes: 6 },
+    ],
+    total_bytes: distBytes + nodeModulesBytes + 13,
+  });
+  // The engine still printed its refusal for the canonical path, and the slice is reclaimed through
+  // the documented route as before.
+  assert.equal(
+    apply.document.commands.some(record => record.stdout.includes(`refuse | worktree | ${quotedReal} | cleanup.refuse.dirty-worktree`)),
+    true,
+  );
+  assert.deepEqual(actionPairs(owner), [
+    ['reclaim-target', 'executed'],
+    ['engine-worktree-removal', 'blocked'],
+    ['fallback-worktree-removal', 'executed'],
+    ['prune', 'executed'],
+    ['engine-branch-removal', 'retained'],
+  ], JSON.stringify(owner.actions));
+  assert.equal(existsSync(quoted.ownerWorktree), false);
+});
+
+test('a vanished enumerated path fails the ignored-only route closed', async t => {
+  // A path that vanishes between Git's report and this tool's measurement is not a zero-byte
+  // footprint: the enumeration cannot be vouched for, so the ignored-only route is not authorized and
+  // nothing is reclaimed. The shim deletes the reported ignored file right after the status call.
+  const vanished = await makeFixture({ shape: 'released', orphans: false, ignoredPatterns: ['*.log'] });
+  t.after(() => vanished.teardown());
+  const gone = join(vanished.ownerWorktree, 'gone.log');
+  writeFileSync(gone, 'gone\n');
+  const shim = await gitShim(vanished.root, { when: '--ignored=traditional', mutate: `/bin/rm -f ${JSON.stringify(gone)}` });
+  vanished.env.PATH = `${shim.directory}:${process.env.PATH}`;
+
+  const apply = await vanished.run(['--apply']);
+  assert.equal(existsSync(shim.marker), true, 'the injected vanish must have fired');
+  assert.equal(existsSync(gone), false, 'the injected fact change removed the enumerated path');
+  assert.equal(apply.code, 1, apply.stdout);
+  const owner = trackOf(apply.document, 'fixture-owner');
+  assert.deepEqual(actionPairs(owner), [['reclaim-footprint', 'refuse']], JSON.stringify(owner.actions));
+  assert.equal(owner.actions[0].reason, 'cleanup.refuse.dirty-worktree');
+  assert.match(owner.actions[0].detail, /cannot be measured truthfully/);
+  // Zero mutation: no `rm`, no engine `--apply`, and the worktree and its target keep their bytes.
+  assert.deepEqual(apply.document.commands.filter(record => record.argv[0] === 'rm'), []);
+  assert.equal(apply.document.commands.some(record => record.argv.includes('--apply')), false);
+  assert.equal(existsSync(vanished.ownerWorktree), true);
+  assert.equal(existsSync(vanished.ownerTarget), true);
+  assert.equal(owner.worktree.listed, true);
+  assert.equal(owner.exit_clean, false);
 });
