@@ -889,7 +889,6 @@ impl HostHandle {
         self.core.verify_principal(principal)?;
         let pair = classify_pair(request.actor_ref.is_some(), request.viewpoint.is_some())?;
         let creator_id = principal.creator_id().to_string();
-        let canonical_root = session_cwd(&request, &self.core)?;
         if pair == ActorPairMode::Actor {
             let (Some(actor_ref), Some(viewpoint)) =
                 (request.actor_ref.as_ref(), request.viewpoint.as_ref())
@@ -910,6 +909,14 @@ impl HostHandle {
                         character_id: character_id.to_string(),
                     }
                 }
+            };
+            // A Character session runs at the admission's own creative-root
+            // pin; a Creator Actor session keeps the pre-existing cwd
+            // boundary (D11 selects only the Character root). Both are
+            // resolved before any Host, provider or memory effect.
+            let canonical_root = match &actor {
+                AdmittedActor::Character { .. } => character_session_cwd(&request, &self.core)?,
+                AdmittedActor::Creator { .. } => session_cwd(&request, &self.core)?,
             };
             let admission = CoreActorAdmission::new(self.core.inner.pool.clone());
             let viewpoint = ActorViewpoint {
@@ -965,6 +972,7 @@ impl HostHandle {
                 viewpoint,
             ));
         }
+        let canonical_root = session_cwd(&request, &self.core)?;
         let host_req = Self::host_create_request(&request, &canonical_root, &creator_id);
         let model = request.model.clone();
         let session = self.host.create_session(host_req).await.map_err(host_err)?;
@@ -1948,6 +1956,64 @@ fn session_cwd(request: &CreateSessionRequest, core: &CoreService) -> CoreResult
                 .map_err(|e| invalid("cwd", e.to_string()))
         },
     )
+}
+
+/// The session cwd for a Character Actor create: the admission's own
+/// creative-root pin, never a second root authority.
+///
+/// The pin is the canonical root the engine-owner admission resolved ONCE at
+/// open from the selected workspace's `meta.json` (§A2: no second
+/// selected-metadata read). An omitted `cwd` uses that pin, and an explicit
+/// `cwd` is accepted only when its canonical form — symlink aliases included —
+/// is exactly equal to it. A descendant, a foreign or Nexus root, the user
+/// home, a pin that is absent or was removed after open, and an unresolvable
+/// explicit path are all `invalid_input` on `cwd`, refused here, before any
+/// Host, provider or memory effect.
+///
+/// Compiled only with the `execution` edge that produces the pin: without it
+/// the admission pins nothing, so the same refusal is the only honest answer
+/// and `provider-host` still compiles on its own.
+#[cfg(feature = "execution")]
+fn character_session_cwd(
+    request: &CreateSessionRequest,
+    core: &CoreService,
+) -> CoreResult<PathBuf> {
+    let Some(pin) = core.admission_creative_root() else {
+        return Err(invalid(
+            "cwd",
+            "a Character session requires an admitted creative root",
+        ));
+    };
+    let pin = validate_workspace_path(pin).map_err(|e| invalid("cwd", e.to_string()))?;
+    let Some(cwd) = request.cwd.as_ref() else {
+        return Ok(pin);
+    };
+    let canonical = validate_workspace_path(std::path::Path::new(cwd))
+        .map_err(|e| invalid("cwd", e.to_string()))?;
+    if canonical == pin {
+        return Ok(canonical);
+    }
+    Err(invalid(
+        "cwd",
+        format!(
+            "a Character session cwd must be the admitted creative root '{}'",
+            pin.display()
+        ),
+    ))
+}
+
+/// Character-root pin without the `execution` edge: this admission holds no
+/// admitted creative root, so the create is refused rather than falling back
+/// to a caller-supplied or default root.
+#[cfg(not(feature = "execution"))]
+fn character_session_cwd(
+    _request: &CreateSessionRequest,
+    _core: &CoreService,
+) -> CoreResult<PathBuf> {
+    Err(invalid(
+        "cwd",
+        "a Character session requires an admitted creative root",
+    ))
 }
 
 const fn session_wire(
