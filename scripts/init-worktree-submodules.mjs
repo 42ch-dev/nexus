@@ -12,8 +12,10 @@
  * Initialization is native and therefore NOT transactional: when a native command
  * fails after an earlier one succeeded, the initialized subset is reported (refusal
  * code `init.refuse.partial`, naming the paths the failure left in place) and is
- * never rolled back, while a refusal raised before any mutation is reported as
- * `init.refuse.preflight`, which promises that nothing was touched.
+ * never rolled back. Every refusal that names no initialized submodule — a refusal
+ * raised before any mutation, and an attempted command that completed none — is
+ * `init.refuse.preflight`, which promises that nothing is initialized because
+ * nothing was changed.
  *
  *   node scripts/init-worktree-submodules.mjs --worktree <absolute-checkout>
  *   node scripts/init-worktree-submodules.mjs --help
@@ -57,20 +59,25 @@ stdout (operational invocations) is exactly one JSON object:
   for every operational failure, including filesystem errors that are not Git
   refusals, and it tells the truth about what the failure left behind:
 
-    "init.refuse.preflight"  this run attempted no mutation at all, so the
-                             checkout is exactly as it was: the refusal is a
-                             preflight refusal.
+    "init.refuse.preflight"  this report names no initialized submodule: the run
+                             attempted no mutation at all, or its native command
+                             completed none, so the checkout is exactly as it was.
+                             Nothing is rolled back.
     "init.refuse.partial"    native Git had already initialized at least one
-                             submodule when the failure happened. Initialization
-                             is NOT transactional and nothing is rolled back:
-                             re-run to validate the initialized subset and finish
-                             the rest.
+                             submodule when the failure happened, and
+                             "initialized_paths" lists those paths (at least one).
+                             Initialization is NOT transactional and nothing is
+                             rolled back: re-run to validate the initialized
+                             subset and finish the rest.
     "initialized_paths"      the submodule paths that are initialized in the
                              checkout at the moment of the failure, re-observed
                              read-only — which paths the failure therefore left in
-                             place. It is null when the checkout could not be
-                             re-read, and null for a preflight refusal, which
-                             enumerates nothing because it touched nothing.
+                             place. A non-empty list (>= 1) always accompanies
+                             "init.refuse.partial"; [] means an attempted native
+                             command completed no submodule; null means nothing is
+                             enumerated, either because the refusal was raised
+                             before any mutation or because the checkout could not
+                             be re-read (an unknown state, never an empty one).
 
 Exit codes:
   0  checkout valid, submodules validated or initialized
@@ -408,9 +415,11 @@ function groupMissing(records, checkout) {
 async function initializeMissing(groups, mutation) {
   for (const group of groups) {
     const paths = group.entries.map(entry => entry.relInRepo);
-    // From this point on the checkout is being mutated, so a failure from here on can no longer be
-    // reported as untouched state. The flag is set BEFORE the command runs: a native command that
-    // fails part-way through its own work has still changed the tree.
+    // From here on a mutating command is issued, so this run can no longer claim it did nothing on a
+    // failure. The flag is set BEFORE the command runs because a native command that fails part-way
+    // through its own work has still changed the tree; it does not by itself mean something is
+    // initialized (the command can complete no submodule at all), which is why the refusal class is
+    // decided by re-observing the checkout instead.
     mutation.attempted = true;
     const result = await runGit(group.repoDir, ['submodule', 'update', '--init', '--recursive', '--', ...paths]);
     if (!result.ok) {
@@ -440,22 +449,24 @@ function writeStdout(value) {
 }
 
 /**
- * The one refusal report. `code` distinguishes a preflight refusal — this run attempted no mutation,
- * so the checkout is exactly as it was — from a partial initialization, where native Git had already
- * initialized at least one submodule and nothing is rolled back, and `initialized_paths` names the
- * submodule paths the failure left initialized in the checkout (`null`: not enumerated).
+ * The one refusal report. The class follows the checkout as re-observed after the failure, not this
+ * run's intent: `init.refuse.partial` means at least one submodule is initialized there and
+ * `initialized_paths` lists those paths, while `init.refuse.preflight` means the report names no
+ * initialized path — no mutation was attempted, or the attempted command completed no submodule —
+ * and `initialized_paths` is `null` when nothing could be enumerated because the checkout could not
+ * be re-read (an unknown state, never reported as an empty one).
  */
 async function refusal(worktree, reason, mutation) {
-  const code = mutation.attempted ? 'init.refuse.partial' : 'init.refuse.preflight';
   const initializedPaths = mutation.attempted ? await initializedPathsAt(worktree) : null;
-  const leftBehind = initializedPaths === null
-    ? 'the checkout could not be re-read, so this report cannot name them'
-    : initializedPaths.length === 0
-      ? 'no submodule path is initialized there yet (the native command failed before completing any)'
-      : `already initialized: ${initializedPaths.join(', ')}`;
-  const note = mutation.attempted
-    ? `${code}: at least one submodule was initialized by this run and is NOT rolled back; ${leftBehind}. Re-run to validate the initialized subset and finish the rest, or inspect with \`git submodule status --recursive\`.`
-    : `${code}: no mutation was attempted by this run, so the checkout is unchanged.`;
+  const partial = initializedPaths !== null && initializedPaths.length > 0;
+  const code = partial ? 'init.refuse.partial' : 'init.refuse.preflight';
+  const note = partial
+    ? `${code}: at least one submodule was initialized by this run and is NOT rolled back; already initialized: ${initializedPaths.join(', ')}. Re-run to validate the initialized subset and finish the rest, or inspect with \`git submodule status --recursive\`.`
+    : initializedPaths === null && mutation.attempted
+      ? `${code}: the checkout could not be re-read, so no initialized path is enumerated (unknown state, never an empty one); nothing is rolled back.`
+      : initializedPaths === null
+        ? `${code}: no mutation was attempted by this run, so the checkout is unchanged and nothing is enumerated.`
+        : `${code}: the native command completed no submodule before it failed, so the checkout is unchanged and no initialized path is enumerated.`;
   process.stderr.write(`init-worktree-submodules: refused: ${reason}\ninit-worktree-submodules: ${note}\n`);
   writeStdout({ version: VERSION, worktree, submodules: [], ok: false, refusal: { code, detail: reason, initialized_paths: initializedPaths } });
   return 1;
@@ -469,8 +480,8 @@ async function run() {
   }
   const worktree = await canonicalize(options.worktree);
   if (!worktree) return await refusal(options.worktree, `not an existing path: ${options.worktree}`, { attempted: false });
-  // Native-init progress: `attempted` flips before the first mutating command runs, which is what
-  // separates a preflight refusal (nothing touched) from a partial initialization in the report.
+  // `attempted` records that a mutating command was issued; it does not decide the refusal class,
+  // which is read from the checkout re-observed after a failure (see `refusal`).
   const mutation = { attempted: false };
   try {
     let state = await inspect(worktree);

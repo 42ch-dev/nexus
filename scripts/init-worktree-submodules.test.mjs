@@ -11,10 +11,12 @@
  * (`.gitmodules` and gitlinks, with and without the working-tree file) and
  * operational filesystem failures, which must keep the JSON stdout contract.
  * The refusal object also has to tell the truth about what a failure left
- * behind: `init.refuse.preflight` (this run attempted no mutation) is
- * distinguished from `init.refuse.partial` (native Git had already initialized
- * at least one submodule, nothing is rolled back, and `initialized_paths` names
- * the paths it left in place). Nothing here touches the product repository, its
+ * behind: `init.refuse.preflight` (this run changed nothing — it attempted no
+ * mutation, or its native command completed none, and `initialized_paths` is
+ * `null` in the first case and `[]` in the second) is distinguished from
+ * `init.refuse.partial` (native Git had already initialized at least one
+ * submodule, nothing is rolled back, and `initialized_paths` lists those paths).
+ * Nothing here touches the product repository, its
  * `.agents` submodule, a package manager or the network.
  *
  * Fixture transport: Git has refused the `file` protocol for submodule clones
@@ -771,18 +773,20 @@ test('operational filesystem failures keep the JSON stdout contract', async () =
   assert.ok(failed.stderr.includes(stranded), `the refusal must name the unreadable path: ${failed.stderr}`);
 });
 
-test('a partial native initialization is reported as partial, never as untouched', async t => {
+test('a native initialization refusal distinguishes an untouched preflight from a partial subset', async t => {
   // F-003: the initializer promised "state unchanged" for every exit-1 failure, but native
   // initialization is not atomic — `git submodule update --init --recursive` runs once per repository
   // group and a later failure leaves the earlier work in place. Rolling Git initialization back is
-  // riskier than telling the truth, so the refusal now distinguishes a PREFLIGHT refusal (this run
-  // attempted no mutation) from a PARTIAL initialization, and names the paths the failure left
-  // initialized instead of claiming an unchanged state.
+  // riskier than telling the truth, so the refusal distinguishes PREFLIGHT (this run changed nothing:
+  // it attempted no mutation, or its native command completed no submodule) from PARTIAL (at least one
+  // submodule is initialized and is named, never rolled back). The class follows the checkout
+  // re-observed after the failure, so an attempted command that completed nothing is preflight with an
+  // empty enumeration — never a "partial" that claims an initialized subset it does not have.
   const worktreeA = fixture.worktree(FEATURE_A);
   const subModuleDir = join(fixture.worktreeGitDir(FEATURE_A), 'modules', 'sub');
 
-  // Control — a preflight refusal: the main worktree is rejected by validation, which reads before
-  // it ever mutates anything.
+  // Control — a preflight refusal raised before any mutation: the main worktree is rejected by
+  // validation, which reads before it ever mutates anything, so nothing is enumerated.
   const preflight = await fixture.wrapper(['--worktree', fixture.superproject]);
   assert.equal(preflight.code, 1, preflight.stdout);
   const preflightJson = JSON.parse(preflight.stdout);
@@ -816,18 +820,24 @@ test('a partial native initialization is reported as partial, never as untouched
     assert.equal(existsSync(join(worktreeA, 'sub', '.git')), true, 'the report is the truth: the child really is initialized');
     assert.equal(existsSync(join(worktreeA, 'sub', 'nested', '.git')), false, 'the nested child is not initialized');
 
-    // Case B — the native command completed nothing at all: still a partial (mutating) refusal, and
-    // the empty enumeration says so instead of pretending an untouched checkout.
+    // Case B — the native command ran but completed nothing at all: the checkout is observably
+    // unchanged, so the refusal is preflight with an empty enumeration. `partial` is reserved for an
+    // observed initialized subset (>= 1 path), and the note must not claim a mutation that never
+    // happened.
     await rm(join(worktreeA, 'sub'), { recursive: true, force: true });
     await rm(subModuleDir, { recursive: true, force: true });
     await rename(fixture.subOrigin, parkedSub);
     const nothing = await fixture.wrapper(['--worktree', worktreeA]);
-    record('partial-init-parent-unreachable', `node scripts/init-worktree-submodules.mjs --worktree <A>`, nothing);
+    record('preflight-init-parent-unreachable', `node scripts/init-worktree-submodules.mjs --worktree <A>`, nothing);
     assert.equal(nothing.code, 1, nothing.stdout);
     const nothingJson = JSON.parse(nothing.stdout);
-    assert.equal(nothingJson.refusal.code, 'init.refuse.partial');
+    assert.equal(nothingJson.ok, false);
+    assert.deepEqual(nothingJson.submodules, []);
+    assert.equal(nothingJson.refusal.code, 'init.refuse.preflight');
     assert.deepEqual(nothingJson.refusal.initialized_paths, []);
-    assert.match(nothing.stderr, /no submodule path is initialized there yet/);
+    assert.match(nothing.stderr, /init\.refuse\.preflight: the native command completed no submodule/);
+    assert.doesNotMatch(nothing.stderr, /NOT rolled back/);
+    assert.doesNotMatch(nothing.stderr, /no mutation was attempted/, 'an attempted command must never report itself as unattempted');
     assert.equal(existsSync(join(worktreeA, 'sub', '.git')), false);
   } finally {
     if (existsSync(parkedSub)) await rename(parkedSub, fixture.subOrigin);
