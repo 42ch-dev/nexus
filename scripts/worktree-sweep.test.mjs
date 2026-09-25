@@ -24,7 +24,9 @@
  *     worktree, receipt or cache descendant must refuse (and must never let `--check-exit` pass),
  *     while a receipt whose components are real directories inside the temp root stays owned;
  *   * a receipt under a linked parent, a receipt claimed by two tracks, and a sibling plan's
- *     worktree path (or the feature target it implies) are refused before anything is proposed.
+ *     worktree path (or the feature target it implies) are refused before anything is proposed;
+ *   * a receipt that names an in-root path through an alias of the temp root stays owned, while a
+ *     receipt traversing a link inside that root is still refused.
  */
 import { strict as assert } from 'node:assert';
 import { execFile } from 'node:child_process';
@@ -307,6 +309,21 @@ const ENGINE_FLAGS = ['--apply', '--all-workflows', '--remote', '--ignore-unread
  */
 function receiptBase(paths) {
   return join(realpathSync(paths.root), 'receipts');
+}
+
+/**
+ * An alias of the fixture's own temp root: `<root>/temp-alias -> <root>/temp-real`. Setting
+ * `TMPDIR` to the alias makes the child sweep a canonical root reached only through a link, which
+ * is the shape `/var` versus `/private/var` takes on Darwin — constructed here so the same shape
+ * is exercised on a host whose `tmpdir()` is already canonical.
+ */
+function aliasTempRoot(paths) {
+  const root = realpathSync(paths.root);
+  const realTemp = join(root, 'temp-real');
+  const aliasTemp = join(root, 'temp-alias');
+  mkdirSync(realTemp, { recursive: true });
+  symlinkSync(realTemp, aliasTemp, 'dir');
+  return { realTemp, aliasTemp };
 }
 
 /** A sibling plan declaration claiming one worktree path — and therefore one feature target. */
@@ -765,4 +782,90 @@ test('unreadable or stale ownership fails closed', async t => {
   const relative = await symlinked.run(['--check-exit', 'fixture-owner', '--repo', 'relative/path']);
   assert.equal(relative.code, 2);
   assert.equal(relative.document, null);
+});
+
+// The temp root is compared canonically, so a receipt naming an in-root path through a system alias
+// of that root must stay owned instead of being refused as a stale claim — while a path that
+// traverses a link *inside* the root still describes a location the receipt never named.
+test('unreadable or stale receipt aliases stay owned', async t => {
+  const reclaimTemporary = run => trackOf(run.document, 'fixture-owner').actions.find(action => action.kind === 'reclaim-temporary');
+  const ownedReceipt = (run, receipt) => {
+    const fact = trackOf(run.document, 'fixture-owner').temporary_paths.find(entry => entry.path === receipt);
+    assert.ok(fact, `receipt ${receipt} must be reported`);
+    assert.equal(fact.exists, true);
+    assert.ok(fact.bytes > 0);
+    const action = reclaimTemporary(run);
+    assert.equal(action.verdict, 'propose');
+    assert.equal(action.reason, 'sweeper.propose.reclaim-owned-temporary');
+  };
+
+  // The reported shape: the fixture root is created under `tmpdir()`, so this receipt is spelled
+  // through that alias (`/var/...` on Darwin, canonical `/private/var/...`) exactly as an inventory
+  // producer would write it.
+  const hostAlias = await makeFixture({
+    shape: 'leased',
+    mutateInventory: (document, paths) => {
+      const receipt = join(paths.root, 'receipts', 'owned');
+      mkdirSync(receipt, { recursive: true });
+      writeFileSync(join(receipt, 'payload.bin'), 'host-aliased receipt\n');
+      document.tracks[0].temporary_paths = [receipt];
+      return document;
+    },
+  });
+  t.after(() => hostAlias.teardown());
+  if (realpathSync(tmpdir()) === tmpdir()) {
+    t.diagnostic('this host spells tmpdir() canonically; the system-alias shape is covered by the constructed temp-root alias below');
+  }
+  const hostAliasBefore = await hostAlias.fingerprint();
+  const hostAliasRun = await hostAlias.run();
+  assert.equal(hostAliasRun.code, 0, `host-aliased receipt: ${hostAliasRun.stdout}`);
+  assert.deepEqual(hostAliasRun.document.refusals, [], `host-aliased receipt: ${hostAliasRun.stdout}`);
+  ownedReceipt(hostAliasRun, join(hostAlias.root, 'receipts', 'owned'));
+  assert.equal(await hostAlias.fingerprint(), hostAliasBefore);
+
+  // The same shape, constructed from the fixture's own temp root so it holds on every host.
+  const aliased = await makeFixture({
+    shape: 'leased',
+    mutateInventory: (document, paths) => {
+      const { aliasTemp } = aliasTempRoot(paths);
+      const receipt = join(aliasTemp, 'receipts', 'owned');
+      mkdirSync(receipt, { recursive: true });
+      writeFileSync(join(receipt, 'payload.bin'), 'aliased receipt\n');
+      document.tracks[0].temporary_paths = [receipt];
+      return document;
+    },
+  });
+  t.after(() => aliased.teardown());
+  aliased.env.TMPDIR = join(realpathSync(aliased.root), 'temp-alias');
+  const aliasedReceipt = join(realpathSync(aliased.root), 'temp-alias', 'receipts', 'owned');
+  const aliasedBefore = await aliased.fingerprint();
+  const aliasedRun = await aliased.run();
+  assert.equal(aliasedRun.code, 0, `constructed alias: ${aliasedRun.stdout}`);
+  assert.deepEqual(aliasedRun.document.refusals, [], `constructed alias: ${aliasedRun.stdout}`);
+  ownedReceipt(aliasedRun, aliasedReceipt);
+  assert.equal(await aliased.fingerprint(), aliasedBefore);
+
+  // Alias tolerance covers the root spelling only: a link below the aliased root is still refused,
+  // never followed out of the temp root.
+  const escaped = await makeFixture({
+    shape: 'leased',
+    mutateInventory: (document, paths) => {
+      const { realTemp, aliasTemp } = aliasTempRoot(paths);
+      mkdirSync(join(paths.cache, 'detached-receipt'), { recursive: true });
+      writeFileSync(join(paths.cache, 'detached-receipt', 'payload.bin'), 'detached\n');
+      symlinkSync(paths.cache, join(realTemp, 'link'), 'dir');
+      document.tracks[0].temporary_paths = [join(aliasTemp, 'link', 'detached-receipt')];
+      return document;
+    },
+  });
+  t.after(() => escaped.teardown());
+  escaped.env.TMPDIR = join(realpathSync(escaped.root), 'temp-alias');
+  const escapedBefore = await escaped.fingerprint();
+  const escapedRun = await escaped.run();
+  assert.equal(escapedRun.code, 2, `escaping link under aliased root: ${escapedRun.stdout}`);
+  assert.equal(escapedRun.document.ok, false);
+  assert.equal(refusalCodes(escapedRun).includes('sweeper.refuse.stale-temporary'), true, `refusals: ${JSON.stringify(refusalCodes(escapedRun))}`);
+  assert.deepEqual(proposedRefs(escapedRun.document), []);
+  assert.deepEqual(escapedRun.document.commands, []);
+  assert.equal(await escaped.fingerprint(), escapedBefore);
 });

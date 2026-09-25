@@ -105,20 +105,56 @@ async function describePath(path) {
 }
 
 /**
- * Canonical containment for an ownership receipt. The candidate's existing components are
- * `lstat`ed one segment at a time from the canonical temp root, so a linked parent is never
- * traversed to reach a location the receipt never described, and a `..`-free resolved prefix is
- * all that can be claimed. `within` is false for a receipt that is not a plain descendant of the
- * root; `unreadable` carries the failure code when the walk itself cannot be completed (a
- * non-`ENOENT` failure), which the caller must refuse as an unreadable fact rather than as a
- * stale claim — and which a deeper `ENOENT` never is: the tail simply does not exist yet.
+ * Split a resolved receipt path into the canonical root it names and the segments below that root.
+ * A path already spelled through the canonical root is a plain prefix slice; any other spelling is
+ * canonicalized one ancestor at a time from the filesystem root until an ancestor lands exactly on
+ * `root`. Only ancestors of the root are ever followed (the walk stops the moment it reaches the
+ * root), so a link *below* the root is never traversed here — the caller's segment walk refuses it.
+ * `tail` is null when the path never lands on the root, which includes the root itself and any
+ * path whose alias prefix does not exist; `unreadable` carries the failure code of a canonical
+ * walk that failed for a reason other than `ENOENT`.
+ */
+async function canonicalAlias(root, target) {
+  if (target === root) return { tail: null, unreadable: null };
+  if (target.startsWith(`${root}${sep}`)) return { tail: target.slice(root.length + 1), unreadable: null };
+  const segments = target.split(sep);
+  let current = segments[0] === '' ? sep : `${segments[0]}${sep}`;
+  for (const [index, segment] of segments.slice(1).entries()) {
+    current = join(current, segment);
+    let canonical;
+    try {
+      canonical = await realpath(current);
+    } catch (error) {
+      if (error.code !== 'ENOENT') return { tail: null, unreadable: error.code ?? 'realpath-failed' };
+      return { tail: null, unreadable: null };
+    }
+    if (canonical === root) {
+      const tail = segments.slice(index + 2).join(sep);
+      return { tail: tail === '' ? null : tail, unreadable: null };
+    }
+  }
+  return { tail: null, unreadable: null };
+}
+
+/**
+ * Canonical containment for an ownership receipt. The candidate's own root alias is canonicalized
+ * first — a receipt may spell the temp root through a system alias (`/var/...` versus canonical
+ * `/private/var/...` on Darwin, or any `TMPDIR` form that traverses a link) while `tmpdir()` is not
+ * canonical on every platform — and only then are the candidate's existing components below the
+ * root `lstat`ed one segment at a time, so a linked parent is never traversed to reach a location
+ * the receipt never described, and a `..`-free resolved prefix is all that can be claimed.
+ * `within` is false for a receipt that is not a plain descendant of the root; `unreadable` carries
+ * the failure code when the walk itself cannot be completed (a non-`ENOENT` failure), which the
+ * caller must refuse as an unreadable fact rather than as a stale claim — and which a deeper
+ * `ENOENT` never is: the tail simply does not exist yet.
  */
 async function canonicalWithin(parent, child) {
   const root = await pathKey(parent);
-  const target = resolve(child);
-  if (target === root || !target.startsWith(`${root}${sep}`)) return { within: false, unreadable: null };
+  const alias = await canonicalAlias(root, resolve(child));
+  if (alias.unreadable !== null) return { within: false, unreadable: alias.unreadable };
+  if (alias.tail === null) return { within: false, unreadable: null };
   let current = root;
-  for (const segment of target.slice(root.length + 1).split(sep)) {
+  for (const segment of alias.tail.split(sep)) {
     current = join(current, segment);
     let stats;
     try {
