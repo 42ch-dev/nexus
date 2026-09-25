@@ -97,11 +97,29 @@ export const SSE_MAX_PENDING_DATA_BYTES = 1024 * 1024;
 /** Max terminal operations retained in the HTTP registry after completion. */
 export const REGISTRY_MAX_TERMINAL_OPERATIONS = 64;
 /**
+ * Max Actor operations the transport mirror retains (record and hub together) —
+ * the Actor arm's twin of {@link REGISTRY_MAX_TERMINAL_OPERATIONS}.
+ *
+ * The mirror's Actor state is bookkeeping: the authority owns the run's outcome
+ * and its bounded observation, and every Actor stream re-marks its operation on
+ * connect. Without a bound the stream-admission path accumulated one record+hub
+ * per distinct connected operation until the next Actor execute swept them,
+ * holding hub control slots (gap/terminal) without limit; this bound keeps that
+ * population finite so the shared control reserve still holds an ending for the
+ * streams that need one.
+ */
+export const REGISTRY_MAX_ACTOR_OPERATIONS = REGISTRY_MAX_TERMINAL_OPERATIONS;
+/**
  * Bound on hubs that may simultaneously hold control frames: at most
  * {@link REGISTRY_MAX_TERMINAL_OPERATIONS} retained terminal hubs plus
  * {@link MAX_ACTIVE_PROVIDER_OPERATIONS} live hubs. Each hub holds at most one
  * terminal and one gap slot of ≤{@link SSE_RESERVED_CONTROL_BYTES}, so the
  * control reserve below is a hard ceiling that never competes with the data pool.
+ *
+ * The Actor mirror arm holds up to {@link REGISTRY_MAX_ACTOR_OPERATIONS}
+ * further hubs inside the same reserve; an ending that a saturated reserve still
+ * cannot charge is counted and logged (`sseUnretainedGapEvents`) instead of
+ * disappearing as a bare close.
  */
 export const ENVIRONMENT_MAX_TRACKED_HUBS =
   REGISTRY_MAX_TERMINAL_OPERATIONS + MAX_ACTIVE_PROVIDER_OPERATIONS;

@@ -17,17 +17,21 @@ mod lifecycle;
 mod runtime;
 pub mod wire_fixture;
 
+use std::future::Future;
 use std::sync::Arc;
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
+use nexus_contracts::generated::daemon_api::agent_host::{
+    CreateSessionRequest, ExecuteOperationRequest,
+};
 use nexus_contracts::native_compatibility::NativeCompatibilityContractTreeSha256;
 use nexus_contracts::{
     CoreChangesRequest, CoreCloseReport, CoreHostQuery, CoreHostQueryResponse, NativeCompatibility,
     NativeOpenOptions, ProviderCall, WorldKbPatchEntityRequest,
 };
 use nexus_contracts::{CoreError, CoreErrorCode};
-use nexus_core::Principal;
+use nexus_core::{HostHandle, Principal};
 use serde_json::Value;
 
 use env_state::{EnvInstance, EnvState};
@@ -177,6 +181,16 @@ impl NativeCore {
     pub async fn provider_call(&self, request_json: Buffer) -> Result<Buffer> {
         self.deny_service_only()?;
         let request: ProviderCall = serde_json::from_slice(request_json.as_ref())?;
+        // The provider-only lane is not an authority bypass (technical contract
+        // §4): a core-indexed or tombstoned Actor id is refused before the port
+        // can serve it, while an id the core never indexed keeps its existing
+        // provider-only semantics.
+        host_query::deny_actor_provider_ids(
+            &self.inner,
+            request.session_id.as_deref(),
+            request.operation_id.as_deref(),
+        )
+        .map_err(core_error::napi_error_from_domain)?;
         let port = self
             .inner
             .provider_port
@@ -199,6 +213,10 @@ impl NativeCore {
         max_bytes: u32,
     ) -> Result<Buffer> {
         self.deny_service_only()?;
+        // Same gate as `provider_call`: an Actor operation's stream belongs to
+        // the core's own observation, so the raw lane must not drain it.
+        host_query::deny_actor_provider_ids(&self.inner, None, Some(&operation_id))
+            .map_err(core_error::napi_error_from_domain)?;
         let port = self
             .inner
             .provider_port
@@ -213,18 +231,126 @@ impl NativeCore {
         Ok(Buffer::from(serde_json::to_vec(&batch)?))
     }
 
+    /// Create an Agent-Host session through the attached core Host authority
+    /// (technical contract §2): the same `HostHandle::create_session` the
+    /// standalone library exposes, with the napi principal handle verified
+    /// before the effect. A valid `actor_ref`/`viewpoint` pair is admitted
+    /// against stored ownership; both absent keeps the legacy create.
+    #[napi]
+    pub async fn host_create_session(
+        &self,
+        principal_handle: String,
+        request_json: Buffer,
+    ) -> Result<Buffer> {
+        self.deny_service_only()?;
+        let request: CreateSessionRequest = serde_json::from_slice(request_json.as_ref())?;
+        self.host_call(principal_handle, async move |host, principal| {
+            host.create_session(&principal, request).await
+        })
+        .await
+    }
+
+    /// Dispatch one normalized operation (prompt / set_model / set_mode) on a
+    /// session through the same authority, so the Actor admission, the
+    /// reservation of a Character operation and its terminal ownership all
+    /// stay in the core.
+    #[napi]
+    pub async fn host_execute_operation(
+        &self,
+        principal_handle: String,
+        session_id: String,
+        request_json: Buffer,
+    ) -> Result<Buffer> {
+        self.deny_service_only()?;
+        let request: ExecuteOperationRequest = serde_json::from_slice(request_json.as_ref())?;
+        self.host_call(principal_handle, async move |host, principal| {
+            host.execute(&principal, session_id, request).await
+        })
+        .await
+    }
+
+    /// The owner-authorized terminal outcome of one Character operation, from
+    /// the authority's process-lifetime registry — never a value inferred from
+    /// a generic session state or a provider-only journal row.
+    #[napi]
+    pub async fn host_character_operation(
+        &self,
+        principal_handle: String,
+        operation_id: String,
+    ) -> Result<Buffer> {
+        self.deny_service_only()?;
+        self.host_call(principal_handle, async move |host, principal| {
+            host.character_operation(&principal, operation_id).await
+        })
+        .await
+    }
+
+    /// Cancel one owner-authorized Character operation through the same
+    /// manager, reporting the provider's actual accept/refuse.
+    #[napi]
+    pub async fn host_cancel_operation(
+        &self,
+        principal_handle: String,
+        operation_id: String,
+    ) -> Result<Buffer> {
+        self.deny_service_only()?;
+        self.host_call(principal_handle, async move |host, principal| {
+            host.cancel_operation(&principal, operation_id).await
+        })
+        .await
+    }
+
+    /// Shut one session down under the stored-owner gate: cancel its active
+    /// work, release it on the same manager, then retire the Actor reuse state.
+    #[napi]
+    pub async fn host_shutdown_session(
+        &self,
+        principal_handle: String,
+        session_id: String,
+    ) -> Result<Buffer> {
+        self.deny_service_only()?;
+        self.host_call(principal_handle, async move |host, principal| {
+            host.shutdown_session(&principal, session_id).await
+        })
+        .await
+    }
+
+    /// The next bounded batch of one Character operation's events, selected to
+    /// the exact `(session_id, operation_id)` pair the authority recorded.
+    #[napi]
+    pub async fn next_host_events(
+        &self,
+        principal_handle: String,
+        session_id: String,
+        operation_id: String,
+        max_events: u32,
+        max_bytes: u32,
+    ) -> Result<Buffer> {
+        self.deny_service_only()?;
+        self.host_call(principal_handle, async move |host, principal| {
+            host.next_events(&principal, session_id, operation_id, max_events, max_bytes)
+                .await
+        })
+        .await
+    }
+
     #[napi]
     pub async fn close(&self) -> Result<Buffer> {
         let report: CoreCloseReport = lifecycle::close_core(self.inner.clone()).await;
         Ok(Buffer::from(serde_json::to_vec(&report)?))
     }
 
-    async fn json_call<T, F, Fut>(&self, principal_handle: String, f: F) -> Result<Buffer>
-    where
-        T: serde::Serialize,
-        F: FnOnce(Arc<nexus_core::CoreService>, Principal) -> Fut,
-        Fut: std::future::Future<Output = std::result::Result<T, nexus_core::CoreError>>,
-    {
+    /// The open service and the principal behind `principal_handle`.
+    ///
+    /// The core must be open, the environment must not be closing, and the
+    /// handle must encode the ACTIVE principal of this open at this
+    /// environment generation — the one verification every principal-scoped
+    /// entry point shares, so the `json_call` and `host_call` families cannot
+    /// drift apart.
+    async fn verified_principal(
+        &self,
+        principal_handle: &str,
+    ) -> Result<(Arc<nexus_core::CoreService>, Principal)> {
         self.deny_service_only()?;
         if self.inner.is_closing() {
             return Err(Error::from_reason("closing"));
@@ -249,7 +375,38 @@ impl NativeCore {
         if encoded != principal_handle {
             return Err(Error::from_reason("invalid principal handle"));
         }
+        Ok((core, principal))
+    }
+
+    async fn json_call<T, F, Fut>(&self, principal_handle: String, f: F) -> Result<Buffer>
+    where
+        T: serde::Serialize,
+        F: FnOnce(Arc<nexus_core::CoreService>, Principal) -> Fut,
+        Fut: Future<Output = std::result::Result<T, nexus_core::CoreError>>,
+    {
+        let (core, principal) = self.verified_principal(&principal_handle).await?;
         let value = f(core, principal)
+            .await
+            .map_err(core_error::napi_error_from_domain)?;
+        Ok(Buffer::from(serde_json::to_vec(&value)?))
+    }
+
+    /// The Host-authority sibling of [`Self::json_call`]: the same verified
+    /// principal, but the call reaches the attached core Host authority
+    /// (`HostHandle`) instead of the domain service. The authority slot must
+    /// hold the open's adopted authority; without one there is no Host to call.
+    async fn host_call<T, F, Fut>(&self, principal_handle: String, f: F) -> Result<Buffer>
+    where
+        T: serde::Serialize,
+        F: FnOnce(Arc<HostHandle>, Principal) -> Fut,
+        Fut: Future<Output = std::result::Result<T, nexus_core::CoreError>>,
+    {
+        let (_core, principal) = self.verified_principal(&principal_handle).await?;
+        let host = self
+            .inner
+            .host_authority()
+            .ok_or_else(|| Error::from_reason("host not started"))?;
+        let value = f(host, principal)
             .await
             .map_err(core_error::napi_error_from_domain)?;
         Ok(Buffer::from(serde_json::to_vec(&value)?))
