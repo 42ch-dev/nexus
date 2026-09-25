@@ -174,7 +174,7 @@ nexus-wasm-host = { path = "../../crates/nexus-wasm-host" }
 # LLM. Same =2.1.0 pin already in the shipped graph via nexus-acp-host
 # (stable v1 API only; no unstable protocol features); dev-only,
 # tests-only (graph pins use --edges normal, dev-deps excluded).
-agent-client-protocol = "=2.1.0"
+agent-client-protocol = "=2.2.0"
 
 # v1.193 P2-T13: the final feature lattice is the two real product
 # cohorts from technical contracts §3. `cli` is the ordinary one-shot
