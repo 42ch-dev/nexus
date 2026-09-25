@@ -21,6 +21,12 @@
  *     in-root containment, a linked checkout under `<repo>/.worktrees/<name>` on its declared
  *     branch, not main or protected), so a fact that changed since the planning pass aborts that
  *     step and every later one fail-closed, with zero further mutation.
+ *   * A track's mutations are a chain: each step reports whether it COMPLETED, and the next step
+ *     runs only while the previous one did. The first refusal or gate failure therefore ends that
+ *     track's mutations there — later receipts are untouched, the engine is never handed the
+ *     worktree, the prune is skipped and no branch is asked for — and the row that step appended
+ *     carries that step's `kind`/`ref`/`reason`/`detail`, so the aggregate names exactly which step
+ *     stopped what. One continuation rule, no per-step exception.
  *   * An inventory track's `worktree` is that track's canonical `<repo>/.worktrees/<name>` linked
  *     checkout of the inventory's repository, on the branch the snapshot claims for it. That shape
  *     is part of the version-1 inventory contract, not a preference: a dry run still reports another
@@ -44,9 +50,15 @@
  *   * The engine's own refusal is never overridden silently. That measured submodule refusal and a
  *     `cleanup.refuse.dirty-worktree` refusal that is purely an ignored build-output footprint
  *     (tracked tree clean, no untracked non-ignored path, owner merged and released, and the exact
- *     ignored paths with their measured sizes enumerated) are both reported as `blocked` with that
- *     evidence, and only then reclaimed through the documented exact-path non-force route. Genuine
- *     tracked or untracked dirt stays a refusal that mutates nothing.
+ *     ignored paths with their measured sizes enumerated through the NUL-delimited porcelain form,
+ *     which is the only spelling in which Git never C-quotes a path) are both reported as `blocked`
+ *     with that evidence, and only then reclaimed through the documented exact-path non-force route.
+ *     The ignored-only footprint is a measurement of one moment, never a permission: it is
+ *     re-derived again immediately before the fallback removal (engine re-asked, tracked tree and
+ *     untracked/ignored paths re-enumerated, every enumerated path re-measured as present) and must
+ *     still hold, or the removal is refused (`sweeper.refuse.reverify-ignored-only`) fail-closed
+ *     with the facts just measured. Genuine tracked or untracked dirt stays a refusal that mutates
+ *     nothing — including dirt that arrived after the first classification.
  *
  * Exit codes: 0 valid dry run / passing check / every requested completed track fully reclaimed;
  * 1 unreadable facts (snapshot, sibling declarations, git, engine, path), a failing requested
@@ -1063,28 +1075,53 @@ async function engineSubmoduleRefusal(record, worktreePath, worktreeKey) {
 }
 
 /**
- * Measure whether the dirt the engine reports in this worktree is an ignored-only build-output
- * footprint, and enumerate it. The tracked tree must already be measured clean
- * (`git status --porcelain --untracked-files=no`), no non-ignored untracked path may exist, and at
- * least one ignored path must be listed; each listed ignored path and its measured size is then
- * returned as this slice's reclamation evidence. Anything else — tracked dirt, an untracked
- * non-ignored path, an unreadable entry, or no dirt at all — returns null, so the engine's refusal
- * stays a refusal and nothing is reclaimed on an unexplained measurement.
+ * Measure whether the dirt in this worktree is an ignored-only build-output footprint, and enumerate
+ * it. The measurement is taken HERE, against the worktree as it stands: the tracked tree must be
+ * clean (`git status --porcelain --untracked-files=no`), every porcelain record must be an ignored
+ * one (a `?? ` untracked non-ignored path, or any other record, is real dirt), and at least one
+ * ignored path must be listed. Each listed path is then measured, and a path that vanished between
+ * the enumeration and its measurement is NOT a zero-byte footprint — `bytes: 0` with
+ * `exists: false` is an unmeasured fact, so it fails closed instead of certifying evidence the tool
+ * cannot vouch for.
+ * The enumeration uses `-z` because that is the only porcelain spelling in which Git never
+ * C-quotes a pathname: the bytes after the `<XY> ` separator ARE the path. The line-oriented form
+ * quotes a name carrying a special character (`!! "we\"ird.log"`, and even a trailing space), so a
+ * parser reading it would silently enumerate a different, nonexistent path; here a spelling that
+ * still looks C-quoted is refused as undecodable rather than measured. Paths are never trimmed,
+ * because leading and trailing spaces belong to the name.
+ * Returns `{ ok: true, footprint }` or `{ ok: false, detail }` naming the fact that failed.
  */
-async function ignoredOnlyFootprint(track, fact, context) {
-  if (fact.worktree.dirty_tracked !== false) return null;
-  const status = await runGit(['status', '--porcelain', '--untracked-files=normal', '--ignored=traditional'], track.worktree_path, context.environment);
-  if (status.exit_code !== 0) return null;
+async function measureIgnoredOnlyFootprint(track, context) {
+  const dirty = await runGit(['status', '--porcelain', '--untracked-files=no'], track.worktree_path, context.environment);
+  if (dirty.exit_code !== 0) {
+    return { ok: false, detail: `git status --untracked-files=no failed in ${track.worktree_path} (${dirty.spawn_error ?? dirty.stderr.trim()})` };
+  }
+  const trackedChange = dirty.stdout.split('\n').find(line => line !== '') ?? null;
+  if (trackedChange !== null) {
+    return { ok: false, detail: `the tracked tree of ${track.worktree_path} is not clean (${JSON.stringify(trackedChange)})` };
+  }
+  const status = await runGit(['status', '--porcelain', '-z', '--untracked-files=normal', '--ignored=traditional'], track.worktree_path, context.environment);
+  if (status.exit_code !== 0) {
+    return { ok: false, detail: `git status --ignored failed in ${track.worktree_path} (${status.spawn_error ?? status.stderr.trim()})` };
+  }
   const ignored = [];
-  for (const line of status.stdout.split('\n')) {
-    if (line === '') continue;
+  for (const record of status.stdout.split('\0')) {
+    if (record === '') continue;
     // `!! ` is an ignored path and `?? ` an untracked non-ignored one; every other entry is a
     // tracked change. Directory-level reporting keeps this enumeration proportional to the number of
     // ignored roots Git itself reports.
-    if (!line.startsWith('!! ')) return null;
-    ignored.push(line.slice(3).trim());
+    if (!record.startsWith('!! ')) {
+      return { ok: false, detail: `${track.worktree_path} carries a non-ignored porcelain entry ${JSON.stringify(record)}, which is real dirt` };
+    }
+    const relative = record.slice(3);
+    if (relative === '' || (relative.startsWith('"') && relative.endsWith('"'))) {
+      return { ok: false, detail: `the ignored enumeration of ${track.worktree_path} carries an entry this tool cannot decode (${JSON.stringify(record)})` };
+    }
+    ignored.push(relative);
   }
-  if (ignored.length === 0) return null;
+  if (ignored.length === 0) {
+    return { ok: false, detail: `${track.worktree_path} reports no ignored path, so there is no ignored-only footprint to enumerate` };
+  }
   const paths = [];
   let total = 0;
   for (const relative of sorted(ignored)) {
@@ -1092,11 +1129,13 @@ async function ignoredOnlyFootprint(track, fact, context) {
     // itself, spelled the way the walk and the evidence expect it.
     const path = join(track.worktree_path, relative.endsWith(sep) ? relative.slice(0, -1) : relative);
     const measured = await pathBytes(path);
-    if (measured.unreadable !== null || measured.is_symlink) return null;
+    if (measured.unreadable !== null || measured.is_symlink || !measured.exists) {
+      return { ok: false, detail: `the enumerated ignored path ${path} cannot be measured truthfully (exists ${measured.exists}, symlink ${measured.is_symlink}, unreadable ${measured.unreadable})` };
+    }
     paths.push({ path, bytes: measured.bytes });
     total += measured.bytes;
   }
-  return { paths, total_bytes: total };
+  return { ok: true, footprint: { paths, total_bytes: total } };
 }
 
 /** `git worktree prune --dry-run --verbose` names each stale record it would drop. */
@@ -1112,7 +1151,9 @@ function prunableWorktreeNames(text) {
 /**
  * Record the prune check for one removed track and prune only when it would affect solely that
  * track's record. A dry run that would also drop a foreign stale entry is retained and reported
- * instead of silently pruning someone else's record.
+ * instead of silently pruning someone else's record. Returns whether this step completed, so a
+ * prune refusal stops the steps after it instead of letting them run on a repository this tool has
+ * just declined to touch.
  */
 async function pruneScopedWorktree({ name, context, actions }) {
   const dry = await runRecorded('git', ['worktree', 'prune', '--dry-run', '--verbose'], context.repoRoot, context.environment);
@@ -1120,42 +1161,46 @@ async function pruneScopedWorktree({ name, context, actions }) {
   if (dry.spawn_error !== null || dry.exit_code !== 0) {
     const detail = `git worktree prune --dry-run failed (${dry.spawn_error ?? dry.stderr.trim()})`;
     addAction(actions, 'prune', context.repoRoot, 'refuse', 'sweeper.refuse.git-unreadable', detail);
-    return;
+    return false;
   }
   const names = prunableWorktreeNames(`${dry.stdout}\n${dry.stderr}`);
   const foreign = unique(names.filter(candidate => candidate !== name));
   if (foreign.length > 0) {
     const detail = `git worktree prune would also drop foreign stale record(s): ${sorted(foreign).join(', ')}`;
     addAction(actions, 'prune', context.repoRoot, 'refuse', 'sweeper.refuse.prune-foreign', detail);
-    return;
+    return false;
   }
   if (!names.includes(name)) {
     addAction(actions, 'prune', context.repoRoot, 'absent', 'sweeper.absent.idempotent');
-    return;
+    return true;
   }
   const actual = await runRecorded('git', ['worktree', 'prune'], context.repoRoot, context.environment);
   context.commands.push(actual);
   if (actual.spawn_error !== null || actual.exit_code !== 0) {
     const detail = `git worktree prune failed (${actual.spawn_error ?? actual.stderr.trim()})`;
     addAction(actions, 'prune', context.repoRoot, 'refuse', 'sweeper.refuse.git-unreadable', detail);
-    return;
+    return false;
   }
   addAction(actions, 'prune', context.repoRoot, 'executed', 'sweeper.executed.prune');
+  return true;
 }
 
 /**
  * Remove one exact owned path after re-verifying it, and prove the removal by re-observing the path
  * instead of trusting the command's wording. `rm -rf` runs with the exact path and no wildcard.
+ * The result reports whether this step COMPLETED (removed, or already idempotent-absent) and whether
+ * it attempted a mutation, so the caller can stop the track's remaining mutations at the first step
+ * that did not complete; the refusal row it appended names that step and what it refused.
  */
 async function reclaimOwnedPath({ path, kind, context, actions, reverify }) {
   const check = await reverify();
   if (!check.ok) {
     addAction(actions, kind, path, 'refuse', check.reason, check.detail);
-    return;
+    return { completed: false, mutated: false };
   }
   if (check.absent) {
     addAction(actions, kind, path, 'absent', 'sweeper.absent.idempotent');
-    return;
+    return { completed: true, mutated: false };
   }
   const removal = await runRecorded('rm', ['-rf', path], context.repoRoot, context.environment);
   context.commands.push(removal);
@@ -1164,9 +1209,10 @@ async function reclaimOwnedPath({ path, kind, context, actions, reverify }) {
     const state = after.unreadable !== null ? `unreadable (${after.unreadable})` : after.exists ? 'still present' : 'gone';
     const detail = `rm -rf ${path} exited ${removal.exit_code ?? removal.spawn_error} and the path is ${state}`;
     addAction(actions, kind, path, 'refuse', 'sweeper.refuse.remove-failed', detail);
-    return;
+    return { completed: false, mutated: true };
   }
   addAction(actions, kind, path, 'executed', `sweeper.executed.${kind}`);
+  return { completed: true, mutated: true };
 }
 
 /**
@@ -1201,7 +1247,9 @@ async function nonForceWorktreeRemoval({ track, context, actions, gate, refusal 
     return;
   }
   addAction(actions, 'fallback-worktree-removal', path, 'executed', 'sweeper.executed.non-force-remove');
-  await pruneScopedWorktree({ name: basename(path), context, actions });
+  // The prune is the next step of the same route: when it refuses, the repository has just been
+  // declined to, so the branch handover after it does not run either.
+  if (!(await pruneScopedWorktree({ name: basename(path), context, actions }))) return;
 
   const release = await invokeEngine({
     mainRoot: context.repoRoot,
@@ -1317,13 +1365,52 @@ async function applyTrack(fact, context) {
     if (!footprint.ok) return footprint;
     return { ok: true, absent: footprint.target_absent, reason: null, detail: null };
   };
+  // The ignored-only classification authorized the documented non-force route, but it is a
+  // measurement of one moment, never a standing permission: this gate re-derives it immediately
+  // before the fallback removal — the same exact worktree/target identity, the engine asked again,
+  // and the whole dirt classification measured again — and requires it to still hold. Real dirt that
+  // arrived after the first classification, an engine row that is no longer precisely
+  // `cleanup.refuse.dirty-worktree`, or an enumeration/cache that cannot be vouched for aborts the
+  // removal fail-closed, reporting the facts measured here.
+  const ignoredOnlyGate = async () => {
+    const footprint = await footprintGate();
+    if (!footprint.ok || footprint.worktree_absent) return footprint;
+    const probe = await invokeEngine({
+      mainRoot: context.repoRoot,
+      workflowId: context.options.workflow,
+      harnessDir: context.options.harness,
+      worktreePath: track.worktree_path,
+      environment: context.environment,
+    });
+    context.commands.push(probe);
+    if (probe.spawn_error !== null) {
+      return { ok: false, absent: false, reason: 'sweeper.refuse.engine-unavailable', detail: `engine cleanup could not be executed to re-derive the ignored-only classification (${probe.spawn_error})` };
+    }
+    if (probe.exit_code === EXIT_INVALID) {
+      return { ok: false, absent: false, reason: 'sweeper.refuse.engine-usage', detail: `engine cleanup rejected the invocation for ${track.worktree_path}` };
+    }
+    if (probe.exit_code !== 0) {
+      return { ok: false, absent: false, reason: 'sweeper.refuse.engine-probe', detail: `engine cleanup could not probe ${track.worktree_path} (exit ${probe.exit_code})` };
+    }
+    const decision = await engineDecision(probe, track.worktree_key);
+    if (decision.reason !== ENGINE_DIRTY_REFUSAL) {
+      return { ok: false, absent: false, reason: 'sweeper.refuse.reverify-ignored-only', detail: `the installed engine no longer refuses ${track.worktree_path} with ${ENGINE_DIRTY_REFUSAL} (raw row reason ${decision.reason}), so the ignored-only classification is stale` };
+    }
+    const measured = await measureIgnoredOnlyFootprint(track, context);
+    if (!measured.ok) {
+      return { ok: false, absent: false, reason: 'sweeper.refuse.reverify-ignored-only', detail: `the ignored-only classification of ${track.worktree_path} no longer holds: ${measured.detail}` };
+    }
+    return { ok: true, worktree_absent: false, target_absent: footprint.target_absent, reason: null, detail: null };
+  };
 
   // Re-execute the engine's dry run (never replay the planning pass): a per-row refusal stays a
   // refusal, so a leased, unmerged or genuinely dirty worktree loses nothing. The one measured
   // exception is the dirt row when the dirt the engine reports is an ignored-only build-output
   // footprint: that refusal is reported verbatim and routed around through the documented exact-path
-  // route below, never treated as a silent pass. The footprint is enumerated here, before anything
-  // is reclaimed, so a dirt-only refusal that is NOT ignored-only still mutates nothing.
+  // route below, never treated as a silent pass. The footprint is classified here, before anything is
+  // reclaimed, so a dirt-only refusal that is NOT ignored-only still mutates nothing — and because a
+  // classification is only true of the moment it was measured, it is re-derived again immediately
+  // before the fallback removal (see `ignoredOnlyGate`) rather than carried as a permission.
   let ignoredOnly = null;
   if (fact.worktree.listed) {
     const probe = await invokeEngine({
@@ -1347,13 +1434,13 @@ async function applyTrack(fact, context) {
     const decision = await engineDecision(probe, track.worktree_key);
     if (decision.verdict !== 'propose') {
       if (decision.reason === ENGINE_DIRTY_REFUSAL) {
-        const footprint = await ignoredOnlyFootprint(track, fact, context);
-        if (footprint !== null) {
-          ignoredOnly = footprint;
+        const measured = await measureIgnoredOnlyFootprint(track, context);
+        if (measured.ok) {
+          ignoredOnly = measured.footprint;
         } else {
           return refuseAll(
             decision.reason,
-            `the installed engine does not permit removing ${track.worktree_path} and the dirt it reports is not an ignored-only footprint (raw row reason ${decision.reason}); nothing is reclaimed`,
+            `the installed engine does not permit removing ${track.worktree_path} and the dirt it reports is not an ignored-only footprint (raw row reason ${decision.reason}; ${measured.detail}); nothing is reclaimed`,
           );
         }
       } else {
@@ -1382,21 +1469,25 @@ async function applyTrack(fact, context) {
   // Exact scoped target/temporary reclamation, each path re-verified immediately before it runs.
   // The target's own gate carries the whole footprint, so a worktree or cache-root fact that moved
   // since planning stops the removal instead of acting on the stale plan.
-  await reclaimOwnedPath({
-    path: fact.target.path,
-    kind: 'reclaim-target',
-    context,
-    actions,
-    reverify: targetRemovalGate,
-  });
-  for (const temporary of fact.temporary_paths) {
-    await reclaimOwnedPath({
-      path: temporary.path,
+  //
+  // The steps run ONLY while the previous one completed: `reclaimOwnedPath` reports whether its step
+  // finished (removed, or idempotently absent), and the first step that did not returns from this
+  // track there — the later receipts are not touched, the engine is never handed the worktree, and
+  // the row that step appended names it (`kind` + `ref`) and what it refused. One continuation rule
+  // for every step, no per-caller special case.
+  let mutated = false;
+  const steps = [
+    { kind: 'reclaim-target', path: fact.target.path, reverify: targetRemovalGate },
+    ...fact.temporary_paths.map(temporary => ({
       kind: 'reclaim-temporary',
-      context,
-      actions,
+      path: temporary.path,
       reverify: gated(() => reverifyTemporary(temporary.path, { tempRootKey: context.tempRootKey, cacheRoot: context.cacheRoot, mainRoot: context.mainRoot })),
-    });
+    })),
+  ];
+  for (const step of steps) {
+    const result = await reclaimOwnedPath({ ...step, context, actions });
+    mutated = mutated || result.mutated;
+    if (!result.completed) return { actions, engineRecords, applied: mutated };
   }
   if (!worktreeRemains) return { actions, engineRecords, applied: true };
 
@@ -1457,7 +1548,9 @@ async function applyTrack(fact, context) {
         track,
         context,
         actions,
-        gate: footprintGate,
+        // The ignored-only route is entered on the classification above and re-proves the whole
+        // classification again, immediately before its `rm -rf`.
+        gate: ignoredOnlyGate,
         refusal: {
           reason: 'sweeper.blocked.ignored-outputs',
           detail: `the installed engine refused ${track.worktree_path} with ${ENGINE_DIRTY_REFUSAL} while its tracked tree is clean: the ignored-only footprint is ${ignoredOnly.paths.length} enumerated path(s) totalling ${ignoredOnly.total_bytes} bytes; taking the documented exact-path route`,

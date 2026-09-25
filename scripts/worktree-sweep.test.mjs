@@ -51,6 +51,16 @@
  *     footprint is reported as `blocked` with each exact ignored path and its measured size and then
  *     reclaimed through the documented exact-path route, while tracked dirt and untracked non-ignored
  *     paths still refuse with zero mutation;
+ *   * a track's mutations are a chain of steps that each report whether they completed, and the first
+ *     step that did not (a refusal or a failed gate) ends that track there: no later receipt is
+ *     removed, the engine is never handed the worktree and no prune runs, with the refusal row naming
+ *     the step that stopped it;
+ *   * the ignored-only classification is re-derived immediately before the non-force fallback
+ *     removal, so tracked or untracked non-ignored dirt that arrives after the first classification
+ *     aborts that removal fail-closed with the facts just measured;
+ *   * the ignored footprint enumeration is truthful: it reads the NUL-delimited porcelain form (which
+ *     Git never C-quotes) and requires every enumerated path to exist, so a quoted name is reported as
+ *     the real path with its real size and a vanished entry refuses instead of reading as zero bytes;
  *   * the canonical `<repo>/.worktrees/<name>` feature-path requirement is part of the contract text
  *     this tool documents, and `--apply` enforces it at action time.
  */
@@ -155,9 +165,13 @@ async function makeFixture(options = {}) {
     await git(['-c', 'protocol.file.allow=always', 'submodule', 'add', origin, 'vendor/fixture-sub'], main);
     await git(['commit', '-m', 'add submodule'], main);
   }
-  if (options.ignoredOutputs === true) {
+  const ignoreRules = [
+    ...(options.ignoredOutputs === true ? ['node_modules/', 'dist/'] : []),
+    ...(options.ignoredPatterns ?? []),
+  ];
+  if (ignoreRules.length > 0) {
     // Committed before any worktree exists so every linked checkout sees the same ignore rule.
-    await writeFile(join(main, '.gitignore'), 'node_modules/\ndist/\n');
+    await writeFile(join(main, '.gitignore'), `${ignoreRules.join('\n')}\n`);
     await git(['add', '.gitignore'], main);
     await git(['commit', '-m', 'ignore build outputs'], main);
   }
@@ -452,10 +466,37 @@ if [ $status -eq 0 ] && [ ! -f ${JSON.stringify(marker)} ]; then
   for arg in "$@"; do
     if [ "$arg" = ${JSON.stringify(after)} ]; then
       touch ${JSON.stringify(marker)}
-      ${mutate} >/dev/null 2>&1
+      ( ${mutate} ) >/dev/null 2>&1
     fi
   done
 fi
+exit $status
+`, { mode: 0o755 });
+  return { directory, marker };
+}
+
+/**
+ * A fixture-local `git` shim: it delegates every invocation to the real binary verbatim and, once,
+ * right AFTER the invocation whose argv carries `when`, injects one fact change. For a `git status`
+ * call that means the change lands after Git reported the fact and before the caller measures it —
+ * the window in which an enumerated path can vanish.
+ */
+async function gitShim(root, { when, mutate }) {
+  const directory = join(root, 'git-shim');
+  const marker = join(root, 'git-shim-fired');
+  const git = (await exec('sh', ['-c', 'command -v git'], { env: process.env })).stdout.trim();
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, 'git'), `#!/bin/sh
+fire=0
+for arg in "$@"; do
+  if [ "$arg" = ${JSON.stringify(when)} ] && [ ! -f ${JSON.stringify(marker)} ]; then
+    fire=1
+    touch ${JSON.stringify(marker)}
+  fi
+done
+${JSON.stringify(git)} "$@"
+status=$?
+if [ "$fire" = 1 ]; then ( ${mutate} ) >/dev/null 2>&1; fi
 exit $status
 `, { mode: 0o755 });
   return { directory, marker };
@@ -476,7 +517,7 @@ async function engineApplyWrapper(root, { mutate }) {
 for arg in "$@"; do
   if [ "$arg" = "--apply" ] && [ ! -f ${JSON.stringify(marker)} ]; then
     touch ${JSON.stringify(marker)}
-    ${mutate} >/dev/null 2>&1
+    ( ${mutate} ) >/dev/null 2>&1
   fi
 done
 exec ${JSON.stringify(engine)} "$@"
@@ -1676,8 +1717,9 @@ test('a retained branch keeps the apply exit incomplete', async t => {
 
 test('the re-verification gate stops the receipt removal on a changed worktree fact', async t => {
   // A fact moves between the target removal and the receipt removal. The receipt's own check is not
-  // enough: the whole footprint is re-proved immediately before that mutation, so the receipt, the
-  // engine handover and the fallback all stay unmade.
+  // enough: the whole footprint is re-proved immediately before that mutation, and the first step
+  // that does not complete ENDS the track's mutation chain — so the receipt, the engine handover and
+  // the fallback are not merely refused, they are never attempted, and nothing later is even probed.
   let receipt = null;
   const fixture = await makeFixture({
     shape: 'released',
@@ -1704,11 +1746,10 @@ test('the re-verification gate stops the receipt removal on a changed worktree f
   assert.deepEqual(actionPairs(owner), [
     ['reclaim-target', 'executed'],
     ['reclaim-temporary', 'refuse'],
-    ['engine-worktree-removal', 'refuse'],
   ], JSON.stringify(owner.actions));
-  for (const refusal of owner.actions.filter(action => action.verdict === 'refuse')) {
-    assert.equal(refusal.reason, 'sweeper.refuse.reverify-worktree', JSON.stringify(refusal));
-  }
+  const refusal = owner.actions.find(action => action.verdict === 'refuse');
+  assert.equal(refusal.reason, 'sweeper.refuse.reverify-worktree');
+  assert.equal(refusal.ref, receipt, 'the refusal names the step it stopped at');
   // Zero further mutation: the receipt keeps its bytes, the worktree keeps its branch, and only the
   // already-finished target removal sits in the command log — no `--apply` was ever handed over.
   assert.equal(existsSync(receipt), true);
@@ -1882,4 +1923,212 @@ test('the documented inventory contract requires canonical feature paths', async
   // The dry run still reports another shape; the action-time refusal is covered by the non-canonical
   // regression in 'apply refusal preserves dirty active unmerged and canonical data'.
   assert.match(help.stdout, /sweeper\.refuse\.reverify-worktree/);
+});
+
+// --- P1-T3 fix round 2: the step chain, the ignored-only re-derivation, truthful enumeration ------
+
+test('the first refusing step stops every later mutation of the track', async t => {
+  // Two receipts on one completed, merged, released slice. The FIRST receipt's own check refuses
+  // (its path is replaced by a symlink right after the target removal) while the worktree and target
+  // portions of the footprint gate still pass. Before this fix `reclaimOwnedPath` appended a refusal
+  // and returned, so the caller went on: the second receipt was still deleted and the engine was
+  // still handed the worktree.
+  let receipts = null;
+  const fixture = await makeFixture({
+    shape: 'released',
+    orphans: false,
+    mutateInventory: (document, paths) => {
+      receipts = {
+        first: join(receiptBase(paths), 'step-chain-first'),
+        second: join(receiptBase(paths), 'step-chain-second'),
+      };
+      mkdirSync(receipts.first, { recursive: true });
+      writeFileSync(join(receipts.first, 'payload.bin'), 'first receipt\n');
+      mkdirSync(receipts.second, { recursive: true });
+      writeFileSync(join(receipts.second, 'payload.bin'), 'second receipt\n');
+      document.tracks[0].temporary_paths = [receipts.first, receipts.second];
+      return document;
+    },
+  });
+  t.after(() => fixture.teardown());
+  const shim = await rmShim(fixture.root, {
+    after: fixture.ownerTarget,
+    mutate: `/bin/rm -rf ${JSON.stringify(receipts.first)} && /bin/ln -s ${JSON.stringify(fixture.ownerWorktree)} ${JSON.stringify(receipts.first)}`,
+  });
+  fixture.env.PATH = `${shim.directory}:${process.env.PATH}`;
+
+  const apply = await fixture.run(['--apply']);
+  assert.equal(apply.code, 1, apply.stdout);
+  assert.equal(apply.document.ok, false);
+  assert.equal(existsSync(shim.marker), true, 'the injected receipt change must have fired');
+  const owner = trackOf(apply.document, 'fixture-owner');
+  // Zero further mutation is the criterion: the later receipt keeps its bytes, the engine never
+  // received this track's worktree, and only the already-finished target removal ran.
+  assert.equal(existsSync(receipts.second), true, `the later receipt must keep its bytes; actions ${JSON.stringify(owner.actions)}`);
+  assert.equal(readFileSync(join(receipts.second, 'payload.bin'), 'utf8'), 'second receipt\n');
+  assert.deepEqual(
+    apply.document.commands.filter(record => record.argv[0] === 'rm').map(record => record.argv),
+    [['rm', '-rf', fixture.ownerTarget]],
+    `only the target removal may run; actions ${JSON.stringify(owner.actions)}`,
+  );
+  assert.equal(apply.document.commands.some(record => record.argv.includes('--apply')), false, 'the engine must never be handed a track whose step refused');
+  assert.equal(
+    apply.document.commands.some(record => record.argv[0] === 'git' && record.argv[1] === 'worktree' && record.argv[2] === 'prune'),
+    false,
+  );
+  // The chain ends at the first receipt: the second receipt is never attempted, so the aggregate has
+  // no row for it, none for the engine handover and none for the prune — and the refusal row names
+  // the step (kind + ref) and the fact it refused with.
+  assert.deepEqual(actionPairs(owner), [
+    ['reclaim-target', 'executed'],
+    ['reclaim-temporary', 'refuse'],
+  ], JSON.stringify(owner.actions));
+  const stopping = owner.actions.find(action => action.verdict === 'refuse');
+  assert.equal(stopping.reason, 'sweeper.refuse.reverify-temporary');
+  assert.equal(stopping.ref, receipts.first);
+  assert.equal(owner.exit_clean, false);
+  // The worktree keeps its branch and its Git record, and the peer is untouched as always.
+  assert.equal(existsSync(fixture.ownerWorktree), true);
+  assert.equal((await fixture.git(['rev-parse', '--abbrev-ref', 'HEAD'], fixture.ownerWorktree)).trim(), 'feat/fixture-owner');
+  assert.equal(
+    (await fixture.git(['for-each-ref', '--format=%(refname)', 'refs/heads/feat/fixture-owner'], fixture.main)).trim(),
+    'refs/heads/feat/fixture-owner',
+  );
+  assert.equal((await fixture.git(['worktree', 'list', '--porcelain'], fixture.main)).includes('fixture-owner'), true);
+  assert.equal(existsSync(fixture.peerWorktree), true);
+});
+
+test('dirt that arrives after the ignored-only classification aborts the fallback', async t => {
+  // The ignored-only classification is measured once, before the target removal; the engine's own
+  // `--apply` attempt runs last before the non-force `rm -rf` of the WHOLE worktree. Dirt that lands
+  // in that window must not be deleted, so the classification is re-derived immediately before the
+  // fallback removal: the engine is asked again and the tracked tree, the untracked/ignored paths and
+  // every enumerated path are measured again.
+  const cases = [
+    ['a tracked modification', worktree => `echo late >> ${JSON.stringify(join(worktree, 'README.md'))}`, /tracked tree/],
+    ['an untracked non-ignored path', worktree => `echo late > ${JSON.stringify(join(worktree, 'late.txt'))}`, /non-ignored porcelain entry/],
+  ];
+  for (const [name, mutateOf, expectedDetail] of cases) {
+    const fixture = await makeFixture({ shape: 'released', orphans: false, ignoredOutputs: true });
+    t.after(() => fixture.teardown());
+    const wrapper = await engineApplyWrapper(fixture.root, { mutate: mutateOf(fixture.ownerWorktree) });
+    fixture.env.PATH = `${wrapper.directory}:${process.env.PATH}`;
+
+    const apply = await fixture.run(['--apply']);
+    assert.equal(existsSync(wrapper.marker), true, `${name}: the injected dirt must have been created`);
+    assert.equal(apply.code, 1, `${name}: ${apply.stdout}`);
+    assert.equal(apply.document.ok, false, name);
+    const owner = trackOf(apply.document, 'fixture-owner');
+    // Zero mutation is the criterion: the worktree and the dirt that arrived are still there, the
+    // fallback never ran, and no prune or branch handover happened.
+    assert.equal(
+      existsSync(fixture.ownerWorktree),
+      true,
+      `${name}: the worktree holding arrived dirt must survive; actions ${JSON.stringify(owner.actions)}`,
+    );
+    if (name === 'a tracked modification') assert.match(readFileSync(join(fixture.ownerWorktree, 'README.md'), 'utf8'), /late/);
+    else assert.equal(readFileSync(join(fixture.ownerWorktree, 'late.txt'), 'utf8').includes('late'), true, name);
+    assert.deepEqual(
+      apply.document.commands.filter(record => record.argv[0] === 'rm').map(record => record.argv),
+      [['rm', '-rf', fixture.ownerTarget]],
+      `${name}: only the target removal may run; actions ${JSON.stringify(owner.actions)}`,
+    );
+    assert.equal(
+      apply.document.commands.some(record => record.argv[0] === 'git' && record.argv[1] === 'worktree' && record.argv[2] === 'prune'),
+      false,
+      name,
+    );
+    assert.equal(
+      apply.document.commands.filter(record => record.argv.includes('--apply')).length,
+      1,
+      `${name}: the engine's single attempt is recorded and never retried with a removal`,
+    );
+    assert.deepEqual(actionPairs(owner), [
+      ['reclaim-target', 'executed'],
+      ['engine-worktree-removal', 'blocked'],
+      ['fallback-worktree-removal', 'refuse'],
+    ], `${name}: ${JSON.stringify(owner.actions)}`);
+    const refusal = owner.actions.find(action => action.verdict === 'refuse');
+    assert.equal(refusal.reason, 'sweeper.refuse.reverify-ignored-only', name);
+    assert.match(refusal.detail, expectedDetail, name);
+    assert.match(refusal.detail, /cleanup\.refuse\.dirty-worktree|no longer holds/, name);
+    assert.equal(owner.worktree.listed, true, name);
+    assert.equal(owner.exit_clean, false, name);
+  }
+});
+
+test('the ignored enumeration reports the real path and size of a quoted name', async t => {
+  // Git's line-oriented porcelain form C-quotes a pathname carrying a special character — `!! "trail
+  // .log"` for a trailing space, `!! "we\"ird.log"` for an embedded quote — and the old parser passed
+  // that spelling on as if it were the path, and the missing-file result on as zero bytes. Both made
+  // the evidence false. The enumeration now uses the NUL-delimited form, in which Git never quotes.
+  const quoted = await makeFixture({ shape: 'released', orphans: false, ignoredOutputs: true, ignoredPatterns: ['*.log'] });
+  t.after(() => quoted.teardown());
+  const odd = join(quoted.ownerWorktree, 'we"ird.log');
+  const spaced = join(quoted.ownerWorktree, 'trail .log');
+  writeFileSync(odd, 'quote\n');
+  writeFileSync(spaced, 'trail \n');
+  const nodeModulesBytes = directoryBytes(join(quoted.ownerWorktree, 'node_modules'));
+  const distBytes = directoryBytes(join(quoted.ownerWorktree, 'dist'));
+  const quotedReal = realpathSync(quoted.ownerWorktree);
+  assert.equal((await quoted.git(['status', '--porcelain', '--untracked-files=no'], quoted.ownerWorktree)).trim(), '', 'the tracked tree must be clean');
+
+  const apply = await quoted.run(['--apply']);
+  assert.equal(apply.code, 1, apply.stdout);
+  assert.deepEqual(apply.document.refusals, []);
+  const owner = trackOf(apply.document, 'fixture-owner');
+  const blocked = owner.actions.find(action => action.verdict === 'blocked');
+  assert.equal(blocked.reason, 'sweeper.blocked.ignored-outputs');
+  // Every path is the real path with its real size — the two special-character names included.
+  assert.deepEqual(blocked.ignored_footprint, {
+    paths: [
+      { path: join(quoted.ownerWorktree, 'dist'), bytes: distBytes },
+      { path: join(quoted.ownerWorktree, 'node_modules'), bytes: nodeModulesBytes },
+      { path: spaced, bytes: 7 },
+      { path: odd, bytes: 6 },
+    ],
+    total_bytes: distBytes + nodeModulesBytes + 13,
+  });
+  // The engine still printed its refusal for the canonical path, and the slice is reclaimed through
+  // the documented route as before.
+  assert.equal(
+    apply.document.commands.some(record => record.stdout.includes(`refuse | worktree | ${quotedReal} | cleanup.refuse.dirty-worktree`)),
+    true,
+  );
+  assert.deepEqual(actionPairs(owner), [
+    ['reclaim-target', 'executed'],
+    ['engine-worktree-removal', 'blocked'],
+    ['fallback-worktree-removal', 'executed'],
+    ['prune', 'executed'],
+    ['engine-branch-removal', 'retained'],
+  ], JSON.stringify(owner.actions));
+  assert.equal(existsSync(quoted.ownerWorktree), false);
+});
+
+test('a vanished enumerated path fails the ignored-only route closed', async t => {
+  // A path that vanishes between Git's report and this tool's measurement is not a zero-byte
+  // footprint: the enumeration cannot be vouched for, so the ignored-only route is not authorized and
+  // nothing is reclaimed. The shim deletes the reported ignored file right after the status call.
+  const vanished = await makeFixture({ shape: 'released', orphans: false, ignoredPatterns: ['*.log'] });
+  t.after(() => vanished.teardown());
+  const gone = join(vanished.ownerWorktree, 'gone.log');
+  writeFileSync(gone, 'gone\n');
+  const shim = await gitShim(vanished.root, { when: '--ignored=traditional', mutate: `/bin/rm -f ${JSON.stringify(gone)}` });
+  vanished.env.PATH = `${shim.directory}:${process.env.PATH}`;
+
+  const apply = await vanished.run(['--apply']);
+  assert.equal(existsSync(shim.marker), true, 'the injected vanish must have fired');
+  assert.equal(existsSync(gone), false, 'the injected fact change removed the enumerated path');
+  assert.equal(apply.code, 1, apply.stdout);
+  const owner = trackOf(apply.document, 'fixture-owner');
+  assert.deepEqual(actionPairs(owner), [['reclaim-footprint', 'refuse']], JSON.stringify(owner.actions));
+  assert.equal(owner.actions[0].reason, 'cleanup.refuse.dirty-worktree');
+  assert.match(owner.actions[0].detail, /cannot be measured truthfully/);
+  // Zero mutation: no `rm`, no engine `--apply`, and the worktree and its target keep their bytes.
+  assert.deepEqual(apply.document.commands.filter(record => record.argv[0] === 'rm'), []);
+  assert.equal(apply.document.commands.some(record => record.argv.includes('--apply')), false);
+  assert.equal(existsSync(vanished.ownerWorktree), true);
+  assert.equal(existsSync(vanished.ownerTarget), true);
+  assert.equal(owner.worktree.listed, true);
+  assert.equal(owner.exit_clean, false);
 });
