@@ -1095,10 +1095,15 @@ impl ActorSessionRegistry {
         let handle = tokio::spawn(async move {
             drain.await;
             // Publication order matters: the count drops BEFORE the wakeup, so
-            // a joiner that armed its notification and then read a non-zero
-            // count still gets the permit this drain publishes.
+            // a joiner that registered and then read a non-zero count is still
+            // woken by this settlement.
+            //
+            // Wake EVERY joiner: the authority-wide drain join is entered by
+            // every concurrent quiesce on this authority, and a settling drain
+            // is the only wakeup its joiners will see. A `notify_one` handoff
+            // would let one joiner recheck zero while a second stayed suspended.
             live.fetch_sub(1, Ordering::AcqRel);
-            settled.notify_one();
+            settled.notify_waiters();
             // The session's accounting entry dies with its last live unit —
             // which is this drain, or an admission that has not retired yet.
             retire_session_liveness(&maps_handle, &session_id, &session_settled);
@@ -1116,12 +1121,17 @@ impl ActorSessionRegistry {
     /// join with its own deadline) loses nothing — the authority still owns
     /// the live drains and a retry joins them instead of reporting a cleanup
     /// it cannot confirm.
+    ///
+    /// Cancellation-safe AND multi-waiter, exactly like the authority's
+    /// admission join: every concurrent quiesce joins the SAME drains, so the
+    /// waiter registers with the notification BEFORE it reads the count and the
+    /// settlement wakes all of them — `notify_one`'s single stored permit would
+    /// strand every joiner after the first once the last drain settled.
     pub async fn join_actor_drains(&self) -> usize {
         loop {
-            // Arm the notification BEFORE reading the count: a drain that
-            // settles in between leaves a permit, so the wait can never miss
-            // its only wakeup.
             let settled = self.drain_settled.notified();
+            tokio::pin!(settled);
+            settled.as_mut().enable();
             let live = self.live_drains.load(Ordering::Acquire);
             if live == 0 {
                 return 0;

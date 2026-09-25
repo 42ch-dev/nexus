@@ -3481,6 +3481,86 @@ async fn actor_control_concurrent_quiesces_join_the_same_admitted_retirement() {
     );
 }
 
+/// W-005 (plan QC fix round 2), second join of the same quiesce: the
+/// authority-wide DRAIN join is entered by every concurrent quiesce too, and a
+/// settling drain is the last settlement in play. A single-permit handoff would
+/// leave the second joiner waiting for a drain that already settled — the same
+/// strand the admission join had, on the other half of the ordered close.
+///
+/// One live Character drain is joined by two concurrent quiesces; ending the
+/// operation settles it, and BOTH joins must observe that settlement.
+#[tokio::test]
+async fn actor_control_concurrent_quiesces_join_the_same_actor_drain() {
+    let env = seed_env().await;
+    let provider = control_provider(true, 0, false);
+    let (_core, principal, _manager, handle, session_id) =
+        control_fixture(&env, Arc::clone(&provider)).await;
+    let operation_id = control_prompt(&handle, &principal, &session_id).await;
+    assert_eq!(
+        handle.actor_sessions().unsettled_drain_count(),
+        1,
+        "the live Character operation owns one drain"
+    );
+
+    // Both quiesces meet that ONE live drain. With no admission in flight the
+    // admission join returns at once, so the drain join is the only place either
+    // can wait — which is what the window below proves.
+    let first = tokio::spawn({
+        let handle = handle.clone();
+        async move { handle.quiesce_actor_sessions().await }
+    });
+    let second = tokio::spawn({
+        let handle = handle.clone();
+        async move { handle.quiesce_actor_sessions().await }
+    });
+    wait_until(
+        || provider.cancels() >= 1,
+        "a quiesce to request cancellation",
+    )
+    .await;
+    // The window lets the second quiesce finish its own cancel round-trip (or
+    // read the recorded terminal) and register at the drain join.
+    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    assert_eq!(
+        handle.actor_sessions().unsettled_drain_count(),
+        1,
+        "the joined drain is still the live one"
+    );
+    assert!(
+        !first.is_finished() && !second.is_finished(),
+        "both quiesces wait on the one live drain"
+    );
+
+    // End the operation: the drain settles, and it is the only settlement either
+    // joiner will observe.
+    provider.push(finished(
+        &session_id,
+        &operation_id,
+        FinishReason::Cancelled,
+    ));
+    provider.close_stream();
+
+    let first = tokio::time::timeout(std::time::Duration::from_secs(5), first)
+        .await
+        .expect("the first quiesce observes the drain settlement")
+        .expect("the first quiesce task joins")
+        .expect("the first quiesce settles");
+    let second = tokio::time::timeout(std::time::Duration::from_secs(5), second)
+        .await
+        .expect("a second concurrent quiesce must not be stranded on a drain that already settled")
+        .expect("the second quiesce task joins")
+        .expect("the second quiesce settles");
+    assert_eq!(
+        handle.actor_sessions().unsettled_drain_count(),
+        0,
+        "both joins observed the settled drain"
+    );
+    assert!(
+        first.cleanup_confirmed || second.cleanup_confirmed,
+        "the drain join did not turn the ordered quiesce into a blanket failure: {first:?} {second:?}"
+    );
+}
+
 /// F-002 (plan QC): the established-owner slot is released at most ONCE per
 /// authority epoch. Two clones of one authority closing concurrently can both
 /// pass the retained-report check before either publishes a report and both run a
