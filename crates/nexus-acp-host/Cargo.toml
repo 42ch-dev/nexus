@@ -34,7 +34,7 @@ which = "7"
 # Unix signal handling for graceful shutdown (only on Unix platforms)
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.28", features = ["signal", "process"] }
-sysinfo = { version = "0.30", default-features = false }
+sysinfo = { version = "0.39", default-features = false }
 
 # v1.193 P2-T13: the `connect-client` feature retired with the Model A
 # `nexus_mcp_stdio_server` factory (deleted in P1-T6). The generic ACP
