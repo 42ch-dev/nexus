@@ -23,6 +23,7 @@ tags:
   - durable-commit-drain
   - lost-wakeup
   - reference-cycle
+last_updated: 2026-09-25
 status: active
 ---
 
@@ -95,6 +96,16 @@ An owner that is otherwise dropped can still be pinned alive by a cycle. The ver
 ### 6. Unconfirmed is a first-class result
 
 `interrupted` carries the retained set (retained owners, unreleased JS provider sessions, `cleanup-owners-retained`) and keeps them claimed; it is actionable, and a later close settles it. Reporting it is always better than either alternative: a fabricated `confirmed` releases a lease over a still-applying commit, and a silent hang strands every later caller with no report at all.
+
+### 7. Fence the admission your join bounds — and make the retry re-enter it
+
+The rule in §3 ("fence new drive admission") has a second drain set and two easier ways to get it wrong, both found on the Actor-session path of the current host (plan `2026-09-24-v1.196-p0-character-execution`).
+
+An **Actor-only quiesce** joins drains that are already registered. That is not a fence: an operation admitted before the quiesce can still register its drain after the zero-count check. The working composition is three steps in order — **freeze that authority's operation admission, join the operations admitted before the freeze, then cancel and join the drains** — and the freeze uses its own latch rather than the closing latch, so reads (and in-flight SSE pulls during the native close window) keep behaving exactly as before the teardown. The same accounting already existed for `close`; the quiesce only had to participate in it. Prefer that over a second bespoke latch: a fresh latch is a new invariant to keep true, not a fence.
+
+The **native teardown** must then treat the quiesce outcome as a precondition rather than a step: an ordered close releases the attached owner only as its **last** step (admission/quiesce confirmed **and** core released **and** its settlement confirmed). When the order comes back unconfirmed, the correct move is to hand the whole authority back with the retained core — not to discard the owner and let a retry read "no attached owner" as proof the Actor side settled. A retry must **re-enter** the quiesce. Two shapes are wrong here and were both reachable: an independent owner discard that leaves the core retained, and a retry that skips the quiesce because the owner is absent.
+
+A companion rule for the join itself: a broadcast completion must wake **every** waiter (`notify_waiters` plus register-before-read — see [tokio-notify-permit-steal-relay-fanout.md](tokio-notify-permit-steal-relay-fanout.md)); a single-permit handoff strands a second concurrent quiesce after the final admission retires.
 
 ## Why This Matters
 
