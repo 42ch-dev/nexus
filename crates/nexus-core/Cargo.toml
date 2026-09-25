@@ -127,7 +127,7 @@ serde_yaml = { workspace = true }
 # Descriptor-relative atomic mutation (openat/renameat/linkat/unlinkat) and the
 # advisory workspace-authority lease. Every use site is `cfg(unix)`-gated, so
 # the edge is scoped to Unix rather than linked on every target.
-nix = { version = "0.28", features = ["fs"], optional = true }
+nix = { version = "0.30", features = ["fs"], optional = true }
 
 [dev-dependencies]
 # Enable the gated execution test seams for this package's own tests without
