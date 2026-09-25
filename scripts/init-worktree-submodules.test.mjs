@@ -10,8 +10,12 @@
  * file creates. Fail-closed coverage includes unresolved index entries
  * (`.gitmodules` and gitlinks, with and without the working-tree file) and
  * operational filesystem failures, which must keep the JSON stdout contract.
- * Nothing here touches the product repository, its `.agents` submodule, a
- * package manager or the network.
+ * The refusal object also has to tell the truth about what a failure left
+ * behind: `init.refuse.preflight` (this run attempted no mutation) is
+ * distinguished from `init.refuse.partial` (native Git had already initialized
+ * at least one submodule, nothing is rolled back, and `initialized_paths` names
+ * the paths it left in place). Nothing here touches the product repository, its
+ * `.agents` submodule, a package manager or the network.
  *
  * Fixture transport: Git has refused the `file` protocol for submodule clones
  * since 2.38, and that policy is read from protected config, so a
@@ -32,7 +36,7 @@ import { strict as assert } from 'node:assert';
 import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { chmod, mkdir, mkdtemp, readFile, readlink, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readlink, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -753,11 +757,89 @@ test('operational filesystem failures keep the JSON stdout contract', async () =
 
   assert.equal(failed.code, 1, `an operational failure must exit 1: ${failed.stdout}${failed.stderr}`);
   const json = JSON.parse(failed.stdout);
-  assert.deepEqual(Object.keys(json), ['version', 'worktree', 'submodules', 'ok']);
+  assert.deepEqual(Object.keys(json), ['version', 'worktree', 'submodules', 'ok', 'refusal']);
   assert.equal(json.worktree, worktreeA);
   assert.equal(json.ok, false);
   assert.deepEqual(json.submodules, []);
+  // The refusal names its own class: this one is a preflight refusal (the read failed before any
+  // mutation was attempted), so nothing was changed and nothing is enumerated.
+  assert.equal(json.refusal.code, 'init.refuse.preflight');
+  assert.equal(json.refusal.initialized_paths, null);
+  assert.match(json.refusal.detail, /cannot be read/);
   assert.match(failed.stderr, /refused/);
+  assert.match(failed.stderr, /init\.refuse\.preflight: no mutation was attempted/);
   assert.ok(failed.stderr.includes(stranded), `the refusal must name the unreadable path: ${failed.stderr}`);
+});
+
+test('a partial native initialization is reported as partial, never as untouched', async t => {
+  // F-003: the initializer promised "state unchanged" for every exit-1 failure, but native
+  // initialization is not atomic — `git submodule update --init --recursive` runs once per repository
+  // group and a later failure leaves the earlier work in place. Rolling Git initialization back is
+  // riskier than telling the truth, so the refusal now distinguishes a PREFLIGHT refusal (this run
+  // attempted no mutation) from a PARTIAL initialization, and names the paths the failure left
+  // initialized instead of claiming an unchanged state.
+  const worktreeA = fixture.worktree(FEATURE_A);
+  const subModuleDir = join(fixture.worktreeGitDir(FEATURE_A), 'modules', 'sub');
+
+  // Control — a preflight refusal: the main worktree is rejected by validation, which reads before
+  // it ever mutates anything.
+  const preflight = await fixture.wrapper(['--worktree', fixture.superproject]);
+  assert.equal(preflight.code, 1, preflight.stdout);
+  const preflightJson = JSON.parse(preflight.stdout);
+  assert.equal(preflightJson.refusal.code, 'init.refuse.preflight');
+  assert.equal(preflightJson.refusal.initialized_paths, null);
+  assert.deepEqual(preflightJson.submodules, []);
+  assert.match(preflight.stderr, /init\.refuse\.preflight: no mutation was attempted/);
+  assert.doesNotMatch(preflight.stderr, /NOT rolled back/);
+
+  const parkedSub = join(fixture.root, 'sub-origin-parked');
+  const parkedNested = join(fixture.root, 'nested-origin-parked');
+  try {
+    // Case A — the parent clones, its nested child cannot: the failure leaves the parent initialized.
+    // The per-worktree submodule metadata is dropped with the working tree so the native command must
+    // really reach both origins instead of reusing an existing module directory.
+    await fixture.gitOk(['-C', worktreeA, 'submodule', 'deinit', '--all']);
+    await rm(join(worktreeA, 'sub'), { recursive: true, force: true });
+    await rm(subModuleDir, { recursive: true, force: true });
+    await rename(fixture.nestedOrigin, parkedNested);
+    const partial = await fixture.wrapper(['--worktree', worktreeA]);
+    record('partial-init-nested-unreachable', `node scripts/init-worktree-submodules.mjs --worktree <A>`, partial);
+    assert.equal(partial.code, 1, partial.stdout);
+    const partialJson = JSON.parse(partial.stdout);
+    assert.equal(partialJson.ok, false);
+    assert.deepEqual(partialJson.submodules, []);
+    assert.equal(partialJson.refusal.code, 'init.refuse.partial');
+    // Exactly which paths the failure left initialized — re-observed, not inferred.
+    assert.deepEqual(partialJson.refusal.initialized_paths, ['sub']);
+    assert.match(partial.stderr, /init\.refuse\.partial: at least one submodule was initialized by this run and is NOT rolled back/);
+    assert.match(partial.stderr, /already initialized: sub/);
+    assert.equal(existsSync(join(worktreeA, 'sub', '.git')), true, 'the report is the truth: the child really is initialized');
+    assert.equal(existsSync(join(worktreeA, 'sub', 'nested', '.git')), false, 'the nested child is not initialized');
+
+    // Case B — the native command completed nothing at all: still a partial (mutating) refusal, and
+    // the empty enumeration says so instead of pretending an untouched checkout.
+    await rm(join(worktreeA, 'sub'), { recursive: true, force: true });
+    await rm(subModuleDir, { recursive: true, force: true });
+    await rename(fixture.subOrigin, parkedSub);
+    const nothing = await fixture.wrapper(['--worktree', worktreeA]);
+    record('partial-init-parent-unreachable', `node scripts/init-worktree-submodules.mjs --worktree <A>`, nothing);
+    assert.equal(nothing.code, 1, nothing.stdout);
+    const nothingJson = JSON.parse(nothing.stdout);
+    assert.equal(nothingJson.refusal.code, 'init.refuse.partial');
+    assert.deepEqual(nothingJson.refusal.initialized_paths, []);
+    assert.match(nothing.stderr, /no submodule path is initialized there yet/);
+    assert.equal(existsSync(join(worktreeA, 'sub', '.git')), false);
+  } finally {
+    if (existsSync(parkedSub)) await rename(parkedSub, fixture.subOrigin);
+    if (existsSync(parkedNested)) await rename(parkedNested, fixture.nestedOrigin);
+  }
+
+  // The partial state is not a trap: a re-run against the restored origins validates the initialized
+  // subset and finishes the rest, which is the manual-safe continuation the refusal points at.
+  const finished = await fixture.wrapper(['--worktree', worktreeA]);
+  assert.equal(finished.code, 0, `${finished.stdout}${finished.stderr}`);
+  assert.deepEqual(JSON.parse(finished.stdout).submodules.map(entry => entry.action), ['initialized', 'initialized']);
+  assert.equal(await fixture.head(join(worktreeA, 'sub')), fixture.subPinned);
+  assert.equal(await fixture.head(join(worktreeA, 'sub', 'nested')), fixture.nestedPinned);
 });
 

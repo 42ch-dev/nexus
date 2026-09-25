@@ -47,6 +47,21 @@
  *     that moves between two mutations aborts the later one — and every one after it — with zero
  *     further mutation, whether the change lands before the engine handover or during `--apply`
  *     before the non-force fallback;
+ *   * the same gate re-reads the AUTHORIZATION facts — the snapshot's status, lease, branch claim
+ *     pair and retained path, the repository ancestry, and the producer/state the receipt declares —
+ *     from disk immediately before each deletion, so a lease re-acquired or a producer receipt
+ *     withdrawn after the planning proof stops the chain with zero further mutation;
+ *   * ownership is proven and never inferred from a branch claim: a live Git record authorizes a
+ *     listed worktree, an absent one needs the snapshot row's retained path, and a receipt that
+ *     matches only a branch deletes nothing — while a track with nothing left to delete is reported
+ *     as the idempotent-absent slice it is, not as a refusal;
+ *   * one canonical-shape predicate decides the feature path for the dry run and the action path
+ *     alike (`<repo>/.worktrees/<name>` under the repository's OWN `.worktrees`), so a proposal never
+ *     implies authorization for a path `--apply` would refuse;
+ *   * a killed or timed-out child is reported as `timeout`, never as a generic `spawn-failed`, and
+ *     `--help` is a standalone mode whose mixed forms are invalid invocations;
+ *   * an absent branch in the non-force route is the idempotent `absent` row, not a claim that this
+ *     run executed a release it never performed;
  *   * an engine `cleanup.refuse.dirty-worktree` caused purely by an ignored-only build-output
  *     footprint is reported as `blocked` with each exact ignored path and its measured size and then
  *     reclaimed through the documented exact-path route, while tracked dirt and untracked non-ignored
@@ -62,7 +77,7 @@
  *     Git never C-quotes) and requires every enumerated path to exist, so a quoted name is reported as
  *     the real path with its real size and a vanished entry refuses instead of reading as zero bytes;
  *   * the canonical `<repo>/.worktrees/<name>` feature-path requirement is part of the contract text
- *     this tool documents, and `--apply` enforces it at action time.
+ *     this tool documents, and both the dry run and the action path enforce it.
  */
 import { strict as assert } from 'node:assert';
 import { execFile } from 'node:child_process';
@@ -135,15 +150,21 @@ async function makeFixture(options = {}) {
   const cache = join(root, 'cache');
   const harness = join(root, 'harness');
   const home = join(root, 'home');
-  const ownerWorktree = join(root, '.worktrees', 'fixture-owner');
-  const peerWorktree = join(root, '.worktrees', 'fixture-peer');
-  const integrationWorktree = join(root, '.worktrees', 'iteration-fixture');
+  // The canonical contract shape: feature checkouts live under the fixture repository's OWN
+  // `.worktrees/`, exactly like this repository's `.worktrees/<name>`. Only the deliberately
+  // non-canonical track (`options.nonCanonicalTrack`) sits elsewhere, because that shape is what
+  // its regression is about.
+  const worktreesRoot = join(main, '.worktrees');
+  const ownerWorktree = join(worktreesRoot, 'fixture-owner');
+  const peerWorktree = join(worktreesRoot, 'fixture-peer');
+  const integrationWorktree = join(worktreesRoot, 'iteration-fixture');
+  const orphanWorktree = join(worktreesRoot, 'fixture-orphan');
   const detachedWorktree = join(root, 'elsewhere', 'fixture-detached');
   const ownerTarget = join(cache, 'nexus-target-fixture-owner');
   const peerTarget = join(cache, 'nexus-target-fixture-peer');
   const canonicalTarget = join(cache, 'nexus-target');
   const detachedTarget = join(cache, 'nexus-target-fixture-detached');
-  const paths = { root, main, cache, ownerWorktree, peerWorktree, integrationWorktree, ownerTarget, peerTarget, canonicalTarget };
+  const paths = { root, main, cache, worktreesRoot, ownerWorktree, peerWorktree, integrationWorktree, ownerTarget, peerTarget, canonicalTarget };
 
   await mkdir(main, { recursive: true });
   await mkdir(cache, { recursive: true });
@@ -166,22 +187,22 @@ async function makeFixture(options = {}) {
     await git(['commit', '-m', 'add submodule'], main);
   }
   const ignoreRules = [
+    // The repository's own convention: `.worktrees/` is gitignored, so the fixture main checkout
+    // stays clean with its feature worktrees inside it.
+    '.worktrees/',
     ...(options.ignoredOutputs === true ? ['node_modules/', 'dist/'] : []),
     ...(options.ignoredPatterns ?? []),
   ];
-  if (ignoreRules.length > 0) {
-    // Committed before any worktree exists so every linked checkout sees the same ignore rule.
-    await writeFile(join(main, '.gitignore'), `${ignoreRules.join('\n')}\n`);
-    await git(['add', '.gitignore'], main);
-    await git(['commit', '-m', 'ignore build outputs'], main);
-  }
+  await writeFile(join(main, '.gitignore'), `${ignoreRules.join('\n')}\n`);
+  await git(['add', '.gitignore'], main);
+  await git(['commit', '-m', 'ignore .worktrees and build outputs'], main);
   await git(['worktree', 'add', '-b', 'iteration/fixture', integrationWorktree], main);
   await git(['worktree', 'add', '-b', 'feat/fixture-owner', ownerWorktree], main);
   await git(['worktree', 'add', '-b', 'feat/fixture-peer', peerWorktree], main);
-  if (orphans) await git(['worktree', 'add', '--detach', join(root, '.worktrees', 'fixture-orphan')], main);
+  if (orphans) await git(['worktree', 'add', '--detach', orphanWorktree], main);
   if (options.nonCanonicalTrack === true) {
-    // A linked checkout outside the mandated `<dir>/.worktrees/<name>` shape: the dry run may still
-    // propose it, but `--apply` must refuse to act on a path it cannot re-prove.
+    // A linked checkout outside the mandated `<repo>/.worktrees/<name>` shape: BOTH the dry run and
+    // `--apply` must refuse to describe it as a reclaimable feature path.
     await mkdir(join(root, 'elsewhere'), { recursive: true });
     await git(['worktree', 'add', '-b', 'feat/fixture-detached', detachedWorktree], main);
   }
@@ -201,7 +222,7 @@ async function makeFixture(options = {}) {
     await git(['commit', '-m', 'unmerged work'], ownerWorktree);
   }
 
-  const trackBranches = ['feat/fixture-owner', 'feat/fixture-peer'];
+  const trackBranches = ['feat/fixture-owner', 'feat/fixture-peer', ...(options.extraTrackBranches ?? [])];
   if (options.nonCanonicalTrack === true) trackBranches.push('feat/fixture-detached');
   const snapshot = {
     schema_version: 1,
@@ -218,7 +239,10 @@ async function makeFixture(options = {}) {
         title: 'Fixture plan',
         file: 'plans/fixture.md',
         status: planStatus,
-        metadata: { track_branches: trackBranches },
+        // The snapshot row retains the path it claims ownership of — how this repository's own
+        // `Done` rows record their `metadata.worktree_path`. That retained path is what proves the
+        // receipt's ownership once the worktree record is gone; a branch claim alone never does.
+        metadata: { track_branches: trackBranches, worktree_path: ownerWorktree },
         ...(leased
           ? {
             execution_lease: {
@@ -319,8 +343,11 @@ async function makeFixture(options = {}) {
     harness,
     home,
     inventory: inventoryPath,
+    snapshot: snapshotPath,
+    worktreesRoot,
     ownerWorktree,
     peerWorktree,
+    orphanWorktree,
     integrationWorktree,
     ownerTarget,
     peerTarget,
@@ -356,7 +383,7 @@ async function makeFixture(options = {}) {
       for (const branch of ['feat/fixture-owner', 'feat/fixture-peer', 'feat/fixture-detached']) {
         await gitTolerant(['merge', '--no-edit', '--ff-only', branch], integrationWorktree);
       }
-      for (const path of [ownerWorktree, peerWorktree, detachedWorktree, integrationWorktree, join(root, '.worktrees', 'fixture-orphan')]) {
+      for (const path of [ownerWorktree, peerWorktree, detachedWorktree, integrationWorktree, orphanWorktree]) {
         if (!existsSync(path)) continue;
         await gitTolerant(['worktree', 'remove', path], main);
         // Test-owned disposable trees only: Git refuses to remove a worktree holding submodule
@@ -523,6 +550,42 @@ done
 exec ${JSON.stringify(engine)} "$@"
 `, { mode: 0o755 });
   return { directory, marker };
+}
+
+/**
+ * A fixture-local shim for one binary that dies to a signal — the shape the shared 30 s timeout
+ * produces, with no exit code at all. Without `when` every invocation dies; with it, only the
+ * invocation whose argv carries that token, and every other invocation is delegated verbatim to the
+ * real binary.
+ */
+async function signalShim(root, { name, when }) {
+  const directory = join(root, `${name}-signal-shim`);
+  const kill = 'kill -TERM $$';
+  let body = `${kill}\n`;
+  if (when !== undefined) {
+    const real = (await exec('sh', ['-c', `command -v ${name}`], { env: process.env })).stdout.trim();
+    body = `for arg in "$@"; do
+  if [ "$arg" = ${JSON.stringify(when)} ]; then ${kill}; fi
+done
+exec ${JSON.stringify(real)} "$@"
+`;
+  }
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, name), `#!/bin/sh\n${body}`, { mode: 0o755 });
+  return { directory };
+}
+
+/**
+ * A one-line node program the shims run to rewrite one document in place, so a test can move a
+ * fact that lives in a file (a snapshot lease, a receipt's producer flag) exactly between two
+ * mutating steps.
+ */
+function rewriteDocument(body) {
+  return `const fs=require('node:fs');const file=process.argv[1];const doc=JSON.parse(fs.readFileSync(file,'utf8'));${body};fs.writeFileSync(file,JSON.stringify(doc,null,2))`;
+}
+
+function nodeCommand(script, path) {
+  return `${JSON.stringify(process.execPath)} -e ${JSON.stringify(script)} ${JSON.stringify(path)}`;
 }
 
 /** Run the sweeper itself, outside any fixture, so a usage/contract probe keeps its exit code. */
@@ -841,9 +904,9 @@ test('unreadable or stale ownership fails closed', async t => {
     // A sibling plan's worktree path is a foreign claim even while that worktree is absent and the
     // branch is separately claimed locally.
     ['foreign sibling worktree path claim', {
-      siblingText: paths => siblingSnapshot({ worktreePath: join(paths.root, '.worktrees', 'fixture-shared') }),
+      siblingText: paths => siblingSnapshot({ worktreePath: join(paths.worktreesRoot, 'fixture-shared') }),
       mutateInventory: (document, paths) => {
-        document.tracks[0].worktree = join(paths.root, '.worktrees', 'fixture-shared');
+        document.tracks[0].worktree = join(paths.worktreesRoot, 'fixture-shared');
         document.tracks[0].target = join(paths.cache, 'nexus-target-fixture-shared');
         return document;
       },
@@ -853,7 +916,7 @@ test('unreadable or stale ownership fails closed', async t => {
     ['foreign sibling target collision', {
       siblingText: paths => siblingSnapshot({ worktreePath: join(paths.root, 'elsewhere', 'fixture-shared') }),
       mutateInventory: (document, paths) => {
-        document.tracks[0].worktree = join(paths.root, '.worktrees', 'fixture-shared');
+        document.tracks[0].worktree = join(paths.worktreesRoot, 'fixture-shared');
         document.tracks[0].target = join(paths.cache, 'nexus-target-fixture-shared');
         return document;
       },
@@ -1434,26 +1497,26 @@ test('apply refusal preserves dirty active unmerged and canonical data', async t
   assert.equal(ownerCommits.length, mainCommits.length + 1, 'the unmerged commit must be preserved');
   assert.equal(existsSync(join(unmerged.ownerWorktree, 'unmerged.txt')), true);
 
-  // A dry-run proposal is never authorization: the exact worktree has to still be a
-  // `<dir>/.worktrees/<name>` linked checkout when the action runs, so a checkout recorded outside
-  // that shape is refused at action time with zero mutation — even though the dry run proposed it.
+  // One canonical-shape predicate decides the feature path, and the dry run applies it exactly as
+  // the action path does: a checkout recorded outside `<repo>/.worktrees/<name>` is refused at
+  // reconciliation with zero mutation, so no proposal can imply authorization for a path `--apply`
+  // would refuse. Before this fix the dry run still proposed it and only the action path refused.
   const detached = await makeFixture({ shape: 'reclaimed', planStatus: 'Done', orphans: false, nonCanonicalTrack: true });
   t.after(() => detached.teardown());
   const detachedBefore = await detached.fingerprint();
   const detachedDry = await detached.run();
-  assert.equal(detachedDry.code, 0);
-  const proposedDetached = trackOf(detachedDry.document, 'fixture-detached');
-  assert.deepEqual(actionPairs(proposedDetached), [
-    ['reclaim-target', 'propose'],
-    ['engine-worktree-removal', 'propose'],
-    ['prune-dry-run', 'propose'],
-  ], JSON.stringify(proposedDetached.actions));
+  assert.equal(detachedDry.code, 2, detachedDry.stdout);
+  assert.equal(detachedDry.document.ok, false);
+  assert.equal(refusalCodes(detachedDry).includes('sweeper.refuse.non-canonical-worktree'), true, JSON.stringify(refusalCodes(detachedDry)));
+  assert.deepEqual(proposedRefs(detachedDry.document), [], 'the dry run must not propose a non-canonical feature path');
+  assert.deepEqual(detachedDry.document.commands, [], 'nothing may be probed for a refused inventory');
+  assert.equal(await detached.fingerprint(), detachedBefore, 'the dry run must not mutate');
+
   const detachedApply = await detached.run(['--apply']);
-  assert.equal(detachedApply.code, 1, detachedApply.stdout);
-  const detachedTrack = trackOf(detachedApply.document, 'fixture-detached');
-  assert.deepEqual(actionPairs(detachedTrack), [['engine-worktree-removal', 'refuse']], JSON.stringify(detachedTrack.actions));
-  assert.equal(detachedTrack.actions[0].reason, 'sweeper.refuse.reverify-worktree');
-  assert.equal(detachedTrack.exit_clean, false);
+  assert.equal(detachedApply.code, 2, detachedApply.stdout);
+  assert.equal(refusalCodes(detachedApply).includes('sweeper.refuse.non-canonical-worktree'), true);
+  assert.deepEqual(detachedApply.document.commands, []);
+  assert.equal(detachedApply.document.tracks.every(track => track.actions.every(action => action.verdict !== 'executed')), true);
   assert.equal(existsSync(detached.detachedWorktree), true);
   assert.equal(existsSync(detached.detachedTarget), true);
   assert.equal(await detached.fingerprint(), detachedBefore, 'the re-verification gate must not mutate');
@@ -1913,16 +1976,23 @@ test('apply routes around an ignored-only footprint and refuses real dirt', asyn
 });
 
 test('the documented inventory contract requires canonical feature paths', async t => {
-  // G2's inventory wording has to say what the apply-time shape check enforces: recorded feature
-  // worktree paths are canonical `<repo>/.worktrees/<name>` linked checkouts. `--help` is the
-  // contract text this tool documents.
+  // G2's inventory wording has to say what the shape predicate enforces in BOTH directions: recorded
+  // feature worktree paths are canonical `<repo>/.worktrees/<name>` linked checkouts, the dry run
+  // refuses any other shape rather than proposing it, and the action path refuses it too. `--help`
+  // is the contract text this tool documents.
   const help = await runScript(['--help']);
   assert.equal(help.code, 0, help.stderr);
   assert.match(help.stdout, /canonical `<repo>\/\.worktrees\/<name>` linked checkout/);
   assert.match(help.stdout, /is not a reclaimable\s+feature path/);
-  // The dry run still reports another shape; the action-time refusal is covered by the non-canonical
-  // regression in 'apply refusal preserves dirty active unmerged and canonical data'.
-  assert.match(help.stdout, /sweeper\.refuse\.reverify-worktree/);
+  assert.match(help.stdout, /the dry run refuses it \(sweeper\.refuse\.non-canonical-worktree\)/);
+  assert.match(help.stdout, /`--apply` refuses it at action time \(sweeper\.refuse\.reverify-worktree\)/);
+  // The receipt never authorizes: an absent worktree is owned only by a retained snapshot path.
+  assert.match(help.stdout, /sweeper\.refuse\.unproven-ownership/);
+  // The size convention that explains a number above `du -sh` is documented, not implied.
+  assert.match(help.stdout, /APPARENT byte sizes read with `lstat`/);
+  assert.match(help.stdout, /counted once per\s+link/);
+  // A killed child is a timeout, not a spawn failure, and the classification is in the contract.
+  assert.match(help.stdout, /`timeout` when the bounded\s+30 s timeout killed it/);
 });
 
 // --- P1-T3 fix round 2: the step chain, the ignored-only re-derivation, truthful enumeration ------
@@ -2131,4 +2201,301 @@ test('a vanished enumerated path fails the ignored-only route closed', async t =
   assert.equal(existsSync(vanished.ownerTarget), true);
   assert.equal(owner.worktree.listed, true);
   assert.equal(owner.exit_clean, false);
+});
+
+// --- P1 plan QC fix round: owned paths, re-read authorization, idle rows, help, timeouts ---------
+
+test('a branch-only ownership receipt cannot delete anything', async t => {
+  // F-001: reconciliation accepted a completed track on a branch/plan match alone. When the worktree
+  // is absent there is no Git record either, so `applyTrack` skipped the engine's own authorization
+  // and could remove "that receipt's" `.envrc`-derived target and its listed temporary paths under an
+  // unrelated released branch. Ownership is now proven against the snapshot row's retained worktree
+  // path before anything is deleted, while the engine's authorization stays an independent gate for
+  // tracks a live Git record does prove.
+  let receipt = null;
+  let ghost = null;
+  const fixture = await makeFixture({
+    shape: 'partial',
+    orphans: false,
+    extraTrackBranches: ['feat/fixture-ghost'],
+    mutateInventory: (document, paths) => {
+      receipt = join(receiptBase(paths), 'ghost');
+      mkdirSync(receipt, { recursive: true });
+      writeFileSync(join(receipt, 'payload.bin'), 'ghost receipt\n');
+      ghost = { worktree: join(paths.worktreesRoot, 'fixture-ghost'), target: join(paths.cache, 'nexus-target-fixture-ghost') };
+      mkdirSync(ghost.target, { recursive: true });
+      writeFileSync(join(ghost.target, 'target.bin'), 'ghost target\n');
+      document.tracks.push({
+        track_id: 'fixture-ghost',
+        plan_id: 'fixture-plan',
+        worktree: ghost.worktree,
+        branch: 'feat/fixture-ghost',
+        target: ghost.target,
+        temporary_paths: [receipt],
+        producer_stopped: true,
+        state: 'completed',
+      });
+      return document;
+    },
+  });
+  t.after(() => fixture.teardown());
+  // The receipt is otherwise perfectly well-formed: canonical shape, claimed branch, released plan,
+  // merged (absent) branch, stopped producer — only the snapshot-backed path ownership is missing.
+  assert.equal(existsSync(ghost.worktree), false, 'the ghost worktree must never have existed');
+  const before = await fixture.fingerprint();
+
+  // The dry run reports the refusal `--apply` would give instead of proposing the footprint: a
+  // proposal never implies authorization for a path whose ownership is not established.
+  const dry = await fixture.run();
+  assert.equal(dry.code, 0, dry.stdout);
+  const dryGhost = trackOf(dry.document, 'fixture-ghost');
+  assert.equal(dryGhost.ownership.path_proof, 'unproven');
+  assert.deepEqual(actionPairs(dryGhost), [['reclaim-footprint', 'refuse']], JSON.stringify(dryGhost.actions));
+  assert.equal(dryGhost.actions[0].reason, 'sweeper.refuse.unproven-ownership');
+  assert.match(dryGhost.actions[0].detail, /retains \(/);
+  assert.equal(proposedRefs(dry.document).includes(ghost.target), false);
+  assert.equal(proposedRefs(dry.document).includes(receipt), false);
+
+  const apply = await fixture.run(['--apply']);
+  assert.equal(apply.code, 1, apply.stdout);
+  const appliedGhost = trackOf(apply.document, 'fixture-ghost');
+  assert.deepEqual(actionPairs(appliedGhost), [['reclaim-footprint', 'refuse']], JSON.stringify(appliedGhost.actions));
+  assert.equal(appliedGhost.actions[0].reason, 'sweeper.refuse.unproven-ownership');
+  assert.equal(appliedGhost.exit_clean, false);
+  // Zero mutation for the unowned paths, and no command ever named them.
+  assert.equal(existsSync(ghost.target), true, 'the unowned target must keep its bytes');
+  assert.equal(readFileSync(join(receipt, 'payload.bin'), 'utf8'), 'ghost receipt\n');
+  assert.equal(apply.document.commands.some(record => record.argv.includes(ghost.target)), false);
+  assert.equal(apply.document.commands.some(record => record.argv.includes(receipt)), false);
+  // One unproven receipt does not withhold a different track's proof: the owner, whose path the
+  // snapshot row retains, is still reclaimed in the same run.
+  assert.deepEqual(apply.document.commands.filter(record => record.argv[0] === 'rm').map(record => record.argv), [['rm', '-rf', fixture.ownerTarget]]);
+  assert.equal(existsSync(fixture.ownerTarget), false);
+  assert.equal(await fixture.fingerprint() === before, false, 'the owner reclamation must have changed the fixture');
+
+  // The refusal is about deletion authority, not about the claim itself: an unproven track with
+  // nothing left to delete has no deletion to authorize, so it is reported as the idempotent-absent
+  // slice it is instead of carrying a refusal it does not deserve.
+  const converged = await makeFixture({
+    shape: 'reclaimed',
+    planStatus: 'Done',
+    orphans: false,
+    extraTrackBranches: ['feat/fixture-ghost'],
+    mutateInventory: (document, paths) => {
+      document.tracks.push({
+        track_id: 'fixture-ghost',
+        plan_id: 'fixture-plan',
+        worktree: join(paths.worktreesRoot, 'fixture-ghost'),
+        branch: 'feat/fixture-ghost',
+        target: join(paths.cache, 'nexus-target-fixture-ghost'),
+        temporary_paths: [],
+        producer_stopped: true,
+        state: 'completed',
+      });
+      return document;
+    },
+  });
+  t.after(() => converged.teardown());
+  const convergedDry = await converged.run();
+  assert.equal(convergedDry.code, 0, convergedDry.stdout);
+  const convergedGhost = trackOf(convergedDry.document, 'fixture-ghost');
+  assert.equal(convergedGhost.ownership.path_proof, 'unproven');
+  assert.deepEqual(actionPairs(convergedGhost), [
+    ['reclaim-target', 'absent'],
+    ['engine-worktree-removal', 'absent'],
+  ], JSON.stringify(convergedGhost.actions));
+  assert.equal(convergedGhost.exit_clean, true);
+  const convergedApply = await converged.run(['--apply']);
+  assert.equal(convergedApply.code, 0, convergedApply.stdout);
+  assert.deepEqual(convergedApply.document.commands, []);
+  assert.deepEqual(actionPairs(trackOf(convergedApply.document, 'fixture-ghost')), [
+    ['reclaim-target', 'absent'],
+    ['engine-worktree-removal', 'absent'],
+  ], JSON.stringify(trackOf(convergedApply.document, 'fixture-ghost').actions));
+});
+
+test('authorization facts are re-read immediately before every deletion', async t => {
+  // F-002: the release/ancestry/producer proof ran once, before the engine probe, while the
+  // per-mutation gate re-checked only path identities and containment. A fact that moves after that
+  // proof — here a lease re-acquisition and, in the second case, a withdrawn producer receipt — must
+  // stop the chain at the very next deletion, with zero further mutation, because deleted bytes
+  // cannot be restored by a later refusal.
+  const leaseReacquired = rewriteDocument(
+    "doc.plans[0].execution_lease={holder:'reacquired',claimed_at:'2026-01-01T00:00:00.000Z',worktree_path:doc.plans[0].metadata.worktree_path,working_branch:'feat/fixture-owner',session_label:'reacquired'}",
+  );
+  let receipt = null;
+  const leased = await makeFixture({
+    shape: 'released',
+    orphans: false,
+    mutateInventory: (document, paths) => {
+      receipt = join(receiptBase(paths), 'fact-reread');
+      mkdirSync(receipt, { recursive: true });
+      writeFileSync(join(receipt, 'payload.bin'), 'fact re-read receipt\n');
+      document.tracks[0].temporary_paths = [receipt];
+      return document;
+    },
+  });
+  t.after(() => leased.teardown());
+  // The lease is re-acquired while the target removal runs: after the planning proof, before the
+  // receipt removal — the exact window the finding names.
+  const leaseShim = await rmShim(leased.root, { after: leased.ownerTarget, mutate: nodeCommand(leaseReacquired, leased.snapshot) });
+  leased.env.PATH = `${leaseShim.directory}:${process.env.PATH}`;
+
+  const apply = await leased.run(['--apply']);
+  assert.equal(existsSync(leaseShim.marker), true, 'the injected lease re-acquisition must have fired');
+  assert.equal(apply.code, 1, apply.stdout);
+  const owner = trackOf(apply.document, 'fixture-owner');
+  assert.deepEqual(actionPairs(owner), [['reclaim-target', 'executed'], ['reclaim-temporary', 'refuse']], JSON.stringify(owner.actions));
+  const refusal = owner.actions.find(action => action.verdict === 'refuse');
+  assert.equal(refusal.reason, 'sweeper.refuse.not-released');
+  assert.equal(refusal.ref, receipt, 'the refusal names the step it stopped at');
+  assert.match(refusal.detail, /execution lease/);
+  // Zero further mutation: the receipt keeps its bytes, the worktree its branch and its Git record,
+  // and the engine was never handed anything.
+  assert.equal(existsSync(receipt), true);
+  assert.equal(readFileSync(join(receipt, 'payload.bin'), 'utf8'), 'fact re-read receipt\n');
+  assert.equal(existsSync(leased.ownerWorktree), true);
+  assert.deepEqual(apply.document.commands.filter(record => record.argv[0] === 'rm').map(record => record.argv), [['rm', '-rf', leased.ownerTarget]]);
+  assert.equal(apply.document.commands.some(record => record.argv.includes('--apply')), false);
+
+  // The producer receipt is withdrawn instead: the same gate, re-read from the other authority
+  // document (the ownership receipt) rather than from the snapshot.
+  let receiptTwo = null;
+  const withdrawn = await makeFixture({
+    shape: 'released',
+    orphans: false,
+    mutateInventory: (document, paths) => {
+      receiptTwo = join(receiptBase(paths), 'fact-reread-two');
+      mkdirSync(receiptTwo, { recursive: true });
+      writeFileSync(join(receiptTwo, 'payload.bin'), 'withdrawn producer receipt\n');
+      document.tracks[0].temporary_paths = [receiptTwo];
+      return document;
+    },
+  });
+  t.after(() => withdrawn.teardown());
+  const producerShim = await rmShim(withdrawn.root, {
+    after: withdrawn.ownerTarget,
+    mutate: nodeCommand(rewriteDocument('doc.tracks[0].producer_stopped=false'), withdrawn.inventory),
+  });
+  withdrawn.env.PATH = `${producerShim.directory}:${process.env.PATH}`;
+
+  const withdrawnApply = await withdrawn.run(['--apply']);
+  assert.equal(existsSync(producerShim.marker), true, 'the injected producer withdrawal must have fired');
+  assert.equal(withdrawnApply.code, 1, withdrawnApply.stdout);
+  const withdrawnOwner = trackOf(withdrawnApply.document, 'fixture-owner');
+  assert.deepEqual(actionPairs(withdrawnOwner), [['reclaim-target', 'executed'], ['reclaim-temporary', 'refuse']], JSON.stringify(withdrawnOwner.actions));
+  assert.equal(withdrawnOwner.actions[1].reason, 'sweeper.refuse.producer-running');
+  assert.match(withdrawnOwner.actions[1].detail, /no longer reports a stopped producer/);
+  assert.equal(existsSync(receiptTwo), true);
+  assert.equal(withdrawnApply.document.commands.some(record => record.argv.includes('--apply')), false);
+
+  // The engine handover is a mutation too, so the same re-read guards it: with no temporary receipt
+  // left, the moved lease stops the handover itself — no `--apply` is ever handed to the engine.
+  const handover = await makeFixture({ shape: 'released', orphans: false });
+  t.after(() => handover.teardown());
+  const handoverShim = await rmShim(handover.root, { after: handover.ownerTarget, mutate: nodeCommand(leaseReacquired, handover.snapshot) });
+  handover.env.PATH = `${handoverShim.directory}:${process.env.PATH}`;
+
+  const handoverApply = await handover.run(['--apply']);
+  assert.equal(existsSync(handoverShim.marker), true, 'the injected lease re-acquisition must have fired');
+  assert.equal(handoverApply.code, 1, handoverApply.stdout);
+  const handoverOwner = trackOf(handoverApply.document, 'fixture-owner');
+  assert.deepEqual(actionPairs(handoverOwner), [
+    ['reclaim-target', 'executed'],
+    ['engine-worktree-removal', 'refuse'],
+  ], JSON.stringify(handoverOwner.actions));
+  assert.equal(handoverOwner.actions[1].reason, 'sweeper.refuse.not-released');
+  assert.equal(existsSync(handover.ownerWorktree), true, 'the worktree must survive the stopped handover');
+  assert.equal(handoverApply.document.commands.some(record => record.argv.includes('--apply')), false);
+  assert.deepEqual(handoverApply.document.commands.filter(record => record.argv[0] === 'rm').map(record => record.argv), [['rm', '-rf', handover.ownerTarget]]);
+});
+
+test('an already absent branch is reported as an idempotent absent row', async t => {
+  // An absent branch in the non-force route used to be labelled `executed` /
+  // `sweeper.executed.engine-branch-remove` — the only idempotent path in the report that did not use
+  // the absent vocabulary, so a run that removed nothing still claimed it had executed the release.
+  // The branch is deleted by a peer between the plan phase and the handover here, which is exactly
+  // the edge the finding names.
+  const native = await makeNativeFixture();
+  t.after(() => native.teardown());
+  const shim = await rmShim(native.root, {
+    after: native.worktrees['fixture-a'],
+    mutate: `git -C ${JSON.stringify(native.main)} update-ref -d refs/heads/feat/fixture-a`,
+  });
+  native.env.PATH = `${shim.directory}:${process.env.PATH}`;
+
+  const apply = await native.run(['--apply']);
+  assert.equal(existsSync(shim.marker), true, 'the injected branch deletion must have fired');
+  assert.equal(apply.code, 1, apply.stdout);
+  const trackA = trackOf(apply.document, 'fixture-a');
+  assert.deepEqual(actionPairs(trackA), [
+    ['reclaim-target', 'executed'],
+    ['engine-worktree-removal', 'blocked'],
+    ['fallback-worktree-removal', 'executed'],
+    ['prune', 'executed'],
+    ['engine-branch-removal', 'absent'],
+  ], JSON.stringify(trackA.actions));
+  const branchRow = trackA.actions[trackA.actions.length - 1];
+  assert.equal(branchRow.ref, 'feat/fixture-a');
+  assert.equal(branchRow.reason, 'sweeper.absent.idempotent');
+  // Re-observed, not assumed: the ref really is gone, so the row reports the idempotent truth and
+  // the track's own exit no longer counts a surviving branch.
+  assert.equal(trackA.worktree.branch_present, false);
+  assert.equal(
+    (await native.git(['for-each-ref', '--format=%(refname)'], native.main)).includes('refs/heads/feat/fixture-a'),
+    false,
+  );
+  assert.equal(trackA.exit_clean, true);
+  await native.teardown();
+});
+
+test('--help is a standalone mode in the sweeper too', async t => {
+  // G2 says both scripts accept standalone `--help`. The sweeper used to accept it anywhere and
+  // silently ignore every other token — so `--repo relative/path --help` printed usage and exited 0
+  // instead of reporting the invocation, and a misspelled required flag beside it was never seen.
+  const help = await runScript(['--help']);
+  assert.equal(help.code, 0, help.stderr);
+  assert.match(help.stdout, /^Usage: node scripts\/worktree-sweep\.mjs/);
+  assert.equal(help.stderr, '');
+  const shortHelp = await runScript(['-h']);
+  assert.equal(shortHelp.code, 0, shortHelp.stderr);
+  assert.equal(shortHelp.stdout, help.stdout);
+  for (const args of [[], ['--unknown'], ['--help', '--unknown'], ['--repo', '/tmp', '--help'], ['--help', '--help'], ['--help', '-h'], ['-h', '--help']]) {
+    const invalid = await runScript(args);
+    assert.equal(invalid.code, 2, `${JSON.stringify(args)}: ${invalid.stderr}`);
+    assert.equal(invalid.stdout, '', `invalid invocations must not write stdout (${JSON.stringify(args)})`);
+  }
+});
+
+test('a killed child is classified as a timeout, not a spawn failure', async t => {
+  // S-5: a signal-terminated child has no exit code, and the old mapping labelled every such child
+  // `spawn-failed` even though the shared 30 s timeout is what kills children here. The
+  // classification is observable in the raw command record and in the refusal detail.
+  const engineDeath = await makeFixture({ shape: 'released', orphans: false });
+  t.after(() => engineDeath.teardown());
+  const engineShim = await signalShim(engineDeath.root, { name: 'mstar-harness' });
+  engineDeath.env.PATH = `${engineShim.directory}:${process.env.PATH}`;
+
+  const dry = await engineDeath.run();
+  assert.equal(dry.code, 1, dry.stdout);
+  assert.equal(dry.document.commands.length, 1);
+  assert.equal(dry.document.commands[0].exit_code, null);
+  assert.equal(dry.document.commands[0].spawn_error, 'timeout');
+  const engineRefusal = dry.document.refusals.find(entry => entry.code === 'sweeper.refuse.engine-unavailable');
+  assert.ok(engineRefusal, JSON.stringify(dry.document.refusals));
+  assert.match(engineRefusal.detail, /\(timeout\)/);
+  assert.equal(dry.stdout.includes('spawn-failed'), false);
+
+  // The same classification covers the git calls this tool makes itself.
+  const gitDeath = await makeFixture({ shape: 'leased' });
+  t.after(() => gitDeath.teardown());
+  const gitShimDir = await signalShim(gitDeath.root, { name: 'git', when: '--untracked-files=no' });
+  gitDeath.env.PATH = `${gitShimDir.directory}:${process.env.PATH}`;
+
+  const gitRun = await gitDeath.run();
+  assert.equal(gitRun.code, 1, gitRun.stdout);
+  const gitRefusal = gitRun.document.refusals.find(entry => entry.code === 'sweeper.refuse.git-unreadable');
+  assert.ok(gitRefusal, JSON.stringify(gitRun.document.refusals));
+  assert.match(gitRefusal.detail, /\(timeout\)/);
+  assert.equal(gitRun.stdout.includes('spawn-failed'), false);
 });
