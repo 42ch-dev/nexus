@@ -1,38 +1,48 @@
 #!/usr/bin/env node
 /**
- * Repository worktree and shared-cache sweeper — read-only inventory, capacity and
- * guard/check half of the G2 contract.
+ * Repository worktree and shared-cache sweeper — the G2 contract: read-only inventory, capacity
+ * and guard/check modes, plus the guarded `--apply` half (P1-T3).
  *
  *   node scripts/worktree-sweep.mjs \
  *     --repo <absolute-main-root> --harness <absolute-control-harness> \
  *     --workflow <id> --inventory <absolute-json> \
- *     [--check-exit <track-id> | --check-convergence]
+ *     [--apply | --check-exit <track-id> | --check-convergence]
  *
  * Authority, deliberately narrow:
  *   * The inventory is a NON-authoritative ownership receipt for one scheduling checkpoint.
  *     The workflow snapshot stays the only claim source, and `mstar-harness worktree cleanup`
  *     stays the only mechanism allowed to delete a worktree or a branch.
- *   * This script never deletes, never writes to the snapshot/register, never scans all home
- *     directories and never expands a wildcard. Faults are refused, never repaired.
- *   * `--apply` is refused until the guarded apply half lands (P1-T3); the dry run already
- *     invokes and records the real installed engine cleanup command.
+ *   * The dry run proposes; it never authorizes. `--apply` reclaims only a completed track whose
+ *     snapshot release and repository ancestry are re-proved at that moment, whose producer has
+ *     stopped, and whose exact worktree removal the installed engine itself still permits. Every
+ *     mutating action re-verifies its own path first (re-canonicalised temp/cache root, exact
+ *     identity, owned and non-symlink and in-root containment) and aborts fail-closed on any
+ *     changed, unreadable or ambiguous fact.
+ *   * This script deletes only the exact scoped target/temporary footprint of such a track and
+ *     never a wildcard, never the shared canonical cache, never a branch, and never with a force
+ *     flag. It never writes to the snapshot/register, never scans all home directories and never
+ *     repairs a fault.
  *   * Snapshot data is projected through an allowlist: session ids, lease holders and session
  *     labels are never copied into output or diagnostics.
  *   * A worktree whose index holds submodule gitlinks is reported as `blocked`, not as
  *     permission: on this repository a non-forced `git worktree remove` is inadmissible there,
- *     and the refusal survives `git submodule deinit --all` (measured by PM on Git 2.54). Each
- *     worktree therefore reports its measured gitlink count and how many initialized submodule
- *     checkouts point at an unresolvable gitdir — the diagnosis for this repository's linked
- *     checkouts. This script never deinitializes (that mutates shared configuration) and never
- *     forces; any recovery remains a separately authorized decision.
+ *     and the refusal survives `git submodule deinit --all` (measured by PM on Git 2.54), which
+ *     unregisters the submodule in the SHARED superproject config. Each worktree therefore
+ *     reports its measured gitlink count and how many initialized submodule checkouts point at an
+ *     unresolvable gitdir — the diagnosis for this repository's linked checkouts. On that exact
+ *     measured refusal `--apply` records the refusal verbatim and takes the documented non-force
+ *     route (`rm -rf <exact worktree path>` + `git worktree prune`, then re-observes). This script
+ *     never deinitializes and never forces.
  *
- * Exit codes: 0 valid dry run / passing check; 1 unreadable facts (snapshot, sibling
- * declarations, git, engine, path) or a failing requested check; 2 invalid invocation or inventory.
+ * Exit codes: 0 valid dry run / passing check / every requested completed track fully reclaimed;
+ * 1 unreadable facts (snapshot, sibling declarations, git, engine, path), a failing requested
+ * check, a failed reclamation, or a requested completed track still owning an artifact;
+ * 2 invalid invocation or inventory.
  */
 import { execFile } from 'node:child_process';
 import { lstat, readFile, readdir, realpath, statfs } from 'node:fs/promises';
 import { availableParallelism, cpus, homedir, tmpdir } from 'node:os';
-import { basename, isAbsolute, join, normalize, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, normalize, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
 
@@ -46,6 +56,14 @@ const WORKFLOW_ID = /^[A-Za-z0-9._-]+$/;
 
 const ENGINE_BINARY = 'mstar-harness';
 const ENGINE_TIMEOUT_MS = 30_000;
+/**
+ * The one measured mutation refusal `--apply` may route around (PM, 2026-09-25, this repository,
+ * git 2.54): `git worktree remove` refuses a worktree whose index holds a tracked submodule
+ * gitlink, and the refusal survives both `git submodule deinit --all` and dropping that gitlink
+ * from the doomed worktree's index. `deinit` additionally unregisters the submodule in the SHARED
+ * superproject config, so it is never invoked here.
+ */
+const ENGINE_SUBMODULE_REFUSAL = 'working trees containing submodules cannot be moved or removed';
 const CAPTURE_LIMIT = 64 * 1024;
 const GIT_BUFFER = 4 * 1024 * 1024;
 const SIZE_WALK_CONCURRENCY = 64;
@@ -240,20 +258,17 @@ function parseArgs(argv) {
   const checkModes = Number(options.checkExit !== null) + Number(options.checkConvergence);
   if (checkModes > 1) throw new UsageError('--check-exit and --check-convergence are mutually exclusive');
   if (options.apply && checkModes > 0) throw new UsageError('--apply is mutually exclusive with --check-exit/--check-convergence');
-  if (options.apply) {
-    throw new UsageError('--apply is unavailable: this round delivers the read-only sweeper only, and the guarded apply half lands in P1-T3');
-  }
   return options;
 }
 
 function usage() {
   return [
     'Usage: node scripts/worktree-sweep.mjs --repo <absolute-main-root> --harness <absolute-control-harness>',
-    '       --workflow <id> --inventory <absolute-json> [--check-exit <track-id> | --check-convergence]',
+    '       --workflow <id> --inventory <absolute-json> [--apply | --check-exit <track-id> | --check-convergence]',
     '',
-    'Read-only worktree/cache sweep: parses the version-1 ownership inventory, reconciles it with',
-    'the workflow snapshot and real Git facts, measures capacity, and proposes ordered reclamation',
-    'actions. Nothing is deleted by this script.',
+    'Worktree/cache sweep: parses the version-1 ownership inventory, reconciles it with the',
+    'workflow snapshot and real Git facts, measures capacity, and proposes ordered reclamation',
+    'actions. Without --apply nothing is deleted by this script.',
     '',
     'Options:',
     '  --repo <path>        Absolute main checkout root (its Git worktree list is the main root).',
@@ -262,15 +277,21 @@ function usage() {
     '  --inventory <path>   Absolute version-1 ownership receipt document.',
     '  --check-exit <id>    Read-only: assert this completed track keeps no target/temp/worktree footprint.',
     '  --check-convergence  Read-only: assert main + integration are the only worktrees listed and no unclaimed footprint remains.',
-    '  --apply              Refused: the guarded apply half lands in P1-T3.',
+    '  --apply              Reclaim the completed, merged, released, producer-stopped tracks: re-verify',
+    '                       every fact immediately before acting, remove the exact target/temporary',
+    '                       footprint, then hand each worktree/branch to the installed engine (never',
+    '                       force). Only on the measured submodule refusal does it take the documented',
+    '                       non-force route `rm -rf <exact worktree path>` + `git worktree prune`.',
     '  -h, --help           Print this usage.',
     '',
-    'Exit codes: 0 valid dry run or passing check; 1 unreadable facts or failing check; 2 invalid invocation/inventory.',
+    'Exit codes: 0 valid dry run, passing check or a fully reclaimed apply; 1 unreadable facts, a',
+    'failing check, a failed reclamation or a requested completed track still owning an artifact;',
+    '2 invalid invocation/inventory.',
     '',
     'A worktree whose index holds submodule gitlinks is reported as `blocked` rather than proposed:',
     'a non-forced removal is inadmissible here, and this tool never forces and never runs',
-    '`git submodule deinit` (that mutates shared configuration). Recovery stays an authorized decision',
-    'taken with merged, clean and released proof.',
+    '`git submodule deinit` (that mutates shared configuration). Recovery uses the exact-path',
+    'non-force route above and re-observes the result.',
     '',
   ].join('\n');
 }
@@ -514,6 +535,7 @@ function declarationOf(doc, fallbackId) {
   return {
     id: nonEmptyString(doc.id) ? doc.id : fallbackId,
     type: doc.type === 'iteration' ? 'iteration' : 'plan',
+    base_branch: nonEmptyString(branch.base) ? branch.base : undefined,
     integration_branch: nonEmptyString(branch.integration) ? branch.integration : undefined,
     integration_worktree_path: nonEmptyString(doc.integration_worktree_path)
       ? doc.integration_worktree_path
@@ -784,12 +806,16 @@ async function reconcileInventory({ raw, workflowId, declaration, foreignClaims,
 
 // --- engine evidence ---------------------------------------------------------------------
 
-async function invokeEngine({ mainRoot, workflowId, harnessDir, worktreePath, environment }) {
-  const argv = [ENGINE_BINARY, 'worktree', 'cleanup', '--workflow', workflowId, '--harness', harnessDir, '--worktree', worktreePath];
-  const record = { argv, exit_code: null, spawn_error: null, stdout: '', stderr: '', truncated: false };
+/**
+ * Raw record of one executed command: exactly the argv that ran plus the captured output, in the
+ * same shape the dry run already records for the engine probe. Nothing here rewrites or summarises
+ * what a command did.
+ */
+async function runRecorded(file, args, cwd, environment) {
+  const record = { argv: [file, ...args], exit_code: null, spawn_error: null, stdout: '', stderr: '', truncated: false };
   try {
-    const { stdout, stderr } = await exec(argv[0], argv.slice(1), {
-      cwd: mainRoot,
+    const { stdout, stderr } = await exec(file, args, {
+      cwd,
       env: environment,
       timeout: ENGINE_TIMEOUT_MS,
       maxBuffer: GIT_BUFFER,
@@ -813,6 +839,13 @@ async function invokeEngine({ mainRoot, workflowId, harnessDir, worktreePath, en
   return record;
 }
 
+/** The exact argv contract: `--workflow --harness --worktree [--apply]`, never a widening flag. */
+async function invokeEngine({ mainRoot, workflowId, harnessDir, worktreePath, environment, apply = false }) {
+  const args = ['worktree', 'cleanup', '--workflow', workflowId, '--harness', harnessDir, '--worktree', worktreePath];
+  if (apply) args.push('--apply');
+  return await runRecorded(ENGINE_BINARY, args, mainRoot, environment);
+}
+
 /** The engine prints `verdict | kind | ref | reason`; a valid dry run may still refuse every row. */
 async function engineDecision(record, worktreeKey) {
   const rows = String(record.stdout)
@@ -829,10 +862,462 @@ async function engineDecision(record, worktreeKey) {
   return { verdict: 'refuse', reason: 'sweeper.refuse.engine-no-candidate' };
 }
 
+// --- guarded apply and the pre-action re-verification gate (P1-T3) -------------------------
+
+/**
+ * Re-verify one exact temporary receipt literally immediately before it is removed. The dry run's
+ * containment decision is not a durable fact — a symlink component's target is resolved by the
+ * kernel in a single step — so the current system temp root and the receipt's own identity are
+ * re-read here: the temp root must still canonicalise to the same root, the receipt must still be
+ * an unlinked path inside it (the same prefix-sequence rule the dry run applied), must not have
+ * moved into the cache or the repository, and must not be a symlink. Any changed, unreadable or
+ * ambiguous fact is a refusal; a receipt that is already gone is idempotent, not a deletion.
+ */
+async function reverifyTemporary(path, { tempRootKey, cacheRoot, mainRoot }) {
+  const currentRoot = await pathKey(tmpdir());
+  if (currentRoot !== tempRootKey) {
+    return { ok: false, absent: false, reason: 'sweeper.refuse.reverify-temp-root', detail: `the system temp root now canonicalises to ${currentRoot}, not the planned ${tempRootKey}` };
+  }
+  const containment = await canonicalWithin(currentRoot, path);
+  if (containment.unreadable !== null) {
+    return { ok: false, absent: false, reason: 'sweeper.refuse.path-unreadable', detail: `temporary ${path} cannot be resolved (${containment.unreadable})` };
+  }
+  if (!containment.within) {
+    return { ok: false, absent: false, reason: 'sweeper.refuse.reverify-temporary', detail: `temporary ${path} is no longer an unlinked receipt path inside the system temp root` };
+  }
+  if (isWithin(cacheRoot, path) || isWithin(mainRoot, path)) {
+    return { ok: false, absent: false, reason: 'sweeper.refuse.reverify-temporary', detail: `temporary ${path} now sits inside a protected shared location` };
+  }
+  const probe = await describePath(path);
+  if (probe.unreadable !== null) {
+    return { ok: false, absent: false, reason: 'sweeper.refuse.path-unreadable', detail: `temporary ${path} cannot be read (${probe.unreadable})` };
+  }
+  if (probe.is_symlink) {
+    return { ok: false, absent: false, reason: 'sweeper.refuse.symlink-path', detail: `temporary ${path} became a symlink` };
+  }
+  return { ok: true, absent: !probe.exists, reason: null, detail: null };
+}
+
+/**
+ * Re-verify one exact feature target immediately before it is removed: the cache root must still
+ * canonicalise to the planned root, the path must still be exactly the `.envrc`-derived target for
+ * this worktree's basename, must still be an unlinked path inside that root, must never be the
+ * shared canonical cache, and must not be a symlink.
+ */
+async function reverifyOwnedTarget(path, { expectedPath, cacheRootKey, environment }) {
+  const resolution = cacheRootFrom(environment);
+  if (resolution.error !== undefined) {
+    return { ok: false, absent: false, reason: 'sweeper.refuse.cache-root', detail: resolution.error };
+  }
+  const currentRoot = await pathKey(resolution.path);
+  if (currentRoot !== cacheRootKey) {
+    return { ok: false, absent: false, reason: 'sweeper.refuse.reverify-cache-root', detail: `the cache root now canonicalises to ${currentRoot}, not the planned ${cacheRootKey}` };
+  }
+  if (resolve(path) === resolve(join(currentRoot, CANONICAL_TARGET_NAME))) {
+    return { ok: false, absent: false, reason: 'sweeper.refuse.protected-target', detail: `target ${path} is the shared canonical cache` };
+  }
+  if (resolve(path) !== resolve(expectedPath)) {
+    return { ok: false, absent: false, reason: 'sweeper.refuse.reverify-target', detail: `target ${path} is no longer the .envrc-derived ${expectedPath}` };
+  }
+  const containment = await canonicalWithin(currentRoot, path);
+  if (containment.unreadable !== null) {
+    return { ok: false, absent: false, reason: 'sweeper.refuse.path-unreadable', detail: `target ${path} cannot be resolved (${containment.unreadable})` };
+  }
+  if (!containment.within) {
+    return { ok: false, absent: false, reason: 'sweeper.refuse.reverify-target', detail: `target ${path} is no longer an unlinked path inside the cache root` };
+  }
+  const probe = await describePath(path);
+  if (probe.unreadable !== null) {
+    return { ok: false, absent: false, reason: 'sweeper.refuse.path-unreadable', detail: `target ${path} cannot be read (${probe.unreadable})` };
+  }
+  if (probe.is_symlink) {
+    return { ok: false, absent: false, reason: 'sweeper.refuse.symlink-path', detail: `target ${path} became a symlink` };
+  }
+  return { ok: true, absent: !probe.exists, reason: null, detail: null };
+}
+
+/**
+ * Re-verify the exact worktree immediately before it is handed to the engine or removed by the
+ * documented non-force route: it must still be a linked worktree of THIS repository, on the
+ * declared branch, at a `<dir>/.worktrees/<name>` path whose parent is a readable real directory,
+ * and must not be the main or a protected checkout. A path that exists without being a registered
+ * linked worktree is refused rather than removed.
+ */
+async function reverifyWorktree(path, { branch, worktreeKey, repoRoot, mainRoot, protectedKeys, environment }) {
+  const probe = await describePath(path);
+  if (probe.unreadable !== null) {
+    return { ok: false, absent: false, reason: 'sweeper.refuse.path-unreadable', detail: `worktree ${path} cannot be read (${probe.unreadable})` };
+  }
+  if (probe.is_symlink) {
+    return { ok: false, absent: false, reason: 'sweeper.refuse.symlink-path', detail: `worktree ${path} is a symlink` };
+  }
+  const listing = await runGit(['worktree', 'list', '--porcelain'], repoRoot, environment);
+  if (listing.exit_code !== 0) {
+    return { ok: false, absent: false, reason: 'sweeper.refuse.git-unreadable', detail: `git worktree list failed in ${repoRoot} (${listing.spawn_error ?? listing.stderr.trim()})` };
+  }
+  const records = await Promise.all(parseWorktreeList(listing.stdout).map(async record => ({ ...record, key: await pathKey(record.path) })));
+  const listed = records.find(record => record.key === worktreeKey) ?? null;
+  if (listed === null && !probe.exists) return { ok: true, absent: true, reason: null, detail: null };
+  if (listed === null) {
+    return { ok: false, absent: false, reason: 'sweeper.refuse.reverify-worktree', detail: `${path} exists on disk but is no longer a linked worktree of this repository` };
+  }
+  const parent = dirname(path);
+  const parentProbe = await describePath(parent);
+  if (basename(parent) !== '.worktrees' || !parentProbe.exists || parentProbe.is_symlink || parentProbe.unreadable !== null) {
+    return { ok: false, absent: false, reason: 'sweeper.refuse.reverify-worktree', detail: `${path} is not a readable <dir>/.worktrees/<name> linked checkout` };
+  }
+  if (listed.branch !== branch) {
+    return { ok: false, absent: false, reason: 'sweeper.refuse.reverify-worktree', detail: `${path} now has ${listed.branch} checked out, not the declared ${branch}` };
+  }
+  if (mainRoot !== null && worktreeKey === mainRoot) {
+    return { ok: false, absent: false, reason: 'sweeper.refuse.reverify-worktree', detail: `${path} is the main worktree` };
+  }
+  if (protectedKeys.has(worktreeKey)) {
+    return { ok: false, absent: false, reason: 'sweeper.refuse.reverify-worktree', detail: `${path} is a protected checkout` };
+  }
+  return { ok: true, absent: false, reason: null, detail: null };
+}
+
+/** Snapshot release proof: the claiming plan row is terminal and holds no execution lease. */
+function releaseProof(track, declaration) {
+  const plan = declaration.plans.find(candidate => candidate.id === track.plan_id) ?? null;
+  if (plan === null) {
+    return { released: false, code: 'sweeper.refuse.not-released', detail: `the snapshot declares no plan row ${track.plan_id}, so the track is not released` };
+  }
+  if (plan.status !== TERMINAL_PLAN_STATUS) {
+    return { released: false, code: 'sweeper.refuse.not-released', detail: `plan ${plan.id} is ${plan.status}, not ${TERMINAL_PLAN_STATUS}, so the track is not released` };
+  }
+  if (plan.leased) {
+    return { released: false, code: 'sweeper.refuse.not-released', detail: `plan ${plan.id} still holds an execution lease` };
+  }
+  return { released: true, code: null, detail: null };
+}
+
+/**
+ * Merge proof from the repository's own ancestry — never from engine wording. A declared branch that
+ * no longer exists is already gone and cannot protect anything; an unresolvable evidence ref is a
+ * fact gap and refuses.
+ */
+async function mergeProof(track, declaration, repoRoot, environment) {
+  const evidenceBase = declaration.integration_branch ?? declaration.base_branch;
+  if (!nonEmptyString(evidenceBase)) {
+    return { merged: false, code: 'sweeper.refuse.merge-unresolvable', detail: 'the workflow declaration records neither an integration nor a base ref' };
+  }
+  const branchRef = await runGit(['rev-parse', '--verify', '--quiet', `refs/heads/${track.branch}`], repoRoot, environment);
+  if (branchRef.exit_code !== 0) {
+    if (branchRef.exit_code === 1 && branchRef.stdout.trim() === '' && branchRef.stderr.trim() === '') {
+      return { merged: true, code: null, detail: null };
+    }
+    return { merged: false, code: 'sweeper.refuse.git-unreadable', detail: `git rev-parse could not read refs/heads/${track.branch} (${branchRef.spawn_error ?? branchRef.stderr.trim()})` };
+  }
+  const ancestry = await runGit(['merge-base', '--is-ancestor', track.branch, evidenceBase], repoRoot, environment);
+  if (ancestry.exit_code === 0) return { merged: true, code: null, detail: null };
+  if (ancestry.exit_code === 1) {
+    return { merged: false, code: 'sweeper.refuse.unmerged-track', detail: `${track.branch} is not an ancestor of ${evidenceBase}` };
+  }
+  return { merged: false, code: 'sweeper.refuse.merge-unresolvable', detail: `git merge-base could not decide ${track.branch} against ${evidenceBase} (${ancestry.spawn_error ?? ancestry.stderr.trim()})` };
+}
+
+/**
+ * The one measured refusal `--apply` may route around, matched against the engine's own raw output:
+ * `apply: failed worktree <exact path>: fatal: <ENGINE_SUBMODULE_REFUSAL>`. The named path must
+ * canonicalise to this track's worktree, so a refusal about any other path cannot authorize a
+ * removal here.
+ */
+async function engineSubmoduleRefusal(record, worktreePath, worktreeKey) {
+  const prefix = 'apply: failed worktree ';
+  const suffix = `: fatal: ${ENGINE_SUBMODULE_REFUSAL}`;
+  for (const line of `${record.stdout}\n${record.stderr}`.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith(prefix) || !trimmed.endsWith(suffix)) continue;
+    const named = trimmed.slice(prefix.length, trimmed.length - suffix.length);
+    if ((await pathKey(named)) === worktreeKey) return { named };
+  }
+  return null;
+}
+
+/** `git worktree prune --dry-run --verbose` names each stale record it would drop. */
+function prunableWorktreeNames(text) {
+  const names = [];
+  for (const line of String(text).split('\n')) {
+    const match = /^Removing worktrees\/(.+?): /.exec(line.trim());
+    if (match !== null) names.push(match[1]);
+  }
+  return names;
+}
+
+/**
+ * Record the prune check for one removed track and prune only when it would affect solely that
+ * track's record. A dry run that would also drop a foreign stale entry is retained and reported
+ * instead of silently pruning someone else's record.
+ */
+async function pruneScopedWorktree({ name, context, actions }) {
+  const dry = await runRecorded('git', ['worktree', 'prune', '--dry-run', '--verbose'], context.repoRoot, context.environment);
+  context.commands.push(dry);
+  if (dry.spawn_error !== null || dry.exit_code !== 0) {
+    const detail = `git worktree prune --dry-run failed (${dry.spawn_error ?? dry.stderr.trim()})`;
+    addAction(actions, 'prune', context.repoRoot, 'refuse', 'sweeper.refuse.git-unreadable', detail);
+    return;
+  }
+  const names = prunableWorktreeNames(`${dry.stdout}\n${dry.stderr}`);
+  const foreign = unique(names.filter(candidate => candidate !== name));
+  if (foreign.length > 0) {
+    const detail = `git worktree prune would also drop foreign stale record(s): ${sorted(foreign).join(', ')}`;
+    addAction(actions, 'prune', context.repoRoot, 'refuse', 'sweeper.refuse.prune-foreign', detail);
+    return;
+  }
+  if (!names.includes(name)) {
+    addAction(actions, 'prune', context.repoRoot, 'absent', 'sweeper.absent.idempotent');
+    return;
+  }
+  const actual = await runRecorded('git', ['worktree', 'prune'], context.repoRoot, context.environment);
+  context.commands.push(actual);
+  if (actual.spawn_error !== null || actual.exit_code !== 0) {
+    const detail = `git worktree prune failed (${actual.spawn_error ?? actual.stderr.trim()})`;
+    addAction(actions, 'prune', context.repoRoot, 'refuse', 'sweeper.refuse.git-unreadable', detail);
+    return;
+  }
+  addAction(actions, 'prune', context.repoRoot, 'executed', 'sweeper.executed.prune');
+}
+
+/**
+ * Remove one exact owned path after re-verifying it, and prove the removal by re-observing the path
+ * instead of trusting the command's wording. `rm -rf` runs with the exact path and no wildcard.
+ */
+async function reclaimOwnedPath({ path, kind, context, actions, reverify }) {
+  const check = await reverify();
+  if (!check.ok) {
+    addAction(actions, kind, path, 'refuse', check.reason, check.detail);
+    return;
+  }
+  if (check.absent) {
+    addAction(actions, kind, path, 'absent', 'sweeper.absent.idempotent');
+    return;
+  }
+  const removal = await runRecorded('rm', ['-rf', path], context.repoRoot, context.environment);
+  context.commands.push(removal);
+  const after = await describePath(path);
+  if (removal.spawn_error !== null || removal.exit_code !== 0 || after.exists || after.unreadable !== null) {
+    const state = after.unreadable !== null ? `unreadable (${after.unreadable})` : after.exists ? 'still present' : 'gone';
+    const detail = `rm -rf ${path} exited ${removal.exit_code ?? removal.spawn_error} and the path is ${state}`;
+    addAction(actions, kind, path, 'refuse', 'sweeper.refuse.remove-failed', detail);
+    return;
+  }
+  addAction(actions, kind, path, 'executed', `sweeper.executed.${kind}`);
+}
+
+/**
+ * The documented non-force route for the measured submodule refusal: report the refusal truthfully,
+ * remove the exact worktree path, run the scoped prune check and re-observe. The branch is handed
+ * back to the engine afterwards; it stays the only mechanism allowed to delete a branch, and it
+ * declines to act on a path whose worktree record is gone rather than forcing anything.
+ */
+async function nonForceWorktreeRemoval({ track, context, actions }) {
+  const path = track.worktree_path;
+  addAction(
+    actions,
+    'engine-worktree-removal',
+    path,
+    'blocked',
+    'sweeper.blocked.submodule-gitlinks',
+    `the installed engine refused the non-force removal with "${ENGINE_SUBMODULE_REFUSAL}"; taking the documented exact-path route`,
+  );
+  const removal = await runRecorded('rm', ['-rf', path], context.repoRoot, context.environment);
+  context.commands.push(removal);
+  const after = await describePath(path);
+  if (removal.spawn_error !== null || removal.exit_code !== 0 || after.exists || after.unreadable !== null) {
+    const state = after.unreadable !== null ? `unreadable (${after.unreadable})` : after.exists ? 'still present' : 'gone';
+    const detail = `rm -rf ${path} exited ${removal.exit_code ?? removal.spawn_error} and the path is ${state}`;
+    addAction(actions, 'fallback-worktree-removal', path, 'refuse', 'sweeper.refuse.remove-failed', detail);
+    return;
+  }
+  addAction(actions, 'fallback-worktree-removal', path, 'executed', 'sweeper.executed.non-force-remove');
+  await pruneScopedWorktree({ name: basename(path), context, actions });
+
+  const release = await invokeEngine({
+    mainRoot: context.repoRoot,
+    workflowId: context.options.workflow,
+    harnessDir: context.options.harness,
+    worktreePath: path,
+    environment: context.environment,
+    apply: true,
+  });
+  context.commands.push(release);
+  const branchRef = await runGit(['rev-parse', '--verify', '--quiet', `refs/heads/${track.branch}`], context.repoRoot, context.environment);
+  if (branchRef.exit_code === 0) {
+    addAction(
+      actions,
+      'engine-branch-removal',
+      track.branch,
+      'retained',
+      'sweeper.retained.branch-unreachable',
+      `the engine declines branch candidates for an exact path whose worktree record is pruned (its raw output is recorded in commands[]), and never force-deletes a branch; release ${track.branch} from the workflow-level cleanup checkpoint`,
+    );
+    return;
+  }
+  if (branchRef.exit_code === 1 && branchRef.stdout.trim() === '' && branchRef.stderr.trim() === '') {
+    addAction(actions, 'engine-branch-removal', track.branch, 'executed', 'sweeper.executed.engine-branch-remove');
+    return;
+  }
+  const detail = `git rev-parse could not read refs/heads/${track.branch} (${branchRef.spawn_error ?? branchRef.stderr.trim()})`;
+  addAction(actions, 'engine-branch-removal', track.branch, 'refuse', 'sweeper.refuse.git-unreadable', detail);
+}
+
+/**
+ * The documented per-track action order (`reclaim-target` → `reclaim-temporary` →
+ * `engine-worktree-removal` → fallback → `prune` → `engine-branch-removal`) is preserved in `--apply`
+ * even though the worktree's identity is re-verified before anything is reclaimed: the report is
+ * ordered by the contract, the mutations by their safety gate. The sort is stable, so rows of one
+ * kind keep the order they were produced in.
+ */
+const ACTION_KIND_ORDER = ['reclaim-target', 'reclaim-temporary', 'engine-worktree-removal', 'fallback-worktree-removal', 'prune', 'engine-branch-removal', 'reclaim-footprint', 'protected'];
+
+function orderActions(actions) {
+  const rank = action => {
+    const index = ACTION_KIND_ORDER.indexOf(action.kind);
+    return index === -1 ? ACTION_KIND_ORDER.length : index;
+  };
+  return [...actions].sort((a, b) => rank(a) - rank(b)).map((action, index) => ({ ...action, order: index + 1 }));
+}
+
+/**
+ * Guarded `--apply` for one reconciled track. The dry run's proposal is an input, never an
+ * authorization: the snapshot release, the repository ancestry, the installed engine's own permit
+ * and every exact path are re-proved here, immediately before each mutating action. A guard that
+ * fails returns a refusal action with the fact that failed and mutates nothing, so a dirty, active,
+ * leased, unmerged or ambiguously shaped slice keeps every byte.
+ */
+async function applyTrack(fact, context) {
+  const { track } = fact;
+  const actions = [];
+  const engineRecords = [];
+  // `applied` means a mutation may have happened, so the caller re-observes this track; a pure
+  // refusal leaves the planning facts untouched and needs no re-read.
+  const refuseAll = (code, detail) => {
+    addAction(actions, 'reclaim-footprint', track.worktree_path, 'refuse', code, detail);
+    return { actions, engineRecords, applied: false };
+  };
+
+  if (track.state !== 'completed') {
+    addAction(actions, 'protected', track.worktree_path, 'protected', 'sweeper.protected.track-active');
+    return { actions, engineRecords, applied: false };
+  }
+  if (track.producer_stopped !== true) {
+    return refuseAll('sweeper.refuse.producer-running', `track ${track.track_id} holds no producer-stopped receipt, so its footprint is not a reclaimable slice`);
+  }
+  const release = releaseProof(track, context.declaration);
+  if (!release.released) return refuseAll(release.code, release.detail);
+  const merge = await mergeProof(track, context.declaration, context.repoRoot, context.environment);
+  if (!merge.merged) return refuseAll(merge.code, merge.detail);
+
+  // Re-execute the engine's dry run (never replay the planning pass): a per-row refusal stays a
+  // refusal, so a dirty or still-leased worktree loses nothing.
+  if (fact.worktree.listed) {
+    const probe = await invokeEngine({
+      mainRoot: context.repoRoot,
+      workflowId: context.options.workflow,
+      harnessDir: context.options.harness,
+      worktreePath: track.worktree_path,
+      environment: context.environment,
+    });
+    context.commands.push(probe);
+    engineRecords.push(probe);
+    if (probe.spawn_error !== null) {
+      return refuseAll('sweeper.refuse.engine-unavailable', `engine cleanup could not be executed (${probe.spawn_error})`);
+    }
+    if (probe.exit_code === EXIT_INVALID) {
+      return refuseAll('sweeper.refuse.engine-usage', `engine cleanup rejected the invocation for ${track.worktree_path}`);
+    }
+    if (probe.exit_code !== 0) {
+      return refuseAll('sweeper.refuse.engine-probe', `engine cleanup could not probe ${track.worktree_path} (exit ${probe.exit_code})`);
+    }
+    const decision = await engineDecision(probe, track.worktree_key);
+    if (decision.verdict !== 'propose') {
+      return refuseAll(decision.reason, `the installed engine does not permit removing ${track.worktree_path} (raw row reason ${decision.reason})`);
+    }
+  }
+
+  // The worktree's identity and containment are re-proved BEFORE anything is reclaimed: when the
+  // primary removal cannot be lawfully attempted the whole track is refused with zero mutation,
+  // instead of half-reclaiming a slice whose worktree has to stay. The worktree and the branch
+  // remain the engine's decision, and only this re-verified exact path is ever handed over.
+  let worktreeRemains = false;
+  if (!fact.worktree.listed) {
+    addAction(actions, 'engine-worktree-removal', track.worktree_path, 'absent', 'sweeper.absent.idempotent');
+  } else {
+    const worktreeCheck = await reverifyWorktree(track.worktree_path, {
+      branch: track.branch,
+      worktreeKey: track.worktree_key,
+      repoRoot: context.repoRoot,
+      mainRoot: context.mainRoot,
+      protectedKeys: context.protectedWorktreeKeys,
+      environment: context.environment,
+    });
+    if (!worktreeCheck.ok) {
+      addAction(actions, 'engine-worktree-removal', track.worktree_path, 'refuse', worktreeCheck.reason, worktreeCheck.detail);
+      return { actions, engineRecords, applied: false };
+    }
+    worktreeRemains = !worktreeCheck.absent;
+    if (!worktreeRemains) addAction(actions, 'engine-worktree-removal', track.worktree_path, 'absent', 'sweeper.absent.idempotent');
+  }
+
+  // Exact scoped target/temporary reclamation, each path re-verified immediately before it runs.
+  await reclaimOwnedPath({
+    path: fact.target.path,
+    kind: 'reclaim-target',
+    context,
+    actions,
+    reverify: () => reverifyOwnedTarget(fact.target.path, { expectedPath: fact.target.expected_path, cacheRootKey: context.cacheRootKey, environment: context.environment }),
+  });
+  for (const temporary of fact.temporary_paths) {
+    await reclaimOwnedPath({
+      path: temporary.path,
+      kind: 'reclaim-temporary',
+      context,
+      actions,
+      reverify: () => reverifyTemporary(temporary.path, { tempRootKey: context.tempRootKey, cacheRoot: context.cacheRoot, mainRoot: context.mainRoot }),
+    });
+  }
+  if (!worktreeRemains) return { actions, engineRecords, applied: true };
+
+  const applied = await invokeEngine({
+    mainRoot: context.repoRoot,
+    workflowId: context.options.workflow,
+    harnessDir: context.options.harness,
+    worktreePath: track.worktree_path,
+    environment: context.environment,
+    apply: true,
+  });
+  context.commands.push(applied);
+  engineRecords.push(applied);
+  if (applied.spawn_error !== null) {
+    addAction(actions, 'engine-worktree-removal', track.worktree_path, 'refuse', 'sweeper.refuse.engine-unavailable', `engine cleanup --apply could not be executed (${applied.spawn_error})`);
+    return { actions, engineRecords, applied: true };
+  }
+  if (applied.exit_code !== 0) {
+    const refusal = await engineSubmoduleRefusal(applied, track.worktree_path, track.worktree_key);
+    // The measured refusal is the only route around the engine's own non-force removal, and only
+    // when the local measurement agrees that this exact worktree carries submodule gitlinks.
+    if (refusal !== null && fact.worktree.submodule_gitlinks > 0) {
+      await nonForceWorktreeRemoval({ track, context, actions });
+      return { actions, engineRecords, applied: true };
+    }
+    const detail = `engine cleanup --apply failed for ${track.worktree_path} (exit ${applied.exit_code}) without the measured submodule refusal; no fallback is taken`;
+    addAction(actions, 'engine-worktree-removal', track.worktree_path, 'refuse', 'sweeper.refuse.engine-apply', detail);
+    return { actions, engineRecords, applied: true };
+  }
+  addAction(actions, 'engine-worktree-removal', track.worktree_path, 'executed', 'sweeper.executed.engine-remove');
+  await pruneScopedWorktree({ name: basename(track.worktree_path), context, actions });
+  return { actions, engineRecords, applied: true };
+}
+
 // --- sweep ------------------------------------------------------------------------------
 
-function addAction(actions, kind, ref, verdict, reason) {
-  actions.push({ order: actions.length + 1, kind, ref, verdict, reason });
+function addAction(actions, kind, ref, verdict, reason, detail = null) {
+  const action = { order: actions.length + 1, kind, ref, verdict, reason };
+  if (detail !== null) action.detail = detail;
+  actions.push(action);
+  return action;
 }
 
 /** G3 own-exit rule: producer stopped, own target/temporaries absent, worktree gone and unlisted. */
@@ -861,6 +1346,18 @@ function exitReasons(track) {
   }
   if (track.worktree.exists) reasons.push({ code: 'sweeper.check.worktree-present', detail: `track ${track.track_id} worktree path ${track.worktree.path} still exists` });
   return reasons;
+}
+
+/** The projection `exitReasons` consumes, so `--apply` can re-use it on freshly observed facts. */
+function projectTrackFact(fact) {
+  return {
+    track_id: fact.track.track_id,
+    state: fact.track.state,
+    producer_stopped: fact.track.producer_stopped,
+    target: fact.target,
+    temporary_paths: fact.temporary_paths,
+    worktree: fact.worktree,
+  };
 }
 
 function buildTrackActions(fact, decision) {
@@ -901,11 +1398,83 @@ function buildTrackActions(fact, decision) {
   return actions;
 }
 
+/**
+ * Measure one reconciled track's live facts: worktree presence/listing/dirt/submodule shape, the
+ * exact target footprint and every temporary receipt. Unreadable facts are returned as refusals,
+ * never as absence, so no caller can certify an unmeasured footprint as gone. `--apply` re-runs
+ * this after its mutations instead of replaying the planned action list.
+ */
+async function observeTrack(track, { repoRoot, environment }) {
+  const refusals = [];
+  const refuse = (code, detail, exitCode = EXIT_FACTS) => refusals.push(refusal(code, detail, exitCode));
+  const worktreeProbe = await describePath(track.worktree_path);
+  if (worktreeProbe.unreadable !== null) {
+    refuse('sweeper.refuse.path-unreadable', `track ${track.track_id} worktree ${track.worktree_path} cannot be read (${worktreeProbe.unreadable})`);
+  }
+  const target = await pathBytes(track.target_path);
+  if (target.unreadable !== null) refuse('sweeper.refuse.path-unreadable', `track ${track.track_id} target ${track.target_path} cannot be read (${target.unreadable})`);
+  if (target.is_symlink) refuse('sweeper.refuse.symlink-path', `track ${track.track_id} target ${track.target_path} is a symlink`);
+  const temporaries = [];
+  for (const path of track.temporary_paths) {
+    const fact = await pathBytes(path);
+    if (fact.unreadable !== null) refuse('sweeper.refuse.path-unreadable', `track ${track.track_id} temporary ${path} cannot be read (${fact.unreadable})`);
+    if (fact.is_symlink) refuse('sweeper.refuse.symlink-path', `track ${track.track_id} temporary ${path} is a symlink`);
+    temporaries.push({ path, exists: fact.exists, is_symlink: fact.is_symlink, bytes: fact.bytes, unreadable: fact.unreadable });
+  }
+  const listed = track.listed_worktree;
+  let dirtyTracked = null;
+  let submodules = { gitlinks: 0, unresolved: 0 };
+  if (listed !== null) {
+    const status = await runGit(['status', '--porcelain', '--untracked-files=no'], listed.path, environment);
+    if (status.exit_code === 0) dirtyTracked = status.stdout.trim() !== '';
+    else refuse('sweeper.refuse.git-unreadable', `git status failed in ${listed.path} (${status.spawn_error ?? status.stderr.trim()})`);
+    submodules = await submoduleState(listed.path, environment);
+    if (submodules.error !== undefined) refuse('sweeper.refuse.git-unreadable', `submodule probe failed in ${listed.path} (${submodules.error})`);
+  }
+  return {
+    fact: {
+      track,
+      main_root: repoRoot,
+      target: { path: track.target_path, expected_path: track.expected_target, exists: target.exists, is_symlink: target.is_symlink, bytes: target.bytes, unreadable: target.unreadable },
+      temporary_paths: temporaries,
+      worktree: {
+        path: track.worktree_path,
+        listed: listed !== null,
+        exists: worktreeProbe.exists,
+        unreadable: worktreeProbe.unreadable,
+        checked_out_branch: listed?.branch ?? null,
+        head: listed?.head ?? null,
+        locked: listed?.locked ?? false,
+        dirty_tracked: dirtyTracked,
+        submodule_gitlinks: submodules.gitlinks ?? 0,
+        submodule_unresolved_pointers: submodules.unresolved ?? 0,
+        removal_blocked_by_submodules: (submodules.gitlinks ?? 0) > 0,
+      },
+    },
+    refusals,
+  };
+}
+
+/**
+ * Re-map one track onto the CURRENT `git worktree list`: after `--apply` mutates a worktree, the
+ * planned listing is a stale fact, so the post-run observation must read the repository again. A
+ * listing that cannot be read keeps the last known record, which then fails the exit gate rather
+ * than reading as an absent footprint.
+ */
+async function refreshListedWorktree(track, repoRoot, environment) {
+  const listing = await runGit(['worktree', 'list', '--porcelain'], repoRoot, environment);
+  if (listing.exit_code !== 0) return track.listed_worktree;
+  for (const record of parseWorktreeList(listing.stdout)) {
+    if ((await pathKey(record.path)) === track.worktree_key) return record;
+  }
+  return null;
+}
+
 export async function sweepWorktreeInventory(options, environment = process.env) {
   const refusals = [];
   const refuse = (code, detail, exitCode = EXIT_FACTS) => refusals.push(refusal(code, detail, exitCode));
 
-  const mode = options.checkExit !== null ? 'check-exit' : options.checkConvergence ? 'check-convergence' : 'dry-run';
+  const mode = options.apply ? 'apply' : options.checkExit !== null ? 'check-exit' : options.checkConvergence ? 'check-convergence' : 'dry-run';
   const cacheResolution = cacheRootFrom(environment);
   if (cacheResolution.error !== undefined) refuse('sweeper.refuse.cache-root', cacheResolution.error, EXIT_INVALID);
   const cacheRoot = cacheResolution.path ?? join(homedir(), '.cache');
@@ -1008,49 +1577,9 @@ export async function sweepWorktreeInventory(options, environment = process.env)
   // Track facts.
   const trackFacts = [];
   for (const track of reconciliation.tracks) {
-    const worktreeProbe = await describePath(track.worktree_path);
-    if (worktreeProbe.unreadable !== null) {
-      refuse('sweeper.refuse.path-unreadable', `track ${track.track_id} worktree ${track.worktree_path} cannot be read (${worktreeProbe.unreadable})`);
-    }
-    const target = await pathBytes(track.target_path);
-    if (target.unreadable !== null) refuse('sweeper.refuse.path-unreadable', `track ${track.track_id} target ${track.target_path} cannot be read (${target.unreadable})`);
-    if (target.is_symlink) refuse('sweeper.refuse.symlink-path', `track ${track.track_id} target ${track.target_path} is a symlink`);
-    const temporaries = [];
-    for (const path of track.temporary_paths) {
-      const fact = await pathBytes(path);
-      if (fact.unreadable !== null) refuse('sweeper.refuse.path-unreadable', `track ${track.track_id} temporary ${path} cannot be read (${fact.unreadable})`);
-      if (fact.is_symlink) refuse('sweeper.refuse.symlink-path', `track ${track.track_id} temporary ${path} is a symlink`);
-      temporaries.push({ path, exists: fact.exists, is_symlink: fact.is_symlink, bytes: fact.bytes, unreadable: fact.unreadable });
-    }
-    const listed = track.listed_worktree;
-    let dirtyTracked = null;
-    let submodules = { gitlinks: 0, unresolved: 0 };
-    if (listed !== null) {
-      const status = await runGit(['status', '--porcelain', '--untracked-files=no'], listed.path, environment);
-      if (status.exit_code === 0) dirtyTracked = status.stdout.trim() !== '';
-      else refuse('sweeper.refuse.git-unreadable', `git status failed in ${listed.path} (${status.spawn_error ?? status.stderr.trim()})`);
-      submodules = await submoduleState(listed.path, environment);
-      if (submodules.error !== undefined) refuse('sweeper.refuse.git-unreadable', `submodule probe failed in ${listed.path} (${submodules.error})`);
-    }
-    trackFacts.push({
-      track,
-      main_root: repoRoot,
-      target: { path: track.target_path, expected_path: track.expected_target, exists: target.exists, is_symlink: target.is_symlink, bytes: target.bytes, unreadable: target.unreadable },
-      temporary_paths: temporaries,
-      worktree: {
-        path: track.worktree_path,
-        listed: listed !== null,
-        exists: worktreeProbe.exists,
-        unreadable: worktreeProbe.unreadable,
-        checked_out_branch: listed?.branch ?? null,
-        head: listed?.head ?? null,
-        locked: listed?.locked ?? false,
-        dirty_tracked: dirtyTracked,
-        submodule_gitlinks: submodules.gitlinks ?? 0,
-        submodule_unresolved_pointers: submodules.unresolved ?? 0,
-        removal_blocked_by_submodules: (submodules.gitlinks ?? 0) > 0,
-      },
-    });
+    const observed = await observeTrack(track, { repoRoot, environment });
+    refusals.push(...observed.refusals);
+    trackFacts.push(observed.fact);
   }
 
   // Cache-root feature targets: measured aggregate, plus unclaimed leftovers no receipt explains.
@@ -1143,12 +1672,48 @@ export async function sweepWorktreeInventory(options, environment = process.env)
     watermarks,
   };
 
-  // Engine evidence, only for a still-valid inventory and only for completed tracks that still
-  // hold a listed worktree. A dry run that refuses every row is still recorded verbatim.
+  // Engine evidence and per-track actions. A dry run probes every completed track that still holds
+  // a listed worktree and records the raw rows verbatim. `--apply` instead re-proves each requested
+  // track and acts only on the exact paths it re-verified that moment; every fact it touched is
+  // re-observed afterwards rather than replayed from the planned action list.
   const commands = [];
   const decisions = new Map();
   const engineRecords = new Map();
-  if (refusals.length === 0) {
+  const applyByTrack = new Map();
+  let applyIncomplete = false;
+  if (refusals.length > 0) {
+    // Input facts are unusable; nothing is proposed and nothing is invoked (unchanged G2 rule).
+  } else if (mode === 'apply') {
+    const context = {
+      options,
+      environment,
+      repoRoot,
+      mainRoot,
+      cacheRoot,
+      cacheRootKey: await pathKey(cacheRoot),
+      tempRootKey: tempRoot,
+      declaration,
+      protectedWorktreeKeys,
+      commands,
+    };
+    for (const fact of sorted(trackFacts, candidate => candidate.track.track_id)) {
+      const outcome = await applyTrack(fact, context);
+      outcome.actions = orderActions(outcome.actions);
+      applyByTrack.set(fact.track.track_id, outcome);
+      if (outcome.engineRecords.length > 0) engineRecords.set(fact.track.track_id, outcome.engineRecords[outcome.engineRecords.length - 1]);
+      if (outcome.applied) {
+        const relisted = { ...fact.track, listed_worktree: await refreshListedWorktree(fact.track, repoRoot, environment) };
+        const observed = await observeTrack(relisted, { repoRoot, environment });
+        fact.target = observed.fact.target;
+        fact.temporary_paths = observed.fact.temporary_paths;
+        fact.worktree = observed.fact.worktree;
+      }
+      // The apply exit gate fails when any requested completed track refused a step or still owns a
+      // scoped artifact after the run. Active peers are protected, never "requested".
+      const refused = outcome.actions.some(action => action.verdict === 'refuse');
+      if (refused || (fact.track.state === 'completed' && exitReasons(projectTrackFact(fact)).length > 0)) applyIncomplete = true;
+    }
+  } else {
     for (const fact of sorted(trackFacts, candidate => candidate.track.track_id)) {
       if (fact.track.state !== 'completed' || !fact.worktree.listed) continue;
       const record = await invokeEngine({
@@ -1175,10 +1740,11 @@ export async function sweepWorktreeInventory(options, environment = process.env)
   const tracks = [];
   for (const fact of sorted(trackFacts, candidate => candidate.track.track_id)) {
     const { track } = fact;
+    const outcome = applyByTrack.get(track.track_id) ?? null;
     const actions = blocked
       ? [{ order: 1, kind: 'refused', ref: track.worktree_path, verdict: 'refuse', reason: 'sweeper.refuse.inventory-blocked' }]
-      : buildTrackActions(fact, decisions.get(track.track_id) ?? null);
-    const reasons = exitReasons({ track_id: track.track_id, state: track.state, producer_stopped: track.producer_stopped, target: fact.target, temporary_paths: fact.temporary_paths, worktree: fact.worktree });
+      : outcome !== null ? outcome.actions : buildTrackActions(fact, decisions.get(track.track_id) ?? null);
+    const reasons = exitReasons(projectTrackFact(fact));
     tracks.push({
       track_id: track.track_id,
       plan_id: track.plan_id,
@@ -1200,7 +1766,7 @@ export async function sweepWorktreeInventory(options, environment = process.env)
     refuse('sweeper.refuse.unknown-track', `--check-exit names track ${JSON.stringify(options.checkExit)} that the inventory does not declare`, EXIT_INVALID);
   }
   let checks = null;
-  if (mode !== 'dry-run' && refusals.length === 0) {
+  if ((mode === 'check-exit' || mode === 'check-convergence') && refusals.length === 0) {
     const reasons = mode === 'check-exit'
       ? exitReasons(checkTrack)
       : [
@@ -1213,7 +1779,9 @@ export async function sweepWorktreeInventory(options, environment = process.env)
 
   const exitCode = refusals.length > 0
     ? Math.max(...refusals.map(entry => entry.exit_code))
-    : checks !== null && !checks.passed ? EXIT_FACTS : EXIT_OK;
+    : mode === 'apply'
+      ? applyIncomplete ? EXIT_FACTS : EXIT_OK
+      : checks !== null && !checks.passed ? EXIT_FACTS : EXIT_OK;
   return {
     document: {
       version: INVENTORY_VERSION,
@@ -1224,7 +1792,7 @@ export async function sweepWorktreeInventory(options, environment = process.env)
       tracks,
       unknown_paths: sorted(unknownPaths, entry => `${entry.kind}:${entry.path}`),
       commands,
-      ok: refusals.length === 0 && (checks === null || checks.passed),
+      ok: refusals.length === 0 && (mode === 'apply' ? !applyIncomplete : checks === null || checks.passed),
       refusals,
       checks,
     },
