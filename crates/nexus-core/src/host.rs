@@ -20,9 +20,7 @@ use nexus_agent_host::capability::model::{
     HostEvent, HostEventStream, HostStartConfig, SessionOwner,
 };
 use nexus_agent_host::capability::CreateSessionRequest as HostCreateRequest;
-use nexus_agent_host::config::{
-    agent_host_config_path, load_config_from_path, validate_workspace_path, AgentHostConfig,
-};
+use nexus_agent_host::config::{load_config_from_path, validate_workspace_path, AgentHostConfig};
 use nexus_agent_host::core::readiness::discover_provider_catalog;
 use nexus_agent_host::core::session::HostSession as RegistryHostSession;
 use nexus_agent_host::discovery::path_scan;
@@ -406,16 +404,22 @@ impl CoreService {
     }
 
     async fn open_host_inner(&self, port: Arc<dyn ProviderPort>) -> CoreResult<HostHandle> {
-        let user_home = self.inner.nexus_home.clone();
-        validate_workspace_path(&user_home).map_err(config_err)?;
-        let config_path = agent_host_config_path(&user_home);
+        // The stored `nexus_home` is already the canonical Nexus root
+        // (`<user_home>/.nexus42`), so the agent-host config is one
+        // `agent-host/config.toml` below it — the same file the native boot
+        // reaches through `agent_host_config_path(user_home)`. Passing this
+        // root to that helper nests `.nexus42` twice and reads a file nothing
+        // writes.
+        let nexus_root = self.inner.nexus_home.clone();
+        validate_workspace_path(&nexus_root).map_err(config_err)?;
+        let config_path = nexus_root.join("agent-host").join("config.toml");
         let host_config: AgentHostConfig =
             load_config_from_path(&config_path).map_err(config_err)?;
         let admitted_catalog = discover_provider_catalog(&host_config).map_err(config_err)?;
         let host = Arc::new(HostManager::new());
         host.start(HostStartConfig {
             config_path,
-            workspace_root: user_home,
+            workspace_root: nexus_root,
             max_sessions: host_config.max_sessions,
             max_ops_per_session: host_config.max_ops_per_session,
             timeouts: host_config.timeouts.clone(),

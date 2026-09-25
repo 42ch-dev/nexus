@@ -1677,12 +1677,12 @@ async fn actor_echo_keeps_the_actor_pair_for_live_and_retired_sessions() {
 /// the authority acts on.
 const ATTACHED_MANAGER_MAX_SESSIONS: usize = 4242;
 
-/// The agent-host config path the standalone `open_host` reads for this env
-/// (same home argument `CoreService::open_host_inner` passes).
+/// The canonical agent-host config path the standalone `open_host` reads for
+/// this env: the Nexus root plus `agent-host/config.toml`, i.e. exactly what
+/// `agent_host_config_path` resolves from the raw user home the native boot
+/// passes it. The helper takes the HOME, so it is handed `env.user_home` once.
 fn host_config_path(env: &Env) -> PathBuf {
-    nexus_agent_host::config::agent_host_config_path(&nexus_home_layout::nexus_root_from_home(
-        &env.user_home,
-    ))
+    nexus_agent_host::config::agent_host_config_path(&env.user_home)
 }
 
 /// Start a native manager the way the native open composes one — the
@@ -1813,6 +1813,79 @@ async fn attached_host_failed_open_releases_the_shared_admission() {
         .attach_host(manager.clone(), CountingPort::new())
         .expect_err("the successful attach now owns the slot");
     assert!(matches!(err, CoreError::OwnerBusy), "single owner: {err:?}");
+}
+
+/// The standalone `open_host` reads the ONE canonical agent-host config
+/// (`<nexus root>/agent-host/config.toml`) once, at open: the Host's own
+/// manager carries that file's value, a conflicting config at the
+/// `.nexus42`-nested path no writer uses cannot win, a later edit never
+/// re-loads into the running authority, and a malformed canonical file fails
+/// the open without retaining the shared admission.
+#[tokio::test]
+async fn standalone_host_reads_canonical_config_once() {
+    let env = seed_env().await;
+    let (core, _principal) = open_core(&env).await;
+
+    let canonical = host_config_path(&env);
+    // The path the standalone lookup must NOT resolve: applying the layout
+    // helper to the already-canonical Nexus root nests `.nexus42` twice, and
+    // nothing ever writes a config there.
+    let nested = nexus_agent_host::config::agent_host_config_path(
+        &nexus_home_layout::nexus_root_from_home(&env.user_home),
+    );
+    assert_ne!(
+        canonical, nested,
+        "the canonical and the nested lookup are different files"
+    );
+    for (path, max_sessions) in [(&canonical, 7), (&nested, 999)] {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, format!("max_sessions = {max_sessions}\n")).unwrap();
+    }
+
+    let handle = core
+        .open_host(CountingPort::new())
+        .await
+        .expect("the standalone authority opens over the canonical config");
+    // Observed through the manager the Host itself uses — not by comparing
+    // path strings.
+    assert_eq!(
+        handle.manager().agent_config().await.max_sessions,
+        7,
+        "the canonical file is the one read; the nested decoy cannot win"
+    );
+
+    // One read, at open: a later edit of the canonical file is not picked up
+    // by the running authority.
+    std::fs::write(&canonical, "max_sessions = 11\n").unwrap();
+    assert_eq!(
+        handle.manager().agent_config().await.max_sessions,
+        7,
+        "the config was read once, when the authority opened"
+    );
+
+    // A confirmed close frees the slot; a malformed canonical file then fails
+    // the next open AFTER the claim, and a corrected file admits the retry —
+    // so the failed open released the shared admission.
+    handle.close().await.expect("close returns a report");
+    std::fs::write(&canonical, "max_sessions = \"not-a-number\"\n").unwrap();
+    let err = core
+        .open_host(CountingPort::new())
+        .await
+        .expect_err("a malformed canonical config fails the open");
+    assert!(
+        matches!(err, CoreError::Internal { .. }),
+        "the failed start is an internal refusal, got {err:?}"
+    );
+    std::fs::write(&canonical, "max_sessions = 7\n").unwrap();
+    let retried = core
+        .open_host(CountingPort::new())
+        .await
+        .expect("the failed open released the shared admission");
+    assert_eq!(
+        retried.manager().agent_config().await.max_sessions,
+        7,
+        "the corrected canonical file is the one read on retry"
+    );
 }
 
 /// An attaching open on a service that is already closing is refused BEFORE
