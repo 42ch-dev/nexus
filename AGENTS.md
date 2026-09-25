@@ -192,9 +192,12 @@ git submodule update --init --recursive   # after pull if skill dirs are empty
 
 | Context | Submodule | Notes |
 |---------|-----------|-------|
-| Developer clone / worktree | **Full** init | Always `--recurse-submodules` + `git submodule update --init --recursive` after new worktree |
+| Developer clone | **Full** init | `--recurse-submodules` at clone; `git submodule update --init --recursive` after a pull only when the skill dirs are empty |
+| New worktree | **Full** init | **Required** after every `git worktree add`: run the checked-in initializer (see **Worktrees** below). The raw `git submodule update --init --recursive` is not an alternative step — it is only what the initializer runs internally for submodules that are still missing |
 | CI default jobs | **Off** | `actions/checkout` without `submodules: true` (Rust/TS builds do not read skills) |
 | CI job needing skills | **On demand** | Add `submodules: true` only when the job touches `.agents/skills/` |
+
+Running the raw command in place of the initializer is not equivalent: the initializer also validates already-initialized metadata, refuses a copied or out-of-subtree gitdir and an unmerged index state, and reports a deliberately different submodule HEAD instead of resetting it.
 
 **Worktrees:**
 
