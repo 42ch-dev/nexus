@@ -1172,9 +1172,8 @@ async fn character_terminal_contract_table_settles_every_run_status() {
             outcome.capture.pending_id.is_none() && outcome.capture.code.is_none(),
             "{label}: no fabricated capture id or code"
         );
-        assert_eq!(
-            outcome.operation_id,
-            operation_id.to_string(),
+        assert!(
+            outcome.operation_id == operation_id.to_string(),
             "{label}: the outcome names the operation it settled"
         );
     }
@@ -1627,9 +1626,8 @@ async fn actor_echo_keeps_the_actor_pair_for_live_and_retired_sessions() {
             nexus_contracts::core_host_query_response::NexusActorRef::CharacterActorRef {
                 character_id,
                 ..
-            } => assert_eq!(
-                character_id.as_str(),
-                env.character_id,
+            } => assert!(
+                character_id.as_str() == env.character_id,
                 "{label}: the Character bearer id survives"
             ),
             ref other @ nexus_contracts::core_host_query_response::NexusActorRef::CreatorActorRef {
@@ -1637,28 +1635,28 @@ async fn actor_echo_keeps_the_actor_pair_for_live_and_retired_sessions() {
             } => panic!("{label}: expected a Character actor ref, got {other:?}"),
         }
         let viewpoint = viewpoint.expect("an Actor row echoes its viewpoint");
-        assert_eq!(viewpoint.world_id.as_str(), WORLD, "{label}: world id");
-        assert_eq!(
+        assert!(viewpoint.world_id.as_str() == WORLD, "{label}: world id");
+        assert!(
             viewpoint
                 .binding_id
                 .as_ref()
-                .map(|id| id.as_str().to_string()),
-            Some(env.binding_id.clone()),
+                .map(|id| id.as_str().to_string())
+                == Some(env.binding_id.clone()),
             "{label}: binding id"
         );
         if !expected_retired {
             let retired = handle
                 .actor_sessions()
                 .retire_character_sessions(&env.character_id);
-            assert_eq!(retired, vec![session_id.clone()], "the id retires once");
+            assert!(retired == vec![session_id.clone()], "the id retires once");
         }
     }
-    assert_eq!(
+    assert!(
         handle
             .actor_sessions()
             .stored_session_owner(&session_id)
-            .map(|(owner, _, retired)| (owner, retired)),
-        Some((CREATOR.to_string(), true)),
+            .map(|(owner, _, retired)| (owner, retired))
+            == Some((CREATOR.to_string(), true)),
         "the echoed pair comes from the owner-retaining tombstone"
     );
 }
@@ -2500,7 +2498,10 @@ async fn actor_control_cancel_wins_the_phase_race_and_settles_once() {
         .cancel_operation(&principal, operation_id.to_string())
         .await
         .expect("an owner-authorized cancel is accepted");
-    assert_eq!(cancel.operation_id, operation_id.to_string());
+    assert!(
+        cancel.operation_id == operation_id.to_string(),
+        "the cancel names the operation it cancelled"
+    );
     assert_eq!(cancel.status, "cancelled");
     assert_eq!(
         provider.cancels(),
@@ -2810,7 +2811,10 @@ async fn actor_control_observation_settles_without_a_subscriber() {
         )
         .await
         .expect("the retained observation is readable");
-    assert_eq!(batch.operation_id, operation_id.to_string());
+    assert!(
+        batch.operation_id == operation_id.to_string(),
+        "the observation batch names the requested operation"
+    );
     assert!(batch.gap.is_none(), "an intact observation is not a gap");
     assert!(!batch.has_more);
     assert!(
@@ -2818,13 +2822,7 @@ async fn actor_control_observation_settles_without_a_subscriber() {
             event,
             nexus_contracts::generated::core::provider_event_batch::NexusProviderHostEvent::OpFinished { .. }
         )),
-        "the observation carries this operation's terminal ({} events, kinds: {:?})",
-        batch.events.len(),
-        batch
-            .events
-            .iter()
-            .map(std::mem::discriminant)
-            .collect::<Vec<_>>()
+        "the observation carries this operation's terminal"
     );
     assert_eq!(
         provider.polled(),
@@ -3060,7 +3058,10 @@ async fn actor_control_session_shutdown_cancels_then_releases() {
         .expect("the session shutdown settles with its drain")
         .expect("the shutdown task joins")
         .expect("an owner-authorized shutdown is confirmed");
-    assert_eq!(response.session_id, session_id.to_string());
+    assert!(
+        response.session_id == session_id.to_string(),
+        "the shutdown names the session it settled"
+    );
     assert_eq!(response.status, "shutdown");
     assert_eq!(
         provider.cancels(),
@@ -3079,12 +3080,12 @@ async fn actor_control_session_shutdown_cancels_then_releases() {
         CharacterOperationResultRunStatus::Cancelled,
         "the shutdown's accepted cancel is the operation's truth"
     );
-    assert_eq!(
+    assert!(
         handle
             .actor_sessions()
             .stored_session_owner(&session_id)
-            .map(|(owner, _, retired)| (owner, retired)),
-        Some((CREATOR.to_string(), true)),
+            .map(|(owner, _, retired)| (owner, retired))
+            == Some((CREATOR.to_string(), true)),
         "the released session is retired, not reusable"
     );
 
@@ -3247,7 +3248,10 @@ async fn actor_control_session_shutdown_waits_for_an_admitted_execute() {
         .await
         .expect("the execute task joins")
         .expect("the admitted execute is dispatched");
-    assert_eq!(started.session_id, session_id.to_string());
+    assert!(
+        started.session_id == session_id.to_string(),
+        "the dispatch names the session it was admitted for"
+    );
     wait_until(
         || handle.actor_sessions().unsettled_drain_count() == 1,
         "the admitted execute to register its drain",
@@ -3265,7 +3269,10 @@ async fn actor_control_session_shutdown_waits_for_an_admitted_execute() {
         .expect("the shutdown settles with the late drain")
         .expect("the shutdown task joins")
         .expect("the confirmed shutdown");
-    assert_eq!(response.session_id, session_id.to_string());
+    assert!(
+        response.session_id == session_id.to_string(),
+        "the confirmed shutdown names the same session"
+    );
     assert_eq!(response.status, "shutdown");
     assert_eq!(
         handle.actor_sessions().unsettled_drain_count(),
