@@ -26,7 +26,9 @@
  *   * a receipt under a linked parent, a receipt claimed by two tracks, and a sibling plan's
  *     worktree path (or the feature target it implies) are refused before anything is proposed;
  *   * a receipt that names an in-root path through an alias of the temp root stays owned, while a
- *     receipt traversing a link inside that root is still refused.
+ *     receipt traversing a link inside that root is still refused — including an alias chain that
+ *     leaves the root and enters it again, and a receipt whose `..` would be resolved against such
+ *     a link.
  */
 import { strict as assert } from 'node:assert';
 import { execFile } from 'node:child_process';
@@ -868,4 +870,68 @@ test('unreadable or stale receipt aliases stay owned', async t => {
   assert.deepEqual(proposedRefs(escapedRun.document), []);
   assert.deepEqual(escapedRun.document.commands, []);
   assert.equal(await escaped.fingerprint(), escapedBefore);
+
+  // An alias chain that leaves the root and re-enters it: `nested-alias` points *below* the root
+  // (`root/sub`), `root/sub/escape` points out of the root, and `outside/back` points back at the
+  // root, so the receipt's resolved end state is an ordinary in-root path. That end state — and any
+  // single canonical `realpath` of the receipt — is identical to the plainly spelled in-root
+  // receipt's, so only the order in which the receipt's prefixes entered the root distinguishes
+  // them. The search must therefore end on the *first* prefix that reaches the root's interior,
+  // never on a later prefix that happens to resolve back to the root.
+  const chainedEscape = await makeFixture({
+    shape: 'leased',
+    mutateInventory: (document, paths) => {
+      const { realTemp } = aliasTempRoot(paths);
+      const root = realpathSync(paths.root);
+      mkdirSync(join(root, 'outside'), { recursive: true });
+      mkdirSync(join(realTemp, 'sub'), { recursive: true });
+      symlinkSync(join(root, 'outside'), join(realTemp, 'sub', 'escape'), 'dir');
+      symlinkSync(realTemp, join(root, 'outside', 'back'), 'dir');
+      symlinkSync(join(realTemp, 'sub'), join(root, 'nested-alias'), 'dir');
+      const receipt = join(realTemp, 'receipts', 'owned');
+      mkdirSync(receipt, { recursive: true });
+      writeFileSync(join(receipt, 'payload.bin'), 'chained escape receipt\n');
+      document.tracks[0].temporary_paths = [join(root, 'nested-alias', 'escape', 'back', 'receipts', 'owned')];
+      return document;
+    },
+  });
+  t.after(() => chainedEscape.teardown());
+  chainedEscape.env.TMPDIR = join(realpathSync(chainedEscape.root), 'temp-alias');
+  const chainedBefore = await chainedEscape.fingerprint();
+  const chainedRun = await chainedEscape.run();
+  assert.equal(chainedRun.code, 2, `chained alias escape: ${chainedRun.stdout}`);
+  assert.equal(chainedRun.document.ok, false);
+  assert.equal(refusalCodes(chainedRun).includes('sweeper.refuse.stale-temporary'), true, `refusals: ${JSON.stringify(refusalCodes(chainedRun))}`);
+  assert.deepEqual(proposedRefs(chainedRun.document), []);
+  assert.deepEqual(chainedRun.document.commands, []);
+  assert.equal(await chainedEscape.fingerprint(), chainedBefore);
+
+  // The receipt is decided on `resolve()`d text but measured and reported by its own spelling, and
+  // the kernel resolves a `..` following a link against that link's target. `escape-dir` leaves the
+  // root, so `escape-dir/../receipts/owned` denotes an out-of-root location while lexical
+  // normalization rewrites it into an ordinary in-root path: a receipt carrying `..` cannot be both
+  // decided and used as one location, so it is refused rather than normalized.
+  const dotDot = await makeFixture({
+    shape: 'leased',
+    mutateInventory: (document, paths) => {
+      const { realTemp } = aliasTempRoot(paths);
+      const root = realpathSync(paths.root);
+      mkdirSync(join(root, 'outside'), { recursive: true });
+      mkdirSync(join(root, 'receipts', 'owned'), { recursive: true });
+      writeFileSync(join(root, 'receipts', 'owned', 'payload.bin'), 'out-of-root receipt\n');
+      symlinkSync(join(root, 'outside'), join(realTemp, 'escape-dir'), 'dir');
+      document.tracks[0].temporary_paths = [`${join(realTemp, 'escape-dir')}/../receipts/owned`];
+      return document;
+    },
+  });
+  t.after(() => dotDot.teardown());
+  dotDot.env.TMPDIR = join(realpathSync(dotDot.root), 'temp-alias');
+  const dotDotBefore = await dotDot.fingerprint();
+  const dotDotRun = await dotDot.run();
+  assert.equal(dotDotRun.code, 2, `dot-dot receipt through a link: ${dotDotRun.stdout}`);
+  assert.equal(dotDotRun.document.ok, false);
+  assert.equal(refusalCodes(dotDotRun).includes('sweeper.refuse.stale-temporary'), true, `refusals: ${JSON.stringify(refusalCodes(dotDotRun))}`);
+  assert.deepEqual(proposedRefs(dotDotRun.document), []);
+  assert.deepEqual(dotDotRun.document.commands, []);
+  assert.equal(await dotDot.fingerprint(), dotDotBefore);
 });

@@ -105,14 +105,20 @@ async function describePath(path) {
 }
 
 /**
- * Split a resolved receipt path into the canonical root it names and the segments below that root.
+ * Split an alias-spelled receipt path into the canonical root it names and the segments below it.
  * A path already spelled through the canonical root is a plain prefix slice; any other spelling is
- * canonicalized one ancestor at a time from the filesystem root until an ancestor lands exactly on
- * `root`. Only ancestors of the root are ever followed (the walk stops the moment it reaches the
- * root), so a link *below* the root is never traversed here — the caller's segment walk refuses it.
- * `tail` is null when the path never lands on the root, which includes the root itself and any
- * path whose alias prefix does not exist; `unreadable` carries the failure code of a canonical
- * walk that failed for a reason other than `ENOENT`.
+ * canonicalized one prefix at a time from the filesystem root, and the FIRST prefix that lands on
+ * or inside `root` decides the outcome: landing exactly on `root` yields the remaining lexical
+ * tail, while landing strictly inside it means the spelling entered the root's interior before it
+ * named the root — it crossed a link below the root — and is refused here without walking further.
+ * Deciding on the first entry is what makes the rule unshort-circuitable: a later prefix that
+ * happens to resolve back to `root` cannot resurrect a receipt whose earlier prefix already
+ * resolved inside it, and no component below the root can be followed for an accepted receipt
+ * because reaching such a component first requires a prefix that resolves inside the root.
+ * `tail` is null when the path never lands on the root, which includes the root itself, any path
+ * whose alias prefix does not exist, and every path that enters the root's interior first;
+ * `unreadable` carries the failure code of a canonical walk that failed for a reason other than
+ * `ENOENT`.
  */
 async function canonicalAlias(root, target) {
   if (target === root) return { tail: null, unreadable: null };
@@ -132,6 +138,7 @@ async function canonicalAlias(root, target) {
       const tail = segments.slice(index + 2).join(sep);
       return { tail: tail === '' ? null : tail, unreadable: null };
     }
+    if (isWithin(root, canonical)) return { tail: null, unreadable: null };
   }
   return { tail: null, unreadable: null };
 }
@@ -143,6 +150,10 @@ async function canonicalAlias(root, target) {
  * canonical on every platform — and only then are the candidate's existing components below the
  * root `lstat`ed one segment at a time, so a linked parent is never traversed to reach a location
  * the receipt never described, and a `..`-free resolved prefix is all that can be claimed.
+ * A `..` component is refused outright: `resolve()` removes it lexically, without consulting the
+ * filesystem, while the receipt is measured and reported by its own spelling, where the kernel
+ * resolves a `..` following a link against that link's target — so a receipt carrying `..` cannot
+ * be decided and used as one location, and is never normalized into one.
  * `within` is false for a receipt that is not a plain descendant of the root; `unreadable` carries
  * the failure code when the walk itself cannot be completed (a non-`ENOENT` failure), which the
  * caller must refuse as an unreadable fact rather than as a stale claim — and which a deeper
@@ -150,6 +161,7 @@ async function canonicalAlias(root, target) {
  */
 async function canonicalWithin(parent, child) {
   const root = await pathKey(parent);
+  if (child.split(sep).includes('..')) return { within: false, unreadable: null };
   const alias = await canonicalAlias(root, resolve(child));
   if (alias.unreadable !== null) return { within: false, unreadable: alias.unreadable };
   if (alias.tail === null) return { within: false, unreadable: null };
