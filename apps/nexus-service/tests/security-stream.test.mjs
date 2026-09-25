@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, realpathSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, appendFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -78,10 +78,23 @@ async function startSharedService(home, port = 0, apiKey, tlsOpts) {
   throw lastError;
 }
 
+// The fixture log is SHARED by every peer of a run (probes and session
+// processes append concurrently), so a torn or interleaved line is an expected
+// artifact of reading it, not a lost read: an unreadable file still answers
+// `[]`, but one malformed line skips only itself.
 function readFixtureLog(logPath) {
+  let text;
   try {
-    return readFileSync(logPath, 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
+    text = readFileSync(logPath, 'utf8');
   } catch { return []; }
+  const entries = [];
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      entries.push(JSON.parse(line));
+    } catch { /* a partial/interleaved write costs its own line only */ }
+  }
+  return entries;
 }
 
 function operationResponseKeys(payload) { return Object.keys(payload).sort(); }
@@ -1452,6 +1465,17 @@ describe('security-stream (P4-T2)', () => {
       assert.equal(reread.payload.run_status, 'incomplete');
       assert.equal(reread.payload.finish_reason, 'max_tokens');
       assert.equal(reread.payload.capture.status, 'disabled');
+
+      // The log is shared by every peer of this run, so the reader must survive
+      // a torn/interleaved write: the readable lines stay readable and only the
+      // partial line is skipped.
+      const intact = readFixtureLog(journeyLog);
+      const tornWrite = JSON.stringify({ event: 'peer_note', cwd: pin, pid: 4242 });
+      appendFileSync(journeyLog, `${tornWrite.slice(0, tornWrite.length - 14)}\n` + `${JSON.stringify({ event: 'after_torn' })}\n`);
+      const afterTorn = readFixtureLog(journeyLog);
+      assert.equal(afterTorn.length, intact.length + 1, 'a torn line must cost its own line only');
+      assert.deepEqual(afterTorn.slice(0, intact.length), intact, 'every readable line before the torn write is retained');
+      assert.equal(afterTorn.at(-1).event, 'after_torn', 'the line after the torn write is still readable');
     } finally {
       await closeServiceBounded(local);
       // The journey's own fixtures (its log dir and its seeded home) are this
@@ -1554,8 +1578,9 @@ describe('security-stream (P4-T2)', () => {
   });
 
   test('terminal reasons never create successful mirror transcripts', async () => {
-    const { ProviderRegistry } = await import(join(serviceRoot, 'dist/provider-registry.js'));
+    const { ProviderRegistry, isTerminalOperationStatus } = await import(join(serviceRoot, 'dist/provider-registry.js'));
     const { ingestEvents } = await import(join(serviceRoot, 'dist/sse.js'));
+    const { cancelProviderOperation } = await import(join(serviceRoot, 'dist/provider.js'));
     const registry = new ProviderRegistry();
     const serviceStub = { providerRegistry: registry };
     const sessionOf = (index) => `00000000-0000-4000-8000-${String(7000 + index).padStart(12, '0')}`;
@@ -1634,5 +1659,22 @@ describe('security-stream (P4-T2)', () => {
     const stopped = registry.operationRecord(operationOf(stoppedIndex));
     assert.equal(stopped.status, 'stopped');
     assert.equal(stopped.terminalTranscript, null, 'a stopped session has no successful transcript');
+
+    // The consumer gate this status feeds: an `incomplete` run is terminal work
+    // for the cancel path, which refuses it before dispatching any provider
+    // mutation. Driven through the real consumer with a hydrated native row (a
+    // terminal status and no local terminal event yet), so the assertion covers
+    // the gate itself rather than the projection above.
+    assert.equal(isTerminalOperationStatus('incomplete'), true, 'an incomplete run is terminal work');
+    const hydrated = 96;
+    registry.registerSession({ sessionId: sessionOf(hydrated), providerId: 'mock-acp', state: 'Running', activeOpId: operationOf(hydrated) });
+    registry.registerOperation({ operationId: operationOf(hydrated), sessionId: sessionOf(hydrated), providerId: 'mock-acp', status: 'incomplete', terminalEvent: null, terminalTranscript: null });
+    assert.equal(registry.operationRecord(operationOf(hydrated)).terminalEvent, null, 'the hydrated row carries no local terminal event');
+    await assert.rejects(
+      () => cancelProviderOperation({ providerRegistry: registry }, operationOf(hydrated)),
+      (error) => error.status === 409 && error.code === 'busy',
+      'an incomplete run must not be cancellable',
+    );
+    assert.equal(registry.operationRecord(operationOf(hydrated)).status, 'incomplete', 'the refused cancel leaves the incomplete row settled');
   });
 });
