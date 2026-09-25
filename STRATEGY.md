@@ -88,6 +88,8 @@ Shared: local-first privacy; harness the user's own ACP/native agents; structure
 
 ## Decision Log
 
+- **2026-09-25 (v1.197) — development concurrency is resource-budgeted and reclaimed, not capped.** The repo-local worktree count limit was replaced by a derived budget (`K = min(ready independent tasks, floor(disk budget / per-track target estimate), max(1, cores/2))`, re-measured each iteration) with a disk watermark gate (root free ≥ 90 GiB, feature targets ≤ 120 GiB) and a same-slice reclamation SLA enforced by a checked-in sweeper. Reason: the v1.190 incident (six concurrent target dirs consuming 98 GiB of `/tmp`) was a product of unfinished slices — completed iterations had left 76 GiB of caches behind — so the durable guard is provable reclamation, not a worktree quota. Applies to every iteration's scheduling and cleanup decisions.
+
 The rows below are the durable decision history, recorded as written on their date — later deliveries supersede some of them (see *Superseded by the delivered architecture* at the end of this log). Current state lives in the sections above.
 
 | Decision | Context | Date |
