@@ -7,8 +7,11 @@
  * Scope: the initializer's own observable contract — native per-checkout
  * metadata, validated no-op repeats that preserve an intentional pin, and
  * fail-closed refusals — against a hermetic temporary Git superproject this
- * file creates. Nothing here touches the product repository, its `.agents`
- * submodule, a package manager or the network.
+ * file creates. Fail-closed coverage includes unresolved index entries
+ * (`.gitmodules` and gitlinks, with and without the working-tree file) and
+ * operational filesystem failures, which must keep the JSON stdout contract.
+ * Nothing here touches the product repository, its `.agents` submodule, a
+ * package manager or the network.
  *
  * Fixture transport: Git has refused the `file` protocol for submodule clones
  * since 2.38, and that policy is read from protected config, so a
@@ -26,10 +29,10 @@
  */
 
 import { strict as assert } from 'node:assert';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, readlink, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readlink, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -55,9 +58,29 @@ done
 exec sh -c "$*"
 `;
 
+/**
+ * Git plumbing that writes index entries (`update-index --index-info`) reads its
+ * payload from stdin, which `execFile` cannot feed.
+ */
+function runWithInput(file, args, options, input) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(file, args, options);
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8').on('data', chunk => { stdout += chunk; });
+    child.stderr.setEncoding('utf8').on('data', chunk => { stderr += chunk; });
+    child.on('error', reject);
+    child.on('close', code => resolve({ ok: code === 0, code: code ?? -1, stdout, stderr }));
+    child.stdin.on('error', () => {});
+    child.stdin.end(input);
+  });
+}
+
 async function run(file, args, options = {}) {
+  const { input, ...execOptions } = options;
+  if (input !== undefined) return await runWithInput(file, args, execOptions, input);
   try {
-    const { stdout, stderr } = await execFileAsync(file, args, { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, ...options });
+    const { stdout, stderr } = await execFileAsync(file, args, { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, ...execOptions });
     return { ok: true, code: 0, stdout, stderr };
   } catch (error) {
     return {
@@ -153,6 +176,13 @@ class WorktreeFixture {
 
   async wrapper(args) {
     return await run(process.execPath, [SCRIPT, ...args], { cwd: this.root, env: this.env });
+  }
+
+  /** Git plumbing whose payload arrives on stdin (index stages). */
+  async gitInput(args, input) {
+    const result = await run('git', args, { cwd: this.superproject, env: this.env, input });
+    assert.equal(result.ok, true, `git ${args.join(' ')} failed: ${firstLine(result.stderr)}`);
+    return result.stdout;
   }
 
   async commit(dir, file, content, message) {
@@ -548,7 +578,28 @@ test('fail-closed invocation and checkout location checks', async () => {
   assert.doesNotMatch(help.stdout, /^\{/, 'help is the only non-JSON stdout mode');
   assert.equal(help.stderr, '');
 
-  for (const args of [[], ['--worktree'], ['--worktree', 'relative/path'], ['--worktree', fixture.superproject, '--worktree', fixture.worktree(FEATURE_A)], ['--unknown']]) {
+  // `-h` is the same standalone mode: usage, exit 0, no probing.
+  const shortHelp = await run(process.execPath, [SCRIPT, '-h'], {
+    cwd: fixture.root,
+    env: { ...fixture.env, PATH: `${probeBin}:${process.env.PATH}` },
+  });
+  assert.equal(shortHelp.code, 0, shortHelp.stderr);
+  assert.match(shortHelp.stdout, /Usage: node scripts\/init-worktree-submodules\.mjs/);
+  assert.equal(shortHelp.stderr, '');
+
+  for (const args of [
+    [],
+    ['--worktree'],
+    ['--worktree', 'relative/path'],
+    ['--worktree', fixture.superproject, '--worktree', fixture.worktree(FEATURE_A)],
+    ['--unknown'],
+    // Help is a standalone mode: mixed with anything else it is not a valid
+    // invocation, and the extra argument must never be silently ignored.
+    ['--help', '--unknown'],
+    ['--worktree', fixture.worktree(FEATURE_A), '--help'],
+    ['--help', '--help'],
+    ['--help', '-h'],
+  ]) {
     const invalid = await fixture.wrapper(args);
     assert.equal(invalid.code, 2, `expected exit 2 for ${JSON.stringify(args)}: ${invalid.stdout}${invalid.stderr}`);
     assert.equal(invalid.stdout, '', 'invalid invocations must not write stdout');
@@ -582,3 +633,131 @@ test('fail-closed invocation and checkout location checks', async () => {
   assert.equal(await readlink(escape), fixture.superproject, 'the symlink must stay untouched');
   await rm(escape, { force: true });
 });
+
+test('an unresolved .gitmodules index conflict is refused without the worktree file', async () => {
+  const worktreeA = fixture.worktree(FEATURE_A);
+  const gitmodules = join(worktreeA, '.gitmodules');
+  const index = join(fixture.worktreeGitDir(FEATURE_A), 'index');
+  const gitmodulesBlob = (await fixture.gitOk(['-C', worktreeA, 'rev-parse', 'HEAD:.gitmodules'])).trim();
+  const otherBlob = (await fixture.gitOk(['-C', worktreeA, 'rev-parse', 'HEAD:.gitignore'])).trim();
+
+  const baseline = await fixture.wrapper(['--worktree', worktreeA]);
+  assert.equal(baseline.code, 0, `the fixture must start from an initialized checkout: ${baseline.stdout}${baseline.stderr}`);
+
+  // An index that still carries the unresolved `.gitmodules` conflict *and* the
+  // unresolved submodule gitlink, with the working-tree `.gitmodules` gone. A
+  // preflight gated on that file's existence skipped this state entirely and
+  // reported an empty — therefore "successful" — submodule list.
+  await rm(gitmodules, { force: true });
+  await fixture.gitOk(['-C', worktreeA, 'update-index', '--force-remove', '--', '.gitmodules', 'sub']);
+  await fixture.gitInput(['-C', worktreeA, 'update-index', '--index-info'], [
+    `100644 ${gitmodulesBlob} 1\t.gitmodules`,
+    `100644 ${otherBlob} 2\t.gitmodules`,
+    `100644 ${gitmodulesBlob} 3\t.gitmodules`,
+    `160000 ${fixture.subOlder} 1\tsub`,
+    `160000 ${fixture.subPinned} 2\tsub`,
+    `160000 ${fixture.subOlder} 3\tsub`,
+  ].join('\n') + '\n');
+  record('unmerged-index', `git -C <A> status --porcelain`, await fixture.git(['-C', worktreeA, 'status', '--porcelain']));
+  record('unmerged-index-entries', `git -C <A> ls-files -u`, await fixture.git(['-C', worktreeA, 'ls-files', '-u']));
+  const conflictedDigest = await digest(index);
+  const conflicted = await fixture.wrapper(['--worktree', worktreeA]);
+  record('unmerged-index-refusal', `node scripts/init-worktree-submodules.mjs --worktree <A>`, conflicted);
+  const leftBehind = { gitmodules: existsSync(gitmodules), index: await digest(index) };
+  // Restore before asserting so a failing run cannot strand the shared fixture.
+  await fixture.gitOk(['-C', worktreeA, 'read-tree', 'HEAD']);
+  await fixture.gitOk(['-C', worktreeA, 'checkout', 'HEAD', '--', '.gitmodules']);
+
+  assert.equal(conflicted.code, 1, `an unresolved .gitmodules conflict must be refused: ${conflicted.stdout}${conflicted.stderr}`);
+  const conflictedJson = JSON.parse(conflicted.stdout);
+  assert.equal(conflictedJson.ok, false);
+  assert.deepEqual(conflictedJson.submodules, []);
+  assert.match(conflicted.stderr, /unmerged entry '\.gitmodules'/, 'the refusal must name the unmerged entry');
+  assert.equal(leftBehind.gitmodules, false, 'the refusal must not materialize .gitmodules');
+  assert.equal(leftBehind.index, conflictedDigest, 'the refusal must not rewrite the conflicted index');
+});
+
+test('an index gitlink that .gitmodules does not declare is refused', async () => {
+  const worktreeA = fixture.worktree(FEATURE_A);
+  const gitmodules = join(worktreeA, '.gitmodules');
+  const index = join(fixture.worktreeGitDir(FEATURE_A), 'index');
+
+  const baseline = await fixture.wrapper(['--worktree', worktreeA]);
+  assert.equal(baseline.code, 0, `the fixture must start from an initialized checkout: ${baseline.stdout}${baseline.stderr}`);
+
+  // The declaration file is gone while the index still commits the gitlink, so
+  // nothing declares that submodule and its state cannot be established. An
+  // empty ok list would report a checkout that was never checked.
+  const digestBefore = await digest(index);
+  await rm(gitmodules, { force: true });
+  const undeclared = await fixture.wrapper(['--worktree', worktreeA]);
+  record('undeclared-gitlink-absent-gitmodules', `node scripts/init-worktree-submodules.mjs --worktree <A>`, undeclared);
+  const leftBehind = { gitmodules: existsSync(gitmodules), index: await digest(index) };
+  await fixture.gitOk(['-C', worktreeA, 'checkout', 'HEAD', '--', '.gitmodules']);
+
+  assert.equal(undeclared.code, 1, `a gitlink without a declaration must be refused: ${undeclared.stdout}${undeclared.stderr}`);
+  const undeclaredJson = JSON.parse(undeclared.stdout);
+  assert.equal(undeclaredJson.ok, false);
+  assert.deepEqual(undeclaredJson.submodules, []);
+  assert.match(undeclared.stderr, /records gitlink\(s\) that \.gitmodules does not declare: sub/);
+  assert.equal(leftBehind.gitmodules, false, 'the refusal must not materialize .gitmodules');
+  assert.equal(leftBehind.index, digestBefore, 'the refusal must not rewrite the index');
+});
+
+test('an unresolved gitlink index entry is refused and the resolved checkout validates', async () => {
+  const worktreeA = fixture.worktree(FEATURE_A);
+  const index = join(fixture.worktreeGitDir(FEATURE_A), 'index');
+
+  const baseline = await fixture.wrapper(['--worktree', worktreeA]);
+  assert.equal(baseline.code, 0, `the fixture must start from an initialized checkout: ${baseline.stdout}${baseline.stderr}`);
+
+  // An unresolved *gitlink* while the declaration file is intact: the submodule
+  // the superproject records is a conflict, not a state to initialize from.
+  await fixture.gitOk(['-C', worktreeA, 'update-index', '--force-remove', '--', 'sub']);
+  await fixture.gitInput(['-C', worktreeA, 'update-index', '--index-info'], [
+    `160000 ${fixture.subOlder} 1\tsub`,
+    `160000 ${fixture.subPinned} 2\tsub`,
+    `160000 ${fixture.subOlder} 3\tsub`,
+  ].join('\n') + '\n');
+  const conflictedDigest = await digest(index);
+  const conflicted = await fixture.wrapper(['--worktree', worktreeA]);
+  record('unmerged-gitlink', `node scripts/init-worktree-submodules.mjs --worktree <A>`, conflicted);
+  const leftBehind = await digest(index);
+  await fixture.gitOk(['-C', worktreeA, 'read-tree', 'HEAD']);
+  const recovered = await fixture.wrapper(['--worktree', worktreeA]);
+  record('resolved-index', `node scripts/init-worktree-submodules.mjs --worktree <A>`, recovered);
+
+  assert.equal(conflicted.code, 1, `an unresolved gitlink must be refused: ${conflicted.stdout}${conflicted.stderr}`);
+  assert.equal(JSON.parse(conflicted.stdout).ok, false);
+  assert.match(conflicted.stderr, /unmerged entry 'sub'/);
+  assert.equal(leftBehind, conflictedDigest, 'the refusal must not rewrite the conflicted index');
+  assert.equal(recovered.code, 0, recovered.stderr);
+  assert.equal(JSON.parse(recovered.stdout).ok, true, 'a resolved checkout must validate again');
+});
+
+test('operational filesystem failures keep the JSON stdout contract', async () => {
+  const worktreeA = fixture.worktree(FEATURE_A);
+  const stranded = join(worktreeA, 'sub');
+
+  // A not-initialized submodule path that exists but cannot be listed: an
+  // ordinary filesystem failure rather than a Git or safety refusal. It must
+  // still be reported through the same JSON object on stdout with exit 1.
+  await fixture.gitOk(['-C', worktreeA, 'submodule', 'deinit', '--all']);
+  await rm(stranded, { recursive: true, force: true });
+  await mkdir(stranded, { recursive: true });
+  await chmod(stranded, 0o000);
+  const failed = await fixture.wrapper(['--worktree', worktreeA]);
+  record('unreadable-submodule-path', `node scripts/init-worktree-submodules.mjs --worktree <A>`, failed);
+  await chmod(stranded, 0o700);
+  await rm(stranded, { recursive: true, force: true });
+
+  assert.equal(failed.code, 1, `an operational failure must exit 1: ${failed.stdout}${failed.stderr}`);
+  const json = JSON.parse(failed.stdout);
+  assert.deepEqual(Object.keys(json), ['version', 'worktree', 'submodules', 'ok']);
+  assert.equal(json.worktree, worktreeA);
+  assert.equal(json.ok, false);
+  assert.deepEqual(json.submodules, []);
+  assert.match(failed.stderr, /refused/);
+  assert.ok(failed.stderr.includes(stranded), `the refusal must name the unreadable path: ${failed.stderr}`);
+});
+

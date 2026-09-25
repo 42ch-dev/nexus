@@ -36,7 +36,8 @@ repository and located at <main-checkout>/.worktrees/<name>.
 Options:
   --worktree <absolute-checkout>  Linked worktree to initialize (absolute path).
   --help, -h                      Print this text and exit 0. This is the only
-                                  human-readable stdout mode; it probes nothing.
+                                  human-readable stdout mode; it is accepted only
+                                  as the sole argument and it probes nothing.
 
 stdout (operational invocations) is exactly one JSON object:
   {"version":1,"worktree":"<absolute>","submodules":[{"path","git_dir","head",
@@ -46,10 +47,13 @@ stdout (operational invocations) is exactly one JSON object:
   is reported on stderr and preserved, never reset. Nothing but the JSON object
   is written to stdout. A refusal still writes that object with "ok":false and an
   empty "submodules" list (the reason is on stderr), so stdout stays parseable.
+  That contract holds for every operational failure, including filesystem errors
+  that are not Git refusals.
 
 Exit codes:
   0  checkout valid, submodules validated or initialized
-  1  Git or safety refusal; the reason is on stderr and the state is unchanged
+  1  Git, safety or operational failure; the reason is on stderr and the state is
+     unchanged
   2  invalid invocation (usage on stderr, no stdout)
 `;
 
@@ -105,10 +109,12 @@ async function gitOut(cwd, args, owner) {
 }
 
 function parseArgs(argv) {
+  // Help is a standalone mode: anywhere else the token is just an unknown
+  // argument, so a stray `--help` can never silently swallow the rest.
+  if (argv.length === 1 && (argv[0] === '--help' || argv[0] === '-h')) return { help: true };
   let worktree;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
-    if (arg === '--help' || arg === '-h') return { help: true };
     if (arg === '--worktree') {
       const value = argv[index + 1];
       if (value === undefined || value.startsWith('--')) {
@@ -164,6 +170,34 @@ async function readDeclaredModules(repoDir, owner) {
   return declared;
 }
 
+/**
+ * Read one repository's index and fail closed on a submodule-relevant conflict.
+ *
+ * This deliberately does not depend on the `.gitmodules` file existing in the
+ * working tree. An index that still carries an unmerged `.gitmodules` entry or an
+ * unmerged gitlink describes a conflict that was never resolved, and
+ * `readDeclaredModules` cannot see it once the file is gone. Returns the
+ * committed (stage 0) gitlink paths so the caller can prove that `.gitmodules`
+ * actually declares them.
+ */
+async function readIndexSubmoduleState(repoDir, scope, owner) {
+  const out = await gitOut(repoDir, ['ls-files', '-s', '-z'], owner);
+  const gitlinks = [];
+  for (const entry of out.split('\0')) {
+    if (entry === '') continue;
+    const tab = entry.indexOf('\t');
+    if (tab === -1) continue;
+    const [mode, , stage] = entry.slice(0, tab).split(' ');
+    const path = entry.slice(tab + 1);
+    if (stage !== '0') {
+      if (path !== '.gitmodules' && mode !== GITLINK_MODE) continue;
+      throw new RefusalError(`${owner}: ${scope} has an unmerged entry '${path}' (mode ${mode} stage ${stage}); resolve the conflict before initializing submodules`);
+    }
+    if (mode === GITLINK_MODE) gitlinks.push(path);
+  }
+  return gitlinks;
+}
+
 async function readGitlink(repoDir, relInParent, owner) {
   const out = await gitOut(repoDir, ['ls-files', '-s', '--', relInParent], owner);
   const lines = out.split('\n').filter(line => line.trim() !== '');
@@ -186,7 +220,9 @@ async function assertMissingPathIsVacant(record, owner) {
   if (!stat.isDirectory()) {
     throw new RefusalError(`${owner}: submodule '${record.path}' path ${record.dir} is not a directory; refusing to initialize over it`);
   }
-  const entries = await readdir(record.dir);
+  const entries = await readdir(record.dir).catch(error => {
+    throw new RefusalError(`${owner}: submodule '${record.path}' is not initialized and ${record.dir} cannot be read (${error?.code ?? firstLine(error?.message ?? error)}); refusing to initialize over it`);
+  });
   if (entries.length > 0) {
     throw new RefusalError(`${owner}: submodule '${record.path}' is not initialized but ${record.dir} is not empty (${entries.slice(0, 3).join(', ')}); refusing to initialize over existing files`);
   }
@@ -244,7 +280,14 @@ async function validateSubmodule(record, worktreeGitDir, owner) {
 }
 
 async function walkSubmodules(checkout, repoDir, prefix, worktreeGitDir, records, owner) {
-  for (const module of await readDeclaredModules(repoDir, owner)) {
+  const scope = prefix === '' ? 'the superproject index' : `the index of submodule '${prefix}'`;
+  const gitlinks = await readIndexSubmoduleState(repoDir, scope, owner);
+  const declared = await readDeclaredModules(repoDir, owner);
+  const undeclared = gitlinks.filter(gitlink => !declared.some(module => module.path === gitlink));
+  if (undeclared.length > 0) {
+    throw new RefusalError(`${owner}: ${scope} records gitlink(s) that .gitmodules does not declare: ${undeclared.join(', ')}; refusing to report a checkout whose submodule state was not established`);
+  }
+  for (const module of declared) {
     const path = prefix === '' ? module.path : `${prefix}/${module.path}`;
     const record = {
       name: module.name,
@@ -296,12 +339,6 @@ async function inspect(worktree) {
   }
   if (dirname(gitDir) !== join(commonDir, 'worktrees')) {
     throw new RefusalError(`${owner}: administrative directory ${gitDir} is not the native linked-worktree directory ${join(commonDir, 'worktrees')}`);
-  }
-  if (existsSync(join(worktree, '.gitmodules'))) {
-    const unmerged = (await gitOut(worktree, ['ls-files', '-u', '--', '.gitmodules'], owner)).trim();
-    if (unmerged !== '') {
-      throw new RefusalError(`${owner}: .gitmodules has unmerged index entries; resolve the conflict before initializing submodules`);
-    }
   }
   const records = [];
   await walkSubmodules(worktree, worktree, '', gitDir, records, owner);
@@ -411,7 +448,12 @@ async function run() {
     return 0;
   } catch (error) {
     if (error instanceof RefusalError) return refusal(worktree, error.message);
-    throw error;
+    // Every other operational failure keeps the documented stdout contract too:
+    // the refusal object is still the only thing on stdout and the exit code is
+    // 1, never a bare stack with empty stdout. Invalid invocation is unaffected
+    // because parseArgs runs before this block and throws UsageError (exit 2).
+    process.stderr.write(`init-worktree-submodules: unexpected failure: ${error?.stack ?? error}\n`);
+    return refusal(worktree, `unexpected operational failure: ${firstLine(error?.stack ?? error)}`);
   }
 }
 
@@ -422,7 +464,10 @@ try {
     process.stderr.write(`init-worktree-submodules: ${error.message}\n\n${USAGE}`);
     process.exitCode = 2;
   } else {
-    process.stderr.write(`init-worktree-submodules: unexpected failure: ${error?.stack ?? error}\n`);
+    // Backstop for a failure `run()` could not report itself, i.e. writing the
+    // refusal object was impossible too (for example stdout is already gone).
+    // Operational failures inside `run()` are normalized into that JSON object.
+    process.stderr.write(`init-worktree-submodules: fatal: ${error?.stack ?? error}\n`);
     process.exitCode = 1;
   }
 }
