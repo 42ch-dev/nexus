@@ -1402,6 +1402,142 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     assert.equal(registry.hubForOperation(operationId), undefined, 'and releases the hub with it');
   });
 
+  test('the Actor stream-admission path stays bounded and its gap endings stay typed', async () => {
+    // W-001: every Actor SSE connect marks a mirror record and ensures a hub, with
+    // no sweep on that path — so a stream-heavy, execute-light workload used to
+    // accumulate one record+hub per distinct connected operation until the next
+    // Actor execute. Each hub holds its typed ending (a gap slot) against the
+    // shared control reserve, so unbounded accumulation eventually left an ending
+    // nothing could charge and the stream closed bare — the one ending §5 forbids.
+    const { ProviderRegistry } = await import(join(serviceRoot, 'dist/provider-registry.js'));
+    const { OperationEventHub, sseUnretainedGapEvents } = await import(join(serviceRoot, 'dist/sse.js'));
+    const { REGISTRY_MAX_ACTOR_OPERATIONS, SSE_CONTROL_RESERVED_TOTAL_BYTES } = await import(
+      join(serviceRoot, 'dist/config.js')
+    );
+    const registry = new ProviderRegistry();
+    const mirrorSessionId = randomUUID();
+    const admitted = [];
+
+    // The exact sequence one Actor stream performs on admission: attach the
+    // reader, mark the Actor record, ensure its hub, write the typed resync gap an
+    // exhausted observation ends with, detach. No execute anywhere.
+    const gapEndedAdmission = () => {
+      const operationId = randomUUID();
+      admitted.push(operationId);
+      registry.attachOperationStream(operationId);
+      registry.markActorOperation(operationId, mirrorSessionId, MAIN_PROVIDER);
+      const hub = registry.ensureHub(operationId, () => new OperationEventHub(operationId, mirrorSessionId));
+      const frame = hub.recordGap({
+        reason: 'interrupted',
+        operation_id: operationId,
+        resync_required: true,
+        inspect_url: `/v1/daemon/agent-host/operations/${operationId}`,
+      });
+      registry.detachOperationStream(operationId);
+      return frame;
+    };
+
+    const first = gapEndedAdmission();
+    assert.ok(first, 'the first gap-ended admission must produce a typed ending');
+    // N is chosen from the reserve itself: a written gap frame is charged to the
+    // control reserve per frame, so an UNBOUNDED arm provably outgrows it and its
+    // later endings cannot be charged at all.
+    const admissions = Math.ceil(SSE_CONTROL_RESERVED_TOTAL_BYTES / first.wireBytes) + 1;
+    let typed = 1;
+    for (let index = 1; index < admissions; index += 1) {
+      if (gapEndedAdmission()) typed += 1;
+    }
+    assert.equal(
+      typed,
+      admissions,
+      `every gap-ended admission must keep its typed ending (${typed}/${admissions})`,
+    );
+    const retainedRecords = admitted.filter((id) => registry.operationRecord(id) !== undefined).length;
+    const retainedHubs = admitted.filter((id) => registry.hubForOperation(id) !== undefined).length;
+    assert.ok(
+      retainedRecords <= REGISTRY_MAX_ACTOR_OPERATIONS,
+      `the Actor arm must stay bounded: ${retainedRecords} records after ${admissions} admissions`,
+    );
+    assert.ok(
+      retainedHubs <= REGISTRY_MAX_ACTOR_OPERATIONS,
+      `an evicted Actor record must release its hub: ${retainedHubs} hubs after ${admissions} admissions`,
+    );
+
+    // A real gap-ended Actor stream on the live service: the mirror record is
+    // dropped (what happens between admissions), so the reconnect builds a fresh
+    // hub while the authority's observation is already drained and must still end
+    // with the typed resync gap, never a bare close.
+    const session = await jsonFetch('/v1/daemon/agent-host/sessions', { method: 'POST', body: actorBody() });
+    assert.equal(session.status, 200, session.text);
+    const sessionId = session.payload.session_id;
+    const prompt = await jsonFetch(`/v1/daemon/agent-host/sessions/${sessionId}/operations`, {
+      method: 'POST',
+      body: { kind: 'prompt', content: 'bounded-gap-ending' },
+    });
+    assert.equal(prompt.status, 200, prompt.text);
+    const operationId = prompt.payload.operation_id;
+    assert.equal((await waitForCharacterOutcome(operationId)).run_status, 'succeeded');
+
+    // Drain the retained observation (terminal ending), then drop the mirror
+    // record: the next stream is the gap-ended shape the finding describes.
+    const firstStream = await sseBody(sessionId, operationId);
+    assert.equal(firstStream.status, 200, `first stream: ${JSON.stringify(firstStream.frames)}`);
+    service.service.providerRegistry.removeSession(sessionId);
+    const reconnected = await sseBody(sessionId, operationId);
+    assert.equal(reconnected.status, 200);
+    const endings = reconnected.frames.filter((frame) => frame.event === 'gap');
+    assert.equal(
+      endings.length,
+      1,
+      `the drained observation must end the stream with exactly one typed resync gap: ${JSON.stringify(reconnected.frames)}`,
+    );
+    assert.equal(endings[0].data.resync_required, true, 'the ending is the typed resync gap');
+    assert.equal(
+      sseUnretainedGapEvents.count,
+      0,
+      'the bounded Actor arm must leave every stream ending chargeable',
+    );
+
+    // Independently, exhaustion itself stays diagnosable: with the shared control
+    // reserve saturated, the ending cannot be charged, and the bare close is
+    // counted and logged instead of passing silently.
+    const { tryReserveControlBytes, releaseControlBytes } = await import(
+      join(serviceRoot, 'dist/environment-budget.js')
+    );
+    const promptTwo = await jsonFetch(`/v1/daemon/agent-host/sessions/${sessionId}/operations`, {
+      method: 'POST',
+      body: { kind: 'prompt', content: 'exhausted-ending' },
+    });
+    assert.equal(promptTwo.status, 200, promptTwo.text);
+    const operationIdTwo = promptTwo.payload.operation_id;
+    assert.equal((await waitForCharacterOutcome(operationIdTwo)).run_status, 'succeeded');
+    assert.equal((await sseBody(sessionId, operationIdTwo)).status, 200);
+    service.service.providerRegistry.removeSession(sessionId);
+
+    let charged = 0;
+    const before = sseUnretainedGapEvents.count;
+    try {
+      // Byte-exact saturation: a frame only fails to charge when nothing is left,
+      // so the last free bytes must go too, or a small gap frame still fits.
+      while (tryReserveControlBytes(1024)) charged += 1024;
+      while (tryReserveControlBytes(1)) charged += 1;
+      const exhausted = await sseBody(sessionId, operationIdTwo);
+      assert.equal(exhausted.status, 200);
+      assert.equal(
+        exhausted.frames.filter((frame) => frame.event === 'gap').length,
+        0,
+        'the residual case: a saturated reserve cannot charge an ending',
+      );
+      assert.equal(
+        sseUnretainedGapEvents.count,
+        before + 1,
+        'the unchargeable ending is counted instead of closing silently',
+      );
+    } finally {
+      releaseControlBytes(charged);
+    }
+  });
+
   test('session create stays API-key and Origin guarded, with zero launch', async () => {
     // One process holds one core Host authority, so the journey service must be
     // down before the keyed service opens; it is restored either way.

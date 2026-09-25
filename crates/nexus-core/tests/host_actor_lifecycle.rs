@@ -1000,17 +1000,18 @@ async fn settle_character_operation(
     build: impl FnOnce(&HostSessionId, &HostOperationId) -> Vec<HostItem>,
     fenced: Option<AdmittedKnowledgeContext>,
 ) -> (CharacterOperationResult, HostOperationId) {
-    let ctx = admit_character(core, principal, env).await;
+    // The snapshot carries only the identity fields the record consumes, so the
+    // admitted context is this fixture's own admission step (a plain data
+    // read-back, no lease: the fences travel in `fenced`).
+    let _admitted = admit_character(core, principal, env).await;
     let operation_id = HostOperationId(Uuid::new_v4());
     let session_id = HostSessionId(Uuid::new_v4());
-    let snapshot = CharacterOperationSnapshot {
-        owner_creator_id: principal.creator_id().to_string(),
-        ctx,
-        session_id: session_id.clone(),
-        operation_id: operation_id.clone(),
-    };
+    let snapshot = CharacterOperationSnapshot::new(
+        principal.creator_id().to_string(),
+        session_id.clone(),
+        operation_id.clone(),
+    );
     handle
-        .actor_sessions()
         .reserve_character_operation(&snapshot)
         .expect("a Character operation reserves an outcome");
     let events = build(&session_id, &operation_id);
@@ -1310,17 +1311,14 @@ async fn character_terminal_accepted_cancel_beats_the_provider_terminal() {
     let port = CountingPort::new();
     let handle: HostHandle = core.open_host(port.clone()).await.unwrap();
 
-    let ctx = admit_character(&core, &principal, &env).await;
     let operation_id = HostOperationId(Uuid::new_v4());
     let session_id = HostSessionId(Uuid::new_v4());
-    let snapshot = CharacterOperationSnapshot {
-        owner_creator_id: principal.creator_id().to_string(),
-        ctx,
-        session_id: session_id.clone(),
-        operation_id: operation_id.clone(),
-    };
+    let snapshot = CharacterOperationSnapshot::new(
+        principal.creator_id().to_string(),
+        session_id.clone(),
+        operation_id.clone(),
+    );
     handle
-        .actor_sessions()
         .reserve_character_operation(&snapshot)
         .expect("a Character operation reserves an outcome");
     handle
@@ -1446,19 +1444,16 @@ async fn character_terminal_eviction_and_reopen_have_no_detailed_outcome() {
 
     // 1025 terminal settlements: the retention window keeps the newest 1024 and
     // drops the oldest instead of answering an evicted id from memory.
-    let ctx = admit_character(&core, &principal, &env).await;
     let mut oldest = None;
     let mut newest = None;
     for _ in 0..1025 {
         let operation_id = HostOperationId(Uuid::new_v4());
         handle
-            .actor_sessions()
-            .reserve_character_operation(&CharacterOperationSnapshot {
-                owner_creator_id: principal.creator_id().to_string(),
-                ctx: ctx.clone(),
-                session_id: HostSessionId(Uuid::new_v4()),
-                operation_id: operation_id.clone(),
-            })
+            .reserve_character_operation(&CharacterOperationSnapshot::new(
+                principal.creator_id().to_string(),
+                HostSessionId(Uuid::new_v4()),
+                operation_id.clone(),
+            ))
             .expect("a Character operation reserves an outcome");
         handle.settle_character_terminal(
             &operation_id,
@@ -2883,15 +2878,13 @@ async fn actor_control_observation_retention_is_bounded_by_its_reserved_operatio
 
     // A reserved Character operation takes one reader, one-for-one, and
     // removing the unstarted reservation drops the reader with its record.
-    let ctx = admit_character(&core, &principal, &env).await;
     let operation_id = HostOperationId(Uuid::new_v4());
-    registry
-        .reserve_character_operation(&CharacterOperationSnapshot {
-            owner_creator_id: principal.creator_id().to_string(),
-            ctx: ctx.clone(),
-            session_id: HostSessionId(Uuid::new_v4()),
-            operation_id: operation_id.clone(),
-        })
+    handle
+        .reserve_character_operation(&CharacterOperationSnapshot::new(
+            principal.creator_id().to_string(),
+            HostSessionId(Uuid::new_v4()),
+            operation_id.clone(),
+        ))
         .expect("a Character operation reserves an outcome");
     registry
         .retain_observation(
@@ -2916,13 +2909,12 @@ async fn actor_control_observation_retention_is_bounded_by_its_reserved_operatio
     let mut newest = None;
     for _ in 0..1025 {
         let operation_id = HostOperationId(Uuid::new_v4());
-        registry
-            .reserve_character_operation(&CharacterOperationSnapshot {
-                owner_creator_id: principal.creator_id().to_string(),
-                ctx: ctx.clone(),
-                session_id: HostSessionId(Uuid::new_v4()),
-                operation_id: operation_id.clone(),
-            })
+        handle
+            .reserve_character_operation(&CharacterOperationSnapshot::new(
+                principal.creator_id().to_string(),
+                HostSessionId(Uuid::new_v4()),
+                operation_id.clone(),
+            ))
             .expect("a Character operation reserves an outcome");
         registry
             .retain_observation(
@@ -3272,6 +3264,152 @@ async fn actor_control_quiesce_is_actor_only_and_joins_drains() {
     assert!(
         matches!(err, CoreError::OwnerBusy),
         "slot retained: {err:?}"
+    );
+}
+
+/// F-001 (plan QC): the quiesce's zero registered-drain count is NOT proof of
+/// quiescence. `execute` takes this authority's admission before its first await
+/// and retires it only after the drain has been transferred, so an operation
+/// admitted before the quiesce latched is still about to own a drain while the
+/// registry shows none. The quiesce must therefore join that admission before it
+/// may confirm — otherwise the native close that trusts the confirmation closes
+/// core storage ahead of the drain it never saw.
+#[tokio::test]
+async fn actor_control_quiesce_waits_for_an_admitted_execute_before_it_confirms() {
+    let env = seed_env().await;
+    let provider = control_provider(true, 0, false);
+    let (_core, principal, _manager, handle, session_id) =
+        control_fixture(&env, Arc::clone(&provider)).await;
+
+    // Park the admitted execute inside the provider's own `execute`: admitted,
+    // past every registry gate and the manager's session lookup, with no drain
+    // registered yet — the window the finding describes.
+    provider.park_executions();
+    let execute = tokio::spawn({
+        let handle = handle.clone();
+        let principal = principal.clone();
+        let session_id = session_id.to_string();
+        async move {
+            handle
+                .execute(
+                    &principal,
+                    session_id,
+                    execute_request(serde_json::json!({
+                        "kind": "prompt",
+                        "content": "race the Actor quiesce",
+                    })),
+                )
+                .await
+        }
+    });
+    wait_until(
+        || provider.executions() == 1,
+        "the admitted execute to reach the provider",
+    )
+    .await;
+    assert_eq!(
+        handle.actor_sessions().unsettled_drain_count(),
+        0,
+        "the admitted execute has registered no drain yet"
+    );
+
+    // The quiesce meets that admission. A correct quiesce joins it and therefore
+    // cannot finish on the zero drain count; an incorrect one confirms at once
+    // and gets the whole observation window to prove it.
+    let quiesce = tokio::spawn({
+        let handle = handle.clone();
+        async move { handle.quiesce_actor_sessions().await }
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    assert!(
+        !quiesce.is_finished(),
+        "the quiesce confirmed on a zero registered-drain count while an admitted execute had not transferred its drain"
+    );
+
+    // Release the parked execute: it registers the drain the join must account
+    // for, the quiesce cancels the operation it can now see, and the Actor side
+    // confirms only once that drain settles.
+    provider.release_parked_executions();
+    let started = execute
+        .await
+        .expect("the execute task joins")
+        .expect("the admitted execute is dispatched");
+    let operation_id = HostOperationId(
+        Uuid::parse_str(&started.operation_id).expect("the operation id is a UUID"),
+    );
+    wait_until(|| provider.cancels() == 1, "the quiesce cancel").await;
+    provider.push(finished(
+        &session_id,
+        &operation_id,
+        FinishReason::Cancelled,
+    ));
+    provider.close_stream();
+    let report = tokio::time::timeout(std::time::Duration::from_secs(20), quiesce)
+        .await
+        .expect("the Actor-side join settles")
+        .expect("the quiesce task joins")
+        .expect("the Actor side settles");
+    assert!(report.cleanup_confirmed, "quiesce report: {report:?}");
+    assert_eq!(
+        handle.actor_sessions().unsettled_drain_count(),
+        0,
+        "the drain the admitted execute transferred was joined"
+    );
+    let recorded = control_status(&handle, &principal, &operation_id).await;
+    assert_eq!(
+        recorded.run_status,
+        CharacterOperationResultRunStatus::Cancelled
+    );
+}
+
+/// F-002 (plan QC): the established-owner slot is released at most ONCE per
+/// authority epoch. Two clones of one authority closing concurrently can both
+/// pass the retained-report check before either publishes a report and both run a
+/// confirmed settle; a second release then clears a successor's claim and lets
+/// two authorities exist over one service, so the release — not just the report —
+/// must be one-shot.
+///
+/// The two closes run on their OWN tasks (a multi-thread runtime): a session-less
+/// close is otherwise short enough to finish inside one poll, which would hide the
+/// window the finding describes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn actor_control_concurrent_confirmed_closes_release_the_slot_once() {
+    let env = seed_env().await;
+    let (core, _principal) = open_core(&env).await;
+    let holder: HostHandle = core.open_host(CountingPort::new()).await.unwrap();
+    let first = holder.clone();
+    let second = holder.clone();
+
+    let a = tokio::spawn(async move { first.close().await });
+    let b = tokio::spawn(async move { second.close().await });
+    let a = a
+        .await
+        .expect("the first close task joins")
+        .expect("the first close returns a report");
+    let b = b
+        .await
+        .expect("the second close task joins")
+        .expect("the second close returns a report");
+    assert!(
+        a.cleanup_confirmed && b.cleanup_confirmed,
+        "both concurrent closes confirm: {a:?} {b:?}"
+    );
+    assert_eq!(
+        holder.slot_release_count(),
+        1,
+        "the retired authority may free the established-owner slot at most once"
+    );
+
+    // The consequence the one-shot release protects: the freed slot admits
+    // exactly one successor, whose claim the retired authority cannot clear.
+    let _successor: HostHandle = core
+        .open_host(CountingPort::new())
+        .await
+        .expect("the freed slot admits a successor");
+    let refused = core.open_host(CountingPort::new()).await;
+    assert!(
+        matches!(refused, Err(CoreError::OwnerBusy)),
+        "the successor's claim holds: {refused:?}"
     );
 }
 

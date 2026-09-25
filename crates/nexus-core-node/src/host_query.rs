@@ -80,25 +80,21 @@ pub fn deny_actor_provider_ids(
     let Some(authority) = state.host_authority() else {
         return Ok(());
     };
-    let registry = authority.actor_sessions();
     if let Some(raw) = session_id {
         if let Ok(uuid) = Uuid::parse_str(raw) {
-            if registry.is_actor_session(&HostSessionId(uuid)) {
+            if authority.owns_actor_session(&HostSessionId(uuid)) {
                 return Err(forbidden_actor_id("session", raw));
             }
         }
     }
     if let Some(raw) = operation_id {
         if let Ok(uuid) = Uuid::parse_str(raw) {
-            let op_id = HostOperationId(uuid);
             // Either index: an operation reserved with a recorded Character
             // outcome, or one registered before the Host bound it to its
             // session. The retired-session case is covered by the session
             // check, and a terminal record keeps its operation id until the
             // core's bounded eviction.
-            if registry.operation_session_id(&op_id).is_some()
-                || registry.resolve_indexed_operation_session(&op_id).is_some()
-            {
+            if authority.owns_actor_operation(&HostOperationId(uuid)) {
                 return Err(forbidden_actor_id("operation", raw));
             }
         }

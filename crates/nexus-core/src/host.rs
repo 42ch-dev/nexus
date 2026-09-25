@@ -115,6 +115,22 @@ struct AuthorityState {
     /// The retained report of the last close attempt: a confirmed cleanup
     /// makes a repeated close idempotent, an unsettled one is re-attempted.
     close_report: Mutex<Option<CoreCloseReport>>,
+    /// The admission barrier's settlement signal: every retirement publishes
+    /// one permit, so a quiesce that latched behind an admitted operation can
+    /// wait for the drain that operation is about to transfer instead of
+    /// reading a zero drain count as quiescence.
+    admissions_settled: tokio::sync::Notify,
+    /// One-shot release of the service-wide established-owner slot for THIS
+    /// authority. Shared by every clone, so two concurrent confirmed closes
+    /// free the slot exactly once and the retired authority can never clear a
+    /// successor's claim.
+    slot_released: Mutex<bool>,
+    /// Test-only: how many times this authority freed the established-owner
+    /// slot. The exactly-once property is otherwise unobservable from outside
+    /// (a second release writes the same `false` again), so the concurrent-close
+    /// regression counts it. Absent from a production build.
+    #[cfg(any(test, feature = "test-hooks"))]
+    slot_release_count: std::sync::atomic::AtomicUsize,
 }
 
 /// The authority's close/admission gate.
@@ -123,6 +139,11 @@ struct AuthorityGate {
     /// and stays closed, so every later call on the handle is `closing`
     /// instead of reaching a shared slot, registry or Host.
     closing: bool,
+    /// Latched by [`HostHandle::quiesce_actor_sessions`]: no further operation
+    /// may be admitted against this authority. A frozen authority still serves
+    /// reads — the quiesce is the Actor-side stop of the ordered close, not a
+    /// retired handle — while `closing` retires the handle as well.
+    admission_frozen: bool,
     /// Operations admitted against this authority and not yet retired: neither
     /// failed before creating a drain nor finished transferring one to the
     /// registry. Frozen by the closing latch (nothing can be admitted after
@@ -151,9 +172,14 @@ impl AuthorityState {
         Self {
             gate: Mutex::new(AuthorityGate {
                 closing: false,
+                admission_frozen: false,
                 in_flight: 0,
             }),
             close_report: Mutex::new(None),
+            admissions_settled: tokio::sync::Notify::const_new(),
+            slot_released: Mutex::new(false),
+            #[cfg(any(test, feature = "test-hooks"))]
+            slot_release_count: std::sync::atomic::AtomicUsize::new(0),
         }
     }
 
@@ -167,20 +193,29 @@ impl AuthorityState {
         self.gate().closing
     }
 
-    /// Admit one operation: refused once this authority is closing, otherwise
-    /// counted until the returned guard is dropped.
+    /// Admit one operation: refused once this authority is closing or has
+    /// frozen operation admission, otherwise counted until the returned guard
+    /// is dropped.
     ///
     /// # Errors
     ///
-    /// Returns [`CoreError::Closing`] when this authority has begun closing.
+    /// Returns [`CoreError::Closing`] when this authority has begun closing or
+    /// has frozen admission.
     fn admit(&self) -> CoreResult<AuthorityAdmission<'_>> {
         let mut gate = self.gate();
-        if gate.closing {
+        if gate.closing || gate.admission_frozen {
             return Err(CoreError::Closing);
         }
         gate.in_flight += 1;
         drop(gate);
         Ok(AuthorityAdmission { state: self })
+    }
+
+    /// Freeze operation admission without retiring the handle: the Actor-side
+    /// stop the quiesce latches before it joins. Reads keep working, and the
+    /// closing latch still retires the handle as a whole.
+    fn freeze_admissions(&self) {
+        self.gate().admission_frozen = true;
     }
 
     /// Latch the closing identity and report how many operations were admitted
@@ -198,6 +233,56 @@ impl AuthorityState {
         // live work, so this fails loudly (debug/tests) or wraps far away from
         // zero (release) — never silently to a confirmable state.
         gate.in_flight -= 1;
+        drop(gate);
+        // Publish AFTER the count dropped, so a joiner that armed its
+        // notification and then read a non-zero count still gets the permit
+        // this retirement publishes (the same order the session-scoped join
+        // uses).
+        self.admissions_settled.notify_one();
+    }
+
+    /// Wait until every operation admitted before the admission latch (the
+    /// closing latch, or the quiesce's freeze) has retired.
+    ///
+    /// This is the authority-wide half of the ordered close: an operation
+    /// admitted before the latch registers its drain only after its asynchronous
+    /// admission and Host execution, so a quiesce that trusted the registered
+    /// drains alone could read a zero count and confirm while that operation was
+    /// still about to own a drain. Cancellation-safe — the latch keeps admission
+    /// frozen, so a caller that runs out of its outer deadline loses nothing and
+    /// a retry joins the same admissions.
+    async fn join_admissions(&self) {
+        loop {
+            // Arm the notification BEFORE reading the count: a retirement in
+            // between leaves a permit, so the wait can never miss its only
+            // wakeup.
+            let settled = self.admissions_settled.notified();
+            if self.gate().in_flight == 0 {
+                return;
+            }
+            settled.await;
+        }
+    }
+
+    /// Claim the ONE release of the service-wide established-owner slot this
+    /// authority is entitled to. Returns `false` when a concurrent (or
+    /// earlier) confirmed close on a clone already claimed it, so the retired
+    /// authority cannot clear a successor's claim with a second release.
+    fn claim_slot_release(&self) -> bool {
+        {
+            let mut released = self
+                .slot_released
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if *released {
+                return false;
+            }
+            *released = true;
+        }
+        #[cfg(any(test, feature = "test-hooks"))]
+        self.slot_release_count
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        true
     }
 
     fn retained_close_report(&self) -> Option<CoreCloseReport> {
@@ -702,10 +787,67 @@ impl HostHandle {
         self.authority.admit()
     }
 
+    /// Whether `session_id` is an Actor-mode session this authority indexes
+    /// (live) or has retired (tombstoned) — the authority's own pure read, so a
+    /// consumer that needs the raw provider-lane guard takes this instead of the
+    /// registry itself.
+    #[must_use]
+    pub fn owns_actor_session(&self, session_id: &HostSessionId) -> bool {
+        self.registry.is_actor_session(session_id)
+    }
+
+    /// Whether `operation_id` belongs to a Character operation this authority
+    /// reserved (a recorded outcome) or registered before the Host bound it to
+    /// its session — the operation half of [`Self::owns_actor_session`].
+    #[must_use]
+    pub fn owns_actor_operation(&self, operation_id: &HostOperationId) -> bool {
+        self.registry.operation_session_id(operation_id).is_some()
+            || self
+                .registry
+                .resolve_indexed_operation_session(operation_id)
+                .is_some()
+    }
+
     /// The Actor session registry (owner/tombstone/epoch index).
+    ///
+    /// Test-only surface: the mutable registry is what lets a caller reserve a
+    /// record the authority's result path would then serve as authoritative, so
+    /// a production build exposes no accessor at all and the registry's
+    /// reservation/lifecycle methods are reachable only from this crate's own
+    /// `execute`/drain path. Reads that production needs go through the narrow
+    /// authority methods above.
+    #[cfg(any(test, feature = "test-hooks"))]
     #[must_use]
     pub const fn actor_sessions(&self) -> &ActorSessionRegistry {
         &self.registry
+    }
+
+    /// Test-only: how many times this authority freed the service-wide
+    /// established-owner slot, so the concurrent-close regression can assert the
+    /// release is exactly-once per authority epoch. Absent from a production
+    /// build with the counter it reads.
+    #[cfg(any(test, feature = "test-hooks"))]
+    #[must_use]
+    pub fn slot_release_count(&self) -> usize {
+        self.authority
+            .slot_release_count
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Test-only reservation seam: the exact reservation `execute` performs,
+    /// over a caller-supplied snapshot, so the drain, cancel and bounded
+    /// observation paths are provable without a provider process.
+    ///
+    /// Compiled out of the production build for the same reason as
+    /// [`Self::actor_sessions`]: reservation is the only way to create an
+    /// operation record, so with no production entry the result path can only
+    /// ever serve records `execute` minted.
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub fn reserve_character_operation(
+        &self,
+        snapshot: &CharacterOperationSnapshot,
+    ) -> CoreResult<()> {
+        self.registry.reserve_character_operation(snapshot)
     }
 
     /// Create a Host session. A valid `actor_ref`/`viewpoint` pair is admitted
@@ -967,13 +1109,8 @@ impl HostHandle {
                     }
                 };
                 let snapshot = if is_character {
-                    let ctx = self
-                        .registry
-                        .context_for(&sid)
-                        .expect("character session context");
                     let snap = CharacterOperationSnapshot {
                         owner_creator_id: principal.creator_id().to_string(),
-                        ctx,
                         session_id: sid.clone(),
                         operation_id: op_id.clone(),
                     };
@@ -1415,16 +1552,28 @@ impl HostHandle {
         if report.cleanup_confirmed {
             // Close/release coordination with the established-owner slot: a
             // confirmed close frees the authority for a later open/attach; an
-            // unconfirmed close keeps the slot held.
-            self.core.release_host_authority();
+            // unconfirmed close keeps the slot held. The claim is one-shot for
+            // this authority, so a concurrent confirmed close on a clone cannot
+            // free the slot a second time and clear a successor's claim.
+            self.release_authority_slot();
         }
         self.authority.retain_close_report(&report);
         Ok(report)
     }
 
-    /// Actor-only quiesce of the close order (technical contract §3): close
-    /// Actor admission, request supported cancellation for every active Actor
-    /// operation, and join the retained Actor drains.
+    /// Actor-only quiesce of the close order (technical contract §3): latch the
+    /// authority's own admission gate, close Actor admission, request supported
+    /// cancellation for every active Actor operation, join the operations
+    /// admitted before the latch, and join the retained Actor drains.
+    ///
+    /// Its confirmation is therefore the ordered-close proof the native owner
+    /// needs before it may close core storage: every admitted operation has
+    /// either failed or transferred its drain (the admission join), and every
+    /// transferred drain has settled (the drain join). The zero registered-drain
+    /// count alone is NOT that proof — registration happens after asynchronous
+    /// admission and Host execution — so an admitted-but-untransferred operation
+    /// keeps this quiesce from confirming until it has transferred and settled
+    /// its drain, instead of being read as quiescence.
     ///
     /// It deliberately settles NOTHING outside the Actor side: it does not shut
     /// the manager used by workflows, does not settle the shared `LocalSet`, and
@@ -1433,8 +1582,8 @@ impl HostHandle {
     /// execution/service owner, and only then calls [`Self::close_before`] with
     /// the same outer deadline.
     ///
-    /// The join is deliberately unbounded here — the native owner bounds it
-    /// with its own deadline — and it never closes storage out from under a
+    /// The joins are deliberately unbounded here — the native owner bounds them
+    /// with its own deadline — and they never close storage out from under a
     /// live drain: the handles stay owned by the registry, so a caller that
     /// runs out of budget retains the whole authority and retries instead of
     /// detaching live work.
@@ -1446,9 +1595,20 @@ impl HostHandle {
     /// reported in the returned report's pending entries.
     pub async fn quiesce_actor_sessions(&self) -> CoreResult<CoreCloseReport> {
         let mut pending: Vec<String> = Vec::new();
-        // Latch Actor admission first: no create, execute or observation can be
-        // admitted (or repopulate the maps) while the quiesce runs.
+        // Freeze this authority's own operation admission FIRST — the same
+        // barrier `close` latches — so no create or execute can be admitted
+        // while the quiesce runs, and the operations counted at that instant are
+        // exactly the ones this quiesce must account for. The registry latch
+        // below covers the Actor maps and the quiesce's own reads stay legal.
+        self.authority.freeze_admissions();
         self.registry.close();
+        // Join the admitted operations BEFORE the drains they become: an
+        // operation admitted before the freeze registers its drain only after
+        // asynchronous admission and Host execution, so the registered drains
+        // alone are not proof of quiescence. Cancellation-safe, like the drain
+        // join below: the native owner bounds this with its own deadline and a
+        // retry joins the same admissions.
+        self.authority.join_admissions().await;
         for operation_id in self.registry.nonterminal_operations() {
             if let Err(err) = self.request_cancel(&operation_id).await {
                 // Neither an unsupported provider (DSH) nor an operation whose
@@ -1502,10 +1662,20 @@ impl HostHandle {
         }
         let report = close_report(pending);
         if report.cleanup_confirmed {
-            self.core.release_host_authority();
+            // Same one-shot claim as [`Self::close`]: two confirmed closes on
+            // clones of one authority free the established-owner slot once.
+            self.release_authority_slot();
         }
         self.authority.retain_close_report(&report);
         Ok(report)
+    }
+
+    /// Free the service-wide established-owner slot for THIS authority, at
+    /// most once.
+    fn release_authority_slot(&self) {
+        if self.authority.claim_slot_release() {
+            self.core.release_host_authority();
+        }
     }
 
     /// The ONE manager + `LocalSet` settlement shared by [`Self::close`] and

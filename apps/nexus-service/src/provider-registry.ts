@@ -3,7 +3,10 @@ import type {
   SessionViewpoint,
   ProviderHostEvent,
 } from '@42ch/nexus-contracts';
-import { REGISTRY_MAX_TERMINAL_OPERATIONS } from './config.js';
+import {
+  REGISTRY_MAX_ACTOR_OPERATIONS,
+  REGISTRY_MAX_TERMINAL_OPERATIONS,
+} from './config.js';
 import type { OperationEventHub } from './sse.js';
 
 export interface ProviderSessionRecord {
@@ -166,6 +169,10 @@ export class ProviderRegistry {
    * observation), so the mirror must not transcribe a status into a
    * cancellability claim here — nor leave a settled Actor run's session marked
    * busy by a transport cache.
+   *
+   * The arm stays bounded: a mark past `REGISTRY_MAX_ACTOR_OPERATIONS` retires
+   * the oldest Actor record with its hub (`evictActorOperationsIfNeeded`), so a
+   * stream-heavy workload cannot accumulate one hub per connect.
    */
   markActorOperation(operationId: string, sessionId: string, providerId: string): void {
     this.operations.set(operationId, {
@@ -177,6 +184,7 @@ export class ProviderRegistry {
       terminalTranscript: null,
       actorBacked: true,
     });
+    this.evictActorOperationsIfNeeded();
     this.evictTerminalOperationsIfNeeded();
   }
 
@@ -312,6 +320,39 @@ export class ProviderRegistry {
       const session = this.sessions.get(op.sessionId);
       if (session?.activeOpId === evictId) continue;
       this.disposeOperation(evictId);
+    }
+  }
+
+  private actorBackedCount(): number {
+    let count = 0;
+    for (const op of this.operations.values()) {
+      if (op.actorBacked) count += 1;
+    }
+    return count;
+  }
+
+  /**
+   * Retain at most {@link REGISTRY_MAX_ACTOR_OPERATIONS} Actor-backed
+   * operations — the Actor arm's twin of `evictTerminalOperationsIfNeeded`.
+   *
+   * The stream-admission path (`markActorOperation`, one per Actor SSE connect)
+   * otherwise accumulated a record and a hub per distinct connected operation
+   * until the next Actor execute swept them, and those hubs hold control slots
+   * (the retained gap or terminal frame) charged against the shared control
+   * reserve. Every Actor stream re-marks its operation on connect, so retiring
+   * the oldest record costs at most the replay history of a stream that is not
+   * attached — and a record with a live reader is deferred to that reader's
+   * detach, so the population is this bound plus one deferred record per
+   * attached stream (attached streams are bounded by the socket budget).
+   */
+  private evictActorOperationsIfNeeded(): void {
+    if (this.actorBackedCount() <= REGISTRY_MAX_ACTOR_OPERATIONS) return;
+    for (const [operationId, op] of this.operations) {
+      if (!op.actorBacked) continue;
+      // `disposeOperation` releases the record and its hub together, and defers
+      // to a live reader instead of taking the hub out from under it.
+      this.disposeOperation(operationId);
+      if (this.actorBackedCount() <= REGISTRY_MAX_ACTOR_OPERATIONS) return;
     }
   }
 }

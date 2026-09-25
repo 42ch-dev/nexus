@@ -345,6 +345,27 @@ export const sseTestHooks = {
   writeBlockedCount: 0,
 };
 
+/**
+ * Typed stream endings the control reserve could not hold: every place a stream
+ * must end with a resync gap but `OperationEventHub.recordGap` cannot charge one
+ * increments this and logs the operation (`noteUnretainedGap`). The ending budget
+ * is a shared reserve, so a saturated one still degrades an ending to a bare
+ * close — that state must be diagnosable instead of silent. Exported like
+ * {@link sseTestHooks} so the bounded-Actor-arm regression can assert it.
+ */
+export const sseUnretainedGapEvents = { count: 0 };
+
+/**
+ * Record and log one typed ending the control reserve could not retain. A bare
+ * close is the one ending §5 forbids, so it must never pass unobserved.
+ */
+function noteUnretainedGap(operationId: string, site: string): void {
+  sseUnretainedGapEvents.count += 1;
+  console.error(
+    `[nexus-service] stream ${operationId} ended without a typed resync gap at ${site}: control-frame reserve exhausted`,
+  );
+}
+
 /** How a writer treats repeated control frames. */
 export interface SseWriterOptions {
   /**
@@ -644,7 +665,14 @@ async function emitInterruptedGap(
     inspect_url: inspectUrl(operationId),
   };
   const frame = hub.recordGap(gap);
-  if (frame) await writer.writeFrame(frame);
+  if (!frame) {
+    // The reserve cannot hold even the ending: the stream closes bare, which is
+    // the one ending §5 forbids. Count and log it — a silent bare close is the
+    // state this makes diagnosable.
+    noteUnretainedGap(operationId, 'interrupted-gap');
+    return;
+  }
+  await writer.writeFrame(frame);
 }
 
 /**
@@ -866,6 +894,10 @@ async function runEventStream(
       if (gapFrame) {
         const gapResult = await writer.writeFrame(gapFrame);
         if (gapResult !== 'ok') await emitInterruptedGap(writer, hub, operationId);
+      } else {
+        // Same saturated-reserve case as `emitInterruptedGap`: the stale-cursor
+        // ending cannot be charged either, so the close is counted, not silent.
+        noteUnretainedGap(operationId, 'stale-plan-gap');
       }
       return;
     }

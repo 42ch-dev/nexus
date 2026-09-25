@@ -492,6 +492,10 @@ async fn cleanup_owners(
         disarmed: false,
     };
 
+    // An Actor quiesce that did not confirm — an error, or the deadline above —
+    // leaves an admitted Actor operation that may still register the drain the
+    // quiesce's join bounds, so core storage must not close ahead of it.
+    let mut actor_quiesce_confirmed = true;
     if let Some(HostOwner::Attached(authority)) = host_guard.value.as_ref() {
         // Bounded by the close's outer deadline: the join itself is deliberately
         // unbounded (the authority retains its drain ownership), so an expired
@@ -503,9 +507,18 @@ async fn cleanup_owners(
         )
         .await
         {
-            Ok(Ok(report)) => pending.extend(report.pending_operations),
-            Ok(Err(err)) => pending.push(format!("actor-quiesce: {err}")),
-            Err(_) => pending.push("actor-quiesce-deadline".to_string()),
+            Ok(Ok(report)) => {
+                actor_quiesce_confirmed = report.cleanup_confirmed;
+                pending.extend(report.pending_operations);
+            }
+            Ok(Err(err)) => {
+                actor_quiesce_confirmed = false;
+                pending.push(format!("actor-quiesce: {err}"));
+            }
+            Err(_) => {
+                actor_quiesce_confirmed = false;
+                pending.push("actor-quiesce-deadline".to_string());
+            }
         }
     }
 
@@ -524,6 +537,17 @@ async fn cleanup_owners(
     // out of a held close) then still hands its owner back through the guard's
     // `Drop` instead of dropping the retained core on the floor.
     let core_report = match core_guard.value.as_ref().map(Arc::clone) {
+        Some(_) if !actor_quiesce_confirmed => {
+            // Order from technical contract §3: the Actor side quiesces while
+            // the core is still open, so an unconfirmed quiesce withholds the
+            // core close entirely. The guard hands the core owner back (it is
+            // never disarmed below, because the report is not released), the
+            // environment reports the withheld close, and a retry re-runs the
+            // ordered quiesce instead of releasing the SQL pool/writer fences
+            // under a drain that is still about to be registered.
+            pending.push("core-close-withheld: actor-quiesce-unconfirmed".to_string());
+            interrupted_report(vec![])
+        }
         Some(service) => {
             #[cfg(test)]
             {

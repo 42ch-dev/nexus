@@ -124,12 +124,35 @@ enum OperationPhase {
 /// Character capture is refused before reservation (technical contract §5), so
 /// a snapshot describes only an uncaptured run: there is no `remember` request
 /// and no prompt digest to carry.
+///
+/// The fields are crate-visible: reservation is the only consumer, so a
+/// production build outside this crate cannot even construct the snapshot whose
+/// record the result path would serve. Test builds construct one through
+/// [`CharacterOperationSnapshot::new`].
 #[derive(Debug, Clone)]
 pub struct CharacterOperationSnapshot {
-    pub owner_creator_id: String,
-    pub ctx: AdmittedActorContext,
-    pub session_id: HostSessionId,
-    pub operation_id: HostOperationId,
+    pub(crate) owner_creator_id: String,
+    pub(crate) session_id: HostSessionId,
+    pub(crate) operation_id: HostOperationId,
+}
+
+impl CharacterOperationSnapshot {
+    /// Test-only constructor (see the type's note): the snapshot a caller-built
+    /// record needs. Compiled out of the production build, where the only
+    /// constructor is `execute`'s own admission.
+    #[cfg(any(test, feature = "test-hooks"))]
+    #[must_use]
+    pub fn new(
+        owner_creator_id: String,
+        session_id: HostSessionId,
+        operation_id: HostOperationId,
+    ) -> Self {
+        Self {
+            owner_creator_id,
+            session_id,
+            operation_id,
+        }
+    }
 }
 
 struct CharacterOperationRecord {
@@ -662,10 +685,15 @@ impl ActorSessionRegistry {
 
     /// Reserve a Character operation outcome before Host exec.
     ///
+    /// Crate-visible: [`crate::HostHandle::execute`] is the only production
+    /// caller, so no caller outside this crate can mint a record the authority's
+    /// result path would serve as authoritative. A test build reaches it through
+    /// the `test-hooks`-gated seam on [`crate::HostHandle`].
+    ///
     /// # Errors
     ///
     /// Returns capacity or shutdown conflicts.
-    pub fn reserve_character_operation(
+    pub(crate) fn reserve_character_operation(
         &self,
         snapshot: &CharacterOperationSnapshot,
     ) -> CoreResult<()> {
@@ -698,10 +726,14 @@ impl ActorSessionRegistry {
 
     /// Owner-scoped authoritative operation outcome.
     ///
+    /// Crate-visible like the reservation itself: the authority's own
+    /// `character_operation` read is the one production entry, so the registry
+    /// read is not a second, unauthenticated path to the same records.
+    ///
     /// # Errors
     ///
     /// Returns `NotFound` when the operation is missing or foreign.
-    pub fn character_operation_result(
+    pub(crate) fn character_operation_result(
         &self,
         owner_creator_id: &str,
         operation_id: &HostOperationId,
