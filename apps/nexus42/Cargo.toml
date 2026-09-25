@@ -146,7 +146,7 @@ chrono-tz = { workspace = true, optional = true }
 # direct caller remains since v1.193 P2-T13 (kept optional, unlinked by the
 # retained cohorts).
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.28", features = ["signal", "process"], optional = true }
+nix = { version = "0.30", features = ["signal", "process"], optional = true }
 
 [dev-dependencies]
 assert_cmd = "2.0"
