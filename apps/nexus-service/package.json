@@ -27,8 +27,8 @@
     "@42ch/nexus-provider-acp": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^26.6.1",
-    "tsx": "^4.19.4"
+    "@types/node": "^26.6.2",
+    "tsx": "^4.23.15"
   },
   "engines": {
     "node": ">=22.22"
