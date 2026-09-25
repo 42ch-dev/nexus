@@ -38,6 +38,18 @@ Modes (env vars, all optional):
                      while it edits durable state, without sleeping.
                      `ACP_FIXTURE_PROMPT_GATE_TIMEOUT_S` (default 60) bounds the
                      wait so a missing release can never hang a run.
+  - ACP_FIXTURE_STOP_REASON=<reason>  the `stopReason` this fixture reports for
+                     a completed `session/prompt`. Accepts exactly the five ACP
+                     wire spellings (`end_turn`, `max_tokens`,
+                     `max_turn_requests`, `refusal`, `cancelled`); default
+                     `end_turn`. Any other value fails fixture setup (exit 2 +
+                     a `setup_failed` log line) instead of silently defaulting,
+                     so a typo can never masquerade as a successful turn. A
+                     fixture knob for tests, not application configuration.
+  - ACP_FIXTURE_PROMPT_ERROR=1  answer `session/prompt` with a deterministic
+                     JSON-RPC error instead of a stop reason, so the wire-level
+                     prompt failure path is selectable. It never invokes a
+                     model and never touches the prompt text.
 
 The fixture writes sanitized evidence (cwd, pid, request log) to the path
 in ACP_FIXTURE_LOG (one JSON object per line). It never writes secrets.
@@ -57,6 +69,15 @@ OVERSIZED_UPDATE = os.environ.get("OVERSIZED_UPDATE") == "1"
 STALL_AFTER_INIT = os.environ.get("STALL_AFTER_INIT") == "1"
 PROMPT_GATE_DIR = os.environ.get("ACP_FIXTURE_PROMPT_GATE_DIR")
 PROMPT_GATE_TIMEOUT_S = float(os.environ.get("ACP_FIXTURE_PROMPT_GATE_TIMEOUT_S") or "60")
+
+# The five ACP wire spellings of `stopReason` this fixture can report.
+STOP_REASONS = ("end_turn", "max_tokens", "max_turn_requests", "refusal", "cancelled")
+STOP_REASON = os.environ.get("ACP_FIXTURE_STOP_REASON") or "end_turn"
+# `None` when the knob is usable; otherwise the rejected value. Reported to the
+# log and to stderr, then a setup failure — a typo must never look like a
+# successful `end_turn` turn.
+INVALID_STOP_REASON = None if STOP_REASON in STOP_REASONS else STOP_REASON
+PROMPT_ERROR = os.environ.get("ACP_FIXTURE_PROMPT_ERROR") == "1"
 
 def _prior_run_count():
     """Fixture starts already recorded in the shared log (0 for the first)."""
@@ -154,6 +175,20 @@ def await_prompt_gate():
 
 def main():
     global _descendant
+    if INVALID_STOP_REASON is not None:
+        # Fail setup loudly: an unrecognized stop reason would otherwise be
+        # answered as a successful turn and hide the test's own typo.
+        log({
+            "event": "setup_failed",
+            "knob": "ACP_FIXTURE_STOP_REASON",
+            "value": INVALID_STOP_REASON,
+            "allowed": list(STOP_REASONS),
+        })
+        sys.stderr.write(
+            "mock_acp_workflow: invalid ACP_FIXTURE_STOP_REASON %r (allowed: %s)\n"
+            % (INVALID_STOP_REASON, ", ".join(STOP_REASONS))
+        )
+        sys.exit(2)
     log({"event": "start", "pid": os.getpid(), "cwd": os.getcwd()})
 
     if DESCENDANT:
@@ -206,6 +241,13 @@ def main():
                 if block.get("type") == "text":
                     prompt += block.get("text", "")
             log({"event": "prompt", "session_id": params.get("sessionId"), "prompt": prompt})
+            if PROMPT_ERROR:
+                # Deterministic wire-level prompt failure: the JSON-RPC error
+                # path is not otherwise selectable from the existing knobs, and
+                # this never involves a model.
+                log({"event": "prompt_error", "session_id": params.get("sessionId")})
+                reply_error(req, -32000, "mock_acp_workflow: deterministic prompt error")
+                continue
             # Gated mode: the prompt evidence above is durable before this
             # blocks, so a test can edit durable state while the step is in
             # flight (no-op when the gate is unset).
@@ -241,7 +283,7 @@ def main():
                     "content": {"type": "text", "text": chunk_text},
                 },
             })
-            reply(req, {"stopReason": "end_turn"})
+            reply(req, {"stopReason": STOP_REASON})
         elif method == "session/cancel":
             log({"event": "cancel", "session_id": params.get("sessionId")})
             if DELAYED_CANCEL_ACK:

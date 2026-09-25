@@ -488,11 +488,17 @@ impl AcpProvider {
                 stop_reason: reason,
                 ..
             } => {
-                // Refusal, resource limits and cancellation are typed
-                // non-success for Host consumers (A5 / I-004): a caller
-                // must never persist refusal, limit exhaustion or a
-                // cancelled turn as successful workflow output. Only a
-                // genuine EndTurn is OpFinished success.
+                // The provider's own stop reason is this operation's terminal
+                // truth (A3 / R-V1196-ACP-INCOMPLETE-MAPPING). A genuine
+                // EndTurn is success; the two real resource limits are
+                // terminal-but-INCOMPLETE — the core terminal matrix reads
+                // `OpFinished(MaxTokens | MaxTurnRequests)` as its
+                // `incomplete` row — so they must not be degraded to the
+                // categoryless failure row. A provider-side refusal that
+                // happened after the run started is NOT the pre-effect
+                // admission refusal and stays the failure it is (A5);
+                // cancellation keeps its own non-success reason (I-004); a
+                // genuine failure stays a failure.
                 match reason {
                     nexus_contracts::local::acp::NexusStopReason::EndTurn => {
                         HostEvent::OpFinished(OperationFinishedEvent {
@@ -515,6 +521,10 @@ impl AcpProvider {
                         })
                     }
                     nexus_contracts::local::acp::NexusStopReason::Refusal => {
+                        // A3: the provider refused AFTER the run started, so
+                        // this is not the pre-effect admission refusal
+                        // (`remember:true` / binding refusal, which never
+                        // dispatches an operation). It stays the failure it is.
                         HostEvent::OpFailed(OperationFailedEvent {
                             session_id: session_id.clone(),
                             op_id: op_id.clone(),
@@ -523,20 +533,23 @@ impl AcpProvider {
                         })
                     }
                     nexus_contracts::local::acp::NexusStopReason::MaxTokens => {
-                        HostEvent::OpFailed(OperationFailedEvent {
+                        // The turn genuinely ended by exhausting the token
+                        // budget; the core matrix classifies this terminal as
+                        // `incomplete / max_tokens`.
+                        HostEvent::OpFinished(OperationFinishedEvent {
                             session_id: session_id.clone(),
                             op_id: op_id.clone(),
-                            error_category: "max_tokens".to_string(),
-                            error_message: "agent reached the maximum token limit".to_string(),
+                            reason: FinishReason::MaxTokens,
                         })
                     }
                     nexus_contracts::local::acp::NexusStopReason::MaxTurnRequests => {
-                        HostEvent::OpFailed(OperationFailedEvent {
+                        // The turn genuinely ended by exhausting the turn
+                        // budget; the core matrix classifies this terminal as
+                        // `incomplete / max_turn_requests`.
+                        HostEvent::OpFinished(OperationFinishedEvent {
                             session_id: session_id.clone(),
                             op_id: op_id.clone(),
-                            error_category: "max_turn_requests".to_string(),
-                            error_message: "agent reached the maximum turn request limit"
-                                .to_string(),
+                            reason: FinishReason::MaxTurnRequests,
                         })
                     }
                 }
@@ -1341,6 +1354,91 @@ mod tests {
                 assert_eq!(finished.reason, FinishReason::EndTurn);
             }
             _ => panic!("expected OpFinished event"),
+        }
+    }
+
+    /// A3 / R-V1196-ACP-INCOMPLETE-MAPPING — the adapter's classification of
+    /// every real provider stop reason.
+    ///
+    /// The input of each case is the actual [`AcpStreamUpdate`] that
+    /// `NexusAcpClient::stream_prompt` produces from the wire, never a
+    /// synthetically built `HostEvent`, so the cases prove the adapter's own
+    /// projection. The two real resource limits must be emitted as
+    /// `OpFinished(MaxTokens | MaxTurnRequests)`: those are exactly the inputs
+    /// the pre-existing core terminal matrix folds into its `incomplete` row
+    /// (`nexus-core` `character_terminal_outcome`). A provider-side refusal
+    /// after the run started, an explicit `Failed`, and every other fault stay
+    /// failures, and `Cancelled` is never `EndTurn`.
+    #[test]
+    fn stream_update_limit_and_failure_classification() {
+        use nexus_contracts::local::acp::NexusStopReason;
+
+        /// The consumer-visible class of one projected event.
+        #[derive(Debug, PartialEq, Eq)]
+        enum Classification {
+            /// A named terminal reason: the provider said why the turn ended.
+            Finished(FinishReason),
+            /// The categoryless failure row, carrying its error category.
+            Faulted(String),
+            /// Any non-terminal projection (must never appear here).
+            Progress(&'static str),
+        }
+
+        fn classify(event: HostEvent) -> Classification {
+            match event {
+                HostEvent::OpFinished(finished) => Classification::Finished(finished.reason),
+                HostEvent::OpFailed(failed) => Classification::Faulted(failed.error_category),
+                _ => Classification::Progress("non-terminal"),
+            }
+        }
+
+        let stopped = |stop_reason| AcpStreamUpdate::Stopped {
+            session_id: "test-session".to_string(),
+            stop_reason,
+        };
+
+        let cases = [
+            (
+                "end_turn",
+                stopped(NexusStopReason::EndTurn),
+                Classification::Finished(FinishReason::EndTurn),
+            ),
+            (
+                "max_tokens",
+                stopped(NexusStopReason::MaxTokens),
+                Classification::Finished(FinishReason::MaxTokens),
+            ),
+            (
+                "max_turn_requests",
+                stopped(NexusStopReason::MaxTurnRequests),
+                Classification::Finished(FinishReason::MaxTurnRequests),
+            ),
+            (
+                "refusal",
+                stopped(NexusStopReason::Refusal),
+                Classification::Faulted("refusal".to_string()),
+            ),
+            (
+                "cancelled",
+                stopped(NexusStopReason::Cancelled),
+                Classification::Finished(FinishReason::Cancelled),
+            ),
+            (
+                "protocol failure",
+                AcpStreamUpdate::Failed {
+                    session_id: "test-session".to_string(),
+                    error_category: "protocol_error".to_string(),
+                    error_message: "prompt failed".to_string(),
+                },
+                Classification::Faulted("protocol_error".to_string()),
+            ),
+        ];
+
+        for (name, update, expected) in cases {
+            let session_id = HostSessionId::new();
+            let op_id = HostOperationId::new();
+            let event = AcpProvider::stream_update_to_event(update, &session_id, &op_id);
+            assert_eq!(classify(event), expected, "stop reason {name}");
         }
     }
 
