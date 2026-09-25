@@ -3962,10 +3962,15 @@ async fn public_cancel_fences_late_workspace_commit() {
         .signal_schedule(&principal, racing.clone(), signal("cancel"));
     let (admitted_result, cancelled_result) = tokio::join!(admission, cancellation);
     let _ = releaser.await;
-    assert_eq!(
-        root_run_count(pool.as_ref()).await,
-        2,
-        "the race minted at most ONE further run"
+    // Whichever writer wins the `current_session_id IS NULL` fence mints AT
+    // MOST this one run: the admission winning claims exactly one new run (the
+    // pre-race count was 1, asserted above), while the cancel winning leaves
+    // the row cancelled owning NO run at all — that is the supervisor's fence
+    // design, not a missing run. The count is therefore 1 or 2, never more.
+    let runs_after_race = root_run_count(pool.as_ref()).await;
+    assert!(
+        (1..=2).contains(&runs_after_race),
+        "the race minted at most ONE further run, got {runs_after_race}"
     );
     match (&admitted_result, &cancelled_result) {
         // The cancel won the fence: the admission legitimately lost.

@@ -130,6 +130,7 @@ enum OperationPhase {
 /// record the result path would serve. Test builds construct one through
 /// [`CharacterOperationSnapshot::new`].
 #[derive(Debug, Clone)]
+#[allow(clippy::struct_field_names)] // fields mirror the contract's id-typed naming (`owner_creator_id`, `session_id`, `operation_id`); stripping the postfix would drop the type signal
 pub struct CharacterOperationSnapshot {
     pub(crate) owner_creator_id: String,
     pub(crate) session_id: HostSessionId,
@@ -142,7 +143,7 @@ impl CharacterOperationSnapshot {
     /// constructor is `execute`'s own admission.
     #[cfg(any(test, feature = "test-hooks"))]
     #[must_use]
-    pub fn new(
+    pub const fn new(
         owner_creator_id: String,
         session_id: HostSessionId,
         operation_id: HostOperationId,
@@ -159,6 +160,13 @@ struct CharacterOperationRecord {
     owner_creator_id: String,
     session_id: HostSessionId,
     phase: OperationPhase,
+    /// Whether a latched cancel intent has been CONFIRMED by the provider.
+    /// The host cancel path latches intent BEFORE awaiting the provider, so an
+    /// unconfirmed intent must not let the drain record `cancelled`: if the
+    /// provider then refuses, that would record a refused cancel as an
+    /// accepted cancellation. Only a confirmed intent wins the finalizing
+    /// race; a provisional one leaves the run's own terminal as the truth.
+    cancel_confirmed: bool,
     outcome: CharacterOperationResult,
     /// The operation's bounded observation reader, once installed.
     ///
@@ -715,6 +723,7 @@ impl ActorSessionRegistry {
                 owner_creator_id: snapshot.owner_creator_id.clone(),
                 session_id: snapshot.session_id.clone(),
                 phase: OperationPhase::Running,
+                cancel_confirmed: false,
                 outcome: running_outcome(snapshot),
                 observation: None,
                 _seq: seq,
@@ -807,7 +816,9 @@ impl ActorSessionRegistry {
         self.maps().character_operations.remove(operation_id);
     }
 
-    /// Latch cancel intent before awaiting Host cancel.
+    /// Latch CONFIRMED cancel intent. The caller vouches that the cancellation
+    /// is authoritative (the test/ seam that drives the drain race directly):
+    /// a drain that finalizes while this intent is latched records `cancelled`.
     ///
     /// # Errors
     ///
@@ -833,6 +844,61 @@ impl ActorSessionRegistry {
         let result = match record.phase {
             OperationPhase::Running => {
                 record.phase = OperationPhase::CancelRequested;
+                record.cancel_confirmed = true;
+                Ok(())
+            }
+            OperationPhase::CancelRequested => {
+                // A confirmed latch upgrades a provisional one in place.
+                record.cancel_confirmed = true;
+                Ok(())
+            }
+            OperationPhase::Finalizing | OperationPhase::Terminal => {
+                Err(CoreError::ActorConflict {
+                    code: "actor_operation_finished".into(),
+                    message: format!("operation {operation_id} already finished"),
+                })
+            }
+        };
+        drop(maps);
+        result
+    }
+
+    /// Latch a PROVISIONAL cancel intent before awaiting the provider's
+    /// answer, protecting the phase race exactly like
+    /// [`Self::request_operation_cancel`] while the call is in flight — but an
+    /// UNCONFIRMED intent must not let the drain record `cancelled`: if the
+    /// provider refuses, the run's own terminal stays the truth and the
+    /// refusal is never recorded as an accepted cancellation. The caller
+    /// confirms on acceptance by committing the cancelled terminal
+    /// ([`HostHandle::cancel_operation`](crate::HostHandle::cancel_operation)'s
+    /// own commit), or undoes the intent with
+    /// [`Self::rollback_operation_cancel`] on refusal.
+    ///
+    /// # Errors
+    ///
+    /// Returns `NotFound` or `interrupted` (`actor_operation_finished`) when
+    /// cancel is invalid.
+    pub fn latch_provisional_operation_cancel(
+        &self,
+        owner_creator_id: &str,
+        operation_id: &HostOperationId,
+    ) -> CoreResult<()> {
+        let mut maps = self.maps();
+        let record = maps
+            .character_operations
+            .get_mut(operation_id)
+            .ok_or_else(|| CoreError::NotFound {
+                resource: format!("operation {operation_id}"),
+            })?;
+        if record.owner_creator_id != owner_creator_id {
+            return Err(CoreError::NotFound {
+                resource: format!("operation {operation_id}"),
+            });
+        }
+        let result = match record.phase {
+            OperationPhase::Running => {
+                record.phase = OperationPhase::CancelRequested;
+                record.cancel_confirmed = false;
                 Ok(())
             }
             OperationPhase::CancelRequested => Ok(()),
@@ -852,34 +918,41 @@ impl ActorSessionRegistry {
     ///
     /// Only a still-unfinalized `CancelRequested` returns to `Running`: once
     /// the terminal race has moved the phase on, the recorded outcome is
-    /// decided by the phase rules, not by this rollback: once the race has
-    /// moved the phase on, this is a no-op.
+    /// decided by the phase rules, not by this rollback — and because an
+    /// UNCONFIRMED intent never won the drain's race (see
+    /// [`Self::latch_provisional_operation_cancel`]), that recorded outcome is
+    /// the run's own terminal, never a fabricated `cancelled`.
     pub fn rollback_operation_cancel(&self, operation_id: &HostOperationId) {
         let mut maps = self.maps();
         let phase = maps.character_operations.get_mut(operation_id);
         if let Some(record) = phase {
             if matches!(record.phase, OperationPhase::CancelRequested) {
                 record.phase = OperationPhase::Running;
+                record.cancel_confirmed = false;
             }
         }
         drop(maps);
     }
 
-    /// Move a draining operation into finalization and return whether cancel
-    /// intent was latched. The cancel read and phase transition are atomic
-    /// under the registry lock so no window can observe stale cancel state.
+    /// Move a draining operation into finalization and return whether a
+    /// CONFIRMED cancel intent was latched. The cancel read and phase
+    /// transition are atomic under the registry lock so no window can observe
+    /// stale cancel state; a merely provisional intent (the provider call is
+    /// still in flight) does NOT win the race, so a refused cancel can never
+    /// be recorded as `cancelled`.
     #[must_use]
     pub fn begin_operation_finalizing(&self, operation_id: &HostOperationId) -> bool {
         let mut maps = self.maps();
         if let Some(record) = maps.character_operations.get_mut(operation_id) {
-            let cancel_requested = matches!(record.phase, OperationPhase::CancelRequested);
+            let cancel_won_the_race =
+                matches!(record.phase, OperationPhase::CancelRequested) && record.cancel_confirmed;
             if matches!(
                 record.phase,
                 OperationPhase::Running | OperationPhase::CancelRequested
             ) {
                 record.phase = OperationPhase::Finalizing;
             }
-            cancel_requested
+            cancel_won_the_race
         } else {
             false
         }

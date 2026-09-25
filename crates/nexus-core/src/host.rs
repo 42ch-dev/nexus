@@ -741,10 +741,14 @@ impl HostHandle {
                 });
             }
         }
-        // Latch under the registry lock: the phase race (a drain that finalizes
-        // first) is decided here, and a finished operation refuses `409`.
+        // Latch a PROVISIONAL intent under the registry lock: the phase race (a
+        // drain that finalizes first) is decided here, and a finished operation
+        // refuses `409` — but the intent is not confirmed until the provider
+        // answers, so a drain that finalizes while the call is in flight
+        // records the run's own terminal, never a `cancelled` the provider may
+        // still refuse.
         self.registry
-            .request_operation_cancel(&owner, operation_id)?;
+            .latch_provisional_operation_cancel(&owner, operation_id)?;
         if let Err(err) = self.host.cancel(operation_id.clone()).await {
             // The provider refused: undo the intent so a refusal can never be
             // recorded as an accepted cancellation.
@@ -852,6 +856,10 @@ impl HostHandle {
     /// [`Self::actor_sessions`]: reservation is the only way to create an
     /// operation record, so with no production entry the result path can only
     /// ever serve records `execute` minted.
+    ///
+    /// # Errors
+    ///
+    /// Returns capacity or shutdown conflicts.
     #[cfg(any(test, feature = "test-hooks"))]
     pub fn reserve_character_operation(
         &self,

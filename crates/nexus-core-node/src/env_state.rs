@@ -679,12 +679,17 @@ impl EnvState {
 
     /// NAPI8 environment cleanup: tombstone and run bounded native-only teardown.
     ///
-    /// The Host leg runs the attached authority's single `close_before`
-    /// settlement (Actor drains + manager/`LocalSet`), and the core leg requires
-    /// a confirmed `CoreService::close` report: `cleanup_confirmed` needs all
-    /// three settlements (technical contract §3), so neither leg releases its
-    /// owner off an unconfirmed result. Dead-environment cleanup never enters
-    /// the Actor cancel path — the only path that could call a dead JS callback.
+    /// The legs run in technical contract §3 order, same as the JS-initiated
+    /// close: the attached authority's Actor-only quiesce FIRST (while the
+    /// core is still open), then the existing core/execution owner — withheld
+    /// entirely when the quiesce did not confirm, so core storage never closes
+    /// ahead of an admitted Actor effect's drain — and only then this
+    /// authority's single `close_before` settlement (Actor drains +
+    /// manager/`LocalSet`), withheld whenever the ordered close is
+    /// unconfirmed. `cleanup_confirmed` needs all three settlements, so no leg
+    /// releases its owner off an unconfirmed result. Dead-environment cleanup
+    /// never enters a JS callback: both Host legs run on the native Host
+    /// manager.
     pub fn run_bounded_native_finalize(state: Arc<EnvState>) {
         state.tombstone_env();
         let deadline = std::time::Instant::now() + FINALIZE_BUDGET;
@@ -700,12 +705,75 @@ impl EnvState {
                         let budget =
                             || deadline.saturating_duration_since(std::time::Instant::now());
 
+                        // Technical contract §3 order, same as the JS-initiated
+                        // close: the Actor quiesce runs while the core is still
+                        // open, so core storage cannot close ahead of an
+                        // admitted Actor effect's drain. Dead-environment
+                        // cleanup enters no JS callback: the quiesce's cancels
+                        // run on the native Host manager, exactly like the
+                        // `close_before` settlement below.
+                        let host = work_state.take_host();
+                        let mut quiesce_pending: Vec<String> = Vec::new();
+                        let actor_quiesce_confirmed = match host.as_ref() {
+                            None => true,
+                            Some(authority) => {
+                                if budget().is_zero() {
+                                    quiesce_pending.push("actor-quiesce-deadline".to_string());
+                                    false
+                                } else {
+                                    // Bounded by the same absolute deadline: the
+                                    // joins inside are deliberately unbounded
+                                    // (the authority retains its drain
+                                    // ownership), so an expired budget cancels
+                                    // this caller and keeps the whole
+                                    // authority instead of detaching live work.
+                                    match tokio::time::timeout_at(
+                                        tokio::time::Instant::from_std(deadline),
+                                        authority.quiesce_actor_sessions(),
+                                    )
+                                    .await
+                                    {
+                                        Ok(Ok(report)) => {
+                                            let confirmed = report.cleanup_confirmed;
+                                            quiesce_pending.extend(report.pending_operations);
+                                            confirmed
+                                        }
+                                        Ok(Err(err)) => {
+                                            quiesce_pending.push(format!("actor-quiesce: {err}"));
+                                            false
+                                        }
+                                        Err(_) => {
+                                            quiesce_pending
+                                                .push("actor-quiesce-deadline".to_string());
+                                            false
+                                        }
+                                    }
+                                }
+                            }
+                        };
+
                         let core = work_state.take_core();
-                        let mut core_pending: Vec<String> = Vec::new();
+                        let mut core_pending: Vec<String> = quiesce_pending;
                         let core_released = match core {
                             None => true,
                             Some(service) => {
-                                if budget().is_zero() {
+                                if !actor_quiesce_confirmed {
+                                    // Order from technical contract §3: an
+                                    // Actor quiesce that did not confirm leaves
+                                    // an admitted operation that may still
+                                    // register the drain the quiesce's join
+                                    // bounds, so core storage must not close
+                                    // ahead of it. The owner is restored (the
+                                    // environment reports the withheld close)
+                                    // and the authority above stays retained
+                                    // for the retry's ordered close.
+                                    core_pending.push(
+                                        "core-close-withheld: actor-quiesce-unconfirmed"
+                                            .to_string(),
+                                    );
+                                    work_state.restore_core(service);
+                                    false
+                                } else if budget().is_zero() {
                                     work_state.restore_core(service);
                                     false
                                 } else {
@@ -744,10 +812,21 @@ impl EnvState {
                         };
 
                         let mut host_pending: Vec<String> = Vec::new();
-                        let host_released = match work_state.take_host() {
+                        let ordered_close_unconfirmed = !actor_quiesce_confirmed || !core_released;
+                        let host_released = match host {
                             None => true,
                             Some(authority) => {
-                                let released = if budget().is_zero() {
+                                let released = if ordered_close_unconfirmed {
+                                    // The ordered close has not reached this
+                                    // authority's settlement: it owns the Actor
+                                    // drains a retry must re-join, so both it
+                                    // and its manager/`LocalSet` stay retained.
+                                    host_pending.push(
+                                        "host-close-withheld: ordered-close-unconfirmed"
+                                            .to_string(),
+                                    );
+                                    false
+                                } else if budget().is_zero() {
                                     host_pending.push("host-close-deadline".to_string());
                                     false
                                 } else {
@@ -760,11 +839,11 @@ impl EnvState {
                                     //
                                     // Not wrapped in an outer timeout: the
                                     // settlement honors this same absolute
-                                    // deadline itself, and wrapping it would let
-                                    // the wrapper cancel a join that has already
-                                    // taken the `LocalSet` thread handle — which
-                                    // would detach the thread instead of handing
-                                    // it to tracked cleanup.
+                                    // deadline itself, and wrapping it would
+                                    // let the wrapper cancel a join that has
+                                    // already taken the `LocalSet` thread
+                                    // handle — which would detach the thread
+                                    // instead of handing it to tracked cleanup.
                                     match authority.close_before(deadline).await {
                                         Ok(report) => {
                                             let confirmed = report.cleanup_confirmed;

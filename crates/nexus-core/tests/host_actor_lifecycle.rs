@@ -2140,6 +2140,10 @@ struct ControlProvider {
     /// Fail executing provider calls instead of producing a stream: the shape of
     /// an execution that reaches the provider and registers no drain at all.
     exec_fails: Arc<AtomicBool>,
+    /// Publish the operation's own clean terminal while a `cancel` call is in
+    /// flight, then refuse the cancel: the drain-settles-midflight race a
+    /// refused cancel must survive (PR #335 Greptile P1).
+    cancel_publishes_terminal: Arc<AtomicBool>,
     /// The release signal for a parked execution.
     exec_gate: Arc<tokio::sync::Notify>,
     cancels: Arc<AtomicUsize>,
@@ -2156,6 +2160,7 @@ fn control_provider(cancellation: bool, burst: usize, cancel_fails: bool) -> Arc
         executions: Arc::new(AtomicUsize::new(0)),
         park: Arc::new(AtomicBool::new(false)),
         exec_fails: Arc::new(AtomicBool::new(false)),
+        cancel_publishes_terminal: Arc::new(AtomicBool::new(false)),
         exec_gate: Arc::new(tokio::sync::Notify::new()),
         cancels: Arc::new(AtomicUsize::new(0)),
         shutdowns: Arc::new(AtomicUsize::new(0)),
@@ -2211,6 +2216,12 @@ impl ControlProvider {
     /// admitted execution retires its admission while registering no drain.
     fn fail_executions(&self) {
         self.exec_fails.store(true, Ordering::SeqCst);
+    }
+
+    /// Publish the operation's own clean terminal while the `cancel` call is
+    /// in flight, then refuse the cancel: the drain-settles-midflight race.
+    fn publish_terminal_before_refusing_cancel(&self) {
+        self.cancel_publishes_terminal.store(true, Ordering::SeqCst);
     }
 
     /// Executions that reached the provider.
@@ -2302,10 +2313,20 @@ impl ProviderAdapter for ControlProvider {
 
     async fn cancel(
         &self,
-        _session: &ManagedSessionHandle,
-        _op_id: HostOperationId,
+        session: &ManagedSessionHandle,
+        op_id: HostOperationId,
     ) -> nexus_agent_host::HostResult<()> {
         self.cancels.fetch_add(1, Ordering::SeqCst);
+        if self.cancel_publishes_terminal.load(Ordering::SeqCst) {
+            // The drain-settles-midflight race (PR #335): the provider settles
+            // the operation with its own clean end of turn WHILE the cancel
+            // call is in flight, then refuses the cancel. The drain settles in
+            // the same poll that pulls the terminal off the stream (no await
+            // between the pull and the settlement), so one polled item proves
+            // the settlement has run before the refusal returns.
+            self.push(finished(&session.session_id, &op_id, FinishReason::EndTurn));
+            wait_until(|| self.polled() >= 1, "the drain to settle the terminal").await;
+        }
         if self.cancel_fails {
             return Err(nexus_agent_host::HostError::internal(
                 "cancel refused by the control fixture",
@@ -2619,6 +2640,44 @@ async fn actor_control_provider_refusal_is_never_recorded_as_cancelled() {
     );
 }
 
+/// PR #335 (Greptile P1): the drain settles the operation WHILE the provider's
+/// cancel call is still in flight, and the provider then refuses the cancel.
+/// The refusal is reported, and the refusal must NOT be recorded as an
+/// accepted cancellation: the drain's settlement on the provider's own clean
+/// end of turn stays the recorded truth.
+#[tokio::test]
+async fn actor_control_refused_cancel_survives_the_drain_settling_midflight() {
+    let env = seed_env().await;
+    let provider = control_provider(true, 0, true);
+    provider.publish_terminal_before_refusing_cancel();
+    let (_core, principal, _manager, handle, session_id) =
+        control_fixture(&env, Arc::clone(&provider)).await;
+    let operation_id = control_prompt(&handle, &principal, &session_id).await;
+
+    let err = handle
+        .cancel_operation(&principal, operation_id.to_string())
+        .await
+        .expect_err("a refused cancel is reported even when the drain settled mid-flight");
+    assert!(
+        matches!(err, CoreError::Internal { .. }),
+        "the refusal surfaces as an error, got {err:?}"
+    );
+    assert_eq!(provider.cancels(), 1, "the provider was asked exactly once");
+
+    // The drain settled on the provider's own clean end of turn BEFORE the
+    // refusal arrived, and the rollback did not erase it into a cancellation.
+    let outcome = control_status(&handle, &principal, &operation_id).await;
+    assert_eq!(
+        outcome.run_status,
+        CharacterOperationResultRunStatus::Succeeded,
+        "a refused cancel is never recorded as an accepted cancellation"
+    );
+    assert_eq!(
+        outcome.finish_reason,
+        Some(CharacterOperationResultFinishReason::EndTurn)
+    );
+}
+
 /// Owner scoping: a foreign principal is `auth_required` on every control
 /// method, and a cross-session or unknown operation is `not_found` — never a
 /// leak of another session's work.
@@ -2759,8 +2818,13 @@ async fn actor_control_observation_settles_without_a_subscriber() {
             event,
             nexus_contracts::generated::core::provider_event_batch::NexusProviderHostEvent::OpFinished { .. }
         )),
-        "the observation carries this operation's terminal: {:?}",
-        batch.events
+        "the observation carries this operation's terminal ({} events, kinds: {:?})",
+        batch.events.len(),
+        batch
+            .events
+            .iter()
+            .map(std::mem::discriminant)
+            .collect::<Vec<_>>()
     );
     assert_eq!(
         provider.polled(),
