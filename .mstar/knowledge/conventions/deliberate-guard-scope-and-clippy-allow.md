@@ -17,6 +17,7 @@ tags:
   - lint-suppression
   - allow-with-reason
   - rust
+last_updated: 2026-09-25
 ---
 
 # Deliberately wide guard scopes and lint suppression
@@ -109,6 +110,15 @@ A comment that only says "clippy false positive" tells the next reader nothing a
 - If the wide scope exists only because a value must outlive an `.await`, the bound guard may itself be an anti-pattern (`await_holding_lock` territory) — prefer restructuring to holding the lock only around the mutation.
 
 Related but distinct lints that co-occur at these sites and take the same scope discipline: `await_holding_lock`, `used_underscore_binding` (rename instead of suppressing), and `needless_pass_by_value` (take a reference when the callee only reads).
+
+### 6. The finding may exist only in another target's feature graph — and its suggestion may break an invariant
+
+Two additions from the Actor/Host plan of v1.196 (`2026-09-24-v1.196-p0-character-execution`), both about *proving* a lint state rather than fixing one:
+
+- **Feature unification decides which findings exist.** Three findings in `crates/nexus-core/src/actor_sessions.rs` (two `significant_drop_tightening`, one `branches_sharing_code`) appeared under `cargo clippy -p nexus-core --lib --features provider-host` and were **absent at the plan's base** under the same command; a package checked alone (`-p nexus-spoke-adapter`) was clean while the same crate warned when it was reached through another member's graph. So "is this ours?" is a question about the *feature graph you invoke*, not about the file: run the invocation whose unification matches the gate, and attribute before fixing.
+- **Clippy output can be a cache replay.** A `Finished` line with a short duration may reprint a *previous* run's diagnostics — or none — without re-checking anything, so "no warnings printed" is not evidence. Substantiate a clean state with a forced fresh compile: touch the file (and show the `Checking <crate>` line in the retained output), or better, run with an isolated `CARGO_TARGET_DIR=$(mktemp -d)` so nothing can be replayed. A report whose cited output omits the `Checking` line does not substantiate the zero-warning claim.
+
+Same-plan counter-example for §1's "decide first whether the finding is real": clippy's own suggestion for one `significant_drop_tightening` site would have moved a session-liveness increment outside the maps lock and re-opened a teardown race the plan had just closed. The correct action was to keep the increment inside the lock and drop the guard immediately after it — the finding went away without adopting the suggested shape, and the invariant stayed true. When the suggestion and an invariant conflict, the invariant wins and the reason comment should say which one.
 
 ## Why This Matters
 

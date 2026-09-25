@@ -125,8 +125,11 @@ struct PullState {
     terminal_pending: bool,
     /// The terminal has been delivered; completion may be reported.
     terminal_delivered: bool,
-    /// A per-operation cap was exceeded; every later pull reports the gap.
-    overflowed: bool,
+    /// The per-operation stop of this pull window: a cap violation reports
+    /// `oversized`, a lost OBSERVATION source (a broadcast lag or the end of
+    /// that source) reports `lagging`. Every later pull keeps reporting the
+    /// same typed gap — never a silent drop, never a claimed completion.
+    gap: Option<ProviderEventBatchGapReason>,
 }
 
 impl PullState {
@@ -159,16 +162,6 @@ impl PullState {
         self.emitted_bytes += bytes;
         self.emitted_messages += 1;
     }
-}
-
-/// Per-operation pull state. The admission flag is atomic and lives outside the
-/// stream slot, so a concurrent pull is rejected without waiting on the owner.
-struct OperationEntry {
-    pull_in_flight: AtomicBool,
-    terminal_seen: AtomicBool,
-    stream_slot: Arc<Mutex<Option<HostEventStream>>>,
-    /// Guarded by the pull-admission flag, so it needs no async lock.
-    pull_state: Mutex<PullState>,
 }
 
 /// Releases the pull admission flag on every exit path, including `?` and drop.
@@ -223,12 +216,412 @@ enum PullStage {
     Continue,
 }
 
+/// Bounded stream-only pull reader: one Host event source plus the
+/// per-operation pending window and rolling budget accounting.
+///
+/// The reader owns no Host, provider factory or effect dispatch — only the
+/// source it was handed. Both consumers share this ONE implementation so the
+/// bounded-pull limits cannot drift between them:
+///
+/// - [`ProviderPortAdapter`] installs it over an operation's own exec stream
+///   ([`Self::new`]): stream end completes the operation and a stream error
+///   keeps the [`HostError`] vocabulary of the provider port.
+/// - The core Host authority installs it over an *observation* source of the
+///   SAME manager ([`Self::observe`]): a broadcast lag, a cap overflow or the
+///   loss of that source becomes a typed resync gap instead of a batch a
+///   consumer could read as a terminal. The authority's own drain keeps
+///   consuming the original exec stream, so observation never consumes it and
+///   a missing subscriber never blocks settlement.
+pub struct ProviderEventReader {
+    /// Atomic and outside the stream slot, so a concurrent pull is rejected
+    /// without waiting on the owner.
+    pull_in_flight: AtomicBool,
+    terminal_seen: AtomicBool,
+    stream_slot: Arc<Mutex<Option<HostEventStream>>>,
+    /// Guarded by the pull-admission flag, so it needs no async lock.
+    pull_state: Mutex<PullState>,
+    /// `true` for an observation source (see the type documentation).
+    observation: bool,
+}
+
+impl ProviderEventReader {
+    /// Reader over an operation's own exec stream.
+    #[must_use]
+    pub fn new(stream: HostEventStream) -> Self {
+        Self::with_source(stream, false)
+    }
+
+    /// Reader over an OBSERVATION source of the same Host — a session event
+    /// broadcast the caller has already selected down to one operation.
+    ///
+    /// An observation is not the operation's own stream, so neither a
+    /// broadcast lag nor the loss of the source may be reported as clean
+    /// completion: both become a typed `lagging` resync gap and the consumer
+    /// re-reads authoritative status instead of inferring a terminal.
+    #[must_use]
+    pub fn observe(stream: HostEventStream) -> Self {
+        Self::with_source(stream, true)
+    }
+
+    fn with_source(stream: HostEventStream, observation: bool) -> Self {
+        Self {
+            pull_in_flight: AtomicBool::new(false),
+            terminal_seen: AtomicBool::new(false),
+            stream_slot: Arc::new(Mutex::new(Some(stream))),
+            pull_state: Mutex::new(PullState::default()),
+            observation,
+        }
+    }
+
+    /// Drain one bounded batch. The caller guarantees single-owner access
+    /// through the per-operation admission flag.
+    ///
+    /// # Errors
+    ///
+    /// Returns `busy` when a concurrent pull is already in flight, the mapped
+    /// host error when an own-stream source errors, and `internal` when the
+    /// stream slot is empty because an earlier pull lost it.
+    pub async fn next(
+        &self,
+        operation_id: String,
+        max_events: u32,
+        max_bytes: u32,
+    ) -> ProviderResult<ProviderEventBatch> {
+        let cap_events = max_events.min(MAX_EVENTS_PER_BATCH);
+        let cap_bytes = max_bytes.min(MAX_BYTES_PER_BATCH);
+
+        if self.terminal_seen.load(Ordering::Acquire) {
+            return Ok(ProviderEventBatch {
+                operation_id,
+                events: vec![],
+                has_more: false,
+                gap: None,
+            });
+        }
+
+        // Atomic, non-blocking admission: a concurrent pull is Busy immediately.
+        if self
+            .pull_in_flight
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return Err(CoreError {
+                code: CoreErrorCode::Busy,
+                message: format!("pull already in flight for operation {operation_id}"),
+                details: serde_json::Map::default(),
+                http_status: Some(503),
+            });
+        }
+        let _pull = PullGuard {
+            flag: &self.pull_in_flight,
+        };
+
+        let mut restore = StreamRestore::new(Arc::clone(&self.stream_slot));
+        restore.acquire().await;
+
+        if let Some(stream) = restore.stream.as_mut() {
+            self.pull_events(&operation_id, stream, cap_events, cap_bytes)
+                .await
+        } else {
+            Err(internal_error(format!(
+                "operation {operation_id} stream unavailable"
+            )))
+        }
+    }
+
+    /// Drain one bounded batch from an owned stream. The caller guarantees
+    /// single-owner access through the per-operation admission flag.
+    ///
+    /// Nothing pulled from the non-rewindable stream is ever silently discarded:
+    /// an item that does not fit the remaining batch budget is deferred to the
+    /// per-operation pending window and returned by the next pull. A terminal is
+    /// a *control* item — it is retained for delivery, and an EOF arriving behind
+    /// it cannot erase it. Only a genuine per-operation cap violation drops an
+    /// item, and then the batch carries a typed `delivery_overflow` gap.
+    async fn pull_events(
+        &self,
+        operation_id: &str,
+        stream: &mut HostEventStream,
+        cap_events: u32,
+        cap_bytes: u32,
+    ) -> ProviderResult<ProviderEventBatch> {
+        let mut events: Vec<NexusProviderHostEvent> = Vec::new();
+        let mut used_bytes = 0usize;
+
+        // (1) Deliver what a previous pull had to defer, oldest first.
+        if let PullStage::Batch(batch) = self
+            .drain_pending(
+                operation_id,
+                &mut events,
+                &mut used_bytes,
+                cap_events,
+                cap_bytes,
+            )
+            .await
+        {
+            return Ok(batch);
+        }
+
+        // (2) Read further items, deferring rather than dropping what does not fit.
+        if let PullStage::Batch(batch) = self
+            .pull_stream_events(
+                operation_id,
+                stream,
+                &mut events,
+                &mut used_bytes,
+                cap_events,
+                cap_bytes,
+            )
+            .await?
+        {
+            return Ok(batch);
+        }
+
+        let has_more = !self.terminal_seen.load(Ordering::Acquire);
+        Ok(ProviderEventBatch {
+            operation_id: operation_id.to_string(),
+            events,
+            has_more,
+            gap: None,
+        })
+    }
+
+    /// Deliver deferred items from the per-operation pending window, oldest
+    /// first. An already-overflowed window keeps reporting the typed gap, a
+    /// delivered terminal completes the operation, and a queued terminal stops
+    /// the pull before the stream is read.
+    async fn drain_pending(
+        &self,
+        operation_id: &str,
+        events: &mut Vec<NexusProviderHostEvent>,
+        used_bytes: &mut usize,
+        cap_events: u32,
+        cap_bytes: u32,
+    ) -> PullStage {
+        let mut state = self.pull_state.lock().await;
+        if let Some(reason) = state.gap {
+            // A stopped window keeps reporting its typed gap. Only an overflow
+            // may still have the terminal queued behind it; a lost OBSERVATION
+            // source reports no more data at all, and never completion.
+            let has_more =
+                reason == ProviderEventBatchGapReason::Oversized && !state.terminal_delivered;
+            return PullStage::Batch(ProviderEventBatch {
+                operation_id: operation_id.to_string(),
+                events: std::mem::take(events),
+                has_more,
+                gap: Some(gap(operation_id, reason)),
+            });
+        }
+        while events.len() < cap_events as usize {
+            let Some(front) = state.pending.front() else {
+                break;
+            };
+            if *used_bytes + front.bytes > cap_bytes as usize {
+                break;
+            }
+            let item = state.pending.pop_front().expect("pending front");
+            state.pending_bytes -= item.bytes;
+            *used_bytes += item.bytes;
+            state.note_emitted(item.bytes);
+            if item.terminal {
+                state.terminal_delivered = true;
+            }
+            events.push(item.wire);
+            if item.terminal {
+                break;
+            }
+        }
+        if state.terminal_delivered {
+            self.terminal_seen.store(true, Ordering::Release);
+            return PullStage::Batch(ProviderEventBatch {
+                operation_id: operation_id.to_string(),
+                events: std::mem::take(events),
+                has_more: false,
+                gap: None,
+            });
+        }
+        if state.terminal_pending {
+            // The terminal the stream already produced is still queued: do
+            // not read past it, and do not report completion yet.
+            return PullStage::Batch(ProviderEventBatch {
+                operation_id: operation_id.to_string(),
+                events: std::mem::take(events),
+                has_more: true,
+                gap: None,
+            });
+        }
+        drop(state);
+        PullStage::Continue
+    }
+
+    /// Read further items straight off the owned stream, deferring rather than
+    /// dropping anything that does not fit the remaining batch budget. Stream
+    /// end reports completion only once every deferred item — above all the
+    /// terminal — has been delivered.
+    async fn pull_stream_events(
+        &self,
+        operation_id: &str,
+        stream: &mut HostEventStream,
+        events: &mut Vec<NexusProviderHostEvent>,
+        used_bytes: &mut usize,
+        cap_events: u32,
+        cap_bytes: u32,
+    ) -> ProviderResult<PullStage> {
+        while events.len() < cap_events as usize && *used_bytes < cap_bytes as usize {
+            match stream.next().await {
+                Some(Ok(event)) => {
+                    let wire = wire_to_batch_event(&host_event_to_wire(&event)?)?;
+                    let size = serde_json::to_vec(&wire).map_or(0, |bytes| bytes.len());
+                    let terminal = is_terminal(&event);
+
+                    // An item that exceeds the per-event cap — or that could not
+                    // fit an *empty* batch under the caller's byte cap — can
+                    // never be delivered, so deferring it would spin forever.
+                    // That is a typed gap, never a partial or silent drop.
+                    if size > MAX_EVENT_BYTES || size > cap_bytes as usize {
+                        self.pull_state.lock().await.gap =
+                            Some(ProviderEventBatchGapReason::Oversized);
+                        return Ok(PullStage::Batch(ProviderEventBatch {
+                            operation_id: operation_id.to_string(),
+                            events: std::mem::take(events),
+                            has_more: true,
+                            gap: Some(oversized_gap(operation_id)),
+                        }));
+                    }
+
+                    if *used_bytes + size <= cap_bytes as usize {
+                        {
+                            let mut state = self.pull_state.lock().await;
+                            state.note_emitted(size);
+                            if terminal {
+                                state.terminal_delivered = true;
+                            }
+                        }
+                        *used_bytes += size;
+                        events.push(wire);
+                        if terminal {
+                            self.terminal_seen.store(true, Ordering::Release);
+                            break;
+                        }
+                        continue;
+                    }
+
+                    // Does not fit this batch: defer it for the next pull.
+                    let deferred = self.pull_state.lock().await.defer(wire, size, terminal);
+                    if !deferred {
+                        self.pull_state.lock().await.gap =
+                            Some(ProviderEventBatchGapReason::Oversized);
+                        return Ok(PullStage::Batch(ProviderEventBatch {
+                            operation_id: operation_id.to_string(),
+                            events: std::mem::take(events),
+                            has_more: true,
+                            gap: Some(oversized_gap(operation_id)),
+                        }));
+                    }
+                    break;
+                }
+                Some(Err(err)) => {
+                    if self.observation {
+                        // A broadcast lag reaches the source as an error and the
+                        // source is no longer trustworthy for this operation.
+                        return Ok(PullStage::Batch(
+                            self.lost_source(operation_id, events).await,
+                        ));
+                    }
+                    return Err(host_error_to_core_error(&err));
+                }
+                None => {
+                    if self.observation {
+                        // The observation source ended (its sender was
+                        // dropped) without this operation's terminal: a resync
+                        // gap, never an EOF a consumer could read as a
+                        // successful completion.
+                        return Ok(PullStage::Batch(
+                            self.lost_source(operation_id, events).await,
+                        ));
+                    }
+                    // Stream ended. Completion may only be reported once every
+                    // deferred item — a terminal above all — has been delivered.
+                    let mut state = self.pull_state.lock().await;
+                    if !state.pending.is_empty() {
+                        return Ok(PullStage::Batch(ProviderEventBatch {
+                            operation_id: operation_id.to_string(),
+                            events: std::mem::take(events),
+                            has_more: true,
+                            gap: None,
+                        }));
+                    }
+                    state.terminal_delivered = true;
+                    drop(state);
+                    self.terminal_seen.store(true, Ordering::Release);
+                    return Ok(PullStage::Batch(ProviderEventBatch {
+                        operation_id: operation_id.to_string(),
+                        events: std::mem::take(events),
+                        has_more: false,
+                        gap: None,
+                    }));
+                }
+            }
+        }
+        Ok(PullStage::Continue)
+    }
+
+    /// Report a lost observation source as the typed resync gap. The state is
+    /// latched, so every later pull keeps reporting it instead of turning the
+    /// loss into completion.
+    async fn lost_source(
+        &self,
+        operation_id: &str,
+        events: &mut Vec<NexusProviderHostEvent>,
+    ) -> ProviderEventBatch {
+        self.pull_state.lock().await.gap = Some(ProviderEventBatchGapReason::Lagging);
+        ProviderEventBatch {
+            operation_id: operation_id.to_string(),
+            events: std::mem::take(events),
+            has_more: false,
+            gap: Some(gap(operation_id, ProviderEventBatchGapReason::Lagging)),
+        }
+    }
+}
+
+/// The typed per-operation data-window gap.
+fn oversized_gap(operation_id: &str) -> ProviderEventBatchGap {
+    gap(operation_id, ProviderEventBatchGapReason::Oversized)
+}
+
+fn gap(operation_id: &str, reason: ProviderEventBatchGapReason) -> ProviderEventBatchGap {
+    ProviderEventBatchGap {
+        reason,
+        operation_id: Some(operation_id.to_string()),
+        resync_required: true,
+        inspect_url: format!("native://provider/events/{operation_id}"),
+    }
+}
+
+fn invalid_input(message: impl Into<String>) -> CoreError {
+    CoreError {
+        code: CoreErrorCode::InvalidInput,
+        message: message.into(),
+        details: serde_json::Map::default(),
+        http_status: Some(400),
+    }
+}
+
+fn internal_error(message: impl Into<String>) -> CoreError {
+    CoreError {
+        code: CoreErrorCode::Internal,
+        message: message.into(),
+        details: serde_json::Map::default(),
+        http_status: Some(500),
+    }
+}
+
 /// Pull-based provider port backed by the existing host facade and adapters.
 pub struct ProviderPortAdapter {
     host: Arc<dyn HostFacade>,
     manager: Option<Arc<HostManager>>,
     providers: HashMap<ProviderId, Arc<dyn ProviderAdapter>>,
-    operations: DashMap<String, Arc<OperationEntry>>,
+    operations: DashMap<String, Arc<ProviderEventReader>>,
 }
 
 impl ProviderPortAdapter {
@@ -260,48 +653,17 @@ impl ProviderPortAdapter {
     }
 
     fn insert_operation(&self, operation_id: String, stream: HostEventStream) {
-        self.operations.insert(
-            operation_id,
-            Arc::new(OperationEntry {
-                pull_in_flight: AtomicBool::new(false),
-                terminal_seen: AtomicBool::new(false),
-                stream_slot: Arc::new(Mutex::new(Some(stream))),
-                pull_state: Mutex::new(PullState::default()),
-            }),
-        );
-    }
-
-    fn map_host_error(err: &HostError) -> CoreError {
-        host_error_to_core_error(err)
-    }
-
-    fn invalid_input(message: impl Into<String>) -> CoreError {
-        CoreError {
-            code: CoreErrorCode::InvalidInput,
-            message: message.into(),
-            details: serde_json::Map::default(),
-            http_status: Some(400),
-        }
-    }
-
-    fn internal_error(message: impl Into<String>) -> CoreError {
-        CoreError {
-            code: CoreErrorCode::Internal,
-            message: message.into(),
-            details: serde_json::Map::default(),
-            http_status: Some(500),
-        }
+        self.operations
+            .insert(operation_id, Arc::new(ProviderEventReader::new(stream)));
     }
 
     fn parse_session_id(raw: &str) -> Result<HostSessionId, CoreError> {
-        let uuid =
-            Uuid::parse_str(raw).map_err(|e| Self::invalid_input(format!("session_id: {e}")))?;
+        let uuid = Uuid::parse_str(raw).map_err(|e| invalid_input(format!("session_id: {e}")))?;
         Ok(HostSessionId(uuid))
     }
 
     fn parse_operation_id(raw: &str) -> Result<HostOperationId, CoreError> {
-        let uuid =
-            Uuid::parse_str(raw).map_err(|e| Self::invalid_input(format!("operation_id: {e}")))?;
+        let uuid = Uuid::parse_str(raw).map_err(|e| invalid_input(format!("operation_id: {e}")))?;
         Ok(HostOperationId(uuid))
     }
 
@@ -312,227 +674,6 @@ impl ProviderPortAdapter {
             latency_ms: health.latency_ms,
             message: health.message,
         }
-    }
-
-    fn oversized_gap(operation_id: &str) -> ProviderEventBatchGap {
-        ProviderEventBatchGap {
-            reason: ProviderEventBatchGapReason::Oversized,
-            operation_id: Some(operation_id.to_string()),
-            resync_required: true,
-            inspect_url: format!("native://provider/events/{operation_id}"),
-        }
-    }
-
-    /// Drain one bounded batch from an owned stream. The caller guarantees
-    /// single-owner access through the per-operation admission flag.
-    ///
-    /// Nothing pulled from the non-rewindable stream is ever silently discarded:
-    /// an item that does not fit the remaining batch budget is deferred to the
-    /// per-operation pending window and returned by the next pull. A terminal is
-    /// a *control* item — it is retained for delivery, and an EOF arriving behind
-    /// it cannot erase it. Only a genuine per-operation cap violation drops an
-    /// item, and then the batch carries a typed `delivery_overflow` gap.
-    async fn pull_events(
-        entry: &OperationEntry,
-        operation_id: &str,
-        stream: &mut HostEventStream,
-        cap_events: u32,
-        cap_bytes: u32,
-    ) -> ProviderResult<ProviderEventBatch> {
-        let mut events: Vec<NexusProviderHostEvent> = Vec::new();
-        let mut used_bytes = 0usize;
-
-        // (1) Deliver what a previous pull had to defer, oldest first.
-        if let PullStage::Batch(batch) = Self::drain_pending(
-            entry,
-            operation_id,
-            &mut events,
-            &mut used_bytes,
-            cap_events,
-            cap_bytes,
-        )
-        .await
-        {
-            return Ok(batch);
-        }
-
-        // (2) Read further items, deferring rather than dropping what does not fit.
-        if let PullStage::Batch(batch) = Self::pull_stream_events(
-            entry,
-            operation_id,
-            stream,
-            &mut events,
-            &mut used_bytes,
-            cap_events,
-            cap_bytes,
-        )
-        .await?
-        {
-            return Ok(batch);
-        }
-
-        let has_more = !entry.terminal_seen.load(Ordering::Acquire);
-        Ok(ProviderEventBatch {
-            operation_id: operation_id.to_string(),
-            events,
-            has_more,
-            gap: None,
-        })
-    }
-
-    /// Deliver deferred items from the per-operation pending window, oldest
-    /// first. An already-overflowed window keeps reporting the typed gap, a
-    /// delivered terminal completes the operation, and a queued terminal stops
-    /// the pull before the stream is read.
-    async fn drain_pending(
-        entry: &OperationEntry,
-        operation_id: &str,
-        events: &mut Vec<NexusProviderHostEvent>,
-        used_bytes: &mut usize,
-        cap_events: u32,
-        cap_bytes: u32,
-    ) -> PullStage {
-        let mut state = entry.pull_state.lock().await;
-        if state.overflowed {
-            return PullStage::Batch(ProviderEventBatch {
-                operation_id: operation_id.to_string(),
-                events: std::mem::take(events),
-                has_more: !state.terminal_delivered,
-                gap: Some(Self::oversized_gap(operation_id)),
-            });
-        }
-        while events.len() < cap_events as usize {
-            let Some(front) = state.pending.front() else {
-                break;
-            };
-            if *used_bytes + front.bytes > cap_bytes as usize {
-                break;
-            }
-            let item = state.pending.pop_front().expect("pending front");
-            state.pending_bytes -= item.bytes;
-            *used_bytes += item.bytes;
-            state.note_emitted(item.bytes);
-            if item.terminal {
-                state.terminal_delivered = true;
-            }
-            events.push(item.wire);
-            if item.terminal {
-                break;
-            }
-        }
-        if state.terminal_delivered {
-            entry.terminal_seen.store(true, Ordering::Release);
-            return PullStage::Batch(ProviderEventBatch {
-                operation_id: operation_id.to_string(),
-                events: std::mem::take(events),
-                has_more: false,
-                gap: None,
-            });
-        }
-        if state.terminal_pending {
-            // The terminal the stream already produced is still queued: do
-            // not read past it, and do not report completion yet.
-            return PullStage::Batch(ProviderEventBatch {
-                operation_id: operation_id.to_string(),
-                events: std::mem::take(events),
-                has_more: true,
-                gap: None,
-            });
-        }
-        drop(state);
-        PullStage::Continue
-    }
-
-    /// Read further items straight off the owned stream, deferring rather than
-    /// dropping anything that does not fit the remaining batch budget. Stream
-    /// end reports completion only once every deferred item — above all the
-    /// terminal — has been delivered.
-    async fn pull_stream_events(
-        entry: &OperationEntry,
-        operation_id: &str,
-        stream: &mut HostEventStream,
-        events: &mut Vec<NexusProviderHostEvent>,
-        used_bytes: &mut usize,
-        cap_events: u32,
-        cap_bytes: u32,
-    ) -> ProviderResult<PullStage> {
-        while events.len() < cap_events as usize && *used_bytes < cap_bytes as usize {
-            match stream.next().await {
-                Some(Ok(event)) => {
-                    let wire = wire_to_batch_event(&host_event_to_wire(&event)?)?;
-                    let size = serde_json::to_vec(&wire).map_or(0, |bytes| bytes.len());
-                    let terminal = is_terminal(&event);
-
-                    // An item that exceeds the per-event cap — or that could not
-                    // fit an *empty* batch under the caller's byte cap — can
-                    // never be delivered, so deferring it would spin forever.
-                    // That is a typed gap, never a partial or silent drop.
-                    if size > MAX_EVENT_BYTES || size > cap_bytes as usize {
-                        entry.pull_state.lock().await.overflowed = true;
-                        return Ok(PullStage::Batch(ProviderEventBatch {
-                            operation_id: operation_id.to_string(),
-                            events: std::mem::take(events),
-                            has_more: true,
-                            gap: Some(Self::oversized_gap(operation_id)),
-                        }));
-                    }
-
-                    if *used_bytes + size <= cap_bytes as usize {
-                        {
-                            let mut state = entry.pull_state.lock().await;
-                            state.note_emitted(size);
-                            if terminal {
-                                state.terminal_delivered = true;
-                            }
-                        }
-                        *used_bytes += size;
-                        events.push(wire);
-                        if terminal {
-                            entry.terminal_seen.store(true, Ordering::Release);
-                            break;
-                        }
-                        continue;
-                    }
-
-                    // Does not fit this batch: defer it for the next pull.
-                    let deferred = entry.pull_state.lock().await.defer(wire, size, terminal);
-                    if !deferred {
-                        entry.pull_state.lock().await.overflowed = true;
-                        return Ok(PullStage::Batch(ProviderEventBatch {
-                            operation_id: operation_id.to_string(),
-                            events: std::mem::take(events),
-                            has_more: true,
-                            gap: Some(Self::oversized_gap(operation_id)),
-                        }));
-                    }
-                    break;
-                }
-                Some(Err(err)) => return Err(Self::map_host_error(&err)),
-                None => {
-                    // Stream ended. Completion may only be reported once every
-                    // deferred item — a terminal above all — has been delivered.
-                    let mut state = entry.pull_state.lock().await;
-                    if !state.pending.is_empty() {
-                        return Ok(PullStage::Batch(ProviderEventBatch {
-                            operation_id: operation_id.to_string(),
-                            events: std::mem::take(events),
-                            has_more: true,
-                            gap: None,
-                        }));
-                    }
-                    state.terminal_delivered = true;
-                    drop(state);
-                    entry.terminal_seen.store(true, Ordering::Release);
-                    return Ok(PullStage::Batch(ProviderEventBatch {
-                        operation_id: operation_id.to_string(),
-                        events: std::mem::take(events),
-                        has_more: false,
-                        gap: None,
-                    }));
-                }
-            }
-        }
-        Ok(PullStage::Continue)
     }
 
     /// `ProviderPort::call` probe arm: run the bounded probe and publish the
@@ -546,7 +687,7 @@ impl ProviderPortAdapter {
             payload_value
                 .get("provider_id")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| Self::invalid_input("probe requires provider_id"))?,
+                .ok_or_else(|| invalid_input("probe requires provider_id"))?,
         );
         let adapter = self.providers.get(&provider_id).ok_or_else(|| CoreError {
             code: CoreErrorCode::NotFound,
@@ -555,12 +696,12 @@ impl ProviderPortAdapter {
             http_status: Some(404),
         })?;
         let probe: ProbeRequest = serde_json::from_value(payload_value)
-            .map_err(|e| Self::invalid_input(format!("probe payload: {e}")))?;
+            .map_err(|e| invalid_input(format!("probe payload: {e}")))?;
         let started = std::time::Instant::now();
         let health = adapter
             .probe(probe)
             .await
-            .map_err(|err| Self::map_host_error(&err))?;
+            .map_err(|err| host_error_to_core_error(&err))?;
         let latency_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
         if let Some(manager) = &self.manager {
             manager
@@ -588,7 +729,7 @@ impl ProviderPortAdapter {
             payload_value
                 .get("provider_id")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| Self::invalid_input("launch requires provider_id"))?,
+                .ok_or_else(|| invalid_input("launch requires provider_id"))?,
         );
         let _adapter = self.providers.get(&provider_id).ok_or_else(|| CoreError {
             code: CoreErrorCode::NotFound,
@@ -597,7 +738,7 @@ impl ProviderPortAdapter {
             http_status: Some(404),
         })?;
         let spec: LaunchSpec = serde_json::from_value(payload_value)
-            .map_err(|e| Self::invalid_input(format!("launch payload: {e}")))?;
+            .map_err(|e| invalid_input(format!("launch payload: {e}")))?;
         let session = self
             .host
             .create_session(CreateSessionRequest {
@@ -610,7 +751,7 @@ impl ProviderPortAdapter {
                 owner: spec.owner,
             })
             .await
-            .map_err(|err| Self::map_host_error(&err))?;
+            .map_err(|err| host_error_to_core_error(&err))?;
         Ok(ProviderReply {
             request_id: request.request_id,
             ok: true,
@@ -631,10 +772,10 @@ impl ProviderPortAdapter {
         let session_raw = request
             .session_id
             .as_deref()
-            .ok_or_else(|| Self::invalid_input("execute requires session_id"))?;
+            .ok_or_else(|| invalid_input("execute requires session_id"))?;
         let session_id = Self::parse_session_id(session_raw)?;
         let op: HostOperation = serde_json::from_value(payload_value)
-            .map_err(|e| Self::invalid_input(format!("execute payload: {e}")))?;
+            .map_err(|e| invalid_input(format!("execute payload: {e}")))?;
         let control = !matches!(&op, HostOperation::Prompt { .. });
         let op_id = match &op {
             HostOperation::Prompt { op_id, .. } => Some(op_id.clone()),
@@ -644,7 +785,7 @@ impl ProviderPortAdapter {
             .host
             .exec(session_id.clone(), op)
             .await
-            .map_err(|err| Self::map_host_error(&err))?;
+            .map_err(|err| host_error_to_core_error(&err))?;
         // The returned stream has not been polled, so HostManager still owns
         // the active control operation. Publish that same identity for both
         // cancellation and terminal delivery rather than inventing a wire ID.
@@ -654,13 +795,11 @@ impl ProviderPortAdapter {
                 .host
                 .list_sessions()
                 .await
-                .map_err(|err| Self::map_host_error(&err))?
+                .map_err(|err| host_error_to_core_error(&err))?
                 .into_iter()
                 .find(|session| session.id == session_id)
                 .and_then(|session| session.active_op_id)
-                .ok_or_else(|| {
-                    Self::internal_error("control operation has no active host identity")
-                })?,
+                .ok_or_else(|| internal_error("control operation has no active host identity"))?,
         };
         // ACP controls generate their own terminal ID after the synchronous
         // RPC. Correlate it after HostManager applies its lifecycle transition.
@@ -696,7 +835,7 @@ impl ProviderPortAdapter {
         let op_raw = request
             .operation_id
             .as_deref()
-            .ok_or_else(|| Self::invalid_input("cancel requires operation_id"))?;
+            .ok_or_else(|| invalid_input("cancel requires operation_id"))?;
         let op_id = Self::parse_operation_id(op_raw)?;
         let op_id_str = op_id.to_string();
         // Check negotiated capability before HostManager can transition the
@@ -705,7 +844,7 @@ impl ProviderPortAdapter {
             .host
             .list_sessions()
             .await
-            .map_err(|err| Self::map_host_error(&err))?;
+            .map_err(|err| host_error_to_core_error(&err))?;
         if let Some(session) = sessions
             .iter()
             .find(|session| session.active_op_id.as_ref() == Some(&op_id))
@@ -722,7 +861,7 @@ impl ProviderPortAdapter {
         self.host
             .cancel(op_id)
             .await
-            .map_err(|err| Self::map_host_error(&err))?;
+            .map_err(|err| host_error_to_core_error(&err))?;
         Ok(ProviderReply {
             request_id: request.request_id,
             ok: true,
@@ -738,12 +877,12 @@ impl ProviderPortAdapter {
         let session_raw = request
             .session_id
             .as_deref()
-            .ok_or_else(|| Self::invalid_input("shutdown requires session_id"))?;
+            .ok_or_else(|| invalid_input("shutdown requires session_id"))?;
         let session_id = Self::parse_session_id(session_raw)?;
         self.host
             .shutdown_session(session_id.clone())
             .await
-            .map_err(|err| Self::map_host_error(&err))?;
+            .map_err(|err| host_error_to_core_error(&err))?;
         Ok(ProviderReply {
             request_id: request.request_id,
             ok: true,
@@ -818,57 +957,21 @@ impl ProviderPort for ProviderPortAdapter {
         max_events: u32,
         max_bytes: u32,
     ) -> ProviderResult<ProviderEventBatch> {
-        let cap_events = max_events.min(MAX_EVENTS_PER_BATCH);
-        let cap_bytes = max_bytes.min(MAX_BYTES_PER_BATCH);
-
-        // Clone the entry handle and release the map guard before any await.
-        let entry = self
+        // Clone the reader handle and release the map guard before any await:
+        // the bounded-pull accounting itself lives in the shared
+        // [`ProviderEventReader`], so this port and the core Host observation
+        // cannot drift on limits, deferral or terminal delivery.
+        let reader = self
             .operations
             .get(&operation_id)
-            .map(|entry| Arc::clone(entry.value()))
+            .map(|operation| Arc::clone(operation.value()))
             .ok_or_else(|| CoreError {
                 code: CoreErrorCode::NotFound,
                 message: format!("operation {operation_id} not found"),
                 details: serde_json::Map::default(),
                 http_status: Some(404),
             })?;
-
-        if entry.terminal_seen.load(Ordering::Acquire) {
-            return Ok(ProviderEventBatch {
-                operation_id,
-                events: vec![],
-                has_more: false,
-                gap: None,
-            });
-        }
-
-        // Atomic, non-blocking admission: a concurrent pull is Busy immediately.
-        if entry
-            .pull_in_flight
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .is_err()
-        {
-            return Err(CoreError {
-                code: CoreErrorCode::Busy,
-                message: format!("pull already in flight for operation {operation_id}"),
-                details: serde_json::Map::default(),
-                http_status: Some(503),
-            });
-        }
-        let _pull = PullGuard {
-            flag: &entry.pull_in_flight,
-        };
-
-        let mut restore = StreamRestore::new(Arc::clone(&entry.stream_slot));
-        restore.acquire().await;
-
-        if let Some(stream) = restore.stream.as_mut() {
-            Self::pull_events(&entry, &operation_id, stream, cap_events, cap_bytes).await
-        } else {
-            Err(Self::internal_error(format!(
-                "operation {operation_id} stream unavailable"
-            )))
-        }
+        reader.next(operation_id, max_events, max_bytes).await
     }
 }
 
@@ -1334,9 +1437,46 @@ mod tests {
 
     #[test]
     fn oversized_gap_is_marked_resync_required() {
-        let gap = ProviderPortAdapter::oversized_gap("op-1");
+        let gap = oversized_gap("op-1");
         assert!(gap.resync_required);
         assert_eq!(gap.operation_id.as_deref(), Some("op-1"));
+    }
+
+    #[tokio::test]
+    async fn observation_source_loss_is_a_typed_resync_gap() {
+        // The SAME bounded reader is used for both consumers; the observation
+        // source is not the operation's own stream, so its loss can never be
+        // read as a clean completion.
+        let items = || {
+            Box::pin(futures_util::stream::iter(vec![Ok(status_event("first"))])) as HostEventStream
+        };
+
+        let own = ProviderEventReader::new(items());
+        let batch = own.next("op-own".to_string(), 16, 4096).await.unwrap();
+        assert_eq!(batch.events.len(), 1);
+        assert!(!batch.has_more, "an own exec stream end completes the op");
+        assert!(batch.gap.is_none(), "completion is not a gap");
+
+        let observed = ProviderEventReader::observe(items());
+        let first = observed.next("op-obs".to_string(), 16, 4096).await.unwrap();
+        assert_eq!(first.events.len(), 1, "events read before the loss survive");
+        assert!(
+            !first.has_more,
+            "a lost observation never reports more data"
+        );
+        let gap = first.gap.expect("a lost observation reports a typed gap");
+        assert_eq!(gap.reason, ProviderEventBatchGapReason::Lagging);
+        assert!(gap.resync_required);
+
+        // The loss is latched: a later pull keeps reporting the resync gap
+        // instead of turning it into completion.
+        let second = observed.next("op-obs".to_string(), 16, 4096).await.unwrap();
+        assert!(second.events.is_empty());
+        assert!(!second.has_more);
+        assert_eq!(
+            second.gap.map(|gap| gap.reason),
+            Some(ProviderEventBatchGapReason::Lagging)
+        );
     }
 
     #[tokio::test]

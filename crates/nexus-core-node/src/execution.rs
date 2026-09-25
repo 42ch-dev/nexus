@@ -165,18 +165,22 @@ impl NativeCore {
             .ok_or_else(|| Error::from_reason("provider port unavailable"))?;
         let host = self
             .inner
-            .host
-            .lock()
-            .map_err(|_| Error::from_reason("host mutex poisoned"))?
-            .clone()
+            .host_authority()
             .ok_or_else(|| Error::from_reason("host not started"))?;
+        // The attached authority's manager IS the manager the open started with
+        // the admitted pinned-root configuration: readiness and the hosted
+        // execution owner borrow that same instance instead of a second one.
+        let manager = host.manager();
         // The readiness answer is read BEFORE establishment so a workspace
         // refusal still reports the truth about the provider lane.
-        let provider_ready = selected_providers_ready(&host)
+        let provider_ready = selected_providers_ready(&manager)
             .await
             .map_err(|error| Error::from_reason(format!("provider readiness: {error}")))?;
-        let timeouts = host.agent_config().await.timeouts;
-        let engine_epoch = match core.start_hosted_execution(host, providers, timeouts).await {
+        let timeouts = manager.agent_config().await.timeouts;
+        let engine_epoch = match core
+            .start_hosted_execution(manager, providers, timeouts)
+            .await
+        {
             Ok(handle) => Some(handle.engine_epoch()),
             // A workspace that cannot host an owner is the ONE shape this
             // profile reports as "no engine epoch": the admission pinned no

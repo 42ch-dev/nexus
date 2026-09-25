@@ -19,7 +19,7 @@ tags:
   - relay-task
   - lost-wakeup
   - peer-tools
-last_updated: 2026-09-24
+last_updated: 2026-09-25
 created: 2026-08-27
 status: active
 ---
@@ -94,6 +94,8 @@ The failure mode is a **silent hang**, not an error: the accept loop simply neve
 V1.179 P1 T1 (`crates/nexus-daemon-runtime/src/connect/watch.rs` + `accept.rs`): `PeerToolsLaneHandle` gained a relay task (`_shutdown_relay`) plus per-child Notify; `spawn_peer_config_watch` selects on the child Notify. Post-fix, `authz_hello` 7/7 and the spawned-watcher e2e (real reload without restart) both pass; reviewer verdict on the relay: "no remaining lost-wakeup window on this seam." Red-green evidence: hang reproduced at the naive wiring, pass at BASE, pass after relay.
 
 V1.195 P0 (`crates/nexus-core-node/src/lifecycle.rs` `await_settled_close`; the same shape in `crates/nexus-core/src/execution/lifecycle.rs` `ExecutionHandle::await_settled`): the close-report waiter registered after checking the in-flight flag, so a settlement could publish between the check and the registration and strand the caller; the confirmed fix is register (`pin!` + `enable()`) then check then loop, with the publisher ordering report → boundary → `notify_waiters`. The whole close contract that depends on it — [cancellation-safe-confirmed-close-settlement.md](cancellation-safe-confirmed-close-settlement.md).
+
+V1.196 P0 (plan `2026-09-24-v1.196-p0-character-execution`, `crates/nexus-core/src/host.rs` + `actor_sessions.rs`): the same handoff appeared twice more on new joins — the **authority-wide admission join** used by the Actor-only quiesce, and the quiesce's **second join** over the Actor drain settle. Both stranded a second concurrent quiesce after the final admission (or drain) retired; both were fixed with `notify_waiters` plus register-before-read (`Notified::enable` before re-reading the condition). Red-before-fix reproduced deterministically as a 5 s timeout on the stranded second quiesce, once per join. A third site — the per-session drain join (`join_session_drains` / `retire_session_liveness`) — still uses the single-permit handoff; it is reachable only from concurrent session shutdowns, not from the quiesce path, and is tracked as a deferred residual rather than open work. The pattern is now established at four sites: **every new join is a candidate for the same defect, and the review question is "who else waits on this signal?"**.
 
 ## Prevention
 

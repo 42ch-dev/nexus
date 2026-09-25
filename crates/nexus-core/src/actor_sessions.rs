@@ -14,9 +14,15 @@
 use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+use nexus_agent_host::capability::model::{FinishReason, HostEvent};
+use nexus_agent_host::providers::port::ProviderEventReader;
 use nexus_agent_host::{HostFacade, HostOperationId, HostSession, HostSessionId, SessionState};
+use nexus_contracts::generated::core::core_host_query_response::{
+    NexusActorRef as QueryActorRef, NexusSessionViewpoint as QueryViewpoint,
+};
 use nexus_contracts::generated::daemon_api::agent_host::character_operation_result::{
     CharacterOperationResult, CharacterOperationResultFinishReason,
     CharacterOperationResultRunStatus, NexusCharacterRunCaptureOutcome,
@@ -114,47 +120,237 @@ enum OperationPhase {
 }
 
 /// Immutable admission snapshot for one Character Host operation.
+///
+/// Character capture is refused before reservation (technical contract §5), so
+/// a snapshot describes only an uncaptured run: there is no `remember` request
+/// and no prompt digest to carry.
+///
+/// The fields are crate-visible: reservation is the only consumer, so a
+/// production build outside this crate cannot even construct the snapshot whose
+/// record the result path would serve. Test builds construct one through
+/// [`CharacterOperationSnapshot::new`].
 #[derive(Debug, Clone)]
+#[allow(clippy::struct_field_names)] // fields mirror the contract's id-typed naming (`owner_creator_id`, `session_id`, `operation_id`); stripping the postfix would drop the type signal
 pub struct CharacterOperationSnapshot {
-    pub owner_creator_id: String,
-    pub ctx: AdmittedActorContext,
-    pub session_id: HostSessionId,
-    pub operation_id: HostOperationId,
-    pub remember: bool,
-    pub raw_prompt: String,
+    pub(crate) owner_creator_id: String,
+    pub(crate) session_id: HostSessionId,
+    pub(crate) operation_id: HostOperationId,
+}
+
+impl CharacterOperationSnapshot {
+    /// Test-only constructor (see the type's note): the snapshot a caller-built
+    /// record needs. Compiled out of the production build, where the only
+    /// constructor is `execute`'s own admission.
+    #[cfg(any(test, feature = "test-hooks"))]
+    #[must_use]
+    pub const fn new(
+        owner_creator_id: String,
+        session_id: HostSessionId,
+        operation_id: HostOperationId,
+    ) -> Self {
+        Self {
+            owner_creator_id,
+            session_id,
+            operation_id,
+        }
+    }
 }
 
 struct CharacterOperationRecord {
     owner_creator_id: String,
     session_id: HostSessionId,
     phase: OperationPhase,
+    /// Whether a latched cancel intent has been CONFIRMED by the provider.
+    /// The host cancel path latches intent BEFORE awaiting the provider, so an
+    /// unconfirmed intent must not let the drain record `cancelled`: if the
+    /// provider then refuses, that would record a refused cancel as an
+    /// accepted cancellation. Only a confirmed intent wins the finalizing
+    /// race; a provisional one leaves the run's own terminal as the truth.
+    cancel_confirmed: bool,
     outcome: CharacterOperationResult,
+    /// The operation's bounded observation reader, once installed.
+    ///
+    /// It lives INSIDE the record on purpose. Reservation is the only way to
+    /// create a record, so a reader can neither be installed for an id that
+    /// holds no reserved Character operation nor outnumber the records; and
+    /// every path that drops a record — reservation removal after a failed exec
+    /// admission, terminal-FIFO eviction — drops its reader with it. `close`
+    /// and session shutdown clear the slot of the records they retire.
+    observation: Option<Arc<ProviderEventReader>>,
     _seq: u64,
+}
+
+/// Live work of ONE session plus its settlement signal — the session-scoped
+/// twin of [`ActorSessionRegistry`]'s registry-wide `live_drains`/`drain_settled`
+/// pair, so a session shutdown joins exactly the work it is retiring instead of
+/// the whole authority's.
+///
+/// `live` counts BOTH halves of the authority's admission/close barrier, at
+/// session scope: the retained drains of the session, and the operations
+/// ADMITTED for it ([`SessionAdmission`]) whose drain has not transferred to
+/// the registry yet. The authority-wide barrier keeps the two apart because
+/// `close` REPORTS them apart; a session join only has to wait for both, so
+/// they share one counter. An entry exists only while that session has live
+/// work: the session's last live unit removes it.
+#[derive(Default)]
+struct SessionLiveness {
+    live: AtomicUsize,
+    settled: tokio::sync::Notify,
+}
+
+/// One admitted operation's slot in its SESSION's live-work accounting — the
+/// session-scoped arm of the same barrier the Host handle's `AuthorityAdmission`
+/// holds authority-wide.
+///
+/// The guard is taken before the operation's first await and retired only after
+/// its drain has transferred to this same accounting (or after it failed before
+/// creating one), so a joiner observes either the admission or the drain it
+/// became: no window remains in which a session reads as having no live work
+/// while an operation admitted for it can still register a drain.
+pub(crate) struct SessionAdmission {
+    maps: Arc<Mutex<RegistryMaps>>,
+    session_id: HostSessionId,
+    liveness: Arc<SessionLiveness>,
+}
+
+impl Drop for SessionAdmission {
+    fn drop(&mut self) {
+        retire_session_liveness(&self.maps, &self.session_id, &self.liveness);
+    }
 }
 
 const MAX_NONTERMINAL_OPERATIONS: usize = 128;
 const MAX_TERMINAL_OPERATIONS: usize = 1024;
 
+/// The reserved, still-running outcome of one Character operation.
+///
+/// Capture is always `disabled` (technical contract §5): a Character
+/// `remember:true` prompt is refused before reservation, so no reservation can
+/// describe a pending capture and no result may claim one.
 fn running_outcome(snapshot: &CharacterOperationSnapshot) -> CharacterOperationResult {
-    let capture = if snapshot.remember {
-        NexusCharacterRunCaptureOutcome {
-            status: NexusCharacterRunCaptureOutcomeStatus::Pending,
-            pending_id: None,
-            code: None,
-        }
-    } else {
-        NexusCharacterRunCaptureOutcome {
-            status: NexusCharacterRunCaptureOutcomeStatus::Disabled,
-            pending_id: None,
-            code: None,
-        }
-    };
     CharacterOperationResult {
         operation_id: snapshot.operation_id.to_string(),
         session_id: snapshot.session_id.to_string(),
         run_status: CharacterOperationResultRunStatus::Running,
         finish_reason: None,
-        capture,
+        capture: NexusCharacterRunCaptureOutcome {
+            status: NexusCharacterRunCaptureOutcomeStatus::Disabled,
+            pending_id: None,
+            code: None,
+        },
+    }
+}
+
+/// The owner-authorized accepted cancellation's terminal (§5): an accepted
+/// local cancel classifies `cancelled`, never a rollback claim about provider
+/// effects. Capture stays `disabled` like every Character result in this batch.
+pub(crate) fn cancelled_outcome(
+    session_id: &HostSessionId,
+    operation_id: &HostOperationId,
+) -> CharacterOperationResult {
+    CharacterOperationResult {
+        operation_id: operation_id.to_string(),
+        session_id: session_id.to_string(),
+        run_status: CharacterOperationResultRunStatus::Cancelled,
+        finish_reason: Some(CharacterOperationResultFinishReason::Cancelled),
+        capture: NexusCharacterRunCaptureOutcome {
+            status: NexusCharacterRunCaptureOutcomeStatus::Disabled,
+            pending_id: None,
+            code: None,
+        },
+    }
+}
+
+/// Authoritative terminal truth of one Character exec stream (technical
+/// contract §5): what the FIRST matching observation of the original
+/// `HostFacade::exec` stream says about the run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum CharacterTerminal {
+    /// A matching `OpFinished`: the provider named the stop reason.
+    Finished(FinishReason),
+    /// A matching fault: a matching `OpFailed` of ANY error category, a stream
+    /// error, a matching `SessionStopped`, or EOF before any terminal.
+    Fault,
+}
+
+/// Fold one host event into this operation's terminal truth.
+///
+/// `None` means the observation is not about the exact
+/// `(session_id, operation_id)` pair — an unrelated operation or session event,
+/// which contract §5 requires the drain to ignore — or is a non-terminal
+/// progress event of this operation.
+pub(crate) fn character_terminal_for(
+    event: &HostEvent,
+    session_id: &HostSessionId,
+    operation_id: &HostOperationId,
+) -> Option<CharacterTerminal> {
+    match event {
+        HostEvent::OpFinished(finished)
+            if &finished.session_id == session_id && &finished.op_id == operation_id =>
+        {
+            Some(CharacterTerminal::Finished(finished.reason.clone()))
+        }
+        // Contract §5 has ONE row for `OpFailed` — failed with no finish
+        // reason — and no error-category exception. A named provider stop
+        // reason reaches the `incomplete` row only as an explicit
+        // `OpFinished(MaxTokens | MaxTurnRequests | Refusal)`. An adapter that
+        // reports such a reason as an `OpFailed` category (e.g.
+        // `providers/acp.rs`) is therefore read as the failure it is: the
+        // adapter's representation may not amend the terminal table.
+        HostEvent::OpFailed(failed)
+            if &failed.session_id == session_id && &failed.op_id == operation_id =>
+        {
+            Some(CharacterTerminal::Fault)
+        }
+        // The session this operation runs on stopped before a terminal: the run
+        // can no longer complete honestly, so it is a fault.
+        HostEvent::SessionStopped(stopped) if &stopped.session_id == session_id => {
+            Some(CharacterTerminal::Fault)
+        }
+        _ => None,
+    }
+}
+
+/// Contract §5 classification of a drained terminal, honouring a cancellation
+/// that won the phase race (the finalizing transition found `CancelRequested`):
+/// an accepted local cancel is the operation's truth, never a rollback claim
+/// about provider effects.
+#[must_use]
+pub(crate) const fn character_terminal_outcome(
+    terminal: &CharacterTerminal,
+    cancel_won_the_race: bool,
+) -> (
+    CharacterOperationResultRunStatus,
+    Option<CharacterOperationResultFinishReason>,
+) {
+    if cancel_won_the_race {
+        return (
+            CharacterOperationResultRunStatus::Cancelled,
+            Some(CharacterOperationResultFinishReason::Cancelled),
+        );
+    }
+    match terminal {
+        CharacterTerminal::Finished(FinishReason::EndTurn) => (
+            CharacterOperationResultRunStatus::Succeeded,
+            Some(CharacterOperationResultFinishReason::EndTurn),
+        ),
+        CharacterTerminal::Finished(FinishReason::MaxTokens) => (
+            CharacterOperationResultRunStatus::Incomplete,
+            Some(CharacterOperationResultFinishReason::MaxTokens),
+        ),
+        CharacterTerminal::Finished(FinishReason::MaxTurnRequests) => (
+            CharacterOperationResultRunStatus::Incomplete,
+            Some(CharacterOperationResultFinishReason::MaxTurnRequests),
+        ),
+        CharacterTerminal::Finished(FinishReason::Refusal) => (
+            CharacterOperationResultRunStatus::Incomplete,
+            Some(CharacterOperationResultFinishReason::Refusal),
+        ),
+        CharacterTerminal::Finished(FinishReason::Cancelled) => (
+            CharacterOperationResultRunStatus::Cancelled,
+            Some(CharacterOperationResultFinishReason::Cancelled),
+        ),
+        CharacterTerminal::Fault => (CharacterOperationResultRunStatus::Failed, None),
     }
 }
 
@@ -169,6 +365,18 @@ struct RegistryMaps {
     character_operations: HashMap<HostOperationId, CharacterOperationRecord>,
     terminal_fifo: VecDeque<HostOperationId>,
     operation_seq: u64,
+    /// Live-work accounting per session, so a session shutdown joins the
+    /// drains AND the admitted operations of the session it retires — the
+    /// registered drains alone are not that proof, because an operation
+    /// registers its drain only after asynchronous admission. An entry exists
+    /// only while that session has live work: the session's last live unit
+    /// removes it.
+    session_liveness: HashMap<HostSessionId, Arc<SessionLiveness>>,
+    /// Actor drains this authority minted, in spawn order. Retained until they
+    /// settle, so an authority close that cannot confirm them keeps owning
+    /// them — and the knowledge leases they hold — instead of detaching live
+    /// work and forgetting it.
+    drains: Vec<tokio::task::JoinHandle<()>>,
     closed: bool,
 }
 
@@ -176,6 +384,14 @@ struct RegistryMaps {
 #[derive(Clone)]
 pub struct ActorSessionRegistry {
     maps: Arc<Mutex<RegistryMaps>>,
+    /// Actor drains minted by this authority that have not settled. The
+    /// authority-owned join (`join_actor_drains`) reads it, so a join that is
+    /// cancelled by an outer deadline loses nothing: the handle stays in the
+    /// registry and a retry joins it.
+    live_drains: Arc<AtomicUsize>,
+    /// Signalled once per settled drain, so the join waits on an event instead
+    /// of polling task handles.
+    drain_settled: Arc<tokio::sync::Notify>,
 }
 
 impl Default for ActorSessionRegistry {
@@ -194,6 +410,62 @@ fn host_err(err: &nexus_agent_host::HostError) -> CoreError {
     }
 }
 
+/// Publish ONE unit of a session's live work settling: drop its count, wake the
+/// joiners, and let the session's accounting entry die with its last unit.
+///
+/// Both live units of a session — a settling drain and a retired admission —
+/// retire through this one path, so they cannot disagree about publication
+/// order: the count drops BEFORE the wakeup, so a joiner that armed its
+/// notification and then read a non-zero count still gets the permit this
+/// retirement publishes.
+fn retire_session_liveness(
+    maps: &Mutex<RegistryMaps>,
+    session_id: &HostSessionId,
+    liveness: &Arc<SessionLiveness>,
+) {
+    liveness.live.fetch_sub(1, Ordering::AcqRel);
+    liveness.settled.notify_one();
+    let mut maps = maps.lock().unwrap_or_else(|poisoned| {
+        tracing::warn!("actor_sessions mutex poisoned, recovering");
+        poisoned.into_inner()
+    });
+    if liveness.live.load(Ordering::Acquire) == 0
+        && maps
+            .session_liveness
+            .get(session_id)
+            .is_some_and(|stored| Arc::ptr_eq(stored, liveness))
+    {
+        maps.session_liveness.remove(session_id);
+    }
+}
+
+/// Settle one reserved Character operation exactly once, under the registry
+/// lock: the first writer records the terminal phase, the outcome update and
+/// the retention slot; every later settlement is a no-op, so the recorded truth
+/// is immutable and the terminal FIFO never sees a duplicate.
+fn settle_terminal_locked(
+    maps: &mut RegistryMaps,
+    operation_id: &HostOperationId,
+    update: impl FnOnce(&mut CharacterOperationRecord),
+) {
+    let Some(record) = maps.character_operations.get_mut(operation_id) else {
+        return;
+    };
+    if matches!(record.phase, OperationPhase::Terminal) {
+        return;
+    }
+    update(record);
+    record.phase = OperationPhase::Terminal;
+    maps.terminal_fifo.push_back(operation_id.clone());
+    while maps.terminal_fifo.len() > MAX_TERMINAL_OPERATIONS {
+        if let Some(evicted) = maps.terminal_fifo.pop_front() {
+            // Removing the record drops its observation reader with it: an
+            // evicted operation has no detailed outcome left to observe.
+            maps.character_operations.remove(&evicted);
+        }
+    }
+}
+
 impl ActorSessionRegistry {
     /// Empty process-lifetime registry.
     #[must_use]
@@ -208,8 +480,12 @@ impl ActorSessionRegistry {
                 character_operations: HashMap::new(),
                 terminal_fifo: VecDeque::new(),
                 operation_seq: 0,
+                session_liveness: HashMap::new(),
+                drains: Vec::new(),
                 closed: false,
             })),
+            live_drains: Arc::new(AtomicUsize::new(0)),
+            drain_settled: Arc::new(tokio::sync::Notify::new()),
         }
     }
 
@@ -364,12 +640,68 @@ impl ActorSessionRegistry {
         self.maps().indexed_operations.get(op_id).cloned()
     }
 
+    /// Install the bounded observation reader ON an already-reserved Character
+    /// operation, before the Host starts executing it.
+    ///
+    /// The reader is a field of the operation record, so retention cannot be
+    /// minted for an id that holds no reservation nor outnumber the records:
+    /// an unknown (unreserved, foreign or already evicted) id is `not_found`
+    /// and a closing registry is `interrupted`, instead of a silent arbitrary
+    /// insert. One reader per reserved operation, dropped with its record on
+    /// reservation removal, terminal eviction, session shutdown or close.
+    ///
+    /// # Errors
+    ///
+    /// Returns `not_found` when no record holds the id, and `interrupted` once
+    /// the registry is closing.
+    pub fn retain_observation(
+        &self,
+        operation_id: &HostOperationId,
+        reader: ProviderEventReader,
+    ) -> CoreResult<()> {
+        let mut maps = self.maps();
+        Self::reject_if_closed(&maps)?;
+        let Some(record) = maps.character_operations.get_mut(operation_id) else {
+            return Err(CoreError::NotFound {
+                resource: format!("operation {operation_id} reservation"),
+            });
+        };
+        record.observation = Some(Arc::new(reader));
+        drop(maps);
+        Ok(())
+    }
+
+    /// The observation reader of one operation, if it is still retained.
+    #[must_use]
+    pub fn observation(&self, operation_id: &HostOperationId) -> Option<Arc<ProviderEventReader>> {
+        self.maps()
+            .character_operations
+            .get(operation_id)
+            .and_then(|record| record.observation.clone())
+    }
+
+    /// Bounded observation-window occupancy (tests / diagnostics): the records
+    /// that carry a reader, which can never outnumber the operation records.
+    #[must_use]
+    pub fn observation_count(&self) -> usize {
+        self.maps()
+            .character_operations
+            .values()
+            .filter(|record| record.observation.is_some())
+            .count()
+    }
+
     /// Reserve a Character operation outcome before Host exec.
+    ///
+    /// Crate-visible: [`crate::HostHandle::execute`] is the only production
+    /// caller, so no caller outside this crate can mint a record the authority's
+    /// result path would serve as authoritative. A test build reaches it through
+    /// the `test-hooks`-gated seam on [`crate::HostHandle`].
     ///
     /// # Errors
     ///
     /// Returns capacity or shutdown conflicts.
-    pub fn reserve_character_operation(
+    pub(crate) fn reserve_character_operation(
         &self,
         snapshot: &CharacterOperationSnapshot,
     ) -> CoreResult<()> {
@@ -391,7 +723,9 @@ impl ActorSessionRegistry {
                 owner_creator_id: snapshot.owner_creator_id.clone(),
                 session_id: snapshot.session_id.clone(),
                 phase: OperationPhase::Running,
+                cancel_confirmed: false,
                 outcome: running_outcome(snapshot),
+                observation: None,
                 _seq: seq,
             },
         );
@@ -401,10 +735,14 @@ impl ActorSessionRegistry {
 
     /// Owner-scoped authoritative operation outcome.
     ///
+    /// Crate-visible like the reservation itself: the authority's own
+    /// `character_operation` read is the one production entry, so the registry
+    /// read is not a second, unauthenticated path to the same records.
+    ///
     /// # Errors
     ///
     /// Returns `NotFound` when the operation is missing or foreign.
-    pub fn character_operation_result(
+    pub(crate) fn character_operation_result(
         &self,
         owner_creator_id: &str,
         operation_id: &HostOperationId,
@@ -427,12 +765,60 @@ impl ActorSessionRegistry {
         Ok(outcome)
     }
 
-    /// Remove an unstarted reservation after exec admission failure.
+    /// Whether `operation_id` is a recorded Character operation owned by
+    /// `owner_creator_id` — the owner-scoped gate the control path applies
+    /// before any mutation. A missing or foreign id is `false`, never a leak.
+    #[must_use]
+    pub fn operation_owned_by(
+        &self,
+        owner_creator_id: &str,
+        operation_id: &HostOperationId,
+    ) -> bool {
+        self.maps()
+            .character_operations
+            .get(operation_id)
+            .is_some_and(|record| record.owner_creator_id == owner_creator_id)
+    }
+
+    /// Every recorded operation whose phase is not terminal yet — the work an
+    /// Actor-only quiesce must request cancellation for.
+    #[must_use]
+    pub fn nonterminal_operations(&self) -> Vec<HostOperationId> {
+        self.maps()
+            .character_operations
+            .iter()
+            .filter(|(_, record)| !matches!(record.phase, OperationPhase::Terminal))
+            .map(|(operation_id, _)| operation_id.clone())
+            .collect()
+    }
+
+    /// The nonterminal operations recorded for one session — the work a
+    /// session shutdown cancels before it tears the session down.
+    #[must_use]
+    pub fn nonterminal_operations_for_session(
+        &self,
+        session_id: &HostSessionId,
+    ) -> Vec<HostOperationId> {
+        self.maps()
+            .character_operations
+            .iter()
+            .filter(|(_, record)| {
+                &record.session_id == session_id
+                    && !matches!(record.phase, OperationPhase::Terminal)
+            })
+            .map(|(operation_id, _)| operation_id.clone())
+            .collect()
+    }
+
+    /// Remove an unstarted reservation after exec admission failure, dropping
+    /// the reader it had already installed with the record.
     pub fn remove_operation_reservation(&self, operation_id: &HostOperationId) {
         self.maps().character_operations.remove(operation_id);
     }
 
-    /// Latch cancel intent before awaiting Host cancel.
+    /// Latch CONFIRMED cancel intent. The caller vouches that the cancellation
+    /// is authoritative (the test/ seam that drives the drain race directly):
+    /// a drain that finalizes while this intent is latched records `cancelled`.
     ///
     /// # Errors
     ///
@@ -458,6 +844,61 @@ impl ActorSessionRegistry {
         let result = match record.phase {
             OperationPhase::Running => {
                 record.phase = OperationPhase::CancelRequested;
+                record.cancel_confirmed = true;
+                Ok(())
+            }
+            OperationPhase::CancelRequested => {
+                // A confirmed latch upgrades a provisional one in place.
+                record.cancel_confirmed = true;
+                Ok(())
+            }
+            OperationPhase::Finalizing | OperationPhase::Terminal => {
+                Err(CoreError::ActorConflict {
+                    code: "actor_operation_finished".into(),
+                    message: format!("operation {operation_id} already finished"),
+                })
+            }
+        };
+        drop(maps);
+        result
+    }
+
+    /// Latch a PROVISIONAL cancel intent before awaiting the provider's
+    /// answer, protecting the phase race exactly like
+    /// [`Self::request_operation_cancel`] while the call is in flight — but an
+    /// UNCONFIRMED intent must not let the drain record `cancelled`: if the
+    /// provider refuses, the run's own terminal stays the truth and the
+    /// refusal is never recorded as an accepted cancellation. The caller
+    /// confirms on acceptance by committing the cancelled terminal
+    /// ([`HostHandle::cancel_operation`](crate::HostHandle::cancel_operation)'s
+    /// own commit), or undoes the intent with
+    /// [`Self::rollback_operation_cancel`] on refusal.
+    ///
+    /// # Errors
+    ///
+    /// Returns `NotFound` or `interrupted` (`actor_operation_finished`) when
+    /// cancel is invalid.
+    pub fn latch_provisional_operation_cancel(
+        &self,
+        owner_creator_id: &str,
+        operation_id: &HostOperationId,
+    ) -> CoreResult<()> {
+        let mut maps = self.maps();
+        let record = maps
+            .character_operations
+            .get_mut(operation_id)
+            .ok_or_else(|| CoreError::NotFound {
+                resource: format!("operation {operation_id}"),
+            })?;
+        if record.owner_creator_id != owner_creator_id {
+            return Err(CoreError::NotFound {
+                resource: format!("operation {operation_id}"),
+            });
+        }
+        let result = match record.phase {
+            OperationPhase::Running => {
+                record.phase = OperationPhase::CancelRequested;
+                record.cancel_confirmed = false;
                 Ok(())
             }
             OperationPhase::CancelRequested => Ok(()),
@@ -472,69 +913,103 @@ impl ActorSessionRegistry {
         result
     }
 
-    /// Move a draining operation into finalization and return whether cancel
-    /// intent was latched. The cancel read and phase transition are atomic
-    /// under the registry lock so no window can observe stale cancel state.
+    /// Undo a latched cancel intent after the provider refused it, so a
+    /// refusal can never be recorded as an accepted cancellation.
+    ///
+    /// Only a still-unfinalized `CancelRequested` returns to `Running`: once
+    /// the terminal race has moved the phase on, the recorded outcome is
+    /// decided by the phase rules, not by this rollback — and because an
+    /// UNCONFIRMED intent never won the drain's race (see
+    /// [`Self::latch_provisional_operation_cancel`]), that recorded outcome is
+    /// the run's own terminal, never a fabricated `cancelled`.
+    pub fn rollback_operation_cancel(&self, operation_id: &HostOperationId) {
+        let mut maps = self.maps();
+        let phase = maps.character_operations.get_mut(operation_id);
+        if let Some(record) = phase {
+            if matches!(record.phase, OperationPhase::CancelRequested) {
+                record.phase = OperationPhase::Running;
+                record.cancel_confirmed = false;
+            }
+        }
+        drop(maps);
+    }
+
+    /// Move a draining operation into finalization and return whether a
+    /// CONFIRMED cancel intent was latched. The cancel read and phase
+    /// transition are atomic under the registry lock so no window can observe
+    /// stale cancel state; a merely provisional intent (the provider call is
+    /// still in flight) does NOT win the race, so a refused cancel can never
+    /// be recorded as `cancelled`.
     #[must_use]
     pub fn begin_operation_finalizing(&self, operation_id: &HostOperationId) -> bool {
         let mut maps = self.maps();
         if let Some(record) = maps.character_operations.get_mut(operation_id) {
-            let cancel_requested = matches!(record.phase, OperationPhase::CancelRequested);
+            let cancel_won_the_race =
+                matches!(record.phase, OperationPhase::CancelRequested) && record.cancel_confirmed;
             if matches!(
                 record.phase,
                 OperationPhase::Running | OperationPhase::CancelRequested
             ) {
                 record.phase = OperationPhase::Finalizing;
             }
-            cancel_requested
+            cancel_won_the_race
         } else {
             false
         }
     }
 
     /// Commit terminal outcome and enforce terminal FIFO retention.
-    pub fn commit_operation_terminal(
+    ///
+    /// Crate-visible because terminal truth is written only from inside the
+    /// authority that owns the original exec stream ([`crate::host`]): the
+    /// `execute`-spawned drain and the owner-authorized cancel path. Outside
+    /// this crate the public [`ActorSessionRegistry`] accessor
+    /// ([`crate::HostHandle::actor_sessions`]) therefore exposes no terminal
+    /// writer at all; a test build reaches one only through the
+    /// `test-hooks`-gated seam on [`crate::HostHandle`].
+    ///
+    /// The owner-authorized accepted cancel is this writer's in-crate
+    /// consumer: the provider accepted the cancellation, so the §5 cancelled
+    /// row IS the operation's truth even if no drain ever settles (a lost or
+    /// silent stream). A drain that settled first stays authoritative.
+    ///
+    /// The FIRST terminal/fault settlement wins: a later settlement of the same
+    /// operation (a duplicate terminal, a trailing producer fault, or a cancel
+    /// that lost the phase race) leaves the recorded truth untouched and never
+    /// re-enters the retention FIFO.
+    pub(crate) fn commit_operation_terminal(
         &self,
         operation_id: &HostOperationId,
         outcome: CharacterOperationResult,
     ) {
         let mut maps = self.maps();
-        if let Some(record) = maps.character_operations.get_mut(operation_id) {
-            record.phase = OperationPhase::Terminal;
+        settle_terminal_locked(&mut maps, operation_id, |record| {
             record.outcome = outcome;
-            maps.terminal_fifo.push_back(operation_id.clone());
-            while maps.terminal_fifo.len() > MAX_TERMINAL_OPERATIONS {
-                if let Some(evicted) = maps.terminal_fifo.pop_front() {
-                    maps.character_operations.remove(&evicted);
-                }
-            }
-        }
-        drop(maps);
+        });
     }
 
     /// Commit a drained Host operation's terminal run status against the
-    /// reserved record (authority-owned drain). The capture half of the
-    /// outcome stays as reserved (`pending`/`disabled`) until a durable
-    /// capture writer settles it.
-    pub fn settle_operation_terminal(
+    /// reserved record (authority-owned drain). The capture half stays the
+    /// reserved `disabled` value: this batch has no capture writer to settle it
+    /// (technical contract §5).
+    ///
+    /// Crate-visible for the same reason as
+    /// [`Self::commit_operation_terminal`]: the authority-owned drain is the
+    /// only production writer, so a caller outside this crate cannot record
+    /// terminal status/reason through the public registry accessor.
+    ///
+    /// Settles once, like [`Self::commit_operation_terminal`].
+    pub(crate) fn settle_operation_terminal(
         &self,
         operation_id: &HostOperationId,
         run_status: CharacterOperationResultRunStatus,
         finish_reason: Option<CharacterOperationResultFinishReason>,
     ) {
         let mut maps = self.maps();
-        if let Some(record) = maps.character_operations.get_mut(operation_id) {
-            record.phase = OperationPhase::Terminal;
+        settle_terminal_locked(&mut maps, operation_id, |record| {
             record.outcome.run_status = run_status;
             record.outcome.finish_reason = finish_reason;
-            maps.terminal_fifo.push_back(operation_id.clone());
-            while maps.terminal_fifo.len() > MAX_TERMINAL_OPERATIONS {
-                if let Some(evicted) = maps.terminal_fifo.pop_front() {
-                    maps.character_operations.remove(&evicted);
-                }
-            }
-        }
-        drop(maps);
+        });
     }
 
     #[must_use]
@@ -558,8 +1033,13 @@ impl ActorSessionRegistry {
         self.maps().indexed_operations.remove(op_id);
     }
 
-    /// Overlay `actor_ref/viewpoint` for list/get: live indexed context first,
-    /// then retired tombstones so leftover Host rows stay Actor-shaped.
+    /// Overlay `actor_ref/viewpoint` for the native list/get rows: the live
+    /// indexed context first, then its retired tombstone, so a leftover Host
+    /// row stays recognizable as an Actor session.
+    ///
+    /// The core-query DTO family carries its own generated `ActorRef` /
+    /// `Viewpoint` types, so the authority's wire echo is re-created through
+    /// their checked constructors instead of being reinterpreted.
     ///
     /// # Errors
     ///
@@ -567,14 +1047,21 @@ impl ActorSessionRegistry {
     pub fn echo_actor_pair_for_session(
         &self,
         session_id: &HostSessionId,
-    ) -> CoreResult<(Option<NexusActorRef>, Option<NexusSessionViewpoint>)> {
-        if let Some(ctx) = self.context_for(session_id) {
-            return echo_actor_pair(&ctx);
-        }
-        if let Some(tombstone) = self.retired_tombstone(session_id) {
-            return echo_retired_pair(&tombstone);
-        }
-        Ok((None, None))
+    ) -> CoreResult<(Option<QueryActorRef>, Option<QueryViewpoint>)> {
+        let echoed = if let Some(ctx) = self.context_for(session_id) {
+            echo_actor_pair(&ctx)?
+        } else if let Some(tombstone) = self.retired_tombstone(session_id) {
+            echo_retired_pair(&tombstone)?
+        } else {
+            return Ok((None, None));
+        };
+        Ok((
+            echoed.0.map(query_actor_ref).transpose()?,
+            echoed
+                .1
+                .map(|viewpoint| query_viewpoint(&viewpoint))
+                .transpose()?,
+        ))
     }
 
     /// True once the process-lifetime maps are closed (authority shutdown).
@@ -625,6 +1112,180 @@ impl ActorSessionRegistry {
         maps.by_session.clear();
         maps.key_locks.clear();
         maps.indexed_operations.clear();
+        // The observation readers die with the authority's Actor side: a
+        // closed registry exposes no stream to pull. The records themselves
+        // stay (their terminal outcomes are read owner-scoped until the
+        // authority is gone), so the reader slot is what is cleared.
+        for record in maps.character_operations.values_mut() {
+            record.observation = None;
+        }
+    }
+
+    /// Spawn an authority-owned Actor drain.
+    ///
+    /// This is the ONE spawn path for core-owned Actor drains: the spawned
+    /// task's handle is retained in the authority's registry instead of being
+    /// dropped on the floor, so a close that cannot settle it keeps owning the
+    /// live drain (and the admitted knowledge leases it holds) rather than
+    /// detaching it and reporting a cleanup it cannot confirm.
+    ///
+    /// Registration is the *transfer* half of the authority's admission/close
+    /// barrier: an operation retires its admission only after its drain is
+    /// registered here, so a concurrent `close` observes either the admission
+    /// still in flight or this retained handle. A registration that lands
+    /// after the closing latch is retained all the same — which is why a
+    /// drained operation can never be dropped on the floor and why the
+    /// repeated close still refuses to confirm while one is unsettled.
+    ///
+    /// `#[doc(hidden)]` integration seam, the same convention as
+    /// [`Self::insert_indexed_entry`].
+    ///
+    /// The drain is also accounted to the `session_id` it runs for — in the
+    /// same live-work entry an admitted operation holds before it transfers a
+    /// drain ([`Self::admit_session_operation`]) — so a session shutdown joins
+    /// exactly the work it is retiring with [`Self::join_session_drains`]
+    /// instead of the whole authority's drains.
+    #[doc(hidden)]
+    pub fn spawn_actor_drain<F>(&self, session_id: HostSessionId, drain: F)
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        self.live_drains.fetch_add(1, Ordering::AcqRel);
+        let live = Arc::clone(&self.live_drains);
+        let settled = Arc::clone(&self.drain_settled);
+        // The session entry and its increment are taken under the maps lock, so
+        // a joiner observes either this drain or an entry that already counts
+        // it — an entry is never removed while an increment is in flight.
+        let session = {
+            let mut maps = self.maps();
+            let session = Arc::clone(maps.session_liveness.entry(session_id.clone()).or_default());
+            session.live.fetch_add(1, Ordering::AcqRel);
+            drop(maps);
+            session
+        };
+        let session_settled = Arc::clone(&session);
+        let maps_handle = Arc::clone(&self.maps);
+        let handle = tokio::spawn(async move {
+            drain.await;
+            // Publication order matters: the count drops BEFORE the wakeup, so
+            // a joiner that registered and then read a non-zero count is still
+            // woken by this settlement.
+            //
+            // Wake EVERY joiner: the authority-wide drain join is entered by
+            // every concurrent quiesce on this authority, and a settling drain
+            // is the only wakeup its joiners will see. A `notify_one` handoff
+            // would let one joiner recheck zero while a second stayed suspended.
+            live.fetch_sub(1, Ordering::AcqRel);
+            settled.notify_waiters();
+            // The session's accounting entry dies with its last live unit —
+            // which is this drain, or an admission that has not retired yet.
+            retire_session_liveness(&maps_handle, &session_id, &session_settled);
+        });
+        let mut maps = self.maps();
+        maps.drains.retain(|settled| !settled.is_finished());
+        maps.drains.push(handle);
+    }
+
+    /// Await every retained Actor drain and return how many were unsettled
+    /// when the join returned (`0` when the Actor side settled).
+    ///
+    /// Cancellation-safe: the drain handles stay in the registry, so a caller
+    /// that runs out of its outer deadline (the native close owner bounds this
+    /// join with its own deadline) loses nothing — the authority still owns
+    /// the live drains and a retry joins them instead of reporting a cleanup
+    /// it cannot confirm.
+    ///
+    /// Cancellation-safe AND multi-waiter, exactly like the authority's
+    /// admission join: every concurrent quiesce joins the SAME drains, so the
+    /// waiter registers with the notification BEFORE it reads the count and the
+    /// settlement wakes all of them — `notify_one`'s single stored permit would
+    /// strand every joiner after the first once the last drain settled.
+    pub async fn join_actor_drains(&self) -> usize {
+        loop {
+            let settled = self.drain_settled.notified();
+            tokio::pin!(settled);
+            settled.as_mut().enable();
+            let live = self.live_drains.load(Ordering::Acquire);
+            if live == 0 {
+                return 0;
+            }
+            settled.await;
+        }
+    }
+
+    /// Admit one operation against its SESSION's live-work accounting.
+    ///
+    /// The count is taken under the maps lock before the operation's first
+    /// await — so a joiner observes either this admission or an entry that
+    /// already counts it — and stays live until the returned guard drops, which
+    /// happens only after the operation's drain has transferred to the same
+    /// accounting (or after it failed before creating one). That is the
+    /// session-scoped half of the authority's admission/close barrier, and it
+    /// is what makes [`Self::join_session_drains`] a proof instead of a
+    /// snapshot: an operation registers its drain only after asynchronous
+    /// admission and Host execution, so a join that trusted the registered
+    /// drains ALONE could read "this session has no live work" in that window
+    /// and let the session retire before the drain it is about to own.
+    ///
+    /// Crate-internal by construction: the accounting is the Host handle's to
+    /// participate in, not a new public surface.
+    pub(crate) fn admit_session_operation(&self, session_id: HostSessionId) -> SessionAdmission {
+        let mut maps = self.maps();
+        let liveness = Arc::clone(maps.session_liveness.entry(session_id.clone()).or_default());
+        liveness.live.fetch_add(1, Ordering::AcqRel);
+        drop(maps);
+        SessionAdmission {
+            maps: Arc::clone(&self.maps),
+            session_id,
+            liveness,
+        }
+    }
+
+    /// Await every retained drain of ONE session — the join a session shutdown
+    /// runs before it retires that session and before it reports success.
+    ///
+    /// Cancellation-safe like [`Self::join_actor_drains`]: the handles stay
+    /// owned by the registry, so a caller that runs out of budget loses nothing
+    /// and a retry joins the same drains. An entry that is gone is that
+    /// session's last live unit settling, so the join returns.
+    ///
+    /// The entry it waits on carries the session's ADMITTED operations as well
+    /// as its drains ([`Self::admit_session_operation`]), so this join cannot
+    /// conclude in the window between "no drain registered yet" and the drain
+    /// registration of an operation already admitted for this session.
+    pub async fn join_session_drains(&self, session_id: &HostSessionId) {
+        loop {
+            let session = {
+                let maps = self.maps();
+                maps.session_liveness.get(session_id).cloned()
+            };
+            let Some(session) = session else {
+                return;
+            };
+            // Arm the notification BEFORE reading the count, exactly like the
+            // authority-wide join: a drain that settles in between leaves a
+            // permit, so the wait can never miss its only wakeup.
+            let settled = session.settled.notified();
+            if session.live.load(Ordering::Acquire) == 0 {
+                return;
+            }
+            settled.await;
+        }
+    }
+
+    /// Drop settled drain handles, retain unsettled ones, and report how many
+    /// remain live — the drain ownership an unsettled authority close keeps.
+    #[must_use]
+    pub fn prune_settled_drains(&self) -> usize {
+        let mut maps = self.maps();
+        maps.drains.retain(|drain| !drain.is_finished());
+        maps.drains.len()
+    }
+
+    /// Count the retained Actor drains that have not settled yet.
+    #[must_use]
+    pub fn unsettled_drain_count(&self) -> usize {
+        self.live_drains.load(Ordering::Acquire)
     }
 
     /// Shut down every retired Actor host session (authority drain).
@@ -655,6 +1316,14 @@ impl ActorSessionRegistry {
     #[must_use]
     pub fn len(&self) -> usize {
         self.maps().by_key.len()
+    }
+
+    /// Count reserved and retained Character operation records (tests /
+    /// diagnostics): running reservations plus the terminal records still
+    /// inside the retention window.
+    #[must_use]
+    pub fn character_operation_count(&self) -> usize {
+        self.maps().character_operations.len()
     }
 
     /// True when no Actor sessions are indexed.
@@ -726,6 +1395,19 @@ impl ActorSessionRegistry {
 
     /// Shut down a host session under the Actor key lock when indexed.
     ///
+    /// The manager release does not settle this authority's own drain of that
+    /// session's exec stream, so the session's retained drains are JOINED here —
+    /// after the release, before the session is retired and before this call
+    /// reports success (technical contract §3, "no success before confirmed
+    /// release"). The join waits on the session's live-work entry, which counts
+    /// the operations ADMITTED for the session as well as its drains, so it
+    /// cannot conclude in the window between an admitted operation and the
+    /// drain registration that operation is still to make. An unsettled drain
+    /// therefore keeps the session indexed and keeps the call in flight instead
+    /// of reporting a shutdown it cannot confirm. The join is deliberately
+    /// unbounded: contract §3 adds no timeout policy, so no fabricated deadline
+    /// decides when a live run is retired.
+    ///
     /// # Errors
     ///
     /// Host shutdown errors are surfaced as `internal` with the host reason.
@@ -752,18 +1434,36 @@ impl ActorSessionRegistry {
                 self.reclaim(&key, &lock);
                 return Err(host_err(&err));
             }
+            // Settle the session's own drains before anything about it is
+            // retired: the manager released the session, while the drain of the
+            // session's original exec stream — and the knowledge leases it
+            // holds — is still this authority's to join.
+            self.join_session_drains(&session_id).await;
             if still_indexed {
                 let mut maps = self.maps();
                 Self::evict_locked(&mut maps, &key, &session_id);
+                // The shutdown removes the session: its indexed-operation
+                // fallback entries go with it (a later cancel must not resolve
+                // a session that no longer exists), and so do the observation
+                // readers of its operations — a released session exposes no
+                // stream, while its recorded outcomes stay readable until the
+                // terminal retention drops them.
+                maps.indexed_operations.retain(|_, sid| sid != &session_id);
+                for record in maps.character_operations.values_mut() {
+                    if record.session_id == session_id {
+                        record.observation = None;
+                    }
+                }
             }
             drop(guard);
             self.reclaim(&key, &lock);
-            Ok(())
         } else {
-            host.shutdown_session(session_id)
+            host.shutdown_session(session_id.clone())
                 .await
-                .map_err(|e| host_err(&e))
+                .map_err(|e| host_err(&e))?;
+            self.join_session_drains(&session_id).await;
         }
+        Ok(())
     }
 
     /// Reuse a `Ready` exact match, reject `Busy`, or mint a replacement after
@@ -911,6 +1611,68 @@ fn echo_conversion(code: &str, e: impl std::fmt::Display) -> CoreError {
     CoreError::Internal {
         category: format!("{code}: {e}"),
     }
+}
+
+/// Re-parse one echoed wire id through a core-query DTO checked constructor.
+///
+/// # Errors
+///
+/// Returns `internal` when the id fails the query family's pattern check.
+fn query_id<T>(id: &str) -> CoreResult<T>
+where
+    T: std::str::FromStr,
+    T::Err: std::fmt::Display,
+{
+    id.parse().map_err(|e| echo_conversion("QUERY_ECHO", e))
+}
+
+/// Re-create the core-query `ActorRef` sum from the authority's echo.
+///
+/// # Errors
+///
+/// Returns `internal` when an id fails the query family's pattern check.
+fn query_actor_ref(actor_ref: NexusActorRef) -> CoreResult<QueryActorRef> {
+    match actor_ref {
+        NexusActorRef::CreatorActorRef { creator_id, .. } => Ok(QueryActorRef::CreatorActorRef {
+            actor_kind: query_id("creator")?,
+            creator_id: query_id(creator_id.as_str())?,
+        }),
+        NexusActorRef::CharacterActorRef { character_id, .. } => {
+            Ok(QueryActorRef::CharacterActorRef {
+                actor_kind: query_id("character")?,
+                character_id: query_id(character_id.as_str())?,
+            })
+        }
+    }
+}
+
+/// Re-create the core-query `Viewpoint` from the authority's echo.
+///
+/// # Errors
+///
+/// Returns `internal` when an id fails the query family's pattern check.
+fn query_viewpoint(viewpoint: &NexusSessionViewpoint) -> CoreResult<QueryViewpoint> {
+    let binding_id = viewpoint
+        .binding_id
+        .as_ref()
+        .map(|id| query_id(id.as_str()))
+        .transpose()?;
+    let branch_id = viewpoint
+        .branch_id
+        .as_ref()
+        .map(|id| query_id(id.as_str()))
+        .transpose()?;
+    let event_id = viewpoint
+        .event_id
+        .as_ref()
+        .map(|id| query_id(id.as_str()))
+        .transpose()?;
+    Ok(QueryViewpoint {
+        world_id: query_id(viewpoint.world_id.as_str())?,
+        binding_id,
+        branch_id,
+        event_id,
+    })
 }
 
 /// Map a retired-session tombstone onto generated session response optionals

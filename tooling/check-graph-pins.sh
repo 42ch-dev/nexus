@@ -228,6 +228,10 @@ assert_empty nexus-core "--no-default-features" nexus-orchestration
 assert_exactly_one nexus-core "--no-default-features" spoke-operations
 
 # --- core MCP/peer library (app-only Model A selectors are gone) -------------
+# v1.196 P1-T1: the cohort's public peer API (peer-tool types, capability and
+# async-trait) is execution-owned, so `connect-client` implies `execution` and
+# the resolved normal feature set is asserted exactly below. Graph structure
+# only — never a version value.
 
 for feats in "--no-default-features --features connect-client" "--no-default-features --features embedded-mcp"; do
   assert_exactly_one nexus-core "$feats" rmcp
@@ -235,6 +239,11 @@ for feats in "--no-default-features --features connect-client" "--no-default-fea
   assert_exactly_one nexus-core "$feats" libp2p
   assert_exactly_one nexus-core "$feats" spoke-operations
 done
+
+# The two cohorts resolve distinct feature sets (`embedded-mcp` implies
+# `connect-client` and adds its own edge), so each is asserted separately.
+assert_features nexus-core "--no-default-features --features connect-client" nexus-core "connect-client,execution"
+assert_features nexus-core "--no-default-features --features embedded-mcp" nexus-core "connect-client,embedded-mcp,execution"
 
 # --- native/TS host (nexus-core-node) ---------------------------------------
 
