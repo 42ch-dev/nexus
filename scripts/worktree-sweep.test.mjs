@@ -19,12 +19,17 @@
  *     the same run must fail convergence because the global footprint is incomplete;
  *   * the watermark gate must admit zero new tracks whenever reclamation is required;
  *   * an unreadable snapshot/sibling and every stale or unknown ownership shape must refuse with
- *     a non-zero exit and must propose nothing.
+ *     a non-zero exit and must propose nothing;
+ *   * a path or receipt that cannot be read is a fact gap, never proof of absence: an unreadable
+ *     worktree, receipt or cache descendant must refuse (and must never let `--check-exit` pass),
+ *     while a receipt whose components are real directories inside the temp root stays owned;
+ *   * a receipt under a linked parent, a receipt claimed by two tracks, and a sibling plan's
+ *     worktree path (or the feature target it implies) are refused before anything is proposed.
  */
 import { strict as assert } from 'node:assert';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, readlinkSync, readdirSync, statSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, readlinkSync, readdirSync, realpathSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { cpus, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -78,6 +83,7 @@ async function makeFixture(options = {}) {
   const ownerTarget = join(cache, 'nexus-target-fixture-owner');
   const peerTarget = join(cache, 'nexus-target-fixture-peer');
   const canonicalTarget = join(cache, 'nexus-target');
+  const paths = { root, main, cache, ownerWorktree, peerWorktree, integrationWorktree, ownerTarget, peerTarget, canonicalTarget };
 
   await mkdir(main, { recursive: true });
   await mkdir(cache, { recursive: true });
@@ -139,8 +145,9 @@ async function makeFixture(options = {}) {
     await writeFile(snapshotPath, options.snapshotText ?? `${JSON.stringify(snapshot, null, 2)}\n`);
   }
   if (options.siblingText !== undefined) {
+    const text = typeof options.siblingText === 'function' ? options.siblingText(paths) : options.siblingText;
     await mkdir(join(harness, 'workflows', SIBLING_ID), { recursive: true });
-    await writeFile(join(harness, 'workflows', SIBLING_ID, 'snapshot.json'), options.siblingText);
+    await writeFile(join(harness, 'workflows', SIBLING_ID, 'snapshot.json'), text);
   }
 
   await mkdir(canonicalTarget, { recursive: true });
@@ -180,7 +187,7 @@ async function makeFixture(options = {}) {
       },
     ],
   };
-  if (options.mutateInventory !== undefined) inventory = options.mutateInventory(inventory, { root, main, cache, ownerWorktree, peerWorktree, ownerTarget, peerTarget });
+  if (options.mutateInventory !== undefined) inventory = options.mutateInventory(inventory, paths);
   const inventoryPath = join(root, 'inventory.json');
   await writeFile(inventoryPath, `${JSON.stringify(inventory, null, 2)}\n`);
 
@@ -292,6 +299,33 @@ function trackOf(document, trackId) {
 }
 
 const ENGINE_FLAGS = ['--apply', '--all-workflows', '--remote', '--ignore-unreadable-snapshots', '--force', '-f'];
+
+/**
+ * Ownership receipts live under the canonical temp root, and `tmpdir()` is not canonical on every
+ * platform: fixtures name them through the fixture root's real path, so a receipt is a plain
+ * descendant of the canonical root instead of an accident of `/var` versus `/private/var`.
+ */
+function receiptBase(paths) {
+  return join(realpathSync(paths.root), 'receipts');
+}
+
+/** A sibling plan declaration claiming one worktree path — and therefore one feature target. */
+function siblingSnapshot({ worktreePath, branches = [] }) {
+  return `${JSON.stringify({
+    schema_version: 1,
+    id: SIBLING_ID,
+    type: 'plan',
+    status: 'running',
+    branch: { base: 'main', target: 'main' },
+    plans: [{
+      id: 'sibling-plan',
+      title: 'Sibling plan',
+      file: 'plans/sibling.md',
+      status: 'InProgress',
+      metadata: branches.length > 0 ? { worktree_path: worktreePath, track_branches: branches } : { worktree_path: worktreePath },
+    }],
+  }, null, 2)}\n`;
+}
 
 // --- tests -------------------------------------------------------------------------------
 
@@ -545,6 +579,61 @@ test('unreadable or stale ownership fails closed', async t => {
     ['omitted claimed plan', { mutateInventory: document => { document.active_plan_ids = []; return document; } }, 2, 'sweeper.refuse.inventory-omission'],
     ['unknown inventory version', { mutateInventory: document => ({ ...document, version: 2 }) }, 2, 'sweeper.refuse.inventory-version'],
     ['stale worktree pair', { mutateInventory: (document, paths) => { document.tracks[0].worktree = paths.peerWorktree; document.tracks[0].target = join(paths.cache, 'nexus-target-fixture-peer'); document.tracks[0].branch = 'feat/fixture-unclaimed'; return document; } }, 2, 'sweeper.refuse.stale-worktree-pair'],
+    // A receipt whose parent is a regular file cannot be read at all: that failure is a fact gap
+    // (exit 1), never proof that the receipt is gone.
+    ['temporary receipt under a non-directory parent', {
+      mutateInventory: (document, paths) => {
+        const notADirectory = join(realpathSync(paths.root), 'not-a-directory');
+        writeFileSync(notADirectory, 'not a directory\n');
+        document.tracks[0].temporary_paths = [join(notADirectory, 'receipt')];
+        return document;
+      },
+    }, 1, 'sweeper.refuse.path-unreadable'],
+    // The declared parent is a link: following it would describe and propose a location the
+    // receipt never named, so the containment check walks the canonical components instead.
+    ['temporary receipt through a symlinked parent', {
+      mutateInventory: (document, paths) => {
+        const receipts = receiptBase(paths);
+        mkdirSync(receipts, { recursive: true });
+        mkdirSync(join(paths.cache, 'detached-receipt'), { recursive: true });
+        writeFileSync(join(paths.cache, 'detached-receipt', 'payload.bin'), 'detached\n');
+        symlinkSync(paths.cache, join(receipts, 'link'), 'dir');
+        document.tracks[0].temporary_paths = [join(receipts, 'link', 'detached-receipt')];
+        return document;
+      },
+    }, 2, 'sweeper.refuse.stale-temporary'],
+    // One receipt cannot be owned twice: the completed track's proposal would otherwise reclaim a
+    // path the still-active peer track has also listed.
+    ['overlapping temporary receipts across tracks', {
+      mutateInventory: (document, paths) => {
+        const shared = join(receiptBase(paths), 'shared');
+        mkdirSync(shared, { recursive: true });
+        writeFileSync(join(shared, 'payload.bin'), 'shared\n');
+        document.tracks[0].temporary_paths = [shared];
+        document.tracks[1].temporary_paths = [shared];
+        return document;
+      },
+    }, 2, 'sweeper.refuse.duplicate-temporary'],
+    // A sibling plan's worktree path is a foreign claim even while that worktree is absent and the
+    // branch is separately claimed locally.
+    ['foreign sibling worktree path claim', {
+      siblingText: paths => siblingSnapshot({ worktreePath: join(paths.root, '.worktrees', 'fixture-shared') }),
+      mutateInventory: (document, paths) => {
+        document.tracks[0].worktree = join(paths.root, '.worktrees', 'fixture-shared');
+        document.tracks[0].target = join(paths.cache, 'nexus-target-fixture-shared');
+        return document;
+      },
+    }, 2, 'sweeper.refuse.foreign-claim'],
+    // A different sibling worktree path can still imply the same `.envrc` feature target: the
+    // derived target is claimed too, so the collision cannot slip through the path map.
+    ['foreign sibling target collision', {
+      siblingText: paths => siblingSnapshot({ worktreePath: join(paths.root, 'elsewhere', 'fixture-shared') }),
+      mutateInventory: (document, paths) => {
+        document.tracks[0].worktree = join(paths.root, '.worktrees', 'fixture-shared');
+        document.tracks[0].target = join(paths.cache, 'nexus-target-fixture-shared');
+        return document;
+      },
+    }, 2, 'sweeper.refuse.foreign-claim'],
   ];
 
   for (const [name, options, expectedCode, expectedRefusal] of scenarios) {
@@ -559,6 +648,102 @@ test('unreadable or stale ownership fails closed', async t => {
     assert.equal(run.document.tracks.every(track => track.actions.every(action => action.verdict !== 'propose')), true, `${name}: no proposing action`);
     assert.deepEqual(run.document.commands, [], `${name}: no engine invocation on refused input`);
     assert.equal(await fixture.fingerprint(), before, `${name}: read-only`);
+  }
+
+  // Facts that cannot be read must never be certified as an absent footprint: pre-fix both
+  // finished-track shapes below reported the footprint gone (target absent, worktree unlisted and
+  // "not present") and let `--check-exit` exit 0 without having read anything.
+  const unreadableWorktree = await makeFixture({
+    shape: 'reclaimed',
+    mutateInventory: (document, paths) => {
+      const notADirectory = join(realpathSync(paths.root), 'not-a-directory');
+      writeFileSync(notADirectory, 'not a directory\n');
+      document.tracks[0].worktree = join(notADirectory, 'fixture-shared');
+      document.tracks[0].target = join(paths.cache, 'nexus-target-fixture-shared');
+      return document;
+    },
+  });
+  t.after(() => unreadableWorktree.teardown());
+  const unreadableWorktreeBefore = await unreadableWorktree.fingerprint();
+  const unreadableWorktreeRun = await unreadableWorktree.run();
+  assert.equal(unreadableWorktreeRun.code, 1);
+  assert.equal(refusalCodes(unreadableWorktreeRun).includes('sweeper.refuse.path-unreadable'), true);
+  const unreadableWorktreeTrack = trackOf(unreadableWorktreeRun.document, 'fixture-owner');
+  assert.equal(unreadableWorktreeTrack.exit_clean, false);
+  const unreadableWorktreeCheck = await unreadableWorktree.run(['--check-exit', 'fixture-owner']);
+  assert.equal(unreadableWorktreeCheck.code, 1);
+  assert.equal(unreadableWorktreeCheck.document.ok, false);
+  assert.equal(unreadableWorktreeCheck.document.checks, null);
+  assert.equal(await unreadableWorktree.fingerprint(), unreadableWorktreeBefore);
+
+  const unreadableReceipt = await makeFixture({
+    shape: 'reclaimed',
+    mutateInventory: (document, paths) => {
+      const notADirectory = join(realpathSync(paths.root), 'not-a-directory');
+      writeFileSync(notADirectory, 'not a directory\n');
+      document.tracks[0].temporary_paths = [join(notADirectory, 'receipt')];
+      return document;
+    },
+  });
+  t.after(() => unreadableReceipt.teardown());
+  const unreadableReceiptBefore = await unreadableReceipt.fingerprint();
+  const unreadableReceiptRun = await unreadableReceipt.run();
+  assert.equal(unreadableReceiptRun.code, 1);
+  assert.equal(refusalCodes(unreadableReceiptRun).includes('sweeper.refuse.path-unreadable'), true);
+  const unreadableReceiptTrack = trackOf(unreadableReceiptRun.document, 'fixture-owner');
+  assert.equal(unreadableReceiptTrack.exit_clean, false);
+  assert.deepEqual(unreadableReceiptTrack.temporary_paths.map(entry => entry.unreadable), ['ENOTDIR']);
+  const unreadableReceiptCheck = await unreadableReceipt.run(['--check-exit', 'fixture-owner']);
+  assert.equal(unreadableReceiptCheck.code, 1);
+  assert.equal(unreadableReceiptCheck.document.checks, null);
+  assert.equal(await unreadableReceipt.fingerprint(), unreadableReceiptBefore);
+
+  // Control: canonical containment refuses linked parents, not receipts. A receipt whose
+  // components are all real directories inside the canonical temp root stays owned and proposable.
+  const ownedReceipt = await makeFixture({
+    shape: 'leased',
+    mutateInventory: (document, paths) => {
+      const receipt = join(receiptBase(paths), 'owned');
+      mkdirSync(receipt, { recursive: true });
+      writeFileSync(join(receipt, 'payload.bin'), 'owned receipt\n');
+      document.tracks[0].temporary_paths = [receipt];
+      return document;
+    },
+  });
+  t.after(() => ownedReceipt.teardown());
+  const ownedReceiptRun = await ownedReceipt.run();
+  assert.equal(ownedReceiptRun.code, 0);
+  assert.deepEqual(ownedReceiptRun.document.refusals, []);
+  const ownedReceiptTrack = trackOf(ownedReceiptRun.document, 'fixture-owner');
+  assert.equal(ownedReceiptTrack.temporary_paths[0].exists, true);
+  assert.ok(ownedReceiptTrack.temporary_paths[0].bytes > 0);
+  const ownedTemporaryAction = ownedReceiptTrack.actions.find(action => action.kind === 'reclaim-temporary');
+  assert.equal(ownedTemporaryAction.verdict, 'propose');
+  assert.equal(ownedTemporaryAction.reason, 'sweeper.propose.reclaim-owned-temporary');
+
+  // An unreadable cache descendant must not silently shrink the measured aggregate. Permission
+  // bits are the only non-ENOENT directory-read failure a fixture can create deterministically,
+  // and root bypasses them, so the check is skipped there instead of asserted vacuously.
+  if (process.getuid?.() === 0) {
+    t.diagnostic('skipped the unreadable cache-descendant check: root bypasses permission bits');
+  } else {
+    const locked = await makeFixture({ shape: 'leased' });
+    const lockedTarget = join(locked.cache, 'nexus-target-locked');
+    await mkdir(lockedTarget, { recursive: true });
+    await writeFile(join(lockedTarget, 'locked.bin'), 'locked\n');
+    const lockedBefore = await locked.fingerprint();
+    chmodSync(lockedTarget, 0o000);
+    t.after(async () => {
+      chmodSync(lockedTarget, 0o700);
+      await locked.teardown();
+    });
+    const lockedRun = await locked.run();
+    assert.equal(lockedRun.code, 1);
+    assert.equal(refusalCodes(lockedRun).includes('sweeper.refuse.path-unreadable'), true);
+    assert.equal(lockedRun.document.ok, false);
+    assert.deepEqual(proposedRefs(lockedRun.document), []);
+    chmodSync(lockedTarget, 0o700);
+    assert.equal(await locked.fingerprint(), lockedBefore);
   }
 
   // A symlinked cache path is refused rather than followed.

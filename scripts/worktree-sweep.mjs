@@ -27,7 +27,7 @@
  *     forces; any recovery remains a separately authorized decision.
  *
  * Exit codes: 0 valid dry run / passing check; 1 unreadable facts (snapshot, sibling
- * declarations, git, engine) or a failing requested check; 2 invalid invocation or inventory.
+ * declarations, git, engine, path) or a failing requested check; 2 invalid invocation or inventory.
  */
 import { execFile } from 'node:child_process';
 import { lstat, readFile, readdir, realpath, statfs } from 'node:fs/promises';
@@ -89,14 +89,47 @@ async function pathKey(path) {
   }
 }
 
-/** Existence probe for paths whose contents are none of this tool's business (worktrees). */
+/**
+ * Existence probe for paths whose contents are none of this tool's business (worktrees).
+ * Only `ENOENT` proves absence: any other failure is an unreadable fact, and every caller must
+ * refuse it instead of reading the failure as "nothing is there".
+ */
 async function describePath(path) {
   try {
     const stats = await lstat(path);
-    return { exists: true, is_symlink: stats.isSymbolicLink() };
-  } catch {
-    return { exists: false, is_symlink: false };
+    return { exists: true, is_symlink: stats.isSymbolicLink(), unreadable: null };
+  } catch (error) {
+    if (error.code === 'ENOENT') return { exists: false, is_symlink: false, unreadable: null };
+    return { exists: false, is_symlink: false, unreadable: error.code ?? 'lstat-failed' };
   }
+}
+
+/**
+ * Canonical containment for an ownership receipt. The candidate's existing components are
+ * `lstat`ed one segment at a time from the canonical temp root, so a linked parent is never
+ * traversed to reach a location the receipt never described, and a `..`-free resolved prefix is
+ * all that can be claimed. `within` is false for a receipt that is not a plain descendant of the
+ * root; `unreadable` carries the failure code when the walk itself cannot be completed (a
+ * non-`ENOENT` failure), which the caller must refuse as an unreadable fact rather than as a
+ * stale claim — and which a deeper `ENOENT` never is: the tail simply does not exist yet.
+ */
+async function canonicalWithin(parent, child) {
+  const root = await pathKey(parent);
+  const target = resolve(child);
+  if (target === root || !target.startsWith(`${root}${sep}`)) return { within: false, unreadable: null };
+  let current = root;
+  for (const segment of target.slice(root.length + 1).split(sep)) {
+    current = join(current, segment);
+    let stats;
+    try {
+      stats = await lstat(current);
+    } catch (error) {
+      if (error.code === 'ENOENT') return { within: true, unreadable: null };
+      return { within: false, unreadable: error.code ?? 'lstat-failed' };
+    }
+    if (stats.isSymbolicLink()) return { within: false, unreadable: null };
+  }
+  return { within: true, unreadable: null };
 }
 
 function refusal(code, detail, exitCode) {
@@ -223,17 +256,28 @@ export function evaluateWatermarks({ rootFreeBytes, featureTargetBytes }) {
 
 // --- filesystem facts --------------------------------------------------------------------
 
-/** Measured size of an explicit owned path. Symlinks are never followed and never counted. */
+/**
+ * Measured size of an explicit owned path. Symlinks are never followed and never counted.
+ * A non-`ENOENT` failure — at the path itself, at a directory read, or at a descendant stat —
+ * is reported as `unreadable` rather than as absence or as a silently partial total, because an
+ * unmeasured footprint must never be certified gone or read as enough free capacity. A descendant
+ * that vanishes mid-walk is `ENOENT` and simply contributes no bytes.
+ */
 async function pathBytes(path) {
   let stats;
   try {
     stats = await lstat(path);
-  } catch {
-    return { exists: false, is_symlink: false, bytes: 0 };
+  } catch (error) {
+    if (error.code === 'ENOENT') return { exists: false, is_symlink: false, bytes: 0, unreadable: null };
+    return { exists: false, is_symlink: false, bytes: 0, unreadable: error.code ?? 'lstat-failed' };
   }
-  if (stats.isSymbolicLink()) return { exists: true, is_symlink: true, bytes: 0 };
-  if (!stats.isDirectory()) return { exists: true, is_symlink: false, bytes: stats.size };
+  if (stats.isSymbolicLink()) return { exists: true, is_symlink: true, bytes: 0, unreadable: null };
+  if (!stats.isDirectory()) return { exists: true, is_symlink: false, bytes: stats.size, unreadable: null };
   let total = 0;
+  let unreadable = null;
+  const noteUnreadable = error => {
+    if (unreadable === null && error.code !== 'ENOENT') unreadable = error.code ?? 'read-failed';
+  };
   let queue = [path];
   while (queue.length > 0) {
     const next = [];
@@ -242,7 +286,8 @@ async function pathBytes(path) {
       let entries;
       try {
         entries = await readdir(directory, { withFileTypes: true });
-      } catch {
+      } catch (error) {
+        noteUnreadable(error);
         continue;
       }
       for (const entry of entries) {
@@ -256,7 +301,8 @@ async function pathBytes(path) {
       const sizes = await Promise.all(batch.map(async file => {
         try {
           return (await lstat(file)).size;
-        } catch {
+        } catch (error) {
+          noteUnreadable(error);
           return 0;
         }
       }));
@@ -264,7 +310,7 @@ async function pathBytes(path) {
     }
     queue = next;
   }
-  return { exists: true, is_symlink: false, bytes: total };
+  return { exists: true, is_symlink: false, bytes: total, unreadable };
 }
 
 /**
@@ -515,7 +561,7 @@ function validateScheduling(raw, refuse) {
  */
 async function reconcileInventory({ raw, workflowId, declaration, foreignClaims, worktrees, mainRoot, cacheRoot, tempRoot }) {
   const refusals = [];
-  const refuse = (code, detail) => refusals.push(refusal(code, detail, EXIT_INVALID));
+  const refuse = (code, detail, exitCode = EXIT_INVALID) => refusals.push(refusal(code, detail, exitCode));
   const result = { refusals, tracks: [], scheduling: null };
 
   if (!plainRow(raw)) {
@@ -557,7 +603,7 @@ async function reconcileInventory({ raw, workflowId, declaration, foreignClaims,
 
   const worktreeByKey = new Map();
   for (const worktree of worktrees) worktreeByKey.set(await pathKey(worktree.path), worktree);
-  const seen = { track_id: new Map(), worktree: new Map(), target: new Map(), branch: new Map() };
+  const seen = { track_id: new Map(), worktree: new Map(), target: new Map(), branch: new Map(), temporary: new Map() };
 
   for (const [index, entry] of raw.tracks.entries()) {
     const where = `tracks[${index}]`;
@@ -603,6 +649,19 @@ async function reconcileInventory({ raw, workflowId, declaration, foreignClaims,
       seen[field].set(value, entry.track_id);
     }
 
+    // A temporary receipt is exclusive ownership: two tracks naming the same path mean at least
+    // one of them is wrong, and the completed one would otherwise propose reclaiming a path an
+    // active or foreign track still claims.
+    for (const temporary of entry.temporary_paths) {
+      const key = await pathKey(temporary);
+      const previous = seen.temporary.get(key);
+      if (previous !== undefined) {
+        refuse('sweeper.refuse.duplicate-temporary', `${where} (${entry.track_id}) lists temporary ${temporary} already claimed by track ${previous}`);
+        continue;
+      }
+      seen.temporary.set(key, entry.track_id);
+    }
+
     const claimers = branchClaimers(declaration, entry.branch);
     const planClaimers = claimers.filter(claimer => claimer.plan_id === entry.plan_id);
     if (claimers.length === 0) {
@@ -627,8 +686,10 @@ async function reconcileInventory({ raw, workflowId, declaration, foreignClaims,
     const worktreeKey = await pathKey(entry.worktree);
     const worktree = worktreeByKey.get(worktreeKey) ?? null;
     if (worktree === null) {
-      const onDisk = (await describePath(entry.worktree)).exists;
-      if (onDisk || entry.state === 'active') {
+      const onDisk = await describePath(entry.worktree);
+      if (onDisk.unreadable !== null) {
+        refuse('sweeper.refuse.path-unreadable', `track ${entry.track_id} worktree ${entry.worktree} cannot be read (${onDisk.unreadable})`, EXIT_FACTS);
+      } else if (onDisk.exists || entry.state === 'active') {
         refuse('sweeper.refuse.stale-worktree', `track ${entry.track_id} declares worktree ${entry.worktree} that Git does not list`);
       }
     } else if (worktree.branch !== entry.branch) {
@@ -645,8 +706,11 @@ async function reconcileInventory({ raw, workflowId, declaration, foreignClaims,
     }
 
     for (const temporary of entry.temporary_paths) {
-      if (resolve(temporary) === resolve(tempRoot) || !isWithin(tempRoot, temporary)) {
-        refuse('sweeper.refuse.stale-temporary', `track ${entry.track_id} temporary ${temporary} is not a receipt path inside the system temp root`);
+      const containment = await canonicalWithin(tempRoot, temporary);
+      if (containment.unreadable !== null) {
+        refuse('sweeper.refuse.path-unreadable', `track ${entry.track_id} temporary ${temporary} cannot be resolved (${containment.unreadable})`, EXIT_FACTS);
+      } else if (!containment.within) {
+        refuse('sweeper.refuse.stale-temporary', `track ${entry.track_id} temporary ${temporary} is not an unlinked receipt path inside the system temp root`);
       } else if (isWithin(cacheRoot, temporary) || isWithin(mainRoot, temporary)) {
         refuse('sweeper.refuse.stale-temporary', `track ${entry.track_id} temporary ${temporary} is inside a protected shared location`);
       }
@@ -726,6 +790,15 @@ function addAction(actions, kind, ref, verdict, reason) {
 /** G3 own-exit rule: producer stopped, own target/temporaries absent, worktree gone and unlisted. */
 function exitReasons(track) {
   const reasons = [];
+  const unreadable = [
+    track.target.unreadable === null ? null : `target ${track.target.path}`,
+    ...track.temporary_paths.filter(temporary => temporary.unreadable !== null).map(temporary => `temporary ${temporary.path}`),
+    track.worktree.unreadable === null ? null : `worktree ${track.worktree.path}`,
+  ].filter(entry => entry !== null);
+  if (unreadable.length > 0) {
+    // An unreadable fact is not an absent footprint: nothing is ever certified gone from it.
+    reasons.push({ code: 'sweeper.check.path-unreadable', detail: `track ${track.track_id} facts cannot be read: ${unreadable.join(', ')}` });
+  }
   if (track.state !== 'completed') reasons.push({ code: 'sweeper.check.track-not-completed', detail: `track ${track.track_id} is ${track.state}` });
   if (track.producer_stopped !== true) reasons.push({ code: 'sweeper.check.producer-running', detail: `track ${track.track_id} holds no producer-stopped receipt` });
   if (track.target.exists) reasons.push({ code: 'sweeper.check.target-present', detail: `track ${track.track_id} target ${track.target.path} still exists` });
@@ -825,6 +898,17 @@ export async function sweepWorktreeInventory(options, environment = process.env)
     if (sibling.integration_worktree_path !== undefined) {
       foreignClaims.paths.set(await pathKey(sibling.integration_worktree_path), sibling.id);
     }
+    // A sibling plan's declared worktree — and the feature target its `.envrc` mapping implies —
+    // is a foreign claim even while that worktree is gone: a path a sibling plan still claims must
+    // never read as free just because the branch happens to be claimed locally as well.
+    for (const plan of sibling.plans) {
+      for (const worktreePath of plan.worktreePaths) {
+        for (const claimed of [worktreePath, expectedTargetFor(cacheRoot, worktreePath)]) {
+          const key = await pathKey(claimed);
+          if (!foreignClaims.paths.has(key)) foreignClaims.paths.set(key, sibling.id);
+        }
+      }
+    }
   }
 
   const tempRoot = await pathKey(tmpdir());
@@ -863,6 +947,7 @@ export async function sweepWorktreeInventory(options, environment = process.env)
     }
   }
   const canonical = await pathBytes(canonicalTarget);
+  if (canonical.unreadable !== null) refuse('sweeper.refuse.path-unreadable', `canonical shared target ${canonicalTarget} cannot be read (${canonical.unreadable})`);
   if (canonical.is_symlink) refuse('sweeper.refuse.canonical-symlink', `the canonical shared target ${canonicalTarget} is a symlink`);
   protectedCheckouts.forEach((checkout, index) => {
     checkout.target_present = canonical.exists;
@@ -875,13 +960,19 @@ export async function sweepWorktreeInventory(options, environment = process.env)
   // Track facts.
   const trackFacts = [];
   for (const track of reconciliation.tracks) {
+    const worktreeProbe = await describePath(track.worktree_path);
+    if (worktreeProbe.unreadable !== null) {
+      refuse('sweeper.refuse.path-unreadable', `track ${track.track_id} worktree ${track.worktree_path} cannot be read (${worktreeProbe.unreadable})`);
+    }
     const target = await pathBytes(track.target_path);
+    if (target.unreadable !== null) refuse('sweeper.refuse.path-unreadable', `track ${track.track_id} target ${track.target_path} cannot be read (${target.unreadable})`);
     if (target.is_symlink) refuse('sweeper.refuse.symlink-path', `track ${track.track_id} target ${track.target_path} is a symlink`);
     const temporaries = [];
     for (const path of track.temporary_paths) {
       const fact = await pathBytes(path);
+      if (fact.unreadable !== null) refuse('sweeper.refuse.path-unreadable', `track ${track.track_id} temporary ${path} cannot be read (${fact.unreadable})`);
       if (fact.is_symlink) refuse('sweeper.refuse.symlink-path', `track ${track.track_id} temporary ${path} is a symlink`);
-      temporaries.push({ path, exists: fact.exists, is_symlink: fact.is_symlink, bytes: fact.bytes });
+      temporaries.push({ path, exists: fact.exists, is_symlink: fact.is_symlink, bytes: fact.bytes, unreadable: fact.unreadable });
     }
     const listed = track.listed_worktree;
     let dirtyTracked = null;
@@ -896,12 +987,13 @@ export async function sweepWorktreeInventory(options, environment = process.env)
     trackFacts.push({
       track,
       main_root: repoRoot,
-      target: { path: track.target_path, expected_path: track.expected_target, exists: target.exists, is_symlink: target.is_symlink, bytes: target.bytes },
+      target: { path: track.target_path, expected_path: track.expected_target, exists: target.exists, is_symlink: target.is_symlink, bytes: target.bytes, unreadable: target.unreadable },
       temporary_paths: temporaries,
       worktree: {
         path: track.worktree_path,
         listed: listed !== null,
-        exists: (await describePath(track.worktree_path)).exists,
+        exists: worktreeProbe.exists,
+        unreadable: worktreeProbe.unreadable,
         checked_out_branch: listed?.branch ?? null,
         head: listed?.head ?? null,
         locked: listed?.locked ?? false,
@@ -932,6 +1024,11 @@ export async function sweepWorktreeInventory(options, environment = process.env)
     if (!name.startsWith(FEATURE_TARGET_PREFIX)) continue;
     const path = join(cacheRoot, name);
     const measured = await pathBytes(path);
+    // An unreadable descendant must not silently shrink the aggregate: the measured share is
+    // incomplete, so it is refused rather than reported as capacity the host still owns.
+    if (measured.unreadable !== null) {
+      refuse('sweeper.refuse.path-unreadable', `feature target ${path} cannot be measured (${measured.unreadable})`);
+    }
     aggregateFeatureTargetBytes += measured.bytes;
     featureTargetCount += 1;
     if (ownedTargetKeys.has(await pathKey(path))) continue;
