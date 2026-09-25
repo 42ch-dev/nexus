@@ -56,6 +56,27 @@ export CARGO_TARGET_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/nexus-target"
 
 Do **not** set `target-dir` in `~/.cargo/config.toml` — that applies to every Rust project on the machine.
 
+### Worktrees
+
+Feature work must live in a linked worktree under `.worktrees/<name>/`. The integration checkout is `.worktrees/iteration-<id>/` (on an `iteration/<id>` branch) and is reserved for merges and final integration verification — it is not a feature development slot.
+
+After every `git worktree add`, initialize that checkout's submodules with the checked-in initializer rather than copying `.git` metadata:
+
+```bash
+git worktree add .worktrees/<name> -b feat/<name>
+node scripts/init-worktree-submodules.mjs --worktree "$PWD/.worktrees/<name>"
+```
+
+The initializer runs native `git submodule update --init --recursive` for the submodules that are missing and validates the ones that are already initialized, so a repeated call is a validated no-op: each submodule keeps its own administrative directory, index, config and HEAD, and an intentional pin difference is reported rather than reset. It writes exactly one JSON object to stdout and exits `0` (checkout valid, submodules validated or initialized), `1` (Git or safety refusal — the reason is on stderr and the state is unchanged) or `2` (invalid invocation). Anything that is not a linked checkout directly under `<main>/.worktrees/<name>` — the main checkout, a plain directory, a copied `.git` pointer, a symlink escape — is refused, never repaired.
+
+Then activate the checkout's [`.envrc`](../.envrc) (`direnv allow`) and confirm the scoped cache:
+
+```bash
+cargo metadata --no-deps --format-version 1 | jq -r .target_directory
+```
+
+The main checkout and the integration checkout share the canonical `${XDG_CACHE_HOME:-$HOME/.cache}/nexus-target`; a feature worktree gets the isolated `${XDG_CACHE_HOME:-$HOME/.cache}/nexus-target-<name>`. See [Worktree lifecycle and reclamation](#worktree-lifecycle-and-reclamation) for the concurrency budget and the exit checklist.
+
 ## Day-to-day development
 
 Root [`package.json`](../package.json) exposes shortcuts for common tasks. Run from the repository root.
@@ -106,6 +127,121 @@ pnpm run build:desktop -- --arch arm64   # native arch is the default
 ```
 
 `nexus42 desktop bundle --arch <arch>` delegates to the same driver. Dev requires a prepared native payload; the package driver fails closed when compiled prerequisites (web dist, service build, native payload) are missing. See [`apps/desktop-electron/AGENTS.md`](../apps/desktop-electron/AGENTS.md).
+
+## Worktree lifecycle and reclamation
+
+A feature track is opened, measured and reclaimed inside the slice that owns it: a feature's cache and worktree are never parked until the end of an iteration. Reclamation is immediate and scoped, and it is never a reason to serialize independent work — in v1.190 six concurrent targets consumed 98 GiB under `/tmp` in a single iteration and degraded the host, so each slice reclaims its own footprint as soon as it is done with it.
+
+### Sizing concurrency (resource budget)
+
+```
+K = min(ready independent tasks, floor(disk budget / per-track target estimate), max(1, cores / 2))
+```
+
+Round the available tracks down; zero ready tasks means zero development tracks. The measured 2026-09-25 example — 10 cores, 32 GiB RAM, a ~120 GiB disk budget and 20 GiB per track — gave `K=2` with two ready plans and `K=4` once four independent tasks were ready, so the number follows ready work and its dependencies, not a standing worktree limit.
+
+Two watermarks gate every new track:
+
+| Watermark | Threshold |
+|-----------|-----------|
+| Root filesystem free space | ≥ 90 GiB |
+| Sum of all feature target directories | ≤ 120 GiB |
+
+If either fails, reclaim first and re-measure before scheduling. A failing watermark is never a reason to refuse concurrency.
+
+### Ownership receipt (the inventory)
+
+The sweeper is driven by a version-1 inventory: a non-authoritative ownership receipt for one scheduling checkpoint. It is read-only input — the workflow snapshot and real Git facts stay the authority for what is claimed and protected, and the receipt never authorizes a deletion.
+
+```json
+{
+  "version": 1,
+  "workflow_id": "<iteration-id>",
+  "active_plan_ids": ["<plan-id>"],
+  "scheduling": {
+    "ready_independent_tasks": 2,
+    "disk_budget_bytes": 128849018880,
+    "per_track_target_estimate_bytes": 21474836480
+  },
+  "tracks": [{
+    "track_id": "<track-id>",
+    "plan_id": "<plan-id>",
+    "worktree": "<absolute-repo>/.worktrees/<name>",
+    "branch": "feat/<name>",
+    "target": "<absolute-cache-root>/nexus-target-<name>",
+    "temporary_paths": ["<absolute-temporary-build-path>"],
+    "producer_stopped": true,
+    "state": "completed"
+  }]
+}
+```
+
+`active_plan_ids` must name every claimed non-Done plan (and every leased plan) from the snapshot; a track's `worktree` must be the canonical `<repo>/.worktrees/<name>` linked checkout of this repository on its declared branch; `target` must be exactly the `.envrc`-derived directory for that checkout, and the shared canonical `nexus-target` is never a track's target; `temporary_paths` are exact absolute receipt paths, never globs; `state` is `active` or `completed`, and `producer_stopped` is a required boolean.
+
+### Checklist
+
+1. **Create and record.** Add the worktree under `.worktrees/<name>/` and initialize it (see [Worktrees](#worktrees)). Record the track's ownership receipt: owner/track id, the exact feature worktree path, the exact target to reclaim, and every temporary build path the task will create.
+2. **Stop the producer.** No build, codegen step or agent may still be writing into the target or the temporary paths when reclamation starts; the receipt's `producer_stopped` must be true.
+3. **Remove the owned feature target before the merge**, together with its temporary build products, in the same task/track slice — only that track's `nexus-target-<name>`, never the shared canonical cache.
+4. **Merge under review, then release ownership.** The merge and the ownership release are proven separately, and the worktree is reclaimed only after both.
+5. **Sweep first — dry run.** The sweeper proposes; without `--apply` it deletes nothing. Run it from the repository's **main** checkout (`--repo` must be the main worktree, exit `2` otherwise), and pass `--harness`, the control directory that holds `workflows/<id>/snapshot.json` for the workflow being swept:
+
+   ```bash
+   node scripts/worktree-sweep.mjs \
+     --repo "$PWD" \
+     --harness <absolute-control-harness-dir> \
+     --workflow <iteration-id> \
+     --inventory <absolute-inventory.json>
+   ```
+
+6. **Apply only for a completed, merged, released, producer-stopped track:**
+
+   ```bash
+   node scripts/worktree-sweep.mjs \
+     --repo "$PWD" \
+     --harness <absolute-control-harness-dir> \
+     --workflow <iteration-id> \
+     --inventory <absolute-inventory.json> \
+     --apply
+   ```
+
+   `--apply` re-verifies every fact immediately before each mutating step, removes the exact scoped target/temporary paths itself, and hands each worktree and branch to the installed harness cleanup. Deletion is **engine-first**: that cleanup is the authority that decides whether a worktree or branch is removable, and the sweeper never deletes either itself — when the cleanup declines the branch after the fallback in step 7, the workflow-level cleanup checkpoint owns that release. The one bounded exception is the two measured engine refusals documented in step 7: only there does the checklist take the documented exact-path non-force route, and never as a general permission. The sweeper never forces, never uses a wildcard, and never runs `git submodule deinit`.
+7. **The two measured non-forced obstacles.** A non-forced removal may legitimately refuse on this repository; both cases are reported, and both are reclaimed through the same documented exact-path route.
+   - **A worktree that carries submodules.** `git worktree remove` refuses with `fatal: working trees containing submodules cannot be moved or removed`, and the refusal survives `git submodule deinit --all` — which unregisters the submodule in the shared superproject config and is therefore never a cleanup step here. The sweeper records the refusal verbatim and then takes the non-force route: `rm -rf <exact worktree path>` followed by `git worktree prune`, then re-observes.
+   - **An ignored-only build footprint in a reviewed checkout.** A clean tracked tree can still refuse as dirty because build preparation left ignored outputs behind (measured example from one worktree: `node_modules/` 119 M, `packages/nexus-contracts/dist/` 3.4 M, `apps/nexus-service/dist/` 472 K — 718 M), so the harness cleanup answers `cleanup.refuse.dirty-worktree`. Once the owner is merged and released, the sweeper enumerates those exact ignored paths with their measured sizes, reports them, and reclaims through the same non-force route. Genuine tracked or untracked dirt stays a refusal that mutates nothing.
+
+   Either way the route is exact-path only. **No `--force`, no wildcard `rm -rf`, no home-directory-wide deletion, and no `git submodule deinit`.** After the fallback the harness cleanup may also decline the branch candidate, because the worktree record it keyed on is now pruned; the branch is then left as explicit unreclaimed state and released from the workflow-level cleanup checkpoint — the sweeper reports it instead of force-deleting a branch.
+8. **Prune — scoped.** A removal leaves the worktree record behind, so the sweeper itself runs `git worktree prune --dry-run` after one and prunes only when that would drop solely that track's own record; a stale entry belonging to something else is retained and reported. Run by hand, follow the same rule.
+9. **Prove your own exit.** Verify the track's footprint is gone with raw command output:
+
+   ```bash
+   node scripts/worktree-sweep.mjs \
+     --repo "$PWD" \
+     --harness <absolute-control-harness-dir> \
+     --workflow <iteration-id> \
+     --inventory <absolute-inventory.json> \
+     --check-exit <track-id>
+   ```
+
+   `--check-exit` is read-only: it asserts that the named completed track keeps no target or temporary path, no worktree, and no branch, and the track must be declared in the inventory it is given (an undeclared id is exit `2`). A declared branch that still exists is unreclaimed state.
+
+### Checkpoints and exit codes
+
+- **Per-slice exit** (`--check-exit <track-id>`) covers this track only. Other tracks may still be active: a live peer neither blocks your own proof nor gets touched by it.
+- **Development convergence** (`--check-convergence`, read-only) requires that, with no feature track left, `git worktree list` contains main + integration only and no unclaimed footprint remains. An active peer blocks convergence — it is reported as protected, never reclaimed — but it never blocks your own exit.
+- **Phase 6 close:** after the integrator's authorized integration cleanup, only main remains.
+
+`--check-exit` and `--check-convergence` are mutually exclusive with each other and with `--apply`; combining them is an invalid invocation. Every invocation shares the same exit codes: `0` a valid dry run, a passing check or a fully reclaimed apply; `1` unreadable facts, a failing check, a failed reclamation or a requested completed track that still owns an artifact; `2` an invalid invocation or inventory. Failed reclamation fails the exit/close gate.
+
+Guards are not obstacles: an `active`, `dirty` or `unmerged` refusal protects work, and the answer is to resolve the underlying fact (stop the writer, remove the build output, merge first) — never to force through it.
+
+### Decisions recorded (evaluated, not adopted)
+
+- **sccache — deferred.** It is not installed, and adopting it needs its own measured hit-rate and tooling decision first.
+- **Per-track cache quota with `cargo clean -p` — deferred.** Partial cleanup does not establish a zero footprint, and crate graphs vary enough that a fixed quota would be guesswork; exact removal of a completed track's target remains the baseline.
+- **Worktree pooling — deferred.** Reusing one worktree across tasks complicates private submodule state and per-track ownership, and buys nothing while two ready tracks fit the budget. Revisit only with setup-time evidence.
+
+These are decisions with evidence gaps, not a backlog promise.
 
 ## Schema-first development
 

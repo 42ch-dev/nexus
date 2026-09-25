@@ -157,18 +157,14 @@ cargo sweep --time 30
 ```
 
   Optional dry-run: append `-d`. Do **not** use `cargo sweep -i N` for age-based cleanup — `-i` is `--installed` (boolean); age uses `--time` / `-t`.
-**Merge gate — feature-branch target cleanup (HARD):** before merging a feature branch or worktree into the integration branch, the feature's scoped `CARGO_TARGET_DIR` **must be removed**. With the scoped `.envrc` layout this is a precise one-liner — no guesswork about which dir belongs to which feature. This is not optional housekeeping — parallel worktree target dirs compound silently (v1.190: six concurrent targets consumed 98 GiB of `/tmp` in a single iteration) and degraded the host. Concretely:
+**Merge gate — feature-branch target cleanup (HARD):** before merging a feature branch into the integration branch, that feature's scoped `CARGO_TARGET_DIR` **must be removed** — a feature target never outlives its own merge. With the scoped `.envrc` layout the removal is precise, by exact name, and never a wildcard: `rm -rf ~/.cache/nexus-target-*` would delete a peer's target while that peer is still building. This is not optional housekeeping — parallel worktree target dirs compound silently (v1.190: six concurrent targets consumed 98 GiB of `/tmp` in a single iteration) and degraded the host. The recorded conclusion is **immediate per-slice reclamation, not a cap on concurrent development**. Concretely:
 
 ```bash
-# Before merging: remove this feature's scoped build cache (precise, by name)
+# Before merging: remove THIS feature's scoped build cache (exact name only)
 rm -rf ~/.cache/nexus-target-<dirname>
-#
-# Or clean ALL feature targets at once (canonical nexus-target is untouched):
-rm -rf ~/.cache/nexus-target-*
-#
-# Then remove the worktree:
-git worktree remove .worktrees/<name> && git worktree prune
 ```
+
+Then reclaim the worktree itself — non-forcibly, after the reviewed merge and the ownership release. See **Worktrees** below and [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) → **Worktree lifecycle and reclamation** for the full ordering and the two measured non-forced refusal routes.
 
 Integration verification (`cargo check --workspace`) runs from the integration worktree with the canonical `~/.cache/nexus-target` — it does not depend on any feature's cache.
 
@@ -196,16 +192,41 @@ git submodule update --init --recursive   # after pull if skill dirs are empty
 
 | Context | Submodule | Notes |
 |---------|-----------|-------|
-| Developer clone / worktree | **Full** init | Always `--recurse-submodules` + `git submodule update --init --recursive` after new worktree |
+| Developer clone | **Full** init | `--recurse-submodules` at clone; `git submodule update --init --recursive` after a pull only when the skill dirs are empty |
+| New worktree | **Full** init | **Required** after every `git worktree add`: run the checked-in initializer (see **Worktrees** below). The raw `git submodule update --init --recursive` is not an alternative step — it is only what the initializer runs internally for submodules that are still missing |
 | CI default jobs | **Off** | `actions/checkout` without `submodules: true` (Rust/TS builds do not read skills) |
 | CI job needing skills | **On demand** | Add `submodules: true` only when the job touches `.agents/skills/` |
 
+Running the raw command in place of the initializer is not equivalent: the initializer also validates already-initialized metadata, refuses a copied or out-of-subtree gitdir and an unmerged index state, and reports a deliberately different submodule HEAD instead of resetting it.
+
 **Worktrees:**
 
-- Path: `.worktrees/<name>/` only (`.worktrees/` is gitignored).
+- Path: `.worktrees/<name>/` only (`.worktrees/` is gitignored). Feature tracks use feature names; the **integration worktree** is `.worktrees/iteration-<id>/` (currently `.worktrees/iteration-v1.197/` on `iteration/v1.197`). Integration is a merge and final-verification location, **not** a development slot: no feature is developed there, and it does not build in parallel with feature writers.
 - Share the main repo object store — worktrees do not re-download packs; slowness is checkout (~4k files), not network.
-- Parallel dual-track: at most **two** worktrees; remove with `git worktree remove` + `git worktree prune` when the iteration slice ends.
-- After `git worktree add`, run `git submodule update --init --recursive`.
+- After **every** `git worktree add`, initialize that checkout's submodules with the checked-in initializer — never by copying `.git` metadata:
+
+  ```bash
+  node scripts/init-worktree-submodules.mjs --worktree "$PWD/.worktrees/<name>"
+  ```
+
+  It runs native `git submodule update --init --recursive` for the submodules that are missing and validates the ones that already exist, so a repeated call keeps each submodule's own gitdir, index, config and HEAD (an intentional pin difference is reported, never reset) and shares nothing with main. Every initialized path is validated first, and the command writes exactly one JSON object to stdout with exit `0` (valid or initialized), `1` (Git/safety refusal — state unchanged, reason on stderr) or `2` (invalid invocation). Keep full recursive submodules; never disable recursion globally.
+- **Size concurrency by resources, not by a fixed count.** Recompute each iteration:
+
+  `K = min(ready independent tasks, floor(disk budget / per-track target estimate), max(1, cores / 2))`
+
+  and round the available tracks down; zero ready tasks means zero development tracks. Measured 2026-09-25 example: 10 cores, 32 GiB RAM, a ~120 GiB budget and 20 GiB per track gave **K=2** with two ready plans and K=4 once four independent tasks were ready — the number follows ready work and its dependencies and is **not** a standing worktree limit.
+- **Watermark gate before another track opens:** root free ≥ **90 GiB** and total feature targets ≤ **120 GiB**. If either fails, reclaim and re-measure before scheduling — a full disk is answered by reclamation, never by refusing concurrency.
+- Activate each feature's `.envrc`/direnv and confirm the isolated cache before building:
+
+  | Checkout | `CARGO_TARGET_DIR` |
+  |----------|--------------------|
+  | main / integration worktree | `${XDG_CACHE_HOME:-$HOME/.cache}/nexus-target` — canonical, shared, and **never** a feature's removal target |
+  | feature worktree `<name>` | `${XDG_CACHE_HOME:-$HOME/.cache}/nexus-target-<dirname>` |
+
+- **Reclaim inside your own slice.** Remove only the owned feature target before merging (with its temporary build products, in the same task/track slice); after the reviewed merge and the lawful release, remove that owned worktree non-forcibly and prune safely. Do not park a finished track for a later task. Six concurrent targets once consumed 98 GiB — that mandates immediate reclamation, not suppressed concurrency.
+- **Exit gates.** Each completed slice proves its own worktree/target/temp footprint is absent with raw command output; failed reclamation fails that exit gate. At final development convergence, when no peer feature remains, `git worktree list` shows only main + integration; after authorized integration cleanup, only main.
+- **Sweeper checkpoints (PM).** At every reschedule the PM runs `node scripts/worktree-sweep.mjs` against the current iteration's active-plan inventory. A dry-run proposal is evidence, never authorization to delete. Exact argv, checks and guard semantics → [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) → **Worktree lifecycle and reclamation**.
+- **Guards are not obstacles.** Active, dirty and unmerged refusals exist to protect other people's work — resolve the fact behind them, never force past them. `git worktree remove --force` is not an accepted cleanup route, a wildcard `rm -rf` is never a cleanup route, and `git submodule deinit` is not a cleanup step (it unregisters the submodule in the shared superproject config). For the two measured non-forced refusals, use the documented exact-path route in the lifecycle checklist.
 - Optional sparse-checkout when editing a subtree only: `git sparse-checkout init --cone` then `git sparse-checkout set apps/web …`.
 
 **Commit discipline (controls object growth):**
