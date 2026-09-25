@@ -1966,9 +1966,18 @@ fn session_cwd(request: &CreateSessionRequest, core: &CoreService) -> CoreResult
 /// selected-metadata read). An omitted `cwd` uses that pin, and an explicit
 /// `cwd` is accepted only when its canonical form — symlink aliases included —
 /// is exactly equal to it. A descendant, a foreign or Nexus root, the user
-/// home, a pin that is absent or was removed after open, and an unresolvable
-/// explicit path are all `invalid_input` on `cwd`, refused here, before any
-/// Host, provider or memory effect.
+/// home, an unresolvable explicit path, a pin that is absent or was removed
+/// after open, and a pin whose pathname no longer RE-RESOLVES to itself (the
+/// admitted directory renamed and its old pathname left as a symlink to
+/// another directory) are all `invalid_input` on `cwd`, refused here, before
+/// any Host, provider or memory effect.
+///
+/// The pin is canonical by construction, so re-resolving it must reproduce the
+/// SAME path: re-resolving it and then comparing the request against that
+/// result instead of against the stored pin is exactly how a retargeted
+/// pathname would silently move the admitted root (D11/A2 keep the admitted
+/// root the sole exact-match authority). The refusal never echoes the admitted
+/// root's absolute path.
 ///
 /// Compiled only with the `execution` edge that produces the pin: without it
 /// the admission pins nothing, so the same refusal is the only honest answer
@@ -1984,21 +1993,29 @@ fn character_session_cwd(
             "a Character session requires an admitted creative root",
         ));
     };
-    let pin = validate_workspace_path(pin).map_err(|e| invalid("cwd", e.to_string()))?;
+    // A stored pin that cannot be resolved, or that resolves somewhere else,
+    // was retargeted or removed after open: refuse it rather than following
+    // whatever its pathname points at now. The pin's own error text is
+    // discarded on purpose — it names the admitted root's path.
+    let resolved = validate_workspace_path(pin)
+        .map_err(|_| invalid("cwd", "the admitted creative root is no longer resolvable"))?;
+    if resolved.as_path() != pin {
+        return Err(invalid(
+            "cwd",
+            "the admitted creative root no longer resolves to itself",
+        ));
+    }
     let Some(cwd) = request.cwd.as_ref() else {
-        return Ok(pin);
+        return Ok(resolved);
     };
     let canonical = validate_workspace_path(std::path::Path::new(cwd))
         .map_err(|e| invalid("cwd", e.to_string()))?;
-    if canonical == pin {
+    if canonical == resolved {
         return Ok(canonical);
     }
     Err(invalid(
         "cwd",
-        format!(
-            "a Character session cwd must be the admitted creative root '{}'",
-            pin.display()
-        ),
+        "a Character session cwd must be the admitted creative root",
     ))
 }
 

@@ -72,7 +72,10 @@ PROMPT_GATE_TIMEOUT_S = float(os.environ.get("ACP_FIXTURE_PROMPT_GATE_TIMEOUT_S"
 
 # The five ACP wire spellings of `stopReason` this fixture can report.
 STOP_REASONS = ("end_turn", "max_tokens", "max_turn_requests", "refusal", "cancelled")
-STOP_REASON = os.environ.get("ACP_FIXTURE_STOP_REASON") or "end_turn"
+# An UNSET knob is the default `end_turn`; an empty value is a value like any
+# other, so it fails setup below instead of being taken for unset.
+_RAW_STOP_REASON = os.environ.get("ACP_FIXTURE_STOP_REASON")
+STOP_REASON = "end_turn" if _RAW_STOP_REASON is None else _RAW_STOP_REASON
 # `None` when the knob is usable; otherwise the rejected value. Reported to the
 # log and to stderr, then a setup failure — a typo must never look like a
 # successful `end_turn` turn.

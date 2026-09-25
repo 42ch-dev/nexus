@@ -4273,3 +4273,79 @@ async fn character_cwd_requires_admitted_pin() {
         "a deleted pin launches nothing"
     );
 }
+
+/// A pin whose pathname has been retargeted is refused, not followed.
+///
+/// The stored pin is the canonical root resolved ONCE at admission, so
+/// re-canonicalising it must reproduce the SAME path. Renaming the admitted
+/// directory and leaving a symlink at its old pathname to a DIFFERENT existing
+/// directory makes the old pathname resolve elsewhere: an omitted cwd must not
+/// silently adopt that new root, an explicit cwd naming it must not pass, and
+/// the renamed original directory is not the pin either. Every refusal happens
+/// before any Host session, provider launch, registry entry or memory candidate.
+#[tokio::test]
+async fn character_cwd_refuses_a_retargeted_pin() {
+    let env = seed_env().await;
+    let creative = env.user_home.join("creative");
+    std::fs::create_dir_all(&creative).unwrap();
+    let pin = register_creative_root(&env, &creative).await;
+
+    let provider = control_provider(true, 0, false);
+    let (core, principal, manager, handle) =
+        pinned_character_fixture(&env, &pin, Arc::clone(&provider)).await;
+    assert_eq!(
+        core.admission_creative_root(),
+        Some(pin.as_path()),
+        "the admission still holds the pin it resolved at open"
+    );
+
+    let baseline_sessions = manager.list_sessions().await.unwrap().len();
+    let baseline_candidates = memory_candidates(&env).await;
+    assert_eq!(provider.launched_cwds(), Vec::<PathBuf>::new(), "boot launches no session");
+
+    // Rename the admitted root away and leave a symlink in its place, pointing
+    // at a DIFFERENT directory that really exists.
+    let moved = env.user_home.join("creative-moved");
+    std::fs::rename(&pin, &moved).unwrap();
+    let target = env.user_home.join("creative-target");
+    std::fs::create_dir_all(&target).unwrap();
+    let target = std::fs::canonicalize(&target).unwrap();
+    std::os::unix::fs::symlink(&target, &pin).unwrap();
+    assert_ne!(target, pin, "the symlink target is a different canonical root");
+    assert_eq!(
+        std::fs::canonicalize(&pin).unwrap(),
+        target,
+        "the old pathname now resolves to the new target"
+    );
+
+    // Only the stored pin pathname is the exact-match authority: the omitted
+    // cwd, the new symlink target, the retargeted old pathname and the renamed
+    // original directory are all refused.
+    let cases: Vec<(&str, Option<&Path>)> = vec![
+        ("an omitted cwd", None),
+        ("the new symlink target", Some(target.as_path())),
+        ("the retargeted old pathname", Some(pin.as_path())),
+        ("the renamed admitted directory", Some(moved.as_path())),
+    ];
+    for (label, cwd) in cases {
+        let err = handle
+            .create_session(
+                &principal,
+                character_create(&env.character_id, &env.binding_id, label, cwd),
+            )
+            .await
+            .expect_err("a retargeted pin is refused");
+        assert!(is_cwd_refusal(&err), "{label}: the refusal names cwd, got {err:?}");
+    }
+
+    // No refusal reached the Host plane, the registry, a provider launch or the
+    // capture queue.
+    assert_eq!(
+        provider.launched_cwds(),
+        Vec::<PathBuf>::new(),
+        "a retargeted pin launches nothing"
+    );
+    assert_eq!(manager.list_sessions().await.unwrap().len(), baseline_sessions);
+    assert_eq!(handle.actor_sessions().len(), 0);
+    assert_eq!(memory_candidates(&env).await, baseline_candidates);
+}
