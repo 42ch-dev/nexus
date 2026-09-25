@@ -182,6 +182,29 @@ mod forcing {
         }
     }
 
+    /// Test-only forcing of an unconfirmed ACTOR quiesce.
+    ///
+    /// The native fixture has no Actor lane — an unconfirmed verdict needs a
+    /// supported cancel that failed, or an expired join, on a real Actor
+    /// operation — so it is injected here to drive the ordered close's
+    /// composition: the withheld core close, the authority retained as one unit
+    /// with it, and the retry that must re-enter the quiesce instead of closing
+    /// core. The path around the verdict stays production code.
+    #[cfg(test)]
+    pub mod quiesce {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        static FORCE_QUIESCE_UNCONFIRMED: AtomicBool = AtomicBool::new(false);
+
+        pub fn set(enable: bool) {
+            FORCE_QUIESCE_UNCONFIRMED.store(enable, Ordering::SeqCst);
+        }
+
+        pub fn get() -> bool {
+            FORCE_QUIESCE_UNCONFIRMED.load(Ordering::SeqCst)
+        }
+    }
+
     /// Test-only forcing of a failed Host attach, so the open rollback owner is
     /// exercised without forging an unadoptable core service.
     #[cfg(test)]
@@ -199,7 +222,7 @@ mod forcing {
         }
     }
 
-    /// Both forcing seams above are process-global, so the tests that arm them
+    /// The forcing seams above are process-global, so the tests that arm them
     /// must not interleave: this lock is their single serialization point.
     #[cfg(test)]
     pub mod seam_lock {
@@ -234,6 +257,13 @@ pub fn set_force_close_budget_ms(ms: u64) {
 #[cfg(test)]
 pub fn set_force_attach_failure(enable: bool) {
     forcing::attach::set(enable);
+}
+
+/// Test-only: force an unconfirmed Actor quiesce verdict (see
+/// [`forcing::quiesce`]).
+#[cfg(test)]
+pub fn set_force_actor_quiesce_unconfirmed(enable: bool) {
+    forcing::quiesce::set(enable);
 }
 
 /// The close budget: the frozen production value unless a test build overrides
@@ -520,6 +550,14 @@ async fn cleanup_owners(
                 pending.push("actor-quiesce-deadline".to_string());
             }
         }
+        // Test-only: the node fixture carries no Actor lane (an unconfirmed
+        // verdict needs a supported cancel that failed, or an expired join, on a
+        // real Actor operation), so the verdict is injected here to drive the
+        // composition below. Everything else in this path stays production.
+        #[cfg(test)]
+        if forcing::quiesce::get() {
+            actor_quiesce_confirmed = false;
+        }
     }
 
     let core_taken = match inject_core {
@@ -571,8 +609,19 @@ async fn cleanup_owners(
         core_guard.disarm();
     }
 
+    // Contract §3's close order is ONE sequence — Actor quiesce (while the core
+    // authority is still open), the existing core/execution owner, then this
+    // authority's manager + `LocalSet` settlement — so the authority is released
+    // as the LAST step of that sequence, never on its own. A quiesce that could
+    // not prove the Actor side (or a core close that did not settle) therefore
+    // keeps BOTH owners: the state a withheld attempt leaves is "the authority is
+    // still here", which is what makes the retry re-enter the ordered close —
+    // quiesce included — instead of reading an absent authority as proof that the
+    // Actor side settled and closing core with no Actor proof at all.
+    let ordered_close_unconfirmed = !actor_quiesce_confirmed || !core_released;
+
     let host_released = match host_guard.value.as_ref() {
-        Some(HostOwner::Attached(authority)) => {
+        Some(HostOwner::Attached(authority)) if !ordered_close_unconfirmed => {
             // ONE settlement of the attached manager + `LocalSet`, inside the
             // close's deadline, reporting its own unsettled work.
             //
@@ -600,6 +649,14 @@ async fn cleanup_owners(
                 retain_unsettled_localset_thread(&manager, &state);
                 false
             }
+        }
+        Some(HostOwner::Attached(_)) => {
+            // The ordered close has not reached this authority's settlement, so
+            // the manager/`LocalSet` is not settled and the authority is not
+            // discarded: it owns the Actor drains the retry must re-join, and the
+            // guard hands it back when this attempt ends.
+            pending.push("host-close-withheld: ordered-close-unconfirmed".to_string());
+            false
         }
         Some(HostOwner::Unattached(manager)) => {
             // A failed open's manager: never adopted, so there is no authority
@@ -1777,6 +1834,97 @@ mod tests {
         let final_report = close_core(state.clone()).await;
         assert_eq!(final_report.state, CoreCloseReportState::Closed);
         assert!(final_report.cleanup_confirmed);
+    }
+
+    /// F-001 (plan QC fix round 2): contract §3's close order is ONE sequence,
+    /// so a quiesce that could not prove the Actor side must keep the WHOLE
+    /// authority — core AND host. Discarding the authority on its own settlement
+    /// while the core is retained leaves a retry with nothing to re-enter the
+    /// quiesce with: it reads the absent authority as "the Actor side settled"
+    /// and closes core storage with no Actor proof at all.
+    ///
+    /// The native fixture carries no Actor lane (the unconfirmed verdict needs a
+    /// supported cancel that failed, or an expired join, on a real Actor
+    /// operation), so the verdict is injected through the `forcing::quiesce`
+    /// seam. Everything else here is the production path: the real core service,
+    /// the real attached authority and manager/`LocalSet` settlement, the
+    /// bounded retry through `close_core`'s retained-cleanup owner, and the
+    /// final confirmed completion.
+    #[tokio::test]
+    async fn native_retry_reenters_the_actor_quiesce_instead_of_closing_core() {
+        use crate::wire_fixture::seed_wire_home;
+        use nexus_contracts::native_open_options::NativeOpenOptionsAccess;
+        use nexus_contracts::NativeOpenOptions;
+        use tempfile::tempdir;
+
+        // The forcing seams are process-global: hold their lock for the whole
+        // case so no concurrent close test can reset the injected verdict.
+        let _seams = forcing::seam_lock::acquire().await;
+        let dir = tempdir().expect("tempdir");
+        seed_wire_home(dir.path()).await;
+        let state = Arc::new(EnvState::new());
+        let options = || NativeOpenOptions {
+            user_home: dir.path().to_string_lossy().to_string(),
+            access: NativeOpenOptionsAccess::EngineOwner,
+            allow_uninitialized: false,
+        };
+        open_core(state.clone(), options(), None)
+            .await
+            .expect("open");
+        assert!(state.owner_slots_present());
+        set_force_actor_quiesce_unconfirmed(true);
+
+        // The unconfirmed quiesce withholds the core close, keeps the authority
+        // for the retry, and reports the interruption.
+        let first = close_core(state.clone()).await;
+        assert_eq!(first.state, CoreCloseReportState::Interrupted, "{first:?}");
+        assert!(!first.cleanup_confirmed);
+        assert!(
+            state.core.lock().expect("core mutex poisoned").is_some(),
+            "the withheld core stays in its slot"
+        );
+
+        // The retry MUST re-enter the quiesce: an independent owner discard in
+        // the first attempt is exactly what let a retry with no attached
+        // authority close core here, confirming a close whose Actor side was
+        // never proven.
+        let retry_had_authority = state.host_authority().is_some();
+        let retry = close_core(state.clone()).await;
+        assert!(
+            !retry.cleanup_confirmed,
+            "a retry may not close core with the Actor side unproven \
+             (attached authority at retry: {retry_had_authority}): {retry:?}"
+        );
+        assert!(
+            state.core.lock().expect("core mutex poisoned").is_some(),
+            "the core stays retained while the Actor side is unproven"
+        );
+        assert!(
+            state.host_authority().is_some(),
+            "the authority stays retained with the core it belongs to"
+        );
+        assert!(
+            first
+                .pending_operations
+                .iter()
+                .any(|entry| entry.starts_with("host-close-withheld:")),
+            "the first attempt names the authority it withheld: {first:?}"
+        );
+
+        // With the Actor side provable again the SAME retained state completes
+        // as one coherent teardown: quiesce, core close, manager settlement.
+        set_force_actor_quiesce_unconfirmed(false);
+        let settled = close_core(state.clone()).await;
+        assert_eq!(settled.state, CoreCloseReportState::Closed, "{settled:?}");
+        assert!(settled.cleanup_confirmed, "{settled:?}");
+        assert!(
+            !state.owner_slots_present(),
+            "the settled close released every owner"
+        );
+        open_core(state.clone(), options(), None)
+            .await
+            .expect("a settled environment admits a new owner");
+        let _ = close_core(state.clone()).await;
     }
 
     /// Q1-C2: a JS session whose owned child was never released must be RETRIED

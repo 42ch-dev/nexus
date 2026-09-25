@@ -2137,6 +2137,9 @@ struct ControlProvider {
     executions: Arc<AtomicUsize>,
     /// Park executing provider calls until [`Self::release_parked_executions`].
     park: Arc<AtomicBool>,
+    /// Fail executing provider calls instead of producing a stream: the shape of
+    /// an execution that reaches the provider and registers no drain at all.
+    exec_fails: Arc<AtomicBool>,
     /// The release signal for a parked execution.
     exec_gate: Arc<tokio::sync::Notify>,
     cancels: Arc<AtomicUsize>,
@@ -2152,6 +2155,7 @@ fn control_provider(cancellation: bool, burst: usize, cancel_fails: bool) -> Arc
         burst,
         executions: Arc::new(AtomicUsize::new(0)),
         park: Arc::new(AtomicBool::new(false)),
+        exec_fails: Arc::new(AtomicBool::new(false)),
         exec_gate: Arc::new(tokio::sync::Notify::new()),
         cancels: Arc::new(AtomicUsize::new(0)),
         shutdowns: Arc::new(AtomicUsize::new(0)),
@@ -2201,6 +2205,12 @@ impl ControlProvider {
     fn release_parked_executions(&self) {
         self.park.store(false, Ordering::SeqCst);
         self.exec_gate.notify_one();
+    }
+
+    /// Make executing provider calls fail instead of producing a stream, so an
+    /// admitted execution retires its admission while registering no drain.
+    fn fail_executions(&self) {
+        self.exec_fails.store(true, Ordering::SeqCst);
     }
 
     /// Executions that reached the provider.
@@ -2261,6 +2271,11 @@ impl ProviderAdapter for ControlProvider {
         // `exec` yet, so no drain is registered.
         if self.park.load(Ordering::SeqCst) {
             self.exec_gate.notified().await;
+        }
+        if self.exec_fails.load(Ordering::SeqCst) {
+            return Err(nexus_agent_host::HostError::internal(
+                "the control fixture refuses every execution",
+            ));
         }
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<HostItem>();
         *self.outbox.lock().unwrap() = Some(tx);
@@ -3359,6 +3374,110 @@ async fn actor_control_quiesce_waits_for_an_admitted_execute_before_it_confirms(
     assert_eq!(
         recorded.run_status,
         CharacterOperationResultRunStatus::Cancelled
+    );
+}
+
+/// W-005 (plan QC fix round 2): the authority-wide admission join is entered by
+/// EVERY concurrent quiesce on one authority, so the final admission retirement
+/// must wake all of them. A single-permit `notify_one` handoff wakes one joiner
+/// to recheck zero while the other stays suspended — and no further retirement
+/// will ever come, because the count only decreases once admission is frozen.
+///
+/// Two concurrent quiesces meet ONE admitted execution that fails before it can
+/// register a drain, so the retirement they wait on is the last settlement in
+/// play and the case stays on the admission join (the drain join is never
+/// entered). Both joins must complete, and both must report the settled Actor
+/// side: the refused execution left no recorded operation and no live drain.
+#[tokio::test]
+async fn actor_control_concurrent_quiesces_join_the_same_admitted_retirement() {
+    let env = seed_env().await;
+    let provider = control_provider(true, 0, false);
+    let (_core, principal, _manager, handle, session_id) =
+        control_fixture(&env, Arc::clone(&provider)).await;
+
+    // Park the admitted execution inside the provider's own `execute`: admitted,
+    // past the registry gates and the manager's session lookup, with no drain
+    // registered yet. Releasing it then fails the call, so the admission retires
+    // with nothing transferred.
+    provider.park_executions();
+    provider.fail_executions();
+    let execute = tokio::spawn({
+        let handle = handle.clone();
+        let principal = principal.clone();
+        let session_id = session_id.to_string();
+        async move {
+            handle
+                .execute(
+                    &principal,
+                    session_id,
+                    execute_request(serde_json::json!({
+                        "kind": "prompt",
+                        "content": "race two Actor quiesces",
+                    })),
+                )
+                .await
+        }
+    });
+    wait_until(
+        || provider.executions() == 1,
+        "the admitted execute to reach the provider",
+    )
+    .await;
+    assert_eq!(
+        handle.actor_sessions().unsettled_drain_count(),
+        0,
+        "the admitted execute has registered no drain yet"
+    );
+
+    // Both quiesces meet that one admission and wait for it to retire.
+    let first = tokio::spawn({
+        let handle = handle.clone();
+        async move { handle.quiesce_actor_sessions().await }
+    });
+    let second = tokio::spawn({
+        let handle = handle.clone();
+        async move { handle.quiesce_actor_sessions().await }
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    assert!(
+        !first.is_finished() && !second.is_finished(),
+        "both quiesces wait on the one in-flight admission"
+    );
+
+    // Retire the admission: the refused execution has failed, so this
+    // retirement is the only settlement either joiner will observe.
+    provider.release_parked_executions();
+    let failed = execute.await.expect("the execute task joins");
+    assert!(
+        failed.is_err(),
+        "the control fixture refuses every execution: {failed:?}"
+    );
+
+    let first = tokio::time::timeout(std::time::Duration::from_secs(5), first)
+        .await
+        .expect("the first quiesce observes the retirement")
+        .expect("the first quiesce task joins")
+        .expect("the first quiesce settles");
+    let second = tokio::time::timeout(std::time::Duration::from_secs(5), second)
+        .await
+        .expect(
+            "a second concurrent quiesce must not be stranded on a retirement that already happened",
+        )
+        .expect("the second quiesce task joins")
+        .expect("the second quiesce settles");
+    assert!(
+        first.cleanup_confirmed && second.cleanup_confirmed,
+        "both joins observe the drained-and-retired admission: {first:?} {second:?}"
+    );
+    assert_eq!(
+        handle.actor_sessions().unsettled_drain_count(),
+        0,
+        "the refused execution registered no drain to keep retained"
+    );
+    assert_eq!(
+        provider.cancels(),
+        0,
+        "the refused execution left no recorded operation to cancel"
     );
 }
 

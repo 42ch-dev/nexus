@@ -115,10 +115,11 @@ struct AuthorityState {
     /// The retained report of the last close attempt: a confirmed cleanup
     /// makes a repeated close idempotent, an unsettled one is re-attempted.
     close_report: Mutex<Option<CoreCloseReport>>,
-    /// The admission barrier's settlement signal: every retirement publishes
-    /// one permit, so a quiesce that latched behind an admitted operation can
-    /// wait for the drain that operation is about to transfer instead of
-    /// reading a zero drain count as quiescence.
+    /// The admission barrier's settlement signal: every retirement wakes EVERY
+    /// joiner, so a quiesce that latched behind an admitted operation can wait
+    /// for the drain that operation is about to transfer instead of reading a
+    /// zero drain count as quiescence — and two concurrent quiesces on clones
+    /// of this authority both observe the same retirement.
     admissions_settled: tokio::sync::Notify,
     /// One-shot release of the service-wide established-owner slot for THIS
     /// authority. Shared by every clone, so two concurrent confirmed closes
@@ -234,11 +235,14 @@ impl AuthorityState {
         // zero (release) — never silently to a confirmable state.
         gate.in_flight -= 1;
         drop(gate);
-        // Publish AFTER the count dropped, so a joiner that armed its
-        // notification and then read a non-zero count still gets the permit
-        // this retirement publishes (the same order the session-scoped join
-        // uses).
-        self.admissions_settled.notify_one();
+        // Publish AFTER the count dropped, so a joiner that registered and then
+        // read a non-zero count is still woken by this retirement.
+        //
+        // Wake EVERY joiner: the admission join is entered by every concurrent
+        // quiesce on this authority, and the last retirement is the only wakeup
+        // they will ever see. A `notify_one` handoff would let one joiner
+        // recheck zero while a second stayed suspended forever.
+        self.admissions_settled.notify_waiters();
     }
 
     /// Wait until every operation admitted before the admission latch (the
@@ -251,12 +255,18 @@ impl AuthorityState {
     /// still about to own a drain. Cancellation-safe — the latch keeps admission
     /// frozen, so a caller that runs out of its outer deadline loses nothing and
     /// a retry joins the same admissions.
+    ///
+    /// Cancellation-safe AND multi-waiter: the join is entered by EVERY
+    /// concurrent quiesce on this authority, so the waiter registers with the
+    /// notification BEFORE it reads the count (`Notified::enable`, the same
+    /// register-first handoff [`Self::close`]'s waiters use) and the retirement
+    /// wakes all of them. `notify_one`'s single stored permit would leave a
+    /// second joiner suspended on a retirement that already happened.
     async fn join_admissions(&self) {
         loop {
-            // Arm the notification BEFORE reading the count: a retirement in
-            // between leaves a permit, so the wait can never miss its only
-            // wakeup.
             let settled = self.admissions_settled.notified();
+            tokio::pin!(settled);
+            settled.as_mut().enable();
             if self.gate().in_flight == 0 {
                 return;
             }
