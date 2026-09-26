@@ -288,7 +288,7 @@ async function validateSubmodule(record, worktreeGitDir, owner) {
   const origin = await runGit(record.dir, ['config', '--get', 'remote.origin.url']);
   const originUrl = origin.ok ? origin.stdout.trim() : '';
   if (originUrl !== record.url) {
-    throw new RefusalError(`${owner}: submodule '${record.path}' origin url ${originUrl || '(unset)'} does not match the .gitmodules url ${record.url}`);
+    throw new RefusalError(`${owner}: submodule '${record.path}' origin url ${originUrl === '' ? '(unset)' : originUrl} does not match the .gitmodules url ${record.url}`);
   }
   const unmerged = (await gitOut(record.dir, ['ls-files', '-u'], owner)).trim();
   if (unmerged !== '') {
@@ -358,7 +358,7 @@ async function inspect(worktree) {
     throw new RefusalError(`${owner}: refusing the main worktree; only linked worktrees under ${worktreesRoot} are initialized`);
   }
   const worktreesRootStat = await lstat(worktreesRoot).catch(() => null);
-  if (!worktreesRootStat || !worktreesRootStat.isDirectory() || worktreesRootStat.isSymbolicLink()) {
+  if (!worktreesRootStat?.isDirectory() || worktreesRootStat.isSymbolicLink()) {
     throw new RefusalError(`${owner}: ${worktreesRoot} must be a real directory (missing or a symlink)`);
   }
   if (dirname(worktree) !== worktreesRoot) {

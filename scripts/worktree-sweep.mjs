@@ -24,7 +24,11 @@
  *     covers the AUTHORIZATION facts — the snapshot's plan status, execution lease, branch claim
  *     pair and retained worktree path, the repository ancestry, and the receipt's producer/state —
  *     which are proof of one moment and are read from disk again immediately before each of those
- *     steps, never carried over from the planning pass.
+ *     steps, never carried over from the planning pass. The sibling declarations are re-read there
+ *     too, because the plan's foreign-claim projection is a planning-pass fact as well: a peer that
+ *     starts claiming this track's branch, worktree or feature target only afterwards aborts the
+ *     step (`sweeper.refuse.foreign-claim`), and a sibling whose declaration became unreadable
+ *     withholds it (`sweeper.refuse.sibling-snapshot-unreadable`).
  *   * Ownership is proven, never inferred from a branch claim. A receipt is non-authoritative: a
  *     track's worktree is owned when a live `git worktree list` shows it as this repository's linked
  *     checkout of that path on the claimed branch, and when no such record exists — an absent
@@ -65,8 +69,11 @@
  *     reports its measured gitlink count and how many initialized submodule checkouts point at an
  *     unresolvable gitdir — the diagnosis for this repository's linked checkouts. On that exact
  *     measured refusal `--apply` records the refusal verbatim and takes the documented non-force
- *     route (`rm -rf <exact worktree path>` + `git worktree prune`, then re-observes). This script
- *     never deinitializes and never forces.
+ *     route (`rm -rf <exact worktree path>` + `git worktree prune`, then re-observes). That route
+ *     removes the checkout the engine refused AS IT STOOD, so it re-measures the working tree
+ *     immediately before its own `rm -rf` — any tracked modification, and any untracked path that is
+ *     not ignored (`sweeper.refuse.reverify-submodule-fallback`) — with the same discipline the
+ *     ignored-only route applies below. This script never deinitializes and never forces.
  *   * The engine's own refusal is never overridden silently. That measured submodule refusal and a
  *     `cleanup.refuse.dirty-worktree` refusal that is purely an ignored build-output footprint
  *     (tracked tree clean, no untracked non-ignored path, owner merged and released, and the exact
@@ -715,7 +722,7 @@ function declarationOf(doc, fallbackId) {
 
 /**
  * Read the explicit workflow declaration plus the sibling declarations under the harness.
- * Sibling snapshots are bounded to `<harness>/workflows/*​/snapshot.json` — never a home scan —
+ * Sibling snapshots are bounded to `<harness>/workflows/<id>/snapshot.json` — never a home scan —
  * and an unreadable sibling withholds every removal because its claims are unknown.
  */
 async function readDeclarations(harnessDir, workflowId) {
@@ -754,6 +761,55 @@ function branchClaimers(declaration, branch) {
     if (plan.branches.has(branch)) claimers.push({ plan_id: plan.id, source: 'plan-branch-claim' });
   }
   return claimers;
+}
+
+/**
+ * Project sibling declarations onto the claims this tool reasons about: every branch a sibling plan
+ * declares, its integration branch, its integration checkout, and each declared plan worktree —
+ * plus the feature target that worktree's `.envrc` mapping implies, so a collision cannot hide
+ * behind a different spelling of the same path. The projection is derived from the declarations
+ * alone and is made from whatever read produced them, so the planning pass and the pre-mutation
+ * re-read apply one rule.
+ */
+async function foreignClaimsOf(siblings, cacheRoot) {
+  const branches = new Map();
+  const paths = new Map();
+  for (const sibling of siblings) {
+    for (const plan of sibling.plans) {
+      for (const branch of plan.branches) if (!branches.has(branch)) branches.set(branch, sibling.id);
+    }
+    if (sibling.integration_branch !== undefined && !branches.has(sibling.integration_branch)) {
+      branches.set(sibling.integration_branch, sibling.id);
+    }
+    if (sibling.integration_worktree_path !== undefined) {
+      paths.set(await pathKey(sibling.integration_worktree_path), sibling.id);
+    }
+    // A sibling plan's declared worktree — and the feature target its `.envrc` mapping implies —
+    // is a foreign claim even while that worktree is gone: a path a sibling plan still claims must
+    // never read as free just because the branch happens to be claimed locally as well.
+    for (const plan of sibling.plans) {
+      for (const worktreePath of plan.worktreePaths) {
+        for (const claimed of [worktreePath, expectedTargetFor(cacheRoot, worktreePath)]) {
+          const key = await pathKey(claimed);
+          if (!paths.has(key)) paths.set(key, sibling.id);
+        }
+      }
+    }
+  }
+  return { branches, paths };
+}
+
+/**
+ * The one sibling claim, if any, that bears on this track: its branch, its worktree path, or its
+ * feature target. The wording is the planning pass's own, so a claim reported before a mutation and
+ * the same claim reported by the dry run read as one rule; `null` means no sibling claims it.
+ */
+async function foreignClaimOn(claims, track, targetKey) {
+  const branchOwner = claims.branches.get(track.branch);
+  if (branchOwner !== undefined) return `branch ${track.branch} is claimed by foreign workflow ${branchOwner}`;
+  const pathOwner = claims.paths.get(track.worktree_key) ?? claims.paths.get(targetKey);
+  if (pathOwner !== undefined) return `track ${track.track_id} names a path claimed by foreign workflow ${pathOwner}`;
+  return null;
 }
 
 // --- inventory ---------------------------------------------------------------------------
@@ -1289,6 +1345,24 @@ async function measureIgnoredOnlyFootprint(track, context) {
   return { ok: true, footprint: { paths, total_bytes: total } };
 }
 
+/**
+ * Measure the one thing a non-force removal must never destroy: changes that arrived in the
+ * worktree after the engine refused it. `git status --porcelain --untracked-files=normal` reports
+ * tracked modifications and untracked, non-ignored paths — the two shapes the ignored-only
+ * classification also treats as real dirt — and never an ignored build output, so the documented
+ * ignored-output route keeps working. Any porcelain record is a change; a status that cannot be
+ * read is a fact gap and refuses, never a clean tree.
+ */
+async function measureWorktreeChanges(track, context) {
+  const status = await runGit(['status', '--porcelain', '-z', '--untracked-files=normal'], track.worktree_path, context.environment);
+  if (status.exit_code !== 0) {
+    return { ok: false, detail: `git status failed in ${track.worktree_path} (${status.spawn_error ?? status.stderr.trim()})` };
+  }
+  const change = status.stdout.split('\0').find(record => record !== '') ?? null;
+  if (change === null) return { ok: true, detail: null };
+  return { ok: false, detail: `${track.worktree_path} carries a working-tree change that arrived after the engine's refusal (${JSON.stringify(change)})` };
+}
+
 /** `git worktree prune --dry-run --verbose` names each stale record it would drop. */
 function prunableWorktreeNames(text) {
   const names = [];
@@ -1479,7 +1553,7 @@ async function applyTrack(fact, context) {
   }
   // What this track still owns and would therefore delete: an idempotent-absent footprint has no
   // deletion to authorize.
-  const reclaimable = fact.target.exists || fact.temporary_paths.some(temporary => temporary.exists);
+  const reclaimable = fact.target.exists ?? fact.temporary_paths.some(temporary => temporary.exists);
   // Ownership is proven before anything else is considered. When the worktree is gone (the
   // idempotent-retry case) there is no live Git record to prove the path, so the snapshot row this
   // receipt pairs with must retain exactly this path; the branch claim already checked at
@@ -1546,15 +1620,31 @@ async function applyTrack(fact, context) {
    * ownership (whenever no live Git record proves the worktree at that moment), the repository's own
    * ancestry, and the producer/state the receipt declares. Any changed, missing or unreadable fact
    * aborts that step — and every later one — fail-closed, with zero further mutation.
+   *
+   * The sibling declarations are re-read in the same breath, because the plan's foreign-claim
+   * projection is a fact of the planning pass too: a peer that claims this track's branch, worktree
+   * or target only AFTER the inventory was reconciled is not in that projection, and the step about
+   * to delete such a path is exactly the deletion the plan never authorized.
    */
   const authorizationGate = async worktreeListed => {
     const declarations = await readDeclarations(context.options.harness, context.options.workflow);
     if (declarations.error !== undefined) {
       return { ok: false, reason: 'sweeper.refuse.snapshot-unreadable', detail: `the workflow declaration can no longer be read (${declarations.error})` };
     }
+    // An unreadable sibling has unknown claims, and an unknown claim is never clear: it withholds
+    // this step exactly as it withholds every proposal in the planning pass.
+    const unreadableSibling = (declarations.unreadable ?? [])[0] ?? null;
+    if (unreadableSibling !== null) {
+      return { ok: false, reason: 'sweeper.refuse.sibling-snapshot-unreadable', detail: `sibling workflow ${unreadableSibling.workflow_id}: ${unreadableSibling.detail} — its claims are unknown, so this step is withheld` };
+    }
     const fresh = declarations.own;
     if (fresh.id !== context.declaration.id) {
       return { ok: false, reason: 'sweeper.refuse.snapshot-identity', detail: `the workflow declaration now reports id ${fresh.id}, not the planned ${context.declaration.id}` };
+    }
+    const claims = await foreignClaimsOf(declarations.siblings ?? [], context.cacheRoot);
+    const foreign = await foreignClaimOn(claims, track, await pathKey(track.target_path));
+    if (foreign !== null) {
+      return { ok: false, reason: 'sweeper.refuse.foreign-claim', detail: `re-read immediately before this step: ${foreign}` };
     }
     const claimers = branchClaimers(fresh, track.branch);
     if (claimers.length !== 1 || claimers[0].plan_id !== track.plan_id) {
@@ -1636,6 +1726,21 @@ async function applyTrack(fact, context) {
     const measured = await measureIgnoredOnlyFootprint(track, context);
     if (!measured.ok) {
       return { ok: false, absent: false, reason: 'sweeper.refuse.reverify-ignored-only', detail: `the ignored-only classification of ${track.worktree_path} no longer holds: ${measured.detail}` };
+    }
+    return { ok: true, worktree_absent: false, target_absent: footprint.target_absent, worktree_listed: footprint.worktree_listed, reason: null, detail: null };
+  };
+  // The measured submodule refusal authorizes the documented non-force route for the worktree the
+  // engine refused AS IT STOOD — never a standing permission to delete whatever is there now. This
+  // gate re-proves the same identity and authorization facts AND measures the working tree again,
+  // immediately before its `rm -rf`: a tracked modification or an untracked non-ignored path that
+  // arrived after the refusal aborts the removal with zero mutation, the same discipline the
+  // ignored-only route applies to its own classification.
+  const submoduleFallbackGate = async () => {
+    const footprint = await footprintGate();
+    if (!footprint.ok || footprint.worktree_absent) return footprint;
+    const changes = await measureWorktreeChanges(track, context);
+    if (!changes.ok) {
+      return { ok: false, absent: false, reason: 'sweeper.refuse.reverify-submodule-fallback', detail: changes.detail };
     }
     return { ok: true, worktree_absent: false, target_absent: footprint.target_absent, worktree_listed: footprint.worktree_listed, reason: null, detail: null };
   };
@@ -1768,12 +1873,14 @@ async function applyTrack(fact, context) {
     const refusal = await engineSubmoduleRefusal(applied, track.worktree_path, track.worktree_key);
     // The measured submodule refusal is the only route around the engine's own non-force removal,
     // and only when the local measurement agrees that this exact worktree carries submodule gitlinks.
+    // Like the ignored-only route, it re-measures the checkout immediately before its own `rm -rf`:
+    // what the engine refused is the worktree it saw, not whatever has arrived since.
     if (refusal !== null && fact.worktree.submodule_gitlinks > 0) {
       await nonForceWorktreeRemoval({
         track,
         context,
         actions,
-        gate: authorized(footprintGate),
+        gate: authorized(submoduleFallbackGate),
         refusal: {
           reason: 'sweeper.blocked.submodule-gitlinks',
           detail: `the installed engine refused the non-force removal with "${ENGINE_SUBMODULE_REFUSAL}"; taking the documented exact-path route`,
@@ -1879,7 +1986,7 @@ function buildTrackActions(fact, decision) {
   // dry run reports the refusal it would get from `--apply` instead of proposing a footprint whose
   // ownership rests on a branch claim alone. A track with nothing left to delete is not refused —
   // there is no proposal to withhold and no deletion to authorize.
-  const reclaimable = fact.target.exists || fact.temporary_paths.some(temporary => temporary.exists);
+  const reclaimable = fact.target.exists ?? fact.temporary_paths.some(temporary => temporary.exists);
   if (reclaimable && fact.worktree.listed === false && fact.ownership.proven !== true) {
     addAction(
       actions,
@@ -2052,29 +2159,7 @@ export async function sweepWorktreeInventory(options, environment = process.env)
   const read = await readInventory(options.inventory);
   if (read.error !== undefined) refuse('sweeper.refuse.inventory-unreadable', read.error, EXIT_INVALID);
 
-  const foreignClaims = { branches: new Map(), paths: new Map() };
-  for (const sibling of declarations.siblings ?? []) {
-    for (const plan of sibling.plans) {
-      for (const branch of plan.branches) if (!foreignClaims.branches.has(branch)) foreignClaims.branches.set(branch, sibling.id);
-    }
-    if (sibling.integration_branch !== undefined && !foreignClaims.branches.has(sibling.integration_branch)) {
-      foreignClaims.branches.set(sibling.integration_branch, sibling.id);
-    }
-    if (sibling.integration_worktree_path !== undefined) {
-      foreignClaims.paths.set(await pathKey(sibling.integration_worktree_path), sibling.id);
-    }
-    // A sibling plan's declared worktree — and the feature target its `.envrc` mapping implies —
-    // is a foreign claim even while that worktree is gone: a path a sibling plan still claims must
-    // never read as free just because the branch happens to be claimed locally as well.
-    for (const plan of sibling.plans) {
-      for (const worktreePath of plan.worktreePaths) {
-        for (const claimed of [worktreePath, expectedTargetFor(cacheRoot, worktreePath)]) {
-          const key = await pathKey(claimed);
-          if (!foreignClaims.paths.has(key)) foreignClaims.paths.set(key, sibling.id);
-        }
-      }
-    }
-  }
+  const foreignClaims = await foreignClaimsOf(declarations.siblings ?? [], cacheRoot);
 
   const tempRoot = await pathKey(tmpdir());
   const reconciliation = declaration === null || read.raw === undefined
@@ -2163,7 +2248,13 @@ export async function sweepWorktreeInventory(options, environment = process.env)
       kind: integrationNamed ? 'iteration-named-feature-target' : 'feature-target',
       bytes: measured.bytes,
       is_symlink: measured.is_symlink,
+      // `verdict` says what this tool may DO with the entry, `leftover` whether the convergence
+      // reasons must COUNT it. An iteration checkout shares the unsuffixed canonical cache, so an
+      // unclaimed `nexus-target-iteration-*` directory is never a deletion candidate — but it is
+      // still an unclaimed footprint, and reporting it as `protected` must not read as evidence
+      // that the cache converged. Both spellings are leftovers; neither is proposed.
       verdict: integrationNamed ? 'protected' : 'unknown',
+      leftover: true,
       reason: integrationNamed ? 'sweeper.unknown.integration-named' : 'sweeper.unknown.unclaimed-feature-target',
     });
   }
@@ -2182,6 +2273,10 @@ export async function sweepWorktreeInventory(options, environment = process.env)
       bytes: null,
       is_symlink: false,
       verdict: integrationNamed ? 'protected' : 'unknown',
+      // An iteration-named worktree is counted by `sweeper.check.worktree-extra` like every extra
+      // worktree is, so it is not counted a second time here; the cache loop above has no such row,
+      // which is why an unclaimed iteration-named target is counted there.
+      leftover: !integrationNamed,
       reason: integrationNamed ? 'sweeper.unknown.integration-named' : 'sweeper.unknown.unclaimed-worktree',
     });
   }
@@ -2331,7 +2426,10 @@ export async function sweepWorktreeInventory(options, environment = process.env)
       : [
         ...sorted(tracks, track => track.track_id).flatMap(track => exitReasons(track)),
         ...extraWorktrees.map(worktree => ({ code: 'sweeper.check.worktree-extra', detail: `Git still lists non-protected worktree ${worktree.path}` })),
-        ...unknownPaths.filter(entry => entry.verdict === 'unknown').map(entry => ({ code: 'sweeper.check.unknown-path', detail: `unclaimed footprint ${entry.path} remains` })),
+        // Every unclaimed footprint the plan can account for is counted here, deletion candidate or
+        // not: `leftover` is what decides, so a `protected` entry that still remains — an unclaimed
+        // `nexus-target-iteration-*` cache — fails convergence instead of passing as clean.
+        ...unknownPaths.filter(entry => entry.leftover === true).map(entry => ({ code: 'sweeper.check.unknown-path', detail: `unclaimed footprint ${entry.path} remains` })),
       ];
     checks = { mode, track_id: mode === 'check-exit' ? options.checkExit : null, passed: reasons.length === 0, reasons };
   }
