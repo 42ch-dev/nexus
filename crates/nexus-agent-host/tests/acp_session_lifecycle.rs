@@ -431,6 +431,15 @@ enum ExpectedTerminal {
     Failed(&'static [&'static str]),
 }
 
+/// One `acp_stop_reason_wire_matrix` row: `(case name, extra fixture env,
+/// expected terminal, turn leaves the session usable)`.
+type StopReasonCase = (
+    &'static str,
+    &'static [(&'static str, &'static str)],
+    ExpectedTerminal,
+    bool,
+);
+
 /// Drive one ACP stop-reason case over the real fixture and assert its terminal.
 ///
 /// `survives` is true when the turn ended through a normal `session/prompt`
@@ -536,7 +545,7 @@ async fn acp_stop_reason_wire_matrix() {
     // Only the five real stop reasons arrive as a normal `session/prompt`
     // reply, so only they are expected to leave the session usable; a wire-level
     // prompt error breaks the transport instead.
-    let cases: [(&str, &[(&str, &str)], ExpectedTerminal, bool); 6] = [
+    let cases: [StopReasonCase; 6] = [
         (
             "end_turn",
             &[],
