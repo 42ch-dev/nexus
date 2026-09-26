@@ -1677,12 +1677,12 @@ async fn actor_echo_keeps_the_actor_pair_for_live_and_retired_sessions() {
 /// the authority acts on.
 const ATTACHED_MANAGER_MAX_SESSIONS: usize = 4242;
 
-/// The agent-host config path the standalone `open_host` reads for this env
-/// (same home argument `CoreService::open_host_inner` passes).
+/// The canonical agent-host config path the standalone `open_host` reads for
+/// this env: the Nexus root plus `agent-host/config.toml`, i.e. exactly what
+/// `agent_host_config_path` resolves from the raw user home the native boot
+/// passes it. The helper takes the HOME, so it is handed `env.user_home` once.
 fn host_config_path(env: &Env) -> PathBuf {
-    nexus_agent_host::config::agent_host_config_path(&nexus_home_layout::nexus_root_from_home(
-        &env.user_home,
-    ))
+    nexus_agent_host::config::agent_host_config_path(&env.user_home)
 }
 
 /// Start a native manager the way the native open composes one — the
@@ -1813,6 +1813,79 @@ async fn attached_host_failed_open_releases_the_shared_admission() {
         .attach_host(manager.clone(), CountingPort::new())
         .expect_err("the successful attach now owns the slot");
     assert!(matches!(err, CoreError::OwnerBusy), "single owner: {err:?}");
+}
+
+/// The standalone `open_host` reads the ONE canonical agent-host config
+/// (`<nexus root>/agent-host/config.toml`) once, at open: the Host's own
+/// manager carries that file's value, a conflicting config at the
+/// `.nexus42`-nested path no writer uses cannot win, a later edit never
+/// re-loads into the running authority, and a malformed canonical file fails
+/// the open without retaining the shared admission.
+#[tokio::test]
+async fn standalone_host_reads_canonical_config_once() {
+    let env = seed_env().await;
+    let (core, _principal) = open_core(&env).await;
+
+    let canonical = host_config_path(&env);
+    // The path the standalone lookup must NOT resolve: applying the layout
+    // helper to the already-canonical Nexus root nests `.nexus42` twice, and
+    // nothing ever writes a config there.
+    let nested = nexus_agent_host::config::agent_host_config_path(
+        &nexus_home_layout::nexus_root_from_home(&env.user_home),
+    );
+    assert_ne!(
+        canonical, nested,
+        "the canonical and the nested lookup are different files"
+    );
+    for (path, max_sessions) in [(&canonical, 7), (&nested, 999)] {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, format!("max_sessions = {max_sessions}\n")).unwrap();
+    }
+
+    let handle = core
+        .open_host(CountingPort::new())
+        .await
+        .expect("the standalone authority opens over the canonical config");
+    // Observed through the manager the Host itself uses — not by comparing
+    // path strings.
+    assert_eq!(
+        handle.manager().agent_config().await.max_sessions,
+        7,
+        "the canonical file is the one read; the nested decoy cannot win"
+    );
+
+    // One read, at open: a later edit of the canonical file is not picked up
+    // by the running authority.
+    std::fs::write(&canonical, "max_sessions = 11\n").unwrap();
+    assert_eq!(
+        handle.manager().agent_config().await.max_sessions,
+        7,
+        "the config was read once, when the authority opened"
+    );
+
+    // A confirmed close frees the slot; a malformed canonical file then fails
+    // the next open AFTER the claim, and a corrected file admits the retry —
+    // so the failed open released the shared admission.
+    handle.close().await.expect("close returns a report");
+    std::fs::write(&canonical, "max_sessions = \"not-a-number\"\n").unwrap();
+    let err = core
+        .open_host(CountingPort::new())
+        .await
+        .expect_err("a malformed canonical config fails the open");
+    assert!(
+        matches!(err, CoreError::Internal { .. }),
+        "the failed start is an internal refusal, got {err:?}"
+    );
+    std::fs::write(&canonical, "max_sessions = 7\n").unwrap();
+    let retried = core
+        .open_host(CountingPort::new())
+        .await
+        .expect("the failed open released the shared admission");
+    assert_eq!(
+        retried.manager().agent_config().await.max_sessions,
+        7,
+        "the corrected canonical file is the one read on retry"
+    );
 }
 
 /// An attaching open on a service that is already closing is refused BEFORE
@@ -2144,6 +2217,9 @@ struct ControlProvider {
     cancel_publishes_terminal: Arc<AtomicBool>,
     /// The release signal for a parked execution.
     exec_gate: Arc<tokio::sync::Notify>,
+    /// Every `LaunchSpec.cwd` a launch actually received, in call order: the
+    /// observable proof of WHICH root a session was launched at (P0-T2).
+    launched_cwds: parking_lot::Mutex<Vec<PathBuf>>,
     cancels: Arc<AtomicUsize>,
     shutdowns: Arc<AtomicUsize>,
     polled: Arc<AtomicUsize>,
@@ -2160,6 +2236,7 @@ fn control_provider(cancellation: bool, burst: usize, cancel_fails: bool) -> Arc
         exec_fails: Arc::new(AtomicBool::new(false)),
         cancel_publishes_terminal: Arc::new(AtomicBool::new(false)),
         exec_gate: Arc::new(tokio::sync::Notify::new()),
+        launched_cwds: parking_lot::Mutex::new(Vec::new()),
         cancels: Arc::new(AtomicUsize::new(0)),
         shutdowns: Arc::new(AtomicUsize::new(0)),
         polled: Arc::new(AtomicUsize::new(0)),
@@ -2235,6 +2312,11 @@ impl ControlProvider {
     fn polled(&self) -> usize {
         self.polled.load(Ordering::SeqCst)
     }
+
+    /// The `cwd` every launch received, in call order.
+    fn launched_cwds(&self) -> Vec<PathBuf> {
+        self.launched_cwds.lock().clone()
+    }
 }
 
 #[async_trait]
@@ -2257,10 +2339,8 @@ impl ProviderAdapter for ControlProvider {
         })
     }
 
-    async fn launch(
-        &self,
-        _spec: LaunchSpec,
-    ) -> nexus_agent_host::HostResult<ManagedSessionHandle> {
+    async fn launch(&self, spec: LaunchSpec) -> nexus_agent_host::HostResult<ManagedSessionHandle> {
+        self.launched_cwds.lock().push(spec.cwd);
         Ok(ManagedSessionHandle {
             provider_id: Self::provider_id(),
             session_id: HostSessionId::new(),
@@ -3760,4 +3840,576 @@ async fn actor_control_close_before_settles_once_after_the_service_closed() {
         repeated.pending_operations, report.pending_operations,
         "a repeated close reports the retained settlement instead of settling twice"
     );
+}
+
+// ── v1.197 P0-T2 — a Character session's cwd is the admitted creative root ──
+//
+// §A2: the engine-owner admission pins the selected workspace's canonical
+// creative root ONCE at open, and a Character Actor create may only run at
+// that exact root. An omitted `cwd` uses the pin; an explicit `cwd` is
+// accepted only when its canonical form (a symlink alias included) equals it.
+// A descendant, a foreign/Nexus/home root, an absent or deleted pin and an
+// unresolvable explicit path are `invalid_input` on `cwd` BEFORE any Host,
+// provider or memory effect. The Creator and legacy lanes keep their
+// pre-existing cwd boundary. The fixtures below use a REAL registered
+// creative root (the operational `meta.json` the daemon/CLI writers emit) and
+// a real manager bounded to that pin — no fake pin, no production setter.
+
+/// Register `local_root` in the selected workspace's operational `meta.json`
+/// BEFORE the core opens, so the engine-owner admission pins a real registered
+/// creative root. Returns that root's canonical form.
+fn register_creative_root(env: &Env, local_root: &Path) -> PathBuf {
+    let op_dir = nexus_home_layout::operational_workspace_dir(&env.user_home, CREATOR, "default");
+    std::fs::create_dir_all(&op_dir).unwrap();
+    std::fs::write(
+        op_dir.join("meta.json"),
+        serde_json::to_vec(&serde_json::json!({ "local_root": local_root })).unwrap(),
+    )
+    .unwrap();
+    std::fs::canonicalize(local_root).unwrap()
+}
+
+/// A real manager whose workspace boundary IS the pin, with the test-driven
+/// control provider registered before start (the native composition order), so
+/// a Character create at the pin is a launch the provider actually receives.
+async fn pin_control_manager(
+    env: &Env,
+    pin: &Path,
+    provider: Arc<ControlProvider>,
+) -> Arc<HostManager> {
+    use nexus_agent_host::config::{load_config_from_path, validate_workspace_path};
+
+    let workspace_root = validate_workspace_path(pin).unwrap();
+    let config_path = host_config_path(env);
+    let mut host_config = load_config_from_path(&config_path).unwrap();
+    host_config.max_sessions = ATTACHED_MANAGER_MAX_SESSIONS;
+    let host = Arc::new(HostManager::new());
+    host.register_provider(
+        provider,
+        LaunchStrategy::NativeCli {
+            command: "control-fixture".to_string(),
+            args: Vec::new(),
+            env: std::collections::HashMap::new(),
+        },
+    )
+    .await;
+    host.start(HostStartConfig {
+        config_path,
+        workspace_root: workspace_root.clone(),
+        max_sessions: host_config.max_sessions,
+        max_ops_per_session: host_config.max_ops_per_session,
+        timeouts: host_config.timeouts.clone(),
+        host_config: Some(host_config),
+        admitted_catalog: None,
+        probe_owner: Some(SessionOwner {
+            creator_id: CREATOR.to_string(),
+            workspace_root,
+            orchestration_run_id: None,
+        }),
+    })
+    .await
+    .unwrap();
+    host
+}
+
+/// The §A2 fixture: a real registered creative root already pinned at open, a
+/// real manager bounded to that pin, and the core authority attached to it.
+async fn pinned_character_fixture(
+    env: &Env,
+    pin: &Path,
+    provider: Arc<ControlProvider>,
+) -> (
+    CoreService,
+    nexus_core::Principal,
+    Arc<HostManager>,
+    HostHandle,
+) {
+    let (core, principal) = open_core(env).await;
+    assert_eq!(
+        core.admission_creative_root(),
+        Some(pin),
+        "the engine-owner admission pins the registered creative root"
+    );
+    let manager = pin_control_manager(env, pin, Arc::clone(&provider)).await;
+    let handle = core
+        .attach_host(Arc::clone(&manager), CountingPort::new())
+        .expect("the pin-bound manager attaches");
+    (core, principal, manager, handle)
+}
+
+/// The Character Actor create body a caller posts, with the optional explicit
+/// `cwd` the case is about.
+fn character_create(
+    character_id: &str,
+    binding_id: &str,
+    model: &str,
+    cwd: Option<&Path>,
+) -> nexus_contracts::generated::daemon_api::agent_host::CreateSessionRequest {
+    let mut body = serde_json::json!({
+        "provider_id": CONTROL_PROVIDER,
+        "model": model,
+        "actor_ref": { "actor_kind": "character", "character_id": character_id },
+        "viewpoint": { "world_id": WORLD, "binding_id": binding_id },
+    });
+    if let Some(cwd) = cwd {
+        body["cwd"] = serde_json::Value::String(cwd.to_string_lossy().into_owned());
+    }
+    serde_json::from_value(body).expect("the Character create body is schema-valid")
+}
+
+/// The Creator Actor create body: no binding, because the Creator carries no
+/// binding-local viewpoint.
+fn creator_actor_create(
+    model: &str,
+    cwd: Option<&Path>,
+) -> nexus_contracts::generated::daemon_api::agent_host::CreateSessionRequest {
+    let mut body = serde_json::json!({
+        "provider_id": CONTROL_PROVIDER,
+        "model": model,
+        "actor_ref": { "actor_kind": "creator", "creator_id": CREATOR },
+        "viewpoint": { "world_id": WORLD },
+    });
+    if let Some(cwd) = cwd {
+        body["cwd"] = serde_json::Value::String(cwd.to_string_lossy().into_owned());
+    }
+    serde_json::from_value(body).expect("the Creator Actor create body is schema-valid")
+}
+
+/// The legacy provider-only create body: no actor pair at all.
+fn legacy_create(
+    model: &str,
+    cwd: Option<&Path>,
+) -> nexus_contracts::generated::daemon_api::agent_host::CreateSessionRequest {
+    let mut body = serde_json::json!({ "provider_id": CONTROL_PROVIDER, "model": model });
+    if let Some(cwd) = cwd {
+        body["cwd"] = serde_json::Value::String(cwd.to_string_lossy().into_owned());
+    }
+    serde_json::from_value(body).expect("the legacy create body is schema-valid")
+}
+
+/// Session-end capture-queue rows (memory candidates) the guarded store holds.
+async fn memory_candidates(env: &Env) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM character_memory_pending_review")
+        .fetch_one(&plain_pool(env).await)
+        .await
+        .unwrap()
+}
+
+/// A cwd refusal is the typed `invalid_input` naming `cwd`.
+fn is_cwd_refusal(err: &CoreError) -> bool {
+    matches!(err, CoreError::InvalidInput { field, .. } if field == "cwd")
+}
+
+/// A Character create at the admitted pin is admitted, and the root the
+/// provider is actually launched at is that pin — for an omitted cwd, for the
+/// pin spelled explicitly, and for a symlink alias of it. The non-Character
+/// lanes keep their pre-existing cwd boundary.
+#[tokio::test]
+async fn character_cwd_uses_admitted_pin() {
+    let env = seed_env().await;
+    let creative = env.user_home.join("creative");
+    std::fs::create_dir_all(&creative).unwrap();
+    let pin = register_creative_root(&env, &creative);
+
+    let provider = control_provider(true, 0, false);
+    let (core, principal, manager, handle) =
+        pinned_character_fixture(&env, &pin, Arc::clone(&provider)).await;
+
+    // (1) An omitted cwd uses the pin: the launch observes exactly that root.
+    let created = handle
+        .create_session(
+            &principal,
+            character_create(&env.character_id, &env.binding_id, "omitted", None),
+        )
+        .await
+        .expect("a Character create with an omitted cwd is admitted");
+    assert_eq!(created.provider_id, CONTROL_PROVIDER);
+    assert!(!created.session_id.is_empty());
+    assert_eq!(
+        provider.launched_cwds(),
+        vec![pin.clone()],
+        "an omitted cwd launches at the admitted pin"
+    );
+
+    // (2) The pin spelled explicitly is the SAME root (exact equality, not a
+    // string alias).
+    handle
+        .create_session(
+            &principal,
+            character_create(&env.character_id, &env.binding_id, "explicit", Some(&pin)),
+        )
+        .await
+        .expect("the canonical pin is an admissible explicit cwd");
+    assert_eq!(provider.launched_cwds(), vec![pin.clone(), pin.clone()]);
+
+    // (3) A symlink alias resolves to the pin, so it is the same root.
+    let alias = env.user_home.join("creative-alias");
+    std::os::unix::fs::symlink(&pin, &alias).unwrap();
+    handle
+        .create_session(
+            &principal,
+            character_create(&env.character_id, &env.binding_id, "alias", Some(&alias)),
+        )
+        .await
+        .expect("a symlink alias of the pin is the same canonical root");
+    assert_eq!(
+        provider.launched_cwds(),
+        vec![pin.clone(), pin.clone(), pin.clone()],
+        "a symlink alias canonicalizes to the pin"
+    );
+
+    // (4) The Creator Actor and legacy lanes keep the pre-existing boundary: a
+    // descendant root is accepted for both, so the pin rule is Character-only.
+    let descendant = pin.join("sub");
+    std::fs::create_dir_all(&descendant).unwrap();
+    let descendant = std::fs::canonicalize(&descendant).unwrap();
+    handle
+        .create_session(
+            &principal,
+            creator_actor_create("creator", Some(&descendant)),
+        )
+        .await
+        .expect("a Creator Actor create keeps the pre-existing cwd boundary");
+    handle
+        .create_session(&principal, legacy_create("legacy", Some(&descendant)))
+        .await
+        .expect("the legacy provider-only create keeps the pre-existing cwd boundary");
+    let launched = provider.launched_cwds();
+    assert_eq!(
+        launched,
+        vec![
+            pin.clone(),
+            pin.clone(),
+            pin.clone(),
+            descendant.clone(),
+            descendant.clone()
+        ],
+        "the non-Character lanes still launch at the caller's own root"
+    );
+
+    // Each distinct create launched its own session; only the three Character
+    // creates were pinned to the creative root.
+    assert_eq!(
+        handle.actor_sessions().len(),
+        4,
+        "three Character + one Creator Actor session"
+    );
+    assert_eq!(manager.list_sessions().await.unwrap().len(), 5);
+    assert_eq!(core.admission_creative_root(), Some(pin.as_path()));
+}
+
+/// Every non-pin Character cwd is refused as `invalid_input` on `cwd`, before
+/// any Host session, launch, registry entry or memory candidate exists; and
+/// the stored Actor/binding admission keeps deciding identity refusals.
+#[tokio::test]
+async fn character_cwd_refuses_non_pin_before_effects() {
+    let env = seed_env().await;
+    let creative = env.user_home.join("creative");
+    std::fs::create_dir_all(&creative).unwrap();
+    let pin = register_creative_root(&env, &creative);
+
+    let provider = control_provider(true, 0, false);
+    let (_core, principal, manager, handle) =
+        pinned_character_fixture(&env, &pin, Arc::clone(&provider)).await;
+
+    // The baseline a refused create must leave untouched.
+    let baseline_sessions = manager.list_sessions().await.unwrap().len();
+    let baseline_indexed = handle.actor_sessions().len();
+    let baseline_candidates = memory_candidates(&env).await;
+    assert_eq!(
+        provider.launched_cwds(),
+        Vec::<PathBuf>::new(),
+        "boot launches no session"
+    );
+    assert_eq!(baseline_sessions, 0);
+    assert_eq!(baseline_indexed, 0);
+    assert_eq!(baseline_candidates, 0);
+
+    // A real descendant exists at the pin and is still not the pin.
+    std::fs::create_dir_all(pin.join("sub")).unwrap();
+    let sibling = env.user_home.join("sibling");
+    std::fs::create_dir_all(&sibling).unwrap();
+    let nexus_root = nexus_home_layout::nexus_root_from_home(&env.user_home);
+
+    let refusals: Vec<(&str, PathBuf)> = vec![
+        ("a descendant of the pin", pin.join("sub")),
+        ("a sibling root", std::fs::canonicalize(&sibling).unwrap()),
+        ("the Nexus root", nexus_root.clone()),
+        ("the user home", env.user_home.clone()),
+        ("a path that does not resolve", pin.join("missing-dir")),
+        ("a traversal path", pin.join("..").join("creative")),
+    ];
+    for (label, cwd) in &refusals {
+        let err = handle
+            .create_session(
+                &principal,
+                character_create(&env.character_id, &env.binding_id, label, Some(cwd)),
+            )
+            .await
+            .expect_err("a non-pin Character cwd is refused");
+        assert!(
+            is_cwd_refusal(&err),
+            "{label}: the refusal names cwd, got {err:?}"
+        );
+    }
+
+    // The cwd IS the pin here, so any refusal is the stored Actor/binding
+    // admission still owning the decision — and still preceding every effect.
+    let unowned_character = "chr_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+    let missing_binding = "awb_ffffffffffffffffffffffffffffffff";
+    for (label, body) in [
+        (
+            "a Character this creator does not own",
+            character_create(unowned_character, &env.binding_id, "unowned", Some(&pin)),
+        ),
+        (
+            "a binding that does not exist",
+            character_create(&env.character_id, missing_binding, "no-binding", Some(&pin)),
+        ),
+    ] {
+        let err = handle
+            .create_session(&principal, body)
+            .await
+            .expect_err("an inadmissible Actor pair is refused");
+        assert!(
+            !is_cwd_refusal(&err),
+            "{label}: the refusal is the stored admission, not cwd: {err:?}"
+        );
+    }
+
+    // No refusal reached the Host plane, the registry, or the capture queue.
+    assert_eq!(
+        provider.launched_cwds(),
+        Vec::<PathBuf>::new(),
+        "no refused create launches"
+    );
+    assert_eq!(
+        manager.list_sessions().await.unwrap().len(),
+        baseline_sessions
+    );
+    assert_eq!(handle.actor_sessions().len(), baseline_indexed);
+    assert_eq!(memory_candidates(&env).await, baseline_candidates);
+}
+
+/// A Character create requires an admitted pin: an unregistered workspace, a
+/// pin whose directory is removed after open, and a selection that MOVES after
+/// open are all refused or still bound to the ORIGINAL pin — never silently
+/// rebound to whatever the metadata says now.
+#[tokio::test]
+async fn character_cwd_requires_admitted_pin() {
+    unregistered_workspace_pins_no_cwd().await;
+    moved_selection_never_rebinds_the_session().await;
+    deleted_pin_is_refused().await;
+}
+
+/// (A) A workspace registering no creative root pins nothing: both the omitted
+/// and the explicit cwd are refused instead of falling back.
+async fn unregistered_workspace_pins_no_cwd() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    assert!(
+        core.admission_creative_root().is_none(),
+        "an unregistered workspace pins no creative root"
+    );
+    let provider = control_provider(true, 0, false);
+    let nexus_root = nexus_home_layout::nexus_root_from_home(&env.user_home);
+    let manager = pin_control_manager(&env, &nexus_root, Arc::clone(&provider)).await;
+    let handle = core
+        .attach_host(manager.clone(), CountingPort::new())
+        .expect("the unpinned manager attaches");
+    for cwd in [None, Some(nexus_root.as_path())] {
+        let err = handle
+            .create_session(
+                &principal,
+                character_create(&env.character_id, &env.binding_id, "no-pin", cwd),
+            )
+            .await
+            .expect_err("without an admitted pin a Character create is refused");
+        assert!(
+            is_cwd_refusal(&err),
+            "no pin: the refusal names cwd, got {err:?}"
+        );
+    }
+    assert_eq!(
+        provider.launched_cwds(),
+        Vec::<PathBuf>::new(),
+        "no pin launches nothing"
+    );
+    assert_eq!(manager.list_sessions().await.unwrap().len(), 0);
+    assert_eq!(handle.actor_sessions().len(), 0);
+}
+
+/// (B) A metadata selection that MOVES after open never silently rebinds the
+/// session to the new root.
+async fn moved_selection_never_rebinds_the_session() {
+    let env = seed_env().await;
+    let first = env.user_home.join("creative-first");
+    let second = env.user_home.join("creative-second");
+    std::fs::create_dir_all(&first).unwrap();
+    std::fs::create_dir_all(&second).unwrap();
+    let pin = register_creative_root(&env, &first);
+    let provider = control_provider(true, 0, false);
+    let (core, principal, _manager, handle) =
+        pinned_character_fixture(&env, &pin, Arc::clone(&provider)).await;
+    let moved = register_creative_root(&env, &second);
+    assert_ne!(
+        moved, pin,
+        "the moved selection is a different canonical root"
+    );
+    assert_eq!(
+        core.admission_creative_root(),
+        Some(pin.as_path()),
+        "a metadata write after open never moves the pinned admission root"
+    );
+    handle
+        .create_session(
+            &principal,
+            character_create(&env.character_id, &env.binding_id, "moved-omitted", None),
+        )
+        .await
+        .expect("the pinned root still admits an omitted cwd");
+    assert_eq!(
+        provider.launched_cwds(),
+        vec![pin.clone()],
+        "a moved selection never silently rebinds the session to the new root"
+    );
+    let err = handle
+        .create_session(
+            &principal,
+            character_create(
+                &env.character_id,
+                &env.binding_id,
+                "moved-explicit",
+                Some(&moved),
+            ),
+        )
+        .await
+        .expect_err("the moved root is not the pin");
+    assert!(
+        is_cwd_refusal(&err),
+        "moved root: the refusal names cwd, got {err:?}"
+    );
+    assert_eq!(
+        provider.launched_cwds(),
+        vec![pin.clone()],
+        "the refused create launched nothing at the moved root"
+    );
+}
+
+/// (C) A pin whose directory is removed after open is refused rather than
+/// launched at a root that no longer exists.
+async fn deleted_pin_is_refused() {
+    let env = seed_env().await;
+    let third = env.user_home.join("creative-third");
+    std::fs::create_dir_all(&third).unwrap();
+    let pin = register_creative_root(&env, &third);
+    let provider = control_provider(true, 0, false);
+    let (_core, principal, _manager, handle) =
+        pinned_character_fixture(&env, &pin, Arc::clone(&provider)).await;
+    std::fs::remove_dir_all(&pin).unwrap();
+    let err = handle
+        .create_session(
+            &principal,
+            character_create(&env.character_id, &env.binding_id, "deleted-pin", None),
+        )
+        .await
+        .expect_err("a deleted pin is refused");
+    assert!(
+        is_cwd_refusal(&err),
+        "deleted pin: the refusal names cwd, got {err:?}"
+    );
+    assert_eq!(
+        provider.launched_cwds(),
+        Vec::<PathBuf>::new(),
+        "a deleted pin launches nothing"
+    );
+}
+
+/// A pin whose pathname has been retargeted is refused, not followed.
+///
+/// The stored pin is the canonical root resolved ONCE at admission, so
+/// re-canonicalising it must reproduce the SAME path. Renaming the admitted
+/// directory and leaving a symlink at its old pathname to a DIFFERENT existing
+/// directory makes the old pathname resolve elsewhere: an omitted cwd must not
+/// silently adopt that new root, an explicit cwd naming it must not pass, and
+/// the renamed original directory is not the pin either. Every refusal happens
+/// before any Host session, provider launch, registry entry or memory candidate.
+#[tokio::test]
+async fn character_cwd_refuses_a_retargeted_pin() {
+    let env = seed_env().await;
+    let creative = env.user_home.join("creative");
+    std::fs::create_dir_all(&creative).unwrap();
+    let pin = register_creative_root(&env, &creative);
+
+    let provider = control_provider(true, 0, false);
+    let (core, principal, manager, handle) =
+        pinned_character_fixture(&env, &pin, Arc::clone(&provider)).await;
+    assert_eq!(
+        core.admission_creative_root(),
+        Some(pin.as_path()),
+        "the admission still holds the pin it resolved at open"
+    );
+
+    let baseline_sessions = manager.list_sessions().await.unwrap().len();
+    let baseline_candidates = memory_candidates(&env).await;
+    assert_eq!(
+        provider.launched_cwds(),
+        Vec::<PathBuf>::new(),
+        "boot launches no session"
+    );
+
+    // Rename the admitted root away and leave a symlink in its place, pointing
+    // at a DIFFERENT directory that really exists.
+    let moved = env.user_home.join("creative-moved");
+    std::fs::rename(&pin, &moved).unwrap();
+    let target = env.user_home.join("creative-target");
+    std::fs::create_dir_all(&target).unwrap();
+    let target = std::fs::canonicalize(&target).unwrap();
+    std::os::unix::fs::symlink(&target, &pin).unwrap();
+    assert_ne!(
+        target, pin,
+        "the symlink target is a different canonical root"
+    );
+    assert_eq!(
+        std::fs::canonicalize(&pin).unwrap(),
+        target,
+        "the old pathname now resolves to the new target"
+    );
+
+    // Only the stored pin pathname is the exact-match authority: the omitted
+    // cwd, the new symlink target, the retargeted old pathname and the renamed
+    // original directory are all refused.
+    let cases: Vec<(&str, Option<&Path>)> = vec![
+        ("an omitted cwd", None),
+        ("the new symlink target", Some(target.as_path())),
+        ("the retargeted old pathname", Some(pin.as_path())),
+        ("the renamed admitted directory", Some(moved.as_path())),
+    ];
+    for (label, cwd) in cases {
+        let err = handle
+            .create_session(
+                &principal,
+                character_create(&env.character_id, &env.binding_id, label, cwd),
+            )
+            .await
+            .expect_err("a retargeted pin is refused");
+        assert!(
+            is_cwd_refusal(&err),
+            "{label}: the refusal names cwd, got {err:?}"
+        );
+    }
+
+    // No refusal reached the Host plane, the registry, a provider launch or the
+    // capture queue.
+    assert_eq!(
+        provider.launched_cwds(),
+        Vec::<PathBuf>::new(),
+        "a retargeted pin launches nothing"
+    );
+    assert_eq!(
+        manager.list_sessions().await.unwrap().len(),
+        baseline_sessions
+    );
+    assert_eq!(handle.actor_sessions().len(), 0);
+    assert_eq!(memory_candidates(&env).await, baseline_candidates);
 }

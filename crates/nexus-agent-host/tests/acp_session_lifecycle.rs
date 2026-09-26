@@ -19,7 +19,8 @@ use std::sync::Arc;
 
 use futures_util::StreamExt;
 use nexus_agent_host::capability::model::{
-    CreateSessionRequest, HostContentBlock, HostEvent, HostOperation, HostStartConfig, SessionOwner,
+    CreateSessionRequest, FinishReason, HostContentBlock, HostEvent, HostOperation,
+    HostStartConfig, SessionOwner,
 };
 use nexus_agent_host::config::{AgentHostConfig, ProviderConfig, TimeoutConfig};
 use nexus_agent_host::core::manager::HostManager;
@@ -417,6 +418,204 @@ async fn prompt_returns_non_echo_agent_output() {
     );
 
     host.shutdown_session(session.id).await.expect("shutdown");
+}
+
+/// The one terminal an ACP stop-reason wire case must observe.
+#[derive(Debug)]
+enum ExpectedTerminal {
+    /// A named terminal reason.
+    Finished(FinishReason),
+    /// The categoryless failure row. The listed categories are the real ones
+    /// this wire path can produce; a named terminal reason instead of a failure
+    /// fails the case.
+    Failed(&'static [&'static str]),
+}
+
+/// One `acp_stop_reason_wire_matrix` row: `(case name, extra fixture env,
+/// expected terminal, turn leaves the session usable)`.
+type StopReasonCase = (
+    &'static str,
+    &'static [(&'static str, &'static str)],
+    ExpectedTerminal,
+    bool,
+);
+
+/// Drive one ACP stop-reason case over the real fixture and assert its terminal.
+///
+/// `survives` is true when the turn ended through a normal `session/prompt`
+/// reply, so a second turn must still work on the same session; a case that
+/// breaks the transport is driven for one turn only.
+async fn assert_stop_reason_case(
+    name: &str,
+    extra_env: &[(&str, &str)],
+    expect: &ExpectedTerminal,
+    survives: bool,
+) {
+    let ws = setup_workspace();
+    let provider_cfg = acp_provider_config("mock-acp", &ws.fixture_log, extra_env, true);
+    let (_manager, host) = build_host(&ws, provider_cfg).await;
+
+    let session = host
+        .create_session(CreateSessionRequest {
+            provider_id: ProviderId::new("mock-acp"),
+            cwd: ws.creator_ws_a.join("sub"),
+            model: None,
+            mode: None,
+            mcp_servers: vec![],
+            metadata: serde_json::Value::Null,
+            owner: owner("ctr_a", ws.creator_ws_a.clone()),
+        })
+        .await
+        .unwrap_or_else(|e| panic!("{name}: session creation failed: {e}"));
+
+    #[allow(clippy::cast_possible_truncation)] // OS pid fits u32
+    let pid = session_start_events(&read_fixture_log(&ws.fixture_log), &ws)[0]["pid"]
+        .as_u64()
+        .expect("pid") as u32;
+
+    // Two serial prompts on the same session: the second one is the proof that
+    // the first terminal returned the session to a usable state.
+    for attempt in 1..=if survives { 2 } else { 1 } {
+        let stream = host
+            .exec(
+                session.id.clone(),
+                HostOperation::Prompt {
+                    op_id: HostOperationId::new(),
+                    content: vec![HostContentBlock::Text {
+                        text: format!("{name}-{attempt}"),
+                    }],
+                    permission_scope: None,
+                },
+            )
+            .await
+            .unwrap_or_else(|e| panic!("{name} (turn {attempt}): exec refused: {e}"));
+        let events: Vec<HostEvent> = stream.map(|r| r.expect("event")).collect().await;
+
+        let terminals: Vec<&HostEvent> = events
+            .iter()
+            .filter(|e| matches!(e, HostEvent::OpFinished(_) | HostEvent::OpFailed(_)))
+            .collect();
+        assert_eq!(
+            terminals.len(),
+            1,
+            "{name} (turn {attempt}): exactly one terminal event: {events:?}"
+        );
+        match (terminals[0], expect) {
+            (HostEvent::OpFinished(finished), ExpectedTerminal::Finished(reason)) => assert_eq!(
+                &finished.reason, reason,
+                "{name} (turn {attempt}): wrong terminal reason"
+            ),
+            (HostEvent::OpFailed(failed), ExpectedTerminal::Failed(categories)) => assert!(
+                categories.contains(&failed.error_category.as_str()),
+                "{name} (turn {attempt}): failure category {:?} is not one of {categories:?}",
+                failed.error_category
+            ),
+            (actual, _) => panic!("{name} (turn {attempt}): expected {expect:?}, got {actual:?}"),
+        }
+    }
+
+    host.shutdown_session(session.id.clone())
+        .await
+        .unwrap_or_else(|e| panic!("{name}: shutdown failed: {e}"));
+    assert!(
+        !process_alive(pid),
+        "{name}: owned ACP child {pid} must be reaped after shutdown"
+    );
+}
+
+/// A3 / R-V1196-ACP-INCOMPLETE-MAPPING — the real adapter's classification of
+/// every ACP stop reason, observed over the wire.
+///
+/// Each case drives the real `AcpProvider` through the real `HostManager` and
+/// the real Python stdio fixture (`ACP_FIXTURE_STOP_REASON` /
+/// `ACP_FIXTURE_PROMPT_ERROR`), so the observed terminal is the adapter's own
+/// classification of a genuine `session/prompt` response — never a
+/// manufactured `OpFinished` echo. Only the two real resource limits change
+/// class: they arrive as `OpFinished(MaxTokens | MaxTurnRequests)`, the inputs
+/// the core terminal matrix folds into `incomplete`. A provider-side `refusal`
+/// after the run started and a genuine protocol error stay failures, and
+/// `cancelled` is never an `EndTurn`. Every case must also emit exactly one
+/// terminal, leave the session usable, and get its owned child reaped.
+#[tokio::test]
+#[allow(clippy::await_holding_lock)] // env_lock() serializes env-mutating tests process-wide
+async fn acp_stop_reason_wire_matrix() {
+    let _lock = env_lock();
+
+    // `(case, fixture env, expected terminal, turn leaves the session usable)`.
+    // Only the five real stop reasons arrive as a normal `session/prompt`
+    // reply, so only they are expected to leave the session usable; a wire-level
+    // prompt error breaks the transport instead.
+    let cases: [StopReasonCase; 6] = [
+        (
+            "end_turn",
+            &[],
+            ExpectedTerminal::Finished(FinishReason::EndTurn),
+            true,
+        ),
+        (
+            "max_tokens",
+            &[("ACP_FIXTURE_STOP_REASON", "max_tokens")],
+            ExpectedTerminal::Finished(FinishReason::MaxTokens),
+            true,
+        ),
+        (
+            "max_turn_requests",
+            &[("ACP_FIXTURE_STOP_REASON", "max_turn_requests")],
+            ExpectedTerminal::Finished(FinishReason::MaxTurnRequests),
+            true,
+        ),
+        (
+            "refusal",
+            &[("ACP_FIXTURE_STOP_REASON", "refusal")],
+            ExpectedTerminal::Failed(&["refusal"]),
+            true,
+        ),
+        (
+            "cancelled",
+            &[("ACP_FIXTURE_STOP_REASON", "cancelled")],
+            ExpectedTerminal::Finished(FinishReason::Cancelled),
+            true,
+        ),
+        (
+            "protocol_error",
+            &[("ACP_FIXTURE_PROMPT_ERROR", "1")],
+            // A wire-level prompt error is a failure either way: the SDK
+            // `Failed` update, or the transport EOF that error causes first.
+            ExpectedTerminal::Failed(&["protocol_error", "provider_eof", "protocol_eof"]),
+            false,
+        ),
+    ];
+
+    for (name, extra_env, expect, survives) in cases {
+        assert_stop_reason_case(name, extra_env, &expect, survives).await;
+    }
+
+    // The stop-reason knob is closed: an unknown value must fail fixture setup
+    // instead of silently answering as `end_turn`, so a test typo can never read
+    // as a successful turn. The real fixture is spawned directly here — the
+    // fastest way to observe its own setup contract without a host.
+    let ws = setup_workspace();
+    let output = std::process::Command::new(FIXTURE)
+        .env("ACP_FIXTURE_LOG", &ws.fixture_log)
+        .env("ACP_FIXTURE_STOP_REASON", "not_a_stop_reason")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .output()
+        .expect("fixture spawn");
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "an invalid ACP_FIXTURE_STOP_REASON must fail fixture setup"
+    );
+    let log = read_fixture_log(&ws.fixture_log);
+    assert!(
+        log.iter().any(|e| {
+            e["event"] == "setup_failed"
+                && e["knob"] == "ACP_FIXTURE_STOP_REASON"
+                && e["value"] == "not_a_stop_reason"
+        }),
+        "the setup failure must record the rejected knob and value: {log:?}"
+    );
 }
 
 #[tokio::test]

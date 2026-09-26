@@ -32,10 +32,17 @@ export interface ProviderOperationRecord {
   /**
    * Native-authoritative status when hydrated (`running` | `cancelling` |
    * `pending` | `completed` | `failed` | `unknown`), or the local `started`
-   * value between admission and the first native observation. Never a constant.
+   * value between admission and the first native observation, or the terminal
+   * projection of the operation's own reason (`finished` | `incomplete` |
+   * `failed` | `stopped` | `cancelled`). Never a constant.
    */
   status: string;
   terminalEvent: ProviderHostEvent | null;
+  /**
+   * The terminal payload of a completed `end_turn` turn — a successful run's
+   * transcript. Every other terminal keeps its event and reason but retains no
+   * payload here, so a non-success can never read as a captured successful run.
+   */
   terminalTranscript: string | null;
   /**
    * True when this operation belongs to a stored Actor session: its terminal
@@ -48,12 +55,16 @@ export interface ProviderOperationRecord {
 
 /**
  * Statuses that mean the operation can no longer be cancelled. Covers the local
- * terminal mapping derived from `ProviderHostEvent` (`finished`/`failed`/
- * `stopped`), the native wire statuses transcribed from `operation_status_wire`
- * in `crates/nexus-agent-host/src/providers/port.rs` (`completed` for Ready/
- * Stopped, `failed` for the error terminals), the cancel acknowledgment
- * (`cancelled`), the native `interrupted` terminal produced when a
- * `SessionStopped` settles an active JS-provider operation.
+ * terminal mapping derived from `ProviderHostEvent` (`finished`/`incomplete`/
+ * `failed`/`stopped`/`cancelled`), the native wire statuses transcribed from
+ * `operation_status_wire` in `crates/nexus-agent-host/src/providers/port.rs`
+ * (`completed` for Ready/Stopped, `failed` for the error terminals), the cancel
+ * acknowledgment (`cancelled`), and the native `interrupted` terminal produced
+ * when a `SessionStopped` settles an active JS-provider operation. `incomplete`
+ * is the provider-named unfinished run (`max_tokens`/`max_turn_requests`) — the
+ * core authority's own row for the same terminal — and it is terminal here for
+ * exactly the same reason as the rest: the reason arrived, so no later event
+ * may overwrite it.
  *
  * The core authority's own run statuses are deliberately NOT part of this set:
  * an Actor operation's cancellability and outcome are the authority's, read on
@@ -64,6 +75,7 @@ export interface ProviderOperationRecord {
  */
 const TERMINAL_OPERATION_STATUS: Record<string, true> = {
   finished: true,
+  incomplete: true,
   failed: true,
   stopped: true,
   completed: true,
@@ -256,13 +268,20 @@ export class ProviderRegistry {
    * provider event is refused rather than overwriting the outcome the
    * durable journal already recorded. Callers must not publish a refused
    * event as the stream's terminal.
+   *
+   * The status is the terminal's own reason ({@link terminalEventStatus}),
+   * and only a completed `end_turn` turn retains its payload as a successful
+   * transcript: every other terminal keeps its event and reason for the
+   * stream, but a payload stored under it would read as a captured
+   * successful run.
    */
   finishOperation(operationId: string, terminal: ProviderHostEvent, transcript: string | null): boolean {
     const op = this.operations.get(operationId);
     if (!op || op.terminalEvent || isTerminalOperationStatus(op.status)) return false;
+    const status = terminalEventStatus(terminal);
     op.terminalEvent = terminal;
-    op.terminalTranscript = transcript;
-    op.status = terminalEventStatus(terminal);
+    op.terminalTranscript = status === 'finished' ? transcript : null;
+    op.status = status;
     const session = this.sessions.get(op.sessionId);
     if (session?.activeOpId === operationId) {
       session.activeOpId = null;
@@ -357,9 +376,35 @@ export class ProviderRegistry {
   }
 }
 
+/**
+ * The mirror's projection of one terminal `ProviderHostEvent` onto the status it
+ * reports. Derived from the event's own reason, never defaulted to success:
+ * `OpFinished` carries the provider's whole stop-reason set, so a blanket
+ * `finished` recorded an exhausted run (`max_tokens`/`max_turn_requests` — the
+ * core authority's own `incomplete` row) and a cancellation as successes on this
+ * lane, and stored their payloads as successful transcripts.
+ *
+ * `refusal` is the failure row here (never `incomplete`): the ACP adapter
+ * reports a post-start refusal as `OpFailed`, and only the core's own
+ * `OpFinished(Refusal)` arm maps that reason to `incomplete`. A terminal the
+ * enumeration does not carry — a reason outside the wire set, or an event that
+ * is no terminal at all — fails closed as `failed` rather than reading as a
+ * completed turn.
+ */
 function terminalEventStatus(event: ProviderHostEvent): string {
-  if ('OpFinished' in event) return 'finished';
   if ('OpFailed' in event) return 'failed';
   if ('SessionStopped' in event) return 'stopped';
-  return 'finished';
+  if (!('OpFinished' in event)) return 'failed';
+  switch (event.OpFinished.reason) {
+    case 'end_turn':
+      return 'finished';
+    case 'max_tokens':
+    case 'max_turn_requests':
+      return 'incomplete';
+    case 'cancelled':
+      return 'cancelled';
+    case 'refusal':
+    default:
+      return 'failed';
+  }
 }

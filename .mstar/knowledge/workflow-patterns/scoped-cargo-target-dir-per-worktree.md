@@ -71,13 +71,15 @@ unset _nexus_wt_file
 
 Detection is `-f .git` (a worktree has a `.git` *file* pointing at the main repo, a normal checkout has a `.git` *directory*) plus a `worktrees` grep, so no per-worktree setup is required. Enable once per checkout with `direnv allow`.
 
-**Merge gate (hard):** before merging a feature branch into the integration branch, remove that feature's scoped cache:
+**Merge gate (hard):** before merging a feature branch into the integration branch, remove that feature's scoped cache — **by exact path only**:
 
 ```sh
-rm -rf ~/.cache/nexus-target-<dirname>     # this feature's cache, precise by name
-rm -rf ~/.cache/nexus-target-*             # all feature caches; canonical dir untouched
-git worktree remove .worktrees/<name> && git worktree prune
+rm -rf ~/.cache/nexus-target-<dirname>     # this feature's cache, precise by name — never a wildcard
 ```
+
+A wildcard (`rm -rf ~/.cache/nexus-target-*`) is **not** a valid cleanup route: it can delete an active peer's cache, so the repository policy withdraws it in favour of the exact-scoped path plus the reclamation checklist in the root `AGENTS.md` / `docs/CONTRIBUTING.md`. Removing the worktree is likewise exact-path and engine-first — `git worktree remove` refuses a submodule-carrying checkout, so the documented non-force route is `rm -rf <exact worktree path>` + `git worktree prune` after merge/release. Both obstacles, the resource-budget concurrency model and the sweeper's convergence check are in [worktree lifecycle: native submodule initialization, resource-budget concurrency, guarded reclamation](worktree-lifecycle-submodule-init-and-reclamation.md).
+
+Updated 2026-09-25 (v1.197): wildcard cleanup withdrawn; worktree removal documented as engine-first with the exact-path non-force fallback.
 
 Integration verification (`cargo check --workspace`) runs from the integration worktree against the canonical `~/.cache/nexus-target`, so it never depends on a feature's cache. `du -sh ~/.cache/nexus-target-*` shows every feature's size at a glance.
 

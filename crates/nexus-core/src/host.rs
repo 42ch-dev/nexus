@@ -20,9 +20,7 @@ use nexus_agent_host::capability::model::{
     HostEvent, HostEventStream, HostStartConfig, SessionOwner,
 };
 use nexus_agent_host::capability::CreateSessionRequest as HostCreateRequest;
-use nexus_agent_host::config::{
-    agent_host_config_path, load_config_from_path, validate_workspace_path, AgentHostConfig,
-};
+use nexus_agent_host::config::{load_config_from_path, validate_workspace_path, AgentHostConfig};
 use nexus_agent_host::core::readiness::discover_provider_catalog;
 use nexus_agent_host::core::session::HostSession as RegistryHostSession;
 use nexus_agent_host::discovery::path_scan;
@@ -406,16 +404,22 @@ impl CoreService {
     }
 
     async fn open_host_inner(&self, port: Arc<dyn ProviderPort>) -> CoreResult<HostHandle> {
-        let user_home = self.inner.nexus_home.clone();
-        validate_workspace_path(&user_home).map_err(config_err)?;
-        let config_path = agent_host_config_path(&user_home);
+        // The stored `nexus_home` is already the canonical Nexus root
+        // (`<user_home>/.nexus42`), so the agent-host config is one
+        // `agent-host/config.toml` below it — the same file the native boot
+        // reaches through `agent_host_config_path(user_home)`. Passing this
+        // root to that helper nests `.nexus42` twice and reads a file nothing
+        // writes.
+        let nexus_root = self.inner.nexus_home.clone();
+        validate_workspace_path(&nexus_root).map_err(config_err)?;
+        let config_path = nexus_root.join("agent-host").join("config.toml");
         let host_config: AgentHostConfig =
             load_config_from_path(&config_path).map_err(config_err)?;
         let admitted_catalog = discover_provider_catalog(&host_config).map_err(config_err)?;
         let host = Arc::new(HostManager::new());
         host.start(HostStartConfig {
             config_path,
-            workspace_root: user_home,
+            workspace_root: nexus_root,
             max_sessions: host_config.max_sessions,
             max_ops_per_session: host_config.max_ops_per_session,
             timeouts: host_config.timeouts.clone(),
@@ -885,7 +889,6 @@ impl HostHandle {
         self.core.verify_principal(principal)?;
         let pair = classify_pair(request.actor_ref.is_some(), request.viewpoint.is_some())?;
         let creator_id = principal.creator_id().to_string();
-        let canonical_root = session_cwd(&request, &self.core)?;
         if pair == ActorPairMode::Actor {
             let (Some(actor_ref), Some(viewpoint)) =
                 (request.actor_ref.as_ref(), request.viewpoint.as_ref())
@@ -906,6 +909,14 @@ impl HostHandle {
                         character_id: character_id.to_string(),
                     }
                 }
+            };
+            // A Character session runs at the admission's own creative-root
+            // pin; a Creator Actor session keeps the pre-existing cwd
+            // boundary (D11 selects only the Character root). Both are
+            // resolved before any Host, provider or memory effect.
+            let canonical_root = match &actor {
+                AdmittedActor::Character { .. } => character_session_cwd(&request, &self.core)?,
+                AdmittedActor::Creator { .. } => session_cwd(&request, &self.core)?,
             };
             let admission = CoreActorAdmission::new(self.core.inner.pool.clone());
             let viewpoint = ActorViewpoint {
@@ -961,6 +972,7 @@ impl HostHandle {
                 viewpoint,
             ));
         }
+        let canonical_root = session_cwd(&request, &self.core)?;
         let host_req = Self::host_create_request(&request, &canonical_root, &creator_id);
         let model = request.model.clone();
         let session = self.host.create_session(host_req).await.map_err(host_err)?;
@@ -1944,6 +1956,81 @@ fn session_cwd(request: &CreateSessionRequest, core: &CoreService) -> CoreResult
                 .map_err(|e| invalid("cwd", e.to_string()))
         },
     )
+}
+
+/// The session cwd for a Character Actor create: the admission's own
+/// creative-root pin, never a second root authority.
+///
+/// The pin is the canonical root the engine-owner admission resolved ONCE at
+/// open from the selected workspace's `meta.json` (§A2: no second
+/// selected-metadata read). An omitted `cwd` uses that pin, and an explicit
+/// `cwd` is accepted only when its canonical form — symlink aliases included —
+/// is exactly equal to it. A descendant, a foreign or Nexus root, the user
+/// home, an unresolvable explicit path, a pin that is absent or was removed
+/// after open, and a pin whose pathname no longer RE-RESOLVES to itself (the
+/// admitted directory renamed and its old pathname left as a symlink to
+/// another directory) are all `invalid_input` on `cwd`, refused here, before
+/// any Host, provider or memory effect.
+///
+/// The pin is canonical by construction, so re-resolving it must reproduce the
+/// SAME path: re-resolving it and then comparing the request against that
+/// result instead of against the stored pin is exactly how a retargeted
+/// pathname would silently move the admitted root (D11/A2 keep the admitted
+/// root the sole exact-match authority). The refusal never echoes the admitted
+/// root's absolute path.
+///
+/// Compiled only with the `execution` edge that produces the pin: without it
+/// the admission pins nothing, so the same refusal is the only honest answer
+/// and `provider-host` still compiles on its own.
+#[cfg(feature = "execution")]
+fn character_session_cwd(
+    request: &CreateSessionRequest,
+    core: &CoreService,
+) -> CoreResult<PathBuf> {
+    let Some(pin) = core.admission_creative_root() else {
+        return Err(invalid(
+            "cwd",
+            "a Character session requires an admitted creative root",
+        ));
+    };
+    // A stored pin that cannot be resolved, or that resolves somewhere else,
+    // was retargeted or removed after open: refuse it rather than following
+    // whatever its pathname points at now. The pin's own error text is
+    // discarded on purpose — it names the admitted root's path.
+    let resolved = validate_workspace_path(pin)
+        .map_err(|_| invalid("cwd", "the admitted creative root is no longer resolvable"))?;
+    if resolved.as_path() != pin {
+        return Err(invalid(
+            "cwd",
+            "the admitted creative root no longer resolves to itself",
+        ));
+    }
+    let Some(cwd) = request.cwd.as_ref() else {
+        return Ok(resolved);
+    };
+    let canonical = validate_workspace_path(std::path::Path::new(cwd))
+        .map_err(|e| invalid("cwd", e.to_string()))?;
+    if canonical == resolved {
+        return Ok(canonical);
+    }
+    Err(invalid(
+        "cwd",
+        "a Character session cwd must be the admitted creative root",
+    ))
+}
+
+/// Character-root pin without the `execution` edge: this admission holds no
+/// admitted creative root, so the create is refused rather than falling back
+/// to a caller-supplied or default root.
+#[cfg(not(feature = "execution"))]
+fn character_session_cwd(
+    _request: &CreateSessionRequest,
+    _core: &CoreService,
+) -> CoreResult<PathBuf> {
+    Err(invalid(
+        "cwd",
+        "a Character session requires an admitted creative root",
+    ))
 }
 
 const fn session_wire(
