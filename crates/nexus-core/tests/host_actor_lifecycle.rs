@@ -2340,7 +2340,7 @@ impl ProviderAdapter for ControlProvider {
     }
 
     async fn launch(&self, spec: LaunchSpec) -> nexus_agent_host::HostResult<ManagedSessionHandle> {
-        self.launched_cwds.lock().push(spec.cwd.clone());
+        self.launched_cwds.lock().push(spec.cwd);
         Ok(ManagedSessionHandle {
             provider_id: Self::provider_id(),
             session_id: HostSessionId::new(),
@@ -3858,7 +3858,7 @@ async fn actor_control_close_before_settles_once_after_the_service_closed() {
 /// Register `local_root` in the selected workspace's operational `meta.json`
 /// BEFORE the core opens, so the engine-owner admission pins a real registered
 /// creative root. Returns that root's canonical form.
-async fn register_creative_root(env: &Env, local_root: &Path) -> PathBuf {
+fn register_creative_root(env: &Env, local_root: &Path) -> PathBuf {
     let op_dir = nexus_home_layout::operational_workspace_dir(&env.user_home, CREATOR, "default");
     std::fs::create_dir_all(&op_dir).unwrap();
     std::fs::write(
@@ -4009,7 +4009,7 @@ async fn character_cwd_uses_admitted_pin() {
     let env = seed_env().await;
     let creative = env.user_home.join("creative");
     std::fs::create_dir_all(&creative).unwrap();
-    let pin = register_creative_root(&env, &creative).await;
+    let pin = register_creative_root(&env, &creative);
 
     let provider = control_provider(true, 0, false);
     let (core, principal, manager, handle) =
@@ -4106,7 +4106,7 @@ async fn character_cwd_refuses_non_pin_before_effects() {
     let env = seed_env().await;
     let creative = env.user_home.join("creative");
     std::fs::create_dir_all(&creative).unwrap();
-    let pin = register_creative_root(&env, &creative).await;
+    let pin = register_creative_root(&env, &creative);
 
     let provider = control_provider(true, 0, false);
     let (_core, principal, manager, handle) =
@@ -4197,8 +4197,14 @@ async fn character_cwd_refuses_non_pin_before_effects() {
 /// rebound to whatever the metadata says now.
 #[tokio::test]
 async fn character_cwd_requires_admitted_pin() {
-    // (A) A workspace registering no creative root pins nothing: both the
-    // omitted and the explicit cwd are refused instead of falling back.
+    unregistered_workspace_pins_no_cwd().await;
+    moved_selection_never_rebinds_the_session().await;
+    deleted_pin_is_refused().await;
+}
+
+/// (A) A workspace registering no creative root pins nothing: both the omitted
+/// and the explicit cwd are refused instead of falling back.
+async fn unregistered_workspace_pins_no_cwd() {
     let env = seed_env().await;
     let (core, principal) = open_core(&env).await;
     assert!(
@@ -4231,19 +4237,21 @@ async fn character_cwd_requires_admitted_pin() {
     );
     assert_eq!(manager.list_sessions().await.unwrap().len(), 0);
     assert_eq!(handle.actor_sessions().len(), 0);
+}
 
-    // (B) A metadata selection that MOVES after open never silently rebinds
-    // the session to the new root.
+/// (B) A metadata selection that MOVES after open never silently rebinds the
+/// session to the new root.
+async fn moved_selection_never_rebinds_the_session() {
     let env = seed_env().await;
     let first = env.user_home.join("creative-first");
     let second = env.user_home.join("creative-second");
     std::fs::create_dir_all(&first).unwrap();
     std::fs::create_dir_all(&second).unwrap();
-    let pin = register_creative_root(&env, &first).await;
+    let pin = register_creative_root(&env, &first);
     let provider = control_provider(true, 0, false);
     let (core, principal, _manager, handle) =
         pinned_character_fixture(&env, &pin, Arc::clone(&provider)).await;
-    let moved = register_creative_root(&env, &second).await;
+    let moved = register_creative_root(&env, &second);
     assert_ne!(
         moved, pin,
         "the moved selection is a different canonical root"
@@ -4286,13 +4294,15 @@ async fn character_cwd_requires_admitted_pin() {
         vec![pin.clone()],
         "the refused create launched nothing at the moved root"
     );
+}
 
-    // (C) A pin whose directory is removed after open is refused rather than
-    // launched at a root that no longer exists.
+/// (C) A pin whose directory is removed after open is refused rather than
+/// launched at a root that no longer exists.
+async fn deleted_pin_is_refused() {
     let env = seed_env().await;
     let third = env.user_home.join("creative-third");
     std::fs::create_dir_all(&third).unwrap();
-    let pin = register_creative_root(&env, &third).await;
+    let pin = register_creative_root(&env, &third);
     let provider = control_provider(true, 0, false);
     let (_core, principal, _manager, handle) =
         pinned_character_fixture(&env, &pin, Arc::clone(&provider)).await;
@@ -4329,7 +4339,7 @@ async fn character_cwd_refuses_a_retargeted_pin() {
     let env = seed_env().await;
     let creative = env.user_home.join("creative");
     std::fs::create_dir_all(&creative).unwrap();
-    let pin = register_creative_root(&env, &creative).await;
+    let pin = register_creative_root(&env, &creative);
 
     let provider = control_provider(true, 0, false);
     let (core, principal, manager, handle) =
