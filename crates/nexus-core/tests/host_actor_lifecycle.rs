@@ -2339,10 +2339,7 @@ impl ProviderAdapter for ControlProvider {
         })
     }
 
-    async fn launch(
-        &self,
-        spec: LaunchSpec,
-    ) -> nexus_agent_host::HostResult<ManagedSessionHandle> {
+    async fn launch(&self, spec: LaunchSpec) -> nexus_agent_host::HostResult<ManagedSessionHandle> {
         self.launched_cwds.lock().push(spec.cwd.clone());
         Ok(ManagedSessionHandle {
             provider_id: Self::provider_id(),
@@ -3921,7 +3918,12 @@ async fn pinned_character_fixture(
     env: &Env,
     pin: &Path,
     provider: Arc<ControlProvider>,
-) -> (CoreService, nexus_core::Principal, Arc<HostManager>, HostHandle) {
+) -> (
+    CoreService,
+    nexus_core::Principal,
+    Arc<HostManager>,
+    HostHandle,
+) {
     let (core, principal) = open_core(env).await;
     assert_eq!(
         core.admission_creative_root(),
@@ -4087,7 +4089,11 @@ async fn character_cwd_uses_admitted_pin() {
 
     // Each distinct create launched its own session; only the three Character
     // creates were pinned to the creative root.
-    assert_eq!(handle.actor_sessions().len(), 4, "three Character + one Creator Actor session");
+    assert_eq!(
+        handle.actor_sessions().len(),
+        4,
+        "three Character + one Creator Actor session"
+    );
     assert_eq!(manager.list_sessions().await.unwrap().len(), 5);
     assert_eq!(core.admission_creative_root(), Some(pin.as_path()));
 }
@@ -4110,7 +4116,11 @@ async fn character_cwd_refuses_non_pin_before_effects() {
     let baseline_sessions = manager.list_sessions().await.unwrap().len();
     let baseline_indexed = handle.actor_sessions().len();
     let baseline_candidates = memory_candidates(&env).await;
-    assert_eq!(provider.launched_cwds(), Vec::<PathBuf>::new(), "boot launches no session");
+    assert_eq!(
+        provider.launched_cwds(),
+        Vec::<PathBuf>::new(),
+        "boot launches no session"
+    );
     assert_eq!(baseline_sessions, 0);
     assert_eq!(baseline_indexed, 0);
     assert_eq!(baseline_candidates, 0);
@@ -4137,7 +4147,10 @@ async fn character_cwd_refuses_non_pin_before_effects() {
             )
             .await
             .expect_err("a non-pin Character cwd is refused");
-        assert!(is_cwd_refusal(&err), "{label}: the refusal names cwd, got {err:?}");
+        assert!(
+            is_cwd_refusal(&err),
+            "{label}: the refusal names cwd, got {err:?}"
+        );
     }
 
     // The cwd IS the pin here, so any refusal is the stored Actor/binding
@@ -4165,8 +4178,15 @@ async fn character_cwd_refuses_non_pin_before_effects() {
     }
 
     // No refusal reached the Host plane, the registry, or the capture queue.
-    assert_eq!(provider.launched_cwds(), Vec::<PathBuf>::new(), "no refused create launches");
-    assert_eq!(manager.list_sessions().await.unwrap().len(), baseline_sessions);
+    assert_eq!(
+        provider.launched_cwds(),
+        Vec::<PathBuf>::new(),
+        "no refused create launches"
+    );
+    assert_eq!(
+        manager.list_sessions().await.unwrap().len(),
+        baseline_sessions
+    );
     assert_eq!(handle.actor_sessions().len(), baseline_indexed);
     assert_eq!(memory_candidates(&env).await, baseline_candidates);
 }
@@ -4199,9 +4219,16 @@ async fn character_cwd_requires_admitted_pin() {
             )
             .await
             .expect_err("without an admitted pin a Character create is refused");
-        assert!(is_cwd_refusal(&err), "no pin: the refusal names cwd, got {err:?}");
+        assert!(
+            is_cwd_refusal(&err),
+            "no pin: the refusal names cwd, got {err:?}"
+        );
     }
-    assert_eq!(provider.launched_cwds(), Vec::<PathBuf>::new(), "no pin launches nothing");
+    assert_eq!(
+        provider.launched_cwds(),
+        Vec::<PathBuf>::new(),
+        "no pin launches nothing"
+    );
     assert_eq!(manager.list_sessions().await.unwrap().len(), 0);
     assert_eq!(handle.actor_sessions().len(), 0);
 
@@ -4217,7 +4244,10 @@ async fn character_cwd_requires_admitted_pin() {
     let (core, principal, _manager, handle) =
         pinned_character_fixture(&env, &pin, Arc::clone(&provider)).await;
     let moved = register_creative_root(&env, &second).await;
-    assert_ne!(moved, pin, "the moved selection is a different canonical root");
+    assert_ne!(
+        moved, pin,
+        "the moved selection is a different canonical root"
+    );
     assert_eq!(
         core.admission_creative_root(),
         Some(pin.as_path()),
@@ -4238,11 +4268,19 @@ async fn character_cwd_requires_admitted_pin() {
     let err = handle
         .create_session(
             &principal,
-            character_create(&env.character_id, &env.binding_id, "moved-explicit", Some(&moved)),
+            character_create(
+                &env.character_id,
+                &env.binding_id,
+                "moved-explicit",
+                Some(&moved),
+            ),
         )
         .await
         .expect_err("the moved root is not the pin");
-    assert!(is_cwd_refusal(&err), "moved root: the refusal names cwd, got {err:?}");
+    assert!(
+        is_cwd_refusal(&err),
+        "moved root: the refusal names cwd, got {err:?}"
+    );
     assert_eq!(
         provider.launched_cwds(),
         vec![pin.clone()],
@@ -4266,7 +4304,10 @@ async fn character_cwd_requires_admitted_pin() {
         )
         .await
         .expect_err("a deleted pin is refused");
-    assert!(is_cwd_refusal(&err), "deleted pin: the refusal names cwd, got {err:?}");
+    assert!(
+        is_cwd_refusal(&err),
+        "deleted pin: the refusal names cwd, got {err:?}"
+    );
     assert_eq!(
         provider.launched_cwds(),
         Vec::<PathBuf>::new(),
@@ -4301,7 +4342,11 @@ async fn character_cwd_refuses_a_retargeted_pin() {
 
     let baseline_sessions = manager.list_sessions().await.unwrap().len();
     let baseline_candidates = memory_candidates(&env).await;
-    assert_eq!(provider.launched_cwds(), Vec::<PathBuf>::new(), "boot launches no session");
+    assert_eq!(
+        provider.launched_cwds(),
+        Vec::<PathBuf>::new(),
+        "boot launches no session"
+    );
 
     // Rename the admitted root away and leave a symlink in its place, pointing
     // at a DIFFERENT directory that really exists.
@@ -4311,7 +4356,10 @@ async fn character_cwd_refuses_a_retargeted_pin() {
     std::fs::create_dir_all(&target).unwrap();
     let target = std::fs::canonicalize(&target).unwrap();
     std::os::unix::fs::symlink(&target, &pin).unwrap();
-    assert_ne!(target, pin, "the symlink target is a different canonical root");
+    assert_ne!(
+        target, pin,
+        "the symlink target is a different canonical root"
+    );
     assert_eq!(
         std::fs::canonicalize(&pin).unwrap(),
         target,
@@ -4335,7 +4383,10 @@ async fn character_cwd_refuses_a_retargeted_pin() {
             )
             .await
             .expect_err("a retargeted pin is refused");
-        assert!(is_cwd_refusal(&err), "{label}: the refusal names cwd, got {err:?}");
+        assert!(
+            is_cwd_refusal(&err),
+            "{label}: the refusal names cwd, got {err:?}"
+        );
     }
 
     // No refusal reached the Host plane, the registry, a provider launch or the
@@ -4345,7 +4396,10 @@ async fn character_cwd_refuses_a_retargeted_pin() {
         Vec::<PathBuf>::new(),
         "a retargeted pin launches nothing"
     );
-    assert_eq!(manager.list_sessions().await.unwrap().len(), baseline_sessions);
+    assert_eq!(
+        manager.list_sessions().await.unwrap().len(),
+        baseline_sessions
+    );
     assert_eq!(handle.actor_sessions().len(), 0);
     assert_eq!(memory_candidates(&env).await, baseline_candidates);
 }

@@ -108,7 +108,8 @@ function firstLine(text) {
 function record(label, command, result) {
   const stdout = result.stdout.trim() === '' ? '' : ` | stdout: ${result.stdout.trim().split('\n').join(' ; ')}`;
   const stderr = result.stderr.trim() === '' ? '' : ` | stderr: ${firstLine(result.stderr)}`;
-  console.log(`EVIDENCE ${label}: ${command} => exit ${result.code}${stdout}${stderr}`);
+  // Evidence lines go to stdout, which is what a transcript captures; `console` is not allowed here.
+  process.stdout.write(`EVIDENCE ${label}: ${command} => exit ${result.code}${stdout}${stderr}\n`);
 }
 
 async function canonical(cwd, raw) {
@@ -434,7 +435,7 @@ test('fresh linked worktrees use independent native metadata', async () => {
 
   record('git-common-dir', `git -C <A> rev-parse --git-common-dir`, await fixture.git(['-C', worktreeA, 'rev-parse', '--git-common-dir']));
   record('sub-absolute-git-dir', `git -C <A>/sub rev-parse --absolute-git-dir`, await fixture.git(['-C', join(worktreeA, 'sub'), 'rev-parse', '--absolute-git-dir']));
-  console.log(`EVIDENCE git-version: ${(await fixture.gitOk(['--version'])).trim()}`);
+  process.stdout.write(`EVIDENCE git-version: ${(await fixture.gitOk(['--version'])).trim()}\n`);
 
   const subGitDirs = [facts.main.subGitDir, facts.a.subGitDir, facts.b.subGitDir];
   const subIndexes = [facts.main.subIndex, facts.a.subIndex, facts.b.subIndex];
@@ -446,8 +447,8 @@ test('fresh linked worktrees use independent native metadata', async () => {
   assert.equal(facts.a.subGitDir, join(fixture.worktreeGitDir(FEATURE_A), 'modules', 'sub'));
   assert.equal(facts.b.subGitDir, join(fixture.worktreeGitDir(FEATURE_B), 'modules', 'sub'));
   assert.equal(facts.a.nestedGitDir, join(fixture.worktreeGitDir(FEATURE_A), 'modules', 'sub', 'modules', 'nested'));
-  console.log(`EVIDENCE distinct-gitdirs: main ${facts.main.subGitDir} | A ${facts.a.subGitDir} | B ${facts.b.subGitDir}`);
-  console.log(`EVIDENCE distinct-indexes: main ${facts.main.subIndex} | A ${facts.a.subIndex} | B ${facts.b.subIndex}`);
+  process.stdout.write(`EVIDENCE distinct-gitdirs: main ${facts.main.subGitDir} | A ${facts.a.subGitDir} | B ${facts.b.subGitDir}\n`);
+  process.stdout.write(`EVIDENCE distinct-indexes: main ${facts.main.subIndex} | A ${facts.a.subIndex} | B ${facts.b.subIndex}\n`);
 });
 
 test('repeat preserves pin and rejects dirty or copied metadata', async () => {
@@ -773,7 +774,7 @@ test('operational filesystem failures keep the JSON stdout contract', async () =
   assert.ok(failed.stderr.includes(stranded), `the refusal must name the unreadable path: ${failed.stderr}`);
 });
 
-test('a native initialization refusal distinguishes an untouched preflight from a partial subset', async t => {
+test('a native initialization refusal distinguishes an untouched preflight from a partial subset', async _t => {
   // F-003: the initializer promised "state unchanged" for every exit-1 failure, but native
   // initialization is not atomic — `git submodule update --init --recursive` runs once per repository
   // group and a later failure leaves the earlier work in place. Rolling Git initialization back is

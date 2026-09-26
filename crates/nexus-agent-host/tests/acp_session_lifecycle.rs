@@ -19,8 +19,8 @@ use std::sync::Arc;
 
 use futures_util::StreamExt;
 use nexus_agent_host::capability::model::{
-    CreateSessionRequest, FinishReason, HostContentBlock, HostEvent, HostOperation, HostStartConfig,
-    SessionOwner,
+    CreateSessionRequest, FinishReason, HostContentBlock, HostEvent, HostOperation,
+    HostStartConfig, SessionOwner,
 };
 use nexus_agent_host::config::{AgentHostConfig, ProviderConfig, TimeoutConfig};
 use nexus_agent_host::core::manager::HostManager;
