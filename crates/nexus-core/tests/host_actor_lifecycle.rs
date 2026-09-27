@@ -2237,7 +2237,12 @@ struct ControlProvider {
     /// manager dispatched. A case with more than one live operation drives
     /// exactly the stream it means; a single-slot fixture could only reach
     /// whichever operation started last.
-    outboxes: parking_lot::Mutex<Vec<(HostOperationId, tokio::sync::mpsc::UnboundedSender<HostItem>)>>,
+    outboxes: parking_lot::Mutex<
+        Vec<(
+            HostOperationId,
+            tokio::sync::mpsc::UnboundedSender<HostItem>,
+        )>,
+    >,
 }
 
 fn control_provider(cancellation: bool, burst: usize, cancel_fails: bool) -> Arc<ControlProvider> {
@@ -3517,7 +3522,10 @@ async fn actor_control_session_shutdown_wakes_every_concurrent_join_waiter() {
         let completed = Arc::clone(&completed);
         async move {
             entered.fetch_add(1, Ordering::SeqCst);
-            handle.actor_sessions().join_session_drains(&session_id).await;
+            handle
+                .actor_sessions()
+                .join_session_drains(&session_id)
+                .await;
             completed.fetch_add(1, Ordering::SeqCst);
         }
     });

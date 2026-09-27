@@ -32,29 +32,24 @@ const ARCHIVED_STATUS: &str = "archived";
 /// literally [`ARCHIVED_STATUS`], every other member must be nonempty), so
 /// inconsistent metadata can never authorize an archived edit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RulePatchPresence {
-    canonical_name: bool,
-    constraint: bool,
-    kind: bool,
-    severity_hint: bool,
-    statement: bool,
-    status: bool,
-    target_entry_types: bool,
-}
+pub struct RulePatchPresence(u8);
 
 impl RulePatchPresence {
     /// No member supplied (the raw-`{}` request); also the builder starting
     /// point. Deliberately not `Default`: a caller that never thought about
     /// presence must not silently claim "nothing was supplied".
-    const NONE: Self = Self {
-        canonical_name: false,
-        constraint: false,
-        kind: false,
-        severity_hint: false,
-        statement: false,
-        status: false,
-        target_entry_types: false,
-    };
+    const NONE: Self = Self(0);
+    const CANONICAL_NAME: u8 = 1 << 0;
+    const CONSTRAINT: u8 = 1 << 1;
+    const KIND: u8 = 1 << 2;
+    const SEVERITY_HINT: u8 = 1 << 3;
+    const STATEMENT: u8 = 1 << 4;
+    const STATUS: u8 = 1 << 5;
+    const TARGET_ENTRY_TYPES: u8 = 1 << 6;
+
+    const fn contains(self, member: u8) -> bool {
+        self.0 & member != 0
+    }
 
     /// Presence from the supplied member keys — native callers pass the raw
     /// JSON object keys, direct callers the fields they authored.
@@ -66,13 +61,13 @@ impl RulePatchPresence {
         let mut presence = Self::NONE;
         for key in keys {
             match *key {
-                "canonical_name" => presence.canonical_name = true,
-                "constraint" => presence.constraint = true,
-                "kind" => presence.kind = true,
-                "severity_hint" => presence.severity_hint = true,
-                "statement" => presence.statement = true,
-                "status" => presence.status = true,
-                "target_entry_types" => presence.target_entry_types = true,
+                "canonical_name" => presence.0 |= Self::CANONICAL_NAME,
+                "constraint" => presence.0 |= Self::CONSTRAINT,
+                "kind" => presence.0 |= Self::KIND,
+                "severity_hint" => presence.0 |= Self::SEVERITY_HINT,
+                "statement" => presence.0 |= Self::STATEMENT,
+                "status" => presence.0 |= Self::STATUS,
+                "target_entry_types" => presence.0 |= Self::TARGET_ENTRY_TYPES,
                 _ => {}
             }
         }
@@ -595,7 +590,11 @@ async fn update_world_rule(
     // the generated DTO collapses (an empty `{}` / `[]`, an explicit `null`, or
     // a `status` exit) is still refused by name instead of being discarded into
     // the empty-PATCH or archive-only shapes.
-    guard_archived_patch(current.status.as_deref() == Some(ARCHIVED_STATUS), &req, presence)?;
+    guard_archived_patch(
+        current.status.as_deref() == Some(ARCHIVED_STATUS),
+        &req,
+        presence,
+    )?;
 
     // §13 strict idempotence: the archive-only repeat on an already archived
     // row is a **no-write** success. The shared update statement refreshes
@@ -839,27 +838,37 @@ fn guard_archived_patch(
     let offenders: [(&str, bool); 7] = [
         (
             "canonical_name",
-            presence.canonical_name || req.canonical_name.is_some(),
+            presence.contains(RulePatchPresence::CANONICAL_NAME) || req.canonical_name.is_some(),
         ),
-        ("constraint", presence.constraint || !req.constraint.is_empty()),
-        ("kind", presence.kind || req.kind.is_some()),
+        (
+            "constraint",
+            presence.contains(RulePatchPresence::CONSTRAINT) || !req.constraint.is_empty(),
+        ),
+        (
+            "kind",
+            presence.contains(RulePatchPresence::KIND) || req.kind.is_some(),
+        ),
         (
             "severity_hint",
-            presence.severity_hint || req.severity_hint.is_some(),
+            presence.contains(RulePatchPresence::SEVERITY_HINT) || req.severity_hint.is_some(),
         ),
-        ("statement", presence.statement || req.statement.is_some()),
+        (
+            "statement",
+            presence.contains(RulePatchPresence::STATEMENT) || req.statement.is_some(),
+        ),
         // A status exit is a *supplied* status other than `archived` (an
         // explicit null counts: `presence` records the key while the typed
         // value is the absent member). An absent status is not an offender —
         // the supplied content member is the one named.
         (
             "status",
-            (presence.status || req.status.is_some())
+            (presence.contains(RulePatchPresence::STATUS) || req.status.is_some())
                 && !matches!(req.status.as_deref(), Some(ARCHIVED_STATUS)),
         ),
         (
             "target_entry_types",
-            presence.target_entry_types || req.target_entry_types.is_some(),
+            presence.contains(RulePatchPresence::TARGET_ENTRY_TYPES)
+                || req.target_entry_types.is_some(),
         ),
     ];
     let Some((field, _)) = offenders.into_iter().find(|(_, offending)| *offending) else {
@@ -870,9 +879,7 @@ fn guard_archived_patch(
          (and no restore route) exists"
             .to_string()
     } else {
-        format!(
-            "an archived rule is read-only: only status=archived may be supplied, got {field}"
-        )
+        format!("an archived rule is read-only: only status=archived may be supplied, got {field}")
     };
     Err(CoreError::InvalidInput {
         field: field.to_string(),

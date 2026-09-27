@@ -285,12 +285,12 @@ fn render_rule_add(world_id: &str, rule: &WorldRuleResponse) -> String {
     lines.join("\n")
 }
 
-/// `creator world rule list` — the world's rules in store order
-/// `canonical_name ASC, rule_id ASC` (AR-3). Every non-archived status is
-/// listed — draft/deprecated included, so authors see what auto-include will
-/// skip — while `archived` rows stay hidden unless `include_archived` is set
-/// (V1.198 §13). The omission is selected once by the core and pushed into
-/// SQL; this leaf never filters rows.
+/// Lists a world's rules in store order (`canonical_name ASC, rule_id ASC`).
+///
+/// Every non-archived status is listed (AR-3), including draft/deprecated so
+/// authors see what auto-include skips. Archived rows stay hidden unless
+/// `include_archived` is set (V1.198 §13). The core selects the omission once
+/// in SQL; this leaf never filters rows.
 ///
 /// `--json` emits the core's `WorldRulesListResponseRulesItem` array
 /// verbatim; the human table projects the same fields. Returns the report

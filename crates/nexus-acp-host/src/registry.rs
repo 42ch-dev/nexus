@@ -1311,7 +1311,10 @@ mod tests {
         .await;
 
         assert_eq!(results.len(), 1, "one installation: {results:?}");
-        assert_eq!(results[0].binary, "kimi", "the absolute path reduces to the bare name");
+        assert_eq!(
+            results[0].binary, "kimi",
+            "the absolute path reduces to the bare name"
+        );
         assert_eq!(
             results[0].version.as_deref(),
             Some("kimi 1.0.0"),

@@ -1351,7 +1351,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn guarded_group_signal_refuses_recycled_birth_token() {
-        use nix::sys::signal::{Signal, killpg};
+        use nix::sys::signal::{killpg, Signal};
 
         let spawner = AgentSpawner::new(PathBuf::from("/tmp"));
         let (mut child, _stdin, _stdout) = spawner
@@ -1380,11 +1380,17 @@ mod tests {
 
         // Nothing reached the owned group: it is still alive and still
         // described by its true birth token.
-        assert!(killpg(pgrp, None).is_ok(), "the owned group must be untouched");
+        assert!(
+            killpg(pgrp, None).is_ok(),
+            "the owned group must be untouched"
+        );
         assert!(birth.verify(), "the owned child must still be alive");
 
         // Owned cleanup with the true token still works.
-        assert!(ManagedAcpProcess::signal_group_guarded(&birth, Signal::SIGKILL));
+        assert!(ManagedAcpProcess::signal_group_guarded(
+            &birth,
+            Signal::SIGKILL
+        ));
         let _ = child.wait().await;
     }
 

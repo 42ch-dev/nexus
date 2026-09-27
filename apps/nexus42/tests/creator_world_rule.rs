@@ -22,9 +22,7 @@ mod direct;
 
 use assert_cmd::Command;
 use direct::DirectFixture;
-use nexus42::commands::creator::world::rule::{
-    rule_add, rule_archive, rule_deactivate, rule_list,
-};
+use nexus42::commands::creator::world::rule::{rule_add, rule_archive, rule_deactivate, rule_list};
 use nexus_contracts::worlds::world_rules_list_response::WorldRulesListResponseRulesItem;
 use nexus_core::{CoreAccess, CoreOpenOptions, CoreService, Principal};
 use nexus_home_layout::{nexus_root_from_home, workspace_state_db_path};
@@ -900,10 +898,36 @@ async fn archive_list_table_and_json_parity() {
     );
     assert!(
         included_table.lines().any(|line| {
-            line.contains("Archived rule")
-                && line.split_whitespace().any(|cell| cell == "archived")
+            line.contains("Archived rule") && line.split_whitespace().any(|cell| cell == "archived")
         }),
         "the STATUS column prints the stored value: {included_table}"
+    );
+}
+
+fn assert_cli_archives_rule(fixture: &DirectFixture, rule_id: &str) {
+    let archived = fixture
+        .command()
+        .args([
+            "creator",
+            "world",
+            "rule",
+            "archive",
+            "--world-id",
+            WORLD,
+            "--rule-id",
+            rule_id,
+        ])
+        .output()
+        .expect("spawn nexus42 rule archive");
+    assert!(
+        archived.status.success(),
+        "archive failed: {}",
+        String::from_utf8_lossy(&archived.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&archived.stdout).contains(rule_id),
+        "archive success output names the rule: {}",
+        String::from_utf8_lossy(&archived.stdout)
     );
 }
 
@@ -928,31 +952,7 @@ async fn cli_rule_list_include_archived_flag() {
     .unwrap()
     .rule_id;
     env.core.close().await.expect("seed core closes");
-    let archived = env
-        .fixture
-        .command()
-        .args([
-            "creator",
-            "world",
-            "rule",
-            "archive",
-            "--world-id",
-            WORLD,
-            "--rule-id",
-            &archived_id,
-        ])
-        .output()
-        .expect("spawn nexus42 rule archive");
-    assert!(
-        archived.status.success(),
-        "archive failed: {}",
-        String::from_utf8_lossy(&archived.stderr)
-    );
-    assert!(
-        String::from_utf8_lossy(&archived.stdout).contains(&archived_id),
-        "archive success output names the rule: {}",
-        String::from_utf8_lossy(&archived.stdout)
-    );
+    assert_cli_archives_rule(&env.fixture, &archived_id);
 
     let default_json = env
         .fixture
@@ -1028,7 +1028,8 @@ async fn cli_rule_list_include_archived_flag() {
     );
     assert!(
         table.lines().any(|line| {
-            line.contains("Archived via CLI") && line.split_whitespace().any(|cell| cell == "archived")
+            line.contains("Archived via CLI")
+                && line.split_whitespace().any(|cell| cell == "archived")
         }),
         "the STATUS column prints `archived`: {table}"
     );
