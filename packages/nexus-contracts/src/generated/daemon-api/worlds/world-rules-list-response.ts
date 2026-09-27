@@ -5,7 +5,7 @@
  */
 
 /**
- * Read surface for a world's structured rules (V1.166 DR-64 / AR-3): GET /v1/daemon/worlds/{world_id}/rules. Items project the spoke Rule author metadata verbatim (canonical_name, kind, statement, severity_hint, status, target_entry_types — open spoke vocabulary, no nexus coercion at rest) plus the AR-2 constraint carrier surfaced first-class from extensions.nexus.constraint (absent/malformed → omitted; the extensions bag itself is NOT exposed). The projection converts the stored INTEGER Unix-epoch timestamps to RFC 3339. Store order is canonical_name ASC, rule_id ASC (author-metadata list, not newest-first); `truncated` is the honest flag for the 500-rule safety cap: true only when more rows exist than the cap. Owned world with zero rules → 200 + {"rules": [], "truncated": false}.
+ * Read surface for a world's structured rules (V1.166 DR-64 / AR-3): GET /v1/daemon/worlds/{world_id}/rules. Items project the spoke Rule author metadata verbatim (canonical_name, kind, statement, severity_hint, status, target_entry_types — open spoke vocabulary, no nexus coercion at rest) plus the AR-2 constraint carrier surfaced first-class from extensions.nexus.constraint (absent/malformed → omitted; the extensions bag itself is NOT exposed). The projection converts the stored INTEGER Unix-epoch timestamps to RFC 3339. Store order is canonical_name ASC, rule_id ASC (author-metadata list, not newest-first). V1.198 daemon-api-surface-conventions.md §13: the optional include_archived query parameter (exactly true/false; absent means false) selects the set once before the cap — absent/false omits archived rows only, true includes them, and NULL/unknown stored statuses stay visible either way. `truncated` is the honest flag for the 500-rule safety cap: true only when more than 500 selected rows exist, so an archived row never occupies a default slot or flips it. Owned world with zero rules → 200 + {"rules": [], "truncated": false}.
  */
 export interface WorldRulesListResponse {
   /**
@@ -37,7 +37,7 @@ export interface WorldRulesListResponse {
      */
     severity_hint?: string | null;
     /**
-     * Open string. Core vocabulary (documented, not enforced): draft, active, deprecated. Verbatim; auto-include only evaluates status=active (PD-1).
+     * Open string — never a closed enum, so the read projection stays open-vocabulary (V1.198 daemon-api-surface-conventions.md §13). Documented core vocabulary (not enforced): draft, active, deprecated, archived. Verbatim; auto-include only evaluates status=active, so archived rules never enter check scope (PD-1).
      */
     status?: string | null;
     /**
@@ -60,7 +60,7 @@ export interface WorldRulesListResponse {
     updated_at?: string;
   }[];
   /**
-   * True when the 500-rule safety cap was exceeded and rules is the first 500 of canonical_name ASC, rule_id ASC order (pagination lands with the Control Room panel — roadmap).
+   * True when more than 500 selected rows exist and rules is the first 500 of canonical_name ASC, rule_id ASC order; rows the caller excluded (archived, by default) do not count toward the cap, so exclusion can never falsely truncate (pagination lands with the Control Room panel — roadmap).
    */
   truncated: boolean;
 }

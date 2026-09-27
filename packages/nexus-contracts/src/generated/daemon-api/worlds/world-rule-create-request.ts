@@ -31,7 +31,7 @@ export interface WorldRuleCreateRequest {
    */
   severity_hint?: string;
   /**
-   * Write vocabulary enforced to the core set draft | active | deprecated (AR-2); default 'active' when omitted (product lock: first rule auto-includes, AR-3).
+   * Write vocabulary enforced to the core set draft | active | deprecated (AR-2); default 'active' when omitted (product lock: first rule auto-includes, AR-3). archived is refused at create with the field-level invalid_input envelope naming status: archive is a transition applied to an existing rule (PATCH status=archived), never an authoring state (V1.198 daemon-api-surface-conventions.md §13).
    */
   status?: string;
   /**
