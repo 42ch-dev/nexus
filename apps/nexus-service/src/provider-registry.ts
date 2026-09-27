@@ -182,11 +182,32 @@ export class ProviderRegistry {
    * cancellability claim here — nor leave a settled Actor run's session marked
    * busy by a transport cache.
    *
+   * A mark is admission, not observation, so it never replaces a row it already
+   * holds: every Actor stream re-marks its operation on (re)connect, and
+   * rebuilding the row there rewound a settled record to `started` with no
+   * terminal event while its id stayed in the terminal FIFO — the record then
+   * read as live to that FIFO's own non-terminal skip, so it could never age
+   * out and the settled terminal the mirror had already observed was lost. An
+   * existing row therefore keeps its identity, association, status, terminal
+   * event/transcript and FIFO position, and a mark carrying a different
+   * association never takes over the row that association owns.
+   *
    * The arm stays bounded: a mark past `REGISTRY_MAX_ACTOR_OPERATIONS` retires
    * the oldest Actor record with its hub (`evictActorOperationsIfNeeded`), so a
    * stream-heavy workload cannot accumulate one hub per connect.
    */
   markActorOperation(operationId: string, sessionId: string, providerId: string): void {
+    const existing = this.operations.get(operationId);
+    if (existing) {
+      // A settled row is the outcome this mirror already observed: admission
+      // never rewinds it, and its terminal FIFO position stands.
+      if (existing.terminalEvent || isTerminalOperationStatus(existing.status)) return;
+      // A live row stays owned by the association that admitted it; a mark with
+      // another association must not take it over.
+      if (existing.sessionId !== sessionId || existing.providerId !== providerId) return;
+      existing.actorBacked = true;
+      return;
+    }
     this.operations.set(operationId, {
       operationId,
       sessionId,

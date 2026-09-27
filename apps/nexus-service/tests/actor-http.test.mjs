@@ -1538,6 +1538,67 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     }
   });
 
+  test('Actor re-mark preserves settled terminal', async () => {
+    // The Actor stream re-marks its operation on every (re)connect, and a mark is
+    // admission bookkeeping, not an observation: it used to replace the row it
+    // already held with `started` and no terminal event while the id stayed in
+    // the terminal FIFO. A settled record then read as live again, so the FIFO's
+    // own non-terminal skip could never age it out — the mirror dropped the
+    // terminal it had already observed and stopped being bounded by it.
+    const { ProviderRegistry } = await import(join(serviceRoot, 'dist/provider-registry.js'));
+    const { REGISTRY_MAX_TERMINAL_OPERATIONS } = await import(join(serviceRoot, 'dist/config.js'));
+    const registry = new ProviderRegistry();
+    const sessionId = randomUUID();
+    const foreignSessionId = randomUUID();
+    const operationId = randomUUID();
+    const terminal = { OpFinished: { reason: 'end_turn' } };
+
+    registry.markActorOperation(operationId, sessionId, MAIN_PROVIDER);
+    assert.equal(
+      registry.finishOperation(operationId, terminal, 'the settled transcript'),
+      true,
+      'the Actor stream settles the mirror row from the terminal it delivered',
+    );
+    assert.equal(registry.operationRecord(operationId).status, 'finished');
+
+    // The reconnect: same (session, operation) association, no observation.
+    registry.markActorOperation(operationId, sessionId, MAIN_PROVIDER);
+    const reMarked = registry.operationRecord(operationId);
+    assert.equal(reMarked.status, 'finished', 'a re-mark must not rewind the settled status');
+    assert.deepEqual(reMarked.terminalEvent, terminal, 'a re-mark must not drop the settled terminal event');
+    assert.equal(reMarked.terminalTranscript, 'the settled transcript', 'a re-mark must not drop the settled transcript');
+    assert.equal(reMarked.sessionId, sessionId, 'a re-mark must not replace the settled row association');
+    assert.equal(reMarked.actorBacked, true);
+
+    // A mark never takes over a row another association holds.
+    const liveId = randomUUID();
+    registry.markActorOperation(liveId, sessionId, MAIN_PROVIDER);
+    registry.markActorOperation(liveId, foreignSessionId, MAIN_PROVIDER);
+    assert.equal(
+      registry.operationRecord(liveId).sessionId,
+      sessionId,
+      'a foreign association must not rewrite a live row',
+    );
+
+    // Eviction eligibility: the re-marked row kept its terminal FIFO position, so
+    // the terminal arm's own overflow still retires it as its oldest terminal row.
+    for (let index = 0; index < REGISTRY_MAX_TERMINAL_OPERATIONS; index += 1) {
+      registry.registerOperation({
+        operationId: randomUUID(),
+        sessionId: foreignSessionId,
+        providerId: MAIN_PROVIDER,
+        status: 'finished',
+        terminalEvent: terminal,
+        terminalTranscript: null,
+      });
+    }
+    assert.equal(
+      registry.operationRecord(operationId),
+      undefined,
+      `the re-marked record must stay the oldest terminal row and age out at the ${REGISTRY_MAX_TERMINAL_OPERATIONS}-row retention bound`,
+    );
+  });
+
   test('session create stays API-key and Origin guarded, with zero launch', async () => {
     // One process holds one core Host authority, so the journey service must be
     // down before the keyed service opens; it is restored either way.
