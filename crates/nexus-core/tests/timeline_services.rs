@@ -710,6 +710,49 @@ async fn overview_pages_worlds_deterministically() {
     f.pool.close().await;
 }
 
+/// Overview wire contract: `cursor` is a *required* but nullable field. A
+/// terminal page must therefore serialize an explicit `"cursor": null`
+/// (never an omitted key), while a non-terminal page still carries a usable
+/// string cursor.
+#[tokio::test]
+async fn overview_cursor_serializes_required_nullable() {
+    let f = fixture().await;
+
+    // Terminal page (no Worlds at all) — the required field must appear as null.
+    let empty = overview(&f.core, &f.principal, None).await;
+    let empty_json = serde_json::to_value(&empty).expect("serialize empty overview");
+    assert_eq!(
+        empty_json.get("cursor"),
+        Some(&serde_json::Value::Null),
+        "terminal page must serialize an explicit null cursor"
+    );
+
+    for i in 0..26 {
+        seed_world(&f.pool, &format!("wld_{i:03}"), CREATOR, Some(ROOT)).await;
+    }
+
+    // Non-terminal page — the same required field carries a usable string.
+    let page1 = overview(&f.core, &f.principal, None).await;
+    let page1_json = serde_json::to_value(&page1).expect("serialize page 1");
+    let cursor = page1_json
+        .get("cursor")
+        .and_then(serde_json::Value::as_str)
+        .expect("non-terminal page must serialize a string cursor");
+    assert_eq!(page1.cursor.as_deref(), Some(cursor));
+
+    // Continuation page — terminal again, so the cursor is null once more.
+    let page2 = overview(&f.core, &f.principal, page1.cursor.clone()).await;
+    let page2_json = serde_json::to_value(&page2).expect("serialize page 2");
+    assert_eq!(
+        page2_json.get("cursor"),
+        Some(&serde_json::Value::Null),
+        "continuation page end must serialize an explicit null cursor"
+    );
+
+    f.core.close().await.expect("close");
+    f.pool.close().await;
+}
+
 /// Overview counts aggregate only live key blocks (`deleted` / `merged` /
 /// `deprecated` excluded) and `last_event_at` parses the latest event
 /// timestamp.

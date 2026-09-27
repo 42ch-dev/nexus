@@ -142,13 +142,17 @@ fn js_sessions_snapshot(state: &EnvState) -> Vec<JsSessionRecord> {
 /// native surface has exactly one open selection — so the principal is the one
 /// that open verified. The authority re-verifies it on every query, which is
 /// what keeps a cached TS value from bypassing the check.
+///
+/// Both slots are released together by the open/close lifetime, so either one
+/// missing is the SAME classified absence (`host_not_started`), never an
+/// unprotected `invalid_input` a consumer has to tell apart by message.
 async fn query_scope(state: &EnvState) -> Result<(std::sync::Arc<HostHandle>, Principal), String> {
     let authority = state
         .host_authority()
-        .ok_or_else(|| core_error::open_reason_invalid_input("host not started"))?;
+        .ok_or_else(core_error::open_reason_host_not_started)?;
     let core = state
         .journal_core()
-        .ok_or_else(|| core_error::open_reason_invalid_input("host not started"))?;
+        .ok_or_else(core_error::open_reason_host_not_started)?;
     let principal = core
         .active_principal()
         .await

@@ -1,5 +1,5 @@
-//! Structured-rule author surface — `creator world rule add|list|deactivate`
-//! (V1.166 PD-1 / AR-2 / AR-3, DR-64).
+//! Structured-rule author surface — `creator world rule add|list|deactivate|archive`
+//! (V1.166 PD-1 / AR-2 / AR-3, DR-64; archive lifecycle V1.198 §13).
 //!
 //! The leaves run on the typed core World-rule seam
 //! ([`crate::core`]): `create_world_rule` / `list_world_rules` /
@@ -12,30 +12,38 @@
 //!
 //! `kind` (core `rule` / `prohibition` / `style`) and `severity_hint` (core
 //! `info` / `warning` / `error`) are open, non-empty strings stored verbatim.
-//! `status` is **not** one of them: it is the core's closed `draft` / `active`
-//! / `deprecated` grammar (AR-3), so any other value is refused by the core
+//! `status` is **not** one of them: it is the core's vocabulary — `draft` /
+//! `active` / `deprecated` at create, `archived` joining them as the terminal
+//! PATCH transition (V1.198 §13) — so any other value is refused by the core
 //! instead of being stored. `statement` is the **human summary only** — it is
 //! never parsed by the evaluator (PD-1). Machine evaluation reads
 //! `extensions.nexus.constraint` (AR-2 carrier).
 //!
 //! # Ownership
 //!
-//! `add` and `deactivate` gate on the core's shared world-owner guard: a
-//! foreign or missing World is a named 404/403 refusal, never a silent no-op.
-//! `deactivate` is the core's `status = deprecated` update (PD-1 recovery lock
-//! — no DELETE route, re-activation is a Non-Goal: authors add a new rule).
+//! `add`, `deactivate` and `archive` gate on the core's shared world-owner
+//! guard: a foreign or missing World is a named 404/403 refusal, never a
+//! silent no-op. `deactivate` is the core's `status = deprecated` update
+//! (PD-1 recovery lock — no DELETE route, re-activation is a Non-Goal:
+//! authors add a new rule). `archive` is the core's terminal
+//! `status = archived` transition (V1.198 §13): the row is retained, hidden
+//! from the default read and accepted only as an archive-only repeat.
 
 use crate::config::CliConfig;
 use crate::core::{finish_direct, map_core_error, open_direct_core};
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
 use nexus_contracts::{WorldRuleCreateRequest, WorldRuleResponse, WorldRuleUpdateRequest};
-use nexus_core::{CoreService, Principal};
+use nexus_core::{CoreService, Principal, RulePatchPresence};
 use serde_json::{Map, Value};
 
 /// The spoke status written by `rule deactivate` (PD-1: spoke vocabulary —
 /// do **not** invent `inactive`).
 const DEPRECATED_STATUS: &str = "deprecated";
+
+/// The terminal status written by `rule archive` (V1.198 §13: the fourth
+/// status, transition-only — `add --status archived` is refused).
+const ARCHIVED_STATUS: &str = "archived";
 
 /// `creator world rule` subcommands.
 #[derive(Debug, Subcommand)]
@@ -63,8 +71,9 @@ pub enum RuleCommand {
         /// carry no `entry_type` — AR-2).
         #[arg(long)]
         entry_type: Vec<String>,
-        /// Rule status (the core's closed grammar: `draft` / `active` /
-        /// `deprecated`; any other value is refused, never stored)
+        /// Rule status (the core's closed create grammar: `draft` / `active` /
+        /// `deprecated`; `archived` is a transition, not an authoring state —
+        /// any other value is refused, never stored)
         #[arg(long, default_value = "active")]
         status: String,
         /// Structured constraint carrier as a JSON object string (AR-2:
@@ -73,12 +82,17 @@ pub enum RuleCommand {
         constraint: String,
     },
 
-    /// List all rules of a world (all statuses — draft/deprecated included,
-    /// so authors see what auto-include will skip)
+    /// List a world's rules (every non-archived status — draft/deprecated
+    /// included, so authors see what auto-include will skip; archived rows are
+    /// omitted by default per the V1.198 default read)
     List {
         /// World ID (e.g. `wld_abc123`)
         #[arg(long)]
         world_id: String,
+        /// Include retained `archived` rows (default: archived omitted; the
+        /// omission is selected by the core, never filtered here)
+        #[arg(long)]
+        include_archived: bool,
         /// Emit machine-readable JSON
         #[arg(long)]
         json: bool,
@@ -87,6 +101,18 @@ pub enum RuleCommand {
     /// Set a rule's status to `deprecated` (spoke vocabulary; re-activation
     /// is a Non-Goal — authors add a new rule)
     Deactivate {
+        /// World ID (e.g. `wld_abc123`)
+        #[arg(long)]
+        world_id: String,
+        /// Rule ID (e.g. `rul_abc123`)
+        #[arg(long)]
+        rule_id: String,
+    },
+
+    /// Archive a rule — the terminal `status = archived` transition (the row
+    /// is retained but hidden from the default list; repetition succeeds).
+    /// There is no restore or delete: reviving content means adding a new rule
+    Archive {
         /// World ID (e.g. `wld_abc123`)
         #[arg(long)]
         world_id: String,
@@ -136,11 +162,16 @@ pub async fn run(cmd: RuleCommand, config: &CliConfig) -> Result<()> {
                 .await?;
                 Ok(Some(render_rule_add(&world_id, &rule)))
             }
-            RuleCommand::List { world_id, json } => {
-                rule_list(&core, &principal, &world_id, json).await
-            }
+            RuleCommand::List {
+                world_id,
+                include_archived,
+                json,
+            } => rule_list(&core, &principal, &world_id, include_archived, json).await,
             RuleCommand::Deactivate { world_id, rule_id } => {
                 rule_deactivate(&core, &principal, &world_id, &rule_id).await
+            }
+            RuleCommand::Archive { world_id, rule_id } => {
+                rule_archive(&core, &principal, &world_id, &rule_id).await
             }
         }
     }
@@ -254,8 +285,12 @@ fn render_rule_add(world_id: &str, rule: &WorldRuleResponse) -> String {
     lines.join("\n")
 }
 
-/// `creator world rule list` — all rules of a world, **all statuses**
-/// (PD-1 list: store order `canonical_name ASC, rule_id ASC` — AR-3).
+/// `creator world rule list` — the world's rules in store order
+/// `canonical_name ASC, rule_id ASC` (AR-3). Every non-archived status is
+/// listed — draft/deprecated included, so authors see what auto-include will
+/// skip — while `archived` rows stay hidden unless `include_archived` is set
+/// (V1.198 §13). The omission is selected once by the core and pushed into
+/// SQL; this leaf never filters rows.
 ///
 /// `--json` emits the core's `WorldRulesListResponseRulesItem` array
 /// verbatim; the human table projects the same fields. Returns the report
@@ -269,10 +304,13 @@ pub async fn rule_list(
     core: &CoreService,
     principal: &Principal,
     world_id: &str,
+    include_archived: bool,
     json: bool,
 ) -> Result<Option<String>> {
+    // V1.198 §13: the caller selects inclusion once; the core omits archived
+    // rows in SQL before the 501-row probe (`--include-archived` reveals them).
     let response = core
-        .list_world_rules(principal, world_id.to_string())
+        .list_world_rules(principal, world_id.to_string(), include_archived)
         .await
         .map_err(map_core_error)?;
 
@@ -313,13 +351,16 @@ pub async fn rule_list(
 ///
 /// This is the core's `status = deprecated` update: the World-ownership guard
 /// runs first and a `rule_id` that is unknown **or** belongs to another World
-/// is the core's 404 naming only the id (AR-6) — never a silent no-op.
+/// is the core's 404 naming only the id (AR-6) — never a silent no-op. An
+/// archived (terminal) row also refuses this status exit by naming `status`
+/// (V1.198 §13), so this leaf can never revive a tombstone.
 /// Returns the report `run` prints once the writer settled.
 ///
 /// # Errors
 ///
 /// Returns the core's named refusal on a cross-author World (403), an
-/// unknown/foreign rule id (404), or a storage error.
+/// unknown/foreign rule id (404), the archived-tombstone status refusal, or a
+/// storage error.
 pub async fn rule_deactivate(
     core: &CoreService,
     principal: &Principal,
@@ -336,11 +377,58 @@ pub async fn rule_deactivate(
         world_id.to_string(),
         rule_id.to_string(),
         request,
+        // A direct caller names the fields it authored: this leaf writes
+        // `status` alone (the generated DTO cannot state that itself).
+        RulePatchPresence::from_supplied_keys(&["status"]),
     )
     .await
     .map_err(map_core_error)?;
 
     Ok(Some(format!(
         "✓ Rule deactivated: {rule_id} (status={DEPRECATED_STATUS})"
+    )))
+}
+
+/// `creator world rule archive` — set a rule's status to `archived`
+/// (V1.198 §13 terminal transition).
+///
+/// The same core `status` update seam as [`rule_deactivate`]: the
+/// World-ownership guard runs first, an unknown or cross-World `rule_id` is
+/// the core's 404 naming only the id (AR-6), and `archived` is written with
+/// `status` as the only supplied member — the presence metadata the core's
+/// tombstone guard requires. Repeating the command on an already-archived row
+/// succeeds without a write; every other member or status value is refused by
+/// the core, so no restore path exists through this leaf. Returns the report
+/// `run` prints once the writer settled.
+///
+/// # Errors
+///
+/// Returns the core's named refusal on a cross-author World (403), an
+/// unknown/foreign rule id (404), the archived-tombstone refusal for a
+/// non-archive member, or a storage error.
+pub async fn rule_archive(
+    core: &CoreService,
+    principal: &Principal,
+    world_id: &str,
+    rule_id: &str,
+) -> Result<Option<String>> {
+    let request = WorldRuleUpdateRequest {
+        status: Some(ARCHIVED_STATUS.to_string()),
+        ..WorldRuleUpdateRequest::default()
+    };
+
+    core.update_world_rule(
+        principal,
+        world_id.to_string(),
+        rule_id.to_string(),
+        request,
+        // Status-only presence: the archived tombstone accepts exactly this.
+        RulePatchPresence::from_supplied_keys(&["status"]),
+    )
+    .await
+    .map_err(map_core_error)?;
+
+    Ok(Some(format!(
+        "✓ Rule archived: {rule_id} (status={ARCHIVED_STATUS})"
     )))
 }

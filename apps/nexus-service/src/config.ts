@@ -110,20 +110,38 @@ export const REGISTRY_MAX_TERMINAL_OPERATIONS = 64;
  */
 export const REGISTRY_MAX_ACTOR_OPERATIONS = REGISTRY_MAX_TERMINAL_OPERATIONS;
 /**
- * Bound on hubs that may simultaneously hold control frames: at most
- * {@link REGISTRY_MAX_TERMINAL_OPERATIONS} retained terminal hubs plus
- * {@link MAX_ACTIVE_PROVIDER_OPERATIONS} live hubs. Each hub holds at most one
- * terminal and one gap slot of ≤{@link SSE_RESERVED_CONTROL_BYTES}, so the
- * control reserve below is a hard ceiling that never competes with the data pool.
+ * Bound on hubs that may simultaneously hold control frames. Every population
+ * below charges the same reserve and can hold a hub at the same time, so they
+ * are summed conservatively rather than deduplicated:
  *
- * The Actor mirror arm holds up to {@link REGISTRY_MAX_ACTOR_OPERATIONS}
- * further hubs inside the same reserve; an ending that a saturated reserve still
- * cannot charge is counted and logged (`sseUnretainedGapEvents`) instead of
- * disappearing as a bare close.
+ * - {@link REGISTRY_MAX_TERMINAL_OPERATIONS} retained terminal provider hubs;
+ * - {@link MAX_ACTIVE_PROVIDER_OPERATIONS} live provider-only hubs;
+ * - {@link REGISTRY_MAX_ACTOR_OPERATIONS} retained Actor mirror hubs;
+ * - up to {@link SSE_MAX_TOTAL_SUBSCRIBERS} further hubs whose retirement the
+ *   registry could not apply because a live stream was still reading them.
+ *   `ProviderRegistry` defers those to the reader's detach, so they keep
+ *   holding their control slots; at most one hub is pinned per live reader and
+ *   readers are capped by the socket budget.
+ *
+ * Each hub holds at most one terminal and one gap slot of
+ * ≤{@link SSE_RESERVED_CONTROL_BYTES}, so the control reserve below is a hard
+ * ceiling that never competes with the data pool; an ending a saturated reserve
+ * still cannot charge is counted and logged (`sseUnretainedGapEvents`) instead
+ * of disappearing as a bare close.
+ *
+ * The first three terms are ceilings the registry enforces on every row it
+ * retains (`ProviderRegistry.registerOperation` / `markActorOperation`), which is
+ * what makes the sum a bound on retained hubs rather than an estimate: a live
+ * provider-only row is refused with no effect once the cap is full (counting
+ * dispatches admitted before their rows), an Actor row is retained only while the
+ * arm has room, and a hub is never created for a row the registry does not hold.
  */
 export const ENVIRONMENT_MAX_TRACKED_HUBS =
-  REGISTRY_MAX_TERMINAL_OPERATIONS + MAX_ACTIVE_PROVIDER_OPERATIONS;
-/** Dedicated control-frame byte reserve (terminal+gap slots), separate from data. */
+  REGISTRY_MAX_TERMINAL_OPERATIONS +
+  MAX_ACTIVE_PROVIDER_OPERATIONS +
+  REGISTRY_MAX_ACTOR_OPERATIONS +
+  SSE_MAX_TOTAL_SUBSCRIBERS;
+/** Control-frame byte reserve: one terminal + one gap slot per tracked hub, separate from data. */
 export const SSE_CONTROL_RESERVED_TOTAL_BYTES =
   ENVIRONMENT_MAX_TRACKED_HUBS * 2 * SSE_RESERVED_CONTROL_BYTES;
 /** Default provider effect deadline. */

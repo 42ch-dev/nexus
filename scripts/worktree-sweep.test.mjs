@@ -615,9 +615,9 @@ function nodeCommand(script, path) {
 }
 
 /** Run the sweeper itself, outside any fixture, so a usage/contract probe keeps its exit code. */
-async function runScript(args) {
+async function runScript(args, script = SCRIPT) {
   try {
-    const { stdout, stderr } = await exec(process.execPath, [SCRIPT, ...args], { cwd: process.cwd(), env: process.env, maxBuffer: 8 * 1024 * 1024 });
+    const { stdout, stderr } = await exec(process.execPath, [script, ...args], { cwd: process.cwd(), env: process.env, maxBuffer: 8 * 1024 * 1024 });
     return { code: 0, stdout, stderr };
   } catch (error) {
     return { code: error.code, stdout: String(error.stdout ?? ''), stderr: String(error.stderr ?? '') };
@@ -2344,6 +2344,59 @@ test('a branch-only ownership receipt cannot delete anything', async t => {
   ], JSON.stringify(trackOf(convergedApply.document, 'fixture-ghost').actions));
 });
 
+test('receipt-only footprint requires snapshot-backed ownership', async t => {
+  let ownedReceipt;
+  let unownedReceipt;
+  const ghostTarget = 'nexus-target-fixture-ghost';
+  const fixture = await makeFixture({
+    shape: 'partial',
+    orphans: false,
+    extraTrackBranches: ['feat/fixture-ghost'],
+    mutateInventory: (document, paths) => {
+      ownedReceipt = join(receiptBase(paths), 'owned-receipt');
+      unownedReceipt = join(receiptBase(paths), 'unowned-receipt');
+      for (const receipt of [ownedReceipt, unownedReceipt]) {
+        mkdirSync(receipt, { recursive: true });
+        writeFileSync(join(receipt, 'payload.bin'), `${basename(receipt)}\n`);
+      }
+      document.tracks[0].temporary_paths.push(ownedReceipt);
+      document.tracks.push({
+        track_id: 'fixture-ghost',
+        plan_id: 'fixture-plan',
+        worktree: join(paths.worktreesRoot, 'fixture-ghost'),
+        branch: 'feat/fixture-ghost',
+        target: join(paths.cache, ghostTarget),
+        temporary_paths: [unownedReceipt],
+        producer_stopped: true,
+        state: 'completed',
+      });
+      return document;
+    },
+  });
+  t.after(() => fixture.teardown());
+  await rm(fixture.ownerTarget, { recursive: true, force: true });
+
+  const dry = await fixture.run();
+  assert.equal(dry.code, 0, dry.stdout);
+  const ghost = trackOf(dry.document, 'fixture-ghost');
+  assert.equal(ghost.ownership.path_proof, 'unproven');
+  assert.deepEqual(actionPairs(ghost), [['reclaim-footprint', 'refuse']], JSON.stringify(ghost.actions));
+  assert.equal(ghost.actions[0].reason, 'sweeper.refuse.unproven-ownership');
+  assert.equal(proposedRefs(dry.document).includes(unownedReceipt), false);
+  assert.deepEqual(actionPairs(trackOf(dry.document, 'fixture-owner')).slice(0, 2), [
+    ['reclaim-target', 'absent'],
+    ['reclaim-temporary', 'propose'],
+  ]);
+
+  const applied = await fixture.run(['--apply']);
+  assert.equal(applied.code, 1, applied.stdout);
+  assert.deepEqual(actionPairs(trackOf(applied.document, 'fixture-ghost')), [['reclaim-footprint', 'refuse']]);
+  assert.equal(trackOf(applied.document, 'fixture-ghost').actions[0].reason, 'sweeper.refuse.unproven-ownership');
+  assert.equal(readFileSync(join(unownedReceipt, 'payload.bin'), 'utf8'), 'unowned-receipt\n');
+  assert.equal(existsSync(ownedReceipt), false, 'snapshot-owned receipt remains reclaimable');
+  assert.equal(applied.document.commands.some(record => record.argv.includes(unownedReceipt)), false);
+});
+
 test('authorization facts are re-read immediately before every deletion', async t => {
   // F-002: the release/ancestry/producer proof ran once, before the engine probe, while the
   // per-mutation gate re-checked only path identities and containment. A fact that moves after that
@@ -2495,6 +2548,24 @@ test('--help is a standalone mode in the sweeper too', async _t => {
     assert.equal(invalid.code, 2, `${JSON.stringify(args)}: ${invalid.stderr}`);
     assert.equal(invalid.stdout, '', `invalid invocations must not write stdout (${JSON.stringify(args)})`);
   }
+});
+
+test('symlink invocation runs the same CLI while imports remain silent', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'nexus-sweep-symlink-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const link = join(directory, 'sweep.mjs');
+  await symlink(SCRIPT, link);
+
+  const canonical = await runScript(['--help']);
+  const linked = await runScript(['--help'], link);
+  assert.deepEqual(linked, canonical);
+  assert.equal(linked.code, 0);
+  const invalid = await runScript(['--unknown'], link);
+  assert.equal(invalid.code, 2);
+  assert.equal(invalid.stdout, '');
+  const imported = await exec(process.execPath, ['--input-type=module', '-e', `await import(${JSON.stringify(link)})`]);
+  assert.equal(imported.stdout, '');
+  assert.equal(imported.stderr, '');
 });
 
 test('a killed child is classified as a timeout, not a spawn failure', async t => {

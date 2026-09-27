@@ -101,4 +101,8 @@ pub use world_pack::{
     ImportQuarantineReview, ImportSummary, QuarantineReason, QuarantinedAtomReport,
     REVIEW_IMPORT_MAX_ATOMS,
 };
+pub use world_rules::RulePatchPresence;
+/// Test-only write-lock rendezvous for the rule write path (`test-hooks`).
+#[cfg(any(test, feature = "test-hooks"))]
+pub use world_rules::{set_rule_write_gate, RuleWriteGate};
 pub use worlds::DELETE_WORLD_BLOCKED_BY_BINDINGS;

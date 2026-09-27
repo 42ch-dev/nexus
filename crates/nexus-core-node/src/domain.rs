@@ -266,15 +266,22 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/worlds/{world_id}/rules`.
+    /// `GET /v1/daemon/worlds/{world_id}/rules` (default read: archived rows
+    /// omitted; the adapter passes `include_archived=true` to reveal them).
+    ///
+    /// The inclusion flag is a required primitive here — the HTTP/browser
+    /// facades default it to `false`, and the native side never filters rows
+    /// itself: the core selects the exclusion and pushes it into SQL.
     #[napi]
     pub async fn list_world_rules(
         &self,
         principal_handle: String,
         world_id: String,
+        include_archived: bool,
     ) -> Result<Buffer> {
         self.json_call(principal_handle, async move |core, principal| {
-            core.list_world_rules(&principal, world_id).await
+            core.list_world_rules(&principal, world_id, include_archived)
+                .await
         })
         .await
     }
@@ -295,6 +302,12 @@ impl NativeCore {
     }
 
     /// `PATCH /v1/daemon/worlds/{world_id}/rules/{rule_id}`.
+    ///
+    /// The generated request DTO erases the supplied-member set (`{}` ≡ absent
+    /// constraint, JSON null ≡ absent member), so the raw JSON object keys are
+    /// collected **before** typed decoding and travel to the core as
+    /// [`RulePatchPresence`] — presence metadata for the archived terminal
+    /// guard, never a second wire DTO or a second validator.
     #[napi]
     pub async fn update_world_rule(
         &self,
@@ -303,9 +316,16 @@ impl NativeCore {
         rule_id: String,
         request_json: Buffer,
     ) -> Result<Buffer> {
-        let request: nexus_contracts::WorldRuleUpdateRequest = decode(request_json, "request")?;
+        let payload: serde_json::Value = decode(request_json, "request")?;
+        let supplied: Vec<&str> = payload
+            .as_object()
+            .map(|members| members.keys().map(String::as_str).collect())
+            .unwrap_or_default();
+        let presence = nexus_core::RulePatchPresence::from_supplied_keys(&supplied);
+        let request: nexus_contracts::WorldRuleUpdateRequest = serde_json::from_value(payload)
+            .map_err(|error| Error::from_reason(format!("invalid request: {error}")))?;
         self.json_call(principal_handle, async move |core, principal| {
-            core.update_world_rule(&principal, world_id, rule_id, request)
+            core.update_world_rule(&principal, world_id, rule_id, request, presence)
                 .await
         })
         .await

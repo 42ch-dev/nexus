@@ -713,9 +713,8 @@ jobs:
           echo "version=$v" >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae  # v2
         with:
-          # Distinct suffix: three feature-unified graphs in one job, none of
-          # which matches another leg's key (same-key concurrent writers race —
-          # same precedent as -sqlx/-module-dx).
+          # Per-job suffix: this job runs multiple feature graphs; keep its cache
+          # separate from concurrent Rust legs that may write under another key.
           shared-key: nexus-rust-${{ steps.workspace-version.outputs.version }}-core-domain
           workspaces: .
           cache-all-crates: false

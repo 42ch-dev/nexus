@@ -163,7 +163,10 @@
         },
         {
           "name": "listWorldRules",
-          "args": [{ "name": "worldId", "type": "string" }],
+          "args": [
+            { "name": "worldId", "type": "string" },
+            { "name": "includeArchived", "type": "boolean", "optional": true }
+          ],
           "returns": "WorldRulesListResponse"
         },
         {
