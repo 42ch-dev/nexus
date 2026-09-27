@@ -405,7 +405,7 @@ impl NativeCore {
         let host = self
             .inner
             .host_authority()
-            .ok_or_else(|| Error::from_reason("host not started"))?;
+            .ok_or_else(core_error::napi_error_host_not_started)?;
         let value = f(host, principal)
             .await
             .map_err(core_error::napi_error_from_domain)?;

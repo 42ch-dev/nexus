@@ -473,4 +473,65 @@ describe('native Actor Host surface (P0-T5)', { concurrency: 1 }, () => {
       (error) => isNativeCoreErrorCode(error, 'not_found'),
     );
   });
+
+  /**
+   * The producer contract behind the TS absence classification: the SAME
+   * refusal must be typed (`details.category`), so no consumer has to match the
+   * human message. Exercised in the binding the service itself opens
+   * (`direct_writer` + `allow_uninitialized`), and the authority's presence is
+   * observed first — the native binding holds ONE open per process, so the
+   * suite's core is taken down and restored around it.
+   */
+  test('host absence is a typed category in the domain-only binding, and a live authority stays untyped', async () => {
+    await core.close();
+    const domain = await openCore({
+      user_home: home,
+      access: 'direct_writer',
+      allow_uninitialized: true,
+    });
+    try {
+      const domainPrincipal = await domain.activePrincipal();
+
+      // The authority IS attached here: an ordinary miss keeps its own
+      // code/status and carries NO absence category, so the discriminator is
+      // categorical instead of a blanket `invalid_input`/400 marker.
+      await assert.rejects(
+        () => domain.hostQuery({ query: 'get_session', session_id: randomUUID() }),
+        (error) => {
+          const wire = parseNativeCoreError(error);
+          assert.equal(wire?.code, 'not_found');
+          assert.equal(wire?.http_status, 404);
+          assert.equal(wire?.details?.category, undefined, JSON.stringify(wire));
+          return true;
+        },
+      );
+      // A live authority answers an unknown operation with its own not_found —
+      // also not absence.
+      await assert.rejects(
+        () => domain.hostCharacterOperation(domainPrincipal, randomUUID()),
+        (error) => isNativeCoreErrorCode(error, 'not_found'),
+      );
+    } finally {
+      const report = await domain.close();
+      assert.equal(report.cleanup_confirmed, true, JSON.stringify(report));
+    }
+
+    // The authority is gone. The public code/status stay the designed
+    // `invalid_input`/400 (degraded readiness is not a client fault) and the
+    // typed category is what names the absence.
+    await assert.rejects(
+      () => domain.hostQuery({ query: 'health' }),
+      (error) => {
+        const wire = parseNativeCoreError(error);
+        assert.equal(wire?.code, 'invalid_input');
+        assert.equal(wire?.http_status, 400);
+        assert.equal(wire?.details?.category, 'host_not_started', JSON.stringify(wire));
+        assert.equal(wire?.message, 'host not started');
+        return true;
+      },
+    );
+
+    // Restore the suite's core so `after` closes the instance it opened.
+    core = await openCore({ ...OPEN_OPTIONS, user_home: home }, providers.callbacks);
+  });
 });

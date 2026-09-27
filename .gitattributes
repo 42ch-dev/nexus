@@ -1,6 +1,6 @@
 # Git LFS — binary brand source assets (PNG provenance references)
 packages/nexus-ui/assets/logos/*.png filter=lfs diff=lfs merge=lfs -text
-apps/desktop-electron/resources/icons/source-1024.png filter=lfs diff=lfs merge=lfs -text
+apps/desktop-electron/resources/icons/source-1024.png -filter -diff -merge -text
 apps/desktop-electron/resources/icons/app-icon-preview-256.png -filter -diff -merge
 
 # Git LFS — canonical font binaries (provenance only; app-vendored copies under

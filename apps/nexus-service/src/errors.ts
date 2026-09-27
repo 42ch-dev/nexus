@@ -102,6 +102,31 @@ export function mapNativeError(error: unknown): HttpError {
   return new HttpError(500, 'internal', PUBLIC_INTERNAL_MESSAGE);
 }
 
+/**
+ * The typed `details.category` the native producer publishes when the embedded
+ * Host authority is not attached.
+ *
+ * Its public code/status stay `invalid_input`/400 — an unattached authority is
+ * truthful degraded readiness, not a client fault — so this category, never the
+ * human message, is the stable discriminator for the absent-host state.
+ */
+export const HOST_NOT_STARTED_CATEGORY = 'host_not_started';
+
+/**
+ * Whether a native rejection reports the absent embedded Host authority.
+ *
+ * Reads the typed envelope (`invalid_input` plus `details.category`): a reworded
+ * producer message cannot change the verdict, and every other `invalid_input` —
+ * or any `internal` — stays a hard failure instead of falling into an absence
+ * fallback. A missing resource is NOT absence and keeps its own deliberate
+ * `not_found` handling at each call site. Accepts a raw native rejection or an
+ * already mapped `HttpError`.
+ */
+export function isAbsentHostError(error: unknown): boolean {
+  const mapped = mapNativeError(error);
+  return mapped.code === 'invalid_input' && mapped.details?.category === HOST_NOT_STARTED_CATEGORY;
+}
+
 export function toErrorBody(error: HttpError, requestId: string): ApiErrorBody {
   const message = error.code === 'internal' ? PUBLIC_INTERNAL_MESSAGE : error.message;
   return {
