@@ -34,7 +34,7 @@
     },
     "status": {
       "type": ["string", "null"],
-      "description": "Open string. Core vocabulary (documented, not enforced): draft, active, deprecated. Verbatim; auto-include only evaluates status=active (PD-1)."
+      "description": "Open string — never a closed enum, so the read projection stays open-vocabulary (V1.198 daemon-api-surface-conventions.md §13). Documented core vocabulary (not enforced): draft, active, deprecated, archived. Verbatim; auto-include only evaluates status=active, so archived rules never enter check scope (PD-1)."
     },
     "target_entry_types": {
       "type": "array",
