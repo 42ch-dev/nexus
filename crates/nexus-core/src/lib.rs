@@ -101,4 +101,5 @@ pub use world_pack::{
     ImportQuarantineReview, ImportSummary, QuarantineReason, QuarantinedAtomReport,
     REVIEW_IMPORT_MAX_ATOMS,
 };
+pub use world_rules::RulePatchPresence;
 pub use worlds::DELETE_WORLD_BLOCKED_BY_BINDINGS;

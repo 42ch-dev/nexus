@@ -36,6 +36,12 @@
 //! unparseable JSON columns) are skipped like absent refs: `list_rules`
 //! resolves a subset and never fails the whole list on one unreadable row.
 //!
+//! `list_rules` stays raw reference resolution (it does not filter by status).
+//! The World-scoped wrapper [`orchestrate_check_world_scoped`] owns the
+//! `status == "active"` check-scope filter for **both** automatic inclusion
+//! and explicit refs (v1.198 §13), so an archived tombstone never evaluates
+//! even when named explicitly.
+//!
 //! # Scope
 //!
 //! Read path only. Author-facing rule write/CRUD is **out of scope** for P1
@@ -52,8 +58,13 @@ use chrono::{DateTime, Utc};
 use nexus_local_db::spoke_rules::{get_spoke_rules_by_ids, list_rules_by_world, SpokeRuleRow};
 use serde_json::{json, Map, Value};
 use spoke_schemas::data::rule::{RuleCanonicalName, RuleExtensionsKey};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU64;
+
+/// The one status that enters check scope (v1.198 §13: "only `status=active`
+/// rules enter check scope", applied by the World-scoped wrapper to both
+/// automatic inclusion and explicit refs).
+const ACTIVE_STATUS: &str = "active";
 
 #[async_trait]
 impl RuleQueryPort for NexusAdapter<'_> {
@@ -160,9 +171,14 @@ fn reject<T>(code: SpokeRejectCode, message: impl Into<String>, details: Value) 
 ///    `statement` / `canonical_name` / extensions — no cross-world data
 ///    leak), all foreign ids in one reject, no partial set proceeds,
 ///    `details = { "foreign_rule_ids": [...] }`.
-/// 4. **Unknown ids (no row) pass through verbatim** — spoke subset-omit
+/// 4. **Active-only scope (v1.198 §13):** the same lookup drops every
+///    resolvable ref whose stored status is not `active`, so an archived
+///    tombstone cannot enter check scope by being named explicitly. The
+///    filter lives here, not in [`RuleQueryPort::list_rules`] — the port
+///    stays raw reference resolution (spec: rule vocabulary amendment).
+/// 5. **Unknown ids (no row) pass through verbatim** — spoke subset-omit
 ///    stays (PD-1: no 400 on typos; AR-1 declines to tighten).
-/// 5. **Storage failure** → `InternalError` (the [`reject`] helper idiom).
+/// 6. **Storage failure** → `InternalError` (the [`reject`] helper idiom).
 ///
 /// Then delegates to [`orchestrate_check`] with the rewritten `rule_refs`.
 /// The adapter [`RuleQueryPort::list_rules`] impl stays by-id only — this
@@ -205,7 +221,7 @@ where
         };
         request.rule_refs = rows
             .iter()
-            .filter(|row| row.status.as_deref() == Some("active"))
+            .filter(|row| row.status.as_deref() == Some(ACTIVE_STATUS))
             .map(|row| row.rule_id.clone())
             .collect();
         // Zero active rules ⇒ refs stay [] ⇒ spoke skips `list_rules`.
@@ -240,10 +256,29 @@ where
                 json!({ "foreign_rule_ids": foreign_ids }),
             );
         }
+
+        // Gate 4 — active-only scope (v1.198, §13): the World-scoped wrapper,
+        // not the port, owns the status filter, and it covers explicit refs as
+        // well as automatic inclusion — so an archived tombstone (or any other
+        // non-active status) can never enter check scope by being named
+        // explicitly. Resolvable non-active refs are dropped here, before spoke
+        // resolves anything, so they evaluate nothing and persist nothing.
+        // Unknown ids keep passing through verbatim: spoke's subset-omit owns
+        // them (gate 5).
+        let known_ids: HashSet<&str> = rows.iter().map(|row| row.rule_id.as_str()).collect();
+        let active_ids: HashSet<&str> = rows
+            .iter()
+            .filter(|row| row.status.as_deref() == Some(ACTIVE_STATUS))
+            .map(|row| row.rule_id.as_str())
+            .collect();
+        request.rule_refs.retain(|rule_id| {
+            let id = rule_id.as_str();
+            !known_ids.contains(id) || active_ids.contains(id)
+        });
     }
 
-    // Gates 4 + delegate: unknown ids pass through verbatim (spoke
-    // subset-omit); world-scoped refs run the spoke orchestrator.
+    // Gates 5 + delegate: unknown ids pass through verbatim (spoke
+    // subset-omit); world-scoped active refs run the spoke orchestrator.
     orchestrate_check(adapter, request, run_checker).await
 }
 
@@ -533,12 +568,17 @@ mod tests {
     /// rule ids in storage order (`canonical_name ASC, rule_id ASC`) —
     /// drafts/deprecated stay out and foreign-world active rules are never
     /// pulled in (world-filtered by construction).
+    ///
+    /// v1.198 §13: an `archived` row is stored inside the same expansion
+    /// window and must stay out as well (auto-inclusion never evaluates a
+    /// tombstone).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn world_scoped_auto_include_expands_active_only_in_storage_order() {
         let (pool, _dir) = fresh_pool().await;
-        // Storage order: Alpha, Beta, Charlie, Delta → active expansion is
-        // exactly [rul_a, rul_d].
+        // Storage order: Alpha, Archived, Beta, Charlie, Delta → active
+        // expansion is exactly [rul_a, rul_d].
         seed_rule_full(&pool, "rul_b", "wld_1", "Beta", "draft").await;
+        seed_rule_full(&pool, "rul_arch", "wld_1", "Archived", "archived").await;
         seed_rule_full(&pool, "rul_a", "wld_1", "Alpha", "active").await;
         seed_rule_full(&pool, "rul_d", "wld_1", "Delta", "active").await;
         seed_rule_full(&pool, "rul_c", "wld_1", "Charlie", "deprecated").await;
@@ -572,6 +612,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_rule_full(&pool, "rul_draft", "wld_1", "Draft", "draft").await;
         seed_rule_full(&pool, "rul_dep", "wld_1", "Dep", "deprecated").await;
+        seed_rule_full(&pool, "rul_arch", "wld_1", "Arch", "archived").await;
 
         let adapter = scoped(pool);
         let request = check_request("wld_1", &[]);
@@ -590,6 +631,71 @@ mod tests {
         {
             SpokeResult::Ok(_) => {}
             SpokeResult::Reject(r) => panic!("empty active set must not reject: {r:?}"),
+        }
+    }
+
+    /// v1.198 §13 (`spoke-adapter-architecture.md` rule vocabulary amendment):
+    /// the World-scoped wrapper applies `status == "active"` to **explicit
+    /// refs** too, so an archived tombstone named by id never enters check
+    /// scope (it evaluates nothing and persists nothing). Same-world
+    /// non-active refs are dropped in place — original ref order survives for
+    /// the ones that stay — and unknown ids keep passing through verbatim
+    /// (spoke subset-omit, gate 5). The port itself stays raw reference
+    /// resolution, so this filter must live here.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn world_scoped_explicit_non_active_refs_never_enter_check_scope() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_rule_full(&pool, "rul_active", "wld_1", "Active", "active").await;
+        seed_rule_full(&pool, "rul_archived", "wld_1", "Archived", "archived").await;
+        seed_rule_full(&pool, "rul_draft", "wld_1", "Draft", "draft").await;
+        seed_rule_full(&pool, "rul_deprecated", "wld_1", "Deprecated", "deprecated").await;
+
+        // The raw port still resolves every stored id (including archived) —
+        // the filter belongs to the wrapper, not to the port.
+        let adapter = scoped(pool);
+        let raw = unwrap_ok(
+            adapter.list_rules(&["rul_archived".to_string()]).await,
+            "raw port resolution",
+        );
+        assert_eq!(
+            raw.len(),
+            1,
+            "the port resolves by id regardless of status (raw reference resolution)"
+        );
+        assert_eq!(raw[0].status.as_deref(), Some("archived"));
+
+        let request = check_request(
+            "wld_1",
+            &[
+                "rul_archived",
+                "rul_active",
+                "rul_unknown",
+                "rul_draft",
+                "rul_deprecated",
+            ],
+        );
+        match orchestrate_check_world_scoped(&adapter, "wld_1", request, |input| {
+            assert_eq!(
+                input.request.rule_refs,
+                vec![
+                    "rul_active".to_string(),
+                    "rul_unknown".to_string(),
+                ],
+                "non-active stored refs are dropped before spoke resolves them; \
+                 unknown ids keep passing through verbatim"
+            );
+            let resolved: Vec<&str> = input.rules.iter().map(|r| r.rule_id.as_str()).collect();
+            assert_eq!(
+                resolved,
+                vec!["rul_active"],
+                "only the active rule enters check scope"
+            );
+            SpokeResult::Ok(vec![])
+        })
+        .await
+        {
+            SpokeResult::Ok(_) => {}
+            SpokeResult::Reject(r) => panic!("active-only refs must not reject: {r:?}"),
         }
     }
 

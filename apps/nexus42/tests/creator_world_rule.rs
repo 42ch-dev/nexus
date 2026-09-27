@@ -119,10 +119,10 @@ async fn fresh_env() -> RuleEnv {
 }
 
 /// The stored rules of an owned World, through the core projection the CLI
-/// renders.
+/// renders. The default read (archived omitted) is what the CLI renders.
 async fn stored_rules(env: &RuleEnv, world_id: &str) -> Vec<WorldRulesListResponseRulesItem> {
     env.core
-        .list_world_rules(&env.principal, world_id.to_string())
+        .list_world_rules(&env.principal, world_id.to_string(), false)
         .await
         .expect("list rules of an owned World")
         .rules

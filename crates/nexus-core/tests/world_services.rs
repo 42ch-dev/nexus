@@ -9,13 +9,17 @@ use nexus_contracts::{
     CreateForkRequest, CreateWorldRequest, WorldKbPatchRelationshipRequest,
     WorldKbPromoteCandidateRequest, WorldRuleCreateRequest, WorldRuleUpdateRequest,
 };
-use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService, CoreTimelineEventsQuery};
+use nexus_core::{
+    CoreAccess, CoreError, CoreOpenOptions, CoreService, CoreTimelineEventsQuery,
+    RulePatchPresence,
+};
 use nexus_local_db::open_pool_read_only;
 use nexus_local_db::spoke_rules::{insert_rule, SpokeRuleRow};
 use nexus_local_db::writer_protocol::{init_engine_pool, GuardedPoolOptions};
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use tempfile::TempDir;
 
 const CREATOR: &str = "test_creator";
@@ -1010,6 +1014,17 @@ fn rule_update(body: Value) -> WorldRuleUpdateRequest {
     serde_json::from_value(body).unwrap()
 }
 
+/// The supplied-member set of a raw PATCH body — what a transport hands the
+/// core beside the typed request (`RulePatchPresence`; the generated DTO
+/// erases `{}` vs. absent and null vs. absent).
+fn rule_presence(body: &Value) -> RulePatchPresence {
+    let supplied: Vec<&str> = body
+        .as_object()
+        .map(|members| members.keys().map(String::as_str).collect())
+        .unwrap_or_default();
+    RulePatchPresence::from_supplied_keys(&supplied)
+}
+
 #[allow(clippy::too_many_arguments)] // seed helper: the row's columns are the fixture surface
 async fn seed_world_rule(
     pool: &SqlitePool,
@@ -1060,23 +1075,24 @@ async fn retained_world_rules_write_surface_and_read_guards() {
     let world = "wld_rules";
     seed_world(&pool, world, CREATOR).await;
 
-    // Read guards and the empty list.
+    // Read guards and the empty list (`false` = the default read, archived
+    // rows omitted — V1.198 §13).
     let empty = fx
         .core
-        .list_world_rules(&fx.principal, world.to_string())
+        .list_world_rules(&fx.principal, world.to_string(), false)
         .await
         .unwrap();
     assert!(empty.rules.is_empty());
     assert!(!empty.truncated);
     let err = fx
         .core
-        .list_world_rules(&fx.principal, "wld_missing".to_string())
+        .list_world_rules(&fx.principal, "wld_missing".to_string(), false)
         .await
         .unwrap_err();
     assert!(matches!(err, CoreError::NotFound { .. }));
     let err = fx
         .core
-        .list_world_rules(&fx.principal, FOREIGN_WORLD.to_string())
+        .list_world_rules(&fx.principal, FOREIGN_WORLD.to_string(), false)
         .await
         .unwrap_err();
     assert!(matches!(err, CoreError::WorldOwnerDenied { .. }));
@@ -1267,6 +1283,15 @@ async fn retained_world_rules_write_surface_and_read_guards() {
                 "target_entry_types": ["new_type"],
                 "constraint": { "family": "module_absence", "module_key": "lore" },
             })),
+            RulePatchPresence::from_supplied_keys(&[
+                "canonical_name",
+                "statement",
+                "severity_hint",
+                "status",
+                "kind",
+                "target_entry_types",
+                "constraint",
+            ]),
         )
         .await
         .unwrap();
@@ -1309,6 +1334,7 @@ async fn retained_world_rules_write_surface_and_read_guards() {
             rule_update(
                 json!({ "constraint": { "family": "required_field", "field": "body.tags" } }),
             ),
+            RulePatchPresence::from_supplied_keys(&["constraint"]),
         )
         .await
         .unwrap();
@@ -1335,6 +1361,7 @@ async fn retained_world_rules_write_surface_and_read_guards() {
             world.to_string(),
             rule_id.clone(),
             rule_update(json!({})),
+            RulePatchPresence::from_supplied_keys(&[]),
         )
         .await
         .unwrap_err();
@@ -1350,6 +1377,7 @@ async fn retained_world_rules_write_surface_and_read_guards() {
             world.to_string(),
             "rul_absent".to_string(),
             rule_update(json!({ "statement": "x" })),
+            RulePatchPresence::from_supplied_keys(&["statement"]),
         )
         .await
         .unwrap_err();
@@ -1376,6 +1404,7 @@ async fn retained_world_rules_write_surface_and_read_guards() {
             world.to_string(),
             "rul_other_world".to_string(),
             rule_update(json!({ "statement": "x" })),
+            RulePatchPresence::from_supplied_keys(&["statement"]),
         )
         .await
         .unwrap_err();
@@ -1414,6 +1443,7 @@ async fn retained_world_rules_write_surface_and_read_guards() {
             world.to_string(),
             "rul_obs".to_string(),
             rule_update(json!({ "target_entry_types": ["x"] })),
+            RulePatchPresence::from_supplied_keys(&["target_entry_types"]),
         )
         .await
         .unwrap_err();
@@ -1429,6 +1459,7 @@ async fn retained_world_rules_write_surface_and_read_guards() {
             world.to_string(),
             "rul_obs".to_string(),
             rule_update(json!({ "constraint": { "family": "observer_cardinality", "min": 1 }, "target_entry_types": ["y"] })),
+            RulePatchPresence::from_supplied_keys(&["constraint", "target_entry_types"]),
         )
         .await
         .unwrap_err();
@@ -1444,6 +1475,7 @@ async fn retained_world_rules_write_surface_and_read_guards() {
             world.to_string(),
             "rul_obs".to_string(),
             rule_update(json!({ "target_entry_types": [] })),
+            RulePatchPresence::from_supplied_keys(&["target_entry_types"]),
         )
         .await
         .unwrap();
@@ -1455,6 +1487,7 @@ async fn retained_world_rules_write_surface_and_read_guards() {
             world.to_string(),
             rule_id.clone(),
             rule_update(json!({ "statement": "left alone" })),
+            RulePatchPresence::from_supplied_keys(&["statement"]),
         )
         .await
         .unwrap();
@@ -1477,7 +1510,7 @@ async fn retained_world_rules_write_surface_and_read_guards() {
     // carrier first-class.
     let rules = fx
         .core
-        .list_world_rules(&fx.principal, world.to_string())
+        .list_world_rules(&fx.principal, world.to_string(), false)
         .await
         .unwrap();
     assert!(!rules.truncated);
@@ -1544,7 +1577,7 @@ async fn retained_world_rules_read_cap_and_store_order() {
 
     let capped = fx
         .core
-        .list_world_rules(&fx.principal, world.to_string())
+        .list_world_rules(&fx.principal, world.to_string(), false)
         .await
         .unwrap();
     assert!(capped.truncated, "502 stored rows exceed the cap");
@@ -1574,7 +1607,7 @@ async fn retained_world_rules_read_cap_and_store_order() {
     }
     let listed = fx
         .core
-        .list_world_rules(&fx.principal, few.to_string())
+        .list_world_rules(&fx.principal, few.to_string(), false)
         .await
         .unwrap();
     assert!(!listed.truncated);
@@ -1617,6 +1650,7 @@ async fn retained_world_rules_patch_failure_modes_and_axis_semantics() {
             rule_update(
                 json!({ "constraint": { "family": "module_presence", "module_key": "m" } }),
             ),
+            RulePatchPresence::from_supplied_keys(&["constraint"]),
         )
         .await
         .unwrap_err();
@@ -1671,6 +1705,7 @@ async fn retained_world_rules_patch_failure_modes_and_axis_semantics() {
                 world.to_string(),
                 "rul_meta".to_string(),
                 rule_update(body.clone()),
+                rule_presence(&body),
             )
             .await
             .unwrap_err();
@@ -1698,6 +1733,7 @@ async fn retained_world_rules_patch_failure_modes_and_axis_semantics() {
             world.to_string(),
             "rul_meta".to_string(),
             rule_update(json!({})),
+            RulePatchPresence::from_supplied_keys(&[]),
         )
         .await
         .unwrap_err();
@@ -1733,6 +1769,7 @@ async fn retained_world_rules_patch_failure_modes_and_axis_semantics() {
                 world.to_string(),
                 rule_id.to_string(),
                 rule_update(json!({ "status": "banana" })),
+                RulePatchPresence::from_supplied_keys(&["status"]),
             )
             .await
             .unwrap_err();
@@ -1754,6 +1791,7 @@ async fn retained_world_rules_patch_failure_modes_and_axis_semantics() {
             FOREIGN_WORLD.to_string(),
             "rul_any".to_string(),
             rule_update(json!({ "statement": "y" })),
+            RulePatchPresence::from_supplied_keys(&["statement"]),
         )
         .await
         .unwrap_err();
@@ -1769,6 +1807,7 @@ async fn retained_world_rules_patch_failure_modes_and_axis_semantics() {
             world.to_string(),
             "rul_meta".to_string(),
             rule_update(json!({ "status": "deprecated" })),
+            RulePatchPresence::from_supplied_keys(&["status"]),
         )
         .await
         .unwrap();
@@ -1779,8 +1818,8 @@ async fn retained_world_rules_patch_failure_modes_and_axis_semantics() {
         "an absent axis is not a clear"
     );
 
-    let null_axis =
-        rule_update(json!({ "target_entry_types": null, "statement": "null is absent" }));
+    let null_axis_body = json!({ "target_entry_types": null, "statement": "null is absent" });
+    let null_axis = rule_update(null_axis_body.clone());
     assert!(
         null_axis.target_entry_types.is_none(),
         "a JSON null axis is the absent member"
@@ -1792,6 +1831,7 @@ async fn retained_world_rules_patch_failure_modes_and_axis_semantics() {
             world.to_string(),
             "rul_meta".to_string(),
             null_axis,
+            RulePatchPresence::from_supplied_keys(&["target_entry_types", "statement"]),
         )
         .await
         .unwrap();
@@ -1812,6 +1852,545 @@ async fn retained_world_rules_patch_failure_modes_and_axis_semantics() {
         updated_at > 1_700_000_100,
         "a matched patch refreshes updated_at, got {updated_at}"
     );
+}
+
+/// V1.198 §13 archive lifecycle (AC-1..4/10/11): the create refusal, the
+/// transition from each prior status with every other field retained, the
+/// idempotent repeat, and the read-only tombstone — mixed PATCH, status exits,
+/// and the supplied-but-empty/`null` members that the generated DTO collapses.
+///
+/// The refusal order is contract: an empty typed PATCH still names `patch`;
+/// on an archived row the first offending supplied member is named in the
+/// shipped request-field order (the generated `WorldRuleUpdateRequest`
+/// declaration order), and addressing (404/403) still precedes the payload.
+#[tokio::test]
+async fn retained_world_rules_archive_terminal_lifecycle() {
+    let fx = setup().await;
+    let (_guard, pool) = live_write_pool(&fx).await;
+    let world = "wld_rules_archive";
+    seed_world(&pool, world, CREATOR).await;
+
+    // AC-1: `archived` is never an authoring state — create refuses it through
+    // the field-level envelope naming `status`, and writes no row.
+    let err = fx
+        .core
+        .create_world_rule(
+            &fx.principal,
+            world.to_string(),
+            rule_create(json!({
+                "canonical_name": "Born archived",
+                "statement": "x",
+                "status": "archived",
+                "constraint": { "family": "module_presence", "module_key": "m" },
+            })),
+        )
+        .await
+        .unwrap_err();
+    let CoreError::InvalidInput { field, reason } = err else {
+        panic!("create must refuse archived through the field envelope, got {err:?}")
+    };
+    assert_eq!(field, "status");
+    assert!(
+        reason.contains("draft | active | deprecated"),
+        "the accepted create set is named: {reason}"
+    );
+    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM spoke_rules WHERE world_id = ?")
+        .bind(world)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(rows, 0, "a refused create writes no row");
+
+    // AC-2: archiving succeeds from every prior status and retains the row.
+    let mut archived_ids = Vec::new();
+    for (index, prior) in ["active", "draft", "deprecated"].iter().enumerate() {
+        let rule_id = format!("rul_archive_{index}");
+        seed_world_rule(
+            &pool,
+            &rule_id,
+            world,
+            &format!("Archive {index}"),
+            prior,
+            Some("info"),
+            &["character"],
+            json!({ "family": "module_presence", "module_key": "kept" }),
+        )
+        .await;
+
+        let archived = fx
+            .core
+            .update_world_rule(
+                &fx.principal,
+                world.to_string(),
+                rule_id.clone(),
+                rule_update(json!({ "status": "archived" })),
+                RulePatchPresence::from_supplied_keys(&["status"]),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("archive from {prior} must succeed: {error:?}"));
+
+        assert_eq!(archived.status.as_deref(), Some("archived"));
+        assert_eq!(archived.rule_id, rule_id, "the id is retained");
+        assert_eq!(archived.canonical_name, format!("Archive {index}"));
+        let expected_statement = format!("Statement for Archive {index}");
+        assert_eq!(
+            archived.statement.as_deref(),
+            Some(expected_statement.as_str())
+        );
+        assert_eq!(archived.kind, "rule");
+        assert_eq!(archived.severity_hint.as_deref(), Some("info"));
+        assert_eq!(archived.target_entry_types, vec!["character".to_string()]);
+        assert_eq!(
+            archived
+                .constraint
+                .get("module_key")
+                .and_then(Value::as_str),
+            Some("kept"),
+            "the carrier is retained"
+        );
+
+        // At rest: ownership, created_at and the whole extensions bag survive;
+        // only updated_at moves.
+        let (owner, created_at, updated_at, bag): (String, i64, i64, String) = sqlx::query_as(
+            "SELECT world_id, created_at, updated_at, extensions_json FROM spoke_rules \
+             WHERE rule_id = ?",
+        )
+        .bind(&rule_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(owner, world, "ownership is retained");
+        assert_eq!(created_at, 1_700_000_000, "created_at is retained");
+        assert!(
+            updated_at > 1_700_000_100,
+            "a matched archive refreshes updated_at, got {updated_at}"
+        );
+        let bag: Value = serde_json::from_str(&bag).unwrap();
+        assert_eq!(
+            bag,
+            json!({ "nexus": { "constraint": { "family": "module_presence", "module_key": "kept" } } }),
+            "content and extensions are retained verbatim"
+        );
+        archived_ids.push(rule_id);
+    }
+
+    // AC-3: the repeat is idempotent — the row stays archived with no field
+    // loss (first archived row, re-archived after other writes exist).
+    let repeat_id = archived_ids[0].clone();
+    let repeated = fx
+        .core
+        .update_world_rule(
+            &fx.principal,
+            world.to_string(),
+            repeat_id.clone(),
+            rule_update(json!({ "status": "archived" })),
+            RulePatchPresence::from_supplied_keys(&["status"]),
+        )
+        .await
+        .unwrap();
+    assert_eq!(repeated.status.as_deref(), Some("archived"));
+    assert_eq!(repeated.canonical_name, "Archive 0");
+    assert_eq!(repeated.target_entry_types, vec!["character".to_string()]);
+
+    // AC-4: the tombstone accepts exactly `{ "status": "archived" }`.
+    let refusals: Vec<(Value, &str, &str)> = vec![
+        // (body, expected field, expectation label)
+        (
+            json!({ "canonical_name": "Resurrected" }),
+            "canonical_name",
+            "content member",
+        ),
+        (json!({ "statement": "changed" }), "statement", "content member"),
+        (json!({ "kind": "prohibition" }), "kind", "content member"),
+        (
+            json!({ "severity_hint": "error" }),
+            "severity_hint",
+            "content member",
+        ),
+        (
+            json!({ "target_entry_types": ["character"] }),
+            "target_entry_types",
+            "content member",
+        ),
+        (
+            json!({ "target_entry_types": [] }),
+            "target_entry_types",
+            "supplied empty array",
+        ),
+        (
+            json!({ "constraint": { "family": "module_presence", "module_key": "m" } }),
+            "constraint",
+            "content member",
+        ),
+        (
+            json!({ "constraint": {} }),
+            "constraint",
+            "a supplied empty object is a supplied member",
+        ),
+        (
+            json!({ "target_entry_types": null }),
+            "target_entry_types",
+            "a supplied explicit null is a supplied member",
+        ),
+        (
+            json!({ "canonical_name": null }),
+            "canonical_name",
+            "a supplied explicit null is a supplied member",
+        ),
+        (json!({ "status": "active" }), "status", "status exit"),
+        (json!({ "status": "deprecated" }), "status", "status exit"),
+        (json!({ "status": "draft" }), "status", "status exit"),
+        (json!({ "status": null }), "status", "supplied explicit null"),
+        (
+            json!({ "status": "archived", "statement": "mixed" }),
+            "statement",
+            "mixed PATCH",
+        ),
+        (
+            json!({ "status": "archived", "constraint": {} }),
+            "constraint",
+            "mixed PATCH with a collapsed empty object",
+        ),
+        (
+            json!({ "status": "archived", "target_entry_types": [] }),
+            "target_entry_types",
+            "mixed PATCH with a collapsed empty array",
+        ),
+        (
+            json!({ "status": "archived", "target_entry_types": null }),
+            "target_entry_types",
+            "mixed PATCH with a collapsed null",
+        ),
+        (
+            json!({ "status": "active", "canonical_name": "x" }),
+            "canonical_name",
+            "the first supplied member in request-field order wins",
+        ),
+        (
+            json!({ "status": "active", "constraint": { "family": "module_presence", "module_key": "m" } }),
+            "constraint",
+            "the first supplied member in request-field order wins",
+        ),
+        (json!({}), "patch", "empty PATCH keeps naming patch"),
+    ];
+    for (body, expected_field, label) in refusals {
+        let err = fx
+            .core
+            .update_world_rule(
+                &fx.principal,
+                world.to_string(),
+                repeat_id.clone(),
+                rule_update(body.clone()),
+                rule_presence(&body),
+            )
+            .await
+            .unwrap_err();
+        let CoreError::InvalidInput { field, .. } = err else {
+            panic!("{label} on an archived rule must refuse with invalid_input: {body} → {err:?}")
+        };
+        assert_eq!(field, expected_field, "{label}: {body}");
+    }
+
+    // AC-11/guard order: addressing still precedes the payload, and the World
+    // guard still precedes addressing — the tombstone changes nothing.
+    let err = fx
+        .core
+        .update_world_rule(
+            &fx.principal,
+            world.to_string(),
+            "rul_absent".to_string(),
+            rule_update(json!({ "status": "archived" })),
+            RulePatchPresence::from_supplied_keys(&["status"]),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, CoreError::NotFound { .. }),
+        "an unknown id stays 404, got {err:?}"
+    );
+    let err = fx
+        .core
+        .update_world_rule(
+            &fx.principal,
+            FOREIGN_WORLD.to_string(),
+            repeat_id.clone(),
+            rule_update(json!({ "status": "archived" })),
+            RulePatchPresence::from_supplied_keys(&["status"]),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, CoreError::WorldOwnerDenied { .. }),
+        "the World guard still precedes the payload, got {err:?}"
+    );
+    let err = fx
+        .core
+        .list_world_rules(&fx.principal, FOREIGN_WORLD.to_string(), true)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, CoreError::WorldOwnerDenied { .. }));
+
+    // Every refusal above returned before any write: the tombstone is
+    // byte-identical to the committed archive (status/content/timestamps) and
+    // the row count is unchanged — no purge, no removal.
+    let (status, name, created_at, updated_at): (String, String, i64, i64) = sqlx::query_as(
+        "SELECT status, canonical_name, created_at, updated_at FROM spoke_rules WHERE rule_id = ?",
+    )
+    .bind(&repeat_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(status, "archived");
+    assert_eq!(name, "Archive 0");
+    assert_eq!(created_at, 1_700_000_000);
+    assert!(
+        updated_at > 1_700_000_100,
+        "the repeat refreshed updated_at, got {updated_at}"
+    );
+    let stored: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM spoke_rules WHERE world_id = ?")
+        .bind(world)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(stored, 3, "archived rows are retained, never purged");
+}
+
+/// V1.198 §13 default visibility and cap honesty (AC-6): the caller-selected
+/// status omission is applied in SQL **before** the 501-row probe, so archived
+/// rows can neither occupy a default slot (no displacement of visible rows)
+/// nor flip `truncated`; 501 visible rows still truncate, and inclusion returns
+/// the archived rows in the same store order.
+#[tokio::test]
+async fn retained_world_rules_archive_visibility_and_cap_honesty() {
+    let fx = setup().await;
+    let (_guard, pool) = live_write_pool(&fx).await;
+    let world = "wld_rules_archive_cap";
+    seed_world(&pool, world, CREATOR).await;
+
+    // Names are chosen so the archived rows sort FIRST: an implementation that
+    // filtered after the cap (or in Rust after the SQL probe) would let them
+    // displace visible rows and inflate `truncated`.
+    for i in 0..500 {
+        seed_world_rule(
+            &pool,
+            &format!("rul_vis_{i:03}"),
+            world,
+            &format!("Visible {i:03}"),
+            "active",
+            None,
+            &[],
+            json!({ "family": "module_presence", "module_key": "x" }),
+        )
+        .await;
+    }
+    for i in 0..30 {
+        seed_world_rule(
+            &pool,
+            &format!("rul_arch_{i:03}"),
+            world,
+            &format!("Aarchived {i:03}"),
+            "archived",
+            None,
+            &[],
+            json!({ "family": "module_presence", "module_key": "x" }),
+        )
+        .await;
+    }
+
+    // 500 visible + 30 archived: the default read returns exactly the 500
+    // visible rows and does not claim truncation.
+    let listed = fx
+        .core
+        .list_world_rules(&fx.principal, world.to_string(), false)
+        .await
+        .unwrap();
+    assert!(
+        !listed.truncated,
+        "500 selected rows are exactly the cap — archived rows must not flip truncated"
+    );
+    assert_eq!(listed.rules.len(), 500);
+    assert!(
+        listed
+            .rules
+            .iter()
+            .all(|rule| rule.status.as_deref() != Some("archived")),
+        "the default read omits archived rows"
+    );
+    assert_eq!(
+        listed.rules[0].rule_id, "rul_vis_000",
+        "no archived row displaces a visible one out of the window"
+    );
+    assert_eq!(listed.rules[499].rule_id, "rul_vis_499");
+
+    // 501 visible rows: the cap is honest about the selected set.
+    seed_world_rule(
+        &pool,
+        "rul_vis_500",
+        world,
+        "Visible 500",
+        "active",
+        None,
+        &[],
+        json!({ "family": "module_presence", "module_key": "x" }),
+    )
+    .await;
+    let capped = fx
+        .core
+        .list_world_rules(&fx.principal, world.to_string(), false)
+        .await
+        .unwrap();
+    assert!(capped.truncated, "501 selected rows exceed the cap");
+    assert_eq!(capped.rules.len(), 500);
+
+    // Explicit inclusion selects the archived rows too, in the same store
+    // order (archived names sort first here).
+    let included = fx
+        .core
+        .list_world_rules(&fx.principal, world.to_string(), true)
+        .await
+        .unwrap();
+    assert!(included.truncated, "531 stored rows exceed the cap");
+    assert_eq!(included.rules.len(), 500);
+    assert_eq!(
+        included.rules[0].rule_id, "rul_arch_000",
+        "inclusion returns the archived rows in storage order"
+    );
+    assert_eq!(
+        included.rules[0].status.as_deref(),
+        Some("archived"),
+        "the archived status is projected verbatim when explicitly selected"
+    );
+    let included_ids: Vec<&str> = included
+        .rules
+        .iter()
+        .map(|rule| rule.rule_id.as_str())
+        .collect();
+    assert!(
+        included_ids.contains(&"rul_arch_029"),
+        "every archived row inside the window is returned: {included_ids:?}"
+    );
+
+    // Draft/deprecated/NULL/unknown statuses stay visible in both reads.
+    let mixed = "wld_rules_archive_mixed";
+    seed_world(&pool, mixed, CREATOR).await;
+    for (rule_id, status) in [
+        ("rul_keep_draft", "draft"),
+        ("rul_keep_deprecated", "deprecated"),
+        ("rul_keep_unknown", "sunset"),
+    ] {
+        seed_world_rule(
+            &pool,
+            rule_id,
+            mixed,
+            rule_id,
+            status,
+            None,
+            &[],
+            json!({ "family": "module_presence", "module_key": "x" }),
+        )
+        .await;
+    }
+    sqlx::query(
+        "INSERT INTO spoke_rules (rule_id, world_id, schema_version, canonical_name, kind, \
+         statement, target_entry_types_json, status, extensions_json, created_at, updated_at) \
+         VALUES ('rul_keep_null', ?, 1, 'rul_keep_null', 'rule', 'S', '[]', NULL, '{}', \
+         1700000000, 1700000100)",
+    )
+    .bind(mixed)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let default_mixed = fx
+        .core
+        .list_world_rules(&fx.principal, mixed.to_string(), false)
+        .await
+        .unwrap();
+    assert_eq!(default_mixed.rules.len(), 4, "the default read omits only archived");
+    let mut statuses: Vec<Option<&str>> = default_mixed
+        .rules
+        .iter()
+        .map(|rule| rule.status.as_deref())
+        .collect();
+    statuses.sort_unstable();
+    assert_eq!(
+        statuses,
+        vec![None, Some("deprecated"), Some("draft"), Some("sunset")],
+        "NULL and unknown stored statuses stay visible"
+    );
+}
+
+/// V1.198 §13 concurrent archive/edit (the race regression): a competing
+/// archive and an edit must not both act on the same preimage.
+///
+/// Deterministic interleaving: another writer holds an UNCOMMITTED archive of
+/// the row under the `BEGIN IMMEDIATE` write lock. The edit must block on that
+/// lock (it cannot read a stale preimage and run), and once the archive
+/// commits, the edit's own transaction reads the archived row and refuses —
+/// the tombstone keeps its content.
+#[tokio::test]
+async fn retained_world_rules_archive_concurrent_tombstone_guard() {
+    let fx = setup().await;
+    let (_guard, pool) = live_write_pool(&fx).await;
+    let world = "wld_rules_race";
+    seed_world(&pool, world, CREATOR).await;
+    seed_world_rule(
+        &pool,
+        "rul_race",
+        world,
+        "Race",
+        "active",
+        Some("info"),
+        &["character"],
+        json!({ "family": "module_presence", "module_key": "m" }),
+    )
+    .await;
+
+    // The competing archive, held open (uncommitted) by a second writer.
+    let mut concurrent_archive = nexus_local_db::begin_immediate(&pool).await.unwrap();
+    sqlx::query(
+        "UPDATE spoke_rules SET status = 'archived', updated_at = 1700000200 \
+         WHERE rule_id = 'rul_race'",
+    )
+    .execute(&mut *concurrent_archive)
+    .await
+    .unwrap();
+
+    let edit = fx.core.update_world_rule(
+        &fx.principal,
+        world.to_string(),
+        "rul_race".to_string(),
+        rule_update(json!({ "canonical_name": "Renamed", "statement": "tombstone edit" })),
+        RulePatchPresence::from_supplied_keys(&["canonical_name", "statement"]),
+    );
+    tokio::pin!(edit);
+    tokio::select! {
+        () = tokio::time::sleep(Duration::from_millis(250)) => {}
+        result = &mut edit => panic!(
+            "the competing edit must wait for the writer lock instead of \
+             reading a stale non-archived preimage: {result:?}"
+        ),
+    }
+    concurrent_archive.commit().await.unwrap();
+
+    // The edit's transaction started after the archive committed, so it sees
+    // the tombstone and refuses the content member it supplied first.
+    let err = edit.await.unwrap_err();
+    let CoreError::InvalidInput { field, .. } = err else {
+        panic!("the tombstone must refuse the edit, got {err:?}")
+    };
+    assert_eq!(field, "canonical_name");
+    let (status, canonical_name, statement, updated_at): (String, String, String, i64) =
+        sqlx::query_as(
+            "SELECT status, canonical_name, statement, updated_at FROM spoke_rules \
+             WHERE rule_id = 'rul_race'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(status, "archived");
+    assert_eq!(canonical_name, "Race", "the tombstone content is untouched");
+    assert_eq!(statement, "Statement for Race");
+    assert_eq!(updated_at, 1_700_000_200, "no write landed after the archive");
 }
 
 fn relate(

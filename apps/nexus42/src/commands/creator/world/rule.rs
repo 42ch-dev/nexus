@@ -12,8 +12,9 @@
 //!
 //! `kind` (core `rule` / `prohibition` / `style`) and `severity_hint` (core
 //! `info` / `warning` / `error`) are open, non-empty strings stored verbatim.
-//! `status` is **not** one of them: it is the core's closed `draft` / `active`
-//! / `deprecated` grammar (AR-3), so any other value is refused by the core
+//! `status` is **not** one of them: it is the core's vocabulary — `draft` /
+//! `active` / `deprecated` at create, `archived` joining them as the terminal
+//! PATCH transition (V1.198 §13) — so any other value is refused by the core
 //! instead of being stored. `statement` is the **human summary only** — it is
 //! never parsed by the evaluator (PD-1). Machine evaluation reads
 //! `extensions.nexus.constraint` (AR-2 carrier).
@@ -30,7 +31,7 @@ use crate::core::{finish_direct, map_core_error, open_direct_core};
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
 use nexus_contracts::{WorldRuleCreateRequest, WorldRuleResponse, WorldRuleUpdateRequest};
-use nexus_core::{CoreService, Principal};
+use nexus_core::{CoreService, Principal, RulePatchPresence};
 use serde_json::{Map, Value};
 
 /// The spoke status written by `rule deactivate` (PD-1: spoke vocabulary —
@@ -73,8 +74,9 @@ pub enum RuleCommand {
         constraint: String,
     },
 
-    /// List all rules of a world (all statuses — draft/deprecated included,
-    /// so authors see what auto-include will skip)
+    /// List a world's rules (every non-archived status — draft/deprecated
+    /// included, so authors see what auto-include will skip; archived rows are
+    /// omitted by default per the V1.198 default read)
     List {
         /// World ID (e.g. `wld_abc123`)
         #[arg(long)]
@@ -254,8 +256,11 @@ fn render_rule_add(world_id: &str, rule: &WorldRuleResponse) -> String {
     lines.join("\n")
 }
 
-/// `creator world rule list` — all rules of a world, **all statuses**
-/// (PD-1 list: store order `canonical_name ASC, rule_id ASC` — AR-3).
+/// `creator world rule list` — the world's rules in store order
+/// `canonical_name ASC, rule_id ASC` (AR-3). Every non-archived status is
+/// listed — draft/deprecated included, so authors see what auto-include will
+/// skip — while `archived` rows stay hidden by default (V1.198 §13; the
+/// explicit inclusion switch is the T3 CLI surface).
 ///
 /// `--json` emits the core's `WorldRulesListResponseRulesItem` array
 /// verbatim; the human table projects the same fields. Returns the report
@@ -271,8 +276,10 @@ pub async fn rule_list(
     world_id: &str,
     json: bool,
 ) -> Result<Option<String>> {
+    // V1.198 §13 default read: archived rows stay hidden; the explicit
+    // `--include-archived` switch is the T3 CLI surface.
     let response = core
-        .list_world_rules(principal, world_id.to_string())
+        .list_world_rules(principal, world_id.to_string(), false)
         .await
         .map_err(map_core_error)?;
 
@@ -336,6 +343,9 @@ pub async fn rule_deactivate(
         world_id.to_string(),
         rule_id.to_string(),
         request,
+        // A direct caller names the fields it authored: this leaf writes
+        // `status` alone (the generated DTO cannot state that itself).
+        RulePatchPresence::from_supplied_keys(&["status"]),
     )
     .await
     .map_err(map_core_error)?;
