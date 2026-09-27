@@ -456,8 +456,9 @@ async fn create_world_rule(
 /// Validation order is contract (AR-5): guards (401/404/403) → current-row
 /// fetch + world filter (404 — a `rule_id` that belongs to a different
 /// world is indistinguishable from an unknown id, AR-6) → empty-PATCH
-/// reject (`patch`) → terminal guard for an archived row (§13) → carrier
-/// validation if provided (`constraint.*`) → effective-pair
+/// reject (`patch`) → terminal guard for an archived row (§13) → archive-only
+/// repeat short-circuit (no write, §13) → carrier validation if provided
+/// (`constraint.*`) → effective-pair
 /// `observer_cardinality` × `target_entry_types` conflict → meta-field value
 /// checks → `RuleUpdate` assembly (whole-carrier replacement preserves the
 /// rest of the extensions bag, AR-3) → `update_rule_in_tx` (`Ok(false)` →
@@ -470,6 +471,8 @@ async fn create_world_rule(
 /// `status=deprecated` is the Deactivate recovery and `status=archived` is the
 /// terminal archive transition (from any non-archived status; repeating it on
 /// an archived row succeeds — product lock, no DELETE and no restore route).
+/// The repeat is a strict no-write success: the stored row is returned as it
+/// stands, `updated_at` included, so replaying the archive is invisible.
 #[allow(clippy::missing_errors_doc)]
 #[allow(clippy::too_many_lines)]
 // ^ the locked validation order (AR-5) is one cohesive chain; splitting
@@ -515,6 +518,21 @@ async fn update_world_rule(
     // a `status` exit) is still refused by name instead of being discarded into
     // the empty-PATCH or archive-only shapes.
     guard_archived_patch(current.status.as_deref() == Some(ARCHIVED_STATUS), &req, presence)?;
+
+    // §13 strict idempotence: the archive-only repeat on an already archived
+    // row is a **no-write** success. The shared update statement refreshes
+    // `updated_at` on every matched row, so letting the repeat reach the write
+    // path would mutate the stored row — and the caller-visible response —
+    // without changing its content. Only the exact repeat short-circuits here:
+    // the guard above already refused every other archived-row shape by name,
+    // and a raw `{}` (no supplied member at all) still falls through to the
+    // empty-PATCH rejection below. No write, so no re-read either — the current
+    // row is already the state this commit publishes.
+    if current.status.as_deref() == Some(ARCHIVED_STATUS)
+        && req.status.as_deref() == Some(ARCHIVED_STATUS)
+    {
+        return Ok(item_to_response(row_to_item(current)));
+    }
 
     // AR-3: empty PATCH (no mutable field present) → 400 field=`patch` —
     // fail-early beats a no-op write that would still refresh updated_at.

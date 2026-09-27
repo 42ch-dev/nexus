@@ -8,6 +8,7 @@
 use nexus_contracts::{
     CreateForkRequest, CreateWorldRequest, WorldKbPatchRelationshipRequest,
     WorldKbPromoteCandidateRequest, WorldRuleCreateRequest, WorldRuleUpdateRequest,
+    WorldRulesListResponseRulesItem,
 };
 use nexus_core::{
     CoreAccess, CoreError, CoreOpenOptions, CoreService, CoreTimelineEventsQuery,
@@ -26,6 +27,10 @@ const CREATOR: &str = "test_creator";
 const SLUG: &str = "default";
 const OWNED_WORLD: &str = "wld_owned";
 const FOREIGN_WORLD: &str = "wld_foreign";
+/// Controlled stored `updated_at` for the archive-replay regression: far from
+/// `now`, so a replay that reached the shared update statement (which always
+/// writes a fresh `updated_at`) cannot hide inside the same wall-clock second.
+const REPEAT_UPDATED_AT: i64 = 1_700_000_200;
 
 struct Fixture {
     tmp: TempDir,
@@ -1059,6 +1064,56 @@ async fn seed_world_rule(
     .unwrap();
 }
 
+/// Every `spoke_rules` column (`20260804_000001_spoke_rules.sql`), in DDL order —
+/// the complete at-rest row, so a "no write" assertion cannot miss a body field
+/// or a refreshed timestamp. (A 14-tuple would not work: std stops deriving
+/// `Debug`/`PartialEq` at 12 elements.)
+#[derive(Debug, Clone, PartialEq, sqlx::FromRow)]
+struct StoredRuleRow {
+    rule_id: String,
+    world_id: String,
+    schema_version: i64,
+    canonical_name: String,
+    kind: String,
+    statement: Option<String>,
+    description: Option<String>,
+    target_entry_types_json: String,
+    severity_hint: Option<String>,
+    status: Option<String>,
+    source_anchor_json: Option<String>,
+    extensions_json: String,
+    created_at: Option<i64>,
+    updated_at: Option<i64>,
+}
+
+/// Read one stored row in full (all 14 columns, `NULL`s included), bypassing the
+/// wire projection: the storage-level byte-identity surface of the no-write
+/// guarantees.
+async fn stored_rule_row(pool: &SqlitePool, rule_id: &str) -> StoredRuleRow {
+    sqlx::query_as::<_, StoredRuleRow>(
+        "SELECT rule_id, world_id, schema_version, canonical_name, kind, statement, \
+         description, target_entry_types_json, severity_hint, status, source_anchor_json, \
+         extensions_json, created_at, updated_at FROM spoke_rules WHERE rule_id = ?",
+    )
+    .bind(rule_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// The stored row as the archived-inclusive list route projects it — the
+/// caller-visible item the write response is nominally converted from.
+async fn listed_rule(fx: &Fixture, world: &str, rule_id: &str) -> WorldRulesListResponseRulesItem {
+    fx.core
+        .list_world_rules(&fx.principal, world.to_string(), true)
+        .await
+        .unwrap()
+        .rules
+        .into_iter()
+        .find(|item| item.rule_id == rule_id)
+        .unwrap_or_else(|| panic!("{rule_id} must be listed when archived rows are included"))
+}
+
 /// World structured rules (migrated from `world_rules_api.rs`): the write
 /// surface's carrier grammar and field-level rejections, the per-field PATCH
 /// semantics with whole-carrier replacement, and the read guards/projection.
@@ -1974,9 +2029,27 @@ async fn retained_world_rules_archive_terminal_lifecycle() {
         archived_ids.push(rule_id);
     }
 
-    // AC-3: the repeat is idempotent — the row stays archived with no field
-    // loss (first archived row, re-archived after other writes exist).
+    // AC-3: the repeat is idempotent — and (V1.198 §13) a **strict no-write
+    // success**, `updated_at` included. The stored timestamp is pinned to a
+    // controlled non-`now` epoch first: the archive above wrote `now`, so a
+    // replay that still reached the shared update statement would refresh
+    // `updated_at` to `now` and this assertion would fail deterministically
+    // instead of passing by landing in the same wall-clock second.
     let repeat_id = archived_ids[0].clone();
+    sqlx::query("UPDATE spoke_rules SET updated_at = ? WHERE rule_id = ?")
+        .bind(REPEAT_UPDATED_AT)
+        .bind(&repeat_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let pinned_row = stored_rule_row(&pool, &repeat_id).await;
+    let pinned_visible = listed_rule(&fx, world, &repeat_id).await;
+    assert_eq!(
+        pinned_visible.updated_at,
+        chrono::DateTime::from_timestamp(REPEAT_UPDATED_AT, 0),
+        "the fixture timestamp is the one the read projection reports"
+    );
+
     let repeated = fx
         .core
         .update_world_rule(
@@ -1991,8 +2064,24 @@ async fn retained_world_rules_archive_terminal_lifecycle() {
     assert_eq!(repeated.status.as_deref(), Some("archived"));
     assert_eq!(repeated.canonical_name, "Archive 0");
     assert_eq!(repeated.target_entry_types, vec!["character".to_string()]);
+    // The caller-visible response is the pre-replay row verbatim (same
+    // projection, `updated_at` included), and the complete at-rest row is
+    // unchanged — the replay wrote nothing at all.
+    assert_eq!(
+        serde_json::to_value(&repeated).unwrap(),
+        serde_json::to_value(&pinned_visible).unwrap(),
+        "the repeated archive returns the pre-replay row byte-for-byte"
+    );
+    assert_eq!(
+        stored_rule_row(&pool, &repeat_id).await,
+        pinned_row,
+        "the replay persisted no change: every column, `updated_at` included"
+    );
 
     // AC-4: the tombstone accepts exactly `{ "status": "archived" }`.
+    // The row that enters the refusal loop is snapshotted in full so the loop's
+    // no-write evidence covers every column, not just the visible trio.
+    let pre_refusal_row = stored_rule_row(&pool, &repeat_id).await;
     let refusals: Vec<(Value, &str, &str)> = vec![
         // (body, expected field, expectation label)
         (
@@ -2130,22 +2219,15 @@ async fn retained_world_rules_archive_terminal_lifecycle() {
         .unwrap_err();
     assert!(matches!(err, CoreError::WorldOwnerDenied { .. }));
 
-    // Every refusal above returned before any write: the tombstone is
-    // byte-identical to the committed archive (status/content/timestamps) and
-    // the row count is unchanged — no purge, no removal.
-    let (status, name, created_at, updated_at): (String, String, i64, i64) = sqlx::query_as(
-        "SELECT status, canonical_name, created_at, updated_at FROM spoke_rules WHERE rule_id = ?",
-    )
-    .bind(&repeat_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    assert_eq!(status, "archived");
-    assert_eq!(name, "Archive 0");
-    assert_eq!(created_at, 1_700_000_000);
-    assert!(
-        updated_at > 1_700_000_100,
-        "the repeat refreshed updated_at, got {updated_at}"
+    // Every refusal above returned before any write: the complete at-rest row
+    // is byte-identical to the row that entered the refusal loop (status,
+    // content, extensions, `created_at` and the pinned `updated_at` all
+    // included) and the row count is unchanged — no purge, no removal, no
+    // partial write.
+    assert_eq!(
+        stored_rule_row(&pool, &repeat_id).await,
+        pre_refusal_row,
+        "no refusal may touch the tombstone"
     );
     let stored: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM spoke_rules WHERE world_id = ?")
         .bind(world)
