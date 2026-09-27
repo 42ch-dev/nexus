@@ -346,7 +346,11 @@ export interface NativeCore {
     worldId: string,
     request: PackImportRequest,
   ): Promise<PackImportResponse>;
-  listWorldRules(principal: PrincipalHandle, worldId: string): Promise<WorldRulesListResponse>;
+  listWorldRules(
+    principal: PrincipalHandle,
+    worldId: string,
+    includeArchived?: boolean,
+  ): Promise<WorldRulesListResponse>;
   createWorldRule(
     principal: PrincipalHandle,
     worldId: string,
@@ -1109,8 +1113,8 @@ function wrapDomainSurface(inner: NativeCoreBinding): DomainSurface {
     async importWorldPack(principal, worldId, request) {
       return json(await inner.importWorldPack(principal, worldId, wire(request, 'request')));
     },
-    async listWorldRules(principal, worldId) {
-      return json(await inner.listWorldRules(principal, worldId));
+    async listWorldRules(principal, worldId, includeArchived) {
+      return json(await inner.listWorldRules(principal, worldId, includeArchived ?? false));
     },
     async createWorldRule(principal, worldId, request) {
       return json(await inner.createWorldRule(principal, worldId, wire(request, 'request')));

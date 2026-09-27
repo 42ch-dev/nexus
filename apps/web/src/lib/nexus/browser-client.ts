@@ -953,9 +953,20 @@ export class BrowserClient implements NexusClient {
   }
 
   // ── World rules (V1.166 P1 / DR-64 surfacing; V1.169 P1 authoring) ─────
-  listWorldRules(worldId: string): Promise<WorldRulesListResponse> {
+  /**
+   * `GET .../rules?include_archived=true` — archived rows are omitted by
+   * default (V1.198 §13); the flag is set only when inclusion is requested,
+   * so the default read carries no query parameter.
+   */
+  listWorldRules(
+    worldId: string,
+    includeArchived = false,
+  ): Promise<WorldRulesListResponse> {
+    const params = new URLSearchParams();
+    if (includeArchived) params.set('include_archived', 'true');
+    const qs = params.toString();
     return this.get<WorldRulesListResponse>(
-      `/v1/daemon/worlds/${encodeURIComponent(worldId)}/rules`,
+      `/v1/daemon/worlds/${encodeURIComponent(worldId)}/rules${qs ? `?${qs}` : ''}`,
     );
   }
   /**
