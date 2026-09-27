@@ -281,13 +281,20 @@ pub struct ProcessBirthToken {
 
 #[cfg(unix)]
 fn read_start_tick(pid: u32) -> Option<u64> {
-    use sysinfo::{Pid, System};
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
     let pid = Pid::from_u32(pid);
     let mut system = System::new();
-    if !system.refresh_process(pid) {
-        return None;
-    }
+    // Selective refresh (sysinfo 0.39): load exactly this PID and nothing
+    // else. `ProcessesToUpdate::Some` keeps the refresh bounded to one
+    // process, `ProcessRefreshKind::nothing()` rules out every optional
+    // field (PID / PPID / name / start time are always reported), and
+    // `without_tasks()` avoids enumerating the process' threads.
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[pid]),
+        true,
+        ProcessRefreshKind::nothing().without_tasks(),
+    );
     system.process(pid).map(sysinfo::Process::start_time)
 }
 
@@ -1315,5 +1322,140 @@ mod tests {
         let err = result.unwrap_err();
         assert!(matches!(err, AcpError::ExecutableNotFound { .. }));
         assert!(err.to_string().contains("not found on PATH"));
+    }
+
+    /// An unavailable PID yields no birth token and can never verify: capture
+    /// fails closed, so cleanup is reported unconfirmed instead of signalling
+    /// on a PID alone.
+    #[cfg(unix)]
+    #[test]
+    fn birth_token_unavailable_pid_fails_closed() {
+        // Above every supported platform's `pid_max` (Linux caps at 2^22,
+        // macOS at 99998), so this PID can never name a live process.
+        let unavailable = i32::MAX.cast_unsigned();
+        assert!(
+            ProcessBirthToken::capture(unavailable).is_none(),
+            "an unavailable PID must not produce a birth token"
+        );
+
+        let dangling = ProcessBirthToken {
+            pid: unavailable,
+            start_tick: 0,
+        };
+        assert!(!dangling.verify(), "an unavailable PID must never verify");
+    }
+
+    /// A recycled PID (same number, different OS start time) is never
+    /// signalled: the guarded group signal refuses and the real owned group
+    /// survives untouched.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn guarded_group_signal_refuses_recycled_birth_token() {
+        use nix::sys::signal::{Signal, killpg};
+
+        let spawner = AgentSpawner::new(PathBuf::from("/tmp"));
+        let (mut child, _stdin, _stdout) = spawner
+            .spawn("/bin/sleep", &["300"])
+            .expect("spawn grouped sleep fixture");
+        let pid = child.id().expect("owned child pid");
+        let birth = ProcessBirthToken::capture(pid).expect("live child has a birth token");
+        let pgrp = nix::unistd::Pid::from_raw(pid.cast_signed());
+        assert!(birth.verify(), "the live owned child must verify");
+        assert!(killpg(pgrp, None).is_ok(), "the owned group must exist");
+
+        // Same PID, different OS start time == a different process birth.
+        let recycled = ProcessBirthToken {
+            pid: birth.pid,
+            start_tick: birth.start_tick.wrapping_add(1),
+        };
+        assert!(!recycled.verify(), "a different birth time must not verify");
+        assert!(
+            !ManagedAcpProcess::signal_group_guarded(&recycled, Signal::SIGTERM),
+            "a recycled birth token must never be SIGTERMed"
+        );
+        assert!(
+            !ManagedAcpProcess::signal_group_guarded(&recycled, Signal::SIGKILL),
+            "even SIGKILL must be refused for a recycled birth token"
+        );
+
+        // Nothing reached the owned group: it is still alive and still
+        // described by its true birth token.
+        assert!(killpg(pgrp, None).is_ok(), "the owned group must be untouched");
+        assert!(birth.verify(), "the owned child must still be alive");
+
+        // Owned cleanup with the true token still works.
+        assert!(ManagedAcpProcess::signal_group_guarded(&birth, Signal::SIGKILL));
+        let _ = child.wait().await;
+    }
+
+    /// Owned-group teardown reaps the leader AND a descendant that inherited
+    /// the owned process group — a leader-only teardown would orphan it.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn guarded_terminate_reaps_owned_group_with_descendant() {
+        use nix::sys::signal::{kill, killpg};
+        use tokio::io::AsyncBufReadExt;
+
+        let spawner = AgentSpawner::new(PathBuf::from("/tmp"));
+        // Group leader (`sh`) waits on a background `sleep` that inherits the
+        // owned process group without being the leader itself. The leader's
+        // TERM trap reaps that descendant before exiting, so the end state is
+        // observable without depending on when the OS reaps an orphan.
+        // stderr is dropped inside the fixture: the shell's job-control notice
+        // for the signalled background job is not part of this contract.
+        let script = "exec 2>/dev/null; sleep 300 & echo $!; \
+                      trap \"wait; exit 0\" TERM; while :; do sleep 0.05; done";
+        let (child, _stdin, stdout) = spawner
+            .spawn("/bin/sh", &["-c", script])
+            .expect("spawn grouped fixture");
+        let leader = child.id().expect("leader pid");
+
+        let mut lines = tokio::io::BufReader::new(stdout).lines();
+        let descendant: u32 = tokio::time::timeout(Duration::from_secs(5), lines.next_line())
+            .await
+            .expect("descendant pid line within bound")
+            .expect("descendant pid line readable")
+            .expect("descendant pid present")
+            .trim()
+            .parse()
+            .expect("descendant pid is numeric");
+        assert_ne!(descendant, leader, "the descendant is not the leader");
+
+        let pgrp = nix::unistd::Pid::from_raw(leader.cast_signed());
+        let leader_pid = nix::unistd::Pid::from_raw(leader.cast_signed());
+        let descendant_pid = nix::unistd::Pid::from_raw(descendant.cast_signed());
+        assert_eq!(
+            nix::unistd::getpgid(Some(descendant_pid)).ok(),
+            Some(pgrp),
+            "the descendant must inherit the owned process group"
+        );
+        assert!(
+            killpg(pgrp, None).is_ok(),
+            "the owned group must exist before teardown"
+        );
+        assert!(
+            kill(leader_pid, None).is_ok(),
+            "the leader must be alive before teardown"
+        );
+        assert!(
+            kill(descendant_pid, None).is_ok(),
+            "the descendant must be alive before teardown"
+        );
+
+        let proc =
+            ManagedAcpProcess::new("group-fixture".to_string(), child, PathBuf::from("/bin/sh"));
+        proc.terminate(Duration::from_secs(5))
+            .await
+            .expect("owned group teardown must be confirmed");
+
+        assert!(kill(leader_pid, None).is_err(), "the leader must be reaped");
+        assert!(
+            kill(descendant_pid, None).is_err(),
+            "the group descendant must be reaped too"
+        );
+        assert!(
+            killpg(pgrp, None).is_err(),
+            "the whole owned group must be quiescent"
+        );
     }
 }
