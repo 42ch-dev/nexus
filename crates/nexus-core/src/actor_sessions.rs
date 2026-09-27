@@ -410,21 +410,27 @@ fn host_err(err: &nexus_agent_host::HostError) -> CoreError {
     }
 }
 
-/// Publish ONE unit of a session's live work settling: drop its count, wake the
-/// joiners, and let the session's accounting entry die with its last unit.
+/// Publish ONE unit of a session's live work settling: drop its count, wake
+/// EVERY joiner, and let the session's accounting entry die with its last unit.
 ///
 /// Both live units of a session — a settling drain and a retired admission —
 /// retire through this one path, so they cannot disagree about publication
-/// order: the count drops BEFORE the wakeup, so a joiner that armed its
-/// notification and then read a non-zero count still gets the permit this
-/// retirement publishes.
+/// order: the count drops BEFORE the wakeup, so a joiner that armed and enabled
+/// its notification and then read a non-zero count is still woken by this
+/// retirement.
+///
+/// The wakeup is a BROADCAST, never a single permit: every concurrent
+/// [`ActorSessionRegistry::join_session_drains`] waits on this same signal, so
+/// the settlement of a session's last live unit must release all of them —
+/// `notify_one` would strand every waiter after the first on work that has
+/// already settled.
 fn retire_session_liveness(
     maps: &Mutex<RegistryMaps>,
     session_id: &HostSessionId,
     liveness: &Arc<SessionLiveness>,
 ) {
     liveness.live.fetch_sub(1, Ordering::AcqRel);
-    liveness.settled.notify_one();
+    liveness.settled.notify_waiters();
     let mut maps = maps.lock().unwrap_or_else(|poisoned| {
         tracing::warn!("actor_sessions mutex poisoned, recovering");
         poisoned.into_inner()
@@ -1249,6 +1255,14 @@ impl ActorSessionRegistry {
     /// and a retry joins the same drains. An entry that is gone is that
     /// session's last live unit settling, so the join returns.
     ///
+    /// Cancellation-safe AND multi-waiter, exactly like the authority-wide
+    /// join: more than one caller can wait on ONE session's live work, so the
+    /// waiter arms AND enables its notification BEFORE it reads the count, and
+    /// the settlement that publishes the count BROADCASTS. A single-permit
+    /// `notify_one` — or a waiter whose notification is armed but not yet
+    /// enabled — would leave every waiter after the first parked on work that
+    /// already settled.
+    ///
     /// The entry it waits on carries the session's ADMITTED operations as well
     /// as its drains ([`Self::admit_session_operation`]), so this join cannot
     /// conclude in the window between "no drain registered yet" and the drain
@@ -1262,10 +1276,13 @@ impl ActorSessionRegistry {
             let Some(session) = session else {
                 return;
             };
-            // Arm the notification BEFORE reading the count, exactly like the
-            // authority-wide join: a drain that settles in between leaves a
-            // permit, so the wait can never miss its only wakeup.
+            // Arm AND enable the notification BEFORE reading the count, exactly
+            // like the authority-wide join: the settlement broadcasts without
+            // storing a permit, so a waiter that was not registered yet would
+            // miss its only wakeup and wait on work that already settled.
             let settled = session.settled.notified();
+            tokio::pin!(settled);
+            settled.as_mut().enable();
             if session.live.load(Ordering::Acquire) == 0 {
                 return;
             }
