@@ -11,8 +11,8 @@ use nexus_contracts::{
     WorldRulesListResponseRulesItem,
 };
 use nexus_core::{
-    CoreAccess, CoreError, CoreOpenOptions, CoreService, CoreTimelineEventsQuery,
-    RulePatchPresence,
+    set_rule_write_gate, CoreAccess, CoreError, CoreOpenOptions, CoreService,
+    CoreTimelineEventsQuery, RulePatchPresence, RuleWriteGate,
 };
 use nexus_local_db::open_pool_read_only;
 use nexus_local_db::spoke_rules::{insert_rule, SpokeRuleRow};
@@ -20,6 +20,7 @@ use nexus_local_db::writer_protocol::{init_engine_pool, GuardedPoolOptions};
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
 
@@ -31,6 +32,10 @@ const FOREIGN_WORLD: &str = "wld_foreign";
 /// `now`, so a replay that reached the shared update statement (which always
 /// writes a fresh `updated_at`) cannot hide inside the same wall-clock second.
 const REPEAT_UPDATED_AT: i64 = 1_700_000_200;
+/// Failure detector for the archive/edit race handshake — NOT an ordering
+/// assumption: the edit reaches the `test-hooks` write-lock rendezvous
+/// promptly, and only a request that never gets there hits this bound.
+const RACE_HANG_GUARD: Duration = Duration::from_secs(30);
 
 struct Fixture {
     tmp: TempDir,
@@ -2404,11 +2409,14 @@ async fn retained_world_rules_archive_visibility_and_cap_honesty() {
 /// V1.198 §13 concurrent archive/edit (the race regression): a competing
 /// archive and an edit must not both act on the same preimage.
 ///
-/// Deterministic interleaving: another writer holds an UNCOMMITTED archive of
-/// the row under the `BEGIN IMMEDIATE` write lock. The edit must block on that
-/// lock (it cannot read a stale preimage and run), and once the archive
-/// commits, the edit's own transaction reads the archived row and refuses —
-/// the tombstone keeps its content.
+/// Deterministic interleaving, no sleeps: another writer holds an UNCOMMITTED
+/// archive of the row under the `BEGIN IMMEDIATE` write lock, and the edit is
+/// parked by the `test-hooks` write-lock rendezvous at the exact point where it
+/// is done with its pre-lock work and about to take the lock. The test commits
+/// the archive from that handshake, so the edit's own transaction starts after
+/// the commit, reads the archived row and refuses — the tombstone keeps its
+/// content. A regression that decided on a pre-lock (stale, non-archived)
+/// preimage tests red here: it would rename the tombstone instead of refusing.
 #[tokio::test]
 async fn retained_world_rules_archive_concurrent_tombstone_guard() {
     let fx = setup().await;
@@ -2437,6 +2445,11 @@ async fn retained_world_rules_archive_concurrent_tombstone_guard() {
     .await
     .unwrap();
 
+    // Arm the write-lock rendezvous for THIS rule (the gate names its rule, so
+    // a gate armed here never parks another test's write).
+    let gate = Arc::new(RuleWriteGate::for_rule("rul_race"));
+    set_rule_write_gate(Some(Arc::clone(&gate)));
+
     let edit = fx.core.update_world_rule(
         &fx.principal,
         world.to_string(),
@@ -2445,14 +2458,29 @@ async fn retained_world_rules_archive_concurrent_tombstone_guard() {
         RulePatchPresence::from_supplied_keys(&["canonical_name", "statement"]),
     );
     tokio::pin!(edit);
-    tokio::select! {
-        () = tokio::time::sleep(Duration::from_millis(250)) => {}
+    let boundary = gate.boundary.notified();
+    tokio::pin!(boundary);
+    let boundary_reached = tokio::select! {
+        // `Ok` = the edit signalled the boundary; `Err` = it never got there
+        // within the blind (hang-guard) bound. Neither is an ordering
+        // assumption: the wait below is what orders the two writers.
+        boundary = tokio::time::timeout(RACE_HANG_GUARD, &mut boundary) => boundary.is_ok(),
         result = &mut edit => panic!(
             "the competing edit must wait for the writer lock instead of \
              reading a stale non-archived preimage: {result:?}"
         ),
-    }
+    };
+    assert!(
+        boundary_reached,
+        "the competing edit never reached its write-lock boundary"
+    );
+
+    // The edit is provably parked between its pre-lock work and the lock
+    // acquisition, so the archive commit lands inside that window by
+    // construction; release the edit only afterwards.
     concurrent_archive.commit().await.unwrap();
+    gate.proceed.notify_one();
+    set_rule_write_gate(None);
 
     // The edit's transaction started after the archive committed, so it sees
     // the tombstone and refuses the content member it supplied first.

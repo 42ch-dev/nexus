@@ -450,6 +450,73 @@ async fn create_world_rule(
     Ok(item_to_response(row_to_item(row)))
 }
 
+/// Test-only rendezvous at the rule write path's write-lock boundary
+/// (`test-hooks`; the production build contains none of this).
+///
+/// Mirrors `execution::test_hooks::OwnerGate`: the gate names the rule whose
+/// write request participates, so a gate armed by one test never parks another
+/// test's write (the integration tests run in parallel). The request signals
+/// [`RuleWriteGate::boundary`] once all of its pre-lock work is done and it is
+/// **about to take the write lock** — the exact point where a competing
+/// writer's commit can still decide what this request will read — and then
+/// waits for [`RuleWriteGate::proceed`]. It is fired from the lock-acquisition
+/// expression itself, so no source position exists between the handshake and
+/// the lock attempt. A regression test therefore drives the
+/// archive/edit race with a real handshake instead of hoping a sleep was long
+/// enough for the request to reach its lock attempt (a request that started
+/// after the competing commit would otherwise pass without ever contending).
+#[cfg(any(test, feature = "test-hooks"))]
+#[derive(Debug)]
+pub struct RuleWriteGate {
+    /// The rule whose write request participates in this rendezvous.
+    pub rule_id: String,
+    /// Signalled once the request reached the write-lock boundary.
+    pub boundary: std::sync::Arc<tokio::sync::Notify>,
+    /// The request waits for this before taking the write lock.
+    pub proceed: std::sync::Arc<tokio::sync::Notify>,
+}
+
+#[cfg(any(test, feature = "test-hooks"))]
+impl RuleWriteGate {
+    /// A gate governing `rule_id`'s write requests.
+    #[must_use]
+    pub fn for_rule(rule_id: impl Into<String>) -> Self {
+        Self {
+            rule_id: rule_id.into(),
+            boundary: std::sync::Arc::new(tokio::sync::Notify::new()),
+            proceed: std::sync::Arc::new(tokio::sync::Notify::new()),
+        }
+    }
+}
+
+#[cfg(any(test, feature = "test-hooks"))]
+static RULE_WRITE_GATE: std::sync::Mutex<Option<std::sync::Arc<RuleWriteGate>>> =
+    std::sync::Mutex::new(None);
+
+/// Install (or clear) the rule-write gate.
+///
+/// # Panics
+///
+/// Panics if the gate mutex was poisoned by a previous panic.
+#[cfg(any(test, feature = "test-hooks"))]
+pub fn set_rule_write_gate(gate: Option<std::sync::Arc<RuleWriteGate>>) {
+    *RULE_WRITE_GATE.lock().expect("rule write gate lock") = gate;
+}
+
+#[cfg(any(test, feature = "test-hooks"))]
+async fn rule_write_gate_boundary(rule_id: &str) {
+    let gate = RULE_WRITE_GATE
+        .lock()
+        .expect("rule write gate lock")
+        .as_ref()
+        .filter(|gate| gate.rule_id == rule_id)
+        .map(std::sync::Arc::clone);
+    if let Some(gate) = gate {
+        gate.boundary.notify_one();
+        gate.proceed.notified().await;
+    }
+}
+
 /// `PATCH /v1/daemon/worlds/:world_id/rules/:rule_id` — per-field edit
 /// (V1.169 P1, AR-2/AR-3/AR-5/AR-6; V1.198 §13 terminal archive).
 ///
@@ -489,11 +556,22 @@ async fn update_world_rule(
     // re-read sequence. The write lock is taken up front, so a competing
     // archive commits before this read or waits behind this write — neither
     // request can act on a stale preimage.
-    let mut tx = nexus_local_db::begin_immediate(pool)
-        .await
-        .map_err(|e| CoreError::Internal {
-            category: e.to_string(),
-        })?;
+    //
+    // One expression on purpose: the `test-hooks` write-lock rendezvous
+    // (compiled out of production builds) is the last statement before the
+    // lock acquisition, so the archive/edit race regression hands over the lock
+    // deterministically — a request can never be between a pre-lock preimage
+    // read and its lock attempt at any other source position.
+    let mut tx = {
+        #[cfg(any(test, feature = "test-hooks"))]
+        rule_write_gate_boundary(&rule_id).await;
+
+        nexus_local_db::begin_immediate(pool)
+            .await
+            .map_err(|e| CoreError::Internal {
+                category: e.to_string(),
+            })?
+    };
 
     // AR-5 order: addressing precedes payload. The pre-fetch is
     // world-scoped (filter below): a rule_id owned by a different world —
