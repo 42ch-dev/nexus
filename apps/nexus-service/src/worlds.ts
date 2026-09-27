@@ -36,6 +36,7 @@ import {
   getWorldKbKeyBlockState,
   patchWorldKbRelationship,
   promoteWorldKbCandidate,
+  refuseUnknownQueryKeys,
   withPrincipal,
   wirePayload,
 } from './world-kb.js';
@@ -98,12 +99,39 @@ export function importWorldPack(
   );
 }
 
-/** `GET /v1/daemon/worlds/{world_id}/rules`. */
+/**
+ * `include_archived` — the rule-list inclusion flag (V1.198 §13).
+ *
+ * Exactly one occurrence, exactly `true` or `false`: absent → default read
+ * (archived omitted). A duplicate key, another value, or an unknown query key
+ * is the retained 400 field-level `invalid_input` envelope. The flag is
+ * forwarded to the core verbatim — no adapter-side status filtering.
+ */
+function includeArchivedQuery(search: URLSearchParams): boolean {
+  refuseUnknownQueryKeys(search, ['include_archived'], 400);
+  const values = search.getAll('include_archived');
+  if (values.length === 0) return false;
+  if (values.length > 1) {
+    throw new HttpError(400, 'invalid_input', 'include_archived must be supplied exactly once', {
+      field: 'include_archived',
+    });
+  }
+  if (values[0] === 'true') return true;
+  if (values[0] === 'false') return false;
+  throw new HttpError(400, 'invalid_input', 'include_archived must be true or false', {
+    field: 'include_archived',
+  });
+}
+
+/** `GET /v1/daemon/worlds/{world_id}/rules?include_archived=`. */
 export function listWorldRules(
   service: ServiceCore,
   worldId: string,
+  includeArchived: boolean,
 ): Promise<WorldRulesListResponse> {
-  return withPrincipal(service, (principal) => service.core.listWorldRules(principal, worldId));
+  return withPrincipal(service, (principal) =>
+    service.core.listWorldRules(principal, worldId, includeArchived),
+  );
 }
 
 /** `POST /v1/daemon/worlds/{world_id}/rules` — 201 created. */
@@ -257,7 +285,9 @@ export const WORLD_ROUTES: readonly DomainRoute[] = [
     pattern: /^\/v1\/daemon\/worlds\/([^/]+)\/rules$/,
     tier: 'tier2',
     family: 'worlds',
-    handle: async (service, params) => ({ body: await listWorldRules(service, params[0]) }),
+    handle: async (service, params, search) => ({
+      body: await listWorldRules(service, params[0], includeArchivedQuery(search)),
+    }),
   },
   {
     method: 'POST',

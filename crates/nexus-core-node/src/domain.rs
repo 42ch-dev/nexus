@@ -267,15 +267,21 @@ impl NativeCore {
     }
 
     /// `GET /v1/daemon/worlds/{world_id}/rules` (default read: archived rows
-    /// omitted; the explicit inclusion parameter lands with the T3 surface).
+    /// omitted; the adapter passes `include_archived=true` to reveal them).
+    ///
+    /// The inclusion flag is a required primitive here — the HTTP/browser
+    /// facades default it to `false`, and the native side never filters rows
+    /// itself: the core selects the exclusion and pushes it into SQL.
     #[napi]
     pub async fn list_world_rules(
         &self,
         principal_handle: String,
         world_id: String,
+        include_archived: bool,
     ) -> Result<Buffer> {
         self.json_call(principal_handle, async move |core, principal| {
-            core.list_world_rules(&principal, world_id, false).await
+            core.list_world_rules(&principal, world_id, include_archived)
+                .await
         })
         .await
     }

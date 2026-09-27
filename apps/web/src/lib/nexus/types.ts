@@ -545,9 +545,10 @@ export interface NexusClient extends CoreSliceClient {
    * (V1.166 AR-3). Author-metadata list in `canonical_name ASC, rule_id ASC`
    * order, 500-cap with an honest `truncated` flag; each item projects the
    * spoke Rule vocabulary verbatim plus the AR-2 constraint carrier
-   * first-class.
+   * first-class. `archived` rows are omitted by default (V1.198 §13);
+   * `includeArchived: true` reveals the retained rows.
    */
-  listWorldRules(worldId: string): Promise<WorldRulesListResponse>;
+  listWorldRules(worldId: string, includeArchived?: boolean): Promise<WorldRulesListResponse>;
   /**
    * `POST /v1/daemon/worlds/{world_id}/rules` — create a structured rule
    * (V1.169 P1, AR-5). The request is the AR-2 constraint carrier plus
