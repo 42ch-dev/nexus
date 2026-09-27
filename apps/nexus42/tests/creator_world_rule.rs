@@ -1,10 +1,10 @@
-//! Server-free tests for the `creator world rule add|list|deactivate` author
+//! Server-free tests for the `creator world rule add|list|deactivate|archive`
 //! CLI (V1.166 PD-1 / AR-2 / AR-3, DR-64; direct-core retarget v1.193 P0-T3).
 //!
 //! Plan: `.mstar/plans/2026-08-15-v1.166-p1-rules-driven-check-evaluator.md`
 //! Spec: `.mstar/iterations/v1.166/specs/v1.166-quality-locks.md` §PD-1 / §AR-2 / §AR-3
 //!
-//! Drives the leaf functions (`rule_add` / `rule_list` / `rule_deactivate`)
+//! Drives the leaf functions (`rule_add` / `rule_list` / `rule_deactivate` / `rule_archive`)
 //! against a hermetic direct-core home — no `$HOME`, no daemon, no Node child
 //! (`common/direct.rs` precedent). Storage truth is read through the same core
 //! projection the CLI renders (`list_world_rules`), so the assertions describe
@@ -927,10 +927,32 @@ async fn cli_rule_list_include_archived_flag() {
     .await
     .unwrap()
     .rule_id;
-    rule_archive(&env.core, &env.principal, WORLD, &archived_id)
-        .await
-        .unwrap();
     env.core.close().await.expect("seed core closes");
+    let archived = env
+        .fixture
+        .command()
+        .args([
+            "creator",
+            "world",
+            "rule",
+            "archive",
+            "--world-id",
+            WORLD,
+            "--rule-id",
+            &archived_id,
+        ])
+        .output()
+        .expect("spawn nexus42 rule archive");
+    assert!(
+        archived.status.success(),
+        "archive failed: {}",
+        String::from_utf8_lossy(&archived.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&archived.stdout).contains(&archived_id),
+        "archive success output names the rule: {}",
+        String::from_utf8_lossy(&archived.stdout)
+    );
 
     let default_json = env
         .fixture
