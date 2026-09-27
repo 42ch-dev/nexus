@@ -4,6 +4,7 @@ import type {
   ProviderHostEvent,
 } from '@42ch/nexus-contracts';
 import {
+  MAX_ACTIVE_PROVIDER_OPERATIONS,
   REGISTRY_MAX_ACTOR_OPERATIONS,
   REGISTRY_MAX_TERMINAL_OPERATIONS,
 } from './config.js';
@@ -96,6 +97,13 @@ export class ProviderRegistry {
   private attachedStreams = new Map<string, number>();
   /** Operations whose disposal was requested while a stream was attached. */
   private retirePending = new Set<string>();
+  /**
+   * Provider-only dispatches admitted before their async provider effect and
+   * not yet registered, keyed by the dispatch's own provider request id. The
+   * admission cap counts them, so parallel dispatches cannot all pass the same
+   * free-slot check while none of them has a row yet.
+   */
+  private pendingProviderDispatches = new Set<string>();
 
   sessionRecord(sessionId: string): ProviderSessionRecord | undefined {
     return this.sessions.get(sessionId);
@@ -166,6 +174,60 @@ export class ProviderRegistry {
   }
 
   /**
+   * Whether one more live provider-only row fits. Live rows charge the cap, and
+   * so do the dispatches admitted for rows not registered yet: the cap has to
+   * count both or parallel dispatches pass the same free slot. Synchronous, so a
+   * registration that reads it last cannot be overtaken by another admission.
+   */
+  private hasLiveProviderOperationRoom(): boolean {
+    return (
+      this.activeOperationCount() + this.pendingProviderDispatches.size <
+      MAX_ACTIVE_PROVIDER_OPERATIONS
+    );
+  }
+
+  /**
+   * Admit one provider-only dispatch BEFORE its async provider effect, named by
+   * that dispatch's own provider request id.
+   *
+   * The cap is read and charged synchronously, so two requests cannot both see
+   * the same free slot: the second sees the first's reservation even though the
+   * first has not registered a row yet. `false` means the dispatch must not be
+   * sent at all — the transport refuses it with `busy` before any effect.
+   */
+  beginProviderOperationDispatch(dispatchId: string): boolean {
+    if (!this.hasLiveProviderOperationRoom()) return false;
+    this.pendingProviderDispatches.add(dispatchId);
+    return true;
+  }
+
+  /**
+   * Abandon a dispatch reservation whose row never materialized (provider
+   * failure, or a refusal after the reservation). Idempotent: a dispatch whose
+   * row was already registered releases nothing here.
+   */
+  endProviderOperationDispatch(dispatchId: string): void {
+    this.pendingProviderDispatches.delete(dispatchId);
+  }
+
+  /**
+   * Register the live row a reserved dispatch produced, consuming that
+   * dispatch's reservation. The reservation is what guaranteed the room — a
+   * dispatch holds one slot from admission until here — so the row is inserted
+   * without a second capacity check, and the slot it takes is the slot it held.
+   * Returns whether the row was registered; a dispatch id with no reservation
+   * never registers anything.
+   */
+  registerAdmittedProviderOperation(
+    dispatchId: string,
+    record: ProviderOperationRecord,
+  ): boolean {
+    if (!this.pendingProviderDispatches.delete(dispatchId)) return false;
+    this.insertOperation(record);
+    return true;
+  }
+
+  /**
    * The Actor-backed records the mirror still holds. The Actor arm is bookkeeping
    * only — the authority owns the outcome and the observation — so it is aged out
    * by the authority's own truth (see `retireActorOperation`).
@@ -192,23 +254,27 @@ export class ProviderRegistry {
    * event/transcript and FIFO position, and a mark carrying a different
    * association never takes over the row that association owns.
    *
-   * The arm stays bounded: a mark past `REGISTRY_MAX_ACTOR_OPERATIONS` retires
-   * the oldest Actor record with its hub (`evictActorOperationsIfNeeded`), so a
-   * stream-heavy workload cannot accumulate one hub per connect.
+   * The arm stays bounded: a mark is retained only while the Actor arm has room
+   * (`retainActorOperation`), which retires the oldest row whose reader is gone
+   * before admitting the new one. An arm full of rows pinned by live readers
+   * retains nothing here and answers `false` rather than evicting a row out from
+   * under its reader — a stream-heavy workload cannot accumulate one hub per
+   * connect either way. Returns whether the mirror holds a row for the operation
+   * now, so a caller never builds a hub for a row the registry dropped.
    */
-  markActorOperation(operationId: string, sessionId: string, providerId: string): void {
+  markActorOperation(operationId: string, sessionId: string, providerId: string): boolean {
     const existing = this.operations.get(operationId);
     if (existing) {
       // A settled row is the outcome this mirror already observed: admission
       // never rewinds it, and its terminal FIFO position stands.
-      if (existing.terminalEvent || isTerminalOperationStatus(existing.status)) return;
+      if (existing.terminalEvent || isTerminalOperationStatus(existing.status)) return true;
       // A live row stays owned by the association that admitted it; a mark with
       // another association must not take it over.
-      if (existing.sessionId !== sessionId || existing.providerId !== providerId) return;
+      if (existing.sessionId !== sessionId || existing.providerId !== providerId) return true;
       existing.actorBacked = true;
-      return;
+      return true;
     }
-    this.operations.set(operationId, {
+    return this.retainActorOperation({
       operationId,
       sessionId,
       providerId,
@@ -217,8 +283,6 @@ export class ProviderRegistry {
       terminalTranscript: null,
       actorBacked: true,
     });
-    this.evictActorOperationsIfNeeded();
-    this.evictTerminalOperationsIfNeeded();
   }
 
   /**
@@ -239,7 +303,40 @@ export class ProviderRegistry {
     this.sessions.set(record.sessionId, record);
   }
 
-  registerOperation(record: ProviderOperationRecord): void {
+  /**
+   * Register one operation row — the single registration authority every live
+   * lane and both hydration paths go through.
+   *
+   * An Actor-backed row is admitted by retention alone (`retainActorOperation`):
+   * the authority has already accepted the run, so the mirror either retains the
+   * bookkeeping inside the Actor arm's bound or retains nothing. A live
+   * provider-only row is admitted only while the live population has room,
+   * counting dispatches already reserved for rows not yet registered
+   * (`hasLiveProviderOperationRoom`); a cold hydration of a natively-live
+   * operation is refused here instead of widening the population past the cap
+   * the control reserve is proven against. Terminal rows are bounded by the
+   * terminal arm's own eviction.
+   *
+   * Returns whether the registry retains the row now. Every refusal is total: no
+   * record, no session state, no hub — a caller must not build a hub for a row
+   * that was not retained, because that hub would hold control slots the reserve
+   * proof excludes.
+   */
+  registerOperation(record: ProviderOperationRecord): boolean {
+    if (record.actorBacked === true) return this.retainActorOperation(record);
+    if (!isTerminalOperationStatus(record.status) && !this.hasLiveProviderOperationRoom()) {
+      return false;
+    }
+    this.insertOperation(record);
+    return true;
+  }
+
+  /**
+   * Insert one row and its bookkeeping. The caller owns admission: `insertOperation`
+   * never refuses, so a row reaches the registry only after the arm that will
+   * charge it has room, or after a reservation guaranteed that room.
+   */
+  private insertOperation(record: ProviderOperationRecord): void {
     this.operations.set(record.operationId, record);
     if (isTerminalOperationStatus(record.status)) {
       this.trackTerminal(record.operationId);
@@ -251,6 +348,25 @@ export class ProviderRegistry {
       }
     }
     this.evictTerminalOperationsIfNeeded();
+  }
+
+  /**
+   * Retain one Actor-backed row inside the Actor arm's bound.
+   *
+   * Room is made by retiring the oldest Actor row that no live reader holds:
+   * `disposeOperation` defers a row a reader is still reading, so a pinned row is
+   * never taken out from under its stream. When every row in the arm is pinned
+   * and the arm is at its bound there is no room at all, and the new row is not
+   * retained rather than evicting a reader's row or letting the arm (and with it
+   * the hubs holding control slots) grow past the bound. Nothing is lost by
+   * that: the authority owns the run and its observation, and the mirror re-marks
+   * the operation on its next stream admission.
+   */
+  private retainActorOperation(record: ProviderOperationRecord): boolean {
+    this.evictActorOperations(REGISTRY_MAX_ACTOR_OPERATIONS - 1);
+    if (this.actorBackedCount() >= REGISTRY_MAX_ACTOR_OPERATIONS) return false;
+    this.insertOperation(record);
+    return true;
   }
 
   clearSessionOperation(sessionId: string): void {
@@ -372,27 +488,26 @@ export class ProviderRegistry {
   }
 
   /**
-   * Retain at most {@link REGISTRY_MAX_ACTOR_OPERATIONS} Actor-backed
-   * operations — the Actor arm's twin of `evictTerminalOperationsIfNeeded`.
+   * Retire Actor-backed rows — oldest first, record and hub together — until the
+   * arm holds at most `limit`.
    *
    * The stream-admission path (`markActorOperation`, one per Actor SSE connect)
-   * otherwise accumulated a record and a hub per distinct connected operation
-   * until the next Actor execute swept them, and those hubs hold control slots
-   * (the retained gap or terminal frame) charged against the shared control
-   * reserve. Every Actor stream re-marks its operation on connect, so retiring
-   * the oldest record costs at most the replay history of a stream that is not
-   * attached — and a record with a live reader is deferred to that reader's
-   * detach, so the population is this bound plus one deferred record per
-   * attached stream (attached streams are bounded by the socket budget).
+   * otherwise accumulated a record and a hub per distinct connected operation,
+   * and those hubs hold control slots (the retained gap or terminal frame)
+   * charged against the shared control reserve. Every Actor stream re-marks its
+   * operation on connect, so retiring the oldest record costs at most the replay
+   * history of a stream that is not attached — and a record with a live reader is
+   * deferred to that reader's detach (`disposeOperation`), so the population this
+   * bounds is the arm's own, plus one pinned record per attached stream.
    */
-  private evictActorOperationsIfNeeded(): void {
-    if (this.actorBackedCount() <= REGISTRY_MAX_ACTOR_OPERATIONS) return;
+  private evictActorOperations(limit: number): void {
+    if (this.actorBackedCount() <= limit) return;
     for (const [operationId, op] of this.operations) {
       if (!op.actorBacked) continue;
       // `disposeOperation` releases the record and its hub together, and defers
       // to a live reader instead of taking the hub out from under it.
       this.disposeOperation(operationId);
-      if (this.actorBackedCount() <= REGISTRY_MAX_ACTOR_OPERATIONS) return;
+      if (this.actorBackedCount() <= limit) return;
     }
   }
 }

@@ -13,7 +13,7 @@ import type {
   ShutdownSessionResponse,
 } from '@42ch/nexus-contracts';
 import type { ServiceCore } from './lifecycle.js';
-import { MAX_ACTIVE_PROVIDER_OPERATIONS, PROVIDER_DEFAULT_DEADLINE_MS } from './config.js';
+import { PROVIDER_DEFAULT_DEADLINE_MS } from './config.js';
 import { HttpError, isAbsentHostError, mapNativeError, routeNotMigrated } from './errors.js';
 import {
   isTerminalOperationStatus,
@@ -473,7 +473,12 @@ export async function executeProviderOperation(service: ServiceCore, sessionId: 
     // this admission is where the mirror learns which of its Actor records the
     // authority no longer serves.
     await ageSettledActorOperations(service);
-    service.providerRegistry.registerOperation({
+    // The mirror retains this row only inside the Actor arm's bound: an arm full
+    // of rows pinned by live readers retains nothing here, and this Host must not
+    // create a hub the registry does not hold — that hub would keep charging
+    // control slots the reserve proof excludes. The stream's own admission
+    // re-marks the operation if the run still needs serving.
+    const retained = service.providerRegistry.registerOperation({
       operationId: reply.operation_id,
       sessionId,
       providerId: placement.record.providerId,
@@ -482,48 +487,63 @@ export async function executeProviderOperation(service: ServiceCore, sessionId: 
       terminalTranscript: null,
       actorBacked: true,
     });
-    service.providerRegistry.ensureHub(
-      reply.operation_id,
-      () => new OperationEventHub(reply.operation_id, sessionId),
-    );
+    if (retained) {
+      service.providerRegistry.ensureHub(
+        reply.operation_id,
+        () => new OperationEventHub(reply.operation_id, sessionId),
+      );
+    }
     return reply;
   }
-  // Transport admission: cap live operations *before* the provider effect so a
-  // stalled/hung population cannot grow without bound (architecture §7).
-  if (service.providerRegistry.activeOperationCount() >= MAX_ACTIVE_PROVIDER_OPERATIONS) {
+  // Transport admission: reserve one live-operation slot *synchronously, before
+  // the provider effect*, named by this dispatch's own request id. The cap counts
+  // reservations, so concurrent requests cannot all pass the same free-slot check
+  // and then each register a row — a stalled/hung population can no longer grow
+  // past the cap (architecture §7). The reservation becomes the registered row's
+  // charge once the provider answers, and is released on every failure path.
+  const dispatchId = randomUUID();
+  if (!service.providerRegistry.beginProviderOperationDispatch(dispatchId)) {
     throw new HttpError(503, 'busy', 'too many active provider operations');
   }
-  // The provider protocol accepts the Rust HostOperation wire shape, not the
-  // public HTTP request. A legacy session cannot authorize memory capture.
-  if (req.remember === true) {
-    throw new HttpError(422, 'invalid_input', 'remember requires an admitted Character session');
+  try {
+    // The provider protocol accepts the Rust HostOperation wire shape, not the
+    // public HTTP request. A legacy session cannot authorize memory capture.
+    if (req.remember === true) {
+      throw new HttpError(422, 'invalid_input', 'remember requires an admitted Character session');
+    }
+    const executePayload = {
+      Prompt: {
+        op_id: randomUUID(),
+        content: [{ Text: { text: req.content } }],
+        permission_scope: null,
+      },
+    };
+    const reply = await providerCall(service, {
+      method: 'execute',
+      request_id: dispatchId,
+      session_id: sessionId,
+      deadline_ms: PROVIDER_DEFAULT_DEADLINE_MS,
+      payload: executePayload,
+    });
+    const operationId = reply.operation_id;
+    if (!operationId) throw new HttpError(500, 'internal', 'provider execute returned no operation_id');
+    if (
+      !service.providerRegistry.registerAdmittedProviderOperation(dispatchId, {
+        operationId,
+        sessionId,
+        providerId: placement.record.providerId,
+        status: 'started',
+        terminalEvent: null,
+        terminalTranscript: null,
+      })
+    ) {
+      throw new HttpError(500, 'internal', 'provider operation admission was lost');
+    }
+    service.providerRegistry.ensureHub(operationId, () => new OperationEventHub(operationId, sessionId));
+    return { operation_id: operationId, session_id: sessionId, status: 'started' };
+  } finally {
+    service.providerRegistry.endProviderOperationDispatch(dispatchId);
   }
-  const executePayload = {
-    Prompt: {
-      op_id: randomUUID(),
-      content: [{ Text: { text: req.content } }],
-      permission_scope: null,
-    },
-  };
-  const reply = await providerCall(service, {
-    method: 'execute',
-    request_id: randomUUID(),
-    session_id: sessionId,
-    deadline_ms: PROVIDER_DEFAULT_DEADLINE_MS,
-    payload: executePayload,
-  });
-  const operationId = reply.operation_id;
-  if (!operationId) throw new HttpError(500, 'internal', 'provider execute returned no operation_id');
-  service.providerRegistry.registerOperation({
-    operationId,
-    sessionId,
-    providerId: placement.record.providerId,
-    status: 'started',
-    terminalEvent: null,
-    terminalTranscript: null,
-  });
-  service.providerRegistry.ensureHub(operationId, () => new OperationEventHub(operationId, sessionId));
-  return { operation_id: operationId, session_id: sessionId, status: 'started' };
 }
 
 export async function cancelProviderOperation(service: ServiceCore, operationId: string): Promise<CancelOperationResponse> {
@@ -667,6 +687,9 @@ async function assertKnownOperation(service: ServiceCore, operationId: string): 
     terminalEvent: null,
     terminalTranscript: null,
   };
+  // A live row the mirror has no room for is simply not cached: native truth
+  // still answers this caller, and the mirror's live population stays at the cap
+  // the control reserve is proven against (`registerOperation` refuses it whole).
   service.providerRegistry.registerOperation(record);
   return record;
 }

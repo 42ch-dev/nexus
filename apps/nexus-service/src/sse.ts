@@ -631,7 +631,14 @@ async function hydrateOperationRecord(
     terminalEvent: null,
     terminalTranscript: null,
   };
-  service.providerRegistry.registerOperation(record);
+  // A live row is admitted only while the live population has room. The registry
+  // refuses the rest with no effect: materializing one more would retain a hub the
+  // control reserve is not sized for, and the mirror would hold more live work
+  // than the cap it refuses new dispatches with. `busy` is the same answer that
+  // dispatch admission gives, and the caller may retry.
+  if (!service.providerRegistry.registerOperation(record)) {
+    throw new HttpError(503, 'busy', 'too many active provider operations');
+  }
   return record;
 }
 
@@ -849,7 +856,13 @@ async function actorEventSource(
     });
   }
   const existingHub = service.providerRegistry.hubForOperation(operationId);
-  service.providerRegistry.markActorOperation(operationId, sessionId, actor.providerId);
+  if (!service.providerRegistry.markActorOperation(operationId, sessionId, actor.providerId)) {
+    // The Actor arm is at its bound with every row pinned by a live reader: this
+    // stream is admitted with no row, and therefore gets no hub — a hub without
+    // its record would hold control slots the reserve proof excludes and would
+    // never be released. The client retries; nothing was admitted or charged.
+    throw new HttpError(503, 'busy', 'too many retained Actor operations');
+  }
   const hub =
     existingHub ??
     service.providerRegistry.ensureHub(
@@ -1020,7 +1033,11 @@ async function creatorActorEventSource(
       resource: `operation:${operationId}`,
     });
   }
-  service.providerRegistry.markActorOperation(operationId, sessionId, actor.providerId);
+  if (!service.providerRegistry.markActorOperation(operationId, sessionId, actor.providerId)) {
+    // Same bound as the Character arm: no retained row means no hub, so this
+    // stream ends here instead of retaining slots outside the reserve proof.
+    throw new HttpError(503, 'busy', 'too many retained Actor operations');
+  }
   const hub = service.providerRegistry.ensureHub(
     operationId,
     () => new OperationEventHub(operationId, sessionId),

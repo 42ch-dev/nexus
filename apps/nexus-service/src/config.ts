@@ -128,6 +128,13 @@ export const REGISTRY_MAX_ACTOR_OPERATIONS = REGISTRY_MAX_TERMINAL_OPERATIONS;
  * ceiling that never competes with the data pool; an ending a saturated reserve
  * still cannot charge is counted and logged (`sseUnretainedGapEvents`) instead
  * of disappearing as a bare close.
+ *
+ * The first three terms are ceilings the registry enforces on every row it
+ * retains (`ProviderRegistry.registerOperation` / `markActorOperation`), which is
+ * what makes the sum a bound on retained hubs rather than an estimate: a live
+ * provider-only row is refused with no effect once the cap is full (counting
+ * dispatches admitted before their rows), an Actor row is retained only while the
+ * arm has room, and a hub is never created for a row the registry does not hold.
  */
 export const ENVIRONMENT_MAX_TRACKED_HUBS =
   REGISTRY_MAX_TERMINAL_OPERATIONS +
