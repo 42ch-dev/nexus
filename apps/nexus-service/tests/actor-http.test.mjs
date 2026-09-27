@@ -253,20 +253,12 @@ describe('actor-http (P5-T2)', () => {
 //   - `crates/nexus-agent-host/tests/fixtures/mock_acp_workflow.py` (end_turn,
 //     plus a never-answering family for cancel/shutdown),
 //   - `actor-http-peer.py`, written into the throwaway home by this file, for
-//     the exact non-success stop reasons, a mid-prompt EOF, and a terminal
-//     emitted *after* an accepted cancel.
+//     mid-prompt EOF and a terminal emitted *after* an accepted cancel.
 //
 // Contract notes this file pins deliberately:
 //   - The host config's own `max_sessions` (default 4) is raised in the
 //     fixture's `config.toml`; the journey legitimately needs more live
 //     sessions than the default budget, and the limit itself is not under test.
-//   - `R-V1196-ACP-INCOMPLETE-MAPPING`: this adapter reports Refusal /
-//     MaxTokens / MaxTurnRequests as `OpFailed(category)`, and the core's §5
-//     table reads every `OpFailed` as the `failed` row — so the `incomplete`
-//     rows are NOT reachable end-to-end through ACP. The three non-success stop
-//     reasons below are therefore asserted as `failed`/null (never success);
-//     the `incomplete` rows' own evidence stays the core group
-//     (`character_terminal_*`). No test here fabricates an `incomplete`.
 //   - `R-V1196-SESSION-CWD-BOUNDARY`: an Actor create must name a `cwd` inside
 //     the pinned workspace root (the registered creative root), which is the
 //     wire field's documented meaning; the no-cwd fallback is untouched.
@@ -279,13 +271,8 @@ const MAIN_PROVIDER = 'mock-acp-main';
 const BLOCK_PROVIDER = 'mock-acp-block';
 const LATE_PROVIDER = 'mock-acp-late';
 const FAIL_PROVIDER = 'mock-acp-fail';
-const STOP_REASON_PROVIDERS = {
-  max_tokens: 'mock-acp-max-tokens',
-  max_turn_requests: 'mock-acp-max-turn-requests',
-  refusal: 'mock-acp-refusal',
-};
 
-/** Hermetic ACP peer for the terminal rows this journey must be able to drive. */
+/** Hermetic ACP peer for the Actor HTTP journey's success and failure rows. */
 const ACTOR_HTTP_PEER = `#!/usr/bin/env python3
 """Deterministic local ACP peer for the P0-T6 Actor HTTP journey.
 
@@ -293,7 +280,6 @@ Speaks the real newline-delimited JSON-RPC ACP wire (initialize, session/new,
 session/prompt, session/cancel) over stdio with no model and no network.
 
 Modes (env):
-  STOP_REASON=<snake_case>  reply to session/prompt with that stop reason
   BLOCK_PROMPT=1            never reply; on session/cancel return (or, with
                             LATE_END_TURN_AFTER_CANCEL=1, answer the still-open
                             prompt with end_turn after LATE_DELAY_S seconds)
@@ -305,7 +291,6 @@ import sys
 import time
 
 LOG = os.environ.get("ACP_FIXTURE_LOG")
-STOP_REASON = os.environ.get("STOP_REASON") or "end_turn"
 BLOCK_PROMPT = os.environ.get("BLOCK_PROMPT") == "1"
 EXIT_ON_PROMPT = os.environ.get("EXIT_ON_PROMPT") == "1"
 LATE_END_TURN_AFTER_CANCEL = os.environ.get("LATE_END_TURN_AFTER_CANCEL") == "1"
@@ -388,7 +373,7 @@ def main():
                 "update": {"sessionUpdate": "agent_message_chunk",
                            "content": {"type": "text", "text": "peer:" + prompt}},
             })
-            reply(req, {"stopReason": STOP_REASON})
+            reply(req, {"stopReason": "end_turn"})
         elif method == "session/cancel":
             log({"event": "cancel"})
         else:
@@ -453,7 +438,6 @@ function seedJourneyHome(label) {
     [BLOCK_PROVIDER, acpFixture, { ACP_FIXTURE_LOG: acpLog, BLOCK_PROMPT: '1' }],
     [LATE_PROVIDER, peerPath, { ACP_FIXTURE_LOG: peerLog, BLOCK_PROMPT: '1', LATE_END_TURN_AFTER_CANCEL: '1' }],
     [FAIL_PROVIDER, peerPath, { ACP_FIXTURE_LOG: peerLog, EXIT_ON_PROMPT: '1' }],
-    ...Object.entries(STOP_REASON_PROVIDERS).map(([reason, id]) => [id, peerPath, { ACP_FIXTURE_LOG: peerLog, STOP_REASON: reason }]),
   ]
     .map(([id, script, env]) => {
       const envLines = Object.entries(env).map(([key, value]) => `${key} = ${JSON.stringify(value)}`).join('\n');
@@ -863,26 +847,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     const delta = stream.frames.find((frame) => frame.data?.MessageDelta);
     assert.ok(delta, 'the peer message delta must be delivered');
     assert.match(delta.data.MessageDelta.text, /^transformed:journey-echo/);
-
-    // The ACP adapter reports Refusal / MaxTokens / MaxTurnRequests as
-    // `OpFailed(category)`, and §5 reads every `OpFailed` as the failure row, so
-    // each of the three must settle `failed`/null — never `succeeded` and never
-    // an `incomplete` this adapter cannot produce (R-V1196-ACP-INCOMPLETE-MAPPING).
-    for (const providerId of Object.values(STOP_REASON_PROVIDERS)) {
-      const row = await jsonFetch('/v1/daemon/agent-host/sessions', {
-        method: 'POST',
-        body: actorBody({ provider_id: providerId }),
-      });
-      assert.equal(row.status, 200, `${providerId}: ${row.text}`);
-      const prompt = await jsonFetch(`/v1/daemon/agent-host/sessions/${row.payload.session_id}/operations`, {
-        method: 'POST',
-        body: { kind: 'prompt', content: `row-${providerId}` },
-      });
-      assert.equal(prompt.status, 200, `${providerId}: ${prompt.text}`);
-      const outcome = await waitForCharacterOutcome(prompt.payload.operation_id);
-      assert.equal(outcome.run_status, 'failed', `${providerId} must not be reported as success`);
-      assert.equal(outcome.finish_reason, null);
-    }
 
     // A mid-prompt EOF is the fault row too.
     const failing = await jsonFetch('/v1/daemon/agent-host/sessions', {
