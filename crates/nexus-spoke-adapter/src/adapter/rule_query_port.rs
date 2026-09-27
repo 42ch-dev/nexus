@@ -677,10 +677,7 @@ mod tests {
         match orchestrate_check_world_scoped(&adapter, "wld_1", request, |input| {
             assert_eq!(
                 input.request.rule_refs,
-                vec![
-                    "rul_active".to_string(),
-                    "rul_unknown".to_string(),
-                ],
+                vec!["rul_active".to_string(), "rul_unknown".to_string(),],
                 "non-active stored refs are dropped before spoke resolves them; \
                  unknown ids keep passing through verbatim"
             );

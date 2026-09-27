@@ -13,8 +13,8 @@ workspace = true
 [dependencies]
 # 2026-09-10 dependency sweep (#281): 0.11.1 → 2.1.0. Stable v1 API only
 # (`schema::v1`, `ProtocolVersion::V1`); no unstable_protocol_v2 features.
-# ACP 2.1.0 core no longer depends on rmcp (companion to #280).
-agent-client-protocol = "=2.1.0"
+# ACP 2.2.0 core no longer depends on rmcp (companion to #280).
+agent-client-protocol = "=2.2.0"
 tokio = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
@@ -30,11 +30,11 @@ async-broadcast = "0.7"
 toml = "1.1"
 toml_edit = "0.25"
 nexus-contracts = { path = "../nexus-contracts" }
-which = "7"
+which = { workspace = true }
 # Unix signal handling for graceful shutdown (only on Unix platforms)
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.28", features = ["signal", "process"] }
-sysinfo = { version = "0.30", default-features = false }
+nix = { version = "0.30.1", features = ["signal", "process"] }
+sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }
 
 # v1.193 P2-T13: the `connect-client` feature retired with the Model A
 # `nexus_mcp_stdio_server` factory (deleted in P1-T6). The generic ACP

@@ -1280,4 +1280,45 @@ mod tests {
         assert_eq!(bare_command_name("./kimi"), "kimi");
         assert_eq!(bare_command_name("opencode"), "opencode");
     }
+
+    /// An absolute registry command is probed as its bare executable name
+    /// through the *configured* directory list, not as that literal absolute
+    /// path.
+    ///
+    /// Ambiguity case: the same binary name exists in two configured
+    /// directories with different `--version` output, and the registry command
+    /// points absolutely at the *second* one. Resolution must follow the
+    /// configured directory order, and the version probe must execute the
+    /// binary the lookup selected — never the literal absolute path and never
+    /// the ambient `PATH`.
+    #[tokio::test]
+    #[serial]
+    async fn scan_local_installations_resolves_absolute_command_by_configured_priority() {
+        let first = tempfile::tempdir().expect("first dir");
+        let second = tempfile::tempdir().expect("second dir");
+        make_shim(&first, "kimi", "#!/bin/sh\necho \"kimi 1.0.0\"\n");
+        make_shim(&second, "kimi", "#!/bin/sh\necho \"kimi 2.0.0\"\n");
+
+        let absolute_cmd = second.path().join("kimi");
+        assert!(absolute_cmd.is_absolute(), "fixture command is absolute");
+        let registry = registry_with_binary(&absolute_cmd.display().to_string());
+
+        let results = scan_local_installations_impl(
+            &registry,
+            &[first.path().to_path_buf(), second.path().to_path_buf()],
+            TEST_PROBE_TIMEOUT,
+        )
+        .await;
+
+        assert_eq!(results.len(), 1, "one installation: {results:?}");
+        assert_eq!(
+            results[0].binary, "kimi",
+            "the absolute path reduces to the bare name"
+        );
+        assert_eq!(
+            results[0].version.as_deref(),
+            Some("kimi 1.0.0"),
+            "the first configured directory must win and the probe must execute that binary"
+        );
+    }
 }

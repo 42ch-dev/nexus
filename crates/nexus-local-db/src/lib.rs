@@ -1089,23 +1089,18 @@ pub fn reset_local_state_with_post_fence_hook(
 
 /// An owned directory descriptor, closed on drop.
 ///
-/// The workspace forbids `unsafe`, so `nix`'s raw descriptor cannot be wrapped
-/// in an `OwnedFd`; it is owned here and released through `close(2)`.
+/// `nix` opens return an [`std::os::fd::OwnedFd`] directly, so the handle owns
+/// the descriptor and never reaches for the raw number: `OwnedFd`'s own `Drop`
+/// closes it exactly once, and `*at` calls borrow it.
 #[cfg(unix)]
-struct DirHandle(std::os::fd::RawFd);
+struct DirHandle(std::os::fd::OwnedFd);
 
 #[cfg(unix)]
 impl DirHandle {
-    /// The raw descriptor this handle owns.
-    const fn fd(&self) -> std::os::fd::RawFd {
-        self.0
-    }
-}
-
-#[cfg(unix)]
-impl Drop for DirHandle {
-    fn drop(&mut self) {
-        let _ = nix::unistd::close(self.0);
+    /// The owned descriptor, borrowed for descriptor-relative `*at` calls.
+    fn as_fd(&self) -> std::os::fd::BorrowedFd<'_> {
+        use std::os::fd::AsFd as _;
+        self.0.as_fd()
     }
 }
 
@@ -1147,13 +1142,15 @@ impl AdmittedDir {
             let std::path::Component::Normal(name) = component else {
                 return Err(untrusted_target(path, home));
             };
-            let parent = current.as_ref().map_or_else(|| home_fd.fd(), DirHandle::fd);
-            match nix::fcntl::openat(
-                Some(parent),
+            // The parent descriptor is borrowed only for the open; the borrow
+            // ends with this block so the opened child can replace `current`.
+            let opened = nix::fcntl::openat(
+                current.as_ref().unwrap_or(&home_fd).as_fd(),
                 name,
                 ADMITTED_DIR_FLAGS,
                 nix::sys::stat::Mode::empty(),
-            ) {
+            );
+            match opened {
                 Ok(fd) => current = Some(DirHandle(fd)),
                 Err(nix::errno::Errno::ENOENT) => return Ok(None),
                 Err(nix::errno::Errno::ELOOP | nix::errno::Errno::ENOTDIR) => {
@@ -1169,7 +1166,7 @@ impl AdmittedDir {
         for name in STATE_DB_FILES {
             let file_path = path.join(name);
             match nix::sys::stat::fstatat(
-                Some(handle.fd()),
+                handle.as_fd(),
                 name,
                 nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
             ) {
@@ -1212,7 +1209,7 @@ impl AdmittedDir {
     ) -> Result<bool, LocalDbError> {
         let file_path = self.dir.join(file.name);
         match nix::sys::stat::fstatat(
-            Some(self.handle.fd()),
+            self.handle.as_fd(),
             file.name,
             nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
         ) {
@@ -1225,7 +1222,7 @@ impl AdmittedDir {
             Err(err) => return Err(io_with_path(&file_path, err)),
         }
         match nix::unistd::unlinkat(
-            Some(self.handle.fd()),
+            self.handle.as_fd(),
             file.name,
             nix::unistd::UnlinkatFlags::NoRemoveDir,
         ) {

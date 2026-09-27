@@ -2094,7 +2094,11 @@ async fn retained_world_rules_archive_terminal_lifecycle() {
             "canonical_name",
             "content member",
         ),
-        (json!({ "statement": "changed" }), "statement", "content member"),
+        (
+            json!({ "statement": "changed" }),
+            "statement",
+            "content member",
+        ),
         (json!({ "kind": "prohibition" }), "kind", "content member"),
         (
             json!({ "severity_hint": "error" }),
@@ -2134,7 +2138,11 @@ async fn retained_world_rules_archive_terminal_lifecycle() {
         (json!({ "status": "active" }), "status", "status exit"),
         (json!({ "status": "deprecated" }), "status", "status exit"),
         (json!({ "status": "draft" }), "status", "status exit"),
-        (json!({ "status": null }), "status", "supplied explicit null"),
+        (
+            json!({ "status": null }),
+            "status",
+            "supplied explicit null",
+        ),
         (
             json!({ "status": "archived", "statement": "mixed" }),
             "statement",
@@ -2392,7 +2400,11 @@ async fn retained_world_rules_archive_visibility_and_cap_honesty() {
         .list_world_rules(&fx.principal, mixed.to_string(), false)
         .await
         .unwrap();
-    assert_eq!(default_mixed.rules.len(), 4, "the default read omits only archived");
+    assert_eq!(
+        default_mixed.rules.len(),
+        4,
+        "the default read omits only archived"
+    );
     let mut statuses: Vec<Option<&str>> = default_mixed
         .rules
         .iter()
@@ -2500,7 +2512,10 @@ async fn retained_world_rules_archive_concurrent_tombstone_guard() {
     assert_eq!(status, "archived");
     assert_eq!(canonical_name, "Race", "the tombstone content is untouched");
     assert_eq!(statement, "Statement for Race");
-    assert_eq!(updated_at, 1_700_000_200, "no write landed after the archive");
+    assert_eq!(
+        updated_at, 1_700_000_200,
+        "no write landed after the archive"
+    );
 }
 
 fn relate(

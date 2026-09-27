@@ -224,10 +224,11 @@ pub async fn get_rule_in_tx(
     Ok(row)
 }
 
-/// World-guarded multi-field update inside the caller-owned transaction —
-/// the same statement as [`update_rule`], so the current-row read, the
-/// lifecycle decision and the write share one `BEGIN IMMEDIATE` transaction
-/// and a competing archive cannot leave the write running against a stale
+/// Updates a rule in its world within the caller-owned transaction.
+///
+/// This uses the same statement as [`update_rule`], so the current-row read,
+/// lifecycle decision and write share one `BEGIN IMMEDIATE` transaction.
+/// A competing archive cannot leave the write running against a stale
 /// non-archived preimage.
 ///
 /// # Errors

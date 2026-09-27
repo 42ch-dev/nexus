@@ -138,6 +138,34 @@ fn wall_time_deadline_traps_independently_of_fuel() {
     );
 }
 
+/// Wasmtime 49 turns the wide-arithmetic proposal ON by default (it is part of
+/// the `WASM3` default feature set); the engine pins it OFF (`engine.rs`) so the
+/// module admission set stays at v48. A module whose code section uses
+/// `i64.mul_wide_u` must be rejected at load time.
+#[test]
+fn rejects_wide_arithmetic_module() {
+    let engine = WasmEngine::new().unwrap();
+    let wasm = wat::parse_str(
+        r#"(module
+            (memory (export "memory") 1)
+            (func (export "alloc") (param $len i32) (result i32) (i32.const 0))
+            (func (export "compute") (param i32 i32 i32 i32) (result i64)
+              (drop (drop (i64.mul_wide_u (i64.const 1) (i64.const 2))))
+              (i64.const 0)))
+        "#,
+    )
+    .expect("valid wat");
+
+    let err = engine
+        .load_module(&wasm)
+        .expect_err("wide-arithmetic module must be rejected");
+
+    assert!(
+        matches!(err, ComputeError::InvalidModule(_)),
+        "expected InvalidModule, got {err:?}"
+    );
+}
+
 /// Wasmtime 47+ enables the GC / function-references / exceptions proposals by
 /// default; the engine pins them OFF (`engine.rs`) to preserve the v46 module
 /// admission set. A module requiring the exceptions proposal (`try_table`)
