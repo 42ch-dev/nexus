@@ -1621,8 +1621,10 @@ impl HostHandle {
     /// # Errors
     ///
     /// Never returns an error for an unsupported provider (its session is torn
-    /// down by the settlement that follows); other cancellation failures are
-    /// reported in the returned report's pending entries.
+    /// down by the settlement that follows), and a cancel refused because the
+    /// operation finished first is accounted the same way; every other
+    /// cancellation failure is reported in the returned report's pending
+    /// entries.
     pub async fn quiesce_actor_sessions(&self) -> CoreResult<CoreCloseReport> {
         let mut pending: Vec<String> = Vec::new();
         // Freeze this authority's own operation admission FIRST — the same
@@ -1641,11 +1643,19 @@ impl HostHandle {
         self.authority.join_admissions().await;
         for operation_id in self.registry.nonterminal_operations() {
             if let Err(err) = self.request_cancel(&operation_id).await {
-                // Neither an unsupported provider (DSH) nor an operation whose
-                // session is already gone is a quiesce failure: nothing latched
-                // intent in either case, and the manager settlement that
-                // follows is the authoritative teardown.
-                if !is_unsupported_cancellation(&err) && !is_missing_session(&err) {
+                // Neither an unsupported provider (DSH), nor an operation whose
+                // session is already gone, nor one that FINISHED between the
+                // nonterminal snapshot above and this cancel's latch is a
+                // quiesce failure: none of them latched intent, the finished
+                // operation's own recorded terminal is its truth, and the drain
+                // join below still proves the settlement of the work this
+                // quiesce owns. Every other refusal is unaccounted work — the
+                // manager settlement that follows is not its teardown — so it
+                // keeps the cleanup unconfirmed.
+                if !is_unsupported_cancellation(&err)
+                    && !is_missing_session(&err)
+                    && !is_finished_operation(&err)
+                {
                     pending.push(format!("actor-cancel: {operation_id}: {err}"));
                 }
             }

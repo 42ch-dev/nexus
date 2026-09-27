@@ -2217,6 +2217,16 @@ struct ControlProvider {
     cancel_publishes_terminal: Arc<AtomicBool>,
     /// The release signal for a parked execution.
     exec_gate: Arc<tokio::sync::Notify>,
+    /// Park `cancel` calls until [`Self::release_parked_cancels`]: the quiesce's
+    /// cancel loop is held at the provider for the operation it reached first,
+    /// which is the rendezvous the finished-operation race needs — the caller
+    /// has already taken its nonterminal snapshot and latched that operation.
+    cancel_park: Arc<AtomicBool>,
+    /// The operation the parked `cancel` holds, so the test settles the OTHER
+    /// recorded operation inside the rendezvous.
+    parked_cancel: Arc<parking_lot::Mutex<Option<HostOperationId>>>,
+    /// The release signal for a parked cancel.
+    cancel_gate: Arc<tokio::sync::Notify>,
     /// Every `LaunchSpec.cwd` a launch actually received, in call order: the
     /// observable proof of WHICH root a session was launched at (P0-T2).
     launched_cwds: parking_lot::Mutex<Vec<PathBuf>>,
@@ -2236,6 +2246,9 @@ fn control_provider(cancellation: bool, burst: usize, cancel_fails: bool) -> Arc
         exec_fails: Arc::new(AtomicBool::new(false)),
         cancel_publishes_terminal: Arc::new(AtomicBool::new(false)),
         exec_gate: Arc::new(tokio::sync::Notify::new()),
+        cancel_park: Arc::new(AtomicBool::new(false)),
+        parked_cancel: Arc::new(parking_lot::Mutex::new(None)),
+        cancel_gate: Arc::new(tokio::sync::Notify::new()),
         launched_cwds: parking_lot::Mutex::new(Vec::new()),
         cancels: Arc::new(AtomicUsize::new(0)),
         shutdowns: Arc::new(AtomicUsize::new(0)),
@@ -2291,6 +2304,23 @@ impl ControlProvider {
     /// admitted execution retires its admission while registering no drain.
     fn fail_executions(&self) {
         self.exec_fails.store(true, Ordering::SeqCst);
+    }
+
+    /// Park `cancel` calls until [`Self::release_parked_cancels`].
+    fn park_cancels(&self) {
+        self.cancel_park.store(true, Ordering::SeqCst);
+    }
+
+    /// Release the parked cancel (later calls run unparked).
+    fn release_parked_cancels(&self) {
+        self.cancel_park.store(false, Ordering::SeqCst);
+        self.cancel_gate.notify_one();
+    }
+
+    /// The operation the parked cancel is holding: the one the quiesce has
+    /// already latched, so the test knows which operation it has NOT reached.
+    fn parked_cancel(&self) -> Option<HostOperationId> {
+        self.parked_cancel.lock().clone()
     }
 
     /// Publish the operation's own clean terminal while the `cancel` call is
@@ -2395,6 +2425,13 @@ impl ProviderAdapter for ControlProvider {
         op_id: HostOperationId,
     ) -> nexus_agent_host::HostResult<()> {
         self.cancels.fetch_add(1, Ordering::SeqCst);
+        // The quiesce's cancel rendezvous: the operation is already latched and
+        // the caller is past its nonterminal snapshot, so the test may settle a
+        // DIFFERENT recorded operation inside this window.
+        if self.cancel_park.load(Ordering::SeqCst) {
+            *self.parked_cancel.lock() = Some(op_id.clone());
+            self.cancel_gate.notified().await;
+        }
         if self.cancel_publishes_terminal.load(Ordering::SeqCst) {
             // The drain-settles-midflight race (PR #335): the provider settles
             // the operation with its own clean end of turn WHILE the cancel
@@ -3525,6 +3562,182 @@ async fn actor_control_quiesce_waits_for_an_admitted_execute_before_it_confirms(
     assert_eq!(
         recorded.run_status,
         CharacterOperationResultRunStatus::Cancelled
+    );
+}
+
+/// R-V1196-QUIESCE-409-PENDING (v1.196-4): the nonterminal snapshot is taken
+/// before any cancel is latched, so an operation that FINISHES in that window is
+/// answered with the typed `actor_operation_finished` conflict instead of a
+/// cancel intent. That refusal latches nothing and is accounted work — its
+/// recorded terminal is the operation's truth, and the drain join still proves
+/// the settlement this quiesce owns — so it must not keep `cleanup_confirmed`
+/// false once the drains settle.
+///
+/// The rendezvous is the provider's own `cancel`: the quiesce is parked there for
+/// the operation it reached first, i.e. past its nonterminal snapshot, and the
+/// finished operation commits its terminal inside that window before the cancel
+/// that meets it. A drain runs its finalization and its outcome commit without an
+/// await between them, so this fixture drives those two production steps
+/// directly: the record is reserved as `execute` reserves one, moved into the
+/// drain's `Finalizing` phase, and settled through the same registry writer the
+/// drain uses. Either registry iteration order lands on the same refusal — the
+/// operation's own finalized phase — and nothing here is ordered by a sleep.
+#[tokio::test]
+async fn actor_control_quiesce_finished_race() {
+    let env = seed_env().await;
+    let provider = control_provider(true, 0, false);
+    let (_core, principal, _manager, handle, session_id) =
+        control_fixture(&env, Arc::clone(&provider)).await;
+
+    // The LIVE operation: the work the quiesce cancels, and the drain its
+    // confirmation still owes.
+    let live = control_prompt(&handle, &principal, &session_id).await;
+
+    // The operation that finishes concurrently: recorded as `execute` records
+    // one, already in the FINALIZING phase its drain enters after observing the
+    // terminal. The nonterminal snapshot still counts it as work to cancel.
+    let finishing = HostOperationId(Uuid::new_v4());
+    let snapshot = CharacterOperationSnapshot::new(
+        principal.creator_id().to_string(),
+        session_id.clone(),
+        finishing.clone(),
+    );
+    handle
+        .reserve_character_operation(&snapshot)
+        .expect("a Character operation reserves an outcome");
+    assert!(
+        !handle.actor_sessions().begin_operation_finalizing(&finishing),
+        "the finishing operation finalizes with no cancel intent to win"
+    );
+
+    provider.park_cancels();
+    let quiescing = tokio::spawn({
+        let handle = handle.clone();
+        async move { handle.quiesce_actor_sessions().await }
+    });
+    wait_until(
+        || provider.parked_cancel().is_some(),
+        "the quiesce cancel to reach the provider",
+    )
+    .await;
+    // Only the live operation reaches the manager's cancel: the finishing
+    // operation is refused at the latch, before any provider effect.
+    assert_eq!(
+        provider.parked_cancel(),
+        Some(live.clone()),
+        "the cancel that reached the provider names the live operation"
+    );
+
+    // The window: the terminal the finishing operation's drain was finalizing is
+    // committed now, so the cancel the quiesce still owes it meets a finished
+    // operation.
+    handle
+        .settle_character_stream(
+            snapshot,
+            exec_stream(vec![Ok(finished(
+                &session_id,
+                &finishing,
+                FinishReason::EndTurn,
+            ))]),
+            None,
+        )
+        .await;
+
+    // Release the parked cancel. Confirmation still owes the live operation's
+    // drain, so the report cannot be produced yet.
+    provider.release_parked_cancels();
+    wait_until(
+        || handle.actor_sessions().nonterminal_operations().is_empty(),
+        "the quiesce cancel loop to finish",
+    )
+    .await;
+    assert!(
+        !quiescing.is_finished(),
+        "the quiesce confirmed before the live drain it owns had settled"
+    );
+    provider.close_stream();
+    let report = tokio::time::timeout(std::time::Duration::from_secs(20), quiescing)
+        .await
+        .expect("the Actor-side join settles")
+        .expect("the quiesce task joins")
+        .expect("the Actor side settles");
+    assert!(
+        report.cleanup_confirmed,
+        "a finished operation is accounted, not pending: {report:?}"
+    );
+    assert!(
+        report.pending_operations.is_empty(),
+        "no work remains pending: {report:?}"
+    );
+    assert_eq!(
+        handle.actor_sessions().unsettled_drain_count(),
+        0,
+        "the live drain the quiesce owns was joined"
+    );
+    let cancelled = control_status(&handle, &principal, &live).await;
+    assert_eq!(
+        cancelled.run_status,
+        CharacterOperationResultRunStatus::Cancelled,
+        "the live operation the quiesce latched was cancelled"
+    );
+    let finished_outcome = control_status(&handle, &principal, &finishing).await;
+    assert_eq!(
+        finished_outcome.run_status,
+        CharacterOperationResultRunStatus::Succeeded,
+        "the operation that finished keeps its own terminal"
+    );
+    assert_eq!(
+        finished_outcome.finish_reason,
+        Some(CharacterOperationResultFinishReason::EndTurn)
+    );
+}
+
+/// The accounted refusals are exactly the ones that latch no intent. A provider
+/// that advertised cancellation and then FAILED the call leaves real unaccounted
+/// work behind, so the quiesce keeps reporting it pending instead of confirming
+/// a cleanup over it.
+#[tokio::test]
+async fn actor_control_quiesce_keeps_a_refused_cancel_pending() {
+    let env = seed_env().await;
+    let provider = control_provider(true, 0, true);
+    let (_core, principal, _manager, handle, session_id) =
+        control_fixture(&env, Arc::clone(&provider)).await;
+    let operation_id = control_prompt(&handle, &principal, &session_id).await;
+
+    let quiescing = tokio::spawn({
+        let handle = handle.clone();
+        async move { handle.quiesce_actor_sessions().await }
+    });
+    wait_until(|| provider.cancels() == 1, "the refused quiesce cancel").await;
+    provider.close_stream();
+    let report = tokio::time::timeout(std::time::Duration::from_secs(20), quiescing)
+        .await
+        .expect("the Actor-side join settles")
+        .expect("the quiesce task joins")
+        .expect("the Actor side settles");
+    assert!(
+        !report.cleanup_confirmed,
+        "a refused cancel is never a confirmed cleanup: {report:?}"
+    );
+    assert!(
+        report
+            .pending_operations
+            .iter()
+            .any(|pending| pending.starts_with("actor-cancel:")),
+        "the report names the cancel it could not confirm: {report:?}"
+    );
+    assert_eq!(
+        handle.actor_sessions().unsettled_drain_count(),
+        0,
+        "the drain settled; only the refusal keeps the report unconfirmed"
+    );
+    // The refused cancel latched no intent, so the provider's own stream end
+    // decides the operation's terminal — never a fabricated cancellation.
+    let outcome = control_status(&handle, &principal, &operation_id).await;
+    assert_eq!(
+        outcome.run_status,
+        CharacterOperationResultRunStatus::Failed,
+        "a refused cancel is not recorded as a cancellation"
     );
 }
 
