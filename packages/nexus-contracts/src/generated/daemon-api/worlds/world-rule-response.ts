@@ -33,7 +33,7 @@ export interface WorldRuleResponse {
    */
   severity_hint?: string | null;
   /**
-   * Open string. Core vocabulary (documented, not enforced): draft, active, deprecated. Verbatim; auto-include only evaluates status=active (PD-1).
+   * Open string — never a closed enum, so the read projection stays open-vocabulary (V1.198 daemon-api-surface-conventions.md §13). Documented core vocabulary (not enforced): draft, active, deprecated, archived. Verbatim; auto-include only evaluates status=active, so archived rules never enter check scope (PD-1).
    */
   status?: string | null;
   /**

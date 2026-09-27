@@ -1,13 +1,12 @@
 import type { ServerResponse } from 'node:http';
 import type { WorldKbPatchEntityRequest } from '@42ch/nexus-contracts';
 import type { ServiceCore } from './lifecycle.js';
-import { HttpError, mapNativeError, routeNotMigrated } from './errors.js';
+import { HttpError, isAbsentHostError, mapNativeError, routeNotMigrated } from './errors.js';
 import {
   cancelProviderOperation,
   createProviderSession,
   executeProviderOperation,
-  lookupCharacterOperation,
-  lookupProviderOperation,
+  lookupOperationObservation,
   lookupProviderSession,
   shutdownProviderSession,
 } from './provider.js';
@@ -183,9 +182,11 @@ export async function handleRoute(
 
 
 /**
- * The embedded host is optional in the domain-only profile: "host not started"
- * is truthful degraded readiness, not a client error. Every other native
- * rejection (uninitialized, forbidden, not_found, invalid_input, ...) propagates.
+ * The embedded host is optional in the domain-only profile: an absent Host
+ * authority is truthful degraded readiness, not a client error. It is
+ * recognized by its typed `details.category`, never by the human message.
+ * Every other native rejection (uninitialized, forbidden, not_found, an
+ * unrelated invalid_input, ...) propagates.
  */
 
 /** A legacy-branch route's success payload (family entries only). */
@@ -356,22 +357,16 @@ export const HOST_ROUTES: readonly DomainRoute[] = [
     handle: async (service, params) => {
       // A live or retained core-indexed Character operation answers with the
       // authority's own CharacterOperationResult; every other id keeps the
-      // generic provider-only / recovered-journal answer below.
-      const character = await lookupCharacterOperation(service, params[0]);
-      if (character) return { body: character };
-      const operation = await lookupProviderOperation(service, params[0]);
-      if (!operation) {
+      // generic provider-only / recovered-journal answer. One observation does
+      // both, so a GET never spends a second Character read: the arm is decided
+      // from the mirror's stored session identity, not from an empty result.
+      const observation = await lookupOperationObservation(service, params[0]);
+      if (!observation) {
         throw new HttpError(404, 'not_found', `operation ${params[0]} not found`, {
           resource: `operation:${params[0]}`,
         });
       }
-      return {
-        body: {
-          operation_id: operation.operation_id,
-          session_id: operation.session_id,
-          status: operation.status,
-        },
-      };
+      return { body: observation };
     },
   },
   // Provider-stream session control: session create/shutdown, operation
@@ -511,7 +506,7 @@ async function tryHostQuery(service: ServiceCore, request: Parameters<typeof hos
     return await hostQuery(service, request);
   } catch (error) {
     const mapped = mapNativeError(error);
-    if (mapped.code === 'invalid_input' && mapped.message === 'host not started') {
+    if (isAbsentHostError(mapped)) {
       return null;
     }
     throw mapped;

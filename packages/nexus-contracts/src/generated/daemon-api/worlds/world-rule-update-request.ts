@@ -21,7 +21,7 @@ export interface WorldRuleUpdateRequest {
    */
   severity_hint?: string;
   /**
-   * Per-field replace. Write vocabulary enforced to draft | active | deprecated (AR-2). status=deprecated is the Deactivate recovery (product lock — no DELETE route).
+   * Per-field replace. Write vocabulary enforced to draft | active | deprecated | archived (AR-2; V1.198 daemon-api-surface-conventions.md §13). status=archived is the terminal archive transition: from any non-archived status it retains id, content, extensions, ownership and created_at and refreshes updated_at; repeating it on an already-archived row succeeds. An archived row is a read-only tombstone — it accepts only status=archived and refuses any other supplied member and any simulated status exit with the field-level envelope; no restore route exists. status=deprecated remains the Deactivate recovery (product lock — no DELETE route).
    */
   status?: string;
   /**

@@ -19,6 +19,13 @@
 //! V1.169 (P1, AR-4) adds the world-guarded multi-field update
 //! ([`update_rule`] — `None` fields keep their stored value via SQL
 //! `COALESCE`; the JSON columns stay opaque pre-serialized strings).
+//!
+//! V1.198 (P0, §13) adds the caller-selected read omission
+//! ([`list_rules_by_world_limited`] takes `excluded_status: Option<&str>` and
+//! applies it NULL-safely **before** `ORDER BY ... LIMIT`) plus the
+//! caller-owned-transaction pair ([`get_rule_in_tx`] / [`update_rule_in_tx`])
+//! that lets the core run its current-row read, terminal-guard decision and
+//! write as one `BEGIN IMMEDIATE` transaction.
 
 use crate::LocalDbError;
 use sqlx::SqlitePool;
@@ -174,6 +181,10 @@ pub struct RuleUpdate {
 /// touched. The JSON columns are stored verbatim as the pre-serialized
 /// strings provided — no parsing or assembly here.
 ///
+/// Standalone (no caller transaction) form of [`update_rule_in_tx`]; callers
+/// whose read → decide → write sequence must be one serialized storage
+/// decision use the in-transaction form instead.
+///
 /// # Errors
 ///
 /// Returns [`LocalDbError::Sqlx`] on database failure.
@@ -183,6 +194,66 @@ pub async fn update_rule(
     rule_id: &str,
     update: &RuleUpdate,
 ) -> Result<bool, LocalDbError> {
+    update_rule_sql(pool, world_id, rule_id, update).await
+}
+
+/// Read one rule by id inside the caller-owned transaction.
+///
+/// The World filter stays with the caller: storage returns the row for the id
+/// alone (unknown id and foreign World stay indistinguishable, the pre-existing
+/// `get_spoke_rules_by_ids` contract).
+///
+/// # Errors
+///
+/// Returns [`LocalDbError::Sqlx`] on database failure.
+pub async fn get_rule_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    rule_id: &str,
+) -> Result<Option<SpokeRuleRow>, LocalDbError> {
+    let row = sqlx::query_as!(
+        SpokeRuleRow,
+        "SELECT rule_id, world_id, schema_version, canonical_name, kind, statement, \
+         description, target_entry_types_json, severity_hint, status, source_anchor_json, \
+         extensions_json, created_at, updated_at \
+         FROM spoke_rules \
+         WHERE rule_id = ?",
+        rule_id,
+    )
+    .fetch_optional(&mut **tx)
+    .await?;
+    Ok(row)
+}
+
+/// Updates a rule in its world within the caller-owned transaction.
+///
+/// This uses the same statement as [`update_rule`], so the current-row read,
+/// lifecycle decision and write share one `BEGIN IMMEDIATE` transaction.
+/// A competing archive cannot leave the write running against a stale
+/// non-archived preimage.
+///
+/// # Errors
+///
+/// Returns [`LocalDbError::Sqlx`] on database failure.
+pub async fn update_rule_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    world_id: &str,
+    rule_id: &str,
+    update: &RuleUpdate,
+) -> Result<bool, LocalDbError> {
+    update_rule_sql(&mut **tx, world_id, rule_id, update).await
+}
+
+/// The single `spoke_rules` multi-field `UPDATE ... COALESCE` statement shared
+/// by [`update_rule`] (pool) and [`update_rule_in_tx`] (caller transaction).
+async fn update_rule_sql<'e, E>(
+    executor: E,
+    world_id: &str,
+    rule_id: &str,
+    update: &RuleUpdate,
+) -> Result<bool, LocalDbError>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+{
     let now_epoch = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
@@ -209,7 +280,7 @@ pub async fn update_rule(
         rule_id,
         world_id,
     )
-    .execute(pool)
+    .execute(executor)
     .await?;
     Ok(result.rows_affected() == 1)
 }
@@ -254,12 +325,21 @@ pub async fn list_rules_by_world(
 /// `LIMIT` as "no limit" — clamped so a buggy caller can never silently
 /// reintroduce the unbounded query.
 ///
+/// `excluded_status` is the caller-selected status omission (V1.198: the core
+/// passes `Some("archived")` for the default read and `None` for explicit
+/// inclusion). The predicate is applied **before** `ORDER BY ... LIMIT`, so an
+/// omitted status can neither occupy a selected slot nor flip `truncated`; it
+/// is NULL-safe (`IS NOT`), so a NULL/unknown stored status stays visible. The
+/// vocabulary itself stays with the caller — pure storage never names a spoke
+/// status.
+///
 /// # Errors
 ///
 /// Returns [`LocalDbError::Sqlx`] on database failure.
 pub async fn list_rules_by_world_limited(
     pool: &SqlitePool,
     world_id: &str,
+    excluded_status: Option<&str>,
     limit: i64,
 ) -> Result<Vec<SpokeRuleRow>, LocalDbError> {
     let limit = limit.max(0);
@@ -269,10 +349,12 @@ pub async fn list_rules_by_world_limited(
          description, target_entry_types_json, severity_hint, status, source_anchor_json, \
          extensions_json, created_at, updated_at \
          FROM spoke_rules \
-         WHERE world_id = ? \
+         WHERE world_id = ? AND (? IS NULL OR status IS NOT ?) \
          ORDER BY canonical_name ASC, rule_id ASC \
          LIMIT ?",
         world_id,
+        excluded_status,
+        excluded_status,
         limit,
     )
     .fetch_all(pool)

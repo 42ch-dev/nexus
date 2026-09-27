@@ -160,6 +160,11 @@ fn new_engine() -> Result<Engine, MiniHostError> {
     config.wasm_gc(false);
     config.wasm_function_references(false);
     config.wasm_exceptions(false);
+    // Wasmtime 49 enables the wide-arithmetic proposal by default; the real
+    // host disables it (`nexus-wasm-host/src/engine.rs`), so the mini-host must
+    // reject the same modules — otherwise ABI probes would admit modules the
+    // runtime host refuses.
+    config.wasm_wide_arithmetic(false);
     Engine::new(&config).map_err(|e| MiniHostError::Instantiation(e.to_string()))
 }
 

@@ -14,7 +14,7 @@
 //! `module-dx` CI leg runs exactly this against the freshly built module.
 
 use nexus_module_sdk::{ComputeInput, DeltaOp, ModuleManifest};
-use nexus_module_test::run;
+use nexus_module_test::{run, MiniHostError};
 use serde_json::json;
 
 const FIXTURE: &str = include_str!("../fixtures/combat-input.json");
@@ -95,6 +95,34 @@ fn fixture_parses_as_compute_input() {
     assert_eq!(input.narrative_state["current_chapter"], "ch-1");
     assert_eq!(input.invocation["attacker_id"], "kb_atk");
     assert_eq!(input.invocation["defender_id"], "kb_def");
+}
+
+/// Wasmtime 49 turns the wide-arithmetic proposal ON by default (it is part of
+/// the `WASM3` default feature set). The mini-host pins it OFF in `new_engine`
+/// so its admission set stays identical to the real host's
+/// (`crates/nexus-wasm-host/src/engine.rs`): a module whose code section uses
+/// `i64.add128` / `i64.mul_wide_*` must fail to compile, not silently become
+/// admissible.
+#[test]
+fn wide_arithmetic_module_is_rejected() {
+    let wasm = wat::parse_str(
+        r#"(module
+  (memory (export "memory") 1)
+  (func (export "alloc") (param $len i32) (result i32) (i32.const 0))
+  (func (export "compute") (param i32 i32 i32 i32) (result i64)
+    (drop (drop (i64.add128 (i64.const 0) (i64.const 0) (i64.const 0) (i64.const 0))))
+    (i64.const 0)))
+"#,
+    )
+    .expect("wat parses");
+
+    let err = run(&wasm, &probe_manifest("wide-arith"), &fixture_input())
+        .expect_err("wide-arithmetic module must be rejected by the mini-host");
+
+    assert!(
+        matches!(err, MiniHostError::Instantiation(_)),
+        "expected Instantiation, got {err:?}"
+    );
 }
 
 #[test]

@@ -87,6 +87,47 @@ pub fn open_reason_internal() -> String {
     })
 }
 
+/// The typed `details.category` naming the absent embedded Host authority.
+///
+/// It is the ONLY stable discriminator for that state: the public code/status
+/// stay `invalid_input`/`400` (an unattached authority is truthful degraded
+/// readiness, not a client fault), so consumers must not read the human
+/// `message` — a wording change would otherwise silently turn the designed
+/// absence fallback into a hard failure.
+pub const HOST_NOT_STARTED_CATEGORY: &str = "host_not_started";
+
+/// The ONE wire envelope for the absent embedded Host authority.
+///
+/// The open/close sequence holds the attached authority pair (journal core +
+/// Host authority) in one lifetime: both slots are published together at the
+/// end of a successful open and released together by close, so either slot
+/// missing means the scoped Host authority is not there.
+pub fn host_not_started_wire() -> CoreError {
+    CoreError {
+        code: CoreErrorCode::InvalidInput,
+        message: "host not started".into(),
+        details: serde_json::Map::from_iter([(
+            "category".into(),
+            Value::String(HOST_NOT_STARTED_CATEGORY.into()),
+        )]),
+        http_status: Some(400),
+    }
+}
+
+/// Serialize the absent-authority envelope for the string-reason entry points.
+pub fn open_reason_host_not_started() -> String {
+    open_reason_from_wire(host_not_started_wire())
+}
+
+/// Reject an absent authority with the typed envelope for N-API entry points.
+///
+/// The raw `Error::from_reason("<text>")` shape is deliberately not used here:
+/// a bare reason cannot carry the typed category, and the TS boundary would
+/// read it as an unmapped `internal` fault instead of the classified absence.
+pub fn napi_error_host_not_started() -> Error {
+    napi_error_from_wire(host_not_started_wire())
+}
+
 fn internal_error_bucket(category: &str) -> &'static str {
     if category.starts_with("config_load:") || category.starts_with("database_error:") {
         "configuration_or_database"
