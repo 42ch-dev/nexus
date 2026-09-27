@@ -1220,6 +1220,252 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     assert.equal(isAbsentHostError(new Error('not a native rejection')), false);
   });
 
+  /**
+   * The generic operation read is where the mirror's Actor mark and the
+   * authority's own row can disagree. Under a typed absence the authority holds
+   * no row at all, so only a provider-only cache entry may answer: an Actor
+   * record is never resurrected as generic provider-only state, and the absence
+   * itself is never a client error for this read.
+   */
+  test('host absence serves the cached provider-only row for the generic operation GET, never a resurrected Actor row', async () => {
+    const legacy = await jsonFetch('/v1/daemon/agent-host/sessions', {
+      method: 'POST',
+      body: { provider_id: MAIN_PROVIDER, cwd: creativeRoot },
+    });
+    assert.equal(legacy.status, 200, legacy.text);
+    const legacySessionId = legacy.payload.session_id;
+    const legacyPrompt = await jsonFetch(`/v1/daemon/agent-host/sessions/${legacySessionId}/operations`, {
+      method: 'POST',
+      body: { kind: 'prompt', content: 'absence-get' },
+    });
+    assert.equal(legacyPrompt.status, 200, legacyPrompt.text);
+    const providerOnlyId = legacyPrompt.payload.operation_id;
+
+    const actorSession = await jsonFetch('/v1/daemon/agent-host/sessions', { method: 'POST', body: actorBody() });
+    assert.equal(actorSession.status, 200, actorSession.text);
+    const actorSessionId = actorSession.payload.session_id;
+    const actorPrompt = await jsonFetch(`/v1/daemon/agent-host/sessions/${actorSessionId}/operations`, {
+      method: 'POST',
+      body: { kind: 'prompt', content: 'absence-actor-get' },
+    });
+    assert.equal(actorPrompt.status, 200, actorPrompt.text);
+    const actorOperationId = actorPrompt.payload.operation_id;
+    assert.equal(
+      service.service.providerRegistry.operationRecord(actorOperationId)?.actorBacked,
+      true,
+      'precondition: the mirror carries the Actor mark for the Character run',
+    );
+
+    // Live baseline with the authority attached: the authority answers for its
+    // own provider-only row, and the Character run is its own Character result.
+    const liveProviderOnly = await jsonFetch(`/v1/daemon/agent-host/operations/${providerOnlyId}`);
+    assert.equal(liveProviderOnly.status, 200, liveProviderOnly.text);
+    assert.deepEqual(Object.keys(liveProviderOnly.payload).sort(), ['operation_id', 'session_id', 'status']);
+    assert.equal(liveProviderOnly.payload.session_id, legacySessionId);
+    const liveActor = await jsonFetch(`/v1/daemon/agent-host/operations/${actorOperationId}`);
+    assert.equal(liveActor.status, 200, liveActor.text);
+    assert.ok(liveActor.payload.run_status, `the Character arm answers with its own result: ${liveActor.text}`);
+
+    const core = service.service.core;
+    const liveBoundary = {
+      hostQuery: core.hostQuery,
+      hostCharacterOperation: core.hostCharacterOperation,
+    };
+    const absence = rejectingBoundary(
+      absentHostEnvelope('the embedded host authority is not attached right now'),
+    );
+    core.hostQuery = absence;
+    core.hostCharacterOperation = absence;
+    try {
+      // 1. An absent authority means "no row", not a client error: the cached
+      //    provider-only row answers exactly as the live read above did.
+      const absentProviderOnly = await jsonFetch(`/v1/daemon/agent-host/operations/${providerOnlyId}`);
+      assert.equal(absentProviderOnly.status, 200, absentProviderOnly.text);
+      assert.deepEqual(absentProviderOnly.payload, {
+        operation_id: providerOnlyId,
+        session_id: legacySessionId,
+        status: 'started',
+      });
+
+      // 2. The mirror's Actor mark is NEVER served as a generic provider-only
+      //    observation: with no authority row the operation is absent — the same
+      //    404 a live miss gives, never the cached admission row and never 400.
+      const absentActor = await jsonFetch(`/v1/daemon/agent-host/operations/${actorOperationId}`);
+      assert.equal(absentActor.status, 404, absentActor.text);
+      assert.equal(absentActor.payload.error.code, 'not_found');
+    } finally {
+      core.hostQuery = liveBoundary.hostQuery;
+      core.hostCharacterOperation = liveBoundary.hostCharacterOperation;
+    }
+
+    // 3. The absence arm stays precise: an unrelated client error and a fault
+    //    keep their own answers instead of degrading to the cached row.
+    core.hostQuery = rejectingBoundary({
+      code: 'invalid_input',
+      message: 'operation_id must be a UUID',
+      http_status: 400,
+    });
+    try {
+      const unrelated = await jsonFetch(`/v1/daemon/agent-host/operations/${providerOnlyId}`);
+      assert.equal(unrelated.status, 400, unrelated.text);
+      assert.equal(unrelated.payload.error.code, 'invalid_input');
+      assert.equal(unrelated.payload.error.message, 'operation_id must be a UUID');
+    } finally {
+      core.hostQuery = liveBoundary.hostQuery;
+    }
+
+    core.hostQuery = rejectingBoundary({
+      code: 'internal',
+      message: 'internal: /Users/somebody/nexus.db is locked',
+      http_status: 500,
+    });
+    try {
+      const fault = await jsonFetch(`/v1/daemon/agent-host/operations/${providerOnlyId}`);
+      assert.equal(fault.status, 500, fault.text);
+      assert.equal(fault.payload.error.code, 'internal');
+      assert.equal(fault.payload.error.message, 'Internal server error');
+    } finally {
+      core.hostQuery = liveBoundary.hostQuery;
+    }
+
+    assert.equal(
+      (await jsonFetch(`/v1/daemon/agent-host/sessions/${legacySessionId}`, { method: 'DELETE' })).status,
+      200,
+    );
+    assert.equal(
+      (await jsonFetch(`/v1/daemon/agent-host/sessions/${actorSessionId}`, { method: 'DELETE' })).status,
+      200,
+    );
+  });
+
+  /**
+   * Cancellation under a typed absence keeps each lane's own authority: a
+   * provider-only cache entry still reaches the raw provider cancel lane, an
+   * Actor mark is cancelled by the authority alone (its own refusal is the
+   * answer, never a provider bypass), and an id nobody knows gains no effect and
+   * no invented success.
+   */
+  test('host absence cancel stays in its cached lane and never bypasses the Actor authority', async () => {
+    // The provider-only prompt runs on the BLOCKED provider so the cancel really
+    // meets a live provider operation: the mock's own log is then the evidence
+    // that the raw provider cancel lane was reached (or was never entered).
+    const legacy = await jsonFetch('/v1/daemon/agent-host/sessions', {
+      method: 'POST',
+      body: { provider_id: BLOCK_PROVIDER, cwd: creativeRoot },
+    });
+    assert.equal(legacy.status, 200, legacy.text);
+    const legacySessionId = legacy.payload.session_id;
+    const legacyPrompt = await jsonFetch(`/v1/daemon/agent-host/sessions/${legacySessionId}/operations`, {
+      method: 'POST',
+      body: { kind: 'prompt', content: 'absence-cancel' },
+    });
+    assert.equal(legacyPrompt.status, 200, legacyPrompt.text);
+    const providerOnlyId = legacyPrompt.payload.operation_id;
+
+    const actorSession = await jsonFetch('/v1/daemon/agent-host/sessions', { method: 'POST', body: actorBody() });
+    assert.equal(actorSession.status, 200, actorSession.text);
+    const actorSessionId = actorSession.payload.session_id;
+    const actorPrompt = await jsonFetch(`/v1/daemon/agent-host/sessions/${actorSessionId}/operations`, {
+      method: 'POST',
+      body: { kind: 'prompt', content: 'absence-actor-cancel' },
+    });
+    assert.equal(actorPrompt.status, 200, actorPrompt.text);
+    const actorOperationId = actorPrompt.payload.operation_id;
+    assert.equal(
+      service.service.providerRegistry.operationRecord(actorOperationId)?.actorBacked,
+      true,
+      'precondition: the mirror carries the Actor mark for the Character run',
+    );
+
+    const cancelsBefore = readLog(acpLog).filter((entry) => entry.event === 'cancel').length;
+    const coldOperationId = randomUUID();
+
+    const core = service.service.core;
+    const liveBoundary = {
+      hostQuery: core.hostQuery,
+      hostCharacterOperation: core.hostCharacterOperation,
+      hostCancelOperation: core.hostCancelOperation,
+      providerCall: core.providerCall,
+    };
+    // The service's own provider dispatch is observed per operation: a raw
+    // provider cancel must be attributed to the provider-only operation and to
+    // nothing else, while the real provider call still runs underneath.
+    const providerCancels = [];
+    core.providerCall = async (request) => {
+      if (request.method === 'cancel') providerCancels.push(request.operation_id);
+      return liveBoundary.providerCall.call(core, request);
+    };
+    const absence = rejectingBoundary(
+      absentHostEnvelope('the embedded host authority is not attached right now'),
+    );
+    core.hostQuery = absence;
+    core.hostCharacterOperation = absence;
+    core.hostCancelOperation = absence;
+    let providerOnlyCancel;
+    let actorCancel;
+    let coldCancel;
+    try {
+      providerOnlyCancel = await jsonFetch(`/v1/daemon/agent-host/operations/${providerOnlyId}`, {
+        method: 'POST',
+        body: {},
+      });
+      actorCancel = await jsonFetch(`/v1/daemon/agent-host/operations/${actorOperationId}`, {
+        method: 'POST',
+        body: {},
+      });
+      coldCancel = await jsonFetch(`/v1/daemon/agent-host/operations/${coldOperationId}`, {
+        method: 'POST',
+        body: {},
+      });
+    } finally {
+      core.hostQuery = liveBoundary.hostQuery;
+      core.hostCharacterOperation = liveBoundary.hostCharacterOperation;
+      core.hostCancelOperation = liveBoundary.hostCancelOperation;
+      core.providerCall = liveBoundary.providerCall;
+    }
+
+    // 1. The provider-only cache entry decides its own lane: the raw provider
+    //    cancel still runs (the mock's own log and the dispatch record are the
+    //    evidence) and the accepted cancel is the cached truth.
+    assert.equal(providerOnlyCancel.status, 200, providerOnlyCancel.text);
+    assert.deepEqual(providerOnlyCancel.payload, { operation_id: providerOnlyId, status: 'cancelled' });
+    assert.equal(service.service.providerRegistry.operationRecord(providerOnlyId)?.status, 'cancelled');
+
+    // 2. The Actor mark belongs to the AUTHORITY alone: its absent-authority
+    //    refusal is the typed failure, and the provider lane is never entered.
+    assert.equal(actorCancel.status, 400, actorCancel.text);
+    assert.equal(actorCancel.payload.error.code, 'invalid_input');
+    assert.equal(actorCancel.payload.error.details?.category, 'host_not_started');
+    assert.equal(actorCancel.payload.error.message, 'the embedded host authority is not attached right now');
+    assert.equal(
+      service.service.providerRegistry.operationRecord(actorOperationId)?.status,
+      'started',
+      'an Actor cancel must not settle the mirror through a provider call',
+    );
+
+    // 3. An id neither the authority nor the mirror knows gains nothing: no
+    //    provider effect, no invented success, no mirror mutation.
+    assert.equal(coldCancel.status, 404, coldCancel.text);
+    assert.equal(coldCancel.payload.error.code, 'not_found');
+    assert.equal(service.service.providerRegistry.operationRecord(coldOperationId), undefined);
+
+    assert.equal(
+      readLog(acpLog).filter((entry) => entry.event === 'cancel').length,
+      cancelsBefore + 1,
+      'exactly one raw provider cancel is observed in this window',
+    );
+    assert.deepEqual(
+      providerCancels,
+      [providerOnlyId],
+      'only the provider-only cancel reaches the raw provider lane',
+    );
+
+    assert.equal(
+      (await jsonFetch(`/v1/daemon/agent-host/sessions/${actorSessionId}`, { method: 'DELETE' })).status,
+      200,
+    );
+  });
+
   test('a valid Creator Actor session takes the core arm for prompt, cancel and observation', async () => {
     const creatorBody = (providerId) => ({
       provider_id: providerId,

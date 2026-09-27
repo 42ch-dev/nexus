@@ -280,10 +280,13 @@ async function resolveSessionPlacement(
 
 /**
  * The authority's own generic operation row for one id, or `null` when it serves
- * none. The mirror is never consulted: it is not authoritative for an Actor
- * operation, and its cache must not resurrect one the authority has aged out
- * (technical contract §5: an expired Actor observation is absent, never
- * re-created as provider-only state).
+ * none. A missing resource is `not_found`, and an unattached authority answers
+ * no row for anything either (`invalid_input` plus the typed `host_not_started`
+ * category); both are absence for this read, and only these two are. The mirror
+ * is never consulted here: it is not authoritative for an Actor operation, and
+ * its cache must not resurrect one the authority has aged out (technical
+ * contract §5: an expired Actor observation is absent, never re-created as
+ * provider-only state).
  */
 async function nativeOperationRow(
   service: ServiceCore,
@@ -294,7 +297,10 @@ async function nativeOperationRow(
     return response.operation ?? null;
   } catch (error) {
     const mapped = mapNativeError(error);
-    if (mapped.code !== 'not_found') throw mapped;
+    // Absence, never a client error: a resource the authority does not hold, or
+    // an authority that is not attached at all. Both mean "no row", so the
+    // caller's cache/absence arm decides; every other rejection propagates.
+    if (mapped.code !== 'not_found' && !isAbsentHostError(mapped)) throw mapped;
     return null;
   }
 }
