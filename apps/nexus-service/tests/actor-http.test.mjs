@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -560,6 +561,83 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
       { headers: { Accept: 'text/event-stream' }, signal: AbortSignal.timeout(20_000) },
     );
     return { status: response.status, frames: parseSseBody(await response.text()) };
+  }
+
+  /**
+   * Hold one Actor SSE stream open over a raw socket. An idle stream writes no
+   * frame, and the transport buffers its headers until the first one, so there
+   * is no response to await: the socket IS the handle, and `body()` is what the
+   * stream really wrote once it ended. An SSE response is chunked and the
+   * socket survives it (keep-alive), so the stream's end for a consumer is the
+   * body's own zero-size chunk, not the socket's close.
+   */
+  function openActorStream(sessionId, operationId) {
+    const target = new URL(url);
+    const socket = net.connect(Number(target.port), target.hostname);
+    socket.setEncoding('utf8');
+    const state = { raw: '', ended: false, connected: false, error: null };
+    let settle = () => {};
+    const ended = new Promise((resolve) => {
+      settle = () => {
+        if (state.ended) return;
+        state.ended = true;
+        resolve();
+      };
+      socket.on('connect', () => {
+        state.connected = true;
+      });
+      socket.on('close', settle);
+      socket.on('end', settle);
+      socket.on('error', (error) => {
+        state.error = error.message;
+        settle();
+      });
+    });
+    socket.on('data', (chunk) => {
+      state.raw += chunk;
+      const head = state.raw.indexOf('\r\n\r\n');
+      const body = head === -1 ? state.raw : state.raw.slice(head + 4);
+      if (body.endsWith('0\r\n\r\n')) settle();
+    });
+    socket.write(
+      [
+        `GET /v1/daemon/agent-host/sessions/${sessionId}/events?operation_id=${operationId} HTTP/1.1`,
+        `Host: ${target.host}`,
+        'Accept: text/event-stream',
+        '',
+        '',
+      ].join('\r\n'),
+    );
+    return {
+      ended: () => state.ended,
+      wrote: () => state.raw.length,
+      state,
+      waitEnded: (timeoutMs) => Promise.race([ended, new Promise((resolve) => setTimeout(resolve, timeoutMs))]),
+      body: () => {
+        const head = state.raw.indexOf('\r\n\r\n');
+        return head === -1 ? '' : state.raw.slice(head + 4);
+      },
+      close: () => {
+        try {
+          socket.destroy();
+        } catch {
+          /* already gone */
+        }
+      },
+    };
+  }
+
+  /**
+   * Wait for an observation the stream produces on its own cadence. The
+   * loop-back interval only samples that cadence — it is never the scheduler
+   * for what is being asserted (the throttle's clock is frozen here).
+   */
+  async function until(predicate, what, timeoutMs = 5_000) {
+    const deadline = Date.now() + timeoutMs;
+    while (!predicate()) {
+      assert.ok(Date.now() < deadline, `timed out waiting for ${what}`);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
   }
 
   before(async () => {
@@ -1924,6 +2002,216 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     } finally {
       releaseControlBytes(charged);
     }
+  });
+
+  test('Actor idle polling is amortized', async () => {
+    // R3: the empty-batch settlement check is a FULL Character read of the same
+    // operation on the stream's 25ms poll cadence, so an idle stream could ask
+    // the authority far more often than the authority can change its answer,
+    // and the operation GET paid a Character read on top of the one its generic
+    // answer needs. Everything below runs on a FROZEN clock: no throttle window
+    // can elapse on its own, so a status read is attributable to the poll that
+    // spent it and never to the passage of time.
+    const { sseTestHooks } = await import(join(serviceRoot, 'dist/sse.js'));
+    // This test owns its Character, binding and session: the regression tests
+    // around it drop or shut down the journey's shared sessions, and an Actor
+    // reuse key is (provider, cwd, Actor, World/binding), so a Character nobody
+    // else holds is what makes this session — and its cwd-typed prompt — unique.
+    const owned = await jsonFetch('/v1/daemon/characters', {
+      method: 'POST',
+      body: { world_id: JOURNEY_WORLD, display_name: 'Idle Polling Actor', persona: { voice: 'quiet' } },
+    });
+    assert.equal(owned.status, 201, owned.text);
+    const idleCharacter = owned.payload.character.character_id;
+    const idleBinding = owned.payload.binding.binding_id;
+    const session = await jsonFetch('/v1/daemon/agent-host/sessions', {
+      method: 'POST',
+      body: {
+        provider_id: MAIN_PROVIDER,
+        cwd: creativeRoot,
+        actor_ref: { actor_kind: 'character', character_id: idleCharacter },
+        viewpoint: { world_id: JOURNEY_WORLD, binding_id: idleBinding },
+      },
+    });
+    assert.equal(session.status, 200, session.text);
+    const sessionId = session.payload.session_id;
+    const prompt = await jsonFetch(`/v1/daemon/agent-host/sessions/${sessionId}/operations`, {
+      method: 'POST',
+      body: { kind: 'prompt', content: 'idle-polling' },
+    });
+    assert.equal(prompt.status, 200, prompt.text);
+    const operationId = prompt.payload.operation_id;
+    assert.equal((await waitForCharacterOutcome(operationId)).run_status, 'succeeded');
+    // Drain the retained observation, then drop the mirror rows: the hub and its
+    // replay are gone, the authority's own observation is already delivered —
+    // so every pull from here on is an immediate EMPTY batch, which is exactly
+    // the state an idle Actor stream polls in.
+    assert.equal((await sseBody(sessionId, operationId)).status, 200);
+    service.service.providerRegistry.removeSession(sessionId);
+    assert.equal(service.service.providerRegistry.operationRecord(operationId), undefined);
+
+    const core = service.service.core;
+    const realCharacterOperation = core.hostCharacterOperation;
+    const realNow = sseTestHooks.now;
+    let clock = 1_000_000_000;
+    let statusReads = 0;
+    // The controlled native boundary: still the REAL read underneath (so the
+    // ending below is the authority's own answer), with its run status pinned
+    // to `running` so the idle state is deterministic instead of a race.
+    let settled = false;
+    core.hostCharacterOperation = async (principal, id) => {
+      statusReads += 1;
+      const character = await realCharacterOperation.call(core, principal, id);
+      return settled ? character : { ...character, run_status: 'running' };
+    };
+    sseTestHooks.now = () => clock;
+    const pullsBefore = sseTestHooks.providerPullCount;
+    const stream = openActorStream(sessionId, operationId);
+    /** What the stream wrote and spent so far — the diagnosis for a failed wait. */
+    const diagnosis = () =>
+      `${stream.body() || '(it wrote nothing)'} | connected=${stream.state.connected} error=${stream.state.error}` +
+      ` reads=${statusReads} pulls=${sseTestHooks.providerPullCount - pullsBefore}`;
+    /** Wait for `target` further polls of THIS stream, showing what it wrote when it can't. */
+    const waitForPolls = async (target, what) => {
+      const deadline = Date.now() + 5_000;
+      while (sseTestHooks.providerPullCount - pullsBefore < target) {
+        assert.ok(!stream.ended(), `the stream ended before ${what}: ${diagnosis()}`);
+        assert.ok(Date.now() < deadline, `timed out waiting for ${what}: ${diagnosis()}`);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+    };
+    try {
+      await waitForPolls(2, 'two empty polls');
+      const readsAtFirstCheck = statusReads;
+      const pullsAtFirstCheck = sseTestHooks.providerPullCount;
+      await until(
+        () => sseTestHooks.providerPullCount - pullsAtFirstCheck >= 10,
+        'ten further empty polls',
+      );
+      assert.equal(
+        statusReads,
+        readsAtFirstCheck,
+        `ten empty polls inside one second must spend no further status read (spent ${statusReads - readsAtFirstCheck})`,
+      );
+      assert.ok(
+        statusReads <= 2,
+        `an idle stream spends one admission read plus at most one amortized check (spent ${statusReads})`,
+      );
+      assert.equal(stream.ended(), false, 'an idle run keeps its stream open while it polls');
+
+      // The authority settles, and the stream is STILL idle: the settlement is
+      // not re-checked inside the window, so the stream stays open rather than
+      // ending on the next poll. The ending waits for the next window's check.
+      settled = true;
+      const readsAtSettlement = statusReads;
+      const pullsAtSettlement = sseTestHooks.providerPullCount;
+      await until(
+        () => sseTestHooks.providerPullCount - pullsAtSettlement >= 3,
+        'three polls after the settlement',
+      );
+      assert.equal(
+        statusReads,
+        readsAtSettlement,
+        'a settled run must not be re-checked inside the window',
+      );
+      assert.equal(
+        stream.wrote(),
+        0,
+        `the settled run ends at the next check, not on every poll: ${diagnosis()}`,
+      );
+
+      clock += 1_000;
+      await stream.waitEnded(3_000);
+      assert.ok(
+        stream.ended(),
+        `the next one-second check must end the settled stream: ${diagnosis()}`,
+      );
+      assert.equal(
+        statusReads,
+        readsAtSettlement + 1,
+        'the ending costs exactly one settlement read',
+      );
+      const endings = parseSseBody(stream.body()).filter((frame) => frame.event === 'gap');
+      assert.equal(
+        endings.length,
+        1,
+        `a settled exhaustion ends with one typed resync gap: ${stream.body()}`,
+      );
+      assert.equal(endings[0].data.reason, 'interrupted');
+      assert.equal(endings[0].data.resync_required, true);
+      assert.equal(endings[0].data.operation_id, operationId);
+
+      // The operation GET reads the Character arm at most once, and spends no
+      // Character read at all on an id the mirror already holds as
+      // provider-only — while still answering with the authority's own result
+      // for an Actor operation.
+      const providerOnly = await jsonFetch('/v1/daemon/agent-host/sessions', {
+        method: 'POST',
+        body: { provider_id: MAIN_PROVIDER, cwd: creativeRoot },
+      });
+      assert.equal(providerOnly.status, 200, providerOnly.text);
+      const providerOnlyPrompt = await jsonFetch(
+        `/v1/daemon/agent-host/sessions/${providerOnly.payload.session_id}/operations`,
+        { method: 'POST', body: { kind: 'prompt', content: 'get-lookup' } },
+      );
+      assert.equal(providerOnlyPrompt.status, 200, providerOnlyPrompt.text);
+      assert.equal(
+        service.service.providerRegistry.operationRecord(providerOnlyPrompt.payload.operation_id)?.actorBacked,
+        undefined,
+        'precondition: the mirror holds this id as provider-only',
+      );
+      const readsBeforeGets = statusReads;
+      const providerOnlyGet = await jsonFetch(
+        `/v1/daemon/agent-host/operations/${providerOnlyPrompt.payload.operation_id}`,
+      );
+      assert.equal(providerOnlyGet.status, 200, providerOnlyGet.text);
+      assert.deepEqual(Object.keys(providerOnlyGet.payload).sort(), ['operation_id', 'session_id', 'status']);
+      assert.equal(
+        statusReads,
+        readsBeforeGets,
+        'a provider-only GET must not spend a Character lookup',
+      );
+      const actorGet = await jsonFetch(`/v1/daemon/agent-host/operations/${operationId}`);
+      assert.equal(actorGet.status, 200, actorGet.text);
+      assert.ok(actorGet.payload.run_status, `the Actor GET keeps its authoritative result: ${actorGet.text}`);
+      assert.equal(
+        statusReads,
+        readsBeforeGets + 1,
+        'an Actor GET spends exactly one Character lookup',
+      );
+      assert.equal(
+        (await jsonFetch(`/v1/daemon/agent-host/sessions/${providerOnly.payload.session_id}`, { method: 'DELETE' })).status,
+        200,
+      );
+
+      // A frame-carrying batch never consults the window: with the clock still
+      // frozen (no window can elapse at all) a run whose real terminal the
+      // authority delivers still ends its stream with that terminal, once.
+      const immediatePrompt = await jsonFetch(`/v1/daemon/agent-host/sessions/${sessionId}/operations`, {
+        method: 'POST',
+        body: { kind: 'prompt', content: 'immediate-terminal' },
+      });
+      assert.equal(immediatePrompt.status, 200, immediatePrompt.text);
+      const immediate = await sseBody(sessionId, immediatePrompt.payload.operation_id);
+      assert.equal(immediate.status, 200);
+      assert.equal(
+        immediate.frames.filter((frame) => frame.data?.OpFinished).length,
+        1,
+        `a delivered terminal must end the stream immediately: ${JSON.stringify(immediate.frames)}`,
+      );
+      assert.ok(
+        immediate.frames.some((frame) => frame.data?.MessageDelta?.text?.includes('transformed:immediate-terminal')),
+        'the peer frame must arrive with the terminal',
+      );
+    } finally {
+      stream.close();
+      sseTestHooks.now = realNow;
+      core.hostCharacterOperation = realCharacterOperation;
+    }
+
+    const released = await jsonFetch(`/v1/daemon/agent-host/sessions/${sessionId}`, { method: 'DELETE' });
+    assert.equal(released.status, 200, released.text);
+    assert.equal(released.payload.status, 'shutdown');
   });
 
   test('Actor re-mark preserves settled terminal', async () => {

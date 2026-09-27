@@ -278,6 +278,9 @@ async function resolveSessionPlacement(
   });
 }
 
+/** The generic provider-only / recovered-journal operation row. */
+type ProviderOperationRow = { operation_id: string; session_id: string; status: string };
+
 /**
  * The authority's own generic operation row for one id, or `null` when it serves
  * none. A missing resource is `not_found`, and an unattached authority answers
@@ -291,7 +294,7 @@ async function resolveSessionPlacement(
 async function nativeOperationRow(
   service: ServiceCore,
   operationId: string,
-): Promise<{ operation_id: string; session_id: string; status: string } | null> {
+): Promise<ProviderOperationRow | null> {
   try {
     const response = await hostQuery(service, { query: 'get_operation', operation_id: operationId });
     return response.operation ?? null;
@@ -590,7 +593,7 @@ export async function lookupProviderSession(service: ServiceCore, sessionId: str
 export async function lookupProviderOperation(
   service: ServiceCore,
   operationId: string,
-): Promise<{ operation_id: string; session_id: string; status: string } | null> {
+): Promise<ProviderOperationRow | null> {
   parseUuid(operationId, 'operation_id');
   const native = await nativeOperationRow(service, operationId);
   if (native) return native;
@@ -600,6 +603,34 @@ export async function lookupProviderOperation(
   // stale mirror row served as a generic provider-only observation.
   if (!cached || cached.actorBacked === true) return null;
   return { operation_id: cached.operationId, session_id: cached.sessionId, status: cached.status };
+}
+
+/**
+ * The one observation behind `GET /v1/daemon/agent-host/operations/{id}`: the
+ * authority's own Character result when it owns the id, otherwise the generic
+ * provider-only / recovered-journal row.
+ *
+ * This read spends at most ONE Character lookup, and a provider-only id spends
+ * none: the mirror row's own non-Actor mark is the stored session identity that
+ * proves the id provider-only (the same positive statement
+ * `isActorOwnedOperation` consumes), so the Character authority is not asked
+ * about a provider-only operation at all. Everything else — an Actor-marked
+ * row, or an id the mirror has never seen — is read from the Character arm, and
+ * a null result there is handed to the generic arm as absence, never as the
+ * discriminator: `lookupProviderOperation` keeps its own `actorBacked` guard, so
+ * a Creator Actor id is still never served as provider-only state.
+ */
+export async function lookupOperationObservation(
+  service: ServiceCore,
+  operationId: string,
+): Promise<CharacterOperationResult | ProviderOperationRow | null> {
+  parseUuid(operationId, 'operation_id');
+  const cached = service.providerRegistry.operationRecord(operationId);
+  if (cached === undefined || cached.actorBacked === true) {
+    const character = await lookupCharacterOperation(service, operationId);
+    if (character) return character;
+  }
+  return lookupProviderOperation(service, operationId);
 }
 
 async function assertKnownSession(service: ServiceCore, sessionId: string): Promise<ProviderSessionRecord> {

@@ -343,6 +343,12 @@ function inspectUrl(operationId: string): string {
 export const sseTestHooks = {
   providerPullCount: 0,
   writeBlockedCount: 0,
+  /**
+   * The Actor settlement throttle's clock (ms). Injectable so a scoped test can
+   * freeze and advance the one-second window instead of sleeping through it;
+   * production reads the real clock.
+   */
+  now: (): number => Date.now(),
 };
 
 /**
@@ -785,6 +791,39 @@ function providerEventSource(
 }
 
 /**
+ * The settled-exhaustion check's window. An observation with nothing left to
+ * deliver is the one state that polls: its pulls return an empty batch
+ * immediately (the authority retains the outcome even after the observation is
+ * consumed) while the run may not be settled yet, and the stream's own cadence
+ * between empty batches is 25ms. Every one of those batches used to ask the
+ * authority with a FULL Character read of the same operation — a second native
+ * read riding along with the poll. One ask per window serves every empty batch,
+ * and every reader, of that operation's hub.
+ */
+const ACTOR_SETTLEMENT_RECHECK_MS = 1000;
+
+/**
+ * When this hub last spent the settlement status read. Keyed by the hub — one
+ * per operation, shared by all of its readers — so a reconnect inherits the
+ * window instead of re-asking immediately, and the entry dies with the hub.
+ */
+const actorSettlementCheckedAt = new WeakMap<OperationEventHub, number>();
+
+/**
+ * Whether this empty batch may spend the settlement status read. The window is
+ * opened BEFORE the read returns, so concurrent readers of one hub cannot both
+ * pass inside one window. A batch that carries a frame never reaches this: a
+ * delivered terminal or gap stays immediate.
+ */
+function actorSettlementDue(hub: OperationEventHub): boolean {
+  const checkedAt = actorSettlementCheckedAt.get(hub);
+  const now = sseTestHooks.now();
+  if (checkedAt !== undefined && now - checkedAt < ACTOR_SETTLEMENT_RECHECK_MS) return false;
+  actorSettlementCheckedAt.set(hub, now);
+  return true;
+}
+
+/**
  * The Actor authority arm: fresh native truth re-authorizes the `(session,
  * operation)` association — an id the authority does not own as a Character
  * operation is absent, and one owned by another session is forbidden — while the
@@ -840,7 +879,19 @@ async function actorEventSource(
       // provider confirmation never arrived, or a terminal that this stream
       // never saw). End with the bounded resync gap instead of polling a stream
       // that can never produce another frame or fabricating a terminal.
-      if ((batch.events?.length ?? 0) === 0 && !batch.has_more && batch.gap === undefined) {
+      //
+      // Amortized: an observation with nothing left is polled, and this status
+      // read is the second native read that used to ride along with every empty
+      // batch — it is now at most one per window per operation, shared by that
+      // hub's readers. A batch carrying events or a gap never reaches the timer,
+      // so a delivered frame stays immediate; a run that settles inside the
+      // window ends at the next window's check.
+      if (
+        (batch.events?.length ?? 0) === 0 &&
+        !batch.has_more &&
+        batch.gap === undefined &&
+        actorSettlementDue(hub)
+      ) {
         const latest = await hydrateCharacterOperation(service, operationId);
         if (latest && latest.run_status !== 'running') {
           throw new Error('actor observation exhausted after settlement');

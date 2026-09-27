@@ -6,8 +6,7 @@ import {
   cancelProviderOperation,
   createProviderSession,
   executeProviderOperation,
-  lookupCharacterOperation,
-  lookupProviderOperation,
+  lookupOperationObservation,
   lookupProviderSession,
   shutdownProviderSession,
 } from './provider.js';
@@ -358,22 +357,16 @@ export const HOST_ROUTES: readonly DomainRoute[] = [
     handle: async (service, params) => {
       // A live or retained core-indexed Character operation answers with the
       // authority's own CharacterOperationResult; every other id keeps the
-      // generic provider-only / recovered-journal answer below.
-      const character = await lookupCharacterOperation(service, params[0]);
-      if (character) return { body: character };
-      const operation = await lookupProviderOperation(service, params[0]);
-      if (!operation) {
+      // generic provider-only / recovered-journal answer. One observation does
+      // both, so a GET never spends a second Character read: the arm is decided
+      // from the mirror's stored session identity, not from an empty result.
+      const observation = await lookupOperationObservation(service, params[0]);
+      if (!observation) {
         throw new HttpError(404, 'not_found', `operation ${params[0]} not found`, {
           resource: `operation:${params[0]}`,
         });
       }
-      return {
-        body: {
-          operation_id: operation.operation_id,
-          session_id: operation.session_id,
-          status: operation.status,
-        },
-      };
+      return { body: observation };
     },
   },
   // Provider-stream session control: session create/shutdown, operation
