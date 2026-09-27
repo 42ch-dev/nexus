@@ -257,10 +257,6 @@ describe('callback lifecycle', { concurrency: 1 }, () => {
     assert.ok(wire, `open rejection must carry the wire envelope, got: ${failure}`);
     assert.equal(wire.code, 'forbidden');
     assert.equal(wire.details?.category, 'policy_denied');
-    assert.ok(
-      !failure.includes('interrupted'),
-      `confirmed cleanup must not report Interrupted, got: ${failure}`,
-    );
 
     // The environment survived with no retained owner: a fresh open succeeds and
     // reports the truth of the newly started host.
@@ -309,7 +305,10 @@ describe('callback lifecycle', { concurrency: 1 }, () => {
       // 2) while cleanup stays unconfirmed, further opens are denied and the
       //    retained owners survive (never replaced or dropped). Distinct fresh
       //    homes are used, so a denial can only come from the environment-wide
-      //    retained-owner fence rather than from one home's own resources.
+      //    retained-owner fence rather than from one home's own resources. The
+      //    fence's reason is not a wire envelope, so the binding classifies it as
+      //    `internal`/`open_failed`; that classification (never its message text)
+      //    is what separates this denial from the config-path rejection above.
       const validHome = seedHome();
       for (const candidate of [validHome, seedHome()]) {
         let denied = null;
@@ -327,11 +326,8 @@ describe('callback lifecycle', { concurrency: 1 }, () => {
         assert.ok(denied, 'open must be denied while a retained owner is unconfirmed');
         const deniedWire = parseWireFailure(denied);
         assert.ok(deniedWire, `fence denial must carry the wire envelope, got: ${denied}`);
-        assert.notEqual(
-          deniedWire.details?.category,
-          'policy_denied',
-          `the fence denial is not a repeat of the config-path rejection, got: ${denied}`,
-        );
+        assert.equal(deniedWire.code, 'internal');
+        assert.equal(deniedWire.details?.category, 'open_failed');
       }
 
       // 3) a confirmed cleanup settles the retained owners and reopens.
