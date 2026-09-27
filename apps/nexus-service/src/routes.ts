@@ -1,7 +1,7 @@
 import type { ServerResponse } from 'node:http';
 import type { WorldKbPatchEntityRequest } from '@42ch/nexus-contracts';
 import type { ServiceCore } from './lifecycle.js';
-import { HttpError, mapNativeError, routeNotMigrated } from './errors.js';
+import { HttpError, isAbsentHostError, mapNativeError, routeNotMigrated } from './errors.js';
 import {
   cancelProviderOperation,
   createProviderSession,
@@ -183,9 +183,11 @@ export async function handleRoute(
 
 
 /**
- * The embedded host is optional in the domain-only profile: "host not started"
- * is truthful degraded readiness, not a client error. Every other native
- * rejection (uninitialized, forbidden, not_found, invalid_input, ...) propagates.
+ * The embedded host is optional in the domain-only profile: an absent Host
+ * authority is truthful degraded readiness, not a client error. It is
+ * recognized by its typed `details.category`, never by the human message.
+ * Every other native rejection (uninitialized, forbidden, not_found, an
+ * unrelated invalid_input, ...) propagates.
  */
 
 /** A legacy-branch route's success payload (family entries only). */
@@ -511,7 +513,7 @@ async function tryHostQuery(service: ServiceCore, request: Parameters<typeof hos
     return await hostQuery(service, request);
   } catch (error) {
     const mapped = mapNativeError(error);
-    if (mapped.code === 'invalid_input' && mapped.message === 'host not started') {
+    if (isAbsentHostError(mapped)) {
       return null;
     }
     throw mapped;

@@ -1078,6 +1078,148 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     }
   });
 
+  /**
+   * The producer's absent-authority envelope (native `core_error.rs`:
+   * `invalid_input`/400 plus `details.category`), driven with a DELIBERATELY
+   * reworded human message: only the typed category may decide, so a producer
+   * wording change can never move a consumer's classification.
+   */
+  const absentHostEnvelope = (message) => ({
+    code: 'invalid_input',
+    message,
+    details: { category: 'host_not_started' },
+    http_status: 400,
+  });
+  const rejectingBoundary = (envelope) => () =>
+    Promise.reject(new Error(JSON.stringify(envelope)));
+
+  test('host absence is classified by the typed category, never the message, at every Host consumer', async () => {
+    // 1. Real mirror rows from the REAL attached authority: a provider-only
+    //    session plus its operation, which is what the absence fallbacks consult.
+    const created = await jsonFetch('/v1/daemon/agent-host/sessions', {
+      method: 'POST',
+      body: { provider_id: MAIN_PROVIDER, cwd: creativeRoot },
+    });
+    assert.equal(created.status, 200, created.text);
+    const sessionId = created.payload.session_id;
+    const executed = await jsonFetch(`/v1/daemon/agent-host/sessions/${sessionId}/operations`, {
+      method: 'POST',
+      body: { kind: 'prompt', content: 'host absence prompt' },
+    });
+    assert.equal(executed.status, 200, executed.text);
+    const operationId = executed.payload.operation_id;
+
+    const core = service.service.core;
+    const liveBoundary = {
+      hostQuery: core.hostQuery,
+      hostCharacterOperation: core.hostCharacterOperation,
+    };
+    // 2. Live baseline for the Character arm: a stream whose operation the
+    //    authority does not own is the authority's own miss, before any absence.
+    const unknownOperation = randomUUID();
+    const liveMiss = await jsonFetch(
+      `/v1/daemon/agent-host/sessions/${sessionA.payload.session_id}/events?operation_id=${unknownOperation}`,
+      { headers: { Accept: 'text/event-stream' } },
+    );
+    assert.equal(liveMiss.status, 404, liveMiss.text);
+    assert.equal(liveMiss.payload.error.code, 'not_found');
+
+    const absence = rejectingBoundary(
+      absentHostEnvelope('the embedded host authority is not attached right now'),
+    );
+    core.hostQuery = absence;
+    core.hostCharacterOperation = absence;
+    try {
+      // 3. Readiness GETs degrade truthfully instead of turning absence into a
+      //    client error.
+      const health = await jsonFetch('/v1/daemon/agent-host/health');
+      assert.equal(health.status, 200, health.text);
+      assert.deepEqual(health.payload, { running: false, active_sessions: 0, active_operations: 0 });
+      const providers = await jsonFetch('/v1/daemon/agent-host/providers');
+      assert.equal(providers.status, 200, providers.text);
+      assert.deepEqual(providers.payload, { providers: [] });
+
+      // 4. Control: session placement is resolved against the mirror, so the
+      //    shutdown of a known provider-only session still reaches its lane.
+      const shutdown = await jsonFetch(`/v1/daemon/agent-host/sessions/${sessionId}`, { method: 'DELETE' });
+      assert.equal(shutdown.status, 200, shutdown.text);
+      assert.deepEqual(shutdown.payload, { session_id: sessionId, status: 'shutdown' });
+
+      // 5. Stream, Character arm: the authority's own read is null, so the
+      //    absent answer is IDENTICAL to the live miss above — never a 400.
+      const absentMiss = await jsonFetch(
+        `/v1/daemon/agent-host/sessions/${sessionA.payload.session_id}/events?operation_id=${unknownOperation}`,
+        { headers: { Accept: 'text/event-stream' } },
+      );
+      assert.equal(absentMiss.status, 404, absentMiss.text);
+      assert.equal(absentMiss.payload.error.code, 'not_found');
+
+      // 6. Stream, session hydration: the shutdown above dropped the mirror row,
+      //    so absence must read as the same 404 a genuinely missing session
+      //    gives. The refusal precedes the stream headers, so the route answers
+      //    JSON.
+      const stream = await jsonFetch(
+        `/v1/daemon/agent-host/sessions/${sessionId}/events?operation_id=${operationId}`,
+        { headers: { Accept: 'text/event-stream' } },
+      );
+      assert.equal(stream.status, 404, stream.text);
+      assert.equal(stream.payload.error.code, 'not_found');
+    } finally {
+      core.hostQuery = liveBoundary.hostQuery;
+      core.hostCharacterOperation = liveBoundary.hostCharacterOperation;
+    }
+
+    // 7. The classification is NOT a blanket `invalid_input`/400 tolerance: an
+    //    unrelated client error keeps its own answer, and a fault stays sanitized.
+    core.hostQuery = rejectingBoundary({
+      code: 'invalid_input',
+      message: 'session_id must be a UUID',
+      http_status: 400,
+    });
+    try {
+      const unrelated = await jsonFetch('/v1/daemon/agent-host/health');
+      assert.equal(unrelated.status, 400, unrelated.text);
+      assert.equal(unrelated.payload.error.code, 'invalid_input');
+      assert.equal(unrelated.payload.error.message, 'session_id must be a UUID');
+    } finally {
+      core.hostQuery = liveBoundary.hostQuery;
+    }
+
+    core.hostQuery = rejectingBoundary({
+      code: 'internal',
+      message: 'internal: /Users/somebody/nexus.db is locked',
+      http_status: 500,
+    });
+    try {
+      const fault = await jsonFetch('/v1/daemon/agent-host/health');
+      assert.equal(fault.status, 500, fault.text);
+      assert.equal(fault.payload.error.code, 'internal');
+      assert.equal(fault.payload.error.message, 'Internal server error');
+    } finally {
+      core.hostQuery = liveBoundary.hostQuery;
+    }
+
+    // 8. The classifier itself: a missing resource is not absence, and the
+    //    message neither adds nor removes the classification.
+    const { isAbsentHostError } = await import(join(serviceRoot, 'dist/errors.js'));
+    const asNativeRejection = (envelope) => new Error(JSON.stringify(envelope));
+    assert.equal(isAbsentHostError(asNativeRejection(absentHostEnvelope('reworded'))), true);
+    assert.equal(
+      isAbsentHostError(asNativeRejection({ code: 'invalid_input', message: 'host not started', http_status: 400 })),
+      false,
+      'the message alone must never classify an error as absent-host',
+    );
+    assert.equal(
+      isAbsentHostError(asNativeRejection({ code: 'not_found', message: 'session not found', http_status: 404 })),
+      false,
+    );
+    assert.equal(
+      isAbsentHostError(asNativeRejection({ code: 'internal', message: 'internal', http_status: 500 })),
+      false,
+    );
+    assert.equal(isAbsentHostError(new Error('not a native rejection')), false);
+  });
+
   test('a valid Creator Actor session takes the core arm for prompt, cancel and observation', async () => {
     const creatorBody = (providerId) => ({
       provider_id: providerId,

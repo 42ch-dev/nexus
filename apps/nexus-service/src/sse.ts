@@ -30,7 +30,7 @@ import {
   tryReserveControlBytes,
   tryReserveEnvironmentBytes,
 } from './environment-budget.js';
-import { HttpError, mapNativeError } from './errors.js';
+import { HttpError, isAbsentHostError, mapNativeError } from './errors.js';
 import { hostQuery, withPrincipal } from './world-kb.js';
 
 type CoreStreamGap = NonNullable<ProviderEventBatch['gap']>;
@@ -579,8 +579,7 @@ async function hydrateSessionRecord(
     return record;
   } catch (error) {
     const mapped = mapNativeError(error);
-    if (mapped.code === 'not_found') return null;
-    if (mapped.code === 'invalid_input' && mapped.message === 'host not started') return null;
+    if (mapped.code === 'not_found' || isAbsentHostError(mapped)) return null;
     throw mapped;
   }
 }
@@ -600,8 +599,7 @@ async function authorityOperationRow(
     return response.operation ?? null;
   } catch (error) {
     const mapped = mapNativeError(error);
-    if (mapped.code === 'not_found') return null;
-    if (mapped.code === 'invalid_input' && mapped.message === 'host not started') return null;
+    if (mapped.code === 'not_found' || isAbsentHostError(mapped)) return null;
     throw mapped;
   }
 }
@@ -647,8 +645,7 @@ async function hydrateCharacterOperation(
     );
   } catch (error) {
     const mapped = mapNativeError(error);
-    if (mapped.code === 'not_found') return null;
-    if (mapped.code === 'invalid_input' && mapped.message === 'host not started') return null;
+    if (mapped.code === 'not_found' || isAbsentHostError(mapped)) return null;
     throw mapped;
   }
 }

@@ -14,7 +14,7 @@ import type {
 } from '@42ch/nexus-contracts';
 import type { ServiceCore } from './lifecycle.js';
 import { MAX_ACTIVE_PROVIDER_OPERATIONS, PROVIDER_DEFAULT_DEADLINE_MS } from './config.js';
-import { HttpError, mapNativeError, routeNotMigrated } from './errors.js';
+import { HttpError, isAbsentHostError, mapNativeError, routeNotMigrated } from './errors.js';
 import {
   isTerminalOperationStatus,
   type ProviderOperationRecord,
@@ -215,15 +215,6 @@ async function providerCall(service: ServiceCore, request: ProviderCall): Promis
   }
 }
 
-/** A missing session/operation, or no attached Host authority, is absence — not a fault. */
-function isAbsentHostError(error: unknown): boolean {
-  const mapped = mapNativeError(error);
-  return (
-    mapped.code === 'not_found' ||
-    (mapped.code === 'invalid_input' && mapped.message === 'host not started')
-  );
-}
-
 /**
  * Fresh native truth for one session, or `null` when the Host authority has no
  * row for it (unknown id, or no attached authority at all). Every session
@@ -238,8 +229,9 @@ async function tryNativeSession(
     const response = await hostQuery(service, { query: 'get_session', session_id: sessionId });
     return response.session ?? null;
   } catch (error) {
-    if (isAbsentHostError(error)) return null;
-    throw mapNativeError(error);
+    const mapped = mapNativeError(error);
+    if (mapped.code === 'not_found' || isAbsentHostError(mapped)) return null;
+    throw mapped;
   }
 }
 
@@ -373,8 +365,9 @@ export async function lookupCharacterOperation(
       service.core.hostCharacterOperation(principal, operationId),
     );
   } catch (error) {
-    if (isAbsentHostError(error)) return null;
-    throw mapNativeError(error);
+    const mapped = mapNativeError(error);
+    if (mapped.code === 'not_found' || isAbsentHostError(mapped)) return null;
+    throw mapped;
   }
 }
 
