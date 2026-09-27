@@ -77,6 +77,12 @@ impl WasmEngine {
         config.wasm_gc(false);
         config.wasm_function_references(false);
         config.wasm_exceptions(false);
+        // Wasmtime 49 additionally enables the wide-arithmetic proposal by
+        // default (it is part of the `WASM3` default feature set). Keep the v48
+        // admission set here too: `i64.add128` / `i64.mul_wide_*` are not part
+        // of the Nexus module ABI, so modules using them must stay rejected at
+        // load time rather than becoming silently admissible.
+        config.wasm_wide_arithmetic(false);
 
         let engine = Engine::new(&config)?;
         Ok(Self {
