@@ -2391,6 +2391,7 @@ test('receipt-only footprint requires snapshot-backed ownership', async t => {
   const applied = await fixture.run(['--apply']);
   assert.equal(applied.code, 1, applied.stdout);
   assert.deepEqual(actionPairs(trackOf(applied.document, 'fixture-ghost')), [['reclaim-footprint', 'refuse']]);
+  assert.equal(trackOf(applied.document, 'fixture-ghost').actions[0].reason, 'sweeper.refuse.unproven-ownership');
   assert.equal(readFileSync(join(unownedReceipt, 'payload.bin'), 'utf8'), 'unowned-receipt\n');
   assert.equal(existsSync(ownedReceipt), false, 'snapshot-owned receipt remains reclaimable');
   assert.equal(applied.document.commands.some(record => record.argv.includes(unownedReceipt)), false);
