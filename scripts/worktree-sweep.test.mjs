@@ -615,9 +615,9 @@ function nodeCommand(script, path) {
 }
 
 /** Run the sweeper itself, outside any fixture, so a usage/contract probe keeps its exit code. */
-async function runScript(args) {
+async function runScript(args, script = SCRIPT) {
   try {
-    const { stdout, stderr } = await exec(process.execPath, [SCRIPT, ...args], { cwd: process.cwd(), env: process.env, maxBuffer: 8 * 1024 * 1024 });
+    const { stdout, stderr } = await exec(process.execPath, [script, ...args], { cwd: process.cwd(), env: process.env, maxBuffer: 8 * 1024 * 1024 });
     return { code: 0, stdout, stderr };
   } catch (error) {
     return { code: error.code, stdout: String(error.stdout ?? ''), stderr: String(error.stderr ?? '') };
@@ -2495,6 +2495,24 @@ test('--help is a standalone mode in the sweeper too', async _t => {
     assert.equal(invalid.code, 2, `${JSON.stringify(args)}: ${invalid.stderr}`);
     assert.equal(invalid.stdout, '', `invalid invocations must not write stdout (${JSON.stringify(args)})`);
   }
+});
+
+test('symlink invocation runs the same CLI while imports remain silent', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'nexus-sweep-symlink-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const link = join(directory, 'sweep.mjs');
+  await symlink(SCRIPT, link);
+
+  const canonical = await runScript(['--help']);
+  const linked = await runScript(['--help'], link);
+  assert.deepEqual(linked, canonical);
+  assert.equal(linked.code, 0);
+  const invalid = await runScript(['--unknown'], link);
+  assert.equal(invalid.code, 2);
+  assert.equal(invalid.stdout, '');
+  const imported = await exec(process.execPath, ['--input-type=module', '-e', `await import(${JSON.stringify(link)})`]);
+  assert.equal(imported.stdout, '');
+  assert.equal(imported.stderr, '');
 });
 
 test('a killed child is classified as a timeout, not a spawn failure', async t => {

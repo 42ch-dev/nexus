@@ -2477,7 +2477,7 @@ async function main(argv) {
   return exitCode;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(await realpath(resolve(process.argv[1]))).href) {
   main(process.argv.slice(2)).then(
     code => {
       process.exitCode = code;
