@@ -3453,6 +3453,144 @@ async fn actor_control_session_shutdown_waits_for_an_admitted_execute() {
     assert_eq!(provider.shutdowns(), 1, "the session was released once");
 }
 
+/// T3 residual: a session's live work can have MORE THAN ONE waiter — the
+/// session shutdown's own join is one, and a concurrent join of the same
+/// session is another. The settlement of that session's last live unit must
+/// release ALL of them: a single-permit `notify_one`, or a `Notified` armed but
+/// not enabled before the count read, leaves every waiter after the first
+/// parked on work that has already settled. This is the session-scoped twin of
+/// `actor_control_concurrent_quiesces_join_the_same_actor_drain`.
+#[tokio::test]
+async fn actor_control_session_shutdown_wakes_every_concurrent_join_waiter() {
+    let env = seed_env().await;
+    let provider = control_provider(true, 0, false);
+    let (_core, principal, _manager, handle, session_id) =
+        control_fixture(&env, Arc::clone(&provider)).await;
+    let operation_id = control_prompt(&handle, &principal, &session_id).await;
+    assert_eq!(
+        handle.actor_sessions().unsettled_drain_count(),
+        1,
+        "the live Character operation owns one drain"
+    );
+
+    // Cancellation boundary: a join that runs out of its own deadline loses
+    // nothing — the registry still owns the live work — so the retry below
+    // joins the same unit instead of reporting a session it cannot confirm.
+    let cancelled = tokio::time::timeout(
+        std::time::Duration::from_millis(200),
+        handle.actor_sessions().join_session_drains(&session_id),
+    )
+    .await;
+    assert!(
+        cancelled.is_err(),
+        "the join parked on the session's live work instead of reporting it settled"
+    );
+
+    // Waiter one is the real session shutdown. This fixture's provider
+    // `shutdown` returns without ending the exec stream, so observing the
+    // manager release while the drain is still live proves the shutdown is past
+    // the release and parked in its own session join.
+    let shutdown = tokio::spawn({
+        let handle = handle.clone();
+        let principal = principal.clone();
+        let session_id = session_id.to_string();
+        async move { handle.shutdown_session(&principal, session_id).await }
+    });
+    wait_until(|| provider.shutdowns() == 1, "the manager session release").await;
+    assert_eq!(
+        handle.actor_sessions().unsettled_drain_count(),
+        1,
+        "the session's drain is still the work its shutdown joined"
+    );
+
+    // Waiter two is a concurrent join of the SAME session. Its counters are the
+    // rendezvous, not a sleep: `entered` is published in the same task poll that
+    // enters the join and `completed` only once the join returns, so
+    // `entered == 1 && completed == 0` holds only while that joiner is parked
+    // INSIDE the join — neither waiter has reported this session settled.
+    let entered = Arc::new(AtomicUsize::new(0));
+    let completed = Arc::new(AtomicUsize::new(0));
+    let joiner = tokio::spawn({
+        let handle = handle.clone();
+        let session_id = session_id.clone();
+        let entered = Arc::clone(&entered);
+        let completed = Arc::clone(&completed);
+        async move {
+            entered.fetch_add(1, Ordering::SeqCst);
+            handle.actor_sessions().join_session_drains(&session_id).await;
+            completed.fetch_add(1, Ordering::SeqCst);
+        }
+    });
+    wait_until(
+        || entered.load(Ordering::SeqCst) == 1,
+        "the second session-drain waiter",
+    )
+    .await;
+    assert_eq!(
+        completed.load(Ordering::SeqCst),
+        0,
+        "a concurrent waiter reported the session settled while its drain was still live"
+    );
+    assert!(
+        !shutdown.is_finished(),
+        "the session shutdown confirmed a cleanup while its own drain was still live"
+    );
+    assert!(
+        !handle
+            .actor_sessions()
+            .stored_session_owner(&session_id)
+            .is_some_and(|(_, _, retired)| retired),
+        "the shutdown retired the session before the work it owns settled"
+    );
+
+    // ONE settlement: the session's last live unit — its drain — retires as the
+    // stream ends. That single retirement must wake BOTH waiters.
+    provider.close_stream();
+
+    let response = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        let response = shutdown
+            .await
+            .expect("the shutdown task joins")
+            .expect("the confirmed shutdown");
+        joiner.await.expect("the concurrent join task joins");
+        response
+    })
+    .await
+    .expect(
+        "the settlement of the session's last live unit must release EVERY concurrent join waiter",
+    );
+    assert_eq!(response.status, "shutdown");
+    assert_eq!(
+        handle.actor_sessions().unsettled_drain_count(),
+        0,
+        "the confirmed shutdown left no unsettled drain behind"
+    );
+    assert_eq!(
+        handle
+            .actor_sessions()
+            .stored_session_owner(&session_id)
+            .map(|(_, _, retired)| retired),
+        Some(true),
+        "the session is retired once the work it owned settled"
+    );
+    assert_eq!(
+        control_status(&handle, &principal, &operation_id)
+            .await
+            .run_status,
+        CharacterOperationResultRunStatus::Cancelled,
+        "the shutdown's accepted cancel is still the operation's truth"
+    );
+
+    // Already-settled boundary: a join of a session whose live work is gone
+    // returns instead of waiting for a settlement that already happened.
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        handle.actor_sessions().join_session_drains(&session_id),
+    )
+    .await
+    .expect("a join of an already settled session returns");
+}
+
 /// Contract §3: `quiesce_actor_sessions` closes the Actor side only — it
 /// cancels active work, joins the retained drains and leaves the manager (and
 /// the Host authority slot) alone for the ordered settlement that follows.
