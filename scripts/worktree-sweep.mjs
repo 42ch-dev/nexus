@@ -1553,7 +1553,7 @@ async function applyTrack(fact, context) {
   }
   // What this track still owns and would therefore delete: an idempotent-absent footprint has no
   // deletion to authorize.
-  const reclaimable = fact.target.exists ?? fact.temporary_paths.some(temporary => temporary.exists);
+  const reclaimable = fact.target.exists || fact.temporary_paths.some(temporary => temporary.exists);
   // Ownership is proven before anything else is considered. When the worktree is gone (the
   // idempotent-retry case) there is no live Git record to prove the path, so the snapshot row this
   // receipt pairs with must retain exactly this path; the branch claim already checked at
@@ -1986,7 +1986,7 @@ function buildTrackActions(fact, decision) {
   // dry run reports the refusal it would get from `--apply` instead of proposing a footprint whose
   // ownership rests on a branch claim alone. A track with nothing left to delete is not refused —
   // there is no proposal to withhold and no deletion to authorize.
-  const reclaimable = fact.target.exists ?? fact.temporary_paths.some(temporary => temporary.exists);
+  const reclaimable = fact.target.exists || fact.temporary_paths.some(temporary => temporary.exists);
   if (reclaimable && fact.worktree.listed === false && fact.ownership.proven !== true) {
     addAction(
       actions,

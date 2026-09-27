@@ -2344,6 +2344,59 @@ test('a branch-only ownership receipt cannot delete anything', async t => {
   ], JSON.stringify(trackOf(convergedApply.document, 'fixture-ghost').actions));
 });
 
+test('receipt-only footprint requires snapshot-backed ownership', async t => {
+  let ownedReceipt;
+  let unownedReceipt;
+  const ghostTarget = 'nexus-target-fixture-ghost';
+  const fixture = await makeFixture({
+    shape: 'partial',
+    orphans: false,
+    extraTrackBranches: ['feat/fixture-ghost'],
+    mutateInventory: (document, paths) => {
+      ownedReceipt = join(receiptBase(paths), 'owned-receipt');
+      unownedReceipt = join(receiptBase(paths), 'unowned-receipt');
+      for (const receipt of [ownedReceipt, unownedReceipt]) {
+        mkdirSync(receipt, { recursive: true });
+        writeFileSync(join(receipt, 'payload.bin'), `${basename(receipt)}\n`);
+      }
+      document.tracks[0].temporary_paths.push(ownedReceipt);
+      document.tracks.push({
+        track_id: 'fixture-ghost',
+        plan_id: 'fixture-plan',
+        worktree: join(paths.worktreesRoot, 'fixture-ghost'),
+        branch: 'feat/fixture-ghost',
+        target: join(paths.cache, ghostTarget),
+        temporary_paths: [unownedReceipt],
+        producer_stopped: true,
+        state: 'completed',
+      });
+      return document;
+    },
+  });
+  t.after(() => fixture.teardown());
+  await rm(fixture.ownerTarget, { recursive: true, force: true });
+
+  const dry = await fixture.run();
+  assert.equal(dry.code, 0, dry.stdout);
+  const ghost = trackOf(dry.document, 'fixture-ghost');
+  assert.equal(ghost.ownership.path_proof, 'unproven');
+  assert.deepEqual(actionPairs(ghost), [['reclaim-footprint', 'refuse']], JSON.stringify(ghost.actions));
+  assert.equal(ghost.actions[0].reason, 'sweeper.refuse.unproven-ownership');
+  assert.equal(proposedRefs(dry.document).includes(unownedReceipt), false);
+  assert.deepEqual(actionPairs(trackOf(dry.document, 'fixture-owner')).slice(0, 2), [
+    ['reclaim-target', 'absent'],
+    ['reclaim-temporary', 'propose'],
+  ]);
+
+  const applied = await fixture.run(['--apply']);
+  assert.equal(applied.code, 1, applied.stdout);
+  assert.deepEqual(actionPairs(trackOf(applied.document, 'fixture-ghost')), [['reclaim-footprint', 'refuse']]);
+  assert.equal(trackOf(applied.document, 'fixture-ghost').actions[0].reason, 'sweeper.refuse.unproven-ownership');
+  assert.equal(readFileSync(join(unownedReceipt, 'payload.bin'), 'utf8'), 'unowned-receipt\n');
+  assert.equal(existsSync(ownedReceipt), false, 'snapshot-owned receipt remains reclaimable');
+  assert.equal(applied.document.commands.some(record => record.argv.includes(unownedReceipt)), false);
+});
+
 test('authorization facts are re-read immediately before every deletion', async t => {
   // F-002: the release/ancestry/producer proof ran once, before the engine probe, while the
   // per-mutation gate re-checked only path identities and containment. A fact that moves after that
