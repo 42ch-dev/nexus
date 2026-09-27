@@ -2288,17 +2288,25 @@ impl ControlProvider {
             HostEvent::OpFailed(terminal) => Some(terminal.op_id.clone()),
             _ => None,
         };
-        let outboxes = self.outboxes.lock();
-        let sender = match target {
-            Some(operation_id) => outboxes
-                .iter()
-                .find(|(id, _)| *id == operation_id)
-                .map(|(_, sender)| sender)
-                .unwrap_or_else(|| panic!("no executing stream for operation {operation_id:?}")),
-            None => match outboxes.as_slice() {
-                [(_, sender)] => sender,
-                _ => panic!("a stream-less event needs exactly one executing operation"),
-            },
+        let sender = {
+            let outboxes = self.outboxes.lock();
+            target
+                .map_or_else(
+                    || match outboxes.as_slice() {
+                        [(_, sender)] => sender,
+                        _ => panic!("a stream-less event needs exactly one executing operation"),
+                    },
+                    |operation_id| {
+                        outboxes
+                            .iter()
+                            .find(|(id, _)| *id == operation_id)
+                            .map_or_else(
+                                || panic!("no executing stream for operation {operation_id:?}"),
+                                |(_, sender)| sender,
+                            )
+                    },
+                )
+                .clone()
         };
         sender.send(Ok(event)).expect("the drain is alive");
     }
@@ -3568,6 +3576,15 @@ async fn actor_control_session_shutdown_wakes_every_concurrent_join_waiter() {
         "the settlement of the session's last live unit must release EVERY concurrent join waiter",
     );
     assert_eq!(response.status, "shutdown");
+    assert_session_shutdown_settled(&handle, &principal, &operation_id, &session_id).await;
+}
+
+async fn assert_session_shutdown_settled(
+    handle: &HostHandle,
+    principal: &nexus_core::Principal,
+    operation_id: &HostOperationId,
+    session_id: &HostSessionId,
+) {
     assert_eq!(
         handle.actor_sessions().unsettled_drain_count(),
         0,
@@ -3576,13 +3593,13 @@ async fn actor_control_session_shutdown_wakes_every_concurrent_join_waiter() {
     assert_eq!(
         handle
             .actor_sessions()
-            .stored_session_owner(&session_id)
+            .stored_session_owner(session_id)
             .map(|(_, _, retired)| retired),
         Some(true),
         "the session is retired once the work it owned settled"
     );
     assert_eq!(
-        control_status(&handle, &principal, &operation_id)
+        control_status(handle, principal, operation_id)
             .await
             .run_status,
         CharacterOperationResultRunStatus::Cancelled,
@@ -3593,7 +3610,7 @@ async fn actor_control_session_shutdown_wakes_every_concurrent_join_waiter() {
     // returns instead of waiting for a settlement that already happened.
     tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        handle.actor_sessions().join_session_drains(&session_id),
+        handle.actor_sessions().join_session_drains(session_id),
     )
     .await
     .expect("a join of an already settled session returns");
@@ -3818,46 +3835,14 @@ async fn actor_control_quiesce_finished_race() {
     } else {
         (first.clone(), session_id.clone(), second_session.clone())
     };
-    assert_eq!(
-        provider.cancels(),
-        1,
-        "only the parked operation reached the provider's cancel"
-    );
-    assert_eq!(
-        control_status(&handle, &principal, &finishing)
-            .await
-            .run_status,
-        CharacterOperationResultRunStatus::Running,
-        "the other operation is still executing inside the window"
-    );
-
-    // The window: the other operation terminates through its OWN provider
-    // stream, and the registered drain that observes it settles the record.
-    provider.push(finished(
-        &finishing_session,
+    assert_finishing_operation_settled(
+        &provider,
+        &handle,
+        &principal,
         &finishing,
-        FinishReason::EndTurn,
-    ));
-    wait_until(
-        || handle.actor_sessions().unsettled_drain_count() == 1,
-        "the finishing operation's drain to settle its terminal",
+        &finishing_session,
     )
     .await;
-    let finished_outcome = control_status(&handle, &principal, &finishing).await;
-    assert_eq!(
-        finished_outcome.run_status,
-        CharacterOperationResultRunStatus::Succeeded,
-        "the operation that finished keeps the terminal its own stream carried"
-    );
-    assert_eq!(
-        finished_outcome.finish_reason,
-        Some(CharacterOperationResultFinishReason::EndTurn)
-    );
-    assert_eq!(
-        provider.cancels(),
-        1,
-        "nothing cancelled the finishing operation before its settlement"
-    );
 
     // Release the barrier: the parked cancel is accepted, and the loop then
     // reaches the already-FINISHED operation, whose cancel is refused with the
@@ -3910,6 +3895,55 @@ async fn actor_control_quiesce_finished_race() {
         provider.cancels(),
         1,
         "the finished operation was never asked to cancel at the provider"
+    );
+}
+
+async fn assert_finishing_operation_settled(
+    provider: &ControlProvider,
+    handle: &HostHandle,
+    principal: &nexus_core::Principal,
+    finishing: &HostOperationId,
+    finishing_session: &HostSessionId,
+) {
+    assert_eq!(
+        provider.cancels(),
+        1,
+        "only the parked operation reached the provider's cancel"
+    );
+    assert_eq!(
+        control_status(handle, principal, finishing)
+            .await
+            .run_status,
+        CharacterOperationResultRunStatus::Running,
+        "the other operation is still executing inside the window"
+    );
+
+    // The window: the other operation terminates through its OWN provider
+    // stream, and the registered drain that observes it settles the record.
+    provider.push(finished(
+        finishing_session,
+        finishing,
+        FinishReason::EndTurn,
+    ));
+    wait_until(
+        || handle.actor_sessions().unsettled_drain_count() == 1,
+        "the finishing operation's drain to settle its terminal",
+    )
+    .await;
+    let finished_outcome = control_status(handle, principal, finishing).await;
+    assert_eq!(
+        finished_outcome.run_status,
+        CharacterOperationResultRunStatus::Succeeded,
+        "the operation that finished keeps the terminal its own stream carried"
+    );
+    assert_eq!(
+        finished_outcome.finish_reason,
+        Some(CharacterOperationResultFinishReason::EndTurn)
+    );
+    assert_eq!(
+        provider.cancels(),
+        1,
+        "nothing cancelled the finishing operation before its settlement"
     );
 }
 
