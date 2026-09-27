@@ -93,7 +93,7 @@ assert_empty() {
   # `|| status=$?` (not a bare capture) so a failing cargo tree does NOT
   # trip `set -e` before we can inspect its status (QC-fix S-a); `status`
   # defaults to 0 so `set -u` stays satisfied on success.
-  out=$(cargo tree -p "$crate" $feats --edges normal,build -i "$pkg" 2>&1) || status=$?
+  out=$(cargo tree -p "$crate" $feats --locked --edges normal,build -i "$pkg" 2>&1) || status=$?
   local count
   # Only count `<pkg> v<ver>` rows (an empty `-i` report prints a bare
   # "package not found" line; tree output also carries parent crate rows
@@ -130,7 +130,7 @@ assert_exactly_one() {
   local out status=0
   # `|| status=$?` so a failing cargo tree does NOT trip `set -e` before
   # the status check (QC-fix S-a); `status` defaults to 0 for success.
-  out=$(cargo tree -p "$crate" $feats --edges normal,build -i "$pkg" 2>&1) || status=$?
+  out=$(cargo tree -p "$crate" $feats --locked --edges normal,build -i "$pkg" 2>&1) || status=$?
   local versions
   versions=$(grep "^$pkg v[0-9]" <<<"$out" | sed -E 's/.* v([^ ]+).*/\1/' | sort -u || true)
   local count
@@ -163,7 +163,7 @@ assert_features() {
   local pkg="$1"; shift
   local want_feats="$1"
   local out status=0
-  out=$(cargo tree -p "$crate" $feats --edges normal,build -i "$pkg" -f "{p} feats=[{f}]" 2>&1) || status=$?
+  out=$(cargo tree -p "$crate" $feats --locked --edges normal,build -i "$pkg" -f "{p} feats=[{f}]" 2>&1) || status=$?
   if [[ "$status" -ne 0 ]]; then
     fail "feature probe for $pkg in $crate ${feats:-<default>} failed (exit $status): $out"
   fi
