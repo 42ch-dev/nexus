@@ -224,19 +224,14 @@ pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
             ]),
             http_status: Some(400),
         },
-        // Outline-canvas OCC conflict: the daemon adapter forwards
-        // current_revision/node_id/conflicting_path/recovery_hint as the 409
-        // payload; the structs carry no Serialize, so the fields are mapped
-        // one by one (same as the daemon's field-wise mapping). The generated
-        // code vocabulary has no outline_conflict arm yet, so the generic
-        // client-fault code carries the envelope.
+        // Outline OCC conflicts retain their structured details on the wire.
         DomainError::OutlineConflict(details) => CoreError {
-            code: CoreErrorCode::InvalidInput,
+            code: CoreErrorCode::OutlineConflict,
             message: "outline conflict".into(),
             details: serde_json::Map::from_iter([
                 (
                     "current_revision".into(),
-                    Value::Number(serde_json::Number::from(details.current_revision)),
+                    serde_json::Number::from(details.current_revision).into(),
                 ),
                 ("node_id".into(), Value::String(details.node_id)),
                 (
@@ -247,11 +242,9 @@ pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
             ]),
             http_status: Some(409),
         },
-        // Outline-canvas validation failure: the summary lands under
-        // `validation_summary` with the daemon's 422 (same vocabulary gap;
-        // OutlineValidationError also maps field-wise).
+        // Outline validation retains its structured summary on the wire.
         DomainError::OutlineValidation(summary) => CoreError {
-            code: CoreErrorCode::InvalidInput,
+            code: CoreErrorCode::OutlineValidationFailed,
             message: "outline validation failed".into(),
             details: serde_json::Map::from_iter([(
                 "validation_summary".into(),
@@ -325,7 +318,7 @@ pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
         },
         DomainError::Preset(error) => wire_core_error_from_preset(error),
         DomainError::Coded { code, message } => CoreError {
-            code: CoreErrorCode::InvalidInput,
+            code: coded_core_error_code(&code),
             message: message.clone(),
             details: serde_json::Map::from_iter([(
                 "wire_code".into(),
@@ -389,7 +382,7 @@ pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
         // Truthful no-provider/capability 503 (e.g. SOUL synthesis demanded
         // with no capability registry).
         DomainError::ServiceUnavailable(message) => CoreError {
-            code: CoreErrorCode::Busy,
+            code: CoreErrorCode::ServiceUnavailable,
             message,
             details: Default::default(),
             http_status: Some(503),
@@ -546,6 +539,21 @@ fn wire_core_error_from_preset(error: nexus_core::PresetError) -> CoreError {
 /// `CoreError.http_status` is `Option<i64>` (generated from the schema); the
 /// numbers are identical either way, and the helper exists only to feed that
 /// field.
+fn coded_core_error_code(code: &str) -> CoreErrorCode {
+    match code {
+        "policy_blocked" => CoreErrorCode::PolicyBlocked,
+        "service_unavailable" => CoreErrorCode::ServiceUnavailable,
+        "compute_fuel_exhausted" => CoreErrorCode::ComputeFuelExhausted,
+        "compute_wall_time_exceeded" => CoreErrorCode::ComputeWallTimeExceeded,
+        "compute_memory_cap_exceeded" => CoreErrorCode::ComputeMemoryCapExceeded,
+        "compute_module_trapped" => CoreErrorCode::ComputeModuleTrapped,
+        "compute_module_error" => CoreErrorCode::ComputeModuleError,
+        "outline_conflict" => CoreErrorCode::OutlineConflict,
+        "outline_validation_failed" => CoreErrorCode::OutlineValidationFailed,
+        _ => CoreErrorCode::InvalidInput,
+    }
+}
+
 fn coded_wire_status(code: &str) -> i64 {
     match code {
         "conflict" => 409,
@@ -569,8 +577,11 @@ fn coded_wire_status(code: &str) -> i64 {
         | "compute_wall_time_exceeded"
         | "compute_memory_cap_exceeded"
         | "compute_module_trapped"
-        | "compute_module_error" => 422,
+        | "compute_module_error"
+        | "outline_validation_failed" => 422,
         "policy_blocked" => 403,
+        "service_unavailable" => 503,
+        "outline_conflict" => 409,
         _ => 400,
     }
 }
@@ -601,6 +612,21 @@ fn preset_rejected_status(code: &str) -> i64 {
 mod tests {
     use super::*;
     use nexus_contracts::WorldKbConflictError;
+    #[test]
+    fn policy_blocked_coded_refusal_uses_its_wire_code() {
+        let wire = wire_core_error_from_domain(DomainError::Coded {
+            code: "policy_blocked".into(),
+            message: "capability denied by policy".into(),
+        });
+
+        assert_eq!(
+            serde_json::to_value(&wire)
+                .expect("serialize")
+                .get("code")
+                .and_then(Value::as_str),
+            Some("policy_blocked")
+        );
+    }
 
     #[test]
     fn internal_error_is_sanitized() {
