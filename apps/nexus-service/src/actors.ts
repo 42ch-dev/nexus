@@ -182,7 +182,9 @@ export function addActorKnowledgeEntry(service: ServiceCore, request: AddKnowled
     !Array.isArray(audience)
   ) {
     const kind = 'kind' in audience && typeof audience.kind === 'string' ? audience.kind : '';
-    const allowed = KNOWLEDGE_AUDIENCE_KEYS[kind];
+    const allowed = Object.hasOwn(KNOWLEDGE_AUDIENCE_KEYS, kind)
+      ? KNOWLEDGE_AUDIENCE_KEYS[kind]
+      : undefined;
     if (allowed && Object.keys(audience).some((key) => !allowed.includes(key))) {
       throw new HttpError(400, 'invalid_input', 'audience contains unknown fields');
     }

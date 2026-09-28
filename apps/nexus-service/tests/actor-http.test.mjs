@@ -170,6 +170,21 @@ describe('actor-http (P5-T2)', () => {
     assert.equal(response.payload.error.code, 'invalid_input');
   });
 
+  test('actor-knowledge create lets unknown prototype-key audience kinds reach downstream validation', async () => {
+    const response = await jsonFetch(`${baseUrl}/v1/daemon/actor-knowledge/entries`, {
+      method: 'POST',
+      body: {
+        owner_kind: 'world',
+        world_id: 'wld_owned',
+        block_type: 'character',
+        canonical_name: 'Unknown audience kind test',
+        audience: { kind: 'toString', unexpected: true },
+      },
+    });
+    assert.equal(response.status, 400, response.text);
+    assert.equal(response.payload.error.code, 'invalid_input');
+  });
+
   test('foreign actor and stale binding are denied by the real store with zero effect, and a valid Actor gets context', async () => {
     // 1. A legal owned Character + binding is created through the surface.
     const created = await jsonFetch(`${baseUrl}/v1/daemon/characters`, {
