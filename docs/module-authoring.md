@@ -25,8 +25,11 @@ generates the three ABI exports (`alloc` / `init` / `compute`) and wires the
 global allocator, and the typed envelope skeleton + accessor helpers cover the
 V1 surface — zero hand-copied marshalling. Scaffold from the in-repo template
 ([`modules/_template/`](../modules/_template/)) and drive the authoring loop
-with `nexus42 compute build|validate|install|run` (see the walkthrough in
-[`modules/README.md`](../modules/README.md)). For a guided authoring
+with `nexus42 compute build|validate|install` (see the walkthrough in
+[`modules/README.md`](../modules/README.md)) — the loop is service-host-free;
+execution happens in a host: the Control Room's Run Studio, the Connect
+`compute` op for admitted peers, or the core seam
+`ExecutionHandle::compute_run`. For a guided authoring
 reference, use the `compute-module-author` skill in the external
 [`42ch-dev/agent-toolkit`](https://github.com/42ch-dev/agent-toolkit)
 repository (no agent skill ships in this repo). The ABI contract below stays

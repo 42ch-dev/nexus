@@ -95,9 +95,10 @@ below for the lanes that still execute a module.
    - a composing host using the core library seam
      `ExecutionHandle::compute_run` (one-shot; not a CLI entrance).
 
-   The Control Room's compute-run route (`POST /v1/daemon/compute/run`) is not
-   migrated to the TS service (`apps/nexus-service/src/execution.ts` returns
-   route-not-migrated), so no shipped UI substitutes for the removed leaf.
+   The Control Room lane is shipped: the standalone TS service serves the
+   compute-run family (run, accept, discard, list/inspect) from
+   `apps/nexus-service/src/compute.ts`, and Run Studio on the Modules surface
+   is its UI.
 
 The CLI exit-code vocabulary (AR-9): `0` success · `1` build/toolchain or
 install I/O failure · `2` manifest validation failure · `3` `wasm_sha256`
@@ -209,12 +210,12 @@ A module you install is reachable through three lanes:
 3. **Control Room run + accept + discard** — the schema-declared compute-run
    routes (`POST /v1/daemon/compute/run` and
    `POST /v1/daemon/compute/runs/:run_id/accept|discard`, plus the `GET`
-   list/inspect routes) describe this lane, but the local HTTP host is the
-   Electron/TS service and its compute-run route is **route-not-migrated**
-   (`apps/nexus-service/src/execution.ts`). The former CLI client
+   list/inspect routes) are served by the standalone TS service
+   (`apps/nexus-service/src/compute.ts`), and Run Studio on the Modules
+   surface is this lane's shipped UI. The former CLI client
    (`nexus42 compute run [--accept]`) was deleted in v1.193 P2: today the
-   executable lanes are §1 and §2 plus the core library seam
-   `ExecutionHandle::compute_run`.
+   executable lanes are §1–§3, plus the core library seam
+   `ExecutionHandle::compute_run` for a composing host.
 
 ## The reference module: `basic-combat`
 
