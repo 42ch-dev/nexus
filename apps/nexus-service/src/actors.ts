@@ -168,27 +168,27 @@ export function actorKnowledgeView(service: ServiceCore, request: ViewRequest) {
 
 const KNOWLEDGE_AUDIENCE_KEYS: Readonly<Record<string, readonly string[]>> = {
   shared: ['kind'],
-  author_only: ['kind'],
-  character_private: ['kind', 'character_id'],
+  'author-only': ['kind'],
+  'character-private': ['kind', 'character_id'],
 };
+
+function assertKnowledgeAudienceKeys(audience: unknown): void {
+  if (audience === null || typeof audience !== 'object' || Array.isArray(audience)) return;
+  const record = audience as Record<string, unknown>;
+  const kind = Object.hasOwn(record, 'kind') && typeof record.kind === 'string'
+    ? record.kind
+    : '';
+  const allowed = Object.hasOwn(KNOWLEDGE_AUDIENCE_KEYS, kind)
+    ? KNOWLEDGE_AUDIENCE_KEYS[kind]
+    : undefined;
+  if (allowed && Object.keys(audience).some((key) => !allowed.includes(key))) {
+    throw new HttpError(400, 'invalid_input', 'audience contains unknown fields');
+  }
+}
 
 /** `POST /v1/daemon/actor-knowledge/entries` — 201 created. */
 export function addActorKnowledgeEntry(service: ServiceCore, request: AddKnowledgeEntryRequest) {
-  const audience: unknown = request.audience;
-  if (
-    audience !== undefined &&
-    audience !== null &&
-    typeof audience === 'object' &&
-    !Array.isArray(audience)
-  ) {
-    const kind = 'kind' in audience && typeof audience.kind === 'string' ? audience.kind : '';
-    const allowed = Object.hasOwn(KNOWLEDGE_AUDIENCE_KEYS, kind)
-      ? KNOWLEDGE_AUDIENCE_KEYS[kind]
-      : undefined;
-    if (allowed && Object.keys(audience).some((key) => !allowed.includes(key))) {
-      throw new HttpError(400, 'invalid_input', 'audience contains unknown fields');
-    }
-  }
+  assertKnowledgeAudienceKeys(request.audience);
   return withPrincipal(service, (principal) =>
     service.core.addActorKnowledgeEntry(principal, request),
   );
@@ -229,6 +229,7 @@ export function patchKnowledgeEntry(
   entryId: string,
   request: UpdateKnowledgeEntryRequest,
 ) {
+  assertKnowledgeAudienceKeys(request.audience);
   return withPrincipal(service, (principal) =>
     service.core.patchKnowledgeEntry(principal, characterId, entryId, request),
   );

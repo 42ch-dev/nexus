@@ -38,7 +38,9 @@ interface FieldSpec {
   readonly shape?: Shape;
   /** JSON Schema `propertyNames.pattern` for object keys. */
   readonly valuePattern?: RegExp;
-  /** JSON Schema `anyOf` — a value must satisfy at least one variant. */
+  /** JSON Schema `oneOf` — an object must satisfy exactly one arm shape. */
+  readonly oneOf?: readonly Shape[];
+  /** JSON Schema `anyOf` values for object maps. */
   readonly values?: readonly FieldSpec[];
   /** Item spec for `kind: 'array'`. */
   readonly items?: FieldSpec;
@@ -124,6 +126,19 @@ function checkField(value: unknown, spec: FieldSpec, path: string): void {
           }
         }
       }
+      if (spec.oneOf) {
+        let matched = false;
+        for (const variant of spec.oneOf) {
+          try {
+            assertShape(value, variant, path);
+            matched = true;
+            break;
+          } catch {
+            // Try the next closed arm.
+          }
+        }
+        if (!matched) throw new Error(`invalid ${path}: value does not match an allowed arm`);
+      }
       if (spec.shape) assertShape(value, spec.shape, path);
       if (spec.values) {
         for (const [key, entry] of Object.entries(value)) {
@@ -156,12 +171,12 @@ export function assertShape(value: unknown, shape: Shape, path: string): void {
     throw new Error(`invalid ${path}: at least ${shape.minProperties} property is required`);
   }
   for (const key of shape.required) {
-    if (value[key] === undefined) {
+    if (!Object.hasOwn(value, key) || value[key] === undefined) {
       throw new Error(`invalid ${path}.${key}: required field is missing`);
     }
   }
   for (const key of present) {
-    const spec = shape.fields[key];
+    const spec = Object.hasOwn(shape.fields, key) ? shape.fields[key] : undefined;
     if (!spec) {
       if (!shape.open) throw new Error(`invalid ${path}.${key}: unknown field`);
       continue;
@@ -267,6 +282,26 @@ export const WORLD_KB_ENTITY_PATCH_SHAPE: Shape = {
         'beat',
         'act',
         'era',
+      ],
+    },
+    audience: {
+      kind: 'object',
+      oneOf: [
+        {
+          fields: { kind: { kind: 'string', enum: ['shared'] } },
+          required: ['kind'],
+        },
+        {
+          fields: { kind: { kind: 'string', enum: ['author-only'] } },
+          required: ['kind'],
+        },
+        {
+          fields: {
+            kind: { kind: 'string', enum: ['character-private'] },
+            character_id: { kind: 'string' },
+          },
+          required: ['kind', 'character_id'],
+        },
       ],
     },
     modules: {

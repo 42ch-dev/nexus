@@ -219,7 +219,7 @@ describe('world-kb-http (P4-T1)', () => {
     assert.equal(missing.payload.error.code, 'not_found');
   });
 
-  test('world-kb entity patch rejects unknown fields inside a known audience arm', async () => {
+  test('world-kb entity patch rejects audience arm extras through the audience guard', async () => {
     const response = await jsonFetch(`${baseUrl}/v1/daemon/worlds/${OWNED_WORLD}/kb/patch-entity`, {
       method: 'POST',
       body: {
@@ -230,6 +230,20 @@ describe('world-kb-http (P4-T1)', () => {
     });
     assert.equal(response.status, 400, response.text);
     assert.equal(response.payload.error.code, 'invalid_input');
+    assert.equal(response.payload.error.message, 'invalid request.patch.audience: value does not match an allowed arm');
+  });
+
+  test('world-kb entity patch accepts a valid audience arm', async () => {
+    const response = await jsonFetch(`${baseUrl}/v1/daemon/worlds/${OWNED_WORLD}/kb/patch-entity`, {
+      method: 'POST',
+      body: {
+        entity_id: 'kb_abc125',
+        expected_version: 0,
+        patch: { title: 'Valid audience probe', block_type: 'character', audience: { kind: 'shared' } },
+      },
+    });
+    assert.equal(response.status, 200, response.text);
+    assert.equal(response.payload.version, 1);
   });
 
   test('patch create/update/stale CAS against real fixture DB', async () => {
