@@ -56,6 +56,8 @@ Global
 
 > **V1.156 amendment (shipped)**: the 3×2 matrix is completed (World×Moment + Work×Brief closed — see §1.4.4). The amendment is frontend-only (`wire_contracts_changed: false`); it adds no scope-ownership, uniqueness, or transition rule. The V1.123 carrier locks (§1.4.1) are unchanged. Product semantics: `product-locks.md` PD-2 / PD-3.
 
+> **Planned v1.200 carrier amendment — not shipped by this note.** DR-26 will replace the deferred/fixtures-only Moment carrier in §1.4.1, the carrier/write-boundary description in §1.4.3 and the World Moment diagram in §1.4.4 with persisted Work-owned `WorkOutline.scenes[]` / `beats[]`. Execute must update those exact sections alongside [canvas-strategy-surface.md](canvas-strategy-surface.md) §3.3.3 / §3.5. This is a wire-carrier extension, not a new scope: Outline remains the authoring home, both Timeline Moment projections stay read-only, default layers remain unchanged and Moment Context Assembly is unaffected. The V1.156 frontend-only statement remains historical.
+
 This subsection is **additive** — it does not rewrite §1.1 (canonical scope tree) or §1.2 (scope definitions). It canonizes three Timeline zoom layers — **Brief**, **Narrative**, **Moment** — as a re-projection of the existing `World > Timeline > Event > Moment` scope hierarchy, and locks the World/Work layer composition.
 
 #### 1.4.1 Layer definitions (LOCKED — product semantics)
