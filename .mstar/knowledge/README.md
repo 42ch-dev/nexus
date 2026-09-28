@@ -262,6 +262,12 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 | --- | --- |
 | [architecture-patterns/connect-host-tools-serving.md](architecture-patterns/connect-host-tools-serving.md) | Connect Host `tools.*` serving (DF-84) — spoke protocol already supports tools; nexus-host serving: single-source manifest composition (LOCAL_TOOL_OPS ++ CORE_OPS), three exact-string authz layers (negotiation intersection + token AND + op_scope), host-level tools skip world gate, process-boundary reachability (no daemon), payload {arguments}→{result}, advertised-schema strictness (compound V1.173) |
 
+### v1.199 additions
+
+| Document | Description |
+| --- | --- |
+| [api-design/governance-audience-strictness-runtime-guard.md](api-design/governance-audience-strictness-runtime-guard.md) | Governance-audience strictness needs a runtime guard — serde ignores arm-internal unknown members on adjacent-tag oneOf arms; enforce closed arms in the native validator shape + service-boundary allowmap (wire-spelled keys, own-key lookup, both verbs), and pin the guard's distinguishing message plus a valid-arm pass (v1.199 R4 distilled) |
+
 ### Indexed (compound V1.174)
 
 | Document | Description |

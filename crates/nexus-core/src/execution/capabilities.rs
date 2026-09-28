@@ -3514,11 +3514,9 @@ async fn dispatch_user_cap(
         CapabilityError::Forbidden(msg) => NexusApiError::Forbidden {
             resource: format!("{}: {}", "tool_execution", msg),
         },
-        CapabilityError::WorkerUnavailable => NexusApiError::Internal {
-            category: format!(
-                "SERVICE_UNAVAILABLE: {}",
-                format_args!("capability '{}' has no executor wired", cap.name()),
-            ),
+        CapabilityError::WorkerUnavailable => NexusApiError::Coded {
+            code: "service_unavailable".to_string(),
+            message: format!("capability '{}' has no executor wired", cap.name()),
         },
         other => NexusApiError::Internal {
             category: format!(

@@ -155,6 +155,63 @@ describe('actor-http (P5-T2)', () => {
     }
   });
 
+  test('actor-knowledge create rejects unknown fields in all known audience arms', async () => {
+    for (const audience of [
+      { kind: 'shared', unexpected: true },
+      { kind: 'author-only', unexpected: true },
+      { kind: 'character-private', character_id: 'chr_' + 'a'.repeat(32), unexpected: true },
+    ]) {
+      const response = await jsonFetch(`${baseUrl}/v1/daemon/actor-knowledge/entries`, {
+        method: 'POST',
+        body: {
+          owner_kind: 'world',
+          world_id: 'wld_owned',
+          block_type: 'character',
+          canonical_name: 'Strict audience test',
+          audience,
+        },
+      });
+      assert.equal(response.status, 400, response.text);
+      assert.equal(response.payload.error.code, 'invalid_input');
+      assert.equal(response.payload.error.message, 'audience contains unknown fields');
+    }
+  });
+
+  test('actor-knowledge create rejects inherited-name keys on a known audience arm', async () => {
+    const response = await jsonFetch(`${baseUrl}/v1/daemon/actor-knowledge/entries`, {
+      method: 'POST',
+      body: {
+        owner_kind: 'world',
+        world_id: 'wld_owned',
+        block_type: 'character',
+        canonical_name: 'Prototype-key audience test',
+        audience: { kind: 'shared', toString: true },
+      },
+    });
+    assert.equal(response.status, 400, response.text);
+    assert.equal(response.payload.error.code, 'invalid_input');
+    assert.equal(response.payload.error.message, 'audience contains unknown fields');
+  });
+
+  test('actor-knowledge patch rejects unknown fields in all known audience arms', async () => {
+    for (const audience of [
+      { kind: 'shared', unexpected: true },
+      { kind: 'author-only', unexpected: true },
+      { kind: 'character-private', character_id: 'chr_' + 'a'.repeat(32), unexpected: true },
+    ]) {
+      const response = await jsonFetch(
+        `${baseUrl}/v1/daemon/characters/chr_${'a'.repeat(32)}/knowledge/kb_missing`,
+        {
+          method: 'PATCH',
+          body: { expected_revision: 0, audience },
+        },
+      );
+      assert.equal(response.status, 400, response.text);
+      assert.equal(response.payload.error.code, 'invalid_input');
+      assert.equal(response.payload.error.message, 'audience contains unknown fields');
+    }
+  });
+
   test('foreign actor and stale binding are denied by the real store with zero effect, and a valid Actor gets context', async () => {
     // 1. A legal owned Character + binding is created through the surface.
     const created = await jsonFetch(`${baseUrl}/v1/daemon/characters`, {

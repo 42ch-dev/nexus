@@ -33,7 +33,7 @@ nexus-contracts = { path = "../nexus-contracts" }
 which = { workspace = true }
 # Unix signal handling for graceful shutdown (only on Unix platforms)
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.30.1", features = ["signal", "process"] }
+nix = { version = "0.31.3", features = ["signal", "process"] }
 sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }
 
 # v1.193 P2-T13: the `connect-client` feature retired with the Model A
