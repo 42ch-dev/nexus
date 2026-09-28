@@ -42,6 +42,15 @@ export interface NexusCoreError {
     | "busy"
     | "closing"
     | "interrupted"
+    | "policy_blocked"
+    | "service_unavailable"
+    | "compute_fuel_exhausted"
+    | "compute_wall_time_exceeded"
+    | "compute_memory_cap_exceeded"
+    | "compute_module_trapped"
+    | "compute_module_error"
+    | "outline_conflict"
+    | "outline_validation_failed"
     | "internal";
   message: string;
   details?: {

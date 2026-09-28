@@ -41,6 +41,15 @@ const STATUS_BY_CODE: Record<CoreError['code'], number> = {
   busy: 503,
   closing: 503,
   interrupted: 503,
+  policy_blocked: 403,
+  service_unavailable: 503,
+  compute_fuel_exhausted: 422,
+  compute_wall_time_exceeded: 422,
+  compute_memory_cap_exceeded: 422,
+  compute_module_trapped: 422,
+  compute_module_error: 422,
+  outline_conflict: 409,
+  outline_validation_failed: 422,
   internal: 500,
 };
 
