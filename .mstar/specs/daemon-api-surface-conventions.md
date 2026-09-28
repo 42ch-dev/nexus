@@ -675,3 +675,63 @@ envelope:
 Sandbox, validation, and build failures persist the Run row as `failed` with
 the same error code — never a silent skip of invalid entries, never a
 misleading 500 (V1.147 P3 F2 reclassification).
+
+## 13. World structured-rule lifecycle
+
+**Normative amendment (v1.198; delivered in PR #345, merged 2026-09-28).**
+The Rust `CoreService` is the lifecycle and ownership authority; the
+standalone TS service and native bridge translate requests only.
+
+| Surface | Contract |
+| --- | --- |
+| `POST /v1/daemon/worlds/{world_id}/rules` | Create accepts `draft`, `active`, `deprecated`, default `active`; rejects `archived` with `invalid_input`, `details.field=status`. |
+| `PATCH /v1/daemon/worlds/{world_id}/rules/{rule_id}` | Write vocabulary adds `archived`. From a non-archived row, archiving retains id, content, extensions, ownership and created_at and refreshes updated_at. Archived accepts only `{ "status": "archived" }`; any other supplied member or status exit is refused. No restore or DELETE route. |
+| `GET /v1/daemon/worlds/{world_id}/rules?include_archived=true` | `include_archived` is optional; absent or `false` omits only archived, `true` includes it. Values are exactly `true`/`false`; invalid values, duplicate keys and unknown query keys produce the existing 400 field-level `invalid_input` envelope. |
+
+World/principal admission and addressed-rule World filtering precede core
+lifecycle/semantic validation, preserving foreign/unknown-rule non-disclosure. Archived writes
+are rejected with the existing 400 `invalid_input` field envelope, not a
+synthetic success. Empty PATCH still names `patch`; status exit names
+`status`; other supplied members name the first such field in the existing
+request-field order. Supplied empty objects/arrays or explicit nulls cannot
+be silently discarded to turn a mixed PATCH into an archive-only repeat.
+The guard and update must share one serialized storage decision so a
+concurrent edit cannot resurrect or alter a tombstone.
+
+Default visibility is decided once in `CoreService::list_world_rules`.
+Storage executes the caller-selected exclusion **before** `ORDER BY
+canonical_name ASC, rule_id ASC LIMIT 501`; SQL NULL/unknown read statuses
+remain visible. `truncated` means more than 500 selected rows, not more than
+500 total rows. Inclusion does not alter active-only evaluation. The web
+rules panel inherits omission without adding an archived-browsing control.
+
+### Schema and generated-contract ownership
+
+The current create/update `status` carriers in
+`schemas/daemon-api/worlds/world-rule-{create,update}-request.schema.json`
+are strings, **not enums**; value validation remains core-owned to preserve
+field-level errors. The list/single-response status is nullable open string.
+Update the create description to explicitly reject archived, PATCH
+description to include its terminal transition, and list/single-response
+descriptions to document archived and selected-set cap semantics. Do not
+close the read vocabulary or introduce schema enums.
+
+The native/core list input is `include_archived: bool`; TS uses
+`includeArchived?: boolean` with omitted → false. The existing
+`schemas/core/core-service-operations.schema.json` `listWorldRules`
+operation gains the optional boolean `includeArchived` argument after
+`worldId`, generating the service client signature. This primitive does
+not need a second handwritten query DTO or a new query schema. Existing
+response DTO shapes and schema_version remain unchanged. Schema edits
+and all generated Rust/TS artifacts land together through the checked-in
+codegen pipeline.
+
+The generated PATCH DTO alone currently collapses absent/empty constraint
+maps and absent/null optional members. Preserve the supplied-member set
+alongside that DTO at the core boundary: native decoding captures JSON
+object keys before typed decoding; direct CLI leaves supply the fields
+they authored. This is internal presence metadata, not a second wire DTO
+or a second value validator. Core combines supplied keys with nonempty typed
+members so inconsistent metadata cannot authorize an archived edit. It applies
+the terminal guard after scoped lookup; ordinary non-archived PATCH replacement
+semantics remain intact.

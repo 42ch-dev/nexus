@@ -924,6 +924,34 @@ Rules:
 - **World findings are read-only (AR-87 #1).** `creator world findings`
   is a GET-only read; any world-findings write route is a P1 non-goal.
 
+### World structured-rule lifecycle (v1.198 normative amendment)
+
+The author commands are direct-core leaves; `/v1/daemon/*` is not their
+transport. `creator world rule add` retains its existing typed flags and
+create vocabulary `draft | active | deprecated` (default `active`).
+
+| Command | Contract |
+| --- | --- |
+| `nexus42 creator world rule list --world-id <id> [--include-archived] [--json]` | Default omits archived only; draft and deprecated remain visible. Explicit inclusion reveals retained archived rows. Human STATUS prints the stored value; JSON remains the existing rule-item array. |
+| `nexus42 creator world rule deactivate --world-id <id> --rule-id <id>` | Writes `deprecated`; not an alias for archive. Deprecated remains visible and PATCH-reversible. |
+| `nexus42 creator world rule archive --world-id <id> --rule-id <id>` | Writes only `status=archived` through the same core update authority. Repetition succeeds. No DELETE, purge or restore command. |
+
+**Archived is terminal (user decision, 2026-09-27).** It is not a create
+state: `add --status archived` fails with the existing `status` field error.
+An archived row accepts only an archive-only repeat; other PATCH members
+or any status exit fail without mutation. Revival means creating a new
+rule, never reusing its id. Data, ownership and World/rule non-disclosure
+guards remain intact. Only active rules evaluate.
+
+List omission is selected at the core boundary and pushed below the SQL
+501-row probe, never implemented as a CLI filter. The retained 500-item
+cap and `truncated` describe the selected set. HTTP/native inclusion and
+schema-description requirements are owned by
+[Daemon API Surface Conventions §13](daemon-api-surface-conventions.md#13-world-structured-rule-lifecycle).
+Delivered in v1.198 (PR #345, merged 2026-09-28): the CLI leaves above
+are implemented and covered by targeted tests; this section is the
+normative record of that behavior.
+
 ### 6.2G.7 V1.189 P1 amendment — basic-cli cohort: `graph` + `entity patch` route through `nexus-core` (Normative; cohort selectors deleted in v1.193 P2)
 
 `nexus42` gained a **daemon-free basic CLI cohort** built with
