@@ -166,8 +166,27 @@ export function actorKnowledgeView(service: ServiceCore, request: ViewRequest) {
   );
 }
 
+const KNOWLEDGE_AUDIENCE_KEYS: Readonly<Record<string, readonly string[]>> = {
+  shared: ['kind'],
+  author_only: ['kind'],
+  character_private: ['kind', 'character_id'],
+};
+
 /** `POST /v1/daemon/actor-knowledge/entries` — 201 created. */
 export function addActorKnowledgeEntry(service: ServiceCore, request: AddKnowledgeEntryRequest) {
+  const audience: unknown = request.audience;
+  if (
+    audience !== undefined &&
+    audience !== null &&
+    typeof audience === 'object' &&
+    !Array.isArray(audience)
+  ) {
+    const kind = 'kind' in audience && typeof audience.kind === 'string' ? audience.kind : '';
+    const allowed = KNOWLEDGE_AUDIENCE_KEYS[kind];
+    if (allowed && Object.keys(audience).some((key) => !allowed.includes(key))) {
+      throw new HttpError(400, 'invalid_input', 'audience contains unknown fields');
+    }
+  }
   return withPrincipal(service, (principal) =>
     service.core.addActorKnowledgeEntry(principal, request),
   );
