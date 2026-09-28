@@ -219,6 +219,19 @@ describe('world-kb-http (P4-T1)', () => {
     assert.equal(missing.payload.error.code, 'not_found');
   });
 
+  test('world-kb entity patch rejects unknown fields inside a known audience arm', async () => {
+    const response = await jsonFetch(`${baseUrl}/v1/daemon/worlds/${OWNED_WORLD}/kb/patch-entity`, {
+      method: 'POST',
+      body: {
+        entity_id: 'kb_mod',
+        expected_version: 0,
+        patch: { title: 'Strict audience test', audience: { kind: 'shared', unexpected: true } },
+      },
+    });
+    assert.equal(response.status, 400, response.text);
+    assert.equal(response.payload.error.code, 'invalid_input');
+  });
+
   test('patch create/update/stale CAS against real fixture DB', async () => {
     const create = await jsonFetch(`${baseUrl}/v1/daemon/worlds/${OWNED_WORLD}/kb/patch-entity`, {
       method: 'POST',
