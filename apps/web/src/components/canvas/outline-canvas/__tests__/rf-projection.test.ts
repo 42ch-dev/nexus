@@ -62,6 +62,8 @@ function outline(partial: Partial<WorkOutline> = {}): WorkOutline {
     volumes: [{ volume_id: 1, label: 'Volume 1', chapter_ids: [1, 2] }],
     timeline_events: [],
     foreshadows: [],
+    scenes: [],
+    beats: [],
     chapter_titles: {},
     updated_at: '',
     ...partial,

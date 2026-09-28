@@ -860,6 +860,87 @@ async fn outline_frontmatter_delimiter_edges() {
     fx.core.close().await.unwrap();
 }
 
+/// A legacy `outline.md` written before the scene/beat carriers existed has no
+/// `scenes`/`beats` keys. Both deserialize to empty arrays, so the Work still
+/// opens and the outline revision is untouched.
+#[tokio::test]
+async fn outline_missing_scenes_and_beats_default_to_empty_arrays() {
+    let fx = setup().await;
+    let rel_path = "Works/test-novel/Outlines/outline.md";
+    let outline_path = fx.creative_root.join(rel_path);
+    std::fs::create_dir_all(outline_path.parent().unwrap()).unwrap();
+    std::fs::write(
+        &outline_path,
+        "---\noutline_revision: 4\nvolumes: []\ntimeline_events: []\nforeshadows: []\nchapter_titles: {}\nupdated_at: \"2024-01-01T00:00:00Z\"\n---\nbody\n",
+    )
+    .unwrap();
+
+    let outline = fx
+        .core
+        .work_outline(&fx.principal, fx.work_id.clone())
+        .await
+        .unwrap();
+    assert_eq!(outline.outline_revision, 4);
+    assert!(outline.scenes.is_empty(), "absent scenes default to empty");
+    assert!(outline.beats.is_empty(), "absent beats default to empty");
+
+    let json = serde_json::to_value(&outline).unwrap();
+    assert_eq!(json["scenes"], serde_json::json!([]));
+    assert_eq!(json["beats"], serde_json::json!([]));
+
+    fx.pool.close().await;
+    fx.core.close().await.unwrap();
+}
+
+/// Frontmatter-written scenes/beats are carried onto the wire verbatim, in
+/// file order, with the per-item fields and status vocabulary intact.
+#[tokio::test]
+async fn outline_scenes_and_beats_round_trip_verbatim() {
+    let fx = setup().await;
+    let rel_path = "Works/test-novel/Outlines/outline.md";
+    let outline_path = fx.creative_root.join(rel_path);
+    std::fs::create_dir_all(outline_path.parent().unwrap()).unwrap();
+    std::fs::write(
+        &outline_path,
+        "---\noutline_revision: 7\nvolumes: []\nscenes:\n  - scene_id: scn_alpha\n    chapter_id: 2\n    title: Opening Scene\n    status: drafted\nbeats:\n  - beat_id: bet_alpha\n    scene_id: scn_alpha\n    title: Inciting Moment\n    status: completed\ntimeline_events: []\nforeshadows: []\nchapter_titles: {}\nupdated_at: \"2024-01-01T00:00:00Z\"\n---\nbody\n",
+    )
+    .unwrap();
+
+    let outline = fx
+        .core
+        .work_outline(&fx.principal, fx.work_id.clone())
+        .await
+        .unwrap();
+    assert_eq!(outline.outline_revision, 7);
+
+    let json = serde_json::to_value(&outline).unwrap();
+    assert_eq!(
+        json["scenes"],
+        serde_json::json!([
+            {
+                "scene_id": "scn_alpha",
+                "chapter_id": 2,
+                "title": "Opening Scene",
+                "status": "drafted"
+            }
+        ])
+    );
+    assert_eq!(
+        json["beats"],
+        serde_json::json!([
+            {
+                "beat_id": "bet_alpha",
+                "scene_id": "scn_alpha",
+                "title": "Inciting Moment",
+                "status": "completed"
+            }
+        ])
+    );
+
+    fx.pool.close().await;
+    fx.core.close().await.unwrap();
+}
+
 /// Wording-independent lock-conflict assertion (PM addition): a refused
 /// mutation must report the `work_locked` class for this Work and name the
 /// holder that actually holds it. No holder spelling is a contract.

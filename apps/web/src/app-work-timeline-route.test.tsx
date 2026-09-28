@@ -59,6 +59,8 @@ function emptyOutline(): WorkOutline {
       { event_id: 'evt-1', title: 'Inciting Incident', realizes_chapter_id: 1 },
     ],
     foreshadows: [],
+    scenes: [],
+    beats: [],
     chapter_titles: {},
     updated_at: '2026-07-18T00:00:00Z',
   } as WorkOutline;

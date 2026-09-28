@@ -22,6 +22,24 @@ export interface WorkOutline {
     chapter_ids: number[];
   }[];
   /**
+   * Ordered list of scenes, each bound to a chapter id.
+   */
+  scenes: {
+    scene_id: string;
+    chapter_id: number;
+    title: string;
+    status: "drafted" | "completed";
+  }[];
+  /**
+   * Ordered list of beats, each bound to a scene id.
+   */
+  beats: {
+    beat_id: string;
+    scene_id: string;
+    title: string;
+    status: "drafted" | "completed";
+  }[];
+  /**
    * Timeline events scheduled across chapters.
    */
   timeline_events: {

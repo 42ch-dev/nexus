@@ -8,8 +8,9 @@ use std::path::Path;
 
 use nexus_contracts::{
     OutlinePatchChapterRequest, OutlinePatchResponse, OutlinePatchStructureRequest,
-    TimelinePatchEventRequest, WorkOutline, WorkOutlineForeshadowsItem,
-    WorkOutlineTimelineEventsItem, WorkOutlineVolumesItem,
+    TimelinePatchEventRequest, WorkOutline, WorkOutlineBeatsItem,
+    WorkOutlineForeshadowsItem, WorkOutlineScenesItem, WorkOutlineTimelineEventsItem,
+    WorkOutlineVolumesItem,
 };
 use nexus_local_db::work_chapters::{self, PatchChapterParams, WorkChapterRecord};
 use nexus_local_db::works;
@@ -78,6 +79,10 @@ impl From<OutlineFault> for CoreError {
 struct OutlineFrontmatter {
     outline_revision: i64,
     volumes: Vec<WorkOutlineVolumesItem>,
+    #[serde(default)]
+    scenes: Vec<WorkOutlineScenesItem>,
+    #[serde(default)]
+    beats: Vec<WorkOutlineBeatsItem>,
     timeline_events: Vec<WorkOutlineTimelineEventsItem>,
     foreshadows: Vec<WorkOutlineForeshadowsItem>,
     chapter_titles: HashMap<String, String>,
@@ -91,6 +96,8 @@ impl OutlineFrontmatter {
             work_id,
             outline_revision: self.outline_revision_u64()?,
             volumes: self.volumes.clone(),
+            scenes: self.scenes.clone(),
+            beats: self.beats.clone(),
             timeline_events: self.timeline_events.clone(),
             foreshadows: self.foreshadows.clone(),
             chapter_titles: self.chapter_titles.clone(),
@@ -245,6 +252,8 @@ fn default_frontmatter(now: &str, chapters: &[WorkChapterRecord]) -> OutlineFron
     OutlineFrontmatter {
         outline_revision: 0,
         volumes: vec![volume],
+        scenes: Vec::new(),
+        beats: Vec::new(),
         timeline_events: Vec::new(),
         foreshadows: Vec::new(),
         chapter_titles: HashMap::new(),

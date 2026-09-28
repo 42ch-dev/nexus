@@ -41,7 +41,7 @@ const mocks = vi.hoisted(() => ({
   OUTLINE: {
     work_id: 'wk_test', outline_revision: 2,
     volumes: [{ volume_id: 1, label: 'Volume 1', chapter_ids: [1] }],
-    timeline_events: [], foreshadows: [], chapter_titles: {}, updated_at: '',
+    timeline_events: [], foreshadows: [], scenes: [], beats: [], chapter_titles: {}, updated_at: '',
   },
 }));
 

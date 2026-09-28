@@ -67,6 +67,8 @@ const mocks = vi.hoisted(() => {
     volumes: [{ volume_id: 1, label: 'Volume 1', chapter_ids: [1] }],
     timeline_events: [],
     foreshadows: [],
+    scenes: [],
+    beats: [],
     chapter_titles: {},
     updated_at: '',
   };

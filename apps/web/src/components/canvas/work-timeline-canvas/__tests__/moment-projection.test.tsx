@@ -56,6 +56,8 @@ function outline(overrides: Partial<WorkOutline> = {}): WorkOutline {
     volumes: [],
     timeline_events: [],
     foreshadows: [],
+    scenes: [],
+    beats: [],
     chapter_titles: {},
     updated_at: '2026-07-18T00:00:00Z',
     ...overrides,
