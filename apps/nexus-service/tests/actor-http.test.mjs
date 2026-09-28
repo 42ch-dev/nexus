@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -252,20 +253,12 @@ describe('actor-http (P5-T2)', () => {
 //   - `crates/nexus-agent-host/tests/fixtures/mock_acp_workflow.py` (end_turn,
 //     plus a never-answering family for cancel/shutdown),
 //   - `actor-http-peer.py`, written into the throwaway home by this file, for
-//     the exact non-success stop reasons, a mid-prompt EOF, and a terminal
-//     emitted *after* an accepted cancel.
+//     mid-prompt EOF and a terminal emitted *after* an accepted cancel.
 //
 // Contract notes this file pins deliberately:
 //   - The host config's own `max_sessions` (default 4) is raised in the
 //     fixture's `config.toml`; the journey legitimately needs more live
 //     sessions than the default budget, and the limit itself is not under test.
-//   - `R-V1196-ACP-INCOMPLETE-MAPPING`: this adapter reports Refusal /
-//     MaxTokens / MaxTurnRequests as `OpFailed(category)`, and the core's §5
-//     table reads every `OpFailed` as the `failed` row — so the `incomplete`
-//     rows are NOT reachable end-to-end through ACP. The three non-success stop
-//     reasons below are therefore asserted as `failed`/null (never success);
-//     the `incomplete` rows' own evidence stays the core group
-//     (`character_terminal_*`). No test here fabricates an `incomplete`.
 //   - `R-V1196-SESSION-CWD-BOUNDARY`: an Actor create must name a `cwd` inside
 //     the pinned workspace root (the registered creative root), which is the
 //     wire field's documented meaning; the no-cwd fallback is untouched.
@@ -278,13 +271,8 @@ const MAIN_PROVIDER = 'mock-acp-main';
 const BLOCK_PROVIDER = 'mock-acp-block';
 const LATE_PROVIDER = 'mock-acp-late';
 const FAIL_PROVIDER = 'mock-acp-fail';
-const STOP_REASON_PROVIDERS = {
-  max_tokens: 'mock-acp-max-tokens',
-  max_turn_requests: 'mock-acp-max-turn-requests',
-  refusal: 'mock-acp-refusal',
-};
 
-/** Hermetic ACP peer for the terminal rows this journey must be able to drive. */
+/** Hermetic ACP peer for the Actor HTTP journey's success and failure rows. */
 const ACTOR_HTTP_PEER = `#!/usr/bin/env python3
 """Deterministic local ACP peer for the P0-T6 Actor HTTP journey.
 
@@ -292,7 +280,6 @@ Speaks the real newline-delimited JSON-RPC ACP wire (initialize, session/new,
 session/prompt, session/cancel) over stdio with no model and no network.
 
 Modes (env):
-  STOP_REASON=<snake_case>  reply to session/prompt with that stop reason
   BLOCK_PROMPT=1            never reply; on session/cancel return (or, with
                             LATE_END_TURN_AFTER_CANCEL=1, answer the still-open
                             prompt with end_turn after LATE_DELAY_S seconds)
@@ -304,7 +291,6 @@ import sys
 import time
 
 LOG = os.environ.get("ACP_FIXTURE_LOG")
-STOP_REASON = os.environ.get("STOP_REASON") or "end_turn"
 BLOCK_PROMPT = os.environ.get("BLOCK_PROMPT") == "1"
 EXIT_ON_PROMPT = os.environ.get("EXIT_ON_PROMPT") == "1"
 LATE_END_TURN_AFTER_CANCEL = os.environ.get("LATE_END_TURN_AFTER_CANCEL") == "1"
@@ -387,7 +373,7 @@ def main():
                 "update": {"sessionUpdate": "agent_message_chunk",
                            "content": {"type": "text", "text": "peer:" + prompt}},
             })
-            reply(req, {"stopReason": STOP_REASON})
+            reply(req, {"stopReason": "end_turn"})
         elif method == "session/cancel":
             log({"event": "cancel"})
         else:
@@ -452,7 +438,6 @@ function seedJourneyHome(label) {
     [BLOCK_PROVIDER, acpFixture, { ACP_FIXTURE_LOG: acpLog, BLOCK_PROMPT: '1' }],
     [LATE_PROVIDER, peerPath, { ACP_FIXTURE_LOG: peerLog, BLOCK_PROMPT: '1', LATE_END_TURN_AFTER_CANCEL: '1' }],
     [FAIL_PROVIDER, peerPath, { ACP_FIXTURE_LOG: peerLog, EXIT_ON_PROMPT: '1' }],
-    ...Object.entries(STOP_REASON_PROVIDERS).map(([reason, id]) => [id, peerPath, { ACP_FIXTURE_LOG: peerLog, STOP_REASON: reason }]),
   ]
     .map(([id, script, env]) => {
       const envLines = Object.entries(env).map(([key, value]) => `${key} = ${JSON.stringify(value)}`).join('\n');
@@ -560,6 +545,83 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
       { headers: { Accept: 'text/event-stream' }, signal: AbortSignal.timeout(20_000) },
     );
     return { status: response.status, frames: parseSseBody(await response.text()) };
+  }
+
+  /**
+   * Hold one Actor SSE stream open over a raw socket. An idle stream writes no
+   * frame, and the transport buffers its headers until the first one, so there
+   * is no response to await: the socket IS the handle, and `body()` is what the
+   * stream really wrote once it ended. An SSE response is chunked and the
+   * socket survives it (keep-alive), so the stream's end for a consumer is the
+   * body's own zero-size chunk, not the socket's close.
+   */
+  function openActorStream(sessionId, operationId) {
+    const target = new URL(url);
+    const socket = net.connect(Number(target.port), target.hostname);
+    socket.setEncoding('utf8');
+    const state = { raw: '', ended: false, connected: false, error: null };
+    let settle = () => {};
+    const ended = new Promise((resolve) => {
+      settle = () => {
+        if (state.ended) return;
+        state.ended = true;
+        resolve();
+      };
+      socket.on('connect', () => {
+        state.connected = true;
+      });
+      socket.on('close', settle);
+      socket.on('end', settle);
+      socket.on('error', (error) => {
+        state.error = error.message;
+        settle();
+      });
+    });
+    socket.on('data', (chunk) => {
+      state.raw += chunk;
+      const head = state.raw.indexOf('\r\n\r\n');
+      const body = head === -1 ? state.raw : state.raw.slice(head + 4);
+      if (body.endsWith('0\r\n\r\n')) settle();
+    });
+    socket.write(
+      [
+        `GET /v1/daemon/agent-host/sessions/${sessionId}/events?operation_id=${operationId} HTTP/1.1`,
+        `Host: ${target.host}`,
+        'Accept: text/event-stream',
+        '',
+        '',
+      ].join('\r\n'),
+    );
+    return {
+      ended: () => state.ended,
+      wrote: () => state.raw.length,
+      state,
+      waitEnded: (timeoutMs) => Promise.race([ended, new Promise((resolve) => setTimeout(resolve, timeoutMs))]),
+      body: () => {
+        const head = state.raw.indexOf('\r\n\r\n');
+        return head === -1 ? '' : state.raw.slice(head + 4);
+      },
+      close: () => {
+        try {
+          socket.destroy();
+        } catch {
+          /* already gone */
+        }
+      },
+    };
+  }
+
+  /**
+   * Wait for an observation the stream produces on its own cadence. The
+   * loop-back interval only samples that cadence — it is never the scheduler
+   * for what is being asserted (the throttle's clock is frozen here).
+   */
+  async function until(predicate, what, timeoutMs = 5_000) {
+    const deadline = Date.now() + timeoutMs;
+    while (!predicate()) {
+      assert.ok(Date.now() < deadline, `timed out waiting for ${what}`);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
   }
 
   before(async () => {
@@ -785,26 +847,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     const delta = stream.frames.find((frame) => frame.data?.MessageDelta);
     assert.ok(delta, 'the peer message delta must be delivered');
     assert.match(delta.data.MessageDelta.text, /^transformed:journey-echo/);
-
-    // The ACP adapter reports Refusal / MaxTokens / MaxTurnRequests as
-    // `OpFailed(category)`, and §5 reads every `OpFailed` as the failure row, so
-    // each of the three must settle `failed`/null — never `succeeded` and never
-    // an `incomplete` this adapter cannot produce (R-V1196-ACP-INCOMPLETE-MAPPING).
-    for (const providerId of Object.values(STOP_REASON_PROVIDERS)) {
-      const row = await jsonFetch('/v1/daemon/agent-host/sessions', {
-        method: 'POST',
-        body: actorBody({ provider_id: providerId }),
-      });
-      assert.equal(row.status, 200, `${providerId}: ${row.text}`);
-      const prompt = await jsonFetch(`/v1/daemon/agent-host/sessions/${row.payload.session_id}/operations`, {
-        method: 'POST',
-        body: { kind: 'prompt', content: `row-${providerId}` },
-      });
-      assert.equal(prompt.status, 200, `${providerId}: ${prompt.text}`);
-      const outcome = await waitForCharacterOutcome(prompt.payload.operation_id);
-      assert.equal(outcome.run_status, 'failed', `${providerId} must not be reported as success`);
-      assert.equal(outcome.finish_reason, null);
-    }
 
     // A mid-prompt EOF is the fault row too.
     const failing = await jsonFetch('/v1/daemon/agent-host/sessions', {
@@ -1076,6 +1118,394 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
       assert.equal(refused.status, 501, refused.text);
       assert.equal(refused.payload.error.code, 'route_not_migrated');
     }
+  });
+
+  /**
+   * The producer's absent-authority envelope (native `core_error.rs`:
+   * `invalid_input`/400 plus `details.category`), driven with a DELIBERATELY
+   * reworded human message: only the typed category may decide, so a producer
+   * wording change can never move a consumer's classification.
+   */
+  const absentHostEnvelope = (message) => ({
+    code: 'invalid_input',
+    message,
+    details: { category: 'host_not_started' },
+    http_status: 400,
+  });
+  const rejectingBoundary = (envelope) => () =>
+    Promise.reject(new Error(JSON.stringify(envelope)));
+
+  test('host absence is classified by the typed category, never the message, at every Host consumer', async () => {
+    // 1. Real mirror rows from the REAL attached authority: a provider-only
+    //    session plus its operation, which is what the absence fallbacks consult.
+    const created = await jsonFetch('/v1/daemon/agent-host/sessions', {
+      method: 'POST',
+      body: { provider_id: MAIN_PROVIDER, cwd: creativeRoot },
+    });
+    assert.equal(created.status, 200, created.text);
+    const sessionId = created.payload.session_id;
+    const executed = await jsonFetch(`/v1/daemon/agent-host/sessions/${sessionId}/operations`, {
+      method: 'POST',
+      body: { kind: 'prompt', content: 'host absence prompt' },
+    });
+    assert.equal(executed.status, 200, executed.text);
+    const operationId = executed.payload.operation_id;
+
+    const core = service.service.core;
+    const liveBoundary = {
+      hostQuery: core.hostQuery,
+      hostCharacterOperation: core.hostCharacterOperation,
+    };
+    // 2. Live baseline for the Character arm: a stream whose operation the
+    //    authority does not own is the authority's own miss, before any absence.
+    const unknownOperation = randomUUID();
+    const liveMiss = await jsonFetch(
+      `/v1/daemon/agent-host/sessions/${sessionA.payload.session_id}/events?operation_id=${unknownOperation}`,
+      { headers: { Accept: 'text/event-stream' } },
+    );
+    assert.equal(liveMiss.status, 404, liveMiss.text);
+    assert.equal(liveMiss.payload.error.code, 'not_found');
+
+    const absence = rejectingBoundary(
+      absentHostEnvelope('the embedded host authority is not attached right now'),
+    );
+    core.hostQuery = absence;
+    core.hostCharacterOperation = absence;
+    try {
+      // 3. Readiness GETs degrade truthfully instead of turning absence into a
+      //    client error.
+      const health = await jsonFetch('/v1/daemon/agent-host/health');
+      assert.equal(health.status, 200, health.text);
+      assert.deepEqual(health.payload, { running: false, active_sessions: 0, active_operations: 0 });
+      const providers = await jsonFetch('/v1/daemon/agent-host/providers');
+      assert.equal(providers.status, 200, providers.text);
+      assert.deepEqual(providers.payload, { providers: [] });
+
+      // 4. Control: session placement is resolved against the mirror, so the
+      //    shutdown of a known provider-only session still reaches its lane.
+      const shutdown = await jsonFetch(`/v1/daemon/agent-host/sessions/${sessionId}`, { method: 'DELETE' });
+      assert.equal(shutdown.status, 200, shutdown.text);
+      assert.deepEqual(shutdown.payload, { session_id: sessionId, status: 'shutdown' });
+
+      // 5. Stream, Character arm: the authority's own read is null, so the
+      //    absent answer is IDENTICAL to the live miss above — never a 400.
+      const absentMiss = await jsonFetch(
+        `/v1/daemon/agent-host/sessions/${sessionA.payload.session_id}/events?operation_id=${unknownOperation}`,
+        { headers: { Accept: 'text/event-stream' } },
+      );
+      assert.equal(absentMiss.status, 404, absentMiss.text);
+      assert.equal(absentMiss.payload.error.code, 'not_found');
+
+      // 6. Stream, session hydration: the shutdown above dropped the mirror row,
+      //    so absence must read as the same 404 a genuinely missing session
+      //    gives. The refusal precedes the stream headers, so the route answers
+      //    JSON.
+      const stream = await jsonFetch(
+        `/v1/daemon/agent-host/sessions/${sessionId}/events?operation_id=${operationId}`,
+        { headers: { Accept: 'text/event-stream' } },
+      );
+      assert.equal(stream.status, 404, stream.text);
+      assert.equal(stream.payload.error.code, 'not_found');
+    } finally {
+      core.hostQuery = liveBoundary.hostQuery;
+      core.hostCharacterOperation = liveBoundary.hostCharacterOperation;
+    }
+
+    // 7. The classification is NOT a blanket `invalid_input`/400 tolerance: an
+    //    unrelated client error keeps its own answer, and a fault stays sanitized.
+    core.hostQuery = rejectingBoundary({
+      code: 'invalid_input',
+      message: 'session_id must be a UUID',
+      http_status: 400,
+    });
+    try {
+      const unrelated = await jsonFetch('/v1/daemon/agent-host/health');
+      assert.equal(unrelated.status, 400, unrelated.text);
+      assert.equal(unrelated.payload.error.code, 'invalid_input');
+      assert.equal(unrelated.payload.error.message, 'session_id must be a UUID');
+    } finally {
+      core.hostQuery = liveBoundary.hostQuery;
+    }
+
+    core.hostQuery = rejectingBoundary({
+      code: 'internal',
+      message: 'internal: /Users/somebody/nexus.db is locked',
+      http_status: 500,
+    });
+    try {
+      const fault = await jsonFetch('/v1/daemon/agent-host/health');
+      assert.equal(fault.status, 500, fault.text);
+      assert.equal(fault.payload.error.code, 'internal');
+      assert.equal(fault.payload.error.message, 'Internal server error');
+    } finally {
+      core.hostQuery = liveBoundary.hostQuery;
+    }
+
+    // 8. The classifier itself: a missing resource is not absence, and the
+    //    message neither adds nor removes the classification.
+    const { isAbsentHostError } = await import(join(serviceRoot, 'dist/errors.js'));
+    const asNativeRejection = (envelope) => new Error(JSON.stringify(envelope));
+    assert.equal(isAbsentHostError(asNativeRejection(absentHostEnvelope('reworded'))), true);
+    assert.equal(
+      isAbsentHostError(asNativeRejection({ code: 'invalid_input', message: 'host not started', http_status: 400 })),
+      false,
+      'the message alone must never classify an error as absent-host',
+    );
+    assert.equal(
+      isAbsentHostError(asNativeRejection({ code: 'not_found', message: 'session not found', http_status: 404 })),
+      false,
+    );
+    assert.equal(
+      isAbsentHostError(asNativeRejection({ code: 'internal', message: 'internal', http_status: 500 })),
+      false,
+    );
+    assert.equal(isAbsentHostError(new Error('not a native rejection')), false);
+  });
+
+  /**
+   * The generic operation read is where the mirror's Actor mark and the
+   * authority's own row can disagree. Under a typed absence the authority holds
+   * no row at all, so only a provider-only cache entry may answer: an Actor
+   * record is never resurrected as generic provider-only state, and the absence
+   * itself is never a client error for this read.
+   */
+  test('host absence serves the cached provider-only row for the generic operation GET, never a resurrected Actor row', async () => {
+    const legacy = await jsonFetch('/v1/daemon/agent-host/sessions', {
+      method: 'POST',
+      body: { provider_id: MAIN_PROVIDER, cwd: creativeRoot },
+    });
+    assert.equal(legacy.status, 200, legacy.text);
+    const legacySessionId = legacy.payload.session_id;
+    const legacyPrompt = await jsonFetch(`/v1/daemon/agent-host/sessions/${legacySessionId}/operations`, {
+      method: 'POST',
+      body: { kind: 'prompt', content: 'absence-get' },
+    });
+    assert.equal(legacyPrompt.status, 200, legacyPrompt.text);
+    const providerOnlyId = legacyPrompt.payload.operation_id;
+
+    const actorSession = await jsonFetch('/v1/daemon/agent-host/sessions', { method: 'POST', body: actorBody() });
+    assert.equal(actorSession.status, 200, actorSession.text);
+    const actorSessionId = actorSession.payload.session_id;
+    const actorPrompt = await jsonFetch(`/v1/daemon/agent-host/sessions/${actorSessionId}/operations`, {
+      method: 'POST',
+      body: { kind: 'prompt', content: 'absence-actor-get' },
+    });
+    assert.equal(actorPrompt.status, 200, actorPrompt.text);
+    const actorOperationId = actorPrompt.payload.operation_id;
+    assert.equal(
+      service.service.providerRegistry.operationRecord(actorOperationId)?.actorBacked,
+      true,
+      'precondition: the mirror carries the Actor mark for the Character run',
+    );
+
+    // Live baseline with the authority attached: the authority answers for its
+    // own provider-only row, and the Character run is its own Character result.
+    const liveProviderOnly = await jsonFetch(`/v1/daemon/agent-host/operations/${providerOnlyId}`);
+    assert.equal(liveProviderOnly.status, 200, liveProviderOnly.text);
+    assert.deepEqual(Object.keys(liveProviderOnly.payload).sort(), ['operation_id', 'session_id', 'status']);
+    assert.equal(liveProviderOnly.payload.session_id, legacySessionId);
+    const liveActor = await jsonFetch(`/v1/daemon/agent-host/operations/${actorOperationId}`);
+    assert.equal(liveActor.status, 200, liveActor.text);
+    assert.ok(liveActor.payload.run_status, `the Character arm answers with its own result: ${liveActor.text}`);
+
+    const core = service.service.core;
+    const liveBoundary = {
+      hostQuery: core.hostQuery,
+      hostCharacterOperation: core.hostCharacterOperation,
+    };
+    const absence = rejectingBoundary(
+      absentHostEnvelope('the embedded host authority is not attached right now'),
+    );
+    core.hostQuery = absence;
+    core.hostCharacterOperation = absence;
+    try {
+      // 1. An absent authority means "no row", not a client error: the cached
+      //    provider-only row answers exactly as the live read above did.
+      const absentProviderOnly = await jsonFetch(`/v1/daemon/agent-host/operations/${providerOnlyId}`);
+      assert.equal(absentProviderOnly.status, 200, absentProviderOnly.text);
+      assert.deepEqual(absentProviderOnly.payload, {
+        operation_id: providerOnlyId,
+        session_id: legacySessionId,
+        status: 'started',
+      });
+
+      // 2. The mirror's Actor mark is NEVER served as a generic provider-only
+      //    observation: with no authority row the operation is absent — the same
+      //    404 a live miss gives, never the cached admission row and never 400.
+      const absentActor = await jsonFetch(`/v1/daemon/agent-host/operations/${actorOperationId}`);
+      assert.equal(absentActor.status, 404, absentActor.text);
+      assert.equal(absentActor.payload.error.code, 'not_found');
+    } finally {
+      core.hostQuery = liveBoundary.hostQuery;
+      core.hostCharacterOperation = liveBoundary.hostCharacterOperation;
+    }
+
+    // 3. The absence arm stays precise: an unrelated client error and a fault
+    //    keep their own answers instead of degrading to the cached row.
+    core.hostQuery = rejectingBoundary({
+      code: 'invalid_input',
+      message: 'operation_id must be a UUID',
+      http_status: 400,
+    });
+    try {
+      const unrelated = await jsonFetch(`/v1/daemon/agent-host/operations/${providerOnlyId}`);
+      assert.equal(unrelated.status, 400, unrelated.text);
+      assert.equal(unrelated.payload.error.code, 'invalid_input');
+      assert.equal(unrelated.payload.error.message, 'operation_id must be a UUID');
+    } finally {
+      core.hostQuery = liveBoundary.hostQuery;
+    }
+
+    core.hostQuery = rejectingBoundary({
+      code: 'internal',
+      message: 'internal: /Users/somebody/nexus.db is locked',
+      http_status: 500,
+    });
+    try {
+      const fault = await jsonFetch(`/v1/daemon/agent-host/operations/${providerOnlyId}`);
+      assert.equal(fault.status, 500, fault.text);
+      assert.equal(fault.payload.error.code, 'internal');
+      assert.equal(fault.payload.error.message, 'Internal server error');
+    } finally {
+      core.hostQuery = liveBoundary.hostQuery;
+    }
+
+    assert.equal(
+      (await jsonFetch(`/v1/daemon/agent-host/sessions/${legacySessionId}`, { method: 'DELETE' })).status,
+      200,
+    );
+    assert.equal(
+      (await jsonFetch(`/v1/daemon/agent-host/sessions/${actorSessionId}`, { method: 'DELETE' })).status,
+      200,
+    );
+  });
+
+  /**
+   * Cancellation under a typed absence keeps each lane's own authority: a
+   * provider-only cache entry still reaches the raw provider cancel lane, an
+   * Actor mark is cancelled by the authority alone (its own refusal is the
+   * answer, never a provider bypass), and an id nobody knows gains no effect and
+   * no invented success.
+   */
+  test('host absence cancel stays in its cached lane and never bypasses the Actor authority', async () => {
+    // The provider-only prompt runs on the BLOCKED provider so the cancel really
+    // meets a live provider operation: the mock's own log is then the evidence
+    // that the raw provider cancel lane was reached (or was never entered).
+    const legacy = await jsonFetch('/v1/daemon/agent-host/sessions', {
+      method: 'POST',
+      body: { provider_id: BLOCK_PROVIDER, cwd: creativeRoot },
+    });
+    assert.equal(legacy.status, 200, legacy.text);
+    const legacySessionId = legacy.payload.session_id;
+    const legacyPrompt = await jsonFetch(`/v1/daemon/agent-host/sessions/${legacySessionId}/operations`, {
+      method: 'POST',
+      body: { kind: 'prompt', content: 'absence-cancel' },
+    });
+    assert.equal(legacyPrompt.status, 200, legacyPrompt.text);
+    const providerOnlyId = legacyPrompt.payload.operation_id;
+
+    const actorSession = await jsonFetch('/v1/daemon/agent-host/sessions', { method: 'POST', body: actorBody() });
+    assert.equal(actorSession.status, 200, actorSession.text);
+    const actorSessionId = actorSession.payload.session_id;
+    const actorPrompt = await jsonFetch(`/v1/daemon/agent-host/sessions/${actorSessionId}/operations`, {
+      method: 'POST',
+      body: { kind: 'prompt', content: 'absence-actor-cancel' },
+    });
+    assert.equal(actorPrompt.status, 200, actorPrompt.text);
+    const actorOperationId = actorPrompt.payload.operation_id;
+    assert.equal(
+      service.service.providerRegistry.operationRecord(actorOperationId)?.actorBacked,
+      true,
+      'precondition: the mirror carries the Actor mark for the Character run',
+    );
+
+    const cancelsBefore = readLog(acpLog).filter((entry) => entry.event === 'cancel').length;
+    const coldOperationId = randomUUID();
+
+    const core = service.service.core;
+    const liveBoundary = {
+      hostQuery: core.hostQuery,
+      hostCharacterOperation: core.hostCharacterOperation,
+      hostCancelOperation: core.hostCancelOperation,
+      providerCall: core.providerCall,
+    };
+    // The service's own provider dispatch is observed per operation: a raw
+    // provider cancel must be attributed to the provider-only operation and to
+    // nothing else, while the real provider call still runs underneath.
+    const providerCancels = [];
+    core.providerCall = async (request) => {
+      if (request.method === 'cancel') providerCancels.push(request.operation_id);
+      return liveBoundary.providerCall.call(core, request);
+    };
+    const absence = rejectingBoundary(
+      absentHostEnvelope('the embedded host authority is not attached right now'),
+    );
+    core.hostQuery = absence;
+    core.hostCharacterOperation = absence;
+    core.hostCancelOperation = absence;
+    let providerOnlyCancel;
+    let actorCancel;
+    let coldCancel;
+    try {
+      providerOnlyCancel = await jsonFetch(`/v1/daemon/agent-host/operations/${providerOnlyId}`, {
+        method: 'POST',
+        body: {},
+      });
+      actorCancel = await jsonFetch(`/v1/daemon/agent-host/operations/${actorOperationId}`, {
+        method: 'POST',
+        body: {},
+      });
+      coldCancel = await jsonFetch(`/v1/daemon/agent-host/operations/${coldOperationId}`, {
+        method: 'POST',
+        body: {},
+      });
+    } finally {
+      core.hostQuery = liveBoundary.hostQuery;
+      core.hostCharacterOperation = liveBoundary.hostCharacterOperation;
+      core.hostCancelOperation = liveBoundary.hostCancelOperation;
+      core.providerCall = liveBoundary.providerCall;
+    }
+
+    // 1. The provider-only cache entry decides its own lane: the raw provider
+    //    cancel still runs (the mock's own log and the dispatch record are the
+    //    evidence) and the accepted cancel is the cached truth.
+    assert.equal(providerOnlyCancel.status, 200, providerOnlyCancel.text);
+    assert.deepEqual(providerOnlyCancel.payload, { operation_id: providerOnlyId, status: 'cancelled' });
+    assert.equal(service.service.providerRegistry.operationRecord(providerOnlyId)?.status, 'cancelled');
+
+    // 2. The Actor mark belongs to the AUTHORITY alone: its absent-authority
+    //    refusal is the typed failure, and the provider lane is never entered.
+    assert.equal(actorCancel.status, 400, actorCancel.text);
+    assert.equal(actorCancel.payload.error.code, 'invalid_input');
+    assert.equal(actorCancel.payload.error.details?.category, 'host_not_started');
+    assert.equal(actorCancel.payload.error.message, 'the embedded host authority is not attached right now');
+    assert.equal(
+      service.service.providerRegistry.operationRecord(actorOperationId)?.status,
+      'started',
+      'an Actor cancel must not settle the mirror through a provider call',
+    );
+
+    // 3. An id neither the authority nor the mirror knows gains nothing: no
+    //    provider effect, no invented success, no mirror mutation.
+    assert.equal(coldCancel.status, 404, coldCancel.text);
+    assert.equal(coldCancel.payload.error.code, 'not_found');
+    assert.equal(service.service.providerRegistry.operationRecord(coldOperationId), undefined);
+
+    assert.equal(
+      readLog(acpLog).filter((entry) => entry.event === 'cancel').length,
+      cancelsBefore + 1,
+      'exactly one raw provider cancel is observed in this window',
+    );
+    assert.deepEqual(
+      providerCancels,
+      [providerOnlyId],
+      'only the provider-only cancel reaches the raw provider lane',
+    );
+
+    assert.equal(
+      (await jsonFetch(`/v1/daemon/agent-host/sessions/${actorSessionId}`, { method: 'DELETE' })).status,
+      200,
+    );
   });
 
   test('a valid Creator Actor session takes the core arm for prompt, cancel and observation', async () => {
@@ -1536,6 +1966,277 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     } finally {
       releaseControlBytes(charged);
     }
+  });
+
+  test('Actor idle polling is amortized', async () => {
+    // R3: the empty-batch settlement check is a FULL Character read of the same
+    // operation on the stream's 25ms poll cadence, so an idle stream could ask
+    // the authority far more often than the authority can change its answer,
+    // and the operation GET paid a Character read on top of the one its generic
+    // answer needs. Everything below runs on a FROZEN clock: no throttle window
+    // can elapse on its own, so a status read is attributable to the poll that
+    // spent it and never to the passage of time.
+    const { sseTestHooks } = await import(join(serviceRoot, 'dist/sse.js'));
+    // This test owns its Character, binding and session: the regression tests
+    // around it drop or shut down the journey's shared sessions, and an Actor
+    // reuse key is (provider, cwd, Actor, World/binding), so a Character nobody
+    // else holds is what makes this session — and its cwd-typed prompt — unique.
+    const owned = await jsonFetch('/v1/daemon/characters', {
+      method: 'POST',
+      body: { world_id: JOURNEY_WORLD, display_name: 'Idle Polling Actor', persona: { voice: 'quiet' } },
+    });
+    assert.equal(owned.status, 201, owned.text);
+    const idleCharacter = owned.payload.character.character_id;
+    const idleBinding = owned.payload.binding.binding_id;
+    const session = await jsonFetch('/v1/daemon/agent-host/sessions', {
+      method: 'POST',
+      body: {
+        provider_id: MAIN_PROVIDER,
+        cwd: creativeRoot,
+        actor_ref: { actor_kind: 'character', character_id: idleCharacter },
+        viewpoint: { world_id: JOURNEY_WORLD, binding_id: idleBinding },
+      },
+    });
+    assert.equal(session.status, 200, session.text);
+    const sessionId = session.payload.session_id;
+    const prompt = await jsonFetch(`/v1/daemon/agent-host/sessions/${sessionId}/operations`, {
+      method: 'POST',
+      body: { kind: 'prompt', content: 'idle-polling' },
+    });
+    assert.equal(prompt.status, 200, prompt.text);
+    const operationId = prompt.payload.operation_id;
+    assert.equal((await waitForCharacterOutcome(operationId)).run_status, 'succeeded');
+    // Drain the retained observation, then drop the mirror rows: the hub and its
+    // replay are gone, the authority's own observation is already delivered —
+    // so every pull from here on is an immediate EMPTY batch, which is exactly
+    // the state an idle Actor stream polls in.
+    assert.equal((await sseBody(sessionId, operationId)).status, 200);
+    service.service.providerRegistry.removeSession(sessionId);
+    assert.equal(service.service.providerRegistry.operationRecord(operationId), undefined);
+
+    const core = service.service.core;
+    const realCharacterOperation = core.hostCharacterOperation;
+    const realNow = sseTestHooks.now;
+    let clock = 1_000_000_000;
+    let statusReads = 0;
+    // The controlled native boundary: still the REAL read underneath (so the
+    // ending below is the authority's own answer), with its run status pinned
+    // to `running` so the idle state is deterministic instead of a race.
+    let settled = false;
+    core.hostCharacterOperation = async (principal, id) => {
+      statusReads += 1;
+      const character = await realCharacterOperation.call(core, principal, id);
+      return settled ? character : { ...character, run_status: 'running' };
+    };
+    sseTestHooks.now = () => clock;
+    const pullsBefore = sseTestHooks.providerPullCount;
+    const stream = openActorStream(sessionId, operationId);
+    /** What the stream wrote and spent so far — the diagnosis for a failed wait. */
+    const diagnosis = () =>
+      `${stream.body() || '(it wrote nothing)'} | connected=${stream.state.connected} error=${stream.state.error}` +
+      ` reads=${statusReads} pulls=${sseTestHooks.providerPullCount - pullsBefore}`;
+    /** Wait for `target` further polls of THIS stream, showing what it wrote when it can't. */
+    const waitForPolls = async (target, what) => {
+      const deadline = Date.now() + 5_000;
+      while (sseTestHooks.providerPullCount - pullsBefore < target) {
+        assert.ok(!stream.ended(), `the stream ended before ${what}: ${diagnosis()}`);
+        assert.ok(Date.now() < deadline, `timed out waiting for ${what}: ${diagnosis()}`);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+    };
+    try {
+      await waitForPolls(2, 'two empty polls');
+      const readsAtFirstCheck = statusReads;
+      const pullsAtFirstCheck = sseTestHooks.providerPullCount;
+      await until(
+        () => sseTestHooks.providerPullCount - pullsAtFirstCheck >= 10,
+        'ten further empty polls',
+      );
+      assert.equal(
+        statusReads,
+        readsAtFirstCheck,
+        `ten empty polls inside one second must spend no further status read (spent ${statusReads - readsAtFirstCheck})`,
+      );
+      assert.ok(
+        statusReads <= 2,
+        `an idle stream spends one admission read plus at most one amortized check (spent ${statusReads})`,
+      );
+      assert.equal(stream.ended(), false, 'an idle run keeps its stream open while it polls');
+
+      // The authority settles, and the stream is STILL idle: the settlement is
+      // not re-checked inside the window, so the stream stays open rather than
+      // ending on the next poll. The ending waits for the next window's check.
+      settled = true;
+      const readsAtSettlement = statusReads;
+      const pullsAtSettlement = sseTestHooks.providerPullCount;
+      await until(
+        () => sseTestHooks.providerPullCount - pullsAtSettlement >= 3,
+        'three polls after the settlement',
+      );
+      assert.equal(
+        statusReads,
+        readsAtSettlement,
+        'a settled run must not be re-checked inside the window',
+      );
+      assert.equal(
+        stream.wrote(),
+        0,
+        `the settled run ends at the next check, not on every poll: ${diagnosis()}`,
+      );
+
+      clock += 1_000;
+      await stream.waitEnded(3_000);
+      assert.ok(
+        stream.ended(),
+        `the next one-second check must end the settled stream: ${diagnosis()}`,
+      );
+      assert.equal(
+        statusReads,
+        readsAtSettlement + 1,
+        'the ending costs exactly one settlement read',
+      );
+      const endings = parseSseBody(stream.body()).filter((frame) => frame.event === 'gap');
+      assert.equal(
+        endings.length,
+        1,
+        `a settled exhaustion ends with one typed resync gap: ${stream.body()}`,
+      );
+      assert.equal(endings[0].data.reason, 'interrupted');
+      assert.equal(endings[0].data.resync_required, true);
+      assert.equal(endings[0].data.operation_id, operationId);
+
+      // The operation GET reads the Character arm at most once, and spends no
+      // Character read at all on an id the mirror already holds as
+      // provider-only — while still answering with the authority's own result
+      // for an Actor operation.
+      const providerOnly = await jsonFetch('/v1/daemon/agent-host/sessions', {
+        method: 'POST',
+        body: { provider_id: MAIN_PROVIDER, cwd: creativeRoot },
+      });
+      assert.equal(providerOnly.status, 200, providerOnly.text);
+      const providerOnlyPrompt = await jsonFetch(
+        `/v1/daemon/agent-host/sessions/${providerOnly.payload.session_id}/operations`,
+        { method: 'POST', body: { kind: 'prompt', content: 'get-lookup' } },
+      );
+      assert.equal(providerOnlyPrompt.status, 200, providerOnlyPrompt.text);
+      assert.equal(
+        service.service.providerRegistry.operationRecord(providerOnlyPrompt.payload.operation_id)?.actorBacked,
+        undefined,
+        'precondition: the mirror holds this id as provider-only',
+      );
+      const readsBeforeGets = statusReads;
+      const providerOnlyGet = await jsonFetch(
+        `/v1/daemon/agent-host/operations/${providerOnlyPrompt.payload.operation_id}`,
+      );
+      assert.equal(providerOnlyGet.status, 200, providerOnlyGet.text);
+      assert.deepEqual(Object.keys(providerOnlyGet.payload).sort(), ['operation_id', 'session_id', 'status']);
+      assert.equal(
+        statusReads,
+        readsBeforeGets,
+        'a provider-only GET must not spend a Character lookup',
+      );
+      const actorGet = await jsonFetch(`/v1/daemon/agent-host/operations/${operationId}`);
+      assert.equal(actorGet.status, 200, actorGet.text);
+      assert.ok(actorGet.payload.run_status, `the Actor GET keeps its authoritative result: ${actorGet.text}`);
+      assert.equal(
+        statusReads,
+        readsBeforeGets + 1,
+        'an Actor GET spends exactly one Character lookup',
+      );
+      assert.equal(
+        (await jsonFetch(`/v1/daemon/agent-host/sessions/${providerOnly.payload.session_id}`, { method: 'DELETE' })).status,
+        200,
+      );
+
+      // A frame-carrying batch never consults the window: with the clock still
+      // frozen (no window can elapse at all) a run whose real terminal the
+      // authority delivers still ends its stream with that terminal, once.
+      const immediatePrompt = await jsonFetch(`/v1/daemon/agent-host/sessions/${sessionId}/operations`, {
+        method: 'POST',
+        body: { kind: 'prompt', content: 'immediate-terminal' },
+      });
+      assert.equal(immediatePrompt.status, 200, immediatePrompt.text);
+      const immediate = await sseBody(sessionId, immediatePrompt.payload.operation_id);
+      assert.equal(immediate.status, 200);
+      assert.equal(
+        immediate.frames.filter((frame) => frame.data?.OpFinished).length,
+        1,
+        `a delivered terminal must end the stream immediately: ${JSON.stringify(immediate.frames)}`,
+      );
+      assert.ok(
+        immediate.frames.some((frame) => frame.data?.MessageDelta?.text?.includes('transformed:immediate-terminal')),
+        'the peer frame must arrive with the terminal',
+      );
+    } finally {
+      stream.close();
+      sseTestHooks.now = realNow;
+      core.hostCharacterOperation = realCharacterOperation;
+    }
+
+    const released = await jsonFetch(`/v1/daemon/agent-host/sessions/${sessionId}`, { method: 'DELETE' });
+    assert.equal(released.status, 200, released.text);
+    assert.equal(released.payload.status, 'shutdown');
+  });
+
+  test('Actor re-mark preserves settled terminal', async () => {
+    // The Actor stream re-marks its operation on every (re)connect, and a mark is
+    // admission bookkeeping, not an observation: it used to replace the row it
+    // already held with `started` and no terminal event while the id stayed in
+    // the terminal FIFO. A settled record then read as live again, so the FIFO's
+    // own non-terminal skip could never age it out — the mirror dropped the
+    // terminal it had already observed and stopped being bounded by it.
+    const { ProviderRegistry } = await import(join(serviceRoot, 'dist/provider-registry.js'));
+    const { REGISTRY_MAX_TERMINAL_OPERATIONS } = await import(join(serviceRoot, 'dist/config.js'));
+    const registry = new ProviderRegistry();
+    const sessionId = randomUUID();
+    const foreignSessionId = randomUUID();
+    const operationId = randomUUID();
+    const terminal = { OpFinished: { reason: 'end_turn' } };
+
+    registry.markActorOperation(operationId, sessionId, MAIN_PROVIDER);
+    assert.equal(
+      registry.finishOperation(operationId, terminal, 'the settled transcript'),
+      true,
+      'the Actor stream settles the mirror row from the terminal it delivered',
+    );
+    assert.equal(registry.operationRecord(operationId).status, 'finished');
+
+    // The reconnect: same (session, operation) association, no observation.
+    registry.markActorOperation(operationId, sessionId, MAIN_PROVIDER);
+    const reMarked = registry.operationRecord(operationId);
+    assert.equal(reMarked.status, 'finished', 'a re-mark must not rewind the settled status');
+    assert.deepEqual(reMarked.terminalEvent, terminal, 'a re-mark must not drop the settled terminal event');
+    assert.equal(reMarked.terminalTranscript, 'the settled transcript', 'a re-mark must not drop the settled transcript');
+    assert.equal(reMarked.sessionId, sessionId, 'a re-mark must not replace the settled row association');
+    assert.equal(reMarked.actorBacked, true);
+
+    // A mark never takes over a row another association holds.
+    const liveId = randomUUID();
+    registry.markActorOperation(liveId, sessionId, MAIN_PROVIDER);
+    registry.markActorOperation(liveId, foreignSessionId, MAIN_PROVIDER);
+    assert.equal(
+      registry.operationRecord(liveId).sessionId,
+      sessionId,
+      'a foreign association must not rewrite a live row',
+    );
+
+    // Eviction eligibility: the re-marked row kept its terminal FIFO position, so
+    // the terminal arm's own overflow still retires it as its oldest terminal row.
+    for (let index = 0; index < REGISTRY_MAX_TERMINAL_OPERATIONS; index += 1) {
+      registry.registerOperation({
+        operationId: randomUUID(),
+        sessionId: foreignSessionId,
+        providerId: MAIN_PROVIDER,
+        status: 'finished',
+        terminalEvent: terminal,
+        terminalTranscript: null,
+      });
+    }
+    assert.equal(
+      registry.operationRecord(operationId),
+      undefined,
+      `the re-marked record must stay the oldest terminal row and age out at the ${REGISTRY_MAX_TERMINAL_OPERATIONS}-row retention bound`,
+    );
   });
 
   test('session create stays API-key and Origin guarded, with zero launch', async () => {

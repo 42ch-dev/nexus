@@ -318,6 +318,29 @@ describe('BrowserClient adapter contract', () => {
     await expect(client.health()).resolves.toBeUndefined();
   });
 
+  it('constructs the rule-list inclusion query (omitted by default, set on request)', async () => {
+    const seen: string[] = [];
+    useHandlers(
+      http.get('/v1/daemon/worlds/w1/rules', ({ request }) => {
+        seen.push(request.url);
+        return HttpResponse.json({ rules: [], truncated: false });
+      }),
+    );
+
+    const client = new BrowserClient();
+    await client.listWorldRules('w1');
+    await client.listWorldRules('w1', false);
+    await client.listWorldRules('w1', true);
+
+    // V1.198 §13: the default read carries no query parameter, so an omitted
+    // or explicit-`false` call is byte-identical; only explicit inclusion adds
+    // the one key the daemon accepts.
+    expect(seen[0]).not.toContain('?');
+    expect(seen[1]).not.toContain('?');
+    expect(new URL(seen[2]).searchParams.get('include_archived')).toBe('true');
+    expect(new URL(seen[2]).searchParams.get('bogus')).toBeNull();
+  });
+
   it('unwraps the canonical error envelope on a POST via the registry handler', async () => {
     useHandlers(
       http.post('/v1/daemon/works', () =>

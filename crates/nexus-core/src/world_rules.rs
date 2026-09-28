@@ -2,23 +2,94 @@
 //! Carrier grammar stays in nexus-spoke-adapter; persistence stays in the
 //! existing `spoke_rules/world_findings` repositories. Validation ordering,
 //! open read vocabulary, whole-carrier replacement and 500-row caps are retained.
+//!
+//! V1.198 (P0, §13) makes `archived` the fourth write status and a terminal,
+//! read-only row: the caller-selected omission of archived rows happens once
+//! in `CoreService::list_world_rules` and is pushed into SQL **before** the
+//! 501-row probe, and the PATCH terminal guard shares one `BEGIN IMMEDIATE`
+//! transaction with the current-row read and the write.
 
 use crate::world_kb::guards;
 use crate::{CoreAccess, CoreError, CoreResult, CoreService, Principal};
 use nexus_contracts::daemon_api::WorldFindingsListResponse;
 
+/// The PATCH status that turns an existing rule into a terminal, read-only
+/// row (§13). Refused at create; never an authoring state.
+const ARCHIVED_STATUS: &str = "archived";
+
+/// Which members a PATCH request actually supplied.
+///
+/// The generated `WorldRuleUpdateRequest` is a lossy carrier for presence:
+/// the constraint `Map` treats absent and `{}` identically
+/// (`skip_serializing_if = Map::is_empty`) and an explicit JSON `null` decodes
+/// to the same `None` as an absent member. The archived terminal guard has to
+/// see the *supplied* member set, so it is carried beside the generated DTO:
+/// native decoding collects the raw JSON object keys before typed decoding and
+/// a direct caller (CLI) names the fields it authored.
+///
+/// Presence metadata only — never a second wire DTO and never a second value
+/// validator. The core still requires the typed member itself (`status` must be
+/// literally [`ARCHIVED_STATUS`], every other member must be nonempty), so
+/// inconsistent metadata can never authorize an archived edit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RulePatchPresence(u8);
+
+impl RulePatchPresence {
+    /// No member supplied (the raw-`{}` request); also the builder starting
+    /// point. Deliberately not `Default`: a caller that never thought about
+    /// presence must not silently claim "nothing was supplied".
+    const NONE: Self = Self(0);
+    const CANONICAL_NAME: u8 = 1 << 0;
+    const CONSTRAINT: u8 = 1 << 1;
+    const KIND: u8 = 1 << 2;
+    const SEVERITY_HINT: u8 = 1 << 3;
+    const STATEMENT: u8 = 1 << 4;
+    const STATUS: u8 = 1 << 5;
+    const TARGET_ENTRY_TYPES: u8 = 1 << 6;
+
+    const fn contains(self, member: u8) -> bool {
+        self.0 & member != 0
+    }
+
+    /// Presence from the supplied member keys — native callers pass the raw
+    /// JSON object keys, direct callers the fields they authored.
+    ///
+    /// Unknown keys are ignored: the request DTO is `deny_unknown_fields`, so
+    /// a key outside the seven mutable members cannot reach the core.
+    #[must_use]
+    pub fn from_supplied_keys(keys: &[&str]) -> Self {
+        let mut presence = Self::NONE;
+        for key in keys {
+            match *key {
+                "canonical_name" => presence.0 |= Self::CANONICAL_NAME,
+                "constraint" => presence.0 |= Self::CONSTRAINT,
+                "kind" => presence.0 |= Self::KIND,
+                "severity_hint" => presence.0 |= Self::SEVERITY_HINT,
+                "statement" => presence.0 |= Self::STATEMENT,
+                "status" => presence.0 |= Self::STATUS,
+                "target_entry_types" => presence.0 |= Self::TARGET_ENTRY_TYPES,
+                _ => {}
+            }
+        }
+        presence
+    }
+}
+
 impl CoreService {
-    /// List the first 500 rules in canonical-name/id order.
+    /// List the first 500 rules in canonical-name/id order, omitting archived
+    /// rows unless `include_archived` selects them (§13: the default read hides
+    /// archived rules; draft/deprecated/NULL/unknown statuses stay visible).
     /// # Errors
     /// Returns principal, World ownership or storage errors.
     pub async fn list_world_rules(
         &self,
         principal: &Principal,
         world_id: String,
+        include_archived: bool,
     ) -> CoreResult<WorldRulesListResponse> {
         self.verify_principal(principal)?;
         guards::require_world_owner(&self.inner.pool, &world_id, principal.creator_id()).await?;
-        list_world_rules(&self.inner.pool, world_id).await
+        list_world_rules(&self.inner.pool, world_id, include_archived).await
     }
 
     /// Create a structured rule after member-aware carrier validation.
@@ -37,6 +108,11 @@ impl CoreService {
     }
 
     /// Update only supplied fields; replace the entire constraint carrier.
+    ///
+    /// `presence` carries the supplied-member set the generated request DTO
+    /// erases (see [`RulePatchPresence`]); the archived terminal guard reads it
+    /// beside the typed members.
+    ///
     /// # Errors
     /// Returns principal, write-access, World/rule ownership, validation or storage errors.
     pub async fn update_world_rule(
@@ -45,11 +121,12 @@ impl CoreService {
         world_id: String,
         rule_id: String,
         request: WorldRuleUpdateRequest,
+        presence: RulePatchPresence,
     ) -> CoreResult<WorldRuleResponse> {
         self.verify_principal(principal)?;
         require_write_access(self)?;
         guards::require_world_owner(&self.inner.pool, &world_id, principal.creator_id()).await?;
-        update_world_rule(&self.inner.pool, world_id, rule_id, request).await
+        update_world_rule(&self.inner.pool, world_id, rule_id, request, presence).await
     }
 
     /// Read the newest 500 advisory World findings, with an honest cap flag.
@@ -82,7 +159,7 @@ use nexus_contracts::daemon_api::worlds::world_rules_list_response::{
     WorldRulesListResponse, WorldRulesListResponseRulesItem,
 };
 use nexus_local_db::spoke_rules::{
-    get_spoke_rules_by_ids, insert_rule, list_rules_by_world_limited, update_rule, RuleUpdate,
+    get_rule_in_tx, insert_rule, list_rules_by_world_limited, update_rule_in_tx, RuleUpdate,
     SpokeRuleRow,
 };
 use nexus_spoke_adapter::constraint::{parse_carrier_json_member, Constraint};
@@ -100,24 +177,34 @@ const WORLD_RULES_CAP: usize = 500;
 #[allow(clippy::cast_possible_wrap)] // const-evaluated literal (500): always fits i64
 const WORLD_RULES_PROBE: i64 = WORLD_RULES_CAP as i64 + 1;
 
-/// `GET /v1/daemon/worlds/:world_id/rules` — list a world's structured
-/// rules, `canonical_name ASC, rule_id ASC`, capped at [`WORLD_RULES_CAP`].
+/// `GET /v1/daemon/worlds/:world_id/rules?include_archived=` — list a world's
+/// structured rules, `canonical_name ASC, rule_id ASC`, capped at
+/// [`WORLD_RULES_CAP`].
+///
+/// §13: the default read omits only `archived` and the omission is pushed into
+/// SQL **before** the `LIMIT ?` probe, so an archived row can neither occupy a
+/// default slot nor flip `truncated` (which counts selected rows only). An
+/// explicit `include_archived` returns every stored status; NULL/unknown stored
+/// statuses stay visible either way.
 #[allow(clippy::missing_errors_doc)]
 async fn list_world_rules(
     pool: &sqlx::SqlitePool,
     world_id: String,
+    include_archived: bool,
 ) -> CoreResult<WorldRulesListResponse> {
     // Fetch one past the cap (501): the store bounds the read SQL-side via
     // `LIMIT ?` (Bugbot 4bad2fca) — the +1 probe returns the single row
     // just beyond the cap so `truncated` below stays honest without ever
-    // loading the full set.
-    let rows = list_rules_by_world_limited(pool, &world_id, WORLD_RULES_PROBE)
+    // loading the full set. The caller-selected status omission travels with
+    // the query, so the probe and the cap both count selected rows.
+    let excluded_status = (!include_archived).then_some(ARCHIVED_STATUS);
+    let rows = list_rules_by_world_limited(pool, &world_id, excluded_status, WORLD_RULES_PROBE)
         .await
         .map_err(|e| CoreError::Internal {
             category: e.to_string(),
         })?;
 
-    // Honest truncation flag: more stored rows than the cap → `truncated:
+    // Honest truncation flag: more *selected* rows than the cap → `truncated:
     // true`, response carries the first 500 (store order is
     // canonical_name ASC, rule_id ASC).
     let truncated = rows.len() > WORLD_RULES_CAP;
@@ -293,6 +380,8 @@ async fn create_world_rule(
         });
     }
     let status = req.status.as_deref().unwrap_or("active");
+    // §13: create is an authoring path — `archived` is a transition applied to
+    // an existing rule, never an authoring state, so it is refused here.
     if !matches!(status, "draft" | "active" | "deprecated") {
         return Err(CoreError::InvalidInput {
             field: "status".to_string(),
@@ -356,20 +445,96 @@ async fn create_world_rule(
     Ok(item_to_response(row_to_item(row)))
 }
 
+/// Test-only rendezvous at the rule write path's write-lock boundary
+/// (`test-hooks`; the production build contains none of this).
+///
+/// Mirrors `execution::test_hooks::OwnerGate`: the gate names the rule whose
+/// write request participates, so a gate armed by one test never parks another
+/// test's write (the integration tests run in parallel). The request signals
+/// [`RuleWriteGate::boundary`] once all of its pre-lock work is done and it is
+/// **about to take the write lock** — the exact point where a competing
+/// writer's commit can still decide what this request will read — and then
+/// waits for [`RuleWriteGate::proceed`]. It is fired from the lock-acquisition
+/// expression itself, so no source position exists between the handshake and
+/// the lock attempt. A regression test therefore drives the
+/// archive/edit race with a real handshake instead of hoping a sleep was long
+/// enough for the request to reach its lock attempt (a request that started
+/// after the competing commit would otherwise pass without ever contending).
+#[cfg(any(test, feature = "test-hooks"))]
+#[derive(Debug)]
+pub struct RuleWriteGate {
+    /// The rule whose write request participates in this rendezvous.
+    pub rule_id: String,
+    /// Signalled once the request reached the write-lock boundary.
+    pub boundary: std::sync::Arc<tokio::sync::Notify>,
+    /// The request waits for this before taking the write lock.
+    pub proceed: std::sync::Arc<tokio::sync::Notify>,
+}
+
+#[cfg(any(test, feature = "test-hooks"))]
+impl RuleWriteGate {
+    /// A gate governing `rule_id`'s write requests.
+    #[must_use]
+    pub fn for_rule(rule_id: impl Into<String>) -> Self {
+        Self {
+            rule_id: rule_id.into(),
+            boundary: std::sync::Arc::new(tokio::sync::Notify::new()),
+            proceed: std::sync::Arc::new(tokio::sync::Notify::new()),
+        }
+    }
+}
+
+#[cfg(any(test, feature = "test-hooks"))]
+static RULE_WRITE_GATE: std::sync::Mutex<Option<std::sync::Arc<RuleWriteGate>>> =
+    std::sync::Mutex::new(None);
+
+/// Install (or clear) the rule-write gate.
+///
+/// # Panics
+///
+/// Panics if the gate mutex was poisoned by a previous panic.
+#[cfg(any(test, feature = "test-hooks"))]
+pub fn set_rule_write_gate(gate: Option<std::sync::Arc<RuleWriteGate>>) {
+    *RULE_WRITE_GATE.lock().expect("rule write gate lock") = gate;
+}
+
+#[cfg(any(test, feature = "test-hooks"))]
+async fn rule_write_gate_boundary(rule_id: &str) {
+    let gate = RULE_WRITE_GATE
+        .lock()
+        .expect("rule write gate lock")
+        .as_ref()
+        .filter(|gate| gate.rule_id == rule_id)
+        .map(std::sync::Arc::clone);
+    if let Some(gate) = gate {
+        gate.boundary.notify_one();
+        gate.proceed.notified().await;
+    }
+}
+
 /// `PATCH /v1/daemon/worlds/:world_id/rules/:rule_id` — per-field edit
-/// (V1.169 P1, AR-2/AR-3/AR-5/AR-6).
+/// (V1.169 P1, AR-2/AR-3/AR-5/AR-6; V1.198 §13 terminal archive).
 ///
 /// Validation order is contract (AR-5): guards (401/404/403) → current-row
 /// fetch + world filter (404 — a `rule_id` that belongs to a different
 /// world is indistinguishable from an unknown id, AR-6) → empty-PATCH
-/// reject (`patch`) → carrier validation if provided (`constraint.*`) →
-/// effective-pair `observer_cardinality` × `target_entry_types` conflict →
-/// meta-field value checks → `RuleUpdate` assembly (whole-carrier
-/// replacement preserves the rest of the extensions bag, AR-3) →
-/// `update_rule` (`Ok(false)` → 404) → re-read → 200 + item.
+/// reject (`patch`) → terminal guard for an archived row (§13) → archive-only
+/// repeat short-circuit (no write, §13) → carrier validation if provided
+/// (`constraint.*`) → effective-pair
+/// `observer_cardinality` × `target_entry_types` conflict → meta-field value
+/// checks → `RuleUpdate` assembly (whole-carrier replacement preserves the
+/// rest of the extensions bag, AR-3) → `update_rule_in_tx` (`Ok(false)` →
+/// 404) → re-read → 200 + item.
 ///
-/// `status=deprecated` is the Deactivate recovery (product lock — no
-/// DELETE route).
+/// §13 atomicity: the current-row read, the guard decision and the write run
+/// in ONE `BEGIN IMMEDIATE` transaction, so two requests cannot pass a stale
+/// non-archived preimage and a concurrent edit cannot alter a tombstone.
+///
+/// `status=deprecated` is the Deactivate recovery and `status=archived` is the
+/// terminal archive transition (from any non-archived status; repeating it on
+/// an archived row succeeds — product lock, no DELETE and no restore route).
+/// The repeat is a strict no-write success: the stored row is returned as it
+/// stands, `updated_at` included, so replaying the archive is invisible.
 #[allow(clippy::missing_errors_doc)]
 #[allow(clippy::too_many_lines)]
 // ^ the locked validation order (AR-5) is one cohesive chain; splitting
@@ -380,28 +545,80 @@ async fn update_world_rule(
     world_id: String,
     rule_id: String,
     req: WorldRuleUpdateRequest,
+    presence: RulePatchPresence,
 ) -> CoreResult<WorldRuleResponse> {
+    // §13: one `BEGIN IMMEDIATE` transaction owns the read → guard → write →
+    // re-read sequence. The write lock is taken up front, so a competing
+    // archive commits before this read or waits behind this write — neither
+    // request can act on a stale preimage.
+    //
+    // One expression on purpose: the `test-hooks` write-lock rendezvous
+    // (compiled out of production builds) is the last statement before the
+    // lock acquisition, so the archive/edit race regression hands over the lock
+    // deterministically — a request can never be between a pre-lock preimage
+    // read and its lock attempt at any other source position.
+    let mut tx = {
+        #[cfg(any(test, feature = "test-hooks"))]
+        rule_write_gate_boundary(&rule_id).await;
+
+        nexus_local_db::begin_immediate(pool)
+            .await
+            .map_err(|e| CoreError::Internal {
+                category: e.to_string(),
+            })?
+    };
+
     // AR-5 order: addressing precedes payload. The pre-fetch is
     // world-scoped (filter below): a rule_id owned by a different world —
     // even another world of the same creator — is 404 naming only the id,
     // with no existence leak (AR-6).
-    let rows = get_spoke_rules_by_ids(pool, std::slice::from_ref(&rule_id))
+    let Some(current) = get_rule_in_tx(&mut tx, &rule_id)
         .await
         .map_err(|e| CoreError::Internal {
             category: e.to_string(),
-        })?;
-    let Some(current) = rows.into_iter().find(|row| row.world_id == world_id) else {
+        })?
+        .filter(|row| row.world_id == world_id)
+    else {
         return Err(CoreError::NotFound {
             resource: format!("rule {rule_id}"),
         });
     };
+
+    // §13: archived is terminal, so the tombstone accepts exactly the
+    // status-only request that produced it. The guard runs straight after the
+    // scoped lookup — before the typed empty-PATCH test — so a supplied member
+    // the generated DTO collapses (an empty `{}` / `[]`, an explicit `null`, or
+    // a `status` exit) is still refused by name instead of being discarded into
+    // the empty-PATCH or archive-only shapes.
+    guard_archived_patch(
+        current.status.as_deref() == Some(ARCHIVED_STATUS),
+        &req,
+        presence,
+    )?;
+
+    // §13 strict idempotence: the archive-only repeat on an already archived
+    // row is a **no-write** success. The shared update statement refreshes
+    // `updated_at` on every matched row, so letting the repeat reach the write
+    // path would mutate the stored row — and the caller-visible response —
+    // without changing its content. Only the exact repeat short-circuits here:
+    // the guard above already refused every other archived-row shape by name,
+    // and a raw `{}` (no supplied member at all) still falls through to the
+    // empty-PATCH rejection below. No write, so no re-read either — the current
+    // row is already the state this commit publishes.
+    if current.status.as_deref() == Some(ARCHIVED_STATUS)
+        && req.status.as_deref() == Some(ARCHIVED_STATUS)
+    {
+        return Ok(item_to_response(row_to_item(current)));
+    }
 
     // AR-3: empty PATCH (no mutable field present) → 400 field=`patch` —
     // fail-early beats a no-op write that would still refresh updated_at.
     // `constraint` counts as present only when non-empty (typify's
     // generated `Map` treats absent and `{}` identically via
     // `skip_serializing_if = Map::is_empty`; an empty carrier is invalid
-    // anyway, so it cannot be a legitimate PATCH payload).
+    // anyway, so it cannot be a legitimate PATCH payload). A raw `{}` carries
+    // no supplied member either, so it reaches this branch on an archived row
+    // too and keeps naming `patch`.
     if req.canonical_name.is_none()
         && req.statement.is_none()
         && req.severity_hint.is_none()
@@ -497,11 +714,15 @@ async fn update_world_rule(
         None => None,
     };
     if let Some(status) = req.status.as_deref() {
-        if !matches!(status, "draft" | "active" | "deprecated") {
+        // §13 write vocabulary: `archived` joins the three authoring states
+        // (create still refuses it). An archived *row* never reaches this
+        // branch with a non-archived value — the terminal guard above already
+        // refused the status exit.
+        if !matches!(status, "draft" | "active" | "deprecated" | ARCHIVED_STATUS) {
             return Err(CoreError::InvalidInput {
                 field: "status".to_string(),
                 reason: format!(
-                    "status must be one of draft | active | deprecated, got {status:?}"
+                    "status must be one of draft | active | deprecated | archived, got {status:?}"
                 ),
             });
         }
@@ -558,7 +779,7 @@ async fn update_world_rule(
 
     // AR-4: Ok(false) = unknown id OR foreign world (storage does not
     // distinguish) → 404 naming only the id (AR-6).
-    if !update_rule(pool, &world_id, &rule_id, &update)
+    if !update_rule_in_tx(&mut tx, &world_id, &rule_id, &update)
         .await
         .map_err(|e| CoreError::Internal {
             category: e.to_string(),
@@ -569,19 +790,101 @@ async fn update_world_rule(
         });
     }
 
-    // Re-read for the response item (AR-4: no new fetch fn).
-    let rows = get_spoke_rules_by_ids(pool, std::slice::from_ref(&rule_id))
+    // Re-read for the response item inside the same transaction: the row this
+    // commit is about to publish, never a concurrent writer's state.
+    let Some(row) = get_rule_in_tx(&mut tx, &rule_id)
         .await
         .map_err(|e| CoreError::Internal {
             category: e.to_string(),
-        })?;
-    let Some(row) = rows.into_iter().next() else {
+        })?
+    else {
         return Err(CoreError::Internal {
             category: format!("rule {rule_id} vanished after a matched update"),
         });
     };
 
+    tx.commit().await.map_err(|e| CoreError::Internal {
+        category: e.to_string(),
+    })?;
+
     Ok(item_to_response(row_to_item(row)))
+}
+
+/// §13 terminal guard: an archived row accepts exactly the status-only
+/// request that produced it.
+///
+/// Rejections use the existing field-level `invalid_input` envelope and follow
+/// the shipped request-field order (the generated `WorldRuleUpdateRequest`
+/// declaration order: `canonical_name`, `constraint`, `kind`, `severity_hint`,
+/// `statement`, `status`, `target_entry_types`), naming the first offending
+/// member. `status` is offending when the caller supplied it with anything but
+/// the literal `archived` (a status exit — an explicit `null` included); every
+/// other member is offending when the caller supplied its key **or** its typed
+/// value is nonempty, so an empty object/array or an explicit null can never be
+/// discarded to turn a mixed PATCH into an archive-only repeat, and inconsistent
+/// presence metadata can never authorize an archived edit.
+///
+/// # Errors
+///
+/// Returns `CoreError::InvalidInput` naming the first offending member.
+fn guard_archived_patch(
+    archived: bool,
+    req: &WorldRuleUpdateRequest,
+    presence: RulePatchPresence,
+) -> CoreResult<()> {
+    if !archived {
+        return Ok(());
+    }
+    let offenders: [(&str, bool); 7] = [
+        (
+            "canonical_name",
+            presence.contains(RulePatchPresence::CANONICAL_NAME) || req.canonical_name.is_some(),
+        ),
+        (
+            "constraint",
+            presence.contains(RulePatchPresence::CONSTRAINT) || !req.constraint.is_empty(),
+        ),
+        (
+            "kind",
+            presence.contains(RulePatchPresence::KIND) || req.kind.is_some(),
+        ),
+        (
+            "severity_hint",
+            presence.contains(RulePatchPresence::SEVERITY_HINT) || req.severity_hint.is_some(),
+        ),
+        (
+            "statement",
+            presence.contains(RulePatchPresence::STATEMENT) || req.statement.is_some(),
+        ),
+        // A status exit is a *supplied* status other than `archived` (an
+        // explicit null counts: `presence` records the key while the typed
+        // value is the absent member). An absent status is not an offender —
+        // the supplied content member is the one named.
+        (
+            "status",
+            (presence.contains(RulePatchPresence::STATUS) || req.status.is_some())
+                && !matches!(req.status.as_deref(), Some(ARCHIVED_STATUS)),
+        ),
+        (
+            "target_entry_types",
+            presence.contains(RulePatchPresence::TARGET_ENTRY_TYPES)
+                || req.target_entry_types.is_some(),
+        ),
+    ];
+    let Some((field, _)) = offenders.into_iter().find(|(_, offending)| *offending) else {
+        return Ok(());
+    };
+    let reason = if field == "status" {
+        "an archived rule is terminal: only status=archived is accepted, so no status exit \
+         (and no restore route) exists"
+            .to_string()
+    } else {
+        format!("an archived rule is read-only: only status=archived may be supplied, got {field}")
+    };
+    Err(CoreError::InvalidInput {
+        field: field.to_string(),
+        reason,
+    })
 }
 
 /// AR-3 whole-carrier replacement: overwrite `extensions["nexus"]

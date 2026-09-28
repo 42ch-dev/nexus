@@ -13,8 +13,8 @@ import type {
   ShutdownSessionResponse,
 } from '@42ch/nexus-contracts';
 import type { ServiceCore } from './lifecycle.js';
-import { MAX_ACTIVE_PROVIDER_OPERATIONS, PROVIDER_DEFAULT_DEADLINE_MS } from './config.js';
-import { HttpError, mapNativeError, routeNotMigrated } from './errors.js';
+import { PROVIDER_DEFAULT_DEADLINE_MS } from './config.js';
+import { HttpError, isAbsentHostError, mapNativeError, routeNotMigrated } from './errors.js';
 import {
   isTerminalOperationStatus,
   type ProviderOperationRecord,
@@ -215,15 +215,6 @@ async function providerCall(service: ServiceCore, request: ProviderCall): Promis
   }
 }
 
-/** A missing session/operation, or no attached Host authority, is absence — not a fault. */
-function isAbsentHostError(error: unknown): boolean {
-  const mapped = mapNativeError(error);
-  return (
-    mapped.code === 'not_found' ||
-    (mapped.code === 'invalid_input' && mapped.message === 'host not started')
-  );
-}
-
 /**
  * Fresh native truth for one session, or `null` when the Host authority has no
  * row for it (unknown id, or no attached authority at all). Every session
@@ -238,8 +229,9 @@ async function tryNativeSession(
     const response = await hostQuery(service, { query: 'get_session', session_id: sessionId });
     return response.session ?? null;
   } catch (error) {
-    if (isAbsentHostError(error)) return null;
-    throw mapNativeError(error);
+    const mapped = mapNativeError(error);
+    if (mapped.code === 'not_found' || isAbsentHostError(mapped)) return null;
+    throw mapped;
   }
 }
 
@@ -286,23 +278,32 @@ async function resolveSessionPlacement(
   });
 }
 
+/** The generic provider-only / recovered-journal operation row. */
+type ProviderOperationRow = { operation_id: string; session_id: string; status: string };
+
 /**
  * The authority's own generic operation row for one id, or `null` when it serves
- * none. The mirror is never consulted: it is not authoritative for an Actor
- * operation, and its cache must not resurrect one the authority has aged out
- * (technical contract §5: an expired Actor observation is absent, never
- * re-created as provider-only state).
+ * none. A missing resource is `not_found`, and an unattached authority answers
+ * no row for anything either (`invalid_input` plus the typed `host_not_started`
+ * category); both are absence for this read, and only these two are. The mirror
+ * is never consulted here: it is not authoritative for an Actor operation, and
+ * its cache must not resurrect one the authority has aged out (technical
+ * contract §5: an expired Actor observation is absent, never re-created as
+ * provider-only state).
  */
 async function nativeOperationRow(
   service: ServiceCore,
   operationId: string,
-): Promise<{ operation_id: string; session_id: string; status: string } | null> {
+): Promise<ProviderOperationRow | null> {
   try {
     const response = await hostQuery(service, { query: 'get_operation', operation_id: operationId });
     return response.operation ?? null;
   } catch (error) {
     const mapped = mapNativeError(error);
-    if (mapped.code !== 'not_found') throw mapped;
+    // Absence, never a client error: a resource the authority does not hold, or
+    // an authority that is not attached at all. Both mean "no row", so the
+    // caller's cache/absence arm decides; every other rejection propagates.
+    if (mapped.code !== 'not_found' && !isAbsentHostError(mapped)) throw mapped;
     return null;
   }
 }
@@ -373,8 +374,9 @@ export async function lookupCharacterOperation(
       service.core.hostCharacterOperation(principal, operationId),
     );
   } catch (error) {
-    if (isAbsentHostError(error)) return null;
-    throw mapNativeError(error);
+    const mapped = mapNativeError(error);
+    if (mapped.code === 'not_found' || isAbsentHostError(mapped)) return null;
+    throw mapped;
   }
 }
 
@@ -471,7 +473,12 @@ export async function executeProviderOperation(service: ServiceCore, sessionId: 
     // this admission is where the mirror learns which of its Actor records the
     // authority no longer serves.
     await ageSettledActorOperations(service);
-    service.providerRegistry.registerOperation({
+    // The mirror retains this row only inside the Actor arm's bound: an arm full
+    // of rows pinned by live readers retains nothing here, and this Host must not
+    // create a hub the registry does not hold — that hub would keep charging
+    // control slots the reserve proof excludes. The stream's own admission
+    // re-marks the operation if the run still needs serving.
+    const retained = service.providerRegistry.registerOperation({
       operationId: reply.operation_id,
       sessionId,
       providerId: placement.record.providerId,
@@ -480,48 +487,63 @@ export async function executeProviderOperation(service: ServiceCore, sessionId: 
       terminalTranscript: null,
       actorBacked: true,
     });
-    service.providerRegistry.ensureHub(
-      reply.operation_id,
-      () => new OperationEventHub(reply.operation_id, sessionId),
-    );
+    if (retained) {
+      service.providerRegistry.ensureHub(
+        reply.operation_id,
+        () => new OperationEventHub(reply.operation_id, sessionId),
+      );
+    }
     return reply;
   }
-  // Transport admission: cap live operations *before* the provider effect so a
-  // stalled/hung population cannot grow without bound (architecture §7).
-  if (service.providerRegistry.activeOperationCount() >= MAX_ACTIVE_PROVIDER_OPERATIONS) {
+  // Transport admission: reserve one live-operation slot *synchronously, before
+  // the provider effect*, named by this dispatch's own request id. The cap counts
+  // reservations, so concurrent requests cannot all pass the same free-slot check
+  // and then each register a row — a stalled/hung population can no longer grow
+  // past the cap (architecture §7). The reservation becomes the registered row's
+  // charge once the provider answers, and is released on every failure path.
+  const dispatchId = randomUUID();
+  if (!service.providerRegistry.beginProviderOperationDispatch(dispatchId)) {
     throw new HttpError(503, 'busy', 'too many active provider operations');
   }
-  // The provider protocol accepts the Rust HostOperation wire shape, not the
-  // public HTTP request. A legacy session cannot authorize memory capture.
-  if (req.remember === true) {
-    throw new HttpError(422, 'invalid_input', 'remember requires an admitted Character session');
+  try {
+    // The provider protocol accepts the Rust HostOperation wire shape, not the
+    // public HTTP request. A legacy session cannot authorize memory capture.
+    if (req.remember === true) {
+      throw new HttpError(422, 'invalid_input', 'remember requires an admitted Character session');
+    }
+    const executePayload = {
+      Prompt: {
+        op_id: randomUUID(),
+        content: [{ Text: { text: req.content } }],
+        permission_scope: null,
+      },
+    };
+    const reply = await providerCall(service, {
+      method: 'execute',
+      request_id: dispatchId,
+      session_id: sessionId,
+      deadline_ms: PROVIDER_DEFAULT_DEADLINE_MS,
+      payload: executePayload,
+    });
+    const operationId = reply.operation_id;
+    if (!operationId) throw new HttpError(500, 'internal', 'provider execute returned no operation_id');
+    if (
+      !service.providerRegistry.registerAdmittedProviderOperation(dispatchId, {
+        operationId,
+        sessionId,
+        providerId: placement.record.providerId,
+        status: 'started',
+        terminalEvent: null,
+        terminalTranscript: null,
+      })
+    ) {
+      throw new HttpError(500, 'internal', 'provider operation admission was lost');
+    }
+    service.providerRegistry.ensureHub(operationId, () => new OperationEventHub(operationId, sessionId));
+    return { operation_id: operationId, session_id: sessionId, status: 'started' };
+  } finally {
+    service.providerRegistry.endProviderOperationDispatch(dispatchId);
   }
-  const executePayload = {
-    Prompt: {
-      op_id: randomUUID(),
-      content: [{ Text: { text: req.content } }],
-      permission_scope: null,
-    },
-  };
-  const reply = await providerCall(service, {
-    method: 'execute',
-    request_id: randomUUID(),
-    session_id: sessionId,
-    deadline_ms: PROVIDER_DEFAULT_DEADLINE_MS,
-    payload: executePayload,
-  });
-  const operationId = reply.operation_id;
-  if (!operationId) throw new HttpError(500, 'internal', 'provider execute returned no operation_id');
-  service.providerRegistry.registerOperation({
-    operationId,
-    sessionId,
-    providerId: placement.record.providerId,
-    status: 'started',
-    terminalEvent: null,
-    terminalTranscript: null,
-  });
-  service.providerRegistry.ensureHub(operationId, () => new OperationEventHub(operationId, sessionId));
-  return { operation_id: operationId, session_id: sessionId, status: 'started' };
 }
 
 export async function cancelProviderOperation(service: ServiceCore, operationId: string): Promise<CancelOperationResponse> {
@@ -591,7 +613,7 @@ export async function lookupProviderSession(service: ServiceCore, sessionId: str
 export async function lookupProviderOperation(
   service: ServiceCore,
   operationId: string,
-): Promise<{ operation_id: string; session_id: string; status: string } | null> {
+): Promise<ProviderOperationRow | null> {
   parseUuid(operationId, 'operation_id');
   const native = await nativeOperationRow(service, operationId);
   if (native) return native;
@@ -601,6 +623,34 @@ export async function lookupProviderOperation(
   // stale mirror row served as a generic provider-only observation.
   if (!cached || cached.actorBacked === true) return null;
   return { operation_id: cached.operationId, session_id: cached.sessionId, status: cached.status };
+}
+
+/**
+ * The one observation behind `GET /v1/daemon/agent-host/operations/{id}`: the
+ * authority's own Character result when it owns the id, otherwise the generic
+ * provider-only / recovered-journal row.
+ *
+ * This read spends at most ONE Character lookup, and a provider-only id spends
+ * none: the mirror row's own non-Actor mark is the stored session identity that
+ * proves the id provider-only (the same positive statement
+ * `isActorOwnedOperation` consumes), so the Character authority is not asked
+ * about a provider-only operation at all. Everything else — an Actor-marked
+ * row, or an id the mirror has never seen — is read from the Character arm, and
+ * a null result there is handed to the generic arm as absence, never as the
+ * discriminator: `lookupProviderOperation` keeps its own `actorBacked` guard, so
+ * a Creator Actor id is still never served as provider-only state.
+ */
+export async function lookupOperationObservation(
+  service: ServiceCore,
+  operationId: string,
+): Promise<CharacterOperationResult | ProviderOperationRow | null> {
+  parseUuid(operationId, 'operation_id');
+  const cached = service.providerRegistry.operationRecord(operationId);
+  if (cached === undefined || cached.actorBacked === true) {
+    const character = await lookupCharacterOperation(service, operationId);
+    if (character) return character;
+  }
+  return lookupProviderOperation(service, operationId);
 }
 
 async function assertKnownSession(service: ServiceCore, sessionId: string): Promise<ProviderSessionRecord> {
@@ -637,6 +687,9 @@ async function assertKnownOperation(service: ServiceCore, operationId: string): 
     terminalEvent: null,
     terminalTranscript: null,
   };
+  // A live row the mirror has no room for is simply not cached: native truth
+  // still answers this caller, and the mirror's live population stays at the cap
+  // the control reserve is proven against (`registerOperation` refuses it whole).
   service.providerRegistry.registerOperation(record);
   return record;
 }

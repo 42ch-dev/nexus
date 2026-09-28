@@ -517,7 +517,6 @@ mod unix_dir {
     use std::fs::{File, OpenOptions};
     use std::io::{self, Read, Write};
     use std::os::unix::fs::OpenOptionsExt;
-    use std::os::unix::io::AsRawFd;
     use std::path::Path;
 
     /// An owned directory descriptor.
@@ -533,10 +532,6 @@ mod unix_dir {
                 .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
                 .open(path)?;
             Ok(Self { file })
-        }
-
-        fn raw_fd(&self) -> i32 {
-            self.file.as_raw_fd()
         }
 
         fn try_clone(&self) -> io::Result<Self> {
@@ -594,7 +589,7 @@ mod unix_dir {
             #[allow(clippy::cast_possible_truncation)]
             let mode = Mode::from_bits_truncate(mode.unwrap_or(CREATE_FILE_MODE) as mode_t);
             let fd = openat(
-                Some(self.raw_fd()),
+                &self.file,
                 name,
                 OFlag::O_WRONLY
                     | OFlag::O_CREAT
@@ -604,7 +599,9 @@ mod unix_dir {
                 mode,
             )
             .map_err(errno_io)?;
-            let mut file = adopt_fd(fd, true)?;
+            // The open returns the descriptor already owned, so the file wraps
+            // it as-is: no reopened `/dev/fd` copy and no manual close.
+            let mut file = File::from(fd);
             file.write_all(bytes)?;
             file.sync_all()?;
             self.sync()?;
@@ -800,17 +797,12 @@ mod unix_dir {
 
         /// `unlinkat` on this descriptor (never follows the final component).
         pub fn unlink(&self, name: &str) -> io::Result<()> {
-            unlinkat(
-                Some(self.raw_fd()),
-                name,
-                nix::unistd::UnlinkatFlags::NoRemoveDir,
-            )
-            .map_err(errno_io)
+            unlinkat(&self.file, name, nix::unistd::UnlinkatFlags::NoRemoveDir).map_err(errno_io)
         }
 
         /// Atomically move `from` onto `to` within this directory.
         fn rename_within(&self, from: &str, to: &str) -> Result<(), CaptureError> {
-            match renameat(Some(self.raw_fd()), from, Some(self.raw_fd()), to) {
+            match renameat(&self.file, from, &self.file, to) {
                 Ok(()) => Ok(()),
                 Err(nix::errno::Errno::ENOENT) => Err(CaptureError::Absent),
                 Err(other) => Err(CaptureError::Io(errno_io(other))),
@@ -821,13 +813,7 @@ mod unix_dir {
         /// name means an external writer won the race, and BOTH the captured
         /// original and the stage are left in place as evidence.
         fn link_no_clobber(&self, from: &str, to: &str, op: &str) -> io::Result<()> {
-            match linkat(
-                Some(self.raw_fd()),
-                from,
-                Some(self.raw_fd()),
-                to,
-                AtFlags::empty(),
-            ) {
+            match linkat(&self.file, from, &self.file, to, AtFlags::empty()) {
                 Ok(()) => Ok(()),
                 Err(nix::errno::Errno::EEXIST) => {
                     self.sync()?;
@@ -843,13 +829,7 @@ mod unix_dir {
 
         /// Put the captured bytes back at the target name.
         fn restore_captured(&self, displaced: &str, target: &str) -> io::Result<()> {
-            match linkat(
-                Some(self.raw_fd()),
-                displaced,
-                Some(self.raw_fd()),
-                target,
-                AtFlags::empty(),
-            ) {
+            match linkat(&self.file, displaced, &self.file, target, AtFlags::empty()) {
                 Ok(()) => {}
                 Err(nix::errno::Errno::EEXIST) => {
                     self.sync()?;
@@ -865,15 +845,16 @@ mod unix_dir {
         }
 
         fn openat(&self, name: &str, flags: OFlag) -> io::Result<File> {
-            let write = flags.contains(OFlag::O_WRONLY);
             let fd = openat(
-                Some(self.raw_fd()),
+                &self.file,
                 name,
                 flags | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
                 Mode::empty(),
             )
             .map_err(errno_io)?;
-            adopt_fd(fd, write)
+            // The open flags above confine the lookup; the descriptor comes
+            // back owned, so it is wrapped directly instead of being reopened.
+            Ok(File::from(fd))
         }
     }
 
@@ -909,14 +890,14 @@ mod unix_dir {
 
     fn open_subdir(parent: &DirFd, name: &str) -> io::Result<DirFd> {
         let fd = openat(
-            Some(parent.raw_fd()),
+            &parent.file,
             name,
             OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
             Mode::empty(),
         )
         .map_err(errno_io)?;
         Ok(DirFd {
-            file: adopt_fd(fd, false)?,
+            file: File::from(fd),
         })
     }
 
@@ -925,21 +906,6 @@ mod unix_dir {
             io::ErrorKind::InvalidData,
             format!("third-state bytes at {op} boundary: {detail}"),
         )
-    }
-
-    /// Reopen an owned raw fd without widening its access mode.
-    ///
-    /// Stage files are created `O_WRONLY`; reopening them read+write returns
-    /// `EACCES` on Darwin/Linux and breaks create commits.
-    fn adopt_fd(fd: i32, write: bool) -> io::Result<File> {
-        let path = format!("/dev/fd/{fd}");
-        let file = if write {
-            OpenOptions::new().write(true).open(&path)?
-        } else {
-            OpenOptions::new().read(true).open(&path)?
-        };
-        nix::unistd::close(fd).map_err(errno_io)?;
-        Ok(file)
     }
 
     fn errno_io(err: nix::errno::Errno) -> io::Error {

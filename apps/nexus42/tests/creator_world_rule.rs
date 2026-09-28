@@ -1,10 +1,10 @@
-//! Server-free tests for the `creator world rule add|list|deactivate` author
+//! Server-free tests for the `creator world rule add|list|deactivate|archive`
 //! CLI (V1.166 PD-1 / AR-2 / AR-3, DR-64; direct-core retarget v1.193 P0-T3).
 //!
 //! Plan: `.mstar/plans/2026-08-15-v1.166-p1-rules-driven-check-evaluator.md`
 //! Spec: `.mstar/iterations/v1.166/specs/v1.166-quality-locks.md` §PD-1 / §AR-2 / §AR-3
 //!
-//! Drives the leaf functions (`rule_add` / `rule_list` / `rule_deactivate`)
+//! Drives the leaf functions (`rule_add` / `rule_list` / `rule_deactivate` / `rule_archive`)
 //! against a hermetic direct-core home — no `$HOME`, no daemon, no Node child
 //! (`common/direct.rs` precedent). Storage truth is read through the same core
 //! projection the CLI renders (`list_world_rules`), so the assertions describe
@@ -22,7 +22,7 @@ mod direct;
 
 use assert_cmd::Command;
 use direct::DirectFixture;
-use nexus42::commands::creator::world::rule::{rule_add, rule_deactivate, rule_list};
+use nexus42::commands::creator::world::rule::{rule_add, rule_archive, rule_deactivate, rule_list};
 use nexus_contracts::worlds::world_rules_list_response::WorldRulesListResponseRulesItem;
 use nexus_core::{CoreAccess, CoreOpenOptions, CoreService, Principal};
 use nexus_home_layout::{nexus_root_from_home, workspace_state_db_path};
@@ -119,10 +119,20 @@ async fn fresh_env() -> RuleEnv {
 }
 
 /// The stored rules of an owned World, through the core projection the CLI
-/// renders.
+/// renders. The default read (archived omitted) is what the CLI renders.
 async fn stored_rules(env: &RuleEnv, world_id: &str) -> Vec<WorldRulesListResponseRulesItem> {
+    stored_rules_including(env, world_id, false).await
+}
+
+/// The same projection with the caller-selected inclusion (V1.198 §13): the
+/// default read omits archived rows, `include_archived = true` reveals them.
+async fn stored_rules_including(
+    env: &RuleEnv,
+    world_id: &str,
+    include_archived: bool,
+) -> Vec<WorldRulesListResponseRulesItem> {
     env.core
-        .list_world_rules(&env.principal, world_id.to_string())
+        .list_world_rules(&env.principal, world_id.to_string(), include_archived)
         .await
         .expect("list rules of an owned World")
         .rules
@@ -191,7 +201,7 @@ async fn cli_rule_list_json_renders_core_projection() {
     );
 }
 
-/// `creator world rule --help` lists the three subcommands.
+/// `creator world rule --help` lists the four subcommands.
 #[test]
 fn world_rule_help_lists_subcommands() {
     let output = Command::cargo_bin("nexus42")
@@ -203,10 +213,30 @@ fn world_rule_help_lists_subcommands() {
         .stdout
         .clone();
     let help_text = String::from_utf8(output).unwrap();
-    for subcmd in &["add", "list", "deactivate"] {
+    for subcmd in &["add", "list", "deactivate", "archive"] {
         assert!(
             help_text.contains(subcmd),
             "creator world rule --help must list '{subcmd}' subcommand: {help_text}"
+        );
+    }
+}
+
+/// `creator world rule list --help` documents the inclusion switch.
+#[test]
+fn world_rule_list_help_shows_include_archived() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "world", "rule", "list", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let help_text = String::from_utf8(output).unwrap();
+    for flag in ["--world-id", "--include-archived", "--json"] {
+        assert!(
+            help_text.contains(flag),
+            "rule list --help must document {flag}: {help_text}"
         );
     }
 }
@@ -295,10 +325,10 @@ async fn add_list_deactivate_round_trip() {
     );
 
     // list: human + JSON paths do not error.
-    rule_list(&env.core, &env.principal, WORLD, false)
+    rule_list(&env.core, &env.principal, WORLD, false, false)
         .await
         .unwrap();
-    rule_list(&env.core, &env.principal, WORLD, true)
+    rule_list(&env.core, &env.principal, WORLD, false, true)
         .await
         .unwrap();
 
@@ -312,10 +342,10 @@ async fn add_list_deactivate_round_trip() {
     assert_ne!(rows[0].status.as_deref(), Some("inactive"), "spoke vocab");
 
     // list after deactivate still shows the row (all statuses visible).
-    rule_list(&env.core, &env.principal, WORLD, false)
+    rule_list(&env.core, &env.principal, WORLD, false, false)
         .await
         .unwrap();
-    rule_list(&env.core, &env.principal, WORLD, true)
+    rule_list(&env.core, &env.principal, WORLD, false, true)
         .await
         .unwrap();
 }
@@ -654,5 +684,505 @@ async fn non_core_status_rejected_no_write() {
     assert!(
         stored_rules(&env, WORLD).await.is_empty(),
         "rejected add must not write a row"
+    );
+}
+
+// =============================================================================
+// Archive lifecycle (V1.198 §13: terminal, retained, hidden by default)
+// =============================================================================
+
+/// `archive` writes the terminal `archived` status, retains the row and
+/// succeeds idempotently on repetition. The default read omits it; only the
+/// explicit inclusion returns it.
+#[tokio::test]
+async fn archive_round_trip_terminal_retained_and_idempotent() {
+    let env = fresh_env().await;
+    let rule_id = rule_add(
+        &env.core,
+        &env.principal,
+        WORLD,
+        "Retire me",
+        "rule",
+        "Every character entry must carry a summary.",
+        "warning",
+        &["character".to_string()],
+        "active",
+        MODULE_PRESENCE_CARRIER,
+    )
+    .await
+    .unwrap()
+    .rule_id;
+
+    rule_archive(&env.core, &env.principal, WORLD, &rule_id)
+        .await
+        .expect("archive on an owned world must succeed");
+
+    assert!(
+        stored_rules(&env, WORLD).await.is_empty(),
+        "the default read omits the archived row"
+    );
+    let stored = stored_rules_including(&env, WORLD, true).await;
+    assert_eq!(stored.len(), 1, "the archived row is retained");
+    assert_eq!(stored[0].status.as_deref(), Some("archived"));
+    assert_eq!(stored[0].canonical_name, "Retire me");
+    assert_eq!(stored[0].target_entry_types, vec!["character".to_string()]);
+    assert_eq!(
+        stored[0].constraint,
+        serde_json::json!({"family": "module_presence", "module_key": "characters"})
+            .as_object()
+            .unwrap()
+            .clone(),
+        "archiving retains the carrier"
+    );
+
+    // Repetition is retry-safe for scripts and loses no field.
+    rule_archive(&env.core, &env.principal, WORLD, &rule_id)
+        .await
+        .expect("repeating archive must succeed");
+    let after_repeat = stored_rules_including(&env, WORLD, true).await;
+    assert_eq!(after_repeat.len(), 1);
+    assert_eq!(after_repeat[0].status.as_deref(), Some("archived"));
+    assert_eq!(after_repeat[0].canonical_name, "Retire me");
+}
+
+/// Archiving reaches `archived` from each prior status — an `active`, a
+/// create-time `draft` and a `deactivate`d (`deprecated`) rule all end as
+/// retained archived rows.
+#[tokio::test]
+async fn archive_transitions_from_each_prior_status() {
+    let env = fresh_env().await;
+    let mut ids = Vec::new();
+    for (name, status) in [
+        ("Active rule", "active"),
+        ("Draft rule", "draft"),
+        ("Deprecated rule", "active"),
+    ] {
+        let id = rule_add(
+            &env.core,
+            &env.principal,
+            WORLD,
+            name,
+            "rule",
+            "statement",
+            "warning",
+            &[],
+            status,
+            MODULE_PRESENCE_CARRIER,
+        )
+        .await
+        .unwrap()
+        .rule_id;
+        ids.push((name.to_string(), id));
+    }
+    // The third row reaches `deprecated` through the CLI seam, not at create.
+    let deprecated_id = ids.last().expect("three seeded rules").1.clone();
+    rule_deactivate(&env.core, &env.principal, WORLD, &deprecated_id)
+        .await
+        .expect("deactivate must succeed before archive");
+    assert_eq!(
+        stored_rules(&env, WORLD).await.len(),
+        3,
+        "draft and deprecated stay visible in the default read"
+    );
+
+    for (_, id) in &ids {
+        rule_archive(&env.core, &env.principal, WORLD, id)
+            .await
+            .expect("archiving a non-archived row must succeed");
+    }
+
+    assert!(
+        stored_rules(&env, WORLD).await.is_empty(),
+        "all three archived rows leave the default read"
+    );
+    let stored = stored_rules_including(&env, WORLD, true).await;
+    assert_eq!(stored.len(), 3);
+    assert!(
+        stored
+            .iter()
+            .all(|row| row.status.as_deref() == Some("archived")),
+        "each prior status ends as archived: {stored:?}"
+    );
+    for (name, _) in &ids {
+        assert!(
+            stored.iter().any(|row| row.canonical_name == *name),
+            "the archived row '{name}' is retained"
+        );
+    }
+}
+
+/// The human table and the `--json` array agree on the selected set: the
+/// default read omits the archived row from both, and the explicit inclusion
+/// shows it in both — with the `STATUS` column printing the stored value.
+#[tokio::test]
+async fn archive_list_table_and_json_parity() {
+    let env = fresh_env().await;
+    let kept_id = rule_add(
+        &env.core,
+        &env.principal,
+        WORLD,
+        "Kept rule",
+        "rule",
+        "statement",
+        "warning",
+        &[],
+        "active",
+        MODULE_PRESENCE_CARRIER,
+    )
+    .await
+    .unwrap()
+    .rule_id;
+    let archived_id = rule_add(
+        &env.core,
+        &env.principal,
+        WORLD,
+        "Archived rule",
+        "rule",
+        "statement",
+        "warning",
+        &[],
+        "active",
+        MODULE_PRESENCE_CARRIER,
+    )
+    .await
+    .unwrap()
+    .rule_id;
+    rule_archive(&env.core, &env.principal, WORLD, &archived_id)
+        .await
+        .unwrap();
+
+    let default_json = rule_list(&env.core, &env.principal, WORLD, false, true)
+        .await
+        .unwrap()
+        .unwrap();
+    let default_table = rule_list(&env.core, &env.principal, WORLD, false, false)
+        .await
+        .unwrap()
+        .unwrap();
+    let parsed: Vec<WorldRulesListResponseRulesItem> =
+        serde_json::from_str(&default_json).expect("default JSON is the rule-item array");
+    assert_eq!(
+        parsed.len(),
+        1,
+        "default JSON omits archived: {default_json}"
+    );
+    assert_eq!(parsed[0].rule_id, kept_id);
+    assert!(
+        !default_table.contains(&archived_id),
+        "default table omits archived: {default_table}"
+    );
+
+    let included_json = rule_list(&env.core, &env.principal, WORLD, true, true)
+        .await
+        .unwrap()
+        .unwrap();
+    let included_table = rule_list(&env.core, &env.principal, WORLD, true, false)
+        .await
+        .unwrap()
+        .unwrap();
+    let parsed: Vec<WorldRulesListResponseRulesItem> =
+        serde_json::from_str(&included_json).expect("included JSON is the rule-item array");
+    assert_eq!(
+        parsed.len(),
+        2,
+        "included JSON reveals archived: {included_json}"
+    );
+    let archived_item = parsed
+        .iter()
+        .find(|row| row.rule_id == archived_id)
+        .expect("the archived row is in the included JSON");
+    assert_eq!(archived_item.status.as_deref(), Some("archived"));
+    assert!(
+        included_table.contains(&kept_id) && included_table.contains(&archived_id),
+        "the included table lists both rows: {included_table}"
+    );
+    assert!(
+        included_table.lines().any(|line| {
+            line.contains("Archived rule") && line.split_whitespace().any(|cell| cell == "archived")
+        }),
+        "the STATUS column prints the stored value: {included_table}"
+    );
+}
+
+fn assert_cli_archives_rule(fixture: &DirectFixture, rule_id: &str) {
+    let archived = fixture
+        .command()
+        .args([
+            "creator",
+            "world",
+            "rule",
+            "archive",
+            "--world-id",
+            WORLD,
+            "--rule-id",
+            rule_id,
+        ])
+        .output()
+        .expect("spawn nexus42 rule archive");
+    assert!(
+        archived.status.success(),
+        "archive failed: {}",
+        String::from_utf8_lossy(&archived.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&archived.stdout).contains(rule_id),
+        "archive success output names the rule: {}",
+        String::from_utf8_lossy(&archived.stdout)
+    );
+}
+
+/// The real binary honours `--include-archived` (AC-7): the default read omits
+/// the archived row, the flag reveals it in both renderings.
+#[tokio::test]
+async fn cli_rule_list_include_archived_flag() {
+    let env = fresh_env().await;
+    let archived_id = rule_add(
+        &env.core,
+        &env.principal,
+        WORLD,
+        "Archived via CLI",
+        "rule",
+        "statement",
+        "warning",
+        &[],
+        "active",
+        MODULE_PRESENCE_CARRIER,
+    )
+    .await
+    .unwrap()
+    .rule_id;
+    env.core.close().await.expect("seed core closes");
+    assert_cli_archives_rule(&env.fixture, &archived_id);
+
+    let default_json = env
+        .fixture
+        .command()
+        .args([
+            "creator",
+            "world",
+            "rule",
+            "list",
+            "--world-id",
+            WORLD,
+            "--json",
+        ])
+        .output()
+        .expect("spawn nexus42 rule list");
+    assert!(
+        default_json.status.success(),
+        "default list failed: {}",
+        String::from_utf8_lossy(&default_json.stderr)
+    );
+    let items: Vec<WorldRulesListResponseRulesItem> =
+        serde_json::from_str(&String::from_utf8_lossy(&default_json.stdout)).expect("json list");
+    assert!(
+        items.is_empty(),
+        "the default CLI read omits the archived row: {items:?}"
+    );
+
+    let included_json = env
+        .fixture
+        .command()
+        .args([
+            "creator",
+            "world",
+            "rule",
+            "list",
+            "--world-id",
+            WORLD,
+            "--include-archived",
+            "--json",
+        ])
+        .output()
+        .expect("spawn nexus42 rule list --include-archived");
+    assert!(
+        included_json.status.success(),
+        "included list failed: {}",
+        String::from_utf8_lossy(&included_json.stderr)
+    );
+    let items: Vec<WorldRulesListResponseRulesItem> =
+        serde_json::from_str(&String::from_utf8_lossy(&included_json.stdout))
+            .expect("json included list");
+    assert_eq!(items.len(), 1, "the flag reveals the retained row");
+    assert_eq!(items[0].rule_id, archived_id);
+    assert_eq!(items[0].status.as_deref(), Some("archived"));
+
+    let included_table = env
+        .fixture
+        .command()
+        .args([
+            "creator",
+            "world",
+            "rule",
+            "list",
+            "--world-id",
+            WORLD,
+            "--include-archived",
+        ])
+        .output()
+        .expect("spawn nexus42 rule list --include-archived");
+    let table = String::from_utf8_lossy(&included_table.stdout).into_owned();
+    assert!(
+        table.contains(&archived_id) && table.contains("Archived via CLI"),
+        "the table lists the archived row: {table}"
+    );
+    assert!(
+        table.lines().any(|line| {
+            line.contains("Archived via CLI")
+                && line.split_whitespace().any(|cell| cell == "archived")
+        }),
+        "the STATUS column prints `archived`: {table}"
+    );
+}
+
+/// The archived row is a terminal tombstone on the CLI seams: the
+/// `deactivate` status exit is refused by name (`status`) with no mutation,
+/// and `add` refuses `archived` as a create state.
+#[tokio::test]
+async fn archived_row_refuses_status_exit_and_create_archived() {
+    let env = fresh_env().await;
+    let rule_id = rule_add(
+        &env.core,
+        &env.principal,
+        WORLD,
+        "Terminal rule",
+        "rule",
+        "statement",
+        "warning",
+        &[],
+        "active",
+        MODULE_PRESENCE_CARRIER,
+    )
+    .await
+    .unwrap()
+    .rule_id;
+    rule_archive(&env.core, &env.principal, WORLD, &rule_id)
+        .await
+        .unwrap();
+
+    let err = rule_deactivate(&env.core, &env.principal, WORLD, &rule_id)
+        .await
+        .expect_err("a status exit from archived must be refused");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("invalid input (status)") && msg.contains("terminal"),
+        "the refusal names `status` and the terminal policy, got: {msg}"
+    );
+    let stored = stored_rules_including(&env, WORLD, true).await;
+    assert_eq!(stored.len(), 1, "the refused exit wrote nothing");
+    assert_eq!(stored[0].status.as_deref(), Some("archived"));
+    assert_eq!(stored[0].canonical_name, "Terminal rule");
+
+    // `--status archived` is refused at create (archive is a transition only).
+    let err = rule_add(
+        &env.core,
+        &env.principal,
+        WORLD,
+        "Born archived",
+        "rule",
+        "statement",
+        "warning",
+        &[],
+        "archived",
+        MODULE_PRESENCE_CARRIER,
+    )
+    .await
+    .expect_err("archived must not be a create state");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("status") && msg.contains("draft | active | deprecated"),
+        "expected the closed create-status rejection, got: {msg}"
+    );
+    assert_eq!(
+        stored_rules_including(&env, WORLD, true).await.len(),
+        1,
+        "the refused create wrote no row"
+    );
+}
+
+/// `creator world rule add --status archived` (the real binary) still refuses
+/// the create with the field-level status error — `archived` is a transition,
+/// never an authoring state (V1.198 §13).
+#[tokio::test]
+async fn cli_rule_add_status_archived_refused() {
+    let env = fresh_env().await;
+    env.core.close().await.expect("seed core closes");
+
+    let out = env
+        .fixture
+        .command()
+        .args([
+            "creator",
+            "world",
+            "rule",
+            "add",
+            "--world-id",
+            WORLD,
+            "--name",
+            "Born archived",
+            "--statement",
+            "statement",
+            "--constraint",
+            MODULE_PRESENCE_CARRIER,
+            "--status",
+            "archived",
+        ])
+        .output()
+        .expect("spawn nexus42 rule add");
+    assert!(
+        !out.status.success(),
+        "add --status archived must fail: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("status") && stderr.contains("draft | active | deprecated"),
+        "the refusal names the closed create set, got: {stderr}"
+    );
+}
+
+/// Ownership and id-addressing guards are unchanged for `archive`: an unknown
+/// or cross-World rule id is the named 404 (indistinguishable, AR-6) and a
+/// foreign World is the world-ownership refusal.
+#[tokio::test]
+async fn archive_guard_parity_unknown_cross_world_and_foreign() {
+    let env = fresh_env().await;
+    let cross_world_id = rule_add(
+        &env.core,
+        &env.principal,
+        OTHER_OWNED_WORLD,
+        "Cross-world rule",
+        "rule",
+        "statement",
+        "warning",
+        &[],
+        "active",
+        MODULE_PRESENCE_CARRIER,
+    )
+    .await
+    .unwrap()
+    .rule_id;
+
+    for rule_id in ["rul_doesnotexist", cross_world_id.as_str()] {
+        let err = rule_archive(&env.core, &env.principal, WORLD, rule_id)
+            .await
+            .expect_err("unknown and cross-World ids must reject");
+        let msg = err.to_string();
+        assert!(
+            msg.contains(rule_id) && msg.contains("404"),
+            "named 404 naming the rule id, got: {msg}"
+        );
+    }
+
+    let err = rule_archive(&env.core, &env.principal, FOREIGN_WORLD, "rul_whatever")
+        .await
+        .expect_err("a foreign World must reject before any rule lookup");
+    assert!(err.to_string().contains("does not own"), "got: {err}");
+
+    let rows = stored_rules(&env, OTHER_OWNED_WORLD).await;
+    assert_eq!(
+        rows[0].status.as_deref(),
+        Some("active"),
+        "a refused archive leaves the cross-World rule untouched"
     );
 }

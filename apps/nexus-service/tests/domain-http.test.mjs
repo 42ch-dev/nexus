@@ -226,4 +226,44 @@ describe('domain-http (P5-T1)', () => {
     const afterDelete = await jsonFetch(`${baseUrl}/v1/daemon/works/${workId}`);
     assert.equal(afterDelete.status, 404);
   });
+
+  test('Timeline overview emits required nullable cursor', async () => {
+    // Terminal page: the seeded home holds fewer Worlds than the 20-row page
+    // cap, so the overview ends here and the required nullable cursor must be
+    // present as explicit null — never an omitted key.
+    const terminal = await jsonFetch(`${baseUrl}/v1/daemon/timeline/overview`);
+    assert.equal(terminal.status, 200, terminal.text);
+    assert.ok(
+      Object.prototype.hasOwnProperty.call(terminal.payload, 'cursor'),
+      'terminal overview must carry the required cursor key',
+    );
+    assert.equal(terminal.payload.cursor, null);
+
+    // Non-terminal page: exceed the 20-World page cap so page 1 must carry a
+    // usable string cursor, and its continuation page closes again.
+    for (let i = 0; i < 21; i += 1) {
+      const created = await jsonFetch(`${baseUrl}/v1/daemon/worlds`, {
+        method: 'POST',
+        body: { title: `Overview World ${i}` },
+      });
+      assert.equal(created.status, 201, created.text);
+    }
+
+    const page1 = await jsonFetch(`${baseUrl}/v1/daemon/timeline/overview`);
+    assert.equal(page1.status, 200, page1.text);
+    assert.equal(page1.payload.worlds.length, 20);
+    assert.equal(typeof page1.payload.cursor, 'string');
+    assert.ok(page1.payload.cursor.length > 0, 'non-terminal page must carry a usable cursor');
+
+    const page2 = await jsonFetch(
+      `${baseUrl}/v1/daemon/timeline/overview?cursor=${encodeURIComponent(page1.payload.cursor)}`,
+    );
+    assert.equal(page2.status, 200, page2.text);
+    assert.ok(
+      Object.prototype.hasOwnProperty.call(page2.payload, 'cursor'),
+      'continuation page must carry the required cursor key',
+    );
+    assert.equal(page2.payload.cursor, null);
+    assert.equal(page2.payload.total_worlds, page1.payload.total_worlds);
+  });
 });

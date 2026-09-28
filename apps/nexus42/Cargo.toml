@@ -146,7 +146,7 @@ chrono-tz = { workspace = true, optional = true }
 # direct caller remains since v1.193 P2-T13 (kept optional, unlinked by the
 # retained cohorts).
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.28", features = ["signal", "process"], optional = true }
+nix = { version = "0.30.1", features = ["signal", "process"], optional = true }
 
 [dev-dependencies]
 assert_cmd = "2.0"
@@ -171,10 +171,10 @@ nexus-wasm-host = { path = "../../crates/nexus-wasm-host" }
 # V1.174 P1 T0 (AR-75 C-1): scripted in-process ACP agent probe
 # (`tests/mcp_acp_probe.rs`) — the SDK's Agent/Client roles + Channel
 # duplex run the full newSession.mcp_servers round trip without a live
-# LLM. Same =2.1.0 pin already in the shipped graph via nexus-acp-host
+# LLM. Same =2.2.0 pin already in the shipped graph via nexus-acp-host
 # (stable v1 API only; no unstable protocol features); dev-only,
 # tests-only (graph pins use --edges normal, dev-deps excluded).
-agent-client-protocol = "=2.1.0"
+agent-client-protocol = "=2.2.0"
 
 # v1.193 P2-T13: the final feature lattice is the two real product
 # cohorts from technical contracts §3. `cli` is the ordinary one-shot

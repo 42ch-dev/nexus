@@ -28,7 +28,7 @@ export interface CoreSliceClient {
   createFork(worldId: string, request: CreateForkRequest): Promise<CreateForkResponse>;
   exportPack(worldId: string, request?: PackExportRequest): Promise<PackExportResponse>;
   importPack(worldId: string, request: PackImportRequest): Promise<PackImportResponse>;
-  listWorldRules(worldId: string): Promise<WorldRulesListResponse>;
+  listWorldRules(worldId: string, includeArchived?: boolean): Promise<WorldRulesListResponse>;
   createWorldRule(worldId: string, body: WorldRuleCreateRequest): Promise<WorldRuleResponse>;
   updateWorldRule(worldId: string, ruleId: string, body: WorldRuleUpdateRequest): Promise<WorldRuleResponse>;
   listWorldFindings(worldId: string): Promise<WorldFindingsListResponse>;

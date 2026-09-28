@@ -75,7 +75,11 @@ export interface NativeCoreBinding {
   createWorldFork(principal: string, worldId: string, requestJson: Uint8Array): Promise<Uint8Array>;
   exportWorldPack(principal: string, worldId: string, requestJson: Uint8Array): Promise<Uint8Array>;
   importWorldPack(principal: string, worldId: string, requestJson: Uint8Array): Promise<Uint8Array>;
-  listWorldRules(principal: string, worldId: string): Promise<Uint8Array>;
+  listWorldRules(
+    principal: string,
+    worldId: string,
+    includeArchived: boolean,
+  ): Promise<Uint8Array>;
   createWorldRule(principal: string, worldId: string, requestJson: Uint8Array): Promise<Uint8Array>;
   updateWorldRule(
     principal: string,

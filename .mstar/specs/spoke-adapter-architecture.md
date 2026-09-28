@@ -633,6 +633,25 @@ Source authorities are `hygiene.rs`, `moment.rs::render_gated_slots`, and
 | `ComputablePort` | **Production** (V1.146 P2 T2) | `compute_sessions` table via `nexus-wasm-host` session store | WASM compute sessions; bridges spoke `project`/`compute` requests to the stateless WASM runtime |
 | `ForkTimelineQueryPort` | **Production** (V1.146 P2 T3) | `narrative_timeline_events` + `narrative_branches` fork-filtered | Fork-scoped timeline queries; fork has no relation to fork-timeline precedes ordering (precedes is Relation-DAG, not fork-port scope) |
 
+**Rule vocabulary amendment (v1.198 accepted target).** Nexus rule
+authoring distinguishes `draft`, `active`, `deprecated`, and `archived`;
+this does not close SPOKE's open string read/storage vocabulary. Create
+excludes archived; PATCH can archive an existing rule. Archived is a
+terminal, read-only retained row: only archive-only repetition succeeds,
+and authors create a new rule to revive content. Deprecated is distinct,
+visible and reversible. No purge, second store or upstream SPOKE pin
+change follows from this vocabulary.
+
+`RuleQueryPort::list_rules` remains the raw reference-resolution port.
+The World-scoped check wrapper applies `status == "active"` to both
+explicit refs and automatic inclusion; archived never evaluates.
+Author-list default omission is separately owned by the core list
+boundary, before its SQL probe/cap, with explicit archived inclusion for
+CLI/HTTP/native callers. See
+[Daemon API Surface Conventions §13](daemon-api-surface-conventions.md#13-world-structured-rule-lifecycle)
+and [CLI specification](cli-spec.md); these are different read purposes,
+not two competing lifecycle authorities.
+
 **Stub behavior contract:** each stub is a documented empty/static return with a doc-comment referencing its roadmap trigger and residual. Stubs must never fabricate data — they return exactly what the backing storage would if it were empty/static. **V1.155 P0 (N-C3): the last stub is gone** — `HostManifestPort.list_peer_host_capability_manifests` is production (see the matrix row); the adapter has zero stubs. See `host_manifest_port.rs` module-level docs and §10.
 
 #### CAS contract reuse

@@ -166,7 +166,7 @@ impl NativeCore {
         let host = self
             .inner
             .host_authority()
-            .ok_or_else(|| Error::from_reason("host not started"))?;
+            .ok_or_else(core_error::napi_error_host_not_started)?;
         // The attached authority's manager IS the manager the open started with
         // the admitted pinned-root configuration: readiness and the hosted
         // execution owner borrow that same instance instead of a second one.

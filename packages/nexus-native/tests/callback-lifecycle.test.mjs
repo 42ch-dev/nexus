@@ -1,8 +1,8 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join, dirname } from 'node:path';
+import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -23,6 +23,38 @@ function seedHome() {
   );
   assert.equal(seed.status, 0, seed.stderr?.toString());
   return home;
+}
+
+/**
+ * A valid seeded home whose `.nexus42/agent-host/config.toml` is a symlink to a
+ * valid TOML holding default-safe values.
+ *
+ * `escape: false` points the link inside the expected config directory (the
+ * config path stays where the host expects it). `escape: true` points it outside
+ * that directory: `validate_host_admission` still reads it through the link and
+ * admits the open, and only `HostManager::start`'s post-open canonicalization
+ * rejects the escaped path — so an `escape: true` failure is the rollback branch
+ * (core already open, host start failed), never a pre-open admission rejection.
+ */
+function seedHostConfigHome(escape) {
+  const home = seedHome();
+  const configDir = join(home, '.nexus42', 'agent-host');
+  mkdirSync(configDir, { recursive: true });
+  const realConfig = escape
+    ? join(home, 'host-config-outside-agent-host.toml')
+    : join(configDir, 'host-config.toml');
+  writeFileSync(realConfig, 'max_sessions = 8\n');
+  symlinkSync(realConfig, join(configDir, 'config.toml'));
+  return home;
+}
+
+/** Parse the wire envelope an `open` rejection carries; null when it has none. */
+function parseWireFailure(failure) {
+  try {
+    return JSON.parse(String(failure).replace(/^Error:\s*/, ''));
+  } catch {
+    return null;
+  }
 }
 
 function parseProviderCall(payload) {
@@ -188,17 +220,31 @@ describe('callback lifecycle', { concurrency: 1 }, () => {
 
   test('host start failure after a successful core open leaves no owner', async () => {
     const binding = require(nodePath);
-    // A `..` component passes the core's home resolution but is rejected by the
-    // host's config/workspace path policy — the core opens, then host.start
-    // fails, which is the branch under test.
-    const home = seedHome();
-    // Built by concatenation: `path.join` would normalize the `..` away.
-    const traversal = `${home}/../${basename(home)}`;
+    // Control: the same linked-config fixture with its target INSIDE the
+    // expected config directory opens, so the failure below is attributable to
+    // the escaped config path and nothing else about the fixture.
+    const control = binding.open(
+      JSON.stringify({
+        user_home: seedHostConfigHome(false),
+        access: 'engine_owner',
+        allow_uninitialized: false,
+      }),
+      {
+        call: async () => providerReply('control'),
+        next: async () => JSON.stringify({ operation_id: 'x', events: [], has_more: false }),
+      },
+    );
+    await control.close();
+
+    // A config link escaping `.nexus42/agent-host/` is read and admitted by
+    // `validate_host_admission` (before the core opens) and rejected only by
+    // `HostManager::start`'s config-path canonicalization — after the core has
+    // already opened, which is the rollback branch under test.
     let failure = null;
     try {
       binding.open(
         JSON.stringify({
-          user_home: traversal,
+          user_home: seedHostConfigHome(true),
           access: 'engine_owner',
           allow_uninitialized: false,
         }),
@@ -206,12 +252,11 @@ describe('callback lifecycle', { concurrency: 1 }, () => {
     } catch (error) {
       failure = String(error);
     }
-    assert.ok(failure, 'host start must fail for a traversal config path');
-    assert.match(failure, /must not contain/i);
-    assert.ok(
-      !failure.includes('interrupted'),
-      `confirmed cleanup must not report Interrupted, got: ${failure}`,
-    );
+    assert.ok(failure, 'host start must fail for an escaping config path');
+    const wire = parseWireFailure(failure);
+    assert.ok(wire, `open rejection must carry the wire envelope, got: ${failure}`);
+    assert.equal(wire.code, 'forbidden');
+    assert.equal(wire.details?.category, 'policy_denied');
 
     // The environment survived with no retained owner: a fresh open succeeds and
     // reports the truth of the newly started host.
@@ -235,17 +280,15 @@ describe('callback lifecycle', { concurrency: 1 }, () => {
 
   test('unconfirmed rollback fences opens until a confirmed settlement', async () => {
     const binding = require(nodePath);
-    const home = seedHome();
-    // `path.join` would normalize the `..` away; the host policy must see it.
-    const traversal = `${home}/../${basename(home)}`;
     binding.forceUnconfirmedCleanup(true);
     try {
-      // 1) core opens, host.start fails, rollback cleanup is unconfirmed.
+      // 1) core opens, host.start rejects the escaped config path, and the
+      //    rollback's cleanup reports unconfirmed, so its owners are retained.
       let failure = null;
       try {
         binding.open(
           JSON.stringify({
-            user_home: traversal,
+            user_home: seedHostConfigHome(true),
             access: 'engine_owner',
             allow_uninitialized: false,
           }),
@@ -253,19 +296,26 @@ describe('callback lifecycle', { concurrency: 1 }, () => {
       } catch (error) {
         failure = String(error);
       }
-      assert.ok(failure, 'host start must fail for a traversal config path');
-      assert.match(failure, /interrupted/);
-      assert.match(failure, /cleanup unconfirmed/);
+      assert.ok(failure, 'host start must fail for an escaping config path');
+      const wire = parseWireFailure(failure);
+      assert.ok(wire, `open rejection must carry the wire envelope, got: ${failure}`);
+      assert.equal(wire.code, 'forbidden');
+      assert.equal(wire.details?.category, 'policy_denied');
 
       // 2) while cleanup stays unconfirmed, further opens are denied and the
-      //    retained owners survive (never replaced or dropped).
+      //    retained owners survive (never replaced or dropped). Distinct fresh
+      //    homes are used, so a denial can only come from the environment-wide
+      //    retained-owner fence rather than from one home's own resources. The
+      //    fence's reason is not a wire envelope, so the binding classifies it as
+      //    `internal`/`open_failed`; that classification (never its message text)
+      //    is what separates this denial from the config-path rejection above.
       const validHome = seedHome();
-      for (let attempt = 0; attempt < 2; attempt += 1) {
+      for (const candidate of [validHome, seedHome()]) {
         let denied = null;
         try {
           binding.open(
             JSON.stringify({
-              user_home: validHome,
+              user_home: candidate,
               access: 'engine_owner',
               allow_uninitialized: false,
             }),
@@ -274,7 +324,10 @@ describe('callback lifecycle', { concurrency: 1 }, () => {
           denied = String(error);
         }
         assert.ok(denied, 'open must be denied while a retained owner is unconfirmed');
-        assert.match(denied, /interrupted/);
+        const deniedWire = parseWireFailure(denied);
+        assert.ok(deniedWire, `fence denial must carry the wire envelope, got: ${denied}`);
+        assert.equal(deniedWire.code, 'internal');
+        assert.equal(deniedWire.details?.category, 'open_failed');
       }
 
       // 3) a confirmed cleanup settles the retained owners and reopens.
