@@ -36,14 +36,18 @@ import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import type { ReactElement } from 'react';
 import type { Node } from '@xyflow/react';
+import { http, HttpResponse } from 'msw';
 
 import type {
   WorldKbEntityProjection,
   WorldKbGraphResponse,
+  WorkOutline,
 } from '@42ch/nexus-contracts';
 
 import type { NexusClient } from '@/lib/nexus';
+import { BrowserClient } from '@/lib/nexus';
 import { renderInApp } from '@/test/test-providers';
+import { useHandlers } from '@/test/msw-server';
 import type {
   BeatFixture,
   SceneBeatFixturePayload,
@@ -90,6 +94,7 @@ function scene(partial: Partial<SceneFixture> & Pick<SceneFixture, 'sceneId'>): 
     chapterId: partial.chapterId ?? 1,
     title: partial.title ?? `Scene ${partial.sceneId}`,
     status: partial.status ?? null,
+    workId: partial.workId,
   };
 }
 
@@ -99,6 +104,7 @@ function beat(partial: Partial<BeatFixture> & Pick<BeatFixture, 'beatId' | 'scen
     sceneId: partial.sceneId,
     title: partial.title ?? `Beat ${partial.beatId}`,
     status: partial.status ?? null,
+    workId: partial.workId,
   };
 }
 
@@ -245,7 +251,7 @@ describe('TimelineCanvasAdapter.projectTimelineGraph — Moment projection (Scen
     });
   });
 
-  it('derives node workId from the graph entity world_id (WorldKbGraphResponse has no top-level world_id)', () => {
+  it('attributes node workId to the supplied worldId — never to the first KB entity (V1.200 DR-26)', () => {
     const g = graph({
       entities: [
         entity({
@@ -258,10 +264,40 @@ describe('TimelineCanvasAdapter.projectTimelineGraph — Moment projection (Scen
     });
     const fx = fixture([scene({ sceneId: 'sc-1', chapterId: 1 })]);
 
-    const { nodes } = projectTimelineGraph(g, 'moment', undefined, undefined, fx);
+    const { nodes } = projectTimelineGraph(g, 'moment', undefined, undefined, fx, 'world-7');
     const sceneNode = nodes.find((n) => n.id === 'wt-scene:sc-1')!;
 
-    expect(momentDataOf(sceneNode).workId).toBe('world-42');
+    expect(momentDataOf(sceneNode).workId).toBe('world-7');
+  });
+
+  it('carries bound-Work provenance with an empty World KB graph — two Works sharing chapter 1 stay distinct', () => {
+    // The Moment carrier does NOT come from the World KB graph: a World with no
+    // KB entities still renders the scenes of its bound Works. Chapter numbers
+    // are Work-local, so the two chapter-1 regions must not collapse.
+    const g = graph({ entities: [] });
+    const fx = fixture(
+      [
+        scene({ sceneId: 'scn_a1', chapterId: 1, title: 'A one', workId: 'work-a' }),
+        scene({ sceneId: 'scn_b1', chapterId: 1, title: 'B one', workId: 'work-b' }),
+      ],
+      [beat({ beatId: 'bet_a1', sceneId: 'scn_a1', workId: 'work-a' })],
+    );
+
+    const { nodes } = projectTimelineGraph(g, 'moment', undefined, undefined, fx, 'world-7');
+
+    const sceneA = nodes.find((n) => n.id === 'wt-scene:scn_a1')!;
+    const sceneB = nodes.find((n) => n.id === 'wt-scene:scn_b1')!;
+    expect(momentDataOf(sceneA).workId).toBe('work-a');
+    expect(momentDataOf(sceneB).workId).toBe('work-b');
+    // The canonical content projects from an empty KB graph — not the empty
+    // state (orchestrator-level counterpart:
+    // `TimelineCanvas — bound-Work Moment carrier composition`).
+    expect(momentDataOf(sceneA).label).toBe('A one');
+    expect(momentDataOf(sceneB).label).toBe('B one');
+    expect(sceneA.position.x).not.toBe(sceneB.position.x);
+
+    const beatNode = nodes.find((n) => n.id === 'wt-beat:bet_a1')!;
+    expect(momentDataOf(beatNode).workId).toBe('work-a');
   });
 
   it('stacks scenes vertically (TB) grouped by chapter region (X groups by chapter)', () => {
@@ -708,5 +744,156 @@ describe('TimelineCanvas — World-Moment NLE band (V1.156 P5)', () => {
     expect(screen.getByTestId('nle-timeline-label-beats')).toHaveTextContent(
       'Beats',
     );
+  });
+});
+
+// ─── Orchestrator — bound-Work canonical carrier (V1.200 DR-26) ────────────
+//
+// The World Moment layer's carrier is composed from the bound Works' canonical
+// `WorkOutline.scenes[]` / `beats[]` — the bound-Work outline fan-out must be
+// enabled on the Moment layer with NO Narrative event selection (the former
+// selection-only gate left the layer permanently empty), and the composed
+// entries must keep their Work provenance.
+
+function workSummary(workId: string, updatedAt: string) {
+  return {
+    work_id: workId,
+    title: `Work ${workId}`,
+    status: 'active',
+    intake_status: 'complete',
+    primary_preset_id: 'preset-a',
+    updated_at: updatedAt,
+  };
+}
+
+function workDetail(workId: string) {
+  return {
+    work_id: workId,
+    status: 'active',
+    title: `Work ${workId}`,
+    long_term_goal: '',
+    initial_idea: '',
+    intake_status: 'complete',
+    world_id: 'world-7',
+    inspiration_log: [],
+    primary_preset_id: 'preset-a',
+    schedule_ids: [],
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+    current_stage: 'draft',
+    stage_status: 'active',
+    auto_chain_enabled: false,
+    auto_chain_interrupted: false,
+    auto_review_master_on_timeout: false,
+    total_planned_chapters: 0,
+    current_chapter: 0,
+  };
+}
+
+function workOutline(workId: string, sceneTitle: string, sceneId: string): WorkOutline {
+  return {
+    work_id: workId,
+    outline_revision: 1,
+    volumes: [],
+    timeline_events: [],
+    foreshadows: [],
+    scenes: [{ scene_id: sceneId, chapter_id: 1, title: sceneTitle, status: 'drafted' }],
+    beats: [],
+    chapter_titles: {},
+    updated_at: '2026-08-01T00:00:00Z',
+  };
+}
+
+describe('TimelineCanvas — bound-Work Moment carrier composition (V1.200 DR-26)', () => {
+  it('projects both bound Works’ chapter-1 scenes on the Moment layer with no Narrative selection', async () => {
+    useHandlers(
+      http.get('/v1/daemon/worlds/:worldId/kb/graph', () =>
+        HttpResponse.json({
+          entities: [
+            entity({ key_block_id: 'kb-era-1', block_type: 'era', canonical_name: 'The First Age' }),
+          ],
+          source_anchors: [],
+          relationships: [],
+        }),
+      ),
+      http.get('/v1/daemon/worlds/:worldId/timeline/events', () =>
+        HttpResponse.json({ items: [], has_more: false, next_cursor: undefined }),
+      ),
+      http.get('/v1/daemon/works', () =>
+        HttpResponse.json({
+          items: [
+            workSummary('work-a', '2026-01-01T00:00:00Z'),
+            workSummary('work-b', '2026-01-02T00:00:00Z'),
+          ],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+      http.get('/v1/daemon/works/:workId', ({ params }) =>
+        HttpResponse.json(workDetail(String(params.workId))),
+      ),
+      http.get('/v1/daemon/works/:workId/outline', ({ params }) => {
+        const workId = String(params.workId);
+        return HttpResponse.json(
+          workId === 'work-a'
+            ? workOutline('work-a', 'A one', 'scn_a1')
+            : workOutline('work-b', 'B one', 'scn_b1'),
+        );
+      }),
+      http.get('/v1/daemon/compute/modules', () => HttpResponse.json({ items: [], has_more: false })),
+    );
+
+    renderInApp(<TimelineCanvas worldId="world-7" />, {
+      client: new BrowserClient(),
+      initialRouterEntries: ['/worlds/world-7/timeline?layer=moment'],
+    });
+
+    // Both Works' canonical scenes reach the Moment layer (no selection, no
+    // fixture prop) — the empty-state panel is gone.
+    await waitFor(() => {
+      expect(screen.queryByTestId('timeline-moment-empty-state')).toBeNull();
+    });
+    expect((await screen.findAllByText('A one')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('B one')).length).toBeGreaterThan(0);
+  });
+
+  it('renders the canonical scenes when the World KB graph AND the compute log are both empty', async () => {
+    // Task 3 review Important #1 — the required empty-KB World Moment case.
+    // The global empty-state gate used to own this World (zero KB entities +
+    // zero compute events), so the bound Work's canonical scenes were
+    // unreachable on the Moment layer. The emptiness decision now includes the
+    // canonical Moment carrier: this World renders its scenes, and the global
+    // EmptyState is reserved for Worlds with truly nothing.
+    useHandlers(
+      http.get('/v1/daemon/worlds/:worldId/kb/graph', () =>
+        HttpResponse.json({ entities: [], source_anchors: [], relationships: [] }),
+      ),
+      http.get('/v1/daemon/worlds/:worldId/timeline/events', () =>
+        HttpResponse.json({ items: [], has_more: false, next_cursor: undefined }),
+      ),
+      http.get('/v1/daemon/works', () =>
+        HttpResponse.json({
+          items: [workSummary('work-a', '2026-01-01T00:00:00Z')],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+      http.get('/v1/daemon/works/:workId', ({ params }) =>
+        HttpResponse.json(workDetail(String(params.workId))),
+      ),
+      http.get('/v1/daemon/works/:workId/outline', () =>
+        HttpResponse.json(workOutline('work-a', 'A one', 'scn_a1')),
+      ),
+      http.get('/v1/daemon/compute/modules', () => HttpResponse.json({ items: [], has_more: false })),
+    );
+
+    renderInApp(<TimelineCanvas worldId="world-7" />, {
+      client: new BrowserClient(),
+      initialRouterEntries: ['/worlds/world-7/timeline?layer=moment'],
+    });
+
+    // The bound Work's canonical scene is the World's Moment content.
+    expect((await screen.findAllByText('A one')).length).toBeGreaterThan(0);
+    expect(screen.queryByTestId('timeline-moment-empty-state')).toBeNull();
+    // NOT the global empty state — the World is not empty.
+    expect(screen.queryByText("This World's timeline is empty")).toBeNull();
   });
 });

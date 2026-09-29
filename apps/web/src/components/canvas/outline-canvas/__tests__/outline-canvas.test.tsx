@@ -15,6 +15,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import { OutlineCanvas } from '@/components/canvas/outline-canvas';
 import { NexusClientError } from '@/lib/nexus/errors';
+import type { WorkOutline } from '@42ch/nexus-contracts';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -61,12 +62,14 @@ const mocks = vi.hoisted(() => {
     created_at: '',
     updated_at: '',
   };
-  const OUTLINE = {
+  const OUTLINE: WorkOutline = {
     work_id: 'wk_test',
     outline_revision: 2,
     volumes: [{ volume_id: 1, label: 'Volume 1', chapter_ids: [1] }],
     timeline_events: [],
     foreshadows: [],
+    scenes: [],
+    beats: [],
     chapter_titles: {},
     updated_at: '',
   };
@@ -177,22 +180,28 @@ function structurePanel(): HTMLElement {
   );
 }
 
-/** Build a real NexusClientError 409 carrying `current_version`. */
-function outlineConflictErr(currentVersion: number): NexusClientError {
+/**
+ * Build a real NexusClientError 409 mirroring the daemon's OutlineConflict
+ * envelope (core_error.rs: details carry `current_revision`). The rendered
+ * revision in the modal is falsifiable because the cached fixture outline
+ * carries `outline_revision: 2` while tests inject 5: a modal showing 5
+ * proves the envelope won; 2 would mean the cache fallback was taken.
+ */
+function outlineConflictErr(currentRevision: number): NexusClientError {
   return new NexusClientError(409, 'outline_conflict', 'stale revision', {
-    current_version: currentVersion,
+    current_revision: currentRevision,
     conflicting_path: 'volumes/1',
   });
 }
 
 /** Invoke the latest captured chapter mutate call's onError callback. */
-async function rejectLastChapterAsConflict(currentVersion: number) {
+async function rejectLastChapterAsConflict(currentRevision: number) {
   const chapterMutate = mocks.patchChapterResult.mutate;
   const lastCall = chapterMutate.mock.calls.at(-1);
   if (!lastCall) throw new Error('no patchChapter.mutate call captured');
   const opts = lastCall[1] as { onError?: (e: unknown) => void };
   await act(async () => {
-    opts.onError?.(outlineConflictErr(currentVersion));
+    opts.onError?.(outlineConflictErr(currentRevision));
   });
 }
 
@@ -225,9 +234,11 @@ describe('OutlineCanvas — conflict modal trigger (FB-C1-003)', () => {
     await user.click(screen.getByRole('button', { name: /^Save$/i }));
     await rejectLastChapterAsConflict(5);
 
-    // 4. The outline-flavored conflict modal must be visible with the new
-    //    server revision (FB-C1-003 acceptance: stale revision → conflict
-    //    modal appears with retry/merge path).
+    // 4. The outline-flavored conflict modal must be visible with the SERVER
+    //    revision (FB-C1-003 acceptance: stale revision → conflict modal
+    //    appears with retry/merge path). The envelope carries
+    //    `current_revision: 5` while the cached outline revision is 2, so
+    //    this passes only when the envelope field feeds the modal.
     expect(
       screen.getByRole('heading', { name: 'Outline Conflict' }),
     ).toBeInTheDocument();
@@ -512,5 +523,101 @@ describe('OutlineCanvas — real RF graph-click selection (FB-GS-002)', () => {
     const inspector =
       screen.getByText('Chapter Inspector').closest('[class*="card"]') ?? document.body;
     expect(within(inspector as HTMLElement).getByText(/#1/)).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// V1.200 DR-26 Task 3 — Scene/Beat authoring controls
+//
+// The Outline canvas is the single scene/beat authoring surface (both Timeline
+// Moment layers are read-only projections). Every control routes through the
+// orchestrator's `handleStructure` — the SAME `outline.patch_structure`
+// mutation + conflict capture the structure/timeline patches use — so a stale
+// revision opens the existing conflict modal instead of a new error path.
+// ---------------------------------------------------------------------------
+
+const AUTHORING_OUTLINE: WorkOutline = {
+  ...mocks.OUTLINE,
+  scenes: [{ scene_id: 'scn_1', chapter_id: 1, title: 'Opening', status: 'drafted' }],
+  beats: [{ beat_id: 'bet_1', scene_id: 'scn_1', title: 'Hook', status: 'drafted' }],
+};
+
+/** Invoke the latest captured structure mutate call's onError callback. */
+async function rejectLastStructureAsConflict(currentRevision: number) {
+  const lastCall = mocks.patchStructureResult.mutate.mock.calls.at(-1);
+  if (!lastCall) throw new Error('no patchStructure.mutate call captured');
+  const opts = lastCall[1] as { onError?: (e: unknown) => void };
+  await act(async () => {
+    opts.onError?.(outlineConflictErr(currentRevision));
+  });
+}
+
+describe('OutlineCanvas — Scene/Beat authoring (V1.200 DR-26 Task 3)', () => {
+  beforeEach(() => {
+    mocks.patchStructureResult.mutate.mockClear();
+    mocks.outlineResult.data = mocks.OUTLINE;
+  });
+
+  it('creating a scene sends add_scene with its target chapter_id', async () => {
+    const user = userEvent.setup();
+    renderOutline();
+
+    await user.selectOptions(screen.getByTestId('outline-scene-chapter'), '1');
+    await user.type(screen.getByTestId('outline-scene-title'), 'Opening Scene');
+    await user.click(screen.getByTestId('outline-add-scene'));
+
+    expect(mocks.patchStructureResult.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        work_id: 'wk_test',
+        base_revision: 2,
+        operation: 'add_scene',
+        chapter_id: 1,
+        title: 'Opening Scene',
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('a stale-revision 409 on add_scene opens the existing conflict modal', async () => {
+    const user = userEvent.setup();
+    renderOutline();
+
+    await user.type(screen.getByTestId('outline-scene-title'), 'Opening Scene');
+    await user.click(screen.getByTestId('outline-add-scene'));
+    await rejectLastStructureAsConflict(5);
+
+    // Envelope `current_revision: 5` ≠ cached `outline_revision: 2`: the
+    // modal must show the server's canonical 5, not the stale cached 2.
+    expect(screen.getByRole('heading', { name: 'Outline Conflict' })).toBeInTheDocument();
+    expect(screen.getByText('5', { selector: 'span.font-mono' })).toBeInTheDocument();
+  });
+
+  it('adds a beat to its parent scene and removes scenes/beats by canonical id', async () => {
+    const user = userEvent.setup();
+    mocks.outlineResult.data = AUTHORING_OUTLINE;
+    renderOutline();
+
+    await user.type(screen.getByTestId('outline-beat-title-scn_1'), 'Turn');
+    await user.click(screen.getByTestId('outline-add-beat-scn_1'));
+    expect(mocks.patchStructureResult.mutate).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        operation: 'add_beat',
+        scene_id: 'scn_1',
+        title: 'Turn',
+      }),
+      expect.anything(),
+    );
+
+    await user.click(screen.getByTestId('outline-remove-beat-bet_1'));
+    expect(mocks.patchStructureResult.mutate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ operation: 'remove_beat', beat_id: 'bet_1' }),
+      expect.anything(),
+    );
+
+    await user.click(screen.getByTestId('outline-remove-scene-scn_1'));
+    expect(mocks.patchStructureResult.mutate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ operation: 'remove_scene', scene_id: 'scn_1' }),
+      expect.anything(),
+    );
   });
 });

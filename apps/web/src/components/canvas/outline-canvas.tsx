@@ -10,9 +10,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
+import { Clapperboard, Plus, Trash2 } from 'lucide-react';
 
 import { CanvasShell } from '@/components/canvas/canvas-shell';
 import { EmptyState, ErrorState, LoadingState } from '@/components/ui/states';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { INPUT_CLASS, MetaField } from './outline-canvas/inspectors/chapter-meta-field';
 import { useChapters, useWork, flattenPages } from '@/api/queries';
 import { useRegisterCommand } from '@/lib/canvas/command-registry';
 import { queryKeys } from '@/lib/nexus/query-keys';
@@ -52,6 +57,7 @@ import type {
   OutlinePatchChapterRequest,
   OutlinePatchStructureRequest,
   TimelinePatchEventRequest,
+  WorkOutline,
 } from '@42ch/nexus-contracts';
 
 /**
@@ -316,12 +322,15 @@ export function OutlineCanvas({
     base: Omit<ConflictState, 'currentRevision' | 'conflictingPath'>,
   ) {
     if (!isOutlineConflictError(error)) return;
+    // Outline OCC 409 details carry `current_revision` (core_error.rs
+    // OutlineConflict arm); `current_version` is the World-KB field name and
+    // never appears on this envelope.
     const details = error.details as
-      | { current_version?: number; conflicting_path?: string }
+      | { current_revision?: number; conflicting_path?: string }
       | undefined;
     setConflict({
       ...base,
-      currentRevision: details?.current_version ?? outline.data?.outline_revision ?? 0,
+      currentRevision: details?.current_revision ?? outline.data?.outline_revision ?? 0,
       conflictingPath: details?.conflicting_path ?? base.pendingRequest.kind,
     });
   }
@@ -565,6 +574,261 @@ export function OutlineCanvas({
         onReapply={onReapply}
         onDismiss={onDismiss}
       />
+
+      {/* V1.200 DR-26 Task 3 — scene/beat authoring. Authoring lives on the
+          Outline surface (both Timeline Moment layers are read-only
+          projections); every control routes through `handleStructure`, so a
+          stale-revision 409 opens the conflict modal above rather than a new
+          error path. */}
+      <SceneBeatAuthoringPanel
+        outline={outline.data}
+        chapters={chapters}
+        onPatchStructure={handleStructure}
+        isPending={patchStructure.isPending}
+      />
     </div>
+  );
+}
+
+/**
+ * V1.200 DR-26 Task 3 — Scene/Beat authoring panel.
+ *
+ * Surfaces the four `outline.patch_structure` scene/beat operations (Task 2)
+ * on the Outline canvas — the single authoring surface (the Work and World
+ * Timeline Moment layers remain read-only projections).
+ *
+ * Write path: every control calls the orchestrator's `onPatchStructure` (the
+ * same `usePatchOutlineStructure` mutation + `captureConflictState` wiring the
+ * structure/timeline patches use), so a stale-revision 409 opens the existing
+ * conflict modal — no new error path. The read-only Scene/Beat inspectors are
+ * untouched.
+ *
+ * Reads: the canonical `outline.scenes` / `outline.beats` arrays. Empty arrays
+ * are real emptiness (no fixture substitution); server-minted `scn_`/`bet_`
+ * ids are observed through the post-write canonical refetch the mutation
+ * invalidation triggers.
+ *
+ * Server rules mirrored (not re-implemented): `add_scene` needs an existing
+ * chapter, `add_beat` an existing scene of this Work, both need a non-blank
+ * title; the daemon is the authority (its 422 validation envelope surfaces
+ * through the existing error toast, its 409 through the conflict modal).
+ */
+function SceneBeatAuthoringPanel({
+  outline,
+  chapters,
+  onPatchStructure,
+  isPending,
+}: {
+  outline: WorkOutline;
+  chapters: ChapterSummary[];
+  onPatchStructure: (request: OutlinePatchStructureRequest) => void;
+  isPending: boolean;
+}) {
+  const { t } = useTranslation('canvas');
+  const [sceneTitle, setSceneTitle] = useState('');
+  const [chapterValue, setChapterValue] = useState('');
+  const [beatTitles, setBeatTitles] = useState<Record<string, string>>({});
+
+  const chapterId = chapterValue === '' ? chapters[0]?.chapter : Number(chapterValue);
+  const canAddScene = !isPending && sceneTitle.trim().length > 0 && chapterId !== undefined;
+
+  const base = { work_id: outline.work_id, base_revision: outline.outline_revision };
+
+  function submitScene() {
+    if (!canAddScene || chapterId === undefined) return;
+    onPatchStructure({
+      ...base,
+      operation: 'add_scene',
+      chapter_id: chapterId,
+      title: sceneTitle.trim(),
+    });
+    setSceneTitle('');
+  }
+
+  function submitBeat(sceneId: string) {
+    const title = (beatTitles[sceneId] ?? '').trim();
+    if (isPending || title.length === 0) return;
+    onPatchStructure({ ...base, operation: 'add_beat', scene_id: sceneId, title });
+    setBeatTitles((prev) => ({ ...prev, [sceneId]: '' }));
+  }
+
+  return (
+    <Card data-testid="outline-scene-beat-authoring">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Clapperboard className="h-5 w-5 text-canvas-outline-accent" aria-hidden />
+          {t('sceneBeatAuthoring.title', { defaultValue: 'Scenes & Beats' })}
+        </CardTitle>
+        <CardDescription>
+          {t('sceneBeatAuthoring.description', {
+            defaultValue:
+              'Scenes and beats are work-owned outline structure. They appear on the Work Timeline Moment layer.',
+          })}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <MetaField label={t('sceneBeatAuthoring.chapter', { defaultValue: 'Chapter' })}>
+            <select
+              data-testid="outline-scene-chapter"
+              value={chapterValue}
+              onChange={(event) => setChapterValue(event.target.value)}
+              disabled={isPending || chapters.length === 0}
+              className={INPUT_CLASS}
+            >
+              {chapters.map((chapter) => (
+                <option key={chapter.chapter} value={String(chapter.chapter)}>
+                  {t('chapter.fallback', { chapter: chapter.chapter })}
+                </option>
+              ))}
+            </select>
+          </MetaField>
+          <MetaField label={t('sceneBeatAuthoring.sceneTitle', { defaultValue: 'Scene title' })}>
+            <input
+              type="text"
+              data-testid="outline-scene-title"
+              value={sceneTitle}
+              onChange={(event) => setSceneTitle(event.target.value)}
+              disabled={isPending}
+              className={INPUT_CLASS}
+            />
+          </MetaField>
+          <Button
+            type="button"
+            variant="secondary"
+            size="small"
+            data-testid="outline-add-scene"
+            disabled={!canAddScene}
+            onClick={submitScene}
+          >
+            <Plus className="h-4 w-4" aria-hidden />
+            {t('sceneBeatAuthoring.addScene', { defaultValue: 'Add scene' })}
+          </Button>
+        </div>
+
+        {chapters.length === 0 ? (
+          <p className="text-copy-13 text-gray-700">
+            {t('sceneBeatAuthoring.noChapters', {
+              defaultValue: 'Add a chapter before authoring scenes.',
+            })}
+          </p>
+        ) : null}
+
+        {outline.scenes.length === 0 ? (
+          <EmptyState
+            title={t('sceneBeatAuthoring.empty.title', { defaultValue: 'No scenes yet' })}
+            description={t('sceneBeatAuthoring.empty.description', {
+              defaultValue:
+                'Scenes you add here appear on the Work Timeline Moment layer.',
+            })}
+          />
+        ) : (
+          <ul className="space-y-3" data-testid="outline-scene-list">
+            {outline.scenes.map((scene) => {
+              const beats = outline.beats.filter((beat) => beat.scene_id === scene.scene_id);
+              const beatTitle = beatTitles[scene.scene_id] ?? '';
+              return (
+                <li
+                  key={scene.scene_id}
+                  className="rounded-card border border-gray-alpha-300 bg-background-100 p-3"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-label-14 font-semibold text-gray-900">
+                        {scene.title ||
+                          t('sceneBeatAuthoring.untitledScene', { defaultValue: 'Untitled scene' })}
+                      </span>
+                      <Badge variant="neutral">
+                        {t('sceneBeatAuthoring.chapterBadge', {
+                          defaultValue: 'Ch. {{chapter}}',
+                          chapter: scene.chapter_id,
+                        })}
+                      </Badge>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="tertiary"
+                      size="small"
+                      data-testid={`outline-remove-scene-${scene.scene_id}`}
+                      disabled={isPending}
+                      onClick={() =>
+                        onPatchStructure({
+                          ...base,
+                          operation: 'remove_scene',
+                          scene_id: scene.scene_id,
+                        })
+                      }
+                    >
+                      <Trash2 className="h-4 w-4" aria-hidden />
+                      {t('sceneBeatAuthoring.remove', { defaultValue: 'Remove' })}
+                    </Button>
+                  </div>
+
+                  {beats.length > 0 ? (
+                    <ul className="mt-2 space-y-1">
+                      {beats.map((beat) => (
+                        <li
+                          key={beat.beat_id}
+                          className="flex items-center justify-between gap-2 text-copy-13 text-gray-900"
+                        >
+                          <span>
+                            {beat.title ||
+                              t('sceneBeatAuthoring.untitledBeat', {
+                                defaultValue: 'Untitled beat',
+                              })}
+                          </span>
+                          <Button
+                            type="button"
+                            variant="tertiary"
+                            size="small"
+                            data-testid={`outline-remove-beat-${beat.beat_id}`}
+                            disabled={isPending}
+                            onClick={() =>
+                              onPatchStructure({
+                                ...base,
+                                operation: 'remove_beat',
+                                beat_id: beat.beat_id,
+                              })
+                            }
+                          >
+                            <Trash2 className="h-4 w-4" aria-hidden />
+                            {t('sceneBeatAuthoring.remove', { defaultValue: 'Remove' })}
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <input
+                      type="text"
+                      data-testid={`outline-beat-title-${scene.scene_id}`}
+                      aria-label={t('sceneBeatAuthoring.beatTitle', { defaultValue: 'Beat title' })}
+                      value={beatTitle}
+                      onChange={(event) =>
+                        setBeatTitles((prev) => ({ ...prev, [scene.scene_id]: event.target.value }))
+                      }
+                      disabled={isPending}
+                      className={INPUT_CLASS}
+                    />
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="small"
+                      data-testid={`outline-add-beat-${scene.scene_id}`}
+                      disabled={isPending || beatTitle.trim().length === 0}
+                      onClick={() => submitBeat(scene.scene_id)}
+                    >
+                      <Plus className="h-4 w-4" aria-hidden />
+                      {t('sceneBeatAuthoring.addBeat', { defaultValue: 'Add beat' })}
+                    </Button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
   );
 }

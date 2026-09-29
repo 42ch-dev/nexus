@@ -65,6 +65,8 @@ function outline(
     volumes: [],
     timeline_events: timelineEvents,
     foreshadows: [],
+    scenes: [],
+    beats: [],
     chapter_titles: {},
     updated_at: '2026-08-01T00:00:00Z',
   };

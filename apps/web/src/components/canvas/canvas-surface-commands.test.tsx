@@ -42,7 +42,13 @@ const outlineMocks = vi.hoisted(() => ({
       outline_revision: 1,
       volumes: [],
       timeline_events: [],
+      // Required `WorkOutline` carrier fields (V1.200 DR-26 Task 1 made
+      // `scenes` / `beats` required on the wire; this stale mock omitted them).
+      foreshadows: [],
+      scenes: [],
+      beats: [],
       chapter_titles: {},
+      updated_at: '',
     },
     isLoading: false,
     isError: false,

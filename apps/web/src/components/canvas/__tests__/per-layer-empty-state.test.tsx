@@ -217,6 +217,8 @@ describe('WorkTimelineCanvas — Moment empty-state copy (P4 Task 7)', () => {
         { event_id: 'evt-1', title: 'Inciting Incident', realizes_chapter_id: 1 },
       ],
       foreshadows: [],
+      scenes: [],
+      beats: [],
       chapter_titles: {},
       updated_at: '2026-07-18T00:00:00Z',
     } as WorkOutline;
@@ -267,6 +269,8 @@ describe('WorkTimelineCanvas — Moment empty-state copy (P4 Task 7)', () => {
         { event_id: 'evt-1', title: '触发事件', realizes_chapter_id: 1 },
       ],
       foreshadows: [],
+      scenes: [],
+      beats: [],
       chapter_titles: {},
       updated_at: '2026-07-18T00:00:00Z',
     } as WorkOutline;

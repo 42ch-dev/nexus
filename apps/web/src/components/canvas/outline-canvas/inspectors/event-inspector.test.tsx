@@ -37,6 +37,8 @@ function makeOutline(overrides: Partial<WorkOutline> = {}): WorkOutline {
       },
     ],
     foreshadows: [],
+    scenes: [],
+    beats: [],
     chapter_titles: {},
     updated_at: '',
     ...overrides,
