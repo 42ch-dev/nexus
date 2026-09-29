@@ -1,6 +1,6 @@
 {
   "title": "日程",
-  "description": "排队的预设运行和每个作品的 cron 角色，包含状态和最后更新时间。",
+  "description": "排队的预设运行，显示状态和最后更新时间。",
   "refreshAria": "刷新日程",
   "refresh": "刷新",
   "errorDescription": "无法加载日程。",

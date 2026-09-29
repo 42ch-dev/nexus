@@ -225,6 +225,9 @@ pub struct SignalScheduleResponse {
     pub current_wait_id: Option<String>,
 }
 
+// The following local-only write DTOs remain solely for isolated serde tests;
+// the retired controls have no production consumer. Generated DeleteScheduleResponse
+// is a separate served wire contract and remains unchanged.
 // ---------------------------------------------------------------------------
 // PATCH /schedules/{schedule_id} — Edit label/metadata (V1.171 P2 AR-29)
 // ---------------------------------------------------------------------------
