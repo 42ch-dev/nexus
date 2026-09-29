@@ -20,6 +20,19 @@ use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Maximum prior lock metadata read for successful-acquire diagnostics.
+const MAX_PRIOR_LOCK_BODY_BYTES: usize = 4096;
+/// Maximum holder identity length emitted in diagnostics.
+const MAX_DIAGNOSTIC_HOLDER_CHARS: usize = 128;
+
+fn diagnostic_holder_name(holder_name: &str) -> String {
+    holder_name
+        .chars()
+        .filter(|character| !character.is_control())
+        .take(MAX_DIAGNOSTIC_HOLDER_CHARS)
+        .collect()
+}
+
 /// Heartbeat refresh interval in seconds.
 const HEARTBEAT_INTERVAL_SECS: u64 = 30;
 
@@ -233,19 +246,28 @@ pub fn try_acquire(work_dir: &Path, holder_name: &str) -> Result<FileLockGuard, 
             stale,
         }));
     }
-    // Classify the prior body only after flock succeeds, before replacing it.
+    // Classify only a bounded prefix from the already-open locked descriptor.
     // The OS lock arbitrates takeover; this is diagnostic-only.
-    match std::fs::read_to_string(&lock_path) {
-        Ok(contents) if contents.trim().is_empty() => {}
-        Ok(contents) => match parse_lock_body(&contents) {
+    let mut prior_body = Vec::with_capacity(MAX_PRIOR_LOCK_BODY_BYTES + 1);
+    let read_result = fd
+        .try_clone()
+        .and_then(|mut reader| reader.take((MAX_PRIOR_LOCK_BODY_BYTES + 1) as u64).read_to_end(&mut prior_body));
+    match read_result {
+        Ok(_) if prior_body.is_empty() => {}
+        Ok(_) if prior_body.len() > MAX_PRIOR_LOCK_BODY_BYTES => tracing::warn!(
+            note = "prior lock body exceeded diagnostic read limit",
+            "file_lock: unparseable prior holder metadata after successful acquire"
+        ),
+        Ok(_) => match std::str::from_utf8(&prior_body).ok().and_then(parse_lock_body) {
             Some((pid, previous_holder, expires_at_ms)) => {
                 let now = now_ms();
                 if expires_at_ms > 0
                     && now.saturating_sub(expires_at_ms) > STALE_THRESHOLD_SECS * 1000
                 {
+                    let holder_name = diagnostic_holder_name(&previous_holder);
                     tracing::warn!(
                         pid,
-                        holder_name = %previous_holder,
+                        holder_name = %holder_name,
                         expires_at_ms,
                         "file_lock: stale holder detected after successful acquire"
                     );
@@ -258,6 +280,7 @@ pub fn try_acquire(work_dir: &Path, holder_name: &str) -> Result<FileLockGuard, 
         },
         Err(_) => {}
     }
+
 
     // Lock acquired. Write metadata.
     let expires_at_ms = now_ms() + STALE_THRESHOLD_SECS * 1000;
@@ -526,6 +549,43 @@ mod tests {
             parse_lock_body(&std::fs::read_to_string(&lock_path).unwrap()).unwrap();
         assert_eq!(holder, "fresh-holder");
         crate::test_tracing::assert_warn_emitted(&captured, &["not parseable"]);
+        drop(guard);
+    }
+
+    #[tokio::test]
+    async fn oversized_prior_body_warns_and_takeover_proceeds() {
+        let (_dir, work_dir) = sample_work_dir();
+        std::fs::write(lock_file_path(&work_dir), vec![b'x'; MAX_PRIOR_LOCK_BODY_BYTES + 1])
+            .unwrap();
+        let (layer, captured) = crate::test_tracing::capture_layer();
+        let subscriber = crate::test_tracing::subscriber_with(layer);
+        let _subscriber_guard = tracing::subscriber::set_default(subscriber);
+
+        let guard = try_acquire(&work_dir, "fresh-holder").unwrap();
+        let content = std::fs::read_to_string(lock_file_path(&work_dir)).unwrap();
+        assert_eq!(parse_lock_body(&content).unwrap().1, "fresh-holder");
+        crate::test_tracing::assert_warn_emitted(&captured, &["exceeded diagnostic read limit"]);
+        drop(guard);
+    }
+
+    #[tokio::test]
+    async fn stale_holder_warning_sanitizes_and_bounds_identity() {
+        let (_dir, work_dir) = sample_work_dir();
+        let lock_path = lock_file_path(&work_dir);
+        let old_expires = now_ms().saturating_sub(120_000);
+        let adversarial = format!("99999:bad\nholder{}:{old_expires}", "x".repeat(200));
+        std::fs::write(&lock_path, adversarial).unwrap();
+        let (layer, captured) = crate::test_tracing::capture_layer();
+        let subscriber = crate::test_tracing::subscriber_with(layer);
+        let _subscriber_guard = tracing::subscriber::set_default(subscriber);
+
+        let guard = try_acquire(&work_dir, "fresh-holder").unwrap();
+        let warning = captured.lock().unwrap().join("\n");
+        assert!(warning.contains("pid=99999"));
+        assert!(warning.contains("holder_name=badh"));
+        assert!(!warning.contains('\n'));
+        assert!(warning.contains("expires_at_ms="));
+        assert!(!warning.contains(&"x".repeat(MAX_DIAGNOSTIC_HOLDER_CHARS)));
         drop(guard);
     }
 
