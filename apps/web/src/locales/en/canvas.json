@@ -714,6 +714,7 @@
       }
     },
     "moment": {
+      "boundWorkLoading": "Loading {{work}}…",
       "emptyState": {
         "title": "No scene or beat data yet",
         "message": "Scene-precision is available when bound Works have scene/beat data in their Outline. Add scenes and beats to a bound Work, or switch to Narrative for events.",
