@@ -308,6 +308,41 @@ describe('useRunObservation — replay/live handoff', () => {
     ]);
     expect(reentry.result.current.phase).toBe('live');
   });
+
+  it('hands a busy re-entry burst off at the catch-up frame total while frames keep arriving', async () => {
+    // A re-entry replay that outruns the observer: frames keep arriving faster
+    // than the settle window, so neither the quiet gap nor the 1 s total can end
+    // the catch-up. Only the hard frame total can, and it must still hand off —
+    // the 64th catch-up frame is the first live-tail frame (QC3-002).
+    const { client, calls } = stubClientFor([
+      (options) => openStream(options, runState('e1:1'), hostEvent('e1:2')),
+      async function* busyReplay(options: SubscribeOptions) {
+        for (let sequence = 3; sequence <= 72; sequence += 1) {
+          yield hostEvent(`e1:${sequence}`);
+          await wait(5);
+        }
+        if (options.signal.aborted) return;
+        await new Promise<void>((resolve) => {
+          options.signal.addEventListener('abort', () => resolve(), { once: true });
+        });
+      },
+    ]);
+
+    const first = observeRun(client, 'run-busy-replay');
+    await waitFor(() => expect(first.result.current.phase).toBe('live'));
+    first.unmount();
+
+    const reentry = observeRun(client, 'run-busy-replay');
+    await waitFor(() => expect(reentry.result.current.events).toHaveLength(72));
+
+    // 70 catch-up frames (e1:3…e1:72): the 64th, `e1:66`, is the first live one,
+    // and the six frames after it keep arriving live rather than replaying.
+    expect(calls[1].lastEventId).toBe('e1:2');
+    expect(reentry.result.current.liveFrom).toBe(65);
+    expect(cursorOf(reentry.result.current.events[reentry.result.current.liveFrom])).toBe('e1:66');
+    expect(reentry.result.current.events.slice(reentry.result.current.liveFrom)).toHaveLength(7);
+    expect(reentry.result.current.phase).toBe('live');
+  });
 });
 
 describe('useRunObservation — gap recovery', () => {
@@ -389,6 +424,33 @@ describe('useRunObservation — bounded reconnect episodes', () => {
     expect(probe.result.current.phase).toBe('error');
     expect(probe.result.current.error?.message).toBe('socket reset');
   });
+
+  it('never resets the reconnect budget for a long productive attempt — only retry() re-arms it', async () => {
+    // Every attempt streams real data for far longer than a "stable" attempt
+    // would need, and only then dies. No outcome buys extra attempts: the budget
+    // is strictly monotonic, so the episode still exhausts at the fixed total and
+    // the hook rests in `error` — only the user's explicit retry() re-arms it
+    // (QC3-001).
+    const { client, calls } = stubClientFor([
+      async function* productive() {
+        yield runState('e1:1');
+        await wait(1_050);
+        throw new Error('socket reset after a productive burst');
+      },
+    ]);
+
+    const probe = observeRun(client, 'run-monotonic-budget');
+    await waitFor(() => expect(probe.result.current.phase).toBe('error'), { timeout: 15_000 });
+
+    expect(calls.length).toBe(4);
+    expect(probe.result.current.error?.message).toBe('socket reset after a productive burst');
+
+    await wait(900);
+    expect(calls.length).toBe(4);
+
+    act(() => probe.result.current.retry());
+    await waitFor(() => expect(calls.length).toBe(5), { timeout: 5_000 });
+  }, 20_000);
 });
 
 describe('useRunObservation — terminal', () => {

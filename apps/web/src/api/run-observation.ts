@@ -32,11 +32,13 @@
  * therefore *inferred from attach ordering*, not observed provenance, and the
  * run view discloses that inference: the restored history plus the server's
  * strictly-after replay arrive at the head of the stream, and the live tail is
- * what follows. The catch-up clock starts at the attempt's FIRST RECEIVED frame
+ * what follows. The catch-up window starts at the attempt's FIRST RECEIVED frame
  * — never before the stream connects, or a slow connect would freeze the
- * boundary ahead of the very replay it is waiting for — and the catch-up is the
- * burst up to the first quiet gap after that frame (still capped, so an actively
- * streaming run hands off). `liveFrom` is the index of the first live-tail
+ * boundary ahead of the very replay it is waiting for — and it ends at whichever
+ * comes first: a `CATCH_UP_SETTLE_MS` quiet gap, `CATCH_UP_MAX_MS` since that
+ * first frame, or `CATCH_UP_MAX_FRAMES` frames received. Only the quiet gap is
+ * re-armed per frame; the two totals are hard, so an actively streaming run
+ * always hands off. `liveFrom` is the index of the first live-tail
  * event: `events.slice(0, liveFrom)` is replayed history, the rest is live. It
  * re-arms at the end of the window while the catch-up is open and freezes at the
  * handoff — and it is *derived* from an eviction-stable anchor rather than stored
@@ -53,8 +55,10 @@
  * EOF while the latest observed run status is non-terminal (or unknown) is a
  * transport failure — the server can also close an active stream on a pull
  * fault after the SSE headers — and reconnects from the cursor under the same
- * bounded policy. A clean EOF never earns a fresh retry budget, so a server
- * that keeps closing cannot turn the hook into a reconnect loop.
+ * bounded policy. The reconnect budget is strictly monotonic: every completed
+ * attempt charges it once, no outcome resets it, and only the user's explicit
+ * `retry()` re-arms it — so neither a server that keeps closing nor a ring that
+ * keeps outrunning the observer can turn the hook into a reconnect loop.
  *
  * Retention: one entry per observed run, bounded three ways. (1) It is dropped
  * as soon as the run reaches its terminal lifecycle end — a finished run is
@@ -156,13 +160,11 @@ const CATCH_UP_SETTLE_MS = 120;
 const CATCH_UP_MAX_MS = 1_000;
 
 /**
- * An attempt that streamed for at least this long is a *recovered* stream: it
- * earns a fresh reconnect budget. Anything shorter is the same tight episode —
- * a ring that keeps outrunning the observer (frame, gap, frame, gap …), or a
- * transport that fails right after each frame — so it consumes the budget
- * instead of resetting it, and the reconnect stays bounded (QC3-001).
+ * Frame ceiling on the catch-up window. A burst arriving faster than
+ * `CATCH_UP_SETTLE_MS` never goes quiet, and on a fast enough stream can still
+ * outrun `CATCH_UP_MAX_MS`; the first frame past this total is the live tail.
  */
-const STABLE_ATTEMPT_MS = 1_000;
+const CATCH_UP_MAX_FRAMES = 64;
 
 /**
  * Durable run statuses that end the lifecycle — the core's
@@ -330,9 +332,11 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
     let cancelled = false;
     /** The subscription attempt in flight: aborted at a gap or on unmount. */
     let attempt: AbortController | null = null;
-    /** Re-entry catch-up: re-armed per received burst frame, capped in total. */
+    /** Re-entry catch-up: quiet timer re-armed per frame, hard totals armed once. */
     let settleTimer: ReturnType<typeof setTimeout> | undefined;
     let capTimer: ReturnType<typeof setTimeout> | undefined;
+    /** Catch-up frames received — the hard frame total that ends the window. */
+    let catchUpFrames = 0;
 
     // Re-entry restores what this run already emitted; a first view starts at
     // `connecting` and its frames are the live tail (there is no catch-up span).
@@ -373,10 +377,21 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
       }
     };
 
+    /**
+     * Arm/extend the catch-up window for one received frame. The quiet timer is
+     * re-armed by every frame (a gap of `CATCH_UP_SETTLE_MS` hands off), while
+     * the hard totals — `CATCH_UP_MAX_MS` since the first frame and
+     * `CATCH_UP_MAX_FRAMES` received — are armed/charged once per catch-up and
+     * are never re-armed by a later frame, so a busy stream cannot keep replaying
+     * forever: whichever total is reached first hands off to the live tail
+     * (QC3-002).
+     */
     const armCatchUp = (): void => {
       clearTimeout(settleTimer);
       settleTimer = setTimeout(handOff, CATCH_UP_SETTLE_MS);
       capTimer ??= setTimeout(handOff, CATCH_UP_MAX_MS);
+      catchUpFrames += 1;
+      if (catchUpFrames >= CATCH_UP_MAX_FRAMES) handOff();
     };
 
     publish(null);
@@ -390,16 +405,9 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
         /** Why the attempt ended: a closed batch, a gap, or a throw. */
         let outcome: 'end' | 'gap' | 'unavailable' | 'failed' = 'end';
         let failure: unknown;
-        let receivedData = false;
 
         const controller = new AbortController();
         attempt = controller;
-        // The catch-up clock and the stability clock both start here, and the
-        // catch-up timer itself starts at the first frame this attempt receives
-        // (`armCatchUp` in the loop below) — never before the stream connects,
-        // or a slow connect would hand off to `live` ahead of the very replay
-        // it is still waiting for.
-        const attemptStartedAt = Date.now();
 
         try {
           for await (const frame of client.subscribeWorkflowEvents(sessionId, {
@@ -433,7 +441,6 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
               break;
             }
 
-            receivedData = true;
             // The catch-up burst is anchored at the first frame this attempt
             // received — a re-delivered duplicate counts — so an attempt that
             // connects late still keeps its replay on the replay side.
@@ -484,22 +491,15 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
           return;
         }
 
-        if (outcome === 'end') {
-          // A clean EOF under a non-terminal (or unknown) status is a transport
-          // failure, not an ending. It never earns a fresh budget: a server that
-          // keeps closing must not turn this into a reconnect loop.
-          consecutiveFailures += 1;
-        } else {
-          // A fresh retry budget is earned only by an attempt that actually
-          // streamed for a while. An attempt that dies within
-          // `STABLE_ATTEMPT_MS` — a busy ring that keeps outrunning the observer
-          // (frame, gap, frame, gap …) or a transport that fails right after
-          // each frame — is the same unresolved episode: it consumes the budget
-          // instead of resetting it, so the retries stay bounded (QC3-001) and
-          // the hook still rests in an honest `gapped`/`error` state.
-          const stable = Date.now() - attemptStartedAt >= STABLE_ATTEMPT_MS;
-          consecutiveFailures = receivedData && stable ? 1 : consecutiveFailures + 1;
-        }
+        // Every completed attempt charges the reconnect budget exactly once. A
+        // clean EOF under a non-terminal (or unknown) status is a transport
+        // failure, not an ending; a gap or a throw is the same unresolved
+        // episode. The budget is strictly monotonic within one subscription: a
+        // productive or long-lived attempt earns no extra attempts (progress is
+        // reported by the attach boundary and the UI phase, not the retry
+        // count), so nothing can reset the count mid-episode and only the user's
+        // explicit `retry()` re-arms it by re-running the effect (QC3-001).
+        consecutiveFailures += 1;
 
         if (consecutiveFailures > MAX_RECONNECT_ATTEMPTS) {
           phase = outcome === 'gap' ? 'gapped' : 'error';
