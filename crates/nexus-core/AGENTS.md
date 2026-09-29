@@ -9,7 +9,7 @@ Owned transport-neutral World KB service for graph/patch/candidates/changes.
 ## Actor holder governance (v1.191 P1 — shipped)
 
 Core is the admission authority for holder-scoped knowledge; the durable
-contract is [holder-governance.md](../../.mstar/specs/holder-governance.md) §§3–5:
+contract is [holder-governance.md](../../.mstar/specs/architecture/holder-governance.md) §§3–5:
 
 - **Admission, not client input.** `actor_knowledge` builds a private-field
   non-`Serialize` `AdmittedKnowledgeContext` only after the `Principal`, stored

@@ -116,7 +116,7 @@ UI work in this repo follows a **studio-first** routing rule. The visual proving
 - Studio boundaries + `@web-*` aliases: [`apps/design-studio/AGENTS.md`](apps/design-studio/AGENTS.md)
 - Promotion rules + package boundary: [`packages/nexus-ui/AGENTS.md`](packages/nexus-ui/AGENTS.md)
 - Canonical workflow + classification labels (`promoted primitive` / `studio-local fixture` / `web-only wrapper` / `future web product component`): [`.mstar/knowledge/architecture-patterns/ui-component-promotion-workflow.md`](.mstar/knowledge/architecture-patterns/ui-component-promotion-workflow.md)
-- Studio spec: [`.mstar/specs/design-studio.md`](.mstar/specs/design-studio.md)
+- Studio spec: [`.mstar/specs/surfaces/design-studio.md`](.mstar/specs/surfaces/design-studio.md)
 
 ## Development Policy
 

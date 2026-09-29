@@ -104,6 +104,6 @@ exclude = ["modules/nexus-module-manifest"]
 
 ## References
 
-- Normative ABI: `.mstar/specs/compute-module-abi.md`
+- Normative ABI: `.mstar/specs/compute/compute-module-abi.md`
 - Iteration spec: `.mstar/iterations/v1.170/specs/v1.170-computable-dx-locks.md` AR-1
 - Workspace dependency hygiene (members only): [../crate-selection-best-practices.md](../crate-selection-best-practices.md)

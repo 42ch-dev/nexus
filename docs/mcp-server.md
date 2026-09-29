@@ -10,7 +10,7 @@
 > features: peer tool registry, shared rmcp bridge core, embedded Model B
 > server, `VisibilityPolicy`, peer-control lane), composed by the native/TS
 > consumers. See
-> [`.mstar/specs/rust-core-service-boundary.md`](../.mstar/specs/rust-core-service-boundary.md)
+> [`.mstar/specs/architecture/rust-core-service-boundary.md`](../.mstar/specs/architecture/rust-core-service-boundary.md)
 > §3–§4 and [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 `nexus42 mcp serve` **was** a **tools-only** Model Context Protocol (MCP)

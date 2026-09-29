@@ -28,7 +28,7 @@ tags:
 
 Before v1.187, `tooling/design-tokens` shipped a hand-maintained `tokens.css` plus a `check-tokens.mjs` gate that searched strings in handwritten CSS and preset files. That gate could only find literals it was told to search: a DESIGN edit that changed a value without a matching handwritten update either shipped stale CSS or was invisible to the check entirely. The design-language overhaul (full palette, type stack, radius, motion and elevation change in one revision) made the gap unacceptable — every changed token had to flow from the DESIGN pair with no second transcription.
 
-The replacement is a single build-time compiler, `tooling/design-tokens/scripts/project-tokens.mjs`, that owns the entire projection from the repo-root DESIGN pair to every derived artifact. The normative contract is [.mstar/specs/design-studio.md](../../specs/design-studio.md) §3.5.
+The replacement is a single build-time compiler, `tooling/design-tokens/scripts/project-tokens.mjs`, that owns the entire projection from the repo-root DESIGN pair to every derived artifact. The normative contract is [.mstar/specs/surfaces/design-studio.md](../../specs/surfaces/design-studio.md) §3.5.
 
 ## Guidance
 

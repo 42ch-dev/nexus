@@ -9,10 +9,10 @@
 
 - [quality-loop.md](quality-loop.md) — findings lifecycle; review routing
 - [workflow-profile.md](workflow-profile.md) — chapter paths, `Logs/review/`, 五问 baseline
-- [creator-workflow.md](../creator-workflow.md) — FL-E stages (audit is **out-of-band**)
-- [cli-spec.md](../cli-spec.md) — `creator run audit-chapter` IA (P0 implement)
-- [entity-scope-model.md](../entity-scope-model.md) — World-bound extract mode
-- [world-kb-runtime-architecture.md](../world-kb-runtime-architecture.md) — `kb.extract_work` on-demand path
+- [creator-workflow.md](../creator/creator-workflow.md) — FL-E stages (audit is **out-of-band**)
+- [cli-spec.md](../cli/cli-spec.md) — `creator run audit-chapter` IA (P0 implement)
+- [entity-scope-model.md](../architecture/entity-scope-model.md) — World-bound extract mode
+- [world-kb-runtime-architecture.md](../architecture/world-kb-runtime-architecture.md) — `kb.extract_work` on-demand path
 
 **Tracker**: DF-69
 
@@ -140,4 +140,4 @@ At V1.44 P-last hygiene:
 
 ## V1.45 supersession (P-last promotion)
 
-**Superseded by**: [creator-run-preset-entry.md](../creator-run-preset-entry.md) (Shipped Master V1.45). The split preset ids (`novel-manuscript-audit-review` / `novel-manuscript-audit-extract`), DEPRECATED parent dir deletion, and `cli_args` declaration are now part of the canonical Master body.
+**Superseded by**: [creator-run-preset-entry.md](../archived/creator-run-preset-entry.md) (Shipped Master V1.45). The split preset ids (`novel-manuscript-audit-review` / `novel-manuscript-audit-extract`), DEPRECATED parent dir deletion, and `cli_args` declaration are now part of the canonical Master body.

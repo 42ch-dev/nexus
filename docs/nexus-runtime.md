@@ -285,4 +285,4 @@ distinct trust role from `identity.key`) and prints the signed wire proof
 - [Integrator walkthrough](../strategy-samples/README.md) — worked example
   end to end.
 - [Docs index](README.md) — all docs.
-- ABI spec: [`.mstar/specs/compute-module-abi.md`](../.mstar/specs/compute-module-abi.md).
+- ABI spec: [`.mstar/specs/compute/compute-module-abi.md`](../.mstar/specs/compute/compute-module-abi.md).

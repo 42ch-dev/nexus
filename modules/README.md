@@ -9,7 +9,7 @@ timeline events, new key blocks, battle report). This directory holds their
 **source**.
 
 > Spec context: the normative ABI contract is
-> [`.mstar/specs/compute-module-abi.md`](../.mstar/specs/compute-module-abi.md);
+> [`.mstar/specs/compute/compute-module-abi.md`](../.mstar/specs/compute/compute-module-abi.md);
 > the integrator-facing authoring guide is
 > [`docs/module-authoring.md`](../docs/module-authoring.md).
 
@@ -248,7 +248,7 @@ intentionally: the per-invocation instance is discarded right after the call.
 - SDK crate: [`nexus-module-sdk/`](nexus-module-sdk/) — the authoring surface.
 - Authoring guide: [`docs/module-authoring.md`](../docs/module-authoring.md).
 - ABI spec (normative):
-  [`.mstar/specs/compute-module-abi.md`](../.mstar/specs/compute-module-abi.md).
+  [`.mstar/specs/compute/compute-module-abi.md`](../.mstar/specs/compute/compute-module-abi.md).
 - Host crate: [`crates/nexus-wasm-host/`](../crates/nexus-wasm-host/) — engine,
   sandbox, host-function ABI, embedded-module loader, registry module.
 - `compute-module-author` skill:

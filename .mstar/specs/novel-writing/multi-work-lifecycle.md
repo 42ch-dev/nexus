@@ -8,10 +8,10 @@
 
 - [workflow-profile.md](workflow-profile.md) — §6 completion criteria
 - [work-pool.md](work-pool.md) — default Work pointer (`novel_pool_entries.status = active`)
-- [creator-workflow.md](../creator-workflow.md) — auto-chain pause during completion-lock; runtime lock on mutating paths
-- [cli-spec.md](../cli-spec.md) — `creator works`, `creator bootstrap --from-work`, resume reopen
-- [work-experience-model.md](../work-experience-model.md) — Work is single-Work; pool `active` is CLI default only
-- [agent-nexus-tool-bridge.md](../agent-nexus-tool-bridge.md) — `nexus.work.patch` obeys same locks
+- [creator-workflow.md](../creator/creator-workflow.md) — auto-chain pause during completion-lock; runtime lock on mutating paths
+- [cli-spec.md](../cli/cli-spec.md) — `creator works`, `creator bootstrap --from-work`, resume reopen
+- [work-experience-model.md](../creator/work-experience-model.md) — Work is single-Work; pool `active` is CLI default only
+- [agent-nexus-tool-bridge.md](../agents/agent-nexus-tool-bridge.md) — `nexus.work.patch` obeys same locks
 
 **V1.42 amend**: §4.2 production acquire gap —  P0
 
@@ -144,7 +144,7 @@ Daemon API and `nexus.work.patch` **must** use the same acquire/release paths as
 
 ## 5. CLI surfaces (summary)
 
-Full flags in [cli-spec.md](../cli-spec.md) §6.2D / §6.2H.
+Full flags in [cli-spec.md](../cli/cli-spec.md) §6.2D / §6.2H.
 
 ### 5.1 `creator run <preset_id>` — strategy execution
 

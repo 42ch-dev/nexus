@@ -43,7 +43,7 @@ spoke releases bundle Rust crates + npm packages + schemas + a drift gate that C
    - re-run the whole graph-pin probe matrix afterwards: the default/domain graph must stay libp2p-free, the feature-on graph must resolve exactly one libp2p version, and no probe asserts a version *value* ([graph-pin-honesty-discipline.md](../conventions/graph-pin-honesty-discipline.md)).
    Because `libp2p` is a transitive requirement of `spoke-connect` rather than a freely chosen dependency, treat a mismatch as an upstream compatibility fact, not a local preference.
 8. **Feature-graph evidence set**: default graph libp2p-free (`cargo tree -p nexus42 -i libp2p` → absent), single libp2p version feature-on, single `regress` version both graphs.
-9. **Record the trail** in the `Cargo.toml` pin comment block (per-iteration section, upstream change summary, and the reason for every lockstep companion pin — including the shared-type argument for `libp2p`) and align `.mstar/specs/spoke-adapter-architecture.md` §1.1/§5.2 pins in the same commit.
+9. **Record the trail** in the `Cargo.toml` pin comment block (per-iteration section, upstream change summary, and the reason for every lockstep companion pin — including the shared-type argument for `libp2p`) and align `.mstar/specs/architecture/spoke-adapter-architecture.md` §1.1/§5.2 pins in the same commit.
 10. **Keep the parity proof cheap and permanent**: the adapter's own parity test (`cargo test -p nexus-spoke-adapter --test spoke_parity`) plus the two `cargo check` shapes are the round's behavioural evidence; a dependency-only round changes no product surface, so it must not grow product tests to look substantial.
 
 ## Why This Matters

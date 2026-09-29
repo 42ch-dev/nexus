@@ -9,9 +9,9 @@ This document is for **orientation and decision-making**. It does not inventory 
 | Product vision & tech rationale | [`STRATEGY.md`](../STRATEGY.md) |
 | Domain vocabulary | [`CONCEPTS.md`](../CONCEPTS.md) |
 | Day-to-day commands | [`README.md`](../README.md) → Development; [`CONTRIBUTING.md`](CONTRIBUTING.md) |
-| Entity ownership & naming | [`.mstar/specs/entity-scope-model.md`](../.mstar/specs/entity-scope-model.md) |
-| Local vs cloud crate rules | [`.mstar/specs/local-cloud-crate-architecture.md`](../.mstar/specs/local-cloud-crate-architecture.md) |
-| Local trust / API classes | [`.mstar/specs/local-runtime-boundary.md`](../.mstar/specs/local-runtime-boundary.md), [`.mstar/specs/rust-core-service-boundary.md`](../.mstar/specs/rust-core-service-boundary.md) |
+| Entity ownership & naming | [`.mstar/specs/architecture/entity-scope-model.md`](../.mstar/specs/architecture/entity-scope-model.md) |
+| Local vs cloud crate rules | [`.mstar/specs/archived/local-cloud-crate-architecture.md`](../.mstar/specs/archived/local-cloud-crate-architecture.md) |
+| Local trust / API classes | [`.mstar/specs/architecture/local-runtime-boundary.md`](../.mstar/specs/architecture/local-runtime-boundary.md), [`.mstar/specs/architecture/rust-core-service-boundary.md`](../.mstar/specs/architecture/rust-core-service-boundary.md) |
 | Per-directory invariants | Root [`AGENTS.md`](../AGENTS.md) and each subtree’s `AGENTS.md` |
 
 ---
@@ -55,7 +55,7 @@ Cross-language wire shapes start in **`schemas/`** (JSON Schema). Codegen produc
 - Local-only daemon/orchestration shapes may live under `nexus-contracts` local modules when platform does not observe them; they still must not be redefined in app crates.
 - After schema edits: validate → codegen → commit schemas and generated output together.
 
-Schema layout and external-consumer boundary: [`.mstar/specs/schemas-directory-layout.md`](../.mstar/specs/schemas-directory-layout.md), [`.mstar/knowledge/schemas-external-consumer-boundary.md`](../.mstar/knowledge/schemas-external-consumer-boundary.md).
+Schema layout and external-consumer boundary: [`.mstar/specs/architecture/schemas-directory-layout.md`](../.mstar/specs/architecture/schemas-directory-layout.md), [`.mstar/knowledge/schemas-external-consumer-boundary.md`](../.mstar/knowledge/schemas-external-consumer-boundary.md).
 
 ---
 
@@ -167,8 +167,8 @@ When designing or reviewing a change:
 
 1. Root [`AGENTS.md`](../AGENTS.md) — repo invariants
 2. This file — orientation
-3. [`entity-scope-model.md`](../.mstar/specs/entity-scope-model.md) — ownership
-4. [`local-cloud-crate-architecture.md`](../.mstar/specs/local-cloud-crate-architecture.md) — line split & forbidden edges
+3. [`entity-scope-model.md`](../.mstar/specs/architecture/entity-scope-model.md) — ownership
+4. [`local-cloud-crate-architecture.md`](../.mstar/specs/archived/local-cloud-crate-architecture.md) — line split & forbidden edges
 5. Domain Master for the subsystem (local-runtime-boundary, rust-core-service-boundary, orchestration, CLI, web-ui, desktop-shell, …) under [`.mstar/specs/`](../.mstar/specs/)
 
 Iteration plans and audit compasses record delivery history; they are not architecture SSOT. Prefer Master specs over dated gap tables when deciding what “should” be true.

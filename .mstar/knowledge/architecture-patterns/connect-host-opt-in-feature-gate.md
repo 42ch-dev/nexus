@@ -90,5 +90,5 @@ V1.148 P3 adopted `spoke-connect` (libp2p + noise + yamux + Ed25519 signed-hello
 ## Examples
 
 - V1.148 P3 `crates/nexus-spoke-adapter/src/manifest.rs` (shared builder), `apps/nexus42/src/commands/connect/{mod,identity,allowlist,interop}.rs` (Connect Host + interop), `crates/nexus-home-layout/src/device_id.rs` (host_id SSOT).
-- Spec: `.mstar/specs/spoke-adapter-architecture.md` §10 (Connect Host N-C0 normative surface).
+- Spec: `.mstar/specs/architecture/spoke-adapter-architecture.md` §10 (Connect Host N-C0 normative surface).
 - The N-C series shipped end-to-end: **N-C1 (V1.153)** — write-op exchange; **N-C2 (V1.154)**; **N-C3 (V1.155)**. Capability-token production (issuance CLI + `config.json` enforcement + PeerScope intersection) shipped in **V1.155 P1**.

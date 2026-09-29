@@ -7,12 +7,12 @@
 **Scope**: End-user **ongoing serial** happy path — normative CLI surfaces, remediation chains, and author visibility (spec-only SSOT; **no** `docs/novel-writing-quickstart.md` after P1)  
 **Coordinates with**:
 
-- [creator-run-preset-entry.md](../creator-run-preset-entry.md) — **Shipped Master V1.45** — CLI IA, preset ids, flags (remediation target for runtime copy)
-- [creator-centric-entry-model.md](../creator-centric-entry-model.md) — §3.1 local bootstrap (≤7 steps)
-- [cli-spec.md](../cli-spec.md) — §7 first-run UX principles
+- [creator-run-preset-entry.md](../archived/creator-run-preset-entry.md) — **Shipped Master V1.45** — CLI IA, preset ids, flags (remediation target for runtime copy)
+- [creator-centric-entry-model.md](../archived/creator-centric-entry-model.md) — §3.1 local bootstrap (≤7 steps)
+- [cli-spec.md](../cli/cli-spec.md) — §7 first-run UX principles
 - [workflow-profile.md](workflow-profile.md) — artifact layout + completion §6
 - [quality-loop.md](quality-loop.md) — findings + review visibility
-- [creator-workflow.md](../creator-workflow.md) — FL-E stage names in narrative
+- [creator-workflow.md](../creator/creator-workflow.md) — FL-E stage names in narrative
 
 ---
 
@@ -37,13 +37,13 @@ V1.36–V1.45 implemented novel-writing **capabilities** across crates. V1.46 do
 | §4.1 `--json` contract | `findings[]` + optional `findings_stale` | P0 |
 | §5 Residual pointer | local process (not clone SSOT) | P-last |
 
-**Invariant**: Every command in §3 must exist in [creator-run-preset-entry.md](../creator-run-preset-entry.md) or [cli-spec.md](../cli-spec.md) at ship time.
+**Invariant**: Every command in §3 must exist in [creator-run-preset-entry.md](../archived/creator-run-preset-entry.md) or [cli-spec.md](../cli/cli-spec.md) at ship time.
 
 ---
 
 ## 3. Author path — ongoing serial (Part I)
 
-> **CLI detail**: [creator-run-preset-entry.md](../creator-run-preset-entry.md). This section is the **narrative** happy path only.
+> **CLI detail**: [creator-run-preset-entry.md](../archived/creator-run-preset-entry.md). This section is the **narrative** happy path only.
 
 ### 3.1 Prerequisites and bootstrap
 
@@ -63,7 +63,7 @@ nexus42 creator bootstrap --idea "A solpac noir detective story in a floating ca
 # → Work created, init preset, intake → produce chain
 ```
 
-Gate/scaffold failures: remediation cites this spec §3.2 or [creator-run-preset-entry.md](../creator-run-preset-entry.md) bootstrap section — **not** a quickstart file.
+Gate/scaffold failures: remediation cites this spec §3.2 or [creator-run-preset-entry.md](../archived/creator-run-preset-entry.md) bootstrap section — **not** a quickstart file.
 
 ### 3.3 First chapter and serial production
 
@@ -165,7 +165,7 @@ JSON-path fetch by the slower of the two rather than their sum.
 
 When error/remediation conditions occur, user-visible output must include a **single-line next action** referencing:
 
-- **CLI commands / preset ids** → [creator-run-preset-entry.md](../creator-run-preset-entry.md)
+- **CLI commands / preset ids** → [creator-run-preset-entry.md](../archived/creator-run-preset-entry.md)
 - **Author narrative** → this document §3
 
 | Condition | Minimum remediation |
@@ -200,7 +200,7 @@ At V1.46 P-last:
 
 > **Status**: Shipped (V1.49 P2) — P2 overlay merged into Master.  
 > **Plan**: 
-> **Cross-refs**: findings lifecycle → [quality-loop.md §2](quality-loop.md#2-findings-lifecycle) (6-state V1.49 P0); narrative indexes → [workflow-profile.md §4.6](workflow-profile.md#46-narrative-indexes--f-e-runtime-v149-p1) (V1.49 P1)
+> **Cross-refs**: findings lifecycle → [quality-loop.md §2](quality-loop.md#2-findings-lifecycle) (6-state V1.49 P0); narrative indexes → [workflow-profile.md §4.6](workflow-profile.md#46-narrative-indexes--f--e-runtime-v149-p1) (V1.49 P1)
 
 ### 8.1 Intake re-trigger on existing Work (R-V147P1-01)
 

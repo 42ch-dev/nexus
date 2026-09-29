@@ -24,7 +24,7 @@ manuscript-audit.md     → DF-69 on-demand audit (out-of-band)
 
 | Overlay | Merge target | Status |
 | --- | --- | --- |
-| `findings-lifecycle.md` | [Cross-profile findings Master](../findings-lifecycle.md) owns lifecycle, `target_executor` routing, and UI remediation; `quality-loop.md` §2 owns only the novel produce side | **Superseded** — historical overlay folded into `quality-loop.md` §2 at V1.49 P-last; lifecycle authority promoted to the root Master at V1.77 |
+| `findings-lifecycle.md` | [Cross-profile findings Master](../contracts/findings-lifecycle.md) owns lifecycle, `target_executor` routing, and UI remediation; `quality-loop.md` §2 owns only the novel produce side | **Superseded** — historical overlay folded into `quality-loop.md` §2 at V1.49 P-last; lifecycle authority promoted to the root Master at V1.77 |
 | `narrative-indexes.md` | `workflow-profile.md` §4.6 | **Superseded** (V1.49 P-last) |
 | `cron-staggering.md` | `workflow-profile.md` §11 | **Superseded** (V1.50 P-last) |
 | `auto-chronology.md` | `workflow-profile.md` §11.5 | **Superseded** (V1.50 P-last) |
@@ -52,16 +52,16 @@ manuscript-audit.md     → DF-69 on-demand audit (out-of-band)
 | `Works/<work_ref>/` layout + chapter frontmatter | `workflow-profile.md` |
 | Per-Work cron staggering (3-role) | `workflow-profile.md` §11 |
 | Per-Work auto-chronology (opt-in) | `workflow-profile.md` §11.5 |
-| Cross-profile findings lifecycle, executor routing, UI remediation | [findings-lifecycle.md](../findings-lifecycle.md) (Master) |
+| Cross-profile findings lifecycle, executor routing, UI remediation | [findings-lifecycle.md](../contracts/findings-lifecycle.md) (Master) |
 | Novel findings produce side / review chain | `quality-loop.md` §2 |
 | F### / E### index files | `workflow-profile.md` §4.6 (5-col schema) |
-| World KB promotion state machine | [entity-scope-model.md §5.5](../entity-scope-model.md#55-world-kb-promotion-state-machine-v150-normative) |
+| World KB promotion state machine | [entity-scope-model.md §5.5](../architecture/entity-scope-model.md#55-world-kb-promotion-state-machine-v150-normative) |
 | Author happy path + remediation copy | `author-experience.md` |
 | On-demand chapter audit | `manuscript-audit.md` |
 | Multi-work completion + locks | `multi-work-lifecycle.md` |
 | Pool / default Work | `work-pool.md` |
 | Sync scan roots | `sync-contract.md` (layout SSOT: `workflow-profile.md` §3, §7) |
-| Top-level CLI groups / preset dispatch | Current authority: [cli-spec.md §6.0B](../cli-spec.md#60b-v2-命令信息架构权威). [creator-run-preset-entry.md](../creator-run-preset-entry.md) is historical: generic runner retired v1.193 P2-T1; no replacement CLI preset-dispatch entrance. |
+| Top-level CLI groups / preset dispatch | Current authority: [cli-spec.md §6.0B](../cli/cli-spec.md#60b-v2-命令信息架构权威). [creator-run-preset-entry.md](../archived/creator-run-preset-entry.md) is historical: generic runner retired v1.193 P2-T1; no replacement CLI preset-dispatch entrance. |
 
 ---
 

@@ -89,7 +89,7 @@ Typify derives `Display` and `FromStr` on string enums. Hand-written duplicate i
 
 Typify maps `format: date-time` to `chrono::DateTime<…>`. Serde's default serialization for `DateTime` can differ from the bespoke generator's `String` RFC3339 fields — affecting canonical hash fixtures in cloud-sync specs.
 
-**Residual (closed 2026-08-08):** `R-V1138P1-001` — spec golden hashes updated after the new serialization was verified wire-correct (no behavioral regression); see [`../../specs/canonical-hash.md`](../../specs/canonical-hash.md).
+**Residual (closed 2026-08-08):** `R-V1138P1-001` — spec golden hashes updated after the new serialization was verified wire-correct (no behavioral regression); see [`../../specs/contracts/canonical-hash.md`](../../specs/contracts/canonical-hash.md).
 
 ### 4. Consumer adaptation is mechanical but cross-crate
 
@@ -124,7 +124,7 @@ Typify inlines a distinct struct copy for every schema that references a shared 
 | [`schemas/AGENTS.md`](../../../schemas/AGENTS.md) | Schema authoring + codegen flow |
 | [`contracts-gap-on-shipped-backend.md`](contracts-gap-on-shipped-backend.md) | Closing schema gaps on shipped handlers (orthogonal but same contracts boundary) |
 | Residuals `R-V1138P0-*` | Closed 2026-08-08 (V1.155 P2 residual sweep) |
-| Residual `R-V1138P1-001` | Canonical-hash spec golden sync — closed 2026-08-08; spec at [`../../specs/canonical-hash.md`](../../specs/canonical-hash.md) |
+| Residual `R-V1138P1-001` | Canonical-hash spec golden sync — closed 2026-08-08; spec at [`../../specs/contracts/canonical-hash.md`](../../specs/contracts/canonical-hash.md) |
 
 ## Evidence
 

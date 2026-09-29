@@ -20,7 +20,7 @@ tags:
 
 # Same-origin iframe pair view with forced frame-local theme
 
-**Track**: Knowledge (distilled from the v1.187 Studio pair view; normative detail in [.mstar/specs/design-studio.md](../../specs/design-studio.md) §5.3).
+**Track**: Knowledge (distilled from the v1.187 Studio pair view; normative detail in [.mstar/specs/surfaces/design-studio.md](../../specs/surfaces/design-studio.md) §5.3).
 
 ## Context
 

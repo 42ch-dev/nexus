@@ -135,6 +135,6 @@ Never close a PR merely because a feature worktree deleted files — verified ma
 ## Evidence
 
 - Product-side retirement — deleted `apps/desktop/**` (21 tracked paths), `scripts/fetch-sidecar.sh`, `scripts/dev-backend-manifest.mjs` sidecar helpers; `.github/workflows/desktop-release.yml` removed and the Tauri `desktop-build` job stripped in `.github/workflows/desktop-build.yml` / `ci.yml`; lockfile 17 → 16 workspace projects with `sharp` preserved.
-- Retained/adjudicated families — `apps/nexus42` default features, daemon boot path, embedded SPA serving, and the dormant CLI rows listed in `.mstar/specs/rust-core-service-boundary.md` §7.4.
-- Policy texts — `.github/dependabot.yml` (all remaining directories verified at HEAD), `.oxlintrc.json` (dead override removed), `.mstar/specs/desktop-shell.md` header, `.mstar/specs/README.md` rows.
+- Retained/adjudicated families — `apps/nexus42` default features, daemon boot path, embedded SPA serving, and the dormant CLI rows listed in `.mstar/specs/architecture/rust-core-service-boundary.md` §7.4.
+- Policy texts — `.github/dependabot.yml` (all remaining directories verified at HEAD), `.oxlintrc.json` (dead override removed), `.mstar/specs/surfaces/desktop-shell.md` header, `.mstar/specs/README.md` rows.
 - Companion docs — [resolved-residual-verification.md](../architecture-patterns/resolved-residual-verification.md) (verify residual claims against current `main`), [surface-rename-hygiene-checklist.md](../conventions/surface-rename-hygiene-checklist.md) (sweep shape for cross-language renames), [capability-parity-receipt.md](capability-parity-receipt.md) (the acceptance-evidence counterpart for this cutover).

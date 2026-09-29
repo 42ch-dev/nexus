@@ -20,7 +20,7 @@ tags:
 
 # Studio catalog + mount-then-focus navigation contract
 
-**Track**: Knowledge (distilled from the v1.187 Studio workspace; normative detail in [.mstar/specs/design-studio.md](../../specs/design-studio.md) §5.4).
+**Track**: Knowledge (distilled from the v1.187 Studio workspace; normative detail in [.mstar/specs/surfaces/design-studio.md](../../specs/surfaces/design-studio.md) §5.4).
 
 ## Context
 

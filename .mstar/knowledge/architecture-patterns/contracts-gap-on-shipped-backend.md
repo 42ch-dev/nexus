@@ -50,6 +50,6 @@ When you discover (or are asked to consume) a shipped Local API handler whose re
 
 ## See Also
 
-- [schemas-external-consumer-boundary.md](../../specs/schemas-external-consumer-boundary.md) — wire vs local-only contract types (external consumer side).
+- [schemas-external-consumer-boundary.md](../../specs/architecture/schemas-external-consumer-boundary.md) — wire vs local-only contract types (external consumer side).
 - [crate-selection-best-practices.md](../crate-selection-best-practices.md) — Rust workspace dependency conventions.
 - [`AGENTS.md`](../../../AGENTS.md) — the single-truth-source-for-DTOs invariant (`crates/nexus-daemon-runtime/AGENTS.md`, which restated it, was deleted with the crate in v1.193 P2).

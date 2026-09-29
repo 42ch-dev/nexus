@@ -30,7 +30,7 @@ The discovery type is `DiscoveredWork`, not the earlier design name `NovelWorkAr
 - Only `.md` files **directly under** `Works/<work_ref>/Stories/` are sync chapter candidates
 - Hidden Work directories and hidden chapter files (starting with `.`) are skipped
 - `README.md`, `foreshadowing.md`, and `event-index.md` are skipped. `Outlines/**`, `Logs/**`, and `Rules/**` are not scanned. Discovery reads filenames only; optional `work_chapters` metadata enrichment happens during bundle construction (§2), not by parsing frontmatter.
-- `Works/<work_ref>/Worldbuilding/` subtree is **not present** in V1.36 (world content lives in World KB per [entity-scope-model.md §5.4](../entity-scope-model.md) + [workflow-profile.md §3.5](workflow-profile.md))
+- `Works/<work_ref>/Worldbuilding/` subtree is **not present** in V1.36 (world content lives in World KB per [entity-scope-model.md §5.4](../architecture/entity-scope-model.md) + [workflow-profile.md §3.5](workflow-profile.md))
 - Workspace-root `Stories/<story_ref>/` is **not** scanned (legacy; removed pre-1.0)
 - Each non-hidden directory under `Works/` with a `Stories/` directory yields a `DiscoveredWork`, even when its chapter list is empty. Works and chapter filenames are sorted alphabetically. Missing/unreadable `Works/` yields no Works; a missing `Stories/` skips that Work, while an unreadable `Stories/` leaves its chapter list empty.
 
@@ -86,9 +86,9 @@ struct ChapterContent {
 ## 5. Current — Platform Handoff Boundary
 
 - The module constructs local `StoryBundle`s containing full chapter text; it does not serialize a platform request or call HTTP.
-- **Current cloud path:** [`nexus42 platform sync push`](../cli-spec.md#142-默认模式) delegates to [`commands/sync/mod.rs`](../../../apps/nexus42/src/commands/sync/mod.rs), which constructs a schema-generated `Bundle` via `nexus-cloud-sync::delta_bundle::BundleBuilder` and passes it to `SyncClient::push_bundle`. It does not invoke this chapter scanner or accept its `StoryBundle`.
-- **Historical target (DR-54):** connecting the chapter library to cloud transport was a separate proposal, not evidence of shipped upload integration. Default sync must not upload full manuscript text; an explicit publication path is distinct from structured sync ([CLI Master §14.2](../cli-spec.md#142-默认模式)).
-- **Legacy (pre–V1.21):** the `nexus-sync` crate and daemon `POST /v1/local/sync/push` path are retired; they are not alternate scanner owners (see [local-cloud-crate-architecture.md](../local-cloud-crate-architecture.md) §5–§6).
+- **Current cloud path:** [`nexus42 platform sync push`](../cli/cli-spec.md#142-默认模式) delegates to [`commands/sync/mod.rs`](../../../apps/nexus42/src/commands/sync/mod.rs), which constructs a schema-generated `Bundle` via `nexus-cloud-sync::delta_bundle::BundleBuilder` and passes it to `SyncClient::push_bundle`. It does not invoke this chapter scanner or accept its `StoryBundle`.
+- **Historical target (DR-54):** connecting the chapter library to cloud transport was a separate proposal, not evidence of shipped upload integration. Default sync must not upload full manuscript text; an explicit publication path is distinct from structured sync ([CLI Master §14.2](../cli/cli-spec.md#142-默认模式)).
+- **Legacy (pre–V1.21):** the `nexus-sync` crate and daemon `POST /v1/local/sync/push` path are retired; they are not alternate scanner owners (see [local-cloud-crate-architecture.md](../archived/local-cloud-crate-architecture.md) §5–§6).
 - Platform wire types remain schema-generated contracts; the local `StoryBundle` and `ChapterContent` above are not generated DTOs. Platform publish (DF-59) remains outside this module contract.
 
 ---
@@ -111,7 +111,7 @@ The sync module scans the workspace for novel-writing artifacts when `work_profi
 - Only `.md` files **directly under** `Works/<work_ref>/Stories/` are sync chapter candidates
 - Hidden files (starting with `.`) are skipped
 - `README.md`, `Outlines/**`, `Logs/**` are **never** chapter candidates. Per-chapter metadata is derived from the **`work_chapters` table** in `state.db` (per [workflow-profile.md §4.1](workflow-profile.md)); the legacy `work-status.md` file is removed in V1.36.
-- `Works/<work_ref>/Worldbuilding/` subtree is **not present** in V1.36 (world content lives in World KB per [entity-scope-model.md §5.4](../entity-scope-model.md) + [workflow-profile.md §3.5](workflow-profile.md))
+- `Works/<work_ref>/Worldbuilding/` subtree is **not present** in V1.36 (world content lives in World KB per [entity-scope-model.md §5.4](../architecture/entity-scope-model.md) + [workflow-profile.md §3.5](workflow-profile.md))
 - Workspace-root `Stories/<story_ref>/` is **not** scanned (legacy; removed pre-1.0)
 - Each `work_ref` directory under `Works/` represents one novel Work's artifact tree
 
@@ -175,6 +175,6 @@ struct ChapterContent {
 
 - The sync module produces `StoryBundle`s
 - **Target (long-term):** platform upload is handled by **`nexus-cloud-sync`** when the CLI runs `nexus42 sync push` (cloud product line). The module does **not** call platform HTTP directly. **Durable roadmap:** DR-54.
-- **Legacy (pre–V1.21):** some builds still route upload through the `nexus-sync` crate and `POST /v1/local/sync/push` on the daemon; that path is **retired** per [local-cloud-crate-architecture.md](../local-cloud-crate-architecture.md) §5–§6.
+- **Legacy (pre–V1.21):** some builds still route upload through the `nexus-sync` crate and `POST /v1/local/sync/push` on the daemon; that path is **retired** per [local-cloud-crate-architecture.md](../archived/local-cloud-crate-architecture.md) §5–§6.
 - Wire bundles use types from `@42ch/nexus-contracts` / `schemas/domain/` + `schemas/platform/sync/` (no duplicate DTOs)
 - **V1.36 scope**: structured sync only; platform publish (DF-59) is explicitly OUT

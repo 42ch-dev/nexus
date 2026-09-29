@@ -25,7 +25,7 @@ The challenge: **the daemon is executing subprocesses (`<binary> --version`) on 
 
 ## Guidance (the pattern)
 
-The `scan_local_installations` helper enforces **five normative constraints** (codified in `specs/desktop-shell.md` §14.3). All five are required; any one missing opens an attack surface.
+The `scan_local_installations` helper enforces **five normative constraints** (codified in `specs/surfaces/desktop-shell.md` §14.3). All five are required; any one missing opens an attack surface.
 
 | # | Constraint | Reason |
 |---|------------|--------|
