@@ -7,6 +7,7 @@
 **实现仓库**: `nexus`（CLI），**非** `nexus-platform`  
 **CLI Spec**: [`cli-spec.md`](./cli-spec.md) §6.2B  
 **集成边界**: [`local-cloud-crate-architecture.md`](./local-cloud-crate-architecture.md) §6 — registration via **`nexus-cloud-sync`** (CLI → platform HTTP), **not** Daemon API.
+**当前实现锚点**: solver 编排在 [`apps/nexus42/src/challenge/mod.rs`](../../apps/nexus42/src/challenge/mod.rs)（`solve_challenge` / `solve_challenge_with_fallback`），由 [`apps/nexus42/src/commands/creator/mod.rs`](../../apps/nexus42/src/commands/creator/mod.rs) 的 `register_creator` 导入并调用；[`crates/nexus-creator/src/creator.rs`](../../crates/nexus-creator/src/creator.rs) 仅承载 Creator aggregate / local-identity 域逻辑，不是 Challenge solver 或注册流程编排的实现 owner。  
 
 > **权威说明**：本文档是 CLI 侧 Challenge 解题逻辑的**独立冻结规格**（原 V1.3 程序提取）。CLI 实现若有分歧，以本文档为准。平台侧 Challenge 生成与验证逻辑见 nexus-platform `v1-spec/platform/creator-agent-registration-v1.md`。
 
@@ -217,6 +218,8 @@ Answer: "47"
 ---
 
 ## 5. 实现模块
+
+**当前 Rust 实现位置**见文首锚点：`apps/nexus42/src/challenge` 拥有解题管线及 fallback 编排，`apps/nexus42/src/commands/creator/mod.rs` 拥有 register → solve → verify → store 调用流程。下表及 §4 的 TypeScript/`packages/cli` 路径保留为原冻结规格的历史建议，不是当前源码位置；冻结 CLI 注册契约不变。
 
 | 模块 | 文件（建议） | 职责 |
 |------|-------------|------|

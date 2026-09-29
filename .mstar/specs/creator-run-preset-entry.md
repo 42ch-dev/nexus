@@ -1,10 +1,10 @@
-# Creator Run Preset Entry — Normative Specification v1
+# Creator Run Preset Entry — Retired Historical Record
 
-**Status**: Shipped (V1.45 — 2026-06-13)  
-**Document class**: Master (wave 0 for V1.45 CLI IA)  
+**Status**: Retired runner record (v1.193 P2-T1); originally Shipped (V1.45 — 2026-06-13)  
+**Document class**: Master (historical V1.45 CLI IA; no current dispatch authority)  
 **Created**: 2026-06-13  
-**Last updated**: 2026-06-14 (P-last promotion Draft → Shipped)  
-**Scope**: Author-facing **`nexus42 creator run <preset_id> [<work_id>]`** — generic orchestration preset dispatch; relationship to `creator bootstrap`, atomic `creator works`, and `daemon schedule`  
+**Last updated**: 2026-09-29 — v1.193 P2-T1 retirement boundary (V1.45 Draft → Shipped promotion: 2026-06-14)  
+**Scope**: Historical author-facing **`nexus42 creator run <preset_id> [<work_id>]`** — removed generic preset dispatch and its former relationship to `creator bootstrap`, atomic `creator works`, and `daemon schedule`  
 **Coordinates with**:
 
 - [cli-spec.md](cli-spec.md) — per-flag detail (§6.2D implement amendment)
@@ -18,7 +18,17 @@
 
 ---
 
+## 0. Current authority and retirement
+
+The generic runner shipped in **V1.45** and was removed in **v1.193 P2-T1** with the incomplete Creator execution entrances. **No replacement CLI preset-dispatch entrance was introduced.** Sections §1–§8 preserve the retired runner's shipped contract, grammar, flows, and acceptance history; none is a current setup or execution instruction.
+
+Current Work operations belong to the retained **`nexus42 creator works`** families: selection/status/pool, `inspire`, `reopen`, `reconcile-chapters`, completion-lock, findings, and rules. They are atomic operations, **not** a replacement generic runner. See [cli-spec.md](cli-spec.md) for the current CLI contract and [`apps/nexus42/src/commands/creator/works/mod.rs`](../../apps/nexus42/src/commands/creator/works/mod.rs) for `WorksCommand`, the retirement header, the migrated atomic handlers, and `print_findings_summary` (which no longer advertises `creator run novel-review-master`).
+
+---
+
 ## 1. Purpose
+
+> **Historical — shipped V1.45, retired v1.193 P2-T1.** The single preset entry below no longer exists; §0 identifies the retained atomic Work surface.
 
 Pre-V1.45, `creator run` accumulated **hardcoded subcommands** (`start`, `continue`, `stage`, `audit-chapter`, `review-master`, …). Each new embedded preset required editing `RunCommand` in Rust.
 
@@ -34,6 +44,8 @@ Adding a preset ships **YAML + optional docs**, not CLI enum variants.
 
 ## 2. Three-plane CLI model
 
+> **Historical V1.45 CLI model.** The strategy-execution plane and its onboarding/daemon execution companions below are not current entrances. Only the retained atomic Work operations are current (§0).
+
 | Plane | Command | Responsibility |
 | --- | --- | --- |
 | Composite onboarding | `creator bootstrap` | Create Work + schedule intake/init/produce chain |
@@ -45,6 +57,8 @@ Presets may invoke daemon capabilities that perform atomic Work ops during execu
 ---
 
 ## 3. Command grammar
+
+> **Historical grammar — not runnable.** The syntax, discovery rules, and runner argument mapping in §3.1–§3.3 describe the removed V1.45 runner, not a supported dispatch command.
 
 ### 3.1 Syntax
 
@@ -106,7 +120,7 @@ The generic runner maps parsed flags to `AddScheduleRequest.input`. P0 ships `cl
 1. Resolve `<preset_id>` (fail if unknown).
 2. Resolve `<work_id>`: positional arg or pool `active`; if none, fail with remediation → `creator bootstrap` or `creator works use`.
 3. Build schedule request (preset input from `cli_args`, Work-derived context from daemon).
-4. For FL-E default presets (`research`, `novel-writing`, `novel-chapter-review`, `kb-extract`), apply **stage advance** semantics before enqueue: validate stage gates, PATCH Work stage fields, then create schedule. These semantics are **live behavior** of the generic runner — the standalone `creator run stage advance` **subcommand** was removed in V1.45 (replaced by this runner's built-in stage path); see the V1.45 changelog.
+4. For FL-E default presets (`research`, `novel-writing`, `novel-chapter-review`, `kb-extract`), apply **stage advance** semantics before enqueue: validate stage gates, PATCH Work stage fields, then create schedule. These semantics were **V1.45 behavior** of the now-retired generic runner — the standalone `creator run stage advance` **subcommand** was removed in V1.45 (replaced then by that runner's built-in stage path); see the V1.45 changelog.
 5. `POST /v1/local/orchestration/schedules` — orchestration validates `run_intents` and `gates`.
 6. Print schedule id (human or JSON).
 
@@ -145,7 +159,7 @@ Hard delete legacy subcommands — **no deprecated aliases** (pre-release).
 
 ## 8. V1.45 supersession notes (P-last promotion)
 
-This Master **supersedes** the V1.44 cli-spec §6.2D/E bespoke subcommand tables and the V1.45 Draft overlay sections in the following specs:
+**Historical V1.45 supersession:** this Master superseded the V1.44 cli-spec §6.2D/E bespoke subcommand tables and the V1.45 Draft overlay sections in the following specs. That promotion does not restore dispatch authority after the v1.193 P2-T1 retirement (§0).
 
 - [creator-workflow.md](creator-workflow.md) (FL-E CLI overlay)
 - [novel-writing/quality-loop.md](novel-writing/quality-loop.md) (preset-id commands overlay; applied P3)

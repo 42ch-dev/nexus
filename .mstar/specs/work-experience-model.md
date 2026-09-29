@@ -34,7 +34,7 @@ Without Work, users must understand `daemon schedule`, preset IDs, seed strings,
 | Term | Meaning | Owning layer |
 | --- | --- | --- |
 | **Workspace** | Per-creator operational root (`workspace_slug`), `state.db`, filesystem layout | `nexus-home-layout`, CLI `creator workspace` |
-| **Work** | A single **creative effort** with stable `work_id`, long-term goal, structured brief, optional World binding, inspiration log, linked runs | **V1.33** — `state.db` table + CLI `creator run` |
+| **Work** | A single **creative effort** with stable `work_id`, long-term goal, structured brief, optional World binding, inspiration log, linked runs | Shipped V1.33; current persistence: `nexus-local-db` (`works` table/DAO); operations: `nexus-core` + CLI `creator works` (§3.3) |
 | **Work index** | CLI `creator kb --scope work` local file index | Daemon `/v1/local/kb/entries` — **not** Work |
 | **World** | Narrative universe (`world_id`) with timeline and World KB | `nexus-narrative`, `nexus-kb` |
 | **Creative brief** | Structured output of intake; required fields before `novel-writing` production states | Work.creative_brief (JSON) |
@@ -77,6 +77,12 @@ Without Work, users must understand `daemon schedule`, preset IDs, seed strings,
 - **SSOT**: `creators/<creator_id>/workspaces/<workspace_slug>/state.db` table `works` (exact DDL in P1 plan).
 - **Not** in `<workspace>/` user-visible tree (runtime metadata only).
 - **Not** duplicated in SOUL.md (SOUL remains creator identity; Work is project-scoped).
+
+**Current implementation ownership** (the V1.33 shipped product history remains unchanged):
+
+- **Creator aggregate / local identity:** [`crates/nexus-creator/src/creator.rs`](../../crates/nexus-creator/src/creator.rs) defines `Creator`, its identity/status, and user linkage. `nexus-creator` does **not** implement the Work store or Work operations.
+- **Work persistence:** each `(creator_id, workspace_slug)` has its `state.db` Work store. `nexus-local-db` owns the `works` tables/migrations (starting with [`20260604_works_table.sql`](../../crates/nexus-local-db/migrations/20260604_works_table.sql)) and the [`works.rs` DAO / `WorkRecord`](../../crates/nexus-local-db/src/works.rs); chapter persistence is in [`work_chapters.rs`](../../crates/nexus-local-db/src/work_chapters.rs). Work is not a nested field of the Creator aggregate.
+- **Work operations / CLI:** [`crates/nexus-core/src/works.rs`](../../crates/nexus-core/src/works.rs) owns the typed Work service operations used by the retained [`creator works` command families](../../apps/nexus42/src/commands/creator/works/mod.rs), including selection/status/pool, inspiration, reopening, completion-lock, and chapter reconciliation. Historical `creator run` spellings in this spec are not current implementation owners or dispatch entrances; see [creator-run-preset-entry.md](creator-run-preset-entry.md) §0 for the v1.193 P2-T1 retirement.
 
 ### 3.4 Invariants
 

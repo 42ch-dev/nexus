@@ -3,7 +3,7 @@
 **Status**: Shipped (V1.63) — essay profile production-ready: scaffold (ScaffoldTransaction), `essay-writing` preset (7-state chain), 4-dimension quality rubric (blocking with `--force-gates` override), completion detection, optional KB extraction.  
 **Document class**: Feature line  
 **Created**: 2026-06-19  
-**Last updated**: 2026-06-24 (V1.63 Shipped — Draft → Shipped promotion).  
+**Last updated**: 2026-09-29 — authority aligned with V1.63 shipped status (Draft → Shipped promotion: 2026-06-24).  
 **Scope**: `work_profile: essay` on generic **Work** — artifact layout under `Works/<work_ref>/`, templates, stage chain, completion semantics  
 **Coordinates with**:
 
@@ -163,9 +163,11 @@ AND works.intake_status == complete
 
 Completion does not enqueue a next chapter, next volume, or new Work. Reopening an essay Work follows the generic Work reopen path, not the novel completion-lock path unless a future plan explicitly generalizes that lock.
 
+**Shipped implementation anchors:** [`202606190004_work_profile_essay.sql`](../../crates/nexus-local-db/migrations/202606190004_work_profile_essay.sql) added `essay` to the stored profile constraint; [`crates/nexus-local-db/src/works.rs`](../../crates/nexus-local-db/src/works.rs) provides `is_essay_profile`; [`crates/nexus-local-db/src/work_chapters.rs`](../../crates/nexus-local-db/src/work_chapters.rs) provides `is_essay_complete` (intake complete + finalized draft, not novel chapter completion). [`crates/nexus-core/src/works.rs`](../../crates/nexus-core/src/works.rs) invokes that completion check for essay Works and promotes `works.status` to `completed` on its writable path.
+
 ---
 
-## 9. Acceptance (V1.52 draft)
+## 9. Acceptance (historical V1.52 draft)
 
 1. Essay layout is distinct from novel layout (`Drafts/` not `Stories/`).
 2. Stage chain is single-artifact and chapter-free.
@@ -174,4 +176,4 @@ Completion does not enqueue a next chapter, next volume, or new Work. Reopening 
 
 ---
 
-*Draft V1.52 Feature line. Implementation authority is active only while V1.52 compass is active; P-last promotes or revises after T-A P2 evidence.*
+*Shipped V1.63 Feature line — normative for the essay profile described here, including the completion contract and implementation anchors in §8. §9 preserves V1.52 draft acceptance as historical context; implementation authority is not conditional on the V1.52 compass remaining active.*

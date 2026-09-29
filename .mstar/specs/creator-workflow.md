@@ -1,17 +1,28 @@
 # Creator Workflow — Normative Specification
 
 **Status**: Shipped (V1.34 — 2026-06-05; V1.35 P4 partial; V1.39 — DF-53 full auto-chain + daemon continuity; **V1.40 Shipped** — DF-63 W5 `kb-extract` persistence via `novel-review-master sync_world_kb`: World-bound Works enqueue extract with `work.world_id`, `source_kind=work_chapter`, `source_locator={{preset.input.body_path}}`, `work_id`; worldless Works (legacy V1.39-and-earlier) skip World promotion; V1.79 additive SOUL visualization contract over memory fragments)  
+**Current authority**: Retained Work stage/field model only for workflow execution; the incomplete Creator runner and auto-chain/resume-chain entrances were removed in v1.193 P2-T1. Automatic progression and restart continuation below are historical shipped behavior, not current guarantees (§0).  
 **Document class**: Feature line  
 **Created**: 2026-06-04  
-**Last updated**: 2026-07-01 — V1.79 SOUL visualization contract note  
-**Scope**: Staged creator journey on **Work** (`intake → research → produce → review → persist`), built on shipped `creator run` + `run_intents`  
+**Last updated**: 2026-09-29 — separate retained state from retired runner/auto-chain behavior  
+**Scope**: Staged Work model (`intake → research → produce → review → persist`) and retained observable fields; historical preset dispatch/auto-chain contract; V1.79 read-only SOUL visualization  
 **Coordinates with**:
 
 - [work-experience-model.md](work-experience-model.md) — Work entity, intake, run_intents
 - [novel-writing/workflow-profile.md](novel-writing/workflow-profile.md) — novel `produce` artifacts and completion (Draft V1.36)
-- [cli-spec.md](cli-spec.md) — `creator run <preset_id>` (see §6.2D) and `creator bootstrap`
+- [cli-spec.md](cli-spec.md) — retained `creator works` atomic operations; retired `creator run` / `creator bootstrap` history is not a current entry contract
 - [orchestration-engine.md](orchestration-engine.md) — presets, schedules, capabilities
 - [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md) — Agent-initiated context/tools (parallel channel)
+
+---
+
+## 0. Current workflow boundary (v1.193 P2-T1)
+
+The stage vocabulary and stored Work state remain: `current_stage`, `stage_status`, `current_chapter`, `auto_chain_enabled`, `driver_schedule_id`, and `auto_chain_interrupted` are retained in [`crates/nexus-local-db/src/works.rs`](../../crates/nexus-local-db/src/works.rs) (`WorkRecord`, `WORKS_COLUMNS`). Retained `creator works` commands expose Work state and atomic operations; **field persistence or visibility does not promise automatic stage dispatch, a live driver, or restart resume**.
+
+[`apps/nexus42/src/commands/creator/works/mod.rs`](../../apps/nexus42/src/commands/creator/works/mod.rs) records the v1.193 P2-T1 removal of the incomplete Creator runner and `works intake` / `works resume-chain`. Its status output still reports `auto_chain_enabled`, `driver_schedule_id`, and interrupted state, but deliberately advertises no resume remediation command. The generic `creator run <preset_id>` entry is also retired, with no replacement CLI preset-dispatch entrance; see [creator-run-preset-entry.md](creator-run-preset-entry.md) §0.
+
+**Reading boundary:** the execution rules, command journeys, automatic full-stage/chapter progression, and daemon restart continuation in §1–§7 are preserved as shipped history, not present-day scheduling instructions. The stage/field vocabulary and §5.6 SOUL read contract remain distinct from those retired execution claims.
 
 ---
 
@@ -23,11 +34,13 @@ The Work loop shipped in V1.33 centered on Creative Brief Intake and `novel-writ
 intake → research → produce → review → persist
 ```
 
-without introducing a second scheduler or replacing World/KB SSOT. After V1.35 P4, `creator bootstrap` chains intake → produce by default (`--chain-novel-writing`, default true). **V1.39** ships full-stage `--auto-chain` (default **true**, opt-out `--no-auto-chain`): while the daemon is online, stages advance through `research → produce → review → persist` per chapter without a manual preset dispatch at each boundary. Daemon restart resumes from a Work continuation checkpoint (DF-68).
+**Historical shipped behavior (retired v1.193 P2-T1):** the workflow reused the existing scheduler and World/KB SSOT. After V1.35 P4, `creator bootstrap` chained intake → produce by default (`--chain-novel-writing`, default true). **V1.39** shipped full-stage `--auto-chain` (default **true**, opt-out `--no-auto-chain`): while the daemon was online, stages advanced through `research → produce → review → persist` per chapter without a manual preset dispatch at each boundary. Daemon restart resumed from a Work continuation checkpoint (DF-68). These are not guarantees of the retained stage fields (§0).
 
 ---
 
 ## 2. Relationship to Work model
+
+> The table records the shipped relationship. Its onboarding and preset-runner progression entries are historical; current CLI operations are the retained `creator works` families (§0).
 
 | Concept | Work model (baseline) | Staged workflow (this spec) |
 | --- | --- | --- |
@@ -51,6 +64,8 @@ without introducing a second scheduler or replacing World/KB SSOT. After V1.35 P
 ---
 
 ## 3. Stage model
+
+> Stage identifiers and stored fields remain part of the Work model. The schedule-driven meanings, force-skip rules, and stage-gate command examples below describe the historical runner; they do not supply a current dispatch or resume entrance (§0).
 
 ### 3.1 Stage identifiers (closed enum)
 
@@ -93,7 +108,7 @@ creator run <preset_id> [<work_id>] # e.g. creator run research, creator run nov
 
 ---
 
-## 4. Preset chain (normative mapping)
+## 4. Preset chain (historical shipped mapping)
 
 | Stage | Preset ID | Notes |
 | --- | --- | --- |
@@ -108,6 +123,8 @@ P2 may add wiring presets or seeds only; **no** new conditional `next.kind`.
 ---
 
 ## 5. User journeys
+
+> **Historical execution journeys:** §5.1–§5.5 retain the shipped CLI/auto-chain record, including command spellings removed or migrated since then. They are not runnable current instructions. §5.6 is the separate retained SOUL visualization contract.
 
 ### 5.1 Happy path (explicit stages)
 
@@ -137,7 +154,7 @@ Does **not** advance `current_stage`; merges into `inspiration_log` and schedule
 
 `daemon schedule` remains valid; schedules created via `creator run <preset>` **must** record `work_id` and stage id in schedule seed/metadata (wire key `fl_e_stage` in V1.34 implementation).
 
-### 5.4 Daemon-attached auto-chain (V1.39 historical design)
+### 5.4 Daemon-attached auto-chain (V1.39 shipped history; retired v1.193 P2-T1)
 
 When `auto_chain_enabled` on a Work (default true for new starts):
 
@@ -148,15 +165,7 @@ When `auto_chain_enabled` on a Work (default true for new starts):
 
 `creator run resume <work_id>` recovers when auto-resume did not run or user disabled auto-chain.
 
-The V1.39 list above is retained as historical workflow intent. Current
-orchestration checkpoint/re-drive behavior is narrower and source-backed by
-[`daemon-runtime.md`](daemon-runtime.md) §19: checkpoints persist position and
-context rather than a completed-stage ledger; daemon boot re-drives only
-non-terminal, readable, non-failed sessions with live converge/merge join
-state and a reconstructed runner. `nexus42 ops inspect [SESSION_ID] [--json]`
-is read-only and never triggers resume. The current Work auto-chain recovery
-command is `nexus42 creator works resume-chain`, migrated from the historical
-`creator run resume` spelling above.
+**Retirement boundary:** the V1.39 list above is historical shipped behavior. Both the old `creator run resume` spelling and its later `creator works resume-chain` entrance are removed; no current Work restart-continuation command is claimed. The retained checkpoint fields are observable state only (§0), not evidence of a resumed chain. [daemon-runtime.md](daemon-runtime.md) is itself a retired-host record and does not restore this execution path.
 
 ### 5.5 Side-input lane (V1.39 extension)
 
@@ -183,6 +192,8 @@ Wire contract: `schemas/daemon-api/memory/memory-fragment-info.schema.json` exte
 
 ## 6. Conflicts and non-goals
 
+> Execution-related rows below are historical shipped constraints, including auto-chain, completion-lock tick suppression, multi-Work scheduling, and the former CLI IA. Retained state/atomic operations do not re-enable those execution entrances (§0).
+
 | Topic | Rule |
 | --- | --- |
 | Work vs `creator kb --scope work` | Index entries may tag `work_id`; index does not define Work |
@@ -200,7 +211,7 @@ Wire contract: `schemas/daemon-api/memory/memory-fragment-info.schema.json` exte
 
 ---
 
-## 7. Acceptance (spec-level)
+## 7. Acceptance (historical spec-level)
 
 1. Stage enum and preset mapping are stable in cli-spec and this document.
 2. The preset runner rejects wrong stage order without `--force-gates` (stage gate validation inside `creator run <preset_id>`).
@@ -211,8 +222,8 @@ Wire contract: `schemas/daemon-api/memory/memory-fragment-info.schema.json` exte
 
 ## V1.45 supersession (P-last promotion)
 
-**Superseded by**: [creator-run-preset-entry.md](creator-run-preset-entry.md) (Shipped Master V1.45). FL-E CLI table is now part of the canonical Master body — see §3.3 (`research` / `novel-writing` / `reflection-loop` / `kb-extract` preset ids) and §2 three-plane IA.
+**Historical supersession:** [creator-run-preset-entry.md](creator-run-preset-entry.md) shipped as the V1.45 Master and superseded the FL-E CLI table with preset-id grammar and three-plane IA. That runner was retired in v1.193 P2-T1; its historical promotion is not current dispatch authority. Current workflow scope is §0.
 
 ---
 
-*Normative staged creator workflow. Shipped V1.34.*
+*Normative for retained Work stage/field vocabulary and the separate SOUL read contract; execution and auto-chain sections preserve V1.34–V1.45 shipped history, retired in v1.193 P2-T1 (§0).*
