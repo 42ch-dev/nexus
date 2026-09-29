@@ -77,6 +77,10 @@ vi.mock('@/lib/nexus/query-keys', () => ({
   queryKeys: {
     chapters: { outlines: () => ['chapters', 'outlines'], detail: () => ['chapters', 'detail'], lists: () => ['chapters', 'lists'], list: () => ['chapters', 'list'] },
     outline: { detail: () => ['outline', 'detail'] },
+    // The event inspector's World-event picker composes its World KB read key
+    // at render even when the Work is unbound (the query is disabled on the
+    // id), so the stub must carry the family these surfaces reach for.
+    worldKb: { graph: (worldId: string) => ['worldKb', 'graph', worldId] },
   },
 }));
 
