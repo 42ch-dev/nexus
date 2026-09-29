@@ -17,6 +17,10 @@
  *   replayed history and `events.slice(liveFrom)` as the live tail, in two
  *   separately labeled sections, so the replay/live handoff stays visible
  *   instead of blending into one undifferentiated log.
+ * - **History lost** — a `history_unavailable` close (a daemon restart, or an
+ *   evicted event ring) is rendered as its own notice above the frames this view
+ *   had already retained, never as an ordinary end: the retained frames stay on
+ *   screen and the badge states that the server's history for this run is gone.
  *
  * Observation only (plan Non-Goal): the view exposes no run control — there is
  * no drive, cancel or restart affordance anywhere on this surface. A typed
@@ -24,7 +28,7 @@
  * typed message it is, never retried.
  */
 import type { ProviderHostEvent } from '@42ch/nexus-contracts';
-import { ArrowLeft, RefreshCw } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, RefreshCw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router';
 
@@ -37,7 +41,7 @@ import { statusVariant } from '@/components/status-badge';
 import { Badge, type BadgeProps } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { EmptyState, ErrorState, LoadingState } from '@/components/ui/states';
+import { ErrorState, LoadingState } from '@/components/ui/states';
 import { humanizeStatus, shortId } from '@/lib/format';
 import { NexusClientError } from '@/lib/nexus';
 import type { WorkflowObservationFrame } from '@/lib/nexus/types';
@@ -97,13 +101,40 @@ function observedRunId(frames: WorkflowObservationFrame[]): string | null {
 type ListedFrame = Exclude<WorkflowObservationFrame, { kind: 'history_unavailable' }>;
 
 /**
- * Drop the `history_unavailable` control frame from a slice — it is the sole
- * frame of a closed subscription (core `run_events.rs` §437), so it is answered
- * by the terminal empty state rather than by a row. The predicate keeps the
- * narrowing at the call site instead of casting the frame shape.
+ * Drop the `history_unavailable` control frame from a slice — it is answered by
+ * the history-unavailable notice above the list, not by a row. The predicate
+ * keeps the narrowing at the call site instead of casting the frame shape.
  */
 function listed(frames: WorkflowObservationFrame[]): ListedFrame[] {
   return frames.filter((frame): frame is ListedFrame => frame.kind !== 'history_unavailable');
+}
+
+/**
+ * The lost-history notice — a `history_unavailable` close is not an ordinary
+ * end: the server holds no history for this run (a restart, or an evicted event
+ * ring), so the frames below are only what this view had already retained.
+ * Warning surface, matching the shared inline-banner convention.
+ */
+function HistoryUnavailableNotice() {
+  const { t } = useTranslation('sessions');
+
+  return (
+    <div
+      role="status"
+      data-testid="run-history-unavailable"
+      className="flex items-start gap-2 rounded-card border border-warning-surface-border bg-warning-surface p-3"
+    >
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" aria-hidden />
+      <div className="flex flex-col gap-1">
+        <p className="text-label-14 font-medium text-amber-1000">
+          {t('runView.historyUnavailableTitle')}
+        </p>
+        <p className="text-copy-13 text-amber-900">
+          {t('runView.historyUnavailableDescription')}
+        </p>
+      </div>
+    </div>
+  );
 }
 
 /** One observed frame: a data frame, or the inline gap marker where it arrived. */
@@ -160,16 +191,23 @@ function EventRow({ frame }: { frame: ListedFrame }) {
 /**
  * The observed stream: the failure/empty states, then the replayed span and the
  * live tail as two separately labeled sections.
+ *
+ * `historyUnavailable` (the hook recorded the server's `history_unavailable`
+ * close) is not an ordinary end: the notice says the server history is gone and
+ * the frames this view already held stay on screen below it.
  */
-function RunStream({ observation }: { observation: RunObservationResult }) {
+function RunStream({
+  observation,
+  historyUnavailable,
+}: {
+  observation: RunObservationResult;
+  historyUnavailable: boolean;
+}) {
   const { t } = useTranslation('sessions');
   const { phase, events, liveFrom, error, retry } = observation;
   const replayed = listed(events.slice(0, liveFrom));
   const live = listed(events.slice(liveFrom));
   const streamOpen = phase !== 'terminal' && phase !== 'error';
-  const hasDataFrame = events.some(
-    (frame) => frame.kind === 'host_event' || frame.kind === 'run_state',
-  );
 
   if (phase === 'error') {
     // A typed refusal (>= 400: absent/foreign/child run, malformed cursor) is
@@ -195,10 +233,15 @@ function RunStream({ observation }: { observation: RunObservationResult }) {
 
   if (events.length === 0) return <LoadingState label={t('runView.loading')} />;
 
-  // A terminal stream that never delivered a data frame: the run's retained
-  // history is gone, so there is nothing to observe (not a crash).
-  if (phase === 'terminal' && !hasDataFrame) {
-    return <EmptyState title={t('runView.emptyTitle')} description={t('runView.emptyDescription')} />;
+  if (historyUnavailable) {
+    return (
+      <div className="flex flex-col gap-4">
+        <HistoryUnavailableNotice />
+        {replayed.length + live.length > 0 && (
+          <StreamSections replayed={replayed} live={live} streamOpen={false} />
+        )}
+      </div>
+    );
   }
 
   return <StreamSections replayed={replayed} live={live} streamOpen={streamOpen} />;
@@ -259,6 +302,12 @@ export function SessionRunViewPage() {
   if (!sessionId) return <NotFoundPage />;
 
   const runId = observedRunId(observation.events);
+  // The server's `history_unavailable` close is not an ordinary end: the retained
+  // frames are only what this view already held, so the badge states the loss
+  // instead of reporting a plain ending.
+  const historyUnavailable = observation.events.some(
+    (frame) => frame.kind === 'history_unavailable',
+  );
 
   return (
     <div className="flex flex-col gap-4" data-testid="session-run-view">
@@ -298,8 +347,13 @@ export function SessionRunViewPage() {
               </CardDescription>
             </div>
             <div className="flex items-center gap-2">
-              <Badge variant={PHASE_VARIANT[observation.phase]} data-testid="run-phase">
-                {t(PHASE_LABEL_KEY[observation.phase])}
+              <Badge
+                variant={historyUnavailable ? 'warning' : PHASE_VARIANT[observation.phase]}
+                data-testid="run-phase"
+              >
+                {historyUnavailable
+                  ? t('runView.historyUnavailableBadge')
+                  : t(PHASE_LABEL_KEY[observation.phase])}
               </Badge>
               {observation.phase === 'gapped' && (
                 <Button
@@ -316,7 +370,7 @@ export function SessionRunViewPage() {
           </div>
         </CardHeader>
         <CardContent>
-          <RunStream observation={observation} />
+          <RunStream observation={observation} historyUnavailable={historyUnavailable} />
         </CardContent>
       </Card>
     </div>

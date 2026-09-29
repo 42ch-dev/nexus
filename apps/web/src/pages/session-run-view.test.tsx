@@ -11,6 +11,8 @@
  *    from the last received id;
  *  - a re-entered session renders replayed history and the live tail as two
  *    distinguishable regions;
+ *  - a `history_unavailable` close is disclosed as lost server history rather
+ *    than an ordinary end, with the frames this view already held left visible;
  *  - a foreign/child run id renders the typed refusal honestly;
  *  - the surface exposes no run control at all (plan Non-Goal).
  */
@@ -302,15 +304,44 @@ describe('SessionRunViewPage — replay', () => {
     expect(screen.getByTestId('run-phase')).toHaveTextContent('Live');
   });
 
-  it('renders the empty state when the stream closes with no replayable history', async () => {
+  it('reports a lost server history instead of an ordinary end when nothing was retained', async () => {
     const { client } = stubClientFor([() => frames(HISTORY_UNAVAILABLE)]);
     renderRunView(client, 'run-history-gone');
 
-    expect(await screen.findByText('No events to show')).toBeInTheDocument();
-    expect(
-      screen.getByText(/without delivering an event this session can replay/i),
-    ).toBeInTheDocument();
-    expect(screen.getByTestId('run-phase')).toHaveTextContent('Ended');
+    expect(await screen.findByTestId('run-history-unavailable')).toHaveTextContent(
+      'Server history unavailable',
+    );
+    // The badge states what was lost — a `history_unavailable` close is not "Ended".
+    expect(screen.getByTestId('run-phase')).toHaveTextContent('History unavailable');
+    expect(screen.queryAllByTestId('run-event')).toHaveLength(0);
+  });
+
+  it('keeps the retained frames under the history-unavailable notice rather than presenting them as an ordinary end', async () => {
+    // The first view receives frames and leaves; the server then answers this
+    // view's re-entry subscription with `history_unavailable` alone (the saved
+    // cursor names a prior epoch or an evicted ring), so the frames still on
+    // screen are only what this view had already retained.
+    const { client, calls } = stubClientFor([
+      (options) => openStream(options, runState('e1:1'), hostEvent('e1:2')),
+      () => frames(HISTORY_UNAVAILABLE),
+    ]);
+
+    const first = renderRunView(client, 'run-history-gone-kept');
+    expect(await screen.findByText('e1:2')).toBeInTheDocument();
+    first.unmount();
+
+    renderRunView(client, 'run-history-gone-kept');
+
+    expect(await screen.findByTestId('run-history-unavailable')).toHaveTextContent(
+      /no longer holds this run's history/i,
+    );
+    // The re-entry asked from the last received cursor, and was told no.
+    expect(calls[1].lastEventId).toBe('e1:2');
+    // The retained frames stay visible — the loss is disclosed, not papered over.
+    expect(screen.getByTestId('run-replay')).toBeInTheDocument();
+    expect(screen.getByText('e1:1')).toBeInTheDocument();
+    expect(screen.getByText('e1:2')).toBeInTheDocument();
+    expect(screen.getByTestId('run-phase')).not.toHaveTextContent('Ended');
   });
 });
 
