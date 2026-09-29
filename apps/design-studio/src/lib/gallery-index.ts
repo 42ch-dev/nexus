@@ -154,6 +154,9 @@ const SURFACES_CANVAS_ENTRIES: readonly GalleryEntry[] = [
   entry('/surfaces/canvas', 'surfaces-conflict-modals', 'Conflict Modals', ['modal', 'conflict'], [
     '@/fixtures/conflict-modal-fixtures',
   ]),
+  entry('/surfaces/canvas', 'surfaces-outline-authoring', 'Outline Authoring & Binding', ['outline', 'scene', 'beat', 'bind', 'world event'], [
+    '@/fixtures/outline-authoring-fixtures',
+  ]),
 ];
 
 const SURFACES_DAEMON_ENTRIES: readonly GalleryEntry[] = [
