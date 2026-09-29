@@ -38,6 +38,7 @@ import { SelectionSubmenuStubFixtures } from '@/fixtures/selection-submenu-fixtu
 import { NleTimelineCanvasFixtures } from '@/fixtures/nle-timeline-canvas-fixtures';
 import { TimelineCanvasFixtures } from '@/fixtures/timeline-canvas-fixtures';
 import { WorkTimelineCanvasFixtures } from '@/fixtures/work-timeline-canvas-fixtures';
+import { OutlineAuthoringFixtures } from '@/fixtures/outline-authoring-fixtures';
 
 /* ------------------------------------------------------------------ */
 /*  Data — IA guide §4.5 fixtures (canonical copy strings)              */
@@ -1141,6 +1142,39 @@ export function SurfacesCanvasPage() {
           fixtures are below (V1.124 P2).
         </p>
         <WorkTimelineCanvasFixtures />
+      </section>
+
+      {/* V1.200 — Outline scene/beat authoring card + World-event bind control (Greptile issue 5 studio-first) */}
+      <section
+        className="mt-10"
+        data-testid="surfaces-outline-authoring"
+        id="surfaces-outline-authoring"
+      >
+        <SurfaceHeading id="surfaces-outline-authoring">
+          Outline Authoring &amp; Binding
+        </SurfaceHeading>
+        <SurfaceSourceBadges
+          importPaths={[
+            '@/fixtures/outline-authoring-fixtures',
+            '@42ch/nexus-ui',
+          ]}
+        />
+        <p className="text-copy-14 text-gray-700 mb-6">
+          Studio-first fixture for the two v1.200 outline canvas surfaces before
+          App wiring — the Scenes &amp; Beats authoring card (empty / with-draft
+          / bound) and the Timeline event inspector&apos;s World-event
+          bind/unbind control (unbound / bound / disabled-when-no-bound-World).
+          The web sources couple to i18n and daemon query hooks, so these
+          fixtures are a studio-local structure and token mirror on promoted{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            @42ch/nexus-ui
+          </code>{' '}
+          primitives with the same literal English copy the app ships. Each
+          variant renders a light + dark pair — the dark specimen sits in a
+          scoped <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">.dark</code>{' '}
+          panel, so both themes are inspectable without a document theme toggle.
+        </p>
+        <OutlineAuthoringFixtures />
       </section>
 
       {/* V1.124 P2 T2 — Global Timeline list chrome */}

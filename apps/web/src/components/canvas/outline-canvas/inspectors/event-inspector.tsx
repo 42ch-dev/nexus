@@ -103,6 +103,7 @@ function TimelinePanelView({
   const [linkTargetByEvent, setLinkTargetByEvent] = useState<Record<string, string>>({});
   // Per-event selected World-event target id (V1.200 DR-26 bind control).
   const [worldEventTargetByEvent, setWorldEventTargetByEvent] = useState<Record<string, string>>({});
+  const [manualWorldEventByEvent, setManualWorldEventByEvent] = useState<Record<string, string>>({});
 
   // Foreshadow edges grouped by source event for quick lookup per row.
   const outgoingForeshadows = useMemo(() => {
@@ -175,15 +176,21 @@ function TimelinePanelView({
   }
 
   function bindWorldEvent(eventId: string, worldEventId: string) {
-    if (!worldEventId) return;
+    const trimmedId = worldEventId.trim();
+    if (!trimmedId) return;
     onPatchTimeline({
       work_id: outline.work_id,
       base_revision: baseRevision,
       operation: 'bind_world_event',
       event_id: eventId,
-      world_event_id: worldEventId,
+      world_event_id: trimmedId,
     });
     setWorldEventTargetByEvent((prev) => {
+      const next = { ...prev };
+      delete next[eventId];
+      return next;
+    });
+    setManualWorldEventByEvent((prev) => {
       const next = { ...prev };
       delete next[eventId];
       return next;
@@ -207,6 +214,9 @@ function TimelinePanelView({
           {t('eventInspector.title')}
         </CardTitle>
         <CardDescription>{t('eventInspector.description')}</CardDescription>
+        {boundWorldId ? (
+          <CardDescription>{t('eventInspector.worldEventPickerLimit')}</CardDescription>
+        ) : null}
       </CardHeader>
       <CardContent className="space-y-4">
         {!boundWorldId ? (
@@ -360,40 +370,73 @@ function TimelinePanelView({
                       </Button>
                     </div>
                   ) : (
-                    <div className="mt-1.5 flex items-center gap-1.5">
-                      <select
-                        value={worldEventTargetByEvent[event.event_id] ?? ''}
-                        onChange={(e) =>
-                          setWorldEventTargetByEvent((prev) => ({
-                            ...prev,
-                            [event.event_id]: e.target.value,
-                          }))
-                        }
-                        disabled={!boundWorldId}
-                        title={boundWorldId ? undefined : t('eventInspector.worldEventRequired')}
-                        className="min-w-0 flex-1 rounded-control border border-gray-alpha-400 bg-background-100 px-2 py-1 text-label-12 text-gray-1000 focus:border-blue-1000 dark:focus:border-blue-700"
-                        aria-label={t('eventInspector.worldEventAria', { title: event.title })}
-                      >
-                        <option value="">{t('eventInspector.worldEventPlaceholder')}</option>
-                        {worldEventOptions.map((option) => (
-                          <option key={option.id} value={option.id}>
-                            {option.name}
-                          </option>
-                        ))}
-                      </select>
-                      <Button
-                        variant="secondary"
-                        size="small"
-                        onClick={() =>
-                          bindWorldEvent(
-                            event.event_id,
-                            worldEventTargetByEvent[event.event_id] ?? '',
-                          )
-                        }
-                        disabled={!boundWorldId || !worldEventTargetByEvent[event.event_id]}
-                      >
-                        {t('eventInspector.worldEventBind')}
-                      </Button>
+                    <div className="mt-1.5 space-y-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <select
+                          value={worldEventTargetByEvent[event.event_id] ?? ''}
+                          onChange={(e) =>
+                            setWorldEventTargetByEvent((prev) => ({
+                              ...prev,
+                              [event.event_id]: e.target.value,
+                            }))
+                          }
+                          disabled={!boundWorldId}
+                          title={boundWorldId ? undefined : t('eventInspector.worldEventRequired')}
+                          className="min-w-0 flex-1 rounded-control border border-gray-alpha-400 bg-background-100 px-2 py-1 text-label-12 text-gray-1000 focus:border-blue-1000 dark:focus:border-blue-700"
+                          aria-label={t('eventInspector.worldEventAria', { title: event.title })}
+                        >
+                          <option value="">{t('eventInspector.worldEventPlaceholder')}</option>
+                          {worldEventOptions.map((option) => (
+                            <option key={option.id} value={option.id}>
+                              {option.name}
+                            </option>
+                          ))}
+                        </select>
+                        <Button
+                          variant="secondary"
+                          size="small"
+                          onClick={() =>
+                            bindWorldEvent(
+                              event.event_id,
+                              worldEventTargetByEvent[event.event_id] ?? '',
+                            )
+                          }
+                          disabled={!boundWorldId || !worldEventTargetByEvent[event.event_id]}
+                        >
+                          {t('eventInspector.worldEventBind')}
+                        </Button>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="text"
+                          value={manualWorldEventByEvent[event.event_id] ?? ''}
+                          onChange={(e) =>
+                            setManualWorldEventByEvent((prev) => ({
+                              ...prev,
+                              [event.event_id]: e.target.value,
+                            }))
+                          }
+                          disabled={!boundWorldId}
+                          placeholder={t('eventInspector.worldEventManualPlaceholder')}
+                          aria-label={t('eventInspector.worldEventManualAria', { title: event.title })}
+                          className="min-w-0 flex-1 rounded-control border border-gray-alpha-400 bg-background-100 px-2 py-1 text-label-12 text-gray-1000 focus:border-blue-1000 dark:focus:border-blue-700"
+                        />
+                        <Button
+                          variant="secondary"
+                          size="small"
+                          onClick={() =>
+                            bindWorldEvent(
+                              event.event_id,
+                              manualWorldEventByEvent[event.event_id] ?? '',
+                            )
+                          }
+                          disabled={
+                            !boundWorldId || !manualWorldEventByEvent[event.event_id]?.trim()
+                          }
+                        >
+                          {t('eventInspector.worldEventManualBind')}
+                        </Button>
+                      </div>
                     </div>
                   )}
                 </li>

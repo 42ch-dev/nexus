@@ -91,9 +91,10 @@ export interface OutlineCanvasAdapterContext {
   /** Always-defined fixture used to resolve Beat/Scene entities from node data. */
   fixture: SceneBeatFixturePayload;
   /**
-   * Original `sceneBeatFixture` prop (undefined on real Works). Drives the
-   * alt-view's "no fixture vs. empty fixture" distinction — when undefined,
-   * chapters render without the empty-under-chapter helper.
+   * Fixture forwarded to the alt view. The orchestrator supplies the explicit
+   * Studio/test `sceneBeatFixture` prop when present, else the Work's canonical
+   * scenes/beats once they have content. `undefined` keeps the alt view's
+   * honest empty chrome (no empty-under-chapter helper).
    */
   altViewSceneBeatFixture?: SceneBeatFixturePayload;
 

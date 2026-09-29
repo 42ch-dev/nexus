@@ -57,7 +57,7 @@ import { useCallback, useContext } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useBeforeUnload, useNavigate, useSearchParams } from 'react-router';
 import type { Node } from '@xyflow/react';
-import { useQueries } from '@tanstack/react-query';
+import { useQueries, useQuery } from '@tanstack/react-query';
 import { Cpu, Info, Plus } from 'lucide-react';
 
 import { CanvasShell } from '@/components/canvas/canvas-shell';
@@ -448,6 +448,47 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   );
   const nexusClient = useNexusClient();
 
+  // Moment is a complete World projection, unlike the bounded navigation
+  // candidate set above. Enumerate the existing works endpoint by cursor.
+  const allMomentWorksQuery = useQuery({
+    queryKey: ['world-moment-works', worldId],
+    enabled: searchParams.get('layer') === 'moment',
+    queryFn: async (): Promise<WorkSummary[]> => {
+      const works: WorkSummary[] = [];
+      let cursor: string | undefined;
+      while (true) {
+        const page = await nexusClient.listWorks({ limit: 100, cursor });
+        works.push(...page.items);
+        if (!page.pagination.has_more) return works;
+        if (!page.pagination.next_cursor) {
+          throw new Error('Works pagination reported more items without a next cursor');
+        }
+        cursor = page.pagination.next_cursor;
+      }
+    },
+  });
+  const allMomentWorks = allMomentWorksQuery.data ?? [];
+  const momentWorkDetailQueries = useQueries({
+    queries: allMomentWorks.map((work) => ({
+      queryKey: ['work-detail', work.work_id],
+      queryFn: (): Promise<WorkDetailResponse> => nexusClient.getWork(work.work_id),
+      staleTime: 30_000,
+      enabled: searchParams.get('layer') === 'moment',
+    })),
+  });
+  const momentRealizingWorks = useMemo<Array<{ workId: string; updatedAt: string }>>(() => {
+    const out: Array<{ workId: string; updatedAt: string }> = [];
+    momentWorkDetailQueries.forEach((q, idx) => {
+      const detail = q.data as WorkDetailResponse | undefined;
+      if (!detail || detail.world_id !== worldId) return;
+      out.push({
+        workId: detail.work_id,
+        updatedAt: allMomentWorks[idx]?.updated_at ?? '',
+      });
+    });
+    return out;
+  }, [momentWorkDetailQueries, allMomentWorks, worldId]);
+
   // Per-Work detail fan-out (parallel). Each `getWork` returns a
   // `WorkDetailResponse` carrying `world_id`; we filter to those matching the
   // active World. Cached at the TanStack Query level — Work-detail readers
@@ -479,6 +520,8 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
     });
     return out;
   }, [workDetailQueries, worksList, worldId]);
+  const outlineWorks =
+    searchParams.get('layer') === 'moment' ? momentRealizingWorks : realizingWorks;
 
   // Surface-level fallback target — most-recent realizing Work (V1.123 P3
   // semantics preserved verbatim: same candidate set, same recency sort).
@@ -663,7 +706,7 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   // lag is harmless.
   const outlineFanOutEnabled = activeLayer === 'moment' || hasEventSelection;
   const workOutlineQueries = useQueries({
-    queries: realizingWorks.map(({ workId }) => ({
+    queries: outlineWorks.map(({ workId }) => ({
       queryKey: queryKeys.outline.detail(workId),
       queryFn: (): Promise<WorkOutline> => nexusClient.getWorkOutline(workId),
       staleTime: 30_000,
@@ -677,7 +720,7 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   // collapse into one chapter region). Keyed on primitive signatures because
   // `useQueries` returns a fresh array each render — depending on it directly
   // would churn the payload identity and re-project every render.
-  const boundWorksSignature = realizingWorks.map((w) => w.workId).join(',');
+  const boundWorksSignature = outlineWorks.map((w) => w.workId).join(',');
   const boundOutlinesSignature = workOutlineQueries
     .map((q) => {
       const outline = q.data as WorkOutline | undefined;
@@ -690,7 +733,7 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
     workOutlineQueries.forEach((q, idx) => {
       const outline = q.data as WorkOutline | undefined;
       if (!outline) return;
-      const payload = sceneBeatPayloadFromOutline(outline, realizingWorks[idx]?.workId);
+      const payload = sceneBeatPayloadFromOutline(outline, outlineWorks[idx]?.workId);
       scenes.push(...payload.scenes);
       beats.push(...payload.beats);
     });
