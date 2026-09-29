@@ -1191,6 +1191,197 @@ async fn timeline_world_event_binding_refusals_leave_outline_unchanged() {
     fx.core.close().await.unwrap();
 }
 
+/// A Work whose **stored** World belongs to another creator refuses both
+/// binding operations with the typed ownership denial (rendered 403 at the
+/// adapter boundary) before any World read, leaving the outline revision and
+/// the file content untouched.
+#[tokio::test]
+async fn timeline_world_event_binding_refuses_a_foreign_stored_world() {
+    let fx = setup().await;
+    let rel_path = "Works/test-novel/Outlines/outline.md";
+    let outline_path = fx.creative_root.join(rel_path);
+    let world_id = work_world_id(&fx).await;
+    let referent = "kb_0000e005";
+    create_kb_entity(&fx, &world_id, referent, "Bystander Event", "event").await;
+
+    let patch = |base: u64, mut value: serde_json::Value| {
+        value["work_id"] = serde_json::json!(fx.work_id.clone());
+        value["base_revision"] = serde_json::json!(base);
+        timeline_request(value)
+    };
+    fx.core
+        .patch_timeline_event(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            patch(
+                0,
+                serde_json::json!({
+                    "operation": "add_event", "title": "Bystander", "realizes_chapter_id": 1
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+    let event_id = event_id_by_title(&fx, "Bystander").await;
+    let revision = outline_revision(&fx).await;
+    let content_before = std::fs::read_to_string(&outline_path).unwrap();
+
+    // The Work's stored `world_id` still names the World; only its owner is
+    // reassigned to another creator. The Work's binding is never trusted from
+    // the payload, and the guard refuses before the referent read.
+    //
+    // `narrative_worlds.owner_creator_id` is `NOT NULL`
+    // (`crates/nexus-local-db/migrations/20260524_narrative_worlds.sql:10`), so
+    // the guard's unowned branch is not constructible; the foreign-owner state
+    // is the representable denial this proves.
+    let other_creator = "other-author";
+    nexus_local_db::creators::ensure_creator_row(&fx.pool, other_creator, "Other Author")
+        .await
+        .unwrap();
+    sqlx::query("UPDATE narrative_worlds SET owner_creator_id = ? WHERE world_id = ?")
+        .bind(other_creator)
+        .bind(&world_id)
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+
+    for (operation, value) in [
+        (
+            "bind",
+            serde_json::json!({
+                "operation": "bind_world_event",
+                "event_id": event_id, "world_event_id": referent
+            }),
+        ),
+        (
+            "unbind",
+            serde_json::json!({
+                "operation": "unbind_world_event", "event_id": event_id
+            }),
+        ),
+    ] {
+        let err = fx
+            .core
+            .patch_timeline_event(
+                &fx.principal,
+                "http",
+                fx.work_id.clone(),
+                patch(revision, value),
+            )
+            .await
+            .unwrap_err();
+        let CoreError::WorldOwnerDenied {
+            world_id: denied, ..
+        } = err
+        else {
+            panic!(
+                "a foreign stored World must refuse {operation} with the typed ownership \
+                 denial, got {err:?}"
+            );
+        };
+        assert_eq!(
+            denied, world_id,
+            "{operation} must name the Work's stored World"
+        );
+    }
+
+    let outline = fx
+        .core
+        .work_outline(&fx.principal, fx.work_id.clone())
+        .await
+        .unwrap();
+    assert_eq!(outline.outline_revision, revision);
+    assert_eq!(outline.timeline_events[0].world_event_id, None);
+    assert_eq!(
+        std::fs::read_to_string(&outline_path).unwrap(),
+        content_before,
+        "an ownership refusal must not rewrite the outline file"
+    );
+    fx.pool.close().await;
+    fx.core.close().await.unwrap();
+}
+
+/// The bind referent is proven by a targeted membership read, not a capped
+/// graph scan: an event that exists in the bound World but sorts past
+/// `GRAPH_ENTITY_CAP` (500) still binds instead of being refused as absent.
+#[tokio::test]
+async fn timeline_world_event_binding_accepts_a_referent_past_the_graph_cap() {
+    let fx = setup().await;
+    let world_id = work_world_id(&fx).await;
+    let referent = "kb_0000e006";
+    create_kb_entity(&fx, &world_id, referent, "Beyond Cap", "event").await;
+
+    // 500 World-owned entities created before the referent: the graph read
+    // (`created_at ASC LIMIT 500`) closes its window before the referent.
+    for index in 0..500 {
+        sqlx::query(
+            r"INSERT INTO kb_key_blocks
+                (key_block_id, owner_kind, world_id, block_type, canonical_name, status,
+                 revision, created_at, updated_at)
+              VALUES (?, 'world', ?, 'event', ?, 'confirmed', 0, ?, ?)",
+        )
+        .bind(format!("kb_cap_{index:05}"))
+        .bind(&world_id)
+        .bind(format!("Cap Filler {index}"))
+        .bind("2000-01-01T00:00:00Z")
+        .bind("2000-01-01T00:00:00Z")
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+    }
+
+    let patch = |base: u64, mut value: serde_json::Value| {
+        value["work_id"] = serde_json::json!(fx.work_id.clone());
+        value["base_revision"] = serde_json::json!(base);
+        timeline_request(value)
+    };
+    fx.core
+        .patch_timeline_event(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            patch(
+                0,
+                serde_json::json!({
+                    "operation": "add_event", "title": "Past Cap", "realizes_chapter_id": 1
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+    let event_id = event_id_by_title(&fx, "Past Cap").await;
+
+    let bound = fx
+        .core
+        .patch_timeline_event(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            patch(
+                1,
+                serde_json::json!({
+                    "operation": "bind_world_event",
+                    "event_id": event_id, "world_event_id": referent
+                }),
+            ),
+        )
+        .await
+        .expect("a referent past the graph cap must still bind");
+    assert_eq!(bound.new_revision, NonZeroU64::new(2).unwrap());
+    let outline = fx
+        .core
+        .work_outline(&fx.principal, fx.work_id.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        outline.timeline_events[0].world_event_id.as_deref(),
+        Some(referent)
+    );
+    fx.pool.close().await;
+    fx.core.close().await.unwrap();
+}
+
 /// The retained CAS and published-chapter guards both refuse a binding attempt
 /// with the outline content and revision untouched.
 #[tokio::test]

@@ -7,12 +7,11 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use nexus_contracts::{
-    world_kb_graph_response::NexusWorldKbEntityProjectionBlockType, OutlinePatchChapterRequest,
-    OutlinePatchResponse, OutlinePatchStructureRequest, OutlinePatchStructureRequestBeatStatus,
-    OutlinePatchStructureRequestSceneStatus, TimelinePatchEventRequest, WorkOutline,
-    WorkOutlineBeatsItem, WorkOutlineBeatsItemStatus, WorkOutlineForeshadowsItem,
-    WorkOutlineScenesItem, WorkOutlineScenesItemStatus, WorkOutlineTimelineEventsItem,
-    WorkOutlineVolumesItem,
+    OutlinePatchChapterRequest, OutlinePatchResponse, OutlinePatchStructureRequest,
+    OutlinePatchStructureRequestBeatStatus, OutlinePatchStructureRequestSceneStatus,
+    TimelinePatchEventRequest, WorkOutline, WorkOutlineBeatsItem, WorkOutlineBeatsItemStatus,
+    WorkOutlineForeshadowsItem, WorkOutlineScenesItem, WorkOutlineScenesItemStatus,
+    WorkOutlineTimelineEventsItem, WorkOutlineVolumesItem, WorldKbEntityProjectionBlockType,
 };
 use nexus_local_db::work_chapters::{self, PatchChapterParams, WorkChapterRecord};
 use nexus_local_db::works;
@@ -1679,10 +1678,16 @@ enum ValidatedBinding {
 ///
 /// The Work's **stored** `world_id` is the only World authority (Work creation
 /// has required a bound World since V1.40), and the existing ownership guard
-/// runs before the graph read so a foreign or unowned World refuses as 403
+/// runs before the referent read so a foreign or unowned World refuses as 403
 /// instead of disclosing World state. Both binding operations require the bound
 /// World; `unbind_world_event` then stops, because clearing must not depend on
 /// the old referent still existing.
+///
+/// The bind referent is proven by `world_kb::graph::find_entity`, a targeted
+/// `key_block_id` membership read: `get_graph` caps its projection at
+/// `GRAPH_ENTITY_CAP`, so a referent past the cap would be absent from the list
+/// while present in the World — a truncated read must never be proof of
+/// absence.
 async fn resolve_validated_binding(
     service: &CoreService,
     principal: &Principal,
@@ -1724,20 +1729,7 @@ async fn resolve_validated_binding(
             message: "bind_world_event requires world_event_id".to_string(),
         })?;
 
-    let graph = crate::world_kb::graph::get_graph(
-        &service.inner.pool,
-        service.inner.access,
-        principal.creator_id(),
-        world_id,
-        false,
-    )
-    .await?;
-
-    match graph
-        .entities
-        .iter()
-        .find(|entity| entity.key_block_id == referent)
-    {
+    match crate::world_kb::graph::find_entity(&service.inner.pool, world_id, referent).await? {
         None => Err(OutlineFault::Validation {
             errors: vec![format!(
                 "world event referent '{referent}' does not exist in the Work's bound World \
@@ -1745,7 +1737,7 @@ async fn resolve_validated_binding(
             )],
             warnings: vec![],
         }),
-        Some(entity) if entity.block_type == NexusWorldKbEntityProjectionBlockType::Event => {
+        Some(entity) if entity.block_type == WorldKbEntityProjectionBlockType::Event => {
             Ok(ValidatedBinding::Bind(referent.to_string()))
         }
         Some(entity) => Err(OutlineFault::Validation {
