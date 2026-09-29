@@ -997,6 +997,10 @@ export class BrowserClient implements NexusClient {
         buffer += decoder.decode(chunk.value, { stream: true });
         let boundary = BrowserClient.nextSseBoundary(buffer);
         while (boundary) {
+          // A consumer may abort after any `yield` below while this chunk still
+          // holds complete frames; aborting must end iteration, not drain the
+          // rest of the buffer.
+          if (signal.aborted) break;
           const frame = buffer.slice(0, boundary.index);
           buffer = buffer.slice(boundary.index + boundary.length);
           const parsed = BrowserClient.parseWorkflowObservationFrame(frame);
@@ -1324,9 +1328,11 @@ export class BrowserClient implements NexusClient {
 
   /**
    * Locate the next complete SSE frame boundary in `buffer`: the blank line
-   * (`\n\n`, `\r\n\r\n`, or mixed) that terminates an event block. Returns the
-   * delimiter's index and length so a `\r\n` split across two network chunks is
-   * still matched once the rest arrives.
+   * that terminates an event block. All four mixed line-ending forms are
+   * recognized — `\n\n`, `\r\n\r\n`, `\r\n\n` and `\n\r\n` — because a
+   * delimiter may differ per line and either half may straddle a network chunk.
+   * Returns the delimiter's index and length so a `\r\n` split across two
+   * chunks is still matched once the rest arrives.
    */
   private static nextSseBoundary(
     buffer: string,
@@ -1335,6 +1341,7 @@ export class BrowserClient implements NexusClient {
       const ch = buffer[i];
       if (ch === '\n') {
         if (buffer[i + 1] === '\n') return { index: i, length: 2 };
+        if (buffer[i + 1] === '\r' && buffer[i + 2] === '\n') return { index: i, length: 3 };
       } else if (ch === '\r') {
         if (buffer[i + 1] === '\n' && buffer[i + 2] === '\r' && buffer[i + 3] === '\n') {
           return { index: i, length: 4 };
@@ -1376,9 +1383,12 @@ export class BrowserClient implements NexusClient {
    * control values: `gap`/`history_unavailable` are returned even with no
    * `data:` line, and `history_unavailable` carries no `id:` line (the server
    * omits the cursor instead of resetting it). A data frame's `id` is returned
-   * verbatim — never fabricated, renumbered or defaulted. Frames with an
-   * unknown event name (or a data event with no data) yield `null` and are
-   * skipped; multiple `data:` lines join with `\n`.
+   * verbatim — never fabricated, renumbered or defaulted; a data frame with an
+   * absent or empty `id:` is a wire-protocol violation and surfaces as a typed
+   * `invalid_response` rather than being silently skipped or given a synthetic
+   * cursor (spec §2/§3 honesty rules). Frames with an unknown event name (or a
+   * data event with no data) yield `null` and are skipped; multiple `data:`
+   * lines join with `\n`.
    */
   private static parseWorkflowObservationFrame(
     frame: string,
@@ -1399,12 +1409,21 @@ export class BrowserClient implements NexusClient {
     if (event === 'gap') return { kind: 'gap' };
     if (event === 'history_unavailable') return { kind: 'history_unavailable' };
     if (dataLines.length === 0) return null;
-    const data = dataLines.join('\n');
-    if (event === 'host_event') {
-      return { kind: 'host_event', id, payload: JSON.parse(data) as WorkflowHostEventPayload };
-    }
-    if (event === 'run_state') {
-      return { kind: 'run_state', id, payload: JSON.parse(data) as WorkflowRunStatePayload };
+    if (event === 'host_event' || event === 'run_state') {
+      if (!id) {
+        throw new NexusClientError(
+          200,
+          'invalid_response',
+          `Workflow observation ${event} frame carried no id: cursor`,
+          { event },
+        );
+      }
+      const payload = JSON.parse(dataLines.join('\n')) as
+        | WorkflowHostEventPayload
+        | WorkflowRunStatePayload;
+      return event === 'host_event'
+        ? { kind: 'host_event', id, payload: payload as WorkflowHostEventPayload }
+        : { kind: 'run_state', id, payload: payload as WorkflowRunStatePayload };
     }
     return null;
   }

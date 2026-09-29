@@ -1063,4 +1063,76 @@ describe('BrowserClient workflow observation stream (v1.201 P1)', () => {
     await expect(drained).resolves.toBeUndefined();
     expect(frames).toEqual([]);
   });
+
+  it('(g) recognizes a mixed `\\n` + `\\r\\n` blank boundary split across chunks', async () => {
+    // §2: a blank-line boundary may mix `\n` and `\r\n`, and either half may
+    // straddle a network chunk. Without the `\n\r\n` case the two frames merge
+    // into one block (or the first is delayed until EOF), breaking the control
+    // frame order the view relies on.
+    const first =
+      'id: e1:1\nevent: run_state\ndata: {"run_id":"r1","epoch":"e1","sequence":1,"state_revision":1,"status":"running"}\n\r';
+    const second =
+      '\nid: e1:2\nevent: run_state\ndata: {"run_id":"r1","epoch":"e1","sequence":2,"state_revision":2,"status":"succeeded"}\n\n';
+
+    const frames = await collect(
+      clientReturning(chunkedResponse([encoder.encode(first), encoder.encode(second)])),
+      'r1',
+      { signal: new AbortController().signal },
+    );
+
+    expect(
+      frames.map((frame) => (frame.kind === 'run_state' ? frame.id : frame.kind)),
+    ).toEqual(['e1:1', 'e1:2']);
+  });
+
+  it('(h) stops draining buffered frames once the consumer aborts mid-chunk', async () => {
+    // §3: abort stops iteration without throwing. Two complete frames arrive in
+    // ONE chunk, so the resumed generator must re-check the signal between
+    // yields instead of draining the rest of the buffer.
+    const controller = new AbortController();
+    const frames: WorkflowObservationFrame[] = [];
+    for await (const frame of clientReturning(
+      frameResponse(
+        'id: e1:1\nevent: run_state\ndata: {"run_id":"r1","epoch":"e1","sequence":1,"state_revision":1,"status":"running"}\n\n'
+          + 'id: e1:2\nevent: run_state\ndata: {"run_id":"r1","epoch":"e1","sequence":2,"state_revision":2,"status":"succeeded"}\n\n',
+      ),
+    ).subscribeWorkflowEvents('r1', { signal: controller.signal })) {
+      frames.push(frame);
+      controller.abort();
+    }
+
+    expect(
+      frames.map((frame) => (frame.kind === 'run_state' ? frame.id : frame.kind)),
+    ).toEqual(['e1:1']);
+  });
+
+  it('(i) rejects a data frame with no usable `id:` cursor instead of inventing one', async () => {
+    // §2: the `<epoch>:<sequence>` cursor is never fabricated. A data frame
+    // with an absent or empty `id:` is a wire-protocol violation, so it
+    // surfaces as a typed refusal rather than an event replayed/persisted
+    // under a synthetic empty cursor.
+    const frames = [
+      'event: run_state\ndata: {"run_id":"r1","epoch":"e1","sequence":1,"state_revision":1,"status":"running"}\n\n',
+      'id:\nevent: host_event\ndata: {"run_id":"r1","epoch":"e1","sequence":2,"step_id":"s1","attempt_id":"a1","host_event":{"OpStarted":{"session_id":"r1","op_id":"op-1"}}}\n\n',
+    ];
+
+    for (const frame of frames) {
+      const yielded: WorkflowObservationFrame[] = [];
+      let thrown: unknown;
+      try {
+        for await (const value of clientReturning(frameResponse(frame)).subscribeWorkflowEvents(
+          'r1',
+          { signal: new AbortController().signal },
+        )) {
+          yielded.push(value);
+        }
+      } catch (error) {
+        thrown = error;
+      }
+
+      expect(yielded).toEqual([]);
+      expect(thrown).toBeInstanceOf(NexusClientError);
+      expect((thrown as NexusClientError).code).toBe('invalid_response');
+    }
+  });
 });
