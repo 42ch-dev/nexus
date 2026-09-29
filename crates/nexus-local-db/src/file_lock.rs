@@ -20,6 +20,104 @@ use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Maximum prior lock metadata read for successful-acquire diagnostics.
+const MAX_PRIOR_LOCK_BODY_BYTES: usize = 4096;
+/// Render a prior lock holder as a non-reversible fingerprint for diagnostics.
+///
+/// A `.lock` body is neither provenance-authenticated nor validated by
+/// `try_acquire`, which writes the caller-supplied holder verbatim, so the raw
+/// text may be stale — or secret-bearing — content. Always emit a digest
+/// stand-in rather than the holder text.
+fn diagnostic_holder_name(holder_name: &str) -> String {
+    let digest = sha256(holder_name.as_bytes());
+    format!("<fp:{}>", &digest[..12])
+}
+
+fn sha256(input: &[u8]) -> String {
+    // FIPS 180-4 round constants (first 32 bits of the fractional parts of the
+    // cube roots of the first 64 primes).
+    #[rustfmt::skip]
+    const K: [u32; 64] = [
+        0x428a_2f98, 0x7137_4491, 0xb5c0_fbcf, 0xe9b5_dba5, 0x3956_c25b, 0x59f1_11f1, 0x923f_82a4, 0xab1c_5ed5,
+        0xd807_aa98, 0x1283_5b01, 0x2431_85be, 0x550c_7dc3, 0x72be_5d74, 0x80de_b1fe, 0x9bdc_06a7, 0xc19b_f174,
+        0xe49b_69c1, 0xefbe_4786, 0x0fc1_9dc6, 0x240c_a1cc, 0x2de9_2c6f, 0x4a74_84aa, 0x5cb0_a9dc, 0x76f9_88da,
+        0x983e_5152, 0xa831_c66d, 0xb003_27c8, 0xbf59_7fc7, 0xc6e0_0bf3, 0xd5a7_9147, 0x06ca_6351, 0x1429_2967,
+        0x27b7_0a85, 0x2e1b_2138, 0x4d2c_6dfc, 0x5338_0d13, 0x650a_7354, 0x766a_0abb, 0x81c2_c92e, 0x9272_2c85,
+        0xa2bf_e8a1, 0xa81a_664b, 0xc24b_8b70, 0xc76c_51a3, 0xd192_e819, 0xd699_0624, 0xf40e_3585, 0x106a_a070,
+        0x19a4_c116, 0x1e37_6c08, 0x2748_774c, 0x34b0_bcb5, 0x391c_0cb3, 0x4ed8_aa4a, 0x5b9c_ca4f, 0x682e_6ff3,
+        0x748f_82ee, 0x78a5_636f, 0x84c8_7814, 0x8cc7_0208, 0x90be_fffa, 0xa450_6ceb, 0xbef9_a3f7, 0xc671_78f2,
+    ];
+    let mut data = input.to_vec();
+    let bit_len = (data.len() as u64).wrapping_mul(8);
+    data.push(0x80);
+    while data.len() % 64 != 56 {
+        data.push(0);
+    }
+    data.extend_from_slice(&bit_len.to_be_bytes());
+    // Initial hash value: first 32 bits of the fractional parts of the square
+    // roots of the first eight primes.
+    let mut state = [
+        0x6a09_e667u32,
+        0xbb67_ae85,
+        0x3c6e_f372,
+        0xa54f_f53a,
+        0x510e_527f,
+        0x9b05_688c,
+        0x1f83_d9ab,
+        0x5be0_cd19,
+    ];
+    for chunk in data.as_chunks::<64>().0 {
+        let mut schedule = [0u32; 64];
+        for (index, bytes) in chunk.as_chunks::<4>().0.iter().enumerate() {
+            schedule[index] = u32::from_be_bytes(*bytes);
+        }
+        for round in 16..64 {
+            let sigma0 = schedule[round - 15].rotate_right(7)
+                ^ schedule[round - 15].rotate_right(18)
+                ^ (schedule[round - 15] >> 3);
+            let sigma1 = schedule[round - 2].rotate_right(17)
+                ^ schedule[round - 2].rotate_right(19)
+                ^ (schedule[round - 2] >> 10);
+            schedule[round] = schedule[round - 16]
+                .wrapping_add(sigma0)
+                .wrapping_add(schedule[round - 7])
+                .wrapping_add(sigma1);
+        }
+        let [mut s0, mut s1, mut s2, mut s3, mut s4, mut s5, mut s6, mut s7] = state;
+        for round in 0..64 {
+            let upper = s4.rotate_right(6) ^ s4.rotate_right(11) ^ s4.rotate_right(25);
+            let choose = (s4 & s5) ^ (!s4 & s6);
+            let temp1 = s7
+                .wrapping_add(upper)
+                .wrapping_add(choose)
+                .wrapping_add(K[round])
+                .wrapping_add(schedule[round]);
+            let lower = s0.rotate_right(2) ^ s0.rotate_right(13) ^ s0.rotate_right(22);
+            let majority = (s0 & s1) ^ (s0 & s2) ^ (s1 & s2);
+            let temp2 = lower.wrapping_add(majority);
+            (s7, s6, s5, s4, s3, s2, s1, s0) = (
+                s6,
+                s5,
+                s4,
+                s3.wrapping_add(temp1),
+                s2,
+                s1,
+                s0,
+                temp1.wrapping_add(temp2),
+            );
+        }
+        for (value, addend) in state.iter_mut().zip([s0, s1, s2, s3, s4, s5, s6, s7]) {
+            *value = value.wrapping_add(addend);
+        }
+    }
+    let mut out = String::with_capacity(64);
+    for word in state {
+        use std::fmt::Write as _;
+        write!(out, "{word:08x}").unwrap();
+    }
+    out
+}
+
 /// Heartbeat refresh interval in seconds.
 const HEARTBEAT_INTERVAL_SECS: u64 = 30;
 
@@ -233,6 +331,46 @@ pub fn try_acquire(work_dir: &Path, holder_name: &str) -> Result<FileLockGuard, 
             stale,
         }));
     }
+    // Classify only a bounded prefix from the already-open locked descriptor.
+    // The OS lock arbitrates takeover; this is diagnostic-only.
+    let mut prior_body = Vec::with_capacity(MAX_PRIOR_LOCK_BODY_BYTES + 1);
+    let read_result = fd.try_clone().and_then(|reader| {
+        reader
+            .take((MAX_PRIOR_LOCK_BODY_BYTES + 1) as u64)
+            .read_to_end(&mut prior_body)
+    });
+    match read_result {
+        Ok(_) if prior_body.is_empty() => {}
+        Ok(_) if prior_body.len() > MAX_PRIOR_LOCK_BODY_BYTES => tracing::warn!(
+            note = "prior lock body exceeded diagnostic read limit",
+            "file_lock: unparseable prior holder metadata after successful acquire"
+        ),
+        Ok(_) => {
+            let parsed = std::str::from_utf8(&prior_body)
+                .ok()
+                .and_then(parse_lock_body);
+            if let Some((pid, previous_holder, expires_at_ms)) = parsed {
+                let now = now_ms();
+                if expires_at_ms > 0
+                    && now.saturating_sub(expires_at_ms) > STALE_THRESHOLD_SECS * 1000
+                {
+                    let holder_name = diagnostic_holder_name(&previous_holder);
+                    tracing::warn!(
+                        pid,
+                        holder_name = %holder_name,
+                        expires_at_ms,
+                        "file_lock: stale holder detected after successful acquire"
+                    );
+                }
+            } else {
+                tracing::warn!(
+                    note = "prior lock body was not parseable",
+                    "file_lock: unparseable prior holder metadata after successful acquire"
+                );
+            }
+        }
+        Err(_) => {}
+    }
 
     // Lock acquired. Write metadata.
     let expires_at_ms = now_ms() + STALE_THRESHOLD_SECS * 1000;
@@ -386,22 +524,22 @@ mod tests {
     #[tokio::test]
     async fn test_acquire_and_release_via_drop() {
         let (_dir, work_dir) = sample_work_dir();
-        let lock_path = lock_file_path(&work_dir);
+        let (layer, captured) = crate::test_tracing::capture_layer();
+        let subscriber = crate::test_tracing::subscriber_with(layer);
+        let _subscriber_guard = tracing::subscriber::set_default(subscriber);
 
         {
             let _guard = try_acquire(&work_dir, "cli:test-acquire").unwrap();
-            assert!(lock_path.exists());
-            let content = std::fs::read_to_string(&lock_path).unwrap();
+            let content = std::fs::read_to_string(lock_file_path(&work_dir)).unwrap();
             let (pid, holder, expires) = parse_lock_body(&content).unwrap();
             assert_eq!(pid, std::process::id());
             assert_eq!(holder, "cli:test-acquire");
             assert!(expires > 0);
-            // Guard drops here.
         }
 
-        // After drop, another acquire should succeed.
         let guard2 = try_acquire(&work_dir, "cli:test-acquire-2").unwrap();
         drop(guard2);
+        crate::test_tracing::assert_warn_absent(&captured);
     }
 
     // ── Contention: second acquire fails ────────────────────────────
@@ -444,22 +582,158 @@ mod tests {
     async fn test_stale_lock_file_overwritten_on_acquire() {
         let (_dir, work_dir) = sample_work_dir();
         let lock_path = lock_file_path(&work_dir);
+        let (layer, captured) = crate::test_tracing::capture_layer();
+        let subscriber = crate::test_tracing::subscriber_with(layer);
 
-        // Simulate a stale lock from a dead process:
-        // Write old metadata, but don't hold flock.
-        let old_expires = now_ms().saturating_sub(120_000); // 2 min ago
+        let old_expires = now_ms().saturating_sub(120_000);
         let stale_body = format!("99999:daemon:schedule:old:{old_expires}");
         std::fs::write(&lock_path, &stale_body).unwrap();
 
-        // Acquire should succeed (no flock held), overwriting stale metadata.
+        let _subscriber_guard = tracing::subscriber::set_default(subscriber);
         let guard = try_acquire(&work_dir, "cli:new-owner").unwrap();
-
         let content = std::fs::read_to_string(&lock_path).unwrap();
         let (pid, holder, expires) = parse_lock_body(&content).unwrap();
         assert_eq!(pid, std::process::id());
         assert_eq!(holder, "cli:new-owner");
         assert!(expires > old_expires);
+        let expected_holder = format!("<fp:{}>", &sha256(b"daemon:schedule:old")[..12]);
+        crate::test_tracing::assert_warn_emitted(
+            &captured,
+            &[
+                "pid=99999",
+                &format!("holder_name={expected_holder}"),
+                "expires_at_ms=",
+            ],
+        );
         drop(guard);
+    }
+
+    #[tokio::test]
+    async fn stale_acquire_emits_zombie_warning() {
+        let (_dir, work_dir) = sample_work_dir();
+        let lock_path = lock_file_path(&work_dir);
+        let old_expires = now_ms().saturating_sub(120_000);
+        std::fs::write(&lock_path, format!("99999:cli:stale-holder:{old_expires}")).unwrap();
+
+        let (layer, captured) = crate::test_tracing::capture_layer();
+        let subscriber = crate::test_tracing::subscriber_with(layer);
+        let _subscriber_guard = tracing::subscriber::set_default(subscriber);
+        let guard = try_acquire(&work_dir, "fresh-holder").unwrap();
+        let (_, holder, expires) =
+            parse_lock_body(&std::fs::read_to_string(&lock_path).unwrap()).unwrap();
+        assert_eq!(holder, "fresh-holder");
+        assert!(expires > old_expires);
+        let expected_holder = format!("<fp:{}>", &sha256(b"cli:stale-holder")[..12]);
+        crate::test_tracing::assert_warn_emitted(
+            &captured,
+            &[
+                "pid=99999",
+                &format!("holder_name={expected_holder}"),
+                "expires_at_ms=",
+            ],
+        );
+        drop(guard);
+    }
+
+    #[tokio::test]
+    async fn unparseable_prior_body_warns_and_proceeds() {
+        let (_dir, work_dir) = sample_work_dir();
+        let lock_path = lock_file_path(&work_dir);
+        std::fs::write(&lock_path, "not:valid:metadata").unwrap();
+
+        let (layer, captured) = crate::test_tracing::capture_layer();
+        let subscriber = crate::test_tracing::subscriber_with(layer);
+        let _subscriber_guard = tracing::subscriber::set_default(subscriber);
+        let guard = try_acquire(&work_dir, "fresh-holder").unwrap();
+        let (_, holder, _) =
+            parse_lock_body(&std::fs::read_to_string(&lock_path).unwrap()).unwrap();
+        assert_eq!(holder, "fresh-holder");
+        crate::test_tracing::assert_warn_emitted(&captured, &["not parseable"]);
+        drop(guard);
+    }
+
+    #[tokio::test]
+    async fn oversized_prior_body_warns_and_takeover_proceeds() {
+        let (_dir, work_dir) = sample_work_dir();
+        std::fs::write(
+            lock_file_path(&work_dir),
+            vec![b'x'; MAX_PRIOR_LOCK_BODY_BYTES + 1],
+        )
+        .unwrap();
+        let (layer, captured) = crate::test_tracing::capture_layer();
+        let subscriber = crate::test_tracing::subscriber_with(layer);
+        let _subscriber_guard = tracing::subscriber::set_default(subscriber);
+
+        let guard = try_acquire(&work_dir, "fresh-holder").unwrap();
+        let content = std::fs::read_to_string(lock_file_path(&work_dir)).unwrap();
+        assert_eq!(parse_lock_body(&content).unwrap().1, "fresh-holder");
+        crate::test_tracing::assert_warn_emitted(&captured, &["exceeded diagnostic read limit"]);
+        drop(guard);
+    }
+
+    #[tokio::test]
+    async fn stale_holder_warning_sanitizes_and_bounds_identity() {
+        let (_dir, work_dir) = sample_work_dir();
+        let lock_path = lock_file_path(&work_dir);
+        let old_expires = now_ms().saturating_sub(120_000);
+        let adversarial = format!("99999:bad\nholder{}:{old_expires}", "x".repeat(200));
+        std::fs::write(&lock_path, adversarial).unwrap();
+        let (layer, captured) = crate::test_tracing::capture_layer();
+        let subscriber = crate::test_tracing::subscriber_with(layer);
+        let _subscriber_guard = tracing::subscriber::set_default(subscriber);
+
+        let guard = try_acquire(&work_dir, "fresh-holder").unwrap();
+        let warning = captured.lock().unwrap().join("\n");
+        assert!(warning.contains("pid=99999"));
+        assert!(warning.contains("<fp:"));
+        assert!(!warning.contains("bad"));
+        assert!(!warning.contains(&"x".repeat(200)));
+        drop(guard);
+    }
+
+    #[tokio::test]
+    async fn stale_holder_warning_redacts_secret_bearing_identity() {
+        let (_dir, work_dir) = sample_work_dir();
+        let lock_path = lock_file_path(&work_dir);
+        // F-001: a grammar-conforming `cli:`-prefixed secret is the exact case
+        // FX-A2 still echoed; it must be fingerprinted like any other holder.
+        let holder = "cli:secret-token-value";
+        let expires = now_ms().saturating_sub(120_000);
+        std::fs::write(&lock_path, format!("99999:{holder}:{expires}")).unwrap();
+        let (layer, captured) = crate::test_tracing::capture_layer();
+        let subscriber = crate::test_tracing::subscriber_with(layer);
+        let _subscriber_guard = tracing::subscriber::set_default(subscriber);
+
+        let guard = try_acquire(&work_dir, "fresh-holder").unwrap();
+        let warning = captured.lock().unwrap().join("\n");
+        let stand_in = format!("<fp:{}>", &sha256(holder.as_bytes())[..12]);
+        assert!(warning.contains(&format!("holder_name={stand_in}")));
+        assert!(!warning.contains(holder));
+        assert!(warning.contains("pid=99999"));
+        assert!(warning.contains("expires_at_ms="));
+        drop(guard);
+    }
+
+    #[test]
+    fn diagnostic_holder_name_always_fingerprints() {
+        // F-001: no holder text may reach diagnostics, even a grammar-conforming
+        // `cli:`-prefixed secret — the case FX-A2 still echoed verbatim.
+        for holder in [
+            "cli:secret-token-value",
+            "bad\nholder",
+            "daemon:schedule:job",
+        ] {
+            let expected = format!("<fp:{}>", &sha256(holder.as_bytes())[..12]);
+            assert_eq!(diagnostic_holder_name(holder), expected);
+        }
+    }
+
+    #[test]
+    fn sha256_matches_known_vector() {
+        assert_eq!(
+            sha256(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
     }
 
     // ── read_lock_holder_info ─────────────────────────────────────

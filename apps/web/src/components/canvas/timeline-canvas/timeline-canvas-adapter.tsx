@@ -1059,6 +1059,28 @@ interface MomentChapterGroup {
   scenes: SceneFixture[];
 }
 
+/**
+ * Compact Work handles for a chapter's owner set, guaranteed pairwise
+ * distinct. Bound-Work ids are `wrk_<uuid>` (nexus-core `works.rs`) and the
+ * spine segment is a 60–280px decoration strip, so the label only needs
+ * enough of the id to tell two Works apart. Truncating each id independently
+ * would give two ids sharing a long prefix (`…0001` / `…0002`) the same
+ * visible label, so handles extend together until distinct, falling back to
+ * the full id when no shorter prefix separates them.
+ */
+function disambiguatedWorkHandles(workIds: string[]): Map<string, string> {
+  const bare = workIds.map((id) => (id.startsWith('wrk_') ? id.slice(4) : id));
+  const maxLen = Math.max(...bare.map((b) => b.length));
+  for (let len = 8; len < maxLen; len++) {
+    const candidates = bare.map((b) => b.slice(0, len));
+    if (new Set(candidates).size === candidates.length) {
+      return new Map(workIds.map((id, i) => [id, candidates[i]]));
+    }
+  }
+  // Distinct ids always separate at full length when no shorter prefix does.
+  return new Map(workIds.map((id, i) => [id, bare[i]]));
+}
+
 function projectMomentLayer(
   fixture: SceneBeatFixturePayload | undefined,
   worldId: string | undefined,
@@ -1190,12 +1212,35 @@ function projectMomentLayer(
   // Mirrors the Work Timeline Moment spine (same rhythm break from the
   // Brief+Narrative time-span convention).
   if (groups.length > 0) {
-    const chapterSegments: MomentSpineConfig['chapterSegments'] = groups.map((group) => ({
-      chapterId: group.chapterId,
-      chapterLabel: `Ch. ${group.chapterId}`,
-      sceneCount: group.scenes.length,
-      sceneTicks: group.scenes.map((s) => s.sceneId),
-    }));
+    // Chapter numbers are Work-local, so a bare `Ch. N` label is ambiguous
+    // whenever two bound Works own the same chapter — both segments rendered
+    // an identical "Ch. 1" (qc2 F-7 / qc3 F-002). A chapter number shared by
+    // more than one Work names its owner (handles unique across that
+    // chapter's owners) so the spine reads unambiguously; a Work-unique
+    // chapter keeps the compact label.
+    const chapterOwners = new Map<number, string[]>();
+    for (const group of groups) {
+      if (!group.workId) continue;
+      const owners = chapterOwners.get(group.chapterId);
+      if (owners) owners.push(group.workId);
+      else chapterOwners.set(group.chapterId, [group.workId]);
+    }
+    const handlesByChapter = new Map<number, Map<string, string>>();
+    for (const [chapterId, owners] of chapterOwners) {
+      if (owners.length > 1) handlesByChapter.set(chapterId, disambiguatedWorkHandles(owners));
+    }
+    const chapterSegments: MomentSpineConfig['chapterSegments'] = groups.map((group) => {
+      const handle = group.workId
+        ? handlesByChapter.get(group.chapterId)?.get(group.workId)
+        : undefined;
+      return {
+        chapterId: group.chapterId,
+        workId: group.workId,
+        chapterLabel: handle ? `Ch. ${group.chapterId} · ${handle}` : `Ch. ${group.chapterId}`,
+        sceneCount: group.scenes.length,
+        sceneTicks: group.scenes.map((s) => s.sceneId),
+      };
+    });
     const momentSpineData: DirectedAxisSpineNodeData = {
       layer: 'moment',
       spineConfig: {
