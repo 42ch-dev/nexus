@@ -836,5 +836,5 @@ For implementer reference, the ACP protocol lifecycle:
 
 > **Durable roadmap:** DR-20, DR-21, DR-22 (ACP-R3..R11: daemon-mediated tool access + permission policy, session persistence, `terminal.kill`/`terminal.wait_for_exit`, `slash_commands`, `agent_plan`, persistent skills manifest, binary auto-update, `session.modes`).
 >
-> Historical V1.0-era framing; ACP hosting now runs in acp-worker child processes — verify before picking up.
+> Historical V1.0-era framing; at the time, ACP hosting ran in per-creator `acp-worker` child processes (retired v1.193 P2 — current composition per the shipped boundary in the header). Verify before picking up.
 

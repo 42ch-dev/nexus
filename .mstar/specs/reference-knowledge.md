@@ -14,7 +14,7 @@
 This Draft spec defines the `nexus.reference.refresh` capability and the
 reference body refreshable scan pipeline introduced in V1.58 P1 (DF-44).
 It covers the refresh policy model, DB schema for refresh tracking,
-capability admission contracts, and the daemon-side refresh-scheduler hook.
+capability admission contracts, and the refresh-scheduler hook.
 
 The static registration of reference sources was shipped in V1.26.
 V1.58 P1 adds the refreshable pipeline core (capability + DB migration +
@@ -28,9 +28,10 @@ scheduler). V1.58 P3 adds the CLI subcommand and cross-cut E2E tests.
 - DB schema for refresh tracking: `reference_sources.last_refreshed_at`,
   `refresh_policy`, `refresh_status` columns and supporting indexes.
 - `nexus.reference.refresh` capability: admission, handler binding, output shape.
-- Daemon-side refresh-scheduler hook: periodic stale-source scan + dispatch.
+- Refresh-scheduler hook (retained implementation, §3): periodic stale-source scan + dispatch.
 - Integration points: `capability::Registry` (orchestration),
-  daemon runtime (periodic task).
+  `crates/nexus-core/src/execution/schedules/refresh.rs` (retained scheduler,
+  unwired — §3).
 
 Non-goals: CLI subcommand (`nexus42 reference refresh`) deferred to P3;
 cross-cut E2E tests deferred to P3; `entity-scope-model.md` unchanged
@@ -64,16 +65,27 @@ The refresh lifecycle status (`refresh_status`) tracks the current state:
 ## 3. Refresh scheduler contract
 
 The refresh-scheduler implementation in `crates/nexus-core/src/execution/schedules/refresh.rs`
-exposes `spawn_refresh_scheduler`, a periodic `tokio::spawn` task. The capability
-is owned by `crates/nexus-orchestration/src/capability/builtins/reference_refresh.rs`;
+exposes `spawn_refresh_scheduler` (which spawns a periodic `tokio` task when
+called) and `run_one_refresh_tick` (one sweep tick). The capability is owned by
+`crates/nexus-orchestration/src/capability/builtins/reference_refresh.rs`;
 tool registration and creator-context wiring live in
 `crates/nexus-core/src/execution/capabilities.rs`.
+
+**Retained implementation, not a running service.** These are the current code
+homes, but no current boot path spawns the scheduler: `spawn_refresh_scheduler`
+has zero call sites in `crates/` and `apps/` (the daemon boot path that spawned
+it was deleted with the v1.193 P2 host removal). Nor does any production caller
+invoke `nexus.reference.refresh`; only
+`crates/nexus-orchestration/tests/cross_reference_refresh_e2e.rs` exercises the
+capability. Registered reference sources therefore do **not** refresh
+automatically today; periodic refresh is unwired pending an explicit
+boot/composition decision.
 
 **V1.58 historical host:** the scheduler formerly lived in
 `crates/nexus-daemon-runtime/src/refresh_scheduler.rs`, and the former
 `crates/nexus-daemon-runtime/src/boot.rs` §4e spawned it at daemon startup.
 Those deleted host paths describe the V1.58 composition, not current boot wiring.
-The scheduler contract is:
+The retained scheduler contract is:
 
 - **Cadence**: Configurable interval (default 3600s = 1 hour). Overridable via
   `NEXUS_DAEMON_REFRESH_SCHEDULER_INTERVAL_SECS` env var.
@@ -153,8 +165,8 @@ Current tracking DAO owner: `crates/nexus-local-db/src/reference_source.rs` (ref
   - URL must be non-empty (else `error` status, not a capability error — the handler
     returns an error status in the output JSON).
   - Network timeout returns `TransientExternal` capability error.
-- **Pool dependency**: Without a pool, returns `WorkerUnavailable`. In production
-  the refresh scheduler constructs the capability with its own pool.
+- **Pool dependency**: Without a pool, returns `WorkerUnavailable`. The retained
+  scheduler constructs the capability with its own pool when spawned (§3).
 
 ### Sibling capability IDs (deferred)
 
