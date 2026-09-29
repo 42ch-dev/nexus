@@ -95,7 +95,7 @@ Specs are organized into **domain subdirectories** (reorganized 2026-09-29 from 
 | Document | Class | Status |
 | --- | --- | --- |
 | [local-db-schema.md](runtime/local-db-schema.md) | Master | Normative — V1.40 Shipped §4.1.2 (KB validation + narrative_worlds + kb_extract_jobs artifact locator); **v1.191 P1 holder amendment shipped** (holder registry, native governance columns, knowledge revisions, schema 23 → 24) — [holder-governance.md](architecture/holder-governance.md) §§2–6 |
-| [concurrency.md](runtime/concurrency.md) | Master | Normative — V1.51 advisory lock/heartbeat/OCC; V1.56 workspace sessions; V1.188 recoverable target-content commit (§9) |
+| [concurrency.md](runtime/concurrency.md) | Master | Normative — V1.51 advisory lock/heartbeat/OCC; V1.56 workspace sessions; V1.188 recoverable target-content commit (§9); **V1.201 P2** §6.2 restated as an implementable successful-acquire stale-holder detection decision table (diagnostics-only; semantics unchanged) |
 | [outbox-consolidation.md](runtime/outbox-consolidation.md) | Master | Normative — V1.59 P-last promote (single-writer contract + schema ownership); **V1.177 revision** (daemon `outbox` table dropped at V1.163 — §2.3/§6 closed history) |
 | [reference-knowledge.md](runtime/reference-knowledge.md) | Master | Normative — V1.58 P-last promote (reference body refreshable scan pipeline); current scheduler: `nexus-core` execution schedules; capability: `nexus-orchestration` builtins, with core registration/context wiring. V1.58 daemon boot composition is historical. |
 | [reference-store-layout.md](runtime/reference-store-layout.md) | Master | Active — normative V1.26 design for local reference registry + body storage |

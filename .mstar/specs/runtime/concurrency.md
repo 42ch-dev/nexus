@@ -1,6 +1,6 @@
 # Concurrency — Master Specification
 
-**Status**: Normative — V1.51 advisory lock/heartbeat/OCC; V1.56 workspace sessions; V1.188 recoverable target-content commit (§9)
+**Status**: Normative — V1.51 advisory lock/heartbeat/OCC; V1.56 workspace sessions; V1.188 recoverable target-content commit (§9); V1.201 P2 §6.2 successful-acquire detection restated as an implementable decision table (semantics unchanged)
 **Document class**: Master
 **Created**: 2026-06-18
 **Scope**: Multi-writer concurrency control for the local-first daemon + CLI model — advisory file lock + heartbeat + zombie detection + CLI integration.
@@ -210,9 +210,17 @@ A lock is **stale** (zombie) when `expires_at_ms` in the lock file content is mo
 
 When `try_acquire` succeeds (i.e., `flock` returns without contention), the acquirer reads the existing lock file content:
 
-1. If the file is empty or newly created → fresh lock; write metadata and proceed.
-2. If `expires_at_ms` < `now_ms - 60_000` → the previous holder was a zombie. Log at `warn!` with the stale holder details. Overwrite with fresh metadata and proceed (the lock was already released by the OS).
-3. If `expires_at_ms` ≥ `now_ms - 60_000` → the previous holder released cleanly but didn't delete the file. Normal — overwrite and proceed.
+1. **Fresh / empty** — no lock file, or content parses as empty → fresh lock; no detection log; write metadata and proceed.
+2. **Stale (zombie)** — content parses and `expires_at_ms < now_ms − 60_000` → the previous holder was a zombie. Log at `warn!` with the stale holder details (prior `pid`, `holder_name`, `expires_at_ms`). Overwrite with fresh metadata and proceed (the lock was already released by the OS).
+3. **Cleanly released** — content parses and `expires_at_ms ≥ now_ms − 60_000` → the previous holder released cleanly but didn't delete the file. Normal — no warning; overwrite and proceed.
+4. **Unparseable** — content is non-empty but malformed (a crash between metadata write and flush can leave a partial `<pid>:<holder_name>:<expires_at_ms>` body) → log at `warn!` noting the unparseable prior holder, then overwrite and proceed. Takeover is already authorized by the uncontended `flock`; a parse failure never blocks or fails the acquire (conservative handling mirrors the conflict-path NB, R-V151Q1-09).
+
+Binding clarifications for implementers and reviewers (V1.201 P2, register `core-and-spoke` / R-DOCS-001):
+
+- **Read before overwrite.** The classification read happens after the successful `flock` and *before* `write_lock_metadata_to_path` writes the fresh body — reading after the overwrite would always classify the new holder.
+- **Diagnostics only.** §2.3's pinned signature `try_acquire(work_dir, holder_name) -> Result<FileLockGuard, FileLockError>` is unchanged; detection adds a log event, not a return path, an error variant, or a takeover condition. Lock-taking behavior is identical in all four cases (the OS `flock` arbitrates; the 60 s heartbeat and conflict-path stale reporting of §6.3 are untouched).
+- **Stale arithmetic.** `expires_at_ms < now_ms − 60_000` (equivalently `now_ms − expires_at_ms > 60_000` under saturating unsigned subtraction, the form used by the conflict path and `read_lock_holder_info`).
+- **Regression observability.** The zombie and clean-release paths must be machine-asserted via the crate's `src/test_tracing.rs` capture (extended from INFO-only to include WARN): warn-emitted-with-holder-details on case 2, warn-on-unparseable on case 4, and silence on cases 1 and 3. The pre-existing expectations — stale file overwritten on acquire, and reacquire-after-clean-drop succeeds — are the case-2 and case-3 outcomes and remain valid, extended (not inverted) by the detection assertions.
 
 ### 6.3 Detection on Conflict
 
