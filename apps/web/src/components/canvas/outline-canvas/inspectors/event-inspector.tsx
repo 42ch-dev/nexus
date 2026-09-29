@@ -72,31 +72,23 @@ function worldEventOptionsFromGraph(graph: WorldKbGraphResponse | undefined): Wo
 /**
  * Timeline panel entry point.
  *
- * The bound-World KB graph is read only when a World is bound. With no bound
- * World the disabled control renders without issuing a World read: the graph
- * query is the picker's option source, not a second source of truth.
+ * V1.201 002/R3 — the entry returns one component type regardless of
+ * `boundWorldId`. Splitting it on the id's truthiness (`BoundWorldTimelinePanel`
+ * when bound, `TimelinePanelView` when not) made React swap the child's
+ * component type when the Work's World resolved after first paint, remounting
+ * the view and discarding in-progress drafts. The graph read is hoisted here
+ * instead, so the view's identity survives the transition.
+ *
+ * The bound-World KB graph is still read only when a World is bound: the query
+ * is gated on the id inside `useWorldKbGraph` (`enabled: Boolean(worldId)`), so
+ * the unbound panel issues no World read — the graph query is the picker's
+ * option source, not a second source of truth.
  */
 export function TimelinePanel(props: TimelinePanelProps) {
   const { boundWorldId } = props;
-  if (!boundWorldId) {
-    return <TimelinePanelView {...props} worldEventOptions={[]} />;
-  }
-  return <BoundWorldTimelinePanel {...props} boundWorldId={boundWorldId} />;
-}
-
-function BoundWorldTimelinePanel({
-  boundWorldId,
-  ...props
-}: TimelinePanelProps & { boundWorldId: string }) {
   const graph = useWorldKbGraph(boundWorldId);
   const worldEventOptions = useMemo(() => worldEventOptionsFromGraph(graph.data), [graph.data]);
-  return (
-    <TimelinePanelView
-      {...props}
-      boundWorldId={boundWorldId}
-      worldEventOptions={worldEventOptions}
-    />
-  );
+  return <TimelinePanelView {...props} worldEventOptions={worldEventOptions} />;
 }
 
 function TimelinePanelView({

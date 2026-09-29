@@ -16,6 +16,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OutlineCanvas } from '@/components/canvas/outline-canvas';
 import { i18n } from '@/lib/i18n/config';
 import { NexusClientError } from '@/lib/nexus/errors';
+import type * as WorldKbData from '@/lib/canvas/use-world-kb-data';
 import type { WorkOutline } from '@42ch/nexus-contracts';
 
 // ---------------------------------------------------------------------------
@@ -136,6 +137,18 @@ vi.mock('@/lib/canvas/use-outline-data', async (importOriginal) => {
     usePatchOutlineStructure: () => mocks.patchStructureResult,
     usePatchOutlineChapter: () => mocks.patchChapterResult,
     usePatchTimelineEvent: () => mocks.patchTimelineResult,
+  };
+});
+
+// The event inspector composes its bound-World KB graph read on every render
+// (the query itself is gated on the bound World id). This file renders the
+// orchestrator under a bare QueryClientProvider — no ClientProvider — and the
+// Work it mocks is unbound, so the read is stubbed to its disabled shape.
+vi.mock('@/lib/canvas/use-world-kb-data', async (importOriginal) => {
+  const actual = await importOriginal<typeof WorldKbData>();
+  return {
+    ...actual,
+    useWorldKbGraph: () => ({ data: undefined, isLoading: false, isError: false }),
   };
 });
 

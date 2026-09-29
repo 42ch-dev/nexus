@@ -21,8 +21,8 @@ import type { TimelinePatchEventRequest, WorkOutline } from '@42ch/nexus-contrac
 // Mocks — the bound World's KB graph read (V1.200 DR-26 bind picker).
 // ---------------------------------------------------------------------------
 
-const worldKbMock = vi.hoisted(() => ({
-  graph: {
+const worldKbMock = vi.hoisted(() => {
+  const graph = {
     entities: [
       {
         key_block_id: 'kb-evt-1',
@@ -44,11 +44,38 @@ const worldKbMock = vi.hoisted(() => ({
     ],
     source_anchors: [],
     relationships: [],
-  },
-}));
+  };
+  // A second bound World, so a `boundWorldId` transition is observable in the
+  // picker's options (V1.201 002/R3 rebinding assertion).
+  const secondWorldGraph = {
+    entities: [
+      {
+        key_block_id: 'kb-evt-7',
+        world_id: 'world-11',
+        block_type: 'event',
+        canonical_name: 'Solar Eclipse',
+        status: 'confirmed',
+        version: 1,
+      },
+    ],
+    source_anchors: [],
+    relationships: [],
+  };
+  return {
+    graph,
+    secondWorldGraph,
+    graphs: { 'world-9': graph, 'world-11': secondWorldGraph } as Record<string, unknown>,
+  };
+});
 
 vi.mock('@/lib/canvas/use-world-kb-data', () => ({
-  useWorldKbGraph: () => ({ data: worldKbMock.graph, isLoading: false, isError: false }),
+  // Mirrors the real hook's contract: the read is gated on the id, so an
+  // unbound panel resolves to no data instead of a stale World's graph.
+  useWorldKbGraph: (worldId?: string) => ({
+    data: worldId ? worldKbMock.graphs[worldId] : undefined,
+    isLoading: false,
+    isError: false,
+  }),
 }));
 
 // ---------------------------------------------------------------------------
@@ -162,6 +189,28 @@ function renderTimelineRefetching(initialOutline: WorkOutline, boundWorldId?: st
   }
   render(<RefetchingTimeline />);
   return onPatch;
+}
+
+/**
+ * Render the inspector with a controllable `boundWorldId`, mirroring the
+ * Outline canvas handoff (`boundWorldId={work.data?.world_id ?? undefined}`):
+ * the Work read can resolve **after** the first paint, and a Work can be
+ * re-bound to another World under the mounted panel. The V1.201 002/R3 cases
+ * drive that transition and assert what survived it.
+ */
+function renderTimelineWithBoundWorld(initialOutline: WorkOutline, initialBoundWorldId?: string) {
+  const onPatch = vi.fn();
+  const props = {
+    outline: initialOutline,
+    selectedChapterId: null,
+    baseRevision: initialOutline.outline_revision,
+    onPatchTimeline: onPatch,
+  };
+  const view = render(<TimelinePanel {...props} boundWorldId={initialBoundWorldId} />);
+  function setBoundWorldId(boundWorldId?: string) {
+    view.rerender(<TimelinePanel {...props} boundWorldId={boundWorldId} />);
+  }
+  return { onPatch, setBoundWorldId };
 }
 
 // ---------------------------------------------------------------------------
@@ -628,5 +677,79 @@ describe('TimelinePanel — World-event binding authoring (V1.200 DR-26)', () =>
     for (const btn of bindButtons) {
       expect(btn).toBeDisabled();
     }
+  });
+});
+
+// V1.201 002/R3 — the inspector keeps its component identity across a
+// `boundWorldId` transition. Splitting the entry on the id's truthiness made
+// React swap the child component type when the Work's World resolved after
+// first paint, remounting the view and discarding the drafts the author had
+// already typed.
+describe('TimelinePanel — bound World transition lifecycle (V1.201 002/R3)', () => {
+  it('preserves the authoring drafts and adopts the bound World when the World resolves after first paint', async () => {
+    const user = userEvent.setup();
+    const { setBoundWorldId } = renderTimelineWithBoundWorld(makeOutline());
+
+    // First paint, no Work-resolved World yet: the control is present but
+    // disabled, and no World's entities are offered (the read is gated on the id).
+    const pickerBeforeBind = screen.getByLabelText('World event for Plant the seed');
+    expect(pickerBeforeBind).toBeDisabled();
+    expect(
+      within(pickerBeforeBind)
+        .getAllByRole('option')
+        .map((option) => (option as HTMLOptionElement).value),
+    ).toEqual(['']);
+
+    // The author drafts while the Work read is still in flight.
+    await user.type(screen.getByPlaceholderText('Event title…'), 'Draft beat');
+    await user.type(screen.getByPlaceholderText('Description (optional)…'), 'Draft note');
+    await user.selectOptions(
+      screen.getByLabelText('Foreshadow target for Plant the seed'),
+      'evt_b',
+    );
+
+    // DOM identity captured before the transition: a remount installs new nodes.
+    const addButton = screen.getByRole('button', { name: /^Add$/i });
+
+    setBoundWorldId('world-9');
+
+    // One view instance across the transition — drafts are not discarded.
+    expect(screen.getByRole('button', { name: /^Add$/i })).toBe(addButton);
+    expect(screen.getByPlaceholderText('Event title…')).toHaveValue('Draft beat');
+    expect(screen.getByPlaceholderText('Description (optional)…')).toHaveValue('Draft note');
+    expect(screen.getByLabelText('Foreshadow target for Plant the seed')).toHaveValue('evt_b');
+
+    // The panel is rebound to the new World: the control is live and offers
+    // exactly that World's event entities.
+    const pickerAfterBind = screen.getByLabelText('World event for Plant the seed');
+    expect(pickerAfterBind).not.toBeDisabled();
+    expect(
+      within(pickerAfterBind)
+        .getAllByRole('option')
+        .map((option) => (option as HTMLOptionElement).value),
+    ).toEqual(['', 'kb-evt-1']);
+  });
+
+  it('keeps the typed bind draft and re-projects the picker when the bound World changes', async () => {
+    const user = userEvent.setup();
+    const { setBoundWorldId } = renderTimelineWithBoundWorld(makeOutline(), 'world-9');
+
+    await user.type(
+      screen.getByLabelText('World event ID for Plant the seed'),
+      'kb-manual-id',
+    );
+
+    setBoundWorldId('world-11');
+
+    // The draft is local state, not World data: rebinding must not clear it.
+    expect(screen.getByLabelText('World event ID for Plant the seed')).toHaveValue('kb-manual-id');
+    // The picker now offers the newly bound World's entities only.
+    const picker = screen.getByLabelText('World event for Plant the seed');
+    expect(
+      within(picker)
+        .getAllByRole('option')
+        .map((option) => (option as HTMLOptionElement).value),
+    ).toEqual(['', 'kb-evt-7']);
+    expect(within(picker).queryByRole('option', { name: 'Coronation' })).not.toBeInTheDocument();
   });
 });
