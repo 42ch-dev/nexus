@@ -198,8 +198,11 @@ function renderTimelineRefetching(initialOutline: WorkOutline, boundWorldId?: st
  * re-bound to another World under the mounted panel. The V1.201 002/R3 cases
  * drive that transition and assert what survived it.
  */
-function renderTimelineWithBoundWorld(initialOutline: WorkOutline, initialBoundWorldId?: string) {
-  const onPatch = vi.fn();
+function renderTimelineWithBoundWorld(
+  initialOutline: WorkOutline,
+  initialBoundWorldId?: string,
+  onPatch = vi.fn(),
+) {
   const props = {
     outline: initialOutline,
     selectedChapterId: null,
@@ -751,5 +754,98 @@ describe('TimelinePanel — bound World transition lifecycle (V1.201 002/R3)', (
         .map((option) => (option as HTMLOptionElement).value),
     ).toEqual(['', 'kb-evt-7']);
     expect(within(picker).queryByRole('option', { name: 'Coronation' })).not.toBeInTheDocument();
+  });
+});
+
+// V1.201 002/FX-B — a bind is issued against one bound World *and* one draft.
+// The Work can be re-bound while the write is in flight, and the drafts
+// survive that transition (R3), so the completion of a former World's bind
+// must not consume a draft now shown under the newly bound World; a picker
+// selection of the former World names an entity of that World and cannot carry
+// into the new one.
+describe('TimelinePanel — bound World rebind race (V1.201 002/FX-B)', () => {
+  it('drops a former World picker selection across a World switch and keeps the manual draft', async () => {
+    const user = userEvent.setup();
+    const { setBoundWorldId } = renderTimelineWithBoundWorld(makeOutline(), 'world-9');
+
+    await user.selectOptions(
+      screen.getByLabelText('World event for Plant the seed'),
+      'kb-evt-1',
+    );
+    await user.type(
+      screen.getByLabelText('World event ID for Plant the seed'),
+      'kb-manual-id',
+    );
+
+    setBoundWorldId('world-11');
+
+    // The picker no longer offers `kb-evt-1`, so the stored selection is not
+    // actionable: it resets to the placeholder and Bind is inert again.
+    const picker = screen.getByLabelText('World event for Plant the seed');
+    expect(picker).toHaveValue('');
+    expect(
+      within(picker)
+        .getAllByRole('option')
+        .map((option) => (option as HTMLOptionElement).value),
+    ).toEqual(['', 'kb-evt-7']);
+    expect(screen.getAllByRole('button', { name: 'Bind' })[0]).toBeDisabled();
+    // The unrelated manual draft is local, World-agnostic text and survives.
+    expect(screen.getByLabelText('World event ID for Plant the seed')).toHaveValue('kb-manual-id');
+  });
+
+  it('keeps the draft retained in the newly bound World when a former World bind lands', async () => {
+    const user = userEvent.setup();
+    const successCallbacks: Array<() => void> = [];
+    const onPatch = vi.fn(
+      (_request: TimelinePatchEventRequest, onSuccess?: () => void) => {
+        if (onSuccess) successCallbacks.push(onSuccess);
+      },
+    );
+    const { setBoundWorldId } = renderTimelineWithBoundWorld(makeOutline(), 'world-9', onPatch);
+
+    await user.type(
+      screen.getByLabelText('World event ID for Plant the seed'),
+      'kb-manual-id',
+    );
+    await user.click(screen.getAllByRole('button', { name: 'Add ID' })[0]);
+    expect(onPatch).toHaveBeenCalledTimes(1);
+
+    // The Work is re-bound while the write is in flight. The draft survives
+    // the transition, so it is now the draft shown under the new World.
+    setBoundWorldId('world-11');
+    expect(screen.getByLabelText('World event ID for Plant the seed')).toHaveValue('kb-manual-id');
+
+    // The former World's bind landing must not consume it.
+    act(() => successCallbacks[0]());
+    expect(screen.getByLabelText('World event ID for Plant the seed')).toHaveValue('kb-manual-id');
+  });
+
+  it('keeps a picker draft authored in the newly bound World when a former World bind lands', async () => {
+    const user = userEvent.setup();
+    const successCallbacks: Array<() => void> = [];
+    const onPatch = vi.fn(
+      (_request: TimelinePatchEventRequest, onSuccess?: () => void) => {
+        if (onSuccess) successCallbacks.push(onSuccess);
+      },
+    );
+    const { setBoundWorldId } = renderTimelineWithBoundWorld(makeOutline(), 'world-9', onPatch);
+
+    await user.selectOptions(
+      screen.getByLabelText('World event for Plant the seed'),
+      'kb-evt-1',
+    );
+    await user.click(screen.getAllByRole('button', { name: 'Bind' })[0]);
+    expect(onPatch).toHaveBeenCalledTimes(1);
+
+    setBoundWorldId('world-11');
+    // The former World's selection is dropped; the author picks a target valid
+    // in the newly bound World while the old write is still in flight.
+    await user.selectOptions(
+      screen.getByLabelText('World event for Plant the seed'),
+      'kb-evt-7',
+    );
+
+    act(() => successCallbacks[0]());
+    expect(screen.getByLabelText('World event for Plant the seed')).toHaveValue('kb-evt-7');
   });
 });
