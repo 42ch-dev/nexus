@@ -34,6 +34,14 @@ export type MomentSpineConfig = {
   chapterSegments: Array<{
     chapterId: number;
     chapterLabel: string;
+    /**
+     * Owning Work id — set only when the projection composes ACROSS bound
+     * Works (World Timeline Moment). Chapter numbers are Work-local, so
+     * `chapterId` alone is not a segment identity: two Works that both own a
+     * chapter 1 produce two segments that must carry distinct React keys, and
+     * the label is disambiguated with this Work (qc2 F-7 / qc3 F-002).
+     */
+    workId?: string;
     sceneCount: number;
     sceneTicks: string[];
   }>;
@@ -271,7 +279,7 @@ function MomentSpine({
 
         if (seg.sceneCount === 0) {
           return (
-            <g key={seg.chapterId}>
+            <g key={`${seg.workId ?? ''}#${seg.chapterId}`}>
               <line
                 x1={x}
                 y1={spineY}
@@ -306,7 +314,7 @@ function MomentSpine({
         }
 
         return (
-          <g key={seg.chapterId}>
+          <g key={`${seg.workId ?? ''}#${seg.chapterId}`}>
             <line
               x1={x}
               y1={spineY}

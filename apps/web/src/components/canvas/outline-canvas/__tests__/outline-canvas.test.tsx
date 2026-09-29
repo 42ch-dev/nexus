@@ -544,13 +544,17 @@ const AUTHORING_OUTLINE: WorkOutline = {
 };
 
 /** Invoke the latest captured structure mutate call's onError callback. */
-async function rejectLastStructureAsConflict(currentRevision: number) {
+async function rejectLastStructure(error: unknown) {
   const lastCall = mocks.patchStructureResult.mutate.mock.calls.at(-1);
   if (!lastCall) throw new Error('no patchStructure.mutate call captured');
   const opts = lastCall[1] as { onError?: (e: unknown) => void };
   await act(async () => {
-    opts.onError?.(outlineConflictErr(currentRevision));
+    opts.onError?.(error);
   });
+}
+
+async function rejectLastStructureAsConflict(currentRevision: number) {
+  await rejectLastStructure(outlineConflictErr(currentRevision));
 }
 
 describe('OutlineCanvas — Scene/Beat authoring (V1.200 DR-26 Task 3)', () => {
@@ -788,6 +792,24 @@ describe('OutlineCanvas — drafts survive failed writes (Greptile wave A)', () 
 
     // Conflict modal opens AND the draft survives so the author can retry.
     expect(screen.getByRole('heading', { name: 'Outline Conflict' })).toBeInTheDocument();
+    expect(screen.getByTestId('outline-scene-title')).toHaveValue('Opening Scene');
+  });
+
+  it('keeps the scene title draft when add_scene is refused with a non-conflict 422', async () => {
+    const user = userEvent.setup();
+    renderOutline();
+
+    await user.type(screen.getByTestId('outline-scene-title'), 'Opening Scene');
+    await user.click(screen.getByTestId('outline-add-scene'));
+    await rejectLastStructure(
+      new NexusClientError(422, 'outline_validation_failed', 'title must not be blank'),
+    );
+
+    // A validation refusal is not a conflict: no modal, and the typed title
+    // survives so the author can correct it and retry (qc3 F-001 named the
+    // non-conflict refusal class; the 409 cases above cover the stale-revision
+    // class, whose draft also survives for the modal's replay).
+    expect(screen.queryByRole('heading', { name: 'Outline Conflict' })).toBeNull();
     expect(screen.getByTestId('outline-scene-title')).toHaveValue('Opening Scene');
   });
 

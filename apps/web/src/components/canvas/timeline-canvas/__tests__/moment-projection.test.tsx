@@ -61,6 +61,10 @@ import {
   type TimelineNodeData,
 } from '../timeline-canvas-adapter';
 import { TimelineCanvas } from '../timeline-canvas';
+import type {
+  DirectedAxisSpineNodeData,
+  MomentSpineConfig,
+} from '../directed-axis-spine';
 import type { WorkTimelineNodeData } from '../../work-timeline-canvas/work-timeline-canvas-adapter';
 
 // ─── Fixture builders ──────────────────────────────────────────────────────
@@ -162,6 +166,17 @@ function makeContext(
 // tests narrow through the shared index signature.
 function momentDataOf(node: Node<TimelineNodeData>): WorkTimelineNodeData {
   return node.data as unknown as WorkTimelineNodeData;
+}
+
+// The directed-axis spine node carries `DirectedAxisSpineNodeData` (a
+// discriminated union on `spineConfig.kind`) behind the generic node-data
+// type — same runtime narrowing, asserted rather than assumed.
+function momentSpineConfigOf(node: Node<TimelineNodeData>): MomentSpineConfig {
+  const data = node.data as unknown as DirectedAxisSpineNodeData;
+  if (data.spineConfig.kind !== 'moment') {
+    throw new Error(`expected the Moment spine, got ${data.spineConfig.kind}`);
+  }
+  return data.spineConfig;
 }
 
 // ─── Moment projection (V1.156 P1 T1 — fixture-driven read-projection) ─────
@@ -306,6 +321,38 @@ describe('TimelineCanvasAdapter.projectTimelineGraph — Moment projection (Scen
 
     const beatNode = nodes.find((n) => n.id === 'wt-beat:bet_a1')!;
     expect(momentDataOf(beatNode).workId).toBe('work-a');
+  });
+
+  it('disambiguates the "Ch. N" spine labels of two bound Works that share a chapter (001/R2)', () => {
+    // Chapter numbers are Work-local, so a bare "Ch. 1" label repeated on two
+    // Work-owned segments leaves the reader with screen position as the only
+    // provenance (qc2 F-7 / qc3 F-002). The colliding chapter names its owner;
+    // a Work-unique chapter keeps the compact label.
+    const g = graph({ entities: [] });
+    const fx = fixture([
+      scene({ sceneId: 'scn_a1', chapterId: 1, workId: 'work-a' }),
+      scene({ sceneId: 'scn_a2', chapterId: 2, workId: 'work-a' }),
+      scene({ sceneId: 'scn_b1', chapterId: 1, workId: 'work-b' }),
+    ]);
+
+    const { nodes } = projectTimelineGraph(g, 'moment', undefined, undefined, fx, 'world-7');
+
+    const spine = nodes.find((n) => n.id === 'directed-axis-spine')!;
+    const { chapterSegments } = momentSpineConfigOf(spine);
+
+    // Groups sort by (Work, chapter): work-a#1, work-a#2, work-b#1.
+    expect(chapterSegments.map((s) => s.chapterLabel)).toEqual([
+      'Ch. 1 · work-a',
+      'Ch. 2',
+      'Ch. 1 · work-b',
+    ]);
+    // Segment identity is (Work, chapter) — the two chapter-1 regions are
+    // distinct spine segments, not a duplicated React key.
+    expect(chapterSegments.map((s) => `${s.workId ?? ''}#${s.chapterId}`)).toEqual([
+      'work-a#1',
+      'work-a#2',
+      'work-b#1',
+    ]);
   });
 
   it('stacks scenes vertically (TB) grouped by chapter region (X groups by chapter)', () => {
