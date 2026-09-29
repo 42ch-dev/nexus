@@ -39,6 +39,7 @@ import { NleTimelineCanvasFixtures } from '@/fixtures/nle-timeline-canvas-fixtur
 import { TimelineCanvasFixtures } from '@/fixtures/timeline-canvas-fixtures';
 import { WorkTimelineCanvasFixtures } from '@/fixtures/work-timeline-canvas-fixtures';
 import { OutlineAuthoringFixtures } from '@/fixtures/outline-authoring-fixtures';
+import { RunObservationViewFixtures } from '@/fixtures/run-observation-view-fixtures';
 
 /* ------------------------------------------------------------------ */
 /*  Data — IA guide §4.5 fixtures (canonical copy strings)              */
@@ -79,7 +80,7 @@ const SURFACES_SECTIONS = [
     label: 'Daemon',
     path: '/surfaces/daemon',
     end: false,
-    desc: 'Daemon status strip',
+    desc: 'Daemon status strip; session run view',
   },
   {
     label: 'Launch',
@@ -824,25 +825,46 @@ export function SurfacesAgentPickerPage() {
 
 export function SurfacesDaemonPage() {
   return (
-    <section data-testid="surfaces-daemon" id="surfaces-daemon">
-      <SurfaceHeading id="surfaces-daemon">Daemon status strip</SurfaceHeading>
-      <SurfaceSourceBadges importPaths={['@42ch/nexus-ui']} />
-      <p className="text-copy-14 text-gray-700 mb-6">
-        Healthy daemon status affordance — green dot, badge, helper text.
-        Composed from{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @42ch/nexus-ui
-        </code>{' '}
-        with inline markup. Per DESIGN.md{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          components.daemon-status-indicator
-        </code>{' '}
-        tokens.
-      </p>
-      <FixtureBoundary>
-        <DaemonStatusStrip />
-      </FixtureBoundary>
-    </section>
+    <div data-testid="surfaces-daemon">
+      <section id="surfaces-daemon">
+        <SurfaceHeading id="surfaces-daemon">Daemon status strip</SurfaceHeading>
+        <SurfaceSourceBadges importPaths={['@42ch/nexus-ui']} />
+        <p className="text-copy-14 text-gray-700 mb-6">
+          Healthy daemon status affordance — green dot, badge, helper text.
+          Composed from{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            @42ch/nexus-ui
+          </code>{' '}
+          with inline markup. Per DESIGN.md{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            components.daemon-status-indicator
+          </code>{' '}
+          tokens.
+        </p>
+        <FixtureBoundary>
+          <DaemonStatusStrip />
+        </FixtureBoundary>
+      </section>
+
+      <section className="mt-10" id="surfaces-run-observation">
+        <SurfaceHeading id="surfaces-run-observation">Session run view</SurfaceHeading>
+        <SurfaceSourceBadges importPaths={['@42ch/nexus-ui', '@web-ui/states']} /> {/* @web-ui/states — transitional — badge path label (not an import) */}
+        <p className="text-copy-14 text-gray-700 mb-6">
+          The v1.201 P1 observation surface (daemon orchestration session events), state by state:
+          live tail, inline gap marker with the reconnect affordance, replay/live split with the
+          inferred-boundary disclosure, lost server history, typed refusal, exhausted transport, and
+          the pre-frame stream. Studio-local replica of{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            apps/web/src/pages/session-run-view.tsx
+          </code>{' '}
+          chrome — single theme-following specimens, so the pair view covers light and dark. No
+          daemon, no stream, no product hooks.
+        </p>
+        <FixtureBoundary>
+          <RunObservationViewFixtures />
+        </FixtureBoundary>
+      </section>
+    </div>
   );
 }
 

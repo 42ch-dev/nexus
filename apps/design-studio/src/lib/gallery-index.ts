@@ -161,6 +161,13 @@ const SURFACES_CANVAS_ENTRIES: readonly GalleryEntry[] = [
 
 const SURFACES_DAEMON_ENTRIES: readonly GalleryEntry[] = [
   entry('/surfaces/daemon', 'surfaces-daemon', 'Daemon status strip', ['healthy', 'badge'], [UI, '@/pages/surfaces']),
+  entry(
+    '/surfaces/daemon',
+    'surfaces-run-observation',
+    'Session run view',
+    ['run', 'observation', 'events', 'live', 'gap', 'replay', 'history', 'refusal', 'sessions'],
+    [UI, '@web-ui/states'], // transitional — badge path label (not an import)
+  ),
 ];
 
 const SURFACES_LAUNCH_ENTRIES: readonly GalleryEntry[] = [

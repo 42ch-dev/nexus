@@ -10,9 +10,12 @@
  *   view holds no polling and no manual refresh: `events` is the subscription's
  *   own output, so a live append renders on the next publish.
  * - **Gap** — a `gap` control frame stays inline at the exact position where
- *   continuity was lost (never smoothed over), and the reconnect affordance
- *   re-arms the subscription from the last received cursor — the contract §3
- *   recovery. Reconnecting is a stream affordance, not a run control.
+ *   continuity was lost (never smoothed over), and the stream keeps carrying
+ *   the frames the ring still holds — the view consumes them in place instead
+ *   of reconnecting into the range the gap named. The reconnect affordance
+ *   appears only when the stream ended at its gap (or the bounded reconnect
+ *   budget is spent) and re-arms the subscription from the last received
+ *   cursor. Reconnecting is a stream affordance, not a run control.
  * - **Replay** — a re-entered session renders `events.slice(0, liveFrom)` as
  *   replayed history and `events.slice(liveFrom)` as the live tail, in two
  *   separately labeled sections, so the replay/live handoff stays visible
