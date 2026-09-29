@@ -180,22 +180,28 @@ function structurePanel(): HTMLElement {
   );
 }
 
-/** Build a real NexusClientError 409 carrying `current_version`. */
-function outlineConflictErr(currentVersion: number): NexusClientError {
+/**
+ * Build a real NexusClientError 409 mirroring the daemon's OutlineConflict
+ * envelope (core_error.rs: details carry `current_revision`). The rendered
+ * revision in the modal is falsifiable because the cached fixture outline
+ * carries `outline_revision: 2` while tests inject 5: a modal showing 5
+ * proves the envelope won; 2 would mean the cache fallback was taken.
+ */
+function outlineConflictErr(currentRevision: number): NexusClientError {
   return new NexusClientError(409, 'outline_conflict', 'stale revision', {
-    current_version: currentVersion,
+    current_revision: currentRevision,
     conflicting_path: 'volumes/1',
   });
 }
 
 /** Invoke the latest captured chapter mutate call's onError callback. */
-async function rejectLastChapterAsConflict(currentVersion: number) {
+async function rejectLastChapterAsConflict(currentRevision: number) {
   const chapterMutate = mocks.patchChapterResult.mutate;
   const lastCall = chapterMutate.mock.calls.at(-1);
   if (!lastCall) throw new Error('no patchChapter.mutate call captured');
   const opts = lastCall[1] as { onError?: (e: unknown) => void };
   await act(async () => {
-    opts.onError?.(outlineConflictErr(currentVersion));
+    opts.onError?.(outlineConflictErr(currentRevision));
   });
 }
 
@@ -228,9 +234,11 @@ describe('OutlineCanvas — conflict modal trigger (FB-C1-003)', () => {
     await user.click(screen.getByRole('button', { name: /^Save$/i }));
     await rejectLastChapterAsConflict(5);
 
-    // 4. The outline-flavored conflict modal must be visible with the new
-    //    server revision (FB-C1-003 acceptance: stale revision → conflict
-    //    modal appears with retry/merge path).
+    // 4. The outline-flavored conflict modal must be visible with the SERVER
+    //    revision (FB-C1-003 acceptance: stale revision → conflict modal
+    //    appears with retry/merge path). The envelope carries
+    //    `current_revision: 5` while the cached outline revision is 2, so
+    //    this passes only when the envelope field feeds the modal.
     expect(
       screen.getByRole('heading', { name: 'Outline Conflict' }),
     ).toBeInTheDocument();
@@ -535,12 +543,12 @@ const AUTHORING_OUTLINE: WorkOutline = {
 };
 
 /** Invoke the latest captured structure mutate call's onError callback. */
-async function rejectLastStructureAsConflict(currentVersion: number) {
+async function rejectLastStructureAsConflict(currentRevision: number) {
   const lastCall = mocks.patchStructureResult.mutate.mock.calls.at(-1);
   if (!lastCall) throw new Error('no patchStructure.mutate call captured');
   const opts = lastCall[1] as { onError?: (e: unknown) => void };
   await act(async () => {
-    opts.onError?.(outlineConflictErr(currentVersion));
+    opts.onError?.(outlineConflictErr(currentRevision));
   });
 }
 
@@ -578,6 +586,8 @@ describe('OutlineCanvas — Scene/Beat authoring (V1.200 DR-26 Task 3)', () => {
     await user.click(screen.getByTestId('outline-add-scene'));
     await rejectLastStructureAsConflict(5);
 
+    // Envelope `current_revision: 5` ≠ cached `outline_revision: 2`: the
+    // modal must show the server's canonical 5, not the stale cached 2.
     expect(screen.getByRole('heading', { name: 'Outline Conflict' })).toBeInTheDocument();
     expect(screen.getByText('5', { selector: 'span.font-mono' })).toBeInTheDocument();
   });

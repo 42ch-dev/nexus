@@ -322,12 +322,15 @@ export function OutlineCanvas({
     base: Omit<ConflictState, 'currentRevision' | 'conflictingPath'>,
   ) {
     if (!isOutlineConflictError(error)) return;
+    // Outline OCC 409 details carry `current_revision` (core_error.rs
+    // OutlineConflict arm); `current_version` is the World-KB field name and
+    // never appears on this envelope.
     const details = error.details as
-      | { current_version?: number; conflicting_path?: string }
+      | { current_revision?: number; conflicting_path?: string }
       | undefined;
     setConflict({
       ...base,
-      currentRevision: details?.current_version ?? outline.data?.outline_revision ?? 0,
+      currentRevision: details?.current_revision ?? outline.data?.outline_revision ?? 0,
       conflictingPath: details?.conflicting_path ?? base.pendingRequest.kind,
     });
   }
