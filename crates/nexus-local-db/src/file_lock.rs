@@ -22,34 +22,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Maximum prior lock metadata read for successful-acquire diagnostics.
 const MAX_PRIOR_LOCK_BODY_BYTES: usize = 4096;
-/// Maximum holder identity length emitted in diagnostics.
-const MAX_DIAGNOSTIC_HOLDER_CHARS: usize = 128;
-
-/// Render a prior lock holder for diagnostics.
+/// Render a prior lock holder as a non-reversible fingerprint for diagnostics.
 ///
-/// Only this crate's callers write `.lock` bodies, so a holder that follows the
-/// producer grammar is safe to echo: printable ASCII, no whitespace, and one of
-/// the known prefixes (`cli:` / `daemon:schedule:` / `capability:` / `test:`).
-/// Anything else may be stale content — including a secret planted in the body —
-/// so it is replaced by a non-reversible digest stand-in instead of the raw text.
+/// A `.lock` body is neither provenance-authenticated nor validated by
+/// `try_acquire`, which writes the caller-supplied holder verbatim, so the raw
+/// text may be stale — or secret-bearing — content. Always emit a digest
+/// stand-in rather than the holder text.
 fn diagnostic_holder_name(holder_name: &str) -> String {
-    let prefixes = ["cli:", "daemon:schedule:", "capability:", "test:"];
-    let conforms = holder_name.is_ascii()
-        && prefixes
-            .iter()
-            .any(|prefix| holder_name.starts_with(prefix))
-        && holder_name
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b':' | b'.' | b'_' | b'-'));
-    if conforms {
-        holder_name
-            .chars()
-            .take(MAX_DIAGNOSTIC_HOLDER_CHARS)
-            .collect()
-    } else {
-        let digest = sha256(holder_name.as_bytes());
-        format!("<invalid-holder {}>", &digest[..12])
-    }
+    let digest = sha256(holder_name.as_bytes());
+    format!("<fp:{}>", &digest[..12])
 }
 
 fn sha256(input: &[u8]) -> String {
@@ -615,11 +596,12 @@ mod tests {
         assert_eq!(pid, std::process::id());
         assert_eq!(holder, "cli:new-owner");
         assert!(expires > old_expires);
+        let expected_holder = format!("<fp:{}>", &sha256(b"daemon:schedule:old")[..12]);
         crate::test_tracing::assert_warn_emitted(
             &captured,
             &[
                 "pid=99999",
-                "holder_name=daemon:schedule:old",
+                &format!("holder_name={expected_holder}"),
                 "expires_at_ms=",
             ],
         );
@@ -641,11 +623,12 @@ mod tests {
             parse_lock_body(&std::fs::read_to_string(&lock_path).unwrap()).unwrap();
         assert_eq!(holder, "fresh-holder");
         assert!(expires > old_expires);
+        let expected_holder = format!("<fp:{}>", &sha256(b"cli:stale-holder")[..12]);
         crate::test_tracing::assert_warn_emitted(
             &captured,
             &[
                 "pid=99999",
-                "holder_name=cli:stale-holder",
+                &format!("holder_name={expected_holder}"),
                 "expires_at_ms=",
             ],
         );
@@ -702,9 +685,9 @@ mod tests {
         let guard = try_acquire(&work_dir, "fresh-holder").unwrap();
         let warning = captured.lock().unwrap().join("\n");
         assert!(warning.contains("pid=99999"));
-        assert!(warning.contains("<invalid-holder "));
+        assert!(warning.contains("<fp:"));
         assert!(!warning.contains("bad"));
-        assert!(!warning.contains("x".repeat(MAX_DIAGNOSTIC_HOLDER_CHARS).as_str()));
+        assert!(!warning.contains(&"x".repeat(200)));
         drop(guard);
     }
 
@@ -712,7 +695,9 @@ mod tests {
     async fn stale_holder_warning_redacts_secret_bearing_identity() {
         let (_dir, work_dir) = sample_work_dir();
         let lock_path = lock_file_path(&work_dir);
-        let holder = "secret-token-value";
+        // F-001: a grammar-conforming `cli:`-prefixed secret is the exact case
+        // FX-A2 still echoed; it must be fingerprinted like any other holder.
+        let holder = "cli:secret-token-value";
         let expires = now_ms().saturating_sub(120_000);
         std::fs::write(&lock_path, format!("99999:{holder}:{expires}")).unwrap();
         let (layer, captured) = crate::test_tracing::capture_layer();
@@ -721,12 +706,26 @@ mod tests {
 
         let guard = try_acquire(&work_dir, "fresh-holder").unwrap();
         let warning = captured.lock().unwrap().join("\n");
-        let stand_in = format!("<invalid-holder {}>", &sha256(holder.as_bytes())[..12]);
+        let stand_in = format!("<fp:{}>", &sha256(holder.as_bytes())[..12]);
         assert!(warning.contains(&format!("holder_name={stand_in}")));
         assert!(!warning.contains(holder));
         assert!(warning.contains("pid=99999"));
         assert!(warning.contains("expires_at_ms="));
         drop(guard);
+    }
+
+    #[test]
+    fn diagnostic_holder_name_always_fingerprints() {
+        // F-001: no holder text may reach diagnostics, even a grammar-conforming
+        // `cli:`-prefixed secret — the case FX-A2 still echoed verbatim.
+        for holder in [
+            "cli:secret-token-value",
+            "bad\nholder",
+            "daemon:schedule:job",
+        ] {
+            let expected = format!("<fp:{}>", &sha256(holder.as_bytes())[..12]);
+            assert_eq!(diagnostic_holder_name(holder), expected);
+        }
     }
 
     #[test]
