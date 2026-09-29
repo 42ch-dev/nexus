@@ -1125,20 +1125,34 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
     );
   }
 
-  // V1.147 P2 T3 — emptiness spans BOTH projection families: the KB graph AND
+  // V1.147 P2 T3 — emptiness spans the projection families: the KB graph AND
   // the merged compute log events. A World whose only Narrative content is an
   // accepted compute Run must render its Compute result node, not the
-  // global empty state.
+  // global empty state. (V1.200 DR-26 adds the canonical Moment carrier as a
+  // third family — see the fix note below.)
   //
   // V1.162 fix wave S-1 (qc3) — the events query is included in the
   // loading gate: during a branch-switch refetch the re-keyed
   // `useInfiniteQuery` has no data (`flattenPages → []`), so without this
   // gate a World with zero KB entities would flash "This World's timeline
   // is empty" + the run-module CTA on a branch that HAS events.
+  //
+  // V1.200 DR-26 fix (finding: empty-KB World Moment blocked by this gate) —
+  // emptiness spans THREE content families: the World KB graph, the merged
+  // compute log, AND the canonical Moment carrier (the bound Works'
+  // `WorkOutline.scenes[]` / `beats[]`, composed above into `fixture`). A
+  // World whose KB graph and compute events are both empty but whose bound
+  // Work carries scenes/beats is NOT empty — the Moment layer must render
+  // those canonical scenes instead of the global empty state. The global
+  // EmptyState remains for Worlds with truly nothing (no KB entities, no
+  // compute events, no canonical Moment data).
+  const momentCarrierHasData =
+    fixture.scenes.length > 0 || fixture.beats.length > 0;
   const isEmpty =
     !timelineEvents.isFetching &&
-    ((!graph.data || (graph.data.entities ?? []).length === 0) &&
-      eventsList.length === 0);
+    (!graph.data || (graph.data.entities ?? []).length === 0) &&
+    eventsList.length === 0 &&
+    !momentCarrierHasData;
 
   // V1.123 P1 T5 — Brief-empty detection. The active layer is Brief but the
   // graph carries zero `block_type=era` entities (the user clicked the Brief
@@ -1173,8 +1187,14 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   // in-flight fan-out would render as "no scene or beat data yet" and a
   // failed read would become a permanent honest empty-state with no retry
   // (a failed read is NOT an empty outline).
+  //
+  // V1.200 DR-26 fix — keyed on the active layer + the bound-Work set, NOT on
+  // `!isEmpty`: while the carrier fan-out is in flight `isEmpty` is still true
+  // (the canonical arrays have not resolved), so an `!isEmpty` guard would
+  // skip this gate precisely in the empty-KB case and flash the global empty
+  // state before the scenes arrive.
   const momentOutlinesPending =
-    !isEmpty && activeLayer === 'moment' && realizingWorks.length > 0;
+    activeLayer === 'moment' && realizingWorks.length > 0;
   if (momentOutlinesPending && workOutlineQueries.some((q) => q.isLoading)) {
     return <LoadingState label={t('timeline.loading')} />;
   }
