@@ -11,6 +11,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
 
 import { TimelinePanel } from '@/components/canvas/outline-canvas/inspectors/event-inspector';
 
@@ -98,6 +99,69 @@ function renderTimeline(
     />,
   );
   return onPatchTimeline;
+}
+
+/**
+ * Canonical result of a successful binding write as the daemon's outline read
+ * returns it: the event's `world_event_id` carrier is now present (bind) or
+ * gone (unbind). Every other operation leaves the read unchanged, so this
+ * models only the transition the case under test declares.
+ */
+function applyCanonicalBinding(
+  outline: WorkOutline,
+  request: TimelinePatchEventRequest,
+): WorkOutline {
+  if (request.operation === 'bind_world_event') {
+    return {
+      ...outline,
+      timeline_events: outline.timeline_events.map((event) =>
+        event.event_id === request.event_id
+          ? { ...event, world_event_id: request.world_event_id }
+          : event,
+      ),
+    };
+  }
+  if (request.operation === 'unbind_world_event') {
+    return {
+      ...outline,
+      timeline_events: outline.timeline_events.map((event) =>
+        event.event_id === request.event_id ? { ...event, world_event_id: undefined } : event,
+      ),
+    };
+  }
+  return outline;
+}
+
+/**
+ * Render the inspector against a **refetched** canonical outline.
+ *
+ * `usePatchTimelineEvent`'s success invalidates the outline read
+ * (`use-outline-data.ts`), so the Outline canvas hands the inspector the
+ * refetched outline — not the emitted request. This harness mirrors that
+ * handoff: each emitted request is applied to the canonical outline, whose
+ * `world_event_id` carrier then drives the asserted UI. That is what makes the
+ * post-bind / post-unbind assertions a statement about the refetched state
+ * rather than the mutation callback payload.
+ */
+function renderTimelineRefetching(initialOutline: WorkOutline, boundWorldId?: string) {
+  const onPatch = vi.fn();
+  function RefetchingTimeline() {
+    const [outline, setOutline] = useState(initialOutline);
+    return (
+      <TimelinePanel
+        outline={outline}
+        selectedChapterId={null}
+        baseRevision={outline.outline_revision}
+        onPatchTimeline={(request) => {
+          onPatch(request);
+          setOutline((prev) => applyCanonicalBinding(prev, request));
+        }}
+        boundWorldId={boundWorldId}
+      />
+    );
+  }
+  render(<RefetchingTimeline />);
+  return onPatch;
 }
 
 // ---------------------------------------------------------------------------
@@ -281,9 +345,10 @@ describe('TimelinePanel — World-event binding authoring (V1.200 DR-26)', () =>
     expect(optionValues).toEqual(['', 'kb-evt-1']);
   });
 
-  it('fires bind_world_event with event_id and world_event_id', async () => {
+  it('fires bind_world_event and renders the refetched canonical binding (projected referent + Unbind)', async () => {
     const user = userEvent.setup();
-    const onPatch = renderTimeline(makeOutline(), vi.fn(), null, 'world-9');
+    // Initial canonical read: evt_a carries no binding yet.
+    const onPatch = renderTimelineRefetching(makeOutline(), 'world-9');
 
     await user.selectOptions(screen.getByLabelText('World event for Plant the seed'), 'kb-evt-1');
     await user.click(screen.getAllByRole('button', { name: 'Bind' })[0]);
@@ -293,6 +358,15 @@ describe('TimelinePanel — World-event binding authoring (V1.200 DR-26)', () =>
     expect(call.operation).toBe('bind_world_event');
     expect(call.event_id).toBe('evt_a');
     expect(call.world_event_id).toBe('kb-evt-1');
+
+    // After the mutation resolves and the outline read is refetched, the
+    // canonical `world_event_id` drives the UI: the bound referent is projected
+    // and the row offers Unbind instead of the picker + Bind.
+    expect(screen.getByText('World event: Coronation')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Unbind' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('World event for Plant the seed')).not.toBeInTheDocument();
+    // The unbound second event keeps its picker + Bind.
+    expect(screen.getByLabelText('World event for The payoff')).toBeInTheDocument();
   });
 
   it('keeps the Bind button inert until a World event is selected', () => {
@@ -303,9 +377,9 @@ describe('TimelinePanel — World-event binding authoring (V1.200 DR-26)', () =>
     }
   });
 
-  it('renders the projected binding and clears it with unbind_world_event', async () => {
+  it('clears the projected binding with unbind_world_event and renders the refetched event-only picker + Bind', async () => {
     const user = userEvent.setup();
-    const onPatch = renderTimeline(
+    const onPatch = renderTimelineRefetching(
       makeOutline({
         timeline_events: [
           {
@@ -317,8 +391,6 @@ describe('TimelinePanel — World-event binding authoring (V1.200 DR-26)', () =>
           { event_id: 'evt_b', title: 'The payoff', realizes_chapter_id: 2 },
         ],
       }),
-      vi.fn(),
-      null,
       'world-9',
     );
 
@@ -333,6 +405,13 @@ describe('TimelinePanel — World-event binding authoring (V1.200 DR-26)', () =>
     const call = onPatch.mock.calls[0][0] as TimelinePatchEventRequest;
     expect(call.operation).toBe('unbind_world_event');
     expect(call.event_id).toBe('evt_a');
+
+    // After the mutation resolves and the outline read is refetched without the
+    // carrier, the row falls back to the event-only picker + Bind.
+    expect(screen.queryByText('World event: Coronation')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Unbind' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('World event for Plant the seed')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Bind' })).toHaveLength(2);
   });
 
   it('disables — never hides — the binding control when the Work has no bound World', () => {
