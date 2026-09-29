@@ -34,7 +34,10 @@ import { ErrorState, LoadingState } from '@web-ui/states'; // transitional — k
  *  - `refusal` — the typed refusal (absent/foreign/child run id) as an error
  *    block with no retry, because a refusal is deterministic;
  *  - `transport-error` — the same block for an exhausted transport episode,
- *    which does offer the reconnect;
+ *    whose recovery affordance is the block's own `Reconnect` (the header
+ *    `Reconnect` is gap-only, exactly as production renders it);
+ *  - `terminal` — the run ended: the frames stay under their heading, the
+ *    stream is closed and offers no reopen affordance;
  *  - `loading` — the pre-frame state (no events yet: the stream is still
  *    connecting), which is also the empty state of this surface.
  *
@@ -227,9 +230,9 @@ export function RunObservationViewFixtures() {
     <div data-testid="run-observation-view-fixtures" className="grid gap-8">
       <p className="text-copy-14 text-gray-700">
         The session run view, state by state: live tail, inline gap, replay/live split with the
-        inferred boundary disclosure, lost server history, typed refusal, exhausted transport, and
-        the pre-frame stream. Single theme-following specimens — every class is token-backed, so the
-        pair view shows all of these in light and dark.
+        inferred boundary disclosure, lost server history, the ended run, typed refusal, exhausted
+        transport, and the pre-frame stream. Single theme-following specimens — every class is
+        token-backed, so the pair view shows all of these in light and dark.
       </p>
 
       <RunViewVariant
@@ -360,9 +363,39 @@ export function RunObservationViewFixtures() {
         badge="Error"
         badgeVariant="error"
         cursor={null}
-        reconnect
       >
-        <ErrorState title="Could not observe this run" description="socket closed" onRetry={handleRetry} />
+        {/* Production shows the header reconnect only for `gapped`; a transport
+            failure recovers through the error block's own affordance. */}
+        <ErrorState
+          title="Could not observe this run"
+          description="socket closed"
+          onRetry={handleRetry}
+          retryLabel="Reconnect"
+        />
+      </RunViewVariant>
+
+      <RunViewVariant
+        testId="run-view-variant-terminal"
+        badge="Ended"
+        badgeVariant="neutral"
+        cursor="e1:46"
+      >
+        <FixtureStreamSection heading="Live" testId="run-view-terminal-live">
+          <ol aria-label="Run events" className={EVENT_LIST_CLASS}>
+            <FixtureEventRow
+              name="Run state"
+              cursor="e1:41"
+              status="Running"
+              detail="queued → running"
+            />
+            <FixtureEventRow
+              name="Run state"
+              cursor="e1:46"
+              status="Completed"
+              detail="running → completed"
+            />
+          </ol>
+        </FixtureStreamSection>
       </RunViewVariant>
 
       <RunViewVariant

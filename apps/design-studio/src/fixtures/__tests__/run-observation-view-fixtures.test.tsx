@@ -17,6 +17,7 @@ const VARIANTS = [
   'run-view-variant-history-unavailable',
   'run-view-variant-refusal',
   'run-view-variant-transport-error',
+  'run-view-variant-terminal',
   'run-view-variant-loading',
 ] as const;
 
@@ -108,8 +109,22 @@ describe('RunObservationViewFixtures', () => {
 
     const transport = screen.getByTestId('run-view-variant-transport-error');
     expect(within(transport).getByRole('alert')).toHaveTextContent('socket closed');
-    expect(within(transport).getByRole('button', { name: 'Try again' })).toBeInTheDocument();
-    expect(within(transport).getByRole('button', { name: 'Reconnect' })).toBeInTheDocument();
+    // Production shows exactly one reconnect for a transport failure: the error
+    // block's own affordance. The header reconnect is gap-only.
+    expect(within(transport).getAllByRole('button', { name: 'Reconnect' })).toHaveLength(1);
+    expect(within(transport).queryByRole('button', { name: 'Try again' })).toBeNull();
+  });
+
+  it('renders the ended run with the frames retained and no reopen affordance', () => {
+    render(<RunObservationViewFixtures />);
+    const ended = screen.getByTestId('run-view-variant-terminal');
+
+    expect(within(ended).getByTestId('run-view-variant-terminal-phase')).toHaveTextContent('Ended');
+    expect(within(ended).getByTestId('run-view-terminal-live')).toHaveTextContent('Completed');
+    // The stream is closed: neither the (gap-only) header reconnect nor a
+    // transport retry is offered on a run that already ended.
+    expect(within(ended).queryByRole('button', { name: 'Reconnect' })).toBeNull();
+    expect(within(ended).queryByRole('button', { name: 'Try again' })).toBeNull();
   });
 
   it('shows the pre-frame stream state for a run with no events yet', () => {
