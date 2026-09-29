@@ -55,7 +55,7 @@ Cross-language wire shapes start in **`schemas/`** (JSON Schema). Codegen produc
 - Local-only daemon/orchestration shapes may live under `nexus-contracts` local modules when platform does not observe them; they still must not be redefined in app crates.
 - After schema edits: validate → codegen → commit schemas and generated output together.
 
-Schema layout and external-consumer boundary: [`.mstar/specs/architecture/schemas-directory-layout.md`](../.mstar/specs/architecture/schemas-directory-layout.md), [`.mstar/knowledge/schemas-external-consumer-boundary.md`](../.mstar/knowledge/schemas-external-consumer-boundary.md).
+Schema layout and external-consumer boundary: [`.mstar/specs/architecture/schemas-directory-layout.md`](../.mstar/specs/architecture/schemas-directory-layout.md), [`.mstar/specs/architecture/schemas-external-consumer-boundary.md`](../.mstar/specs/architecture/schemas-external-consumer-boundary.md).
 
 ---
 
