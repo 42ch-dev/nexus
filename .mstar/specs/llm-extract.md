@@ -7,7 +7,7 @@
 | **Status** | Normative — V1.51 Shipped (T-A P0). The `nexus.llm.extract` capability, `LlmExtractTask`, and the `kb_extract_jobs` payload extension landed together; review-time extraction in `novel-review-master` swapped from the V1.50 heuristic to this LLM pathway (closes `R-V150KBED-01`). |
 | **Document class** | Master |
 | **Scope** | `nexus.llm.extract` capability contract; `LlmExtractTask` lifecycle; `kb_extract_jobs.proposed_payload` LLM extension; Host-mediated prompt execution; integration with `novel-review-master` review-time extraction |
-| **Last updated** | 2026-09-08 — V1.186 Host prompt cutover; status confirmed Normative |
+| **Last updated** | 2026-09-29 — task/review-path boundary clarified; production preset `llm_extract` routing remains unshipped |
 | **Related** | [orchestration-engine.md](./orchestration-engine.md) §4.4.1 (`LlmJudgeTask` sibling), [entity-scope-model.md](./entity-scope-model.md) §5.5 (World KB promotion), [world-kb-runtime-architecture.md](world-kb-runtime-architecture.md) §5.5, [cli-spec.md](./cli-spec.md) §6.2G, [local-db-schema.md](./local-db-schema.md) §4.1.2 |
 
 This Master is normative for the `nexus.llm.extract` capability surface. It is a
@@ -131,21 +131,38 @@ review-time hook is non-blocking.
 
 ```text
 1. Render `template` content against the orchestration context (handlebars).
-2. Build capability input: { prompt: <rendered>, chapter_prose, _creator_id, _session_id }.
-3. Resolve `nexus.llm.extract` (or configured capability name) via CapabilityRegistry.
-4. Invoke capability; parse output.candidates into Vec<KbCandidate>.
-5. Typed prompt unavailability → return an empty `Vec` so the caller may choose its documented heuristic fallback.
+2. Read chapter prose, trusted identity/target/source, and work profile from context.
+3. Invoke the shared `quality_loop::run_llm_extract` pathway, resolving `nexus.llm.extract` (or the configured capability name) via CapabilityRegistry.
+4. Return LlmExtractOutcome::Candidates { candidates, relationships } on success.
+5. Return WorkerUnavailable or Refused(reason) distinctly; the review-time caller alone decides fallback or zero writes.
 ```
 
-`LlmExtractTask` is the unit the orchestrator routes a `kind: llm_extract` exit
-condition / enter action to (acceptance criterion §4.1). It does NOT persist
-candidates itself — persistence is the caller's responsibility (the review-time
-hook), keeping the task pure and hermetically testable.
+**Shipped scope:** hermetic `llm_extract_task_*` tests exercise `LlmExtractTask`;
+the production review-time extraction hook in
+`crates/nexus-orchestration/src/quality_loop.rs` exercises the same shared
+`run_llm_extract` pathway via `extract_via_llm`, not a preset-kind dispatcher.
+The hook supplies its review prompt; the task supplies a rendered template.
+Both reuse the same capability invocation and candidate parsing. The task does
+NOT persist candidates itself — the review-time caller owns `kb_extract_jobs`
+and relationship persistence (§3, §5).
 
-**Public surface:**
+**Unshipped/deferred:** routing a preset `kind: llm_extract` exit condition or
+enter action to this task is NOT implemented. The explicit
+`crates/nexus-orchestration/src/tasks/mod.rs` note (`R-V152TA-S003`) says there
+is no production preset routing and applies
+`#[cfg_attr(not(test), allow(dead_code))]`; §7 must not be read as proof that
+this routing shipped.
+
+**Task API (not a preset grammar):**
 
 - `LlmExtractTask::new(template, capability_name, registry) -> Self`
-- `LlmExtractTask::evaluate(&self, context) -> Result<Vec<KbCandidate>, GraphError>`
+- `pub(crate) async LlmExtractTask::evaluate(&self, context) -> Result<LlmExtractOutcome, GraphError>`
+
+`template` is stored at construction and rendered against `context` during
+`evaluate`; there is no separate `evaluate(template, context)` overload.
+`LlmExtractOutcome` distinguishes `Candidates { candidates, relationships }`,
+`WorkerUnavailable`, and `Refused(reason)`, rather than returning a bare
+`Vec<KbCandidate>` or treating an empty successful result as unavailability.
 
 `KbCandidate` is defined in `nexus-orchestration::quality_loop` and is shared
 between the heuristic fallback and the LLM pathway so callers treat both
@@ -291,7 +308,7 @@ excluding `needs_review` rows; `?include_suggested=true` surfaces them.
 
 | Acceptance criterion (plan §4) | Where satisfied |
 | --- | --- |
-| §4.1 `nexus.llm.extract` registered; `kind: llm_extract` routes to `LlmExtractTask` | §1, `capability/mod.rs`, `tasks/mod.rs` |
+| §4.1 `nexus.llm.extract` registered; proposed `kind: llm_extract` routing | Registration shipped (§1, `capability/mod.rs`); production preset routing is **unshipped/deferred** (`tasks/mod.rs` `R-V152TA-S003`, §2) |
 | §4.2 `LlmExtractTask` hermetic tests (golden → golden, mock `PromptExecutor`) | `tasks/mod.rs` `llm_extract_task_*` tests |
 | §4.3 `novel-review-master` uses llm_extract; E2E asserts payload carries 4 LLM keys | §5, `tests/novel_review_master.rs` |
 | §4.4 adopt shows confidence + source_quote | cli-spec §6.2G, `creator_world_kb_adopt.rs` |

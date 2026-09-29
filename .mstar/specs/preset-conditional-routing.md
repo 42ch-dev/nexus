@@ -3,23 +3,23 @@
 **Status**: Shipped (V1.42 P2 — 2026-06-12; `llm_judge` GO/NOGO → two `next` edges; V1.52 T-B P0 — 2026-06-19; N-way labeled routing; V1.52 T-B P1 — 2026-06-19; multi-branch merge semantics; V1.56 P2 — 2026-06-22; arbitrary stage conditional + expression routing + converge nodes; V1.56 P3 — 2026-06-22; registry.refresh conditional edges + workspace branch inputs; **V1.179 P2 — 2026-08-27; DR-06 bounded joins** — `timeout_ms` / `on_timeout` on `merge:`/`converge:` states (additive fields; normative §3.3.3))  
 **Document class**: Feature line (conditional routing — minimal slice → N-way labeled → merge semantics → full expression routing → data-source integration)  
 **Created**: 2026-06-06  
-**Last updated**: 2026-09-04 (V1.179 P2: DR-06 bounded joins shipped, §3.3.3)
+**Last updated**: 2026-09-29 (authority clarified; V1.179 P2 DR-06 bounded joins remain shipped, §3.3.3)
 **Tracker**: DF-56 (conditional routing / branching engine)  
 **Scope**: Preset `next.kind: conditional` loader + runtime evaluator (shipped)  
 **Coordinates with**:
 
-- [orchestration-engine.md](orchestration-engine.md) §7.5 — current linear-only contract; this doc is the future normative target when conditional routing ships
+- [orchestration-engine.md](orchestration-engine.md) §7.5 — delegates conditional-routing semantics to this file as the shipped normative SSOT, including DR-06 bounded joins (V1.179 P2); it is not a linear-only contract awaiting a future shipment
 - [creator-workflow.md](creator-workflow.md) — linear creator workflow stages (shipped V1.34); conditional routing layers beneath, does not replace FL-E enum in the first ship slice
 
-This file is the long-term SSOT.
+This file is the shipped normative SSOT for conditional routing. DR-06 bounded-join validation is implemented in `crates/nexus-preset/src/loader.rs`, runtime deadlines/rerouting in `crates/nexus-orchestration/src/tasks/mod.rs`, and deterministic coverage in `crates/nexus-orchestration/tests/join_timeout_e2e.rs`. Pre-shipment rationale and release snapshots below are explicitly historical, not pending implementation gates.
 
 ---
 
 ## 1. Purpose
 
-Authors need presets that branch on runtime signals (judge outcome, tool result, user input) without spawning separate schedules or a manual `creator run <preset_id>` dispatch.
+Authors need presets that branch on runtime signals (judge outcome, tool result, user input) without spawning separate schedules or manual dispatch (historically `creator run <preset_id>`; that CLI runner was retired in v1.193 P2).
 
-**V1.42 P2 shipped minimal slice** (2026-06-11):
+**Historical V1.42 P2 minimal-slice snapshot** (2026-06-11; later shipped semantics are in §3):
 
 - `llm_judge` states with `next: { go: <state>, nogo: <state> }` now accepted by loader.
 - Graph wires a conditional edge using `_judge_result` from context.
@@ -27,7 +27,7 @@ Authors need presets that branch on runtime signals (judge outcome, tool result,
 - Only valid on `exit_when: { kind: llm_judge }` states. Full expression-based conditional routing remains post-V1.42 (see §3.6.3).
 - 
 
-Pre-V1.42 state:
+Historical pre-V1.42 state:
 
 - Preset loader rejected `next.kind: conditional` with `ConditionalNotYetSupported`.
 - Shipped creator workflow uses linear stage enum + explicit `creator run <preset_id>` dispatch (DF-53 auto-chain still open).
@@ -35,7 +35,9 @@ Pre-V1.42 state:
 
 ---
 
-## 2. Current state (V1.42 P2 shipped)
+## 2. Historical state (V1.42 P2 shipped snapshot)
+
+This table records the initial slice, not today's loader limits or CLI surface. Expression routing shipped in V1.56 (§3.3); `creator run` was retired in v1.193 P2.
 
 | Area | State |
 | --- | --- |
@@ -47,9 +49,9 @@ Pre-V1.42 state:
 
 ---
 
-## 3. Target semantics (future normative)
+## 3. Shipped normative semantics
 
-When Status advances to **Draft** or **Normative**, orchestration-engine §7.5 defers to this document for the full conditional `next` schema.
+Orchestration-engine §7.5 delegates the full conditional `next` schema and merge/converge semantics to this section. N-way routing, expression routing, and DR-06 bounded joins are shipped; the release labels below identify their provenance, not future targets.
 
 ### 3.1 N-way labeled routing (V1.52 T-B P0 — Normative)
 
@@ -358,7 +360,9 @@ The runtime scans compiled expression ASTs for `registry_refresh` and `workspace
 
 ---
 
-## 4. Design axes (unlocked — future grill required)
+## 4. Historical design axes (pre-shipment exploration)
+
+§4–§7 preserve the pre-shipment V1.35 exploration, dependencies, proposed sequencing, and non-goals. They do not override shipped §3 or define current CLI entries; `creator run` was retired in v1.193 P2.
 
 | Axis | Options | Recommendation (exploration) |
 | --- | --- | --- |
@@ -370,7 +374,7 @@ The runtime scans compiled expression ASTs for `registry_refresh` and `workspace
 
 ---
 
-## 5. Dependencies before implement
+## 5. Historical dependencies before implementation
 
 1. Close or cap V1.33 **critical** residuals (security/auth on memory, judge.llm correctness).
 2. DF-47 production caller wiring (agent tool path stable).
@@ -379,7 +383,7 @@ The runtime scans compiled expression ASTs for `registry_refresh` and `workspace
 
 ---
 
-## 6. Suggested future iteration shape (non-binding)
+## 6. Historical proposed iteration shape (non-binding)
 
 | Phase | Deliverable |
 | --- | --- |
@@ -393,7 +397,7 @@ The runtime scans compiled expression ASTs for `registry_refresh` and `workspace
 
 ---
 
-## 7. Explicit non-goals
+## 7. Historical explicit non-goals (V1.35 exploration)
 
 | Scope | Rule |
 | --- | --- |
@@ -413,7 +417,7 @@ The runtime scans compiled expression ASTs for `registry_refresh` and `workspace
 
 ---
 
-## 9. Change control
+## 9. Historical change control (promotion record)
 
 | Event | Action |
 | --- | --- |

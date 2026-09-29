@@ -4,8 +4,9 @@
 **Document class**: Master  
 **Pillar (V1.122)**: **Harness** — this spec is the control-strategy engine contract for the [Harness](../../STRATEGY.md) pillar (orchestration engine + agent host + capability registry + presets). Harness is the "how an author harnesses AI agents to execute creative work" pillar; the user-visible Strategy/Strategies → **Harness** product rename shipped V1.156 P3; internal identifiers remain `strategy`/`preset` (architect LOCKED).
 **Author**: @project-manager (brainstorm consolidation) / to be co-authored by @architect before first implement
-**Date**: 2026-04-17; **Last updated**: 2026-09-12 — V1.188 workspace and cancellation/replay contracts
-**Scope**: daemon runtime, `crates/nexus-acp-host`, `crates/nexus-orchestration`, `nexus42` CLI, and preset bundle format.
+**Date**: 2026-04-17; **Last updated**: 2026-09-29 — scope clarified after v1.193 P2 daemon retirement; V1.188 workspace and cancellation/replay contracts retained
+**Scope**: Retained orchestration/preset contracts in `crates/nexus-orchestration` and `crates/nexus-preset`, their `crates/nexus-acp-host` boundary, and preset bundle format under the ordinary direct-core `cli` cohort.
+**Historical host scope (v1.193 P2 supersession)**: The original “daemon runtime … `nexus42` CLI” scope and daemon-owned execution/lifecycle/schedule wording below describe the retired integrated host. They do not restore the daemon group or a CLI preset runner. The libraries remain; current CLI entry authority is [cli-spec.md](cli-spec.md) §6.0B + its delivered v1.193 P2 overlay (`apps/nexus42/src/cli.rs`; retained crate/cohort edges in `apps/nexus42/Cargo.toml`).
 **Supersedes**: — (new topic)
 **Coordinates with**:
 
@@ -87,6 +88,8 @@ Per [effort-estimation.md](https://github.com/btspoony/mstar-harness/blob/main/d
 
 ## 2. Scope and Responsibility Split
 
+The runtime/preset contracts remain authoritative for the retained crates above. References to the daemon runtime, its lifecycle HSM, and daemon-era `nexus42` schedule/execution entries are historical composition context, not the current CLI execution surface.
+
 ### 2.1 In scope (this document is authoritative for)
 
 - Runtime architecture of the orchestration engine and capability registry.
@@ -95,7 +98,7 @@ Per [effort-estimation.md](https://github.com/btspoony/mstar-harness/blob/main/d
 - Preset bundle filesystem layout, YAML manifest schema, prompt reference semantics, loader mapping rules.
 - Adapter layer over `graph-flow`: trait boundary, SQLite `SessionStorage` impl contract, `Task` impls for the standard node kinds.
 - Built-in capabilities catalog (first release).
-- How the orchestration engine consumes and is consumed by `statig` daemon lifecycle.
+- Historical host integration: how the orchestration engine consumed and was consumed by the `statig` daemon lifecycle (retired host, not a current CLI requirement).
 - Migration phases and their ordering constraints.
 
 ### 2.2 Out of scope

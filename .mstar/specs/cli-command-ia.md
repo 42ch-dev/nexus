@@ -1,12 +1,13 @@
 # CLI Command Information Architecture — Normative Specification v1
 
 **Status**: Shipped (V1.35)  
-**Document class**: Master (V1.35 lock effective)  
+**Document class**: Master (historical V1.35 lock; retained rationale supplement)  
 **Created**: 2026-06-06  
 **Shipped**: 2026-06-07 (V1.35 P5 spec-tracker-hygiene)  
 **Supersedes**: pre-V1.35 [cli-spec.md](cli-spec.md) §6.0B six-group lock
 **Merged into**: [cli-spec.md](cli-spec.md) §6.0B in V1.35 P5; retained as shipped IA rationale and acceptance supplement
 **Scope**: Top-level `nexus42` command groups, deprecation rules, creator-centric entry  
+**Supersession (v1.193 P2)**: Current command authority is [cli-spec.md](cli-spec.md) §6.0B plus its delivered v1.193 P2 overlay, checked against `apps/nexus42/src/cli.rs`. The daemon group (including lifecycle/schedule controls and hidden `daemon-run`), `web-embed`, DaemonClient leaves, `creator run` / `creator bootstrap` and the other incomplete runner entries, and the top-level `sync` alias were removed. `platform sync` is canonical; the direct-core `cli` cohort is the ordinary default (`apps/nexus42/Cargo.toml`). The V1.35 rationale and later pre-retirement amendments below are historical, not current command or onboarding rules.
 **Coordinates with**:
 
 - [cli-spec.md](cli-spec.md) — per-command detail (§6 subsections remain authoritative for flags)
@@ -27,12 +28,12 @@ V1.35 revises top-level IA to **five groups** while preserving ADR-025 spirit (A
 
 ---
 
-## 2. Top-level groups (V1.35 target)
+## 2. Top-level groups (historical V1.35 target)
 
 | Group | Role | Primary persona |
 | --- | --- | --- |
 | **`creator`** | Agent identity hub — Work, workspace, assets, register/use | Creator operator |
-| **`daemon`** | Runtime supervisor — start/stop, schedules (power user) | Advanced / automation |
+| **`daemon`** (historical; retired v1.193 P2) | Runtime supervisor — start/stop, schedules (power user) | Advanced / automation |
 | **`acp`** | ACP capability plane — agents, registry, skills, probe | Integrator |
 | **`platform`** | User session — auth, **sync**, explore, context, publish | Platform user |
 | **`system`** | Local maintenance — doctor, config, preset list/validate, debug | Operator |
@@ -43,9 +44,9 @@ No sixth top-level group in V1.35. Pre-release allows deprecation aliases (see �
 
 ---
 
-## 3. Creator hub principles
+## 3. Creator hub principles (V1.35 historical lock)
 
-1. **Creative default path**: `creator run` is the user-facing Work lifecycle entry (V1.33 FL-E).
+1. **Historical creative default path**: `creator run` was the user-facing Work lifecycle entry (V1.33 FL-E); its CLI entry was removed in v1.193 P2.
 2. **Identity anchor**: All `creator *` commands bind to active `creator_id` from `creator use`.
 3. **Optional platform mount**: Creator may operate pure-local; platform commands add cloud capabilities when User is logged in.
 4. **Subcommand stability**: Existing `creator` subcommands remain unless P3 locks a rename strategy (§3.2).
@@ -54,17 +55,17 @@ No sixth top-level group in V1.35. Pre-release allows deprecation aliases (see �
 
 | Tier | Subcommands | UX |
 | --- | --- | --- |
-| **Primary** | `bootstrap`, `run`, `works`, `workspace`, `register`, `use` | First-run and daily use |
+| **Primary** | `bootstrap`, `run` (both retired v1.193 P2), `works`, `workspace`, `register`, `use` | Historical first-run and daily-use tier |
 | **Assets** | `soul`, `memory`, `kb`, `knowledge`, `reference`, `world` | Scoped; help must disambiguate KB terms |
 | **Platform bridge** | `pair`, `unpair`, `credentials`, `list` (when User logged in) | Optional |
 | **Maintenance** | `demo-seed`, `status`, `logout` | Secondary |
 
-**`creator run` (V1.45 target — replaces V1.44 bespoke subcommands):**
+**Historical `creator run` amendment (V1.45 target — replaced V1.44 bespoke subcommands; runner retired v1.193 P2):**
 
 | Entry | Role |
 | --- | --- |
-| `creator run <preset_id> [<work_id>]` | Generic preset dispatch; see [creator-run-preset-entry.md](creator-run-preset-entry.md) |
-| `creator bootstrap …` | Composite Work onboarding (V1.45 generic runner; see creator-run-preset-entry.md) |
+| `creator run <preset_id> [<work_id>]` (retired v1.193 P2) | Historical generic preset dispatch; see [creator-run-preset-entry.md](creator-run-preset-entry.md) |
+| `creator bootstrap …` (retired v1.193 P2) | Historical composite Work onboarding (V1.45 generic runner; see creator-run-preset-entry.md) |
 | `creator works …` | Atomic Work ops only (`inspire`, `reopen`, `resume-chain`, `reconcile-chapters`, …) |
 
 **Removed in V1.45 (hard delete):** `review-master`, `audit-chapter`, `stage`, `start`, `continue`, `resume`, `reconcile-chapters` under `creator run`.
@@ -94,7 +95,7 @@ No sixth top-level group in V1.35. Pre-release allows deprecation aliases (see �
 
 ---
 
-## 4. Group responsibilities
+## 4. Group responsibilities (historical V1.35 IA)
 
 ### 4.1 `platform` (includes sync)
 
@@ -105,13 +106,13 @@ No sixth top-level group in V1.35. Pre-release allows deprecation aliases (see �
 | Context | `platform context assemble-moment` | local path shipped; cloud assemble deferred (DF-55) |
 | Explore / publish | `platform explore`, `platform publish` | yes |
 
-**Migration (P2):**
+**Historical migration (V1.35 P2; alias removed in v1.193 P2):**
 
 - Implement `platform sync` as canonical surface.
-- Top-level `nexus42 sync` → deprecated hidden alias forwarding to `platform sync` for ≥1 iteration.
+- Top-level `nexus42 sync` → deprecated hidden alias forwarding to `platform sync` for ≥1 iteration (historical transition only; the alias is now deleted).
 - Update cli-spec §6.7 boundary table and shell completion.
 
-### 4.2 `daemon`
+### 4.2 `daemon` (historical — entire group retired v1.193 P2)
 
 - Lifecycle: `start`, `stop`, `status`, `logs`, `doctor`
 - Orchestration control: `schedule add|edit|...` — **advanced**; document as power-user path
@@ -120,7 +121,7 @@ No sixth top-level group in V1.35. Pre-release allows deprecation aliases (see �
 ### 4.3 `acp`
 
 - Unchanged separation from daemon (negotiation vs runtime control)
-- Worker entry points remain hidden (`acp-worker`, `daemon-run`)
+- Historical worker entry points were hidden (`acp-worker`, `daemon-run`); `daemon-run` was deleted in v1.193 P2, not retained as a hidden entry.
 
 ### 4.4 `system`
 
@@ -129,7 +130,9 @@ No sixth top-level group in V1.35. Pre-release allows deprecation aliases (see �
 
 ---
 
-## 5. Deprecation and compatibility
+## 5. Deprecation and compatibility (historical V1.35 policy)
+
+The table records the V1.35 transition, not live aliases or runner guidance. The top-level `sync` alias, `daemon` group, and `creator run` entry were deleted in v1.193 P2.
 
 | Legacy | Target | V1.35 rule |
 | --- | --- | --- |
@@ -137,24 +140,26 @@ No sixth top-level group in V1.35. Pre-release allows deprecation aliases (see �
 | `daemon schedule` as first-run hint | `creator run` | Help text only; no command removal |
 | Top-level `preset` (never shipped) | `system preset`, `creator run` | Document only (DF-52) |
 
-**Hard delete** of `sync` top-level: **Out of V1.35** — earliest V1.36 after alias period. **Durable roadmap:** DR-53 (top-level `sync` hard-delete).
+**Historical V1.35 deferral:** hard delete of top-level `sync` was out of V1.35 — earliest V1.36 after the alias period (DR-53). **Delivered v1.193 P2:** the alias is deleted; only `platform sync` remains canonical.
 
 ---
 
-## 6. First-run paths (summary)
+## 6. First-run paths (historical V1.35 summary)
 
-Detailed steps: cli-spec §7. Normative split:
+Historical detailed steps: cli-spec §7. V1.35 normative split (current entry authority: cli-spec §6.0B + v1.193 P2 overlay):
 
 | Path | When | Platform auth |
 | --- | --- | --- |
 | **Local-first** (§7.1) | Default; `platform_integration = paused` | Not required |
 | **Platform-mounted** (§7.2) | User wants cloud worlds / sync | Required |
 
-Local-first must reach `creator bootstrap` in ≤7 commands (see creator-centric-entry-model §3.1).
+Historical V1.35 acceptance required local-first to reach `creator bootstrap` in ≤7 commands (see creator-centric-entry-model §3.1). `creator bootstrap` was removed in v1.193 P2; this is not a current onboarding chain.
 
 ---
 
-## 7. Help and discoverability rules (P2/P3 implement)
+## 7. Help and discoverability rules (historical V1.35 P2/P3 implement)
+
+The `creator run` / `daemon schedule` help rules below describe the retired entry model, not current help requirements.
 
 1. Root `long_about` mentions **`creator run`** and **`creator workspace init`**, not `daemon schedule`.
 2. `creator --help` ordering: surface `run` near top (implementation detail — P3).
@@ -163,7 +168,7 @@ Local-first must reach `creator bootstrap` in ≤7 commands (see creator-centric
 
 ---
 
-## 8. Acceptance (spec-level)
+## 8. Acceptance (historical V1.35 spec-level criteria)
 
 1. This document and cli-spec §6 header agree on five groups post-P2.
 2. `nexus42 --help` lists five groups; sync appears under platform or as deprecated alias only.
@@ -174,7 +179,7 @@ Local-first must reach `creator bootstrap` in ≤7 commands (see creator-centric
 
 ## 9. Change control
 
-- **Authority**: this spec > cli-spec §6.0B legacy text until P5 hygiene merge.
+- **Historical authority**: this spec overrode cli-spec §6.0B legacy text until the V1.35 P5 hygiene merge. Current authority is cli-spec §6.0B + the delivered v1.193 P2 overlay, not this rationale supplement.
 - **Platform unpause**: Does not automatically add top-level groups; extends `platform` subcommands only.
 - **Impact before rename**: `gitnexus_impact` required for any `creator kb` rename (P3).
 
