@@ -26,13 +26,8 @@ export type {
   ClearRunsResponse,
   DaemonHealth,
   DiscardRunResponse,
-  EditScheduleRequest,
   ListRunsQuery,
   NexusClient,
-  UpdateWorkCronRequest,
-  WorkCronResponse,
-  WorkCronRole,
-  WorkCronRoles,
 } from './types';
 export type {
   PresetProfileConditionalRule,

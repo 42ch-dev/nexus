@@ -143,7 +143,7 @@ Seven screen groups. READ = visibility; CRUD = write/setup.
 | --- | --- | --- | --- |
 | 1 | **Works dashboard** | List Works (cursor-paginated after F-P1) with status + completion %; drill into a Work detail view (intake status, stage, world binding, linked schedules). | READ |
 | 2 | **Orchestration sessions** | List sessions with per-session status (running / completed / failed); watch what the runtime is doing right now. | READ |
-| 3 | **Schedule / cron** | List cron roles per Work with next-fire in UTC and local time (parity with CLI `creator works cron`). Editing cron is deferred (§8). | READ |
+| 3 | **Schedule / cron** | List schedule identities; schedule creation remains available. Per-Work cron editing is retired in v1.200 P3; CLI `creator works cron` declaration editing is retained. | READ |
 | 4 | **Capability registry browser** | List `nexus.*` capabilities with descriptions — surfaces the V1.34 agent tool bridge so authors can see what the runtime can do. | READ |
 | 5 | **Findings** | List findings (per Work, post-F-P2 endpoint) with status / severity filtering. Remediation actions are deferred (§8). | READ |
 
@@ -182,7 +182,7 @@ Explicitly deferred with durable tracking (compass §1.2 + §6; satisfies the Du
 - **Tauri desktop shell (`apps/desktop`)** — V1.65. The SPA is Tauri-ready now; the shell wraps the same `apps/web/dist`.
 - **Content-authoring UI** — chapter rich-text editor, outline editor, KB editor — V1.65+. CLI continues content production this iteration.
 - **Findings-remediation UI** — **Ships in V1.77 (§23).** Findings were *visible* in V1.64; remediation (status transitions, `target_executor` assignment, inline edit) is the V1.77 lead surface. Remaining remediation follow-up (inline fix / re-run from finding) is deferred — **DR-28**.
-- **Schedule / cron editor** — deferred. **Durable roadmap:** DR-27 (Control Room cron editing).
+- **Schedule / cron editor** — retired in v1.200 P3. CLI `creator works cron` declaration editing is retained; no successor UI roadmap item.
 - **Mobile (Tauri v2 mobile targets)** — deferred. **Durable roadmap:** DR-61 (mobile / Tauri v2 mobile targets).
 - **OpenAPI spec generation + generated TS client SDK (C2)** — deferred; TanStack Query + codegen TS types suffice for the SPA.
 - **Remote (non-loopback) access / any new auth** — out of scope; would require its own auth spec.
