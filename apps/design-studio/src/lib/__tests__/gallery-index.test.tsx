@@ -1,7 +1,12 @@
 import { act } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { focusGalleryHeading, getGalleryLabel } from '@/lib/gallery-index';
+import {
+  filterGalleryEntries,
+  focusGalleryHeading,
+  getGalleryEntries,
+  getGalleryLabel,
+} from '@/lib/gallery-index';
 
 describe('focusGalleryHeading', () => {
   afterEach(() => {
@@ -50,6 +55,18 @@ describe('focusGalleryHeading', () => {
     });
 
     expect(document.activeElement).not.toBe(heading);
+  });
+});
+
+describe('getGalleryEntries', () => {
+  it('indexes the session run view family on the Surfaces Daemon route', () => {
+    const ids = getGalleryEntries('/surfaces/daemon').map((item) => item.id);
+    expect(ids).toContain('surfaces-run-observation');
+    // The family stays reachable through the section index by state vocabulary.
+    const matched = filterGalleryEntries(getGalleryEntries('/surfaces/daemon'), 'replay').map(
+      (item) => item.id,
+    );
+    expect(matched).toEqual(['surfaces-run-observation']);
   });
 });
 
