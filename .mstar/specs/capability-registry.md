@@ -1,19 +1,29 @@
 # Capability Registry — Master v1
 
-**Status**: Master (V1.57 P-last promote — bridge Master promotion + P0/P1/P3 spec changes folded in)
+**Status**: Normative / Shipped — Master (promoted V1.57 P-last; current core ownership reconciled 2026-09-29)
 **Document class**: Master  
 **Created**: 2026-06-20 (V1.53 P-1 Draft)  
-**Last updated**: 2026-06-22 (V1.57 P-last — folded in P0 test vectors + P1 3-caller dispatch + P3 dynamic allowlist mechanism)  
-**Scope**: Runtime SSOT for Nexus `nexus.*` capability dispatch — 18 host tools (per V1.57 P0 acp §4 roster, reconciled from 35 plan estimate) + dynamic worker allowlist (per V1.57 P3) + 3-caller entry point shape (per V1.57 P1)  
-**Coordinates with**: [acp-capability-set.md](acp-capability-set.md), [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md) (now Master), [acp-client-tech-spec.md](acp-client-tech-spec.md), [orchestration-engine.md](orchestration-engine.md) (§6.4 worker IPC), [daemon-runtime.md](daemon-runtime.md) (3-caller topology), [local-runtime-boundary.md](local-runtime-boundary.md) (3-caller adapter pattern)  
+**Last updated**: 2026-09-29 — retained core dispatch, static roster and historical authority labels
+**Scope**: Runtime SSOT for the retained Nexus host-tool registry and dispatch spine — **30 static host tools (28 `nexus.*` + 2 `fs/*`)**, peer/user-capability resolution, admission and audit ownership. Former daemon worker allowlists and three-caller wrappers are historical.
+**Coordinates with**: [acp-capability-set.md](acp-capability-set.md), [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md), [acp-client-tech-spec.md](acp-client-tech-spec.md), [orchestration-engine.md](orchestration-engine.md) (separate orchestration registry), [daemon-runtime.md](daemon-runtime.md) (retired three-caller topology), [local-runtime-boundary.md](local-runtime-boundary.md) (current host boundaries)
 
 ---
 
 ## 0. Document position
 
-This Draft overlay defines the target runtime registry shape for Nexus `nexus.*` capability dispatch. It does **not** replace [acp-capability-set.md](acp-capability-set.md): the capability-set spec remains the logical catalog (capability id + one-line description). This registry spec is the runtime SSOT for handler binding, ACP wire shape, failure mode, and test-vector coverage.
+This **Master** defines the **shipped runtime registry contract** for Nexus host-tool dispatch. It does **not** replace [acp-capability-set.md](acp-capability-set.md): that spec remains the logical catalog (capability id + one-line description). This registry spec owns handler binding, catalog shape, admission/failure behavior and test-vector authority. Its former Draft-overlay/target-shape status ended at V1.57 P-last.
 
 Non-overlap rule: **catalog = ID + one-liner**; **registry = handler + wire + failure mode + test vector**.
+
+### 0.1 Current implementation authority
+
+[`nexus_core::execution::capabilities`](../../crates/nexus-core/src/execution/capabilities.rs) owns `host_tool_registry()` and its process-global `LazyLock<CapabilityRegistry>`. `execute_tool` runs admission, calls that registry's `dispatch`, then audits success or refusal; `ToolContext` replaces the former daemon `WorkspaceState`. The allowlist uses `spine_resolves`: static builtin → admitted peer → admitted user capability. Unknown IDs fail with `not_supported`; callers must not maintain a second lookup/allowlist table.
+
+The static registry contains **30 rows: 28 `nexus.*` and 2 `fs/*`**. `build_registry` is the row authority; [`retained_peer_contracts.rs`](../../crates/nexus-core/tests/retained_peer_contracts.rs), `host_tool_registry_roster_is_the_declared_nexus_surface`, pins the same set and excludes `nexus.profile.*` grouping metadata. Dynamic peer/user entries are additional spine resolutions, not part of this static count. The former 18-tool count was a V1.57 snapshot.
+
+The [`nexus-orchestration` `CapabilityRegistry`](../../crates/nexus-orchestration/src/capability/mod.rs) is a **separate registry** of orchestration `Capability` implementations. Its live admitted user entries may be resolved by the core spine; it does not own the static host-tool dispatch table. ACP **agent discovery/selection** is yet another surface, governed by [registry-integration.md](registry-integration.md), not by this spec.
+
+**Historical boundary:** the integrated daemon and `HostToolExecutor` were deleted in v1.193 P2. §2 preserves versioned field-design/migration records; §5 preserves the promotion checklist; the dated amendments retain their delivery context. Any `WorkspaceState`, daemon wrapper, worker transport, or Draft-overlay wording in those records is historical, not an alternative current authority.
 
 ---
 
@@ -23,18 +33,20 @@ Non-overlap rule: **catalog = ID + one-liner**; **registry = handler + wire + fa
 
 - Registry fields needed to route `nexus.*` capabilities consistently.
 - Authority chain between catalog, bridge, ACP tech spec, orchestration, and runtime handler code.
-- Promote-decision checklist for P-last.
+- Preserve the versioned migration and promotion record without treating it as a second current authority.
 
 ### 1.2 Non-goals
 
-- Full field semantics in P-1; P0 owns details.
+- Reopening the completed P-1/P0 field-design and Master-promotion decisions.
 - New ACP wire protocol design outside existing ACP-client topology.
 - Platform REST contracts, cloud publish, standalone MCP, or third-party registry.
 - Skills-export CLI compatibility; DF-50 is Cancelled.
 
 ---
 
-## 2. Registry field skeleton
+## 2. Registry field skeleton (historical design and migration record)
+
+The original field definitions below retain their V1.53–V1.175 context. Current `CapabilityRow` metadata, `RegistryHandlerFn` (using `&ToolContext`, not `&WorkspaceState`), catalog emission and execution are defined in §0.1's core source. Audit ownership is `execute_tool`; the old `HostToolExecutor::execute()` attribution below is historical.
 
 | Field | One-line meaning | P0 detail status |
 | --- | --- | --- |
@@ -201,6 +213,8 @@ verifies that all 7 fields are populated for every registered row.
 
 ### 2.8 `nexus.reference.refresh` (V1.58 P1 — DF-44)
 
+**Historical V1.58 P1 binding:** the following row predates the V1.58 P3 host-tool addition. Today `build_registry` also binds `nexus.reference.refresh` as a core host tool (`Access::Write`, `ADMISSION_WRITE_WORKSPACE`, `registry_reference_refresh`); the separate orchestration handler remains distinct.
+
 **id**: `nexus.reference.refresh`
 **access**: `Read` + side-effect (writes `last_refreshed_at` / `refresh_status` to `reference_sources`)
 **admission**: Reference source must exist in `reference_sources` table; `refresh_policy != 'offline'` (else `policy_blocked`); URL must be valid (else `invalid_input`); network timeout returns `transient_error`.
@@ -215,9 +229,9 @@ verifies that all 7 fields are populated for every registered row.
 
 1. Repo root `AGENTS.md` defines scope and local-first boundaries.
 2. `acp-capability-set.md` defines the logical capability catalog.
-3. This Draft overlay defines the runtime registry contract for active V1.53 work.
-4. `agent-nexus-tool-bridge.md` defines mediated external-agent tool invocation and admission invariants.
-5. `acp-client-tech-spec.md` and `orchestration-engine.md` define ACP client topology and schedule/tool request participation.
+3. This shipped Master defines the runtime registry contract; §0.1 identifies current core ownership and the historical sections it supersedes.
+4. `agent-nexus-tool-bridge.md` defines retained core admission/execution invariants and preserves the historical external-agent transport record.
+5. `acp-client-tech-spec.md` and `orchestration-engine.md` define current ACP provider composition and the separate orchestration capability surface.
 6. Runtime implementation must not create a second dispatch table for the same `nexus.*` id.
 
 ---
@@ -227,16 +241,16 @@ verifies that all 7 fields are populated for every registered row.
 | Existing spec | Boundary |
 | --- | --- |
 | `acp-capability-set.md` | Logical catalog only; no runtime dispatch authority. |
-| `agent-nexus-tool-bridge.md` | Master spec (promoted V1.57 P-last). Entrypoint/admission history and mediated external-agent tool invocation; registry is the shared runtime SSOT underneath it. |
+| `agent-nexus-tool-bridge.md` | Master spec (promoted V1.57 P-last). Retained core admission/execution boundary plus historical external-agent transport; this registry is the shared runtime dispatch authority. |
 | `acp-client-tech-spec.md` | ACP client behavior and handshake; registry rows may reference wire details but do not redefine ACP. |
-| `orchestration-engine.md` | Schedules and worker tool requests; registry may serve schedule-initiated tool dispatch but does not replace preset grammar. |
+| `orchestration-engine.md` | Preset grammar and orchestration capabilities; its registry is separate from the core host-tool registry. Former worker-tool topology is historical. |
 | `cli-spec.md` | User-visible commands; capability registry is not a CLI command tree. |
 
 ---
 
-## 5. Acceptance (spec-level)
+## 5. Acceptance (historical promotion checklist)
 
-Promote decision checklist for P-last:
+V1.53–V1.57 promotion checklist, preserved as recorded. Master promotion completed in V1.57 P-last; the unchecked decision row below is historical, not an open authority choice.
 
 - [x] P0 has filled field semantics for all registry fields.
 - [x] P0 has recorded explicit cutover triggers and no lingering dual dispatch path.
@@ -248,9 +262,9 @@ Promote decision checklist for P-last:
 
 ---
 
-## V1.58 P0 Draft overlay: `registry.refresh` capability body extension
+## V1.58 P0: `registry.refresh` capability body extension (historical amendment)
 
-**Status**: Draft (V1.58 P0)
+**Historical status**: Draft (V1.58 P0 record; not the status of this shipped Master).
 
 ### Body extension
 

@@ -1,17 +1,17 @@
 # ACP Client Integration — Technical Specification
 
-**Status:** Shipped. Current implementation uses official `agent-client-protocol = "=2.1.0"` (stable-v1 API via `schema::v1::*`; no unstable v2 features, no `agent-client-protocol-rmcp`) behind Nexus-owned DTOs; daemon-orchestrated ACP sessions are delegated to per-creator `nexus42 acp-worker` children, while the route-facing daemon `HostManager` currently registers installed native CLI providers. Sections 2–10 retain the original V1.0 design and migration record where not superseded by the current amendment below.
+**Status:** Shipped. The Rust adapter uses official `agent-client-protocol = "=2.2.0"` (stable-v1 API via `schema::v1::*`; no unstable v2 features, no `agent-client-protocol-rmcp`) behind Nexus-owned DTOs. Current service composition uses the core-owned `HostManager` and `packages/nexus-provider-acp` callbacks, not a route-facing daemon manager plus per-creator `acp-worker` children. Sections 2–10 retain the original V1.0 design and migration record; they are historical wherever superseded by the shipped boundary below.
 **Document class**: Master  
 
 **Source Plan**: `2025-04-05-acp-client`
 **Date**: 2026-04-06
-**Last reconciled**: 2026-09-04 — current SDK pin, client trait authority, provider wiring, and ACP worker boundary through V1.183.
+**Last reconciled**: 2026-09-29 — exact Rust SDK pin and post-v1.193 service/provider composition.
 
 
 The shipped boundary is:
 
 - `crates/nexus-acp-host/Cargo.toml` pins
-  `agent-client-protocol = "=2.1.0"`; stable-v1 messages are imported from
+  `agent-client-protocol = "=2.2.0"`; stable-v1 messages are imported from
   `agent_client_protocol::schema::v1` (the flat `schema` re-export was
   removed upstream) and the adapter pins `ProtocolVersion::V1` explicitly.
 - Official SDK types are confined to `nexus-acp-host`; the public
@@ -20,11 +20,11 @@ The shipped boundary is:
 - `nexus-agent-host::providers::acp` consumes `NexusAcpClient` /
   `AcpSdkAdapter`, but those provider-specific types do not cross the
   `HostFacade` boundary.
-- The daemon runtime does not import SDK protocol types or execute ACP sessions
-  in process. Daemon orchestration delegates those sessions to a per-creator
-  `nexus42 acp-worker` child; the route-facing `HostManager` boot path currently
-  registers installed `codex-native`, `claude-native`, and `dsh-native`
-  adapters.
+- [`HostManager`](../../crates/nexus-agent-host/src/core/manager.rs) owns provider/session policy. `register_provider` accepts an adapter plus its launch recipe; ordinary `start` instead materializes the admitted catalog when no adapters were pre-registered. [`core/readiness.rs`](../../crates/nexus-agent-host/src/core/readiness.rs) builds that catalog from configured providers and PATH discovery, not a fixed native-only registration list.
+- [`nexus-core-node` boot](../../crates/nexus-core-node/src/lifecycle.rs) starts one manager, wraps a supplied JS provider port in `AdmittingProviderPort` (otherwise uses `host.build_provider_port()`), and adopts that same manager into the core host authority. [`apps/nexus-service/src/index.ts`](../../apps/nexus-service/src/index.ts) supplies `createAcpProvider()` except in domain-only mode; [`lifecycle.ts`](../../apps/nexus-service/src/lifecycle.ts) passes it to `openCore`.
+- The Rust `AcpProvider` stores an enabled ACP launch recipe and lazily owns a separate child for each Host session. The TS callback implementation in [`packages/nexus-provider-acp`](../../packages/nexus-provider-acp/src/acp.ts) owns its ACP sessions and subprocesses through [`process-owner.ts`](../../packages/nexus-provider-acp/src/process-owner.ts). Neither path requires the deleted daemon host.
+
+**Historical composition (through V1.183; retired v1.193 P2):** daemon orchestration delegated ACP sessions to per-creator `nexus42 acp-worker` children, while its route-facing `HostManager` registered native CLI adapters. This is no longer the service boot composition or a current SDK-linkage boundary.
 
 ---
 
@@ -47,7 +47,7 @@ The shipped boundary is:
 
 ### 1.1 Current dependency and boundary
 
-The shipped ACP SDK is **`agent-client-protocol` 2.1.0**, exact-pinned in
+The shipped Rust ACP SDK is **`agent-client-protocol` 2.2.0**, exact-pinned in
 `crates/nexus-acp-host/Cargo.toml`. ACP crate major 2 does not put the wire
 on protocol v2 — the adapter stays on stable v1 and no longer pulls `rmcp`
 transitively (the default dependency graph is rmcp-free; see
@@ -58,14 +58,16 @@ and implementation code; consumers use nexus contract DTOs through
 
 `crates/nexus-agent-host/src/providers/acp.rs` adapts that client boundary to
 the normalized `ProviderAdapter` lifecycle (initialize, session creation,
-prompt/stream, cancel, shutdown). The daemon runtime does not directly link
-the SDK. No fixed client-method count is normative: the trait definition and
+prompt/stream, cancel, shutdown). The integrated daemon is retired; current
+service/provider ownership is described above. No fixed client-method count is normative: the trait definition and
 its adapter implementation are the source authority as protocol support
 evolves.
 
 ---
 
 ## 2. Integration Architecture
+
+> **Historical design record (§§2–10):** the module layout, daemon dependencies, worker topology and migration tasks below describe the original V1.0 proposal, not the current boot composition. Use the shipped-boundary amendment above and [registry-integration.md](registry-integration.md) for current ACP registry behavior.
 
 ### 2.1 High-Level Architecture
 
@@ -705,7 +707,7 @@ cat ~/.nexus42/registry/cache_meta.json
 - `apps/nexus42/src/acp/error.rs`
 
 **Files to modify:**
-- `apps/nexus42/Cargo.toml` — originally planned `agent-client-protocol = "=0.10.4"` dependency; current pin is `=2.1.0` in `crates/nexus-acp-host/Cargo.toml`
+- `apps/nexus42/Cargo.toml` — originally planned `agent-client-protocol = "=0.10.4"` dependency; current pin is `=2.2.0` in `crates/nexus-acp-host/Cargo.toml`
 - `apps/nexus42/src/main.rs` — add `mod acp;` and `Agent` command variant
 - `apps/nexus42/src/commands/mod.rs` — add `pub mod agent;`
 

@@ -3,14 +3,14 @@
 **Status**: Shipped (V1.65) — Control Room + Setup MVP (V1.64) **+ Content-Authoring UI stage (V1.65, §13)**: outline rich-text editor + chapter structure table + structure CRUD (slug/wc/volume/status; title display-only) + body read-only render + browser "Copy path" context menu. Tauri desktop shell + body full-text editor + "open-with" → **V1.66** (compass §0 Q5). QC tri-review Approve (fix-wave-1) + QA Pass. **+ V1.67 Surface Convergence & De-risk (§15)** + **V1.69 Design System Maturation & Canvas Draft** (`apps/web/DESIGN.md` Production + Canvas Draft) + **V1.70 Canvas Strategy Implement α (§16)** + **CI/desktop-build optimization** (parallel ops track; PR path filter narrowed + release-gated full build) + **V1.71 Canvas Strategy Write-Boundary (§17)** (Strategy patch routes, graphRevision conflict policy, conflict modal UX, canvas-write tokens) + **V1.72 Canvas Outline+Timeline β (§18)** (3 outline/timeline patch routes `outline.patch_structure` / `outline.patch_chapter` / `timeline.patch_event` + outlineRevision conflict policy + outline-flavored conflict modal UX + non-spatial alternate views + 8 outline/timeline canvas-write DESIGN.md tokens). V1.71 `wire_contracts_changed: TRUE` for Strategy; V1.72 `wire_contracts_changed: TRUE` for additive Outline+Timeline (`@42ch/nexus-contracts` 0.7.0 → 0.8.0); V1.73 `wire_contracts_changed: TRUE` for additive World KB (`@42ch/nexus-contracts` 0.8.0 → 0.9.0). **V1.74 Shipped** — Canvas World KB Relationships β (§20) with typed relationship edges, `world_kb.patch_relationship`, relationship inspector, non-spatial relationship table, and KB-flavored conflict modal reuse. **V1.94 Draft amendment** — §29 Information Architecture (V1.94): two-tab sidebar, nested nav, footer Profiles switcher, daemon status bar simplification, Strategies unification, button contrast invariant. **V1.98 Draft amendment** — §30 Design Studio dev surface (auxiliary gallery app; not author-facing). **V1.118 Draft amendment** — §29.17 Creation peer groups (Works / Worlds / Memories) + Canvas-first work shell (`WorkShellLayout` + `WorkRail`). **V1.125 Draft amendment** — §29.17.4 Worlds-first Creator list-mode sidebar (supersedes §29.17.1 peer groups only). **V1.122 Draft amendment** — §29.18 Three-pillar pivot (Harness/Canvas/Computable) + Timeline-first Canvas IA: Timeline is the default surface for **World entry** (`/worlds/:worldId` → Timeline); Work entry stays Outline (V1.118); `CanvasSurfaceKind = "timeline"` added as a peer surface. `wire_contracts_changed: false`. **V1.147/V1.156** (§29.18.2 pillar framing): Computable pillar fronted — V1.147 Run Studio on Modules + compute-on-Timeline Accept-landed nodes; V1.156 P3 Harness pillar-entry rename (user-visible copy only; internal identifiers unchanged). **V1.157** (§3 stack): React 19 upgrade. **V1.170 P1** (§29.2/§29.13, AR-15/AR-17): Entrance axis + Entrance-first setup step (Create/Develop layout trees).
 **Document class**: Feature line  
 **Created**: 2026-06-24  
-**Scope**: Nexus local Web UI product contract — placement (`apps/web`), stack, daemon-served model, `tauri-api` adapter boundary, MVP surface (Control Room + Setup), Content-Authoring stage (V1.65), Tauri / body-editor roadmap (V1.66), and strict separation from the private cloud SaaS  
+**Scope**: Nexus local Web SPA (`apps/web`), its `NexusClient` transport boundary and standalone TypeScript HTTP service (`apps/nexus-service`) under Electron lifecycle ownership; Control Room, Setup and content-authoring product stages; strict separation from the private cloud SaaS.
 
-> **Desktop host note (v1.192, RFT-11):** the Tauri desktop host was retired; the repository has exactly one desktop host — Electron, contract [desktop-shell.md](desktop-shell.md). Tauri-era names below (`tauri-api`, `TauriClient`, `apps/desktop`, the V1.66 shell stage) are historical records of what shipped at that time, kept for traceability. The daemon-served browser SPA model (§§4, 11) is unchanged: the integrated daemon and its embedded SPA still ship.
+> **Current host boundary (v1.193 P2; reconciled 2026-09-29):** Electron is the sole desktop host ([desktop-shell.md](desktop-shell.md)); Tauri was retired in v1.192. The integrated daemon, `nexus-daemon-runtime`, `nexus42 daemon` command group and `web-embed` were deleted in v1.193 P2. The standalone `apps/web` SPA uses `apps/nexus-service` for `/v1/daemon/*`; that retained URL prefix does not imply a Rust daemon host. Tauri/daemon-era shipping stages below are historical records, not current host or packaging requirements.
 
 **Coordinates with**:
 
-- [cli-spec.md](cli-spec.md) §6.3 (daemon command group — Web UI access) + §7.1 (first-run path)
-- [daemon-runtime.md](daemon-runtime.md) §2 (normative layering) — static-asset serving on the axum router
+- [cli-spec.md](cli-spec.md) — current CLI contract; its former daemon Web UI launcher is historical
+- [rust-core-service-boundary.md](rust-core-service-boundary.md) — current core / TS service boundary; [daemon-runtime.md](daemon-runtime.md) retains the retired axum/static-asset topology
 - [schemas-external-consumer-boundary.md](schemas-external-consumer-boundary.md) — the bundled UI is a first-class external consumer of `@42ch/nexus-contracts`
 - [local-cloud-crate-architecture.md](local-cloud-crate-architecture.md) §1 — strict local-product vs cloud-product separation
 - Repo-root [`DESIGN.md`](../../DESIGN.md) + [`DESIGN.dark.md`](../../DESIGN.dark.md) — sole normative DESIGN pair *(V1.98: supersedes former `apps/web/DESIGN*.md` — see §30)*
@@ -18,7 +18,16 @@
 
 ---
 
-## 1. Purpose
+## 0. Current architecture
+
+`apps/web` is a standalone SPA, not a Rust-embedded asset feature. In the desktop product, Electron loads the built web assets through `nexus://app/index.html` and owns the local service lifecycle through `DesktopServiceController`. The standalone TS service opens the native core and serves the retained `/v1/daemon/*` HTTP surface. Browser development/preview runs the SPA separately with a proxy to that service.
+
+Code anchors: [`apps/desktop-electron/src/main.ts`](../../apps/desktop-electron/src/main.ts) (web protocol, `DesktopServiceController`, standalone service entry), [`apps/nexus-service/src/index.ts`](../../apps/nexus-service/src/index.ts) (`startService`), [`apps/nexus-service/src/routes.ts`](../../apps/nexus-service/src/routes.ts), and [`apps/web/vite.config.ts`](../../apps/web/vite.config.ts) (dev/preview proxy). §§1, 4.1–4.3, 11–14 retain their shipped-era context where they describe the deleted daemon or Tauri; this section and §4's current boundary supersede those hosting claims.
+
+---
+
+
+## 1. Purpose (historical V1.64 introduction)
 
 Through V1.63 the local-first runtime is **feature-complete for writing but only reachable from the terminal**. Every operational action — see my Works, watch an orchestration session, inspect findings, configure a preset, start a Work — requires remembering `nexus42` commands.
 
@@ -39,7 +48,7 @@ The local Web UI lives in **this OSS repository** at `apps/web/` (a pnpm workspa
 
 Rationale (frozen, compass §0 Q2):
 
-1. **Build coupling.** The release build embeds the SPA bundle into the `nexus42` binary via `rust-embed`. The OSS binary build must not depend on a private repo's build graph; otherwise the public binary cannot be reproduced from the public repo.
+1. **Build coupling (historical V1.64 rationale).** The release build then embedded the SPA bundle into the `nexus42` binary via `rust-embed`. That packaging was retired in v1.193 P2; the public SPA, Electron host and TS service still build within this OSS repository without the private repo's build graph.
 2. **Type coupling.** The UI consumes `@42ch/nexus-contracts` via `workspace:*` so there is zero cross-repo version lag between wire schemas and the UI types. A private-repo placement would reintroduce npm-semver drift that V1.63's codegen promotion was meant to eliminate.
 3. **Audience coupling.** This UI is a *local-first* surface for the local product line; it shares nothing with the cloud SaaS deployment model.
 
@@ -49,10 +58,10 @@ This is a **different product** from any web UI in the private `nexus-platform`:
 
 | Dimension | Local Web UI (this spec, OSS) | Cloud SaaS (private `nexus-platform`) |
 | --- | --- | --- |
-| Deployment | bundled into the local `nexus42` binary; served from `localhost` | hosted multi-tenant cloud |
+| Deployment | standalone `apps/web` SPA; Electron packages the web assets and owns the local TS service lifecycle | hosted multi-tenant cloud |
 | Data source | local `state.db` + reference store via loopback Daemon API | platform HTTP / cloud DB |
 | Audience | a single author on their own machine | platform tenants / cloud users |
-| Auth | loopback only (keyless on `localhost`; see §4.2) | platform auth / sessions |
+| Auth | local service / desktop transport policy; §4.2 records the historical loopback model | platform auth / sessions |
 | Roadmap home | this spec + `apps/web/` | `nexus-platform` `v1-spec/` |
 
 **Invariant:** no cloud-product feature, platform auth flow, or platform-gated capability (DF-13/16/55/59; PD-05) is exposed in this UI while `platform_integration = paused`. The UI surfaces only the local product line. Cross-repo contract sharing is one-way: this repo's `schemas/` → `nexus-contracts`; the UI never imports platform-only types.
@@ -64,7 +73,7 @@ This is a **different product** from any web UI in the private `nexus-platform`:
 | Layer | Choice | Why |
 | --- | --- | --- |
 | Framework | **React 19** (V1.157 upgrade from 18.3) | largest ecosystem; mental-model consistency with the existing `@42ch/nexus-contracts` TS consumer surface |
-| Build / dev server | **Vite** (SPA) | matches "single-binary local-first"; no Node runtime required in the shipped product (build-time only) |
+| Build / dev server | **Vite** (SPA) | builds standalone web assets; dev/preview proxies the local TS service |
 | Language | **TypeScript** (strict) | non-negotiable; the whole point of V1.63 codegen is end-to-end type safety |
 | Styling | **TailwindCSS** | utility-first, low design-debt, pairs with the component layer |
 | Component primitives | **shadcn/ui** | copy-in components keep ownership inside the repo; no opaque runtime dependency |
@@ -78,20 +87,24 @@ This stack is the **desktop-ready** foundation: it introduces no browser-only AP
 
 ## 4. Serving and access model
 
-### 4.1 Two serving modes
+**Current (v1.193 P2):** the SPA and HTTP service are separate surfaces. Electron serves packaged web assets and owns `apps/nexus-service` startup/stop/handoff; the TS service, not `nexus42`, serves `/v1/daemon/*`. Dev/preview Vite proxies that prefix to the configured service endpoint. There is no current integrated-daemon or `web-embed` release mode; see §0 for source anchors and [desktop-shell.md](desktop-shell.md) for lifecycle policy.
+
+The following V1.64 subsections preserve the original serving/access design for traceability; they do not prescribe today's host, auth configuration, or CLI launch path.
+
+### 4.1 Two serving modes (historical V1.64)
 
 - **Release** — the built `apps/web/dist` is embedded into the `nexus42` binary via **`rust-embed`** and exposed by the daemon router through **`tower-http::ServeDir`-style** static serving semantics at the server root (`/`). The same binary that runs the runtime serves the UI. (Embedding strategy is finalized in plan P3; `serve-from-disk` under `~/.nexus42/web/` is the fallback only if embedding creates release-pipeline friction.)
 - **Dev** — `apps/web` runs the **Vite dev server**, which proxies `/v1/daemon/*` to the running daemon (`nexus42 daemon start`). No embedding in dev; hot reload against the live Daemon API.
 
 The static shell (HTML/JS/CSS assets) is **unauthenticated** by design: it carries no data. All data flows through the Daemon API.
 
-### 4.2 Auth model (unchanged from the daemon)
+### 4.2 Auth model (historical daemon boundary)
 
 The Web UI introduces **no new auth surface**. It inherits the daemon's existing loopback model (V1.20 compass): Daemon API data endpoints are reachable on `localhost` and are **keyless on loopback**; the static shell needs no credential because it holds no data. The UI does not add login, sessions, or tokens. Any future remote (non-loopback) access is explicitly opt-in (§8) and would require both `NEXUS42_DAEMON_API_KEY` and `NEXUS_DAEMON_REMOTE_BIND=1`; loopback remains the default.
 
 > Implementation note for `daemon-api-surface-conventions.md`: the shared `ErrorResponse` (F-E1) is what the UI's toast/notification layer parses; the UI must never have to special-case per-handler error shapes.
 
-### 4.3 CLI entry
+### 4.3 CLI entry (historical; retired)
 
 See §11 and the [cli-spec.md](cli-spec.md) §6.3 amendment (proposed by this iteration): `nexus42 daemon start` serves the UI and logs its URL; an optional `nexus42 ui` convenience command may start the daemon (if not running) and open the OS browser. Final shape is a PM + architect decision; the spec records the chosen shape at P-last.
 
@@ -227,14 +240,14 @@ Versioning, npm/Rust bumps, and the single breaking shape change (Works list) ar
 
 ---
 
-## 11. CLI entry (summary; detail in cli-spec.md §6.3 amendment)
+## 11. CLI entry (historical daemon-era summary; retired v1.193 P2)
 
 - `nexus42 daemon start` serves the UI at `http://localhost:<port>/` and **logs that URL** on startup.
 - An optional `nexus42 ui` (alias `nexus42 web`) convenience command starts the daemon if not running and opens the OS browser. Whether it ships in V1.64 (P3) or is deferred is a PM decision grounded in cost; the spec records the outcome at P-last.
 
 ---
 
-## 12. Acceptance (spec-level)
+## 12. Acceptance (historical V1.64 spec-level criteria)
 
 1. The UI is served from the `nexus42` binary (release) with no Node runtime requirement, and from the Vite dev server (dev) proxying `/v1/daemon/*`.
 2. All seven MVP screen groups render and operate against the hardened Daemon API; no screen calls a transport directly (all via `NexusClient`).
@@ -302,7 +315,7 @@ The authoring surface consumes new chapter-content schemas (additive, owned by T
 
 ---
 
-## 14. Next stage — Desktop Shell (V1.66 lead slice)
+## 14. Next stage — Desktop Shell (historical V1.66 Tauri lead slice)
 
 V1.65 made the UI an **authoring entry surface** in the browser. V1.66 takes Nexus from **"open a browser tab to `localhost:8420`"** to a **double-clickable macOS desktop application**. The browser SPA transport stays **unchanged** (screen data access remains transport-agnostic); a new `apps/desktop` Tauri v2 wrapper loads the `apps/web` dist, the `TauriClient` impl of `NexusClient` swaps in, and the bundled `nexus42` daemon comes up transparently on launch. This is the gating prerequisite for everything desktop-native in the roadmap (signing, multi-OS, auto-update, mobile).
 
@@ -1442,6 +1455,8 @@ Outline and World KB are **not** Creation peer groups. Strategy remains under Or
 #### 29.18.1 Canvas IA — World entry default flips to Timeline (P1)
 
 V1.122 inverts the **World-entry** default so an author meets a World's history first, not its entity graph. **Work entry is unchanged.**
+
+**Current route clarification (2026-09-29):** [`apps/web/src/App.tsx`](../../apps/web/src/App.tsx) explicitly nests an index `<Navigate to="timeline" replace />` under `worlds/:worldId`, alongside the `timeline` route rendering `TimelinePage`. Thus `/worlds/:worldId` redirects to `/worlds/:worldId/timeline`; the latter is also directly navigable. There is no World-detail-page index route. The Work Timeline remains a sibling of `outline`, not the Work index.
 
 | Entry context | Route | Default surface (V1.122) | Prior default |
 | --- | --- | --- | --- |

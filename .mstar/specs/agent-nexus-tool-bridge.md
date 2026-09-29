@@ -1,18 +1,29 @@
 # Agent Nexus Tool Bridge — Normative Specification v1
 
-**Status**: Master (V1.57 P-last promote)  
+**Status**: Normative — retained core tool-execution contract; V1.34–V1.186 daemon bridge history preserved below
 **Document class**: Master  
 **Created**: 2026-06-04
-**Scope**: How **external ACP Agents** invoke selected **Nexus logical capabilities** (`nexus.*`) through the **daemon** — parallel to, not replacing, preset orchestration  
+**Scope**: Retained admission and dispatch of **Nexus logical capabilities** (`nexus.*`) through `nexus-core`, plus the historical external-ACP-agent / daemon bridge design. This spec does not assert that the deleted worker-to-daemon HTTP topology still ships.
 **Coordinates with**:
 
 - [acp-capability-set.md](acp-capability-set.md) — full logical capability catalog (mostly deferred DF-46)
 - [agent-host.md](agent-host.md) — Managed-only host, mediation invariants
 - [orchestration-engine.md](orchestration-engine.md) — schedule tool dispatch (worker `agent_tool_request` IPC removed, M-007)
-- [local-runtime-boundary.md](local-runtime-boundary.md) — CLI vs daemon vs Agent topology
+- [local-runtime-boundary.md](local-runtime-boundary.md) — current core / TS service / Agent ownership and retired daemon topology
 - [creator-workflow.md](creator-workflow.md) — FL-E stages; Work read/patch tools
 
 ---
+
+## 0. Current execution authority (post-v1.193 P2)
+
+The integrated daemon and its `HostToolExecutor` wrappers were deleted in v1.193 P2. The retained execution authority is [`crates/nexus-core/src/execution/capabilities.rs`](../../crates/nexus-core/src/execution/capabilities.rs), not a daemon handler or an ACP discovery registry:
+
+- `execute_tool(&ToolContext, &ToolExecuteRequest)` runs admission, calls `host_tool_registry().dispatch(...)`, and audits both success and refusal. `ToolContext` supplies resolved core/domain inputs instead of the retired daemon `WorkspaceState`.
+- The allowlist is derived from the **same dispatch spine**: static builtin row → admitted peer tool → admitted user capability from the live orchestration registry. `spine_resolves` and `dispatch` share that order; unresolved IDs return lowercase `not_supported` without invoking a handler. Builtin creator/workspace/permission gates and per-handler ownership checks remain enforced; peer/user tools retain their own admission boundaries.
+- `host_tool_registry()` is a process-global `LazyLock` registry with **30 static tools (28 `nexus.*` + 2 `fs/*`)**, not the original six-tool `nexus.*` set. The current roster, exclusion of `nexus.profile.*` metadata, and retirement of daemon caller wrappers are recorded in [`retained_peer_contracts.rs`](../../crates/nexus-core/tests/retained_peer_contracts.rs), `host_tool_registry_roster_is_the_declared_nexus_surface`.
+- The core's host-tool registry and the [`nexus-orchestration` `CapabilityRegistry`](../../crates/nexus-orchestration/src/capability/mod.rs) are distinct. The latter owns orchestration capabilities; it is not a second static `nexus.*` dispatch table. [capability-registry.md](capability-registry.md) is the shipped registry contract.
+
+**Historical boundary (§§1–12):** the V1.34 six-tool roster, worker HTTP `tool-executions` topology, daemon `HostToolExecutor`, three-caller wrappers, and P3/P4 handoff below preserve the old design and delivery record. They do not define the current transport or require the deleted daemon to exist. The retained core surface above is not evidence that every former external-ACP-agent entrypoint survives.
 
 ## 1. Purpose
 
@@ -26,7 +37,7 @@ Preset orchestration drives **multi-step** creative work via schedules and capab
 
 ---
 
-## 2. Frozen decisions
+## 2. Frozen decisions (historical daemon design)
 
 | # | Decision |
 | --- | --- |
@@ -38,7 +49,7 @@ Preset orchestration drives **multi-step** creative work via schedules and capab
 
 ---
 
-## 3. Topology
+## 3. Topology (historical worker / daemon HTTP path)
 
 ```text
 [External ACP Agent]
@@ -67,7 +78,7 @@ The two paths **must not** share session secrets across creators (IDOR preventio
 
 ---
 
-## 4. V1.34 minimal tool registry
+## 4. V1.34 minimal tool registry (historical roster)
 
 | Tool ID | Access | Handler summary | FL-E relevance | Admission rule |
 | --- | --- | --- | --- | --- |
@@ -136,7 +147,7 @@ Invalid or rejected fields fail with `INVALID_INPUT` when malformed and `FORBIDD
 
 ---
 
-## 5. Request / response contract (normative shape)
+## 5. Request / response contract (historical V1.34 shape)
 
 Wire JSON types live in `nexus-contracts` when codegen’d; until then:
 
@@ -170,7 +181,7 @@ Wire JSON types live in `nexus-contracts` when codegen’d; until then:
 
 ---
 
-## 6. Permissions
+## 6. Permissions (historical daemon enforcement)
 
 1. Load `permissions.toml` under workspace `.nexus42/` when present (existing HostToolExecutor behavior).
 2. Default-deny for `nexus.work.patch` if policy file exists and tool not granted.
@@ -180,7 +191,7 @@ Audit: append row to tool audit log (existing ACP tool audit table pattern).
 
 ---
 
-## 7. Dispatch lane unification
+## 7. Dispatch lane unification (historical daemon wrappers)
 
 Cross-reference with [orchestration-engine.md](orchestration-engine.md) §6.4: the worker `agent_tool_request` IPC lane was **removed** (M-007) — the surviving dispatch lanes are daemon HTTP tool execute, the internal agent-host route, and the in-process schedule lane (`HostToolExecutor::dispatch_for_schedule` with `HostToolCallerKind::Schedule`). Every `tool_name` in the `nexus.*` namespace or V1.33 `fs/*` baseline must be admitted through this spec's registry. Each lane is an entrypoint into the registry, not a second registry.
 
@@ -234,7 +245,7 @@ DF-47 row in the deferred tracker is narrowed. Full DF-46 capability matrix (all
 
 ---
 
-## 8. Capability registry direction (V1.53 → V1.54)
+## 8. Capability registry direction (historical V1.53 → V1.54)
 
 Skills-export CLI/spec work is **Cancelled** (DF-50, V1.53). Runtime `nexus.*` dispatch now converges on the [`capability-registry.md`](capability-registry.md) Draft overlay: the bridge remains the mediated external-agent tool path, while the registry becomes the handler/admission/wire/failure/test-vector SSOT.
 
@@ -365,7 +376,7 @@ Required side effects: no platform HTTP attempt; audit row recorded with `audit_
 
 ---
 
-## 11. Contract gap list
+## 11. Contract gap list (historical P3 snapshot)
 
 This section is informational for P3 and documents current contract gaps. P3 does **not** add schemas or run codegen. The future codegen envelope work (gap table below) is DR-23.
 
@@ -391,7 +402,7 @@ Until the gap is closed, P4 must keep the runtime DTO boundary localized in `Hos
 
 ---
 
-## 12. P4 implementer handoff
+## 12. P4 implementer handoff (historical)
 
 P4 implements this spec; it must not expand into DF-46/47/49/50/55 unless PM opens a separate plan. The minimal handoff is:
 
@@ -554,4 +565,4 @@ Add one schedule-lane test proving `dispatch_for_schedule` and HTTP execute hit 
 
 ---
 
-*Normative agent tool bridge for V1.34. Implementation: P3 (spec/registry design), P4 (code).*
+*Historical agent tool bridge for V1.34: P3 (spec/registry design), P4 (code). Current retained execution authority: §0.*

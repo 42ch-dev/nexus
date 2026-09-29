@@ -13,15 +13,15 @@ The same logical `nexus.*` IDs may appear in **platform REST** contracts for **n
 
 - **Nexus runtime** participates on the ACP wire only as ACP Client.
 - **User-side agent** is the ACP Agent.
-- **daemon runtime / daemon** is a local helper / supervisor. It is not an ACP Agent, not an ACP Server, and must not be advertised via ACP Registry as an agent.
+- **Local hosting** is not an ACP Agent/Server: Electron owns the local TS service lifecycle; `nexus-agent-host` owns provider/session policy; the Rust ACP adapter or `packages/nexus-provider-acp` owns the selected agent connection. These hosts must not be advertised via ACP Registry as agents.
 
 Related docs: nexus-platform `v1-spec/architecture.md`, [`cli-spec.md`](./cli-spec.md).
 
-**Naming note**: CLI executable **`nexus42`**; local supervisor is the **daemon runtime** (single-binary mode via `nexus42 daemon start`, crate `nexus-daemon-runtime`). Product name **Nexus** (42ch / Creative Hub). **`nexus.*`** is the stable logical capability ID prefix; capability IDs need not match executable names.
+**Naming note (current):** CLI executable **`nexus42`**; local HTTP service **`apps/nexus-service`** under **`apps/desktop-electron`** lifecycle ownership; headless Connect host **`nexus-runtime`**. The former **daemon runtime** / `nexus-daemon-runtime` / `nexus42 daemon start` naming is historical: that integrated host was deleted in v1.193 P2. Product name **Nexus** (42ch / Creative Hub). **`nexus.*`** remains the stable logical capability ID prefix; IDs need not match executable names. Composition anchors: [`apps/nexus-service/src/index.ts`](../../apps/nexus-service/src/index.ts), [`crates/nexus-core-node/src/lifecycle.rs`](../../crates/nexus-core-node/src/lifecycle.rs); details in [acp-client-tech-spec.md](acp-client-tech-spec.md).
 
 ## 0.5 Runtime registry and bridge pointers (V1.53; V1.57)
 
-This spec is the logical catalog for `nexus.*` capabilities. Each entry lists the capability id and a one-line description. **It is not the runtime source of truth for dispatch.** The runtime SSOT is [`capability-registry.md`](capability-registry.md) (Master, V1.54 P-last). The mediated external-agent tool invocation path is now Master-spec [`agent-nexus-tool-bridge.md`](agent-nexus-tool-bridge.md) (promoted from Feature line in V1.57 P-last).
+This spec is the logical catalog for `nexus.*` capabilities. Each entry lists the capability id and a one-line description. **It is not the runtime source of truth for dispatch.** The shipped registry contract is [`capability-registry.md`](capability-registry.md) (Master); code ownership is identified in §4 below. [`agent-nexus-tool-bridge.md`](agent-nexus-tool-bridge.md) (Master) defines the retained core admission/execution boundary and labels the former mediated external-agent/daemon transport as historical.
 
 ---
 
@@ -42,6 +42,10 @@ This spec is the logical catalog for `nexus.*` capabilities. Each entry lists th
 ---
 
 ## 2. Topology
+
+Current ACP clients are the CLI/Rust adapter and the service's admitted provider composition; registry discovery selects agent launch metadata, not a `nexus.*` tool handler. See [registry-integration.md](registry-integration.md) for the current owners.
+
+**Historical topology (integrated-daemon era; retired v1.193 P2):**
 
 ```text
 [User] -> [nexus42 / daemon runtime] --ACP Client--> [Local/Remote ACP Agent]
@@ -93,13 +97,13 @@ The three profile-set IDs (`nexus.profile.minimal`, `nexus.profile.writer`, `nex
 
 ## 4. Capability roster (V1.60)
 
-> **Roster governance:** This table is the single SSOT for every `nexus.*` capability ID.
-> Each row maps to a runtime binding via the `host_tool_registry()` (daemon host tools)
-> or the `CapabilityRegistry` (orchestration engine capabilities). Cross-references:
-> [`agent-nexus-tool-bridge.md`](agent-nexus-tool-bridge.md) (Master — mediated external-agent tool path),
-> [`capability-registry.md`](capability-registry.md) (Master — runtime dispatch contract).
+> **Roster governance:** This table is the logical catalog and V1.60 delivery record, not the current executable allowlist.
+> Host-tool binding and dispatch are owned by `nexus_core::execution::capabilities::host_tool_registry()` in [`crates/nexus-core/src/execution/capabilities.rs`](../../crates/nexus-core/src/execution/capabilities.rs): `execute_tool` dispatches through it, and `admission_pipeline` uses the same `spine_resolves` authority.
+> The [`nexus-orchestration` `CapabilityRegistry`](../../crates/nexus-orchestration/src/capability/mod.rs) is a **separate** registry of orchestration `Capability` implementations, not the owner of the core's static host-tool table. Its admitted user capabilities can participate in the core dispatch spine after builtin and peer lookup.
+> The retained core registry has **30 static host tools: 28 `nexus.*` + 2 `fs/*`**; [`retained_peer_contracts.rs`](../../crates/nexus-core/tests/retained_peer_contracts.rs) pins that roster and excludes `nexus.profile.*` grouping metadata. The historical `nexus.reference.refresh` row below records its V1.58 P1 orchestration binding; a core host-tool binding also shipped in V1.58 P3 and is in today's registry. The retained ID `nexus.observability.daemon.health` does not restore the deleted daemon host.
+> Cross-references: [`agent-nexus-tool-bridge.md`](agent-nexus-tool-bridge.md) (retained admission/execution boundary and historical agent transport), [`capability-registry.md`](capability-registry.md) (Master — current runtime dispatch contract).
 >
-> **Status tags**: `shipped` (runtime handler bound), `scaffold-equivalent` (§3.3 metadata, not an action ID), `OUT` (explicitly non-implemented), `catalog-only` (logical contract; runtime binding deferred or in orchestration engine), `deferred-to-V2.0+` (platform-gated).
+> **Status tags (V1.60 delivery snapshot)**: `shipped` (runtime handler bound at that stage), `scaffold-equivalent` (§3.3 metadata, not an action ID), `OUT` (explicitly non-implemented), `catalog-only` (logical contract; runtime binding deferred or in orchestration engine), `deferred-to-V2.0+` (platform-gated). Current binding authority is the code-backed registry above.
 
 | Capability ID | Description | Status | Shipped in | Registry row ref |
 | --- | --- | --- | --- | --- |
