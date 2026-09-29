@@ -355,6 +355,35 @@ describe('TimelineCanvasAdapter.projectTimelineGraph — Moment projection (Scen
     ]);
   });
 
+  it('keeps the two chapter-1 spine labels distinct when the bound Works share a long id prefix (P2 T6 F-1)', () => {
+    // Truncating each Work id independently gave `wrk_12345678-…0001` and
+    // `…0002` the same visible handle. The labels must stay unique among the
+    // chapter's owners (extend, else fall back to the full id), while node
+    // identity is untouched.
+    const g = graph({ entities: [] });
+    const fx = fixture([
+      scene({ sceneId: 'scn_x1', chapterId: 1, workId: 'wrk_12345678-0000-4000-8000-000000000001' }),
+      scene({ sceneId: 'scn_y1', chapterId: 1, workId: 'wrk_12345678-0000-4000-8000-000000000002' }),
+    ]);
+
+    const { nodes } = projectTimelineGraph(g, 'moment', undefined, undefined, fx, 'world-7');
+
+    const spine = nodes.find((n) => n.id === 'directed-axis-spine')!;
+    const labels = momentSpineConfigOf(spine).chapterSegments.map((s) => s.chapterLabel);
+
+    expect(labels).toHaveLength(2);
+    expect(new Set(labels).size).toBe(2);
+    // The shared 8-char prefix is not enough — the labels fall back to the
+    // full ids rather than rendering "12345678" twice.
+    expect(labels).toEqual([
+      'Ch. 1 · 12345678-0000-4000-8000-000000000001',
+      'Ch. 1 · 12345678-0000-4000-8000-000000000002',
+    ]);
+    // Node identity is unchanged by the label fix.
+    expect(nodes.find((n) => n.id === 'wt-scene:scn_x1')).toBeDefined();
+    expect(nodes.find((n) => n.id === 'wt-scene:scn_y1')).toBeDefined();
+  });
+
   it('stacks scenes vertically (TB) grouped by chapter region (X groups by chapter)', () => {
     const g = graph();
     const fx = fixture([
