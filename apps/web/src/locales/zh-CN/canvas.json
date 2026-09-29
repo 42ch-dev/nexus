@@ -144,7 +144,14 @@
     "unlinkAria": "移除到 {{title}} 的伏笔关联",
     "targetAria": "{{title}} 的伏笔目标",
     "targetPlaceholder": "选择要关联的伏笔目标…",
-    "link": "关联"
+    "link": "关联",
+    "worldEventRequired": "先为此作品绑定世界，才能绑定世界事件。",
+    "worldEventBound": "世界事件：{{name}}",
+    "worldEventPlaceholder": "绑定世界事件…",
+    "worldEventAria": "{{title}} 的世界事件",
+    "worldEventBind": "绑定",
+    "worldEventUnbind": "解绑",
+    "worldEventUnbindTitle": "解绑世界事件"
   },
   "sceneInspector": {
     "title": "场景",

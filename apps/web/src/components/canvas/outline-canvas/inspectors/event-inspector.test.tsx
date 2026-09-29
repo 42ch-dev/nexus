@@ -1,9 +1,12 @@
 /**
- * Event inspector — foreshadow authoring controls (FB-C1-005, V1.108 P0 T4).
+ * Event inspector — foreshadow authoring controls (FB-C1-005, V1.108 P0 T4)
+ * and World-event binding authoring (V1.200 DR-26).
  *
  * Verifies the Link Foreshadow / Unlink Foreshadow controls fire the correct
  * `timeline.patch_event` operations with the locked copy
- * ("Link Foreshadow" / "Unlink Foreshadow").
+ * ("Link Foreshadow" / "Unlink Foreshadow"), and that the bind/unbind control
+ * drives `bind_world_event` / `unbind_world_event` through the same mutation
+ * boundary — disabled, never hidden, when the Work has no bound World.
  */
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
@@ -12,6 +15,40 @@ import userEvent from '@testing-library/user-event';
 import { TimelinePanel } from '@/components/canvas/outline-canvas/inspectors/event-inspector';
 
 import type { TimelinePatchEventRequest, WorkOutline } from '@42ch/nexus-contracts';
+
+// ---------------------------------------------------------------------------
+// Mocks — the bound World's KB graph read (V1.200 DR-26 bind picker).
+// ---------------------------------------------------------------------------
+
+const worldKbMock = vi.hoisted(() => ({
+  graph: {
+    entities: [
+      {
+        key_block_id: 'kb-evt-1',
+        world_id: 'world-9',
+        block_type: 'event',
+        canonical_name: 'Coronation',
+        status: 'confirmed',
+        version: 1,
+      },
+      // Non-event entities must never appear as binding targets.
+      {
+        key_block_id: 'kb-chr-1',
+        world_id: 'world-9',
+        block_type: 'character',
+        canonical_name: 'Queen',
+        status: 'confirmed',
+        version: 1,
+      },
+    ],
+    source_anchors: [],
+    relationships: [],
+  },
+}));
+
+vi.mock('@/lib/canvas/use-world-kb-data', () => ({
+  useWorldKbGraph: () => ({ data: worldKbMock.graph, isLoading: false, isError: false }),
+}));
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -49,6 +86,7 @@ function renderTimeline(
   outline: WorkOutline,
   onPatchTimeline = vi.fn(),
   selectedChapterId: number | null = null,
+  boundWorldId?: string,
 ) {
   render(
     <TimelinePanel
@@ -56,6 +94,7 @@ function renderTimeline(
       selectedChapterId={selectedChapterId}
       baseRevision={outline.outline_revision}
       onPatchTimeline={onPatchTimeline}
+      boundWorldId={boundWorldId}
     />,
   );
   return onPatchTimeline;
@@ -222,5 +261,91 @@ describe('TimelinePanel — attach event to chapter (I-QC1-004)', () => {
     // realizes_chapter_id must NOT be set on the attach op — it's only valid
     // for add_event. The daemon ignores it and returns missing_target_chapter_id.
     expect(call.realizes_chapter_id).toBeUndefined();
+  });
+});
+
+// V1.200 DR-26 — the Outline inspector authors the cross-surface binding
+// through the existing `timeline.patch_event` boundary. The control renders
+// disabled rather than hidden when no World is bound (the core refuses both
+// operations without a bound World, mirroring Task 2's typed refusal).
+describe('TimelinePanel — World-event binding authoring (V1.200 DR-26)', () => {
+  it('offers only the bound World’s event entities in the picker', () => {
+    renderTimeline(makeOutline(), vi.fn(), null, 'world-9');
+
+    const picker = screen.getByLabelText('World event for Plant the seed');
+    const optionValues = within(picker)
+      .getAllByRole('option')
+      .map((option) => (option as HTMLOptionElement).value);
+    // Placeholder + the single `block_type=event` entity; `kb-chr-1` is not a
+    // valid referent and must not be offered.
+    expect(optionValues).toEqual(['', 'kb-evt-1']);
+  });
+
+  it('fires bind_world_event with event_id and world_event_id', async () => {
+    const user = userEvent.setup();
+    const onPatch = renderTimeline(makeOutline(), vi.fn(), null, 'world-9');
+
+    await user.selectOptions(screen.getByLabelText('World event for Plant the seed'), 'kb-evt-1');
+    await user.click(screen.getAllByRole('button', { name: 'Bind' })[0]);
+
+    expect(onPatch).toHaveBeenCalledTimes(1);
+    const call = onPatch.mock.calls[0][0] as TimelinePatchEventRequest;
+    expect(call.operation).toBe('bind_world_event');
+    expect(call.event_id).toBe('evt_a');
+    expect(call.world_event_id).toBe('kb-evt-1');
+  });
+
+  it('keeps the Bind button inert until a World event is selected', () => {
+    renderTimeline(makeOutline(), vi.fn(), null, 'world-9');
+
+    for (const btn of screen.getAllByRole('button', { name: 'Bind' })) {
+      expect(btn).toBeDisabled();
+    }
+  });
+
+  it('renders the projected binding and clears it with unbind_world_event', async () => {
+    const user = userEvent.setup();
+    const onPatch = renderTimeline(
+      makeOutline({
+        timeline_events: [
+          {
+            event_id: 'evt_a',
+            title: 'Plant the seed',
+            realizes_chapter_id: 1,
+            world_event_id: 'kb-evt-1',
+          },
+          { event_id: 'evt_b', title: 'The payoff', realizes_chapter_id: 2 },
+        ],
+      }),
+      vi.fn(),
+      null,
+      'world-9',
+    );
+
+    // The stored `world_event_id` (refetched canonical read) renders the bound
+    // World event's canonical name, and the unbound row keeps its picker.
+    expect(screen.getByText('World event: Coronation')).toBeInTheDocument();
+    expect(screen.getByLabelText('World event for The payoff')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Unbind' }));
+
+    expect(onPatch).toHaveBeenCalledTimes(1);
+    const call = onPatch.mock.calls[0][0] as TimelinePatchEventRequest;
+    expect(call.operation).toBe('unbind_world_event');
+    expect(call.event_id).toBe('evt_a');
+  });
+
+  it('disables — never hides — the binding control when the Work has no bound World', () => {
+    renderTimeline(makeOutline());
+
+    // The control is present (not hidden) with the refusal reason visible.
+    expect(screen.getByText('Bind a World to this Work to bind World events.')).toBeInTheDocument();
+    expect(screen.getByLabelText('World event for Plant the seed')).toBeDisabled();
+
+    const bindButtons = screen.getAllByRole('button', { name: 'Bind' });
+    expect(bindButtons).toHaveLength(2);
+    for (const btn of bindButtons) {
+      expect(btn).toBeDisabled();
+    }
   });
 });
