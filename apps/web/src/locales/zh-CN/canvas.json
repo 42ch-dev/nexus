@@ -175,6 +175,25 @@
     "statusNotSet": "未设置",
     "partOf": "属于 {{title}}。"
   },
+  "sceneBeatAuthoring": {
+    "title": "场景与节拍",
+    "description": "场景与节拍属于作品的大纲结构，会显示在作品时间线的瞬间图层。",
+    "chapter": "章节",
+    "sceneTitle": "场景标题",
+    "addScene": "添加场景",
+    "noChapters": "请先添加章节，再创作场景。",
+    "empty": {
+      "title": "暂无场景",
+      "description": "在此添加的场景会显示在作品时间线的瞬间图层。"
+    },
+    "untitledScene": "未命名场景",
+    "chapterBadge": "第 {{chapter}} 章",
+    "remove": "移除",
+    "untitledBeat": "未命名节拍",
+    "beatTitle": "节拍标题",
+    "addBeat": "添加节拍",
+    "removeSceneConfirm": "删除该场景将一并删除其节拍：{{beats}}。确定删除该场景及其节拍？"
+  },
   "chapter": {
     "fallback": "章节",
     "volume": "第 {{volume}} 卷",

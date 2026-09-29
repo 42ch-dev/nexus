@@ -180,6 +180,25 @@
     "statusNotSet": "Not set",
     "partOf": "Part of {{title}}."
   },
+  "sceneBeatAuthoring": {
+    "title": "Scenes & Beats",
+    "description": "Scenes and beats are work-owned outline structure. They appear on the Work Timeline Moment layer.",
+    "chapter": "Chapter",
+    "sceneTitle": "Scene title",
+    "addScene": "Add scene",
+    "noChapters": "Add a chapter before authoring scenes.",
+    "empty": {
+      "title": "No scenes yet",
+      "description": "Scenes you add here appear on the Work Timeline Moment layer."
+    },
+    "untitledScene": "Untitled scene",
+    "chapterBadge": "Ch. {{chapter}}",
+    "remove": "Remove",
+    "untitledBeat": "Untitled beat",
+    "beatTitle": "Beat title",
+    "addBeat": "Add beat",
+    "removeSceneConfirm": "Removing this scene will also remove its beats: {{beats}}. Remove the scene and its beats?"
+  },
   "chapter": {
     "fallback": "Chapter",
     "volume": "Volume {{volume}}",

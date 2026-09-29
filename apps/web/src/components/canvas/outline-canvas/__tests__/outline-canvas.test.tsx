@@ -14,6 +14,7 @@ import { act } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import { OutlineCanvas } from '@/components/canvas/outline-canvas';
+import { i18n } from '@/lib/i18n/config';
 import { NexusClientError } from '@/lib/nexus/errors';
 import type { WorkOutline } from '@42ch/nexus-contracts';
 
@@ -592,9 +593,26 @@ describe('OutlineCanvas — Scene/Beat authoring (V1.200 DR-26 Task 3)', () => {
     expect(screen.getByText('5', { selector: 'span.font-mono' })).toBeInTheDocument();
   });
 
+  it('renders the authoring copy from the canvas catalog in zh-CN (Greptile wave A)', async () => {
+    await i18n.changeLanguage('zh-CN');
+    mocks.outlineResult.data = AUTHORING_OUTLINE;
+    renderOutline();
+
+    // Copy comes from the catalog keys (zh-CN), not an inline English default.
+    expect(screen.getByText('场景与节拍')).toBeInTheDocument();
+    expect(screen.getByText('添加场景')).toBeInTheDocument();
+    expect(screen.getByText('场景标题')).toBeInTheDocument();
+    expect(screen.getByText('第 1 章')).toBeInTheDocument();
+    expect(screen.getByTestId('outline-remove-scene-scn_1')).toHaveTextContent('移除');
+    expect(screen.getByTestId('outline-remove-beat-bet_1')).toHaveTextContent('移除');
+    expect(screen.getByTestId('outline-add-beat-scn_1')).toHaveTextContent('添加节拍');
+  });
+
   it('adds a beat to its parent scene and removes scenes/beats by canonical id', async () => {
     const user = userEvent.setup();
     mocks.outlineResult.data = AUTHORING_OUTLINE;
+    // Removing a scene that owns beats is gated behind a cascade confirmation.
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     renderOutline();
 
     await user.type(screen.getByTestId('outline-beat-title-scn_1'), 'Turn');
@@ -619,5 +637,188 @@ describe('OutlineCanvas — Scene/Beat authoring (V1.200 DR-26 Task 3)', () => {
       expect.objectContaining({ operation: 'remove_scene', scene_id: 'scn_1' }),
       expect.anything(),
     );
+
+    confirmSpy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// V1.200 Greptile wave A — canonical scene/beat visibility + authoring guards
+//
+//   1. Authored scenes/beats (the Work's canonical arrays) must be visible on
+//      the whole Outline surface — graph, alt view, Scene/Beat inspectors —
+//      without an explicit Studio fixture.
+//   2. `remove_scene` on a scene that owns beats confirms first and names the
+//      cascaded beats.
+//   4. Draft titles are cleared only after the write SUCCEEDS (a 409 refusal
+//      keeps the draft for retry).
+// ---------------------------------------------------------------------------
+
+describe('OutlineCanvas — canonical scene/beat visibility (Greptile wave A)', () => {
+  beforeEach(() => {
+    mocks.patchStructureResult.mutate.mockClear();
+    mocks.outlineResult.data = AUTHORING_OUTLINE;
+    mocks.chaptersResult.data = {
+      pages: [{ items: [mocks.CHAPTER_1], pagination: { has_more: false, next_cursor: null } }],
+    };
+  });
+
+  it('projects the Work canonical scenes/beats into the graph, inspector and alt view without a fixture', async () => {
+    const user = userEvent.setup();
+    renderOutline(); // No sceneBeatFixture prop — canonical arrays are the source.
+
+    const harness = screen.getByTestId('rf-integration-harness');
+    // Real RF nodes for the canonical scene + beat (previously dropped by the
+    // empty fixture, which hid authored structure from the graph).
+    expect(harness.querySelector('.react-flow__node[data-id="scene:scn_1"]')).not.toBeNull();
+    expect(harness.querySelector('.react-flow__node[data-id="beat:bet_1"]')).not.toBeNull();
+
+    // Clicking the canonical scene node resolves the Scene inspector from those
+    // same arrays (parent-chapter helper included).
+    await user.click(within(harness).getByText('Opening'));
+    expect(screen.getByText('Part of Chapter One.')).toBeInTheDocument();
+
+    // Alt view nests the canonical scene/beat rows under their chapter.
+    await user.click(screen.getByRole('button', { name: 'Show list view' }));
+    const altSection = screen.getByLabelText('Outline chapters and timeline in list order');
+    expect(within(altSection).getByText('Opening')).toBeInTheDocument();
+    expect(within(altSection).getByText('Hook')).toBeInTheDocument();
+  });
+
+  it('keeps honest empty chrome when the canonical arrays are genuinely empty', async () => {
+    const user = userEvent.setup();
+    mocks.outlineResult.data = mocks.OUTLINE; // scenes: [], beats: []
+    renderOutline();
+
+    await user.click(screen.getByRole('button', { name: 'Show list view' }));
+    expect(screen.queryByText('No scenes in this chapter yet.')).not.toBeInTheDocument();
+  });
+});
+
+describe('OutlineCanvas — scene removal cascade guard (Greptile wave A)', () => {
+  beforeEach(() => {
+    mocks.patchStructureResult.mutate.mockClear();
+    mocks.outlineResult.data = AUTHORING_OUTLINE; // scn_1 owns bet_1 ("Hook")
+    mocks.chaptersResult.data = {
+      pages: [{ items: [mocks.CHAPTER_1], pagination: { has_more: false, next_cursor: null } }],
+    };
+  });
+
+  it('confirms first and names the affected beats before removing a scene with beats', async () => {
+    const user = userEvent.setup();
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    renderOutline();
+
+    await user.click(screen.getByTestId('outline-remove-scene-scn_1'));
+
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(confirmSpy.mock.calls[0]?.[0]).toContain('Hook');
+    expect(mocks.patchStructureResult.mutate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ operation: 'remove_scene', scene_id: 'scn_1' }),
+      expect.anything(),
+    );
+
+    confirmSpy.mockRestore();
+  });
+
+  it('does not dispatch remove_scene when the author cancels the cascade confirmation', async () => {
+    const user = userEvent.setup();
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    renderOutline();
+
+    await user.click(screen.getByTestId('outline-remove-scene-scn_1'));
+
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(mocks.patchStructureResult.mutate).not.toHaveBeenCalled();
+
+    confirmSpy.mockRestore();
+  });
+
+  it('removes a beat-less scene without asking for confirmation', async () => {
+    const user = userEvent.setup();
+    mocks.outlineResult.data = { ...AUTHORING_OUTLINE, beats: [] };
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    renderOutline();
+
+    await user.click(screen.getByTestId('outline-remove-scene-scn_1'));
+
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(mocks.patchStructureResult.mutate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ operation: 'remove_scene', scene_id: 'scn_1' }),
+      expect.anything(),
+    );
+
+    confirmSpy.mockRestore();
+  });
+});
+
+describe('OutlineCanvas — drafts survive failed writes (Greptile wave A)', () => {
+  beforeEach(() => {
+    mocks.patchStructureResult.mutate.mockClear();
+    mocks.outlineResult.data = mocks.OUTLINE;
+  });
+
+  it('clears the scene title draft only after the write succeeds', async () => {
+    const user = userEvent.setup();
+    renderOutline();
+
+    await user.type(screen.getByTestId('outline-scene-title'), 'Opening Scene');
+    await user.click(screen.getByTestId('outline-add-scene'));
+
+    // The mutation mock never resolves on its own — the draft is still there.
+    expect(screen.getByTestId('outline-scene-title')).toHaveValue('Opening Scene');
+
+    const options = mocks.patchStructureResult.mutate.mock.calls.at(-1)?.[1] as {
+      onSuccess?: () => void;
+    };
+    await act(async () => {
+      options.onSuccess?.();
+    });
+
+    expect(screen.getByTestId('outline-scene-title')).toHaveValue('');
+  });
+
+  it('keeps the scene title draft when add_scene is refused with a 409', async () => {
+    const user = userEvent.setup();
+    renderOutline();
+
+    await user.type(screen.getByTestId('outline-scene-title'), 'Opening Scene');
+    await user.click(screen.getByTestId('outline-add-scene'));
+    await rejectLastStructureAsConflict(5);
+
+    // Conflict modal opens AND the draft survives so the author can retry.
+    expect(screen.getByRole('heading', { name: 'Outline Conflict' })).toBeInTheDocument();
+    expect(screen.getByTestId('outline-scene-title')).toHaveValue('Opening Scene');
+  });
+
+  it('keeps a beat title draft when add_beat is refused with a 409', async () => {
+    const user = userEvent.setup();
+    mocks.outlineResult.data = AUTHORING_OUTLINE;
+    renderOutline();
+
+    await user.type(screen.getByTestId('outline-beat-title-scn_1'), 'Turn');
+    await user.click(screen.getByTestId('outline-add-beat-scn_1'));
+    await rejectLastStructureAsConflict(5);
+
+    expect(screen.getByTestId('outline-beat-title-scn_1')).toHaveValue('Turn');
+  });
+
+  it('clears the beat title draft once add_beat succeeds', async () => {
+    const user = userEvent.setup();
+    mocks.outlineResult.data = AUTHORING_OUTLINE;
+    renderOutline();
+
+    await user.type(screen.getByTestId('outline-beat-title-scn_1'), 'Turn');
+    await user.click(screen.getByTestId('outline-add-beat-scn_1'));
+    expect(screen.getByTestId('outline-beat-title-scn_1')).toHaveValue('Turn');
+
+    const options = mocks.patchStructureResult.mutate.mock.calls.at(-1)?.[1] as {
+      onSuccess?: () => void;
+    };
+    await act(async () => {
+      options.onSuccess?.();
+    });
+
+    expect(screen.getByTestId('outline-beat-title-scn_1')).toHaveValue('');
   });
 });
