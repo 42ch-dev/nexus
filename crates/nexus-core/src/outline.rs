@@ -8,10 +8,10 @@ use std::path::Path;
 
 use nexus_contracts::{
     OutlinePatchChapterRequest, OutlinePatchResponse, OutlinePatchStructureRequest,
-    OutlinePatchStructureRequestStatus, TimelinePatchEventRequest, WorkOutline,
-    WorkOutlineBeatsItem, WorkOutlineBeatsItemStatus, WorkOutlineForeshadowsItem,
-    WorkOutlineScenesItem, WorkOutlineScenesItemStatus, WorkOutlineTimelineEventsItem,
-    WorkOutlineVolumesItem,
+    OutlinePatchStructureRequestBeatStatus, OutlinePatchStructureRequestSceneStatus,
+    TimelinePatchEventRequest, WorkOutline, WorkOutlineBeatsItem, WorkOutlineBeatsItemStatus,
+    WorkOutlineForeshadowsItem, WorkOutlineScenesItem, WorkOutlineScenesItemStatus,
+    WorkOutlineTimelineEventsItem, WorkOutlineVolumesItem,
 };
 use nexus_local_db::work_chapters::{self, PatchChapterParams, WorkChapterRecord};
 use nexus_local_db::works;
@@ -1072,23 +1072,28 @@ fn scene_beat_title(title: Option<&str>, kind: &str) -> Result<String, OutlineFa
     Ok(title.to_string())
 }
 
-/// Map the request status vocabulary onto the canonical scene status, with
+/// Map the request `scene_status` member onto the canonical scene status, with
 /// `drafted` as the omitted default.
 fn scene_status_from_request(
-    status: Option<OutlinePatchStructureRequestStatus>,
+    status: Option<OutlinePatchStructureRequestSceneStatus>,
 ) -> WorkOutlineScenesItemStatus {
     match status {
-        Some(OutlinePatchStructureRequestStatus::Completed) => WorkOutlineScenesItemStatus::Completed,
+        Some(OutlinePatchStructureRequestSceneStatus::Completed) => {
+            WorkOutlineScenesItemStatus::Completed
+        }
         _ => WorkOutlineScenesItemStatus::Drafted,
     }
 }
 
-/// Map the request status vocabulary onto the canonical beat status.
+/// Map the request `beat_status` member onto the canonical beat status, with
+/// `drafted` as the omitted default.
 fn beat_status_from_request(
-    status: Option<OutlinePatchStructureRequestStatus>,
+    status: Option<OutlinePatchStructureRequestBeatStatus>,
 ) -> WorkOutlineBeatsItemStatus {
     match status {
-        Some(OutlinePatchStructureRequestStatus::Completed) => WorkOutlineBeatsItemStatus::Completed,
+        Some(OutlinePatchStructureRequestBeatStatus::Completed) => {
+            WorkOutlineBeatsItemStatus::Completed
+        }
         _ => WorkOutlineBeatsItemStatus::Drafted,
     }
 }
@@ -1126,7 +1131,7 @@ fn scene_add(
         scene_id: mint_scene_beat_id("scn"),
         chapter_id,
         title,
-        status: scene_status_from_request(req.status),
+        status: scene_status_from_request(req.scene_status),
     });
     Ok(())
 }
@@ -1162,7 +1167,7 @@ fn beat_add(
         beat_id: mint_scene_beat_id("bet"),
         scene_id: scene_id.to_string(),
         title,
-        status: beat_status_from_request(req.status),
+        status: beat_status_from_request(req.beat_status),
     });
     Ok(())
 }

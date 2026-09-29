@@ -50,7 +50,11 @@ export interface OutlinePatchStructureRequest {
    */
   title?: string;
   /**
-   * Scene or beat status for add_scene or add_beat; omitted defaults to drafted.
+   * Status of the scene created by add_scene; omitted defaults to drafted.
    */
-  status?: "drafted" | "completed";
+  scene_status?: "drafted" | "completed";
+  /**
+   * Status of the beat created by add_beat; omitted defaults to drafted.
+   */
+  beat_status?: "drafted" | "completed";
 }

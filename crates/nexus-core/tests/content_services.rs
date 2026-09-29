@@ -1011,8 +1011,9 @@ async fn authored_beat(fx: &Fixture, base_revision: u64, scene_id: &str, title: 
         .beat_id
 }
 
-/// `add_scene` / `add_beat` mint ids bound to their parent, one revision bump
-/// per accepted operation, `drafted` as the omitted-status default and
+/// `add_scene` / `add_beat` mint ids bound to their parent and each consume
+/// only their own status member (`scene_status` / `beat_status`), one revision
+/// bump per accepted operation, `drafted` as the omitted-value default and
 /// `completed` as the other accepted value.
 #[tokio::test]
 async fn retained_outline_scene_beat_authoring_round_trip() {
@@ -1021,6 +1022,13 @@ async fn retained_outline_scene_beat_authoring_round_trip() {
 
     let opening = authored_scene(&fx, 0, 1, "Opening Scene").await;
     assert_minted_id(&opening, "scn_");
+    // F-3: a single accepted add persists exactly one revision bump — read back
+    // from the canonical outline, not from the patch response envelope.
+    assert_eq!(
+        outline_revision(&fx).await,
+        1,
+        "exactly one persisted revision bump for one accepted add_scene"
+    );
     let storm = authored_scene(&fx, 1, 2, "Storm Scene").await;
     assert_minted_id(&storm, "scn_");
     assert_ne!(opening, storm, "each add_scene mints a fresh id");
@@ -1034,7 +1042,7 @@ async fn retained_outline_scene_beat_authoring_round_trip() {
             structure_request(serde_json::json!({
                 "work_id": fx.work_id, "base_revision": 2,
                 "operation": "add_scene", "chapter_id": 3,
-                "title": "Aftermath", "status": "completed"
+                "title": "Aftermath", "scene_status": "completed"
             })),
         )
         .await
@@ -1043,7 +1051,26 @@ async fn retained_outline_scene_beat_authoring_round_trip() {
 
     let inciting = authored_beat(&fx, 3, &opening, "Inciting Moment").await;
     assert_minted_id(&inciting, "bet_");
-    let reaction = authored_beat(&fx, 4, &storm, "Reaction Beat").await;
+    assert_eq!(
+        outline_revision(&fx).await,
+        4,
+        "exactly one persisted revision bump for one accepted add_beat"
+    );
+    let reaction = fx
+        .core
+        .patch_outline_structure(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            structure_request(serde_json::json!({
+                "work_id": fx.work_id, "base_revision": 4,
+                "operation": "add_beat", "scene_id": storm,
+                "title": "Reaction Beat", "beat_status": "completed"
+            })),
+        )
+        .await
+        .expect("add_beat with an explicit status");
+    assert_eq!(reaction.new_revision, NonZeroU64::new(5).unwrap());
 
     let outline = fx
         .core
@@ -1087,9 +1114,24 @@ async fn retained_outline_scene_beat_authoring_round_trip() {
     let reaction_row = outline
         .beats
         .iter()
-        .find(|beat| beat.beat_id == reaction)
+        .find(|beat| beat.title == "Reaction Beat")
         .expect("reaction beat row");
     assert_eq!(reaction_row.scene_id, storm);
+    assert_eq!(
+        reaction_row.status,
+        WorkOutlineBeatsItemStatus::Completed,
+        "beat_status lands on the authored beat"
+    );
+    let storm_row = outline
+        .scenes
+        .iter()
+        .find(|scene| scene.scene_id == storm)
+        .expect("storm scene row");
+    assert_eq!(
+        storm_row.status,
+        WorkOutlineScenesItemStatus::Drafted,
+        "beat_status never leaks onto the beat's parent scene"
+    );
 
     fx.pool.close().await;
     fx.core.close().await.unwrap();

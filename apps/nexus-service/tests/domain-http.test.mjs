@@ -324,29 +324,42 @@ describe('domain-http (P5-T1)', () => {
       operation: 'add_scene',
       chapter_id: 1,
       title: 'Opening Scene',
+      scene_status: 'completed',
     });
     assert.equal(addedScene.status, 200, addedScene.text);
     assert.equal(addedScene.payload.new_revision, 1);
 
     const afterScene = await readOutline();
+    // F-3: one accepted add persists exactly one revision bump — read back from
+    // the canonical outline, not the patch response envelope.
+    assert.equal(
+      afterScene.payload.outline_revision,
+      1,
+      'exactly one persisted revision bump for add_scene',
+    );
     assert.equal(afterScene.payload.scenes.length, 1);
     const scene = afterScene.payload.scenes[0];
     assert.match(scene.scene_id, /^scn_[0-9a-f]{32}$/);
     assert.equal(scene.chapter_id, 1);
     assert.equal(scene.title, 'Opening Scene');
-    assert.equal(scene.status, 'drafted');
+    assert.equal(scene.status, 'completed');
 
     const addedBeat = await patchOutline({
       base_revision: 1,
       operation: 'add_beat',
       scene_id: scene.scene_id,
       title: 'Inciting Moment',
-      status: 'completed',
+      beat_status: 'completed',
     });
     assert.equal(addedBeat.status, 200, addedBeat.text);
     assert.equal(addedBeat.payload.new_revision, 2);
 
     const afterBeat = await readOutline();
+    assert.equal(
+      afterBeat.payload.outline_revision,
+      2,
+      'exactly one persisted revision bump for add_beat',
+    );
     assert.equal(afterBeat.payload.beats.length, 1);
     const beat = afterBeat.payload.beats[0];
     assert.match(beat.beat_id, /^bet_[0-9a-f]{32}$/);

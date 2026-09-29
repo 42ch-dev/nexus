@@ -60,10 +60,15 @@
       "type": "string",
       "description": "Scene or beat title for add_scene or add_beat. Must not be blank."
     },
-    "status": {
+    "scene_status": {
       "type": "string",
       "enum": ["drafted", "completed"],
-      "description": "Scene or beat status for add_scene or add_beat; omitted defaults to drafted."
+      "description": "Status of the scene created by add_scene; omitted defaults to drafted."
+    },
+    "beat_status": {
+      "type": "string",
+      "enum": ["drafted", "completed"],
+      "description": "Status of the beat created by add_beat; omitted defaults to drafted."
     }
   },
   "additionalProperties": false

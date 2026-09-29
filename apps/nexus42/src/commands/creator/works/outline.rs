@@ -543,7 +543,8 @@ async fn outline_patch(
         scene_id: None,
         beat_id: None,
         title: None,
-        status: None,
+        scene_status: None,
+        beat_status: None,
     };
     let resp: OutlinePatchResponse = {
         let core = open_direct_core(config).await?;
