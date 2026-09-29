@@ -53,8 +53,6 @@ interface WorldEventOption {
  */
 type WorldEventDraftControl = 'picker' | 'manual';
 
-const WORLD_EVENT_DRAFT_CONTROLS: readonly WorldEventDraftControl[] = ['picker', 'manual'];
-
 /**
  * Project the bound World's KB graph into picker options (V1.200 DR-26).
  *
@@ -213,18 +211,19 @@ function TimelinePanelView({
     });
   }
 
-  function bindWorldEvent(eventId: string, worldEventId: string) {
+  function bindWorldEvent(
+    control: WorldEventDraftControl,
+    eventId: string,
+    worldEventId: string,
+  ) {
     const trimmedId = worldEventId.trim();
     if (!trimmedId) return;
-    // V1.201 002/R4 — capture each control's draft generation as the bind's
-    // request tag. Both drafts are still cleared only once the write lands (the
-    // success-only pattern the scene/beat drafts use); a typed 422/409 refusal
-    // keeps both drafts for retry, and the 409 conflict modal still opens
-    // through the orchestrator's `onError`.
-    const issuedGenerations: Record<WorldEventDraftControl, number> = {
-      picker: draftGenerationRef.current.picker[eventId] ?? 0,
-      manual: draftGenerationRef.current.manual[eventId] ?? 0,
-    };
+    // V1.201 002/R4 — a bind is issued against exactly one control's draft, so
+    // the request tag is that control's draft generation. The write is still
+    // cleared only once it lands (the success-only pattern the scene/beat
+    // drafts use); a typed 422/409 refusal keeps the draft for retry, and the
+    // 409 conflict modal still opens through the orchestrator's `onError`.
+    const issuedGeneration = draftGenerationRef.current[control][eventId] ?? 0;
     onPatchTimeline(
       {
         work_id: outline.work_id,
@@ -233,22 +232,21 @@ function TimelinePanelView({
         event_id: eventId,
         world_event_id: trimmedId,
       },
-      // V1.201 002/R4 — resolve only the draft this bind was issued against: a
-      // draft authored while the write is in flight is a newer generation and
-      // survives, whether it is the issuing control re-typed to the issued
-      // value or the other control's independently entered ID.
+      // V1.201 002/R4 — release exactly the draft this bind was issued
+      // against: the originating control, and only while its generation is
+      // unchanged (a re-typed draft is a newer generation and survives). The
+      // other control's draft was never part of this request, so an unrelated
+      // bind's success must leave it alone.
       () => {
-        for (const control of WORLD_EVENT_DRAFT_CONTROLS) {
-          if ((draftGenerationRef.current[control][eventId] ?? 0) !== issuedGenerations[control]) {
-            continue;
-          }
-          draftSetters[control]((prev) => {
-            if (!(eventId in prev)) return prev;
-            const next = { ...prev };
-            delete next[eventId];
-            return next;
-          });
+        if ((draftGenerationRef.current[control][eventId] ?? 0) !== issuedGeneration) {
+          return;
         }
+        draftSetters[control]((prev) => {
+          if (!(eventId in prev)) return prev;
+          const next = { ...prev };
+          delete next[eventId];
+          return next;
+        });
       },
     );
   }
@@ -450,6 +448,7 @@ function TimelinePanelView({
                           size="small"
                           onClick={() =>
                             bindWorldEvent(
+                              'picker',
                               event.event_id,
                               worldEventTargetByEvent[event.event_id] ?? '',
                             )
@@ -476,6 +475,7 @@ function TimelinePanelView({
                           size="small"
                           onClick={() =>
                             bindWorldEvent(
+                              'manual',
                               event.event_id,
                               manualWorldEventByEvent[event.event_id] ?? '',
                             )

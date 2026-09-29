@@ -488,6 +488,42 @@ describe('TimelinePanel — World-event binding authoring (V1.200 DR-26)', () =>
     expect(screen.getByLabelText('World event for Plant the seed')).toHaveValue('');
   });
 
+  // V1.201 002/R4 fix round 2 — the release is scoped to the issuing control.
+  // A draft that already sat in the *other* control is not part of this
+  // request; the picker bind's success must leave the pre-existing manual
+  // draft alone (it is not a draft authored during the flight).
+  it('keeps a pre-existing manual draft when an unrelated picker bind succeeds (002/R4)', async () => {
+    const user = userEvent.setup();
+    const successCallbacks: Array<() => void> = [];
+    const onPatch = vi.fn(
+      (_request: TimelinePatchEventRequest, onSuccess?: () => void) => {
+        if (onSuccess) successCallbacks.push(onSuccess);
+      },
+    );
+    renderTimeline(makeOutline(), onPatch, null, 'world-9');
+
+    // Both controls hold a draft before the request is issued.
+    await user.selectOptions(
+      screen.getByLabelText('World event for Plant the seed'),
+      'kb-evt-1',
+    );
+    await user.type(
+      screen.getByLabelText('World event ID for Plant the seed'),
+      'kb-manual-id',
+    );
+
+    await user.click(screen.getAllByRole('button', { name: 'Bind' })[0]);
+    expect(onPatch).toHaveBeenCalledTimes(1);
+
+    act(() => successCallbacks[0]());
+    // The picker draft the bind was issued against is released…
+    expect(screen.getByLabelText('World event for Plant the seed')).toHaveValue('');
+    // …while the pre-existing manual draft survives untouched.
+    expect(screen.getByLabelText('World event ID for Plant the seed')).toHaveValue(
+      'kb-manual-id',
+    );
+  });
+
   it('keeps the picked World event until the write succeeds', async () => {
     const user = userEvent.setup();
     const successCallbacks: Array<() => void> = [];
