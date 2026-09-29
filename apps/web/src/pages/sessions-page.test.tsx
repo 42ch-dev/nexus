@@ -124,6 +124,34 @@ describe('SessionsPage', () => {
     expect(screen.queryByText('sys-session-1')).not.toBeInTheDocument();
   });
 
+  // v1.201 P1 T3 (compass D7): the row affordance into the run view — the
+  // acceptance-bearing observation surface — carrying the run id in the path.
+  it('opens the run view from a session row through the id link', async () => {
+    useHandlers(
+      http.get('/v1/daemon/orchestration/sessions', () =>
+        HttpResponse.json({
+          items: [
+            {
+              session_id: 'session-1',
+              creator_id: 'creator-a',
+              preset_id: 'preset-a',
+              status: 'running',
+              current_task_id: 'task-1',
+            },
+          ],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+    );
+
+    renderSessions();
+
+    const link = await screen.findByRole('link', {
+      name: 'Open run view for session session-1',
+    });
+    expect(link).toHaveAttribute('href', '/sessions/session-1');
+  });
+
   it('renders the error state and offers retry when the daemon fails', async () => {
     useHandlers(
       http.get('/v1/daemon/orchestration/sessions', () =>
