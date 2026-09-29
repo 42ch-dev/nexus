@@ -15,11 +15,13 @@
 | **Wire DTOs** | `schemas/` → generated Rust + `@42ch/nexus-contracts` | Unchanged by this lock |
 | **Product names** | Root `AGENTS.md` | `Nexus`, `nexus42`, `nexus-runtime`, `@42ch` — the retired integrated daemon runtime is no longer a product name |
 
-**Activation rule:** a family uses the target topology only after the extracted Rust service is the single effect owner **and** the old mixed-handler path for that family has an explicit deletion owner and proof. **Delivered (v1.193 P2):** that gate fired for every retained family — the old mixed-handler path is the deleted daemon/SPA composition, so no shipped Master still describes an implementable daemon topology, and the retained SSOT is this document plus `cli-spec`, `desktop-shell` and the TS service. What has *not* been exercised is the rest of the program: the RFT-05–11 destinations listed in §7.5 (complete TS API, remaining World/Work families, Actor families) remain open, apart from the retained public first-run half of RFT-11 that v1.195 P3 exercises (§7.5.1). Do not describe an unexercised destination as delivered, and do not describe the M1 subset as the complete program.
+**Activation rule:** a family uses the target topology only after the extracted Rust service is the single effect owner **and** the old mixed-handler path for that family has an explicit deletion owner and proof. **Delivered (v1.193 P2):** that gate fired for every retained family — the old mixed-handler path is the deleted daemon/SPA composition, so no shipped Master still describes an implementable daemon topology, and the retained SSOT is this document plus `cli-spec`, `desktop-shell` and the TS service. **Implementation is not product qualification:** the RFT-05–07 route families are implemented and exercised through the TS service and Rust core (§7.5); outstanding product acceptance/QA and Run Studio completeness must not be reported as missing or wholly unexercised routes. RFT-10 distribution qualification and RFT-11 first-run qualification remain distinct obligations (§7.5.1). Neither the M1 subset nor subsequent route-level exercise alone proves the complete program.
 
 Historical 2026-09-12 research (source baseline `3bb262b`) is advisory structure only. It is not runtime proof, a measurement, or this spec's authority. The merged v1.189 record for the exercised M1 subset is `71e01cf9e1a8c64cb68062ac9a08762e2156a925` (PR #306); the baseline has since advanced — v1.192 (RFT-09 cutover + unsigned packaging) and v1.193 P2 (obsolete-host retirement) are **merged on `main`**, so the retained `cli`/`connect-host` cohorts and the Electron host are shipped current state, not target state. Inherited v1.188 reliability remains `bbaae32d422b673576d683859b474da6bd787743`.
 
 ## 1. Problem
+
+> **Historical problem statement (before the v1.193 P2 cutover).** The mixed daemon-handler/HTTP-client topology below is retired; current identities and ownership are in §§0, 2, and 4.
 
 Operators and authors already have three consumption ends. The local stack that serves them mixes:
 
@@ -51,6 +53,19 @@ These names and roles stay. The refactor does not invent a second CLI, a second 
 | Content creators | `apps/web` + desktop shell wrapping the same SPA | No visual redesign. Browser uses generated `NexusClient`. The desktop host cut over to Electron in v1.192 (RFT-09 accepted) and stays exactly one desktop host. |
 | Third-party users | `nexus-runtime` + Connect | Keep the existing Connect-only served-op profile. No first-party player. |
 
+### Current workspace boundary inventory
+
+These six workspace crates extend the frozen 2026-05 inventory in [local-cloud-crate-architecture.md](local-cloud-crate-architecture.md); they support the authority graph in §4.2, not another product or host. Membership is declared in root `Cargo.toml`; the linked per-crate `AGENTS.md` files own their detailed rules.
+
+| Workspace crate | Boundary role |
+| --- | --- |
+| [`nexus-core`](../../crates/nexus-core/AGENTS.md) | Owned transport-neutral World KB service and stored Actor/holder admission authority; no transport or SQL pool in its public domain surface. |
+| [`nexus-core-node`](../../crates/nexus-core-node/AGENTS.md) | Thin Node-API cdylib composing core and provider ports, with environment-local state and an audited FFI boundary. |
+| [`nexus-preset`](../../crates/nexus-preset/AGENTS.md) | Pure preset authoring/source-file domain library shared by core and orchestration; no execution, Host, WASM, HTTP, or database dependency. |
+| [`nexus-provider-conformance`](../../crates/nexus-provider-conformance/AGENTS.md) | Provider-neutral normalized `HostEvent` stream conformance runner; CI/test-only, not wired into product binaries. |
+| [`nexus-provider-ports`](../../crates/nexus-provider-ports/AGENTS.md) | Port-only `ProviderPort`/`ProviderResult` contracts; no Host, SDK, SQL, napi, or orchestration implementation. |
+| [`nexus-storage-guard`](../../crates/nexus-storage-guard/AGENTS.md) | Audited SQLite FFI boundary installing connection-local writer-protocol functions; no business SQL or independent pool. |
+
 ## 3. Topology before the v1.193 cutover (migration record)
 
 **Historical record.** The numbered items below describe the mixed shipped
@@ -74,6 +89,8 @@ Kept as the record of the mix at lock time; nothing below is a supported instruc
 `WorkspaceState` is the current daemon aggregate, not the target facade. `nexus-local-db` `runtime_lock` read-then-update without an expected-holder predicate is **not** the target cross-process writer protocol.
 
 ## 4. Target topology
+
+> **Migration edge only:** “Old HTTP adapter” in the frozen target diagram and temporary-adapter rule below describes the cutover path, not a surviving host. That adapter and `nexus-daemon-runtime` were deleted in v1.193 P2; browser/Electron now reach core through the standalone TS/native service.
 
 ```text
  Basic Rust CLI ──────┐
@@ -128,6 +145,8 @@ These are the shipped dependency cohorts (v1.193 P2 delivered them), kept as the
 | Connect-only runtime (`connect-host`, no defaults) | Existing stored-Actor invoke authority and spoke-connect/libp2p; explicit spoke-adapter `compute` preserves WASM/module-cache behavior | CLI-only ACP/agent-host, orchestration scheduler, SPA/HTTP/Node; `connect-host` must not imply `cli` |
 | TS native service | Current selection on `main` is core `[execution]` with native-owned Host/ProviderPort. The v1.195 current-host completion selects `[execution,provider-host,compute]` and composes existing Rust owners: the workflow-control, observation/recovery and Compute whole-plan releases are accepted, and P3 adds the exercised public first workflow. Completing it is not merely changing the feature list, and the P3 driver/guidance stay pending plan QC/QA and iteration integration (§7.5.1). | old-daemon proxy, TS domain/SQL owner, duplicate engine/Host/WASM runtime; domain/default and Connect-only cohorts must not inherit native-service startup |
 
+> **Historical row wording.** The TS native service row retains its v1.193 selection / v1.195 opening target; current route implementation and qualification are in §7.5.
+
 The existing pure `nexus-preset` closure and default-disabled MCA/core spoke edges are retained. The app's spoke dependency also disables defaults; only `connect-host` explicitly enables its real compute feature. Current Connect invoke code already serves compute with stored holder/module scope and a shared cache; removing WASM to satisfy a graph slogan would delete supported functionality. The ordinary CLI may retain orchestration **library** edges for chronology/cron/ops without starting an engine. Core domain closure remains engine/Host/WASM-free.
 
 **Delivered (v1.193 P2).** The app cohorts are `default = ["cli"]`, independent `connect-host`, and `nexus42` binary `required-features = ["cli"]`. `basic-cli`, `legacy-cli`, `web-embed` and the app-only `connect-client`/`embedded-mcp` selectors are deleted; the core `connect-client`/`embedded-mcp` **library** features remain. The ACP factory that prescribed `nexus42 mcp serve` is deleted; generic ACP MCP descriptors remain. No second CLI, renamed legacy mode or no-op compatibility feature was introduced.
@@ -135,6 +154,8 @@ The existing pure `nexus-preset` closure and default-disabled MCA/core spoke edg
 **Accepted feature correction target (not yet delivered):** core `connect-client` explicitly implies `execution`, because its retained peer-control methods are implemented on `ExecutionHandle` and its peer table/configuration consume execution-owned registry types. The execution feature also owns the required `async-trait` dependency. `embedded-mcp` inherits that prerequisite through `connect-client`; it is not a separate execution activation rule. This is a selected library dependency, not implicit EngineOwner/Host/scheduler startup. Default remains `[]`, provider-host/compute are not added to Connect, and the application's independent `connect-host` cohort is unchanged. Preserve the retained consumers rather than cfg-gating them away. Prove domain, execution, connect-client and connect-client+embedded-mcp with separate lib-only `cargo check -p nexus-core --lib --no-default-features --locked` invocations, each adding only its cohort's `--features` selection; tests with self dev-dependency feature unification and graph inspection alone are not compilation evidence.
 
 `CoreService::start_execution(&self, _providers: Arc<dyn ProviderPort>, mut deps: RunnerDeps) -> Result<Arc<ExecutionHandle>, ExecutionOpenError>` requires EngineOwner and preserves typed ownership/closing errors. Production prompt/tool/workspace dependencies must be supplied; default dependencies are not execution parity. Domain open starts no scheduler or Host. CoreService remains bound to the selected Creator/workspace generation; selection changes require reopen. Direct CLI adapters obtain a stored Principal, call typed family methods, and await close on success and failure without pool escape hatches or JSON dispatch.
+
+> **Historical cutover instructions / v1.195 opening target (next three paragraphs).** Preserve their original “route-not-migrated” / “not yet delivered” wording as the starting record, not today's route availability. Workflow control, same-run observation, and Compute are implemented and exercised; current support limits and outstanding product qualification are in §7.5–§7.5.1.
 
 Retire CLI `creator run`, `bootstrap`, Work `intake`/`resume-chain`, `preset run`, Character `run`/`soul reflect`, reference refresh, compute run and old runtime catalog/tool entrances where the complete direct production/observation closure does not exist. Preserve underlying Work/execution/Host/capture/SOUL/reference/compute libraries. `resume_driven_sessions` is not Work auto-chain; HostHandle query does not supply the Character CLI capture stream. Existing TS schedule add/signal and provider routes are not claimed as equivalent workflow replacements; TS compute run is currently route-not-migrated and forced native SOUL reflection has no synthesizer.
 
@@ -179,6 +200,8 @@ Selected M2 composition reuses actual maintained adapters: TS ACP uses `packages
 ### 7.1 Independent Rust CLI (basic local authoring/storage)
 
 **Destination:** daemon-free, Node-free, full-engine-free product cohort completed in **RFT-08**. **Delivered (v1.193 P2):** the ordinary default authoring/storage entries are this cohort (`default = ["cli"]`, `nexus42` bin `required-features = ["cli"]`); M1 delivered **one real slice** of it, and it is not the whole basic CLI.
+
+> **Historical M1 planning record below (§7.1).** The HTTP transports, daemon-mediated Works reads, leaf counts, and remaining-family assignments describe the M1 baseline and its planned expansion, not current CLI dependencies. The delivered direct-core CLI disposition above supersedes those transport claims; current RFT-05–07 implementation/qualification is in §7.5.
 
 **M1 first slice (RFT-01) — delivered in v1.189:**
 
@@ -229,28 +252,31 @@ RFT-00–04 shipped together as milestone **RFT-M1** (v1.189). RFT-05–08 are o
 | RFT-02 | napi adapter, provider ports, ACP LocalSet lifecycle | Shipped (v1.189) |
 | RFT-03 | Native npm + packaged Electron **development** feasibility go/no-go | Shipped development GO (v1.189). Production signing is RFT-10 |
 | RFT-04 | Standalone TS service + browser vertical of the M1 slice | Shipped (v1.189). Complete TS API is RFT-07 |
-| RFT-05 | Remaining World/Work/KB/narrative/fork families, including Works reads/writes beyond the M1 slice | M2 / not started |
-| RFT-06 | Actor/Character/admission/memory/context | M2 / not started |
-| RFT-07 | Execution/scheduler/Host/providers/capabilities/MCP/Connect control plane **and** complete TS API/default service entry | M2 / not started |
-| RFT-08 | Complete independent Rust CLI + headless product cutover (default authoring entry; Connect-only runtime). **v1.193 target:** no CLI operator control surface for the TS service | **Delivered (v1.193 P2)** — the ordinary `cli` cohort is the default authoring entry, `nexus-runtime` is the Connect-only headless binary, and no CLI operator control surface for the TS service exists. The unexercised destinations above stay open |
+| RFT-05 | Remaining World/Work/KB/narrative/fork families, including Works reads/writes beyond the M1 slice | **Implemented and exercised family paths** in `apps/nexus-service` (`works.ts`, `world-kb.ts`, World/content/knowledge modules) over `nexus-core`. Not “M2 / not started”; product-wide acceptance/QA is not established by route-level exercise alone. |
+| RFT-06 | Actor/Character/admission/memory/context | **Implemented and exercised family paths** in `apps/nexus-service` (`actors.ts`, `memory.ts`, `context.ts`) over the core admission/domain owners. Product acceptance/QA remains a separate qualification, not an implementation-absence claim. |
+| RFT-07 | Execution/scheduler/Host/providers/capabilities/MCP/Connect control plane **and** complete TS API/default service entry | **Implemented and exercised retained route families**, including `execution.ts`, `workflow-observation.ts`, and `compute.ts`, over core execution/Compute owners. Default host cutover is delivered (v1.193 P2); outstanding product acceptance/QA, Run Studio completeness, and specific unmounted identities (§7.5.1) do not mean the service is unstarted or wholly unexercised. |
+| RFT-08 | Complete independent Rust CLI + headless product cutover (default authoring entry; Connect-only runtime). **v1.193 target:** no CLI operator control surface for the TS service | **Delivered (v1.193 P2)** — the ordinary `cli` cohort is the default authoring entry, `nexus-runtime` is the Connect-only headless binary, and no CLI operator control surface for the TS service exists. The distinct product-qualification obligations above remain open. |
 | RFT-09 | Formal desktop cutover (Electron host after the M1 development GO; reuse web/Studio; no visual redesign) | M3 / **delivered in v1.192** (accepted) |
 | RFT-10 | Production distribution / Developer ID signing / notarization / stapling | M3. **v1.192 delivers the unsigned half** (`.app` and `.dmg`, both macOS architectures, no Apple credentials required); that delivery is not dual-architecture GUI qualification. Signing remains the durable destination and is a Non-Goal until explicit release authorization |
 | RFT-11 | Obsolete-host retirement **and** retained v1.188 P5 public first-run / Quick Start / live request | **v1.192** retired Tauri. **v1.193 P2 delivered:** the remaining daemon/SPA/`legacy-cli` composition and the dormant CLI rows listed in §7.4 were retired in that iteration. **v1.195 P3** exercises the retained public first-run as a clean-home deterministic example with its Quick Start/startup guidance, and one user-authorized live request has been exercised against the pinned official origin (all of it pending plan QC/QA and iteration integration) — see §7.5.1 |
+
+**Implementation and exercise anchors:** `apps/nexus-service/src/routes.ts` mounts the family modules named above; `crates/nexus-core/src/service.rs`, `execution/handle_ops.rs`, and `execution/compute.rs` retain the Rust authority. Existing real-native HTTP journeys in `apps/nexus-service/tests/domain-http.test.mjs`, `actor-http.test.mjs`, `workflow-control-http.test.mjs`, `workflow-observation-http.test.mjs`, and `compute-http.test.mjs` exercise persisted domain effects, stored ownership, control/observation, and Compute accept/discard/clear. These are bounded family exercises, not blanket product acceptance, a Run Studio completeness claim, or permission for another live model request.
 
 ### 7.5.1 Current-target reading (v1.195)
 
 The milestone labels above are historical program keys. They are not a blank-slate order, and they are not a claim that every family is product-complete.
 
 - Landed World/Work, Actor/Character, ordinary CLI, and desktop-host behavior stay out of v1.195 except where a selected workflow or Compute operation touches their existing authorization, CAS, or durable-effect contracts.
-- RFT-07 is partial on the public service. Mounted schedule add and schedule signal are not list, inspect, core-context steering, cancellation settlement, or same-workflow observation.
-- The TS-service Compute / Run Studio rows in the v1.195 inventory are still open. A native `compute` feature flag is not that closure.
+- RFT-07 public workflow control includes schedule add/signal **and** `listSchedules`, `inspectSchedule`, `listWorkflowSessions`, `getWorkflowSession`, and `editCoreContext` in `apps/nexus-service/src/execution.ts`. Same-run `GET /v1/daemon/orchestration/sessions/{run_id}/events` is mounted by `workflow-observation.ts` over core-owned subscription/replay. The real-native control/observation journeys exercise append/resume, cancellation settlement, and restart visibility; these are not missing list/inspect/observation surfaces.
+- The remaining unmounted identities in this execution surface are core-context **history reads** and schedule **label/delete** mutations (`execution.ts` explicitly retains `route_not_migrated` for them). That narrow gap is distinct from product-wide acceptance/QA.
+- The TS-service Compute C1–C8 discovery/detail/run/history/accept/discard/terminal-clear routes are implemented in `compute.ts` over `crates/nexus-core/src/execution/compute.rs` and exercised by `compute-http.test.mjs`. What remains unqualified here is product acceptance/QA and Run Studio completeness, not backend route presence. A native feature flag or HTTP exercise alone does not close that UI/product obligation.
 - RFT-11 public first-run and Quick Start: v1.195 P3 exercises them as the clean-home public first workflow (`scripts/public-first-workflow.mjs` in deterministic mode) plus the Quick Start/current-startup guidance that replaced the retired daemon text. Those are P3 plan artifacts pending plan QC/QA and iteration integration; the deterministic receipt is loopback-only and is **not** live qualification.
 - The single user-authorized live request has been **exercised once** against the pinned official origin: one admitted request, guard evidence complete, same-run replay, committed revision, restart without repeating the commit and confirmed cleanup all observed. It is a P3 plan-scope receipt, not a product shipment — it stays pending plan QC/QA and iteration integration, and the authorization is now spent, so a further live attempt needs a new explicit user grant.
 - The live gate still refuses an environment that does not name the inherited credential channel: that case stops at `credentials_unavailable` with zero admissions, and an inherited model-origin override is refused rather than silently stripped. The driver never reads, copies, prints or persists the secret — its value stays with the sealed runtime's normal credential resolver — and a transport or authentication failure **after** an admission consumes the authorization, with no retry. Retired daemon commands stay retired.
 
 ## 8. Concurrent writes (user-locked)
 
-While a TS service **or** the current integrated host is active, **authorized direct Rust CLI transactions are allowed**. Policy:
+While a TS service is active, **authorized direct Rust CLI transactions are allowed**. The integrated Rust host is historical and was deleted in v1.193 P2. Policy:
 
 1. **One engine/effect owner.** CLI and HTTP/native callers invoke the same Rust commands. No second workflow/recovery engine and no dual-writer caches that diverge.
 2. **Per-resource CAS/OCC remains the conflict tool** for the M1 slice (`expected_version` on World KB entity patch).
@@ -387,4 +413,4 @@ A family that has landed on the target:
 2. Use this document for destination, host/lifetime, CLI disposition, the delivered M1 vertical identity, and the remaining RFT-05–11 keep/cutover rules.
 3. When a remaining family lands on the target, fold the superseded section or record the deletion gate in the family plan. Do not leave two contradictory implementable topologies for the same family.
 
-**Delivered (v1.193 P2):** the M1 World KB graph/patch, napi ACP, TS M1 vertical **and** the remaining retained families all fired their gates — the old mixed-handler topology no longer exists to conflict with. The rule above now binds only the unexercised RFT-05–11 destinations (§7.5), which must not be described as delivered before their own gates fire.
+**Delivered (v1.193 P2):** the M1 World KB graph/patch, napi ACP, TS M1 vertical **and** the remaining retained families all fired their host-retirement gates — the old mixed-handler topology no longer exists to conflict with. RFT-05–07 route families are implemented and exercised (§7.5), while their product acceptance/QA and Run Studio completeness remain distinct from that evidence. Do not label implemented routes “unexercised”, or claim the remaining product/distribution/first-run qualification obligations are delivered without their own evidence.

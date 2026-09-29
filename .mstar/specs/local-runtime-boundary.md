@@ -1,9 +1,11 @@
 # Nexus Local Runtime Boundary
 
-**Status**: Normative  
+**Status**: Normative for retained wire/ACP boundaries; daemon host-process sections are historical (retired in v1.193 P2)  
 **Document class**: Master  
 
 ## 0. Document position
+
+> **Retired daemon host model (v1.193 P2).** The `nexus-daemon-runtime` crate and integrated `nexus42 daemon` process mode are deleted. Retained `/v1/daemon/*` wire families are served by the standalone TypeScript service, `apps/nexus-service`, over `nexus-core`; Electron owns the app-managed service lifecycle and is the desktop host since v1.192. An independently owned service may be attached without transferring ownership to the app. The Connect host is `nexus-runtime`, an independent bin of `apps/nexus42`, not a daemon mode. Current topology authority: [rust-core-service-boundary.md](rust-core-service-boundary.md); desktop lifecycle: [desktop-shell.md](desktop-shell.md). The original scope outline below and explicitly marked process sections remain historical, not setup instructions.
 
 This document defines boundaries between:
 
@@ -23,6 +25,8 @@ Logical `nexus.*` capabilities are shared with platform-hosted creators; this do
 
 ## 1. Frozen topology recap
 
+> **Historical topology.** The daemon process and CLI↔daemon link below are retired. The ACP client-only invariant survives; current hosts are identified in §0.
+
 | Component | ACP role | Notes |
 | --- | --- | --- |
 | User-owned agent | **ACP Agent** | Hosts tools/resources; executes model calls |
@@ -33,6 +37,8 @@ Logical `nexus.*` capabilities are shared with platform-hosted creators; this do
 ---
 
 ## 2. Process model
+
+> **Historical process composition (§2.1–§2.3).** The single-binary daemon mode and its managed-host placement below describe the deleted host, not the current CLI or Electron lifecycle. The retained CLI calls Rust core/cloud/Connect directly; the TS/native service composes the Rust execution and provider owners ([rust-core-service-boundary.md](rust-core-service-boundary.md) §§4–5).
 
 ### 2.1 One-shot CLI
 
@@ -70,12 +76,16 @@ Daemon runtime hosts agent sessions through a managed host subsystem with these 
 
 ### 3.1 Why Daemon API exists
 
+> **Historical motivation.** The CLI↔daemon use case below is no longer a supported CLI dependency; browser/Electron retain the HTTP wire families through the TS service.
+
 ACP is for agent integration. Nexus still needs a stable internal interface for:
 
 - CLI talking to daemon without spawning agents
 - Local automation or IDE plugins that should not pretend to be ACP Agents
 
 ### 3.2 Daemon API characteristics
+
+Here “Daemon API” names the retained wire namespace, not the retired Rust process. Exact current route identities and auth tiers come from `apps/nexus-service/src/routes.ts` and its family modules; the inventory below preserves its historical release annotations.
 
 - Loopback-only by default
 - Minimal surface: workspace status, daemon health, orchestration/agent-host, local KB/memory — **no** sync or platform registration proxy (see [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md))
@@ -84,11 +94,13 @@ ACP is for agent integration. Nexus still needs a stable internal interface for:
 
 ### 3.2.1 Daemon API endpoint families
 
-The Daemon API is the **codegen-ready** internal contract between CLI, daemon, and local automation.
+The retained Daemon API is the **codegen-ready** HTTP contract for browser/Electron clients of `apps/nexus-service`; it is not a CLI dependency or evidence that the deleted Rust daemon still runs.
 
-**Routing policy (long-term):** [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md) §5. **Removal acceptance:** v1.21 delivery compass.
+**Current ownership:** `apps/nexus-service/src/routes.ts` composes the endpoint families and owns runtime health/status HTTP projections. `actors.ts`, `memory.ts`, `context.ts`, `presets.ts`, `works.ts`, and the World/knowledge family modules translate requests to the native facade over `nexus-core`; Rust owns stored-principal authorization and domain/storage effects. `execution.ts` and `workflow-observation.ts` expose the core execution owner, while `routes.ts`/`provider.ts` adapt the retained Agent-Host/provider surface. Current topology and qualification status: [rust-core-service-boundary.md](rust-core-service-boundary.md) §§4, 7.5.
 
-| Endpoint / family | Status on daemon | Notes |
+> **Historical endpoint inventory.** The exact inventory below is retained from the Rust-host record. “Active” means active in that record, not that every legacy identity is mounted today. Retained identities are served only when registered in the TS route composer; old `api/mod.rs`/`orchestration_routes()` references and daemon restart wording below are historical. Do not infer current support from these annotations or restore retired `/v1/local/*` routes.
+
+| Endpoint / family | Recorded status (historical Rust host) | Notes |
 | --- | --- | --- |
 | `GET /v1/daemon/runtime/health` | Active | Unguarded liveness route. |
 | `GET /v1/daemon/runtime/status` | Active | Unguarded diagnostic route. |
@@ -141,7 +153,7 @@ Rules:
 - `request_id` is caller-generated and traceable in logs
 - `workspace_id` is mandatory for workspace-scoped actions
 - `error_code` should align with sync / conflict schemas where applicable
-- Research-specific routes may use the `/v1/daemon/*` namespace only after they are registered in the daemon router.
+- Research-specific routes may use the `/v1/daemon/*` namespace only after they are registered in the TS-service route composer.
 - **V1.24 KCA-002 B2:** `POST /v1/local/context/assemble` is retired from the Daemon API. CLI/platform context assembly should call `nexus-moment-context-assembly` in-process rather than proxying through the daemon.
 - **V1.2**：若请求体支持可选 **`as_of`**，Local 与 Platform HTTP **须**共享 **同一**字段语义与校验；不得仅在一侧出现私有历史参数。
 
@@ -152,6 +164,8 @@ Rules:
 - Shipping ad-hoc CLI-only request/response shapes that bypass the versioned Daemon API contract
 
 ### 3.4 Relationship diagram
+
+> **Historical relationship diagram (retired host).** The daemon IPC/`DaemonClient` path below was deleted in v1.193 P2. Current CLI/core, browser/TS-service, and Connect boundaries are in [rust-core-service-boundary.md](rust-core-service-boundary.md).
 
 ```text
 CLI --Daemon API--> daemon runtime mode --ACP Client--> ACP Agent
@@ -241,6 +255,8 @@ V1.53 cancelled the skills-export CLI/spec line (DF-50). Nexus keeps the static 
 
 ## 7. Operational boundaries
 
+> **Historical path table.** Daemon health through the CLI below is retired; current HTTP health belongs to `apps/nexus-service`, desktop lifecycle belongs to Electron, and the one-shot CLI does not launch or status that service.
+
 | Action | Preferred path |
 | --- | --- |
 | Agent reasons & writes manuscript via tools | ACP session |
@@ -253,6 +269,8 @@ V1.53 cancelled the skills-export CLI/spec line (DF-50). Nexus keeps the static 
 
 ## 8. Open items
 
+> **Historical open questions.** These are the original daemon-model questions, not an instruction to recreate that host. Current service transport/lifecycle authority is [rust-core-service-boundary.md §8.1](rust-core-service-boundary.md#81-independent-service-launch-and-attach).
+
 - Whether loopback TCP is allowed on shared machines
 - Multi-workspace daemon strategy vs one-daemon-multi-workspace
 - Whether the frozen `/v1/daemon/*` envelope should be JSON-over-HTTP only or also mirrored on unix socket RPC
@@ -260,6 +278,8 @@ V1.53 cancelled the skills-export CLI/spec line (DF-50). Nexus keeps the static 
 ---
 
 ## V1.57 P1 Draft overlay: 3-caller adapter topology
+
+> **Historical draft overlay (host retired in v1.193 P2).** The original V1.57 draft status and diagram below are preserved as history. `host-call`, daemon IPC, and the daemon-runtime registry placement are not current entrances; retained tool/execution authority is composed through the Rust core/native and TS-service owners.
 
 **Status**: Draft (V1.57 P1)  
 

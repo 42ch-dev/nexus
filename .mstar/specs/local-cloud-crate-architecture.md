@@ -4,11 +4,13 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Active — V1.64 amendment: local Web UI workspace member + embedded asset edge |
+| **Status** | **Historical crate-graph record (v1.193 P2).** The integrated daemon host and `nexus-daemon-runtime` crate were deleted; current topology authority is [rust-core-service-boundary.md](rust-core-service-boundary.md). |
 | **Document class** | Master |
-| **Scope** | Stable rules: local vs cloud product lines, crate responsibilities, contracts usage, dependency forbidden edges, current-vs-target wiring, Daemon API *classes* allowed/forbidden |
+| **Scope** | Historical local/cloud rules, crate responsibilities, contracts usage, dependency edges, current-vs-target wiring, and Daemon API classes; not the current workspace inventory or host topology. |
 | **Scope model SSOT** | [entity-scope-model.md](./entity-scope-model.md) — authoritative for scope hierarchy, crate ownership, and `kb`/`knowledge` naming boundaries |
 | **Related** | [entity-scope-model.md](./entity-scope-model.md), [local-runtime-boundary.md](./local-runtime-boundary.md), [daemon-runtime.md](./daemon-runtime.md), [cli-spec.md](./cli-spec.md), [schemas-directory-layout.md](./schemas-directory-layout.md), [schemas-external-consumer-boundary.md](schemas-external-consumer-boundary.md) |
+
+> **Historical as of v1.193 P2.** Sections §1–§9 retain the earlier crate-graph and product-integration record; “current”, “target”, and daemon ownership below refer to that record, not today's implementation. The retained `/v1/daemon/*` wire families are served by the standalone TypeScript service, `apps/nexus-service`, over Rust core authority, not by `nexus42 daemon`. Current topology: [rust-core-service-boundary.md](rust-core-service-boundary.md). Current crate inventory and responsibilities: root [`AGENTS.md`](../../AGENTS.md) and each crate's `AGENTS.md`, with workspace membership in root `Cargo.toml`.
 
 **This file is not an implementation checklist.** Do not add migration batches, branch names, or “done by V1.21” task tables here — put those in the matching **iteration compass** and local plan documents (harness process artifacts, not tracked specs).
 
@@ -17,6 +19,8 @@
 ---
 
 ## 1. Two product lines (frozen)
+
+> **Historical host assignment.** The `nexus42 daemon` integration surface and `nexus-daemon-runtime` isolation edge below describe the deleted host; the local/cloud product separation does not reinstate it.
 
 | Line | Purpose | Integration surface |
 | --- | --- | --- |
@@ -51,6 +55,10 @@ External wire shapes come from the **`nexus-contracts`** crate's generated modul
 
 ## 3. Crate responsibility and scope ownership
 
+> **Historical inventory.** Preserve this inventory and the 2026-05-22 Cargo snapshot in §4 as recorded, including the now-deleted daemon crate; neither is a current workspace list.
+
+Post-2026-05 workspace additions — `nexus-core`, `nexus-core-node`, `nexus-preset`, `nexus-provider-conformance`, `nexus-provider-ports`, and `nexus-storage-guard` — are indexed with their per-crate `AGENTS.md` roles in [rust-core-service-boundary.md §2](rust-core-service-boundary.md#current-workspace-boundary-inventory); they are not backfilled into this frozen inventory.
+
 This table follows [entity-scope-model.md §4](./entity-scope-model.md#4-crate-ownership-map). If older wording conflicts with that model, the entity scope model is authoritative.
 
 ### 3.1 Foundation (types & paths)
@@ -81,6 +89,8 @@ These crates are **not** split by the local/cloud program; they sit **under** al
 | **`nexus42`** | CLI surface | User-facing command routing and wording. It invokes owning crates; it MUST NOT become a second domain implementation for scope rules. | CLI may use cloud-sync for cloud commands |
 
 ### 3.2A Local Web UI app (V1.64)
+
+> **Historical serving model (retired in v1.193 P2).** The `rust-embed`/daemon-router edge below is deleted, not a current build or serving instruction. Current browser/desktop host boundaries are in [rust-core-service-boundary.md](rust-core-service-boundary.md) and [desktop-shell.md](desktop-shell.md).
 
 | App | Product line | Responsibility boundary | Cloud/platform dep? |
 | --- | --- | --- | --- |
@@ -125,6 +135,8 @@ The legacy crate name `nexus-domain` is **not** retained after the split program
 
 ### 3.6 `nexus-moment-context-assembly`
 
+> **Historical product status.** The daemon route/default-build claims below belong to the retired host; retained TS-service context routes and Rust owners are described in [rust-core-service-boundary.md §7.5](rust-core-service-boundary.md#75-family-destinations-program-keys-not-extra-iterations).
+
 - **Shipped local four-domain Moment path (V1.26+, SSOT V1.28):** `assemble_moment` depends on `nexus-creator-memory`, `nexus-narrative`, `nexus-knowledge`, and `nexus-contracts`. (The former `nexus-kb` crate was merged into `nexus-knowledge` in V1.139.) `nexus42 platform context assemble-moment` is the **single** local assembly command; it calls `assemble_moment` in-process with persistent narrative / World KB / User knowledge stores (SQLite User knowledge since V1.27).
 - **Stage0 / TwoStage on assemble-moment (V1.28):** `--max-tokens`, `--no-fragments`, `--hint`, and runtime/degradation routing are flags on `assemble-moment`, not a separate subcommand.
 - **Removed path:** `nexus42 platform context assemble-local` was removed in V1.28 (pre-release breaking change).
@@ -148,7 +160,9 @@ cloud-stage = ["dep:nexus-cloud-sync"]
 
 ---
 
-## 4. Currently wired Cargo graph (verified 2026-05-22)
+## 4. Historical Cargo graph (snapshot verified 2026-05-22)
+
+> **Frozen historical snapshot.** The original table, diagram, and “current” claims below are preserved verbatim as the 2026-05-22 record, not a graph to build today; `nexus-daemon-runtime` and its embedded-SPA edge were deleted in v1.193 P2.
 
 This section describes the current `Cargo.toml` and `cargo tree` reality. It is intentionally separate from product integration gaps in §6 and the V1.24 audit compass.
 
@@ -210,6 +224,8 @@ nexus-cloud-sync ──► nexus-cloud-domain, nexus-contracts, nexus-home-layou
 
 ## 5. V1.23 dependency wiring target (achieved for Cargo edges)
 
+> **Historical V1.23 target and results.** “Current Cargo shape”, “already wired”, and daemon constraints below are statements at that milestone, not current runtime ownership.
+
 The following graph was the normative V1.23 dependency target and is now the current Cargo shape for the alignment-sensitive edges. Remaining gaps are product integration gaps, not missing Cargo dependencies.
 
 ### 5.1 Target dependency shape
@@ -267,6 +283,8 @@ nexus-moment-context-assembly (default four-domain library target)
 
 ## 6. Daemon API (principles)
 
+> **Historical router authority.** `crates/nexus-daemon-runtime/src/api/mod.rs` below was deleted with its crate in v1.193 P2. Current retained route composition is [`apps/nexus-service/src/routes.ts`](../../apps/nexus-service/src/routes.ts) and its family modules; domain/effect ownership is Rust core. The V1.24 gap list below remains a historical audit record, not a list of today's missing routes.
+
 Authoritative route list for a given release lives in **`crates/nexus-daemon-runtime/src/api/mod.rs`** and the active **iteration compass**.
 
 **Always allowed (local product):** runtime health/status, workspace, local creator listing/active/logout, local references, work-scope KB file-index APIs, memory pending-review, presets, orchestration, and agent-host (+ internal tool execution). Future World KB / User knowledge / Moment context surfaces may be local-only, but must be explicitly registered and documented (DR-46); after KCA-002 B2, daemon context assembly is not an active Daemon API route.
@@ -289,6 +307,8 @@ These are runtime/product gaps after Cargo alignment, not missing dependency edg
 
 ## 7. CLI integration (principles)
 
+> **Historical CLI assignment.** The daemon-control row below records the deleted CLI/API integration; current CLI disposition is [rust-core-service-boundary.md §7.2](rust-core-service-boundary.md#72-operator--service-lifecycle), with no TS-service launcher alias.
+
 | Concern | Owner |
 | --- | --- |
 | Daemon control | Daemon API |
@@ -302,6 +322,8 @@ These are runtime/product gaps after Cargo alignment, not missing dependency edg
 
 ## 8. Orchestration
 
+> **Historical daemon-build policy.** No daemon build survives v1.193 P2; current execution/transport ownership is defined in [rust-core-service-boundary.md](rust-core-service-boundary.md).
+
 Built-in `sync.*` / `outbox.flush` capabilities on **daemon builds** MUST NOT call cloud-sync; stubs or explicit “cloud line disabled” results are acceptable until cloud orchestration is redesigned.
 
 Workspace file writes remain agent-mediated (agent-host internal tool execution); unchanged principle from preset-driven architecture.
@@ -310,8 +332,10 @@ Workspace file writes remain agent-mediated (agent-host internal tool execution)
 
 ## 9. Cloud runtime policy
 
+> **Historical host wording.** “Daemon hot path” below refers to the retired host, not a surviving process mode.
+
 `runtime_mode`, `degradation`, and platform health probing belong to the **cloud line** (CLI / `cloud-stage` builds), not the daemon hot path.
 
 ---
 
-*Long-term SSOT for local/cloud crate and Daemon API boundaries.*
+*Historical local/cloud crate and Daemon API boundary record; current topology SSOT: [rust-core-service-boundary.md](rust-core-service-boundary.md).*
