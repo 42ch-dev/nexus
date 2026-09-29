@@ -1426,7 +1426,7 @@ fn apply_timeline_patch(
                     .to_string(),
             }),
         },
-        "unbind_world_event" => timeline_unbind_world_event(req, frontmatter, chapters),
+        "unbind_world_event" => timeline_unbind_world_event(req, frontmatter),
         operation => Err(OutlineFault::BadRequest {
             code: "invalid_timeline_operation".to_string(),
             message: format!("unsupported timeline operation '{operation}'"),
@@ -1757,6 +1757,11 @@ async fn resolve_validated_binding(
 /// [`resolve_validated_binding`]); this helper owns only the outline-local
 /// preconditions: the event must exist in `timeline_events`, and its attached
 /// chapter must not be published.
+///
+/// Publishing pins a chapter's **new** cross-surface bindings. It does not pin
+/// a stale one in place: the refusal names [`timeline_unbind_world_event`], the
+/// single sanctioned unbind path for a published chapter, so an author holding
+/// a broken deep-link is never left without a reachable remedy.
 fn timeline_bind_world_event(
     req: &TimelinePatchEventRequest,
     frontmatter: &mut OutlineFrontmatter,
@@ -1775,22 +1780,37 @@ fn timeline_bind_world_event(
         .iter_mut()
         .find(|e| e.event_id == event_id)
         .ok_or_else(|| OutlineFault::NotFound(format!("event {event_id}")))?;
-    ensure_event_chapter_not_published(chapters, event.realizes_chapter_id)?;
+    if let Some(chapter_id) = published_event_chapter(chapters, event.realizes_chapter_id) {
+        return Err(OutlineFault::Validation {
+            errors: vec![format!(
+                "cannot bind a World event on published chapter {chapter_id}: publishing pins a \
+                 chapter's new World-event bindings; a stale binding on a published chapter is \
+                 cleared through the sanctioned unbind path (unbind_world_event)"
+            )],
+            warnings: vec![],
+        });
+    }
     event.world_event_id = Some(referent.to_string());
     Ok(())
 }
 
-/// Clear a Work timeline event's World event binding.
+/// Clear a Work timeline event's World event binding — the sanctioned unbind
+/// path for a published chapter.
 ///
 /// Only `event_id` is required. An event with no stored binding is accepted —
 /// the mutation rides the one revision bump the patch envelope always applies —
 /// and the old referent is never re-read, so a referent deleted from the World
 /// KB after the bind stays clearable. This is deliberately not the
 /// `unlink_foreshadow` absent-edge `NotFound` behavior.
+///
+/// Unlike a new binding ([`timeline_bind_world_event`]), clearing a binding is
+/// deliberately **not** subject to the published-chapter refusal: it mutates no
+/// chapter content or structure, and a referent re-typed or deleted in the
+/// World KB after the bind would otherwise strand a broken cross-surface
+/// deep-link on a published chapter with no reachable remedy.
 fn timeline_unbind_world_event(
     req: &TimelinePatchEventRequest,
     frontmatter: &mut OutlineFrontmatter,
-    chapters: &[WorkChapterRecord],
 ) -> Result<(), OutlineFault> {
     let event_id = req
         .event_id
@@ -1804,21 +1824,116 @@ fn timeline_unbind_world_event(
         .iter_mut()
         .find(|e| e.event_id == event_id)
         .ok_or_else(|| OutlineFault::NotFound(format!("event {event_id}")))?;
-    ensure_event_chapter_not_published(chapters, event.realizes_chapter_id)?;
     event.world_event_id = None;
     Ok(())
 }
 
-/// Apply the published-chapter refusal to a timeline event's attached chapter.
+/// The published chapter a timeline event is attached to, if any.
 ///
 /// An event's `realizes_chapter_id` is the chapter it belongs to; an event with
-/// no attached chapter has no chapter to guard.
-fn ensure_event_chapter_not_published(
+/// no attached chapter — or one whose chapter is not in this Work's chapter
+/// rows — has no published chapter to refuse a new binding on.
+fn published_event_chapter(
     chapters: &[WorkChapterRecord],
     realizes_chapter_id: Option<std::num::NonZeroU64>,
-) -> Result<(), OutlineFault> {
-    let Some(chapter_id) = realizes_chapter_id else {
-        return Ok(());
-    };
-    ensure_chapter_not_published(chapters, i64::try_from(u64::from(chapter_id)).unwrap_or(0))
+) -> Option<i64> {
+    let chapter_id = i64::try_from(u64::from(realizes_chapter_id?)).unwrap_or(0);
+    chapters
+        .iter()
+        .find(|record| i64::from(record.chapter) == chapter_id && record.status == "published")
+        .map(|record| i64::from(record.chapter))
+}
+
+#[cfg(test)]
+mod world_event_binding_tests {
+    use super::*;
+
+    /// Chapter 1 of the fixture Work, already published.
+    fn published_chapter() -> Vec<WorkChapterRecord> {
+        vec![WorkChapterRecord {
+            work_id: "wrk_test".to_string(),
+            chapter: 1,
+            volume: Some(1),
+            slug: None,
+            planned_word_count: 4000,
+            actual_word_count: None,
+            status: "published".to_string(),
+            outline_path: None,
+            body_path: None,
+            created_at: "2026-09-30T00:00:00Z".to_string(),
+            updated_at: "2026-09-30T00:00:00Z".to_string(),
+        }]
+    }
+
+    /// One timeline event attached to chapter 1, optionally already bound to a
+    /// World event referent (the value a re-typed referent leaves behind).
+    fn frontmatter_with_event(world_event_id: Option<&str>) -> OutlineFrontmatter {
+        OutlineFrontmatter {
+            timeline_events: vec![WorkOutlineTimelineEventsItem {
+                event_id: "evt_1".to_string(),
+                title: "Guarded".to_string(),
+                description: None,
+                realizes_chapter_id: std::num::NonZeroU64::new(1),
+                world_event_id: world_event_id.map(str::to_string),
+            }],
+            ..OutlineFrontmatter::default()
+        }
+    }
+
+    fn bind_request() -> TimelinePatchEventRequest {
+        serde_json::from_value(serde_json::json!({
+            "work_id": "wrk_test",
+            "base_revision": 1,
+            "operation": "bind_world_event",
+            "event_id": "evt_1",
+            "world_event_id": "kb_0000e004"
+        }))
+        .expect("bind_world_event request")
+    }
+
+    fn unbind_request() -> TimelinePatchEventRequest {
+        serde_json::from_value(serde_json::json!({
+            "work_id": "wrk_test",
+            "base_revision": 1,
+            "operation": "unbind_world_event",
+            "event_id": "evt_1"
+        }))
+        .expect("unbind_world_event request")
+    }
+
+    /// A new binding on a published chapter still refuses, and the refusal
+    /// names the sanctioned unbind path; the event is left untouched.
+    #[test]
+    fn world_event_binding_published_chapter_bind_refusal_names_the_remedy() {
+        let mut frontmatter = frontmatter_with_event(None);
+
+        let error = timeline_bind_world_event(
+            &bind_request(),
+            &mut frontmatter,
+            &published_chapter(),
+            "kb_0000e004",
+        )
+        .expect_err("a new binding on a published chapter must refuse");
+        let OutlineFault::Validation { errors, .. } = error else {
+            panic!("expected the structured outline-validation refusal, got {error:?}");
+        };
+        assert!(
+            errors
+                .iter()
+                .any(|message| message.contains("unbind_world_event")),
+            "the refusal must name the sanctioned unbind path: {errors:?}"
+        );
+        assert_eq!(frontmatter.timeline_events[0].world_event_id, None);
+    }
+
+    /// The sanctioned unbind path clears a binding on a published chapter —
+    /// the reachable remedy for a referent re-typed after the bind.
+    #[test]
+    fn world_event_binding_published_chapter_unbind_is_the_sanctioned_remedy() {
+        let mut frontmatter = frontmatter_with_event(Some("kb_0000e004"));
+
+        timeline_unbind_world_event(&unbind_request(), &mut frontmatter)
+            .expect("unbind must be reachable on a published chapter");
+        assert_eq!(frontmatter.timeline_events[0].world_event_id, None);
+    }
 }

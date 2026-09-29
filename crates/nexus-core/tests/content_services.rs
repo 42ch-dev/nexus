@@ -1382,10 +1382,15 @@ async fn timeline_world_event_binding_accepts_a_referent_past_the_graph_cap() {
     fx.core.close().await.unwrap();
 }
 
-/// The retained CAS and published-chapter guards both refuse a binding attempt
-/// with the outline content and revision untouched.
+/// The retained CAS guard refuses a binding attempt with the outline content
+/// and revision untouched.
+///
+/// The published-chapter binding arms are covered at the helper level in
+/// `outline::world_event_binding_tests`: nothing in this product publishes a
+/// chapter, so a published chapter row is reachable only through a raw
+/// `UPDATE` — the test technique this suite no longer uses.
 #[tokio::test]
-async fn timeline_world_event_binding_guards_leave_outline_unchanged() {
+async fn timeline_world_event_binding_stale_cas_leaves_outline_unchanged() {
     let fx = setup().await;
     let rel_path = "Works/test-novel/Outlines/outline.md";
     let outline_path = fx.creative_root.join(rel_path);
@@ -1437,48 +1442,6 @@ async fn timeline_world_event_binding_guards_leave_outline_unchanged() {
         panic!("stale base_revision must be the typed outline conflict, got {err:?}");
     };
     assert_eq!(details.current_revision, revision);
-
-    // The event's attached chapter is published: both operations refuse.
-    sqlx::query("UPDATE work_chapters SET status = 'published' WHERE work_id = ? AND chapter = 1")
-        .bind(&fx.work_id)
-        .execute(&fx.pool)
-        .await
-        .unwrap();
-    assert_outline_validation(
-        "published bind",
-        fx.core
-            .patch_timeline_event(
-                &fx.principal,
-                "http",
-                fx.work_id.clone(),
-                patch(
-                    revision,
-                    serde_json::json!({
-                        "operation": "bind_world_event",
-                        "event_id": event_id, "world_event_id": referent
-                    }),
-                ),
-            )
-            .await,
-        "published chapter 1",
-    );
-    assert_outline_validation(
-        "published unbind",
-        fx.core
-            .patch_timeline_event(
-                &fx.principal,
-                "http",
-                fx.work_id.clone(),
-                patch(
-                    revision,
-                    serde_json::json!({
-                        "operation": "unbind_world_event", "event_id": event_id
-                    }),
-                ),
-            )
-            .await,
-        "published chapter 1",
-    );
 
     let outline = fx
         .core
