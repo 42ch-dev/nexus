@@ -428,6 +428,66 @@ describe('TimelinePanel — World-event binding authoring (V1.200 DR-26)', () =>
     expect(screen.getAllByRole('button', { name: 'Add ID' })[0]).not.toBeDisabled();
   });
 
+  // V1.201 002/R4 fix round — the value is not the draft tag. A draft re-typed
+  // back to the issued ID during the flight is a newer draft: equality with the
+  // issued `world_event_id` used to clear it.
+  it('keeps a manual ID retyped to the issued value while the bind is in flight (002/R4)', async () => {
+    const user = userEvent.setup();
+    const successCallbacks: Array<() => void> = [];
+    const onPatch = vi.fn(
+      (_request: TimelinePatchEventRequest, onSuccess?: () => void) => {
+        if (onSuccess) successCallbacks.push(onSuccess);
+      },
+    );
+    renderTimeline(makeOutline(), onPatch, null, 'world-9');
+
+    const field = screen.getByLabelText('World event ID for Plant the seed');
+    await user.type(field, 'kb-outside-picker');
+    await user.click(screen.getAllByRole('button', { name: 'Add ID' })[0]);
+    expect(onPatch).toHaveBeenCalledTimes(1);
+
+    // The write is still in flight; the author edits away from the issued ID
+    // and back to it, so the live value equals the one the bind was issued for.
+    await user.clear(field);
+    await user.type(field, 'kb-other-id');
+    await user.clear(field);
+    await user.type(field, 'kb-outside-picker');
+
+    act(() => successCallbacks[0]());
+    expect(screen.getByLabelText('World event ID for Plant the seed')).toHaveValue(
+      'kb-outside-picker',
+    );
+  });
+
+  // V1.201 002/R4 fix round — each control owns its own draft. The same ID in
+  // the manual field is not the picker draft the bind was issued against, so a
+  // picker bind's resolution must leave the independently authored entry alone.
+  it('keeps a manual ID entered during an in-flight picker bind of the same ID (002/R4)', async () => {
+    const user = userEvent.setup();
+    const successCallbacks: Array<() => void> = [];
+    const onPatch = vi.fn(
+      (_request: TimelinePatchEventRequest, onSuccess?: () => void) => {
+        if (onSuccess) successCallbacks.push(onSuccess);
+      },
+    );
+    renderTimeline(makeOutline(), onPatch, null, 'world-9');
+
+    const picker = screen.getByLabelText('World event for Plant the seed');
+    await user.selectOptions(picker, 'kb-evt-1');
+    await user.click(screen.getAllByRole('button', { name: 'Bind' })[0]);
+    expect(onPatch).toHaveBeenCalledTimes(1);
+
+    // The write is still in flight; the author independently enters the same
+    // World event ID in the manual field.
+    await user.type(screen.getByLabelText('World event ID for Plant the seed'), 'kb-evt-1');
+
+    act(() => successCallbacks[0]());
+    // The manual draft survives; only the picker draft the bind was issued
+    // against is released.
+    expect(screen.getByLabelText('World event ID for Plant the seed')).toHaveValue('kb-evt-1');
+    expect(screen.getByLabelText('World event for Plant the seed')).toHaveValue('');
+  });
+
   it('keeps the picked World event until the write succeeds', async () => {
     const user = userEvent.setup();
     const successCallbacks: Array<() => void> = [];

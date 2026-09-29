@@ -8,7 +8,7 @@
  * link/unlink authoring controls, and the World-event bind/unbind control.
  * Drives the `patch_timeline_event` route.
  */
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ArrowRight, CalendarPlus, Link2, Trash2, Unlink } from 'lucide-react';
 
@@ -46,6 +46,14 @@ interface WorldEventOption {
   id: string;
   name: string;
 }
+
+/**
+ * The two controls that author a World-event binding draft (V1.200 DR-26): the
+ * picker's selection and the manual World-event-ID field.
+ */
+type WorldEventDraftControl = 'picker' | 'manual';
+
+const WORLD_EVENT_DRAFT_CONTROLS: readonly WorldEventDraftControl[] = ['picker', 'manual'];
 
 /**
  * Project the bound World's KB graph into picker options (V1.200 DR-26).
@@ -109,6 +117,31 @@ function TimelinePanelView({
   // Per-event selected World-event target id (V1.200 DR-26 bind control).
   const [worldEventTargetByEvent, setWorldEventTargetByEvent] = useState<Record<string, string>>({});
   const [manualWorldEventByEvent, setManualWorldEventByEvent] = useState<Record<string, string>>({});
+
+  // V1.201 002/R4 — one draft generation per (control, event). The value alone
+  // is not a draft tag: a manual `A → B → A` retype reads as untouched, and a
+  // picker draft can equal an independently typed manual one. Every draft
+  // mutation bumps its generation, so a resolving bind can tell whether the
+  // draft it was issued against is still the draft in the field.
+  const draftGenerationRef = useRef<Record<WorldEventDraftControl, Record<string, number>>>({
+    picker: {},
+    manual: {},
+  });
+
+  const draftSetters = {
+    picker: setWorldEventTargetByEvent,
+    manual: setManualWorldEventByEvent,
+  } as const;
+
+  function setWorldEventDraft(
+    control: WorldEventDraftControl,
+    eventId: string,
+    value: string,
+  ) {
+    const byEvent = draftGenerationRef.current[control];
+    byEvent[eventId] = (byEvent[eventId] ?? 0) + 1;
+    draftSetters[control]((prev) => ({ ...prev, [eventId]: value }));
+  }
 
   // Foreshadow edges grouped by source event for quick lookup per row.
   const outgoingForeshadows = useMemo(() => {
@@ -183,6 +216,15 @@ function TimelinePanelView({
   function bindWorldEvent(eventId: string, worldEventId: string) {
     const trimmedId = worldEventId.trim();
     if (!trimmedId) return;
+    // V1.201 002/R4 — capture each control's draft generation as the bind's
+    // request tag. Both drafts are still cleared only once the write lands (the
+    // success-only pattern the scene/beat drafts use); a typed 422/409 refusal
+    // keeps both drafts for retry, and the 409 conflict modal still opens
+    // through the orchestrator's `onError`.
+    const issuedGenerations: Record<WorldEventDraftControl, number> = {
+      picker: draftGenerationRef.current.picker[eventId] ?? 0,
+      manual: draftGenerationRef.current.manual[eventId] ?? 0,
+    };
     onPatchTimeline(
       {
         work_id: outline.work_id,
@@ -191,24 +233,22 @@ function TimelinePanelView({
         event_id: eventId,
         world_event_id: trimmedId,
       },
-      // V1.200 DR-26 (Greptile round 2) — clear the picker + manual-ID drafts
-      // only once the write lands (the success-only pattern the scene/beat
-      // drafts use). A typed 422/409 refusal keeps both drafts for retry; the
-      // 409 conflict modal still opens through the orchestrator's `onError`.
-      //
-      // V1.201 002/R4 — resolve only the draft this bind was issued against:
-      // an ID the author edits while the write is in flight is a newer draft
-      // and survives (comparing live value to the issued `trimmedId` is the
-      // request tag; no extra state or store refactor is needed).
+      // V1.201 002/R4 — resolve only the draft this bind was issued against: a
+      // draft authored while the write is in flight is a newer generation and
+      // survives, whether it is the issuing control re-typed to the issued
+      // value or the other control's independently entered ID.
       () => {
-        const clearIssuedDraft = (prev: Record<string, string>) => {
-          if (prev[eventId]?.trim() !== trimmedId) return prev;
-          const next = { ...prev };
-          delete next[eventId];
-          return next;
-        };
-        setWorldEventTargetByEvent(clearIssuedDraft);
-        setManualWorldEventByEvent(clearIssuedDraft);
+        for (const control of WORLD_EVENT_DRAFT_CONTROLS) {
+          if ((draftGenerationRef.current[control][eventId] ?? 0) !== issuedGenerations[control]) {
+            continue;
+          }
+          draftSetters[control]((prev) => {
+            if (!(eventId in prev)) return prev;
+            const next = { ...prev };
+            delete next[eventId];
+            return next;
+          });
+        }
       },
     );
   }
@@ -391,10 +431,7 @@ function TimelinePanelView({
                         <select
                           value={worldEventTargetByEvent[event.event_id] ?? ''}
                           onChange={(e) =>
-                            setWorldEventTargetByEvent((prev) => ({
-                              ...prev,
-                              [event.event_id]: e.target.value,
-                            }))
+                            setWorldEventDraft('picker', event.event_id, e.target.value)
                           }
                           disabled={!boundWorldId}
                           title={boundWorldId ? undefined : t('eventInspector.worldEventRequired')}
@@ -427,10 +464,7 @@ function TimelinePanelView({
                           type="text"
                           value={manualWorldEventByEvent[event.event_id] ?? ''}
                           onChange={(e) =>
-                            setManualWorldEventByEvent((prev) => ({
-                              ...prev,
-                              [event.event_id]: e.target.value,
-                            }))
+                            setWorldEventDraft('manual', event.event_id, e.target.value)
                           }
                           disabled={!boundWorldId}
                           placeholder={t('eventInspector.worldEventManualPlaceholder')}
