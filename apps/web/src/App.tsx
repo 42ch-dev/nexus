@@ -28,6 +28,7 @@ import { MemoryPage } from '@/pages/memory-page';
 import { ModulesPage } from '@/pages/modules-page';
 import { NotFoundPage } from '@/pages/not-found-page';
 import { SchedulePage } from '@/pages/schedule-page';
+import { SessionRunViewPage } from '@/pages/session-run-view';
 import { SessionsPage } from '@/pages/sessions-page';
 import { WorkShellLayout } from '@/components/layout/work-shell-layout';
 import { CreatorHubPage } from '@/pages/creator-hub-page';
@@ -257,7 +258,14 @@ function AppRoutes() {
             }
           />
         </Route>
-        <Route path="sessions" element={<SessionsPage />} />
+        {/* v1.201 P1 (compass D7) — the Sessions page is the observation
+            surface: a session row opens its run view at `/sessions/:sessionId`
+            (read-only event stream; no run control). Sibling of the list, not
+            a layout — mirrors the `worlds/:worldId` nesting. */}
+        <Route path="sessions">
+          <Route index element={<SessionsPage />} />
+          <Route path=":sessionId" element={<SessionRunViewPage />} />
+        </Route>
         <Route path="schedule" element={<SchedulePage />} />
         {/* V1.170 P1 (EL-6) — capability browser restored as a live Develop-tree
             surface (read-only builtin capability schemas from

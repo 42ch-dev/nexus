@@ -1,5 +1,6 @@
 import { RefreshCw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router';
 
 import { StatusBadge } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
@@ -16,6 +17,9 @@ import { isOrchestrationEngineUnavailable } from '@/lib/nexus/errors';
  * Lists every orchestration session with its status (running/completed/failed),
  * preset, and creator. The endpoint is un-paginated; the F-F1 sort keeps a
  * stable order (SessionSummary has no timestamp).
+ *
+ * v1.201 P1 (compass D7): each session id opens the read-only run view
+ * (`/sessions/:sessionId`), the plan's acceptance-bearing observation surface.
  */
 export function SessionsPage() {
   const { t } = useTranslation('sessions');
@@ -75,7 +79,18 @@ export function SessionsPage() {
             <TableBody>
               {sessions.data.map((s) => (
                 <TableRow key={s.session_id}>
-                  <TableCell><span className="text-copy-13-mono text-gray-1000">{shortId(s.session_id)}</span></TableCell>
+                  {/* v1.201 P1 (compass D7) — the row affordance that opens the
+                      read-only run view for this session (its `session_id` is
+                      the root run the events route is addressed by). */}
+                  <TableCell>
+                    <Link
+                      to={`/sessions/${encodeURIComponent(s.session_id)}`}
+                      aria-label={t('openRunAria', { id: shortId(s.session_id) })}
+                      className="text-copy-13-mono font-medium text-brand-deep-blue hover:underline dark:text-blue-700 dark:hover:text-blue-800"
+                    >
+                      {shortId(s.session_id)}
+                    </Link>
+                  </TableCell>
                   <TableCell><StatusBadge status={s.status} /></TableCell>
                   <TableCell><span className="text-copy-13-mono text-gray-900">{shortId(s.preset_id)}</span></TableCell>
                   <TableCell><span className="text-copy-13-mono text-gray-900">{shortId(s.creator_id)}</span></TableCell>
