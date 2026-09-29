@@ -155,6 +155,10 @@
     "worldEventPlaceholder": "Bind World event…",
     "worldEventAria": "World event for {{title}}",
     "worldEventBind": "Bind",
+    "worldEventManualAria": "World event ID for {{title}}",
+    "worldEventManualPlaceholder": "Enter World event ID",
+    "worldEventManualBind": "Add ID",
+    "worldEventPickerLimit": "The picker covers the first 500 World entities. Enter an event ID to bind any valid event.",
     "worldEventUnbind": "Unbind",
     "worldEventUnbindTitle": "Unbind World event"
   },

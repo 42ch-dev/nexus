@@ -856,6 +856,60 @@ describe('TimelineCanvas — bound-Work Moment carrier composition (V1.200 DR-26
     expect((await screen.findAllByText('B one')).length).toBeGreaterThan(0);
   });
 
+  it('includes a bound Work found beyond the first paginated Works page', async () => {
+    const firstPage = Array.from({ length: 20 }, (_, index) =>
+      workSummary(`work-${index}`, `2026-01-${String(index + 1).padStart(2, '0')}T00:00:00Z`),
+    );
+    const listRequests: string[] = [];
+    useHandlers(
+      http.get('/v1/daemon/worlds/:worldId/kb/graph', () =>
+        HttpResponse.json({ entities: [], source_anchors: [], relationships: [] }),
+      ),
+      http.get('/v1/daemon/worlds/:worldId/timeline/events', () =>
+        HttpResponse.json({ items: [], has_more: false, next_cursor: undefined }),
+      ),
+      http.get('/v1/daemon/works', ({ request }) => {
+        const url = new URL(request.url);
+        const limit = url.searchParams.get('limit') ?? '';
+        const cursor = url.searchParams.get('cursor') ?? '';
+        listRequests.push(`${limit}:${cursor}`);
+        if (limit === '100' && cursor === 'page-2') {
+          return HttpResponse.json({
+            items: [workSummary('work-late', '2026-02-01T00:00:00Z')],
+            pagination: { limit: 100, has_more: false },
+          });
+        }
+        return HttpResponse.json({
+          items: firstPage,
+          pagination: {
+            limit: Number(limit),
+            has_more: limit === '100',
+            next_cursor: limit === '100' ? 'page-2' : undefined,
+          },
+        });
+      }),
+      http.get('/v1/daemon/works/:workId', ({ params }) => {
+        const workId = String(params.workId);
+        return HttpResponse.json({
+          ...workDetail(workId),
+          world_id: workId === 'work-late' ? 'world-7' : 'world-other',
+        });
+      }),
+      http.get('/v1/daemon/works/:workId/outline', () =>
+        HttpResponse.json(workOutline('work-late', 'Beyond the first page', 'scn_late')),
+      ),
+      http.get('/v1/daemon/compute/modules', () => HttpResponse.json({ items: [], has_more: false })),
+    );
+
+    renderInApp(<TimelineCanvas worldId="world-7" />, {
+      client: new BrowserClient(),
+      initialRouterEntries: ['/worlds/world-7/timeline?layer=moment'],
+    });
+
+    expect(await screen.findAllByText('Beyond the first page')).not.toHaveLength(0);
+    expect(listRequests).toContain('100:page-2');
+  });
+
   it('renders the canonical scenes when the World KB graph AND the compute log are both empty', async () => {
     // Task 3 review Important #1 — the required empty-KB World Moment case.
     // The global empty-state gate used to own this World (zero KB entities +

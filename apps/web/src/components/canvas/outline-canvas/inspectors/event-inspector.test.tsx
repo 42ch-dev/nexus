@@ -343,6 +343,29 @@ describe('TimelinePanel — World-event binding authoring (V1.200 DR-26)', () =>
     // Placeholder + the single `block_type=event` entity; `kb-chr-1` is not a
     // valid referent and must not be offered.
     expect(optionValues).toEqual(['', 'kb-evt-1']);
+    expect(
+      screen.getByText(
+        'The picker covers the first 500 World entities. Enter an event ID to bind any valid event.',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('submits a manually entered event ID through the existing binding mutation path', async () => {
+    const user = userEvent.setup();
+    const onPatch = renderTimeline(makeOutline(), vi.fn(), null, 'world-9');
+
+    await user.type(
+      screen.getByLabelText('World event ID for Plant the seed'),
+      'kb-outside-picker',
+    );
+    await user.click(screen.getAllByRole('button', { name: 'Add ID' })[0]);
+
+    expect(onPatch).toHaveBeenCalledTimes(1);
+    expect(onPatch.mock.calls[0][0]).toMatchObject({
+      operation: 'bind_world_event',
+      event_id: 'evt_a',
+      world_event_id: 'kb-outside-picker',
+    });
   });
 
   it('fires bind_world_event and renders the refetched canonical binding (projected referent + Unbind)', async () => {
