@@ -8,8 +8,9 @@ use std::path::Path;
 
 use nexus_contracts::{
     OutlinePatchChapterRequest, OutlinePatchResponse, OutlinePatchStructureRequest,
-    TimelinePatchEventRequest, WorkOutline, WorkOutlineBeatsItem,
-    WorkOutlineForeshadowsItem, WorkOutlineScenesItem, WorkOutlineTimelineEventsItem,
+    OutlinePatchStructureRequestStatus, TimelinePatchEventRequest, WorkOutline,
+    WorkOutlineBeatsItem, WorkOutlineBeatsItemStatus, WorkOutlineForeshadowsItem,
+    WorkOutlineScenesItem, WorkOutlineScenesItemStatus, WorkOutlineTimelineEventsItem,
     WorkOutlineVolumesItem,
 };
 use nexus_local_db::work_chapters::{self, PatchChapterParams, WorkChapterRecord};
@@ -488,8 +489,8 @@ impl CoreService {
         Ok(outline)
     }
 
-    /// Structured outline patch (move/attach chapters, link events) guarded by
-    /// `outline_revision` CAS.
+    /// Structured outline patch (move/attach chapters, link events, author
+    /// scenes/beats) guarded by `outline_revision` CAS.
     ///
     /// # Errors
     /// As [`CoreService::work_outline`]; additionally
@@ -955,6 +956,10 @@ async fn apply_structure_patch(
             event.realizes_chapter_id = Some(target);
             Ok(())
         }
+        "add_scene" => scene_add(req, frontmatter, chapters),
+        "remove_scene" => scene_remove(req, frontmatter, chapters),
+        "add_beat" => beat_add(req, frontmatter, chapters),
+        "remove_beat" => beat_remove(req, frontmatter, chapters),
         _ => Err(OutlineFault::BadRequest {
             code: "invalid_outline_operation".to_string(),
             message: format!("unsupported outline operation '{operation}'"),
@@ -1040,6 +1045,146 @@ fn move_chapter_in_frontmatter(
         vol.chapter_ids.sort_unstable();
     }
     frontmatter.volumes.sort_by_key(|vol| vol.volume_id);
+}
+
+// ─── Scene/beat authoring (V1.200 DR-26) ────────────────────────────────────
+
+/// Mint a scene/beat id: the `scn_`/`bet_` prefix plus a simple (hyphen-free)
+/// v4 UUID, i.e. 32 lowercase hex characters.
+fn mint_scene_beat_id(prefix: &str) -> String {
+    format!("{prefix}_{}", uuid::Uuid::new_v4().simple())
+}
+
+/// Resolve the authoring title for `add_scene`/`add_beat`. An omitted title is
+/// the existing missing-field `BadRequest`; a present but blank title is the
+/// structured 422 validation refusal.
+fn scene_beat_title(title: Option<&str>, kind: &str) -> Result<String, OutlineFault> {
+    let title = title.ok_or_else(|| OutlineFault::BadRequest {
+        code: format!("missing_{kind}_title"),
+        message: format!("add_{kind} requires title"),
+    })?;
+    if title.trim().is_empty() {
+        return Err(OutlineFault::Validation {
+            errors: vec![format!("{kind} title must not be blank")],
+            warnings: vec![],
+        });
+    }
+    Ok(title.to_string())
+}
+
+/// Map the request status vocabulary onto the canonical scene status, with
+/// `drafted` as the omitted default.
+fn scene_status_from_request(
+    status: Option<OutlinePatchStructureRequestStatus>,
+) -> WorkOutlineScenesItemStatus {
+    match status {
+        Some(OutlinePatchStructureRequestStatus::Completed) => WorkOutlineScenesItemStatus::Completed,
+        _ => WorkOutlineScenesItemStatus::Drafted,
+    }
+}
+
+/// Map the request status vocabulary onto the canonical beat status.
+fn beat_status_from_request(
+    status: Option<OutlinePatchStructureRequestStatus>,
+) -> WorkOutlineBeatsItemStatus {
+    match status {
+        Some(OutlinePatchStructureRequestStatus::Completed) => WorkOutlineBeatsItemStatus::Completed,
+        _ => WorkOutlineBeatsItemStatus::Drafted,
+    }
+}
+
+/// The chapter owning `scene_id` in this Work's outline.
+///
+/// Beat operations resolve their owning chapter through their scene, so the
+/// published-chapter guard cannot be bypassed with a scene id.
+fn scene_owning_chapter(
+    frontmatter: &OutlineFrontmatter,
+    scene_id: &str,
+) -> Result<i64, OutlineFault> {
+    frontmatter
+        .scenes
+        .iter()
+        .find(|scene| scene.scene_id == scene_id)
+        .map(|scene| i64::try_from(u64::from(scene.chapter_id)).unwrap_or(0))
+        .ok_or_else(|| OutlineFault::NotFound(format!("scene {scene_id}")))
+}
+
+fn scene_add(
+    req: &OutlinePatchStructureRequest,
+    frontmatter: &mut OutlineFrontmatter,
+    chapters: &[WorkChapterRecord],
+) -> Result<(), OutlineFault> {
+    let chapter_id = req.chapter_id.ok_or_else(|| OutlineFault::BadRequest {
+        code: "missing_chapter_id".to_string(),
+        message: "add_scene requires chapter_id".to_string(),
+    })?;
+    let chapter_num = i64::try_from(u64::from(chapter_id)).unwrap_or(0);
+    ensure_chapter_exists(chapters, chapter_num)?;
+    ensure_chapter_not_published(chapters, chapter_num)?;
+    let title = scene_beat_title(req.title.as_deref(), "scene")?;
+    frontmatter.scenes.push(WorkOutlineScenesItem {
+        scene_id: mint_scene_beat_id("scn"),
+        chapter_id,
+        title,
+        status: scene_status_from_request(req.status),
+    });
+    Ok(())
+}
+
+fn scene_remove(
+    req: &OutlinePatchStructureRequest,
+    frontmatter: &mut OutlineFrontmatter,
+    chapters: &[WorkChapterRecord],
+) -> Result<(), OutlineFault> {
+    let scene_id = req.scene_id.as_deref().ok_or_else(|| OutlineFault::BadRequest {
+        code: "missing_scene_id".to_string(),
+        message: "remove_scene requires scene_id".to_string(),
+    })?;
+    ensure_chapter_not_published(chapters, scene_owning_chapter(frontmatter, scene_id)?)?;
+    frontmatter.scenes.retain(|scene| scene.scene_id != scene_id);
+    // Cascade: a removed scene takes its beats with it in the same revision.
+    frontmatter.beats.retain(|beat| beat.scene_id != scene_id);
+    Ok(())
+}
+
+fn beat_add(
+    req: &OutlinePatchStructureRequest,
+    frontmatter: &mut OutlineFrontmatter,
+    chapters: &[WorkChapterRecord],
+) -> Result<(), OutlineFault> {
+    let scene_id = req.scene_id.as_deref().ok_or_else(|| OutlineFault::BadRequest {
+        code: "missing_scene_id".to_string(),
+        message: "add_beat requires scene_id".to_string(),
+    })?;
+    ensure_chapter_not_published(chapters, scene_owning_chapter(frontmatter, scene_id)?)?;
+    let title = scene_beat_title(req.title.as_deref(), "beat")?;
+    frontmatter.beats.push(WorkOutlineBeatsItem {
+        beat_id: mint_scene_beat_id("bet"),
+        scene_id: scene_id.to_string(),
+        title,
+        status: beat_status_from_request(req.status),
+    });
+    Ok(())
+}
+
+fn beat_remove(
+    req: &OutlinePatchStructureRequest,
+    frontmatter: &mut OutlineFrontmatter,
+    chapters: &[WorkChapterRecord],
+) -> Result<(), OutlineFault> {
+    let beat_id = req.beat_id.as_deref().ok_or_else(|| OutlineFault::BadRequest {
+        code: "missing_beat_id".to_string(),
+        message: "remove_beat requires beat_id".to_string(),
+    })?;
+    let scene_id = frontmatter
+        .beats
+        .iter()
+        .find(|beat| beat.beat_id == beat_id)
+        .map(|beat| beat.scene_id.clone())
+        .ok_or_else(|| OutlineFault::NotFound(format!("beat {beat_id}")))?;
+    ensure_chapter_not_published(chapters, scene_owning_chapter(frontmatter, &scene_id)?)?;
+    frontmatter.beats.retain(|beat| beat.beat_id != beat_id);
+    Ok(())
 }
 
 /// Persist chapter outline prose to its per-chapter file and seed the DB

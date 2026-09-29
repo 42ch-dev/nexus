@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use nexus_contracts::{
     ChapterContentQuery, CreateWorkRequest, CreateWorldRequest, ListChaptersQuery,
     OutlinePatchChapterRequest, OutlinePatchStructureRequest, PatchChapterRequest,
-    TimelinePatchEventRequest,
+    TimelinePatchEventRequest, WorkOutlineBeatsItemStatus, WorkOutlineScenesItemStatus,
 };
 use nexus_core::{CoreAccess, CoreChapterContentQuery, CoreError, CoreOpenOptions, CoreService};
 use nexus_local_db::writer_protocol::init_guarded_pool;
@@ -936,6 +936,488 @@ async fn outline_scenes_and_beats_round_trip_verbatim() {
             }
         ])
     );
+
+    fx.pool.close().await;
+    fx.core.close().await.unwrap();
+}
+
+// ─── V1.200 DR-26: scene/beat authoring over the structure-patch path ────────
+
+/// A core-minted scene/beat id is `<prefix><32 lowercase hex>` — the
+/// convention the existing `evt_`/`wrk_` ids use, not a hyphenated UUID.
+fn assert_minted_id(id: &str, prefix: &str) {
+    let hex = id
+        .strip_prefix(prefix)
+        .unwrap_or_else(|| panic!("id '{id}' must start with '{prefix}'"));
+    assert_eq!(hex.len(), 32, "id '{id}' must carry 32 hex characters");
+    assert!(
+        hex.chars()
+            .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)),
+        "id '{id}' must be lowercase hex"
+    );
+}
+
+/// Author a scene at `base_revision` and return the id the server minted.
+///
+/// The patch response is a revision envelope with empty side effects, so the
+/// created id is observed through the canonical refetch — exactly how clients
+/// obtain it.
+async fn authored_scene(fx: &Fixture, base_revision: u64, chapter_id: u64, title: &str) -> String {
+    fx.core
+        .patch_outline_structure(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            structure_request(serde_json::json!({
+                "work_id": fx.work_id, "base_revision": base_revision,
+                "operation": "add_scene", "chapter_id": chapter_id, "title": title
+            })),
+        )
+        .await
+        .expect("add_scene must be accepted");
+    fx.core
+        .work_outline(&fx.principal, fx.work_id.clone())
+        .await
+        .expect("outline read")
+        .scenes
+        .into_iter()
+        .find(|scene| scene.title == title)
+        .unwrap_or_else(|| panic!("authored scene '{title}'"))
+        .scene_id
+}
+
+/// Author a beat under `scene_id` at `base_revision`; returns its minted id.
+async fn authored_beat(fx: &Fixture, base_revision: u64, scene_id: &str, title: &str) -> String {
+    fx.core
+        .patch_outline_structure(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            structure_request(serde_json::json!({
+                "work_id": fx.work_id, "base_revision": base_revision,
+                "operation": "add_beat", "scene_id": scene_id, "title": title
+            })),
+        )
+        .await
+        .expect("add_beat must be accepted");
+    fx.core
+        .work_outline(&fx.principal, fx.work_id.clone())
+        .await
+        .expect("outline read")
+        .beats
+        .into_iter()
+        .find(|beat| beat.title == title)
+        .unwrap_or_else(|| panic!("authored beat '{title}'"))
+        .beat_id
+}
+
+/// `add_scene` / `add_beat` mint ids bound to their parent, one revision bump
+/// per accepted operation, `drafted` as the omitted-status default and
+/// `completed` as the other accepted value.
+#[tokio::test]
+async fn retained_outline_scene_beat_authoring_round_trip() {
+    let fx = setup().await;
+    assert_eq!(outline_revision(&fx).await, 0);
+
+    let opening = authored_scene(&fx, 0, 1, "Opening Scene").await;
+    assert_minted_id(&opening, "scn_");
+    let storm = authored_scene(&fx, 1, 2, "Storm Scene").await;
+    assert_minted_id(&storm, "scn_");
+    assert_ne!(opening, storm, "each add_scene mints a fresh id");
+
+    let completed = fx
+        .core
+        .patch_outline_structure(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            structure_request(serde_json::json!({
+                "work_id": fx.work_id, "base_revision": 2,
+                "operation": "add_scene", "chapter_id": 3,
+                "title": "Aftermath", "status": "completed"
+            })),
+        )
+        .await
+        .expect("add_scene with an explicit status");
+    assert_eq!(completed.new_revision, NonZeroU64::new(3).unwrap());
+
+    let inciting = authored_beat(&fx, 3, &opening, "Inciting Moment").await;
+    assert_minted_id(&inciting, "bet_");
+    let reaction = authored_beat(&fx, 4, &storm, "Reaction Beat").await;
+
+    let outline = fx
+        .core
+        .work_outline(&fx.principal, fx.work_id.clone())
+        .await
+        .expect("outline read");
+    assert_eq!(
+        outline.outline_revision, 5,
+        "one revision bump per accepted operation"
+    );
+    assert_eq!(outline.scenes.len(), 3);
+    assert_eq!(outline.beats.len(), 2);
+
+    let opening_row = outline
+        .scenes
+        .iter()
+        .find(|scene| scene.scene_id == opening)
+        .expect("opening scene row");
+    assert_eq!(opening_row.chapter_id, NonZeroU64::new(1).unwrap());
+    assert_eq!(opening_row.title, "Opening Scene");
+    assert_eq!(opening_row.status, WorkOutlineScenesItemStatus::Drafted);
+
+    let aftermath = outline
+        .scenes
+        .iter()
+        .find(|scene| scene.title == "Aftermath")
+        .expect("aftermath scene row");
+    assert_eq!(
+        aftermath.status,
+        WorkOutlineScenesItemStatus::Completed,
+        "the declared completed value is persisted verbatim"
+    );
+
+    let inciting_row = outline
+        .beats
+        .iter()
+        .find(|beat| beat.beat_id == inciting)
+        .expect("inciting beat row");
+    assert_eq!(inciting_row.scene_id, opening, "the beat keeps its parent");
+    assert_eq!(inciting_row.status, WorkOutlineBeatsItemStatus::Drafted);
+    let reaction_row = outline
+        .beats
+        .iter()
+        .find(|beat| beat.beat_id == reaction)
+        .expect("reaction beat row");
+    assert_eq!(reaction_row.scene_id, storm);
+
+    fx.pool.close().await;
+    fx.core.close().await.unwrap();
+}
+
+/// `remove_beat` drops exactly one beat; `remove_scene` cascades that scene's
+/// beats in the same single revision bump.
+#[tokio::test]
+async fn retained_outline_scene_beat_removals() {
+    let fx = setup().await;
+    let scene_a = authored_scene(&fx, 0, 1, "Scene A").await;
+    let scene_b = authored_scene(&fx, 1, 2, "Scene B").await;
+    let beat_a1 = authored_beat(&fx, 2, &scene_a, "Beat A1").await;
+    let beat_a2 = authored_beat(&fx, 3, &scene_a, "Beat A2").await;
+    let beat_b1 = authored_beat(&fx, 4, &scene_b, "Beat B1").await;
+
+    let removed_beat = fx
+        .core
+        .patch_outline_structure(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            structure_request(serde_json::json!({
+                "work_id": fx.work_id, "base_revision": 5,
+                "operation": "remove_beat", "beat_id": beat_a2
+            })),
+        )
+        .await
+        .expect("remove_beat");
+    assert_eq!(removed_beat.new_revision, NonZeroU64::new(6).unwrap());
+    let outline = fx
+        .core
+        .work_outline(&fx.principal, fx.work_id.clone())
+        .await
+        .expect("outline read");
+    assert!(
+        outline.beats.iter().all(|beat| beat.beat_id != beat_a2),
+        "the removed beat is gone"
+    );
+    assert_eq!(outline.beats.len(), 2, "only that beat is removed");
+    assert_eq!(outline.scenes.len(), 2, "beats never remove their scene");
+
+    let removed_scene = fx
+        .core
+        .patch_outline_structure(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            structure_request(serde_json::json!({
+                "work_id": fx.work_id, "base_revision": 6,
+                "operation": "remove_scene", "scene_id": scene_a
+            })),
+        )
+        .await
+        .expect("remove_scene");
+    assert_eq!(removed_scene.new_revision, NonZeroU64::new(7).unwrap());
+    let outline = fx
+        .core
+        .work_outline(&fx.principal, fx.work_id.clone())
+        .await
+        .expect("outline read");
+    assert_eq!(outline.outline_revision, 7, "one bump for the cascade");
+    assert!(outline.scenes.iter().all(|scene| scene.scene_id != scene_a));
+    assert!(
+        outline.beats.iter().all(|beat| beat.scene_id != scene_a),
+        "the removed scene's beats cascade with it: {:?}",
+        outline.beats
+    );
+    assert_eq!(outline.beats.len(), 1);
+    assert_eq!(outline.beats[0].beat_id, beat_b1);
+    assert!(outline.beats.iter().all(|beat| beat.beat_id != beat_a1));
+
+    fx.pool.close().await;
+    fx.core.close().await.unwrap();
+}
+
+/// Unknown chapter / scene / beat ids refuse with the not-found class, a blank
+/// title with the structured validation class, and every refusal leaves the
+/// canonical outline byte-identical.
+#[tokio::test]
+async fn retained_outline_scene_beat_unknown_ids_refuse() {
+    let fx = setup().await;
+    let scene = authored_scene(&fx, 0, 1, "Real Scene").await;
+    let _beat = authored_beat(&fx, 1, &scene, "Real Beat").await;
+
+    let before = serde_json::to_value(
+        fx.core
+            .work_outline(&fx.principal, fx.work_id.clone())
+            .await
+            .expect("outline read"),
+    )
+    .unwrap();
+
+    let unknown_chapter = fx
+        .core
+        .patch_outline_structure(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            structure_request(serde_json::json!({
+                "work_id": fx.work_id, "base_revision": 2,
+                "operation": "add_scene", "chapter_id": 99, "title": "Orphan"
+            })),
+        )
+        .await;
+    assert!(
+        matches!(unknown_chapter, Err(CoreError::NotFound { .. })),
+        "add_scene on an unknown chapter: {unknown_chapter:?}"
+    );
+
+    let unknown_scene = fx
+        .core
+        .patch_outline_structure(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            structure_request(serde_json::json!({
+                "work_id": fx.work_id, "base_revision": 2,
+                "operation": "add_beat", "scene_id": "scn_missing", "title": "Orphan"
+            })),
+        )
+        .await;
+    assert!(
+        matches!(unknown_scene, Err(CoreError::NotFound { .. })),
+        "add_beat on an unknown scene: {unknown_scene:?}"
+    );
+
+    let unknown_removed_scene = fx
+        .core
+        .patch_outline_structure(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            structure_request(serde_json::json!({
+                "work_id": fx.work_id, "base_revision": 2,
+                "operation": "remove_scene", "scene_id": "scn_missing"
+            })),
+        )
+        .await;
+    assert!(
+        matches!(unknown_removed_scene, Err(CoreError::NotFound { .. })),
+        "remove_scene on an unknown scene: {unknown_removed_scene:?}"
+    );
+
+    let unknown_removed_beat = fx
+        .core
+        .patch_outline_structure(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            structure_request(serde_json::json!({
+                "work_id": fx.work_id, "base_revision": 2,
+                "operation": "remove_beat", "beat_id": "bet_missing"
+            })),
+        )
+        .await;
+    assert!(
+        matches!(unknown_removed_beat, Err(CoreError::NotFound { .. })),
+        "remove_beat on an unknown beat: {unknown_removed_beat:?}"
+    );
+
+    let blank_title = fx
+        .core
+        .patch_outline_structure(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            structure_request(serde_json::json!({
+                "work_id": fx.work_id, "base_revision": 2,
+                "operation": "add_scene", "chapter_id": 1, "title": "   "
+            })),
+        )
+        .await;
+    assert_outline_validation("blank scene title", blank_title, "must not be blank");
+
+    let after = serde_json::to_value(
+        fx.core
+            .work_outline(&fx.principal, fx.work_id.clone())
+            .await
+            .expect("outline read"),
+    )
+    .unwrap();
+    assert_eq!(after, before, "refusals never mutate the outline");
+
+    fx.pool.close().await;
+    fx.core.close().await.unwrap();
+}
+
+/// All four scene/beat operations resolve the owning chapter and refuse on a
+/// published one — a beat cannot bypass the guard through its scene id.
+#[tokio::test]
+async fn retained_outline_scene_beat_published_chapter_guard() {
+    let fx = setup().await;
+    let scene = authored_scene(&fx, 0, 1, "Frozen Scene").await;
+    let beat = authored_beat(&fx, 1, &scene, "Frozen Beat").await;
+    sqlx::query("UPDATE work_chapters SET status = 'published' WHERE work_id = ? AND chapter = 1")
+        .bind(&fx.work_id)
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+
+    let before = serde_json::to_value(
+        fx.core
+            .work_outline(&fx.principal, fx.work_id.clone())
+            .await
+            .expect("outline read"),
+    )
+    .unwrap();
+
+    let add_scene = fx
+        .core
+        .patch_outline_structure(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            structure_request(serde_json::json!({
+                "work_id": fx.work_id, "base_revision": 2,
+                "operation": "add_scene", "chapter_id": 1, "title": "Blocked Scene"
+            })),
+        )
+        .await;
+    assert_outline_validation("published add_scene", add_scene, "published chapter 1");
+
+    let add_beat = fx
+        .core
+        .patch_outline_structure(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            structure_request(serde_json::json!({
+                "work_id": fx.work_id, "base_revision": 2,
+                "operation": "add_beat", "scene_id": scene, "title": "Blocked Beat"
+            })),
+        )
+        .await;
+    assert_outline_validation(
+        "published add_beat through a scene id",
+        add_beat,
+        "published chapter 1",
+    );
+
+    let remove_beat = fx
+        .core
+        .patch_outline_structure(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            structure_request(serde_json::json!({
+                "work_id": fx.work_id, "base_revision": 2,
+                "operation": "remove_beat", "beat_id": beat
+            })),
+        )
+        .await;
+    assert_outline_validation(
+        "published remove_beat through a scene id",
+        remove_beat,
+        "published chapter 1",
+    );
+
+    let remove_scene = fx
+        .core
+        .patch_outline_structure(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            structure_request(serde_json::json!({
+                "work_id": fx.work_id, "base_revision": 2,
+                "operation": "remove_scene", "scene_id": scene
+            })),
+        )
+        .await;
+    assert_outline_validation("published remove_scene", remove_scene, "published chapter 1");
+
+    let after = serde_json::to_value(
+        fx.core
+            .work_outline(&fx.principal, fx.work_id.clone())
+            .await
+            .expect("outline read"),
+    )
+    .unwrap();
+    assert_eq!(after, before, "refusals never mutate the outline");
+
+    fx.pool.close().await;
+    fx.core.close().await.unwrap();
+}
+
+/// A stale `base_revision` is the retained CAS conflict, and the refusal
+/// leaves the persisted scene/beat carrier untouched.
+#[tokio::test]
+async fn retained_outline_scene_beat_stale_revision_conflicts() {
+    let fx = setup().await;
+    let _scene = authored_scene(&fx, 0, 1, "Scene").await;
+
+    let before = serde_json::to_value(
+        fx.core
+            .work_outline(&fx.principal, fx.work_id.clone())
+            .await
+            .expect("outline read"),
+    )
+    .unwrap();
+
+    let stale = fx
+        .core
+        .patch_outline_structure(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            structure_request(serde_json::json!({
+                "work_id": fx.work_id, "base_revision": 0,
+                "operation": "add_scene", "chapter_id": 2, "title": "Stale Scene"
+            })),
+        )
+        .await
+        .expect_err("a stale base_revision must conflict");
+    let CoreError::OutlineConflict(details) = stale else {
+        panic!("expected a typed outline conflict, got {stale:?}");
+    };
+    assert_eq!(details.current_revision, 1);
+    assert_eq!(details.conflicting_path, "outline_revision");
+
+    let after = serde_json::to_value(
+        fx.core
+            .work_outline(&fx.principal, fx.work_id.clone())
+            .await
+            .expect("outline read"),
+    )
+    .unwrap();
+    assert_eq!(after, before, "the conflict left the outline untouched");
 
     fx.pool.close().await;
     fx.core.close().await.unwrap();
