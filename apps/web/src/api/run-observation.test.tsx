@@ -80,6 +80,7 @@ function observeRun(client: NexusClient, runId: string | null): Probe {
 const GAP: WorkflowObservationFrame = { kind: 'gap' };
 const HISTORY_UNAVAILABLE: WorkflowObservationFrame = { kind: 'history_unavailable' };
 
+/** The durable run statuses the core projects into a `run_state` frame. */
 function runState(id: string, status = 'running'): WorkflowObservationFrame {
   const sequence = Number(id.slice(id.indexOf(':') + 1));
   return {
@@ -136,7 +137,7 @@ describe('useRunObservation — replay/live handoff', () => {
     const { client, calls } = stubClientFor([
       (options) => openStream(options, runState('e1:1'), hostEvent('e1:2')),
       // The re-entry replay re-delivers the last id the client already holds.
-      (options) => openStream(options, hostEvent('e1:2'), runState('e1:3', 'succeeded')),
+      (options) => openStream(options, hostEvent('e1:2'), runState('e1:3')),
     ]);
 
     const first = observeRun(client, 'run-replay');
@@ -149,6 +150,7 @@ describe('useRunObservation — replay/live handoff', () => {
     const reentry = observeRun(client, 'run-replay');
     // The already-emitted history is on screen immediately — never a blank view.
     expect(reentry.result.current.events.map(cursorOf)).toEqual(['e1:1', 'e1:2']);
+    expect(reentry.result.current.phase).toBe('replaying');
 
     await waitFor(() => expect(reentry.result.current.phase).toBe('live'));
     expect(calls[1].lastEventId).toBe('e1:2');
@@ -167,20 +169,62 @@ describe('useRunObservation — replay/live handoff', () => {
     expect(calls[0].lastEventId).toBeUndefined();
     expect(probe.phases).toContain('connecting');
     expect(probe.phases).not.toContain('replaying');
+    // No retained history to catch up: every frame of this view is the live tail.
+    expect(probe.result.current.liveFrom).toBe(0);
+  });
+
+  it('draws the boundary after a multi-frame re-entry catch-up and appends the live tail past it', async () => {
+    const { client, calls } = stubClientFor([
+      (options) => openStream(options, runState('e1:1'), hostEvent('e1:2')),
+      async function* reentry(options: SubscribeOptions) {
+        // Missed while the view was closed: the server's strictly-after replay.
+        yield runState('e1:3');
+        yield hostEvent('e1:4');
+        // The catch-up settles, then the run appends for real.
+        await wait(300);
+        yield hostEvent('e1:5');
+        if (options.signal.aborted) return;
+        await new Promise<void>((resolve) => {
+          options.signal.addEventListener('abort', () => resolve(), { once: true });
+        });
+      },
+    ]);
+
+    const first = observeRun(client, 'run-boundary');
+    await waitFor(() => expect(first.result.current.phase).toBe('live'));
+    first.unmount();
+
+    const reentry = observeRun(client, 'run-boundary');
+    await waitFor(() => expect(reentry.result.current.events.map(cursorOf)).toContain('e1:5'));
+
+    expect(calls[1].lastEventId).toBe('e1:2');
+    expect(reentry.result.current.events.map(cursorOf)).toEqual([
+      'e1:1',
+      'e1:2',
+      'e1:3',
+      'e1:4',
+      'e1:5',
+    ]);
+    // The two replayed frames are history; only the append after the settle is live.
+    expect(reentry.result.current.liveFrom).toBe(4);
+    expect(reentry.result.current.phase).toBe('live');
+    expect(reentry.phases.indexOf('replaying')).toBeLessThan(reentry.phases.indexOf('live'));
   });
 });
 
 describe('useRunObservation — gap recovery', () => {
-  it('surfaces gapped and reconnects from the last received id', async () => {
+  it('aborts an inline gap on an open stream and resubscribes from the last received id', async () => {
     const { client, calls } = stubClientFor([
-      () => frames(runState('e1:1'), hostEvent('e1:2'), GAP),
+      // The server delivers the gap and then keeps the stream open.
+      (options) => openStream(options, runState('e1:1'), hostEvent('e1:2'), GAP),
       (options) => openStream(options),
     ]);
 
-    const probe = observeRun(client, 'run-gap-id');
+    const probe = observeRun(client, 'run-gap-inline');
     await waitFor(() => expect(calls.length).toBe(2));
 
     expect(calls[1].lastEventId).toBe('e1:2');
+    expect(calls[0].signal.aborted).toBe(true);
     expect(probe.phases).toContain('gapped');
     expect(probe.result.current.phase).toBe('gapped');
     expect(probe.result.current.events.map(cursorOf)).toEqual(['e1:1', 'e1:2', 'gap']);
@@ -188,7 +232,7 @@ describe('useRunObservation — gap recovery', () => {
 
   it('resumes the live tail on the reconnect after a gap', async () => {
     const { client, calls } = stubClientFor([
-      () => frames(runState('e1:1'), GAP),
+      (options) => openStream(options, runState('e1:1'), GAP),
       (options) => openStream(options, hostEvent('e1:2')),
     ]);
 
@@ -217,9 +261,9 @@ describe('useRunObservation — gap recovery', () => {
 });
 
 describe('useRunObservation — terminal', () => {
-  it('reaches terminal on a clean stream end and never resubscribes', async () => {
+  it('reaches terminal on a clean stream end at a terminal run state and never resubscribes', async () => {
     const { client, calls } = stubClientFor([
-      () => frames(runState('e1:1'), runState('e1:2', 'succeeded')),
+      () => frames(runState('e1:1'), runState('e1:2', 'completed')),
     ]);
 
     const probe = observeRun(client, 'run-terminal');
@@ -229,6 +273,33 @@ describe('useRunObservation — terminal', () => {
     await wait(300);
     expect(calls.length).toBe(1);
     expect(probe.result.current.phase).toBe('terminal');
+  });
+
+  it('reconnects from the cursor when a clean stream end leaves the run still running', async () => {
+    const { client, calls } = stubClientFor([
+      () => frames(runState('e1:1'), hostEvent('e1:2')),
+      (options) => openStream(options, runState('e1:3')),
+    ]);
+
+    const probe = observeRun(client, 'run-eof-running');
+    await waitFor(() => expect(calls.length).toBe(2), { timeout: 5_000 });
+
+    expect(calls[1].lastEventId).toBe('e1:2');
+    expect(probe.result.current.events.map(cursorOf)).toEqual(['e1:1', 'e1:2', 'e1:3']);
+    await waitFor(() => expect(probe.result.current.phase).toBe('live'));
+  });
+
+  it('bounds the reconnect policy when a clean end keeps reporting a running run', async () => {
+    const { client, calls } = stubClientFor([() => frames(runState('e1:1'))]);
+
+    const probe = observeRun(client, 'run-eof-loop');
+    await waitFor(() => expect(probe.result.current.phase).toBe('error'), { timeout: 5_000 });
+
+    expect(calls.length).toBe(4);
+    expect(probe.result.current.error).toBeInstanceOf(Error);
+
+    await wait(900);
+    expect(calls.length).toBe(4);
   });
 
   it('treats a history_unavailable close as terminal and records the marker', async () => {
@@ -294,5 +365,44 @@ describe('useRunObservation — failure and unmount', () => {
 
     await wait(300);
     expect(calls.length).toBe(1);
+  });
+});
+
+describe('useRunObservation — retention bounds', () => {
+  it('drops a run’s retained history once the run reaches a terminal state', async () => {
+    const { client, calls } = stubClientFor([
+      () => frames(runState('e1:1'), runState('e1:2', 'completed')),
+    ]);
+
+    const first = observeRun(client, 'run-evicted');
+    await waitFor(() => expect(first.result.current.phase).toBe('terminal'));
+    first.unmount();
+
+    // A closed run is re-observed from the server's own ring, not from the SPA.
+    const again = observeRun(client, 'run-evicted');
+    expect(again.result.current.phase).toBe('connecting');
+    expect(again.result.current.events).toEqual([]);
+    await waitFor(() => expect(calls.length).toBe(2));
+    expect(calls[1].lastEventId).toBeUndefined();
+  });
+
+  it('caps the retained history per run, keeping the newest frames', async () => {
+    async function* many(options: SubscribeOptions) {
+      for (let sequence = 1; sequence <= 300; sequence += 1) yield hostEvent(`e1:${sequence}`);
+      if (options.signal.aborted) return;
+      await new Promise<void>((resolve) => {
+        options.signal.addEventListener('abort', () => resolve(), { once: true });
+      });
+    }
+
+    const { client } = stubClientFor([(options) => many(options)]);
+    const probe = observeRun(client, 'run-capped');
+    await waitFor(() => expect(probe.result.current.events.length).toBeGreaterThan(128));
+
+    const retained = probe.result.current.events;
+    expect(retained.length).toBeLessThan(300);
+    expect(cursorOf(retained[retained.length - 1])).toBe('e1:300');
+    expect(retained.some((frame) => cursorOf(frame) === 'e1:1')).toBe(false);
+    expect(probe.result.current.lastEventId).toBe('e1:300');
   });
 });

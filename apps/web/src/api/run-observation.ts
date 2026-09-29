@@ -9,41 +9,60 @@
  * `<epoch>:<sequence>` cursor verbatim.
  *
  * Phases:
- *  - `connecting` — a subscription is in flight for the current attempt and no
- *    frame has been observed yet in this view (also the resting phase when no
- *    run is selected).
- *  - `replaying` — the same run's already-received frames were restored from
- *    the retained cursor/history cache and are on screen; the current
- *    subscription has not yet handed off to a new frame.
- *  - `live` — the subscription delivered a data frame: the live tail is
- *    attached, and frames keep appending without a manual refresh.
- *  - `gapped` — the stream reported an explicit gap (history the client never
- *    received). Never silently skipped: the gap marker stays in `events`, and
- *    the hook reconnects from the last received id; exhausted retries stay
- *    honestly `gapped` with the `retry` affordance.
- *  - `terminal` — the stream ended (a closed/terminal batch, or the
- *    `history_unavailable` close). No automatic resubscribe: an
- *    auto-reconnecting transport would loop the replay.
+ *  - `connecting` — a subscription attempt is in flight and no frame has been
+ *    observed yet (also the resting phase when no run is selected).
+ *  - `replaying` — history is on screen that has not been confirmed as the live
+ *    tail: the re-entered view's restored frames, plus the strictly-after replay
+ *    the server delivers when the view reattaches. See the boundary note below.
+ *  - `live` — the view has caught up; frames append without a manual refresh.
+ *  - `gapped` — the stream reported an explicit gap (history this view never
+ *    received). The marker stays inline in `events` and the hook recovers by
+ *    resubscribing from the last received id; exhausted retries stay honestly
+ *    `gapped` with the `retry` affordance.
+ *  - `terminal` — the lifecycle ended on a terminal statement: a
+ *    `history_unavailable` close, or a clean stream end whose latest observed
+ *    durable run status is terminal. No automatic resubscribe.
  *  - `error` — a typed non-200 refusal (absent/foreign/child run, malformed
  *    cursor, subscriber cap) or exhausted transport retries; `error` carries
  *    the reason and `retry` re-arms the subscription.
  *
- * Replay/live handoff: the frames present when the view mounts (restored from
- * the retained cache) are the replayed history; frames appended after the
- * phase reaches `live` are the live tail. The phase flip is the atomic handoff
- * boundary the run view marks — the hook never duplicates a cursor, so a
- * replayed frame and its live re-delivery collapse into one entry.
+ * Replay/live boundary (`liveFrom`): the wire carries no replay/live marker —
+ * the service forwards the run ring's frames verbatim and the retained
+ * contract's "atomic replay/live handoff" is a server-side guarantee. The one
+ * boundary the client can honor is therefore its own attach boundary: on
+ * re-entry the restored history and the server's strictly-after replay are the
+ * catch-up, and the live tail begins once the stream is observed to have come
+ * to rest (the server writes the replay immediately after the response headers
+ * and then blocks on its pull gate). `liveFrom` is the index of the first live
+ * event: `events.slice(0, liveFrom)` is replayed history, the rest is live. It
+ * advances while the catch-up window is open and freezes at the handoff.
  *
- * Re-entry (`Reopening a session's run view`) subscribes with the retained
- * cursor, which the server answers with a strictly-after replay — the browser
- * never re-renders a blank view and never re-requests frames it already shows.
- * Unmount/navigation aborts the iterator, which releases the run's subscriber
- * permit server-side.
+ * `gap` handling: a gap ends the current subscription immediately (`abort`) and
+ * the hook resubscribes from the last cursor it actually received under the
+ * bounded retry policy. The server delivers a gap and then keeps the stream
+ * open for the live tail (`workflow-observation.ts`), so waiting for the
+ * iterator to end would stall recovery behind the very stream the gap
+ * invalidated.
  *
- * `simplify:` retention is one in-memory entry per observed run for the SPA
- * session and is never evicted — a run's own ring is bounded (256 frames /
- * 1 MiB), so the retained copy is bounded too. Swap for an LRU or a
- * `sessionStorage` cap if the set of observed runs ever stops being small.
+ * Stream end: only a terminal statement ends the lifecycle. A clean transport
+ * EOF while the latest observed run status is non-terminal (or unknown) is a
+ * transport failure — the server can also close an active stream on a pull
+ * fault after the SSE headers — and reconnects from the cursor under the same
+ * bounded policy. A clean EOF never earns a fresh retry budget, so a server
+ * that keeps closing cannot turn the hook into a reconnect loop.
+ *
+ * Retention: one entry per observed run, dropped as soon as the run reaches its
+ * terminal lifecycle end (a finished run is re-observable from the server's own
+ * ring instead of being pinned in the SPA). Each entry keeps at most
+ * `MAX_RETAINED_EVENTS` frames — the server ring's own 256-frame window — and a
+ * single monotonic cursor instead of a growing id set, so neither the frame
+ * list nor the cursor store grows without bound over a long-lived run.
+ * `events` is that retained buffer itself, mutated in place and re-published
+ * per frame (no per-frame copy of the whole history); memoize on
+ * `events.length` / `lastEventId` rather than on the array identity.
+ *
+ * `simplify:` the module map still keeps every run that has not ended yet; swap
+ * for an LRU if the set of simultaneously-observed runs ever stops being small.
  */
 import { useCallback, useEffect, useState } from 'react';
 
@@ -64,12 +83,21 @@ export interface RunObservationState {
   /** Current phase of the observed run's stream. */
   phase: RunObservationPhase;
   /**
-   * Every frame observed for this run, in receive order, each cursor `id` at
-   * most once. `gap`/`history_unavailable` control frames are kept inline so
-   * the run view can render where continuity was lost rather than smoothing
-   * over it.
+   * Every frame observed for this run, in ring order, each cursor `id` at most
+   * once. `gap`/`history_unavailable` control frames are kept inline so the run
+   * view can render where continuity was lost rather than smoothing over it.
+   *
+   * This is the hook's bounded retained buffer, re-published per frame: read it
+   * directly, and memoize on `events.length` / `lastEventId` rather than on the
+   * array identity.
    */
   events: WorkflowObservationFrame[];
+  /**
+   * Index into `events` of the first live-tail frame: `events.slice(0, liveFrom)`
+   * is replayed history (the re-entered span plus the server's strictly-after
+   * replay), `events.slice(liveFrom)` arrived once the view had caught up.
+   */
+  liveFrom: number;
   /** Last received `<epoch>:<sequence>` cursor, or `null` before any frame. */
   lastEventId: string | null;
   /** Why the stream is in `error` (typed refusal or exhausted retries). */
@@ -87,10 +115,33 @@ const MAX_RECONNECT_ATTEMPTS = 3;
 /** Backoff before reconnect attempt N (index N-1); one entry per attempt. */
 const RECONNECT_BACKOFF_MS = [200, 400, 800];
 
+/** Frames retained per run — the server ring's own window (`daemon-runtime` §20.2). */
+const MAX_RETAINED_EVENTS = 256;
+
+/** Quiet period that ends the view's catch-up replay and hands off to the live tail. */
+const CATCH_UP_SETTLE_MS = 120;
+
+/** Ceiling on the catch-up window, so an actively streaming run still hands off. */
+const CATCH_UP_MAX_MS = 1_000;
+
+/**
+ * Durable run statuses that end the lifecycle — the core's
+ * `SessionStatus::is_terminal` (`crates/nexus-orchestration/src/engine.rs`).
+ * Every other status (and an unknown one) keeps the run's stream alive, so a
+ * clean EOF under it is a transport failure, not a terminal state.
+ */
+const TERMINAL_RUN_STATUS: Record<string, true> = {
+  completed: true,
+  failed: true,
+  cancelled: true,
+  interrupted: true,
+};
+
 interface RetainedObservation {
   events: WorkflowObservationFrame[];
-  seenIds: Set<string>;
   lastEventId: string | null;
+  /** Durable status of the latest `run_state` frame, or `null` if none seen. */
+  latestStatus: string | null;
 }
 
 const retainedObservations = new Map<string, RetainedObservation>();
@@ -98,13 +149,40 @@ const retainedObservations = new Map<string, RetainedObservation>();
 function retainedFor(sessionId: string): RetainedObservation {
   const existing = retainedObservations.get(sessionId);
   if (existing) return existing;
-  const created: RetainedObservation = {
-    events: [],
-    seenIds: new Set(),
-    lastEventId: null,
-  };
+  const created: RetainedObservation = { events: [], lastEventId: null, latestStatus: null };
   retainedObservations.set(sessionId, created);
   return created;
+}
+
+/** Append one frame, keeping the retained window bounded. */
+function retain(retained: RetainedObservation, frame: WorkflowObservationFrame): void {
+  retained.events.push(frame);
+  const overflow = retained.events.length - MAX_RETAINED_EVENTS;
+  if (overflow > 0) retained.events.splice(0, overflow);
+}
+
+/** The `<epoch>:<sequence>` halves of a cursor, or `null` when it is not one. */
+function cursorParts(cursor: string): { epoch: string; sequence: number } | null {
+  const at = cursor.indexOf(':');
+  if (at <= 0) return null;
+  const sequence = Number(cursor.slice(at + 1));
+  return Number.isSafeInteger(sequence) ? { epoch: cursor.slice(0, at), sequence } : null;
+}
+
+/**
+ * True when `id` names a cursor this view already holds (or one older than it)
+ * — a re-delivered frame, which must never be appended twice. The server's
+ * `Last-Event-ID` resume is strictly-after, with the sent cursor itself the
+ * only inclusive redelivery, so a monotonic per-epoch comparison IS the
+ * deduplication; a changing epoch is a different ring and is never stale.
+ */
+function isReplayedCursor(id: string, previous: string | null): boolean {
+  if (previous === null) return false;
+  if (id === previous) return true;
+  const current = cursorParts(id);
+  const last = cursorParts(previous);
+  if (current === null || last === null) return false;
+  return current.epoch === last.epoch && current.sequence <= last.sequence;
 }
 
 /** A non-200 answer is a typed refusal: retrying cannot change it. */
@@ -128,28 +206,68 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
   const [snapshot, setSnapshot] = useState<RunObservationState>({
     phase: 'connecting',
     events: [],
+    liveFrom: 0,
     lastEventId: null,
     error: null,
   });
 
   useEffect(() => {
     if (!sessionId) {
-      setSnapshot({ phase: 'connecting', events: [], lastEventId: null, error: null });
+      setSnapshot({ phase: 'connecting', events: [], liveFrom: 0, lastEventId: null, error: null });
       return;
     }
 
     const retained = retainedFor(sessionId);
-    const controller = new AbortController();
     let cancelled = false;
+    /** The subscription attempt in flight: aborted at a gap or on unmount. */
+    let attempt: AbortController | null = null;
+    /** Re-entry catch-up window: re-armed per catch-up frame, capped in total. */
+    let settleTimer: ReturnType<typeof setTimeout> | undefined;
+    let capTimer: ReturnType<typeof setTimeout> | undefined;
 
-    // Re-entry shows what this run already emitted instead of a blank view; the
-    // first frame of the new subscription hands off to the live tail.
-    setSnapshot({
-      phase: retained.events.length > 0 ? 'replaying' : 'connecting',
-      events: retained.events,
-      lastEventId: retained.lastEventId,
-      error: null,
-    });
+    // Re-entry restores what this run already emitted; a first view starts at
+    // `connecting` and its frames are the live tail (there is no catch-up span).
+    // A retained cursor IS the history: control frames alone are no catch-up.
+    let phase: RunObservationPhase = retained.lastEventId !== null ? 'replaying' : 'connecting';
+    let liveFrom = retained.events.length;
+    let catchingUp = retained.lastEventId !== null;
+
+    const clearCatchUp = (): void => {
+      clearTimeout(settleTimer);
+      clearTimeout(capTimer);
+      settleTimer = undefined;
+      capTimer = undefined;
+    };
+
+    const publish = (error: Error | null): void => {
+      setSnapshot({
+        phase,
+        events: retained.events,
+        liveFrom,
+        lastEventId: retained.lastEventId,
+        error,
+      });
+    };
+
+    /** End the catch-up window: everything received so far is history, the rest is live. */
+    const handOff = (): void => {
+      clearCatchUp();
+      if (cancelled || !catchingUp) return;
+      catchingUp = false;
+      liveFrom = retained.events.length;
+      if (phase === 'replaying') {
+        phase = 'live';
+        publish(null);
+      }
+    };
+
+    const armCatchUp = (): void => {
+      clearTimeout(settleTimer);
+      settleTimer = setTimeout(handOff, CATCH_UP_SETTLE_MS);
+      capTimer ??= setTimeout(handOff, CATCH_UP_MAX_MS);
+    };
+
+    publish(null);
 
     void (async () => {
       let consecutiveFailures = 0;
@@ -161,8 +279,10 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
         let outcome: 'end' | 'gap' | 'unavailable' | 'failed' = 'end';
         let failure: unknown;
         let receivedData = false;
-        /** A gap with no data frame after it: our cursor is behind the ring. */
-        let gappedAtClose = false;
+
+        const controller = new AbortController();
+        attempt = controller;
+        if (catchingUp) armCatchUp();
 
         try {
           for await (const frame of client.subscribeWorkflowEvents(sessionId, {
@@ -172,79 +292,101 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
             if (cancelled) return;
 
             if (frame.kind === 'gap') {
-              // The ring skipped a range we never received. Record the hole and
-              // keep reading: a retention gap is followed by the frames the
-              // ring still holds. If the stream closes on this gap, the attempt
-              // below reconnects from the last id we actually received.
-              gappedAtClose = true;
-              retained.events = [...retained.events, frame];
-              setSnapshot((prev) => ({ ...prev, phase: 'gapped', events: retained.events }));
-              continue;
+              // The ring skipped a range this view never received. Record the
+              // hole inline, end this subscription now, and recover by
+              // resubscribing from the last cursor actually received (§3) —
+              // the server follows a gap with the frames it still holds and
+              // then keeps the stream open, so waiting for the iterator to end
+              // would stall recovery behind the live tail.
+              retain(retained, frame);
+              outcome = 'gap';
+              catchingUp = false;
+              clearCatchUp();
+              phase = 'gapped';
+              publish(null);
+              controller.abort();
+              break;
             }
 
             if (frame.kind === 'history_unavailable') {
               // The retained history is gone (restart/eviction). Reconnecting
               // would only loop this same close, so this ends in `terminal`.
-              retained.events = [...retained.events, frame];
+              retain(retained, frame);
               outcome = 'unavailable';
-              setSnapshot((prev) => ({ ...prev, events: retained.events }));
-              continue;
+              break;
             }
 
             receivedData = true;
-            gappedAtClose = false;
-            if (!retained.seenIds.has(frame.id)) {
-              retained.seenIds.add(frame.id);
-              retained.lastEventId = frame.id;
-              retained.events = [...retained.events, frame];
-            }
-            setSnapshot({
-              phase: 'live',
-              events: retained.events,
-              lastEventId: retained.lastEventId,
-              error: null,
-            });
-          }
+            if (isReplayedCursor(frame.id, retained.lastEventId)) continue;
 
-          if (gappedAtClose) outcome = 'gap';
+            retained.lastEventId = frame.id;
+            if (frame.kind === 'run_state') retained.latestStatus = frame.payload.status;
+            retain(retained, frame);
+
+            if (catchingUp) {
+              liveFrom = retained.events.length;
+              phase = 'replaying';
+              armCatchUp();
+            } else {
+              phase = 'live';
+            }
+            publish(null);
+          }
         } catch (error) {
           if (cancelled) return;
           outcome = 'failed';
           failure = error;
         }
 
+        attempt = null;
+        clearCatchUp();
         if (cancelled) return;
 
-        if (outcome === 'end' || outcome === 'unavailable') {
-          setSnapshot((prev) => ({ ...prev, phase: 'terminal', error: null }));
+        if (
+          outcome === 'unavailable' ||
+          (outcome === 'end' && retained.latestStatus !== null
+            && TERMINAL_RUN_STATUS[retained.latestStatus] === true)
+        ) {
+          // A terminal statement: `history_unavailable`, or a closed batch whose
+          // latest durable status is terminal. The lifecycle is over and the run
+          // is dropped from the retention map — a finished run is re-observable
+          // from the server's own ring instead of being pinned for the session.
+          retainedObservations.delete(sessionId);
+          phase = 'terminal';
+          publish(null);
           return;
         }
 
         if (isRefusal(failure)) {
-          setSnapshot((prev) => ({ ...prev, phase: 'error', error: failure }));
+          phase = 'error';
+          publish(failure);
           return;
         }
 
-        // A productive attempt earns a fresh retry budget.
-        consecutiveFailures = receivedData ? 1 : consecutiveFailures + 1;
+        if (outcome === 'end') {
+          // A clean EOF under a non-terminal (or unknown) status is a transport
+          // failure, not an ending. It never earns a fresh budget: a server that
+          // keeps closing must not turn this into a reconnect loop.
+          consecutiveFailures += 1;
+        } else {
+          // A productive attempt earns a fresh retry budget.
+          consecutiveFailures = receivedData ? 1 : consecutiveFailures + 1;
+        }
+
         if (consecutiveFailures > MAX_RECONNECT_ATTEMPTS) {
-          setSnapshot((prev) => ({
-            ...prev,
-            phase: outcome === 'gap' ? 'gapped' : 'error',
-            error:
-              outcome === 'gap'
-                ? null
-                : failure instanceof Error
-                  ? failure
-                  : new Error('Run observation stream failed'),
-          }));
+          phase = outcome === 'gap' ? 'gapped' : 'error';
+          publish(
+            outcome === 'gap'
+              ? null
+              : failure instanceof Error
+                ? failure
+                : new Error('Run observation stream ended while the run was still running'),
+          );
           return;
         }
 
-        setSnapshot((prev) => ({
-          ...prev,
-          phase: outcome === 'gap' ? 'gapped' : 'connecting',
-        }));
+        phase = outcome === 'gap' ? 'gapped' : 'connecting';
+        publish(null);
 
         // `Promise.withResolvers` is ES2024; this app compiles against the
         // ES2022 lib (apps/web/tsconfig.json), so the executor form stays.
@@ -256,7 +398,8 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
 
     return () => {
       cancelled = true;
-      controller.abort();
+      clearCatchUp();
+      attempt?.abort();
     };
   }, [client, sessionId, retryToken]);
 
