@@ -85,7 +85,9 @@ pub fn assert_warn_emitted(messages: &Arc<Mutex<Vec<String>>>, needles: &[&str])
 }
 
 pub fn assert_warn_absent(messages: &Arc<Mutex<Vec<String>>>) {
-    let msgs = messages.lock().unwrap();
+    // Clone the buffer out of the guard so the lock is released before the
+    // assert scans/formats it (clippy::significant_drop_tightening).
+    let msgs = messages.lock().unwrap().clone();
     assert!(
         !msgs.iter().any(|message| message.starts_with("WARN ")),
         "expected no WARN trace; captured: {msgs:?}"
@@ -93,7 +95,9 @@ pub fn assert_warn_absent(messages: &Arc<Mutex<Vec<String>>>) {
 }
 
 fn assert_level_emitted(messages: &Arc<Mutex<Vec<String>>>, level: &str, needles: &[&str]) {
-    let msgs = messages.lock().unwrap();
+    // Clone the buffer out of the guard so the lock is released before the
+    // prefix build and the assert scan (clippy::significant_drop_tightening).
+    let msgs = messages.lock().unwrap().clone();
     let prefix = format!("{level} ");
     assert!(
         msgs.iter().any(|message| {
