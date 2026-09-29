@@ -7,11 +7,12 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use nexus_contracts::{
-    OutlinePatchChapterRequest, OutlinePatchResponse, OutlinePatchStructureRequest,
-    OutlinePatchStructureRequestBeatStatus, OutlinePatchStructureRequestSceneStatus,
-    TimelinePatchEventRequest, WorkOutline, WorkOutlineBeatsItem, WorkOutlineBeatsItemStatus,
-    WorkOutlineForeshadowsItem, WorkOutlineScenesItem, WorkOutlineScenesItemStatus,
-    WorkOutlineTimelineEventsItem, WorkOutlineVolumesItem,
+    world_kb_graph_response::NexusWorldKbEntityProjectionBlockType, OutlinePatchChapterRequest,
+    OutlinePatchResponse, OutlinePatchStructureRequest, OutlinePatchStructureRequestBeatStatus,
+    OutlinePatchStructureRequestSceneStatus, TimelinePatchEventRequest, WorkOutline,
+    WorkOutlineBeatsItem, WorkOutlineBeatsItemStatus, WorkOutlineForeshadowsItem,
+    WorkOutlineScenesItem, WorkOutlineScenesItemStatus, WorkOutlineTimelineEventsItem,
+    WorkOutlineVolumesItem,
 };
 use nexus_local_db::work_chapters::{self, PatchChapterParams, WorkChapterRecord};
 use nexus_local_db::works;
@@ -853,7 +854,15 @@ async fn patch_timeline_event(
         });
     }
 
-    let result = apply_timeline_patch(&req, &mut frontmatter, &chapters);
+    let binding = match resolve_validated_binding(service, principal, work, &req).await {
+        Ok(binding) => binding,
+        Err(e) => {
+            lock.release().await;
+            return Err(e);
+        }
+    };
+
+    let result = apply_timeline_patch(&req, &mut frontmatter, &chapters, &binding);
     if let Err(e) = &result {
         lock.release().await;
         return Err(e.clone());
@@ -1386,6 +1395,7 @@ fn apply_timeline_patch(
     req: &TimelinePatchEventRequest,
     frontmatter: &mut OutlineFrontmatter,
     chapters: &[WorkChapterRecord],
+    binding: &ValidatedBinding,
 ) -> Result<(), OutlineFault> {
     match req.operation.as_str() {
         "add_event" => timeline_add_event(req, frontmatter, chapters),
@@ -1393,6 +1403,20 @@ fn apply_timeline_patch(
         "attach_event_to_chapter" => timeline_attach_event_to_chapter(req, frontmatter, chapters),
         "link_foreshadow" => timeline_link_foreshadow(req, frontmatter),
         "unlink_foreshadow" => timeline_unlink_foreshadow(req, frontmatter),
+        "bind_world_event" => match binding {
+            ValidatedBinding::Bind(referent) => {
+                timeline_bind_world_event(req, frontmatter, chapters, referent)
+            }
+            // Unreachable: the async owner resolves and validates the referent
+            // before this synchronous helper runs. Kept explicit so the two
+            // halves cannot silently drift into an unvalidated write.
+            ValidatedBinding::Unbind | ValidatedBinding::None => Err(OutlineFault::Internal {
+                code: "WORLD_EVENT_BIND_UNVALIDATED".to_string(),
+                message: "bind_world_event reached mutation without a validated referent"
+                    .to_string(),
+            }),
+        },
+        "unbind_world_event" => timeline_unbind_world_event(req, frontmatter, chapters),
         operation => Err(OutlineFault::BadRequest {
             code: "invalid_timeline_operation".to_string(),
             message: format!("unsupported timeline operation '{operation}'"),
@@ -1617,4 +1641,181 @@ fn timeline_unlink_foreshadow(
         )));
     }
     Ok(())
+}
+
+// ─── Cross-surface binding (V1.200 DR-26 / DF-V1123-CROSS-SURFACE-BINDING) ──
+
+/// The outcome of the authorized World read that gates a binding mutation.
+///
+/// [`apply_timeline_patch`] is synchronous and has no database access, so the
+/// async core owner resolves the bound-World precondition first and hands the
+/// mutation helper only this validated outcome — never a payload-claimed World
+/// or an unvalidated referent.
+enum ValidatedBinding {
+    /// `bind_world_event`: the referent `key_block_id`, proven to be a
+    /// `block_type=event` entity of the Work's bound World.
+    Bind(String),
+    /// `unbind_world_event`: clear the stored referent. The previous value is
+    /// deliberately not re-validated — a referent deleted from the World KB
+    /// after the bind must remain clearable.
+    Unbind,
+    /// Any other operation: no World read was needed.
+    None,
+}
+
+/// Resolve the bound-World precondition of a binding operation and, for
+/// `bind_world_event`, prove the referent is an event of that World.
+///
+/// The Work's **stored** `world_id` is the only World authority (Work creation
+/// has required a bound World since V1.40), and the existing ownership guard
+/// runs before the graph read so a foreign or unowned World refuses as 403
+/// instead of disclosing World state. Both binding operations require the bound
+/// World; `unbind_world_event` then stops, because clearing must not depend on
+/// the old referent still existing.
+async fn resolve_validated_binding(
+    service: &CoreService,
+    principal: &Principal,
+    work: &works::WorkRecord,
+    req: &TimelinePatchEventRequest,
+) -> Result<ValidatedBinding, OutlineFault> {
+    let operation = req.operation.as_str();
+    let is_bind = operation == "bind_world_event";
+    if !is_bind && operation != "unbind_world_event" {
+        return Ok(ValidatedBinding::None);
+    }
+
+    let world_id = work
+        .world_id
+        .as_deref()
+        .ok_or_else(|| OutlineFault::Validation {
+            errors: vec![format!(
+                "work {} has no bound World; bind a World before binding World events",
+                work.work_id
+            )],
+            warnings: vec![],
+        })?;
+    crate::world_kb::guards::require_world_owner(
+        &service.inner.pool,
+        world_id,
+        principal.creator_id(),
+    )
+    .await?;
+
+    if !is_bind {
+        return Ok(ValidatedBinding::Unbind);
+    }
+
+    let referent = req
+        .world_event_id
+        .as_deref()
+        .ok_or_else(|| OutlineFault::BadRequest {
+            code: "missing_world_event_id".to_string(),
+            message: "bind_world_event requires world_event_id".to_string(),
+        })?;
+
+    let graph = crate::world_kb::graph::get_graph(
+        &service.inner.pool,
+        service.inner.access,
+        principal.creator_id(),
+        world_id,
+        false,
+    )
+    .await?;
+
+    match graph
+        .entities
+        .iter()
+        .find(|entity| entity.key_block_id == referent)
+    {
+        None => Err(OutlineFault::Validation {
+            errors: vec![format!(
+                "world event referent '{referent}' does not exist in the Work's bound World \
+                 {world_id}"
+            )],
+            warnings: vec![],
+        }),
+        Some(entity) if entity.block_type == NexusWorldKbEntityProjectionBlockType::Event => {
+            Ok(ValidatedBinding::Bind(referent.to_string()))
+        }
+        Some(entity) => Err(OutlineFault::Validation {
+            errors: vec![format!(
+                "world event referent '{referent}' is a '{}' entity in World {world_id}, not an \
+                 event",
+                entity.block_type
+            )],
+            warnings: vec![],
+        }),
+    }
+}
+
+/// Set a Work timeline event's World event binding from a validated referent.
+///
+/// The referent arrives already proven against the bound World's KB graph (see
+/// [`resolve_validated_binding`]); this helper owns only the outline-local
+/// preconditions: the event must exist in `timeline_events`, and its attached
+/// chapter must not be published.
+fn timeline_bind_world_event(
+    req: &TimelinePatchEventRequest,
+    frontmatter: &mut OutlineFrontmatter,
+    chapters: &[WorkChapterRecord],
+    referent: &str,
+) -> Result<(), OutlineFault> {
+    let event_id = req
+        .event_id
+        .as_deref()
+        .ok_or_else(|| OutlineFault::BadRequest {
+            code: "missing_event_id".to_string(),
+            message: "bind_world_event requires event_id".to_string(),
+        })?;
+    let event = frontmatter
+        .timeline_events
+        .iter_mut()
+        .find(|e| e.event_id == event_id)
+        .ok_or_else(|| OutlineFault::NotFound(format!("event {event_id}")))?;
+    ensure_event_chapter_not_published(chapters, event.realizes_chapter_id)?;
+    event.world_event_id = Some(referent.to_string());
+    Ok(())
+}
+
+/// Clear a Work timeline event's World event binding.
+///
+/// Only `event_id` is required. An event with no stored binding is accepted —
+/// the mutation rides the one revision bump the patch envelope always applies —
+/// and the old referent is never re-read, so a referent deleted from the World
+/// KB after the bind stays clearable. This is deliberately not the
+/// `unlink_foreshadow` absent-edge `NotFound` behavior.
+fn timeline_unbind_world_event(
+    req: &TimelinePatchEventRequest,
+    frontmatter: &mut OutlineFrontmatter,
+    chapters: &[WorkChapterRecord],
+) -> Result<(), OutlineFault> {
+    let event_id = req
+        .event_id
+        .as_deref()
+        .ok_or_else(|| OutlineFault::BadRequest {
+            code: "missing_event_id".to_string(),
+            message: "unbind_world_event requires event_id".to_string(),
+        })?;
+    let event = frontmatter
+        .timeline_events
+        .iter_mut()
+        .find(|e| e.event_id == event_id)
+        .ok_or_else(|| OutlineFault::NotFound(format!("event {event_id}")))?;
+    ensure_event_chapter_not_published(chapters, event.realizes_chapter_id)?;
+    event.world_event_id = None;
+    Ok(())
+}
+
+/// Apply the published-chapter refusal to a timeline event's attached chapter.
+///
+/// An event's `realizes_chapter_id` is the chapter it belongs to; an event with
+/// no attached chapter has no chapter to guard.
+fn ensure_event_chapter_not_published(
+    chapters: &[WorkChapterRecord],
+    realizes_chapter_id: Option<std::num::NonZeroU64>,
+) -> Result<(), OutlineFault> {
+    let Some(chapter_id) = realizes_chapter_id else {
+        return Ok(());
+    };
+    ensure_chapter_not_published(chapters, i64::try_from(u64::from(chapter_id)).unwrap_or(0))
 }

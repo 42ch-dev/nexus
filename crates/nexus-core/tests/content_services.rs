@@ -733,6 +733,577 @@ async fn timeline_patch_round_trip_and_guards() {
     fx.core.close().await.unwrap();
 }
 
+/// The Work's stored bound World (the only World authority a binding may use).
+async fn work_world_id(fx: &Fixture) -> String {
+    fx.core
+        .get_work(&fx.principal, fx.work_id.clone())
+        .await
+        .expect("work read")
+        .world_id
+        .expect("the fixture Work is created with a bound World")
+}
+
+/// Create a World KB entity of `block_type` in `world_id` through the service.
+async fn create_kb_entity(
+    fx: &Fixture,
+    world_id: &str,
+    entity_id: &str,
+    title: &str,
+    block_type: &str,
+) {
+    fx.core
+        .patch_world_kb_entity(
+            &fx.principal,
+            world_id.to_string(),
+            serde_json::from_value::<nexus_contracts::WorldKbPatchEntityRequest>(
+                serde_json::json!({
+                    "entity_id": entity_id,
+                    "expected_version": 0,
+                    "patch": {"title": title, "block_type": block_type}
+                }),
+            )
+            .unwrap(),
+        )
+        .await
+        .expect("seed World KB entity");
+}
+
+/// World-event binding round trip: `bind_world_event` stores the referent that
+/// the bound World's graph proves is an event, and `unbind_world_event` clears
+/// it in one revision — including the explicitly accepted case of an event that
+/// has no stored binding (unlike `unlink_foreshadow`'s absent-edge `NotFound`).
+#[tokio::test]
+async fn timeline_world_event_binding_round_trip_and_unbind() {
+    let fx = setup().await;
+    let world_id = work_world_id(&fx).await;
+    let referent = "kb_0000e001";
+    create_kb_entity(&fx, &world_id, referent, "Bound Event", "event").await;
+
+    let patch = |base: u64, mut value: serde_json::Value| {
+        value["work_id"] = serde_json::json!(fx.work_id.clone());
+        value["base_revision"] = serde_json::json!(base);
+        timeline_request(value)
+    };
+
+    fx.core
+        .patch_timeline_event(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            patch(
+                0,
+                serde_json::json!({
+                    "operation": "add_event", "title": "Realized", "realizes_chapter_id": 1
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+    let event_id = event_id_by_title(&fx, "Realized").await;
+
+    let bound = fx
+        .core
+        .patch_timeline_event(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            patch(
+                1,
+                serde_json::json!({
+                    "operation": "bind_world_event",
+                    "event_id": event_id, "world_event_id": referent
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(bound.new_revision, NonZeroU64::new(2).unwrap());
+    let outline = fx
+        .core
+        .work_outline(&fx.principal, fx.work_id.clone())
+        .await
+        .unwrap();
+    assert_eq!(outline.outline_revision, 2);
+    assert_eq!(outline.timeline_events.len(), 1);
+    assert_eq!(
+        outline.timeline_events[0].world_event_id.as_deref(),
+        Some(referent),
+        "bind stores the validated World KB referent"
+    );
+
+    // Unbind clears the stored referent with exactly one revision bump.
+    let cleared = fx
+        .core
+        .patch_timeline_event(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            patch(
+                2,
+                serde_json::json!({
+                    "operation": "unbind_world_event", "event_id": event_id
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(cleared.new_revision, NonZeroU64::new(3).unwrap());
+    let outline = fx
+        .core
+        .work_outline(&fx.principal, fx.work_id.clone())
+        .await
+        .unwrap();
+    assert_eq!(outline.timeline_events[0].world_event_id, None);
+
+    // An already-unbound valid event is accepted, with exactly one more bump.
+    let repeated = fx
+        .core
+        .patch_timeline_event(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            patch(
+                3,
+                serde_json::json!({
+                    "operation": "unbind_world_event", "event_id": event_id
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(repeated.new_revision, NonZeroU64::new(4).unwrap());
+    assert_eq!(outline_revision(&fx).await, 4);
+    fx.pool.close().await;
+    fx.core.close().await.unwrap();
+}
+
+/// A referent deleted from the World KB after the bind stays clearable: an
+/// unbind never re-reads the previous referent.
+#[tokio::test]
+async fn timeline_world_event_unbind_ignores_a_deleted_referent() {
+    let fx = setup().await;
+    let world_id = work_world_id(&fx).await;
+    let referent = "kb_0000e002";
+    create_kb_entity(&fx, &world_id, referent, "Doomed Event", "event").await;
+
+    let patch = |base: u64, mut value: serde_json::Value| {
+        value["work_id"] = serde_json::json!(fx.work_id.clone());
+        value["base_revision"] = serde_json::json!(base);
+        timeline_request(value)
+    };
+    fx.core
+        .patch_timeline_event(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            patch(
+                0,
+                serde_json::json!({
+                    "operation": "add_event", "title": "Doomed", "realizes_chapter_id": 1
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+    let event_id = event_id_by_title(&fx, "Doomed").await;
+    fx.core
+        .patch_timeline_event(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            patch(
+                1,
+                serde_json::json!({
+                    "operation": "bind_world_event",
+                    "event_id": event_id, "world_event_id": referent
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+
+    sqlx::query("DELETE FROM kb_key_blocks WHERE key_block_id = ?")
+        .bind(referent)
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+
+    let cleared = fx
+        .core
+        .patch_timeline_event(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            patch(
+                2,
+                serde_json::json!({
+                    "operation": "unbind_world_event", "event_id": event_id
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(cleared.new_revision, NonZeroU64::new(3).unwrap());
+    let outline = fx
+        .core
+        .work_outline(&fx.principal, fx.work_id.clone())
+        .await
+        .unwrap();
+    assert_eq!(outline.timeline_events[0].world_event_id, None);
+    fx.pool.close().await;
+    fx.core.close().await.unwrap();
+}
+
+/// Every binding refusal is typed and leaves the outline content and revision
+/// untouched: unknown event, missing / foreign-World / non-event referent,
+/// missing members, and a Work with no bound World.
+#[tokio::test]
+async fn timeline_world_event_binding_refusals_leave_outline_unchanged() {
+    let fx = setup().await;
+    let rel_path = "Works/test-novel/Outlines/outline.md";
+    let outline_path = fx.creative_root.join(rel_path);
+    let world_id = work_world_id(&fx).await;
+    let referent = "kb_0000e003";
+    create_kb_entity(&fx, &world_id, referent, "Owned Event", "event").await;
+    create_kb_entity(
+        &fx,
+        &world_id,
+        "kb_0000c003",
+        "Owned Character",
+        "character",
+    )
+    .await;
+    let foreign_world = fx
+        .core
+        .create_world(
+            &fx.principal,
+            serde_json::from_value::<CreateWorldRequest>(serde_json::json!({"title": "Foreign"}))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+        .world_id;
+    let foreign_referent = "kb_0000f003";
+    create_kb_entity(
+        &fx,
+        &foreign_world,
+        foreign_referent,
+        "Foreign Event",
+        "event",
+    )
+    .await;
+
+    let patch = |base: u64, mut value: serde_json::Value| {
+        value["work_id"] = serde_json::json!(fx.work_id.clone());
+        value["base_revision"] = serde_json::json!(base);
+        timeline_request(value)
+    };
+    fx.core
+        .patch_timeline_event(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            patch(
+                0,
+                serde_json::json!({
+                    "operation": "add_event", "title": "Anchor", "realizes_chapter_id": 1
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+    let event_id = event_id_by_title(&fx, "Anchor").await;
+    let revision = outline_revision(&fx).await;
+    let content_before = std::fs::read_to_string(&outline_path).unwrap();
+
+    // Unknown timeline event: the retained event NotFound.
+    let err = fx
+        .core
+        .patch_timeline_event(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            patch(
+                revision,
+                serde_json::json!({
+                    "operation": "bind_world_event",
+                    "event_id": "evt_missing", "world_event_id": referent
+                }),
+            ),
+        )
+        .await
+        .unwrap_err();
+    let CoreError::NotFound { resource } = err else {
+        panic!("unknown event must be NotFound, got {err:?}");
+    };
+    assert_eq!(resource, "event evt_missing");
+
+    // A referent no World holds.
+    assert_outline_validation(
+        "missing referent",
+        fx.core
+            .patch_timeline_event(
+                &fx.principal,
+                "http",
+                fx.work_id.clone(),
+                patch(
+                    revision,
+                    serde_json::json!({
+                        "operation": "bind_world_event",
+                        "event_id": event_id, "world_event_id": "kb_0000dead"
+                    }),
+                ),
+            )
+            .await,
+        "does not exist in the Work's bound World",
+    );
+
+    // A referent that exists as an event, but in a different World: the Work's
+    // stored binding — never a payload claim — decides membership.
+    assert_outline_validation(
+        "foreign-World referent",
+        fx.core
+            .patch_timeline_event(
+                &fx.principal,
+                "http",
+                fx.work_id.clone(),
+                patch(
+                    revision,
+                    serde_json::json!({
+                        "operation": "bind_world_event",
+                        "event_id": event_id, "world_event_id": foreign_referent
+                    }),
+                ),
+            )
+            .await,
+        "does not exist in the Work's bound World",
+    );
+
+    // A bound-World referent that is not an event entity.
+    assert_outline_validation(
+        "non-event referent",
+        fx.core
+            .patch_timeline_event(
+                &fx.principal,
+                "http",
+                fx.work_id.clone(),
+                patch(
+                    revision,
+                    serde_json::json!({
+                        "operation": "bind_world_event",
+                        "event_id": event_id, "world_event_id": "kb_0000c003"
+                    }),
+                ),
+            )
+            .await,
+        "is a 'character' entity",
+    );
+
+    // Missing members are the retained 400 invalid_input channel.
+    for (value, field) in [
+        (
+            serde_json::json!({"operation": "bind_world_event", "event_id": event_id}),
+            "missing_world_event_id",
+        ),
+        (
+            serde_json::json!({
+                "operation": "bind_world_event", "world_event_id": referent
+            }),
+            "missing_event_id",
+        ),
+        (
+            serde_json::json!({"operation": "unbind_world_event"}),
+            "missing_event_id",
+        ),
+    ] {
+        let err = fx
+            .core
+            .patch_timeline_event(
+                &fx.principal,
+                "http",
+                fx.work_id.clone(),
+                patch(revision, value),
+            )
+            .await
+            .unwrap_err();
+        let CoreError::InvalidInput { field: actual, .. } = err else {
+            panic!("missing member must be invalid_input, got {err:?}");
+        };
+        assert_eq!(actual, field);
+    }
+
+    // A Work with no bound World refuses both binding operations.
+    sqlx::query("UPDATE works SET world_id = NULL WHERE work_id = ?")
+        .bind(&fx.work_id)
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+    assert_outline_validation(
+        "unbound World bind",
+        fx.core
+            .patch_timeline_event(
+                &fx.principal,
+                "http",
+                fx.work_id.clone(),
+                patch(
+                    revision,
+                    serde_json::json!({
+                        "operation": "bind_world_event",
+                        "event_id": event_id, "world_event_id": referent
+                    }),
+                ),
+            )
+            .await,
+        "has no bound World",
+    );
+    assert_outline_validation(
+        "unbound World unbind",
+        fx.core
+            .patch_timeline_event(
+                &fx.principal,
+                "http",
+                fx.work_id.clone(),
+                patch(
+                    revision,
+                    serde_json::json!({
+                        "operation": "unbind_world_event", "event_id": event_id
+                    }),
+                ),
+            )
+            .await,
+        "has no bound World",
+    );
+
+    // Not one refusal wrote anything.
+    let outline = fx
+        .core
+        .work_outline(&fx.principal, fx.work_id.clone())
+        .await
+        .unwrap();
+    assert_eq!(outline.outline_revision, revision);
+    assert_eq!(outline.timeline_events[0].world_event_id, None);
+    assert_eq!(
+        std::fs::read_to_string(&outline_path).unwrap(),
+        content_before,
+        "refused bindings must not rewrite the outline file"
+    );
+    fx.pool.close().await;
+    fx.core.close().await.unwrap();
+}
+
+/// The retained CAS and published-chapter guards both refuse a binding attempt
+/// with the outline content and revision untouched.
+#[tokio::test]
+async fn timeline_world_event_binding_guards_leave_outline_unchanged() {
+    let fx = setup().await;
+    let rel_path = "Works/test-novel/Outlines/outline.md";
+    let outline_path = fx.creative_root.join(rel_path);
+    let world_id = work_world_id(&fx).await;
+    let referent = "kb_0000e004";
+    create_kb_entity(&fx, &world_id, referent, "Guarded Event", "event").await;
+
+    let patch = |base: u64, mut value: serde_json::Value| {
+        value["work_id"] = serde_json::json!(fx.work_id.clone());
+        value["base_revision"] = serde_json::json!(base);
+        timeline_request(value)
+    };
+    fx.core
+        .patch_timeline_event(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            patch(
+                0,
+                serde_json::json!({
+                    "operation": "add_event", "title": "Guarded", "realizes_chapter_id": 1
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+    let event_id = event_id_by_title(&fx, "Guarded").await;
+    let revision = outline_revision(&fx).await;
+    let content_before = std::fs::read_to_string(&outline_path).unwrap();
+
+    // Stale base_revision: the typed OCC conflict, nothing written.
+    let err = fx
+        .core
+        .patch_timeline_event(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            patch(
+                0,
+                serde_json::json!({
+                    "operation": "bind_world_event",
+                    "event_id": event_id, "world_event_id": referent
+                }),
+            ),
+        )
+        .await
+        .unwrap_err();
+    let CoreError::OutlineConflict(details) = err else {
+        panic!("stale base_revision must be the typed outline conflict, got {err:?}");
+    };
+    assert_eq!(details.current_revision, revision);
+
+    // The event's attached chapter is published: both operations refuse.
+    sqlx::query("UPDATE work_chapters SET status = 'published' WHERE work_id = ? AND chapter = 1")
+        .bind(&fx.work_id)
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+    assert_outline_validation(
+        "published bind",
+        fx.core
+            .patch_timeline_event(
+                &fx.principal,
+                "http",
+                fx.work_id.clone(),
+                patch(
+                    revision,
+                    serde_json::json!({
+                        "operation": "bind_world_event",
+                        "event_id": event_id, "world_event_id": referent
+                    }),
+                ),
+            )
+            .await,
+        "published chapter 1",
+    );
+    assert_outline_validation(
+        "published unbind",
+        fx.core
+            .patch_timeline_event(
+                &fx.principal,
+                "http",
+                fx.work_id.clone(),
+                patch(
+                    revision,
+                    serde_json::json!({
+                        "operation": "unbind_world_event", "event_id": event_id
+                    }),
+                ),
+            )
+            .await,
+        "published chapter 1",
+    );
+
+    let outline = fx
+        .core
+        .work_outline(&fx.principal, fx.work_id.clone())
+        .await
+        .unwrap();
+    assert_eq!(outline.outline_revision, revision);
+    assert_eq!(outline.timeline_events[0].world_event_id, None);
+    assert_eq!(
+        std::fs::read_to_string(&outline_path).unwrap(),
+        content_before
+    );
+    fx.pool.close().await;
+    fx.core.close().await.unwrap();
+}
+
 /// A content patch on a chapter with no stored outline path seeds the derived
 /// path, writes the per-chapter prose durably, and the prose reads back.
 #[tokio::test]

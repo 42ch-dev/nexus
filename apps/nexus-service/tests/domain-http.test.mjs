@@ -399,4 +399,129 @@ describe('domain-http (P5-T1)', () => {
     assert.deepEqual(afterStale.payload.scenes, afterBeat.payload.scenes);
     assert.deepEqual(afterStale.payload.beats, afterBeat.payload.beats);
   });
+
+  test('cross-surface World event binding binds, persists, unbinds and refuses a bad referent', async () => {
+    // A real creative root, registered the same way the scene/beat proof does.
+    const creativeRoot = mkdtempSync(join(tmpdir(), 'nexus-service-binding-'));
+    const workspaceDir = join(
+      home,
+      '.nexus42',
+      'creators',
+      'ctr_testcreator',
+      'workspaces',
+      'default',
+    );
+    writeFileSync(
+      join(workspaceDir, 'meta.json'),
+      JSON.stringify({ local_root: creativeRoot }),
+    );
+
+    const workRef = 'http-binding';
+    const created = await jsonFetch(`${baseUrl}/v1/daemon/works`, {
+      method: 'POST',
+      body: { ...CREATE_WORK_BODY, story_ref: workRef, title: 'Binding Work' },
+    });
+    assert.equal(created.status, 201, created.text);
+    const workId = created.payload.work_id;
+
+    const storiesDir = join(creativeRoot, 'Works', workRef, 'Stories');
+    mkdirSync(storiesDir, { recursive: true });
+    writeFileSync(
+      join(storiesDir, 'ch01-opening.md'),
+      '---\nstatus: not_started\nvolume: 1\n---\nChapter one body\n',
+    );
+    const reconciled = await jsonFetch(
+      `${baseUrl}/v1/daemon/works/${workId}/reconcile-chapters`,
+      { method: 'POST' },
+    );
+    assert.equal(reconciled.status, 200, reconciled.text);
+
+    // The referent is a real World KB event entity of the Work's bound World,
+    // created through the mounted KB route rather than a fixture row.
+    const referent = 'kb_e7e17aab';
+    const seeded = await jsonFetch(
+      `${baseUrl}/v1/daemon/worlds/${OWNED_WORLD}/kb/patch-entity`,
+      {
+        method: 'POST',
+        body: {
+          entity_id: referent,
+          expected_version: 0,
+          patch: { title: 'HTTP Bound Event', block_type: 'event' },
+        },
+      },
+    );
+    assert.equal(seeded.status, 200, seeded.text);
+
+    const patchTimeline = (body) =>
+      jsonFetch(`${baseUrl}/v1/daemon/works/${workId}/timeline/patch`, {
+        method: 'POST',
+        body: { work_id: workId, ...body },
+      });
+    const readOutline = () => jsonFetch(`${baseUrl}/v1/daemon/works/${workId}/outline`);
+    const eventById = (outline, eventId) =>
+      outline.payload.timeline_events.find((event) => event.event_id === eventId);
+
+    const added = await patchTimeline({
+      base_revision: 0,
+      operation: 'add_event',
+      title: 'Realized',
+      realizes_chapter_id: 1,
+    });
+    assert.equal(added.status, 200, added.text);
+    const afterAdd = await readOutline();
+    const eventId = afterAdd.payload.timeline_events[0].event_id;
+
+    // Bind reaches the core owner over HTTP and the canonical GET serves it.
+    const bound = await patchTimeline({
+      base_revision: 1,
+      operation: 'bind_world_event',
+      event_id: eventId,
+      world_event_id: referent,
+    });
+    assert.equal(bound.status, 200, bound.text);
+    assert.equal(bound.payload.new_revision, 2);
+    const afterBind = await readOutline();
+    assert.equal(afterBind.payload.outline_revision, 2);
+    assert.equal(eventById(afterBind, eventId).world_event_id, referent);
+
+    // Persistence is observed through a full close + reopen on the same home.
+    await service.close();
+    service = await startDomainService(home, 18_444);
+    baseUrl = service.url;
+
+    const reopened = await readOutline();
+    assert.equal(reopened.status, 200, reopened.text);
+    assert.equal(reopened.payload.outline_revision, 2);
+    assert.equal(eventById(reopened, eventId).world_event_id, referent);
+
+    // Unbind clears the stored binding with exactly one revision bump.
+    const cleared = await patchTimeline({
+      base_revision: 2,
+      operation: 'unbind_world_event',
+      event_id: eventId,
+    });
+    assert.equal(cleared.status, 200, cleared.text);
+    assert.equal(cleared.payload.new_revision, 3);
+    const afterUnbind = await readOutline();
+    assert.equal(afterUnbind.payload.outline_revision, 3);
+    assert.equal(eventById(afterUnbind, eventId).world_event_id, undefined);
+
+    // A referent that is a bound-World entity but not an event is refused by
+    // the core and nothing is persisted (kb_mod is a seeded character).
+    const rejected = await patchTimeline({
+      base_revision: 3,
+      operation: 'bind_world_event',
+      event_id: eventId,
+      world_event_id: 'kb_mod',
+    });
+    assert.equal(rejected.status, 422, rejected.text);
+    assert.equal(rejected.payload.error.code, 'outline_validation_failed');
+    assert.match(
+      rejected.payload.error.details.validation_summary.errors.join(' '),
+      /is a 'character' entity/,
+    );
+    const afterRejected = await readOutline();
+    assert.equal(afterRejected.payload.outline_revision, 3);
+    assert.equal(eventById(afterRejected, eventId).world_event_id, undefined);
+  });
 });
