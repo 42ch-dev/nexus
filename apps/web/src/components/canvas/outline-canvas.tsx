@@ -564,6 +564,7 @@ export function OutlineCanvas({
             selectedChapterId={selectedChapterId}
             baseRevision={outline.data.outline_revision}
             onPatchTimeline={handleTimeline}
+            boundWorldId={work.data?.world_id ?? undefined}
           />
         </div>
       </div>

@@ -1,10 +1,12 @@
 /**
  * Outline canvas — event/timeline inspector (V1.73 B5 split,
- * `R-V172P0-QC1-002`; V1.108 P0 T4 foreshadow authoring — FB-C1-005).
+ * `R-V172P0-QC1-002`; V1.108 P0 T4 foreshadow authoring — FB-C1-005;
+ * V1.200 DR-26 cross-surface World-event binding authoring).
  *
  * Renders the Work timeline: existing events with attach-to-chapter and
- * remove affordances, plus the "Add Event" composer and the foreshadow
- * link/unlink authoring controls. Drives the `patch_timeline_event` route.
+ * remove affordances, plus the "Add Event" composer, the foreshadow
+ * link/unlink authoring controls, and the World-event bind/unbind control.
+ * Drives the `patch_timeline_event` route.
  */
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -12,27 +14,95 @@ import { ArrowRight, CalendarPlus, Link2, Trash2, Unlink } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { useWorldKbGraph } from '@/lib/canvas/use-world-kb-data';
 
-import type { TimelinePatchEventRequest, WorkOutline } from '@42ch/nexus-contracts';
+import type {
+  TimelinePatchEventRequest,
+  WorkOutline,
+  WorldKbGraphResponse,
+} from '@42ch/nexus-contracts';
 
 interface TimelinePanelProps {
   outline: WorkOutline;
   selectedChapterId: number | null;
   baseRevision: number;
   onPatchTimeline: (request: TimelinePatchEventRequest) => void;
+  /**
+   * The Work's bound World id (`Work.world_id`, V1.200 DR-26). Absent → the
+   * World-event binding control renders **disabled, never hidden**: the core
+   * refuses both `bind_world_event` and `unbind_world_event` without a bound
+   * World, so the affordance stays visible and carries the refusal reason.
+   */
+  boundWorldId?: string;
 }
 
-export function TimelinePanel({
+/** One selectable World KB `block_type=event` entity of the bound World. */
+interface WorldEventOption {
+  id: string;
+  name: string;
+}
+
+/**
+ * Project the bound World's KB graph into picker options (V1.200 DR-26).
+ *
+ * Reuses the existing single graph source (`useWorldKbGraph` →
+ * `WorldKbGraphResponse.entities[]`, V1.73) — the same read the World Timeline
+ * Narrative layer projects — so no new World KB endpoint or query hook is
+ * introduced. Non-`event` entities are filtered out because the core refuses
+ * every other referent `block_type`.
+ */
+function worldEventOptionsFromGraph(graph: WorldKbGraphResponse | undefined): WorldEventOption[] {
+  if (!graph) return [];
+  return graph.entities
+    .filter((entity) => entity.block_type === 'event')
+    .map((entity) => ({ id: entity.key_block_id, name: entity.canonical_name }));
+}
+
+/**
+ * Timeline panel entry point.
+ *
+ * The bound-World KB graph is read only when a World is bound. With no bound
+ * World the disabled control renders without issuing a World read: the graph
+ * query is the picker's option source, not a second source of truth.
+ */
+export function TimelinePanel(props: TimelinePanelProps) {
+  const { boundWorldId } = props;
+  if (!boundWorldId) {
+    return <TimelinePanelView {...props} worldEventOptions={[]} />;
+  }
+  return <BoundWorldTimelinePanel {...props} boundWorldId={boundWorldId} />;
+}
+
+function BoundWorldTimelinePanel({
+  boundWorldId,
+  ...props
+}: TimelinePanelProps & { boundWorldId: string }) {
+  const graph = useWorldKbGraph(boundWorldId);
+  const worldEventOptions = useMemo(() => worldEventOptionsFromGraph(graph.data), [graph.data]);
+  return (
+    <TimelinePanelView
+      {...props}
+      boundWorldId={boundWorldId}
+      worldEventOptions={worldEventOptions}
+    />
+  );
+}
+
+function TimelinePanelView({
   outline,
   selectedChapterId,
   baseRevision,
   onPatchTimeline,
-}: TimelinePanelProps) {
+  boundWorldId,
+  worldEventOptions,
+}: TimelinePanelProps & { worldEventOptions: WorldEventOption[] }) {
   const { t } = useTranslation('canvas');
   const [newTitle, setNewTitle] = useState('');
   const [newDescription, setNewDescription] = useState('');
   // Per-source-event selected foreshadow target id (FB-C1-005 link control).
   const [linkTargetByEvent, setLinkTargetByEvent] = useState<Record<string, string>>({});
+  // Per-event selected World-event target id (V1.200 DR-26 bind control).
+  const [worldEventTargetByEvent, setWorldEventTargetByEvent] = useState<Record<string, string>>({});
 
   // Foreshadow edges grouped by source event for quick lookup per row.
   const outgoingForeshadows = useMemo(() => {
@@ -52,6 +122,17 @@ export function TimelinePanel({
     }
     return map;
   }, [outline.timeline_events]);
+
+  // Bound referent → display name, so a binding renders its World event's
+  // canonical name when the (possibly capped) graph read carries it and falls
+  // back to the raw `key_block_id` otherwise.
+  const worldEventNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const option of worldEventOptions) {
+      map.set(option.id, option.name);
+    }
+    return map;
+  }, [worldEventOptions]);
 
   function addEvent() {
     if (!newTitle.trim()) return;
@@ -93,6 +174,31 @@ export function TimelinePanel({
     });
   }
 
+  function bindWorldEvent(eventId: string, worldEventId: string) {
+    if (!worldEventId) return;
+    onPatchTimeline({
+      work_id: outline.work_id,
+      base_revision: baseRevision,
+      operation: 'bind_world_event',
+      event_id: eventId,
+      world_event_id: worldEventId,
+    });
+    setWorldEventTargetByEvent((prev) => {
+      const next = { ...prev };
+      delete next[eventId];
+      return next;
+    });
+  }
+
+  function unbindWorldEvent(eventId: string) {
+    onPatchTimeline({
+      work_id: outline.work_id,
+      base_revision: baseRevision,
+      operation: 'unbind_world_event',
+      event_id: eventId,
+    });
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -103,6 +209,10 @@ export function TimelinePanel({
         <CardDescription>{t('eventInspector.description')}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        {!boundWorldId ? (
+          <p className="text-label-12 text-gray-700">{t('eventInspector.worldEventRequired')}</p>
+        ) : null}
+
         {outline.timeline_events.length === 0 ? (
           <p className="text-copy-13 text-gray-700">{t('outlineAltView.noTimelineEvents')}</p>
         ) : (
@@ -227,6 +337,65 @@ export function TimelinePanel({
                       </Button>
                     </div>
                   ) : null}
+
+                  {event.world_event_id ? (
+                    <div className="mt-1.5 flex items-center gap-1.5">
+                      <span className="min-w-0 flex-1 truncate text-label-12 text-gray-700">
+                        {t('eventInspector.worldEventBound', {
+                          name: worldEventNameById.get(event.world_event_id) ?? event.world_event_id,
+                        })}
+                      </span>
+                      <Button
+                        variant="secondary"
+                        size="small"
+                        onClick={() => unbindWorldEvent(event.event_id)}
+                        disabled={!boundWorldId}
+                        title={
+                          boundWorldId
+                            ? t('eventInspector.worldEventUnbindTitle')
+                            : t('eventInspector.worldEventRequired')
+                        }
+                      >
+                        {t('eventInspector.worldEventUnbind')}
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="mt-1.5 flex items-center gap-1.5">
+                      <select
+                        value={worldEventTargetByEvent[event.event_id] ?? ''}
+                        onChange={(e) =>
+                          setWorldEventTargetByEvent((prev) => ({
+                            ...prev,
+                            [event.event_id]: e.target.value,
+                          }))
+                        }
+                        disabled={!boundWorldId}
+                        title={boundWorldId ? undefined : t('eventInspector.worldEventRequired')}
+                        className="min-w-0 flex-1 rounded-control border border-gray-alpha-400 bg-background-100 px-2 py-1 text-label-12 text-gray-1000 focus:border-blue-1000 dark:focus:border-blue-700"
+                        aria-label={t('eventInspector.worldEventAria', { title: event.title })}
+                      >
+                        <option value="">{t('eventInspector.worldEventPlaceholder')}</option>
+                        {worldEventOptions.map((option) => (
+                          <option key={option.id} value={option.id}>
+                            {option.name}
+                          </option>
+                        ))}
+                      </select>
+                      <Button
+                        variant="secondary"
+                        size="small"
+                        onClick={() =>
+                          bindWorldEvent(
+                            event.event_id,
+                            worldEventTargetByEvent[event.event_id] ?? '',
+                          )
+                        }
+                        disabled={!boundWorldId || !worldEventTargetByEvent[event.event_id]}
+                      >
+                        {t('eventInspector.worldEventBind')}
+                      </Button>
+                    </div>
+                  )}
                 </li>
               );
             })}

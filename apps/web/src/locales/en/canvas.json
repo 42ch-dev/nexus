@@ -149,7 +149,14 @@
     "unlinkAria": "Unlink foreshadow to {{title}}",
     "targetAria": "Foreshadow target for {{title}}",
     "targetPlaceholder": "Link foreshadow to…",
-    "link": "Link"
+    "link": "Link",
+    "worldEventRequired": "Bind a World to this Work to bind World events.",
+    "worldEventBound": "World event: {{name}}",
+    "worldEventPlaceholder": "Bind World event…",
+    "worldEventAria": "World event for {{title}}",
+    "worldEventBind": "Bind",
+    "worldEventUnbind": "Unbind",
+    "worldEventUnbindTitle": "Unbind World event"
   },
   "sceneInspector": {
     "title": "Scene",

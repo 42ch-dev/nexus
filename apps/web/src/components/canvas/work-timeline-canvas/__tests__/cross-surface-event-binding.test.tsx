@@ -17,9 +17,15 @@
  *     cross-surface CTA).
  *   - PD-5 three-state matrix: event bind → `?layer=narrative&event=<id>`;
  *     surface bind only → V1.123 `?layer=narrative`; no bind → hidden.
- *   - Task 4: PD-5 matrix re-pinned TABLE-DRIVEN for both directions, and
- *     AC-V1163-7 (no write path — the inspectors expose no control to
- *     set/clear `world_event_id`; CTA clicks navigate and never patch).
+ *   - Task 4: PD-5 matrix re-pinned TABLE-DRIVEN for both directions, plus
+ *     the read-only navigation guarantee — a CTA click navigates and never
+ *     patches.
+ *   - V1.200 DR-26 supersedes AC-V1163-7's global no-author-write scope: the
+ *     binding is now authored on the **Outline** surface through
+ *     `timeline.patch_event` (`bind_world_event` / `unbind_world_event`),
+ *     covered by `outline-canvas/inspectors/event-inspector.test.tsx`. The
+ *     projected Work Timeline inspector stays read-only, so the navigation
+ *     cases here remain this surface's read-only pin.
  *
  * Two layers of coverage:
  *   1. Inspector-level (mirrors `cross-surface-nav.test.tsx`) — the CTA slot
@@ -528,39 +534,11 @@ describe('V1.163 Task 4 — PD-5 three-state matrix, Work → World (table-drive
         );
       }
 
-      // AC-V1163-7: navigation (or honest hide) never fires a write op.
+      // Read-only navigation (the preserved half of AC-V1163-7): a CTA click
+      // (or an honest hide) never fires a write op.
       expect(client.patchTimelineEvent).not.toHaveBeenCalled();
       expect(client.patchOutlineStructure).not.toHaveBeenCalled();
       expect(client.patchOutlineChapter).not.toHaveBeenCalled();
     },
   );
-});
-
-// ─── Task 4: AC-V1163-7 — no write path for world_event_id (Work side) ──────
-
-describe('V1.163 Task 4 — AC-V1163-7: no write path for world_event_id (Work side)', () => {
-  it('event inspector exposes no editable control at all on a fully bound node', () => {
-    const { container } = render(
-      <MemoryRouter>
-        <WorkTimelineEventInspector
-          node={workTimelineEventNode({ worldEventId: WORLD_EVENT_ID })}
-          workId="work-1"
-          worldId="world-9"
-          onViewOnWorldTimeline={() => undefined}
-        />
-      </MemoryRouter>,
-    );
-
-    // The Work Timeline inspector is read-only — no input/textarea/select/
-    // contenteditable anywhere (edits route through the Outline surface via
-    // the Edit-in-Outline link). No control or label references the carrier.
-    expect(
-      container.querySelector('input, textarea, select, [contenteditable="true"]'),
-    ).toBeNull();
-    expect(screen.queryByLabelText(/world event/i)).toBeNull();
-    expect(screen.queryByText('world_event_id')).toBeNull();
-
-    // The cross-surface affordance is a navigation button, not a form submit.
-    expect(screen.getByTestId('work-timeline-view-on-world-timeline')).toHaveAttribute('type', 'button');
-  });
 });
