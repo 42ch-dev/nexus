@@ -16,23 +16,25 @@ World KB concerns were split across `nexus-knowledge` (formerly `nexus-kb`, merg
 
 | Layer | Crate | Responsibility |
 | --- | --- | --- |
-| **Domain authority** | `nexus-core` | Transport-neutral family authority: `worlds`, `world_kb`, `forks`, `world_pack`, `world_rules` (+findings), `timeline` services, one ownership guard, guarded storage (§2.1) |
-| **Domain (local)** | `nexus-knowledge` (V1.139: `nexus-kb` merged in) | KnowledgeEntry, SourceAnchors, taxonomy validation, `ingest_from_artifact()`, `KbStore` CRUD/query |
-| **Domain (narrative)** | `nexus-narrative` | World entity, timeline binding |
+| **Service-family authority** | `nexus-core` | `CoreService` orchestration and authorization for `worlds`, `world_kb`, `forks`, `world_pack`, `world_rules` (+findings), and `timeline`; shared ownership guard and guarded storage (§2.1), not ownership of the underlying domain aggregates |
+| **World KB domain** | `nexus-knowledge` | `crates/nexus-knowledge/src/world_kb/` owns `KnowledgeEntryRecord`, `SourceAnchor`, taxonomy/body validation, `KbStore` traits and query types, and extraction preparation/persistence coordination. The former `nexus-kb` crate was merged here in V1.139. |
+| **Narrative domain** | `nexus-narrative` | World, fork, timeline/event, and manuscript domain models; local branch persistence remains separate from the world-copy fork model (§6.6 of entity-scope-model) |
 | **Read SSOT** | `nexus-moment-context-assembly` | `WorldKbQueryBuilder` — shared filter/taxonomy logic; `assemble_moment` (wide session snapshot) and `build_chapter_kb_block` (narrow prompt slice) |
 | **User knowledge** | `nexus-knowledge` | User-scoped global knowledge — **also owns World KB after V1.139 merger** |
 | **Execution** | `nexus-orchestration` | Presets + capabilities; LLM inner graphs; schedule/job lifecycle — **no** KB domain rules |
-| **Persistence mechanics** | `nexus-local-db` | SQLite migrations, `kb_extract_jobs`, `kb_key_blocks` tables |
+| **SQLite persistence** | `nexus-local-db` | `crates/nexus-local-db/src/kb_store.rs` implements `SqliteKbStore`; `crates/nexus-local-db/src/kb_relationships.rs` owns relationship CRUD/OCC. This crate owns SQLite migrations and persistence for `kb_key_blocks`, `kb_relationships`, and `kb_extract_jobs`, not the domain aggregate definitions. |
 
 Platform integration reads World KB through `assemble_moment` / moment-context-assembly contracts, not through orchestration presets.
 
 V1.74 adds `kb_relationships` as the first-class relationship store under the World KB graph. Source/target entities FK to `kb_key_blocks`; source anchors remain optional JSON projection ids validated by the daemon. `GET graph` reads stored rows and emits derived reverse projections for `symmetric=true` without writing duplicate rows.
 
-### 2.1 `nexus-core` — single World/KB/narrative family authority (v1.190 P0 — Normative)
+### 2.1 `nexus-core` — single World/KB/narrative service-family authority (v1.190 P0 — Normative)
 
-The World/KB/narrative family is owned by `nexus-core` behind `CoreService`; each family lives in its own module under `crates/nexus-core/src/`: `worlds` (World lifecycle list/get/create/delete), `world_kb` (graph / patch-entity / candidates / promote / relationship), `forks` (local timeline forks over immutable parent history), `world_pack` (pack import/export), `world_rules` (structured rules plus the advisory world-findings read) and `timeline` (timeline overview + per-World keyset event pages). Family reads and writes reuse the existing shared repositories (`SqliteNarrativeGateway`, `narrative_write`, `KbStore` and the spoke operations) — one SQL implementation, the same one the CLI uses.
+World/KB/narrative **service orchestration and authorization** live behind `CoreService` in `nexus-core`; this is not a transfer of data/domain ownership from `nexus-knowledge` or `nexus-narrative`. Each family lives in its own module under `crates/nexus-core/src/`: `worlds` (World lifecycle list/get/create/delete), `world_kb` (graph / patch-entity / candidates / promote / relationship), `forks` (local timeline forks over immutable parent history), `world_pack` (pack import/export), `world_rules` (structured rules plus the advisory world-findings read) and `timeline` (timeline overview + per-World keyset event pages). Family reads and writes reuse the shared persistence implementations in `nexus-local-db` (`SqliteNarrativeGateway`, `narrative_write`, `SqliteKbStore`, `kb_relationships`) and the spoke operations; the `KbStore` trait and `KnowledgeEntryRecord` aggregate remain in `nexus_knowledge::world_kb`.
 
 **One ownership guard.** `world_kb::guards::check_world_owner` is the single ownership SQL: `SELECT owner_creator_id FROM narrative_worlds WHERE world_id = ?`. It reports a typed denial — `Missing` (no row), `Foreign` (the row names another creator), `Unowned` (`owner_creator_id` is NULL) — and every family (kb, pack, fork, rules, findings, timeline) calls this one guard; the daemon runs no ownership SQL of its own.
+
+> **Historical v1.190 adapter/bridge notes (below).** The daemon HTTP adapters and transitional CLI pack bridge described in the next three paragraphs belong to the pre-retirement host topology, not current implementation anchors. Current pack service authority is `CoreService::import_world_pack` in `crates/nexus-core/src/world_pack.rs`; the `nexus-daemon-runtime` host was retired in v1.193.
 
 **Denial → retained envelopes.** The guard surfaces the neutral `CoreError::WorldOwnerDenied { world_id, reason }`; the daemon adapter maps it to `Forbidden { resource: "world {id}", reason }` and HTTP 403. Each transport family keeps its retained envelope verbatim: World-KB-family routes render `world {id}` 404 plus the cross-author/unowned 403 reasons; timeline routes render `world {id} not found` 404 plus `you do not own this world` 403.
 
@@ -151,8 +153,14 @@ nexus.llm.extract → { candidates, relationships? }
 
 `LlmExtractTask` remains a pure parser/invoker (it does not persist). Entity
 candidates continue through `quality_loop::persist_candidates` /
-`kb_extract_jobs`; `extract_finalize` remains the `kb.extract_work` direct
-KnowledgeEntry insert helper (not the suggestion path). Relationship persistence runs
+`kb_extract_jobs`. The separate extraction finalization seam in
+`crates/nexus-knowledge/src/world_kb/extract_finalize.rs` exposes
+`prepare_extract` + `persist_prepared_extract`: preparation validates the
+canonical name, body and trusted job-policy governance, allocates the entry ID
+once, and attaches the source anchor and governance pair; persistence inserts
+that exact prepared `KnowledgeEntryRecord` through `KbStore` without allocating
+another ID or rebuilding defaults. The caller retains job-lifecycle ownership;
+this seam is separate from the relationship-suggestion path. Relationship persistence runs
 **after** endpoint resolution and writes idempotent suggestions only when both
 endpoints already exist as non-deleted KnowledgeEntries (entity-scope-model §5.6.7).
 The `needs_review` gate + GET graph default-filter + confidence-weighting UX

@@ -181,10 +181,9 @@ The holder must refresh the `expires_at_ms` field in the lock file every **30 se
 
 ### 5.2 Write Protocol
 
-The heartbeat task:
-1. Seeks to the start of the `.lock` file.
-2. Writes `<pid>:<holder_name>:<expires_at_ms>` where `expires_at_ms = now_ms + 60_000`.
-3. Flushes.
+The heartbeat task refreshes metadata via the `.lock` **path**, not by seeking or writing the file descriptor that holds `flock`:
+1. Builds `<pid>:<holder_name>:<expires_at_ms>` where `expires_at_ms = now_ms + 60_000`.
+2. Calls `write_lock_metadata_to_path` in `crates/nexus-local-db/src/file_lock.rs`, which uses `std::fs::write` to overwrite the path's contents. It does not explicitly flush the held lock descriptor.
 
 If the write fails (e.g., disk full), the heartbeat task logs at `error!` and continues retrying. The lock validity window is 60 s — a single missed heartbeat is tolerated.
 

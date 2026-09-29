@@ -63,8 +63,17 @@ The refresh lifecycle status (`refresh_status`) tracks the current state:
 
 ## 3. Refresh scheduler contract
 
-The daemon-side refresh-scheduler hook (`crates/nexus-daemon-runtime/src/refresh_scheduler.rs`)
-is a periodic `tokio::spawn` task:
+The refresh-scheduler implementation in `crates/nexus-core/src/execution/schedules/refresh.rs`
+exposes `spawn_refresh_scheduler`, a periodic `tokio::spawn` task. The capability
+is owned by `crates/nexus-orchestration/src/capability/builtins/reference_refresh.rs`;
+tool registration and creator-context wiring live in
+`crates/nexus-core/src/execution/capabilities.rs`.
+
+**V1.58 historical host:** the scheduler formerly lived in
+`crates/nexus-daemon-runtime/src/refresh_scheduler.rs`, and the former
+`crates/nexus-daemon-runtime/src/boot.rs` §4e spawned it at daemon startup.
+Those deleted host paths describe the V1.58 composition, not current boot wiring.
+The scheduler contract is:
 
 - **Cadence**: Configurable interval (default 3600s = 1 hour). Overridable via
   `NEXUS_DAEMON_REFRESH_SCHEDULER_INTERVAL_SECS` env var.
@@ -117,14 +126,14 @@ Indexes:
 - `idx_reference_sources_refresh_status` — index on `refresh_status` for
   quick filtering.
 
-DAO methods added to `crates/nexus-local-db/src/reference_source.rs`:
+Current tracking DAO owner: `crates/nexus-local-db/src/reference_source.rs` (refresh lifecycle methods introduced with the V1.58 migration above):
 
 - `set_refresh_policy(source_id, policy)` — change the refresh policy.
 - `mark_refreshing(source_id)` — set `refresh_status = 'refreshing'`.
 - `mark_refreshed(source_id, new_body_hash)` — set `last_refreshed_at`,
   `refresh_status = 'fresh'`, `content_hash`.
 - `mark_refresh_error(source_id, error_msg)` — set `refresh_status = 'error'`.
-- `find_stale_sources(now, stale_threshold_seconds, limit)` — find sources
+- `find_stale_sources(pool, limit, stale_threshold_seconds)` — find sources
   due for refresh.
 
 ---
@@ -161,17 +170,17 @@ deferred to P3 if the user-facing surface (CLI) requires them. P1 ships only
 
 - **`crates/nexus-orchestration/src/capability/builtins/reference_refresh.rs`**:
   Capability handler struct + `Capability` trait impl.
-- **`crates/nexus-orchestration/src/capability/mod.rs`**:
-  `CapabilityRegistry` constructors (`with_builtins`, `with_builtins_and_pool`,
-  `with_runtime_deps`) all include `ReferenceRefresh`.
-- **`crates/nexus-daemon-runtime/src/refresh_scheduler.rs`**:
-  Periodic task that queries stale sources and dispatches refresh.
-- **`crates/nexus-daemon-runtime/src/boot.rs`**:
-  §4e spawns the refresh scheduler at daemon startup.
+- **`crates/nexus-core/src/execution/capabilities.rs`**:
+  Registers `nexus.reference.refresh` in the core tool table and wires the pool
+  and active creator context before delegating to `ReferenceRefresh`.
+- **`crates/nexus-core/src/execution/schedules/refresh.rs`**:
+  Owns `spawn_refresh_scheduler` and `run_one_refresh_tick`; queries stale
+  sources and dispatches refresh. The former V1.58 daemon boot composition is
+  historical (§3), not a current startup anchor.
 - **`crates/nexus-local-db/src/reference_source.rs`**:
   Refresh lifecycle DAOs (`set_refresh_policy`, `mark_refreshing`,
   `mark_refreshed`, `mark_refresh_error`, `find_stale_sources`).
-- **`crates/nexus-local-db/migrations/202606220003_*`**:
+- **`crates/nexus-local-db/migrations/202606220003_reference_sources_refresh_tracking.sql`**:
   DB migration adding `last_refreshed_at`, `refresh_policy`, `refresh_status`.
 
 ---
@@ -209,7 +218,7 @@ deferred to P3 if the user-facing surface (CLI) requires them. P1 ships only
 
 ### 7.2 Scheduled refresh flow
 
-1. Daemon boots → refresh scheduler spawns with 60s initial delay.
+1. V1.58 historical daemon boot flow: the former host spawned the scheduler with a 60s initial delay. The current scheduler implementation is `crates/nexus-core/src/execution/schedules/refresh.rs` (§3); this example does not assert current host startup wiring.
 2. After 60s, first tick: `find_stale_sources()` queries `reference_sources`.
 3. For each stale source: `ReferenceRefresh::run({"reference_source_id": "..."})`.
 4. Handler fetches URL, compares hash, updates DB.

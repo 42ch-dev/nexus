@@ -6,7 +6,7 @@
 | **Document class** | Feature line |
 | **Scope** | Chapter list/detail, outline read, structure PATCH, and body read-only Daemon API contracts under `/v1/daemon/works/{work_id}/chapters/*` |
 | **Coordinates with** | [daemon-api-surface-conventions.md](./daemon-api-surface-conventions.md), [daemon-runtime.md](./daemon-runtime.md), [schemas-directory-layout.md](./schemas-directory-layout.md), [web-ui.md](./web-ui.md), repo-root [`DESIGN.md`](../../DESIGN.md) |
-| **Implementation owner** | `nexus-daemon-runtime` chapter/canvas handlers; Web UI consumes only through `NexusClient` |
+| **Implementation owner** | `crates/nexus-core/src/content.rs` (chapter content/metadata service) + `crates/nexus-core/src/outline.rs` (outline/structure operations), exposed through `crates/nexus-core-node/src/domain.rs`; metadata persistence: `crates/nexus-local-db/src/work_chapters.rs`. Web UI consumes only through `NexusClient`. |
 
 ---
 
@@ -30,7 +30,7 @@ The surface is intentionally split:
 - `seed_chapters` initializes `outline_path` as `Works/{work_ref}/Outlines/chapters/chNN-outline.md` and `body_path` as `Works/{work_ref}/Stories/chNN-{slug}.md`.
 - `work_chapters::update_paths` and `update_status` update DB metadata with `updated_at`.
 - `work_chapters::sync_frontmatter_status` demonstrates the filesystem write pattern P0 must mirror for outline writes: sibling temp file, flush, atomic rename, and best-effort temp cleanup on failure.
-- `host_tool_handlers.rs` body read path applies a W-002-style path guard around a DB-sourced `body_path`: resolve inside the workspace root, reject traversal, and fail closed when the resolved path escapes the workspace.
+- `crates/nexus-core/src/content.rs` owns the body-read guard: `chapter_body` reads the DB-sourced `body_path` through `read_guarded_file` and `resolve_guarded_path_async` / `resolve_guarded_path`, canonicalizing under the workspace root and failing closed when the resolved path escapes it.
 
 ## 3. Endpoint summary
 
@@ -312,7 +312,7 @@ Algorithm:
 5. For a missing target that is expected to be creatable, canonicalize the nearest existing parent or normalize the joined path and require the resulting absolute path to remain under the workspace root. Do not allow `..` traversal to escape before creation.
 6. Reject escape with a typed validation error; do not attempt to create parent directories outside the workspace.
 
-This mirrors the W-002 defense-in-depth guard in `host_tool_handlers.rs` around line 2006, adapted for outline writes where the target may not exist yet.
+This uses the W-002 defense-in-depth authority in `crates/nexus-core/src/content.rs` (`resolve_guarded_path` / `resolve_guarded_path_async`), including guarded resolution for outline writes where the target may not exist yet.
 
 ## 8. Tauri-ready frontend boundary
 

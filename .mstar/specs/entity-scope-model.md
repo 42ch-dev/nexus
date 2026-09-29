@@ -155,7 +155,7 @@ No new scope-ownership rule. No new uniqueness constraint. No new transition rul
 
 | Scope | Entity types that live here | Primary owner crate(s) |
 | --- | --- | --- |
-| `Global` | Schema bundle identity, contract schema versions, product-wide command/capability names, global daemon/runtime constants | `nexus-contracts`; `nexus42` for CLI surface; `nexus-daemon-runtime` for local runtime process constants |
+| `Global` | Schema bundle identity, contract schema versions, product-wide command/capability names, global runtime constants | `nexus-contracts`; `nexus42` for the CLI and headless `nexus-runtime` process (`apps/nexus42/src/bin/nexus-runtime.rs`) |
 | `User` | User account/profile, platform session, Pairing records, user-level knowledge index, user-global reference corpus | `nexus-cloud-domain` for User/Pairing invariants; `nexus-cloud-sync` for HTTP transport; `nexus-knowledge` for user-scoped knowledge/reference index |
 | `Creator` | Creator aggregate, Creator credentials/cache records, active Creator selection, workspace registrations, SOUL, long-term memory, review queue/personality I/O | `nexus-creator`; `nexus-creator-memory`; `nexus-home-layout`; `nexus-local-db` for local persistence mechanics |
 | `World` | World aggregate, world membership, fork branches, story manifests, manuscript state/projections, narrative KB graph, KnowledgeEntries, SourceAnchors | `nexus-narrative`; `nexus-knowledge` for KB graph insertion/query and KnowledgeEntry/SourceAnchor logic |
@@ -228,10 +228,10 @@ explicitly declares uniqueness.
 | `nexus-creator` | `Creator` | Owns Creator aggregate logic, credential/cache hooks, active Creator local state, and conversions over contract types. No platform HTTP. |
 | `nexus-creator-memory` | `Creator` memory subdomain | Owns SOUL, long-term memory, review, and personality/experience I/O under Creator scope. |
 | `nexus-knowledge` | `World` (narrative KB) + `User` (global knowledge) | Two-tier knowledge crate merged in V1.139 (former `nexus-kb`). World-scoped: narrative KnowledgeEntries, SourceAnchors, graph insertion/query, narrative KB lifecycle; holds spoke `KnowledgeEntry` natively with `extensions.nexus` accessors via `nexus-spoke-adapter`. User-scoped: global knowledge/reference indexing and storage; tag-driven, may be pulled into Moment context assembly. Does not own Creator memory semantics. |
-| `nexus-narrative` | `World`, `Timeline`, `Event` | Owns creative-work narrative state: current work background, world state, forks, timelines, events, story/manuscript projections, and narrative consistency. |
+| `nexus-narrative` | `World`, `Timeline`, `Event` | Owns creative-work narrative domain models: world state, `World::fork` / `ForkBranch`, timelines, events, story/manuscript projections, and narrative consistency. Domain fork models do not imply populated local world-fork metadata: local authoring forks use branch-level marker lineage, while the SQLite gateway returns world-level fork fields as `false` / `None` (§6.6). |
 | `nexus-spoke-adapter` | SPOKE consumption boundary | Constructs spoke standard objects with `extensions.nexus` populated; delegates standard lifecycle ops to `spoke-operations`. Enforces the spoke-operations call-boundary invariant (spoke-standard operands only). The sole crate that directly depends on `spoke-operations`. |
 | `nexus-moment-context-assembly` | `Moment` | Owns session-start moment context aggregation. It runs before a session begins and aggregates relevant local domains: Creator memory, narrative state, World KB assets, and User knowledge. Optional `cloud-stage` may merge platform context, but daemon default remains local Stage-0. |
-| `nexus-daemon-runtime` | Runtime host, not entity owner | Hosts local APIs, DB handles, orchestration, and agent-host. It MUST NOT own cloud transport or platform User/Pairing invariants. |
+| `nexus-daemon-runtime` (historical; retired v1.193) | Former runtime host, not entity owner | Hosted local APIs, DB handles, orchestration, and agent-host before retirement. This is a historical ownership boundary, not a current implementation anchor; current service-family authority is `nexus-core` (see [world-kb-runtime-architecture.md](world-kb-runtime-architecture.md) §2.1). |
 | `nexus-orchestration` | Execution sessions/schedules, not hierarchy owner | Owns presets, schedules, workers, and capability registry. It carries `creator_id`/workspace/world references as execution context, but it does not redefine entity ownership. |
 
 #### 5.5.8 Conditional routing branch input visibility (V1.56 P3 amendment)
@@ -241,7 +241,7 @@ When the conditional routing engine (DF-56) evaluates a state's `next: { kind: c
 - **`_context.registry_refresh.*`** — fields projected from the `nexus.registry.refresh` capability output (which is itself an entity-scope snapshot of the capability registry). Fields include `source` (`synthetic` | `network` | `synthetic_fallback`), `snapshot_version`, `capability_count`, `fallback_reason` (CdnError variant stringified per V1.56 P1 fix-wave), `retry_count`. The branch input is read-only; the capability invocation does not mutate the registry.
 - **`_context.workspace.*`** — fields projected from the active workspace session (V1.56 P0 OCC + persistent session). Fields include `session_id`, `conflict_detected` (bool; OCC outcome of last commit), `changes_applied` (count of paths committed), `workspace_root` (canonical path). The branch input is read-only; expression evaluation does not invoke `workspace.commit` itself.
 
-Branch inputs do **not** redefine entity ownership. The expression evaluator reads through existing API surfaces:
+Branch inputs do **not** redefine entity ownership. The following API wiring is a **V1.56 historical snapshot**; the former daemon handlers are not current implementation anchors:
 
 - Registry refresh input: `nexus-orchestration::tasks::inject_registry_refresh_context()` → reads `nexus.registry.refresh` capability output via existing capability registry machinery.
 - Workspace input: `nexus-orchestration::tasks::inject_workspace_context()` → reads active workspace session via existing `nexus-daemon-runtime` workspace handlers.
@@ -269,8 +269,8 @@ participating in WASM compute. Its semantics are:
 
 The flag is a filterable marker — the KB query layer
 (`KbQuery::with_computable(bool)`) can select only computable KnowledgeEntries
-when building the invocation snapshot. This was implemented in V1.61 P1
-(`crates/nexus-kb/src/query.rs`, `InMemoryKbStore`, `SqliteKbStore`).
+when building the invocation snapshot. The V1.61 P1 historical implementation
+anchors were `crates/nexus-kb/src/query.rs`, `InMemoryKbStore`, and `SqliteKbStore`.
 
 ##### 5.5.9.2 `state` field
 
@@ -335,8 +335,8 @@ by per-module JSON Schema fragments declared in each compute module's
 
 The structured validation mode is:
 
-1. The `nexus-kb::validation` module provides `ValidationMode::Structured`
-   (added in V1.61 P1, `crates/nexus-kb/src/validation.rs`). This mode
+1. The `nexus_knowledge::world_kb::validation` module provides `ValidationMode::Structured`
+   (introduced in V1.61 P1; current source: `crates/nexus-knowledge/src/world_kb/validation.rs`). This mode
    requires `computable: true` on KnowledgeEntries that carry `state`.
 2. Per-module attribute/state shapes are declared in the module's
    `manifest.json` `schemas.key_block_attributes[block_type]` and
@@ -347,7 +347,7 @@ The structured validation mode is:
 4. Validation failures produce `ComputeError::ManifestValidationFailed`
    with a JSON path to the offending field.
 
-The `ValidationMode::Structured` variant in `nexus-kb` validates the
+The `ValidationMode::Structured` variant in `nexus-knowledge` validates the
 computable flag and state field at the KB layer; the manifest-driven
 validation in `nexus-wasm-host` validates the **shapes** of those fields
 at compute time. Both layers are additive — KB validation ensures the
@@ -392,7 +392,7 @@ replacement is `manifest.json` `schemas` as documented in
 
 The `nexus-knowledge` persistence model stores World-scoped KnowledgeEntries with `block_type`, `canonical_name`, `body`, provenance anchors, and active uniqueness under `(world_id, block_type, canonical_name)` (see [local-db-schema.md](./local-db-schema.md) §4.1.2).
 
-**SSOT for `block_type` (wire enum):** `schemas/common/common.schema.json` → `BlockType` → `@42ch/nexus-contracts` / `nexus-contracts`. Shipped values (snake_case on wire): `character`, `ability`, `scene`, `organization`, `item`, `conflict`, `info_point`, `event`. Implementations MUST NOT introduce a parallel `block_type` enum in `nexus-knowledge` or orchestration presets. `kb-extract`, `SqliteKbStore`, and `assemble_moment` / `fetch_world_kb` already use this vocabulary.
+**SSOT for `block_type` (wire enum):** `schemas/common/common.schema.json` → `BlockType` → `@42ch/nexus-contracts` / `nexus-contracts`. Current shipped values (snake_case on wire): `character`, `ability`, `scene`, `organization`, `item`, `conflict`, `info_point`, `event`, `species`, `faction`, `magic_system`, `technology`, `deity`, `level`, `economy_tier`, `dialogue`, `beat`, `act`, `era`. The eight-value V1.40 baseline was extended by the game-bible, script, and Brief-era additions documented below; `era` is the cross-profile Brief carrier in §§1.4.4–1.4.5. The generated patch wire enum is in `crates/nexus-contracts/src/generated/daemon_api/canvas/world_kb/world_kb_entity_patch.rs`. Implementations MUST NOT introduce a parallel `block_type` enum in `nexus-knowledge` or orchestration presets. `kb-extract`, `SqliteKbStore`, and `assemble_moment` / `fetch_world_kb` already use this vocabulary.
 
 **Design decision: `environment` NOT in `BlockType` (R-V161P0-INFO-001).** The V1.61 compass initially named `environment` as a potential computable BlockType for environmental context (weather, terrain, lighting). After evaluation, `environment` was intentionally excluded from the wire enum:
 
@@ -404,7 +404,7 @@ Module authors should use the `scene` + `info_point` BlockType combination to mo
 
 **Novel profile semantics (body layer):** The V1.37 novel "seven categories" (`foundation`, `background`, `character`, `location`, `society`, `rules`, `economy`) are carried in `KnowledgeEntry.body.attributes.novel_category` (string) plus type-specific fields in `body.attributes` / `body.summary`. They do **not** replace wire `block_type`.
 
-**V1.40 P1 implementation:** `nexus-kb::validation` module provides `validate_body(block_type, body, ValidationMode)` that enforces `novel_category` presence and validity when `ValidationMode::Novel` is active. Both `InMemoryKbStore` and `SqliteKbStore` run validation on insert/update. Validation errors are structured (`ValidationKind` enum) so callers can produce precise diagnostics without string matching. `canonical_name` is validated for format/safety (no control chars, path separators, shell metacharacters, max 256 chars). Advisory warnings for `novel_category` ↔ `block_type` mismatch are emitted via `tracing::warn!`. See `crates/nexus-kb/src/validation.rs`.
+**V1.40 P1 validation (current owner):** `nexus_knowledge::world_kb::validation` provides `validate_body(block_type, body, ValidationMode)` that enforces `novel_category` presence and validity when `ValidationMode::Novel` is active. Both `InMemoryKbStore` and `SqliteKbStore` run validation on insert/update. Validation errors are structured (`ValidationKind` enum) so callers can produce precise diagnostics without string matching. `canonical_name` is validated for format/safety (no control chars, path separators, shell metacharacters, max 256 chars). Advisory warnings for `novel_category` ↔ `block_type` mismatch are emitted via `tracing::warn!`. See `crates/nexus-knowledge/src/world_kb/validation.rs`.
 
 **`canonical_name` grammar (V1.40 P1):** `[^\x00-\x1F\x7F/\\`$;&|><!*?"'(){}\[\]#]{1,256}` — non-empty, no control characters, no path separators, no shell metacharacters, max 256 chars.
 
@@ -436,7 +436,7 @@ Minimum common `body` shape for novel-profile items (V1.40 P1):
 }
 ```
 
-P1 adds validation helpers in `nexus-kb` for wire `BlockType` + optional `novel_category` / per-category `body.attributes` minimums. **Shipped in V1.40 P1** (`nexus-kb::validation`). No `schemas/` enum change in V1.40 unless a future ADR opts into a wire superset (out of V1.40 scope).
+**V1.40 P1 history:** validation helpers shipped in the former `nexus-kb` crate for wire `BlockType` + optional `novel_category` / per-category `body.attributes` minimums, without a `schemas/` enum change in V1.40. Their current owner is `nexus_knowledge::world_kb::validation` (`crates/nexus-knowledge/src/world_kb/validation.rs`); later wire additions are recorded below.
 
 **Game-bible profile semantics (body layer — V1.54 P1):** Seven new `BlockType` wire enum variants are registered in `schemas/common/common.schema.json` for game-bible domain concepts. The corresponding body-layer category is `game_bible_category` (string, carried in `KnowledgeEntry.body.attributes`). It does **not** replace wire `block_type`.
 
@@ -454,7 +454,7 @@ Game-bible profile `BlockType` additions (V1.54 P1, snake_case on wire):
 
 Existing variants (`character`, `ability`, `scene`, `organization`, `item`, `conflict`, `info_point`, `event`) are reused for cross-domain concepts (e.g., a game character uses `BlockType::Character` with `game_bible_category: "character"`).
 
-**V1.54 P1 implementation:** `nexus-kb::validation` adds `ValidationMode::GameBible` that requires `game_bible_category` in `body.attributes` when active and rejects `novel_category`. The game-bible category validation mirrors the novel pattern: seven valid categories, structured (`ValidationKind`) errors, advisory warnings on `game_bible_category` ↔ `block_type` mismatch. `canonical_name` validation is identical across all modes.
+**V1.54 P1 validation (current owner):** `nexus_knowledge::world_kb::validation` provides `ValidationMode::GameBible` that requires `game_bible_category` in `body.attributes` when active and rejects `novel_category`. The game-bible category validation mirrors the novel pattern: seven valid categories, structured (`ValidationKind`) errors, advisory warnings on `game_bible_category` ↔ `block_type` mismatch. `canonical_name` validation is identical across all modes.
 
 Valid `game_bible_category` values:
 
@@ -500,7 +500,7 @@ Shipped `BlockType` values (snake_case on wire) extended with:
 
 Existing variants (`character`, `ability`, `scene`, `organization`, `item`, `conflict`, `info_point`, `event`, `species`, `faction`, `magic_system`, `technology`, `deity`, `level`, `economy_tier`, `dialogue`, `beat`, `act`) are reused unchanged.
 
-**V1.123 implementation:** `nexus-kb::validation` does NOT add a new `ValidationMode` for `era` — `era` is cross-profile and not subject to `novel_category` / `game_bible_category` / `script_category` enforcement (mirroring how `event` — the V1.122 Timeline event block type — is handled today). Advisory warnings only. `canonical_name` validation is identical across all modes. The wire enum change is additive; daemon Rust handlers that accept `BlockType` (notably `world_kb::patch_entity` and `world_kb::get_graph`) require **no** code change because they already parse any valid `BlockType` value through `parse_block_type` (see iteration architecture §2.4 for codebase evidence).
+**V1.123 implementation history:** no new `ValidationMode` was added for `era` — `era` is cross-profile and not subject to `novel_category` / `game_bible_category` / `script_category` enforcement (mirroring `event`, the V1.122 Timeline event block type). Advisory warnings only. `canonical_name` validation is identical across all modes. The wire enum change was additive; the then-current daemon Rust handlers accepting `BlockType` (`world_kb::patch_entity` and `world_kb::get_graph`) needed no code change because they parsed valid values through `parse_block_type`. **Current validation anchor:** `crates/nexus-knowledge/src/world_kb/validation.rs` (`is_cross_profile_block_type` recognizes `Event` and `Era`).
 
 Minimum common `body` shape for Brief-era items (V1.123):
 
@@ -524,7 +524,7 @@ Minimum common `body` shape for Brief-era items (V1.123):
 - **Carrier:** `KnowledgeEntry.body.attributes.era_type` — an optional freeform string. Because `body.attributes` is already freeform JSON (§5.1.1 + §5.5.9.2), adding `era_type` is **additive with no schema/codegen change** (`wire_contracts_changed: false`).
 - **Recommended values:** `kingdom` / `age` / `epoch` / `period` / `sub-age` (matching product-locks PD-2). These are author-facing taxonomy hints, not an enforced enum; values are freeform strings (snake_case is conventional but not required — the product-locked `sub-age` spelling is canonical).
 - **Custom values allowed:** authors MAY use any string (`dynasty`, `reign`, `eon`, …). Unknown values are NOT rejected and render with a default Brief-layer color (no validation error). This mirrors the V1.123 decision that `era` is cross-profile world-shape and is **not** subject to `novel_category` / `game_bible_category` / `script_category` enforcement.
-- **No `ValidationMode::Era` and no `era_category` body-layer string.** V1.159 deliberately does NOT introduce a validation mode or a parallel category string (mirrors the V1.123 "no `brief_category`" rationale: era taxonomy is cross-profile world-shape, not a profile-specific category). `nexus-kb::validation` gains no new mode in V1.159.
+- **No `ValidationMode::Era` and no `era_category` body-layer string.** V1.159 deliberately does NOT introduce a validation mode or a parallel category string (mirrors the V1.123 "no `brief_category`" rationale: era taxonomy is cross-profile world-shape, not a profile-specific category). The current `nexus_knowledge::world_kb::validation` module has no era-specific mode.
 - **Cross-profile consistency:** `era_type` is read the same way across profiles; the Brief layer colors known recommended types and falls back to the default Brief accent for unknown/absent values. A missing `era_type` (legacy V1.123 flat-era data) renders at the default nesting depth with the default color — V1.156-era flat era data is **backward-compatible**.
 
 **Era nesting carrier (V1.159 — reuses §5.6 World KB relationships, no new data model).** Era-era parent-child nesting is modeled as a directed World KB relationship edge (§5.6), NOT as a self-referential `parent_era_id` column. The nesting edge uses the **sanctioned §5.6.3 escape hatch**: `relation_type = "custom"` with `custom_label = "parent_era"`, directed `source → target` where source is the **parent** (coarser) era and target is the **child** (finer) era. Rationale: `parent_era` is a single domain relationship kind, not a third concrete use case for extending the closed `WorldKbRelationshipKind` wire enum (STRATEGY guiding principle #3 — simplicity over premature abstraction); the `custom` + `custom_label` mechanism exists precisely for domain-specific relationship kinds and round-trips honestly through the graph read path (`project_relationship` preserves `custom_label`). `wire_contracts_changed: false`. See [`canvas-strategy-surface.md`](./canvas-strategy-surface.md) §3.3.3 V1.159 amendment for the Brief-layer nesting UI contract.
@@ -557,7 +557,7 @@ Script profile `BlockType` additions (V1.55 P3, snake_case on wire):
 
 Existing variants (`character`, `scene`, `organization`, `event`, etc.) are reused for cross-domain concepts (e.g., a script character uses `BlockType::Character` with `script_category: "dialogue"`).
 
-**V1.55 P3 implementation:** `nexus-kb::validation` adds `ValidationMode::Script` that requires `script_category` in `body.attributes` when active and rejects `novel_category` and `game_bible_category`. The script category validation mirrors the novel/game-bible pattern: three valid categories, structured (`ValidationKind`) errors, advisory warnings on `script_category` ↔ `block_type` mismatch. `canonical_name` validation is identical across all modes.
+**V1.55 P3 validation (current owner):** `nexus_knowledge::world_kb::validation` provides `ValidationMode::Script` that requires `script_category` in `body.attributes` when active and rejects `novel_category` and `game_bible_category`. The script category validation mirrors the novel/game-bible pattern: three valid categories, structured (`ValidationKind`) errors, advisory warnings on `script_category` ↔ `block_type` mismatch. `canonical_name` validation is identical across all modes.
 
 Valid `script_category` values:
 
@@ -678,7 +678,7 @@ Invalid transitions return `422` with stable error code on Daemon API.
 
 Rejected promotion candidates are retained in `Logs/kb/rejected/<YYYY-MM-DD>-<extract_job_id>.md` for audit. Retention is **indefinite** by default (no TTL); future iterations may add a `--prune-rejected` CLI — **durable roadmap:** DR-18 (`creator world kb` rejected-candidate `--prune-rejected`).
 
-#### 5.5.5 Relationship to existing `nexus-kb` taxonomy
+#### 5.5.5 Relationship to existing World KB taxonomy
 
 The promotion state machine does **not** change the `BlockType` enum (see §5.1.1 SSOT) or the `ValidationMode` constraints (see V1.40 P1 validation module). It governs **how** a row enters the World, not **what** the row contains.
 
@@ -836,7 +836,7 @@ User scope.
 ### 6.3 User knowledge → World KB
 
 Promoting User knowledge into a World creates or updates a World-scoped narrative KB
-asset through `nexus-kb`/`nexus-narrative`. The promoted World KB asset MUST carry
+asset through `nexus-knowledge`/`nexus-narrative`. The promoted World KB asset MUST carry
 source/anchor provenance back to the User knowledge material when available. The
 source material remains User-scoped.
 
@@ -857,6 +857,8 @@ Timeline/Event history is immutable for canonical narrative purposes. Correction
 alternate histories, or rewrites use Fork semantics; they do not mutate prior Event
 records in place. There are two distinct fork kinds, and the boundary between them is
 normative.
+
+**Domain vs local persistence.** `nexus-narrative` owns the narrative fork models (`crates/nexus-narrative/src/world.rs`, `crates/nexus-narrative/src/fork_branch.rs`), not a promise that local world-copy fork fields are populated. `CoreService::create_fork` (`crates/nexus-core/src/forks.rs`) creates the local branch marker; `crates/nexus-local-db/src/narrative_gateway.rs` reads its timeline metadata while leaving the separate world-level fork projection unset.
 
 #### 6.6.1 Local authoring fork (in-scope; local surface)
 
@@ -902,7 +904,7 @@ Because a local fork is a branch within a world (not a forked world), fork linea
   - `parent_branch_id` — the branch this fork diverged from (drives one-hop return-to-parent).
   - `forked_from_event_id` — the fork-point event on the parent branch.
   - `label` (optional) — the human-readable label given at create.
-- **World-level `WorldState` fork fields** (`is_fork`, `fork_branch_id`, `parent_world_id`, `forked_from_event_id`) describe the platform world-copy fork model (§6.6.2); they are NOT the carrier for local branch lineage and are NOT populated for local forks on the SQLite read path. Compute branch derivation reads `WorldState.fork_branch_id` as the world's current branch — that world-level semantic is unchanged by V1.162.
+- **World-level `WorldState` fork fields** (`is_fork`, `fork_branch_id`, `parent_world_id`, `forked_from_event_id`) describe the platform world-copy fork model (§6.6.2); they are NOT the carrier for local branch lineage. `WorldRow::to_world_state` in `crates/nexus-local-db/src/narrative_gateway.rs` explicitly returns `is_fork: false` and `None` for the other three fields, even when local fork markers exist. Local `is_fork` / `parent_branch_id` / `forked_from_event_id` lineage must therefore come from the branch marker, not from populated world-fork columns. Compute's interpretation of `WorldState.fork_branch_id` is a separate world-level semantic and does not make that field a local lineage carrier.
 - **No spoke dependence.** The nexus-local lineage projection is independent of spoke round-trip fidelity (DR-44 stays deferred); lineage is read from the local `narrative_timeline_events` marker, never reconstructed from a spoke round-trip.
 
 ### 6.7 Creator/User pairing
@@ -918,12 +920,14 @@ Cloud transport may synchronize or fetch representations of multiple scopes, but
 does not own their domain invariants. In particular:
 
 - User/Pairing invariants go through `nexus-cloud-domain`.
-- Narrative World/Timeline/Event/KB invariants go through `nexus-narrative` and `nexus-kb`.
+- Narrative World/Timeline/Event/KB invariants go through `nexus-narrative` and `nexus-knowledge`.
 - Moment assembly remains `nexus-moment-context-assembly`; optional cloud Stage-1 is an input source, not a replacement owner.
 
 ---
 
 ## 7. Wiring implications for V1.23
+
+> **Historical V1.23 wiring snapshot.** The former `nexus-kb` and separate User-only `nexus-knowledge` responsibilities below describe that version, not current crate ownership. Current World/User knowledge ownership is in §4 and §5.2.
 
 1. `nexus-moment-context-assembly` target wiring should aggregate local `nexus-creator-memory`, `nexus-narrative`, `nexus-kb`, and `nexus-knowledge` inputs for Stage-0 moment context.
 2. `nexus-narrative` is the core entry point for creative-work narrative state and should be the natural owner for World/Timeline/Event queries consumed by context assembly and CLI/daemon local APIs.

@@ -78,9 +78,13 @@ The canonical body path remains `content_path`; callers must not infer filesyste
 
 ## 6. Contract/type alignment notes
 
+> **Frozen historical implementation snapshot — As of R1.** The two observations below record the R1 state, not current implementation requirements.
+
 As of R1, `crates/nexus-knowledge/src/reference_source.rs` and `crates/nexus-contracts/src/local/domain/reference_source.rs` do not yet expose `content_path` or `source_mutability`. R2/R3 implementation should add those fields to the local/domain representation before repository and handler wiring, or introduce an explicit DB DTO that carries them without duplicating wire-contract ownership.
 
 Generated files under `crates/nexus-contracts/src/generated/` currently contain only the shared `ReferenceSourceType` and `ScanStatus` enums; no generated `ReferenceSource` DTO needs hand edits.
+
+**Current state:** the DAO's `ReferenceSourceRow` in `crates/nexus-local-db/src/reference_source.rs` carries both `source_mutability` and `content_path`; the historical domain/generated-type observation above does not imply those fields are absent from current storage.
 
 ## 7. Migration policy
 
