@@ -233,6 +233,31 @@ pub fn try_acquire(work_dir: &Path, holder_name: &str) -> Result<FileLockGuard, 
             stale,
         }));
     }
+    // Classify the prior body only after flock succeeds, before replacing it.
+    // The OS lock arbitrates takeover; this is diagnostic-only.
+    match std::fs::read_to_string(&lock_path) {
+        Ok(contents) if contents.trim().is_empty() => {}
+        Ok(contents) => match parse_lock_body(&contents) {
+            Some((pid, previous_holder, expires_at_ms)) => {
+                let now = now_ms();
+                if expires_at_ms > 0
+                    && now.saturating_sub(expires_at_ms) > STALE_THRESHOLD_SECS * 1000
+                {
+                    tracing::warn!(
+                        pid,
+                        holder_name = %previous_holder,
+                        expires_at_ms,
+                        "file_lock: stale holder detected after successful acquire"
+                    );
+                }
+            }
+            None => tracing::warn!(
+                note = "prior lock body was not parseable",
+                "file_lock: unparseable prior holder metadata after successful acquire"
+            ),
+        },
+        Err(_) => {}
+    }
 
     // Lock acquired. Write metadata.
     let expires_at_ms = now_ms() + STALE_THRESHOLD_SECS * 1000;
@@ -386,22 +411,22 @@ mod tests {
     #[tokio::test]
     async fn test_acquire_and_release_via_drop() {
         let (_dir, work_dir) = sample_work_dir();
-        let lock_path = lock_file_path(&work_dir);
+        let (layer, captured) = crate::test_tracing::capture_layer();
+        let subscriber = crate::test_tracing::subscriber_with(layer);
+        let _subscriber_guard = tracing::subscriber::set_default(subscriber);
 
         {
             let _guard = try_acquire(&work_dir, "cli:test-acquire").unwrap();
-            assert!(lock_path.exists());
-            let content = std::fs::read_to_string(&lock_path).unwrap();
+            let content = std::fs::read_to_string(lock_file_path(&work_dir)).unwrap();
             let (pid, holder, expires) = parse_lock_body(&content).unwrap();
             assert_eq!(pid, std::process::id());
             assert_eq!(holder, "cli:test-acquire");
             assert!(expires > 0);
-            // Guard drops here.
         }
 
-        // After drop, another acquire should succeed.
         let guard2 = try_acquire(&work_dir, "cli:test-acquire-2").unwrap();
         drop(guard2);
+        crate::test_tracing::assert_warn_absent(&captured);
     }
 
     // ── Contention: second acquire fails ────────────────────────────
@@ -444,21 +469,63 @@ mod tests {
     async fn test_stale_lock_file_overwritten_on_acquire() {
         let (_dir, work_dir) = sample_work_dir();
         let lock_path = lock_file_path(&work_dir);
+        let (layer, captured) = crate::test_tracing::capture_layer();
+        let subscriber = crate::test_tracing::subscriber_with(layer);
 
-        // Simulate a stale lock from a dead process:
-        // Write old metadata, but don't hold flock.
-        let old_expires = now_ms().saturating_sub(120_000); // 2 min ago
+        let old_expires = now_ms().saturating_sub(120_000);
         let stale_body = format!("99999:daemon:schedule:old:{old_expires}");
         std::fs::write(&lock_path, &stale_body).unwrap();
 
-        // Acquire should succeed (no flock held), overwriting stale metadata.
+        let _subscriber_guard = tracing::subscriber::set_default(subscriber);
         let guard = try_acquire(&work_dir, "cli:new-owner").unwrap();
-
         let content = std::fs::read_to_string(&lock_path).unwrap();
         let (pid, holder, expires) = parse_lock_body(&content).unwrap();
         assert_eq!(pid, std::process::id());
         assert_eq!(holder, "cli:new-owner");
         assert!(expires > old_expires);
+        crate::test_tracing::assert_warn_emitted(
+            &captured,
+            &["pid=99999", "holder_name=daemon:schedule:old", "expires_at_ms="],
+        );
+        drop(guard);
+    }
+
+    #[tokio::test]
+    async fn stale_acquire_emits_zombie_warning() {
+        let (_dir, work_dir) = sample_work_dir();
+        let lock_path = lock_file_path(&work_dir);
+        let old_expires = now_ms().saturating_sub(120_000);
+        std::fs::write(&lock_path, format!("99999:stale-holder:{old_expires}")).unwrap();
+
+        let (layer, captured) = crate::test_tracing::capture_layer();
+        let subscriber = crate::test_tracing::subscriber_with(layer);
+        let _subscriber_guard = tracing::subscriber::set_default(subscriber);
+        let guard = try_acquire(&work_dir, "fresh-holder").unwrap();
+        let (_, holder, expires) =
+            parse_lock_body(&std::fs::read_to_string(&lock_path).unwrap()).unwrap();
+        assert_eq!(holder, "fresh-holder");
+        assert!(expires > old_expires);
+        crate::test_tracing::assert_warn_emitted(
+            &captured,
+            &["pid=99999", "holder_name=stale-holder", "expires_at_ms="],
+        );
+        drop(guard);
+    }
+
+    #[tokio::test]
+    async fn unparseable_prior_body_warns_and_proceeds() {
+        let (_dir, work_dir) = sample_work_dir();
+        let lock_path = lock_file_path(&work_dir);
+        std::fs::write(&lock_path, "not:valid:metadata").unwrap();
+
+        let (layer, captured) = crate::test_tracing::capture_layer();
+        let subscriber = crate::test_tracing::subscriber_with(layer);
+        let _subscriber_guard = tracing::subscriber::set_default(subscriber);
+        let guard = try_acquire(&work_dir, "fresh-holder").unwrap();
+        let (_, holder, _) =
+            parse_lock_body(&std::fs::read_to_string(&lock_path).unwrap()).unwrap();
+        assert_eq!(holder, "fresh-holder");
+        crate::test_tracing::assert_warn_emitted(&captured, &["not parseable"]);
         drop(guard);
     }
 
