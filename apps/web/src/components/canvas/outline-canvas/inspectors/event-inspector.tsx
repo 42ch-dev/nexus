@@ -195,17 +195,20 @@ function TimelinePanelView({
       // only once the write lands (the success-only pattern the scene/beat
       // drafts use). A typed 422/409 refusal keeps both drafts for retry; the
       // 409 conflict modal still opens through the orchestrator's `onError`.
+      //
+      // V1.201 002/R4 — resolve only the draft this bind was issued against:
+      // an ID the author edits while the write is in flight is a newer draft
+      // and survives (comparing live value to the issued `trimmedId` is the
+      // request tag; no extra state or store refactor is needed).
       () => {
-        setWorldEventTargetByEvent((prev) => {
+        const clearIssuedDraft = (prev: Record<string, string>) => {
+          if (prev[eventId]?.trim() !== trimmedId) return prev;
           const next = { ...prev };
           delete next[eventId];
           return next;
-        });
-        setManualWorldEventByEvent((prev) => {
-          const next = { ...prev };
-          delete next[eventId];
-          return next;
-        });
+        };
+        setWorldEventTargetByEvent(clearIssuedDraft);
+        setManualWorldEventByEvent(clearIssuedDraft);
       },
     );
   }

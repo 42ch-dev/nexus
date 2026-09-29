@@ -397,6 +397,37 @@ describe('TimelinePanel — World-event binding authoring (V1.200 DR-26)', () =>
     expect(screen.getAllByRole('button', { name: 'Add ID' })[0]).toBeDisabled();
   });
 
+  // V1.201 002/R4 — an in-flight bind resolves only the draft it was issued
+  // against. Clearing by event id alone let a slow write erase an ID the
+  // author entered while it was still in flight.
+  it('keeps a manual ID edited while the bind is in flight (002/R4)', async () => {
+    const user = userEvent.setup();
+    const successCallbacks: Array<() => void> = [];
+    const onPatch = vi.fn(
+      (_request: TimelinePatchEventRequest, onSuccess?: () => void) => {
+        if (onSuccess) successCallbacks.push(onSuccess);
+      },
+    );
+    renderTimeline(makeOutline(), onPatch, null, 'world-9');
+
+    await user.type(
+      screen.getByLabelText('World event ID for Plant the seed'),
+      'kb-outside-picker',
+    );
+    await user.click(screen.getAllByRole('button', { name: 'Add ID' })[0]);
+    expect(onPatch).toHaveBeenCalledTimes(1);
+
+    // The write is still in flight; the author lands a newer ID in the field.
+    const field = screen.getByLabelText('World event ID for Plant the seed');
+    await user.clear(field);
+    await user.type(field, 'kb-newer-id');
+
+    // Resolving the stale bind must not clobber the newer draft.
+    act(() => successCallbacks[0]());
+    expect(screen.getByLabelText('World event ID for Plant the seed')).toHaveValue('kb-newer-id');
+    expect(screen.getAllByRole('button', { name: 'Add ID' })[0]).not.toBeDisabled();
+  });
+
   it('keeps the picked World event until the write succeeds', async () => {
     const user = userEvent.setup();
     const successCallbacks: Array<() => void> = [];
