@@ -1384,11 +1384,6 @@ async fn timeline_world_event_binding_accepts_a_referent_past_the_graph_cap() {
 
 /// The retained CAS guard refuses a binding attempt with the outline content
 /// and revision untouched.
-///
-/// The published-chapter binding arms are covered at the helper level in
-/// `outline::world_event_binding_tests`: nothing in this product publishes a
-/// chapter, so a published chapter row is reachable only through a raw
-/// `UPDATE` — the test technique this suite no longer uses.
 #[tokio::test]
 async fn timeline_world_event_binding_stale_cas_leaves_outline_unchanged() {
     let fx = setup().await;
@@ -1453,6 +1448,245 @@ async fn timeline_world_event_binding_stale_cas_leaves_outline_unchanged() {
     assert_eq!(
         std::fs::read_to_string(&outline_path).unwrap(),
         content_before
+    );
+    fx.pool.close().await;
+    fx.core.close().await.unwrap();
+}
+
+/// The published-chapter binding arms at the public service entry: publishing
+/// pins a chapter's **new** World-event bindings but not a stale one in place,
+/// so a bind on a published chapter still refuses and names the sanctioned
+/// unbind path, while that unbind clears the binding through
+/// `CoreService::patch_timeline_event` — the remedy an author can reach.
+///
+/// The retained envelopes survive on that path: a stale `base_revision` is the
+/// typed 409 conflict, a foreign stored World is the typed ownership denial
+/// (403 at the adapter boundary), and no denial rewrites the outline file.
+///
+/// Nothing in this product publishes a chapter — `patch_outline_chapter`'s
+/// lifecycle vocabulary stops at `finalized` — so the published row is
+/// manufactured through the chapter-SSOT helper the reconcile path uses,
+/// scoped to this test.
+#[tokio::test]
+async fn timeline_world_event_binding_on_a_published_chapter_keeps_the_unbind_remedy() {
+    let fx = setup().await;
+    let rel_path = "Works/test-novel/Outlines/outline.md";
+    let outline_path = fx.creative_root.join(rel_path);
+    let world_id = work_world_id(&fx).await;
+    let referent = "kb_0000e007";
+    create_kb_entity(&fx, &world_id, referent, "Pinned Event", "event").await;
+
+    let patch = |base: u64, mut value: serde_json::Value| {
+        value["work_id"] = serde_json::json!(fx.work_id.clone());
+        value["base_revision"] = serde_json::json!(base);
+        timeline_request(value)
+    };
+    fx.core
+        .patch_timeline_event(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            patch(
+                0,
+                serde_json::json!({
+                    "operation": "add_event", "title": "Pinned", "realizes_chapter_id": 1
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+    let event_id = event_id_by_title(&fx, "Pinned").await;
+    // Bind while the chapter is still editable, then publish it: the stored
+    // referent is exactly what a re-typed World event leaves behind on a
+    // published chapter.
+    fx.core
+        .patch_timeline_event(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            patch(
+                1,
+                serde_json::json!({
+                    "operation": "bind_world_event",
+                    "event_id": event_id, "world_event_id": referent
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+    nexus_local_db::work_chapters::update_status(
+        &fx.pool,
+        &fx.work_id,
+        1,
+        1,
+        "published",
+        None,
+        &chrono::Utc::now().to_rfc3339(),
+    )
+    .await
+    .unwrap();
+
+    let revision = outline_revision(&fx).await;
+    assert_eq!(
+        revision, 2,
+        "a bind then a publish leaves the outline at revision 2"
+    );
+    let published_content = std::fs::read_to_string(&outline_path).unwrap();
+
+    // A new binding on the published chapter still refuses, and the refusal
+    // names the sanctioned unbind path.
+    assert_outline_validation(
+        "published bind",
+        fx.core
+            .patch_timeline_event(
+                &fx.principal,
+                "http",
+                fx.work_id.clone(),
+                patch(
+                    revision,
+                    serde_json::json!({
+                        "operation": "bind_world_event",
+                        "event_id": event_id, "world_event_id": referent
+                    }),
+                ),
+            )
+            .await,
+        "unbind_world_event",
+    );
+
+    // The published path keeps the retained CAS envelope: a stale
+    // `base_revision` is the typed conflict, not a published-chapter refusal.
+    let err = fx
+        .core
+        .patch_timeline_event(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            patch(
+                revision - 1,
+                serde_json::json!({
+                    "operation": "unbind_world_event", "event_id": event_id
+                }),
+            ),
+        )
+        .await
+        .unwrap_err();
+    let CoreError::OutlineConflict(details) = err else {
+        panic!("stale base_revision must be the typed outline conflict, got {err:?}");
+    };
+    assert_eq!(details.current_revision, revision);
+
+    // Neither refusal wrote anything.
+    let outline = fx
+        .core
+        .work_outline(&fx.principal, fx.work_id.clone())
+        .await
+        .unwrap();
+    assert_eq!(outline.outline_revision, revision);
+    assert_eq!(
+        outline.timeline_events[0].world_event_id.as_deref(),
+        Some(referent)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&outline_path).unwrap(),
+        published_content,
+        "a refused mutation on a published chapter must not rewrite the outline file"
+    );
+
+    // The remedy: the author clears the stale binding through the public patch
+    // path — one revision bump, no chapter content or structure touched.
+    let cleared = fx
+        .core
+        .patch_timeline_event(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            patch(
+                revision,
+                serde_json::json!({
+                    "operation": "unbind_world_event", "event_id": event_id
+                }),
+            ),
+        )
+        .await
+        .expect("the sanctioned unbind must be reachable on a published chapter");
+    assert_eq!(cleared.new_revision, NonZeroU64::new(3).unwrap());
+    let outline = fx
+        .core
+        .work_outline(&fx.principal, fx.work_id.clone())
+        .await
+        .unwrap();
+    assert_eq!(outline.outline_revision, 3);
+    assert_eq!(outline.timeline_events[0].world_event_id, None);
+    let unbound_content = std::fs::read_to_string(&outline_path).unwrap();
+    assert!(
+        !unbound_content.contains(referent),
+        "the sanctioned unbind must clear the stored referent from the outline"
+    );
+
+    // A foreign stored World still refuses both operations on the published
+    // chapter with the typed ownership denial before any chapter-status read,
+    // leaving the outline revision and the file content untouched.
+    let other_creator = "other-author";
+    nexus_local_db::creators::ensure_creator_row(&fx.pool, other_creator, "Other Author")
+        .await
+        .unwrap();
+    sqlx::query("UPDATE narrative_worlds SET owner_creator_id = ? WHERE world_id = ?")
+        .bind(other_creator)
+        .bind(&world_id)
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+    for (operation, value) in [
+        (
+            "bind",
+            serde_json::json!({
+                "operation": "bind_world_event",
+                "event_id": event_id, "world_event_id": referent
+            }),
+        ),
+        (
+            "unbind",
+            serde_json::json!({
+                "operation": "unbind_world_event", "event_id": event_id
+            }),
+        ),
+    ] {
+        let err = fx
+            .core
+            .patch_timeline_event(
+                &fx.principal,
+                "http",
+                fx.work_id.clone(),
+                patch(3, value),
+            )
+            .await
+            .unwrap_err();
+        let CoreError::WorldOwnerDenied {
+            world_id: denied, ..
+        } = err
+        else {
+            panic!(
+                "a foreign stored World must refuse {operation} with the typed ownership \
+                 denial, got {err:?}"
+            );
+        };
+        assert_eq!(
+            denied, world_id,
+            "{operation} must name the Work's stored World"
+        );
+    }
+    let outline = fx
+        .core
+        .work_outline(&fx.principal, fx.work_id.clone())
+        .await
+        .unwrap();
+    assert_eq!(outline.outline_revision, 3);
+    assert_eq!(outline.timeline_events[0].world_event_id, None);
+    assert_eq!(
+        std::fs::read_to_string(&outline_path).unwrap(),
+        unbound_content,
+        "an ownership refusal must not rewrite the outline file"
     );
     fx.pool.close().await;
     fx.core.close().await.unwrap();
