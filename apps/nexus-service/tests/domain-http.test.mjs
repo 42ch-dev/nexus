@@ -366,20 +366,20 @@ describe('domain-http (P5-T1)', () => {
     assert.deepEqual(reopened.payload.scenes, afterBeat.payload.scenes);
     assert.deepEqual(reopened.payload.beats, afterBeat.payload.beats);
 
-    // A stale base_revision is refused and the canonical content/revision is
-    // untouched. The core refusal class is asserted at the core layer
-    // (`retained_outline_scene_beat_stale_revision_conflicts`); this transport
-    // reaches the same owner and must not commit anything.
+    // A stale base_revision is refused with the typed OCC envelope — the same
+    // `outline_conflict` class the core layer asserts in
+    // `retained_outline_scene_beat_stale_revision_conflicts` — and the canonical
+    // content/revision is untouched. The transport must render the coded 409,
+    // never a sanitized 500, or Task 3's conflict modal cannot open.
     const stale = await patchOutline({
       base_revision: 0,
       operation: 'add_scene',
       chapter_id: 1,
       title: 'Stale Scene',
     });
-    assert.ok(
-      stale.status >= 400,
-      `a stale base_revision must be refused, not accepted: ${stale.text}`,
-    );
+    assert.equal(stale.status, 409, stale.text);
+    assert.equal(stale.payload.error.code, 'outline_conflict');
+    assert.equal(stale.payload.error.details.current_revision, 2);
 
     const afterStale = await readOutline();
     assert.equal(afterStale.payload.outline_revision, 2);
