@@ -148,6 +148,14 @@ function makeMockClient(graph: WorldKbGraphResponse): NexusClient {
     patchTimelineEvent: vi.fn(),
     patchOutlineStructure: vi.fn(),
     patchOutlineChapter: vi.fn(),
+    // V1.200 DR-26 round 2 — the Moment layer's bound-Work source (the
+    // complete works enumeration) must RESOLVE: an unresolved / failed read is
+    // no longer rendered as "no bound Works". An empty page = this World has
+    // no bound Works.
+    listWorks: vi.fn().mockResolvedValue({
+      items: [],
+      pagination: { limit: 20, has_more: false },
+    }),
     health: vi.fn().mockResolvedValue({ status: 'ok', version: 'test' }),
   } as unknown as NexusClient;
 }

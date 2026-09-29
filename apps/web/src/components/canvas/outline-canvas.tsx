@@ -376,12 +376,16 @@ export function OutlineCanvas({
     );
   }
 
-  function handleTimeline(request: TimelinePatchEventRequest) {
+  // Mirrors `handleStructure`: `onSuccess` lets the Timeline inspector clear
+  // its bind drafts only once the write actually lands (V1.200 DR-26 round 2) —
+  // a 409/422 refusal keeps the typed World-event draft for retry.
+  function handleTimeline(request: TimelinePatchEventRequest, onSuccess?: () => void) {
     const state: Omit<ConflictState, 'currentRevision' | 'conflictingPath'> = {
       pendingRequest: { kind: 'timeline', request },
     };
     patchTimeline.mutate(request, {
       onError: (error) => captureConflictState(error, state),
+      onSuccess,
     });
   }
 

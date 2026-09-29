@@ -26,7 +26,12 @@ interface TimelinePanelProps {
   outline: WorkOutline;
   selectedChapterId: number | null;
   baseRevision: number;
-  onPatchTimeline: (request: TimelinePatchEventRequest) => void;
+  /**
+   * Dispatch a `timeline.patch_event` write. `onSuccess` fires only after the
+   * write lands, so the bind drafts below are cleared on success alone
+   * (V1.200 DR-26 round 2 — a 409/422 refusal keeps the typed draft).
+   */
+  onPatchTimeline: (request: TimelinePatchEventRequest, onSuccess?: () => void) => void;
   /**
    * The Work's bound World id (`Work.world_id`, V1.200 DR-26). Absent → the
    * World-event binding control renders **disabled, never hidden**: the core
@@ -178,23 +183,31 @@ function TimelinePanelView({
   function bindWorldEvent(eventId: string, worldEventId: string) {
     const trimmedId = worldEventId.trim();
     if (!trimmedId) return;
-    onPatchTimeline({
-      work_id: outline.work_id,
-      base_revision: baseRevision,
-      operation: 'bind_world_event',
-      event_id: eventId,
-      world_event_id: trimmedId,
-    });
-    setWorldEventTargetByEvent((prev) => {
-      const next = { ...prev };
-      delete next[eventId];
-      return next;
-    });
-    setManualWorldEventByEvent((prev) => {
-      const next = { ...prev };
-      delete next[eventId];
-      return next;
-    });
+    onPatchTimeline(
+      {
+        work_id: outline.work_id,
+        base_revision: baseRevision,
+        operation: 'bind_world_event',
+        event_id: eventId,
+        world_event_id: trimmedId,
+      },
+      // V1.200 DR-26 (Greptile round 2) — clear the picker + manual-ID drafts
+      // only once the write lands (the success-only pattern the scene/beat
+      // drafts use). A typed 422/409 refusal keeps both drafts for retry; the
+      // 409 conflict modal still opens through the orchestrator's `onError`.
+      () => {
+        setWorldEventTargetByEvent((prev) => {
+          const next = { ...prev };
+          delete next[eventId];
+          return next;
+        });
+        setManualWorldEventByEvent((prev) => {
+          const next = { ...prev };
+          delete next[eventId];
+          return next;
+        });
+      },
+    );
   }
 
   function unbindWorldEvent(eventId: string) {

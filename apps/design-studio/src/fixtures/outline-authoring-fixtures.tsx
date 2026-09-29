@@ -8,7 +8,8 @@
  *      remove buttons, disabled states, EmptyState.
  *   2. The Timeline event inspector's World-event bind/unbind control
  *      (apps/web/src/components/canvas/outline-canvas/inspectors/
- *      event-inspector.tsx) — event-only picker, bound state with Unbind,
+ *      event-inspector.tsx) — event-only picker, manual World-event ID entry
+ *      (empty / filled / disabled), bound state with Unbind,
  *      disabled-when-no-bound-World (affordance disabled, never hidden).
  *
  * The web sources couple to `useTranslation`, daemon query hooks, and
@@ -22,9 +23,10 @@
  *   Authoring card — empty (no chapters, no scenes) / with-draft (scene and
  *   beat titles in progress, add buttons enabled) / bound (scenes bound to
  *   chapters, beats bound to scenes, remove affordances live).
- *   Bind control — unbound (picker enabled, Bind gated on selection) / bound
- *   (World event name + Unbind) / disabled (no bound World: hint copy +
- *   picker/Bind/Unbind all disabled).
+ *   Bind control — unbound (picker enabled, Bind gated on selection; manual
+ *   ID empty so Add ID is gated) / unbound-filled (typed World event ID, Add
+ *   ID live) / bound (World event name + Unbind) / disabled (no bound World:
+ *   hint copy + picker/Bind/manual ID/Add ID/Unbind all disabled).
  *
  * Boundary (apps/design-studio AGENTS.md — HARD): no `@xyflow/react`, no
  * `@42ch/nexus-contracts`, no daemon clients (`lib/nexus`), no
@@ -59,7 +61,10 @@ import { EmptyState } from '@web-ui/states'; // @web-ui/states — transitional 
 const INPUT_CLASS =
   'rounded-control border border-gray-alpha-400 bg-background-100 px-3 py-2 text-gray-1000 focus:border-blue-1000 dark:focus:border-blue-700 disabled:bg-gray-100 disabled:text-gray-700';
 
-/** Picker class — verbatim mirror of the World-event select in the event inspector. */
+/**
+ * Picker class — verbatim mirror of the World-event select AND the manual
+ * World-event ID input in the event inspector (both ship this exact class).
+ */
 const SELECT_CLASS =
   'min-w-0 flex-1 rounded-control border border-gray-alpha-400 bg-background-100 px-2 py-1 text-label-12 text-gray-1000 focus:border-blue-1000 dark:focus:border-blue-700';
 
@@ -376,7 +381,10 @@ const WORLD_EVENT_OPTIONS = [
 
 const WORLD_EVENT_REQUIRED = 'Bind a World to this Work to bind World events.';
 
-type BindVariant = 'unbound' | 'bound' | 'disabled';
+type BindVariant = 'unbound' | 'unbound-filled' | 'bound' | 'disabled';
+
+/** The typed manual World-event ID the `unbound-filled` variant carries. */
+const MANUAL_EVENT_ID_DRAFT = 'kb-ashen-gate-fall';
 
 function WorldEventBindRow({
   variant,
@@ -387,6 +395,14 @@ function WorldEventBindRow({
   bound: boolean;
 }) {
   const hasBoundWorld = variant !== 'disabled';
+  // No unbound variant models a PICKED World event, so the picker's Bind stays
+  // gated off in every unbound variant (`unbound` = empty picker,
+  // `unbound-filled` = manual ID only). Shipped rule:
+  // `!boundWorldId || !worldEventTargetByEvent[eventId]`.
+  const pickerBindDisabled = variant === 'unbound' || variant === 'unbound-filled';
+  // Manual-ID entry states: `unbound-filled` carries a typed ID (Add ID
+  // enabled) — every other unbound variant mirrors the initial empty field.
+  const manualEventId = variant === 'unbound-filled' ? MANUAL_EVENT_ID_DRAFT : '';
   const title = 'The Crossing';
 
   return (
@@ -416,34 +432,59 @@ function WorldEventBindRow({
           </Button>
         </div>
       ) : (
-        <div className="mt-1.5 flex items-center gap-1.5">
-          <select
-            data-testid={`outline-world-event-select-${variant}`}
-            disabled={!hasBoundWorld}
-            title={hasBoundWorld ? undefined : WORLD_EVENT_REQUIRED}
-            className={SELECT_CLASS}
-            aria-label={`World event for ${title}`}
-            defaultValue=""
-          >
-            <option value="">Bind World event…</option>
-            {WORLD_EVENT_OPTIONS.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.name}
-              </option>
-            ))}
-          </select>
-          <Button
-            variant="secondary"
-            size="small"
-            data-testid={`outline-world-event-bind-${variant}`}
-            // App rule: Bind needs a bound World AND a selected World event
-            // (`!boundWorldId || !worldEventTargetByEvent[eventId]`). The
-            // static unbound fixture mirrors the initial no-selection state,
-            // so Bind stays gated off there too.
-            disabled={!hasBoundWorld || variant === 'unbound'}
-          >
-            Bind
-          </Button>
+        <div className="mt-1.5 space-y-1.5">
+          <div className="flex items-center gap-1.5">
+            <select
+              data-testid={`outline-world-event-select-${variant}`}
+              disabled={!hasBoundWorld}
+              title={hasBoundWorld ? undefined : WORLD_EVENT_REQUIRED}
+              className={SELECT_CLASS}
+              aria-label={`World event for ${title}`}
+              defaultValue=""
+            >
+              <option value="">Bind World event…</option>
+              {WORLD_EVENT_OPTIONS.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.name}
+                </option>
+              ))}
+            </select>
+            <Button
+              variant="secondary"
+              size="small"
+              data-testid={`outline-world-event-bind-${variant}`}
+              // App rule: Bind needs a bound World AND a selected World event
+              // (`!boundWorldId || !worldEventTargetByEvent[eventId]`). The
+              // static unbound rows mirror the initial no-selection state,
+              // so Bind stays gated off there too.
+              disabled={!hasBoundWorld || pickerBindDisabled}
+            >
+              Bind
+            </Button>
+          </div>
+          {/* Manual World-event ID entry — mirrors the shipped inspector's
+              input + "Add ID" action (`eventInspector.worldEventManual*`). */}
+          <div className="flex items-center gap-1.5">
+            <input
+              type="text"
+              data-testid={`outline-world-event-manual-${variant}`}
+              defaultValue={manualEventId}
+              disabled={!hasBoundWorld}
+              placeholder="Enter World event ID"
+              aria-label={`World event ID for ${title}`}
+              className={SELECT_CLASS}
+            />
+            <Button
+              variant="secondary"
+              size="small"
+              data-testid={`outline-world-event-manual-bind-${variant}`}
+              // App rule: Add ID needs a bound World AND a non-blank ID
+              // (`!boundWorldId || !manualWorldEventByEvent[eventId]?.trim()`).
+              disabled={!hasBoundWorld || !manualEventId.trim()}
+            >
+              Add ID
+            </Button>
+          </div>
         </div>
       )}
     </li>
@@ -480,12 +521,15 @@ function WorldEventBindFixtureFrame() {
   return (
     <FixtureFrame
       title="Outline Timeline — World-event bind / unbind"
-      description="Studio mirror of the v1.200 DR-26 bind/unbind control (event-inspector.tsx): event-only World-event picker, bound state with Unbind, and the disabled-when-no-bound-World rule — the affordance is disabled, never hidden, and carries the refusal reason as hint copy + control title. Unbound — picker enabled, Bind gated on a selected World event. Bound — canonical World-event name with a live Unbind. Disabled — no bound World: hint paragraph, picker/Bind/Unbind all disabled. Light and dark themes per variant (dark panel is scoped .dark)."
+      description="Studio mirror of the v1.200 DR-26 bind/unbind control (event-inspector.tsx): event-only World-event picker, the manual World-event ID entry (empty / filled / disabled), bound state with Unbind, and the disabled-when-no-bound-World rule — every affordance is disabled, never hidden, and carries the refusal reason as hint copy + control title. Unbound — picker enabled, Bind gated on a selected World event, manual ID empty so Add ID is gated. Unbound + manual ID — a typed World event ID with a live Add ID. Bound — canonical World-event name with a live Unbind. Disabled — no bound World: hint paragraph, picker/Bind/manual ID/Add ID/Unbind all disabled. Light and dark themes per variant (dark panel is scoped .dark)."
       testId="outline-world-event-fixture"
     >
       <div className="flex flex-col gap-6">
         <ThemePair testId="outline-world-event-unbound" label="Unbound — World bound, no World event selected">
           <WorldEventBindPanel variant="unbound" />
+        </ThemePair>
+        <ThemePair testId="outline-world-event-unbound-filled" label="Unbound + manual ID — typed World event ID">
+          <WorldEventBindPanel variant="unbound-filled" />
         </ThemePair>
         <ThemePair testId="outline-world-event-bound" label="Bound — World event bound to the Narrative event">
           <WorldEventBindPanel variant="bound" />
