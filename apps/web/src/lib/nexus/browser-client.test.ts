@@ -11,6 +11,7 @@ import { http, HttpResponse } from 'msw';
 import { describe, expect, it, vi } from 'vitest';
 
 import { BrowserClient, NexusClientError } from '@/lib/nexus';
+import type { WorkflowObservationFrame } from '@/lib/nexus/types';
 import { useHandlers } from '@/test/msw-server';
 
 describe('BrowserClient cursor list', () => {
@@ -824,5 +825,242 @@ describe('BrowserClient transport classification (V1.129 P0)', () => {
     expect(err.status).toBe(400);
     expect(err.code).toBe('validation_failed');
     expect(err.kind).toBeUndefined();
+  });
+});
+
+// ── Workflow observation stream (v1.201 P1 T1) ─────────────────────────────
+//
+// The same-run observation route's frozen client contract
+// (.mstar/iterations/v1.201/specs/p1-run-observation-consumption.md §2/§5):
+// `{id, event, data}` triples whose control frames are first-class values
+// (a data-less `gap` and an `id`-less `history_unavailable` must survive — the
+// data-only agent-host parser drops both), streaming decoding is chunk-split
+// safe, a trailing frame without its blank line flushes at stream end, a
+// non-200 typed refusal surfaces before any yield, the resume cursor travels
+// as `Last-Event-ID`, and an abort ends iteration without throwing.
+describe('BrowserClient workflow observation stream (v1.201 P1)', () => {
+  const encoder = new TextEncoder();
+
+  /** A `Response` whose SSE body is exactly `chunks`, in order, then EOF. */
+  function chunkedResponse(chunks: Uint8Array[]): Response {
+    return new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          for (const chunk of chunks) controller.enqueue(chunk);
+          controller.close();
+        },
+      }),
+      { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+    );
+  }
+
+  /** A `Response` streaming the given SSE text, one network chunk per argument. */
+  function frameResponse(...frames: string[]): Response {
+    return chunkedResponse(frames.map((frame) => encoder.encode(frame)));
+  }
+
+  /** A client whose one fetch call resolves with `response`. */
+  function clientReturning(response: Response): BrowserClient {
+    return new BrowserClient({
+      fetchImpl: (async () => response) as unknown as typeof fetch,
+    });
+  }
+
+  /** Drain the iterator into an array (the transport's consumer shape). */
+  async function collect(
+    client: BrowserClient,
+    runId: string,
+    options: { lastEventId?: string; signal: AbortSignal },
+  ): Promise<WorkflowObservationFrame[]> {
+    const frames: WorkflowObservationFrame[] = [];
+    for await (const frame of client.subscribeWorkflowEvents(runId, options)) {
+      frames.push(frame);
+    }
+    return frames;
+  }
+
+  it('(a) yields scripted frames in order, keeping a data-less gap and an id-less history_unavailable', async () => {
+    const frames = await collect(
+      clientReturning(
+        frameResponse(
+          'id: e1:1\nevent: run_state\ndata: {"run_id":"r1","epoch":"e1","sequence":1,"state_revision":1,"status":"running"}\n\n'
+            + 'id: e1:2\nevent: host_event\ndata: {"run_id":"r1","epoch":"e1","sequence":2,"step_id":"step-1","attempt_id":"attempt-1","host_event":{"OpStarted":{"session_id":"r1","op_id":"op-1"}}}\n\n'
+            + 'event: gap\n\n'
+            + 'id: e1:3\nevent: run_state\ndata: {"run_id":"r1","epoch":"e1","sequence":3,"state_revision":2,"status":"succeeded"}\n\n'
+            + 'event: history_unavailable\ndata: {"run_id":"r1","inspect_url":"/v1/daemon/orchestration/sessions/r1"}\n\n',
+        ),
+      ),
+      'r1',
+      { signal: new AbortController().signal },
+    );
+
+    expect(frames.map((frame) => frame.kind)).toEqual([
+      'run_state',
+      'host_event',
+      'gap',
+      'run_state',
+      'history_unavailable',
+    ]);
+    expect(frames[0]).toEqual({
+      kind: 'run_state',
+      id: 'e1:1',
+      payload: { run_id: 'r1', epoch: 'e1', sequence: 1, state_revision: 1, status: 'running' },
+    });
+    expect(frames[1]).toEqual({
+      kind: 'host_event',
+      id: 'e1:2',
+      payload: {
+        run_id: 'r1',
+        epoch: 'e1',
+        sequence: 2,
+        step_id: 'step-1',
+        attempt_id: 'attempt-1',
+        host_event: { OpStarted: { session_id: 'r1', op_id: 'op-1' } },
+      },
+    });
+    expect(frames[3]).toEqual({
+      kind: 'run_state',
+      id: 'e1:3',
+      payload: { run_id: 'r1', epoch: 'e1', sequence: 3, state_revision: 2, status: 'succeeded' },
+    });
+  });
+
+  it('(b) survives a multibyte UTF-8 sequence split across network chunks', async () => {
+    const prefix =
+      'id: e1:1\nevent: host_event\ndata: {"run_id":"r1","epoch":"e1","sequence":1,"step_id":"s1","attempt_id":"a1","host_event":{"ThoughtDelta":{"session_id":"r1","op_id":"op-1","text":"';
+    const encoded = encoder.encode(`${prefix}思考の断片"}}}\n\n`);
+    // Split one byte INTO the first 3-byte character — a non-streaming
+    // `TextDecoder` would decode it as U+FFFD and corrupt the frame.
+    const split = encoder.encode(prefix).length + 1;
+
+    const frames = await collect(
+      clientReturning(chunkedResponse([encoded.slice(0, split), encoded.slice(split)])),
+      'r1',
+      { signal: new AbortController().signal },
+    );
+
+    expect(frames).toHaveLength(1);
+    expect(frames[0]).toEqual({
+      kind: 'host_event',
+      id: 'e1:1',
+      payload: {
+        run_id: 'r1',
+        epoch: 'e1',
+        sequence: 1,
+        step_id: 's1',
+        attempt_id: 'a1',
+        host_event: {
+          ThoughtDelta: { session_id: 'r1', op_id: 'op-1', text: '思考の断片' },
+        },
+      },
+    });
+  });
+
+  it('(c) flushes a trailing frame that never received its terminating blank line', async () => {
+    const frames = await collect(
+      clientReturning(
+        frameResponse(
+          'id: e1:1\nevent: run_state\ndata: {"run_id":"r1","epoch":"e1","sequence":1,"state_revision":1,"status":"running"}\n\n'
+            + 'id: e1:2\nevent: run_state\ndata: {"run_id":"r1","epoch":"e1","sequence":2,"state_revision":2,"status":"succeeded"}',
+        ),
+      ),
+      'r1',
+      { signal: new AbortController().signal },
+    );
+
+    expect(
+      frames.map((frame) => (frame.kind === 'run_state' ? frame.id : frame.kind)),
+    ).toEqual(['e1:1', 'e1:2']);
+  });
+
+  it('(d) surfaces a non-200 typed JSON refusal before yielding anything', async () => {
+    const response = new Response(
+      JSON.stringify({ error: { code: 'not_found', message: 'run does not exist' } }),
+      { status: 404, headers: { 'Content-Type': 'application/json' } },
+    );
+    const frames: WorkflowObservationFrame[] = [];
+    let thrown: unknown;
+    try {
+      for await (const frame of clientReturning(response).subscribeWorkflowEvents('r1', {
+        signal: new AbortController().signal,
+      })) {
+        frames.push(frame);
+      }
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(frames).toEqual([]);
+    expect(thrown).toBeInstanceOf(NexusClientError);
+    expect((thrown as NexusClientError).status).toBe(404);
+    expect((thrown as NexusClientError).code).toBe('not_found');
+  });
+
+  it('(e) sends lastEventId as Last-Event-ID and omits the header when absent', async () => {
+    const seen: { url: string; headers: Record<string, string> }[] = [];
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      seen.push({ url: String(input), headers: (init?.headers ?? {}) as Record<string, string> });
+      return chunkedResponse([]);
+    }) as unknown as typeof fetch;
+    const client = new BrowserClient({
+      baseUrl: 'http://127.0.0.1:8420',
+      apiKey: 'secret',
+      fetchImpl,
+    });
+
+    await collect(client, 'run/1', { lastEventId: 'e1:7', signal: new AbortController().signal });
+    await collect(client, 'run/1', { signal: new AbortController().signal });
+
+    // Zero query parameters (the route refuses them) + the path param encoded.
+    expect(seen[0].url).toBe(
+      'http://127.0.0.1:8420/v1/daemon/orchestration/sessions/run%2F1/events',
+    );
+    expect(seen[0].headers).toEqual({
+      Accept: 'text/event-stream',
+      'X-API-Key': 'secret',
+      'Last-Event-ID': 'e1:7',
+    });
+    expect(seen[1].url).toBe(seen[0].url);
+    expect(seen[1].headers).toEqual({ Accept: 'text/event-stream', 'X-API-Key': 'secret' });
+  });
+
+  it('(f) aborting the signal stops iteration without throwing', async () => {
+    const controller = new AbortController();
+    let releasePull = () => {};
+    const pulled = new Promise<void>((resolve) => {
+      releasePull = resolve;
+    });
+    // `highWaterMark: 0` defers `pull` until the first read request, so the
+    // iterator is provably blocked on the open stream when the abort lands.
+    const body = new ReadableStream<Uint8Array>(
+      {
+        start(streamController) {
+          controller.signal.addEventListener('abort', () => {
+            streamController.error(new DOMException('Aborted', 'AbortError'));
+          });
+        },
+        pull() {
+          releasePull();
+        },
+      },
+      { highWaterMark: 0 },
+    );
+    const client = clientReturning(
+      new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } }),
+    );
+
+    const frames: WorkflowObservationFrame[] = [];
+    const drained = (async () => {
+      for await (const frame of client.subscribeWorkflowEvents('r1', {
+        signal: controller.signal,
+      })) {
+        frames.push(frame);
+      }
+    })();
+
+    await pulled;
+    controller.abort();
+    await expect(drained).resolves.toBeUndefined();
+    expect(frames).toEqual([]);
   });
 });

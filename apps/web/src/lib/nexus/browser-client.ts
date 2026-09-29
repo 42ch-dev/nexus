@@ -183,6 +183,9 @@ import type {
   ListRunsQuery,
   ListTimelineEventsQuery,
   NexusClient,
+  WorkflowHostEventPayload,
+  WorkflowObservationFrame,
+  WorkflowRunStatePayload,
 } from './types';
 
 export interface BrowserClientOptions {
@@ -918,6 +921,102 @@ export class BrowserClient implements NexusClient {
     }
   }
 
+  /**
+   * `GET /v1/daemon/orchestration/sessions/{run_id}/events` — one root run's
+   * retained/live observation frames as an `AsyncIterable` of typed values.
+   *
+   * Same fetch-stream posture as {@link subscribeAgentHostEvents} (streaming
+   * `TextDecoder`, chunk-boundary-safe splitting, trailing-frame flush, abort
+   * window, typed non-200 refusals) but with this route's own `{id, event,
+   * data}` triple parser: the run-event vocabulary carries first-class control
+   * frames, so the data-only agent-host parser would wrongly drop a data-less
+   * `gap` and every `history_unavailable` close.
+   *
+   * `options.lastEventId` is the EXCLUSIVE resume cursor — it is forwarded as
+   * the `Last-Event-ID` request header and omitted entirely when absent (an
+   * empty header would name a cursor that is never valid). The route serves
+   * zero query parameters. Aborting `options.signal` stops iteration without
+   * throwing.
+   */
+  async *subscribeWorkflowEvents(
+    runId: string,
+    options: { lastEventId?: string; signal: AbortSignal },
+  ): AsyncIterable<WorkflowObservationFrame> {
+    const { lastEventId, signal } = options;
+    const url = `${this.baseUrl}/v1/daemon/orchestration/sessions/${encodeURIComponent(runId)}/events`;
+    const headers: Record<string, string> = { Accept: 'text/event-stream' };
+    if (this.apiKey) headers['X-API-Key'] = this.apiKey;
+    if (lastEventId) headers['Last-Event-ID'] = lastEventId;
+
+    let response: Response;
+    try {
+      response = await this.fetchImpl(url, { method: 'GET', headers, signal });
+    } catch (cause) {
+      if (signal.aborted) return;
+      throw new NexusClientError(
+        0,
+        'transport_unreachable',
+        BrowserClient.transportMessage(this.baseUrl),
+        { cause: String(cause) },
+        BrowserClient.classifyTransportError(this.baseUrl, cause),
+      );
+    }
+
+    if (!response.ok) {
+      let errorBody: unknown = null;
+      try {
+        errorBody = await response.json();
+      } catch {
+        // Non-JSON error body; fall through to the generic status error.
+      }
+      throw NexusClientError.fromBody(response.status, errorBody);
+    }
+
+    const body = response.body;
+    if (!body) {
+      throw new NexusClientError(
+        response.status,
+        'invalid_response',
+        'Workflow observation stream returned an empty body',
+      );
+    }
+
+    const reader = body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    try {
+      while (!signal.aborted) {
+        let chunk: ReadableStreamReadResult<Uint8Array>;
+        try {
+          chunk = await reader.read();
+        } catch (cause) {
+          if (signal.aborted) return;
+          throw cause;
+        }
+        if (chunk.done) break;
+        buffer += decoder.decode(chunk.value, { stream: true });
+        let boundary = BrowserClient.nextSseBoundary(buffer);
+        while (boundary) {
+          const frame = buffer.slice(0, boundary.index);
+          buffer = buffer.slice(boundary.index + boundary.length);
+          const parsed = BrowserClient.parseWorkflowObservationFrame(frame);
+          if (parsed) yield parsed;
+          boundary = BrowserClient.nextSseBoundary(buffer);
+        }
+      }
+      // Flush the decoder and any frame whose terminating blank line never
+      // arrived (a final partial frame must not be lost). An explicit abort
+      // ends iteration without emitting further values.
+      if (!signal.aborted) {
+        buffer += decoder.decode();
+        const trailing = BrowserClient.parseWorkflowObservationFrame(buffer);
+        if (trailing) yield trailing;
+      }
+    } finally {
+      void reader.cancel().catch(() => undefined);
+    }
+  }
+
   // ── World check findings (V1.165 / DR-64 surfacing) ─────────────────────
   listWorldFindings(worldId: string): Promise<WorldFindingsListResponse> {
     return this.get<WorldFindingsListResponse>(
@@ -1267,6 +1366,47 @@ export class BrowserClient implements NexusClient {
     }
     if (dataLines.length === 0) return null;
     return JSON.parse(dataLines.join('\n')) as ProviderHostEvent | CoreStreamGap;
+  }
+
+  /**
+   * Parse one workflow-observation SSE frame into its typed client value.
+   *
+   * Unlike {@link parseSseFrame} (data-only, for the agent-host vocabulary),
+   * this route's frames are `{id?, event, data?}` triples carrying first-class
+   * control values: `gap`/`history_unavailable` are returned even with no
+   * `data:` line, and `history_unavailable` carries no `id:` line (the server
+   * omits the cursor instead of resetting it). A data frame's `id` is returned
+   * verbatim — never fabricated, renumbered or defaulted. Frames with an
+   * unknown event name (or a data event with no data) yield `null` and are
+   * skipped; multiple `data:` lines join with `\n`.
+   */
+  private static parseWorkflowObservationFrame(
+    frame: string,
+  ): WorkflowObservationFrame | null {
+    let id = '';
+    let event = '';
+    const dataLines: string[] = [];
+    for (const rawLine of frame.split('\n')) {
+      const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
+      if (line.startsWith('id:')) {
+        id = line.slice(3).replace(/^ /, '');
+      } else if (line.startsWith('event:')) {
+        event = line.slice(6).replace(/^ /, '');
+      } else if (line.startsWith('data:')) {
+        dataLines.push(line.slice(5).replace(/^ /, ''));
+      }
+    }
+    if (event === 'gap') return { kind: 'gap' };
+    if (event === 'history_unavailable') return { kind: 'history_unavailable' };
+    if (dataLines.length === 0) return null;
+    const data = dataLines.join('\n');
+    if (event === 'host_event') {
+      return { kind: 'host_event', id, payload: JSON.parse(data) as WorkflowHostEventPayload };
+    }
+    if (event === 'run_state') {
+      return { kind: 'run_state', id, payload: JSON.parse(data) as WorkflowRunStatePayload };
+    }
+    return null;
   }
 
   // ── Transport classification helpers (V1.129 P0) ───────────────────────────

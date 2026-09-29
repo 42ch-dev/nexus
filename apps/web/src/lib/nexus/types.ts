@@ -81,6 +81,7 @@ import type {
   PatchChapterRequest,
   PatchWorkRequest,
   PendingReviewInfo,
+  ProviderHostEvent,
   ReadingAnnotation,
   ReadingAnnotationCreateRequest,
   ReadingAnnotationListResponse,
@@ -180,6 +181,65 @@ export interface ListTimelineEventsQuery {
 }
 
 /**
+ * `host_event` frame payload of the same-run observation stream — one
+ * host-lifecycle event on a run's ring plus the run/step/attempt identity it
+ * belongs to.
+ *
+ * App-side wrapper (v1.201 P1): the generated contracts export the nested host
+ * event (`ProviderHostEvent`) but not this route's envelope, which mirrors the
+ * core's `HostEventWire` (`crates/nexus-core/src/execution/run_events.rs`).
+ */
+export interface WorkflowHostEventPayload {
+  /** Root run id the frame belongs to. */
+  run_id: string;
+  /** Ring epoch (`<epoch>:<sequence>` cursor half); never consumed to renumber. */
+  epoch: string;
+  /** Monotonic per-run sequence (the cursor's trailing segment). */
+  sequence: number;
+  /** Step that produced the host event. */
+  step_id: string;
+  /** Prompt attempt that produced the host event. */
+  attempt_id: string;
+  /** The normalized provider host event, verbatim. */
+  host_event: ProviderHostEvent;
+}
+
+/**
+ * `run_state` frame payload — the run's durable status/reason projection
+ * (mirrors the core's `RunStateWire`).
+ */
+export interface WorkflowRunStatePayload {
+  /** Root run id the frame belongs to. */
+  run_id: string;
+  /** Ring epoch (`<epoch>:<sequence>` cursor half). */
+  epoch: string;
+  /** Monotonic per-run sequence (the cursor's trailing segment). */
+  sequence: number;
+  /** Durable state revision this projection was written at. */
+  state_revision: number;
+  /** Durable run status. */
+  status: string;
+  /** Optional failure/cancel reason for the status. */
+  reason?: string;
+}
+
+/**
+ * One frame of the frozen same-run workflow observation stream
+ * (`GET /v1/daemon/orchestration/sessions/{run_id}/events`).
+ *
+ * Frozen client-side contract: `.mstar/iterations/v1.201/specs/p1-run-observation-consumption.md`
+ * §2. Data frames carry their `<epoch>:<sequence>` `id` verbatim; `gap` and
+ * `history_unavailable` are first-class control values (a data-less control
+ * frame is never dropped, and `history_unavailable` carries no `id` — the
+ * server omits the cursor rather than resetting it).
+ */
+export type WorkflowObservationFrame =
+  | { kind: 'host_event'; id: string; payload: WorkflowHostEventPayload }
+  | { kind: 'run_state'; id: string; payload: WorkflowRunStatePayload }
+  | { kind: 'gap' }
+  | { kind: 'history_unavailable' };
+
+/**
  * Transport-agnostic client for the Nexus Daemon API.
  *
  * Two implementations ship with this scaffold:
@@ -254,6 +314,25 @@ export interface NexusClient extends CoreSliceClient {
   listSessions(query?: ListSessionsQuery): Promise<ListSessionsResponse>;
   /** `GET /v1/daemon/orchestration/sessions/{session_id}`. */
   getSession(sessionId: string): Promise<SessionDetailResponse>;
+  /**
+   * `GET /v1/daemon/orchestration/sessions/{run_id}/events` — one root run's
+   * retained/live observation frames as an `AsyncIterable`.
+   *
+   * SSE fetch-stream reader (never browser `EventSource` — it cannot carry
+   * `X-API-Key`, hides the route's pre-header typed JSON refusals behind an
+   * opaque `onerror`, and re-subscribes past deliberate terminal ends). The
+   * route accepts no query parameters; `lastEventId` resumes strictly after
+   * the given `<epoch>:<sequence>` cursor. Frames keep the frozen client-side
+   * contract: data frames carry their id verbatim, `gap`/
+   * `history_unavailable` control values are never dropped, and ids are never
+   * fabricated or reset. Aborting `options.signal` stops iteration without
+   * throwing; a non-200 answer surfaces as a typed
+   * {@link NexusClientError} before any frame is yielded.
+   */
+  subscribeWorkflowEvents(
+    runId: string,
+    options: { lastEventId?: string; signal: AbortSignal },
+  ): AsyncIterable<WorkflowObservationFrame>;
 
   // ── Schedules / cron ──────────────────────────────────────────────────────
   /** `GET /v1/daemon/orchestration/schedules` — cursor list (F-P3/F-F1; canonical `items` key). */
