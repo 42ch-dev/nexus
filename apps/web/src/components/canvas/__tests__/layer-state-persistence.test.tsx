@@ -97,7 +97,13 @@ function makeWorldMockClient(graph: WorldKbGraphResponse): NexusClient {
     patchTimelineEvent: vi.fn(),
     patchOutlineStructure: vi.fn(),
     patchOutlineChapter: vi.fn(),
-    getWorks: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+    // V1.200 DR-26 round 2 — the Moment layer's bound-Work source (the
+    // complete works enumeration) must RESOLVE: an unresolved / failed read is
+    // no longer rendered as "no bound Works". An empty page = no bound Works.
+    listWorks: vi.fn().mockResolvedValue({
+      items: [],
+      pagination: { limit: 20, has_more: false },
+    }),
     health: vi.fn().mockResolvedValue({ status: 'ok', version: 'test' }),
   } as unknown as NexusClient;
 }
@@ -404,6 +410,8 @@ describe('WorkTimelineCanvas — layer-state persistence via URL ?layer= (P4 Tas
         { event_id: 'evt-1', title: 'Inciting Incident', realizes_chapter_id: 1 },
       ],
       foreshadows: [],
+      scenes: [],
+      beats: [],
       chapter_titles: {},
       updated_at: '2026-07-18T00:00:00Z',
     } as WorkOutline;
@@ -450,6 +458,8 @@ describe('WorkTimelineCanvas — layer-state persistence via URL ?layer= (P4 Tas
         { event_id: 'evt-1', title: 'Inciting Incident', realizes_chapter_id: 1 },
       ],
       foreshadows: [],
+      scenes: [],
+      beats: [],
       chapter_titles: {},
       updated_at: '2026-07-18T00:00:00Z',
     } as WorkOutline;
@@ -493,6 +503,8 @@ describe('WorkTimelineCanvas — layer-state persistence via URL ?layer= (P4 Tas
         { event_id: 'evt-1', title: 'Inciting Incident', realizes_chapter_id: 1 },
       ],
       foreshadows: [],
+      scenes: [],
+      beats: [],
       chapter_titles: {},
       updated_at: '2026-07-18T00:00:00Z',
     } as WorkOutline;
@@ -520,6 +532,8 @@ describe('WorkTimelineCanvas — layer-state persistence via URL ?layer= (P4 Tas
         { event_id: 'evt-2', title: 'Turning Point', realizes_chapter_id: 2 },
       ],
       foreshadows: [],
+      scenes: [],
+      beats: [],
       chapter_titles: {},
       updated_at: '2026-07-18T00:00:00Z',
     } as WorkOutline;
@@ -579,6 +593,8 @@ describe('WorkTimelineCanvas — layer-state persistence via URL ?layer= (P4 Tas
         { event_id: 'evt-1', title: 'Inciting Incident', realizes_chapter_id: 1 },
       ],
       foreshadows: [],
+      scenes: [],
+      beats: [],
       chapter_titles: {},
       updated_at: '2026-07-18T00:00:00Z',
     } as WorkOutline;

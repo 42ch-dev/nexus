@@ -36,6 +36,8 @@ function workOutlineHandler(chapterIds: number[]) {
       volumes: [{ volume_id: 1, label: 'Volume 1', chapter_ids: chapterIds }],
       timeline_events: [],
       foreshadows: [],
+      scenes: [],
+      beats: [],
       chapter_titles: {},
       updated_at: '2026-06-25T00:00:00Z',
     }),

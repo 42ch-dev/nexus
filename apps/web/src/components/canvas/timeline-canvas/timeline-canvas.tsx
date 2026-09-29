@@ -57,7 +57,7 @@ import { useCallback, useContext } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useBeforeUnload, useNavigate, useSearchParams } from 'react-router';
 import type { Node } from '@xyflow/react';
-import { useQueries } from '@tanstack/react-query';
+import { useQueries, useQuery } from '@tanstack/react-query';
 import { Cpu, Info, Plus } from 'lucide-react';
 
 import { CanvasShell } from '@/components/canvas/canvas-shell';
@@ -100,7 +100,12 @@ import {
 } from './timeline-canvas-adapter';
 import type { TimelineNodeData } from './timeline-canvas-adapter';
 import { WorldKbEntityConflictModal, type WorldKbEntityConflictDraft } from '../world-kb/world-kb-conflict-modal';
-import type { SceneBeatFixturePayload } from '../outline-canvas/graph-projection';
+import type {
+  BeatFixture,
+  SceneBeatFixturePayload,
+  SceneFixture,
+} from '../outline-canvas/graph-projection';
+import { sceneBeatPayloadFromOutline } from '../outline-canvas/graph-projection';
 import { NleTimelineBandOverlay } from './nle-timeline-band-overlay';
 import { filterTimelineEntityNodes } from './nle-timeline-projection';
 import { EraCreateDialog } from './era-create-dialog';
@@ -110,21 +115,16 @@ import { ForkLineageBadge } from './fork-lineage-badge';
 export interface TimelineCanvasProps {
   worldId: string;
   /**
-   * Optional V1.108 Scene/Beat fixture for the Moment layer (V1.156 P1 T2 —
-   * architect spec §3.3.3 V1.156 amendment). The `WorkOutline` wire exposes
-   * no scenes/beats today (DR-26 tracks the extension); Design Studio / test
-   * fixtures inject scene/beat payloads at the projection layer. When
-   * undefined or empty, the Moment layer emits honest empty-state (zero
-   * nodes) per product semantics PD-3 — World Timeline Moment is a
-   * READ/projection layer: scenes come from Works bound to this World, and
-   * Moments remain Work-owned (no World Moment authoring flow).
+   * Optional Scene/Beat payload — EXPLICIT injection mode (Design Studio /
+   * component tests). Production passes nothing: the Moment layer's carrier
+   * is composed from the bound Works' canonical `WorkOutline.scenes[]` /
+   * `beats[]` (V1.200 DR-26), each entry tagged with its owning Work. An
+   * explicitly supplied payload is projected verbatim (populated OR
+   * deliberately empty) and never acts as an automatic empty-data fallback.
    *
    * The fixture is captured by the adapter factory (alongside the active
    * layer) so the adapter memo deps include it — a fixture identity change
-   * re-projects the Moment layer without a layer swap. It is also forwarded
-   * to the adapter context as the `sceneBeatFixture` slot (mirrors the Work
-   * Timeline orchestrator's slot); the captured value takes precedence at
-   * projection time.
+   * re-projects the Moment layer without a layer swap.
    */
   sceneBeatFixture?: SceneBeatFixturePayload;
 }
@@ -448,6 +448,53 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   );
   const nexusClient = useNexusClient();
 
+  // Moment is a complete World projection, unlike the bounded navigation
+  // candidate set above. Enumerate the existing works endpoint by cursor.
+  //
+  // V1.200 DR-26 (Greptile round 2) — every Moment-layer read keys on this
+  // predicate: the effective `activeLayer` is derived from the same URL param
+  // (and Moment is never the default layer), so the two agree wherever the
+  // distinction matters.
+  const isMomentLayer = searchParams.get('layer') === 'moment';
+  const allMomentWorksQuery = useQuery({
+    queryKey: ['world-moment-works', worldId],
+    enabled: isMomentLayer,
+    queryFn: async (): Promise<WorkSummary[]> => {
+      const works: WorkSummary[] = [];
+      let cursor: string | undefined;
+      while (true) {
+        const page = await nexusClient.listWorks({ limit: 100, cursor });
+        works.push(...page.items);
+        if (!page.pagination.has_more) return works;
+        if (!page.pagination.next_cursor) {
+          throw new Error('Works pagination reported more items without a next cursor');
+        }
+        cursor = page.pagination.next_cursor;
+      }
+    },
+  });
+  const allMomentWorks = allMomentWorksQuery.data ?? [];
+  const momentWorkDetailQueries = useQueries({
+    queries: allMomentWorks.map((work) => ({
+      queryKey: ['work-detail', work.work_id],
+      queryFn: (): Promise<WorkDetailResponse> => nexusClient.getWork(work.work_id),
+      staleTime: 30_000,
+      enabled: isMomentLayer,
+    })),
+  });
+  const momentRealizingWorks = useMemo<Array<{ workId: string; updatedAt: string }>>(() => {
+    const out: Array<{ workId: string; updatedAt: string }> = [];
+    momentWorkDetailQueries.forEach((q, idx) => {
+      const detail = q.data as WorkDetailResponse | undefined;
+      if (!detail || detail.world_id !== worldId) return;
+      out.push({
+        workId: detail.work_id,
+        updatedAt: allMomentWorks[idx]?.updated_at ?? '',
+      });
+    });
+    return out;
+  }, [momentWorkDetailQueries, allMomentWorks, worldId]);
+
   // Per-Work detail fan-out (parallel). Each `getWork` returns a
   // `WorkDetailResponse` carrying `world_id`; we filter to those matching the
   // active World. Cached at the TanStack Query level — Work-detail readers
@@ -479,6 +526,7 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
     });
     return out;
   }, [workDetailQueries, worksList, worldId]);
+  const outlineWorks = isMomentLayer ? momentRealizingWorks : realizingWorks;
 
   // Surface-level fallback target — most-recent realizing Work (V1.123 P3
   // semantics preserved verbatim: same candidate set, same recency sort).
@@ -635,6 +683,70 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
     [defaultLayer, searchParams, setSearchParams],
   );
 
+  // Derived selection flag for the reverse-resolve gate below. Kept as state
+  // (not read from `surface`) because the fan-out queries must be declared
+  // before the adapter, which depends on their composed result.
+  const [hasEventSelection, setHasEventSelection] = useState(false);
+
+  // ── V1.163 P1 Task 2 + V1.200 DR-26 — bound-Work outline fan-out ────────
+  //
+  // One `WorkOutline` read per realizing Work (the capped N=20 candidate set
+  // above). The SHARED outline detail key (`queryKeys.outline.detail`) is the
+  // same cache entry the Work Timeline surface's `useWorkOutline` reads, so
+  // the fan-out costs at most one outline fetch per Work per session.
+  //
+  // Two consumers:
+  //   1. V1.163 P1 Task 2 — the event-level reverse resolve (World → Work)
+  //      scans `timeline_events[].world_event_id` and needs the outlines only
+  //      while a Narrative event is selected.
+  //   2. V1.200 DR-26 — the Moment layer's canonical carrier (the bound
+  //      Works' `scenes[]` / `beats[]`), which must populate WITHOUT any
+  //      Narrative selection. The former selection-only gate could not.
+  //
+  // QC3 F-1 (fix wave) — the reverse-resolve reads stay SELECTION-LAZY: a
+  // World Timeline mount with no selection and a non-Moment layer performs
+  // ZERO outline GETs. `hasEventSelection` is derived state (set by the
+  // effect below) because the selection lives inside `useCanvasSurface`,
+  // whose adapter needs the composed payload declared here; the one-render
+  // lag is harmless.
+  const outlineFanOutEnabled = activeLayer === 'moment' || hasEventSelection;
+  const workOutlineQueries = useQueries({
+    queries: outlineWorks.map(({ workId }) => ({
+      queryKey: queryKeys.outline.detail(workId),
+      queryFn: (): Promise<WorkOutline> => nexusClient.getWorkOutline(workId),
+      staleTime: 30_000,
+      enabled: outlineFanOutEnabled,
+    })),
+  });
+
+  // V1.200 DR-26 — compose the canonical Moment carrier from the bound Works'
+  // canonical outlines, tagging each scene/beat with its owning Work (chapter
+  // numbers are Work-local: two Works that both own a chapter 1 must not
+  // collapse into one chapter region). Keyed on primitive signatures because
+  // `useQueries` returns a fresh array each render — depending on it directly
+  // would churn the payload identity and re-project every render.
+  const boundWorksSignature = outlineWorks.map((w) => w.workId).join(',');
+  const boundOutlinesSignature = workOutlineQueries
+    .map((q) => {
+      const outline = q.data as WorkOutline | undefined;
+      return outline ? `${outline.work_id}#${outline.outline_revision}` : '-';
+    })
+    .join('|');
+  const canonicalSceneBeatFixture = useMemo<SceneBeatFixturePayload>(() => {
+    const scenes: SceneFixture[] = [];
+    const beats: BeatFixture[] = [];
+    workOutlineQueries.forEach((q, idx) => {
+      const outline = q.data as WorkOutline | undefined;
+      if (!outline) return;
+      const payload = sceneBeatPayloadFromOutline(outline, outlineWorks[idx]?.workId);
+      scenes.push(...payload.scenes);
+      beats.push(...payload.beats);
+    });
+    if (scenes.length === 0 && beats.length === 0) return EMPTY_SCENE_BEAT_FIXTURE;
+    return { scenes, beats };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the primitive signatures above
+  }, [boundWorksSignature, boundOutlinesSignature]);
+
   // Rebuild the adapter on layer swap so `useCanvasSurface`'s `[graph,
   // adapter]` memo re-projects (semantic discrete swap per layer-feel §3.1).
   // The ctxRef stays mutable; the adapter just captures the new layer
@@ -645,14 +757,15 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   // memoises on `[graph, adapter]`, so a new adapter identity re-runs the
   // Narrative merge with the fresh events).
   //
-  // V1.156 P1 fix-wave 1 (F3) — the adapter ALSO captures the Moment
-  // scene/beat fixture (`fixture` — the stable module-level empty constant
-  // when the prop is absent, so real Worlds never churn the memo). A fixture
-  // identity change recreates the adapter and re-projects the Moment layer
-  // without a layer swap (previously the fixture was only read via
-  // `ctxRef.current` AFTER this memo, so the projection stayed stale until
-  // a layer swap / graph refetch).
-  const fixture = sceneBeatFixture ?? EMPTY_SCENE_BEAT_FIXTURE;
+  // V1.156 P1 fix-wave 1 (F3) — the adapter ALSO captures the Moment carrier
+  // (`fixture`) so a fixture identity change recreates the adapter and
+  // re-projects the Moment layer without a layer swap. V1.200 DR-26 — the
+  // captured value is the EXPLICIT `sceneBeatFixture` prop when supplied
+  // (Design Studio / tests) and the composed canonical bound-Work payload
+  // otherwise; production passes no prop. The module-level
+  // `EMPTY_SCENE_BEAT_FIXTURE` keeps the identity stable while nothing is
+  // projectable, so real Worlds never churn the memo.
+  const fixture = sceneBeatFixture ?? canonicalSceneBeatFixture;
   const adapter = useMemo(
     () =>
       createTimelineCanvasAdapter(
@@ -667,31 +780,12 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
 
   const surface = useCanvasSurface(adapter, surfaceQuery);
 
-  // V1.163 P1 Task 2 — event-level reverse resolve carrier: a `WorkOutline`
-  // read per realizing Work (the capped candidate set), so the orchestrator
-  // can scan `timeline_events[].world_event_id` for the selected World event
-  // (architect lock — reverse fan-out cap N=20 reuses the V1.123 P3 fan-out).
-  // The query key is the SHARED outline detail key (`queryKeys.outline
-  // .detail`) — the Work Timeline surface's `useWorkOutline` hook reads the
-  // same cache entry, so the fan-out costs at most one outline fetch per
-  // Work per session.
-  //
-  // QC3 F-1 (fix wave) — the fan-out is SELECTION-LAZY, not eager-on-mount.
-  // The reads are consumed only by `boundWorkEventTarget` below, which
-  // requires a selected Narrative event (`layoutHint === 'event'`); gating
-  // the queries on that selection means a World Timeline mount with no
-  // selection performs ZERO outline GETs (previously up to N=20 per mount).
-  // On selection the gate flips, the fan-out fetches, and the F-2 reactive
-  // inspector below re-renders the open CTA when the data settles.
-  const outlineFanOutEnabled = surface.selectedNode?.data.layoutHint === 'event';
-  const workOutlineQueries = useQueries({
-    queries: realizingWorks.map(({ workId }) => ({
-      queryKey: queryKeys.outline.detail(workId),
-      queryFn: (): Promise<WorkOutline> => nexusClient.getWorkOutline(workId),
-      staleTime: 30_000,
-      enabled: outlineFanOutEnabled,
-    })),
-  });
+  // Keep the reverse-resolve gate in sync with the projected selection (see
+  // `outlineFanOutEnabled` above). Setting the same boolean is a no-op for
+  // React, so this does not re-render on every projection rebuild.
+  useEffect(() => {
+    setHasEventSelection(surface.selectedNode?.data.layoutHint === 'event');
+  }, [surface.selectedNode]);
 
   // ── V1.163 P1 Task 2 — event-level reverse resolve (World → Work) ────────
   //
@@ -1011,10 +1105,11 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   // alt-view itself performs NO writes (architect-locked §4.2).
   ctxRef.current = {
     worldId,
-    // V1.156 P1 T2 — bound-Works Scene/Beat fixture slot. Forwarded to the
-    // adapter context so the Moment projection reads it at projection time
-    // (`ctxRef.current.sceneBeatFixture`). Production passes nothing
-    // (honest empty-state); Design Studio / tests inject fixture payloads.
+    // V1.156 P1 T2 / V1.200 DR-26 — Scene/Beat carrier slot. Production passes
+    // no prop: the adapter projects the canonical carrier composed from the
+    // bound Works' outlines (`canonicalSceneBeatFixture`). An explicitly
+    // supplied `sceneBeatFixture` (Design Studio / tests) is an injection mode
+    // and takes precedence; an absent prop never means "substitute empty data".
     sceneBeatFixture,
     onPatchEntity: handlePatchEntity,
     onConflict: (info) => setConflictInfo(info),
@@ -1078,20 +1173,39 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
     );
   }
 
-  // V1.147 P2 T3 — emptiness spans BOTH projection families: the KB graph AND
+  // V1.147 P2 T3 — emptiness spans the projection families: the KB graph AND
   // the merged compute log events. A World whose only Narrative content is an
   // accepted compute Run must render its Compute result node, not the
-  // global empty state.
+  // global empty state. (V1.200 DR-26 adds the canonical Moment carrier as a
+  // third family — see the fix note below.)
   //
   // V1.162 fix wave S-1 (qc3) — the events query is included in the
   // loading gate: during a branch-switch refetch the re-keyed
   // `useInfiniteQuery` has no data (`flattenPages → []`), so without this
   // gate a World with zero KB entities would flash "This World's timeline
   // is empty" + the run-module CTA on a branch that HAS events.
+  //
+  // V1.200 DR-26 fix (finding: empty-KB World Moment blocked by this gate) —
+  // emptiness spans THREE content families: the World KB graph, the merged
+  // compute log, AND the canonical Moment carrier (the bound Works'
+  // `WorkOutline.scenes[]` / `beats[]`, composed above into `fixture`). A
+  // World whose KB graph and compute events are both empty but whose bound
+  // Work carries scenes/beats is NOT empty — the Moment layer must render
+  // those canonical scenes instead of the global empty state. The global
+  // EmptyState remains for Worlds with truly nothing (no KB entities, no
+  // compute events, no canonical Moment data).
+  const momentOutlineFailures = isMomentLayer
+    ? workOutlineQueries.filter((q) => q.isError).length
+    : 0;
+  const momentCarrierHasData =
+    fixture.scenes.length > 0 ||
+    fixture.beats.length > 0 ||
+    momentOutlineFailures > 0;
   const isEmpty =
     !timelineEvents.isFetching &&
-    ((!graph.data || (graph.data.entities ?? []).length === 0) &&
-      eventsList.length === 0);
+    (!graph.data || (graph.data.entities ?? []).length === 0) &&
+    eventsList.length === 0 &&
+    !momentCarrierHasData;
 
   // V1.123 P1 T5 — Brief-empty detection. The active layer is Brief but the
   // graph carries zero `block_type=era` entities (the user clicked the Brief
@@ -1109,6 +1223,57 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   ).length;
   const isBriefEmpty = !isEmpty && activeLayer === 'brief' && eraCount === 0;
 
+  // ── V1.200 DR-26 (Greptile round 2) — honest Moment bound-Work states ────
+  //
+  // The Moment carrier is composed from the bound Works' outlines — a second
+  // async source independent of the World KB graph. That source has TWO
+  // stages, and an unsettled stage means the bound-Work set is UNKNOWN, which
+  // is a different fact from "no bound Works":
+  //   1. the COMPLETE Works enumeration (`allMomentWorksQuery`) plus the
+  //      per-Work detail fan-out resolving `world_id`
+  //      (`momentWorkDetailQueries`) — until both settle, nothing is known
+  //      about which Works bind to this World;
+  //   2. one outline read per bound Work (`workOutlineQueries`) — a failed
+  //      read is NOT an empty outline.
+  // Stage 1 in flight → the loading affordance (the honest-empty panel would
+  // claim "no bound Works" before the list even arrived); stage 1 failed →
+  // the error affordance with retry. Stage 2 in flight → the loading
+  // affordance; stage 2 failures are surfaced as ONE aggregated affordance
+  // with retry while the Works that DID resolve keep rendering — a single bad
+  // read must neither blank the whole layer nor be silently dropped from the
+  // composition (Greptile round 2, findings 1 + 2).
+  const momentBoundWorksUnknown =
+    isMomentLayer &&
+    (allMomentWorksQuery.isLoading ||
+      momentWorkDetailQueries.some((q) => q.isLoading));
+  const momentBoundWorksFailed =
+    isMomentLayer &&
+    (allMomentWorksQuery.isError ||
+      momentWorkDetailQueries.some((q) => q.isError));
+  if (momentBoundWorksUnknown) {
+    return <LoadingState label={t('timeline.loading')} />;
+  }
+  if (momentBoundWorksFailed) {
+    return (
+      <ErrorState
+        description={t('timeline.loadError')}
+        onRetry={() => {
+          void allMomentWorksQuery.refetch();
+          momentWorkDetailQueries.forEach((q) => void q.refetch());
+        }}
+      />
+    );
+  }
+  // Round 2 (finding 2) — the fan-out covers EVERY bound Work of the complete
+  // Moment enumeration (`outlineWorks`), not just the legacy N=20 navigation
+  // window, so an older Work's failed outline read is seen here too.
+  const momentOutlinesPending = isMomentLayer && outlineWorks.length > 0;
+  if (momentOutlinesPending && workOutlineQueries.some((q) => q.isLoading)) {
+    return <LoadingState label={t('timeline.loading')} />;
+  }
+  // Failed outline reads already count as unresolved Moment carrier data in
+  // `isEmpty` above, so they cannot be mislabeled as an empty World timeline.
+
   // V1.156 P1 T2 — World-Moment empty detection. Mirrors the Work Timeline
   // orchestrator's `isMomentEmpty` pattern: the active layer is Moment AND
   // the projection returned zero nodes (no bound-Works scene/beat fixture /
@@ -1117,8 +1282,16 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   // when there is content on Brief/Narrative but nothing projectable on
   // Moment — the honest panel (PD-3) explains scenes come from bound Works'
   // Outline data, with a CTA back to Narrative.
+  //
+  // Round 2 (finding 1) — only a SUCCESSFUL empty bound-Work set renders as
+  // empty: the unresolved / failed stages above already returned, and a
+  // failed bound-Work outline read is not an empty Moment (the aggregated
+  // affordance in the render owns that state).
   const isMomentEmpty =
-    !isEmpty && activeLayer === 'moment' && surface.nodes.length === 0;
+    !isEmpty &&
+    activeLayer === 'moment' &&
+    surface.nodes.length === 0 &&
+    momentOutlineFailures === 0;
 
   // Visible ordering-disclaimer gate (PR #156 fix 3 — Greptile P1). Mirrors
   // the adapter's `summarizeTimelineGraph` a11y-disclaimer condition: present
@@ -1194,6 +1367,21 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
             <li key={i}>{err}</li>
           ))}
         </ul>
+      ) : null}
+
+      {/* V1.200 DR-26 (Greptile round 2, finding 2) — aggregated bound-Work
+          outline failure. The Works whose outlines DID resolve keep rendering
+          below; this panel states the failure and offers retry instead of
+          silently dropping the affected Work from the Moment composition. */}
+      {momentOutlineFailures > 0 ? (
+        <ErrorState
+          description={t('timeline.loadError')}
+          onRetry={() => {
+            workOutlineQueries.forEach((q) => {
+              if (q.isError) void q.refetch();
+            });
+          }}
+        />
       ) : null}
 
       {hasEvents ? (

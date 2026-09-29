@@ -213,6 +213,8 @@ describe('WorkTimelineCanvas — layer breadcrumb (P4 Task 5 + V1.156 P2 T2)', (
         { event_id: 'evt-1', title: 'Inciting Incident', realizes_chapter_id: 1 },
       ],
       foreshadows: [],
+      scenes: [],
+      beats: [],
       chapter_titles: {},
       updated_at: '2026-07-18T00:00:00Z',
     } as WorkOutline;
@@ -257,6 +259,8 @@ describe('WorkTimelineCanvas — layer breadcrumb (P4 Task 5 + V1.156 P2 T2)', (
         { event_id: 'evt-1', title: 'Inciting Incident', realizes_chapter_id: 1 },
       ],
       foreshadows: [],
+      scenes: [],
+      beats: [],
       chapter_titles: {},
       updated_at: '2026-07-18T00:00:00Z',
     } as WorkOutline;
@@ -304,6 +308,8 @@ describe('WorkTimelineCanvas — layer breadcrumb (P4 Task 5 + V1.156 P2 T2)', (
         { event_id: 'evt-2', title: 'Turning Point', realizes_chapter_id: 2 },
       ],
       foreshadows: [],
+      scenes: [],
+      beats: [],
       chapter_titles: {},
       updated_at: '2026-07-18T00:00:00Z',
     } as WorkOutline;

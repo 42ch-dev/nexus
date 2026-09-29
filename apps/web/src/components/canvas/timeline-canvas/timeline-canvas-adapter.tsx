@@ -700,6 +700,7 @@ export function projectTimelineGraph(
   events?: TimelineEventInfo[],
   moduleNames?: ReadonlyMap<string, string>,
   fixture?: SceneBeatFixturePayload,
+  worldId?: string,
 ): {
   nodes: Node<TimelineNodeData>[];
   edges: Edge<TimelineEdgeData>[];
@@ -713,7 +714,11 @@ export function projectTimelineGraph(
     // adapter's `TimelineNodeData` base). Cast is deliberate cross-surface
     // reuse — same carrier + same node components as the Work Timeline
     // Moment layer (V1.123 layer-feel §2.4); see `projectMomentLayer`.
-    return projectMomentLayer(graph, fixture) as unknown as {
+    //
+    // V1.200 DR-26 — the World is identified by the orchestrator's supplied
+    // `worldId` (never by the first KB entity, which an empty KB graph does
+    // not have); the carrier `fixture` is the composed bound-Work payload.
+    return projectMomentLayer(fixture, worldId) as unknown as {
       nodes: Node<TimelineNodeData>[];
       edges: Edge<TimelineEdgeData>[];
     };
@@ -1005,28 +1010,6 @@ function entityToTimelineNodeData(
 // ─── Moment projection (V1.156 P1 T1) ───────────────────────────────────────
 
 /**
- * Derive the World id for Moment node payloads. `WorldKbGraphResponse`
- * carries no top-level `world_id` (unlike `WorkOutline.work_id`); the
- * entities carry it per-row. Moment nodes only render when the fixture has
- * scenes/beats, which implies the graph has bound-Work data — the first
- * entity's `world_id` is the stable source. Empty string only when the
- * graph is entity-less AND a fixture is present (test-only degenerate case;
- * the node components do not read `workId` for rendering).
- *
- * Semantic caveat (qc3 F-4 / qc2 M-1): the returned WORLD id is stored into
- * `WorkTimelineNodeData.workId`, whose documented meaning is "Work id the
- * node belongs to" — a known mismatch on the World surface (a World-Moment
- * node can't name one Work). No current consumer reads `workId` on Moment
- * nodes (the node components + the World Moment inspector render without
- * it, and the inspector deliberately renders NO Edit-in-Outline CTA that
- * would navigate to `/works/<worldId>/outline`). DR-26 multi-Work
- * aggregation must carry real per-node Work attribution.
- */
-function worldIdOf(graph: TimelineGraph): string {
-  return graph.entities?.[0]?.world_id ?? '';
-}
-
-/**
  * V1.156 P1 T1 — World Timeline Moment layer projection (architect
  * `canvas-strategy-surface.md` §3.3.3 V1.156 amendment). Completes the
  * World Timeline 3-layer matrix (Brief + Narrative + Moment).
@@ -1037,14 +1020,25 @@ function worldIdOf(graph: TimelineGraph): string {
  * feel per V1.123 layer-feel-differentiation §2.4 — no new node component
  * family).
  *
- * Carrier: `SceneBeatFixturePayload` (V1.108 outline-canvas fixture type).
- * The `WorkOutline` wire exposes no scenes/beats today; the orchestrator
- * injects Design Studio / test fixtures via `ctxRef.current.sceneBeatFixture`
- * (fixture-driven read-projection — DR-26 tracks the future wire extension).
- * When the fixture is absent or empty, the projection emits zero nodes
- * (honest empty-state per product semantics PD-3 — World Timeline Moment is
- * a READ/projection layer: Moments remain Work-owned, this is NOT a World
- * Moment authoring surface, no World-owned Moment write flow).
+ * Carrier (V1.200 DR-26): `SceneBeatFixturePayload`, composed by the
+ * orchestrator from the bound Works' canonical `WorkOutline.scenes[]` /
+ * `.beats[]` (each entry tagged with its owning Work id), or supplied
+ * EXPLICITLY by Design Studio / tests through `sceneBeatFixture`. An
+ * explicitly supplied payload is projected verbatim; omitting it means
+ * "project the composed canonical carrier", never an automatic empty-data
+ * substitution. An empty payload emits zero nodes (honest empty-state per
+ * product semantics PD-3 — World Timeline Moment is a READ/projection
+ * layer: Moments remain Work-owned, this is NOT a World Moment authoring
+ * surface, no World-owned Moment write flow).
+ *
+ * Node attribution (V1.200 DR-26): a scene/beat coming from a bound Work
+ * carries that Work's id into `WorkTimelineNodeData.workId`; an explicitly
+ * injected fixture entry without provenance falls back to the supplied
+ * `worldId`. (The World is never identified by the first KB entity — an
+ * empty World KB graph has no entity, and a multi-Work World has no single
+ * answer. No current consumer reads `workId` on Moment nodes: the node
+ * components + the World Moment inspector render without it, and that
+ * inspector deliberately renders NO Edit-in-Outline CTA.)
  *
  * Product semantics (PD-3 — HARD): primary readable set = Moments from
  * Works bound to that World, projected into the World Timeline. Node
@@ -1058,9 +1052,16 @@ function worldIdOf(graph: TimelineGraph): string {
  * `simplify:` deterministic vertical stack. P4 may swap in a richer
  * manuscript-aware layout (anchored scene-card grid) per layer-feel §9.
  */
+/** One vertical scene-stack region: a Work's chapters are Work-local. */
+interface MomentChapterGroup {
+  workId: string | undefined;
+  chapterId: number;
+  scenes: SceneFixture[];
+}
+
 function projectMomentLayer(
-  graph: TimelineGraph,
   fixture: SceneBeatFixturePayload | undefined,
+  worldId: string | undefined,
 ): {
   nodes: Node<WorkTimelineNodeData>[];
   edges: Edge<TimelineEdgeData>[];
@@ -1072,44 +1073,53 @@ function projectMomentLayer(
     return { nodes: [], edges: [] };
   }
 
-  const workId = worldIdOf(graph);
-
-  // Group scenes by chapter so the vertical stack reads chapter → scene →
-  // beat top-to-bottom. Chapter ordering is numeric ascending.
-  const scenesByChapter = new Map<number, SceneFixture[]>();
+  // Group scenes by (Work, chapter). Chapter numbers are Work-local, so two
+  // bound Works that each own a chapter 1 must not collapse into one chapter
+  // region (V1.200 DR-26 provenance rule).
+  const groupsByKey = new Map<string, MomentChapterGroup>();
   for (const scene of fixture.scenes) {
-    const bucket = scenesByChapter.get(scene.chapterId);
-    if (bucket) bucket.push(scene);
-    else scenesByChapter.set(scene.chapterId, [scene]);
+    const key = `${scene.workId ?? ''}#${scene.chapterId}`;
+    const bucket = groupsByKey.get(key);
+    if (bucket) bucket.scenes.push(scene);
+    else {
+      groupsByKey.set(key, {
+        workId: scene.workId,
+        chapterId: scene.chapterId,
+        scenes: [scene],
+      });
+    }
   }
-  const sortedChapterIds = [...scenesByChapter.keys()].sort((a, b) => a - b);
+  const groups = [...groupsByKey.values()].sort((a, b) => {
+    const aWork = a.workId ?? '';
+    const bWork = b.workId ?? '';
+    if (aWork !== bWork) return aWork.localeCompare(bWork);
+    return a.chapterId - b.chapterId;
+  });
 
   const emittedSceneIds = new Set<string>();
   const nodes: Node<WorkTimelineNodeData>[] = [];
 
-  // Scene cards — vertical stack per chapter region (X groups by chapter).
-  sortedChapterIds.forEach((chapterId, chapterIdx) => {
-    const scenes = scenesByChapter.get(chapterId) ?? [];
-    // Stable sort by sceneId within the chapter so the stack is
-    // deterministic across refetches.
-    const sortedScenes = [...scenes].sort((a, b) => a.sceneId.localeCompare(b.sceneId));
+  // Scene cards — vertical stack per (Work, chapter) region (X groups by
+  // region so the chapter→scene→beat hierarchy reads spatially).
+  groups.forEach((group, groupIdx) => {
+    const sortedScenes = [...group.scenes].sort((a, b) => a.sceneId.localeCompare(b.sceneId));
     sortedScenes.forEach((scene, sceneIdx) => {
       emittedSceneIds.add(scene.sceneId);
       const data: WorkTimelineNodeData = {
-        workId,
+        workId: scene.workId ?? worldId ?? '',
         nodeKind: 'scene',
         nodeId: scene.sceneId,
         sceneId: scene.sceneId,
         label: scene.title ?? '',
         status: scene.status,
-        manuscriptAnchor: { chapterId: scene.chapterId, sceneId: scene.sceneId },
-        realizesChapterId: scene.chapterId,
+        manuscriptAnchor: { chapterId: group.chapterId, sceneId: scene.sceneId },
+        realizesChapterId: group.chapterId,
       };
       nodes.push({
         id: momentSceneNodeId(scene.sceneId),
         type: 'work-timeline-moment-scene',
         position: {
-          x: MOMENT_ORIGIN_X + chapterIdx * MOMENT_CHAPTER_STEP_X,
+          x: MOMENT_ORIGIN_X + groupIdx * MOMENT_CHAPTER_STEP_X,
           y: MOMENT_ORIGIN_Y + sceneIdx * MOMENT_SCENE_STEP_Y,
         },
         data,
@@ -1149,7 +1159,7 @@ function projectMomentLayer(
     const sortedBeats = [...beats].sort((a, b) => a.beatId.localeCompare(b.beatId));
     sortedBeats.forEach((beat, beatIdx) => {
       const data: WorkTimelineNodeData = {
-        workId,
+        workId: beat.workId ?? worldId ?? '',
         nodeKind: 'beat',
         nodeId: beat.beatId,
         beatId: beat.beatId,
@@ -1179,19 +1189,13 @@ function projectMomentLayer(
   // Density-encoded: segment length proportional to scene count per ND-A1.
   // Mirrors the Work Timeline Moment spine (same rhythm break from the
   // Brief+Narrative time-span convention).
-  if (sortedChapterIds.length > 0) {
-    const chapterSegments: MomentSpineConfig['chapterSegments'] = sortedChapterIds.map(
-      (chapterId) => {
-        const scenes = scenesByChapter.get(chapterId) ?? [];
-        const sceneTicks = scenes.map((s) => s.sceneId);
-        return {
-          chapterId,
-          chapterLabel: `Ch. ${chapterId}`,
-          sceneCount: scenes.length,
-          sceneTicks,
-        };
-      },
-    );
+  if (groups.length > 0) {
+    const chapterSegments: MomentSpineConfig['chapterSegments'] = groups.map((group) => ({
+      chapterId: group.chapterId,
+      chapterLabel: `Ch. ${group.chapterId}`,
+      sceneCount: group.scenes.length,
+      sceneTicks: group.scenes.map((s) => s.sceneId),
+    }));
     const momentSpineData: DirectedAxisSpineNodeData = {
       layer: 'moment',
       spineConfig: {
@@ -1703,6 +1707,9 @@ export function createTimelineCanvasAdapter(
         timelineEvents,
         computeModuleNames,
         sceneBeatFixture ?? ctxRef.current.sceneBeatFixture,
+        // V1.200 DR-26 — identify the World from the supplied `worldId`,
+        // never from the first KB entity (empty KB graphs have none).
+        ctxRef.current.worldId,
       );
     },
 

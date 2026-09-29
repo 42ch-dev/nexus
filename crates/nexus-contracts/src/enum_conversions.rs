@@ -1020,6 +1020,10 @@ impl crate::generated::daemon_api::canvas::outline::outline_patch_structure_requ
             Self::MoveChapter => "move_chapter",
             Self::LinkEvent => "link_event",
             Self::AttachToVolume => "attach_to_volume",
+            Self::AddScene => "add_scene",
+            Self::RemoveScene => "remove_scene",
+            Self::AddBeat => "add_beat",
+            Self::RemoveBeat => "remove_beat",
         }
     }
 }
@@ -1033,6 +1037,8 @@ impl crate::generated::daemon_api::canvas::outline::timeline_patch_event_request
             Self::AttachEventToChapter => "attach_event_to_chapter",
             Self::LinkForeshadow => "link_foreshadow",
             Self::UnlinkForeshadow => "unlink_foreshadow",
+            Self::BindWorldEvent => "bind_world_event",
+            Self::UnbindWorldEvent => "unbind_world_event",
         }
     }
 }

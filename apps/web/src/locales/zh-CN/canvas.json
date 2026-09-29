@@ -144,7 +144,18 @@
     "unlinkAria": "移除到 {{title}} 的伏笔关联",
     "targetAria": "{{title}} 的伏笔目标",
     "targetPlaceholder": "选择要关联的伏笔目标…",
-    "link": "关联"
+    "link": "关联",
+    "worldEventRequired": "先为此作品绑定世界，才能绑定世界事件。",
+    "worldEventBound": "世界事件：{{name}}",
+    "worldEventPlaceholder": "绑定世界事件…",
+    "worldEventAria": "{{title}} 的世界事件",
+    "worldEventBind": "绑定",
+    "worldEventManualAria": "{{title}} 的世界事件 ID",
+    "worldEventManualPlaceholder": "输入世界事件 ID",
+    "worldEventManualBind": "添加 ID",
+    "worldEventPickerLimit": "选择器仅覆盖前 500 个世界实体。输入事件 ID 可绑定任何有效事件。",
+    "worldEventUnbind": "解绑",
+    "worldEventUnbindTitle": "解绑世界事件"
   },
   "sceneInspector": {
     "title": "场景",
@@ -167,6 +178,25 @@
     },
     "statusNotSet": "未设置",
     "partOf": "属于 {{title}}。"
+  },
+  "sceneBeatAuthoring": {
+    "title": "场景与节拍",
+    "description": "场景与节拍属于作品的大纲结构，会显示在作品时间线的瞬间图层。",
+    "chapter": "章节",
+    "sceneTitle": "场景标题",
+    "addScene": "添加场景",
+    "noChapters": "请先添加章节，再创作场景。",
+    "empty": {
+      "title": "暂无场景",
+      "description": "在此添加的场景会显示在作品时间线的瞬间图层。"
+    },
+    "untitledScene": "未命名场景",
+    "chapterBadge": "第 {{chapter}} 章",
+    "remove": "移除",
+    "untitledBeat": "未命名节拍",
+    "beatTitle": "节拍标题",
+    "addBeat": "添加节拍",
+    "removeSceneConfirm": "删除该场景将一并删除其节拍：{{beats}}。确定删除该场景及其节拍？"
   },
   "chapter": {
     "fallback": "章节",

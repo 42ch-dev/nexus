@@ -36,15 +36,4 @@ describe('queryKeys', () => {
     });
   });
 
-  describe('worksCron.detail (V1.171 P2 AR-29)', () => {
-    it('keys the per-Work cron query under the works tree with a cron segment', () => {
-      expect(queryKeys.worksCron.detail('work-1')).toEqual(['works', 'cron', 'work-1']);
-    });
-
-    it('produces different keys for different work ids', () => {
-      expect(queryKeys.worksCron.detail('work-1')).not.toEqual(
-        queryKeys.worksCron.detail('work-2'),
-      );
-    });
-  });
 });

@@ -22,11 +22,14 @@
  *     has no Context-cluster lane (Work Timeline is Work-scoped, not
  *     World-scoped). `foreshadows[]` → `Edge<relation: 'foreshadows'>`
  *     event→event.
- *   - **Moment layer** (Task 3): outline Scene/Beat data via V1.108
- *     `OutlineSceneNodeData` / `OutlineBeatNodeData` (fixture-driven
- *     today; V1.124+ `DF-V1123-MOMENT-WIRE` upgrades the wire). Vertical
- *     scene-stack (TB layout direction per `layer-feel-differentiation.md`
- *     §2.4). Honest empty-state when no fixture / no scene-beat data.
+ *   - **Moment layer** (Task 3): the canonical `WorkOutline.scenes[]` /
+ *     `beats[]` carrier (V1.200 DR-26 — mapped snake→camel through
+ *     `sceneBeatPayloadFromOutline`), projected via V1.108
+ *     `OutlineSceneNodeData` / `OutlineBeatNodeData`. Vertical scene-stack
+ *     (TB layout direction per `layer-feel-differentiation.md` §2.4).
+ *     Honest empty-state only when the canonical arrays are empty; the
+ *     `sceneBeatFixture` slot survives as an explicit Studio/test
+ *     injection mode, never an automatic empty-data fallback.
  *   - **Brief layer** (V1.156 P2 T1): read-only **projection** of the
  *     bound World's Brief (`WorldKbGraphResponse.entities[block_type=era]`,
  *     V1.73) onto the Work Timeline Brief when-axis — Work-Brief feel ≡
@@ -41,9 +44,9 @@
  * Layer model: `projectGraphForLayer(graph, 'brief' | 'narrative' |
  * 'moment')` selects the active layer. The default `projectGraph(graph)`
  * delegates to the adapter's active layer, which defaults to `'narrative'`
- * per architect §7.3 UX-risk override (the V1.72 `WorkOutline` wire has no
- * Scene/Beat data today; Moment-default would surface persistent
- * empty-state in nearly all real Works).
+ * per architect §7.3 UX-risk override. V1.200 keeps that default unchanged
+ * (Task 3 scope): flipping to a Moment default is a UX decision for a later
+ * iteration now that the canonical carrier exists.
  *
  * Write boundary (architect-locked §6 — read-only in V1.123 P2): the Work
  * Timeline surface performs NO direct writes. Edits route through the
@@ -57,10 +60,11 @@
  * specific conflict DTO. The orchestrator renders an Outline-flavored
  * conflict modal when writes (from the Outline surface) return 409/422.
  *
- * `wire_contracts_changed: false for P2` — Moment-on-Outline is frontend-
- * only; P2 adds zero `schemas/` / `crates/` / `packages/nexus-contracts`
- * diff. (The iteration-level `wire_contracts_changed: true` is
- * attributable entirely to P1's `BlockType = "era"`.)
+ * `wire_contracts_changed: false for P2` — HISTORICAL (V1.123 P2, version-
+ * scoped): Moment-on-Outline was frontend-only then; that P2 added zero
+ * `schemas/` / `crates/` / `packages/nexus-contracts` diff. V1.200 (DR-26)
+ * IS a wire change: `WorkOutline` now carries `scenes[]` / `beats[]` and
+ * this adapter projects them.
  *
  * V1.156 P2 T1 — `wire_contracts_changed: false`: the Work Timeline Brief
  * layer is frontend-only. `WorkTimelineLayer` gains `'brief'` as a UI-only
@@ -81,6 +85,7 @@ import type {
   SceneBeatFixturePayload,
   SceneFixture,
 } from '../outline-canvas/graph-projection';
+import { sceneBeatPayloadFromOutline } from '../outline-canvas/graph-projection';
 import type { DirectedAxisSpineNodeData, MomentSpineConfig, NarrativeSpineConfig } from '../timeline-canvas/directed-axis-spine';
 import { SPINE_Y_OFFSET } from '../timeline-canvas/directed-axis-spine';
 // V1.160 P2 T1 — Work-Brief time-band rendering reuses the V1.159 era
@@ -260,15 +265,15 @@ export interface WorkTimelineCanvasAdapterContext {
    */
   onViewOnWorldTimeline?: (node: Node<WorkTimelineNodeData>) => void;
   /**
-   * V1.108 Scene/Beat fixture (Moment-on-Outline carrier). The V1.72
-   * `WorkOutline` wire has no scene/beat data today (architect §3.4); the
-   * orchestrator injects Design Studio / test fixtures at the projection
-   * call site. When undefined or empty, the Moment layer emits honest
-   * empty-state (zero nodes) per architect §3.2.
+   * V1.108 Scene/Beat fixture — EXPLICIT injection mode only (Design
+   * Studio / component tests). The canonical Moment carrier is the
+   * `WorkOutline.scenes[]` / `.beats[]` wire (V1.200 DR-26), projected by
+   * the adapter itself; production callers pass nothing here.
    *
-   * When the WorkOutline wire extends to expose scenes/beats (V1.124+
-   * `DF-V1123-MOMENT-WIRE`), this slot will be populated from the wire
-   * itself; the adapter contract stays unchanged.
+   * An explicitly supplied payload (populated OR deliberately empty) is
+   * projected verbatim and never acts as an automatic empty-data fallback:
+   * omitting this slot means "project the canonical wire arrays", not
+   * "substitute empty data".
    */
   sceneBeatFixture?: SceneBeatFixturePayload;
 }
@@ -548,13 +553,16 @@ function deriveForeshadowEdges(graph: WorkTimelineGraph): Edge<WorkTimelineEdgeD
  * Project outline Scene/Beat data onto the Work Timeline Moment layer
  * (vertical scene-stack, TB direction).
  *
- * Carrier: Moment-on-Outline (frontend-only projection of V1.108
- * `OutlineSceneNodeData` / `OutlineBeatNodeData` fixture data). The V1.72
- * `WorkOutline` wire has no scene/beat data today (architect §3.4); the
- * orchestrator injects Design Studio / test fixtures via
- * `ctxRef.current.sceneBeatFixture`. When the fixture is absent or empty,
- * the projection emits zero nodes (honest empty-state per architect §3.2 +
- * product spec §4.5 — Task 7 owns the visible copy).
+ * Carrier (V1.200 DR-26 swap): the canonical `WorkOutline.scenes[]` /
+ * `.beats[]` wire arrays, mapped snake→camel through
+ * {@link sceneBeatPayloadFromOutline}. Empty canonical arrays mean real
+ * emptiness — zero nodes, honest empty-state (product spec §4.5 — Task 7
+ * owns the visible copy; the orchestrator renders the panel).
+ *
+ * `ctxRef.current.sceneBeatFixture` stays as an EXPLICIT injection mode for
+ * Design Studio / component tests: an explicitly supplied payload (populated
+ * OR deliberately empty) is projected verbatim and is never an automatic
+ * empty-data fallback. Production callers pass no fixture.
  *
  * Scenes stack vertically by chapter order (numeric `chapterId` ascending);
  * beats stack vertically inside their scene. The X coordinate groups scenes
@@ -570,7 +578,8 @@ function projectMomentLayer(
   nodes: Node<WorkTimelineNodeData>[];
   edges: Edge<WorkTimelineEdgeData>[];
 } {
-  if (!fixture || (fixture.scenes.length === 0 && fixture.beats.length === 0)) {
+  const payload = fixture ?? sceneBeatPayloadFromOutline(graph);
+  if (payload.scenes.length === 0 && payload.beats.length === 0) {
     // Honest empty-state — Task 7 owns the visible copy. The adapter's
     // contract is to emit zero nodes; the orchestrator renders the
     // empty-state panel when the active layer has no projectable data.
@@ -580,7 +589,7 @@ function projectMomentLayer(
   // Group scenes by chapter so the vertical stack reads chapter → scene →
   // beat top-to-bottom. Chapter ordering is numeric ascending.
   const scenesByChapter = new Map<number, SceneFixture[]>();
-  for (const scene of fixture.scenes) {
+  for (const scene of payload.scenes) {
     const bucket = scenesByChapter.get(scene.chapterId);
     if (bucket) bucket.push(scene);
     else scenesByChapter.set(scene.chapterId, [scene]);
@@ -625,7 +634,7 @@ function projectMomentLayer(
   // from the emitted scenes are dropped (mirrors V1.108 rf-projection
   // orphan guard).
   const beatsByScene = new Map<string, BeatFixture[]>();
-  for (const beat of fixture.beats) {
+  for (const beat of payload.beats) {
     if (!emittedSceneIds.has(beat.sceneId)) continue;
     const bucket = beatsByScene.get(beat.sceneId);
     if (bucket) bucket.push(beat);
@@ -779,9 +788,10 @@ function projectBriefLayer(
  * Project the Work Timeline graph for a specific layer.
  *
  * Narrative layer reads from `WorkOutline.timeline_events[]` (V1.72 wire).
- * Moment layer reads from the V1.108 `SceneBeatFixturePayload` carried in
- * the adapter context (`ctxRef.current.sceneBeatFixture`); when absent,
- * the Moment layer emits honest empty-state (zero nodes).
+ * Moment layer reads the canonical `WorkOutline.scenes[]` / `.beats[]`
+ * carrier (V1.200 DR-26) unless an explicit `fixture` payload is supplied
+ * (Design Studio / tests); empty canonical arrays emit honest empty-state
+ * (zero nodes).
  * Brief layer (V1.156 P2 T1) reads the bound World's `WorldKbGraphResponse`
  * (`entities[block_type=era]`) passed via `boundWorldGraph`; when absent,
  * the Brief layer emits honest empty-state (zero nodes).

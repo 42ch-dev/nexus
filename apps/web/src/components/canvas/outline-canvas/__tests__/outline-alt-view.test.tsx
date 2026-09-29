@@ -21,6 +21,8 @@ function makeOutline(overrides: Partial<WorkOutline> = {}): WorkOutline {
     volumes: [],
     timeline_events: [],
     foreshadows: [],
+    scenes: [],
+    beats: [],
     chapter_titles: {},
     updated_at: '',
     ...overrides,

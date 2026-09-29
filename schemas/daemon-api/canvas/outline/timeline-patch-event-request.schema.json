@@ -3,7 +3,7 @@
   "$id": "https://nexus42.invalid/schemas/daemon-api/canvas/outline/timeline-patch-event-request.schema.json",
   "schema_version": 1,
   "title": "Nexus TimelinePatchEventRequest",
-  "description": "Request body for POST /v1/daemon/works/{work_id}/timeline/patch (V1.72). Mutates the Work timeline: add, remove, attach to chapter, or create/remove foreshadow links.",
+  "description": "Request body for POST /v1/daemon/works/{work_id}/timeline/patch (V1.72). Mutates the Work timeline: add, remove, attach to chapter, create/remove foreshadow links, or bind/unbind a World Narrative event.",
   "type": "object",
   "required": ["work_id", "base_revision", "operation"],
   "properties": {
@@ -18,12 +18,12 @@
     },
     "operation": {
       "type": "string",
-      "enum": ["add_event", "remove_event", "attach_event_to_chapter", "link_foreshadow", "unlink_foreshadow"],
+      "enum": ["add_event", "remove_event", "attach_event_to_chapter", "link_foreshadow", "unlink_foreshadow", "bind_world_event", "unbind_world_event"],
       "description": "Timeline patch operation to perform."
     },
     "event_id": {
       "type": "string",
-      "description": "Identifier of an existing event (required for remove_event, attach_event_to_chapter, link_foreshadow, unlink_foreshadow)."
+      "description": "Identifier of an existing event (required for remove_event, attach_event_to_chapter, link_foreshadow, unlink_foreshadow, bind_world_event, unbind_world_event)."
     },
     "title": {
       "type": "string",
@@ -46,6 +46,10 @@
     "foreshadows_event_id": {
       "type": "string",
       "description": "Event identifier that the source event foreshadows (link_foreshadow) or stops foreshadowing (unlink_foreshadow)."
+    },
+    "world_event_id": {
+      "type": "string",
+      "description": "World KB entity `key_block_id` (`block_type=event` KnowledgeEntry) belonging to the Work's bound World that the event realizes. Required for bind_world_event and only meaningful for bind_world_event; not accepted as a mutation source by unbind_world_event, which clears the stored value."
     }
   },
   "additionalProperties": false

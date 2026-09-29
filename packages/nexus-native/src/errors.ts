@@ -8,6 +8,8 @@ const CORE_ERROR_CODES = new Set<string>([
   'not_found',
   'world_kb_conflict',
   'world_kb_validation',
+  'outline_conflict',
+  'outline_validation_failed',
   'writer_fenced',
   'owner_busy',
   'schema_mismatch',

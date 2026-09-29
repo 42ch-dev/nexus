@@ -39,6 +39,8 @@ function outline(volumes: WorkOutline['volumes']): WorkOutline {
     volumes,
     timeline_events: [],
     foreshadows: [],
+    scenes: [],
+    beats: [],
     chapter_titles: {},
     updated_at: '',
   };

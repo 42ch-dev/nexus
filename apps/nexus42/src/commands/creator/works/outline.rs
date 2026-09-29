@@ -538,6 +538,13 @@ async fn outline_patch(
         target_chapter_id: target_chapter
             .map(|n| parse_positive(n, "--target-chapter"))
             .transpose()?,
+        // Scene/beat authoring members are not exposed through the CLI yet;
+        // the transport still requires the struct literal to name them.
+        scene_id: None,
+        beat_id: None,
+        title: None,
+        scene_status: None,
+        beat_status: None,
     };
     let resp: OutlinePatchResponse = {
         let core = open_direct_core(config).await?;
@@ -758,6 +765,7 @@ async fn timeline_patch(
             .map(|n| parse_positive(n, "--target-chapter"))
             .transpose()?,
         foreshadows_event_id: foreshadows_event.map(str::to_string),
+        world_event_id: None,
     };
     let resp: OutlinePatchResponse = {
         let core = open_direct_core(config).await?;

@@ -149,7 +149,18 @@
     "unlinkAria": "Unlink foreshadow to {{title}}",
     "targetAria": "Foreshadow target for {{title}}",
     "targetPlaceholder": "Link foreshadow to…",
-    "link": "Link"
+    "link": "Link",
+    "worldEventRequired": "Bind a World to this Work to bind World events.",
+    "worldEventBound": "World event: {{name}}",
+    "worldEventPlaceholder": "Bind World event…",
+    "worldEventAria": "World event for {{title}}",
+    "worldEventBind": "Bind",
+    "worldEventManualAria": "World event ID for {{title}}",
+    "worldEventManualPlaceholder": "Enter World event ID",
+    "worldEventManualBind": "Add ID",
+    "worldEventPickerLimit": "The picker covers the first 500 World entities. Enter an event ID to bind any valid event.",
+    "worldEventUnbind": "Unbind",
+    "worldEventUnbindTitle": "Unbind World event"
   },
   "sceneInspector": {
     "title": "Scene",
@@ -172,6 +183,25 @@
     },
     "statusNotSet": "Not set",
     "partOf": "Part of {{title}}."
+  },
+  "sceneBeatAuthoring": {
+    "title": "Scenes & Beats",
+    "description": "Scenes and beats are work-owned outline structure. They appear on the Work Timeline Moment layer.",
+    "chapter": "Chapter",
+    "sceneTitle": "Scene title",
+    "addScene": "Add scene",
+    "noChapters": "Add a chapter before authoring scenes.",
+    "empty": {
+      "title": "No scenes yet",
+      "description": "Scenes you add here appear on the Work Timeline Moment layer."
+    },
+    "untitledScene": "Untitled scene",
+    "chapterBadge": "Ch. {{chapter}}",
+    "remove": "Remove",
+    "untitledBeat": "Untitled beat",
+    "beatTitle": "Beat title",
+    "addBeat": "Add beat",
+    "removeSceneConfirm": "Removing this scene will also remove its beats: {{beats}}. Remove the scene and its beats?"
   },
   "chapter": {
     "fallback": "Chapter",

@@ -267,10 +267,12 @@ pub mod guards {
 pub mod graph {
     use super::{
         db_err, guards, list_by_world_in_tx, list_relationships_for_world_in_tx, local_db_err,
-        project_entity, store_err, warn, wire_cast, CoreAccess, CoreResult, SqlitePool,
-        WorldKbGraphResponse, WorldKbRelationshipProjection, WorldKbSourceAnchorProjection,
-        GRAPH_ENTITY_CAP, GRAPH_RELATIONSHIP_CAP,
+        project_entity, store_err, warn, wire_cast, CoreAccess, CoreResult, KbStoreError,
+        SqlitePool, WorldKbEntityProjection, WorldKbGraphResponse, WorldKbRelationshipProjection,
+        WorldKbSourceAnchorProjection, GRAPH_ENTITY_CAP, GRAPH_RELATIONSHIP_CAP,
     };
+    use nexus_knowledge::world_kb::KbStore;
+    use nexus_local_db::kb_store::SqliteKbStore;
 
     pub async fn get_graph(
         pool: &SqlitePool,
@@ -326,6 +328,35 @@ pub mod graph {
             source_anchors: wire_cast(source_anchors),
             relationships: wire_cast(relationships),
         })
+    }
+
+    /// Targeted, cap-free membership read for exactly one World KB entity.
+    ///
+    /// [`get_graph`] projects at most `GRAPH_ENTITY_CAP` entities, so absence
+    /// from that projection is not evidence that the World lacks the entity: a
+    /// referent past the cap is missing from the list while being present in
+    /// the World. This indexed `key_block_id` read answers the same membership
+    /// question over the same active World-owned row set (`owner_kind =
+    /// 'world'`, matching `world_id`, status not `deleted`/`merged`/
+    /// `deprecated`) with no ceiling, so a truncated graph can never be read as
+    /// "the entity does not exist".
+    pub async fn find_entity(
+        pool: &SqlitePool,
+        world_id: &str,
+        key_block_id: &str,
+    ) -> CoreResult<Option<WorldKbEntityProjection>> {
+        let store = SqliteKbStore::new(pool.clone());
+        let kb = match store.get_knowledge_entry(key_block_id).await {
+            Ok(kb) => kb,
+            Err(KbStoreError::NotFound(_)) => return Ok(None),
+            Err(e) => return Err(store_err(&e)),
+        };
+        if kb.world_id() != Some(world_id)
+            || matches!(kb.status.as_str(), "deleted" | "merged" | "deprecated")
+        {
+            return Ok(None);
+        }
+        Ok(Some(project_entity(&kb)))
     }
 
     fn project_relationships_for_world(

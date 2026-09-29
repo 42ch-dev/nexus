@@ -91,6 +91,14 @@ function makeMockClient(graph: WorldKbGraphResponse): NexusClient {
     patchTimelineEvent: vi.fn(),
     patchOutlineStructure: vi.fn(),
     patchOutlineChapter: vi.fn(),
+    // V1.200 DR-26 round 2 — the Moment layer's bound-Work source (the
+    // complete works enumeration) must RESOLVE: an unresolved / failed read is
+    // no longer rendered as "no bound Works". An empty page = this World has
+    // no bound Works.
+    listWorks: vi.fn().mockResolvedValue({
+      items: [],
+      pagination: { limit: 20, has_more: false },
+    }),
     health: vi.fn().mockResolvedValue({ status: 'ok', version: 'test' }),
   } as unknown as NexusClient;
 }
@@ -529,8 +537,14 @@ describe('TimelineCanvas — 3-way layer switcher Moment tab (V1.156 P1 T2)', ()
 
     fireEvent.click(screen.getByTestId('timeline-layer-tab-moment'));
 
+    // The Moment layer's bound-Work source resolves before the shell renders
+    // (the loading affordance owns the swap in between, V1.200 DR-26 round 2),
+    // so the active layer is asserted on the CURRENT canvas element.
     await waitFor(() => {
-      expect(canvas).toHaveAttribute('data-active-layer', 'moment');
+      expect(screen.getByTestId('timeline-canvas')).toHaveAttribute(
+        'data-active-layer',
+        'moment',
+      );
     });
     expect(screen.getByTestId('timeline-layer-tab-moment')).toHaveAttribute(
       'aria-pressed',
@@ -571,30 +585,45 @@ describe('TimelineCanvas — 3-way layer switcher Moment tab (V1.156 P1 T2)', ()
       client: makeMockClient(graph),
     });
 
-    const canvas = await screen.findByTestId('timeline-canvas');
+    await screen.findByTestId('timeline-canvas');
 
     await waitFor(() => {
-      expect(canvas).toHaveAttribute('data-active-layer', 'brief');
+      expect(screen.getByTestId('timeline-canvas')).toHaveAttribute(
+        'data-active-layer',
+        'brief',
+      );
     });
 
     fireEvent.click(screen.getByTestId('timeline-layer-tab-narrative'));
     await waitFor(() => {
-      expect(canvas).toHaveAttribute('data-active-layer', 'narrative');
+      expect(screen.getByTestId('timeline-canvas')).toHaveAttribute(
+        'data-active-layer',
+        'narrative',
+      );
     });
 
     fireEvent.click(screen.getByTestId('timeline-layer-tab-moment'));
     await waitFor(() => {
-      expect(canvas).toHaveAttribute('data-active-layer', 'moment');
+      expect(screen.getByTestId('timeline-canvas')).toHaveAttribute(
+        'data-active-layer',
+        'moment',
+      );
     });
 
     fireEvent.click(screen.getByTestId('timeline-layer-tab-narrative'));
     await waitFor(() => {
-      expect(canvas).toHaveAttribute('data-active-layer', 'narrative');
+      expect(screen.getByTestId('timeline-canvas')).toHaveAttribute(
+        'data-active-layer',
+        'narrative',
+      );
     });
 
     fireEvent.click(screen.getByTestId('timeline-layer-tab-brief'));
     await waitFor(() => {
-      expect(canvas).toHaveAttribute('data-active-layer', 'brief');
+      expect(screen.getByTestId('timeline-canvas')).toHaveAttribute(
+        'data-active-layer',
+        'brief',
+      );
     });
     expect(screen.getByTestId('timeline-layer-tab-brief')).toHaveAttribute(
       'aria-pressed',
@@ -743,16 +772,23 @@ describe('TimelineCanvas — 3-way layer switcher a11y (V1.156 P1 T2)', () => {
     expect(momentTab).toHaveAttribute('aria-pressed', 'false');
 
     // Activating it flips the pressed state (SR toggle announcement) and the
-    // active layer.
+    // active layer. The Moment swap re-renders the shell (its bound-Work
+    // source resolves first), so both are asserted on current elements.
     fireEvent.click(momentTab);
     await waitFor(() => {
-      expect(momentTab).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getByTestId('timeline-layer-tab-moment')).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
     });
     expect(screen.getByTestId('timeline-canvas')).toHaveAttribute(
       'data-active-layer',
       'moment',
     );
     // The previously-pressed Brief tab reports unpressed.
-    expect(briefTab).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByTestId('timeline-layer-tab-brief')).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
   });
 });
