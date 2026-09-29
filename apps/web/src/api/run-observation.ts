@@ -35,7 +35,9 @@
  * to rest (the server writes the replay immediately after the response headers
  * and then blocks on its pull gate). `liveFrom` is the index of the first live
  * event: `events.slice(0, liveFrom)` is replayed history, the rest is live. It
- * advances while the catch-up window is open and freezes at the handoff.
+ * re-arms at the end of the window while the catch-up is open and freezes at the
+ * handoff — and it is *derived* from an eviction-stable anchor rather than stored
+ * as an index (see `boundaryIndex`), because the retained window slides.
  *
  * `gap` handling: a gap ends the current subscription immediately (`abort`) and
  * the hook resubscribes from the last cursor it actually received under the
@@ -51,18 +53,19 @@
  * bounded policy. A clean EOF never earns a fresh retry budget, so a server
  * that keeps closing cannot turn the hook into a reconnect loop.
  *
- * Retention: one entry per observed run, dropped as soon as the run reaches its
- * terminal lifecycle end (a finished run is re-observable from the server's own
- * ring instead of being pinned in the SPA). Each entry keeps at most
- * `MAX_RETAINED_EVENTS` frames — the server ring's own 256-frame window — and a
- * single monotonic cursor instead of a growing id set, so neither the frame
- * list nor the cursor store grows without bound over a long-lived run.
- * `events` is that retained buffer itself, mutated in place and re-published
- * per frame (no per-frame copy of the whole history); memoize on
- * `events.length` / `lastEventId` rather than on the array identity.
- *
- * `simplify:` the module map still keeps every run that has not ended yet; swap
- * for an LRU if the set of simultaneously-observed runs ever stops being small.
+ * Retention: one entry per observed run, bounded three ways. (1) It is dropped
+ * as soon as the run reaches its terminal lifecycle end — a finished run is
+ * re-observable from the server's own ring instead of being pinned in the SPA.
+ * (2) A non-terminal entry is dropped once its last view has unmounted and it
+ * has been idle past `RETAINED_IDLE_TTL_MS`; re-entry after that is a fresh
+ * subscription with no cursor — an honest re-fetch, the contract's re-entry path
+ * taken from scratch. (3) Each entry keeps at most `MAX_RETAINED_EVENTS` frames
+ * — the server ring's own 256-frame window — and a single monotonic cursor
+ * instead of a growing id set, so neither the frame list nor the cursor store
+ * grows without bound over a long-lived run. `events` is that retained buffer
+ * itself, mutated in place and re-published per frame (no per-frame copy of the
+ * whole history); memoize on `events.length` / `lastEventId` rather than on the
+ * array identity.
  */
 import { useCallback, useEffect, useState } from 'react';
 
@@ -96,6 +99,9 @@ export interface RunObservationState {
    * Index into `events` of the first live-tail frame: `events.slice(0, liveFrom)`
    * is replayed history (the re-entered span plus the server's strictly-after
    * replay), `events.slice(liveFrom)` arrived once the view had caught up.
+   *
+   * Derived per publish from the entry's monotonic append count, so it moves
+   * with the sliding window instead of stranding the live tail off the end.
    */
   liveFrom: number;
   /** Last received `<epoch>:<sequence>` cursor, or `null` before any frame. */
@@ -117,6 +123,16 @@ const RECONNECT_BACKOFF_MS = [200, 400, 800];
 
 /** Frames retained per run — the server ring's own window (`daemon-runtime` §20.2). */
 const MAX_RETAINED_EVENTS = 256;
+
+/**
+ * Idle lifetime of a non-terminal run's retained observation once no view is
+ * mounted on it. Five minutes matches React Query's default `gcTime`, which this
+ * app leaves at its default (`main.tsx` configures only `staleTime`/`retry`), so
+ * warm run-view retention expires on the same clock as every other cached
+ * resource: long enough for the navigate-away-and-back a run view invites, short
+ * enough that abandoned runs cannot pin their window for the SPA session.
+ */
+const RETAINED_IDLE_TTL_MS = 5 * 60_000;
 
 /** Quiet period that ends the view's catch-up replay and hands off to the live tail. */
 const CATCH_UP_SETTLE_MS = 120;
@@ -142,23 +158,80 @@ interface RetainedObservation {
   lastEventId: string | null;
   /** Durable status of the latest `run_state` frame, or `null` if none seen. */
   latestStatus: string | null;
+  /** Frames appended over this entry's lifetime — the window slides, this does not. */
+  appended: number;
+  /** `appended` count at which the live tail begins (0 = every retained frame is live). */
+  liveFromAppended: number;
+  /** Views currently mounted on this run. */
+  subscribers: number;
+  /** `Date.now()` of the last retained frame, for the idle sweep. */
+  lastActivity: number;
+  /** Idle-eviction timer, armed when the last view unmounts. */
+  releaseTimer: ReturnType<typeof setTimeout> | undefined;
 }
 
 const retainedObservations = new Map<string, RetainedObservation>();
 
+/**
+ * Drop entries no view is observing whose last activity is older than
+ * `RETAINED_IDLE_TTL_MS`. Terminal runs are dropped immediately by the hook;
+ * this is the bound for the non-terminal runs a user has navigated away from.
+ * An entry with a mounted view is never swept: an observed run may legitimately
+ * produce nothing for longer than the TTL (the server's pull gate blocks until
+ * the next event).
+ */
+function sweepIdleObservations(now: number): void {
+  for (const [sessionId, entry] of retainedObservations) {
+    if (entry.subscribers > 0) continue;
+    if (now - entry.lastActivity < RETAINED_IDLE_TTL_MS) continue;
+    clearTimeout(entry.releaseTimer);
+    retainedObservations.delete(sessionId);
+  }
+}
+
 function retainedFor(sessionId: string): RetainedObservation {
+  sweepIdleObservations(Date.now());
   const existing = retainedObservations.get(sessionId);
   if (existing) return existing;
-  const created: RetainedObservation = { events: [], lastEventId: null, latestStatus: null };
+  const created: RetainedObservation = {
+    events: [],
+    lastEventId: null,
+    latestStatus: null,
+    appended: 0,
+    liveFromAppended: 0,
+    subscribers: 0,
+    lastActivity: Date.now(),
+    releaseTimer: undefined,
+  };
   retainedObservations.set(sessionId, created);
   return created;
 }
 
-/** Append one frame, keeping the retained window bounded. */
+/** Append one frame, keeping the retained window and the activity clock current. */
 function retain(retained: RetainedObservation, frame: WorkflowObservationFrame): void {
+  retained.appended += 1;
+  retained.lastActivity = Date.now();
   retained.events.push(frame);
   const overflow = retained.events.length - MAX_RETAINED_EVENTS;
   if (overflow > 0) retained.events.splice(0, overflow);
+}
+
+/**
+ * Index into `events` of the first live-tail frame — the `liveFrom` the run view
+ * renders from.
+ *
+ * The boundary is *stored* as an append count
+ * (`RetainedObservation.liveFromAppended`), never as an index: the retained
+ * window slides (`retain` splices the oldest frame off a full window), so a
+ * stored index would keep pointing past the end of the window and hide the live
+ * tail — a full window would report `liveFrom === events.length` forever, even
+ * while the phase is `live`. Deriving the index from the monotonic append count
+ * keeps the boundary anchored to the same frame as the window moves; once that
+ * frame is itself evicted, every retained frame is live and the boundary is 0.
+ */
+function boundaryIndex(retained: RetainedObservation): number {
+  const evicted = retained.appended - retained.events.length;
+  return Math.max(0, retained.liveFromAppended - evicted);
 }
 
 /** The `<epoch>:<sequence>` halves of a cursor, or `null` when it is not one. */
@@ -218,6 +291,10 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
     }
 
     const retained = retainedFor(sessionId);
+    retained.subscribers += 1;
+    retained.lastActivity = Date.now();
+    clearTimeout(retained.releaseTimer);
+    retained.releaseTimer = undefined;
     let cancelled = false;
     /** The subscription attempt in flight: aborted at a gap or on unmount. */
     let attempt: AbortController | null = null;
@@ -229,8 +306,11 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
     // `connecting` and its frames are the live tail (there is no catch-up span).
     // A retained cursor IS the history: control frames alone are no catch-up.
     let phase: RunObservationPhase = retained.lastEventId !== null ? 'replaying' : 'connecting';
-    let liveFrom = retained.events.length;
     let catchingUp = retained.lastEventId !== null;
+    // A re-entry starts with the whole retained window on the replay side of the
+    // boundary; each catch-up frame re-arms it at the end of the window and the
+    // handoff freezes it there (see `boundaryIndex`).
+    if (catchingUp) retained.liveFromAppended = retained.appended;
 
     const clearCatchUp = (): void => {
       clearTimeout(settleTimer);
@@ -243,7 +323,7 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
       setSnapshot({
         phase,
         events: retained.events,
-        liveFrom,
+        liveFrom: boundaryIndex(retained),
         lastEventId: retained.lastEventId,
         error,
       });
@@ -254,7 +334,6 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
       clearCatchUp();
       if (cancelled || !catchingUp) return;
       catchingUp = false;
-      liveFrom = retained.events.length;
       if (phase === 'replaying') {
         phase = 'live';
         publish(null);
@@ -324,7 +403,7 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
             retain(retained, frame);
 
             if (catchingUp) {
-              liveFrom = retained.events.length;
+              retained.liveFromAppended = retained.appended;
               phase = 'replaying';
               armCatchUp();
             } else {
@@ -351,6 +430,7 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
           // latest durable status is terminal. The lifecycle is over and the run
           // is dropped from the retention map — a finished run is re-observable
           // from the server's own ring instead of being pinned for the session.
+          clearTimeout(retained.releaseTimer);
           retainedObservations.delete(sessionId);
           phase = 'terminal';
           publish(null);
@@ -400,6 +480,17 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
       cancelled = true;
       clearCatchUp();
       attempt?.abort();
+      if (retainedObservations.get(sessionId) !== retained) return;
+      retained.subscribers -= 1;
+      retained.lastActivity = Date.now();
+      if (retained.subscribers > 0) return;
+      // The last view left: drop the entry once it has been idle past the TTL,
+      // unless something re-observes the run first (that mount clears the timer).
+      // The timer arms exactly one TTL after the last activity, so it runs the
+      // same predicate as the access-time sweep rather than a second rule.
+      retained.releaseTimer = setTimeout(() => {
+        sweepIdleObservations(Date.now());
+      }, RETAINED_IDLE_TTL_MS);
     };
   }, [client, sessionId, retryToken]);
 

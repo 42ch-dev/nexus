@@ -9,7 +9,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { MemoryRouter } from 'react-router';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   useRunObservation,
@@ -210,6 +210,55 @@ describe('useRunObservation — replay/live handoff', () => {
     expect(reentry.result.current.phase).toBe('live');
     expect(reentry.phases.indexOf('replaying')).toBeLessThan(reentry.phases.indexOf('live'));
   });
+
+  it('keeps the live boundary anchored when eviction slides the retained window', async () => {
+    async function* fullWindow(options: SubscribeOptions) {
+      for (let sequence = 1; sequence <= 300; sequence += 1) yield hostEvent(`e1:${sequence}`);
+      if (options.signal.aborted) return;
+      await new Promise<void>((resolve) => {
+        options.signal.addEventListener('abort', () => resolve(), { once: true });
+      });
+    }
+
+    const { client, calls } = stubClientFor([
+      (options) => fullWindow(options),
+      async function* reentry(options: SubscribeOptions) {
+        // Away long enough for the catch-up to settle before the run appends
+        // again: nothing to replay, then exactly one genuinely live frame.
+        await wait(300);
+        yield hostEvent('e1:301');
+        if (options.signal.aborted) return;
+        await new Promise<void>((resolve) => {
+          options.signal.addEventListener('abort', () => resolve(), { once: true });
+        });
+      },
+    ]);
+
+    const first = observeRun(client, 'run-window-boundary');
+    await waitFor(() => expect(first.result.current.lastEventId).toBe('e1:300'));
+    expect(first.result.current.events).toHaveLength(256);
+    first.unmount();
+
+    const reentry = observeRun(client, 'run-window-boundary');
+    expect(reentry.result.current.phase).toBe('replaying');
+    // Everything the full window holds is catch-up until the handoff.
+    expect(reentry.result.current.liveFrom).toBe(256);
+
+    await waitFor(() =>
+      expect(cursorOf(reentry.result.current.events[reentry.result.current.liveFrom])).toBe('e1:301'),
+    );
+    await waitFor(() => expect(reentry.result.current.phase).toBe('live'));
+
+    // The window is still full (256). The boundary must slide with it, or the
+    // frame appended after the handoff would sit outside the live tail.
+    const { events, liveFrom } = reentry.result.current;
+    expect(calls[1].lastEventId).toBe('e1:300');
+    expect(events).toHaveLength(256);
+    expect(liveFrom).toBe(255);
+    expect(cursorOf(events[0])).toBe('e1:46');
+    expect(cursorOf(events[liveFrom])).toBe('e1:301');
+    expect(events.slice(liveFrom).map(cursorOf)).toEqual(['e1:301']);
+  });
 });
 
 describe('useRunObservation — gap recovery', () => {
@@ -404,5 +453,33 @@ describe('useRunObservation — retention bounds', () => {
     expect(cursorOf(retained[retained.length - 1])).toBe('e1:300');
     expect(retained.some((frame) => cursorOf(frame) === 'e1:1')).toBe(false);
     expect(probe.result.current.lastEventId).toBe('e1:300');
+  });
+
+  it('evicts an idle non-terminal run and re-subscribes from scratch on re-entry', async () => {
+    const { client, calls } = stubClientFor([
+      (options) => openStream(options, runState('e1:1')),
+      (options) => openStream(options, runState('e1:2')),
+    ]);
+
+    const first = observeRun(client, 'run-idle');
+    await waitFor(() => expect(first.result.current.phase).toBe('live'));
+    expect(first.result.current.events.map(cursorOf)).toEqual(['e1:1']);
+    first.unmount();
+
+    // The run never reaches a terminal state; the user just never comes back.
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 60 * 60_000);
+    const reentry = observeRun(client, 'run-idle');
+    clock.mockRestore();
+
+    // The idle entry was evicted, so re-entry is a cold subscription — no
+    // restored history and no cursor (an honest re-fetch, not a stale window).
+    expect(reentry.result.current.phase).toBe('connecting');
+    expect(reentry.result.current.events).toEqual([]);
+    expect(reentry.result.current.lastEventId).toBeNull();
+
+    await waitFor(() => expect(calls.length).toBe(2));
+    expect(calls[1].lastEventId).toBeUndefined();
+    await waitFor(() => expect(reentry.result.current.phase).toBe('live'));
+    expect(reentry.result.current.events.map(cursorOf)).toEqual(['e1:2']);
   });
 });
