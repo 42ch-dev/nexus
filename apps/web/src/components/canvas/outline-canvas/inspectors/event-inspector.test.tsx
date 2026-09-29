@@ -9,7 +9,7 @@
  * boundary — disabled, never hidden, when the Work has no bound World.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 
@@ -366,6 +366,58 @@ describe('TimelinePanel — World-event binding authoring (V1.200 DR-26)', () =>
       event_id: 'evt_a',
       world_event_id: 'kb-outside-picker',
     });
+  });
+
+  it('keeps the typed manual event ID until the write succeeds (a refusal keeps the draft)', async () => {
+    const user = userEvent.setup();
+    const successCallbacks: Array<() => void> = [];
+    const onPatch = vi.fn(
+      (_request: TimelinePatchEventRequest, onSuccess?: () => void) => {
+        if (onSuccess) successCallbacks.push(onSuccess);
+      },
+    );
+    renderTimeline(makeOutline(), onPatch, null, 'world-9');
+
+    await user.type(
+      screen.getByLabelText('World event ID for Plant the seed'),
+      'kb-outside-picker',
+    );
+    await user.click(screen.getAllByRole('button', { name: 'Add ID' })[0]);
+
+    expect(onPatch).toHaveBeenCalledTimes(1);
+    // The refusal path never invokes the callback the panel handed in — the
+    // typed ID survives so the author can retry without re-typing.
+    const refused = screen.getByLabelText('World event ID for Plant the seed');
+    expect(refused).toHaveValue('kb-outside-picker');
+    expect(screen.getAllByRole('button', { name: 'Add ID' })[0]).not.toBeDisabled();
+
+    // The write landing is what releases the draft.
+    act(() => successCallbacks[0]());
+    expect(refused).toHaveValue('');
+    expect(screen.getAllByRole('button', { name: 'Add ID' })[0]).toBeDisabled();
+  });
+
+  it('keeps the picked World event until the write succeeds', async () => {
+    const user = userEvent.setup();
+    const successCallbacks: Array<() => void> = [];
+    const onPatch = vi.fn(
+      (_request: TimelinePatchEventRequest, onSuccess?: () => void) => {
+        if (onSuccess) successCallbacks.push(onSuccess);
+      },
+    );
+    renderTimeline(makeOutline(), onPatch, null, 'world-9');
+
+    const picker = screen.getByLabelText('World event for Plant the seed');
+    await user.selectOptions(picker, 'kb-evt-1');
+    await user.click(screen.getAllByRole('button', { name: 'Bind' })[0]);
+
+    expect(onPatch).toHaveBeenCalledTimes(1);
+    // The refusal path never invokes the callback: the picked World event
+    // survives the refused write.
+    expect(picker).toHaveValue('kb-evt-1');
+
+    act(() => successCallbacks[0]());
+    expect(picker).toHaveValue('');
   });
 
   it('fires bind_world_event and renders the refetched canonical binding (projected referent + Unbind)', async () => {

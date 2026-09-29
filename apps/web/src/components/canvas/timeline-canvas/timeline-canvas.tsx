@@ -450,9 +450,15 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
 
   // Moment is a complete World projection, unlike the bounded navigation
   // candidate set above. Enumerate the existing works endpoint by cursor.
+  //
+  // V1.200 DR-26 (Greptile round 2) — every Moment-layer read keys on this
+  // predicate: the effective `activeLayer` is derived from the same URL param
+  // (and Moment is never the default layer), so the two agree wherever the
+  // distinction matters.
+  const isMomentLayer = searchParams.get('layer') === 'moment';
   const allMomentWorksQuery = useQuery({
     queryKey: ['world-moment-works', worldId],
-    enabled: searchParams.get('layer') === 'moment',
+    enabled: isMomentLayer,
     queryFn: async (): Promise<WorkSummary[]> => {
       const works: WorkSummary[] = [];
       let cursor: string | undefined;
@@ -473,7 +479,7 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
       queryKey: ['work-detail', work.work_id],
       queryFn: (): Promise<WorkDetailResponse> => nexusClient.getWork(work.work_id),
       staleTime: 30_000,
-      enabled: searchParams.get('layer') === 'moment',
+      enabled: isMomentLayer,
     })),
   });
   const momentRealizingWorks = useMemo<Array<{ workId: string; updatedAt: string }>>(() => {
@@ -520,8 +526,7 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
     });
     return out;
   }, [workDetailQueries, worksList, worldId]);
-  const outlineWorks =
-    searchParams.get('layer') === 'moment' ? momentRealizingWorks : realizingWorks;
+  const outlineWorks = isMomentLayer ? momentRealizingWorks : realizingWorks;
 
   // Surface-level fallback target — most-recent realizing Work (V1.123 P3
   // semantics preserved verbatim: same candidate set, same recency sort).
@@ -1189,8 +1194,13 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   // those canonical scenes instead of the global empty state. The global
   // EmptyState remains for Worlds with truly nothing (no KB entities, no
   // compute events, no canonical Moment data).
+  const momentOutlineFailures = isMomentLayer
+    ? workOutlineQueries.filter((q) => q.isError).length
+    : 0;
   const momentCarrierHasData =
-    fixture.scenes.length > 0 || fixture.beats.length > 0;
+    fixture.scenes.length > 0 ||
+    fixture.beats.length > 0 ||
+    momentOutlineFailures > 0;
   const isEmpty =
     !timelineEvents.isFetching &&
     (!graph.data || (graph.data.entities ?? []).length === 0) &&
@@ -1213,6 +1223,57 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   ).length;
   const isBriefEmpty = !isEmpty && activeLayer === 'brief' && eraCount === 0;
 
+  // ── V1.200 DR-26 (Greptile round 2) — honest Moment bound-Work states ────
+  //
+  // The Moment carrier is composed from the bound Works' outlines — a second
+  // async source independent of the World KB graph. That source has TWO
+  // stages, and an unsettled stage means the bound-Work set is UNKNOWN, which
+  // is a different fact from "no bound Works":
+  //   1. the COMPLETE Works enumeration (`allMomentWorksQuery`) plus the
+  //      per-Work detail fan-out resolving `world_id`
+  //      (`momentWorkDetailQueries`) — until both settle, nothing is known
+  //      about which Works bind to this World;
+  //   2. one outline read per bound Work (`workOutlineQueries`) — a failed
+  //      read is NOT an empty outline.
+  // Stage 1 in flight → the loading affordance (the honest-empty panel would
+  // claim "no bound Works" before the list even arrived); stage 1 failed →
+  // the error affordance with retry. Stage 2 in flight → the loading
+  // affordance; stage 2 failures are surfaced as ONE aggregated affordance
+  // with retry while the Works that DID resolve keep rendering — a single bad
+  // read must neither blank the whole layer nor be silently dropped from the
+  // composition (Greptile round 2, findings 1 + 2).
+  const momentBoundWorksUnknown =
+    isMomentLayer &&
+    (allMomentWorksQuery.isLoading ||
+      momentWorkDetailQueries.some((q) => q.isLoading));
+  const momentBoundWorksFailed =
+    isMomentLayer &&
+    (allMomentWorksQuery.isError ||
+      momentWorkDetailQueries.some((q) => q.isError));
+  if (momentBoundWorksUnknown) {
+    return <LoadingState label={t('timeline.loading')} />;
+  }
+  if (momentBoundWorksFailed) {
+    return (
+      <ErrorState
+        description={t('timeline.loadError')}
+        onRetry={() => {
+          void allMomentWorksQuery.refetch();
+          momentWorkDetailQueries.forEach((q) => void q.refetch());
+        }}
+      />
+    );
+  }
+  // Round 2 (finding 2) — the fan-out covers EVERY bound Work of the complete
+  // Moment enumeration (`outlineWorks`), not just the legacy N=20 navigation
+  // window, so an older Work's failed outline read is seen here too.
+  const momentOutlinesPending = isMomentLayer && outlineWorks.length > 0;
+  if (momentOutlinesPending && workOutlineQueries.some((q) => q.isLoading)) {
+    return <LoadingState label={t('timeline.loading')} />;
+  }
+  // Failed outline reads already count as unresolved Moment carrier data in
+  // `isEmpty` above, so they cannot be mislabeled as an empty World timeline.
+
   // V1.156 P1 T2 — World-Moment empty detection. Mirrors the Work Timeline
   // orchestrator's `isMomentEmpty` pattern: the active layer is Moment AND
   // the projection returned zero nodes (no bound-Works scene/beat fixture /
@@ -1221,36 +1282,16 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   // when there is content on Brief/Narrative but nothing projectable on
   // Moment — the honest panel (PD-3) explains scenes come from bound Works'
   // Outline data, with a CTA back to Narrative.
-  const isMomentEmpty =
-    !isEmpty && activeLayer === 'moment' && surface.nodes.length === 0;
-
-  // V1.200 DR-26 — the Moment carrier is composed from the bound Works'
-  // outlines, a second async source independent of the World KB graph. These
-  // gates keep the reads visibly loading / erroring: without them an
-  // in-flight fan-out would render as "no scene or beat data yet" and a
-  // failed read would become a permanent honest empty-state with no retry
-  // (a failed read is NOT an empty outline).
   //
-  // V1.200 DR-26 fix — keyed on the active layer + the bound-Work set, NOT on
-  // `!isEmpty`: while the carrier fan-out is in flight `isEmpty` is still true
-  // (the canonical arrays have not resolved), so an `!isEmpty` guard would
-  // skip this gate precisely in the empty-KB case and flash the global empty
-  // state before the scenes arrive.
-  const momentOutlinesPending =
-    activeLayer === 'moment' && realizingWorks.length > 0;
-  if (momentOutlinesPending && workOutlineQueries.some((q) => q.isLoading)) {
-    return <LoadingState label={t('timeline.loading')} />;
-  }
-  if (momentOutlinesPending && workOutlineQueries.some((q) => q.isError)) {
-    return (
-      <ErrorState
-        description={t('timeline.loadError')}
-        onRetry={() => {
-          workOutlineQueries.forEach((q) => void q.refetch());
-        }}
-      />
-    );
-  }
+  // Round 2 (finding 1) — only a SUCCESSFUL empty bound-Work set renders as
+  // empty: the unresolved / failed stages above already returned, and a
+  // failed bound-Work outline read is not an empty Moment (the aggregated
+  // affordance in the render owns that state).
+  const isMomentEmpty =
+    !isEmpty &&
+    activeLayer === 'moment' &&
+    surface.nodes.length === 0 &&
+    momentOutlineFailures === 0;
 
   // Visible ordering-disclaimer gate (PR #156 fix 3 — Greptile P1). Mirrors
   // the adapter's `summarizeTimelineGraph` a11y-disclaimer condition: present
@@ -1326,6 +1367,21 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
             <li key={i}>{err}</li>
           ))}
         </ul>
+      ) : null}
+
+      {/* V1.200 DR-26 (Greptile round 2, finding 2) — aggregated bound-Work
+          outline failure. The Works whose outlines DID resolve keep rendering
+          below; this panel states the failure and offers retry instead of
+          silently dropping the affected Work from the Moment composition. */}
+      {momentOutlineFailures > 0 ? (
+        <ErrorState
+          description={t('timeline.loadError')}
+          onRetry={() => {
+            workOutlineQueries.forEach((q) => {
+              if (q.isError) void q.refetch();
+            });
+          }}
+        />
       ) : null}
 
       {hasEvents ? (

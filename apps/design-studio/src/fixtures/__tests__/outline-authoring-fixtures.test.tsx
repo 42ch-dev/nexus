@@ -95,6 +95,7 @@ describe('OutlineAuthoringFixtures render', () => {
       'outline-authoring-card-draft',
       'outline-authoring-card-bound',
       'outline-world-event-unbound',
+      'outline-world-event-unbound-filled',
       'outline-world-event-bound',
       'outline-world-event-disabled',
     ]) {
@@ -192,6 +193,60 @@ describe('Outline World-event bind control fixtures', () => {
     ).toBeInTheDocument();
   });
 
+  it('manual ID: empty draft gates Add ID, filled draft enables it, no bound World disables both', () => {
+    mockMatchMedia(false);
+    render(<OutlineAuthoringFixtures />);
+
+    // Empty draft — the manual ID entry ships alongside the picker with a
+    // blank field, so Add ID is gated off.
+    const unbound = screen.getByTestId('outline-world-event-unbound-light');
+    const emptyManual = within(unbound).getByTestId('outline-world-event-manual-unbound');
+    expect(emptyManual).toHaveValue('');
+    expect(emptyManual).not.toBeDisabled();
+    expect(
+      within(unbound).getByTestId('outline-world-event-manual-bind-unbound'),
+    ).toBeDisabled();
+
+    // Filled draft — a typed World event ID with a live Add ID action; the
+    // picker's Bind stays gated because no World event was picked.
+    const filled = screen.getByTestId('outline-world-event-unbound-filled-light');
+    const filledManual = within(filled).getByTestId(
+      'outline-world-event-manual-unbound-filled',
+    );
+    expect(filledManual).toHaveValue('kb-ashen-gate-fall');
+    expect(filledManual).not.toBeDisabled();
+    expect(
+      within(filled).getByTestId('outline-world-event-manual-bind-unbound-filled'),
+    ).not.toBeDisabled();
+    expect(
+      within(filled).getByTestId('outline-world-event-bind-unbound-filled'),
+    ).toBeDisabled();
+
+    // Disabled (no bound World) — the entry and Add ID are disabled, never
+    // hidden.
+    const disabled = screen.getByTestId('outline-world-event-disabled-light');
+    const disabledManual = within(disabled).getByTestId('outline-world-event-manual-disabled');
+    expect(disabledManual).toBeDisabled();
+    expect(
+      within(disabled).getByTestId('outline-world-event-manual-bind-disabled'),
+    ).toBeDisabled();
+    // The same manual-ID state is present in the dark specimen pair.
+    const filledDark = screen.getByTestId('outline-world-event-unbound-filled-dark');
+    expect(
+      within(filledDark).getByTestId('outline-world-event-manual-unbound-filled'),
+    ).toHaveValue('kb-ashen-gate-fall');
+    expect(
+      within(filledDark).getByTestId('outline-world-event-manual-bind-unbound-filled'),
+    ).not.toBeDisabled();
+    const disabledDark = screen.getByTestId('outline-world-event-disabled-dark');
+    expect(
+      within(disabledDark).getByTestId('outline-world-event-manual-disabled'),
+    ).toBeDisabled();
+    expect(
+      within(disabledDark).getByTestId('outline-world-event-manual-bind-disabled'),
+    ).toBeDisabled();
+  });
+
   it('disabled (no bound World): hint copy and every affordance disabled, none hidden', () => {
     mockMatchMedia(false);
     render(<OutlineAuthoringFixtures />);
@@ -223,7 +278,7 @@ describe('OutlineAuthoringFixtures themes', () => {
 
     const root = screen.getByTestId('outline-authoring-fixtures');
     const darkPanels = root.querySelectorAll('[data-testid$="-dark"].dark');
-    expect(darkPanels).toHaveLength(6);
+    expect(darkPanels).toHaveLength(7);
   });
 
   it('renders without throw under a document-level .dark class', () => {
