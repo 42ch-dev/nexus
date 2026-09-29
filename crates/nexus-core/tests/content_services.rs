@@ -1717,7 +1717,7 @@ async fn retained_outline_scene_beat_removals() {
     let scene_b = authored_scene(&fx, 1, 2, "Scene B").await;
     let beat_a1 = authored_beat(&fx, 2, &scene_a, "Beat A1").await;
     let beat_a2 = authored_beat(&fx, 3, &scene_a, "Beat A2").await;
-    let beat_b1 = authored_beat(&fx, 4, &scene_b, "Beat B1").await;
+    let surviving_beat = authored_beat(&fx, 4, &scene_b, "Beat B1").await;
 
     let removed_beat = fx
         .core
@@ -1772,7 +1772,7 @@ async fn retained_outline_scene_beat_removals() {
         outline.beats
     );
     assert_eq!(outline.beats.len(), 1);
-    assert_eq!(outline.beats[0].beat_id, beat_b1);
+    assert_eq!(outline.beats[0].beat_id, surviving_beat);
     assert!(outline.beats.iter().all(|beat| beat.beat_id != beat_a1));
 
     fx.pool.close().await;
@@ -1974,7 +1974,11 @@ async fn retained_outline_scene_beat_published_chapter_guard() {
             })),
         )
         .await;
-    assert_outline_validation("published remove_scene", remove_scene, "published chapter 1");
+    assert_outline_validation(
+        "published remove_scene",
+        remove_scene,
+        "published chapter 1",
+    );
 
     let after = serde_json::to_value(
         fx.core

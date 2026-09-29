@@ -1083,7 +1083,7 @@ fn scene_beat_title(title: Option<&str>, kind: &str) -> Result<String, OutlineFa
 
 /// Map the request `scene_status` member onto the canonical scene status, with
 /// `drafted` as the omitted default.
-fn scene_status_from_request(
+const fn scene_status_from_request(
     status: Option<OutlinePatchStructureRequestSceneStatus>,
 ) -> WorkOutlineScenesItemStatus {
     match status {
@@ -1096,7 +1096,7 @@ fn scene_status_from_request(
 
 /// Map the request `beat_status` member onto the canonical beat status, with
 /// `drafted` as the omitted default.
-fn beat_status_from_request(
+const fn beat_status_from_request(
     status: Option<OutlinePatchStructureRequestBeatStatus>,
 ) -> WorkOutlineBeatsItemStatus {
     match status {
@@ -1150,12 +1150,17 @@ fn scene_remove(
     frontmatter: &mut OutlineFrontmatter,
     chapters: &[WorkChapterRecord],
 ) -> Result<(), OutlineFault> {
-    let scene_id = req.scene_id.as_deref().ok_or_else(|| OutlineFault::BadRequest {
-        code: "missing_scene_id".to_string(),
-        message: "remove_scene requires scene_id".to_string(),
-    })?;
+    let scene_id = req
+        .scene_id
+        .as_deref()
+        .ok_or_else(|| OutlineFault::BadRequest {
+            code: "missing_scene_id".to_string(),
+            message: "remove_scene requires scene_id".to_string(),
+        })?;
     ensure_chapter_not_published(chapters, scene_owning_chapter(frontmatter, scene_id)?)?;
-    frontmatter.scenes.retain(|scene| scene.scene_id != scene_id);
+    frontmatter
+        .scenes
+        .retain(|scene| scene.scene_id != scene_id);
     // Cascade: a removed scene takes its beats with it in the same revision.
     frontmatter.beats.retain(|beat| beat.scene_id != scene_id);
     Ok(())
@@ -1166,10 +1171,13 @@ fn beat_add(
     frontmatter: &mut OutlineFrontmatter,
     chapters: &[WorkChapterRecord],
 ) -> Result<(), OutlineFault> {
-    let scene_id = req.scene_id.as_deref().ok_or_else(|| OutlineFault::BadRequest {
-        code: "missing_scene_id".to_string(),
-        message: "add_beat requires scene_id".to_string(),
-    })?;
+    let scene_id = req
+        .scene_id
+        .as_deref()
+        .ok_or_else(|| OutlineFault::BadRequest {
+            code: "missing_scene_id".to_string(),
+            message: "add_beat requires scene_id".to_string(),
+        })?;
     ensure_chapter_not_published(chapters, scene_owning_chapter(frontmatter, scene_id)?)?;
     let title = scene_beat_title(req.title.as_deref(), "beat")?;
     frontmatter.beats.push(WorkOutlineBeatsItem {
@@ -1186,10 +1194,13 @@ fn beat_remove(
     frontmatter: &mut OutlineFrontmatter,
     chapters: &[WorkChapterRecord],
 ) -> Result<(), OutlineFault> {
-    let beat_id = req.beat_id.as_deref().ok_or_else(|| OutlineFault::BadRequest {
-        code: "missing_beat_id".to_string(),
-        message: "remove_beat requires beat_id".to_string(),
-    })?;
+    let beat_id = req
+        .beat_id
+        .as_deref()
+        .ok_or_else(|| OutlineFault::BadRequest {
+            code: "missing_beat_id".to_string(),
+            message: "remove_beat requires beat_id".to_string(),
+        })?;
     let scene_id = frontmatter
         .beats
         .iter()
