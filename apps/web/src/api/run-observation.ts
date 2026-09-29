@@ -16,9 +16,11 @@
  *    the server delivers when the view reattaches. See the boundary note below.
  *  - `live` — the view has caught up; frames append without a manual refresh.
  *  - `gapped` — the stream reported an explicit gap (history this view never
- *    received). The marker stays inline in `events` and the hook recovers by
- *    resubscribing from the last received id; exhausted retries stay honestly
- *    `gapped` with the `retry` affordance.
+ *    received). The marker stays inline in `events`; the phase is *transient*
+ *    while the stream is alive (frames that follow return it to
+ *    `live`/`replaying` on the same subscription), and *resting* only when the
+ *    stream ended at the gap or the bounded reconnect budget is spent — both
+ *    with the `retry` affordance.
  *  - `terminal` — the lifecycle ended on a terminal statement: a
  *    `history_unavailable` close, or a clean stream end whose latest observed
  *    durable run status is terminal. No automatic resubscribe.
@@ -44,29 +46,43 @@
  * handoff — and it is *derived* from an eviction-stable anchor rather than stored
  * as an index (see `boundaryIndex`), because the retained window slides.
  *
- * `gap` handling: a gap ends the current subscription immediately (`abort`) and
- * the hook resubscribes from the last cursor it actually received under the
- * bounded retry policy. The server delivers a gap and then keeps the stream
- * open for the live tail (`workflow-observation.ts`), so waiting for the
- * iterator to end would stall recovery behind the very stream the gap
- * invalidated.
+ * `gap` handling: the server writes a `gap` control frame and then keeps
+ * writing the frames its ring still holds, on the SAME stream — the gap record
+ * is one entry of that ring, forwarded in order by `workflow-observation.ts`,
+ * which then blocks for the next batch. The hook therefore does NOT abort on a
+ * gap: it records the marker inline, rests in `gapped`, and keeps consuming, so
+ * the retained frames that follow land where they belong and the stream's own
+ * live tail is never thrown away. Recovery is considered only when the stream
+ * ENDS while still gapped, and only if that stream moved PAST the gap — its
+ * last received DATA cursor is strictly newer than the cursor at the gap report
+ * — because reconnecting from the gap's own cursor asks the ring for exactly
+ * the range whose gap it just reported. A stream that ends at the gap instead
+ * stays honestly `gapped` with the `retry` affordance and charges no attempt.
  *
  * Stream end: only a terminal statement ends the lifecycle. A clean transport
  * EOF while the latest observed run status is non-terminal (or unknown) is a
  * transport failure — the server can also close an active stream on a pull
  * fault after the SSE headers — and reconnects from the cursor under the same
- * bounded policy. The reconnect budget is strictly monotonic: every completed
+ * bounded policy (a gapped stream that moved past its gap takes this same
+ * path). The reconnect budget is strictly monotonic: every completed
  * attempt charges it once, no outcome resets it, and only the user's explicit
  * `retry()` re-arms it — so neither a server that keeps closing nor a ring that
  * keeps outrunning the observer can turn the hook into a reconnect loop.
  *
- * Retention: one entry per observed run, bounded three ways. (1) It is dropped
- * as soon as the run reaches its terminal lifecycle end — a finished run is
- * re-observable from the server's own ring instead of being pinned in the SPA.
- * (2) A non-terminal entry is dropped once its last view has unmounted and it
- * has been idle past `RETAINED_IDLE_TTL_MS`; re-entry after that is a fresh
- * subscription with no cursor — an honest re-fetch, the contract's re-entry path
- * taken from scratch. (3) Each entry keeps at most `MAX_RETAINED_EVENTS` frames
+ * Retention: one entry per observed run, keyed by the CONNECTION it was
+ * observed over (the client instance) as well as the run id, and bounded three
+ * ways. The connection half of the key is the point: a rebuilt client — a
+ * daemon/client reconnect, a changed endpoint or key — is a different
+ * connection, and the frames a previous connection retained must never be shown
+ * under it before that connection's own subscription has been authorized.
+ * A different connection therefore starts cold (cursorless subscribe, no
+ * restored history). (1) An entry is dropped as soon as the run reaches its
+ * terminal lifecycle end — a finished run is re-observable from the server's own
+ * ring instead of being pinned in the SPA. (2) A non-terminal entry is dropped
+ * once its last view has unmounted and it has been idle past
+ * `RETAINED_IDLE_TTL_MS`; re-entry after that is a fresh subscription with no
+ * cursor — an honest re-fetch, the contract's re-entry path taken from scratch.
+ * (3) Each entry keeps at most `MAX_RETAINED_EVENTS` frames
  * — the server ring's own 256-frame window — and a single monotonic cursor
  * instead of a growing id set, so neither the frame list nor the cursor store
  * grows without bound over a long-lived run. `events` is that retained buffer
@@ -78,7 +94,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { useNexusClient } from '@/lib/client-context';
-import { NexusClientError } from '@/lib/nexus';
+import { NexusClientError, type NexusClient } from '@/lib/nexus';
 import type { WorkflowObservationFrame } from '@/lib/nexus/types';
 
 /** Observation phase of one run's stream (see the module header). */
@@ -196,7 +212,43 @@ interface RetainedObservation {
   releaseTimer: ReturnType<typeof setTimeout> | undefined;
 }
 
-const retainedObservations = new Map<string, RetainedObservation>();
+const retainedObservations = new Map<number, Map<string, RetainedObservation>>();
+
+/**
+ * Connection identity of the client a view observes over. A rebuilt client
+ * (daemon/client reconnect, changed endpoint or key) is a new instance and so a
+ * new identity; the identity is a monotonic number rather than the instance
+ * itself, and the WeakMap never pins a retired client alive. Identities are
+ * never reused, so a swept connection's entries can never be read back by a
+ * later one.
+ */
+const connectionIdentities = new WeakMap<NexusClient, number>();
+let latestConnectionIdentity = 0;
+
+function connectionIdentityOf(client: NexusClient): number {
+  const existing = connectionIdentities.get(client);
+  if (existing !== undefined) return existing;
+  latestConnectionIdentity += 1;
+  connectionIdentities.set(client, latestConnectionIdentity);
+  return latestConnectionIdentity;
+}
+
+/** This connection's run-id → observation map, created on first use. */
+function observationsFor(identity: number): Map<string, RetainedObservation> {
+  const existing = retainedObservations.get(identity);
+  if (existing) return existing;
+  const created = new Map<string, RetainedObservation>();
+  retainedObservations.set(identity, created);
+  return created;
+}
+
+/** Forget one run's observation, dropping the connection entry when it empties. */
+function dropRetained(identity: number, sessionId: string): void {
+  const bySession = retainedObservations.get(identity);
+  if (!bySession) return;
+  bySession.delete(sessionId);
+  if (bySession.size === 0) retainedObservations.delete(identity);
+}
 
 /**
  * Drop entries no view is observing whose last activity is older than
@@ -207,17 +259,21 @@ const retainedObservations = new Map<string, RetainedObservation>();
  * the next event).
  */
 function sweepIdleObservations(now: number): void {
-  for (const [sessionId, entry] of retainedObservations) {
-    if (entry.subscribers > 0) continue;
-    if (now - entry.lastActivity < RETAINED_IDLE_TTL_MS) continue;
-    clearTimeout(entry.releaseTimer);
-    retainedObservations.delete(sessionId);
+  for (const [identity, bySession] of retainedObservations) {
+    for (const [sessionId, entry] of bySession) {
+      if (entry.subscribers > 0) continue;
+      if (now - entry.lastActivity < RETAINED_IDLE_TTL_MS) continue;
+      clearTimeout(entry.releaseTimer);
+      bySession.delete(sessionId);
+    }
+    if (bySession.size === 0) retainedObservations.delete(identity);
   }
 }
 
-function retainedFor(sessionId: string): RetainedObservation {
+function retainedFor(identity: number, sessionId: string): RetainedObservation {
   sweepIdleObservations(Date.now());
-  const existing = retainedObservations.get(sessionId);
+  const bySession = observationsFor(identity);
+  const existing = bySession.get(sessionId);
   if (existing) return existing;
   const created: RetainedObservation = {
     events: [],
@@ -229,7 +285,7 @@ function retainedFor(sessionId: string): RetainedObservation {
     lastActivity: Date.now(),
     releaseTimer: undefined,
   };
-  retainedObservations.set(sessionId, created);
+  bySession.set(sessionId, created);
   return created;
 }
 
@@ -290,6 +346,21 @@ function isRefusal(error: unknown): error is NexusClientError {
 }
 
 /**
+ * True when `cursor` is strictly newer than `previous` — the stream carried
+ * data past the point `previous` named. A changing epoch is a different ring and
+ * is never stale, and an unparsable pair falls back to plain inequality.
+ */
+function dataCursorAdvanced(cursor: string | null, previous: string | null): boolean {
+  if (cursor === null) return false;
+  if (previous === null) return true;
+  const current = cursorParts(cursor);
+  const last = cursorParts(previous);
+  if (current === null || last === null) return cursor !== previous;
+  if (current.epoch !== last.epoch) return true;
+  return current.sequence > last.sequence;
+}
+
+/**
  * Observe one root run's retained/live event stream.
  *
  * `sessionId` is the run id the events route is addressed by (orchestration
@@ -324,13 +395,14 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
       return;
     }
 
-    const retained = retainedFor(sessionId);
+    const connectionIdentity = connectionIdentityOf(client);
+    const retained = retainedFor(connectionIdentity, sessionId);
     retained.subscribers += 1;
     retained.lastActivity = Date.now();
     clearTimeout(retained.releaseTimer);
     retained.releaseTimer = undefined;
     let cancelled = false;
-    /** The subscription attempt in flight: aborted at a gap or on unmount. */
+    /** The subscription attempt in flight: aborted on unmount. */
     let attempt: AbortController | null = null;
     /** Re-entry catch-up: quiet timer re-armed per frame, hard totals armed once. */
     let settleTimer: ReturnType<typeof setTimeout> | undefined;
@@ -402,9 +474,12 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
       for (;;) {
         if (cancelled) return;
 
-        /** Why the attempt ended: a closed batch, a gap, or a throw. */
-        let outcome: 'end' | 'gap' | 'unavailable' | 'failed' = 'end';
+        /** Why the attempt ended: a closed batch, an unavailable history, or a throw. */
+        let outcome: 'end' | 'unavailable' | 'failed' = 'end';
         let failure: unknown;
+        /** This stream reported a gap, and the data cursor at that report. */
+        let gapReported = false;
+        let gapCursor: string | null = null;
 
         const controller = new AbortController();
         attempt = controller;
@@ -418,19 +493,19 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
 
             if (frame.kind === 'gap') {
               // The ring skipped a range this view never received. Record the
-              // hole inline, end this subscription now, and recover by
-              // resubscribing from the last cursor actually received (§3) —
-              // the server follows a gap with the frames it still holds and
-              // then keeps the stream open, so waiting for the iterator to end
-              // would stall recovery behind the live tail.
+              // hole inline and KEEP CONSUMING: the server writes the frames it
+              // still holds after the gap on this same stream, so aborting here
+              // would throw away the retained events and reconnect into the very
+              // range whose gap was just reported. Recovery is decided at stream
+              // end instead (below).
               retain(retained, frame);
-              outcome = 'gap';
+              gapReported = true;
+              gapCursor = retained.lastEventId;
               catchingUp = false;
               clearCatchUp();
               phase = 'gapped';
               publish(null);
-              controller.abort();
-              break;
+              continue;
             }
 
             if (frame.kind === 'history_unavailable') {
@@ -451,6 +526,9 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
             if (frame.kind === 'run_state') retained.latestStatus = frame.payload.status;
             retain(retained, frame);
 
+            // A frame arriving after a gap is what the ring retained past the
+            // hole: the subscription is alive again, so the phase leaves
+            // `gapped` while the marker itself stays inline in `events`.
             if (catchingUp) {
               retained.liveFromAppended = retained.appended;
               phase = 'replaying';
@@ -479,7 +557,7 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
           // is dropped from the retention map — a finished run is re-observable
           // from the server's own ring instead of being pinned for the session.
           clearTimeout(retained.releaseTimer);
-          retainedObservations.delete(sessionId);
+          dropRetained(connectionIdentity, sessionId);
           phase = 'terminal';
           publish(null);
           return;
@@ -491,20 +569,36 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
           return;
         }
 
+        if (outcome === 'end' && gapReported && !dataCursorAdvanced(retained.lastEventId, gapCursor)) {
+          // The stream ended at the gap it reported: it never carried a data
+          // frame past it, so `Last-Event-ID` still names exactly the range the
+          // ring just gapped. Reconnecting would re-report the same gap and
+          // burn the budget on it, so the view stays honestly `gapped` with the
+          // `retry` affordance and no attempt is charged.
+          phase = 'gapped';
+          publish(null);
+          return;
+        }
+
         // Every completed attempt charges the reconnect budget exactly once. A
         // clean EOF under a non-terminal (or unknown) status is a transport
-        // failure, not an ending; a gap or a throw is the same unresolved
-        // episode. The budget is strictly monotonic within one subscription: a
-        // productive or long-lived attempt earns no extra attempts (progress is
-        // reported by the attach boundary and the UI phase, not the retry
-        // count), so nothing can reset the count mid-episode and only the user's
-        // explicit `retry()` re-arms it by re-running the effect (QC3-001).
+        // failure, not an ending — the same episode a gapped stream that did
+        // move past its gap belongs to. The budget is strictly monotonic within
+        // one subscription: a productive or long-lived attempt earns no extra
+        // attempts (progress is reported by the attach boundary and the UI
+        // phase, not the retry count), so nothing can reset the count mid-episode
+        // and only the user's explicit `retry()` re-arms it by re-running the
+        // effect (QC3-001).
         consecutiveFailures += 1;
 
         if (consecutiveFailures > MAX_RECONNECT_ATTEMPTS) {
-          phase = outcome === 'gap' ? 'gapped' : 'error';
+          // Only a clean END that is still gapped rests on the gap affordance;
+          // a throw keeps its own failure on screen instead of hiding it behind
+          // the gap the stream happened to report first.
+          const restingGapped = outcome === 'end' && gapReported;
+          phase = restingGapped ? 'gapped' : 'error';
           publish(
-            outcome === 'gap'
+            restingGapped
               ? null
               : failure instanceof Error
                 ? failure
@@ -513,7 +607,7 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
           return;
         }
 
-        phase = outcome === 'gap' ? 'gapped' : 'connecting';
+        phase = 'connecting';
         publish(null);
 
         // `Promise.withResolvers` is ES2024; this app compiles against the
@@ -528,7 +622,7 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
       cancelled = true;
       clearCatchUp();
       attempt?.abort();
-      if (retainedObservations.get(sessionId) !== retained) return;
+      if (retainedObservations.get(connectionIdentity)?.get(sessionId) !== retained) return;
       retained.subscribers -= 1;
       retained.lastActivity = Date.now();
       if (retained.subscribers > 0) return;

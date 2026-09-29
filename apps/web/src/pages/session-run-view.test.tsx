@@ -7,8 +7,9 @@
  * `ClientProvider`, so the frames are the test's own (no network, no SSE):
  *  - a **running** view appends frames as they arrive, reached from a session
  *    row through SPA navigation only;
- *  - a forced **gap** renders its indication inline and the reconnect resumes
- *    from the last received id;
+ *  - a forced **gap** renders its indication inline while the stream keeps
+ *    carrying the frames that follow it, and a stream that ends at its gap
+ *    leaves the view resting on the reconnect affordance;
  *  - a re-entered session renders replayed history and the live tail as two
  *    distinguishable regions;
  *  - a `history_unavailable` close is disclosed as lost server history rather
@@ -234,40 +235,51 @@ describe('SessionRunViewPage — running', () => {
 });
 
 describe('SessionRunViewPage — gap', () => {
-  it('shows the gap where continuity was lost and resumes the tail after the reconnect', async () => {
-    const { client, calls } = stubClientFor([
-      (options) => openStream(options, runState('e1:1'), hostEvent('e1:2'), GAP),
-      (options) => openStream(options, hostEvent('e1:3')),
-    ]);
-
+  it('keeps the gap on screen where continuity was lost and keeps rendering the frames that follow it', async () => {
+    const feed = pushable();
+    const { client, calls } = stubClientFor([feed.stream]);
     renderRunView(client, 'run-gap');
+
+    await act(async () => {
+      feed.push(runState('e1:1'));
+    });
+    await act(async () => {
+      feed.push(GAP);
+    });
 
     const gap = await screen.findByTestId('run-event-gap');
     expect(gap).toHaveTextContent('Events were missed');
-    // Contract recovery: the reconnect carries the last received id.
-    await waitFor(() => expect(calls).toHaveLength(2));
-    expect(calls[1].lastEventId).toBe('e1:2');
-    expect(calls[0].signal.aborted).toBe(true);
+    expect(screen.getByTestId('run-phase')).toHaveTextContent('Gap');
 
-    // Continuity returns past the hole, and the hole stays visible.
-    expect(await screen.findByText('e1:3')).toBeInTheDocument();
+    // The server writes the frames its ring still holds after the gap on the
+    // same stream, so the view consumes them in place — it never reconnects
+    // into the range whose gap was just reported.
+    await act(async () => {
+      feed.push(hostEvent('e1:2'));
+    });
+
+    expect(await screen.findByText('e1:2')).toBeInTheDocument();
     expect(screen.getByTestId('run-event-gap')).toBeInTheDocument();
+    expect(calls).toHaveLength(1);
+    expect(calls[0].signal.aborted).toBe(false);
+    expect(screen.getByTestId('run-phase')).toHaveTextContent('Live');
   });
 
-  it('offers the reconnect affordance once the gap retries are exhausted, and re-arms', async () => {
+  it('offers the reconnect affordance when the stream ends at the gap, and re-arms', async () => {
     const { client, calls } = stubClientFor([() => frames(GAP)]);
     renderRunView(client, 'run-gap-exhausted');
 
-    // Bounded retries: the gap is re-attempted, then the view stays honestly gapped.
-    await waitFor(() => expect(calls).toHaveLength(4), { timeout: 5_000 });
+    // The stream never moved past its gap, so a reconnect would re-report the
+    // same gap: the view stays honestly gapped rather than looping.
+    expect(await screen.findByTestId('run-event-gap')).toHaveTextContent('Events were missed');
+    await wait(300);
+    expect(calls).toHaveLength(1);
     expect(screen.getByTestId('run-phase')).toHaveTextContent('Gap');
-    // Every gap this view hit is still on screen — none is smoothed over.
-    expect(screen.getAllByTestId('run-event-gap')).toHaveLength(4);
 
     fireEvent.click(screen.getByRole('button', { name: 'Reconnect' }));
 
-    await waitFor(() => expect(calls).toHaveLength(5));
-    expect(calls[4].lastEventId).toBeUndefined();
+    await waitFor(() => expect(calls).toHaveLength(2));
+    expect(calls[1].lastEventId).toBeUndefined();
   });
 });
 
