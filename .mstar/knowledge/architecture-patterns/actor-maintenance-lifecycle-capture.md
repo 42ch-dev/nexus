@@ -32,7 +32,7 @@ related_components:
 
 The v1.185 developer loop added material mutation and reversible freeze to the shipped Actor vertical: identity edit, archive/restore, WorldSheet maintenance, bounded KE content maintenance, and an opted-in run-to-memory capture. Three well-known concurrency mechanisms are individually insufficient here: SQLite row CAS does not cover Host sessions or file effects, a provider session can outlive a DB transaction, and a server-owned stream ends on the Host's schedule, not the request's. The pattern combines **per-resource revision CAS**, an **internal lifecycle epoch**, a **per-Character activity fence**, and a **drain-authoritative capture** with a receipt-keyed immutable dedup.
 
-Normative product semantics: [Actor Product Model §11](../../specs/actor-product-model.md). The sibling composition doc covers the shipped v1.184 admission/bearer boundaries: [actor-bearer-boundary-composition.md](actor-bearer-boundary-composition.md).
+Normative product semantics: [Actor Product Model §11](../../specs/architecture/actor-product-model.md). The sibling composition doc covers the shipped v1.184 admission/bearer boundaries: [actor-bearer-boundary-composition.md](actor-bearer-boundary-composition.md).
 
 Rejected option (kept as explicit non-goal): archive cancels all sessions, persists conversation/job history, and reconstructs capture from broadcast or SSE. Cancellation cannot atomically roll back provider or file effects, broadcasts are lossy, and persistent history is out of scope. Busy is refused, never forced.
 
@@ -123,4 +123,4 @@ Each mechanism covers what the others cannot. Row CAS protects the SQLite truth;
 - Drain, digest, persist — `crates/nexus-daemon-runtime/src/actor_run_capture.rs` (`drain_and_finalize_character_operation`, `try_persist_capture`, `DrainAccumulator`, `build_capture_digest`).
 - Receipt dedup, provenance — `crates/nexus-local-db/src/character_pending_review.rs` (`capture_character_run`, `capture_character_run_in_tx`, `receipt_matches_input`), migration `crates/nexus-local-db/migrations/20260906000003_character_run_capture.sql`.
 - Stale-session rejection and session admission order — `crates/nexus-daemon-runtime/src/api/handlers/agent_host.rs` (`prepare_prompt`, retired-session paths).
-- Published slice — the v1.185 iteration package is a local process artifact (not tracked at HEAD); the durable authorities are [§11](../../specs/actor-product-model.md) plus the sources above.
+- Published slice — the v1.185 iteration package is a local process artifact (not tracked at HEAD); the durable authorities are [§11](../../specs/architecture/actor-product-model.md) plus the sources above.

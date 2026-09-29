@@ -50,16 +50,23 @@ See linked AGENTS.md files for per-directory decision rules and invariants:
 | `tooling/` | Codegen pipeline & CI | [`tooling/AGENTS.md`](tooling/AGENTS.md) |
 | `tooling/design-tokens/` | Shared `@nexus/design-tokens` Tailwind preset + tokens.css | [`tooling/design-tokens/AGENTS.md`](tooling/design-tokens/AGENTS.md) |
 | `apps/nexus42/` | CLI executable (polyglot product-surfaces dir) | [`apps/nexus42/AGENTS.md`](apps/nexus42/AGENTS.md) |
+| `apps/nexus-service/` | Standalone Node HTTP service over `@42ch/nexus-native` | [`apps/nexus-service/AGENTS.md`](apps/nexus-service/AGENTS.md) |
 | `apps/web/` | Web SPA — Control Room + canvas (React; served by the Electron/TS host) | [`apps/web/AGENTS.md`](apps/web/AGENTS.md) |
 | `apps/desktop-electron/` | Electron desktop host (unsigned macOS arm64 + x64) wrapping `apps/web` | [`apps/desktop-electron/AGENTS.md`](apps/desktop-electron/AGENTS.md) |
 | `apps/design-studio/` | Design-system gallery (daemon-independent Vite SPA) | [`apps/design-studio/AGENTS.md`](apps/design-studio/AGENTS.md) |
 | `crates/nexus-acp-host/` | ACP client adapter | [`crates/nexus-acp-host/AGENTS.md`](crates/nexus-acp-host/AGENTS.md) |
 | `crates/nexus-agent-host/` | Agent host adapter | [`crates/nexus-agent-host/AGENTS.md`](crates/nexus-agent-host/AGENTS.md) |
 | `crates/nexus-contracts/` | Generated Rust wire types | [`crates/nexus-contracts/AGENTS.md`](crates/nexus-contracts/AGENTS.md) |
+| `crates/nexus-core/` | Transport-neutral World KB service + stored Actor/holder admission authority | [`crates/nexus-core/AGENTS.md`](crates/nexus-core/AGENTS.md) |
+| `crates/nexus-core-node/` | Thin Node-API cdylib composing core + provider ports; audited FFI boundary | [`crates/nexus-core-node/AGENTS.md`](crates/nexus-core-node/AGENTS.md) |
 | `crates/nexus-embedding/` | Embedding readiness contract (RN-OGA-3) — provider trait seam, identity tuple, fail-closed derived-index protocol; no OSS execution | [`crates/nexus-embedding/AGENTS.md`](crates/nexus-embedding/AGENTS.md) |
 | `crates/nexus-home-layout/` | `~/.nexus42/` path layout | [`crates/nexus-home-layout/AGENTS.md`](crates/nexus-home-layout/AGENTS.md) |
 | `crates/nexus-local-db/` | Local database layer | [`crates/nexus-local-db/AGENTS.md`](crates/nexus-local-db/AGENTS.md) |
 | `crates/nexus-orchestration/` | Orchestration engine | [`crates/nexus-orchestration/AGENTS.md`](crates/nexus-orchestration/AGENTS.md) |
+| `crates/nexus-preset/` | Pure preset authoring/source-file domain shared by core + orchestration | [`crates/nexus-preset/AGENTS.md`](crates/nexus-preset/AGENTS.md) |
+| `crates/nexus-provider-conformance/` | Provider-neutral normalized `HostEvent` stream conformance; CI/test-only | [`crates/nexus-provider-conformance/AGENTS.md`](crates/nexus-provider-conformance/AGENTS.md) |
+| `crates/nexus-provider-ports/` | Port-only `ProviderPort` / `ProviderResult` contracts; no provider implementation | [`crates/nexus-provider-ports/AGENTS.md`](crates/nexus-provider-ports/AGENTS.md) |
+| `crates/nexus-storage-guard/` | Audited SQLite FFI for connection-local writer-protocol functions | [`crates/nexus-storage-guard/AGENTS.md`](crates/nexus-storage-guard/AGENTS.md) |
 | `crates/nexus-spoke-adapter/` | SPOKE boundary — extensions.nexus accessors + spoke-operations delegation | [`crates/nexus-spoke-adapter/AGENTS.md`](crates/nexus-spoke-adapter/AGENTS.md) |
 | `crates/nexus-cloud-sync/` | Cloud sync transport | [`crates/nexus-cloud-sync/AGENTS.md`](crates/nexus-cloud-sync/AGENTS.md) |
 | `crates/nexus-creator/` | Creator aggregate + local identity | [`crates/nexus-creator/AGENTS.md`](crates/nexus-creator/AGENTS.md) |
@@ -109,7 +116,7 @@ UI work in this repo follows a **studio-first** routing rule. The visual proving
 - Studio boundaries + `@web-*` aliases: [`apps/design-studio/AGENTS.md`](apps/design-studio/AGENTS.md)
 - Promotion rules + package boundary: [`packages/nexus-ui/AGENTS.md`](packages/nexus-ui/AGENTS.md)
 - Canonical workflow + classification labels (`promoted primitive` / `studio-local fixture` / `web-only wrapper` / `future web product component`): [`.mstar/knowledge/architecture-patterns/ui-component-promotion-workflow.md`](.mstar/knowledge/architecture-patterns/ui-component-promotion-workflow.md)
-- Studio spec: [`.mstar/specs/design-studio.md`](.mstar/specs/design-studio.md)
+- Studio spec: [`.mstar/specs/surfaces/design-studio.md`](.mstar/specs/surfaces/design-studio.md)
 
 ## Development Policy
 

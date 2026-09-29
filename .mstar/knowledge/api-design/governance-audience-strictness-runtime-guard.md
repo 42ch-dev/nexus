@@ -1,6 +1,6 @@
 # Governance-Audience Strictness Needs a Runtime Guard
 
-**Source:** v1.199 medium-residual convergence (`R4-audience-oneOf`, plan `2026-09-28-medium-residual-convergence`). SSOT for the audience contract: [holder-governance.md](../../specs/holder-governance.md).
+**Source:** v1.199 medium-residual convergence (`R4-audience-oneOf`, plan `2026-09-28-medium-residual-convergence`). SSOT for the audience contract: [holder-governance.md](../../specs/architecture/holder-governance.md).
 
 ## Failure shape
 

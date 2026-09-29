@@ -65,7 +65,7 @@ the spoke `KnowledgeEntry` wire type for consumers that read it through this cra
 
 The domain record and the store traits own the native holder contract; authority
 stays in `nexus-core` admission, never in a client value (durable
-[holder-governance.md](../../.mstar/specs/holder-governance.md) §§1–5):
+[holder-governance.md](../../.mstar/specs/architecture/holder-governance.md) §§1–5):
 
 - **Native pair.** `KnowledgeEntryRecord.holder_entry_id: Option<String>` /
   `.disclosure: Option<String>` carry the resolved holder and its disclosure

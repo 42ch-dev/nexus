@@ -13,8 +13,8 @@ Parent rules: [`../AGENTS.md`](../AGENTS.md) (apps placement), root [`AGENTS.md`
 
 - Design tokens: repo-root [`DESIGN.md`](../../DESIGN.md) + [`DESIGN.dark.md`](../../DESIGN.dark.md) only
 - CSS projection: [`@nexus/design-tokens`](../../tooling/design-tokens) (`tokens.css` + Tailwind preset) — shared with `apps/web`
-- Normative spec: [`.mstar/specs/design-studio.md`](../../.mstar/specs/design-studio.md)
-- Import tiers and source categories: [`.mstar/specs/design-studio.md`](../../.mstar/specs/design-studio.md) §3.2, §7.5
+- Normative spec: [`.mstar/specs/surfaces/design-studio.md`](../../.mstar/specs/surfaces/design-studio.md)
+- Import tiers and source categories: [`.mstar/specs/surfaces/design-studio.md`](../../.mstar/specs/surfaces/design-studio.md) §3.2, §7.5
 
 ## Import boundaries (HARD)
 
@@ -35,7 +35,7 @@ Design Studio and `apps/web` use distinct import source categories. Do not treat
 - `@web-*` aliases remain valid; V1.128+ success is **clarity**, not mass migration into `@42ch/nexus-ui`.
 - Promote only through the studio-first workflow and an explicit plan promotion list entry.
 
-Surfaces pages label each section with badges (`surface-source-badge-*` test ids). Source classification: [`.mstar/specs/design-studio.md`](../../.mstar/specs/design-studio.md) §7.5.
+Surfaces pages label each section with badges (`surface-source-badge-*` test ids). Source classification: [`.mstar/specs/surfaces/design-studio.md`](../../.mstar/specs/surfaces/design-studio.md) §7.5.
 
 ### Allowed
 
@@ -99,7 +99,7 @@ No daemon or Tauri required.
 - Theme toggle: `class` strategy on `<html>` — mirrors web `theme-provider` behavior
 - Read-only gallery — no YAML write-back, no localStorage token overrides
 - App chrome shows **Read-only · edit `DESIGN.md`** (repo-root SSOT helper)
-- Voice & Content and Surfaces fixture strings: [`.mstar/specs/design-studio.md`](../../.mstar/specs/design-studio.md) §7.4–§7.5 — sourced from DESIGN § Voice & Content and shipped product copy
+- Voice & Content and Surfaces fixture strings: [`.mstar/specs/surfaces/design-studio.md`](../../.mstar/specs/surfaces/design-studio.md) §7.4–§7.5 — sourced from DESIGN § Voice & Content and shipped product copy
 - Canvas surfaces fixture mirrors Outline + Strategy + WorldKB + World Timeline + Work Timeline node chrome, plus Global Timeline list chrome, Layer breadcrumb, and shared conflict-modal chrome (V1.124 P2).
 
 ## Audiences
@@ -111,7 +111,7 @@ No daemon or Tauri required.
 | Brand / VI reviewers | Confirm logo usage, clear space, and theme.css alignment |
 | Authors (local Web UI users) | **Not in scope** — studio is not bundled in `nexus42` or desktop installer |
 
-See [design-studio.md spec §2](../../.mstar/specs/design-studio.md#2-audiences) for audience job-to-be-done detail.
+See [design-studio.md spec §2](../../.mstar/specs/surfaces/design-studio.md#2-audiences-and-contributor-jobs) for audience job-to-be-done detail.
 
 ## Tests
 

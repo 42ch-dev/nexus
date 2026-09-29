@@ -3,14 +3,14 @@
 **Status**: Normative — V1.51 Shipped (findings lifecycle F6 + KB closure overwrites/supersedes integrated)  
 **Document class**: Feature line (quality-loop supplement)  
 **Created**: 2026-06-09  
-**Last updated**: 2026-06-19 (V1.51 P-last — findings lifecycle F6 marked Normative; no runtime change)  
+**Last updated**: 2026-09-29 (authority routing aligned with the cross-profile findings Master; V1.49 lifecycle history retained)  
 **Scope**: Local-first quality loop for `work_profile: novel` — findings, review routing, rules, logs, 96h escalation, on-demand audit cross-refs  
 **Coordinates with**:
 
 - [workflow-profile.md](workflow-profile.md) — layout, preset gates, completion (quality-loop detail in sibling spec)
-- [creator-workflow.md](../creator-workflow.md) — FL-E `review` stage and auto-chain
-- [orchestration-engine.md](../orchestration-engine.md) — presets, daemon scheduled tasks
-- [cli-spec.md](../cli-spec.md) — status/banner surfaces
+- [creator-workflow.md](../creator/creator-workflow.md) — FL-E `review` stage and auto-chain
+- [orchestration-engine.md](../orchestration/orchestration-engine.md) — presets, daemon scheduled tasks
+- [cli-spec.md](../cli/cli-spec.md) — status/banner surfaces
 - [manuscript-audit.md](manuscript-audit.md) — DF-69 on-demand audit (V1.44 P0)
 - [author-experience.md](author-experience.md) — quickstart §5 cross-refs (V1.43 shipped)
 
@@ -53,6 +53,8 @@ Indexes: `(work_id, status)`, `(work_id, chapter, status)`. **V1.49 P0**: added 
 Auto-chain must not fork driver when routing spawns auxiliary schedules; at most one active FL-E driver per Work remains invariant.
 
 ### 2.3 Extended status enum (V1.49 P0 — F6 lifecycle)
+
+> **Authority (§2.3–§2.4 and executor routing):** The root [Findings Lifecycle — Cross-Profile Master](../contracts/findings-lifecycle.md) owns the cross-profile six-state lifecycle, `target_executor` routing semantics, and UI remediation surface. The V1.49 enum and transition graph below are retained as historical context, not a second normative lifecycle authority. This spec retains only novel-specific producer-side responsibilities: review verdicts, finding creation, orchestration hooks, produce-prompt selection, and retention/prune.
 
 V1.49 P0 extends the V1.39 three-state model (`open` / `resolved` / `wont_fix`) to a 6-state lifecycle:
 
@@ -299,4 +301,4 @@ V1.48 closes the novel quality loop: durable findings enrich the writing prompt,
 
 ## V1.45 supersession (P-last promotion)
 
-**Superseded by**: [creator-run-preset-entry.md](../creator-run-preset-entry.md) (Shipped Master V1.45). The `novel-review-master` preset id + enqueue-only semantics + audit preset ids are now part of the canonical Master body.
+**Superseded by**: [creator-run-preset-entry.md](../archived/creator-run-preset-entry.md) (Shipped Master V1.45). The `novel-review-master` preset id + enqueue-only semantics + audit preset ids are now part of the canonical Master body.

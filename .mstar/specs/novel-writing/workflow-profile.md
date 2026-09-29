@@ -7,12 +7,12 @@
 **Scope**: `work_profile: novel` on generic **Work** — artifact layout under `Works/<work_ref>/`, templates, chapter status, completion semantics, sync boundaries  
 **Coordinates with**:
 
-- [work-experience-model.md](../work-experience-model.md) — generic Work entity
-- [creator-workflow.md](../creator-workflow.md) — FL-E `produce` stage
-- [cli-spec.md](../cli-spec.md) — workspace layout §13.1
+- [work-experience-model.md](../creator/work-experience-model.md) — generic Work entity
+- [creator-workflow.md](../creator/creator-workflow.md) — FL-E `produce` stage
+- [cli-spec.md](../cli/cli-spec.md) — workspace layout §13.1
 - [sync-contract.md](sync-contract.md) — chapter discovery
-- [orchestration-engine.md](../orchestration-engine.md) — `novel-writing` preset
-- [entity-scope-model.md](../entity-scope-model.md) — World entity + World KB (`work_profile: novel` binds Work to World; world content is cross-Work, lives in World KB, NOT in per-Work `Worldbuilding/` subtree)
+- [orchestration-engine.md](../orchestration/orchestration-engine.md) — `novel-writing` preset
+- [entity-scope-model.md](../architecture/entity-scope-model.md) — World entity + World KB (`work_profile: novel` binds Work to World; world content is cross-Work, lives in World KB, NOT in per-Work `Worldbuilding/` subtree)
 
 ---
 
@@ -47,7 +47,7 @@ On `works` table / Work API (additive):
 | `work_ref` | string | yes | Filesystem directory name: `Works/<work_ref>/` |
 | `total_planned_chapters` | integer | no | Target chapter count for completion (default TBD in init preset) |
 | `current_chapter` | integer | no | Latest chapter number in progress |
-| `world_id` | string (FK) | yes for new V1.40 novel Works | Bind to a World (per [entity-scope-model.md](../entity-scope-model.md) §5.4). Required for V1.40 Work creation/init; legacy `NULL` is allowed only when reading V1.39-and-earlier worldless Works. `novel-project-init` grill-me asks whether to create a new World or bind an existing one (see §3.5). |
+| `world_id` | string (FK) | yes for new V1.40 novel Works | Bind to a World (per [entity-scope-model.md](../architecture/entity-scope-model.md) §5.4). Required for V1.40 Work creation/init; legacy `NULL` is allowed only when reading V1.39-and-earlier worldless Works. `novel-project-init` grill-me asks whether to create a new World or bind an existing one (see §3.5). |
 | `novel_completion_status` | enum | no | `in_progress` \| `completed` (mirrors Work.status when terminal) |
 
 **Invariant**: `work_ref` is stable for the life of the Work; renaming directory without DB update is unsupported pre-1.0.
@@ -102,7 +102,7 @@ Non-novel `work_profile` values may use different subtrees under `Works/<work_re
 
 ### 3.5 World integration (cross-Work worldbuilding)
 
-**Key principle**: worldbuilding content is **cross-Work**, not per-Work. A `Works/<work_ref>/` directory is **one event in a World's timeline**, not the canonical home of characters, locations, society, or rules. The canonical home is **World KB** (per [entity-scope-model.md](../entity-scope-model.md) §5.4 World entity + `nexus-kb` crate).
+**Key principle**: worldbuilding content is **cross-Work**, not per-Work. A `Works/<work_ref>/` directory is **one event in a World's timeline**, not the canonical home of characters, locations, society, or rules. The canonical home is **World KB** (per [entity-scope-model.md](../architecture/entity-scope-model.md) §5.4 World entity + `nexus-kb` crate).
 
 Therefore:
 
@@ -111,7 +111,7 @@ Therefore:
   - **World-bound Work** (`world_id != NULL`): characters, locations, society, rules, events, timelines come from World KB. Chapter body may reference World KB items by id via `world_refs: [char_xxx, loc_yyy]` frontmatter; V1.40 validates per §3.5.1.4.
   - **Legacy worldless Work** (`world_id == NULL`, V1.39 and earlier only): no cross-Work continuity. Existing data remains readable/operable; V1.40 creation/init must not produce this state.
 - **`novel-project-init` asks the binding question** (grill-me). Two valid V1.40 options: bind to existing `world_id` (user picks from `nexus42 creator world list`) / create new World (calls `creator world create --title "..."`, narrative kind implicit). There is no V1.40 "stay worldless" creation option.
-- **Work → World KB promotion** is the **long-term** path: as chapters finalize, `kb-extract` preset (existing, per [creator-workflow.md](../creator-workflow.md) `persist` stage) can extract entities / events / rules from chapter body into World KB items. V1.36 documents this path; enforcement is V1.37+.
+- **Work → World KB promotion** is the **long-term** path: as chapters finalize, `kb-extract` preset (existing, per [creator-workflow.md](../creator/creator-workflow.md) `persist` stage) can extract entities / events / rules from chapter body into World KB items. V1.36 documents this path; enforcement is V1.37+.
 
 ### 3.5.1 World KB continuity implement contract (V1.37 P2 roadmap → V1.40 implement)
 
@@ -126,7 +126,7 @@ nexus42 creator world create --title "Neon River" --description "Solarpunk noir 
 → world_id: wld_<uuid>
 ```
 
-Note: `--kind narrative` is implicit (deferred to P1 taxonomy). `--title` is canonical; `--name` is an alias (see [cli-spec.md §6.2G](../cli-spec.md)).
+Note: `--kind narrative` is implicit (deferred to P1 taxonomy). `--title` is canonical; `--name` is an alias (see [cli-spec.md §6.2G](../cli/cli-spec.md)).
 
 The init grill-me has exactly two valid V1.40 binding paths:
 
@@ -345,7 +345,7 @@ Missing filesystem hints are still surfaced to the user (see §8.1), but a missi
 **V1.42 P1 (implement — grill-me locked):**
 
 1. Backfill **implicit `volume = 1`** for all existing `work_chapters` rows (single-volume behavior unchanged).
-2. Migrate PK to **`(work_id, volume, chapter)`** (see [local-db-schema.md](../local-db-schema.md) V1.42 amendment).
+2. Migrate PK to **`(work_id, volume, chapter)`** (see [local-db-schema.md](../runtime/local-db-schema.md) V1.42 amendment).
 3. Preserve row data (`status`, `outline_path`, `body_path`, `actual_word_count`, timestamps) through an idempotent migration.
 4. New multi-volume Works declare volume count at init; chapter numbers may repeat across volumes.
 
@@ -653,7 +653,7 @@ Works/
 All template files live under `crates/nexus-orchestration/embedded-presets/novel-project-init/templates/` (P1 deliverable). The init preset's scaffold capability:
 
 1. Reads each template from the embedded asset.
-2. Substitutes preset input vars (`work_ref`, `title`, `world_id`, etc.) using `handlebars-rust` (per [orchestration-engine.md](../orchestration-engine.md) §7.3).
+2. Substitutes preset input vars (`work_ref`, `title`, `world_id`, etc.) using `handlebars-rust` (per [orchestration-engine.md](../orchestration/orchestration-engine.md) §7.3).
 3. Writes to `Works/<work_ref>/...` at the path listed above.
 
 For V1.40 Works, `README.md` is rendered with a one-line `world_id: <uuid>` header and links to the World KB items the Work will reference most. Legacy worldless Works from V1.39 and earlier may retain README inline world setting notes, but V1.40 scaffold rendering does not create new worldless README variants.
@@ -794,7 +794,7 @@ Sync **must not** upload full正文 by default (cli-spec §5.3 unchanged).
 | `creator bootstrap --idea "..."` | Default `work_profile: novel` when `--preset novel-writing` or default produce path; V1.40 creation/init must obtain a `world_id` via create-new or bind-existing before scaffold completes |
 | `creator bootstrap --idea "..." --world-id <world_id>` | Bind the new Work to an existing World (per §3.5); World KB is injected as context in `novel-writing` prompts |
 | `creator bootstrap --idea "..." --init-preset novel-project-init` | Run the `novel-project-init` grill-me (scaffold dirs + mandatory World binding question + `work_chapters` seed rows) before intake |
-| `creator works status [<work_id>]` | **V1.41** — migrated from `creator run status`; reads `work_chapters`; shows `work_ref`, chapter list, completion; **V1.39** fields + completion/runtime lock per [cli-spec.md](../cli-spec.md) §6.2H |
+| `creator works status [<work_id>]` | **V1.41** — migrated from `creator run status`; reads `work_chapters`; shows `work_ref`, chapter list, completion; **V1.39** fields + completion/runtime lock per [cli-spec.md](../cli/cli-spec.md) §6.2H |
 | `creator works list` | **V1.41** — migrated from `creator run list` |
 | `creator run resume <work_id>` | **V1.39** — resume checkpointed auto-chain after daemon restart |
 | `creator run continue <work_id> --note "..."` | Appends inspiration; does not advance chapter index |

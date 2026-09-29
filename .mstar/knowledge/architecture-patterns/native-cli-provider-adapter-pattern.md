@@ -62,9 +62,9 @@ these boundaries when changing the adapter, boot path or public catalog:
    exit proof does not justify a process-tree/restart no-leak claim or a blind
    PID kill. A sealed deny-all profile is model-tool denial, not an OS sandbox.
 
-Durable contracts: [agent-host](../../specs/agent-host.md) §§5–8,
-[workspace OCC/recovery](../../specs/concurrency.md) §9 and
-[run settlement/replay](../../specs/daemon-runtime.md) §20.
+Durable contracts: [agent-host](../../specs/agents/agent-host.md) §§5–8,
+[workspace OCC/recovery](../../specs/runtime/concurrency.md) §9 and
+[run settlement/replay](../../specs/archived/daemon-runtime.md) §20.
 Derived from verified V1.188 P0–P4 runtime, recovery and review evidence;
 the public first-run/Quick Start/live-model composition was explicitly deferred.
 

@@ -20,7 +20,7 @@ tags:
 
 # Bounded local scrolling as the responsive containment pattern
 
-**Track**: Knowledge (distilled from the v1.187 Studio workspace acceptance; rule stated in [DESIGN.md](../../../DESIGN.md) §Spacing & Layout and [.mstar/specs/design-studio.md](../../specs/design-studio.md) §6).
+**Track**: Knowledge (distilled from the v1.187 Studio workspace acceptance; rule stated in [DESIGN.md](../../../DESIGN.md) §Spacing & Layout and [.mstar/specs/surfaces/design-studio.md](../../specs/surfaces/design-studio.md) §6).
 
 ## Context
 

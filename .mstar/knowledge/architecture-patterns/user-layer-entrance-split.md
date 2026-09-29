@@ -79,4 +79,4 @@ See §3 table for the four enforcement-path failures and fixes. Structural ancho
 - Settings host pattern: [settings-modal-primary-host.md](settings-modal-primary-host.md)
 - `setup_completed` asymmetry: [asymmetric-setup-completed-context.md](asymmetric-setup-completed-context.md)
 - Shell IA: [workspace-parent-shell-ia.md](workspace-parent-shell-ia.md)
-- Specs: `.mstar/specs/web-ui.md`, `.mstar/specs/desktop-shell.md`; iteration spec `.mstar/iterations/v1.170/specs/v1.170-entrance-locks.md` EL-1..EL-8 + AR-15..AR-22
+- Specs: `.mstar/specs/surfaces/web-ui.md`, `.mstar/specs/surfaces/desktop-shell.md`; iteration spec `.mstar/iterations/v1.170/specs/v1.170-entrance-locks.md` EL-1..EL-8 + AR-15..AR-22

@@ -2,7 +2,7 @@
 
 Embedding contract crate: the `EmbeddingProvider` trait seam, the embedding
 identity tuple, and the fail-closed derived-index protocol. Normative spec:
-`.mstar/specs/embedding-readiness.md`.
+`.mstar/specs/runtime/embedding-readiness.md`.
 
 ## Key Rules
 

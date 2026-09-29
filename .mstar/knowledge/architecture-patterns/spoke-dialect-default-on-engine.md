@@ -60,7 +60,7 @@ Multi-byte (CJK) keys + `whole_word` match: advancing `offset = start + 1` split
 
 - V1.149 P0 `crates/nexus-spoke-adapter/src/adapter/activation.rs` (default-on engine, truth-table logic, `regex` crate match, char-boundary whole_word, neutral-only golden).
 - V1.149 P1 `expand_relation_hops` + `NexusAdapter::list_hop_edges_for_world` (graph hops via storage list, pre_visited dedup).
-- Spec: `.mstar/specs/spoke-adapter-architecture.md` §7.4 Lore activation engine (normative contract).
+- Spec: `.mstar/specs/architecture/spoke-adapter-architecture.md` §7.4 Lore activation engine (normative contract).
 - Spoke handbook: `spoke/.mstar/specs/domain-profile-lore-activation.md` (the dialect — consumer-only).
 
 ---
@@ -96,5 +96,5 @@ Slot filling is gated by the creator-workflow `stage` (`intake`/`research`/`prod
 - V1.150 P0 `crates/nexus-moment-context-assembly/src/slots.rs` (slot routing + emit order; gated behind `activation_enabled`).
 - V1.150 P1 `crates/nexus-moment-context-assembly/src/directive.rs` + `crates/nexus-local-db/src/moment_directive.rs` (Moment Directive + `DirectiveStore` trait + `NoDirectiveStore` default + compile-time `query_as!`).
 - V1.150 P2 `crates/nexus-moment-context-assembly/src/generation.rs` (`apply_stage_gate` §4 matrix; `Unspecified` zero-cost pass-through).
-- Spec: `.mstar/specs/spoke-adapter-architecture.md` §7.4 (V1.150 slot + Directive matrix promoted by P2 sweep).
+- Spec: `.mstar/specs/architecture/spoke-adapter-architecture.md` §7.4 (V1.150 slot + Directive matrix promoted by P2 sweep).
 - Iteration guide: `mca-section-audit.md` (MCA section-heading evidence).

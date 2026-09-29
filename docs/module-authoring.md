@@ -11,7 +11,7 @@ compute is **read-only** — the module never commits state itself (see
 [Read-only compute](#read-only-compute)).
 
 The normative ABI contract is
-[`.mstar/specs/compute-module-abi.md`](../.mstar/specs/compute-module-abi.md) —
+[`.mstar/specs/compute/compute-module-abi.md`](../.mstar/specs/compute/compute-module-abi.md) —
 this doc is the authoring reference: the contract at a glance, the
 `manifest.json` contract (incl. `wasm_sha256`), the allowlist gate, and the
 operator install. The module-authoring walkthrough lives in
@@ -330,4 +330,4 @@ is documented in the
 - Module guide: [`modules/README.md`](../modules/README.md) — authoring
   walkthrough + embedding procedure.
 - Reference implementation: [`modules/basic-combat/`](../modules/basic-combat/).
-- ABI spec (normative): [`.mstar/specs/compute-module-abi.md`](../.mstar/specs/compute-module-abi.md).
+- ABI spec (normative): [`.mstar/specs/compute/compute-module-abi.md`](../.mstar/specs/compute/compute-module-abi.md).

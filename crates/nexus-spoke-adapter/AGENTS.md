@@ -22,9 +22,9 @@ Since V1.141 the crate also flat-re-exports spoke 0.4.0's adapter **port traits 
 
 ## Authority
 
-- Normative spec: [`specs/spoke-adapter-architecture.md`](../../.mstar/specs/spoke-adapter-architecture.md) (tracked). §7.2 is the authoritative public API surface; §7.3 is the Surface B (ports + orchestrators) surface; §2 is the `extensions.nexus` contract.
+- Normative spec: [`specs/architecture/spoke-adapter-architecture.md`](../../.mstar/specs/architecture/spoke-adapter-architecture.md) (tracked). §7.2 is the authoritative public API surface; §7.3 is the Surface B (ports + orchestrators) surface; §2 is the `extensions.nexus` contract.
 - Upstream types: `spoke-schemas` + `spoke-operations` (crates.io, lockstep exact pin on the **pinned upstream lockstep release** — the version SSOT is the workspace manifest, mirrored by the two root npm pins and `tooling/check-wire-drift.sh::SPOKE_PIN`).
-- **Shipped (v1.191 P1):** the lockstep SPOKE release plus complete Actor-holder governance (native `holder_entry_id`/`disclosure`, Creator management vs ActorView admission, `creator_only` cutover) and the production extraction wrapper. Durable contract: [`.mstar/specs/holder-governance.md`](../../.mstar/specs/holder-governance.md). `spoke-connect` stays behind `connect-host` / `connect-client`.
+- **Shipped (v1.191 P1):** the lockstep SPOKE release plus complete Actor-holder governance (native `holder_entry_id`/`disclosure`, Creator management vs ActorView admission, `creator_only` cutover) and the production extraction wrapper. Durable contract: [`.mstar/specs/architecture/holder-governance.md`](../../.mstar/specs/architecture/holder-governance.md). `spoke-connect` stays behind `connect-host` / `connect-client`.
 
 ## Key rules
 
@@ -38,7 +38,7 @@ Since V1.141 the crate also flat-re-exports spoke 0.4.0's adapter **port traits 
 This crate is the single place where native holder governance crosses the SPOKE wire:
 
 - **Exact field mapping.** `KnowledgeEntryRecord.holder_entry_id` → spoke `KnowledgeEntry.owner`, and `.disclosure` → `.disclosure`. No governance value rides in `extensions.nexus`, and the wire `owner` is never a narrative-container id (durable §1, D2).
-- **Scoped ports (HARD).** `NexusAdapter::new(pool, KnowledgeReadScope)` requires a validated request-bound scope for every KE load/mutate/query path; `NexusAdapter::new_host(pool)` is tools/metadata only and fails closed on every KE entry point. Relationship/finding/compute expansion filters or rejects hidden operands **before** emitting an id or payload, and a missing scope never widens selection. See `.mstar/specs/holder-governance.md` §4.
+- **Scoped ports (HARD).** `NexusAdapter::new(pool, KnowledgeReadScope)` requires a validated request-bound scope for every KE load/mutate/query path; `NexusAdapter::new_host(pool)` is tools/metadata only and fails closed on every KE entry point. Relationship/finding/compute expansion filters or rejects hidden operands **before** emitting an id or payload, and a missing scope never widens selection. See `.mstar/specs/architecture/holder-governance.md` §4.
 - **Retired legacy key.** Raw input that still carries `extensions.nexus.creator_only` is refused with the stable `legacy_creator_only_unsupported` reason (`false` included) — never folded into governance, never carried as an unknown extra.
 - **Production extraction wrapper.** `src/extraction.rs` owns `ResolvedExtractionPort` + the native callback and is the only caller of `spoke_operations::adapter::orchestrate_extract`; `ExtractionPort` stays outside `BaselinePorts`/`FullPorts`. The adapter imports neither `nexus-core` nor `nexus-orchestration`. See durable §8.
 - **Connect manifest.** `src/manifest.rs` declares `ke-ownership` only on the composition that enforces every served family, and never declares `ke-extraction` (remote extract is not served). See durable §9.
@@ -55,6 +55,6 @@ Dev-deps mirror the runtime deps so tests can compare wrapper output against the
 
 ## V1.146 P5 sweep notes
 
-- The adapter now hosts 13 modules in `src/adapter/` (activation, computable_port, computable_port_stub, finding_port, fork_port, host_manifest_port, knowledge_entry_port, mca_read, mind_state, narrative_read, relation_port, rule_query_port, scope_query_port) plus the free-function conversion seam in `src/conversion/`. See `.mstar/specs/spoke-adapter-architecture.md` §7.4 for the production-vs-stub matrix.
+- The adapter now hosts 13 modules in `src/adapter/` (activation, computable_port, computable_port_stub, finding_port, fork_port, host_manifest_port, knowledge_entry_port, mca_read, mind_state, narrative_read, relation_port, rule_query_port, scope_query_port) plus the free-function conversion seam in `src/conversion/`. See `.mstar/specs/architecture/spoke-adapter-architecture.md` §7.4 for the production-vs-stub matrix.
 - `activation` is the **default-on lore activation engine** (V1.149 / DF-74) — pure match + Relation hop expand; supersedes the V1.146 flag-gated spike. MCA calls the engine; CLI loads hop edges; no matching/hop code in `spoke-operations`.
 - `build_assemble_packet` exposes the spec §7.2 signature. Spoke's real API takes a `BuildAssemblePacketInput` struct with `&[KnowledgeEntryForAssemble]` and a packet-level `extensions` slot. The wrapper honors §7.2 and wraps internally. See `src/ops.rs` doc comment.

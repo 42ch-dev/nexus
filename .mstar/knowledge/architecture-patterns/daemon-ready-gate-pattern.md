@@ -86,7 +86,7 @@ V1.110 optimized the cold-start path. Previously `start_with_budget` ran the ful
 
 V1.96 () hit a P0 blocker: the setup wizard Step 2 hung indefinitely in "Starting daemon…" on a clean `~/.nexus42/` first launch. RCA revealed **three** consumer-side root causes (pre-V1.118, the daemon also crashed within milliseconds when `WorkspaceState::initialize()` found no `active_creator_id`; the wizard just never learned about it). The fixes distill into four durable rules that apply to **any** observer of a process lifecycle event stream, not just the daemon-ready gate.
 
-> **V1.118 supersession (daemon no-Profile boot):** After V1.118 P0 ships, clean home reaches T0 health without `active_creator_id`; the gate opens on `running` and Profile selection is post-gate business flow. Crash-on-no-creator RCA below is **pre-V1.118** only. See [daemon-runtime.md §17](../../specs/daemon-runtime.md) + [desktop-shell.md §13.11](../../specs/desktop-shell.md).
+> **V1.118 supersession (daemon no-Profile boot):** After V1.118 P0 ships, clean home reaches T0 health without `active_creator_id`; the gate opens on `running` and Profile selection is post-gate business flow. Crash-on-no-creator RCA below is **pre-V1.118** only. See [daemon-runtime.md §17](../../specs/archived/daemon-runtime.md) + [desktop-shell.md §13.11](../../specs/surfaces/desktop-shell.md).
 
 ### Rule 5: probe current state on mount, BEFORE subscribing
 

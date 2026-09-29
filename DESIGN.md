@@ -440,7 +440,7 @@ Nexus is a **precision creative tool**: a neutral workbench with clear boundarie
 
 This light/default frontmatter and [DESIGN.dark.md](DESIGN.dark.md) are the sole token authority. `version: 0.5.0` is this repository's design-contract revision, continuing its existing schema: nested component recipes, semantic `rounded` keys, `space-*` steps, and scalar typography metrics are intentional. Do not flatten/rename them to match an external template. Every frontmatter key exists in both themes; only values differ. Level 3 describes specification completeness, not a claim of rendered QA.
 
-The implementation contract and complete Studio inventory live in [.mstar/specs/design-studio.md](.mstar/specs/design-studio.md). No app-specific palette, shadow table, font stack, or live token override is allowed.
+The implementation contract and complete Studio inventory live in [.mstar/specs/surfaces/design-studio.md](.mstar/specs/surfaces/design-studio.md). No app-specific palette, shadow table, font stack, or live token override is allowed.
 
 ## Design Concept — Precision Creative Tool
 
@@ -586,7 +586,7 @@ Existing editor, data-table, context-menu, desktop-window-chrome, app-menu, nati
 
 ## Implementation Mapping
 
-One pipeline: DESIGN pair → shared token projection → shared Tailwind utilities and existing brand projections → public primitives → Studio and web consumers. Full projection/compiler contract: [Studio spec §3.5](.mstar/specs/design-studio.md#35-token-projection-contract). Shared `:root` and `.dark` are the only theme value layers. Pair view uses isolated documents loading the **same** entrypoint and CSS, not nested `.dark`/light-reset subtrees.
+One pipeline: DESIGN pair → shared token projection → shared Tailwind utilities and existing brand projections → public primitives → Studio and web consumers. Full projection/compiler contract: [Studio spec §3.5](.mstar/specs/surfaces/design-studio.md#35-token-projection-contract). Shared `:root` and `.dark` are the only theme value layers. Pair view uses isolated documents loading the **same** entrypoint and CSS, not nested `.dark`/light-reset subtrees.
 
 All existing CSS names and Tailwind utility keys are retained, including historical structural names under `--color-*`; do not rename them while web edits are excluded. New missing color, typography and brand-step projections follow the documented mapping. Existing shadow names remain projections of the elevation scale, not duplicated shadow values. `brandColors` literal values are generated light snapshots; `--nexus-brand-*` and `--color-*` resolve per theme.
 

@@ -85,5 +85,5 @@ Use this pattern whenever a local-first service adds an opt-in remote listener. 
 
 - Implementation: `crates/nexus-daemon-runtime/src/boot.rs`
 - Auth middleware: `crates/nexus-daemon-runtime/src/api/auth_middleware.rs`
-- Spec: `.mstar/specs/daemon-runtime.md`
-- Surface conventions: `.mstar/specs/daemon-api-surface-conventions.md`
+- Spec: `.mstar/specs/archived/daemon-runtime.md`
+- Surface conventions: `.mstar/specs/runtime/daemon-api-surface-conventions.md`

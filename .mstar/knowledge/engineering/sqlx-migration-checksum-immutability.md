@@ -21,7 +21,7 @@ status: active
 
 ## Why This Matters
 
-The apparent fix is always tempting because editing comments looks behavior-free — SQL is untouched, so tests pass. The hazard is data, not code: checksums are computed over file bytes. In v1.178, the drop-migration header said "V1.159 T3" while sibling specs said "V1.59 T3"; archaeology proved V1.59 was correct, but the only safe channel was a provenance note in `.mstar/specs/local-db-schema.md` §4.2 plus tracking the header value as known-immutable (AR-106). An unexplained constraint would eventually be "cleaned up" by a well-meaning editor.
+The apparent fix is always tempting because editing comments looks behavior-free — SQL is untouched, so tests pass. The hazard is data, not code: checksums are computed over file bytes. In v1.178, the drop-migration header said "V1.159 T3" while sibling specs said "V1.59 T3"; archaeology proved V1.59 was correct, but the only safe channel was a provenance note in `.mstar/specs/runtime/local-db-schema.md` §4.2 plus tracking the header value as known-immutable (AR-106). An unexplained constraint would eventually be "cleaned up" by a well-meaning editor.
 
 ## When to Apply
 

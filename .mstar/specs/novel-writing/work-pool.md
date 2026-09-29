@@ -7,9 +7,9 @@
 **Coordinates with**:
 
 - [multi-work-lifecycle.md](multi-work-lifecycle.md) — completion clears active; `works use` sets default
-- [work-experience-model.md](../work-experience-model.md) — pool is **not** a Work profile
-- [cli-spec.md](../cli-spec.md) — `creator works` command group
-- [local-db-schema.md](../local-db-schema.md) — table definitions
+- [work-experience-model.md](../creator/work-experience-model.md) — pool is **not** a Work profile
+- [cli-spec.md](../cli/cli-spec.md) — `creator works` command group
+- [local-db-schema.md](../runtime/local-db-schema.md) — table definitions
 
 ---
 
@@ -73,7 +73,7 @@ Each inspiration item has:
 
 ### 3.4 Why `Pool/Ideas/` not `Works/_pool/`
 
-Inspiration items are **creator-scoped**, not Work-scoped. An idea can outlive any single Work and may inspire multiple Works over time. The pool directory lives at the workspace root level (alongside `Works/`), not nested under any Work. See [`work-experience-model.md`](../work-experience-model.md) — pool is not a Work profile.
+Inspiration items are **creator-scoped**, not Work-scoped. An idea can outlive any single Work and may inspire multiple Works over time. The pool directory lives at the workspace root level (alongside `Works/`), not nested under any Work. See [`work-experience-model.md`](../creator/work-experience-model.md) — pool is not a Work profile.
 
 ### 3.2 Table `inspiration_items` (intent)
 
@@ -104,7 +104,7 @@ Daemon API `set_pool_active` (and CLI `creator works use` / `pool promote --set-
 
 - Request body **`creator_id` must match** the authenticated/active creator context.
 - Mismatch → **403 Forbidden** (not silent demote on wrong creator).
-- Cross-reference [cli-spec.md](../cli-spec.md) §6.2D.
+- Cross-reference [cli-spec.md](../cli/cli-spec.md) §6.2D.
 
 ---
 
