@@ -11,11 +11,9 @@ import userEvent from '@testing-library/user-event';
 
 const client = () => new BrowserClient();
 
-const WORKS_EMPTY = { items: [], pagination: { limit: 20, has_more: false } };
 
 /**
- * All page tests register their own Works handler where needed; schedule reads
- * are independent of the retained CLI cron declaration editor.
+ * Schedule reads are independent of the retained CLI cron declaration editor.
  */
 function renderSchedule() {
   return renderInApp(<SchedulePage />, { client: client() });
@@ -40,7 +38,6 @@ beforeEach(async () => {
 describe('SchedulePage', () => {
   it('renders the schedule table on a successful list', async () => {
     useHandlers(
-      http.get('/v1/daemon/works', () => HttpResponse.json(WORKS_EMPTY)),
       http.get('/v1/daemon/orchestration/schedules', () =>
         HttpResponse.json({
           items: [
@@ -68,7 +65,6 @@ describe('SchedulePage', () => {
 
   it('renders the empty state when there are no schedules', async () => {
     useHandlers(
-      http.get('/v1/daemon/works', () => HttpResponse.json(WORKS_EMPTY)),
       http.get('/v1/daemon/orchestration/schedules', () => HttpResponse.json(SCHEDULES_EMPTY)),
     );
 
@@ -82,7 +78,6 @@ describe('SchedulePage', () => {
 
   it('renders the error state and offers retry when the daemon fails', async () => {
     useHandlers(
-      http.get('/v1/daemon/works', () => HttpResponse.json(WORKS_EMPTY)),
       http.get('/v1/daemon/orchestration/schedules', () =>
         HttpResponse.json(
           { success: false, error: { code: 'internal', message: 'boom' } },
@@ -100,7 +95,6 @@ describe('SchedulePage', () => {
 
   it('switches to zh-CN locale without remounting', async () => {
     useHandlers(
-      http.get('/v1/daemon/works', () => HttpResponse.json(WORKS_EMPTY)),
       http.get('/v1/daemon/orchestration/schedules', () =>
         HttpResponse.json({
           items: [
@@ -134,7 +128,6 @@ describe('SchedulePage', () => {
 
   it('disables the create button when no active creator is selected', async () => {
     useHandlers(
-      http.get('/v1/daemon/works', () => HttpResponse.json(WORKS_EMPTY)),
       http.get('/v1/daemon/orchestration/schedules', () => HttpResponse.json(SCHEDULES_EMPTY)),
     );
 
@@ -148,7 +141,6 @@ describe('SchedulePage', () => {
     const user = userEvent.setup();
     let postedBody: unknown = null;
     useHandlers(
-      http.get('/v1/daemon/works', () => HttpResponse.json(WORKS_EMPTY)),
       http.get('/v1/daemon/orchestration/schedules', () => HttpResponse.json(SCHEDULES_EMPTY)),
       http.get('/v1/daemon/presets', () => HttpResponse.json(PRESETS)),
       http.post('/v1/daemon/orchestration/schedules', async ({ request }) => {
@@ -192,7 +184,6 @@ describe('SchedulePage', () => {
     const user = userEvent.setup();
     let created = false;
     useHandlers(
-      http.get('/v1/daemon/works', () => HttpResponse.json(WORKS_EMPTY)),
       http.get('/v1/daemon/orchestration/schedules', () =>
         HttpResponse.json(
           created
@@ -240,7 +231,6 @@ describe('SchedulePage', () => {
   it('surfaces a daemon 400 visibly and keeps the dialog open', async () => {
     const user = userEvent.setup();
     useHandlers(
-      http.get('/v1/daemon/works', () => HttpResponse.json(WORKS_EMPTY)),
       http.get('/v1/daemon/orchestration/schedules', () => HttpResponse.json(SCHEDULES_EMPTY)),
       http.get('/v1/daemon/presets', () => HttpResponse.json(PRESETS)),
       http.post('/v1/daemon/orchestration/schedules', () =>
@@ -271,7 +261,6 @@ describe('SchedulePage', () => {
   it('requires a preset selection before submitting', async () => {
     const user = userEvent.setup();
     useHandlers(
-      http.get('/v1/daemon/works', () => HttpResponse.json(WORKS_EMPTY)),
       http.get('/v1/daemon/orchestration/schedules', () => HttpResponse.json(SCHEDULES_EMPTY)),
       http.get('/v1/daemon/presets', () => HttpResponse.json(PRESETS)),
     );
@@ -290,7 +279,6 @@ describe('SchedulePage', () => {
     const user = userEvent.setup();
     let fail = true;
     useHandlers(
-      http.get('/v1/daemon/works', () => HttpResponse.json(WORKS_EMPTY)),
       http.get('/v1/daemon/orchestration/schedules', () => HttpResponse.json(SCHEDULES_EMPTY)),
       http.get('/v1/daemon/presets', () =>
         fail
@@ -325,7 +313,6 @@ describe('SchedulePage', () => {
 
   it('keeps served schedule rows visible without retired write controls', async () => {
     useHandlers(
-      http.get('/v1/daemon/works', () => HttpResponse.json(WORKS_EMPTY)),
       http.get('/v1/daemon/orchestration/schedules', () =>
         HttpResponse.json({
           items: [{
@@ -350,7 +337,6 @@ describe('SchedulePage', () => {
 
   it('never promises firing cadence on the empty list either (AR-30)', async () => {
     useHandlers(
-      http.get('/v1/daemon/works', () => HttpResponse.json(WORKS_EMPTY)),
       http.get('/v1/daemon/orchestration/schedules', () => HttpResponse.json(SCHEDULES_EMPTY)),
     );
 

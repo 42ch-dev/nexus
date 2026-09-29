@@ -12,8 +12,7 @@ import { formatRelative, shortId } from '@/lib/format';
 import { CreateScheduleDialog } from './dialogs/create-schedule-dialog';
 
 /**
- * Schedule view (Control Room — read-only schedule identities) — web-ui.md §6.1 #3.
- *
+ * Schedule view (Control Room — read-only schedule identities; creation remains available) — web-ui.md §6.1 #3.
  * ScheduleSummary does not carry a next-fire timestamp, so we show the
  * last-updated relative time — never a fabricated next-run (PL-17).
  * V1.171 P2 retains schedule creation via the existing POST endpoint. Per-Work
