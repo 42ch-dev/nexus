@@ -1,6 +1,7 @@
 # Web UI — Design Requirements (input brief for repo-root `DESIGN.md`)
 
 **Status**: Input brief (Prepare Phase 2b) — **not** the DESIGN.md itself  
+**Document class**: Companion  
 **Author**: `@product-manager`  
 **Consumer**: `@architect` (authors repo-root [`DESIGN.md`](../../DESIGN.md), the design-token SSOT; completeness level **Standard** per compass §5 item #6) *(V1.98: sole SSOT — former `apps/web/DESIGN*.md` retired)*  
 **Iteration**: V1.64 (V1.65 authoring-surface amendment appended in §5)  

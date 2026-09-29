@@ -4,7 +4,7 @@ Normative specifications for `work_profile: novel` — layout, presets, quality 
 
 **Relocated**: 2026-06-17 from flat `specs/novel-*.md` (spec hygiene).
 
-**Parent index**: [specs/README.md](README.md) · **Rules**: [specs/AGENTS.md](../AGENTS.md)
+**Parent index**: [specs/README.md](../README.md) · **Rules**: [specs/AGENTS.md](../AGENTS.md)
 
 ---
 
@@ -36,10 +36,10 @@ manuscript-audit.md     → DF-69 on-demand audit (out-of-band)
 | Document | Class | Status |
 | --- | --- | --- |
 | [workflow-profile.md](workflow-profile.md) | Feature line | Shipped V1.36 → V1.50 (§11 cron + auto-chronology) |
-| [quality-loop.md](quality-loop.md) | Feature line | Shipped V1.47 → V1.49 |
+| [quality-loop.md](quality-loop.md) | Feature line | Normative — V1.51 Shipped |
 | [author-experience.md](author-experience.md) | Feature line | Shipped V1.49 P2 |
 | [manuscript-audit.md](manuscript-audit.md) | Feature line | Shipped V1.44 |
-| [multi-work-lifecycle.md](multi-work-lifecycle.md) | Feature line | Shipped V1.41 → V1.42 |
+| [multi-work-lifecycle.md](multi-work-lifecycle.md) | Feature line | Shipped V1.41 |
 | [work-pool.md](work-pool.md) | Feature line | Shipped V1.41 |
 | [sync-contract.md](sync-contract.md) | Companion | Normative — shipped V1.36 layout library (`nexus-orchestration::sync_module`); no cloud upload integration |
 
@@ -61,7 +61,7 @@ manuscript-audit.md     → DF-69 on-demand audit (out-of-band)
 | Multi-work completion + locks | `multi-work-lifecycle.md` |
 | Pool / default Work | `work-pool.md` |
 | Sync scan roots | `sync-contract.md` (layout SSOT: `workflow-profile.md` §3, §7) |
-| Top-level CLI groups / preset dispatch | [cli-spec.md](../cli-spec.md), [creator-run-preset-entry.md](../creator-run-preset-entry.md) |
+| Top-level CLI groups / preset dispatch | Current authority: [cli-spec.md §6.0B](../cli-spec.md#60b-v2-命令信息架构权威). [creator-run-preset-entry.md](../creator-run-preset-entry.md) is historical: generic runner retired v1.193 P2-T1; no replacement CLI preset-dispatch entrance. |
 
 ---
 
