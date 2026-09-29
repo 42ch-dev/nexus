@@ -15,6 +15,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import { OutlineCanvas } from '@/components/canvas/outline-canvas';
 import { NexusClientError } from '@/lib/nexus/errors';
+import type { WorkOutline } from '@42ch/nexus-contracts';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -61,7 +62,7 @@ const mocks = vi.hoisted(() => {
     created_at: '',
     updated_at: '',
   };
-  const OUTLINE = {
+  const OUTLINE: WorkOutline = {
     work_id: 'wk_test',
     outline_revision: 2,
     volumes: [{ volume_id: 1, label: 'Volume 1', chapter_ids: [1] }],
@@ -514,5 +515,99 @@ describe('OutlineCanvas — real RF graph-click selection (FB-GS-002)', () => {
     const inspector =
       screen.getByText('Chapter Inspector').closest('[class*="card"]') ?? document.body;
     expect(within(inspector as HTMLElement).getByText(/#1/)).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// V1.200 DR-26 Task 3 — Scene/Beat authoring controls
+//
+// The Outline canvas is the single scene/beat authoring surface (both Timeline
+// Moment layers are read-only projections). Every control routes through the
+// orchestrator's `handleStructure` — the SAME `outline.patch_structure`
+// mutation + conflict capture the structure/timeline patches use — so a stale
+// revision opens the existing conflict modal instead of a new error path.
+// ---------------------------------------------------------------------------
+
+const AUTHORING_OUTLINE: WorkOutline = {
+  ...mocks.OUTLINE,
+  scenes: [{ scene_id: 'scn_1', chapter_id: 1, title: 'Opening', status: 'drafted' }],
+  beats: [{ beat_id: 'bet_1', scene_id: 'scn_1', title: 'Hook', status: 'drafted' }],
+};
+
+/** Invoke the latest captured structure mutate call's onError callback. */
+async function rejectLastStructureAsConflict(currentVersion: number) {
+  const lastCall = mocks.patchStructureResult.mutate.mock.calls.at(-1);
+  if (!lastCall) throw new Error('no patchStructure.mutate call captured');
+  const opts = lastCall[1] as { onError?: (e: unknown) => void };
+  await act(async () => {
+    opts.onError?.(outlineConflictErr(currentVersion));
+  });
+}
+
+describe('OutlineCanvas — Scene/Beat authoring (V1.200 DR-26 Task 3)', () => {
+  beforeEach(() => {
+    mocks.patchStructureResult.mutate.mockClear();
+    mocks.outlineResult.data = mocks.OUTLINE;
+  });
+
+  it('creating a scene sends add_scene with its target chapter_id', async () => {
+    const user = userEvent.setup();
+    renderOutline();
+
+    await user.selectOptions(screen.getByTestId('outline-scene-chapter'), '1');
+    await user.type(screen.getByTestId('outline-scene-title'), 'Opening Scene');
+    await user.click(screen.getByTestId('outline-add-scene'));
+
+    expect(mocks.patchStructureResult.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        work_id: 'wk_test',
+        base_revision: 2,
+        operation: 'add_scene',
+        chapter_id: 1,
+        title: 'Opening Scene',
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('a stale-revision 409 on add_scene opens the existing conflict modal', async () => {
+    const user = userEvent.setup();
+    renderOutline();
+
+    await user.type(screen.getByTestId('outline-scene-title'), 'Opening Scene');
+    await user.click(screen.getByTestId('outline-add-scene'));
+    await rejectLastStructureAsConflict(5);
+
+    expect(screen.getByRole('heading', { name: 'Outline Conflict' })).toBeInTheDocument();
+    expect(screen.getByText('5', { selector: 'span.font-mono' })).toBeInTheDocument();
+  });
+
+  it('adds a beat to its parent scene and removes scenes/beats by canonical id', async () => {
+    const user = userEvent.setup();
+    mocks.outlineResult.data = AUTHORING_OUTLINE;
+    renderOutline();
+
+    await user.type(screen.getByTestId('outline-beat-title-scn_1'), 'Turn');
+    await user.click(screen.getByTestId('outline-add-beat-scn_1'));
+    expect(mocks.patchStructureResult.mutate).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        operation: 'add_beat',
+        scene_id: 'scn_1',
+        title: 'Turn',
+      }),
+      expect.anything(),
+    );
+
+    await user.click(screen.getByTestId('outline-remove-beat-bet_1'));
+    expect(mocks.patchStructureResult.mutate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ operation: 'remove_beat', beat_id: 'bet_1' }),
+      expect.anything(),
+    );
+
+    await user.click(screen.getByTestId('outline-remove-scene-scn_1'));
+    expect(mocks.patchStructureResult.mutate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ operation: 'remove_scene', scene_id: 'scn_1' }),
+      expect.anything(),
+    );
   });
 });

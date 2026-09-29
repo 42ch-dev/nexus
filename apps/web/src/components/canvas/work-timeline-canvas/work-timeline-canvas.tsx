@@ -64,11 +64,12 @@ import { filterTimelineEntityNodes } from '../timeline-canvas/nle-timeline-proje
 export interface WorkTimelineCanvasProps {
   workId: string;
   /**
-   * Optional V1.108 Scene/Beat fixture for the Moment layer (architect §3.2
-   * + §3.4 — the V1.72 `WorkOutline` wire has no Scene/Beat data today;
-   * Design Studio / test fixtures inject scene/beat payloads at the
-   * projection layer). When undefined or empty, the Moment layer emits
-   * honest empty-state (zero nodes) per architect §3.2.
+   * Optional Scene/Beat payload — EXPLICIT injection mode (Design Studio /
+   * component tests). Production passes nothing: the Moment layer projects
+   * the canonical `WorkOutline.scenes[]` / `beats[]` carrier (V1.200 DR-26)
+   * from the outline read itself. An explicitly supplied payload is
+   * projected verbatim (populated OR deliberately empty) and never acts as
+   * an automatic empty-data fallback.
    *
    * The fixture is forwarded to the adapter context so the adapter's
    * `projectGraphForLayer(graph, 'moment')` can read it at projection
@@ -239,8 +240,10 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
 
   // Keep the adapter context current. The adapter object stays
   // referentially stable; only the values inside ctxRef.current change.
-  // Task 4 wires the `sceneBeatFixture` slot so the Moment projection
-  // reads from the orchestrator-supplied fixture (V1.108 carrier pattern).
+  // The `sceneBeatFixture` slot is the EXPLICIT injection mode for Design
+  // Studio / tests; production leaves it undefined and the Moment layer
+  // projects the canonical `WorkOutline.scenes[]` / `beats[]` carrier
+  // (V1.200 DR-26) from the outline read that already drives this surface.
   //
   // V1.123 P3 Task 4 — also wires the cross-surface navigation slots
   // (`worldId` + `onViewOnWorldTimeline`) so the Narrative event inspector

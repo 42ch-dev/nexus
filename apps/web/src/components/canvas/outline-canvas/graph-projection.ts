@@ -56,12 +56,19 @@ export const STATUS_VARIANT: Record<
 };
 
 // ---------------------------------------------------------------------------
-// Scene/Beat fixture types (V1.109 C2 — fixture-driven read-projection)
+// Scene/Beat projection payload (V1.109 C2 → V1.200 DR-26 carrier swap)
 //
-// The outline wire model carries no scene/beat data (architect-locked §5.2 Q1).
-// Design Studio / test fixtures inject scene/beat payloads at the UI projection
-// layer. On real Works (no scene/beat data today), the projection emits zero
-// scene/beat children — honest empty chrome.
+// V1.200: the outline wire model carries `WorkOutline.scenes[]` / `.beats[]`
+// (snake_case, the canonical carrier). The App projects THOSE arrays through
+// {@link sceneBeatPayloadFromOutline}; the projection emits zero scene/beat
+// children only when the canonical arrays are genuinely empty — empty
+// canonical arrays mean real emptiness, never permission to substitute
+// sample data.
+//
+// The `sceneBeatFixture` props remain as an EXPLICIT injection mode for
+// Design Studio / component tests (a populated or deliberately empty fixture
+// supplied by the caller), never as an automatic empty-data fallback:
+// production callers pass no fixture.
 // ---------------------------------------------------------------------------
 
 /**
@@ -72,18 +79,28 @@ export const STATUS_VARIANT: Record<
 export type OutlineSceneStatus = 'drafted' | 'completed';
 
 /**
- * Fixture shape for a single Scene — injected at the projection call site.
- * `chapterId` ties the scene to its parent Chapter node (`chapter:<chapterId>`).
+ * Projection shape for a single Scene — the camelCase form of the canonical
+ * wire item (`WorkOutline.scenes[]` → `{scene_id, chapter_id, title, status}`).
+ * `chapterId` ties the scene to its parent Chapter node
+ * (`chapter:<chapterId>`).
  */
 export interface SceneFixture {
   sceneId: string;
   chapterId: number;
   title: string | null;
   status: OutlineSceneStatus | null;
+  /**
+   * Owning Work id — present only when composing across Works (World
+   * Timeline Moment reads bound Works' outlines; chapter numbers are
+   * Work-local, so grouping needs the Work dimension to avoid collapsing
+   * two Works' chapter 1 into one chapter region).
+   */
+  workId?: string;
 }
 
 /**
- * Fixture shape for a single Beat — injected at the projection call site.
+ * Projection shape for a single Beat — the camelCase form of the canonical
+ * wire item (`WorkOutline.beats[]` → `{beat_id, scene_id, title, status}`).
  * `sceneId` ties the beat to its parent Scene node (`scene:<sceneId>`,
  * Scene→Beat nesting per §5.2 Q2).
  */
@@ -92,16 +109,47 @@ export interface BeatFixture {
   sceneId: string;
   title: string | null;
   status: OutlineSceneStatus | null;
+  /** Owning Work id — see {@link SceneFixture.workId}. */
+  workId?: string;
 }
 
 /**
- * Fixture payload for scene/beat data injected into {@link projectOutlineGraph}.
- * Empty by default on real Works — chapters then render with zero scene/beat
- * children.
+ * Projection payload for scene/beat data consumed by the outline/Work/World
+ * Timeline projections and by the Design Studio fixture components.
  */
 export interface SceneBeatFixturePayload {
   scenes: SceneFixture[];
   beats: BeatFixture[];
+}
+
+/**
+ * Map the canonical wire carrier (`WorkOutline.scenes[]` / `.beats[]`,
+ * snake_case — V1.200 DR-26) onto the camelCase projection payload.
+ *
+ * `workId` tags every derived scene/beat with its owning Work for
+ * cross-Work composition (World Timeline Moment); omit it for the Work-local
+ * projection, where provenance is the graph's own `work_id`.
+ */
+export function sceneBeatPayloadFromOutline(
+  outline: WorkOutline,
+  workId?: string,
+): SceneBeatFixturePayload {
+  return {
+    scenes: outline.scenes.map((scene) => ({
+      sceneId: scene.scene_id,
+      chapterId: scene.chapter_id,
+      title: scene.title,
+      status: scene.status,
+      workId,
+    })),
+    beats: outline.beats.map((beat) => ({
+      beatId: beat.beat_id,
+      sceneId: beat.scene_id,
+      title: beat.title,
+      status: beat.status,
+      workId,
+    })),
+  };
 }
 
 /** A pending canvas patch awaiting confirmation, captured for conflict replay. */

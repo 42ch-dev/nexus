@@ -30,10 +30,13 @@
  * stays V1.72 `WorkOutline`). No wire diff in P2.
  */
 import { describe, expect, it, vi } from 'vitest';
+import { act } from 'react';
+import { screen, waitFor } from '@testing-library/react';
 import type { Node } from '@xyflow/react';
 
 import type { WorkOutline } from '@42ch/nexus-contracts';
 
+import { makeQueryClient, renderInApp } from '@/test/test-providers';
 import type { NexusClient } from '@/lib/nexus';
 import type {
   BeatFixture,
@@ -46,6 +49,7 @@ import {
   type WorkTimelineCanvasAdapterContext,
   type WorkTimelineNodeData,
 } from '../work-timeline-canvas-adapter';
+import { WorkTimelineCanvas } from '../work-timeline-canvas';
 
 // ─── Fixture builders ──────────────────────────────────────────────────────
 
@@ -241,6 +245,51 @@ describe('WorkTimelineCanvasAdapter.projectGraphForLayer — Moment projection (
     expect(nodes.find((n) => n.id === 'wt-beat:bt-orphan')).toBeUndefined();
   });
 
+  it('projects the canonical WorkOutline.scenes/beats carrier when no fixture is injected (V1.200 DR-26)', () => {
+    const g = outline({
+      scenes: [
+        { scene_id: 'scn_a', chapter_id: 1, title: 'Opening', status: 'drafted' },
+        { scene_id: 'scn_b', chapter_id: 2, title: 'Twist', status: 'completed' },
+      ],
+      beats: [{ beat_id: 'bet_a', scene_id: 'scn_a', title: 'Hook', status: 'drafted' }],
+    });
+
+    const { nodes } = projectWorkTimelineGraph(g, 'moment');
+
+    // chapter 1 before chapter 2, then the derived spine node.
+    expect(nodes.filter((n) => n.type === 'work-timeline-moment-scene').map((n) => n.id)).toEqual([
+      'wt-scene:scn_a',
+      'wt-scene:scn_b',
+    ]);
+    const sceneNode = nodes.find((n) => n.id === 'wt-scene:scn_a') as Node<WorkTimelineNodeData>;
+    expect(sceneNode.data.workId).toBe('work-1');
+    expect(sceneNode.data.label).toBe('Opening');
+    expect(sceneNode.data.status).toBe('drafted');
+    expect(sceneNode.data.manuscriptAnchor).toEqual({ chapterId: 1, sceneId: 'scn_a' });
+
+    const beatNode = nodes.find((n) => n.id === 'wt-beat:bet_a') as Node<WorkTimelineNodeData>;
+    expect(beatNode.data.label).toBe('Hook');
+    expect(beatNode.data.status).toBe('drafted');
+    expect(beatNode.data.manuscriptAnchor).toEqual({
+      chapterId: 1,
+      sceneId: 'scn_a',
+      beatId: 'bet_a',
+    });
+  });
+
+  it('projects an explicitly injected empty fixture verbatim even when the canonical arrays carry data', () => {
+    // Explicit injection mode: a supplied payload (populated OR deliberately
+    // empty) wins; it is never an automatic empty-data fallback.
+    const g = outline({
+      scenes: [{ scene_id: 'scn_a', chapter_id: 1, title: 'Opening', status: 'drafted' }],
+      beats: [],
+    });
+
+    const { nodes } = projectWorkTimelineGraph(g, 'moment', fixture());
+
+    expect(nodes).toEqual([]);
+  });
+
   it('emits zero edges on the Moment layer in V1.123 MVP (beat succession is spatial)', () => {
     const g = outline();
     const fx = fixture(
@@ -305,5 +354,70 @@ describe('WorkTimelineCanvasAdapter — Moment projection reads fixture from ctx
 
     expect(narrativeAdapter.layoutOptions?.direction).toBe('LR');
     expect(momentAdapter.layoutOptions?.direction).toBe('TB');
+  });
+});
+
+// ─── Orchestrator — the canonical carrier arrives after mount ──────────────
+
+function makeWorkClient(outlineData: WorkOutline): NexusClient {
+  return {
+    getWorkOutline: vi.fn().mockResolvedValue(outlineData),
+    getWork: vi.fn().mockResolvedValue({ work_id: 'work-1', world_id: null }),
+    getWorldKbGraph: vi.fn(),
+    patchOutlineStructure: vi.fn(),
+    patchOutlineChapter: vi.fn(),
+    patchTimelineEvent: vi.fn(),
+    health: vi.fn().mockResolvedValue({ status: 'ok', version: 'test' }),
+  } as unknown as NexusClient;
+}
+
+describe('WorkTimelineCanvas — canonical Moment carrier (V1.200 DR-26)', () => {
+  // The global empty-state branch owns zero-event outlines, so the fixture
+  // carries one Narrative event (a real Work with scenes has a populated
+  // outline); the Moment layer then owns the scene/beat projection.
+  const baseOutline = outline({
+    timeline_events: [{ event_id: 'evt-1', title: 'Inciting Incident', realizes_chapter_id: 1 }],
+  });
+
+  it('projects the canonical scenes on the Moment layer with no fixture and no layer toggle', async () => {
+    const client = makeWorkClient(baseOutline);
+    const queryClient = makeQueryClient();
+    renderInApp(<WorkTimelineCanvas workId="work-1" />, {
+      client,
+      queryClient,
+      initialRouterEntries: ['/works/work-1/timeline?layer=moment'],
+    });
+
+    // Canonical arrays are empty → honest Moment empty-state (real emptiness).
+    await waitFor(() => {
+      expect(screen.getByTestId('work-timeline-moment-empty-state')).toBeInTheDocument();
+    });
+
+    // The canonical carrier changes (an outline write anywhere → the existing
+    // outline-mutation invalidation / refetch). No `sceneBeatFixture` prop is
+    // ever passed from production.
+    vi.mocked(client.getWorkOutline).mockResolvedValue(
+      outline({
+        ...baseOutline,
+        scenes: [{ scene_id: 'scn_a', chapter_id: 1, title: 'Opening', status: 'drafted' }],
+        beats: [{ beat_id: 'bet_a', scene_id: 'scn_a', title: 'Hook', status: 'drafted' }],
+      }),
+    );
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ['outline'] });
+    });
+
+    // Re-projected in place: the empty-state panel is gone and the scene card
+    // carries the persisted title — still on the Moment layer.
+    await waitFor(() => {
+      expect(screen.queryByTestId('work-timeline-moment-empty-state')).toBeNull();
+    });
+    expect(screen.getByTestId('work-timeline-canvas')).toHaveAttribute(
+      'data-active-layer',
+      'moment',
+    );
+    await waitFor(() => {
+      expect(screen.getAllByText('Opening').length).toBeGreaterThan(0);
+    });
   });
 });

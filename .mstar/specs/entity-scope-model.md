@@ -56,7 +56,7 @@ Global
 
 > **V1.156 amendment (shipped)**: the 3×2 matrix is completed (World×Moment + Work×Brief closed — see §1.4.4). The amendment is frontend-only (`wire_contracts_changed: false`); it adds no scope-ownership, uniqueness, or transition rule. The V1.123 carrier locks (§1.4.1) are unchanged. Product semantics: `product-locks.md` PD-2 / PD-3.
 
-> **Planned v1.200 carrier amendment — not shipped by this note.** DR-26 will replace the deferred/fixtures-only Moment carrier in §1.4.1, the carrier/write-boundary description in §1.4.3 and the World Moment diagram in §1.4.4 with persisted Work-owned `WorkOutline.scenes[]` / `beats[]`. Execute must update those exact sections alongside [canvas-strategy-surface.md](canvas-strategy-surface.md) §3.3.3 / §3.5. This is a wire-carrier extension, not a new scope: Outline remains the authoring home, both Timeline Moment projections stay read-only, default layers remain unchanged and Moment Context Assembly is unaffected. The V1.156 frontend-only statement remains historical.
+> **V1.200 carrier amendment (shipped) — persisted Work-owned scene/beat carrier.** V1.200 replaces the deferred/fixtures-only Moment carrier described in §1.4.1, §1.4.3 and §1.4.4 with persisted Work-owned `WorkOutline.scenes[]` / `beats[]` (`{scene_id, chapter_id, title, status}` / `{beat_id, scene_id, title, status}`), authored through four additive `outline.patch_structure` operations (`add_scene` / `remove_scene` / `add_beat` / `remove_beat`) and read through the existing outline read route. Carrier/write-boundary contract: [`canvas-strategy-surface.md`](canvas-strategy-surface.md) §3.3.3 (V1.200 amendment) + §3.5 (V1.200 scene/beat authoring). This is a wire-carrier extension, **not a new scope**: Outline remains the authoring home, both Timeline Moment projections stay read-only, default layers remain unchanged, and Moment Context Assembly is unaffected. The V1.156 frontend-only statement remains historical (V1.200 itself is a wire change).
 
 This subsection is **additive** — it does not rewrite §1.1 (canonical scope tree) or §1.2 (scope definitions). It canonizes three Timeline zoom layers — **Brief**, **Narrative**, **Moment** — as a re-projection of the existing `World > Timeline > Event > Moment` scope hierarchy, and locks the World/Work layer composition.
 
@@ -66,7 +66,7 @@ This subsection is **additive** — it does not rewrite §1.1 (canonical scope t
 |-------|-------------|-----------|----------------|---------------------------------|
 | **Brief** | World-global | Multi-decade / era / age | **World** (World-global Timeline layer) | `block_type=era` KnowledgeEntry (new wire enum value — see §5.1.1 narrative taxonomy extension + iteration architecture §2) |
 | **Narrative** | Event-level | Human-paced (days/weeks/years) | **Shared** (both World Timeline and Work Timeline) | World scope: `block_type=event` KnowledgeEntry (V1.122 preserved). Work scope: `WorkOutline.timeline_events[]` (V1.72 preserved). |
-| **Moment** | Scene/beat-precise | Sub-scene (minutes/hours within a scene) | **Work** (Work-scoped Timeline layer) | Frontend-only projection of V1.108 `OutlineSceneNodeData` / `OutlineBeatNodeData` from V1.72 `WorkOutline` (wire extension deferred to V1.124+ — **durable roadmap:** DR-26; honest empty-state until then — see iteration architecture §3) |
+| **Moment** | Scene/beat-precise | Sub-scene (minutes/hours within a scene) | **Work** (Work-scoped Timeline layer) | Persisted Work-owned outline carrier `WorkOutline.scenes[]` / `beats[]` (`{scene_id, chapter_id, title, status}` / `{beat_id, scene_id, title, status}` — V1.200, replacing the V1.108 fixture-only deferred carrier), projected as `OutlineSceneNodeData` / `OutlineBeatNodeData`. Work Timeline projects its own outline; World Timeline projects the composed bound-Work carrier (per-entry Work provenance). Honestly empty when the arrays are empty — never fabricated from chapter titles. See iteration architecture §3. |
 
 #### 1.4.2 Brief canonization
 
@@ -81,8 +81,8 @@ Brief is canonized as a **Timeline-granularity concept at the World-global level
 The existing §1.2 `Moment` scope definition ("session-start context point: a read-only snapshot assembled before an agent session begins") is **preserved unchanged** — that is `Moment Context Assembly` semantics. V1.123 **adds** a second, parallel meaning to `Moment` as a **Timeline layer at the Work scope**:
 
 - Moment-as-Timeline-layer is a **projection granularity of the Work Timeline** — scene/beat precision visible on the Work Timeline Moment layer.
-- The Moment data carrier is the V1.108 `OutlineSceneNodeData` / `OutlineBeatNodeData` UI projection from the V1.72 `WorkOutline` wire (architect seat 2 LOCK — see iteration architecture §3). It is owned by the `Work` scope (via the Outline).
-- Moment-as-Timeline-layer is **read-only in V1.123** — edits route through the V1.72 `outline.patch_chapter` / `outline.patch_structure` write boundary (Outline surface owns the write; Work Timeline offers "Edit in Outline" affordance).
+- The Moment data carrier is the persisted Work-owned `WorkOutline.scenes[]` / `beats[]` outline arrays (**V1.200** — `{scene_id, chapter_id, title, status}` / `{beat_id, scene_id, title, status}`, snake_case on the wire), projected as the V1.108 `OutlineSceneNodeData` / `OutlineBeatNodeData` UI projection (architect seat 2 LOCK — see iteration architecture §3). It is owned by the `Work` scope (via the Outline). The World Timeline Moment layer projects the **same carrier composed across the World's bound Works** (each entry tagged with its owning Work); it owns nothing. The previous V1.108 fixture-only deferred carrier is retired.
+- Moment-as-Timeline-layer is **read-only on both surfaces** — edits route through the outline write boundary (`outline.patch_structure`, which since V1.200 carries `add_scene` / `remove_scene` / `add_beat` / `remove_beat`; `outline.patch_chapter` for chapter prose/metadata). The Outline surface owns the write; the Work Timeline offers an "Edit in Outline" affordance and the World Timeline Moment inspector offers no authoring path at all.
 - The existing `Moment Context Assembly` (session-start snapshot) is unaffected. `nexus-moment-context-assembly` continues to assemble session context per §6.5; the Timeline-layer Moment is a separate projection concern.
 
 The two meanings of "Moment" are disambiguated by context:
@@ -95,17 +95,20 @@ The two meanings of "Moment" are disambiguated by context:
 World Timeline (V1.123 + V1.156):
   ├── Brief layer (hero)     — `block_type=era` KnowledgeEntry projection (era markers / world shape) — V1.123
   ├── Narrative layer (peer) — `block_type=event` KnowledgeEntry projection (V1.122 baseline, reframed)
-  └── Moment layer (V1.156)  — projection of bound Works' Scene/Beat data (OutlineSceneNodeData /
-                               OutlineBeatNodeData from WorkOutline, V1.72 — composed client-side across
-                               the World's bound Works; read-only — Moments remain Work-owned per PD-3;
-                               honest empty-state until WorkOutline wire exposes scenes/beats — DR-26)
+  └── Moment layer (V1.156; carrier V1.200) — projection of bound Works' Scene/Beat data
+                               (WorkOutline.scenes[] / beats[] — the persisted carrier;
+                               composed client-side across the World's bound Works, each
+                               entry tagged with its owning Work; read-only — Moments
+                               remain Work-owned per PD-3; honestly empty when the bound
+                               Works' canonical arrays are empty — never fabricated)
 
 Work Timeline (V1.123 + V1.156):
   ├── Brief layer (V1.156)   — projection of the bound World's Brief (WorldKbGraphResponse.entities
                                [block_type=era], V1.73 — composed client-side from the bound World;
                                read-only — Brief remains World spine per PD-2; full bound-World Brief)
   ├── Narrative layer (peer) — `WorkOutline.timeline_events[]` projection (V1.72 preserved)
-  └── Moment layer (hero-on-demand) — V1.108 Scene/Beat projection from `WorkOutline`
+  └── Moment layer (hero-on-demand) — Scene/Beat projection from `WorkOutline.scenes[]` / `beats[]`
+                                       (persisted V1.200 carrier; read-only)
                                        (default layer = Narrative; Moment is one click away —
                                         architect UX-risk override documented in iteration
                                         architecture §7.3, authorized by product spec §4.3)
@@ -126,7 +129,7 @@ Projection invariant:
   Work Timeline Brief    = read-only projection of the bound World's eras
 ```
 
-Narrative is the **shared bridge**: events at human pace belong to both world history (World Timeline) and chapter realization (Work Timeline). Brief is the World's spine; Moment is the Work's spine. The V1.156 matrix completion does **not** change spine ownership — it adds read-only projections of each surface's non-owned layer. `wire_contracts_changed: false` for V1.156 (frontend-only; see `canvas-strategy-surface.md` §3.3.3 "V1.156 wire verification").
+Narrative is the **shared bridge**: events at human pace belong to both world history (World Timeline) and chapter realization (Work Timeline). Brief is the World's spine; Moment is the Work's spine. The V1.156 matrix completion does **not** change spine ownership — it adds read-only projections of each surface's non-owned layer. `wire_contracts_changed: false` for **V1.156** (frontend-only; see `canvas-strategy-surface.md` §3.3.3 "V1.156 wire verification") — that gate is version-scoped: **V1.200 is a wire change** (`WorkOutline.scenes[]` / `beats[]` + the four `outline.patch_structure` operations), and it likewise changes no spine ownership: Moment stays Work-owned and Outline-authored, World-Moment stays a read-only projection of bound Works.
 
 #### 1.4.5 Scope tree preservation
 
@@ -136,12 +139,12 @@ The canonical `World > Timeline > Event > Moment` scope tree (§1.1) is **unchan
 - Narrative → Event-level projection (already in §1.1 as `Timeline > Event`).
 - Moment → Work-scoped projection at `Event > Moment` granularity (with the dual meaning noted in §1.4.3).
 
-No new scope-ownership rule. No new uniqueness constraint. No new transition rule. The V1.123 changes are confined to (a) one additive wire enum value (`BlockType::Era`) per §5.1.1 narrative taxonomy extension and (b) one additive overlay on the Canvas surface contract (`specs/canvas-strategy-surface.md` V1.123 overlay — see `canvas-strategy-surface.md`). The V1.156 matrix completion adds **no** scope-ownership, uniqueness, or transition rule either — it is a frontend-only projection extension (`wire_contracts_changed: false`); both non-owned layers (World-Moment, Work-Brief) are read-only projections that preserve the existing `World > Timeline > Event > Moment` scope tree.
+No new scope-ownership rule. No new uniqueness constraint. No new transition rule. The V1.123 changes are confined to (a) one additive wire enum value (`BlockType::Era`) per §5.1.1 narrative taxonomy extension and (b) one additive overlay on the Canvas surface contract (`specs/canvas-strategy-surface.md` V1.123 overlay — see `canvas-strategy-surface.md`). The V1.156 matrix completion adds **no** scope-ownership, uniqueness, or transition rule either — it is a frontend-only projection extension (`wire_contracts_changed: false`, version-scoped to V1.156); both non-owned layers (World-Moment, Work-Brief) are read-only projections that preserve the existing `World > Timeline > Event > Moment` scope tree. The **V1.200** scene/beat carrier lands on the same terms: it extends the persisted shape of an already-Work-owned outline artifact (`WorkOutline.scenes[]` / `beats[]`) and its patch operation enum, adding **no** scope, ownership, uniqueness, or transition rule — the scope tree is unchanged.
 
 #### 1.4.6 Cross-reference
 
 - **Iteration-scoped architecture (authoritative for carrier implementation):** `three-layer-architecture.md` §2 (Brief carrier), §3 (Moment carrier), §4 (wire_contracts_changed), §6 (conflict policy), §7 (Work Timeline adapter contract).
-- **Canvas surface contract overlay:** [`specs/canvas-strategy-surface.md`](canvas-strategy-surface.md) §3.3.3 (V1.123 three-layer overlay + V1.156 3×2 matrix completion amendment).
+- **Canvas surface contract overlay:** [`specs/canvas-strategy-surface.md`](canvas-strategy-surface.md) §3.3.3 (V1.123 three-layer overlay + V1.156 3×2 matrix completion amendment + **V1.200 persisted scene/beat carrier amendment**) and §3.5 (structured write boundary — **V1.200 scene/beat authoring through `outline.patch_structure`**).
 - **Product spec (author voice + demo script):** `three-layer-product-spec.md`.
 - **V1.156 product locks (World-Moment + Work-Brief semantics):** `product-locks.md` PD-2 (Work-Brief projection) + PD-3 (World-Moment projection).
 - **Layer feel contract (P4 handoff):** `layer-feel-differentiation.md`.
