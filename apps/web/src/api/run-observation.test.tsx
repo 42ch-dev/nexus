@@ -7,7 +7,7 @@
  * consumes only `NexusClient.subscribeWorkflowEvents`.
  */
 import { act, renderHook, waitFor } from '@testing-library/react';
-import type { ReactNode } from 'react';
+import { useLayoutEffect, type ReactNode } from 'react';
 import { MemoryRouter } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -131,6 +131,13 @@ async function wait(ms: number): Promise<void> {
     setTimeout(resolve, ms);
   });
 }
+
+/**
+ * Frames a COMMITTED render showed. A render React discards never commits, so
+ * the layout effect that records here never runs for it: an entry with a stale
+ * identity's frames is therefore a frame that reached the UI.
+ */
+const committedFrames: Array<{ phase: RunObservationPhase; cursors: string[] }> = [];
 
 describe('useRunObservation — replay/live handoff', () => {
   it('replays the retained history on re-entry and resumes the live tail without duplicating an id', async () => {
@@ -395,6 +402,37 @@ describe('useRunObservation — gap recovery', () => {
     expect(calls[1].lastEventId).toBe('e1:2');
     // The hole is still on screen; only the recovery cursor moved past it.
     expect(probe.result.current.events.map(cursorOf)).toEqual(['gap', 'e1:1', 'e1:2', 'e1:3']);
+  });
+
+  it('rests honestly gapped when a gapped stream THROWS at the gap, charging no attempt', async () => {
+    // A pull fault can terminate the stream after the SSE headers, and a network
+    // reader can throw. The attempt still ended with its last DATA cursor at the
+    // gap it reported, so a resubscribe would ask the ring for exactly the range
+    // whose gap was just reported. The no-advance guard must cover any ended
+    // attempt — not only a clean EOF — so the view rests gapped and the budget
+    // is untouched.
+    const { client, calls } = stubClientFor([
+      async function* script() {
+        yield runState('e1:1');
+        yield GAP;
+        throw new Error('socket reset');
+      },
+    ]);
+
+    const probe = observeRun(client, 'run-gap-throw');
+    await waitFor(() => expect(probe.result.current.phase).toBe('gapped'));
+    await wait(900);
+
+    expect(calls).toHaveLength(1);
+    expect(probe.result.current.error).toBeNull();
+    expect(probe.result.current.events.map(cursorOf)).toEqual(['e1:1', 'gap']);
+    expect(probe.result.current.lastEventId).toBe('e1:1');
+    expect(probe.result.current.phase).toBe('gapped');
+
+    // The affordance is still the only way out, from the retained cursor.
+    act(() => probe.result.current.retry());
+    await waitFor(() => expect(calls).toHaveLength(2));
+    expect(calls[1].lastEventId).toBe('e1:1');
   });
 
   it('stays honestly gapped when the stream ends at the gap, and retry() re-arms', async () => {
@@ -712,5 +750,115 @@ describe('useRunObservation — connection-scoped retention', () => {
     // The first connection observed nothing new — no shared subscription state.
     expect(first.calls).toHaveLength(1);
     expect(reconnected.result.current.events.map(cursorOf)).toEqual(['e1:9']);
+  });
+
+  it('renders cold on an in-place client replacement — never a frame of the old connection', async () => {
+    // `ClientProvider` can replace its client without remounting children, so the
+    // hook's own state survives the identity change and the subscription effect
+    // only runs after the render that saw the new client. The snapshot must be
+    // discarded synchronously with that change: the first commit under the new
+    // connection must already be cold, with no frame of the old connection's
+    // events shown before the new subscription publishes.
+    const oldConnection = stubClientFor([
+      (options) => openStream(options, runState('e1:1'), hostEvent('e1:2')),
+    ]);
+    const sent: { client: NexusClient } = { client: oldConnection.client };
+
+    // Gate the new connection's stream so its cold render is observable before
+    // anything publishes: nothing is delivered until this test releases it.
+    let releaseNew: (() => void) | undefined;
+    const newStreamReady = new Promise<void>((resolve) => {
+      releaseNew = resolve;
+    });
+    const newConnection = stubClientFor([
+      async function* script(options: SubscribeOptions) {
+        await newStreamReady;
+        yield runState('e1:9');
+        if (options.signal.aborted) return;
+        await new Promise<void>((resolve) => {
+          options.signal.addEventListener('abort', () => resolve(), { once: true });
+        });
+      },
+    ]);
+
+    const hook = renderHook(
+      () => {
+        const observation = useRunObservation('run-in-place-swap');
+        useLayoutEffect(() => {
+          committedFrames.push({
+            phase: observation.phase,
+            cursors: observation.events.map(cursorOf),
+          });
+        });
+        return observation;
+      },
+      {
+        wrapper: ({ children }: { children: ReactNode }) => (
+          <MemoryRouter>
+            <ClientProvider client={sent.client} desktop={null} connectionConfig={null}>
+              {children}
+            </ClientProvider>
+          </MemoryRouter>
+        ),
+      },
+    );
+    await waitFor(() =>
+      expect(committedFrames[committedFrames.length - 1]?.cursors).toEqual(['e1:1', 'e1:2']),
+    );
+
+    // Swap the connection in place: the provider does not remount the view.
+    sent.client = newConnection.client;
+    committedFrames.length = 0;
+    act(() => hook.rerender());
+
+    expect(committedFrames[0]).toEqual({ phase: 'connecting', cursors: [] });
+    expect(committedFrames.every((frame) => frame.cursors.length === 0)).toBe(true);
+    expect(hook.result.current.lastEventId).toBeNull();
+
+    releaseNew?.();
+    await waitFor(() => expect(newConnection.calls).toHaveLength(1));
+    expect(newConnection.calls[0].lastEventId).toBeUndefined();
+    // The old connection observed nothing new — its subscription was dropped.
+    expect(oldConnection.calls).toHaveLength(1);
+    await waitFor(() =>
+      expect(committedFrames[committedFrames.length - 1]?.cursors).toEqual(['e1:9']),
+    );
+  });
+
+  it('renders cold when the observed run changes — never a frame of the previous run', async () => {
+    // The same identity rule covers the run half of the pair: a view switching
+    // runs on one live connection must not commit the previous run's frames
+    // under the new run id before that run's own subscription publishes.
+    const { client, calls } = stubClientFor([
+      (options) => openStream(options, runState('e1:1')),
+      (options) => openStream(options, runState('e1:9')),
+    ]);
+
+    const hook = renderHook(
+      ({ runId }: { runId: string }) => {
+        const observation = useRunObservation(runId);
+        useLayoutEffect(() => {
+          committedFrames.push({
+            phase: observation.phase,
+            cursors: observation.events.map(cursorOf),
+          });
+        });
+        return observation;
+      },
+      { wrapper: wrapperFor(client), initialProps: { runId: 'run-switch-a' } },
+    );
+    await waitFor(() => expect(hook.result.current.events.map(cursorOf)).toEqual(['e1:1']));
+
+    committedFrames.length = 0;
+    act(() => hook.rerender({ runId: 'run-switch-b' }));
+
+    expect(committedFrames[0]).toEqual({ phase: 'connecting', cursors: [] });
+    expect(committedFrames.every((frame) => frame.cursors.length === 0)).toBe(true);
+
+    await waitFor(() => expect(calls).toHaveLength(2));
+    expect(calls[1].lastEventId).toBeUndefined();
+    await waitFor(() =>
+      expect(committedFrames[committedFrames.length - 1]?.cursors).toEqual(['e1:9']),
+    );
   });
 });

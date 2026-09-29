@@ -56,8 +56,9 @@
  * ENDS while still gapped, and only if that stream moved PAST the gap — its
  * last received DATA cursor is strictly newer than the cursor at the gap report
  * — because reconnecting from the gap's own cursor asks the ring for exactly
- * the range whose gap it just reported. A stream that ends at the gap instead
- * stays honestly `gapped` with the `retry` affordance and charges no attempt.
+ * the range whose gap it just reported. A stream that ends at the gap instead —
+ * a clean EOF or a transport throw alike — stays honestly `gapped` with the
+ * `retry` affordance and charges no attempt.
  *
  * Stream end: only a terminal statement ends the lifecycle. A clean transport
  * EOF while the latest observed run status is non-terminal (or unknown) is a
@@ -361,6 +362,21 @@ function dataCursorAdvanced(cursor: string | null, previous: string | null): boo
 }
 
 /**
+ * The resting observation for a run no subscription has published for yet —
+ * also what a changed connection/run identity resets to (see the hook).
+ */
+function coldStartState(): RunObservationState {
+  return {
+    phase: 'connecting',
+    events: [],
+    revision: 0,
+    liveFrom: 0,
+    lastEventId: null,
+    error: null,
+  };
+}
+
+/**
  * Observe one root run's retained/live event stream.
  *
  * `sessionId` is the run id the events route is addressed by (orchestration
@@ -373,27 +389,28 @@ function dataCursorAdvanced(cursor: string | null, previous: string | null): boo
 export function useRunObservation(sessionId: string | null): RunObservationResult {
   const client = useNexusClient();
   const [retryToken, setRetryToken] = useState(0);
-  const [snapshot, setSnapshot] = useState<RunObservationState>({
-    phase: 'connecting',
-    events: [],
-    revision: 0,
-    liveFrom: 0,
-    lastEventId: null,
-    error: null,
-  });
+  const [snapshot, setSnapshot] = useState<RunObservationState>(coldStartState);
+
+  // `snapshot` is component state, but the identity it was produced under (the
+  // connection and the run) is not: `ClientProvider` can replace its client
+  // without remounting this hook (`client-context.tsx`), and the subscription
+  // effect only runs AFTER the render that saw the new client. Adjusting the
+  // state on the identity change, during render, is React's documented "store
+  // information from previous renders" pattern (`useState` reference, react.dev):
+  // React re-renders this component immediately after it exits with `return`,
+  // BEFORE rendering its children, so no frame of the previous connection's (or
+  // run's) events/status ever reaches the UI — the effect alone would be too
+  // late by exactly one committed frame.
+  const [observed, setObserved] = useState<{ client: NexusClient; sessionId: string | null }>(
+    () => ({ client, sessionId }),
+  );
+  if (observed.client !== client || observed.sessionId !== sessionId) {
+    setObserved({ client, sessionId });
+    setSnapshot(coldStartState());
+  }
 
   useEffect(() => {
-    if (!sessionId) {
-      setSnapshot({
-        phase: 'connecting',
-        events: [],
-        revision: 0,
-        liveFrom: 0,
-        lastEventId: null,
-        error: null,
-      });
-      return;
-    }
+    if (!sessionId) return;
 
     const connectionIdentity = connectionIdentityOf(client);
     const retained = retainedFor(connectionIdentity, sessionId);
@@ -569,12 +586,16 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
           return;
         }
 
-        if (outcome === 'end' && gapReported && !dataCursorAdvanced(retained.lastEventId, gapCursor)) {
-          // The stream ended at the gap it reported: it never carried a data
-          // frame past it, so `Last-Event-ID` still names exactly the range the
-          // ring just gapped. Reconnecting would re-report the same gap and
-          // burn the budget on it, so the view stays honestly `gapped` with the
-          // `retry` affordance and no attempt is charged.
+        if (gapReported && !dataCursorAdvanced(retained.lastEventId, gapCursor)) {
+          // The attempt ended — cleanly, or by throwing — at the gap it
+          // reported: it never carried a data frame past it, so `Last-Event-ID`
+          // still names exactly the range the ring just gapped. Reconnecting
+          // would re-report the same gap and burn the budget on a reconnect that
+          // cannot help, so the view rests honestly `gapped` with the `retry`
+          // affordance and charges no attempt. A throw is NOT an exception here:
+          // the server can terminate an active stream on a pull fault after the
+          // SSE headers, and a network reader can throw, both leaving the cursor
+          // exactly where the gap was reported.
           phase = 'gapped';
           publish(null);
           return;
@@ -592,9 +613,11 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
         consecutiveFailures += 1;
 
         if (consecutiveFailures > MAX_RECONNECT_ATTEMPTS) {
-          // Only a clean END that is still gapped rests on the gap affordance;
-          // a throw keeps its own failure on screen instead of hiding it behind
-          // the gap the stream happened to report first.
+          // The budget is spent. A clean END that is still gapped — necessarily
+          // one that DID advance past its gap, since an unadvanced gapped end
+          // rested above — keeps the gap affordance; a throw keeps its own
+          // failure on screen instead of hiding it behind the gap the stream
+          // happened to report first.
           const restingGapped = outcome === 'end' && gapReported;
           phase = restingGapped ? 'gapped' : 'error';
           publish(
