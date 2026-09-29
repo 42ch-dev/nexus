@@ -1654,12 +1654,7 @@ async fn timeline_world_event_binding_on_a_published_chapter_keeps_the_unbind_re
     ] {
         let err = fx
             .core
-            .patch_timeline_event(
-                &fx.principal,
-                "http",
-                fx.work_id.clone(),
-                patch(3, value),
-            )
+            .patch_timeline_event(&fx.principal, "http", fx.work_id.clone(), patch(3, value))
             .await
             .unwrap_err();
         let CoreError::WorldOwnerDenied {
