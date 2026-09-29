@@ -765,6 +765,7 @@ async fn timeline_patch(
             .map(|n| parse_positive(n, "--target-chapter"))
             .transpose()?,
         foreshadows_event_id: foreshadows_event.map(str::to_string),
+        world_event_id: None,
     };
     let resp: OutlinePatchResponse = {
         let core = open_direct_core(config).await?;

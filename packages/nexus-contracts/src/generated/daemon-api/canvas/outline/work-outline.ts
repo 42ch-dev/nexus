@@ -48,7 +48,7 @@ export interface WorkOutline {
     description?: string;
     realizes_chapter_id?: number;
     /**
-     * Optional World Timeline Narrative event this Work Narrative event realizes. The value is a World KB entity `key_block_id` (`block_type=event` KnowledgeEntry). Cross-surface navigation binding (DF-V1123-CROSS-SURFACE-BINDING). Read-only in V1.163 — no UI write path; may be seeded by fixtures/presets/agents.
+     * Optional World Narrative event this Work Narrative event realizes. The value is a World KB entity `key_block_id` (`block_type=event` KnowledgeEntry) belonging to the Work's bound World. Cross-surface navigation binding (DF-V1123-CROSS-SURFACE-BINDING). Authored through the timeline patch operation `bind_world_event` and cleared by `unbind_world_event`.
      */
     world_event_id?: string;
   }[];

@@ -5,7 +5,7 @@
  */
 
 /**
- * Request body for POST /v1/daemon/works/{work_id}/timeline/patch (V1.72). Mutates the Work timeline: add, remove, attach to chapter, or create/remove foreshadow links.
+ * Request body for POST /v1/daemon/works/{work_id}/timeline/patch (V1.72). Mutates the Work timeline: add, remove, attach to chapter, create/remove foreshadow links, or bind/unbind a World Narrative event.
  */
 export interface TimelinePatchEventRequest {
   /**
@@ -19,9 +19,16 @@ export interface TimelinePatchEventRequest {
   /**
    * Timeline patch operation to perform.
    */
-  operation: "add_event" | "remove_event" | "attach_event_to_chapter" | "link_foreshadow" | "unlink_foreshadow";
+  operation:
+    | "add_event"
+    | "remove_event"
+    | "attach_event_to_chapter"
+    | "link_foreshadow"
+    | "unlink_foreshadow"
+    | "bind_world_event"
+    | "unbind_world_event";
   /**
-   * Identifier of an existing event (required for remove_event, attach_event_to_chapter, link_foreshadow, unlink_foreshadow).
+   * Identifier of an existing event (required for remove_event, attach_event_to_chapter, link_foreshadow, unlink_foreshadow, bind_world_event, unbind_world_event).
    */
   event_id?: string;
   /**
@@ -44,4 +51,8 @@ export interface TimelinePatchEventRequest {
    * Event identifier that the source event foreshadows (link_foreshadow) or stops foreshadowing (unlink_foreshadow).
    */
   foreshadows_event_id?: string;
+  /**
+   * World KB entity `key_block_id` (`block_type=event` KnowledgeEntry) belonging to the Work's bound World that the event realizes. Required for bind_world_event and only meaningful for bind_world_event; not accepted as a mutation source by unbind_world_event, which clears the stored value.
+   */
+  world_event_id?: string;
 }
