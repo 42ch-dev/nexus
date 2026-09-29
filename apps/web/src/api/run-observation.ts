@@ -27,13 +27,16 @@
  *    the reason and `retry` re-arms the subscription.
  *
  * Replay/live boundary (`liveFrom`): the wire carries no replay/live marker —
- * the service forwards the run ring's frames verbatim and the retained
- * contract's "atomic replay/live handoff" is a server-side guarantee. The one
- * boundary the client can honor is therefore its own attach boundary: on
- * re-entry the restored history and the server's strictly-after replay are the
- * catch-up, and the live tail begins once the stream is observed to have come
- * to rest (the server writes the replay immediately after the response headers
- * and then blocks on its pull gate). `liveFrom` is the index of the first live
+ * the service forwards the run ring's frames verbatim, so no frame says whether
+ * the server replayed it or emitted it live. The split this hook renders is
+ * therefore *inferred from attach ordering*, not observed provenance, and the
+ * run view discloses that inference: the restored history plus the server's
+ * strictly-after replay arrive at the head of the stream, and the live tail is
+ * what follows. The catch-up clock starts at the attempt's FIRST RECEIVED frame
+ * — never before the stream connects, or a slow connect would freeze the
+ * boundary ahead of the very replay it is waiting for — and the catch-up is the
+ * burst up to the first quiet gap after that frame (still capped, so an actively
+ * streaming run hands off). `liveFrom` is the index of the first live-tail
  * event: `events.slice(0, liveFrom)` is replayed history, the rest is live. It
  * re-arms at the end of the window while the catch-up is open and freezes at the
  * handoff — and it is *derived* from an eviction-stable anchor rather than stored
@@ -64,8 +67,9 @@
  * instead of a growing id set, so neither the frame list nor the cursor store
  * grows without bound over a long-lived run. `events` is that retained buffer
  * itself, mutated in place and re-published per frame (no per-frame copy of the
- * whole history); memoize on `events.length` / `lastEventId` rather than on the
- * array identity.
+ * whole history); memoize on the published `revision` — it advances on every
+ * retained frame, control frames included, unlike `events.length` or
+ * `lastEventId` — rather than on the array identity.
  */
 import { useCallback, useEffect, useState } from 'react';
 
@@ -91,10 +95,18 @@ export interface RunObservationState {
    * view can render where continuity was lost rather than smoothing over it.
    *
    * This is the hook's bounded retained buffer, re-published per frame: read it
-   * directly, and memoize on `events.length` / `lastEventId` rather than on the
-   * array identity.
+   * directly, and memoize on `revision` — never on the array identity,
+   * `events.length` or `lastEventId`, none of which change when a control frame
+   * is appended to a full window.
    */
   events: WorkflowObservationFrame[];
+  /**
+   * Monotonic publish revision: the number of frames retained for this run over
+   * the current observation's lifetime. Every retained frame — a data frame or
+   * an inline `gap`/`history_unavailable` control frame — advances it, so it is
+   * the safe memoization key for a consumer deriving from `events`.
+   */
+  revision: number;
   /**
    * Index into `events` of the first live-tail frame: `events.slice(0, liveFrom)`
    * is replayed history (the re-entered span plus the server's strictly-after
@@ -134,11 +146,23 @@ const MAX_RETAINED_EVENTS = 256;
  */
 const RETAINED_IDLE_TTL_MS = 5 * 60_000;
 
-/** Quiet period that ends the view's catch-up replay and hands off to the live tail. */
+/**
+ * Quiet period, measured from the attempt's first received frame, that ends the
+ * catch-up burst and hands off to the live tail.
+ */
 const CATCH_UP_SETTLE_MS = 120;
 
 /** Ceiling on the catch-up window, so an actively streaming run still hands off. */
 const CATCH_UP_MAX_MS = 1_000;
+
+/**
+ * An attempt that streamed for at least this long is a *recovered* stream: it
+ * earns a fresh reconnect budget. Anything shorter is the same tight episode —
+ * a ring that keeps outrunning the observer (frame, gap, frame, gap …), or a
+ * transport that fails right after each frame — so it consumes the budget
+ * instead of resetting it, and the reconnect stays bounded (QC3-001).
+ */
+const STABLE_ATTEMPT_MS = 1_000;
 
 /**
  * Durable run statuses that end the lifecycle — the core's
@@ -279,6 +303,7 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
   const [snapshot, setSnapshot] = useState<RunObservationState>({
     phase: 'connecting',
     events: [],
+    revision: 0,
     liveFrom: 0,
     lastEventId: null,
     error: null,
@@ -286,7 +311,14 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
 
   useEffect(() => {
     if (!sessionId) {
-      setSnapshot({ phase: 'connecting', events: [], liveFrom: 0, lastEventId: null, error: null });
+      setSnapshot({
+        phase: 'connecting',
+        events: [],
+        revision: 0,
+        liveFrom: 0,
+        lastEventId: null,
+        error: null,
+      });
       return;
     }
 
@@ -298,7 +330,7 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
     let cancelled = false;
     /** The subscription attempt in flight: aborted at a gap or on unmount. */
     let attempt: AbortController | null = null;
-    /** Re-entry catch-up window: re-armed per catch-up frame, capped in total. */
+    /** Re-entry catch-up: re-armed per received burst frame, capped in total. */
     let settleTimer: ReturnType<typeof setTimeout> | undefined;
     let capTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -323,6 +355,7 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
       setSnapshot({
         phase,
         events: retained.events,
+        revision: retained.appended,
         liveFrom: boundaryIndex(retained),
         lastEventId: retained.lastEventId,
         error,
@@ -361,7 +394,12 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
 
         const controller = new AbortController();
         attempt = controller;
-        if (catchingUp) armCatchUp();
+        // The catch-up clock and the stability clock both start here, and the
+        // catch-up timer itself starts at the first frame this attempt receives
+        // (`armCatchUp` in the loop below) — never before the stream connects,
+        // or a slow connect would hand off to `live` ahead of the very replay
+        // it is still waiting for.
+        const attemptStartedAt = Date.now();
 
         try {
           for await (const frame of client.subscribeWorkflowEvents(sessionId, {
@@ -396,6 +434,10 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
             }
 
             receivedData = true;
+            // The catch-up burst is anchored at the first frame this attempt
+            // received — a re-delivered duplicate counts — so an attempt that
+            // connects late still keeps its replay on the replay side.
+            if (catchingUp) armCatchUp();
             if (isReplayedCursor(frame.id, retained.lastEventId)) continue;
 
             retained.lastEventId = frame.id;
@@ -405,7 +447,6 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
             if (catchingUp) {
               retained.liveFromAppended = retained.appended;
               phase = 'replaying';
-              armCatchUp();
             } else {
               phase = 'live';
             }
@@ -449,8 +490,15 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
           // keeps closing must not turn this into a reconnect loop.
           consecutiveFailures += 1;
         } else {
-          // A productive attempt earns a fresh retry budget.
-          consecutiveFailures = receivedData ? 1 : consecutiveFailures + 1;
+          // A fresh retry budget is earned only by an attempt that actually
+          // streamed for a while. An attempt that dies within
+          // `STABLE_ATTEMPT_MS` — a busy ring that keeps outrunning the observer
+          // (frame, gap, frame, gap …) or a transport that fails right after
+          // each frame — is the same unresolved episode: it consumes the budget
+          // instead of resetting it, so the retries stay bounded (QC3-001) and
+          // the hook still rests in an honest `gapped`/`error` state.
+          const stable = Date.now() - attemptStartedAt >= STABLE_ATTEMPT_MS;
+          consecutiveFailures = receivedData && stable ? 1 : consecutiveFailures + 1;
         }
 
         if (consecutiveFailures > MAX_RECONNECT_ATTEMPTS) {

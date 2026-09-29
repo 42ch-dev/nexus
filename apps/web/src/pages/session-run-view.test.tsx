@@ -272,7 +272,7 @@ describe('SessionRunViewPage — gap', () => {
 });
 
 describe('SessionRunViewPage — replay', () => {
-  it('separates replayed history from the live tail on re-entry', async () => {
+  it('separates replayed history from the live tail on re-entry and discloses the inferred boundary', async () => {
     const feed = pushable();
     const { client, calls } = stubClientFor([
       (options) => openStream(options, runState('e1:1'), hostEvent('e1:2')),
@@ -290,17 +290,27 @@ describe('SessionRunViewPage — replay', () => {
     expect(within(replay).getByText('e1:1')).toBeInTheDocument();
     expect(within(replay).getByText('e1:2')).toBeInTheDocument();
     expect(calls[1].lastEventId).toBe('e1:2');
-    const live = screen.getByTestId('run-live');
-    expect(within(live).getByText('Waiting for the next event…')).toBeInTheDocument();
+    // The wire carries no replay/live marker: the split is disclosed as inferred
+    // from attach order rather than presented as server-reported provenance.
+    expect(replay).toHaveTextContent('split by attach order');
+    expect(screen.getByTestId('run-live')).toHaveTextContent('Waiting for the next event…');
 
-    // Past the catch-up handoff, an appended frame is the live tail — not replay.
+    // The catch-up is anchored at the first frame the re-attached stream
+    // delivers: this one is still on the replay side of the boundary.
     await act(async () => {
-      await wait(400);
       feed.push(hostEvent('e1:3'));
     });
+    expect(await within(replay).findByText('e1:3')).toBeInTheDocument();
 
-    expect(await within(live).findByText('e1:3')).toBeInTheDocument();
-    expect(within(replay).queryByText('e1:3')).toBeNull();
+    // Past the settle handoff, an appended frame is the live tail — not replay.
+    await act(async () => {
+      await wait(400);
+      feed.push(hostEvent('e1:4'));
+    });
+
+    const live = await screen.findByTestId('run-live');
+    expect(await within(live).findByText('e1:4')).toBeInTheDocument();
+    expect(within(replay).queryByText('e1:4')).toBeNull();
     expect(screen.getByTestId('run-phase')).toHaveTextContent('Live');
   });
 

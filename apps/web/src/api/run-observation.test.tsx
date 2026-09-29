@@ -223,10 +223,11 @@ describe('useRunObservation — replay/live handoff', () => {
     const { client, calls } = stubClientFor([
       (options) => fullWindow(options),
       async function* reentry(options: SubscribeOptions) {
-        // Away long enough for the catch-up to settle before the run appends
-        // again: nothing to replay, then exactly one genuinely live frame.
-        await wait(300);
+        // The re-attached stream's first frame anchors the catch-up burst (a
+        // replay-side frame), then the run appends for real past the handoff.
         yield hostEvent('e1:301');
+        await wait(300);
+        yield hostEvent('e1:302');
         if (options.signal.aborted) return;
         await new Promise<void>((resolve) => {
           options.signal.addEventListener('abort', () => resolve(), { once: true });
@@ -244,10 +245,12 @@ describe('useRunObservation — replay/live handoff', () => {
     // Everything the full window holds is catch-up until the handoff.
     expect(reentry.result.current.liveFrom).toBe(256);
 
-    await waitFor(() =>
-      expect(cursorOf(reentry.result.current.events[reentry.result.current.liveFrom])).toBe('e1:301'),
-    );
     await waitFor(() => expect(reentry.result.current.phase).toBe('live'));
+    await waitFor(() =>
+      expect(
+        reentry.result.current.events.slice(reentry.result.current.liveFrom).map(cursorOf),
+      ).toEqual(['e1:302']),
+    );
 
     // The window is still full (256). The boundary must slide with it, or the
     // frame appended after the handoff would sit outside the live tail.
@@ -255,9 +258,55 @@ describe('useRunObservation — replay/live handoff', () => {
     expect(calls[1].lastEventId).toBe('e1:300');
     expect(events).toHaveLength(256);
     expect(liveFrom).toBe(255);
-    expect(cursorOf(events[0])).toBe('e1:46');
-    expect(cursorOf(events[liveFrom])).toBe('e1:301');
-    expect(events.slice(liveFrom).map(cursorOf)).toEqual(['e1:301']);
+    expect(cursorOf(events[0])).toBe('e1:47');
+    expect(cursorOf(events[liveFrom])).toBe('e1:302');
+    expect(events.slice(liveFrom).map(cursorOf)).toEqual(['e1:302']);
+  });
+
+  it('anchors the catch-up at the first received frame, so a delayed connect keeps its replay on the replay side', async () => {
+    const { client, calls } = stubClientFor([
+      (options) => openStream(options, runState('e1:1'), hostEvent('e1:2')),
+      async function* delayedReplay(options: SubscribeOptions) {
+        // Connect and replay delivery are both slower than the settle window: a
+        // timer armed before the stream connects would already have declared the
+        // view live here, mislabeling this whole replay burst as the live tail.
+        await wait(300);
+        yield runState('e1:3');
+        yield hostEvent('e1:4');
+        await wait(300);
+        yield hostEvent('e1:5');
+        if (options.signal.aborted) return;
+        await new Promise<void>((resolve) => {
+          options.signal.addEventListener('abort', () => resolve(), { once: true });
+        });
+      },
+    ]);
+
+    const first = observeRun(client, 'run-delayed-replay');
+    await waitFor(() => expect(first.result.current.phase).toBe('live'));
+    first.unmount();
+
+    const reentry = observeRun(client, 'run-delayed-replay');
+    // Nothing has arrived yet: the view is waiting on the stream, not live.
+    await wait(200);
+    expect(reentry.result.current.phase).toBe('replaying');
+
+    await waitFor(() => expect(reentry.result.current.events.map(cursorOf)).toContain('e1:5'));
+
+    expect(calls[1].lastEventId).toBe('e1:2');
+    // The delayed replay burst stays replayed; only the post-settle frame is live.
+    expect(reentry.result.current.events.map(cursorOf)).toEqual([
+      'e1:1',
+      'e1:2',
+      'e1:3',
+      'e1:4',
+      'e1:5',
+    ]);
+    expect(reentry.result.current.liveFrom).toBe(4);
+    expect(reentry.result.current.events.slice(reentry.result.current.liveFrom).map(cursorOf)).toEqual([
+      'e1:5',
+    ]);
+    expect(reentry.result.current.phase).toBe('live');
   });
 });
 
@@ -306,6 +355,39 @@ describe('useRunObservation — gap recovery', () => {
 
     act(() => probe.result.current.retry());
     await waitFor(() => expect(calls.length).toBe(5));
+  });
+});
+
+describe('useRunObservation — bounded reconnect episodes', () => {
+  it('exhausts the retry budget on a repeated data-plus-gap episode instead of reconnecting forever', async () => {
+    // Every attempt delivers a frame and then gaps: the ring keeps outrunning
+    // the observer, so the episode must still exhaust rather than resetting the
+    // budget on each productive-looking attempt (QC3-001).
+    const { client, calls } = stubClientFor([() => frames(runState('e1:1'), GAP)]);
+
+    const probe = observeRun(client, 'run-gap-churn');
+    await waitFor(() => expect(calls.length).toBeGreaterThanOrEqual(4), { timeout: 5_000 });
+    await wait(900);
+
+    expect(calls.length).toBe(4);
+    expect(probe.result.current.phase).toBe('gapped');
+  });
+
+  it('exhausts the retry budget on a repeated data-plus-throw episode instead of reconnecting forever', async () => {
+    const { client, calls } = stubClientFor([
+      async function* script() {
+        yield runState('e1:1');
+        throw new Error('socket reset');
+      },
+    ]);
+
+    const probe = observeRun(client, 'run-throw-churn');
+    await waitFor(() => expect(calls.length).toBeGreaterThanOrEqual(4), { timeout: 5_000 });
+    await wait(900);
+
+    expect(calls.length).toBe(4);
+    expect(probe.result.current.phase).toBe('error');
+    expect(probe.result.current.error?.message).toBe('socket reset');
   });
 });
 
@@ -453,6 +535,29 @@ describe('useRunObservation — retention bounds', () => {
     expect(cursorOf(retained[retained.length - 1])).toBe('e1:300');
     expect(retained.some((frame) => cursorOf(frame) === 'e1:1')).toBe(false);
     expect(probe.result.current.lastEventId).toBe('e1:300');
+  });
+
+  it('advances the publish revision when an inline gap lands on a full window', async () => {
+    // A control frame has no cursor and, on a full window, does not change the
+    // retained length either — so length/lastEventId are unsafe memoization
+    // keys. The revision must still move (QC3-003).
+    async function* full(options: SubscribeOptions) {
+      for (let sequence = 1; sequence <= 256; sequence += 1) yield hostEvent(`e1:${sequence}`);
+      yield GAP;
+      if (options.signal.aborted) return;
+      await new Promise<void>((resolve) => {
+        options.signal.addEventListener('abort', () => resolve(), { once: true });
+      });
+    }
+
+    const { client } = stubClientFor([(options) => full(options), (options) => openStream(options)]);
+    const probe = observeRun(client, 'run-revision');
+    await waitFor(() => expect(probe.result.current.phase).toBe('gapped'));
+
+    expect(probe.result.current.events).toHaveLength(256);
+    expect(probe.result.current.lastEventId).toBe('e1:256');
+    expect(cursorOf(probe.result.current.events[255])).toBe('gap');
+    expect(probe.result.current.revision).toBe(257);
   });
 
   it('evicts an idle non-terminal run and re-subscribes from scratch on re-entry', async () => {

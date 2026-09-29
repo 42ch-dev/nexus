@@ -16,7 +16,10 @@
  * - **Replay** — a re-entered session renders `events.slice(0, liveFrom)` as
  *   replayed history and `events.slice(liveFrom)` as the live tail, in two
  *   separately labeled sections, so the replay/live handoff stays visible
- *   instead of blending into one undifferentiated log.
+ *   instead of blending into one undifferentiated log. The wire carries no
+ *   replay/live marker, so that boundary is *inferred from attach order* (the
+ *   server sends the replay when the stream opens, before the live tail) — the
+ *   replayed section says so rather than implying the server reported it.
  * - **History lost** — a `history_unavailable` close (a daemon restart, or an
  *   evicted event ring) is rendered as its own notice above the frames this view
  *   had already retained, never as an ordinary end: the retained frames stay on
@@ -264,6 +267,11 @@ function StreamSections({
       {replayed.length > 0 && (
         <section className="flex flex-col gap-2" data-testid="run-replay">
           <h2 className="text-label-14 text-gray-900">{t('runView.replayedHeading')}</h2>
+          {/* The split is inferred from attach order, not reported by the wire:
+              the disclosure states that plainly instead of implying provenance. */}
+          <p className="text-copy-13 text-gray-700" data-testid="run-boundary-note">
+            {t('runView.boundaryNote')}
+          </p>
           <ol aria-label={t('runView.eventsAria')} className={EVENT_LIST_CLASS}>
             {replayed.map((frame, index) => (
               <EventRow key={`replay-${index}`} frame={frame} />

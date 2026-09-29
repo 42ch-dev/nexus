@@ -30,6 +30,7 @@
     "loading": "Connecting to the run stream…",
     "waitingForLive": "Waiting for the next event…",
     "replayedHeading": "Replayed history",
+    "boundaryNote": "Replay and live are split by attach order — the server sends the replay when the stream opens, before the live tail — so the boundary is inferred, not reported by the server.",
     "liveHeading": "Live",
     "eventsAria": "Run events",
     "reconnect": "Reconnect",

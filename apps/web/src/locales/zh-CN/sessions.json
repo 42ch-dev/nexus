@@ -30,6 +30,7 @@
     "loading": "正在连接运行事件流…",
     "waitingForLive": "等待下一个事件…",
     "replayedHeading": "回放历史",
+    "boundaryNote": "回放与实时的划分依据接入顺序推断：服务器在事件流打开时先发送回放，再发送实时尾部，因此该分界是推断所得，并非服务器上报。",
     "liveHeading": "实时",
     "eventsAria": "运行事件",
     "reconnect": "重新连接",
