@@ -8,7 +8,7 @@
  * link/unlink authoring controls, and the World-event bind/unbind control.
  * Drives the `patch_timeline_event` route.
  */
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ArrowRight, CalendarPlus, Link2, Trash2, Unlink } from 'lucide-react';
 
@@ -117,6 +117,32 @@ function TimelinePanelView({
     picker: {},
     manual: {},
   });
+
+  // V1.201 002/FX-B — a bind is issued against one draft *and* one bound World,
+  // and the Work can be re-bound to another World while the write is in flight.
+  // The drafts survive that transition (R3), so the completion of a former
+  // World's bind must not consume a draft now shown under the newly bound
+  // World. Every draft generation is bumped on a `boundWorldId` change: the
+  // counters stay monotonic, so an old issuance can never collide with a draft
+  // (re-)authored in the new World.
+  const previousBoundWorldIdRef = useRef(boundWorldId);
+
+  useEffect(() => {
+    if (previousBoundWorldIdRef.current === boundWorldId) return;
+    previousBoundWorldIdRef.current = boundWorldId;
+    const generations = draftGenerationRef.current;
+    for (const control of ['picker', 'manual'] as const) {
+      const byEvent = generations[control];
+      for (const eventId of Object.keys(byEvent)) {
+        byEvent[eventId] += 1;
+      }
+    }
+    // A picker selection names an entity of one specific World, so it cannot
+    // carry into the newly bound World (the picker no longer offers it and
+    // Bind has no valid referent). The manual field is free-form World-event
+    // ID text, not World data, so its draft is preserved.
+    setWorldEventTargetByEvent({});
+  }, [boundWorldId]);
 
   const draftSetters = {
     picker: setWorldEventTargetByEvent,
