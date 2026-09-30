@@ -95,7 +95,7 @@ jobs:
         run: cargo test -p nexus42 --lib --no-default-features --features connect-host explicit_home
 
       - name: Check discovery tests
-        run: cargo test -p nexus-agent-host --lib discovery::
+        run: cargo test -p nexus-agent-host --lib 'discovery::'
 
       - name: Check native CLI provider tests
         run: cargo test -p nexus-agent-host --lib providers::native_cli
