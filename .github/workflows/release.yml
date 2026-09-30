@@ -207,7 +207,7 @@ jobs:
           printf '%s\n' "${files[@]}" >> "$GITHUB_ENV"
           echo 'EOF' >> "$GITHUB_ENV"
           echo "RELEASE_BODY=$body" >> "$GITHUB_ENV"
-      - name: Create or update GitHub Release
+      - name: Stage, upload, and publish GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: v${{ needs.tag.outputs.version }}
@@ -215,16 +215,37 @@ jobs:
           RELEASE_BODY: ${{ runner.temp }}/release-body.md
         run: |
           set -euo pipefail
+          # GitHub Releases API draft state keeps the asset set unpublished until
+          # the uploads finish: https://docs.github.com/en/rest/releases/releases
+          if [[ "$PRERELEASE" != true && "$PRERELEASE" != false ]]; then
+            echo "::error::invalid effective prerelease value: $PRERELEASE"
+            exit 1
+          fi
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --notes-file "$RELEASE_BODY"
             release_id="$(gh release view "$TAG" --json databaseId --jq .databaseId)"
-            gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" --method PATCH -F "prerelease=$PRERELEASE" >/dev/null
+            gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" --method PATCH \
+              -F draft=true -F "prerelease=$PRERELEASE" >/dev/null
+            gh release edit "$TAG" --notes-file "$RELEASE_BODY"
           else
-            release_flags=()
+            release_flags=(--draft)
             [[ "$PRERELEASE" == true ]] && release_flags+=(--prerelease)
             gh release create "$TAG" --title "$TAG" --notes-file "$RELEASE_BODY" "${release_flags[@]}"
+            release_id="$(gh release view "$TAG" --json databaseId --jq .databaseId)"
           fi
+          asset_count=0
           while IFS= read -r asset; do
-            [[ -n "$asset" ]] && gh release upload "$TAG" "$asset" --clobber
+            [[ -n "$asset" ]] || continue
+            gh release upload "$TAG" "$asset" --clobber
+            ((asset_count += 1))
           done <<< "$RELEASE_ASSETS"
-
+          [[ "$asset_count" -eq 14 ]] || { echo "::error::expected 14 release assets, got $asset_count"; exit 1; }
+          remote_assets="$(gh release view "$TAG" --json assets --jq '.assets[].name')"
+          remote_count="$(printf '%s\n' "$remote_assets" | awk 'NF { count++ } END { print count + 0 }')"
+          [[ "$remote_count" -eq 14 ]] || { echo "::error::expected 14 uploaded release assets, got $remote_count"; exit 1; }
+          while IFS= read -r asset; do
+            [[ -n "$asset" ]] || continue
+            asset_name="${asset##*/}"
+            grep -Fqx -- "$asset_name" <<< "$remote_assets" || { echo "::error::uploaded release asset missing: $asset_name"; exit 1; }
+          done <<< "$RELEASE_ASSETS"
+          gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" --method PATCH \
+            -F draft=false -F "prerelease=$PRERELEASE" >/dev/null

@@ -73,20 +73,21 @@ published until the pull request it opens is merged into `main`.
    ```
 
 3. **Dispatch.** Actions → *New release* → *Run workflow* on `main` with the
-   inputs above. Runs are serialized per requested version (concurrency group
-   `new-release-<version>`, which does not cancel the running one), so
-   re-dispatching the same version waits for the earlier run instead of
-   cancelling it.
-4. **Preflight.** `Run release tooling tests` runs the release tooling's unit
-   tests (`node --test 'tooling/release/*.test.mjs'`, Node 22 or newer — the
-   quoted glob needs a Node release that expands test-file globs), and
-   `Warm Cargo registry cache` runs `cargo fetch --locked` so the later
-   offline lockfile regeneration can run without network access.
+   inputs above. Runs share the requested-version concurrency group with
+   `cancel-in-progress: false`: a running run is not cancelled, but Actions keeps
+   only one pending run per group; a newer pending dispatch replaces the older
+   pending one. This is serialization, not a FIFO queue, so do not rely on every
+   repeated dispatch executing.
+4. **Preflight.** `Warm Cargo registry cache` runs `cargo fetch --locked`
+   **before** `Run release tooling tests` (`node --test
+   'tooling/release/*.test.mjs'`, Node 22 or newer — the quoted glob needs a
+   Node release that expands test-file globs). The cache is needed by the tests'
+   real offline Cargo lockfile regeneration path as well as the later bump.
 5. **Validate.** `Validate clean SemVer, greater-than-main, and unused tag`
    re-runs `assert-version-greater.mjs` against a full-history checkout.
 6. **Open the signed bump pull request.** In the `create-release-pr` job,
    `Fetch main, revalidate, and create release branch` re-checks the version
-   and resets `release/<version>` onto `origin/main`. `Bump version surfaces
+   and starts `release/<version>` from `origin/main`. `Bump version surfaces
    and lockfile` then runs `cargo fetch --locked`,
    `node tooling/release/bump-version.mjs <version>` (the four manifests, then
    `cargo update --workspace --offline` for `Cargo.lock`) and a confirming
@@ -96,13 +97,12 @@ published until the pull request it opens is merged into `main`.
    creates the single commit `chore(release): bump version to <version>` —
    GitHub-signed through the GraphQL `createCommitOnBranch` API, so it stays
    valid when signature-protected branches arrive — with a
-   `Nexus-Prerelease: <toggle>` trailer, and resets the branch to exactly that
-   commit. The commit step is pinned to the `origin/main` OID the branch was
-   created from (`RELEASE_BASE_OID`): if `main` advanced in between, the helper
-   refuses without touching the branch, naming both OIDs — re-dispatch the same
-   version so the bump is rebuilt on the current `main` instead of reverting the
-   intervening changes. `Ensure release label exists` and `Open or update release
-   pull request` finish the job by opening or updating a pull request titled
+   `Nexus-Prerelease: <toggle>` trailer. The replacement commit is parented on
+   the existing `release/<version>` head and published with an expected-head
+   compare-and-swap (CAS); on first creation, the branch starts from its base
+   ref. A moved head makes the helper refuse without overwriting it. `Ensure
+   release label exists` and `Open or update release pull request` finish the
+   job by opening or updating a pull request titled
    `chore(release): bump version to <version>`, labeled `release`, whose body is
    the `summary` followed by the new changelog section.
 7. **Review, then merge with a merge commit.** Review the diff (the version
@@ -113,9 +113,9 @@ published until the pull request it opens is merged into `main`.
    tagged and no Release is published.
 
    To correct the summary or the generated entry before merging, dispatch the
-   same version again; the branch is reset from `main` and a fresh signed commit
-   is created, and the pull request is updated in place. Do not hand-edit the
-   release branch: a hand-made commit is not GitHub-signed.
+   same version again; the replacement commit parents on the current release
+   branch head (CAS), and the pull request is updated in place. Do not hand-edit
+   the release branch: a hand-made commit is not GitHub-signed.
 
 ## Pipeline stages
 
@@ -124,11 +124,11 @@ Merging the `release`-labeled pull request into `main` starts
 
 | Stage | Job | Gate | What it does |
 |-------|-----|------|--------------|
-| Tag | `tag` | merged PR carrying the `release` label, or a `v*` tag push | `Ensure annotated tag and resolve prerelease`: resolves the version from `package.json` at the merge commit, creates and pushes the annotated tag `v<version>` at that commit if it is missing (annotation = the first usable line of the bump commit body — the `summary`'s first line when one was given, otherwise the `Nexus-Prerelease:` trailer, since the body is the `summary` followed by the trailer block), requires an existing tag to be annotated and to point at the same commit, reads the `Nexus-Prerelease` trailer from the merge commit's second parent, and resolves the effective prerelease value. |
+| Tag | `tag` | merged PR carrying the `release` label, or a `v*` tag push | `Ensure annotated tag and resolve prerelease`: resolves the version from `package.json` at the merge commit, creates and pushes the annotated tag `v<version>` at that commit if it is missing (annotation = the first non-empty line in the bump commit body: the summary's first line when provided, otherwise the `Nexus-Prerelease:` trailer), requires an existing tag to be annotated and to point at the same commit, reads the `Nexus-Prerelease` trailer from the merge commit's second parent, and resolves the effective prerelease value. |
 | Verify | `verify-version` | `tag` succeeded | `Assert lockstep version`: checks out `refs/tags/v<version>` and asserts the four hand-written version files are equal (`assert-lockstep-version.mjs`). |
 | Producers | `runtime-build` | `tag` and `verify-version` succeeded | Reusable call into `runtime-build.yml` (job `runtime-build`): the three-platform matrix (`windows-x64`, `macos-arm64`, `linux-x64`) builds `nexus-runtime-<os>-<arch>.zip` plus a `.sha256` sidecar, and smoke-tests `--version` on each runner. |
 | Producers | `desktop-electron-build` | `tag` and `verify-version` succeeded | Reusable call into `desktop-electron-build.yml` (job `package`): the two macOS legs (darwin arm64, darwin x64) package `Nexus-<version>-darwin-<arch>-unsigned.dmg`, `Nexus-<version>-darwin-<arch>-unsigned.app.zip`, `receipt.json` and `SHA256SUMS`, with signing-dispatch sentinels proving no codesign/notarize call ran. |
-| Publish | `publish` | all four jobs succeeded | `Download runtime artifacts` and `Download desktop artifacts` collect the five artifact sets; `Assemble release notes and assets` renders the Release body (changelog section plus the fixed footer) and queues the 14 assets; `Create or update GitHub Release` creates the Release at the tag — or updates it when it already exists — with the resolved prerelease value, then uploads the assets with `--clobber`. |
+| Publish | `publish` | all four jobs succeeded | `Download runtime artifacts` and `Download desktop artifacts` collect the five artifact sets; `Assemble release notes and assets` renders the Release body (changelog section plus the fixed footer) and stages the complete 14-asset set; `Stage, upload, and publish GitHub Release` creates or reconciles the Release as a draft with the effective prerelease value, uploads all assets with `--clobber`, and clears `draft` only after every upload succeeds. |
 
 Permissions stay least-privilege: `new-release.yml` requests
 `contents: write` + `pull-requests: write`, the release workflow grants
@@ -171,9 +171,11 @@ node tooling/release/effective-prerelease.mjs --toggle false   # prints true tod
 ```
 
 The tag is always the clean version `v<version>`: prerelease-ness is Release
-metadata only. The Release is created with `--prerelease` when the effective
-value is true, and an existing Release has its prerelease flag patched to the
-same value.
+metadata only. The workflow creates a draft with `--draft`, adding
+`--prerelease` when the effective value is true; an existing Release is first
+reconciled to draft state and the same prerelease value. Only after every asset
+upload succeeds does the workflow clear `draft`, retaining the effective
+prerelease value.
 
 ## Release body and footer
 
@@ -320,34 +322,37 @@ dispatches a producer, pushes a tag, or creates a Release.
 
 ## Recovery
 
-The release workflow has two entry points, and both are idempotent, so a failed
-run is repaired by re-entering rather than by hand-fixing state.
+The release workflow can be re-entered after failure. Publication stages the
+Release as a draft, updates notes and the complete asset set, and publishes only
+after every upload succeeds. A failed update remains unpublished for recovery.
 
 - **Re-run the run.** Actions → *Release* → the failed run → *Re-run failed
   jobs* replays the original event with the same payload. The `tag` job
-  re-creates the tag only if it is missing, so a partially completed run
-  resumes cleanly.
+  re-creates the tag only if it is missing, then verify → producers → publish
+  runs again. Existing Releases are explicitly returned to draft state before
+  asset updates; successful completion clears draft and publishes them.
 - **Tag-push re-entry.** `push: tags: ['v*']` enters the same workflow: the
   `tag` job requires the pushed tag to be annotated, takes the tagged commit as
   the merge commit, and carries it through verify → producers → publish. This
-  path fires when a maintainer pushes a `v*` tag (for example, hand-tagging the
-  merge commit after a failure that never created the tag), and it is also why
-  a staged release is repeatable: publishing an existing tag updates the Release
-  and re-uploads assets with `--clobber` instead of erroring.
+  path fires when a maintainer pushes a `v*` tag (for example, after a failure
+  that never created the tag).
 
   The pipeline's own tag push uses the default `GITHUB_TOKEN`, and GitHub does
   not start workflow runs for events created by that token, so a normal merge
   never re-enters through this path — it is an operator tool, not a loop.
 
   To reach it for an already-pushed tag you must delete the remote tag and push
-  it again. Note that deleting a tag that a Release references turns that
-  Release into a draft (GitHub behavior), so prefer re-running the failed run;
-  if you do re-push a tag, confirm the Release is published afterwards.
+  it again. GitHub turns a Release whose tag is deleted into a draft. It stays
+  unpublished if re-entry fails; on success, the workflow uploads the complete
+  set and publishes it. Prefer re-running the failed run when possible.
 
 - **Existing-tag guards.** When the tag already exists, the `tag` job requires
   it to be annotated and to point at the merge commit; a lightweight tag, or one
-  pointing somewhere else, fails the run on purpose. A failure in either
-  producer fails the run before `publish`, so no partial Release is published.
+  pointing somewhere else, fails closed. A failure in either producer prevents
+  `publish`. During `publish`, both new and existing Releases are kept draft
+  while notes and assets are updated; all uploads must succeed before the Release
+  becomes public. The workflow implements GitHub Releases API draft behavior by
+  setting `draft=true` before uploads and `draft=false` afterwards.
 
 ## Signing arrival
 
