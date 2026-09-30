@@ -426,6 +426,36 @@ mod tests {
         }
     }
 
+    /// RAII guard that sets `PATHEXT` to the canonical Windows extension list
+    /// on construction and restores the previous value on drop. Only the
+    /// Windows PATHEXT-resolution test needs it, so it is cfg-gated to keep
+    /// the unix build free of dead code. The guard pins the extension set
+    /// (`.EXE` ahead of `.CMD`) and its priority order, so the resolution
+    /// assertions do not depend on whatever `PATHEXT` the host shell exported.
+    #[cfg(target_os = "windows")]
+    struct PathextGuard {
+        previous: Option<String>,
+    }
+
+    #[cfg(target_os = "windows")]
+    impl PathextGuard {
+        fn set(value: &str) -> Self {
+            let previous = std::env::var("PATHEXT").ok();
+            std::env::set_var("PATHEXT", value);
+            Self { previous }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    impl Drop for PathextGuard {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(value) => std::env::set_var("PATHEXT", value),
+                None => std::env::remove_var("PATHEXT"),
+            }
+        }
+    }
+
     /// Verify that `scan_path_in` (the production scan path, not the test-only
     /// `scan_custom_path` helper) discovers ALL native CLI providers when the
     /// stub binaries are present and executable in the scanned directory.
@@ -753,6 +783,111 @@ mod tests {
         }
         // If none found, that's fine too (unusual environment) — the important
         // thing is that the function didn't panic or hang.
+    }
+
+    /// Windows-only (Gap A, v1.202 p1 T1): `find_command` must resolve a
+    /// command whose only stub carries a `PATHEXT` extension (`claude.exe` /
+    /// `claude.cmd`). Every other stub in this module is extensionless, so the
+    /// extension-bearing shape was untested on any platform.
+    ///
+    /// Two resolution routes are asserted, because they are separate code:
+    /// 1. the primary `which` route (`path_scan.rs:186-195`), which appends
+    ///    `PATHEXT` extensions itself — `.EXE` outranks `.CMD`;
+    /// 2. the manual fallback's Windows `PATHEXT` loop
+    ///    (`path_scan.rs:215-226`), reached only when the two `which` calls
+    ///    fail. `std::env::join_paths` rejects a path entry containing the
+    ///    platform separator, so the `fallback;bin` directory forces the
+    ///    primary route to be skipped — the only deterministic way to execute
+    ///    that loop, which no test reached before.
+    ///
+    /// Only compiled on Windows: the `PATHEXT` extension-append path does not
+    /// exist on unix, so this test can be neither compiled nor run there.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn find_command_resolves_windows_pathext_extension_stub() {
+        let _lock = crate::test_support::PROCESS_ENV_LOCK.blocking_lock();
+
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+
+        // Both extension forms in one directory: `.EXE` precedes `.CMD` in the
+        // canonical PATHEXT order, so the priority assertion is deterministic.
+        let both_dir = temp_dir.path().join("both-bin");
+        std::fs::create_dir_all(&both_dir).expect("create both-bin dir");
+        let exe_stub = both_dir.join("claude.exe");
+        let cmd_stub = both_dir.join("claude.cmd");
+        std::fs::write(&exe_stub, "MZ stub payload").expect("write claude.exe stub");
+        std::fs::write(&cmd_stub, "@echo off\r\necho stub\r\n").expect("write claude.cmd stub");
+
+        // `;` is the Windows PATH separator: `join_paths` rejects this entry,
+        // so `find_command` must fall back to its manual scan, which reaches
+        // the PATHEXT loop. Only the `.cmd` form exists, so the loop — not an
+        // `.exe` short-circuit — produces the resolution.
+        let fallback_dir = temp_dir.path().join("fallback;bin");
+        std::fs::create_dir_all(&fallback_dir).expect("create fallback;bin dir");
+        let fallback_stub = fallback_dir.join("claude.cmd");
+        std::fs::write(&fallback_stub, "@echo off\r\necho stub\r\n")
+            .expect("write fallback claude.cmd stub");
+
+        let _pathext_guard = PathextGuard::set(".COM;.EXE;.BAT;.CMD");
+        // Isolate PATH to an empty directory so neither `which` call can find a
+        // real `claude` installed on the runner (same rationale as qc1 W-002);
+        // every resolution below therefore comes from the scanned `path_dirs`.
+        let empty_dir = temp_dir.path().join("empty-path");
+        std::fs::create_dir_all(&empty_dir).expect("create empty-path dir");
+        let _path_guard = PathGuard::isolate(&empty_dir);
+
+        let resolved_exe = find_command(std::slice::from_ref(&both_dir), "claude")
+            .expect("claude must resolve through its PATHEXT extension (.EXE/.CMD)");
+        assert!(
+            resolved_exe.is_absolute(),
+            "resolution must be absolute: {}",
+            resolved_exe.display()
+        );
+        assert_eq!(
+            resolved_exe.parent(),
+            Some(both_dir.as_path()),
+            "resolution must come from the scanned stub dir: {}",
+            resolved_exe.display()
+        );
+        // Windows paths are case-insensitive, so compare the name and the
+        // extension case-insensitively: the `.EXE` stub must outrank `.CMD`.
+        assert_eq!(
+            resolved_exe
+                .file_name()
+                .and_then(std::ffi::OsStr::to_str)
+                .map(str::to_ascii_lowercase),
+            Some("claude.exe".to_owned()),
+            "`.EXE` outranks `.CMD` in PATHEXT, so the .exe stub must win: {}",
+            resolved_exe.display()
+        );
+        assert_eq!(
+            resolved_exe
+                .extension()
+                .and_then(std::ffi::OsStr::to_str)
+                .map(str::to_ascii_lowercase),
+            Some("exe".to_owned()),
+            "the resolved path must carry the matched PATHEXT extension: {}",
+            resolved_exe.display()
+        );
+
+        // Route 2: the manual fallback's PATHEXT loop.
+        let resolved_fallback = find_command(std::slice::from_ref(&fallback_dir), "claude")
+            .expect("the manual PATHEXT fallback must resolve claude.cmd");
+        assert_eq!(
+            resolved_fallback.parent(),
+            Some(fallback_dir.as_path()),
+            "the fallback must resolve from the scanned dir: {}",
+            resolved_fallback.display()
+        );
+        assert_eq!(
+            resolved_fallback
+                .file_name()
+                .and_then(std::ffi::OsStr::to_str)
+                .map(str::to_ascii_lowercase),
+            Some("claude.cmd".to_owned()),
+            "the fallback loop must resolve the .cmd extension: {}",
+            resolved_fallback.display()
+        );
     }
 
     /// Verify that `scan_path` doesn't panic when PATH is available
