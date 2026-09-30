@@ -100,9 +100,33 @@ jobs:
       - name: Check discovery tests
         run: cargo test -p nexus-agent-host --lib 'discovery::'
 
+      # The SDK-wire fixtures are `#!/usr/bin/env python3` scripts: Windows
+      # cannot exec them (no shebang, no exec bit), so the claude/codex/dsh
+      # launch cohorts are a unix-only proof surface. The Windows row runs the
+      # platform-independent mapping cohort; the excluded parity work is
+      # registered as R-V1202-P1T3-001. macOS runs the full cohort.
+      - name: Check native CLI provider tests (Windows mapping cohort)
+        if: always() && runner.os == 'Windows'
+        run: cargo test -p nexus-agent-host --lib 'providers::native_cli::map_'
+
       - name: Check native CLI provider tests
-        if: always()
+        if: always() && runner.os != 'Windows'
         run: cargo test -p nexus-agent-host --lib providers::native_cli
+
+      # The integration cohort spawns a Node peer that imports the built
+      # `packages/nexus-provider-acp/dist` (the same prerequisite as ci.yml's
+      # cli-hosts group), so the package is built before the tests run.
+      - name: Set up monorepo for macOS integration tests
+        if: runner.os == 'macOS'
+        uses: ./.github/actions/setup-monorepo
+        with:
+          rust-toolchain: ""
+
+      - name: Build provider-acp test peer
+        if: runner.os == 'macOS'
+        run: |
+          pnpm --filter @42ch/nexus-contracts run build
+          pnpm --filter @42ch/nexus-provider-acp build
 
       - name: Run macOS integration tests
         if: runner.os == 'macOS'
