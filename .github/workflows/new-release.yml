@@ -109,9 +109,14 @@ jobs:
           VERSION: ${{ inputs.version }}
           PRERELEASE: ${{ inputs.prerelease }}
         run: |
+          body_args=()
+          if [[ -s "$RUNNER_TEMP/release-summary" ]]; then
+            body_args=(--body-file "$RUNNER_TEMP/release-summary")
+          fi
           node tooling/release/push-github-signed-commit.mjs \
             --branch "release/${VERSION}" \
             --message "chore(release): bump version to ${VERSION}" \
+            "${body_args[@]}" \
             --trailer "Nexus-Prerelease: ${PRERELEASE}" \
             --base-ref main
       - name: Ensure release label exists

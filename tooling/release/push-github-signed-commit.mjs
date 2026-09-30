@@ -15,6 +15,7 @@
  *   GITHUB_TOKEN=… node tooling/release/push-github-signed-commit.mjs \
  *     --branch release/X.Y.Z \
  *     --message "chore(release): bump version to X.Y.Z" \
+ *     [--body-file path/to/summary] \
  *     [--trailer "Nexus-Prerelease: true"] \
  *     [--base-ref main] \
  *     [--repo owner/name]
@@ -44,13 +45,14 @@ export function git(repoRoot, args) {
 /**
  * @param {string[]} argv
  * @param {NodeJS.ProcessEnv} [env]
- * @returns {{ branch: string | null; headline: string | null; trailers: string[]; baseRef: string; repo: string | null; help: boolean }}
+ * @returns {{ branch: string | null; headline: string | null; bodyFile: string | null; trailers: string[]; baseRef: string; repo: string | null; help: boolean }}
  */
 export function parseArgs(argv, env = process.env) {
-  /** @type {{ branch: string | null; headline: string | null; trailers: string[]; baseRef: string; repo: string | null; help: boolean }} */
+  /** @type {{ branch: string | null; headline: string | null; bodyFile: string | null; trailers: string[]; baseRef: string; repo: string | null; help: boolean }} */
   const out = {
     branch: null,
     headline: null,
+    bodyFile: null,
     trailers: [],
     baseRef: "main",
     repo: env.GITHUB_REPOSITORY ?? null,
@@ -63,6 +65,12 @@ export function parseArgs(argv, env = process.env) {
       out.branch = argv[++i] ?? null;
     } else if (arg === "--message") {
       out.headline = argv[++i] ?? null;
+    } else if (arg === "--body-file") {
+      const path = argv[++i];
+      if (path === undefined || path.trim().length === 0) {
+        throw new Error("--body-file requires a path to a message body file");
+      }
+      out.bodyFile = path;
     } else if (arg === "--trailer") {
       const trailer = argv[++i];
       if (trailer === undefined || trailer.trim().length === 0) {
@@ -94,18 +102,34 @@ export function parseArgs(argv, env = process.env) {
 }
 
 /**
- * Compose the commit message: truncated headline plus the trailer block.
+ * Compose the commit message: truncated headline, optional body line(s), then
+ * the trailer block.
  *
- * @param {{ headline: string; trailers?: string[] }} options
+ * The body precedes the trailers so the first usable line of the message body
+ * is the human text (the release `summary`), not a trailer — the release `tag`
+ * job annotates the tag with that first usable line.
+ *
+ * @param {{ headline: string; body?: string; trailers?: string[] }} options
  * @returns {{ headline: string; body?: string }}
  */
-export function composeCommitMessage({ headline, trailers = [] }) {
+export function composeCommitMessage({ headline, body = "", trailers = [] }) {
   const trimmed =
     headline.length <= HEADLINE_MAX_LENGTH
       ? headline
       : `${headline.slice(0, HEADLINE_MAX_LENGTH - 3)}...`;
-  const body = trailers.map((trailer) => trailer.trim()).filter(Boolean).join("\n");
-  return body.length > 0 ? { headline: trimmed, body } : { headline: trimmed };
+  const parts = [];
+  const bodyText = typeof body === "string" ? body.trim() : "";
+  if (bodyText.length > 0) {
+    parts.push(bodyText);
+  }
+  for (const trailer of trailers) {
+    const value = trailer.trim();
+    if (value.length > 0) {
+      parts.push(value);
+    }
+  }
+  const messageBody = parts.join("\n");
+  return messageBody.length > 0 ? { headline: trimmed, body: messageBody } : { headline: trimmed };
 }
 
 /**
@@ -290,10 +314,10 @@ async function ensureBranchAtOid(repo, branch, baseOid) {
 }
 
 export const USAGE = `Usage: GITHUB_TOKEN=… node tooling/release/push-github-signed-commit.mjs \\
-  --branch <name> --message <headline> [--trailer "<Name>: <value>"]… [--base-ref main] [--repo owner/name]`;
+  --branch <name> --message <headline> [--body-file <path>] [--trailer "<Name>: <value>"]… [--base-ref main] [--repo owner/name]`;
 
 export async function main(argv = process.argv.slice(2)) {
-  const { branch, headline, trailers, baseRef, repo, help } = parseArgs(argv);
+  const { branch, headline, bodyFile, trailers, baseRef, repo, help } = parseArgs(argv);
   if (help) {
     console.log(USAGE);
     return 0;
@@ -314,6 +338,7 @@ export async function main(argv = process.argv.slice(2)) {
 
   const message = composeCommitMessage({
     headline: /** @type {string} */ (headline),
+    body: bodyFile ? readFileSync(bodyFile, "utf8") : "",
     trailers,
   });
 

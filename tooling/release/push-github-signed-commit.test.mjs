@@ -72,6 +72,19 @@ test("parseArgs collects repeated --trailer flags and honours --base-ref", () =>
   );
 });
 
+test("parseArgs accepts an optional --body-file and rejects a missing value", () => {
+  const parsed = parseArgs(
+    ["--branch", "b", "--message", "m", "--repo", "42ch/nexus", "--body-file", "summary.md"],
+    {},
+  );
+  assert.equal(parsed.bodyFile, "summary.md");
+  assert.equal(parsed.trailers.length, 0);
+  assert.throws(
+    () => parseArgs(["--branch", "b", "--message", "m", "--repo", "42ch/nexus", "--body-file"], {}),
+    /--body-file requires a path/,
+  );
+});
+
 test("parseArgs reports --help without requiring the other flags", () => {
   assert.equal(parseArgs(["--help"], {}).help, true);
 });
@@ -90,9 +103,57 @@ test("composeCommitMessage appends the trailer block and truncates long headline
       body: "Nexus-Prerelease: true",
     },
   );
+  assert.deepEqual(
+    composeCommitMessage({
+      headline: "chore(release): bump version to 0.2.0",
+      body: "First release.\n\nHighlights here.",
+      trailers: ["Nexus-Prerelease: true"],
+    }),
+    {
+      headline: "chore(release): bump version to 0.2.0",
+      body: "First release.\n\nHighlights here.\nNexus-Prerelease: true",
+    },
+  );
+  assert.deepEqual(composeCommitMessage({ headline: "h", body: "Summary line" }), {
+    headline: "h",
+    body: "Summary line",
+  });
+  assert.deepEqual(
+    composeCommitMessage({ headline: "h", body: "  \n ", trailers: ["Nexus-Prerelease: true"] }),
+    { headline: "h", body: "Nexus-Prerelease: true" },
+  );
   const long = composeCommitMessage({ headline: "x".repeat(300) });
   assert.equal(long.headline.length, 256);
   assert.ok(long.headline.endsWith("..."));
+});
+
+test("the release tag annotation reads the summary line, not the trailer", () => {
+  // Mirrors `.github/workflows/release.yml`: the tag job annotates with the
+  // first usable line of the bump commit body, read as
+  // `git show -s --format=%B <commit> | awk 'NR == 1 { next } NF { print; exit }'`.
+  // `%B` renders `headline\n\nbody`, so line 1 is the subject.
+  const firstUsableBodyLine = (message) =>
+    message
+      .split("\n")
+      .slice(1)
+      .find((line) => line.trim().length > 0) ?? "";
+  const rawMessage = (message) => `${message.headline}\n\n${message.body ?? ""}`;
+
+  const withSummary = composeCommitMessage({
+    headline: "chore(release): bump version to 0.2.0",
+    body: "Nexus 0.2.0 opens the pre-baseline history.\n\nMore detail.",
+    trailers: ["Nexus-Prerelease: true"],
+  });
+  assert.equal(
+    firstUsableBodyLine(rawMessage(withSummary)),
+    "Nexus 0.2.0 opens the pre-baseline history.",
+  );
+
+  const withoutSummary = composeCommitMessage({
+    headline: "chore(release): bump version to 0.2.0",
+    trailers: ["Nexus-Prerelease: true"],
+  });
+  assert.equal(firstUsableBodyLine(rawMessage(withoutSummary)), "Nexus-Prerelease: true");
 });
 
 test("buildCreateCommitInput maps the GraphQL createCommitOnBranch payload", () => {
