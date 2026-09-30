@@ -14,6 +14,7 @@
  */
 import assert from 'node:assert/strict';
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -699,6 +700,65 @@ test('openFailure captures the typed classification without changing the inactiv
   const reopened = await ConnectionStore.open(healthyDeps);
   assert.equal(reopened.openFailure, null, 'a healthy store reports no failure');
   assert.equal(reopened.getAuth()?.apiKey, 'sk-1');
+});
+
+// ---------------------------------------------------------------------------
+// Diagnosis capture (v1.202 P2-T3): permission denial and every corrupt shape
+// ---------------------------------------------------------------------------
+
+test('a permission-denied store file is openFailure secure_store_unreadable (readFileSync EACCES)', async (t) => {
+  if (process.getuid?.() === 0) {
+    t.skip('EACCES cannot be simulated for the superuser');
+    return;
+  }
+  const deps = makeDeps(t);
+  const bytes = JSON.stringify({ version: 1, config: { endpointUrl: ENDPOINT, hasApiKey: false } });
+  writeFileSync(deps.filePath, bytes);
+  chmodSync(deps.filePath, 0o000);
+  try {
+    const denied = await ConnectionStore.open(deps);
+    assert.equal(errorCode(denied.openFailure), 'secure_store_unreadable');
+    assert.equal(
+      errorMessage(denied.openFailure),
+      'connection store file could not be read (EACCES)',
+    );
+    assert.equal(await denied.get(), null, 'a permission-denied store is never activated');
+    assert.equal(denied.getAuth(), null);
+  } finally {
+    chmodSync(deps.filePath, 0o600);
+  }
+  assert.equal(
+    readFileSync(deps.filePath, 'utf8'),
+    bytes,
+    'a permission denial is not the ENOENT fresh-install path: the bytes stay on disk',
+  );
+});
+
+test('a corrupt store shape is openFailure secure_store_corrupt for every readFile rejection', async (t) => {
+  // Valid JSON that is not a v1 store.
+  const shapeDeps = makeDeps(t);
+  const shapeBytes = JSON.stringify({ version: 2, config: { endpointUrl: ENDPOINT, hasApiKey: false } });
+  writeFileSync(shapeDeps.filePath, shapeBytes);
+  const shapeless = await ConnectionStore.open(shapeDeps);
+  assert.equal(errorCode(shapeless.openFailure), 'secure_store_corrupt');
+  assert.equal(errorMessage(shapeless.openFailure), 'connection store file is not a valid v1 store');
+  assert.equal(await shapeless.get(), null);
+  assert.equal(readFileSync(shapeDeps.filePath, 'utf8'), shapeBytes, 'bytes preserved verbatim');
+
+  // Structurally valid store whose stored credential cannot be decrypted.
+  const credDeps = makeDeps(t, { storage: encryptOnlyStorage });
+  const credBytes = JSON.stringify({
+    version: 1,
+    config: { endpointUrl: ENDPOINT, hasApiKey: true, active: true },
+    credential: Buffer.from('ciphertext-that-needs-another-key').toString('base64'),
+  });
+  writeFileSync(credDeps.filePath, credBytes);
+  const undecryptable = await ConnectionStore.open(credDeps);
+  assert.equal(errorCode(undecryptable.openFailure), 'secure_store_corrupt');
+  assert.equal(errorMessage(undecryptable.openFailure), 'connection store credential is not decryptable');
+  assert.equal(await undecryptable.get(), null, 'an undecryptable credential never half-loads');
+  assert.equal(undecryptable.getAuth(), null);
+  assert.equal(readFileSync(credDeps.filePath, 'utf8'), credBytes, 'bytes preserved verbatim');
 });
 
 // ---------------------------------------------------------------------------

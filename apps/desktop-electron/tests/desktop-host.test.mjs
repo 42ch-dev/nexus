@@ -1207,7 +1207,7 @@ test('a corrupt connection store surfaces the stderr diagnostic and one window-l
   host.dispose();
 });
 
-test('an unreadable store names the unreadable classification, and a healthy store stays silent', async () => {
+test('an unreadable store names the unreadable classification, and a fresh install stays silent', async () => {
   const unreadable = Object.assign(new Error('connection store file could not be read (EACCES)'), {
     code: 'secure_store_unreadable',
   });
@@ -1233,27 +1233,87 @@ test('an unreadable store names the unreadable classification, and a healthy sto
     stderr[0],
     /^\[desktop\] secure_store_unreadable: connection store file could not be read \(EACCES\)\n$/,
   );
-  assert.equal(composed.dialogCalls.length, 1);
-  assert.match(composed.dialogCalls[0].options.message, /unreadable/i);
-  assert.ok(!composed.dialogCalls[0].options.message.includes('corrupt'));
+  assert.equal(composed.dialogCalls.length, 1, 'exactly one notice per launch');
+  const notice = composed.dialogCalls[0];
+  assert.equal(notice.attachedToWindow, false, 'no window exists at the compose seam');
+  assert.equal(notice.options.type, 'warning');
+  assert.equal(notice.options.title, product.name);
+  assert.deepEqual(notice.options.buttons, ['OK']);
+  assert.equal(notice.options.noLink, true);
+  const { message, detail } = notice.options;
+  // classification word (unreadable), never the corrupt wording nor the raw code
+  assert.match(message, /unreadable/i);
+  assert.ok(!message.includes('corrupt'), 'the unreadable case must not claim corrupt');
+  // consequence
+  assert.match(detail, /unavailable/i);
+  assert.match(detail, /start without one/i);
+  // non-destructive assurance
+  assert.match(detail, /[Nn]othing was deleted/);
+  assert.match(detail, /left in place/);
+  assert.match(detail, /replaces it/);
+  // payload discipline: no raw code, no path, no store file name
+  for (const surfaced of [message, detail]) {
+    assert.ok(!surfaced.includes('secure_store_'), 'no raw classification code');
+    assert.ok(!surfaced.includes(composed.paths.userDataDir), 'no path');
+    assert.ok(!surfaced.includes('connection-config.enc'), 'no store file name');
+  }
   composed.host.dispose();
 
-  // Healthy store: no dialog, no diagnostic (acceptance criterion 3).
-  const healthyStderr = [];
+  // Fresh install (ENOENT): no dialog, no diagnostic (acceptance criterion 4).
+  const freshStderr = [];
   process.stderr.write = (chunk) => {
-    healthyStderr.push(String(chunk));
+    freshStderr.push(String(chunk));
     return true;
   };
-  let healthy;
+  let fresh;
   try {
-    healthy = await makeHost();
+    fresh = await makeHost();
   } finally {
     process.stderr.write = originalWrite;
   }
-  assert.equal(healthy.dialogCalls.length, 0, 'a healthy store adds no surface');
-  assert.deepEqual(healthyStderr, [], 'a healthy store writes no diagnostic line');
-  assert.equal(healthy.host.connectionStore.openFailure, null);
-  healthy.host.dispose();
+  assert.equal(
+    existsSync(join(fresh.paths.userDataDir, 'connection-config.enc')),
+    false,
+    'the fixture is a genuine absent store (the ENOENT path)',
+  );
+  assert.equal(fresh.dialogCalls.length, 0, 'a fresh install adds no surface');
+  assert.deepEqual(freshStderr, [], 'a fresh install writes no diagnostic line');
+  assert.equal(fresh.host.connectionStore.openFailure, null);
+  fresh.host.dispose();
+});
+
+test('a healthy existing store adds no surface (acceptance criterion 3)', async () => {
+  const dir = mkdtempSync(join(root, 'store-healthy-'));
+  const userDataDir = join(dir, 'userData');
+  mkdirSync(userDataDir, { recursive: true });
+  // A store the real ConnectionStore opens cleanly: valid v1 shape plus a
+  // credential the injected safeStorage stub can decrypt.
+  writeFileSync(
+    join(userDataDir, 'connection-config.enc'),
+    JSON.stringify({
+      version: 1,
+      config: { endpointUrl: LOCAL_ENDPOINT, hasApiKey: true, active: true },
+      credential: Buffer.from(new TextEncoder().encode('enc:ciphertext')).toString('base64'),
+    }),
+  );
+
+  const stderr = [];
+  const originalWrite = process.stderr.write;
+  process.stderr.write = (chunk) => {
+    stderr.push(String(chunk));
+    return true;
+  };
+  let composed;
+  try {
+    composed = await makeHost({ paths: { userDataDir } });
+  } finally {
+    process.stderr.write = originalWrite;
+  }
+
+  assert.equal(composed.host.connectionStore.openFailure, null, 'a healthy store reports no failure');
+  assert.equal(composed.dialogCalls.length, 0, 'a healthy store adds no dialog');
+  assert.deepEqual(stderr, [], 'a healthy store writes no diagnostic line');
+  composed.host.dispose();
 });
 
 // ---------------------------------------------------------------------------
