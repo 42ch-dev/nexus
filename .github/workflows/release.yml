@@ -2,6 +2,7 @@ name: Release
 
 on:
   pull_request:
+    branches: [main]
     types: [closed]
   push:
     tags: ['v*']
@@ -15,7 +16,6 @@ jobs:
     if: >-
       github.event_name == 'push' ||
       (github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'release'))
-    runs-on: ubuntu-latest
     permissions:
       contents: write
     outputs:
@@ -55,7 +55,7 @@ jobs:
             else
               summary="$(git show -s --format=%B "$merge_sha^2" | awk 'NR == 1 { next } NF { print; exit }')"
               [[ -n "$summary" ]] || { echo '::error::release summary is empty'; exit 1; }
-              git tag -a "$tag" -m "$summary" "$merge_sha"
+              GIT_COMMITTER_NAME='github-actions[bot]' GIT_COMMITTER_EMAIL='41898282+github-actions[bot]@users.noreply.github.com' git tag -a "$tag" -m "$summary" "$merge_sha"
               git push origin "refs/tags/$tag"
             fi
           fi
@@ -97,6 +97,9 @@ jobs:
     name: Build unsigned macOS desktop packages
     needs: [tag, verify-version]
     if: needs.tag.result == 'success' && needs.verify-version.result == 'success'
+    permissions:
+      contents: read
+      actions: read
     uses: ./.github/workflows/desktop-electron-build.yml
 
   publish:
@@ -155,7 +158,9 @@ jobs:
               filename="Nexus-${version}-darwin-${arch}-unsigned.$suffix"
               line="$(awk -v name="$filename" '$2 == name || $2 == "*"name { print; found=1 } END { if (!found) exit 1 }' "$sums")" || { echo "::error::checksum absent for $filename"; exit 1; }
               printf '%s\n' "$line" >> "$body"
-            done
+          done
+          printf '\nDesktop producer sidecars are uploaded unchanged as architecture-specific assets:\n' >> "$body"
+          printf '%s\n' "Nexus-${version}-darwin-arm64-SHA256SUMS" "Nexus-${version}-darwin-arm64-receipt.json" "Nexus-${version}-darwin-x64-SHA256SUMS" "Nexus-${version}-darwin-x64-receipt.json" >> "$body"
           done
           cat >> "$body" <<'FOOTER'
           ```
@@ -182,7 +187,9 @@ jobs:
             require_file "$dir/Nexus-${version}-darwin-${arch}-unsigned.dmg"
             require_file "$dir/Nexus-${version}-darwin-${arch}-unsigned.app.zip"
             require_file "$dir/receipt.json"
+            files+=("$dir/receipt.json#Nexus-${version}-darwin-${arch}-receipt.json")
             require_file "$dir/SHA256SUMS"
+            files+=("$dir/SHA256SUMS#Nexus-${version}-darwin-${arch}-SHA256SUMS")
           done
           echo "RELEASE_ASSETS<<EOF" >> "$GITHUB_ENV"
           printf '%s\n' "${files[@]}" >> "$GITHUB_ENV"
@@ -198,11 +205,14 @@ jobs:
           set -euo pipefail
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --notes-file "$RELEASE_BODY"
+            release_id="$(gh release view "$TAG" --json databaseId --jq .databaseId)"
+            gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" --method PATCH -F "prerelease=$PRERELEASE" >/dev/null
           else
-            gh release create "$TAG" --title "$TAG" --notes-file "$RELEASE_BODY"
+            release_flags=()
+            [[ "$PRERELEASE" == true ]] && release_flags+=(--prerelease)
+            gh release create "$TAG" --title "$TAG" --notes-file "$RELEASE_BODY" "${release_flags[@]}"
           fi
-          release_id="$(gh release view "$TAG" --json databaseId --jq .databaseId)"
-          gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" --method PATCH -F "prerelease=$PRERELEASE" >/dev/null
           while IFS= read -r asset; do
             [[ -n "$asset" ]] && gh release upload "$TAG" "$asset" --clobber
           done <<< "$RELEASE_ASSETS"
+
