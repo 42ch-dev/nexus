@@ -37,6 +37,12 @@ Behavior knobs (env vars):
 - SHUTDOWN_DELAY_MS=<ms>  delay the `shutdown` reply, so the provider's
   close-wait timeout fires while the retained cleanup owner still runs
   (unconfirmed-close lifecycle arm).
+- SHUTDOWN_GATE_FILE=<path>  HOLD the `shutdown` reply of a SEALED spawn
+  (`--patch` present) until this path exists, so a caller-side deadline
+  can be held to expire while the sealed close is still in flight on a
+  host of any speed (retained sealed-close-ownership arm). The hold is
+  bounded; the ordinary recipe is never gated, so the sealed close stays
+  reachable.
 - INIT_DELAY_MS=<ms>  delay the `initialize` reply, so a probe deadline
   can fire while the sealed runtime START is still in flight (retained
   init-ownership arm).
@@ -100,6 +106,29 @@ def log_marker(method):
         return
     with open(path, "a") as f:
         f.write(json.dumps({"method": method}) + "\n")
+
+
+# Upper bound on a SHUTDOWN_GATE_FILE hold: a missing release surfaces as a
+# test failure instead of a child wedged past the SDK's own close ladder.
+_GATE_TIMEOUT_S = 4.0
+
+
+def wait_for_shutdown_gate():
+    """Hold a SEALED spawn's `shutdown` reply until SHUTDOWN_GATE_FILE exists.
+
+    Sealed spawns only (`--patch` present): the ordinary recipe must stay
+    free to complete, otherwise the deadline under test could never reach
+    the sealed close. Bounded so a missing release cannot hang the child.
+    """
+    path = os.environ.get("SHUTDOWN_GATE_FILE")
+    if not path:
+        return
+    deadline = time.monotonic() + _GATE_TIMEOUT_S
+    while not os.path.exists(path):
+        if time.monotonic() >= deadline:
+            return
+        time.sleep(0.01)
+
 
 def reply(req, result):
     send({"jsonrpc": "2.0", "id": req["id"], "result": result})
@@ -246,6 +275,8 @@ def handle_request(req):
         return
 
     if method == "shutdown":
+        if "--patch" in sys.argv:
+            wait_for_shutdown_gate()
         delay_ms = int(os.environ.get("SHUTDOWN_DELAY_MS", "0"))
         if delay_ms > 0:
             time.sleep(delay_ms / 1000.0)
