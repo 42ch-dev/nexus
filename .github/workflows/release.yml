@@ -12,6 +12,7 @@ permissions:
 
 jobs:
   tag:
+    runs-on: ubuntu-latest
     name: Tag release commit and resolve prerelease
     if: >-
       github.event_name == 'push' ||
@@ -187,9 +188,13 @@ jobs:
             require_file "$dir/Nexus-${version}-darwin-${arch}-unsigned.dmg"
             require_file "$dir/Nexus-${version}-darwin-${arch}-unsigned.app.zip"
             require_file "$dir/receipt.json"
-            files+=("$dir/receipt.json#Nexus-${version}-darwin-${arch}-receipt.json")
+            staged_receipt="$assets/Nexus-${version}-darwin-${arch}-receipt.json"
+            cp "$dir/receipt.json" "$staged_receipt"
+            files+=("$staged_receipt")
             require_file "$dir/SHA256SUMS"
-            files+=("$dir/SHA256SUMS#Nexus-${version}-darwin-${arch}-SHA256SUMS")
+            staged_sums="$assets/Nexus-${version}-darwin-${arch}-SHA256SUMS"
+            cp "$dir/SHA256SUMS" "$staged_sums"
+            files+=("$staged_sums")
           done
           echo "RELEASE_ASSETS<<EOF" >> "$GITHUB_ENV"
           printf '%s\n' "${files[@]}" >> "$GITHUB_ENV"
