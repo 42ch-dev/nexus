@@ -62,6 +62,9 @@ function makeFakeElectron() {
   const forkCalls = [];
   let dialogResponse = 2;
   let openDialogResult = { canceled: true, filePaths: [] };
+  // Default null → the canned immediate response below. A test that needs a
+  // pending or rejected native dialog installs its own responder.
+  let messageBoxHandler = null;
 
   const session = {
     webRequest: {
@@ -176,6 +179,7 @@ function makeFakeElectron() {
     showMessageBox: async (...args) => {
       const options = args.at(-1);
       dialogCalls.push({ attachedToWindow: args.length === 2, options });
+      if (messageBoxHandler !== null) return messageBoxHandler(options);
       return { response: dialogResponse, checkboxChecked: false };
     },
     showOpenDialog: async (...args) => {
@@ -240,6 +244,11 @@ function makeFakeElectron() {
     setOpenDialogResult: (result) => {
       openDialogResult = result;
     },
+    // Replaces the canned showMessageBox result with a test-owned promise
+    // (pending / rejected), keeping the dialogCalls recording above.
+    setMessageBoxHandler: (handler) => {
+      messageBoxHandler = handler;
+    },
   };
 }
 
@@ -248,7 +257,15 @@ const product = loadProductIdentity(RESOURCES_DIR);
 async function makeHost(overrides = {}) {
   const electron = makeFakeElectron();
   const dir = mkdtempSync(join(root, 'case-'));
-  const { adapters: adapterOverrides = {}, paths: pathsOverride = {}, ...hostOverrides } = overrides;
+  const {
+    adapters: adapterOverrides = {},
+    paths: pathsOverride = {},
+    patchElectron,
+    ...hostOverrides
+  } = overrides;
+  // Applied before composeDesktopHost so a test can install its own dialog
+  // responder (pending / rejected) on the injected Electron surface.
+  if (typeof patchElectron === 'function') patchElectron(electron);
   const paths = {
     resourcesDir: RESOURCES_DIR,
     distRoot: dir,
@@ -1280,6 +1297,116 @@ test('an unreadable store names the unreadable classification, and a fresh insta
   assert.deepEqual(freshStderr, [], 'a fresh install writes no diagnostic line');
   assert.equal(fresh.host.connectionStore.openFailure, null);
   fresh.host.dispose();
+});
+
+// QC3-S001: the notice is fire-and-forget. Startup must finish while the user
+// has not answered the dialog, and a dialog failure must never fail boot.
+test('a pending warning dialog never blocks startup: the window is usable before the user dismisses it', async () => {
+  const dir = mkdtempSync(join(root, 'store-pending-dialog-'));
+  const userDataDir = join(dir, 'userData');
+  mkdirSync(userDataDir, { recursive: true });
+  writeFileSync(join(userDataDir, 'connection-config.enc'), 'not a valid store');
+
+  let settleNotice = null;
+  let deadline;
+  const stderr = [];
+  const originalWrite = process.stderr.write;
+  process.stderr.write = (chunk) => {
+    stderr.push(String(chunk));
+    return true;
+  };
+  let composed;
+  try {
+    composed = await Promise.race([
+      makeHost({
+        paths: { userDataDir },
+        patchElectron: (electron) => {
+          electron.setMessageBoxHandler(
+            () =>
+              new Promise((resolve) => {
+                settleNotice = resolve;
+              }),
+          );
+        },
+      }),
+      // Bounded deadline: an accidental `await` on the notice would leave the
+      // host uncomposed for as long as the user stays away from the dialog.
+      new Promise((_, reject) => {
+        deadline = setTimeout(
+          () => reject(new Error('composition awaited the pending warning dialog')),
+          3_000,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(deadline);
+    process.stderr.write = originalWrite;
+  }
+  const { host, electron, dialogCalls } = composed;
+
+  // The notice is out and the user has not answered it…
+  assert.equal(dialogCalls.length, 1, 'exactly one notice per launch');
+  assert.equal(dialogCalls[0].attachedToWindow, false, 'no window exists at the compose seam');
+  assert.equal(typeof settleNotice, 'function', 'the notice promise is still pending');
+  assert.equal(stderr.length, 1, 'the durable diagnostic landed while the dialog waits');
+  assert.match(stderr[0], /^\[desktop\] secure_store_corrupt: /);
+
+  // …yet startup finished and the host owns a real, usable window.
+  assert.equal(electron.windows.length, 1);
+  const win = electron.windows[0];
+  assert.equal(win.destroyed, false);
+  assert.equal(win.loadedUrl, 'nexus://app/index.html');
+  assert.equal(host.generation(), 1);
+  assert.deepEqual(await host.handlers.get_daemon_status(), { state: 'stopped', port: 8420 });
+
+  // Settle the deferred dialog and clean up.
+  settleNotice({ response: 0, checkboxChecked: false });
+  await new Promise((resolve) => setImmediate(resolve));
+  host.dispose();
+});
+
+test('a rejected warning dialog never fails startup and leaves no unhandled rejection', async () => {
+  const dir = mkdtempSync(join(root, 'store-rejected-dialog-'));
+  const userDataDir = join(dir, 'userData');
+  mkdirSync(userDataDir, { recursive: true });
+  writeFileSync(join(userDataDir, 'connection-config.enc'), 'not a valid store');
+
+  const stderr = [];
+  const originalWrite = process.stderr.write;
+  process.stderr.write = (chunk) => {
+    stderr.push(String(chunk));
+    return true;
+  };
+  const unhandled = [];
+  const onUnhandled = (reason) => unhandled.push(reason);
+  process.on('unhandledRejection', onUnhandled);
+  let composed;
+  try {
+    composed = await makeHost({
+      paths: { userDataDir },
+      patchElectron: (electron) => {
+        electron.setMessageBoxHandler(() =>
+          Promise.reject(new Error('native dialog backend unavailable')),
+        );
+      },
+    });
+    // Give an unhandled rejection the tick it needs to surface.
+    await new Promise((resolve) => setImmediate(resolve));
+  } finally {
+    process.removeListener('unhandledRejection', onUnhandled);
+    process.stderr.write = originalWrite;
+  }
+  const { host, electron, dialogCalls } = composed;
+
+  assert.equal(dialogCalls.length, 1, 'the notice was still attempted');
+  assert.equal(stderr.length, 1, 'the durable diagnostic survives a failed dialog');
+  assert.match(stderr[0], /^\[desktop\] secure_store_corrupt: /);
+  assert.equal(electron.windows.length, 1, 'startup still produced the host window');
+  assert.equal(electron.windows[0].destroyed, false);
+  assert.deepEqual(await host.handlers.get_daemon_status(), { state: 'stopped', port: 8420 });
+  assert.deepEqual(unhandled, [], 'the discarded dialog promise is handled, never unhandled');
+
+  host.dispose();
 });
 
 test('a healthy existing store adds no surface (acceptance criterion 3)', async () => {
