@@ -3,6 +3,12 @@ name: Electron Desktop Unsigned Build
 on:
   workflow_dispatch:
   workflow_call:
+    inputs:
+      release_run_identity:
+        description: Caller release workflow run ID for isolated producer concurrency
+        required: false
+        type: string
+        default: ''
   push:
     branches: [main, iteration/v1.192]
     paths:
@@ -31,8 +37,8 @@ on:
       - '.github/workflows/desktop-electron-build.yml'
 
 concurrency:
-  group: ${{ github.event_name == 'workflow_call' && format('desktop-electron-unsigned-release-{0}', github.run_id) || format('desktop-electron-unsigned-{0}', github.ref) }}
-  cancel-in-progress: true
+  group: ${{ inputs.release_run_identity != '' && format('release-{0}', inputs.release_run_identity) || format('{0}-{1}', github.workflow, github.ref) }}
+  cancel-in-progress: ${{ inputs.release_run_identity == '' }}
 
 permissions:
   contents: read

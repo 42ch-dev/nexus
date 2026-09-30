@@ -16,11 +16,20 @@ name: Runtime Build
 # Trigger set: manual runs and release-pipeline reusable calls.
 on:
   workflow_dispatch:
+  push:
+    tags:
+      - 'runtime-v*'
   workflow_call:
+    inputs:
+      release_run_identity:
+        description: Caller release workflow run ID for isolated producer concurrency
+        required: false
+        type: string
+        default: ''
 
 concurrency:
-  group: ${{ github.event_name == 'workflow_call' && format('runtime-build-release-{0}', github.run_id) || format('runtime-build-{0}', github.ref) }}
-  cancel-in-progress: true
+  group: ${{ inputs.release_run_identity != '' && format('release-{0}', inputs.release_run_identity) || format('{0}-{1}', github.workflow, github.ref) }}
+  cancel-in-progress: ${{ inputs.release_run_identity == '' }}
 
 permissions:
   contents: read

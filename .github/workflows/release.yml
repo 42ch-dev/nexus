@@ -93,7 +93,8 @@ jobs:
     needs: [tag, verify-version]
     if: needs.tag.result == 'success' && needs.verify-version.result == 'success'
     uses: ./.github/workflows/runtime-build.yml
-
+    with:
+      release_run_identity: '${{ github.run_id }}'
   desktop-electron-build:
     name: Build unsigned macOS desktop packages
     needs: [tag, verify-version]
@@ -102,7 +103,8 @@ jobs:
       contents: read
       actions: read
     uses: ./.github/workflows/desktop-electron-build.yml
-
+    with:
+      release_run_identity: '${{ github.run_id }}'
   publish:
     name: Publish GitHub Release
     needs: [tag, verify-version, runtime-build, desktop-electron-build]
