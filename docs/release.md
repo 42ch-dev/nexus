@@ -130,7 +130,7 @@ Merging the `release`-labeled pull request into `main` starts
 | Verify | `verify-version` | `tag` succeeded | `Assert lockstep version`: checks out `refs/tags/v<version>` and asserts the four hand-written version files are equal (`assert-lockstep-version.mjs`). |
 | Producers | `runtime-build` | `tag` and `verify-version` succeeded | Reusable call into `runtime-build.yml` (job `runtime-build`): the three-platform matrix (`windows-x64`, `macos-arm64`, `linux-x64`) builds `nexus-runtime-<os>-<arch>.zip` plus a `.sha256` sidecar, and smoke-tests `--version` on each runner. |
 | Producers | `desktop-electron-build` | `tag` and `verify-version` succeeded | Reusable call into `desktop-electron-build.yml` (job `package`): the two macOS legs (darwin arm64, darwin x64) package `Nexus-<version>-darwin-<arch>-unsigned.dmg`, `Nexus-<version>-darwin-<arch>-unsigned.app.zip`, `receipt.json` and `SHA256SUMS`, with signing-dispatch sentinels proving no codesign/notarize call ran. |
-| Publish | `publish` | all four jobs succeeded | `Download runtime artifacts` and `Download desktop artifacts` collect the five artifact sets; `Assemble release notes and assets` renders the Release body (changelog section plus the fixed footer) and stages the complete 14-asset set; `Stage, upload, and publish GitHub Release` creates or reconciles the Release as a draft with the effective prerelease value, uploads all assets with `--clobber`, and clears `draft` only after every upload succeeds; an existing Release that the retry returns to draft is best-effort restored to the draft/prerelease state it had on entry if a later step fails, so a failed retry never leaves a published Release hidden. |
+| Publish | `publish` | all four jobs succeeded | `Download runtime artifacts` and `Download desktop artifacts` collect the five artifact sets; `Assemble release notes and assets` renders the Release body (changelog section plus the fixed footer) and stages the complete 14-asset set; `Stage, upload, and publish GitHub Release` creates or reconciles the Release as a draft with the effective prerelease value, uploads all assets with `--clobber`, and clears `draft` only after every upload succeeds; on failure an existing Release that the retry returned to draft is restored to the draft/prerelease state it had on entry while no asset has been replaced, and is deliberately left unpublished — never restored to public — once any asset replacement has begun, so a partial old/new asset set is never downloadable. |
 
 Permissions stay least-privilege: `new-release.yml` requests
 `contents: write` + `pull-requests: write`, the release workflow grants
@@ -178,9 +178,15 @@ metadata only. The workflow creates a draft with `--draft`, adding
 reconciled to draft state and the same prerelease value. Only after every asset
 upload succeeds does the workflow clear `draft`, retaining the effective
 prerelease value. Because an existing Release may already be public, the step
-records its draft/prerelease state on entry and restores it on the failure path
-(an `EXIT` trap), so a failed retry returns a published Release to public
-instead of leaving it hidden.
+records its draft/prerelease state on entry and handles the failure path (an
+`EXIT` trap) with two outcomes. If no asset has been replaced yet, visibility is
+preserved: the recorded draft/prerelease state is best-effort restored, so a
+failed retry leaves a published Release public. Once at least one `--clobber`
+upload has succeeded, the original assets are gone and the release is instead
+left unpublished — draft — with a loud diagnostic naming the partial state and
+the recovery action, so no download page can serve a mixed old/new set whose
+checksums disagree with the release notes; re-run the workflow to complete the
+replacement.
 
 ## Release body and footer
 
@@ -340,10 +346,13 @@ after every upload succeeds. A failed update remains unpublished for recovery.
   re-creates the tag only if it is missing, then verify → producers → publish
   runs again. Existing Releases are explicitly returned to draft state before
   asset updates; successful completion clears draft and publishes them. The step
-  records the Release's draft/prerelease state before that, and restores it
-  (best-effort, via an `EXIT` trap) if a later step fails, so a retry that
-  started from a published Release returns it to public rather than leaving its
-  download page offline.
+  records the Release's draft/prerelease state before that and restores it
+  (best-effort, via an `EXIT` trap) if a later step fails **before any asset has
+  been replaced**, so a retry that started from a published Release returns it to
+  public. A failure **after** a successful `--clobber` upload cannot restore the
+  original assets, so the release is deliberately left unpublished instead, with
+  an `::error::` diagnostic telling the operator to re-run to finish the
+  replacement — a partial old/new set is never exposed on a public download page.
 - **Tag-push re-entry.** `push: tags: ['v*']` enters the same workflow: the
   `tag` job requires the pushed tag to be annotated, takes the tagged commit as
   the merge commit, and carries it through verify → producers → publish. This
@@ -365,9 +374,10 @@ after every upload succeeds. A failed update remains unpublished for recovery.
   `publish`. During `publish`, both new and existing Releases are kept draft
   while notes and assets are updated; all uploads must succeed before the Release
   becomes public. The workflow implements GitHub Releases API draft behavior by
-  setting `draft=true` before uploads and `draft=false` afterwards, and an
-  existing Release that a retry returned to draft is restored to its entry
-  state on the failure path instead of staying hidden.
+  setting `draft=true` before uploads and `draft=false` afterwards. On failure,
+  an existing Release that a retry returned to draft is restored to its entry
+  state only while no asset has been replaced; once a replacement has begun it
+  stays unpublished (with a diagnostic) rather than exposing a partial set.
 
 ## Signing arrival
 

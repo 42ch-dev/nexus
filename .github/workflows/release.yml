@@ -224,12 +224,23 @@ jobs:
             exit 1
           fi
           # A retry may find an already-published release. Draft-ifying it keeps
-          # the asset set atomic, but a later failure must not leave an existing
-          # release hidden: record the state we found and best-effort restore it
-          # through an EXIT trap until the release is published again.
+          # the asset set atomic, but the failure path must never expose a
+          # half-updated release. Record the state found on entry and default to
+          # restoring it: that is correct while no asset has been replaced yet,
+          # because visibility is preserved and nothing is inconsistent. Once any
+          # `--clobber` upload has succeeded the original assets are gone, so the
+          # release is deliberately left unpublished instead, so no published
+          # download page can serve a mixed old/new asset set whose checksums
+          # disagree with the release notes.
           prior_release_state=""
           release_id=""
+          asset_replaced=""
           restore_prior_release() {
+            [[ -n "$release_id" ]] || return 0
+            if [[ -n "$asset_replaced" ]]; then
+              echo "::error::release $TAG left unpublished after a partial asset replacement: at least one asset was replaced before the failure, so the draft holds an incomplete asset set whose checksums do not match the release notes. Re-run the Release workflow for $TAG to finish the replacement; do not publish the draft by hand."
+              return 0
+            fi
             [[ -n "$prior_release_state" ]] || return 0
             IFS=$'\t' read -r prior_draft prior_prerelease <<< "$prior_release_state"
             gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" --method PATCH \
@@ -253,6 +264,7 @@ jobs:
           while IFS= read -r asset; do
             [[ -n "$asset" ]] || continue
             gh release upload "$TAG" "$asset" --clobber
+            asset_replaced=1
             ((asset_count += 1))
           done <<< "$RELEASE_ASSETS"
           [[ "$asset_count" -eq 14 ]] || { echo "::error::expected 14 release assets, got $asset_count"; exit 1; }
@@ -266,5 +278,6 @@ jobs:
           done <<< "$RELEASE_ASSETS"
           gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" --method PATCH \
             -F draft=false -F "prerelease=$PRERELEASE" >/dev/null
-          # Published: the restore finalizer no longer applies.
+          # Published: the failure finalizer no longer applies.
           prior_release_state=""
+          asset_replaced=""
