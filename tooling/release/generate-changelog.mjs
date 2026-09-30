@@ -219,7 +219,7 @@ export function resolveChangelogBase(repoRoot) {
  */
 export function prependSection(contents, section) {
   const match = contents.match(/^## /m);
-  if (!match || match.index === undefined) {
+  if (match?.index === undefined) {
     return `${contents.replace(/\s*$/, "")}\n\n${section}\n`;
   }
   const before = contents.slice(0, match.index).replace(/\s*$/, "");

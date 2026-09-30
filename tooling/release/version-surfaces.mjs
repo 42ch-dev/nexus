@@ -89,7 +89,7 @@ function escapeRegExp(value) {
  */
 function workspacePackageSection(contents, manifestPath) {
   const match = contents.match(/(?:^|\n)\[workspace\.package\][\s\S]*?(?=\n\[|$)/);
-  if (!match || match.index === undefined) {
+  if (match?.index === undefined) {
     throw new Error(`${manifestPath}: missing [workspace.package] section`);
   }
   const start = match.index + (match[0].startsWith("\n") ? 1 : 0);

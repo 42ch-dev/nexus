@@ -61,7 +61,7 @@ test("garbled duplicates force a prerelease even with signing implemented", () =
   /** Mirrors the release pipeline: an unreadable trailer means prerelease. */
   const effectiveFromMessage = (message, signing) => {
     const trailer = parsePrereleaseTrailer(message);
-    return effectivePrerelease(trailer === null ? true : trailer, signing);
+    return effectivePrerelease(trailer ?? true, signing);
   };
 
   // Readable `false` alone: signing implemented publishes a real Release.

@@ -69,6 +69,9 @@ export function parseArgs(argv, env = process.env) {
     bodyFile: null,
     trailers: [],
     baseRef: "main",
+    // A blank RELEASE_BASE_OID must fail the pin off (null) rather than pin an
+    // empty string, so the falsy fallback is deliberate here.
+    // eslint-disable-next-line typescript/prefer-nullish-coalescing -- blank env must map to null, not ""
     expectedBaseOid: env.RELEASE_BASE_OID?.trim() || null,
     repo: env.GITHUB_REPOSITORY ?? null,
     help: false,
@@ -258,6 +261,9 @@ function apiBaseUrl() {
  * @returns {Promise<unknown>}
  */
 async function ghApi(path, body, method = body === undefined ? "GET" : "POST") {
+  // An empty GITHUB_TOKEN must fall back to GH_TOKEN: the `!token` guard below
+  // already treats an empty token as missing, so the falsy fallback is intended.
+  // eslint-disable-next-line typescript/prefer-nullish-coalescing -- empty token must fall through, not throw
   const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
   if (!token) {
     throw new Error("GITHUB_TOKEN (or GH_TOKEN) is required");
