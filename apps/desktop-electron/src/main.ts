@@ -478,14 +478,17 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
     }));
   // An existing store that could not be activated is surfaced on both
   // channels: the durable main-process diagnostic (the legacyCleanupFailure
-  // shape) and a one-shot window-less notice. The compose seam runs after
+  // stderr shape, extended with the typed classification code) and a one-shot
+  // window-less notice. The compose seam runs after
   // `whenReady` and before any window exists, and `.catch` keeps a dialog
   // failure from ever failing boot; the stderr write stays the durable
-  // record. The copy names the classification in user-facing words and never
-  // carries the raw code, a file path, or secret material.
+  // record. The dialog copy names the classification in user-facing words and
+  // never carries the raw code, a file path, or secret material.
   if (connectionStore.openFailure !== null) {
     const openFailureCode = errorCode(connectionStore.openFailure);
-    process.stderr.write(`[desktop] ${errorMessage(connectionStore.openFailure)}\n`);
+    process.stderr.write(
+      `[desktop] ${openFailureCode}: ${errorMessage(connectionStore.openFailure)}\n`,
+    );
     void e.dialog
       .showMessageBox({
         type: 'warning',

@@ -1171,9 +1171,13 @@ test('a corrupt connection store surfaces the stderr diagnostic and one window-l
   }
   const { host, dialogCalls } = composed;
 
-  // (a) durable diagnostic on the existing main-process channel.
+  // (a) durable diagnostic on the existing main-process channel: the typed
+  // classification code plus the sanitized message, under the fixed prefix.
   assert.equal(stderr.length, 1);
-  assert.match(stderr[0], /^\[desktop\] connection store file is not valid JSON\n$/);
+  assert.match(
+    stderr[0],
+    /^\[desktop\] secure_store_corrupt: connection store file is not valid JSON\n$/,
+  );
 
   // (b) exactly one non-blocking, window-less notice with the pinned copy.
   assert.equal(dialogCalls.length, 1);
@@ -1225,15 +1229,29 @@ test('an unreadable store names the unreadable classification, and a healthy sto
   } finally {
     process.stderr.write = originalWrite;
   }
-  assert.match(stderr[0], /^\[desktop\] connection store file could not be read \(EACCES\)\n$/);
+  assert.match(
+    stderr[0],
+    /^\[desktop\] secure_store_unreadable: connection store file could not be read \(EACCES\)\n$/,
+  );
   assert.equal(composed.dialogCalls.length, 1);
   assert.match(composed.dialogCalls[0].options.message, /unreadable/i);
   assert.ok(!composed.dialogCalls[0].options.message.includes('corrupt'));
   composed.host.dispose();
 
   // Healthy store: no dialog, no diagnostic (acceptance criterion 3).
-  const healthy = await makeHost();
+  const healthyStderr = [];
+  process.stderr.write = (chunk) => {
+    healthyStderr.push(String(chunk));
+    return true;
+  };
+  let healthy;
+  try {
+    healthy = await makeHost();
+  } finally {
+    process.stderr.write = originalWrite;
+  }
   assert.equal(healthy.dialogCalls.length, 0, 'a healthy store adds no surface');
+  assert.deepEqual(healthyStderr, [], 'a healthy store writes no diagnostic line');
   assert.equal(healthy.host.connectionStore.openFailure, null);
   healthy.host.dispose();
 });
