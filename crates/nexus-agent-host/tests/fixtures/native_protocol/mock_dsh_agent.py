@@ -43,6 +43,12 @@ Behavior knobs (env vars):
   host of any speed (retained sealed-close-ownership arm). The hold is
   bounded; the ordinary recipe is never gated, so the sealed close stays
   reachable.
+- INIT_GATE_FILE=<path>  HOLD the `initialize` reply of a SEALED spawn
+  (`--patch` present) until this path exists, so a caller-side deadline
+  can be held to expire while the sealed start is still in flight on a
+  host of any speed (retained sealed-init-ownership arm). The hold is
+  bounded; the ordinary recipe is never gated, so the sealed start stays
+  reachable.
 - INIT_DELAY_MS=<ms>  delay the `initialize` reply, so a probe deadline
   can fire while the sealed runtime START is still in flight (retained
   init-ownership arm).
@@ -108,19 +114,23 @@ def log_marker(method):
         f.write(json.dumps({"method": method}) + "\n")
 
 
-# Upper bound on a SHUTDOWN_GATE_FILE hold: a missing release surfaces as a
-# test failure instead of a child wedged past the SDK's own close ladder.
+# Upper bound on a gate hold: a missing release surfaces as a test failure
+# instead of a child wedged past the SDK's own handshake/close ladder.
 _GATE_TIMEOUT_S = 4.0
 
 
-def wait_for_shutdown_gate():
-    """Hold a SEALED spawn's `shutdown` reply until SHUTDOWN_GATE_FILE exists.
+def hold_until_gate(env_var):
+    """Hold a SEALED spawn's reply until the file named by `env_var` exists.
 
-    Sealed spawns only (`--patch` present): the ordinary recipe must stay
-    free to complete, otherwise the deadline under test could never reach
-    the sealed close. Bounded so a missing release cannot hang the child.
+    `SHUTDOWN_GATE_FILE` holds the sealed `shutdown` reply (a caller-side
+    deadline can expire while the sealed close is still in flight);
+    `INIT_GATE_FILE` holds the sealed `initialize` reply (a caller-side
+    deadline can expire while the sealed start is still in flight). Sealed
+    spawns only (`--patch` present): the ordinary recipe must stay free to
+    complete, otherwise the deadline under test could never reach the
+    sealed phase. Bounded so a missing release cannot hang the child.
     """
-    path = os.environ.get("SHUTDOWN_GATE_FILE")
+    path = os.environ.get(env_var)
     if not path:
         return
     deadline = time.monotonic() + _GATE_TIMEOUT_S
@@ -172,6 +182,8 @@ def handle_request(req):
             })
             return
         delay_ms = int(os.environ.get("INIT_DELAY_MS", "0"))
+        if "--patch" in sys.argv:
+            hold_until_gate("INIT_GATE_FILE")
         if delay_ms > 0:
             time.sleep(delay_ms / 1000.0)
         name = "deepseek-harness-sdk-runtime"
@@ -276,7 +288,7 @@ def handle_request(req):
 
     if method == "shutdown":
         if "--patch" in sys.argv:
-            wait_for_shutdown_gate()
+            hold_until_gate("SHUTDOWN_GATE_FILE")
         delay_ms = int(os.environ.get("SHUTDOWN_DELAY_MS", "0"))
         if delay_ms > 0:
             time.sleep(delay_ms / 1000.0)

@@ -4542,46 +4542,72 @@ mod tests {
     /// sealed runtime START drops the wait, never the lease's only path
     /// owner — the retained spawned owner (held since provisioning)
     /// still drives the start to completion, confirms the close, and
-    /// removes the lease. No reliance on SDK `kill_on_drop`. (The
-    /// fixture delays the `initialize` reply so the deadline lands
-    /// mid-start; on the previous implementation the dropped start left
-    /// the provisioned lease behind and this test fails.)
+    /// removes the lease. No reliance on SDK `kill_on_drop`.
+    ///
+    /// The sealed start is HELD open (the fixture gates the sealed
+    /// `initialize` reply on `INIT_GATE_FILE`, and the test releases it
+    /// only after observing the deadline), so the start provably cannot
+    /// complete while the deadline is pending: the deadline always lands
+    /// mid-start regardless of host speed. Only the ordinary recipe plus
+    /// the sealed spawn has to fit the budget, and 2000ms leaves several
+    /// times the fixture work this host needs. The previous form delayed
+    /// BOTH `initialize` replies by 600ms against a 1000ms budget, leaving
+    /// only ~400ms for two fixture startups: on loaded CI runners the
+    /// deadline expired during the ORDINARY start instead, the dropped
+    /// `probe_recipes` future never reached the sealed recipe, and only
+    /// one `_spawn` was ever recorded.
     #[tokio::test]
     async fn probe_init_timeout_retains_sealed_owner_and_completes_cleanup() {
         let _env_lock = lock_test_env().await;
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let req_log = temp_dir.path().join("reqs.jsonl");
         let dsh_home = temp_dir.path().join("dsh-home");
+        // Released only after the probe deadline has been observed, so the
+        // sealed start is still in flight at that moment by construction.
+        let release_sealed_start = temp_dir.path().join("release-sealed-start");
         let mut env = stub_env(&req_log, &dsh_home);
-        // 600ms initialize delay: the ordinary recipe (init 600 + close
-        // ~0) fits the 1000ms budget; the sealed start (beginning after
-        // the ordinary close) cannot — the probe deadline fires during
-        // the sealed START.
-        env.insert("INIT_DELAY_MS".to_string(), "600".to_string());
+        env.insert(
+            "INIT_GATE_FILE".to_string(),
+            release_sealed_start.to_string_lossy().into_owned(),
+        );
         let provider = stub_provider("test-dsh-probeinit", env);
 
-        let probe = provider.probe(test_probe_request(1000)).await;
+        // 2000ms budget: the ordinary recipe (start + immediate close)
+        // plus the sealed spawn consume a small fraction of it, leaving
+        // the rest as slack for fixture startup — an order of magnitude
+        // more than the timing assumption this test previously made.
+        let probe = provider.probe(test_probe_request(2000)).await;
         assert!(
             matches!(probe, Err(HostError::OperationTimeout { .. })),
-            "the probe deadline fires during the sealed start: {probe:?}"
+            "the probe deadline fires during the held sealed start: {probe:?}"
         );
+        std::fs::write(&release_sealed_start, b"release").expect("release the held sealed start");
 
         // The retained sealed owner keeps running past the dropped wait:
         // the start completes, the close is confirmed, and the lease is
         // removed.
-        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
-        let entries = req_log_entries(&req_log);
-        let spawns = spawn_records(&entries);
-        assert_eq!(spawns.len(), 2, "both recipes were spawned: {entries:?}");
+        let entries = wait_for_observed(
+            "both recipes to be spawned",
+            // The fixture may not have written anything yet at first poll.
+            || {
+                std::fs::read_to_string(&req_log)
+                    .map(|text| parse_req_log(&text))
+                    .unwrap_or_default()
+            },
+            |entries| spawn_records(entries).len() == 2,
+        )
+        .await;
         let sealed_home = PathBuf::from(
-            spawns[1]["dsh_home"]
+            spawn_records(&entries)[1]["dsh_home"]
                 .as_str()
                 .expect("sealed dsh_home logged"),
         );
-        assert!(
-            !sealed_home.exists(),
-            "the retained init owner completed the close and removed the lease"
-        );
+        wait_for_observed(
+            "the retained init owner to complete the close and remove the lease",
+            || sealed_home.exists(),
+            |exists| !exists,
+        )
+        .await;
         assert!(
             provider
                 .retained_leases
