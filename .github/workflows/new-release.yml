@@ -87,6 +87,7 @@ jobs:
         run: |
           git fetch origin main --prune
           node tooling/release/assert-version-greater.mjs "$VERSION" --base-ref main
+          echo "RELEASE_BASE_OID=$(git rev-parse origin/main)" >> "$GITHUB_ENV"
           git switch --force-create "release/${VERSION}" origin/main
       - name: Bump version surfaces and lockfile
         env:

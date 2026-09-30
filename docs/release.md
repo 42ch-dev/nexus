@@ -97,8 +97,12 @@ published until the pull request it opens is merged into `main`.
    GitHub-signed through the GraphQL `createCommitOnBranch` API, so it stays
    valid when signature-protected branches arrive — with a
    `Nexus-Prerelease: <toggle>` trailer, and resets the branch to exactly that
-   commit. `Ensure release label exists` and `Open or update release pull
-   request` finish the job by opening or updating a pull request titled
+   commit. The commit step is pinned to the `origin/main` OID the branch was
+   created from (`RELEASE_BASE_OID`): if `main` advanced in between, the helper
+   refuses without touching the branch, naming both OIDs — re-dispatch the same
+   version so the bump is rebuilt on the current `main` instead of reverting the
+   intervening changes. `Ensure release label exists` and `Open or update release
+   pull request` finish the job by opening or updating a pull request titled
    `chore(release): bump version to <version>`, labeled `release`, whose body is
    the `summary` followed by the new changelog section.
 7. **Review, then merge with a merge commit.** Review the diff (the version

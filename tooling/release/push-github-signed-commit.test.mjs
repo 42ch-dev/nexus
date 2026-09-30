@@ -1,20 +1,27 @@
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import {
   buildCreateCommitInput,
   collectFileChanges,
   composeCommitMessage,
   parseArgs,
+  verifyPinnedBase,
 } from "./push-github-signed-commit.mjs";
 import {
   cleanupTempRepo,
+  commitFile,
   createTempRepo,
   FIXTURE_BASELINE_VERSION,
   FIXTURE_TARGET_VERSION,
+  git,
   gitOk,
   initGitRepo,
   readRepoFile,
   removeRepoFile,
+  runReleaseScript,
   writeRepoFile,
 } from "./test-harness.mjs";
 
@@ -87,6 +94,31 @@ test("parseArgs accepts an optional --body-file and rejects a missing value", ()
 
 test("parseArgs reports --help without requiring the other flags", () => {
   assert.equal(parseArgs(["--help"], {}).help, true);
+});
+
+test("parseArgs takes the expected base OID from --expected-base-oid or RELEASE_BASE_OID", () => {
+  const oid = "a".repeat(40);
+  assert.equal(parseArgs(["--branch", "b", "--message", "m", "--repo", "o/r"], {}).expectedBaseOid, null);
+  assert.equal(
+    parseArgs(["--branch", "b", "--message", "m", "--repo", "o/r"], { RELEASE_BASE_OID: oid })
+      .expectedBaseOid,
+    oid,
+  );
+  assert.equal(
+    parseArgs(
+      ["--branch", "b", "--message", "m", "--repo", "o/r", "--expected-base-oid", oid],
+      { RELEASE_BASE_OID: "b".repeat(40) },
+    ).expectedBaseOid,
+    oid,
+  );
+  // A blank flag/env value must not disable the check with an empty string.
+  assert.equal(
+    parseArgs(
+      ["--branch", "b", "--message", "m", "--repo", "o/r", "--expected-base-oid", "  "],
+      { RELEASE_BASE_OID: "   " },
+    ).expectedBaseOid,
+    null,
+  );
 });
 
 test("composeCommitMessage appends the trailer block and truncates long headlines", () => {
@@ -233,5 +265,103 @@ test("collectFileChanges handles renames as delete plus add", () => {
     );
   } finally {
     cleanupTempRepo(dir);
+  }
+});
+
+test("verifyPinnedBase passes on a match, is skipped without an expected OID, and refuses a stale base", () => {
+  const pinned = "a".repeat(40);
+  assert.equal(verifyPinnedBase(pinned, pinned, "main"), null);
+  assert.equal(verifyPinnedBase(null, pinned, "main"), null);
+  assert.equal(verifyPinnedBase(undefined, pinned, "main"), null);
+
+  assert.throws(() => verifyPinnedBase(pinned, "b".repeat(40), "main"), (error) => {
+    assert.match(error.message, /Stale base/);
+    assert.ok(error.message.includes(pinned));
+    assert.ok(error.message.includes("b".repeat(40)));
+    assert.match(error.message, /Re-dispatch/);
+    return true;
+  });
+});
+
+/**
+ * Scratch repo whose `origin` is a local bare repo, with `main` advanced past
+ * the commit the working tree was prepared from — the QC2-001 race shape.
+ *
+ * @returns {{ root: string; origin: string; work: string; preparedOid: string; advancedOid: string }}
+ */
+function createAdvancedOriginFixture() {
+  const root = mkdtempSync(join(tmpdir(), "nexus-release-origin-"));
+  const origin = join(root, "origin.git");
+  const work = join(root, "work");
+  gitOk(root, ["init", "-q", "--bare", "-b", "main", origin]);
+  mkdirSync(work, { recursive: true });
+  gitOk(work, ["init", "-q", "-b", "main"]);
+  gitOk(work, ["config", "user.email", "release-test@example.com"]);
+  gitOk(work, ["config", "user.name", "Release Test"]);
+  gitOk(work, ["config", "commit.gpgsign", "false"]);
+  writeRepoFile(work, "package.json", '{"name":"scratch","version":"9.8.7"}\n');
+  gitOk(work, ["add", "-A"]);
+  gitOk(work, ["commit", "-q", "-m", "init"]);
+  gitOk(work, ["remote", "add", "origin", origin]);
+  gitOk(work, ["push", "-q", "origin", "main"]);
+  const preparedOid = gitOk(work, ["rev-parse", "HEAD"]);
+
+  const advancedOid = commitFile(work, "main-only.txt", "main advanced\n", "main advances");
+  gitOk(work, ["push", "-q", "origin", "main"]);
+  return { root, origin, work, preparedOid, advancedOid };
+}
+
+test("the helper refuses a stale prepared base instead of reverting the newer main", () => {
+  const { root, origin, work, preparedOid, advancedOid } = createAdvancedOriginFixture();
+  try {
+    // Faithful race: the bump was prepared on the old base, then main advanced.
+    gitOk(work, ["reset", "-q", "--hard", preparedOid]);
+    writeRepoFile(work, "package.json", '{"name":"scratch","version":"9.8.8"}\n');
+
+    // What the unguarded helper would have committed: main's added file shows
+    // up as a deletion against the newer origin/main.
+    gitOk(work, ["fetch", "-q", "origin", "main"]);
+    assert.deepEqual(
+      collectFileChanges(work, "main").deletions.map((entry) => entry.path),
+      ["main-only.txt"],
+    );
+
+    const result = runReleaseScript(
+      "push-github-signed-commit.mjs",
+      ["--branch", "release/0.2.0", "--message", "chore(release): bump version to 0.2.0", "--repo", "o/r"],
+      work,
+      { env: { RELEASE_BASE_OID: preparedOid, GITHUB_TOKEN: "", GH_TOKEN: "" } },
+    );
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /Stale base/);
+    assert.ok(result.stderr.includes(preparedOid));
+    assert.ok(result.stderr.includes(advancedOid));
+    assert.match(result.stderr, /Re-dispatch/);
+    // No mutation attempted: the API boundary (token check) was never reached.
+    assert.doesNotMatch(result.stderr, /GITHUB_TOKEN/);
+    assert.doesNotMatch(result.stdout, /COMMIT_OID/);
+    assert.equal(git(origin, ["show-ref", "--verify", "--quiet", "refs/heads/release/0.2.0"]).status, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the helper proceeds past the base pin when the fetched main still matches it", () => {
+  const { root, work, advancedOid } = createAdvancedOriginFixture();
+  try {
+    const result = runReleaseScript(
+      "push-github-signed-commit.mjs",
+      ["--branch", "release/0.2.0", "--message", "chore(release): bump version to 0.2.0", "--repo", "o/r"],
+      work,
+      { env: { RELEASE_BASE_OID: advancedOid, GITHUB_TOKEN: "", GH_TOKEN: "" } },
+    );
+
+    // Reached the next guard, not the stale-base refusal.
+    assert.equal(result.status, 1);
+    assert.doesNotMatch(result.stderr, /Stale base/);
+    assert.match(result.stderr, /No file changes vs origin\/main/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });

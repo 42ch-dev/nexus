@@ -11,6 +11,11 @@
  * Resets the remote `--branch` tip to `--base-ref`, then commits the diff of
  * the current working tree against that base as one signed commit.
  *
+ * The working tree must have been prepared from the same `--base-ref` tip this
+ * run fetches. `--expected-base-oid` (or `RELEASE_BASE_OID`) pins that OID; a
+ * mismatch is a visible refusal instead of a commit that would revert the
+ * intervening `--base-ref` changes.
+ *
  * CLI:
  *   GITHUB_TOKEN=… node tooling/release/push-github-signed-commit.mjs \
  *     --branch release/X.Y.Z \
@@ -18,6 +23,7 @@
  *     [--body-file path/to/summary] \
  *     [--trailer "Nexus-Prerelease: true"] \
  *     [--base-ref main] \
+ *     [--expected-base-oid <oid>] \
  *     [--repo owner/name]
  *
  * Prints `COMMIT_OID=<sha>` for later workflow steps.
@@ -45,16 +51,17 @@ export function git(repoRoot, args) {
 /**
  * @param {string[]} argv
  * @param {NodeJS.ProcessEnv} [env]
- * @returns {{ branch: string | null; headline: string | null; bodyFile: string | null; trailers: string[]; baseRef: string; repo: string | null; help: boolean }}
+ * @returns {{ branch: string | null; headline: string | null; bodyFile: string | null; trailers: string[]; baseRef: string; expectedBaseOid: string | null; repo: string | null; help: boolean }}
  */
 export function parseArgs(argv, env = process.env) {
-  /** @type {{ branch: string | null; headline: string | null; bodyFile: string | null; trailers: string[]; baseRef: string; repo: string | null; help: boolean }} */
+  /** @type {{ branch: string | null; headline: string | null; bodyFile: string | null; trailers: string[]; baseRef: string; expectedBaseOid: string | null; repo: string | null; help: boolean }} */
   const out = {
     branch: null,
     headline: null,
     bodyFile: null,
     trailers: [],
     baseRef: "main",
+    expectedBaseOid: env.RELEASE_BASE_OID?.trim() || null,
     repo: env.GITHUB_REPOSITORY ?? null,
     help: false,
   };
@@ -79,6 +86,8 @@ export function parseArgs(argv, env = process.env) {
       out.trailers.push(trailer.trim());
     } else if (arg === "--base-ref") {
       out.baseRef = argv[++i] ?? out.baseRef;
+    } else if (arg === "--expected-base-oid") {
+      out.expectedBaseOid = argv[++i]?.trim() || null;
     } else if (arg === "--repo") {
       out.repo = argv[++i] ?? null;
     } else if (arg === "--help" || arg === "-h") {
@@ -313,11 +322,40 @@ async function ensureBranchAtOid(repo, branch, baseOid) {
   console.log(`Created refs/heads/${branch} → ${baseOid}`);
 }
 
+/**
+ * Refuse to diff/commit a working tree that was prepared from an older base
+ * than the base ref the helper just fetched.
+ *
+ * The dispatch checks out `origin/<baseRef>` and mutates the version surfaces,
+ * then this helper fetches `<baseRef>` again. If `<baseRef>` advanced in
+ * between, diffing the prepared tree against the new ref would collect the
+ * intervening commits as reversions (and could bypass the greater-than check),
+ * so the only safe answer is a visible refusal: the operator re-dispatches and
+ * the bump is rebuilt on the current base. With no expected OID supplied
+ * (direct/backward-compatible invocation) the check is skipped.
+ *
+ * @param {string | null | undefined} expectedBaseOid
+ * @param {string} actualBaseOid
+ * @param {string} baseRef
+ * @returns {null}
+ */
+export function verifyPinnedBase(expectedBaseOid, actualBaseOid, baseRef = "main") {
+  if (!expectedBaseOid || expectedBaseOid === actualBaseOid) {
+    return null;
+  }
+  throw new Error(
+    `Stale base: the prepared working tree was based on origin/${baseRef} ${expectedBaseOid}, ` +
+      `but origin/${baseRef} is now ${actualBaseOid}. Refusing to create a commit from a stale tree ` +
+      `(it would revert the newer origin/${baseRef} changes). Re-dispatch the "New release" workflow.`,
+  );
+}
+
 export const USAGE = `Usage: GITHUB_TOKEN=… node tooling/release/push-github-signed-commit.mjs \\
-  --branch <name> --message <headline> [--body-file <path>] [--trailer "<Name>: <value>"]… [--base-ref main] [--repo owner/name]`;
+  --branch <name> --message <headline> [--body-file <path>] [--trailer "<Name>: <value>"]… [--base-ref main] [--expected-base-oid <oid>] [--repo owner/name]`;
 
 export async function main(argv = process.argv.slice(2)) {
-  const { branch, headline, bodyFile, trailers, baseRef, repo, help } = parseArgs(argv);
+  const { branch, headline, bodyFile, trailers, baseRef, expectedBaseOid, repo, help } =
+    parseArgs(argv);
   if (help) {
     console.log(USAGE);
     return 0;
@@ -327,6 +365,7 @@ export async function main(argv = process.argv.slice(2)) {
 
   git(repoRoot, ["fetch", "origin", baseRef, "--prune"]);
   const baseOid = git(repoRoot, ["rev-parse", `origin/${baseRef}`]);
+  verifyPinnedBase(expectedBaseOid, baseOid, baseRef);
   const fileChanges = collectFileChanges(repoRoot, baseRef);
 
   if (fileChanges.additions.length === 0 && fileChanges.deletions.length === 0) {
