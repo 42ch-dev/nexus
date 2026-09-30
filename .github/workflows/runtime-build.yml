@@ -13,15 +13,10 @@ name: Runtime Build
 # invoke surface), then packages `nexus-runtime-<os>-<arch>.zip` + `.sha256`,
 # uploads them, and smoke-tests `--version` on the runner itself.
 #
-# Trigger set (locked by Clarify #3): `workflow_dispatch` + tag
-# `runtime-v*` ONLY. Note: `workflow_dispatch` is only offered once this
-# file is on the default branch; release-channel automation polish is E2+.
-
+# Trigger set: manual runs and release-pipeline reusable calls.
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - 'runtime-v*'
+  workflow_call:
 
 concurrency:
   group: runtime-build-${{ github.ref }}
