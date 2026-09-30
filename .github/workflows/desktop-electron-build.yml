@@ -31,7 +31,7 @@ on:
       - '.github/workflows/desktop-electron-build.yml'
 
 concurrency:
-  group: desktop-electron-unsigned-${{ github.ref }}
+  group: ${{ github.event_name == 'workflow_call' && format('desktop-electron-unsigned-release-{0}', github.run_id) || format('desktop-electron-unsigned-{0}', github.ref) }}
   cancel-in-progress: true
 
 permissions:

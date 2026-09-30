@@ -19,7 +19,7 @@ on:
   workflow_call:
 
 concurrency:
-  group: runtime-build-${{ github.ref }}
+  group: ${{ github.event_name == 'workflow_call' && format('runtime-build-release-{0}', github.run_id) || format('runtime-build-{0}', github.ref) }}
   cancel-in-progress: true
 
 permissions:
