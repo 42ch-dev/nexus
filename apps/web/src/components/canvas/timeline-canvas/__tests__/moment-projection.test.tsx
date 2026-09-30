@@ -61,6 +61,10 @@ import {
   type TimelineNodeData,
 } from '../timeline-canvas-adapter';
 import { TimelineCanvas } from '../timeline-canvas';
+import type {
+  DirectedAxisSpineNodeData,
+  MomentSpineConfig,
+} from '../directed-axis-spine';
 import type { WorkTimelineNodeData } from '../../work-timeline-canvas/work-timeline-canvas-adapter';
 
 // ─── Fixture builders ──────────────────────────────────────────────────────
@@ -162,6 +166,17 @@ function makeContext(
 // tests narrow through the shared index signature.
 function momentDataOf(node: Node<TimelineNodeData>): WorkTimelineNodeData {
   return node.data as unknown as WorkTimelineNodeData;
+}
+
+// The directed-axis spine node carries `DirectedAxisSpineNodeData` (a
+// discriminated union on `spineConfig.kind`) behind the generic node-data
+// type — same runtime narrowing, asserted rather than assumed.
+function momentSpineConfigOf(node: Node<TimelineNodeData>): MomentSpineConfig {
+  const data = node.data as unknown as DirectedAxisSpineNodeData;
+  if (data.spineConfig.kind !== 'moment') {
+    throw new Error(`expected the Moment spine, got ${data.spineConfig.kind}`);
+  }
+  return data.spineConfig;
 }
 
 // ─── Moment projection (V1.156 P1 T1 — fixture-driven read-projection) ─────
@@ -306,6 +321,67 @@ describe('TimelineCanvasAdapter.projectTimelineGraph — Moment projection (Scen
 
     const beatNode = nodes.find((n) => n.id === 'wt-beat:bet_a1')!;
     expect(momentDataOf(beatNode).workId).toBe('work-a');
+  });
+
+  it('disambiguates the "Ch. N" spine labels of two bound Works that share a chapter (001/R2)', () => {
+    // Chapter numbers are Work-local, so a bare "Ch. 1" label repeated on two
+    // Work-owned segments leaves the reader with screen position as the only
+    // provenance (qc2 F-7 / qc3 F-002). The colliding chapter names its owner;
+    // a Work-unique chapter keeps the compact label.
+    const g = graph({ entities: [] });
+    const fx = fixture([
+      scene({ sceneId: 'scn_a1', chapterId: 1, workId: 'work-a' }),
+      scene({ sceneId: 'scn_a2', chapterId: 2, workId: 'work-a' }),
+      scene({ sceneId: 'scn_b1', chapterId: 1, workId: 'work-b' }),
+    ]);
+
+    const { nodes } = projectTimelineGraph(g, 'moment', undefined, undefined, fx, 'world-7');
+
+    const spine = nodes.find((n) => n.id === 'directed-axis-spine')!;
+    const { chapterSegments } = momentSpineConfigOf(spine);
+
+    // Groups sort by (Work, chapter): work-a#1, work-a#2, work-b#1.
+    expect(chapterSegments.map((s) => s.chapterLabel)).toEqual([
+      'Ch. 1 · work-a',
+      'Ch. 2',
+      'Ch. 1 · work-b',
+    ]);
+    // Segment identity is (Work, chapter) — the two chapter-1 regions are
+    // distinct spine segments, not a duplicated React key.
+    expect(chapterSegments.map((s) => `${s.workId ?? ''}#${s.chapterId}`)).toEqual([
+      'work-a#1',
+      'work-a#2',
+      'work-b#1',
+    ]);
+  });
+
+  it('keeps the two chapter-1 spine labels distinct when the bound Works share a long id prefix (P2 T6 F-1)', () => {
+    // Truncating each Work id independently gave `wrk_12345678-…0001` and
+    // `…0002` the same visible handle. The labels must stay unique among the
+    // chapter's owners (extend, else fall back to the full id), while node
+    // identity is untouched.
+    const g = graph({ entities: [] });
+    const fx = fixture([
+      scene({ sceneId: 'scn_x1', chapterId: 1, workId: 'wrk_12345678-0000-4000-8000-000000000001' }),
+      scene({ sceneId: 'scn_y1', chapterId: 1, workId: 'wrk_12345678-0000-4000-8000-000000000002' }),
+    ]);
+
+    const { nodes } = projectTimelineGraph(g, 'moment', undefined, undefined, fx, 'world-7');
+
+    const spine = nodes.find((n) => n.id === 'directed-axis-spine')!;
+    const labels = momentSpineConfigOf(spine).chapterSegments.map((s) => s.chapterLabel);
+
+    expect(labels).toHaveLength(2);
+    expect(new Set(labels).size).toBe(2);
+    // The shared 8-char prefix is not enough — the labels fall back to the
+    // full ids rather than rendering "12345678" twice.
+    expect(labels).toEqual([
+      'Ch. 1 · 12345678-0000-4000-8000-000000000001',
+      'Ch. 1 · 12345678-0000-4000-8000-000000000002',
+    ]);
+    // Node identity is unchanged by the label fix.
+    expect(nodes.find((n) => n.id === 'wt-scene:scn_x1')).toBeDefined();
+    expect(nodes.find((n) => n.id === 'wt-scene:scn_y1')).toBeDefined();
   });
 
   it('stacks scenes vertically (TB) grouped by chapter region (X groups by chapter)', () => {
@@ -1131,5 +1207,149 @@ describe('TimelineCanvas — honest Moment bound-Work read states (V1.200 DR-26 
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('Could not load the world timeline.');
     expect(screen.queryByTestId('timeline-moment-empty-state')).toBeNull();
+  });
+
+  it('keys the bound-Work outline gate per Work — a slow Work A read keeps Work B’s loaded scenes visible (R5)', async () => {
+    let releaseWorkA!: () => void;
+    const workAGate = new Promise<void>((resolve) => {
+      releaseWorkA = resolve;
+    });
+    useHandlers(
+      http.get('/v1/daemon/worlds/:worldId/kb/graph', () =>
+        HttpResponse.json({
+          entities: [
+            entity({
+              key_block_id: 'kb-era-1',
+              block_type: 'era',
+              canonical_name: 'The First Age',
+            }),
+          ],
+          source_anchors: [],
+          relationships: [],
+        }),
+      ),
+      http.get('/v1/daemon/worlds/:worldId/timeline/events', () =>
+        HttpResponse.json({ items: [], has_more: false, next_cursor: undefined }),
+      ),
+      http.get('/v1/daemon/works', () =>
+        HttpResponse.json({
+          items: [
+            workSummary('work-a', '2026-01-01T00:00:00Z'),
+            workSummary('work-b', '2026-01-02T00:00:00Z'),
+          ],
+          pagination: { limit: 100, has_more: false },
+        }),
+      ),
+      http.get('/v1/daemon/works/:workId', ({ params }) =>
+        HttpResponse.json(workDetail(String(params.workId))),
+      ),
+      http.get('/v1/daemon/works/:workId/outline', async ({ params }) => {
+        const workId = String(params.workId);
+        if (workId === 'work-a') {
+          await workAGate;
+          return HttpResponse.json(workOutline('work-a', 'A one', 'scn_a1'));
+        }
+        return HttpResponse.json(workOutline('work-b', 'B one', 'scn_b1'));
+      }),
+      http.get('/v1/daemon/compute/modules', () =>
+        HttpResponse.json({ items: [], has_more: false }),
+      ),
+    );
+
+    renderInApp(<TimelineCanvas worldId="world-7" />, {
+      client: new BrowserClient(),
+      initialRouterEntries: ['/worlds/world-7/timeline?layer=moment'],
+    });
+
+    // Work B's outline settled: its scene renders while Work A is still
+    // reading — the slowest read no longer owns the whole layer.
+    expect((await screen.findAllByText('B one')).length).toBeGreaterThan(0);
+    // Work A carries its OWN pending state (and Work B does not), labelled
+    // with the Work's title (not its raw id).
+    const pending = await screen.findByTestId('timeline-moment-work-loading');
+    expect(pending.querySelector('[data-work-id="work-a"]')).not.toBeNull();
+    expect(pending.querySelector('[data-work-id="work-b"]')).toBeNull();
+    expect(pending).toHaveTextContent('Work work-a');
+    // The in-flight Work also never makes the layer claim it is empty.
+    expect(screen.queryByTestId('timeline-moment-empty-state')).toBeNull();
+
+    releaseWorkA();
+
+    // Work A's own scene lands and its pending row disappears.
+    expect((await screen.findAllByText('A one')).length).toBeGreaterThan(0);
+    await waitFor(() =>
+      expect(screen.queryByTestId('timeline-moment-work-loading')).toBeNull(),
+    );
+  });
+
+  it('does not claim an empty Moment while a bound Work’s outline read is still in flight (R5)', async () => {
+    let releaseWorkA!: () => void;
+    const workAGate = new Promise<void>((resolve) => {
+      releaseWorkA = resolve;
+    });
+    // Both bound Works settle EMPTY — the honest-empty panel is owed only
+    // once every bound-Work read has settled.
+    const emptyOutline = (workId: string): WorkOutline => ({
+      ...workOutline(workId, 'unused', `scn_${workId}`),
+      scenes: [],
+    });
+    useHandlers(
+      http.get('/v1/daemon/worlds/:worldId/kb/graph', () =>
+        HttpResponse.json({
+          entities: [
+            entity({
+              key_block_id: 'kb-era-1',
+              block_type: 'era',
+              canonical_name: 'The First Age',
+            }),
+          ],
+          source_anchors: [],
+          relationships: [],
+        }),
+      ),
+      http.get('/v1/daemon/worlds/:worldId/timeline/events', () =>
+        HttpResponse.json({ items: [], has_more: false, next_cursor: undefined }),
+      ),
+      http.get('/v1/daemon/works', () =>
+        HttpResponse.json({
+          items: [
+            workSummary('work-a', '2026-01-01T00:00:00Z'),
+            workSummary('work-b', '2026-01-02T00:00:00Z'),
+          ],
+          pagination: { limit: 100, has_more: false },
+        }),
+      ),
+      http.get('/v1/daemon/works/:workId', ({ params }) =>
+        HttpResponse.json(workDetail(String(params.workId))),
+      ),
+      http.get('/v1/daemon/works/:workId/outline', async ({ params }) => {
+        const workId = String(params.workId);
+        if (workId === 'work-a') {
+          await workAGate;
+        }
+        return HttpResponse.json(emptyOutline(workId));
+      }),
+      http.get('/v1/daemon/compute/modules', () =>
+        HttpResponse.json({ items: [], has_more: false }),
+      ),
+    );
+
+    renderInApp(<TimelineCanvas worldId="world-7" />, {
+      client: new BrowserClient(),
+      initialRouterEntries: ['/worlds/world-7/timeline?layer=moment'],
+    });
+
+    // Work B settled empty, Work A still reading: an unsettled bound-Work set
+    // is not an empty one — Work A's pending row owns that state instead.
+    const pending = await screen.findByTestId('timeline-moment-work-loading');
+    expect(pending.querySelector('[data-work-id="work-a"]')).not.toBeNull();
+    expect(screen.queryByTestId('timeline-moment-empty-state')).toBeNull();
+
+    releaseWorkA();
+
+    // Only once EVERY bound-Work read has settled empty does the honest-empty
+    // panel render.
+    expect(await screen.findByTestId('timeline-moment-empty-state')).toBeInTheDocument();
+    expect(screen.queryByTestId('timeline-moment-work-loading')).toBeNull();
   });
 });

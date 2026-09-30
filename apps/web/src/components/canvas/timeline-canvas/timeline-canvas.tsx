@@ -74,7 +74,7 @@ import {
 } from '@/api/queries';
 import { useNexusClient } from '@/lib/client-context';
 import { SettingsModalContext } from '@/components/layout/settings-modal-context';
-import { LoadingState, ErrorState, EmptyState } from '@/components/ui/states';
+import { LoadingState, ErrorState, EmptyState, Spinner } from '@/components/ui/states';
 import { Button } from '@42ch/nexus-ui';
 import { useToast } from '@/lib/use-toast';
 import { shortId } from '@/lib/format';
@@ -1194,6 +1194,32 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   // those canonical scenes instead of the global empty state. The global
   // EmptyState remains for Worlds with truly nothing (no KB entities, no
   // compute events, no canonical Moment data).
+  // R5 (_default/002) — the bound-Work outline gate is keyed PER BOUND WORK.
+  //
+  // Round 2 gated the whole layer on `workOutlineQueries.some(isLoading)`:
+  // the slowest bound-Work outline read replaced the entire canvas, hiding
+  // the scenes that had ALREADY resolved for the other Works. In-flight is a
+  // per-Work fact — each Work still reading renders its own pending row in
+  // the chrome while the settled Works keep rendering their scenes.
+  //
+  // `outlineWorks` / `workOutlineQueries` are index-aligned (the fan-out is
+  // built from `outlineWorks` in order). Round 2 (finding 2) — the fan-out
+  // covers EVERY bound Work of the complete Moment enumeration, not just the
+  // legacy N=20 navigation window, so an older Work's read is seen here too.
+  const momentPendingOutlineWorks: Array<{ workId: string; title: string }> = [];
+  if (isMomentLayer) {
+    const momentWorkTitles = new Map(
+      allMomentWorks.map((work) => [work.work_id, work.title]),
+    );
+    outlineWorks.forEach(({ workId }, idx) => {
+      if (workOutlineQueries[idx]?.isLoading === true) {
+        momentPendingOutlineWorks.push({
+          workId,
+          title: momentWorkTitles.get(workId) ?? workId,
+        });
+      }
+    });
+  }
   const momentOutlineFailures = isMomentLayer
     ? workOutlineQueries.filter((q) => q.isError).length
     : 0;
@@ -1205,7 +1231,11 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
     !timelineEvents.isFetching &&
     (!graph.data || (graph.data.entities ?? []).length === 0) &&
     eventsList.length === 0 &&
-    !momentCarrierHasData;
+    !momentCarrierHasData &&
+    // R5 — an in-flight bound-Work outline read is not "truly nothing": the
+    // Moment carrier for that Work is simply not composed yet, so the global
+    // empty state must not claim the timeline is empty while it resolves.
+    momentPendingOutlineWorks.length === 0;
 
   // V1.123 P1 T5 — Brief-empty detection. The active layer is Brief but the
   // graph carries zero `block_type=era` entities (the user clicked the Brief
@@ -1237,9 +1267,10 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   //      read is NOT an empty outline.
   // Stage 1 in flight → the loading affordance (the honest-empty panel would
   // claim "no bound Works" before the list even arrived); stage 1 failed →
-  // the error affordance with retry. Stage 2 in flight → the loading
-  // affordance; stage 2 failures are surfaced as ONE aggregated affordance
-  // with retry while the Works that DID resolve keep rendering — a single bad
+  // the error affordance with retry. Stage 2 (the per-Work outline reads) is
+  // scoped PER WORK (R5): a still-reading Work owns a pending row of its own
+  // while every settled Work keeps rendering, and stage 2 failures are
+  // surfaced as ONE aggregated affordance with retry — a single slow or bad
   // read must neither blank the whole layer nor be silently dropped from the
   // composition (Greptile round 2, findings 1 + 2).
   const momentBoundWorksUnknown =
@@ -1264,13 +1295,10 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
       />
     );
   }
-  // Round 2 (finding 2) — the fan-out covers EVERY bound Work of the complete
-  // Moment enumeration (`outlineWorks`), not just the legacy N=20 navigation
-  // window, so an older Work's failed outline read is seen here too.
-  const momentOutlinesPending = isMomentLayer && outlineWorks.length > 0;
-  if (momentOutlinesPending && workOutlineQueries.some((q) => q.isLoading)) {
-    return <LoadingState label={t('timeline.loading')} />;
-  }
+  // R5 (_default/002) — the per-Work pending outline reads are derived above
+  // (`momentPendingOutlineWorks`, from the same index-aligned fan-out) and
+  // never blank the layer: each still-reading Work owns a row in the render,
+  // and the Works that settled keep rendering their scenes.
   // Failed outline reads already count as unresolved Moment carrier data in
   // `isEmpty` above, so they cannot be mislabeled as an empty World timeline.
 
@@ -1284,14 +1312,17 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   // Outline data, with a CTA back to Narrative.
   //
   // Round 2 (finding 1) — only a SUCCESSFUL empty bound-Work set renders as
-  // empty: the unresolved / failed stages above already returned, and a
-  // failed bound-Work outline read is not an empty Moment (the aggregated
-  // affordance in the render owns that state).
+  // empty: a failed bound-Work outline read is not an empty Moment (the
+  // aggregated affordance in the render owns that state). R5 — the same
+  // honesty for an in-flight read: while ANY bound Work's outline is still
+  // unresolved the composed carrier is incomplete, so a so-far-empty
+  // projection must not be presented as "no scene or beat data yet".
   const isMomentEmpty =
     !isEmpty &&
     activeLayer === 'moment' &&
     surface.nodes.length === 0 &&
-    momentOutlineFailures === 0;
+    momentOutlineFailures === 0 &&
+    momentPendingOutlineWorks.length === 0;
 
   // Visible ordering-disclaimer gate (PR #156 fix 3 — Greptile P1). Mirrors
   // the adapter's `summarizeTimelineGraph` a11y-disclaimer condition: present
@@ -1365,6 +1396,25 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
         >
           {validationBanner.map((err, i) => (
             <li key={i}>{err}</li>
+          ))}
+        </ul>
+      ) : null}
+
+      {/* R5 (_default/002) — per-Work bound-Work outline pending state. Each
+          bound Work still reading owns its own row here; the Works whose
+          outlines DID resolve keep rendering their scenes below (the former
+          whole-layer loading gate hid them behind the slowest read). */}
+      {momentPendingOutlineWorks.length > 0 ? (
+        <ul
+          role="status"
+          className="flex flex-col gap-1 rounded-card border border-gray-alpha-400 bg-background-100 px-3 py-2 text-copy-13 text-gray-700 shadow-elevation-2"
+          data-testid="timeline-moment-work-loading"
+        >
+          {momentPendingOutlineWorks.map(({ workId, title }) => (
+            <li key={workId} data-work-id={workId} className="flex items-center gap-2">
+              <Spinner />
+              <span>{t('timeline.moment.boundWorkLoading', { work: title })}</span>
+            </li>
           ))}
         </ul>
       ) : null}

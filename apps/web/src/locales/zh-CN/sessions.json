@@ -16,5 +16,39 @@
     "preset": "预设",
     "creator": "创作者",
     "currentTask": "当前任务"
+  },
+  "openRunAria": "打开会话 {{id}} 的运行视图",
+  "runView": {
+    "title": "运行视图",
+    "description": "实时查看该运行正在执行的内容。",
+    "back": "返回会话",
+    "observingTitle": "正在观察的运行",
+    "sessionFact": "会话 {{id}}",
+    "runFact": "运行 {{id}}",
+    "cursorFact": "最近事件 {{cursor}}",
+    "stepCursor": "步骤 {{step}} · 尝试 {{attempt}}",
+    "loading": "正在连接运行事件流…",
+    "waitingForLive": "等待下一个事件…",
+    "replayedHeading": "回放历史",
+    "boundaryNote": "回放与实时的划分依据接入顺序推断：服务器在事件流打开时先发送回放，再发送实时尾部，因此该分界是推断所得，并非服务器上报。",
+    "liveHeading": "实时",
+    "eventsAria": "运行事件",
+    "reconnect": "重新连接",
+    "gapTitle": "事件出现缺失",
+    "gapDescription": "事件流跳过了本视图未收到的事件。重新连接将从最后收到的事件继续。",
+    "historyUnavailableTitle": "服务器历史不可用",
+    "historyUnavailableDescription": "服务器已不再保留该运行的历史（重启或事件环已被淘汰）。下方事件仅为本视图此前收到的事件。",
+    "historyUnavailableBadge": "历史不可用",
+    "errorTitle": "无法观察该运行",
+    "errorDescription": "无法打开该运行的事件流。",
+    "runState": "运行状态",
+    "phase": {
+      "connecting": "连接中",
+      "replaying": "回放中",
+      "live": "实时",
+      "gapped": "缺失",
+      "terminal": "已结束",
+      "error": "错误"
+    }
   }
 }

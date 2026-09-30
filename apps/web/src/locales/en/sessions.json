@@ -16,5 +16,39 @@
     "preset": "Preset",
     "creator": "Creator",
     "currentTask": "Current task"
+  },
+  "openRunAria": "Open run view for session {{id}}",
+  "runView": {
+    "title": "Run View",
+    "description": "What this run is doing, as it happens.",
+    "back": "Back to Sessions",
+    "observingTitle": "Observed run",
+    "sessionFact": "Session {{id}}",
+    "runFact": "Run {{id}}",
+    "cursorFact": "Last event {{cursor}}",
+    "stepCursor": "step {{step}} · attempt {{attempt}}",
+    "loading": "Connecting to the run stream…",
+    "waitingForLive": "Waiting for the next event…",
+    "replayedHeading": "Replayed history",
+    "boundaryNote": "Replay and live are split by attach order — the server sends the replay when the stream opens, before the live tail — so the boundary is inferred, not reported by the server.",
+    "liveHeading": "Live",
+    "eventsAria": "Run events",
+    "reconnect": "Reconnect",
+    "gapTitle": "Events were missed",
+    "gapDescription": "The stream skipped events this view never received. Reconnect resumes from the last event received.",
+    "historyUnavailableTitle": "Server history unavailable",
+    "historyUnavailableDescription": "The server no longer holds this run's history (a restart, or an evicted event ring). The events below are only what this view received earlier.",
+    "historyUnavailableBadge": "History unavailable",
+    "errorTitle": "Could not observe this run",
+    "errorDescription": "The run stream could not be opened.",
+    "runState": "Run state",
+    "phase": {
+      "connecting": "Connecting",
+      "replaying": "Replaying",
+      "live": "Live",
+      "gapped": "Gap",
+      "terminal": "Ended",
+      "error": "Error"
+    }
   }
 }

@@ -12,11 +12,11 @@
 
 use std::sync::{Arc, Mutex};
 
-/// `tracing_subscriber` layer that records every INFO event's fields into a
+/// `tracing_subscriber` layer that records INFO and WARN event fields into a
 /// shared buffer. Clone-safe via `Arc<Mutex<...>>`.
 #[derive(Clone)]
 pub struct CaptureLayer {
-    /// Captured INFO-event field renderings (one String per event).
+    /// Captured INFO/WARN event field renderings (one String per event).
     pub messages: Arc<Mutex<Vec<String>>>,
 }
 
@@ -29,8 +29,9 @@ where
         event: &tracing::Event<'_>,
         _ctx: tracing_subscriber::layer::Context<'_, S>,
     ) {
-        if event.metadata().level() == &tracing::Level::INFO {
-            let mut visitor = CaptureVisitor(String::new());
+        let level = event.metadata().level();
+        if level == &tracing::Level::INFO || level == &tracing::Level::WARN {
+            let mut visitor = CaptureVisitor(format!("{level} "));
             event.record(&mut visitor);
             let mut msgs = self.messages.lock().unwrap();
             msgs.push(visitor.0);
@@ -74,16 +75,34 @@ pub fn subscriber_with(layer: CaptureLayer) -> impl tracing::Subscriber + Send +
 }
 
 /// Assert at least one captured INFO event contains every needle in `needles`.
-///
-/// Use inside the `set_default` guard scope OR after it (the buffer is shared
-/// and outlives the guard).
-// The guard is held through the assert (the failure message reads `msgs`);
-// dropping it earlier adds nothing.
-#[allow(clippy::significant_drop_tightening)]
 pub fn assert_info_emitted(messages: &Arc<Mutex<Vec<String>>>, needles: &[&str]) {
-    let msgs = messages.lock().unwrap();
+    assert_level_emitted(messages, "INFO", needles);
+}
+
+/// Assert at least one captured WARN event contains every needle in `needles`.
+pub fn assert_warn_emitted(messages: &Arc<Mutex<Vec<String>>>, needles: &[&str]) {
+    assert_level_emitted(messages, "WARN", needles);
+}
+
+pub fn assert_warn_absent(messages: &Arc<Mutex<Vec<String>>>) {
+    // Clone the buffer out of the guard so the lock is released before the
+    // assert scans/formats it (clippy::significant_drop_tightening).
+    let msgs = messages.lock().unwrap().clone();
     assert!(
-        msgs.iter().any(|m| needles.iter().all(|n| m.contains(n))),
-        "expected an INFO trace containing all of {needles:?}; captured: {msgs:?}"
+        !msgs.iter().any(|message| message.starts_with("WARN ")),
+        "expected no WARN trace; captured: {msgs:?}"
+    );
+}
+
+fn assert_level_emitted(messages: &Arc<Mutex<Vec<String>>>, level: &str, needles: &[&str]) {
+    // Clone the buffer out of the guard so the lock is released before the
+    // prefix build and the assert scan (clippy::significant_drop_tightening).
+    let msgs = messages.lock().unwrap().clone();
+    let prefix = format!("{level} ");
+    assert!(
+        msgs.iter().any(|message| {
+            message.starts_with(&prefix) && needles.iter().all(|needle| message.contains(needle))
+        }),
+        "expected a {level} trace containing all of {needles:?}; captured: {msgs:?}"
     );
 }

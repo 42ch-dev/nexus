@@ -8,7 +8,7 @@
  * link/unlink authoring controls, and the World-event bind/unbind control.
  * Drives the `patch_timeline_event` route.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ArrowRight, CalendarPlus, Link2, Trash2, Unlink } from 'lucide-react';
 
@@ -48,6 +48,12 @@ interface WorldEventOption {
 }
 
 /**
+ * The two controls that author a World-event binding draft (V1.200 DR-26): the
+ * picker's selection and the manual World-event-ID field.
+ */
+type WorldEventDraftControl = 'picker' | 'manual';
+
+/**
  * Project the bound World's KB graph into picker options (V1.200 DR-26).
  *
  * Reuses the existing single graph source (`useWorldKbGraph` →
@@ -66,31 +72,23 @@ function worldEventOptionsFromGraph(graph: WorldKbGraphResponse | undefined): Wo
 /**
  * Timeline panel entry point.
  *
- * The bound-World KB graph is read only when a World is bound. With no bound
- * World the disabled control renders without issuing a World read: the graph
- * query is the picker's option source, not a second source of truth.
+ * V1.201 002/R3 — the entry returns one component type regardless of
+ * `boundWorldId`. Splitting it on the id's truthiness (`BoundWorldTimelinePanel`
+ * when bound, `TimelinePanelView` when not) made React swap the child's
+ * component type when the Work's World resolved after first paint, remounting
+ * the view and discarding in-progress drafts. The graph read is hoisted here
+ * instead, so the view's identity survives the transition.
+ *
+ * The bound-World KB graph is still read only when a World is bound: the query
+ * is gated on the id inside `useWorldKbGraph` (`enabled: Boolean(worldId)`), so
+ * the unbound panel issues no World read — the graph query is the picker's
+ * option source, not a second source of truth.
  */
 export function TimelinePanel(props: TimelinePanelProps) {
   const { boundWorldId } = props;
-  if (!boundWorldId) {
-    return <TimelinePanelView {...props} worldEventOptions={[]} />;
-  }
-  return <BoundWorldTimelinePanel {...props} boundWorldId={boundWorldId} />;
-}
-
-function BoundWorldTimelinePanel({
-  boundWorldId,
-  ...props
-}: TimelinePanelProps & { boundWorldId: string }) {
   const graph = useWorldKbGraph(boundWorldId);
   const worldEventOptions = useMemo(() => worldEventOptionsFromGraph(graph.data), [graph.data]);
-  return (
-    <TimelinePanelView
-      {...props}
-      boundWorldId={boundWorldId}
-      worldEventOptions={worldEventOptions}
-    />
-  );
+  return <TimelinePanelView {...props} worldEventOptions={worldEventOptions} />;
 }
 
 function TimelinePanelView({
@@ -109,6 +107,57 @@ function TimelinePanelView({
   // Per-event selected World-event target id (V1.200 DR-26 bind control).
   const [worldEventTargetByEvent, setWorldEventTargetByEvent] = useState<Record<string, string>>({});
   const [manualWorldEventByEvent, setManualWorldEventByEvent] = useState<Record<string, string>>({});
+
+  // V1.201 002/R4 — one draft generation per (control, event). The value alone
+  // is not a draft tag: a manual `A → B → A` retype reads as untouched, and a
+  // picker draft can equal an independently typed manual one. Every draft
+  // mutation bumps its generation, so a resolving bind can tell whether the
+  // draft it was issued against is still the draft in the field.
+  const draftGenerationRef = useRef<Record<WorldEventDraftControl, Record<string, number>>>({
+    picker: {},
+    manual: {},
+  });
+
+  // V1.201 002/FX-B — a bind is issued against one draft *and* one bound World,
+  // and the Work can be re-bound to another World while the write is in flight.
+  // The drafts survive that transition (R3), so the completion of a former
+  // World's bind must not consume a draft now shown under the newly bound
+  // World. Every draft generation is bumped on a `boundWorldId` change: the
+  // counters stay monotonic, so an old issuance can never collide with a draft
+  // (re-)authored in the new World.
+  const previousBoundWorldIdRef = useRef(boundWorldId);
+
+  useEffect(() => {
+    if (previousBoundWorldIdRef.current === boundWorldId) return;
+    previousBoundWorldIdRef.current = boundWorldId;
+    const generations = draftGenerationRef.current;
+    for (const control of ['picker', 'manual'] as const) {
+      const byEvent = generations[control];
+      for (const eventId of Object.keys(byEvent)) {
+        byEvent[eventId] += 1;
+      }
+    }
+    // A picker selection names an entity of one specific World, so it cannot
+    // carry into the newly bound World (the picker no longer offers it and
+    // Bind has no valid referent). The manual field is free-form World-event
+    // ID text, not World data, so its draft is preserved.
+    setWorldEventTargetByEvent({});
+  }, [boundWorldId]);
+
+  const draftSetters = {
+    picker: setWorldEventTargetByEvent,
+    manual: setManualWorldEventByEvent,
+  } as const;
+
+  function setWorldEventDraft(
+    control: WorldEventDraftControl,
+    eventId: string,
+    value: string,
+  ) {
+    const byEvent = draftGenerationRef.current[control];
+    byEvent[eventId] = (byEvent[eventId] ?? 0) + 1;
+    draftSetters[control]((prev) => ({ ...prev, [eventId]: value }));
+  }
 
   // Foreshadow edges grouped by source event for quick lookup per row.
   const outgoingForeshadows = useMemo(() => {
@@ -180,9 +229,19 @@ function TimelinePanelView({
     });
   }
 
-  function bindWorldEvent(eventId: string, worldEventId: string) {
+  function bindWorldEvent(
+    control: WorldEventDraftControl,
+    eventId: string,
+    worldEventId: string,
+  ) {
     const trimmedId = worldEventId.trim();
     if (!trimmedId) return;
+    // V1.201 002/R4 — a bind is issued against exactly one control's draft, so
+    // the request tag is that control's draft generation. The write is still
+    // cleared only once it lands (the success-only pattern the scene/beat
+    // drafts use); a typed 422/409 refusal keeps the draft for retry, and the
+    // 409 conflict modal still opens through the orchestrator's `onError`.
+    const issuedGeneration = draftGenerationRef.current[control][eventId] ?? 0;
     onPatchTimeline(
       {
         work_id: outline.work_id,
@@ -191,17 +250,17 @@ function TimelinePanelView({
         event_id: eventId,
         world_event_id: trimmedId,
       },
-      // V1.200 DR-26 (Greptile round 2) — clear the picker + manual-ID drafts
-      // only once the write lands (the success-only pattern the scene/beat
-      // drafts use). A typed 422/409 refusal keeps both drafts for retry; the
-      // 409 conflict modal still opens through the orchestrator's `onError`.
+      // V1.201 002/R4 — release exactly the draft this bind was issued
+      // against: the originating control, and only while its generation is
+      // unchanged (a re-typed draft is a newer generation and survives). The
+      // other control's draft was never part of this request, so an unrelated
+      // bind's success must leave it alone.
       () => {
-        setWorldEventTargetByEvent((prev) => {
-          const next = { ...prev };
-          delete next[eventId];
-          return next;
-        });
-        setManualWorldEventByEvent((prev) => {
+        if ((draftGenerationRef.current[control][eventId] ?? 0) !== issuedGeneration) {
+          return;
+        }
+        draftSetters[control]((prev) => {
+          if (!(eventId in prev)) return prev;
           const next = { ...prev };
           delete next[eventId];
           return next;
@@ -388,10 +447,7 @@ function TimelinePanelView({
                         <select
                           value={worldEventTargetByEvent[event.event_id] ?? ''}
                           onChange={(e) =>
-                            setWorldEventTargetByEvent((prev) => ({
-                              ...prev,
-                              [event.event_id]: e.target.value,
-                            }))
+                            setWorldEventDraft('picker', event.event_id, e.target.value)
                           }
                           disabled={!boundWorldId}
                           title={boundWorldId ? undefined : t('eventInspector.worldEventRequired')}
@@ -410,6 +466,7 @@ function TimelinePanelView({
                           size="small"
                           onClick={() =>
                             bindWorldEvent(
+                              'picker',
                               event.event_id,
                               worldEventTargetByEvent[event.event_id] ?? '',
                             )
@@ -424,10 +481,7 @@ function TimelinePanelView({
                           type="text"
                           value={manualWorldEventByEvent[event.event_id] ?? ''}
                           onChange={(e) =>
-                            setManualWorldEventByEvent((prev) => ({
-                              ...prev,
-                              [event.event_id]: e.target.value,
-                            }))
+                            setWorldEventDraft('manual', event.event_id, e.target.value)
                           }
                           disabled={!boundWorldId}
                           placeholder={t('eventInspector.worldEventManualPlaceholder')}
@@ -439,6 +493,7 @@ function TimelinePanelView({
                           size="small"
                           onClick={() =>
                             bindWorldEvent(
+                              'manual',
                               event.event_id,
                               manualWorldEventByEvent[event.event_id] ?? '',
                             )
