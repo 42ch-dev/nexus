@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   CARGO_LOCK_PATH,
@@ -16,7 +16,6 @@ import {
   readSurfaceVersion,
   readSurfaceVersions,
   readWorkspaceMemberPackages,
-  replaceCargoLockMemberVersions,
   replaceJsonVersion,
   replaceWorkspacePackageVersion,
   writeReleaseVersion,
@@ -24,6 +23,7 @@ import {
 import {
   createTempRepo,
   cleanupTempRepo,
+  FIXTURE_BASELINE_VERSION,
   readRepoFile,
   REPO_ROOT,
 } from "./test-harness.mjs";
@@ -118,38 +118,10 @@ test("package names parse and members resolve to lock entries", () => {
   }
 });
 
-test("Cargo.lock rewrite touches workspace members only", () => {
-  const lock = readRepoFile(REPO_ROOT, CARGO_LOCK_PATH);
-  const members = readWorkspaceMemberPackages(REPO_ROOT).map((member) => member.name);
-  const updated = replaceCargoLockMemberVersions(lock, "9.9.9", members);
-
-  for (const name of members) {
-    assert.equal(parseCargoLockPackageVersion(updated, name), "9.9.9", name);
-  }
-  // Non-member packages keep their versions: `nexus-module-manifest` is a
-  // standalone (excluded) crate, `leb128fmt` an unrelated dependency.
-  for (const name of ["nexus-module-manifest", "leb128fmt"]) {
-    assert.equal(
-      parseCargoLockPackageVersion(updated, name),
-      parseCargoLockPackageVersion(lock, name),
-      name,
-    );
-  }
-  assert.equal(updated.split("\n").length, lock.split("\n").length);
-  assert.equal(replaceCargoLockMemberVersions(updated, "9.9.9", members), updated);
-});
-
-test("Cargo.lock rewrite fails when a member entry is missing", () => {
-  const lock = readRepoFile(REPO_ROOT, CARGO_LOCK_PATH);
-  assert.throws(
-    () => replaceCargoLockMemberVersions(lock, "9.9.9", ["nexus-not-a-member"]),
-    /missing \[\[package\]\] entry for nexus-not-a-member/,
-  );
-});
-
-test("writeReleaseVersion bumps all five surfaces", () => {
+test("writeReleaseVersion regenerates Cargo.lock through Cargo", () => {
   const dir = createTempRepo();
   try {
+    const lockBefore = readFileSync(join(dir, CARGO_LOCK_PATH), "utf8");
     const changed = writeReleaseVersion(dir, "9.9.9");
     assert.deepEqual(
       changed.map((entry) => entry.path),
@@ -159,10 +131,45 @@ test("writeReleaseVersion bumps all five surfaces", () => {
     for (const surface of readSurfaceVersions(dir)) {
       assert.equal(surface.version, "9.9.9", surface.path);
     }
+
     const lock = readFileSync(join(dir, CARGO_LOCK_PATH), "utf8");
-    for (const member of readWorkspaceMemberPackages(dir)) {
+    const members = readWorkspaceMemberPackages(dir);
+    for (const member of members) {
       assert.equal(parseCargoLockPackageVersion(lock, member.name), "9.9.9", member.name);
     }
+    // Non-member packages keep their versions: `nexus-module-manifest` is a
+    // standalone (excluded) crate, `leb128fmt` an unrelated dependency.
+    for (const name of ["nexus-module-manifest", "leb128fmt"]) {
+      assert.equal(
+        parseCargoLockPackageVersion(lock, name),
+        parseCargoLockPackageVersion(lockBefore, name),
+        name,
+      );
+    }
+    assert.equal(lock.split("\n").length, lockBefore.split("\n").length);
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("writeReleaseVersion refuses a lockfile missing a workspace member entry", () => {
+  const dir = createTempRepo();
+  try {
+    const lock = readFileSync(join(dir, CARGO_LOCK_PATH), "utf8").replace(
+      /\[\[package\]\]\nname = "nexus42"\nversion = "[^"]+"\n/,
+      "",
+    );
+    writeFileSync(join(dir, CARGO_LOCK_PATH), lock, "utf8");
+
+    assert.throws(
+      () => writeReleaseVersion(dir, "9.9.9"),
+      /missing \[\[package\]\] entry for nexus42/,
+    );
+    // All-or-nothing: the refused call wrote nothing.
+    for (const surface of readSurfaceVersions(dir)) {
+      assert.equal(surface.version, FIXTURE_BASELINE_VERSION, surface.path);
+    }
+    assert.equal(readFileSync(join(dir, CARGO_LOCK_PATH), "utf8"), lock);
   } finally {
     cleanupTempRepo(dir);
   }

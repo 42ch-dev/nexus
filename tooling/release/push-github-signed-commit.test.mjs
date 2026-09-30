@@ -9,6 +9,8 @@ import {
 import {
   cleanupTempRepo,
   createTempRepo,
+  FIXTURE_BASELINE_VERSION,
+  FIXTURE_TARGET_VERSION,
   gitOk,
   initGitRepo,
   readRepoFile,
@@ -114,7 +116,14 @@ test("collectFileChanges reports additions and deletions against origin/<base>",
   const dir = createTempRepo();
   try {
     initGitRepo(dir);
-    writeRepoFile(dir, "package.json", readRepoFile(dir, "package.json").replace('"0.1.0"', '"0.2.0"'));
+    writeRepoFile(
+      dir,
+      "package.json",
+      readRepoFile(dir, "package.json").replace(
+        `"version": "${FIXTURE_BASELINE_VERSION}"`,
+        `"version": "${FIXTURE_TARGET_VERSION}"`,
+      ),
+    );
     writeRepoFile(dir, "docs/release.md", "notes\n");
     removeRepoFile(dir, "Cargo.lock");
 

@@ -37,6 +37,49 @@ test("parsePrereleaseTrailer fails closed on absent, invalid or conflicting valu
   assert.equal(parsePrereleaseTrailer(undefined), null);
 });
 
+test("parsePrereleaseTrailer fails closed when a readable value has a garbled duplicate", () => {
+  for (const garbled of [
+    "Nexus-Prerelease:",
+    "Nexus-Prerelease: ",
+    "Nexus-Prerelease:: false",
+    "Nexus-Prerelease: false extra",
+  ]) {
+    assert.equal(
+      parsePrereleaseTrailer(`msg\n\nNexus-Prerelease: false\n${garbled}\n`),
+      null,
+      garbled,
+    );
+    assert.equal(
+      parsePrereleaseTrailer(`msg\n\n${garbled}\nNexus-Prerelease: true\n`),
+      null,
+      garbled,
+    );
+  }
+});
+
+test("garbled duplicates force a prerelease even with signing implemented", () => {
+  /** Mirrors the release pipeline: an unreadable trailer means prerelease. */
+  const effectiveFromMessage = (message, signing) => {
+    const trailer = parsePrereleaseTrailer(message);
+    return effectivePrerelease(trailer === null ? true : trailer, signing);
+  };
+
+  // Readable `false` alone: signing implemented publishes a real Release.
+  assert.equal(effectiveFromMessage("msg\n\nNexus-Prerelease: false\n", true), false);
+  // Same message plus any garbled duplicate: fail closed back to prerelease.
+  for (const garbled of [
+    "Nexus-Prerelease:",
+    "Nexus-Prerelease: false extra",
+    "Nexus-Prerelease: yes",
+  ]) {
+    assert.equal(
+      effectiveFromMessage(`msg\n\nNexus-Prerelease: false\n${garbled}\n`, true),
+      true,
+      garbled,
+    );
+  }
+});
+
 test("effectivePrerelease is toggle OR 'signing unimplemented'", () => {
   // Signing unimplemented (today): every Release is a prerelease.
   assert.equal(effectivePrerelease(true, false), true);
@@ -86,6 +129,22 @@ test("CLI reads the trailer from a message file and fails closed when absent", (
     assert.equal(withoutTrailer.status, 0);
     assert.equal(withoutTrailer.stdout, "true\n");
     assert.match(withoutTrailer.stderr, /failing closed to prerelease/);
+
+    writeRepoFile(
+      dir,
+      "garbled.txt",
+      "chore(release): bump version to 0.2.0\n\nNexus-Prerelease: false\nNexus-Prerelease: false extra\n",
+    );
+    const garbled = runReleaseScript(
+      "effective-prerelease.mjs",
+      ["--message-file", "garbled.txt"],
+      dir,
+    );
+    assert.equal(garbled.status, 0);
+    assert.equal(garbled.stdout, "true\n");
+    // A readable `false` must not win over the garbled duplicate next to it.
+    assert.match(garbled.stderr, /failing closed to prerelease/);
+    assert.match(garbled.stderr, /\(trailer-missing/);
   } finally {
     cleanupTempRepo(dir);
   }

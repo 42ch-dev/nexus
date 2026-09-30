@@ -11,21 +11,19 @@ import { checkLockstep } from "./assert-lockstep-version.mjs";
 import {
   cleanupTempRepo,
   createTempRepo,
+  FIXTURE_BASELINE_VERSION,
   mutateRepoFile,
   readRepoFile,
   removeRepoFile,
-  REPO_ROOT,
   runReleaseScript,
 } from "./test-harness.mjs";
 
-const CURRENT_VERSION = JSON.parse(readRepoFile(REPO_ROOT, ROOT_PACKAGE_PATH)).version;
-
-test("checkLockstep accepts the real surface set", () => {
+test("checkLockstep accepts the fixture surface set", () => {
   const dir = createTempRepo();
   try {
     const report = checkLockstep(dir);
     assert.equal(report.ok, true, report.problems.join("; "));
-    assert.equal(report.version, CURRENT_VERSION);
+    assert.equal(report.version, FIXTURE_BASELINE_VERSION);
     assert.equal(report.surfaces.length, 4);
     assert.equal(report.lockMembers.length, readWorkspaceMemberPackages(dir).length);
   } finally {
@@ -115,14 +113,18 @@ test("CLI --help exits zero", () => {
   }
 });
 
-test("every workspace member resolves to a lock entry at the current version", () => {
+test("every workspace member resolves to a lock entry at the fixture version", () => {
   const dir = createTempRepo();
   try {
     const lock = readRepoFile(dir, CARGO_LOCK_PATH);
     const members = readWorkspaceMemberPackages(dir);
     assert.ok(members.length > 20, `expected > 20 members, got ${members.length}`);
     for (const member of members) {
-      assert.equal(parseCargoLockPackageVersion(lock, member.name), CURRENT_VERSION, member.name);
+      assert.equal(
+        parseCargoLockPackageVersion(lock, member.name),
+        FIXTURE_BASELINE_VERSION,
+        member.name,
+      );
     }
   } finally {
     cleanupTempRepo(dir);

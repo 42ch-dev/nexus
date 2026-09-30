@@ -9,15 +9,20 @@
  *   - `apps/desktop-electron/resources/product.json`
  *
  * `Cargo.lock` is the fifth file: it pins the resolved version of every
- * workspace member, so the bump rewrites those `[[package]]` entries too.
- * The rewrite is textual and never invokes `cargo` (release CI stays
- * Node-only, spoke parity). Verified 2026-09-30 in a scratch checkout:
- * `cargo update --workspace --offline` changes exactly the member entries this
- * module rewrites (23 of them) and nothing else.
+ * workspace member, so the bump regenerates it with
+ * `cargo update --workspace --offline` after the manifests are written — Cargo,
+ * not a hand-rolled text edit, owns the lockfile. Cargo rewrites exactly the
+ * workspace member `[[package]]` entries and leaves non-member entries and
+ * dependency pins alone (verified 2026-09-30 in a scratch checkout).
+ *
+ * Because the vehicle is Cargo, the bump step needs the Rust toolchain on the
+ * runner plus a populated registry cache (`--offline` never fetches): a bump
+ * job must run after `cargo fetch`/a build in the same `CARGO_HOME`.
  *
  * @module tooling/release/version-surfaces
  */
 
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -48,6 +53,13 @@ export const ELECTRON_PACKAGE_PATH = "apps/desktop-electron/package.json";
 export const PRODUCT_JSON_PATH = "apps/desktop-electron/resources/product.json";
 /** Cargo lockfile pinning workspace member versions. */
 export const CARGO_LOCK_PATH = "Cargo.lock";
+/**
+ * The contracted `Cargo.lock` regeneration vehicle: workspace members only, no
+ * network, lockfile written by Cargo itself.
+ */
+const CARGO_LOCK_REGEN_ARGS = ["update", "--workspace", "--offline"];
+/** Human-readable form of the regen vehicle for messages and docs. */
+export const CARGO_LOCK_REGEN_COMMAND = `cargo ${CARGO_LOCK_REGEN_ARGS.join(" ")}`;
 
 /**
  * The four hand-written surfaces whose versions must be equal.
@@ -279,48 +291,58 @@ export function parseCargoLockPackageVersion(contents, packageName) {
 }
 
 /**
- * Rewrite workspace member versions in Cargo.lock. Idempotent when the
- * lockfile already lists the target version; throws when a member entry is
- * missing so a partial rewrite can never be mistaken for a complete one.
+ * Regenerate `Cargo.lock` from the manifests on disk with Cargo itself.
  *
- * @param {string} contents
- * @param {string} version
- * @param {readonly string[]} packageNames
- * @returns {string}
+ * Fails loudly when Cargo is unavailable or refuses to resolve: a lockfile
+ * that was not produced by Cargo must never be committed with the bump.
+ *
+ * @param {string} repoRoot
+ * @returns {void}
  */
-export function replaceCargoLockMemberVersions(contents, version, packageNames) {
-  let updated = contents;
+function regenerateCargoLock(repoRoot) {
+  const result = spawnSync("cargo", CARGO_LOCK_REGEN_ARGS, {
+    cwd: repoRoot,
+    encoding: "utf8",
+  });
+  if (result.error) {
+    throw new Error(
+      `${CARGO_LOCK_PATH}: \`${CARGO_LOCK_REGEN_COMMAND}\` could not run (${result.error.message}); ` +
+        "the release runner needs the Rust toolchain and a populated cargo registry cache",
+    );
+  }
+  if (result.status !== 0) {
+    const detail = `${result.stderr ?? ""}${result.stdout ?? ""}`.trim();
+    throw new Error(
+      `${CARGO_LOCK_PATH}: \`${CARGO_LOCK_REGEN_COMMAND}\` failed (exit ${result.status})` +
+        (detail.length > 0 ? `: ${detail}` : ""),
+    );
+  }
+}
+
+/**
+ * Every workspace member must already be pinned in `Cargo.lock`. Checked
+ * before the first write so a drifted lockfile refuses the bump instead of
+ * leaving a half-bumped repository behind.
+ *
+ * @param {string} lockContents
+ * @param {readonly string[]} packageNames
+ * @returns {void}
+ */
+function assertLockEntriesExist(lockContents, packageNames) {
   for (const packageName of packageNames) {
-    const current = parseCargoLockPackageVersion(updated, packageName);
-    if (current === null) {
+    if (parseCargoLockPackageVersion(lockContents, packageName) === null) {
       throw new Error(
         `${CARGO_LOCK_PATH}: missing [[package]] entry for ${packageName}`,
       );
     }
-    if (current === version) {
-      continue;
-    }
-    const escaped = escapeRegExp(packageName);
-    const pattern = new RegExp(
-      `(^\\[\\[package\\]\\]\\nname = "${escaped}"\\nversion = ")[^"]+(")`,
-      "m",
-    );
-    const next = updated.replace(
-      pattern,
-      (_match, prefix, suffix) => `${prefix}${version}${suffix}`,
-    );
-    if (next === updated) {
-      throw new Error(
-        `${CARGO_LOCK_PATH}: could not update [[package]] version for ${packageName}`,
-      );
-    }
-    updated = next;
   }
-  return updated;
 }
 
 /**
- * Write the release version into all five surfaces.
+ * Write the release version into all five surfaces: the four hand-written
+ * manifests first, then `Cargo.lock` through `cargo update --workspace
+ * `--offline`. A Cargo failure rolls every written file back, so a refused
+ * bump leaves the repository untouched.
  *
  * @param {string} repoRoot
  * @param {string} version
@@ -348,31 +370,44 @@ export function writeReleaseVersion(repoRoot, version) {
 
   const lockPath = join(repoRoot, CARGO_LOCK_PATH);
   if (!existsSync(lockPath)) {
-    throw new Error(`${CARGO_LOCK_PATH}: missing; cannot update workspace member versions`);
+    throw new Error(
+      `${CARGO_LOCK_PATH}: missing; cannot regenerate workspace member versions`,
+    );
   }
   const lockContents = readFileSync(lockPath, "utf8");
   const memberNames = readWorkspaceMemberPackages(repoRoot).map(
     (member) => member.name,
   );
-  const updatedLock = replaceCargoLockMemberVersions(
-    lockContents,
-    version,
-    memberNames,
-  );
-  if (updatedLock !== lockContents) {
-    planned.push({
+  assertLockEntriesExist(lockContents, memberNames);
+
+  if (planned.length === 0) {
+    return [];
+  }
+
+  const originals = planned.map((entry) => ({
+    path: entry.path,
+    contents: readFileSync(join(repoRoot, entry.path), "utf8"),
+  }));
+  try {
+    for (const entry of planned) {
+      writeFileSync(join(repoRoot, entry.path), entry.contents, "utf8");
+    }
+    regenerateCargoLock(repoRoot);
+  } catch (error) {
+    for (const entry of originals) {
+      writeFileSync(join(repoRoot, entry.path), entry.contents, "utf8");
+    }
+    writeFileSync(lockPath, lockContents, "utf8");
+    throw error;
+  }
+
+  const changed = planned.map(({ path, from, members }) => ({ path, from, members }));
+  if (readFileSync(lockPath, "utf8") !== lockContents) {
+    changed.push({
       path: CARGO_LOCK_PATH,
-      contents: updatedLock,
       from: "members",
       members: memberNames.length,
     });
   }
-
-  // Every surface is computed before the first write, so a refused bump leaves
-  // the repository untouched.
-  for (const entry of planned) {
-    writeFileSync(join(repoRoot, entry.path), entry.contents, "utf8");
-  }
-
-  return planned.map(({ path, from, members }) => ({ path, from, members }));
+  return changed;
 }

@@ -6,28 +6,27 @@ import {
   cleanupTempRepo,
   commitFile,
   createTempRepo,
+  FIXTURE_BASELINE_VERSION,
+  FIXTURE_TARGET_VERSION,
   gitOk,
   initGitRepo,
   readRepoFile,
-  REPO_ROOT,
   runReleaseScript,
   tagRelease,
 } from "./test-harness.mjs";
 
-const CURRENT_VERSION = JSON.parse(readRepoFile(REPO_ROOT, ROOT_PACKAGE_PATH)).version;
-
-/** @param {(version: string) => string} replace */
-function packageJsonWith(replace) {
-  return readRepoFile(REPO_ROOT, ROOT_PACKAGE_PATH).replace(/"version": "[^"]*"/, replace);
+/** `package.json` of a fixture repo with its version line rewritten. */
+function packageJsonWith(dir, replace) {
+  return readRepoFile(dir, ROOT_PACKAGE_PATH).replace(/"version": "[^"]*"/, replace);
 }
 
 test("checkVersionGreater accepts a strictly greater, untagged version", () => {
   const dir = createTempRepo();
   try {
     initGitRepo(dir);
-    const report = checkVersionGreater({ repoRoot: dir, target: "0.2.0" });
+    const report = checkVersionGreater({ repoRoot: dir, target: FIXTURE_TARGET_VERSION });
     assert.equal(report.ok, true, report.problems.join("; "));
-    assert.equal(report.referenceVersion, CURRENT_VERSION);
+    assert.equal(report.referenceVersion, FIXTURE_BASELINE_VERSION);
     assert.equal(report.referenceRef, "origin/main");
     assert.equal(report.tagExists, false);
   } finally {
@@ -39,7 +38,13 @@ test("checkVersionGreater rejects invalid, equal, and lower versions", () => {
   const dir = createTempRepo();
   try {
     initGitRepo(dir);
-    for (const target of ["0.2", "v0.2.0", "0.2.0-rc.1", "0.2.0+build.1", CURRENT_VERSION]) {
+    for (const target of [
+      "9.8",
+      `v${FIXTURE_TARGET_VERSION}`,
+      `${FIXTURE_TARGET_VERSION}-rc.1`,
+      `${FIXTURE_TARGET_VERSION}+build.1`,
+      FIXTURE_BASELINE_VERSION,
+    ]) {
       const report = checkVersionGreater({ repoRoot: dir, target });
       assert.equal(report.ok, false, target);
     }
@@ -55,14 +60,14 @@ test("checkVersionGreater rejects an existing v<version> tag", () => {
   const dir = createTempRepo();
   try {
     initGitRepo(dir);
-    tagRelease(dir, "v0.2.0");
-    const report = checkVersionGreater({ repoRoot: dir, target: "0.2.0" });
+    tagRelease(dir, `v${FIXTURE_TARGET_VERSION}`);
+    const report = checkVersionGreater({ repoRoot: dir, target: FIXTURE_TARGET_VERSION });
     assert.equal(report.ok, false);
     assert.equal(report.tagExists, true);
     assert.ok(report.problems.some((problem) => problem.includes("already exists")));
     // An unrelated tag does not block the release (exact tag match only).
-    tagRelease(dir, "v0.2.1");
-    assert.equal(checkVersionGreater({ repoRoot: dir, target: "0.3.0" }).ok, true);
+    tagRelease(dir, "v9.8.9");
+    assert.equal(checkVersionGreater({ repoRoot: dir, target: "9.8.10" }).ok, true);
   } finally {
     cleanupTempRepo(dir);
   }
@@ -72,16 +77,19 @@ test("checkVersionGreater compares against origin/<base-ref>, not the working tr
   const dir = createTempRepo();
   try {
     initGitRepo(dir);
-    commitFile(dir, ROOT_PACKAGE_PATH, packageJsonWith('"version": "0.5.0"'), "release 0.5.0");
+    commitFile(dir, ROOT_PACKAGE_PATH, packageJsonWith(dir, '"version": "9.9.9"'), "release 9.9.9");
     gitOk(dir, ["update-ref", "refs/remotes/origin/main", "HEAD"]);
-    // Working tree still advertises the older version; origin/main does not.
+    // Working tree still advertises the baseline; origin/main does not.
     gitOk(dir, ["checkout", "HEAD~1", "--", ROOT_PACKAGE_PATH]);
-    assert.equal(JSON.parse(readRepoFile(dir, ROOT_PACKAGE_PATH)).version, CURRENT_VERSION);
+    assert.equal(
+      JSON.parse(readRepoFile(dir, ROOT_PACKAGE_PATH)).version,
+      FIXTURE_BASELINE_VERSION,
+    );
 
-    const report = checkVersionGreater({ repoRoot: dir, target: "0.2.0" });
+    const report = checkVersionGreater({ repoRoot: dir, target: FIXTURE_TARGET_VERSION });
     assert.equal(report.ok, false);
-    assert.equal(report.referenceVersion, "0.5.0");
-    assert.ok(report.problems.some((problem) => problem.includes("must be greater than 0.5.0")));
+    assert.equal(report.referenceVersion, "9.9.9");
+    assert.ok(report.problems.some((problem) => problem.includes("must be greater than 9.9.9")));
   } finally {
     cleanupTempRepo(dir);
   }
@@ -93,10 +101,15 @@ test("checkVersionGreater honours --base-ref and fails without the ref", () => {
     initGitRepo(dir);
     gitOk(dir, ["update-ref", "refs/remotes/origin/release-line", "HEAD"]);
     assert.equal(
-      checkVersionGreater({ repoRoot: dir, target: "0.2.0", baseRef: "release-line" }).ok,
+      checkVersionGreater({ repoRoot: dir, target: FIXTURE_TARGET_VERSION, baseRef: "release-line" })
+        .ok,
       true,
     );
-    const missing = checkVersionGreater({ repoRoot: dir, target: "0.2.0", baseRef: "nope" });
+    const missing = checkVersionGreater({
+      repoRoot: dir,
+      target: FIXTURE_TARGET_VERSION,
+      baseRef: "nope",
+    });
     assert.equal(missing.ok, false);
     assert.ok(missing.problems.some((problem) => problem.includes("cannot read origin/nope")));
   } finally {
@@ -108,11 +121,21 @@ test("CLI exit codes and messages", () => {
   const dir = createTempRepo();
   try {
     initGitRepo(dir);
-    const ok = runReleaseScript("assert-version-greater.mjs", ["0.2.0"], dir);
+    const ok = runReleaseScript("assert-version-greater.mjs", [FIXTURE_TARGET_VERSION], dir);
     assert.equal(ok.status, 0, ok.stderr);
-    assert.match(ok.stdout, /Version OK: 0\.2\.0 > .* \(origin\/main\); v0\.2\.0 does not exist/);
+    assert.ok(
+      ok.stdout.includes(
+        `Version OK: ${FIXTURE_TARGET_VERSION} > ${FIXTURE_BASELINE_VERSION} (origin/main); ` +
+          `v${FIXTURE_TARGET_VERSION} does not exist`,
+      ),
+      ok.stdout,
+    );
 
-    const duplicate = runReleaseScript("assert-version-greater.mjs", [CURRENT_VERSION], dir);
+    const duplicate = runReleaseScript(
+      "assert-version-greater.mjs",
+      [FIXTURE_BASELINE_VERSION],
+      dir,
+    );
     assert.equal(duplicate.status, 1);
     assert.match(duplicate.stderr, /equals the origin\/main version/);
 
@@ -134,7 +157,7 @@ test("CLI exit codes and messages", () => {
 test("CLI fails cleanly when origin/main is not fetched", () => {
   const dir = createTempRepo();
   try {
-    const run = runReleaseScript("assert-version-greater.mjs", ["0.2.0"], dir);
+    const run = runReleaseScript("assert-version-greater.mjs", [FIXTURE_TARGET_VERSION], dir);
     assert.equal(run.status, 1);
     assert.match(run.stderr, /cannot read origin\/main:package\.json/);
   } finally {

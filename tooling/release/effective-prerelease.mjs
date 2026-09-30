@@ -28,10 +28,17 @@ import { signingImplemented } from "./release-config.mjs";
 /** Commit-message trailer read by the release pipeline. */
 export const PRERELEASE_TRAILER = "Nexus-Prerelease";
 
-const TRAILER_PATTERN = /^\s*Nexus-Prerelease:\s*(\S+)\s*$/i;
+/** Any line carrying the trailer key, well-formed or not. */
+const TRAILER_KEY_PATTERN = /^\s*Nexus-Prerelease\s*:/i;
+/** A line carrying the trailer key with exactly one readable value. */
+const TRAILER_PATTERN = /^\s*Nexus-Prerelease\s*:\s*(\S+)\s*$/i;
 
 /**
  * Parse the `Nexus-Prerelease` trailer out of a commit message.
+ *
+ * Every line carrying the key is collected before any value is trusted: a
+ * message that also carries a garbled duplicate (empty value, extra tokens,
+ * unexpected shape) fails closed instead of letting the readable line win.
  *
  * @param {string} message Full commit message (`git show -s --format=%B`).
  * @returns {boolean | null} Toggle value, or null when absent/ambiguous.
@@ -40,10 +47,18 @@ export function parsePrereleaseTrailer(message) {
   if (typeof message !== "string") {
     return null;
   }
-  const values = message
-    .split("\n")
-    .map((line) => line.match(TRAILER_PATTERN)?.[1]?.toLowerCase())
-    .filter((value) => value !== undefined);
+  /** @type {string[]} */
+  const values = [];
+  for (const line of message.split("\n")) {
+    if (!TRAILER_KEY_PATTERN.test(line)) {
+      continue;
+    }
+    const value = line.match(TRAILER_PATTERN)?.[1];
+    if (value === undefined) {
+      return null;
+    }
+    values.push(value.toLowerCase());
+  }
   if (values.length === 0) {
     return null;
   }
