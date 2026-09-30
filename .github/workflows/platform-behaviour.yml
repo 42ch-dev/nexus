@@ -1,0 +1,173 @@
+name: Platform Behaviour
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: platform-behaviour-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    permissions:
+      contents: read
+      pull-requests: read
+    name: Classify changed files
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      desktop: ${{ steps.filter.outputs.desktop }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        with:
+          predicate-quantifier: 'some-with-excludes'
+          filters: |
+            rust:
+              - '**/*.rs'
+              - '**/Cargo.toml'
+              - '**/Cargo.lock'
+              - '.cargo/**'
+              - 'rust-toolchain*'
+              - 'schemas/**'
+              - 'modules/**'
+              - 'crates/**'
+              - 'apps/nexus42/**'
+              # The macOS integration leg builds and loads these Node
+              # packages (see the "Build provider-acp test peer" step), so a
+              # provider/contracts-only change must schedule this job too.
+              - 'packages/nexus-provider-acp/**'
+              - 'packages/nexus-contracts/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - '.github/workflows/platform-behaviour.yml'
+            desktop:
+              - 'apps/desktop-electron/**'
+              - 'apps/nexus-service/**'
+              - 'apps/web/**'
+              - 'packages/nexus-provider-acp/**'
+              - 'packages/nexus-contracts/**'
+              - 'packages/nexus-native/**'
+              - 'packages/nexus-native-darwin-*/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - '.github/workflows/platform-behaviour.yml'
+
+  platform-subset:
+    name: Platform subset (${{ matrix.os }})
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.rust == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+          - os: macos-latest
+    env:
+      SQLX_OFFLINE: "true"
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Read workspace version for cargo cache key
+        if: runner.os == 'macOS'
+        id: workspace-version
+        run: |
+          v=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['workspace']['package']['version'])")
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
+        with:
+          shared-key: ${{ runner.os == 'Windows' && 'nexus-runtime' || format('nexus-rust-{0}-platform-behaviour', steps.workspace-version.outputs.version) }}
+          workspaces: .
+          cache-all-crates: false
+          cache-on-failure: false
+
+      - name: Check explicit-home regression tests
+        if: runner.os == 'Windows'
+        run: cargo test --target x86_64-pc-windows-msvc -p nexus42 --lib --no-default-features --features connect-host explicit_home
+
+      - name: Check explicit-home regression tests
+        if: runner.os == 'macOS'
+        run: cargo test -p nexus42 --lib --no-default-features --features connect-host explicit_home
+
+      - name: Check discovery tests
+        run: cargo test -p nexus-agent-host --lib 'discovery::'
+
+      # The SDK-wire fixtures are `#!/usr/bin/env python3` scripts: Windows
+      # cannot exec them (no shebang, no exec bit), so the claude/codex/dsh
+      # launch cohorts are a unix-only proof surface. The Windows row runs the
+      # platform-independent mapping cohort; the excluded parity work is
+      # registered as R-V1202-P1T3-001. macOS runs the full cohort.
+      - name: Check native CLI provider tests (Windows mapping cohort)
+        if: always() && runner.os == 'Windows'
+        run: cargo test -p nexus-agent-host --lib 'providers::native_cli::map_'
+
+      - name: Check native CLI provider tests
+        if: always() && runner.os != 'Windows'
+        run: cargo test -p nexus-agent-host --lib providers::native_cli
+
+      # The integration cohort spawns a Node peer that imports the built
+      # `packages/nexus-provider-acp/dist` (the same prerequisite as ci.yml's
+      # cli-hosts group), so the package is built before the tests run.
+      - name: Set up monorepo for macOS integration tests
+        if: runner.os == 'macOS'
+        uses: ./.github/actions/setup-monorepo
+        with:
+          rust-toolchain: ""
+
+      - name: Build provider-acp test peer
+        if: runner.os == 'macOS'
+        run: |
+          pnpm --filter @42ch/nexus-contracts run build
+          pnpm --filter @42ch/nexus-provider-acp build
+
+      - name: Run macOS integration tests
+        if: runner.os == 'macOS'
+        run: cargo test -p nexus-agent-host --tests
+
+  desktop-clean-home:
+    name: Desktop clean-home tests
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.desktop == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          lfs: true
+
+      - name: Set up Node, pnpm, and stable Rust
+        uses: ./.github/actions/setup-monorepo
+        with:
+          node-version: '22.22.0'
+          pnpm-version: '11.25.0'
+          rust-toolchain: stable
+          rust-targets: wasm32-unknown-unknown
+
+      - name: Build packaging prerequisites
+        run: |
+          set -euo pipefail
+          pnpm run build:web
+          pnpm --filter @42ch/nexus-contracts run build
+          pnpm --filter @42ch/nexus-provider-acp run build
+          pnpm --filter @42ch/nexus-native run build
+          pnpm --dir apps/nexus-service run build
+          pnpm --dir apps/desktop-electron run build
+
+      - name: Run desktop clean-home tests
+        run: node --test apps/desktop-electron/tests/*.test.mjs

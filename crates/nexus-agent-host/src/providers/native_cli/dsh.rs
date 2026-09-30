@@ -5049,6 +5049,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn dsh_two_messages_emit_a_then_b_without_duplicate_final() {
         let req_log_dir = tempfile::tempdir().expect("temp dir");
@@ -5067,6 +5068,7 @@ mod tests {
         ));
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn dsh_nested_assistant_message_is_ignored() {
         let req_log_dir = tempfile::tempdir().expect("temp dir");
@@ -5081,6 +5083,7 @@ mod tests {
         assert_eq!(message_texts(&events), vec!["mock dsh reply"], "{events:?}");
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn dsh_absent_root_event_type_fails_protocol_not_final_fallback() {
         let req_log_dir = tempfile::tempdir().expect("temp dir");
@@ -5102,6 +5105,7 @@ mod tests {
         assert_eq!(terminal_count(&events), 1);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn dsh_malformed_text_block_fails_after_partial_delivery() {
         let req_log_dir = tempfile::tempdir().expect("temp dir");
@@ -5122,6 +5126,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn dsh_non_success_after_streamed_text_still_fails() {
         let req_log_dir = tempfile::tempdir().expect("temp dir");
@@ -5208,6 +5213,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn dsh_oversize_fixture_fails_delivery_bounds() {
         let req_log_dir = tempfile::tempdir().expect("temp dir");
@@ -5356,6 +5362,7 @@ mod tests {
         assert_delivery_overflow_terminal(&terminal);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn dsh_receiver_drop_while_hold_turn_invalidates_session() {
         let req_log_dir = tempfile::tempdir().expect("temp dir");
@@ -5403,6 +5410,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn dsh_lag_fixture_still_delivers_message_before_terminal() {
         let req_log_dir = tempfile::tempdir().expect("temp dir");

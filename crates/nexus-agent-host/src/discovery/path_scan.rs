@@ -426,6 +426,36 @@ mod tests {
         }
     }
 
+    /// RAII guard that sets `PATHEXT` to the canonical Windows extension list
+    /// on construction and restores the previous value on drop. Only the
+    /// Windows PATHEXT-resolution test needs it, so it is cfg-gated to keep
+    /// the unix build free of dead code. The guard pins the extension set
+    /// (`.EXE` ahead of `.CMD`) and its priority order, so the resolution
+    /// assertions do not depend on whatever `PATHEXT` the host shell exported.
+    #[cfg(target_os = "windows")]
+    struct PathextGuard {
+        previous: Option<String>,
+    }
+
+    #[cfg(target_os = "windows")]
+    impl PathextGuard {
+        fn set(value: &str) -> Self {
+            let previous = std::env::var("PATHEXT").ok();
+            std::env::set_var("PATHEXT", value);
+            Self { previous }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    impl Drop for PathextGuard {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(value) => std::env::set_var("PATHEXT", value),
+                None => std::env::remove_var("PATHEXT"),
+            }
+        }
+    }
+
     /// Verify that `scan_path_in` (the production scan path, not the test-only
     /// `scan_custom_path` helper) discovers ALL native CLI providers when the
     /// stub binaries are present and executable in the scanned directory.
@@ -613,7 +643,14 @@ mod tests {
 
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
         let _path_guard = PathGuard::isolate(temp_dir.path());
-        let _env_guard = DshEnvGuard::set("/definitely/missing/dsh-runtime");
+        // A missing ABSOLUTE path: a `/`-rooted value is not absolute on
+        // Windows, where it would be rejected as a relative path before ever
+        // reaching the executability check this test targets.
+        #[cfg(windows)]
+        let missing_override = r"C:\definitely\missing\dsh-runtime";
+        #[cfg(unix)]
+        let missing_override = "/definitely/missing/dsh-runtime";
+        let _env_guard = DshEnvGuard::set(missing_override);
 
         let config = AgentHostConfig::default();
         let entries = scan_path_in(&config, &[], &[temp_dir.path().to_path_buf()])
@@ -753,6 +790,145 @@ mod tests {
         }
         // If none found, that's fine too (unusual environment) — the important
         // thing is that the function didn't panic or hang.
+    }
+
+    /// Windows-only (Gap A, v1.202 p1 T1): `find_command` must resolve a
+    /// command whose only stub carries a `PATHEXT` extension (`claude.exe` /
+    /// `claude.cmd`). Every other stub in this module is extensionless, so the
+    /// extension-bearing shape was untested on any platform.
+    ///
+    /// Two resolution routes are asserted, because they are separate code:
+    /// 1. the primary `which` route (`path_scan.rs:186-195`), which appends
+    ///    `PATHEXT` extensions itself — `.EXE` outranks `.CMD`;
+    /// 2. the manual fallback's Windows `PATHEXT` loop
+    ///    (`path_scan.rs:214-226`), reached only when the two `which` calls
+    ///    fail. `find_command` enters `which::which_in` only when
+    ///    `std::env::join_paths` accepts the directory list; the character
+    ///    that makes `join_paths` reject a list is a **double quote on
+    ///    Windows** (`:` on Unix), *not* the `;` separator — a semicolon is
+    ///    legal in a quoted entry
+    ///    (<https://doc.rust-lang.org/std/env/fn.join_paths.html#errors>).
+    ///    Pairing the stub dir with one synthetic, never-created quote-bearing
+    ///    entry therefore skips the primary route — the only deterministic way
+    ///    to execute that loop, which no test reached before.
+    ///
+    /// Only compiled on Windows: the `PATHEXT` extension-append path does not
+    /// exist on unix, so this test can be neither compiled nor run there.
+    ///
+    /// Construction note for T2's `platform-behaviour.yml` run: this test is
+    /// expected to **fail when the manual `PATHEXT` loop in `find_command` is
+    /// disabled and pass with it present**, since that loop is the only
+    /// remaining route once `join_paths` rejects the list. The Windows CI run
+    /// is the proof of that behaviour; it is not demonstrated on this host.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn find_command_resolves_windows_pathext_extension_stub() {
+        let _lock = crate::test_support::PROCESS_ENV_LOCK.blocking_lock();
+
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+
+        // Route 1 fixture: both extension forms in one directory: `.EXE`
+        // precedes `.CMD` in the canonical PATHEXT order, so the priority
+        // assertion is deterministic.
+        let both_dir = temp_dir.path().join("both-bin");
+        std::fs::create_dir_all(&both_dir).expect("create both-bin dir");
+        let exe_stub = both_dir.join("claude.exe");
+        let cmd_stub = both_dir.join("claude.cmd");
+        std::fs::write(&exe_stub, "MZ stub payload").expect("write claude.exe stub");
+        std::fs::write(&cmd_stub, "@echo off\r\necho stub\r\n").expect("write claude.cmd stub");
+
+        // Route 2 fixture: a valid directory holding ONLY `claude.cmd`, paired
+        // with a synthetic entry that carries a double quote. `find_command`
+        // reaches `which::which_in` only when `join_paths` accepts the list;
+        // on Windows `join_paths` rejects any entry containing `"` (the
+        // rejected character is `"` on Windows, `:` on Unix), so this list is
+        // rejected and the primary route is skipped. The quote-bearing path is
+        // never created — it only has to poison the join.
+        let fallback_dir = temp_dir.path().join("fallback-bin");
+        std::fs::create_dir_all(&fallback_dir).expect("create fallback-bin dir");
+        let fallback_stub = fallback_dir.join("claude.cmd");
+        std::fs::write(&fallback_stub, "@echo off\r\necho stub\r\n")
+            .expect("write fallback claude.cmd stub");
+
+        let quoted_entry = temp_dir.path().join("synthetic-claude\"bin");
+        let search_dirs = vec![fallback_dir.clone(), quoted_entry.clone()];
+        assert!(
+            !quoted_entry.exists(),
+            "the quote-bearing entry must stay synthetic: {}",
+            quoted_entry.display()
+        );
+        // Guard route 2's premise: this exact list must be rejected, otherwise
+        // `find_command` would take the `which_in` branch and the test would
+        // pass without ever executing the manual PATHEXT loop it targets.
+        assert!(
+            std::env::join_paths(&search_dirs).is_err(),
+            "a quote-bearing entry must make join_paths fail on Windows, so \
+             find_command skips which_in: {search_dirs:?}"
+        );
+
+        let _pathext_guard = PathextGuard::set(".COM;.EXE;.BAT;.CMD");
+        // Isolate PATH to an empty directory so neither `which` call can find a
+        // real `claude` installed on the runner (same rationale as qc1 W-002);
+        // every resolution below therefore comes from the scanned `path_dirs`.
+        let empty_dir = temp_dir.path().join("empty-path");
+        std::fs::create_dir_all(&empty_dir).expect("create empty-path dir");
+        let _path_guard = PathGuard::isolate(&empty_dir);
+
+        let resolved_exe = find_command(std::slice::from_ref(&both_dir), "claude")
+            .expect("claude must resolve through its PATHEXT extension (.EXE/.CMD)");
+        assert!(
+            resolved_exe.is_absolute(),
+            "resolution must be absolute: {}",
+            resolved_exe.display()
+        );
+        assert_eq!(
+            resolved_exe.parent(),
+            Some(both_dir.as_path()),
+            "resolution must come from the scanned stub dir: {}",
+            resolved_exe.display()
+        );
+        // Windows paths are case-insensitive, so compare the name and the
+        // extension case-insensitively: the `.EXE` stub must outrank `.CMD`.
+        assert_eq!(
+            resolved_exe
+                .file_name()
+                .and_then(std::ffi::OsStr::to_str)
+                .map(str::to_ascii_lowercase),
+            Some("claude.exe".to_owned()),
+            "`.EXE` outranks `.CMD` in PATHEXT, so the .exe stub must win: {}",
+            resolved_exe.display()
+        );
+        assert_eq!(
+            resolved_exe
+                .extension()
+                .and_then(std::ffi::OsStr::to_str)
+                .map(str::to_ascii_lowercase),
+            Some("exe".to_owned()),
+            "the resolved path must carry the matched PATHEXT extension: {}",
+            resolved_exe.display()
+        );
+
+        // Route 2: the manual fallback's PATHEXT loop. `join_paths` rejects
+        // `search_dirs`, so `which_in` is skipped; the isolated PATH makes the
+        // second `which()` call miss; the loop resolves `claude.cmd` from the
+        // valid entry.
+        let resolved_fallback = find_command(&search_dirs, "claude")
+            .expect("the manual PATHEXT fallback must resolve claude.cmd");
+        assert_eq!(
+            resolved_fallback.parent(),
+            Some(fallback_dir.as_path()),
+            "the fallback must resolve from the scanned dir: {}",
+            resolved_fallback.display()
+        );
+        assert_eq!(
+            resolved_fallback
+                .file_name()
+                .and_then(std::ffi::OsStr::to_str)
+                .map(str::to_ascii_lowercase),
+            Some("claude.cmd".to_owned()),
+            "the fallback loop must resolve the .cmd extension: {}",
+            resolved_fallback.display()
+        );
     }
 
     /// Verify that `scan_path` doesn't panic when PATH is available
