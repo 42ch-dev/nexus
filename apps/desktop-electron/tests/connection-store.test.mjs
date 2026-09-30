@@ -543,6 +543,18 @@ test('raw-form endpoints are refused on the persisted load path and never re-imp
 
     assert.equal(await store.get(), null, `not activated: ${endpointUrl}`);
     assert.equal(store.getAuth(), null, `no auth authority: ${endpointUrl}`);
+    // The endpoint-validation rejection is its own secure_store_corrupt branch;
+    // its sanitized message must stay distinct from the malformed-shape branch.
+    assert.equal(
+      errorCode(store.openFailure),
+      'secure_store_corrupt',
+      `classified corrupt: ${endpointUrl}`,
+    );
+    assert.equal(
+      errorMessage(store.openFailure),
+      'connection store endpoint is not a supported root service URL',
+      `endpoint-specific message: ${endpointUrl}`,
+    );
     assert.equal(legacyReads, 0, `never replaced by legacy material: ${endpointUrl}`);
     assert.equal(readFileSync(deps.filePath, 'utf8'), contents, `bytes untouched: ${endpointUrl}`);
   }
@@ -734,7 +746,7 @@ test('a permission-denied store file is openFailure secure_store_unreadable (rea
   );
 });
 
-test('a corrupt store shape is openFailure secure_store_corrupt for every readFile rejection', async (t) => {
+test('a corrupt store shape is openFailure secure_store_corrupt (invalid v1 shape or undecryptable credential)', async (t) => {
   // Valid JSON that is not a v1 store.
   const shapeDeps = makeDeps(t);
   const shapeBytes = JSON.stringify({ version: 2, config: { endpointUrl: ENDPOINT, hasApiKey: false } });
