@@ -8,8 +8,16 @@
  * `required_signatures` protection lands. `createCommitOnBranch` produces a
  * GitHub-signed (verified) commit instead.
  *
- * Resets the remote `--branch` tip to `--base-ref`, then commits the diff of
- * the current working tree against that base as one signed commit.
+ * Publishes the current working tree as one signed commit on the remote
+ * `--branch`: creates the branch from the `--base-ref` tip when it is absent,
+ * otherwise replaces its existing tip in place.
+ *
+ * Publication never destroys a previous `--branch` head. When the branch
+ * already exists the replacement commit is created with that head OID as the
+ * `createCommitOnBranch` compare-and-swap `expectedHeadOid`, so the ref moves
+ * only as part of a mutation that succeeded — a body-read, network, GraphQL or
+ * interruption failure leaves the published branch at its previous, usable
+ * head instead of resetting it to `--base-ref`.
  *
  * The working tree must have been prepared from the same `--base-ref` tip this
  * run fetches. `--expected-base-oid` (or `RELEASE_BASE_OID`) pins that OID; a
@@ -232,6 +240,18 @@ export function collectFileChanges(repoRoot, baseRef) {
 }
 
 /**
+ * GitHub REST/GraphQL base URL. GitHub sets `GITHUB_API_URL` in every Actions
+ * step (github.com and GitHub Enterprise Server alike); the tests point it at a
+ * local stub.
+ *
+ * @returns {string}
+ */
+function apiBaseUrl() {
+  const override = process.env.GITHUB_API_URL?.trim();
+  return (override && override.length > 0 ? override : "https://api.github.com").replace(/\/+$/, "");
+}
+
+/**
  * @param {string} path
  * @param {Record<string, unknown>} [body]
  * @param {string} [method]
@@ -243,7 +263,7 @@ async function ghApi(path, body, method = body === undefined ? "GET" : "POST") {
     throw new Error("GITHUB_TOKEN (or GH_TOKEN) is required");
   }
 
-  const response = await fetch(`https://api.github.com${path}`, {
+  const response = await fetch(`${apiBaseUrl()}${path}`, {
     method,
     headers: {
       Accept: "application/vnd.github+json",
@@ -288,8 +308,8 @@ async function ghGraphql(query, variables) {
 }
 
 /**
- * Point the remote branch at `baseOid` (create or force-update). Release
- * branches live outside the default branch, so force updates are allowed.
+ * Resolve the exact `refs/heads/<branch>` tip, or `null` when the branch does
+ * not exist yet.
  *
  * Exact-match endpoint: singular `GET /git/ref/heads/<branch>`. The plural
  * `refs` form is a prefix match — `release/0.1.0` also matches
@@ -297,29 +317,40 @@ async function ghGraphql(query, variables) {
  *
  * @param {string} repo
  * @param {string} branch
- * @param {string} baseOid
+ * @returns {Promise<string | null>}
  */
-async function ensureBranchAtOid(repo, branch, baseOid) {
-  const exactRefPath = `/repos/${repo}/git/ref/heads/${branch}`;
-  let exists = false;
+async function resolveBranchOid(repo, branch) {
   try {
-    await ghApi(exactRefPath);
-    exists = true;
+    const ref = await ghApi(`/repos/${repo}/git/ref/heads/${branch}`);
+    const oid = /** @type {{ object?: { sha?: unknown } } | null} */ (ref)?.object?.sha;
+    if (typeof oid !== "string" || oid.length === 0) {
+      throw new Error(
+        `GitHub API returned no OID for refs/heads/${branch}: ${JSON.stringify(ref)}`,
+      );
+    }
+    return oid;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (!/\b404\b/.test(message) && !/Reference does not exist/i.test(message)) {
       throw error;
     }
+    return null;
   }
+}
 
-  if (exists) {
-    await ghApi(`/repos/${repo}/git/refs/heads/${branch}`, { sha: baseOid, force: true }, "PATCH");
-    console.log(`Updated refs/heads/${branch} → ${baseOid}`);
-    return;
-  }
-
-  await ghApi(`/repos/${repo}/git/refs`, { ref: `refs/heads/${branch}`, sha: baseOid });
-  console.log(`Created refs/heads/${branch} → ${baseOid}`);
+/**
+ * Create `refs/heads/<branch>` at `oid`. Used only when the branch is absent:
+ * an existing release head is never force-reset — the replacement commit's
+ * `expectedHeadOid` compare-and-swap is what moves it.
+ *
+ * @param {string} repo
+ * @param {string} branch
+ * @param {string} oid
+ * @returns {Promise<void>}
+ */
+async function createBranchAtOid(repo, branch, oid) {
+  await ghApi(`/repos/${repo}/git/refs`, { ref: `refs/heads/${branch}`, sha: oid });
+  console.log(`Created refs/heads/${branch} → ${oid}`);
 }
 
 /**
@@ -366,20 +397,48 @@ export async function main(argv = process.argv.slice(2)) {
   git(repoRoot, ["fetch", "origin", baseRef, "--prune"]);
   const baseOid = git(repoRoot, ["rev-parse", `origin/${baseRef}`]);
   verifyPinnedBase(expectedBaseOid, baseOid, baseRef);
-  const fileChanges = collectFileChanges(repoRoot, baseRef);
 
-  if (fileChanges.additions.length === 0 && fileChanges.deletions.length === 0) {
+  // Pre-screen: the dispatch prepared the bump on `origin/<baseRef>`, so an
+  // empty delta there means there is nothing to publish. Refusing before any
+  // GitHub call keeps the branch (and its previous head) untouched.
+  const baseChanges = collectFileChanges(repoRoot, baseRef);
+  if (baseChanges.additions.length === 0 && baseChanges.deletions.length === 0) {
     console.error(`No file changes vs origin/${baseRef}; nothing to commit on ${branch}.`);
     return 1;
   }
 
-  await ensureBranchAtOid(/** @type {string} */ (repo), /** @type {string} */ (branch), baseOid);
+  // Never destroy a previous release head: when the branch already exists the
+  // replacement commit carries its current OID as the compare-and-swap
+  // `expectedHeadOid`, so the ref only moves as part of a successful mutation.
+  const existingHeadOid = await resolveBranchOid(
+    /** @type {string} */ (repo),
+    /** @type {string} */ (branch),
+  );
+
+  let fileChanges = baseChanges;
+  let expectedHeadOid = baseOid;
+  if (existingHeadOid !== null) {
+    // The replacement is parented on the existing head, so its delta must be
+    // taken against that head: a delta against `baseRef` would drop the
+    // `baseRef` changes that landed after the branch was first published.
+    git(repoRoot, ["fetch", "origin", /** @type {string} */ (branch), "--prune"]);
+    fileChanges = collectFileChanges(repoRoot, /** @type {string} */ (branch));
+    if (fileChanges.additions.length === 0 && fileChanges.deletions.length === 0) {
+      console.error(`No file changes vs origin/${branch}; nothing to commit on ${branch}.`);
+      return 1;
+    }
+    expectedHeadOid = existingHeadOid;
+  }
 
   const message = composeCommitMessage({
     headline: /** @type {string} */ (headline),
     body: bodyFile ? readFileSync(bodyFile, "utf8") : "",
     trailers,
   });
+
+  if (existingHeadOid === null) {
+    await createBranchAtOid(/** @type {string} */ (repo), /** @type {string} */ (branch), baseOid);
+  }
 
   const result = await ghGraphql(
     `mutation($input: CreateCommitOnBranchInput!) {
@@ -391,7 +450,7 @@ export async function main(argv = process.argv.slice(2)) {
       input: buildCreateCommitInput({
         repo: /** @type {string} */ (repo),
         branch: /** @type {string} */ (branch),
-        baseOid,
+        baseOid: expectedHeadOid,
         message,
         fileChanges,
       }),

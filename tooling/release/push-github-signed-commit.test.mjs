@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,6 +8,7 @@ import {
   buildCreateCommitInput,
   collectFileChanges,
   composeCommitMessage,
+  main,
   parseArgs,
   verifyPinnedBase,
 } from "./push-github-signed-commit.mjs";
@@ -363,5 +365,233 @@ test("the helper proceeds past the base pin when the fetched main still matches 
     assert.match(result.stderr, /No file changes vs origin\/main/);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/**
+ * Scratch repo whose `origin` is a local bare repo, with `main` advanced past
+ * the commit the previous release branch was published from and the working
+ * tree prepared exactly like the workflow (fresh branch off `origin/main` plus
+ * the version bump) — the QC3-002 re-dispatch shape.
+ *
+ * @param {{ existingRelease?: boolean }} [options]
+ * @returns {{ root: string; origin: string; work: string; previousReleaseOid: string | null; advancedMainOid: string }}
+ */
+function createRedispatchFixture({ existingRelease = true } = {}) {
+  const root = mkdtempSync(join(tmpdir(), "nexus-release-redispatch-"));
+  const origin = join(root, "origin.git");
+  const work = join(root, "work");
+  gitOk(root, ["init", "-q", "--bare", "-b", "main", origin]);
+  mkdirSync(work, { recursive: true });
+  gitOk(work, ["init", "-q", "-b", "main"]);
+  gitOk(work, ["config", "user.email", "release-test@example.com"]);
+  gitOk(work, ["config", "user.name", "Release Test"]);
+  gitOk(work, ["config", "commit.gpgsign", "false"]);
+  writeRepoFile(work, "package.json", '{"name":"scratch","version":"9.8.7"}\n');
+  gitOk(work, ["add", "-A"]);
+  gitOk(work, ["commit", "-q", "-m", "init"]);
+  gitOk(work, ["remote", "add", "origin", origin]);
+  gitOk(work, ["push", "-q", "origin", "main"]);
+
+  let previousReleaseOid = null;
+  if (existingRelease) {
+    // A previously published release head: the bump on the older `main`.
+    gitOk(work, ["switch", "-q", "-c", "release/0.2.0"]);
+    writeRepoFile(work, "package.json", '{"name":"scratch","version":"9.8.8"}\n');
+    gitOk(work, ["add", "-A"]);
+    gitOk(work, ["commit", "-q", "-m", "chore(release): bump version to 0.2.0"]);
+    previousReleaseOid = gitOk(work, ["rev-parse", "HEAD"]);
+    gitOk(work, ["push", "-q", "origin", "release/0.2.0"]);
+    gitOk(work, ["switch", "-q", "main"]);
+  }
+
+  const advancedMainOid = commitFile(work, "main-only.txt", "main advanced\n", "main advances");
+  gitOk(work, ["push", "-q", "origin", "main"]);
+
+  gitOk(work, ["switch", "-q", "--force-create", "release/0.2.0", "origin/main"]);
+  writeRepoFile(work, "package.json", '{"name":"scratch","version":"9.8.9"}\n');
+
+  return { root, origin, work, previousReleaseOid, advancedMainOid };
+}
+
+/**
+ * Minimal stand-in for the GitHub REST + GraphQL endpoints the helper calls.
+ *
+ * @param {{ refOid: string | null; commitOid?: string; commitError?: string }} options
+ * @returns {Promise<{ url: string; requests: { method: string; url: string; body: any }[]; refMutations: () => { method: string; url: string; body: any }[]; close: () => Promise<void> }>}
+ */
+async function startGitHubStub({ refOid, commitOid = "c".repeat(40), commitError = null }) {
+  /** @type {{ method: string; url: string; body: any }[]} */
+  const requests = [];
+  const server = createServer((req, res) => {
+    let raw = "";
+    req.on("data", (chunk) => {
+      raw += chunk;
+    });
+    req.on("end", () => {
+      requests.push({ method: req.method ?? "", url: req.url ?? "", body: raw ? JSON.parse(raw) : null });
+      const send = (status, payload) => {
+        res.writeHead(status, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(payload));
+      };
+      if (req.method === "GET" && req.url?.startsWith("/repos/o/r/git/ref/heads/")) {
+        return refOid === null
+          ? send(404, { message: "Not Found" })
+          : send(200, { ref: "refs/heads/release/0.2.0", object: { sha: refOid } });
+      }
+      if (req.url === "/graphql") {
+        return commitError
+          ? send(200, { errors: [{ message: commitError }] })
+          : send(200, {
+              data: { createCommitOnBranch: { commit: { oid: commitOid, url: `https://example.test/${commitOid}` } } },
+            });
+      }
+      if (req.method === "POST" && req.url === "/repos/o/r/git/refs") {
+        return send(201, {});
+      }
+      if (req.method === "PATCH" && req.url?.startsWith("/repos/o/r/git/refs/heads/")) {
+        return send(200, {});
+      }
+      return send(404, { message: `unexpected ${req.method} ${req.url}` });
+    });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  const port = typeof address === "object" && address !== null ? address.port : 0;
+  return {
+    url: `http://127.0.0.1:${port}`,
+    requests,
+    // Any REST call that would move a ref; the commit mutation itself is
+    // GraphQL and counted separately.
+    refMutations: () => requests.filter((entry) => entry.method !== "GET" && entry.url.startsWith("/repos/o/r/git/")),
+    close: () =>
+      new Promise((resolve) => {
+        server.close(() => resolve());
+      }),
+  };
+}
+
+/**
+ * Run the helper in-process (the stub server shares this event loop) with the
+ * GitHub environment pointed at it.
+ *
+ * @param {{ url: string }} stub
+ * @param {string} work
+ * @param {string[]} args
+ * @param {Record<string, string>} [env]
+ * @returns {Promise<number>}
+ */
+async function runHelper(stub, work, args, env = {}) {
+  const applied = {
+    NEXUS_REPO_ROOT: work,
+    GITHUB_TOKEN: "stub-token",
+    GH_TOKEN: "",
+    GITHUB_API_URL: stub.url,
+    ...env,
+  };
+  /** @type {Record<string, string | undefined>} */
+  const saved = {};
+  for (const [key, value] of Object.entries(applied)) {
+    saved[key] = process.env[key];
+    process.env[key] = value;
+  }
+  try {
+    return await main(args);
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+}
+
+/** The re-dispatch CLI invocation shared by the three publication tests. */
+const REDISPATCH_ARGS = [
+  "--branch",
+  "release/0.2.0",
+  "--message",
+  "chore(release): bump version to 0.2.0",
+  "--repo",
+  "o/r",
+];
+
+test("the helper keeps an existing release head when the replacement commit fails", async () => {
+  const fixture = createRedispatchFixture();
+  const stub = await startGitHubStub({ refOid: fixture.previousReleaseOid, commitError: "commit denied" });
+  try {
+    await assert.rejects(
+      runHelper(stub, fixture.work, REDISPATCH_ARGS, { RELEASE_BASE_OID: fixture.advancedMainOid }),
+      /GraphQL errors/,
+    );
+
+    // The failing run never moved the published ref: no force-reset to main.
+    assert.deepEqual(stub.refMutations(), []);
+    assert.equal(
+      gitOk(fixture.origin, ["rev-parse", "refs/heads/release/0.2.0"]),
+      fixture.previousReleaseOid,
+    );
+  } finally {
+    await stub.close();
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("the helper replaces an existing release head with a commit parented on it", async () => {
+  const fixture = createRedispatchFixture();
+  const stub = await startGitHubStub({ refOid: fixture.previousReleaseOid });
+  try {
+    assert.equal(
+      await runHelper(stub, fixture.work, REDISPATCH_ARGS, { RELEASE_BASE_OID: fixture.advancedMainOid }),
+      0,
+    );
+
+    const mutation = stub.requests.find((entry) => entry.url === "/graphql");
+    assert.ok(mutation, "expected a createCommitOnBranch mutation");
+    const input = mutation.body.variables.input;
+    // Compare-and-swap on the existing head, not on main.
+    assert.equal(input.expectedHeadOid, fixture.previousReleaseOid);
+    assert.notEqual(input.expectedHeadOid, fixture.advancedMainOid);
+    assert.deepEqual(stub.refMutations(), []);
+    // Delta taken against the previous release head, so the resulting tree is
+    // the prepared working tree (main's later changes included) and the PR
+    // does not revert them.
+    assert.deepEqual(
+      input.fileChanges.additions.map((entry) => entry.path).sort(),
+      ["main-only.txt", "package.json"],
+    );
+    assert.deepEqual(input.fileChanges.deletions, []);
+  } finally {
+    await stub.close();
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("the helper creates the release branch from the base when it is absent", async () => {
+  const fixture = createRedispatchFixture({ existingRelease: false });
+  const stub = await startGitHubStub({ refOid: null, commitOid: "d".repeat(40) });
+  try {
+    assert.equal(
+      await runHelper(stub, fixture.work, REDISPATCH_ARGS, { RELEASE_BASE_OID: fixture.advancedMainOid }),
+      0,
+    );
+
+    const created = stub.requests.find(
+      (entry) => entry.method === "POST" && entry.url === "/repos/o/r/git/refs",
+    );
+    assert.deepEqual(created?.body, { ref: "refs/heads/release/0.2.0", sha: fixture.advancedMainOid });
+
+    const input = stub.requests.find((entry) => entry.url === "/graphql").body.variables.input;
+    assert.equal(input.expectedHeadOid, fixture.advancedMainOid);
+    // Fresh path unchanged: the delta is still taken against the base ref.
+    assert.deepEqual(
+      input.fileChanges.additions.map((entry) => entry.path).sort(),
+      ["package.json"],
+    );
+  } finally {
+    await stub.close();
+    rmSync(fixture.root, { recursive: true, force: true });
   }
 });
