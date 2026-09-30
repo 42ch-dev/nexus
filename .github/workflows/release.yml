@@ -176,17 +176,24 @@ jobs:
           files=()
           require_file() {
             [[ -f "$1" ]] || { echo "::error::missing release artifact: $1"; exit 1; }
-            files+=("$1")
           }
           for slug in windows-x64 macos-arm64 linux-x64; do
             dir="$assets/nexus-runtime-$slug"
-            require_file "$dir/nexus-runtime-$slug.zip"
-            require_file "$dir/nexus-runtime-$slug.zip.sha256"
+            runtime_zip="$dir/nexus-runtime-$slug.zip"
+            require_file "$runtime_zip"
+            files+=("$runtime_zip")
+            runtime_checksum="$dir/nexus-runtime-$slug.zip.sha256"
+            require_file "$runtime_checksum"
+            files+=("$runtime_checksum")
           done
           for arch in arm64 x64; do
             dir="$assets/nexus-desktop-unsigned-darwin-$arch"
-            require_file "$dir/Nexus-${version}-darwin-${arch}-unsigned.dmg"
-            require_file "$dir/Nexus-${version}-darwin-${arch}-unsigned.app.zip"
+            desktop_dmg="$dir/Nexus-${version}-darwin-${arch}-unsigned.dmg"
+            require_file "$desktop_dmg"
+            files+=("$desktop_dmg")
+            desktop_zip="$dir/Nexus-${version}-darwin-${arch}-unsigned.app.zip"
+            require_file "$desktop_zip"
+            files+=("$desktop_zip")
             require_file "$dir/receipt.json"
             staged_receipt="$assets/Nexus-${version}-darwin-${arch}-receipt.json"
             cp "$dir/receipt.json" "$staged_receipt"
