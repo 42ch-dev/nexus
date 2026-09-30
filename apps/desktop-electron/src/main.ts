@@ -52,6 +52,7 @@ import {
   DESKTOP_RUNTIME_CHANNEL,
   DESKTOP_SCHEME,
   connectionEndpointOrigin,
+  errorCode,
   errorMessage,
   isAllowedDesktopExternalUrl,
 } from './desktop-contract.js';
@@ -475,6 +476,36 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
       readLegacy: () => legacyCredentials.read(),
       cleanupLegacy: () => legacyCredentials.cleanup(),
     }));
+  // An existing store that could not be activated is surfaced on both
+  // channels: the durable main-process diagnostic (the legacyCleanupFailure
+  // stderr shape, extended with the typed classification code) and a one-shot
+  // window-less notice. The compose seam runs after
+  // `whenReady` and before any window exists, and `.catch` keeps a dialog
+  // failure from ever failing boot; the stderr write stays the durable
+  // record. The dialog copy names the classification in user-facing words and
+  // never carries the raw code, a file path, or secret material.
+  if (connectionStore.openFailure !== null) {
+    const openFailureCode = errorCode(connectionStore.openFailure);
+    process.stderr.write(
+      `[desktop] ${openFailureCode}: ${errorMessage(connectionStore.openFailure)}\n`,
+    );
+    void e.dialog
+      .showMessageBox({
+        type: 'warning',
+        title: product.name,
+        message:
+          openFailureCode === 'secure_store_unreadable'
+            ? 'Stored connections are unreadable'
+            : 'Stored connections are corrupt',
+        detail:
+          'Your stored connections are unavailable and the app will start without one. ' +
+          'Nothing was deleted — the original file was left in place, and saving a connection again replaces it once the location is writable.',
+        buttons: ['OK'],
+        noLink: true,
+      })
+      .catch(() => undefined);
+  }
+
   let activeConfig: PublicConnectionConfig | null = await connectionStore.get();
   const refreshActiveConfig = async (): Promise<void> => {
     activeConfig = await connectionStore.get();

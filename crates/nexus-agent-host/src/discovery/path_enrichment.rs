@@ -360,7 +360,8 @@ pub fn apply_process_path_enrichment() {
     let after_count = env::split_paths(&enriched).count();
 
     // Process-global PATH update before Tokio (and before any agent scan).
-    // Concurrent tests that mutate PATH must serialize (see module tests).
+    // Concurrent tests that mutate process env serialize on the crate-wide
+    // `crate::test_support::PROCESS_ENV_LOCK` (see this module's tests).
     // Workspace forbids `unsafe`, so we use the safe `set_var` call — but only
     // from a single-threaded context (binary `main` before Runtime::new).
     env::set_var("PATH", &enriched);
@@ -385,12 +386,24 @@ pub fn apply_process_path_enrichment() {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
 
-    static PATH_TEST_LOCK: Mutex<()> = Mutex::new(());
+    // Tests that isolate the user home by setting `HOME` are `#[cfg(unix)]`:
+    // `dirs::home_dir()` resolves the Windows profile known folder
+    // (`FOLDERID_Profile`) and cannot be redirected from a test, so their
+    // home-relative assertions have no Windows meaning.
+    //
+    // Every test below mutates process-global environment (`PATH`, `HOME`,
+    // `NVM_DIR`, `VOLTA_HOME`, `PNPM_HOME`), so they all serialize on the
+    // crate-wide `crate::test_support::PROCESS_ENV_LOCK`. That lock is the
+    // single PATH synchronization boundary for this crate: it also covers
+    // `discovery::path_scan` (whose `PathGuard` replaces `PATH`) and the
+    // python-fixture spawn tests whose `#!/usr/bin/env python3` shebang
+    // resolves the interpreter through the process `PATH`. A module-local
+    // lock here would let this module's `PATH` writes interleave with those.
 
     /// Remove version-manager env vars that would override the temp HOME path,
     /// returning their previous values so callers can restore them.
+    #[cfg(unix)]
     fn stash_manager_env_vars() -> [Option<OsString>; 3] {
         let nvm = env::var_os("NVM_DIR");
         let volta = env::var_os("VOLTA_HOME");
@@ -401,6 +414,7 @@ mod tests {
         [nvm, volta, pnpm]
     }
 
+    #[cfg(unix)]
     fn restore_manager_env_vars(stashed: [Option<OsString>; 3]) {
         let [nvm, volta, pnpm] = stashed;
         match nvm {
@@ -419,7 +433,9 @@ mod tests {
 
     #[test]
     fn merge_path_prepends_extras_and_dedupes() {
-        let existing = OsString::from("/usr/bin:/bin:/opt/homebrew/bin");
+        // Build the value with the platform PATH separator: the assertion is
+        // about merge/split round-tripping, not about a `:`-joined literal.
+        let existing = env::join_paths(["/usr/bin", "/bin", "/opt/homebrew/bin"]).unwrap();
         let extras = vec![
             PathBuf::from("/opt/homebrew/bin"),
             PathBuf::from("/custom/bin"),
@@ -454,7 +470,7 @@ mod tests {
         use std::fs;
         use std::os::unix::fs::PermissionsExt;
 
-        let _guard = PATH_TEST_LOCK.lock().unwrap();
+        let _guard = crate::test_support::PROCESS_ENV_LOCK.blocking_lock();
         let tmp = tempfile::tempdir().unwrap();
         let bin_dir = tmp.path().to_path_buf();
         let binary = bin_dir.join("nexus-path-probe-agent");
@@ -489,7 +505,7 @@ mod tests {
 
     #[test]
     fn apply_process_path_enrichment_is_idempotent() {
-        let _guard = PATH_TEST_LOCK.lock().unwrap();
+        let _guard = crate::test_support::PROCESS_ENV_LOCK.blocking_lock();
         let previous = env::var_os("PATH");
         env::set_var("PATH", "/usr/bin:/bin");
         apply_process_path_enrichment();
@@ -504,6 +520,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn login_equivalent_bin_dirs_includes_asdf_and_mise_when_present() {
         let tmp = tempfile::tempdir().unwrap();
@@ -513,7 +530,7 @@ mod tests {
         std::fs::create_dir_all(&asdf).unwrap();
         std::fs::create_dir_all(&mise).unwrap();
 
-        let _guard = PATH_TEST_LOCK.lock().unwrap();
+        let _guard = crate::test_support::PROCESS_ENV_LOCK.blocking_lock();
         let previous_home = env::var_os("HOME");
         env::set_var("HOME", home);
 
@@ -533,6 +550,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn login_equivalent_bin_dirs_includes_kimi_code_bin_when_present() {
         let tmp = tempfile::tempdir().unwrap();
@@ -540,7 +558,7 @@ mod tests {
         let kimi = home.join(".kimi-code/bin");
         std::fs::create_dir_all(&kimi).unwrap();
 
-        let _guard = PATH_TEST_LOCK.lock().unwrap();
+        let _guard = crate::test_support::PROCESS_ENV_LOCK.blocking_lock();
         let previous_home = env::var_os("HOME");
         let stashed = stash_manager_env_vars();
         env::set_var("HOME", home);
@@ -558,6 +576,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn probe_path_dirs_keeps_process_path_before_enrichment() {
         let tmp = tempfile::tempdir().unwrap();
@@ -567,7 +586,7 @@ mod tests {
         let isolated = home.join("isolated-bin");
         std::fs::create_dir_all(&isolated).unwrap();
 
-        let _guard = PATH_TEST_LOCK.lock().unwrap();
+        let _guard = crate::test_support::PROCESS_ENV_LOCK.blocking_lock();
         let previous_home = env::var_os("HOME");
         let previous_path = env::var_os("PATH");
         let stashed = stash_manager_env_vars();
@@ -605,7 +624,7 @@ mod tests {
         std::fs::create_dir_all(nvm_root.join("alias")).unwrap();
         std::fs::write(nvm_root.join("alias/default"), "v20.11.0\n").unwrap();
 
-        let _guard = PATH_TEST_LOCK.lock().unwrap();
+        let _guard = crate::test_support::PROCESS_ENV_LOCK.blocking_lock();
         let previous = env::var_os("NVM_DIR");
         env::set_var("NVM_DIR", nvm_root);
 
@@ -628,7 +647,7 @@ mod tests {
         std::fs::write(nvm_root.join("alias/default"), "lts/iron\n").unwrap();
         std::fs::write(nvm_root.join("alias/lts/iron"), "v20.11.0\n").unwrap();
 
-        let _guard = PATH_TEST_LOCK.lock().unwrap();
+        let _guard = crate::test_support::PROCESS_ENV_LOCK.blocking_lock();
         let previous = env::var_os("NVM_DIR");
         env::set_var("NVM_DIR", nvm_root);
 
@@ -650,7 +669,7 @@ mod tests {
         std::fs::create_dir_all(&old_bin).unwrap();
         std::fs::create_dir_all(&new_bin).unwrap();
 
-        let _guard = PATH_TEST_LOCK.lock().unwrap();
+        let _guard = crate::test_support::PROCESS_ENV_LOCK.blocking_lock();
         let previous = env::var_os("NVM_DIR");
         env::set_var("NVM_DIR", nvm_root);
 
@@ -674,7 +693,7 @@ mod tests {
         std::fs::create_dir_all(&current_bin).unwrap();
         std::fs::write(nvm_root.join("versions/node/.DS_Store"), b"junk").unwrap();
 
-        let _guard = PATH_TEST_LOCK.lock().unwrap();
+        let _guard = crate::test_support::PROCESS_ENV_LOCK.blocking_lock();
         let previous = env::var_os("NVM_DIR");
         env::set_var("NVM_DIR", nvm_root);
 
@@ -698,7 +717,7 @@ mod tests {
         let bin_dir = nvm_root.join("versions/node/20.11.0/bin");
         std::fs::create_dir_all(&bin_dir).unwrap();
 
-        let _guard = PATH_TEST_LOCK.lock().unwrap();
+        let _guard = crate::test_support::PROCESS_ENV_LOCK.blocking_lock();
         let previous = env::var_os("NVM_DIR");
         env::set_var("NVM_DIR", nvm_root);
 
@@ -711,6 +730,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn login_equivalent_bin_dirs_includes_version_managers_when_present() {
         let tmp = tempfile::tempdir().unwrap();
@@ -720,7 +740,7 @@ mod tests {
         std::fs::create_dir_all(&volta).unwrap();
         std::fs::create_dir_all(&yarn).unwrap();
 
-        let _guard = PATH_TEST_LOCK.lock().unwrap();
+        let _guard = crate::test_support::PROCESS_ENV_LOCK.blocking_lock();
         let previous_home = env::var_os("HOME");
         let previous_managers = stash_manager_env_vars();
         env::set_var("HOME", home);
@@ -746,7 +766,7 @@ mod tests {
         std::fs::create_dir_all(&fnm).unwrap();
         std::fs::create_dir_all(&pnpm).unwrap();
 
-        let _guard = PATH_TEST_LOCK.lock().unwrap();
+        let _guard = crate::test_support::PROCESS_ENV_LOCK.blocking_lock();
         let previous_home = env::var_os("HOME");
         let previous_managers = stash_manager_env_vars();
         env::set_var("HOME", home);
@@ -762,6 +782,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn login_equivalent_bin_dirs_tracks_manager_sources() {
         let tmp = tempfile::tempdir().unwrap();
@@ -771,7 +792,7 @@ mod tests {
         std::fs::create_dir_all(&volta).unwrap();
         std::fs::create_dir_all(&yarn).unwrap();
 
-        let _guard = PATH_TEST_LOCK.lock().unwrap();
+        let _guard = crate::test_support::PROCESS_ENV_LOCK.blocking_lock();
         let previous_home = env::var_os("HOME");
         let previous_managers = stash_manager_env_vars();
         env::set_var("HOME", home);
@@ -801,7 +822,7 @@ mod tests {
         let bin = volta_home.join("bin");
         std::fs::create_dir_all(&bin).unwrap();
 
-        let _guard = PATH_TEST_LOCK.lock().unwrap();
+        let _guard = crate::test_support::PROCESS_ENV_LOCK.blocking_lock();
         let previous = env::var_os("VOLTA_HOME");
         env::set_var("VOLTA_HOME", &volta_home);
 

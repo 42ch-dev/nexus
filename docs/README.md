@@ -20,6 +20,7 @@ compute, fork + validate).
 |-----|----------|---------|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Maintainers | Directional map: product surfaces, hard boundaries, where authority lives. |
 | [CODEGEN.md](CODEGEN.md) | Maintainers | Schema-first codegen workflow (JSON Schema → TypeScript + Rust). |
+| [release.md](release.md) | Maintainers | Release governance: dispatch inputs, pipeline stages, prerelease gate, local dry-runs, recovery, signing arrival. |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Contributors | Setup, pre-PR checklist, local checks, documentation placement. |
 
 ## Normative sources

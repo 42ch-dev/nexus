@@ -1537,9 +1537,7 @@ mod tests {
         let err = manager.start(empty).await.expect_err("empty path rejected");
         assert!(matches!(err, HostError::PolicyDenied { .. }), "got {err:?}");
 
-        // Symlink escape: config path resolves outside its own parent dir.
         let temp_dir = tempfile::tempdir().expect("temp dir");
-        let outside = temp_dir.path().join("outside-config.toml");
 
         // Absolute in-root path with lexical `..` → rejected BEFORE
         // canonicalization (validate_workspace_path contract).
@@ -1561,30 +1559,38 @@ mod tests {
             .await
             .expect_err("ParentDir component rejected");
         assert!(matches!(err, HostError::PolicyDenied { .. }), "got {err:?}");
-        std::fs::write(&outside, "max_sessions = 2\n").expect("write outside config");
-        let parent = temp_dir.path().join("cfg");
-        std::fs::create_dir_all(&parent).expect("make cfg dir");
-        let link = parent.join("config.toml");
-        std::os::unix::fs::symlink(&outside, &link).expect("symlink escape");
-        let esc = HostStartConfig {
-            config_path: link,
-            workspace_root: temp_dir.path().to_path_buf(),
-            ..start_config()
-        };
-        let manager = HostManager::new();
-        manager
-            .register_provider(
-                Arc::new(MockProvider {
-                    provider_id: ProviderId::new("mock"),
-                }),
-                mock_launch(),
-            )
-            .await;
-        let err = manager
-            .start(esc)
-            .await
-            .expect_err("symlink escape rejected");
-        assert!(matches!(err, HostError::PolicyDenied { .. }), "got {err:?}");
+
+        // Symlink escape: a config path that resolves outside its own parent
+        // dir must be rejected. Staging the escape needs `symlink(2)`, which a
+        // Windows test cannot create portably, so this case is a unix proof.
+        #[cfg(unix)]
+        {
+            let outside = temp_dir.path().join("outside-config.toml");
+            std::fs::write(&outside, "max_sessions = 2\n").expect("write outside config");
+            let parent = temp_dir.path().join("cfg");
+            std::fs::create_dir_all(&parent).expect("make cfg dir");
+            let link = parent.join("config.toml");
+            std::os::unix::fs::symlink(&outside, &link).expect("symlink escape");
+            let esc = HostStartConfig {
+                config_path: link,
+                workspace_root: temp_dir.path().to_path_buf(),
+                ..start_config()
+            };
+            let manager = HostManager::new();
+            manager
+                .register_provider(
+                    Arc::new(MockProvider {
+                        provider_id: ProviderId::new("mock"),
+                    }),
+                    mock_launch(),
+                )
+                .await;
+            let err = manager
+                .start(esc)
+                .await
+                .expect_err("symlink escape rejected");
+            assert!(matches!(err, HostError::PolicyDenied { .. }), "got {err:?}");
+        }
     }
 
     #[tokio::test]
