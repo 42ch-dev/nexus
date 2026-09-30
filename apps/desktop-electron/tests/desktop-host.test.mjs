@@ -1214,7 +1214,8 @@ test('a corrupt connection store surfaces the stderr diagnostic and one window-l
   // non-destructive assurance
   assert.match(detail, /[Nn]othing was deleted/);
   assert.match(detail, /left in place/);
-  assert.match(detail, /replaces it/);
+  // recovery guarantee is bounded by the location actually being writable
+  assert.match(detail, /replaces it once the location is writable/);
   // payload discipline: no raw code, no path, no store file name
   for (const surfaced of [message, detail]) {
     assert.ok(!surfaced.includes('secure_store_'), 'no raw classification code');
@@ -1267,7 +1268,8 @@ test('an unreadable store names the unreadable classification, and a fresh insta
   // non-destructive assurance
   assert.match(detail, /[Nn]othing was deleted/);
   assert.match(detail, /left in place/);
-  assert.match(detail, /replaces it/);
+  // recovery guarantee is bounded by the location actually being writable
+  assert.match(detail, /replaces it once the location is writable/);
   // payload discipline: no raw code, no path, no store file name
   for (const surfaced of [message, detail]) {
     assert.ok(!surfaced.includes('secure_store_'), 'no raw classification code');

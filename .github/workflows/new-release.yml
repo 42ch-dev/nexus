@@ -134,7 +134,7 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           body="$(cat "$RUNNER_TEMP/release-summary")"
-          changelog="$(awk -v version="$VERSION" 'index($0, "## [" version "] - ") == 1 { found=1; print; next } found && /^## / { exit } found { print }' CHANGELOG.md)"
+          changelog="$(awk -v version="$VERSION" 'index($0, "## [" version "] - ") == 1 { found=1; print; next } found && /^## \[/ { exit } found { print }' CHANGELOG.md)"
           if [[ -n "$body" ]]; then body+=$'\n\n'; fi
           body+="$changelog"
           number=$(gh pr list --head "release/$VERSION" --base main --state open --json number --jq '.[0].number')

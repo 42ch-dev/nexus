@@ -499,7 +499,7 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
             : 'Stored connections are corrupt',
         detail:
           'Your stored connections are unavailable and the app will start without one. ' +
-          'Nothing was deleted — the original file was left in place, and saving a connection again replaces it.',
+          'Nothing was deleted — the original file was left in place, and saving a connection again replaces it once the location is writable.',
         buttons: ['OK'],
         noLink: true,
       })

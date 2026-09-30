@@ -23,7 +23,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -89,7 +89,7 @@ function escapeRegExp(value) {
  */
 function workspacePackageSection(contents, manifestPath) {
   const match = contents.match(/(?:^|\n)\[workspace\.package\][\s\S]*?(?=\n\[|$)/);
-  if (!match || match.index === undefined) {
+  if (match?.index === undefined) {
     throw new Error(`${manifestPath}: missing [workspace.package] section`);
   }
   const start = match.index + (match[0].startsWith("\n") ? 1 : 0);
@@ -339,6 +339,22 @@ function assertLockEntriesExist(lockContents, packageNames) {
 }
 
 /**
+ * Replace `path` with `contents` in one step: the bytes land in a
+ * same-directory temporary file that is then renamed over the target, so no
+ * reader can observe a half-written surface and the target never depends on a
+ * prior existence check.
+ *
+ * @param {string} path
+ * @param {string} contents
+ * @returns {void}
+ */
+function writeFileAtomically(path, contents) {
+  const tempPath = `${path}.tmp`;
+  writeFileSync(tempPath, contents, "utf8");
+  renameSync(tempPath, path);
+}
+
+/**
  * Write the release version into all five surfaces: the four hand-written
  * manifests first, then `Cargo.lock` through `cargo update --workspace
  * `--offline`. A Cargo failure rolls every written file back, so a refused
@@ -369,12 +385,19 @@ export function writeReleaseVersion(repoRoot, version) {
   }
 
   const lockPath = join(repoRoot, CARGO_LOCK_PATH);
-  if (!existsSync(lockPath)) {
+  let lockContents;
+  try {
+    // Read directly instead of probing with `existsSync` first: the check would
+    // open a check/use window on a path this function later rewrites.
+    lockContents = readFileSync(lockPath, "utf8");
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      throw error;
+    }
     throw new Error(
       `${CARGO_LOCK_PATH}: missing; cannot regenerate workspace member versions`,
     );
   }
-  const lockContents = readFileSync(lockPath, "utf8");
   const memberNames = readWorkspaceMemberPackages(repoRoot).map(
     (member) => member.name,
   );
@@ -395,9 +418,9 @@ export function writeReleaseVersion(repoRoot, version) {
     regenerateCargoLock(repoRoot);
   } catch (error) {
     for (const entry of originals) {
-      writeFileSync(join(repoRoot, entry.path), entry.contents, "utf8");
+      writeFileAtomically(join(repoRoot, entry.path), entry.contents);
     }
-    writeFileSync(lockPath, lockContents, "utf8");
+    writeFileAtomically(lockPath, lockContents);
     throw error;
   }
 
