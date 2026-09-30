@@ -1148,6 +1148,97 @@ test('a refused legacy cleanup does not fail host startup and surfaces only the 
 });
 
 // ---------------------------------------------------------------------------
+// Connection-store open failure (v1.202 P2-T2): stderr diagnostic + notice
+// ---------------------------------------------------------------------------
+
+test('a corrupt connection store surfaces the stderr diagnostic and one window-less warning notice', async () => {
+  const dir = mkdtempSync(join(root, 'store-open-failure-'));
+  const userDataDir = join(dir, 'userData');
+  mkdirSync(userDataDir, { recursive: true });
+  writeFileSync(join(userDataDir, 'connection-config.enc'), 'not a valid store');
+
+  const stderr = [];
+  const originalWrite = process.stderr.write;
+  process.stderr.write = (chunk) => {
+    stderr.push(String(chunk));
+    return true;
+  };
+  let composed;
+  try {
+    composed = await makeHost({ paths: { userDataDir } });
+  } finally {
+    process.stderr.write = originalWrite;
+  }
+  const { host, dialogCalls } = composed;
+
+  // (a) durable diagnostic on the existing main-process channel.
+  assert.equal(stderr.length, 1);
+  assert.match(stderr[0], /^\[desktop\] connection store file is not valid JSON\n$/);
+
+  // (b) exactly one non-blocking, window-less notice with the pinned copy.
+  assert.equal(dialogCalls.length, 1);
+  const notice = dialogCalls[0];
+  assert.equal(notice.attachedToWindow, false, 'no window exists at the compose seam');
+  assert.equal(notice.options.type, 'warning');
+  assert.equal(notice.options.title, product.name);
+  assert.deepEqual(notice.options.buttons, ['OK']);
+  assert.equal(notice.options.noLink, true);
+  const { message, detail } = notice.options;
+  // classification word (corrupt), never the raw code
+  assert.match(message, /corrupt/i);
+  assert.ok(!message.includes('unreadable'), 'the corrupt case must not claim unreadable');
+  // consequence
+  assert.match(detail, /unavailable/i);
+  assert.match(detail, /start without one/i);
+  // non-destructive assurance
+  assert.match(detail, /[Nn]othing was deleted/);
+  assert.match(detail, /left in place/);
+  assert.match(detail, /replaces it/);
+  // payload discipline: no raw code, no path, no store file name
+  for (const surfaced of [message, detail]) {
+    assert.ok(!surfaced.includes('secure_store_'), 'no raw classification code');
+    assert.ok(!surfaced.includes(userDataDir), 'no path');
+    assert.ok(!surfaced.includes('connection-config.enc'), 'no store file name');
+  }
+  host.dispose();
+});
+
+test('an unreadable store names the unreadable classification, and a healthy store stays silent', async () => {
+  const unreadable = Object.assign(new Error('connection store file could not be read (EACCES)'), {
+    code: 'secure_store_unreadable',
+  });
+  const storeStub = {
+    openFailure: unreadable,
+    legacyCleanupFailure: null,
+    get: async () => null,
+    getAuth: () => null,
+  };
+  const stderr = [];
+  const originalWrite = process.stderr.write;
+  process.stderr.write = (chunk) => {
+    stderr.push(String(chunk));
+    return true;
+  };
+  let composed;
+  try {
+    composed = await makeHost({ connectionStore: storeStub });
+  } finally {
+    process.stderr.write = originalWrite;
+  }
+  assert.match(stderr[0], /^\[desktop\] connection store file could not be read \(EACCES\)\n$/);
+  assert.equal(composed.dialogCalls.length, 1);
+  assert.match(composed.dialogCalls[0].options.message, /unreadable/i);
+  assert.ok(!composed.dialogCalls[0].options.message.includes('corrupt'));
+  composed.host.dispose();
+
+  // Healthy store: no dialog, no diagnostic (acceptance criterion 3).
+  const healthy = await makeHost();
+  assert.equal(healthy.dialogCalls.length, 0, 'a healthy store adds no surface');
+  assert.equal(healthy.host.connectionStore.openFailure, null);
+  healthy.host.dispose();
+});
+
+// ---------------------------------------------------------------------------
 // External URL policy (parity row 25) and navigation lockdown (row 26)
 // ---------------------------------------------------------------------------
 
