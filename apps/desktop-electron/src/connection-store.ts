@@ -120,6 +120,18 @@ export class ConnectionStore {
      * open, and the next open retries it.
      */
     readonly legacyCleanupFailure: Error | null = null,
+    /**
+     * Typed `secure_store_unreadable` / `secure_store_corrupt` error of the
+     * last open, or null when the open ended healthy or found no store file
+     * at all. Non-null means an existing store was present but could not be
+     * activated; its bytes stay on disk for the user to recover.
+     *
+     * Tri-state: `openFailure === null && state === null` → fresh install
+     * (no diagnostic); `openFailure !== null` → unreadable/corrupt
+     * (diagnostic); otherwise the store is healthy. Reported by the host;
+     * the store itself takes no further action.
+     */
+    readonly openFailure: Error | null = null,
   ) {}
 
   /**
@@ -147,10 +159,13 @@ export class ConnectionStore {
     let state: StoredFile | null = null;
     try {
       state = ConnectionStore.readFile(deps);
-    } catch {
+    } catch (err) {
       // Invalid/corrupt/unreadable existing store: not activated, not
-      // rewritten, and never replaced by the legacy material.
-      return new ConnectionStore(deps, null);
+      // rewritten, and never replaced by the legacy material. The typed
+      // classification is retained in `openFailure` so the host can surface
+      // it; the inactive-store return contract and the on-disk bytes are
+      // unchanged.
+      return new ConnectionStore(deps, null, null, err as Error);
     }
     let cleared = false;
     try {

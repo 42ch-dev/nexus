@@ -14,6 +14,7 @@
  */
 import assert from 'node:assert/strict';
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -542,6 +543,18 @@ test('raw-form endpoints are refused on the persisted load path and never re-imp
 
     assert.equal(await store.get(), null, `not activated: ${endpointUrl}`);
     assert.equal(store.getAuth(), null, `no auth authority: ${endpointUrl}`);
+    // The endpoint-validation rejection is its own secure_store_corrupt branch;
+    // its sanitized message must stay distinct from the malformed-shape branch.
+    assert.equal(
+      errorCode(store.openFailure),
+      'secure_store_corrupt',
+      `classified corrupt: ${endpointUrl}`,
+    );
+    assert.equal(
+      errorMessage(store.openFailure),
+      'connection store endpoint is not a supported root service URL',
+      `endpoint-specific message: ${endpointUrl}`,
+    );
     assert.equal(legacyReads, 0, `never replaced by legacy material: ${endpointUrl}`);
     assert.equal(readFileSync(deps.filePath, 'utf8'), contents, `bytes untouched: ${endpointUrl}`);
   }
@@ -662,6 +675,102 @@ test('a legacy import with an unsupported endpoint persists nothing and keeps th
   );
   assert.equal(cleanups, 0, 'a refused legacy import removes no legacy source');
   assert.ok(readFileSync(legacyPath, 'utf8').includes('sk-legacy'), 'legacy recovery bytes stay untouched');
+});
+
+// ---------------------------------------------------------------------------
+// Diagnosis capture (v1.202 P2-T1): open() retains the typed failure
+// ---------------------------------------------------------------------------
+
+test('openFailure captures the typed classification without changing the inactive-store contract', async (t) => {
+  // Healthy / fresh install: no store file at all → openFailure stays null.
+  const freshDeps = makeDeps(t);
+  const fresh = await ConnectionStore.open(freshDeps);
+  assert.equal(fresh.openFailure, null, 'ENOENT is the fresh-install path, not a failure');
+  assert.equal(await fresh.get(), null);
+
+  // Existing-but-unreadable store file → secure_store_unreadable, bytes kept.
+  const unreadableDeps = makeDeps(t);
+  mkdirSync(unreadableDeps.filePath); // a non-ENOENT read failure
+  const unreadable = await ConnectionStore.open(unreadableDeps);
+  assert.equal(errorCode(unreadable.openFailure), 'secure_store_unreadable');
+  assert.equal(await unreadable.get(), null, 'still not activated');
+  assert.equal(await unreadable.getAuth(), null);
+  assert.equal(statSync(unreadableDeps.filePath).isDirectory(), true, 'the bytes stay on disk');
+
+  // Corrupt store bytes → secure_store_corrupt, bytes preserved verbatim.
+  const corruptDeps = makeDeps(t);
+  writeFileSync(corruptDeps.filePath, '{ not json');
+  const corrupt = await ConnectionStore.open(corruptDeps);
+  assert.equal(errorCode(corrupt.openFailure), 'secure_store_corrupt');
+  assert.equal(await corrupt.get(), null, 'still not activated');
+  assert.equal(readFileSync(corruptDeps.filePath, 'utf8'), '{ not json', 'bytes preserved');
+
+  // Healthy store → openFailure stays null (no diagnostic surface).
+  const healthyDeps = makeDeps(t);
+  const healthy = await ConnectionStore.open(healthyDeps);
+  await healthy.set({ ...BASE_CONFIG }, { action: 'replace', value: 'sk-1' });
+  const reopened = await ConnectionStore.open(healthyDeps);
+  assert.equal(reopened.openFailure, null, 'a healthy store reports no failure');
+  assert.equal(reopened.getAuth()?.apiKey, 'sk-1');
+});
+
+// ---------------------------------------------------------------------------
+// Diagnosis capture (v1.202 P2-T3): permission denial and every corrupt shape
+// ---------------------------------------------------------------------------
+
+test('a permission-denied store file is openFailure secure_store_unreadable (readFileSync EACCES)', async (t) => {
+  if (process.getuid?.() === 0) {
+    t.skip('EACCES cannot be simulated for the superuser');
+    return;
+  }
+  const deps = makeDeps(t);
+  const bytes = JSON.stringify({ version: 1, config: { endpointUrl: ENDPOINT, hasApiKey: false } });
+  writeFileSync(deps.filePath, bytes);
+  chmodSync(deps.filePath, 0o000);
+  try {
+    const denied = await ConnectionStore.open(deps);
+    assert.equal(errorCode(denied.openFailure), 'secure_store_unreadable');
+    assert.equal(
+      errorMessage(denied.openFailure),
+      'connection store file could not be read (EACCES)',
+    );
+    assert.equal(await denied.get(), null, 'a permission-denied store is never activated');
+    assert.equal(denied.getAuth(), null);
+  } finally {
+    chmodSync(deps.filePath, 0o600);
+  }
+  assert.equal(
+    readFileSync(deps.filePath, 'utf8'),
+    bytes,
+    'a permission denial is not the ENOENT fresh-install path: the bytes stay on disk',
+  );
+});
+
+test('a corrupt store shape is openFailure secure_store_corrupt (invalid v1 shape or undecryptable credential)', async (t) => {
+  // Valid JSON that is not a v1 store.
+  const shapeDeps = makeDeps(t);
+  const shapeBytes = JSON.stringify({ version: 2, config: { endpointUrl: ENDPOINT, hasApiKey: false } });
+  writeFileSync(shapeDeps.filePath, shapeBytes);
+  const shapeless = await ConnectionStore.open(shapeDeps);
+  assert.equal(errorCode(shapeless.openFailure), 'secure_store_corrupt');
+  assert.equal(errorMessage(shapeless.openFailure), 'connection store file is not a valid v1 store');
+  assert.equal(await shapeless.get(), null);
+  assert.equal(readFileSync(shapeDeps.filePath, 'utf8'), shapeBytes, 'bytes preserved verbatim');
+
+  // Structurally valid store whose stored credential cannot be decrypted.
+  const credDeps = makeDeps(t, { storage: encryptOnlyStorage });
+  const credBytes = JSON.stringify({
+    version: 1,
+    config: { endpointUrl: ENDPOINT, hasApiKey: true, active: true },
+    credential: Buffer.from('ciphertext-that-needs-another-key').toString('base64'),
+  });
+  writeFileSync(credDeps.filePath, credBytes);
+  const undecryptable = await ConnectionStore.open(credDeps);
+  assert.equal(errorCode(undecryptable.openFailure), 'secure_store_corrupt');
+  assert.equal(errorMessage(undecryptable.openFailure), 'connection store credential is not decryptable');
+  assert.equal(await undecryptable.get(), null, 'an undecryptable credential never half-loads');
+  assert.equal(undecryptable.getAuth(), null);
+  assert.equal(readFileSync(credDeps.filePath, 'utf8'), credBytes, 'bytes preserved verbatim');
 });
 
 // ---------------------------------------------------------------------------
