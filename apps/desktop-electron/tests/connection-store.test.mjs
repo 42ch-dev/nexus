@@ -665,6 +665,43 @@ test('a legacy import with an unsupported endpoint persists nothing and keeps th
 });
 
 // ---------------------------------------------------------------------------
+// Diagnosis capture (v1.202 P2-T1): open() retains the typed failure
+// ---------------------------------------------------------------------------
+
+test('openFailure captures the typed classification without changing the inactive-store contract', async (t) => {
+  // Healthy / fresh install: no store file at all → openFailure stays null.
+  const freshDeps = makeDeps(t);
+  const fresh = await ConnectionStore.open(freshDeps);
+  assert.equal(fresh.openFailure, null, 'ENOENT is the fresh-install path, not a failure');
+  assert.equal(await fresh.get(), null);
+
+  // Existing-but-unreadable store file → secure_store_unreadable, bytes kept.
+  const unreadableDeps = makeDeps(t);
+  mkdirSync(unreadableDeps.filePath); // a non-ENOENT read failure
+  const unreadable = await ConnectionStore.open(unreadableDeps);
+  assert.equal(errorCode(unreadable.openFailure), 'secure_store_unreadable');
+  assert.equal(await unreadable.get(), null, 'still not activated');
+  assert.equal(await unreadable.getAuth(), null);
+  assert.equal(statSync(unreadableDeps.filePath).isDirectory(), true, 'the bytes stay on disk');
+
+  // Corrupt store bytes → secure_store_corrupt, bytes preserved verbatim.
+  const corruptDeps = makeDeps(t);
+  writeFileSync(corruptDeps.filePath, '{ not json');
+  const corrupt = await ConnectionStore.open(corruptDeps);
+  assert.equal(errorCode(corrupt.openFailure), 'secure_store_corrupt');
+  assert.equal(await corrupt.get(), null, 'still not activated');
+  assert.equal(readFileSync(corruptDeps.filePath, 'utf8'), '{ not json', 'bytes preserved');
+
+  // Healthy store → openFailure stays null (no diagnostic surface).
+  const healthyDeps = makeDeps(t);
+  const healthy = await ConnectionStore.open(healthyDeps);
+  await healthy.set({ ...BASE_CONFIG }, { action: 'replace', value: 'sk-1' });
+  const reopened = await ConnectionStore.open(healthyDeps);
+  assert.equal(reopened.openFailure, null, 'a healthy store reports no failure');
+  assert.equal(reopened.getAuth()?.apiKey, 'sk-1');
+});
+
+// ---------------------------------------------------------------------------
 // File permissions
 // ---------------------------------------------------------------------------
 
