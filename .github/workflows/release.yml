@@ -159,10 +159,10 @@ jobs:
               filename="Nexus-${version}-darwin-${arch}-unsigned.$suffix"
               line="$(awk -v name="$filename" '$2 == name || $2 == "*"name { print; found=1 } END { if (!found) exit 1 }' "$sums")" || { echo "::error::checksum absent for $filename"; exit 1; }
               printf '%s\n' "$line" >> "$body"
+            done
           done
           printf '\nDesktop producer sidecars are uploaded unchanged as architecture-specific assets:\n' >> "$body"
           printf '%s\n' "Nexus-${version}-darwin-arm64-SHA256SUMS" "Nexus-${version}-darwin-arm64-receipt.json" "Nexus-${version}-darwin-x64-SHA256SUMS" "Nexus-${version}-darwin-x64-receipt.json" >> "$body"
-          done
           cat >> "$body" <<'FOOTER'
           ```
 
