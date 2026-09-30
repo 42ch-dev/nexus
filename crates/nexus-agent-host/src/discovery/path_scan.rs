@@ -643,7 +643,14 @@ mod tests {
 
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
         let _path_guard = PathGuard::isolate(temp_dir.path());
-        let _env_guard = DshEnvGuard::set("/definitely/missing/dsh-runtime");
+        // A missing ABSOLUTE path: a `/`-rooted value is not absolute on
+        // Windows, where it would be rejected as a relative path before ever
+        // reaching the executability check this test targets.
+        #[cfg(windows)]
+        let missing_override = r"C:\definitely\missing\dsh-runtime";
+        #[cfg(unix)]
+        let missing_override = "/definitely/missing/dsh-runtime";
+        let _env_guard = DshEnvGuard::set(missing_override);
 
         let config = AgentHostConfig::default();
         let entries = scan_path_in(&config, &[], &[temp_dir.path().to_path_buf()])

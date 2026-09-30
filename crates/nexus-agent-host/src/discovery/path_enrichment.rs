@@ -387,10 +387,16 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
+    // Tests that isolate the user home by setting `HOME` are `#[cfg(unix)]`:
+    // `dirs::home_dir()` resolves the Windows profile known folder
+    // (`FOLDERID_Profile`) and cannot be redirected from a test, so their
+    // home-relative assertions have no Windows meaning.
+
     static PATH_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     /// Remove version-manager env vars that would override the temp HOME path,
     /// returning their previous values so callers can restore them.
+    #[cfg(unix)]
     fn stash_manager_env_vars() -> [Option<OsString>; 3] {
         let nvm = env::var_os("NVM_DIR");
         let volta = env::var_os("VOLTA_HOME");
@@ -401,6 +407,7 @@ mod tests {
         [nvm, volta, pnpm]
     }
 
+    #[cfg(unix)]
     fn restore_manager_env_vars(stashed: [Option<OsString>; 3]) {
         let [nvm, volta, pnpm] = stashed;
         match nvm {
@@ -419,7 +426,9 @@ mod tests {
 
     #[test]
     fn merge_path_prepends_extras_and_dedupes() {
-        let existing = OsString::from("/usr/bin:/bin:/opt/homebrew/bin");
+        // Build the value with the platform PATH separator: the assertion is
+        // about merge/split round-tripping, not about a `:`-joined literal.
+        let existing = env::join_paths(["/usr/bin", "/bin", "/opt/homebrew/bin"]).unwrap();
         let extras = vec![
             PathBuf::from("/opt/homebrew/bin"),
             PathBuf::from("/custom/bin"),
@@ -504,6 +513,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn login_equivalent_bin_dirs_includes_asdf_and_mise_when_present() {
         let tmp = tempfile::tempdir().unwrap();
@@ -533,6 +543,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn login_equivalent_bin_dirs_includes_kimi_code_bin_when_present() {
         let tmp = tempfile::tempdir().unwrap();
@@ -558,6 +569,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn probe_path_dirs_keeps_process_path_before_enrichment() {
         let tmp = tempfile::tempdir().unwrap();
@@ -711,6 +723,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn login_equivalent_bin_dirs_includes_version_managers_when_present() {
         let tmp = tempfile::tempdir().unwrap();
@@ -762,6 +775,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn login_equivalent_bin_dirs_tracks_manager_sources() {
         let tmp = tempfile::tempdir().unwrap();
