@@ -41,11 +41,19 @@ jobs:
               - 'modules/**'
               - 'crates/**'
               - 'apps/nexus42/**'
+              # The macOS integration leg builds and loads these Node
+              # packages (see the "Build provider-acp test peer" step), so a
+              # provider/contracts-only change must schedule this job too.
+              - 'packages/nexus-provider-acp/**'
+              - 'packages/nexus-contracts/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
               - '.github/workflows/platform-behaviour.yml'
             desktop:
               - 'apps/desktop-electron/**'
               - 'apps/nexus-service/**'
               - 'apps/web/**'
+              - 'packages/nexus-provider-acp/**'
               - 'packages/nexus-contracts/**'
               - 'packages/nexus-native/**'
               - 'packages/nexus-native-darwin-*/**'
