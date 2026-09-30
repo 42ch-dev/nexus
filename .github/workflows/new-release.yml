@@ -1,0 +1,145 @@
+name: New release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Clean release version (X.Y.Z), greater than main
+        type: string
+        required: true
+      summary:
+        description: Human-written release summary
+        type: string
+        required: false
+        default: ""
+      prerelease:
+        description: Mark the requested release as a prerelease (forced until signing is implemented)
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: new-release-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Release tooling preflight
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          workspaces: .
+          cache-all-crates: false
+          cache-on-failure: false
+      # Order matters: the bump tests exercise the real offline Cargo lockfile
+      # regeneration path, so the registry cache must be populated first.
+      - name: Warm Cargo registry cache
+        run: cargo fetch --locked
+      - name: Run release tooling tests
+        run: node --test 'tooling/release/*.test.mjs'
+
+  validate:
+    name: Validate requested version
+    needs: preflight
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - name: Validate clean SemVer, greater-than-main, and unused tag
+        env:
+          VERSION: ${{ inputs.version }}
+        run: node tooling/release/assert-version-greater.mjs "$VERSION" --base-ref main
+
+  create-release-pr:
+    name: Create signed release bump PR
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          workspaces: .
+          cache-all-crates: false
+          cache-on-failure: false
+      - name: Fetch main, revalidate, and create release branch
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          git fetch origin main --prune
+          node tooling/release/assert-version-greater.mjs "$VERSION" --base-ref main
+          echo "RELEASE_BASE_OID=$(git rev-parse origin/main)" >> "$GITHUB_ENV"
+          git switch --force-create "release/${VERSION}" origin/main
+      - name: Bump version surfaces and lockfile
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          cargo fetch --locked
+          node tooling/release/bump-version.mjs "$VERSION"
+          cargo update --workspace --offline
+      - name: Write dispatch summary
+        env:
+          SUMMARY: ${{ inputs.summary }}
+        run: printf '%s' "$SUMMARY" > "$RUNNER_TEMP/release-summary"
+      - name: Generate and prepend CHANGELOG entry
+        env:
+          VERSION: ${{ inputs.version }}
+        run: node tooling/release/generate-changelog.mjs --version "$VERSION" --summary-file "$RUNNER_TEMP/release-summary" --prepend CHANGELOG.md
+      - name: Push GitHub-signed release commit
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          body_args=()
+          if [[ -s "$RUNNER_TEMP/release-summary" ]]; then
+            body_args=(--body-file "$RUNNER_TEMP/release-summary")
+          fi
+          node tooling/release/push-github-signed-commit.mjs \
+            --branch "release/${VERSION}" \
+            --message "chore(release): bump version to ${VERSION}" \
+            "${body_args[@]}" \
+            --trailer "Nexus-Prerelease: ${PRERELEASE}" \
+            --base-ref main
+      - name: Ensure release label exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: gh label create release --color 0E8A16 --description 'Release version bump' 2>/dev/null || gh label edit release --color 0E8A16 --description 'Release version bump'
+      - name: Open or update release pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          body="$(cat "$RUNNER_TEMP/release-summary")"
+          changelog="$(awk -v version="$VERSION" 'index($0, "## [" version "] - ") == 1 { found=1; print; next } found && /^## / { exit } found { print }' CHANGELOG.md)"
+          if [[ -n "$body" ]]; then body+=$'\n\n'; fi
+          body+="$changelog"
+          number=$(gh pr list --head "release/$VERSION" --base main --state open --json number --jq '.[0].number')
+          if [[ -n "$number" ]]; then
+            gh pr edit "$number" --title "chore(release): bump version to $VERSION" --body "$body" --add-label release
+          else
+            gh pr create --base main --head "release/$VERSION" --title "chore(release): bump version to $VERSION" --body "$body" --label release
+          fi

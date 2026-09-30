@@ -1,0 +1,253 @@
+name: Release
+
+on:
+  pull_request:
+    branches: [main]
+    types: [closed]
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    name: Tag release commit and resolve prerelease
+    if: >-
+      github.event_name == 'push' ||
+      (github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'release'))
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      merge_sha: ${{ steps.release.outputs.merge_sha }}
+      effective_prerelease: ${{ steps.release.outputs.effective_prerelease }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'push' && github.ref || github.event.pull_request.merge_commit_sha }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+      - name: Ensure annotated tag and resolve prerelease
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_TAG: ${{ github.ref_name }}
+          PR_MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == push ]]; then
+            tag="$EVENT_TAG"
+            object_type="$(git cat-file -t "refs/tags/$tag")"
+            [[ "$object_type" == tag ]] || { echo "::error::release tag $tag is not annotated (object type: $object_type)"; exit 1; }
+            merge_sha="$(git rev-parse "refs/tags/$tag^{}")"
+          else
+            merge_sha="$PR_MERGE_SHA"
+            version="$(git show "$merge_sha:package.json" | node -p 'JSON.parse(require("fs").readFileSync(0,"utf8")).version')"
+            tag="v$version"
+            if git show-ref --verify --quiet "refs/tags/$tag"; then
+              object_type="$(git cat-file -t "refs/tags/$tag")"
+              [[ "$object_type" == tag ]] || { echo "::error::release tag $tag exists but is not annotated (object type: $object_type)"; exit 1; }
+              [[ "$(git rev-parse "refs/tags/$tag^{}")" == "$merge_sha" ]] || { echo "::error::release tag $tag points at a different commit"; exit 1; }
+            else
+              summary="$(git show -s --format=%B "$merge_sha^2" | awk 'NR == 1 { next } NF { print; exit }')"
+              [[ -n "$summary" ]] || { echo '::error::release summary is empty'; exit 1; }
+              GIT_COMMITTER_NAME='github-actions[bot]' GIT_COMMITTER_EMAIL='41898282+github-actions[bot]@users.noreply.github.com' git tag -a "$tag" -m "$summary" "$merge_sha"
+              git push origin "refs/tags/$tag"
+            fi
+          fi
+          version="${tag#v}"
+          [[ "$tag" == "v$version" && -n "$version" ]] || { echo "::error::invalid release tag $tag"; exit 1; }
+          package_version="$(git show "$merge_sha:package.json" | node -p 'JSON.parse(require("fs").readFileSync(0,"utf8")).version')"
+          [[ "$version" == "$package_version" ]] || { echo "::error::tag version $version does not match package.json $package_version"; exit 1; }
+          commit_message="$(git show -s --format=%B "$merge_sha^2")"
+          printf '%s' "$commit_message" | node tooling/release/effective-prerelease.mjs --message-file - > "$RUNNER_TEMP/effective-prerelease"
+          effective="$(cat "$RUNNER_TEMP/effective-prerelease")"
+          {
+            echo "version=$version"
+            echo "merge_sha=$merge_sha"
+            echo "effective_prerelease=$effective"
+          } >> "$GITHUB_OUTPUT"
+  verify-version:
+    name: Verify release version lockstep
+    needs: tag
+    if: needs.tag.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: refs/tags/v${{ needs.tag.outputs.version }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+      - name: Assert lockstep version
+        run: node tooling/release/assert-lockstep-version.mjs
+
+  runtime-build:
+    name: Build three-platform runtime
+    needs: [tag, verify-version]
+    if: needs.tag.result == 'success' && needs.verify-version.result == 'success'
+    uses: ./.github/workflows/runtime-build.yml
+    with:
+      release_run_identity: '${{ github.run_id }}'
+  desktop-electron-build:
+    name: Build unsigned macOS desktop packages
+    needs: [tag, verify-version]
+    if: needs.tag.result == 'success' && needs.verify-version.result == 'success'
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/desktop-electron-build.yml
+    with:
+      release_run_identity: '${{ github.run_id }}'
+  publish:
+    name: Publish GitHub Release
+    needs: [tag, verify-version, runtime-build, desktop-electron-build]
+    if: needs.tag.result == 'success' && needs.verify-version.result == 'success' && needs.runtime-build.result == 'success' && needs.desktop-electron-build.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: refs/tags/v${{ needs.tag.outputs.version }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+      - name: Download runtime artifacts
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          pattern: nexus-runtime-*
+          path: ${{ runner.temp }}/release-artifacts
+      - name: Download desktop artifacts
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          pattern: nexus-desktop-unsigned-darwin-*
+          path: ${{ runner.temp }}/release-artifacts
+      - name: Assemble release notes and assets
+        env:
+          VERSION: ${{ needs.tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          version="$VERSION"
+          changelog="$(awk -v version="$version" 'index($0, "## [" version "] - ") == 1 { found=1; print; next } found && /^## / { exit } found { print }' CHANGELOG.md)"
+          [[ -n "$changelog" ]] || { echo "::error::no CHANGELOG section for $version"; exit 1; }
+          assets="$RUNNER_TEMP/release-artifacts"
+          body="$RUNNER_TEMP/release-body.md"
+          printf '%s\n\n' "$changelog" > "$body"
+          cat >> "$body" <<'FOOTER'
+          Every artifact in this release is unsigned. macOS Gatekeeper and Windows SmartScreen are expected to warn on first launch. This release is a prerelease because signing is not implemented. Signed packages will replace these artifacts without changing how they are installed once signing lands.
+
+          ## SHA-256 checksums
+          ```text
+          FOOTER
+          for slug in windows-x64 macos-arm64 linux-x64; do
+            sidecar="$assets/nexus-runtime-$slug/nexus-runtime-$slug.zip.sha256"
+            [[ -f "$sidecar" ]] || { echo "::error::missing producer checksum $sidecar"; exit 1; }
+            while IFS= read -r checksum || [[ -n "$checksum" ]]; do
+              printf '%s\n' "$checksum" >> "$body"
+            done < "$sidecar"
+          done
+          for arch in arm64 x64; do
+            sums="$assets/nexus-desktop-unsigned-darwin-$arch/SHA256SUMS"
+            [[ -f "$sums" ]] || { echo "::error::missing producer checksum $sums"; exit 1; }
+            for suffix in dmg app.zip; do
+              filename="Nexus-${version}-darwin-${arch}-unsigned.$suffix"
+              line="$(awk -v name="$filename" '$2 == name || $2 == "*"name { print; found=1 } END { if (!found) exit 1 }' "$sums")" || { echo "::error::checksum absent for $filename"; exit 1; }
+              printf '%s\n' "$line" >> "$body"
+            done
+          done
+          printf '\nDesktop producer sidecars are uploaded unchanged as architecture-specific assets:\n' >> "$body"
+          printf '%s\n' "Nexus-${version}-darwin-arm64-SHA256SUMS" "Nexus-${version}-darwin-arm64-receipt.json" "Nexus-${version}-darwin-x64-SHA256SUMS" "Nexus-${version}-darwin-x64-receipt.json" >> "$body"
+          cat >> "$body" <<'FOOTER'
+          ```
+
+          ## Installation
+          - **nexus-runtime-windows-x64.zip**: Unzip and run `nexus-runtime.exe` directly. Expect a SmartScreen warning on first run because it is unsigned.
+          - **nexus-runtime-macos-arm64.zip**: Unzip, run `chmod +x nexus-runtime`, then launch it. Gatekeeper may block the unsigned binary on first launch.
+          - **nexus-runtime-linux-x64.zip**: Unzip, run `chmod +x nexus-runtime`, then launch it.
+          - **Nexus-<version>-darwin-<arch>-unsigned.dmg** (arm64 and x64): Open the DMG and drag `Nexus` to Applications. On first launch, right-click → Open to bypass Gatekeeper for the unsigned app.
+          - **Nexus-<version>-darwin-<arch>-unsigned.app.zip** (arm64 and x64): Unzip and run `Nexus.app`; on first launch, use right-click → Open as above.
+          FOOTER
+          files=()
+          require_file() {
+            [[ -f "$1" ]] || { echo "::error::missing release artifact: $1"; exit 1; }
+          }
+          for slug in windows-x64 macos-arm64 linux-x64; do
+            dir="$assets/nexus-runtime-$slug"
+            runtime_zip="$dir/nexus-runtime-$slug.zip"
+            require_file "$runtime_zip"
+            files+=("$runtime_zip")
+            runtime_checksum="$dir/nexus-runtime-$slug.zip.sha256"
+            require_file "$runtime_checksum"
+            files+=("$runtime_checksum")
+          done
+          for arch in arm64 x64; do
+            dir="$assets/nexus-desktop-unsigned-darwin-$arch"
+            desktop_dmg="$dir/Nexus-${version}-darwin-${arch}-unsigned.dmg"
+            require_file "$desktop_dmg"
+            files+=("$desktop_dmg")
+            desktop_zip="$dir/Nexus-${version}-darwin-${arch}-unsigned.app.zip"
+            require_file "$desktop_zip"
+            files+=("$desktop_zip")
+            require_file "$dir/receipt.json"
+            staged_receipt="$assets/Nexus-${version}-darwin-${arch}-receipt.json"
+            cp "$dir/receipt.json" "$staged_receipt"
+            files+=("$staged_receipt")
+            require_file "$dir/SHA256SUMS"
+            staged_sums="$assets/Nexus-${version}-darwin-${arch}-SHA256SUMS"
+            cp "$dir/SHA256SUMS" "$staged_sums"
+            files+=("$staged_sums")
+          done
+          echo "RELEASE_ASSETS<<EOF" >> "$GITHUB_ENV"
+          printf '%s\n' "${files[@]}" >> "$GITHUB_ENV"
+          echo 'EOF' >> "$GITHUB_ENV"
+          echo "RELEASE_BODY=$body" >> "$GITHUB_ENV"
+      - name: Stage, upload, and publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: v${{ needs.tag.outputs.version }}
+          PRERELEASE: ${{ needs.tag.outputs.effective_prerelease }}
+          RELEASE_BODY: ${{ runner.temp }}/release-body.md
+        run: |
+          set -euo pipefail
+          # GitHub Releases API draft state keeps the asset set unpublished until
+          # the uploads finish: https://docs.github.com/en/rest/releases/releases
+          if [[ "$PRERELEASE" != true && "$PRERELEASE" != false ]]; then
+            echo "::error::invalid effective prerelease value: $PRERELEASE"
+            exit 1
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            release_id="$(gh release view "$TAG" --json databaseId --jq .databaseId)"
+            gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" --method PATCH \
+              -F draft=true -F "prerelease=$PRERELEASE" >/dev/null
+            gh release edit "$TAG" --notes-file "$RELEASE_BODY"
+          else
+            release_flags=(--draft)
+            [[ "$PRERELEASE" == true ]] && release_flags+=(--prerelease)
+            gh release create "$TAG" --title "$TAG" --notes-file "$RELEASE_BODY" "${release_flags[@]}"
+            release_id="$(gh release view "$TAG" --json databaseId --jq .databaseId)"
+          fi
+          asset_count=0
+          while IFS= read -r asset; do
+            [[ -n "$asset" ]] || continue
+            gh release upload "$TAG" "$asset" --clobber
+            ((asset_count += 1))
+          done <<< "$RELEASE_ASSETS"
+          [[ "$asset_count" -eq 14 ]] || { echo "::error::expected 14 release assets, got $asset_count"; exit 1; }
+          remote_assets="$(gh release view "$TAG" --json assets --jq '.assets[].name')"
+          remote_count="$(printf '%s\n' "$remote_assets" | awk 'NF { count++ } END { print count + 0 }')"
+          [[ "$remote_count" -eq 14 ]] || { echo "::error::expected 14 uploaded release assets, got $remote_count"; exit 1; }
+          while IFS= read -r asset; do
+            [[ -n "$asset" ]] || continue
+            asset_name="${asset##*/}"
+            grep -Fqx -- "$asset_name" <<< "$remote_assets" || { echo "::error::uploaded release asset missing: $asset_name"; exit 1; }
+          done <<< "$RELEASE_ASSETS"
+          gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" --method PATCH \
+            -F draft=false -F "prerelease=$PRERELEASE" >/dev/null
