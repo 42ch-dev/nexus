@@ -794,14 +794,25 @@ mod tests {
     /// 1. the primary `which` route (`path_scan.rs:186-195`), which appends
     ///    `PATHEXT` extensions itself — `.EXE` outranks `.CMD`;
     /// 2. the manual fallback's Windows `PATHEXT` loop
-    ///    (`path_scan.rs:215-226`), reached only when the two `which` calls
-    ///    fail. `std::env::join_paths` rejects a path entry containing the
-    ///    platform separator, so the `fallback;bin` directory forces the
-    ///    primary route to be skipped — the only deterministic way to execute
-    ///    that loop, which no test reached before.
+    ///    (`path_scan.rs:214-226`), reached only when the two `which` calls
+    ///    fail. `find_command` enters `which::which_in` only when
+    ///    `std::env::join_paths` accepts the directory list; the character
+    ///    that makes `join_paths` reject a list is a **double quote on
+    ///    Windows** (`:` on Unix), *not* the `;` separator — a semicolon is
+    ///    legal in a quoted entry
+    ///    (<https://doc.rust-lang.org/std/env/fn.join_paths.html#errors>).
+    ///    Pairing the stub dir with one synthetic, never-created quote-bearing
+    ///    entry therefore skips the primary route — the only deterministic way
+    ///    to execute that loop, which no test reached before.
     ///
     /// Only compiled on Windows: the `PATHEXT` extension-append path does not
     /// exist on unix, so this test can be neither compiled nor run there.
+    ///
+    /// Construction note for T2's `platform-behaviour.yml` run: this test is
+    /// expected to **fail when the manual `PATHEXT` loop in `find_command` is
+    /// disabled and pass with it present**, since that loop is the only
+    /// remaining route once `join_paths` rejects the list. The Windows CI run
+    /// is the proof of that behaviour; it is not demonstrated on this host.
     #[cfg(target_os = "windows")]
     #[test]
     fn find_command_resolves_windows_pathext_extension_stub() {
@@ -809,8 +820,9 @@ mod tests {
 
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
 
-        // Both extension forms in one directory: `.EXE` precedes `.CMD` in the
-        // canonical PATHEXT order, so the priority assertion is deterministic.
+        // Route 1 fixture: both extension forms in one directory: `.EXE`
+        // precedes `.CMD` in the canonical PATHEXT order, so the priority
+        // assertion is deterministic.
         let both_dir = temp_dir.path().join("both-bin");
         std::fs::create_dir_all(&both_dir).expect("create both-bin dir");
         let exe_stub = both_dir.join("claude.exe");
@@ -818,15 +830,34 @@ mod tests {
         std::fs::write(&exe_stub, "MZ stub payload").expect("write claude.exe stub");
         std::fs::write(&cmd_stub, "@echo off\r\necho stub\r\n").expect("write claude.cmd stub");
 
-        // `;` is the Windows PATH separator: `join_paths` rejects this entry,
-        // so `find_command` must fall back to its manual scan, which reaches
-        // the PATHEXT loop. Only the `.cmd` form exists, so the loop — not an
-        // `.exe` short-circuit — produces the resolution.
-        let fallback_dir = temp_dir.path().join("fallback;bin");
-        std::fs::create_dir_all(&fallback_dir).expect("create fallback;bin dir");
+        // Route 2 fixture: a valid directory holding ONLY `claude.cmd`, paired
+        // with a synthetic entry that carries a double quote. `find_command`
+        // reaches `which::which_in` only when `join_paths` accepts the list;
+        // on Windows `join_paths` rejects any entry containing `"` (the
+        // rejected character is `"` on Windows, `:` on Unix), so this list is
+        // rejected and the primary route is skipped. The quote-bearing path is
+        // never created — it only has to poison the join.
+        let fallback_dir = temp_dir.path().join("fallback-bin");
+        std::fs::create_dir_all(&fallback_dir).expect("create fallback-bin dir");
         let fallback_stub = fallback_dir.join("claude.cmd");
         std::fs::write(&fallback_stub, "@echo off\r\necho stub\r\n")
             .expect("write fallback claude.cmd stub");
+
+        let quoted_entry = temp_dir.path().join("synthetic-claude\"bin");
+        let search_dirs = vec![fallback_dir.clone(), quoted_entry.clone()];
+        assert!(
+            !quoted_entry.exists(),
+            "the quote-bearing entry must stay synthetic: {}",
+            quoted_entry.display()
+        );
+        // Guard route 2's premise: this exact list must be rejected, otherwise
+        // `find_command` would take the `which_in` branch and the test would
+        // pass without ever executing the manual PATHEXT loop it targets.
+        assert!(
+            std::env::join_paths(&search_dirs).is_err(),
+            "a quote-bearing entry must make join_paths fail on Windows, so \
+             find_command skips which_in: {search_dirs:?}"
+        );
 
         let _pathext_guard = PathextGuard::set(".COM;.EXE;.BAT;.CMD");
         // Isolate PATH to an empty directory so neither `which` call can find a
@@ -870,8 +901,11 @@ mod tests {
             resolved_exe.display()
         );
 
-        // Route 2: the manual fallback's PATHEXT loop.
-        let resolved_fallback = find_command(std::slice::from_ref(&fallback_dir), "claude")
+        // Route 2: the manual fallback's PATHEXT loop. `join_paths` rejects
+        // `search_dirs`, so `which_in` is skipped; the isolated PATH makes the
+        // second `which()` call miss; the loop resolves `claude.cmd` from the
+        // valid entry.
+        let resolved_fallback = find_command(&search_dirs, "claude")
             .expect("the manual PATHEXT fallback must resolve claude.cmd");
         assert_eq!(
             resolved_fallback.parent(),
