@@ -9,8 +9,13 @@
  * @module tooling/release/semver
  */
 
-/** @type {RegExp} */
-export const CLEAN_SEMVER_PATTERN = /^\d+\.\d+\.\d+$/;
+/**
+ * Canonical clean SemVer: three numeric components with no leading zeros, so
+ * `01.2.3` and `1.02.3` are rejected instead of silently normalised.
+ *
+ * @type {RegExp}
+ */
+export const CLEAN_SEMVER_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
 /**
  * @param {unknown} version
@@ -21,7 +26,12 @@ export function isCleanSemVer(version) {
 }
 
 /**
- * @typedef {{ major: number; minor: number; patch: number }} ParsedSemVer
+ * Numeric components as their canonical digit strings. Because the pattern
+ * forbids leading zeros, string length then lexicographic order is a lossless
+ * numeric ordering: arbitrarily long components (beyond `Number.MAX_SAFE_INTEGER`)
+ * stay distinct and correctly ordered.
+ *
+ * @typedef {{ major: string; minor: string; patch: string }} ParsedSemVer
  */
 
 /**
@@ -32,8 +42,23 @@ export function parseSemVer(version) {
   if (!isCleanSemVer(version)) {
     return null;
   }
-  const [major, minor, patch] = version.split(".").map((part) => Number(part));
+  const [major, minor, patch] = version.split(".");
   return { major, minor, patch };
+}
+
+/**
+ * @param {string} a
+ * @param {string} b
+ * @returns {number}
+ */
+function compareComponents(a, b) {
+  if (a.length !== b.length) {
+    return a.length < b.length ? -1 : 1;
+  }
+  if (a === b) {
+    return 0;
+  }
+  return a < b ? -1 : 1;
 }
 
 /**
@@ -50,7 +75,11 @@ export function compareSemVer(a, b) {
   if (!left || !right) {
     throw new Error(`Invalid SemVer compare: "${a}" vs "${b}"`);
   }
-  return left.major - right.major || left.minor - right.minor || left.patch - right.patch;
+  return (
+    compareComponents(left.major, right.major) ||
+    compareComponents(left.minor, right.minor) ||
+    compareComponents(left.patch, right.patch)
+  );
 }
 
 /**

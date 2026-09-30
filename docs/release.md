@@ -25,9 +25,11 @@ Two constraints shape the current flow:
 
 ## Versioning
 
-- Release versions are clean `X.Y.Z`. A prerelease or build suffix is rejected:
-  "prerelease" is GitHub Release metadata, never part of a version string or a
-  tag.
+- Release versions are clean `X.Y.Z` with canonical numeric components: no
+  leading zeros (`01.2.3` is rejected), and components are compared without
+  number conversion so very long fields stay distinct. A prerelease or build
+  suffix is rejected: "prerelease" is GitHub Release metadata, never part of a
+  version string or a tag.
 - While Nexus is pre-1.0: MINOR for a feature increment, PATCH for fixes only.
 - `0.1.0` is the never-released workspace baseline. The first governed release
   is expected to be **`0.2.0`** — the smallest version that both clears the
@@ -128,7 +130,7 @@ Merging the `release`-labeled pull request into `main` starts
 | Verify | `verify-version` | `tag` succeeded | `Assert lockstep version`: checks out `refs/tags/v<version>` and asserts the four hand-written version files are equal (`assert-lockstep-version.mjs`). |
 | Producers | `runtime-build` | `tag` and `verify-version` succeeded | Reusable call into `runtime-build.yml` (job `runtime-build`): the three-platform matrix (`windows-x64`, `macos-arm64`, `linux-x64`) builds `nexus-runtime-<os>-<arch>.zip` plus a `.sha256` sidecar, and smoke-tests `--version` on each runner. |
 | Producers | `desktop-electron-build` | `tag` and `verify-version` succeeded | Reusable call into `desktop-electron-build.yml` (job `package`): the two macOS legs (darwin arm64, darwin x64) package `Nexus-<version>-darwin-<arch>-unsigned.dmg`, `Nexus-<version>-darwin-<arch>-unsigned.app.zip`, `receipt.json` and `SHA256SUMS`, with signing-dispatch sentinels proving no codesign/notarize call ran. |
-| Publish | `publish` | all four jobs succeeded | `Download runtime artifacts` and `Download desktop artifacts` collect the five artifact sets; `Assemble release notes and assets` renders the Release body (changelog section plus the fixed footer) and stages the complete 14-asset set; `Stage, upload, and publish GitHub Release` creates or reconciles the Release as a draft with the effective prerelease value, uploads all assets with `--clobber`, and clears `draft` only after every upload succeeds. |
+| Publish | `publish` | all four jobs succeeded | `Download runtime artifacts` and `Download desktop artifacts` collect the five artifact sets; `Assemble release notes and assets` renders the Release body (changelog section plus the fixed footer) and stages the complete 14-asset set; `Stage, upload, and publish GitHub Release` creates or reconciles the Release as a draft with the effective prerelease value, uploads all assets with `--clobber`, and clears `draft` only after every upload succeeds; an existing Release that the retry returns to draft is best-effort restored to the draft/prerelease state it had on entry if a later step fails, so a failed retry never leaves a published Release hidden. |
 
 Permissions stay least-privilege: `new-release.yml` requests
 `contents: write` + `pull-requests: write`, the release workflow grants
@@ -175,14 +177,21 @@ metadata only. The workflow creates a draft with `--draft`, adding
 `--prerelease` when the effective value is true; an existing Release is first
 reconciled to draft state and the same prerelease value. Only after every asset
 upload succeeds does the workflow clear `draft`, retaining the effective
-prerelease value.
+prerelease value. Because an existing Release may already be public, the step
+records its draft/prerelease state on entry and restores it on the failure path
+(an `EXIT` trap), so a failed retry returns a published Release to public
+instead of leaving it hidden.
 
 ## Release body and footer
 
 The publish job's `Assemble release notes and assets` step builds the body in
 two parts: the CHANGELOG section for the version (the same text the bump PR
 added — human `summary` plus the conventional-commit groups Features / Fixes /
-Docs & chores), then the fixed footer below. Checksums are read from the
+Docs & chores), then the fixed footer below. The section is extracted by
+matching the generator's own header form `## [<version>] - ` and stopping only
+at the next such version header, so a `summary` that itself contains a `## `
+Markdown heading is preserved instead of truncating the notes; the bump PR body
+uses the identical extraction. Checksums are read from the
 producers' sidecars — the three `.zip.sha256` files and each architecture's
 `SHA256SUMS` — and are never recomputed; a missing sidecar or a missing line for
 one of the seven distributed artifacts fails the publish job.
@@ -330,7 +339,11 @@ after every upload succeeds. A failed update remains unpublished for recovery.
   jobs* replays the original event with the same payload. The `tag` job
   re-creates the tag only if it is missing, then verify → producers → publish
   runs again. Existing Releases are explicitly returned to draft state before
-  asset updates; successful completion clears draft and publishes them.
+  asset updates; successful completion clears draft and publishes them. The step
+  records the Release's draft/prerelease state before that, and restores it
+  (best-effort, via an `EXIT` trap) if a later step fails, so a retry that
+  started from a published Release returns it to public rather than leaving its
+  download page offline.
 - **Tag-push re-entry.** `push: tags: ['v*']` enters the same workflow: the
   `tag` job requires the pushed tag to be annotated, takes the tagged commit as
   the merge commit, and carries it through verify → producers → publish. This
@@ -352,7 +365,9 @@ after every upload succeeds. A failed update remains unpublished for recovery.
   `publish`. During `publish`, both new and existing Releases are kept draft
   while notes and assets are updated; all uploads must succeed before the Release
   becomes public. The workflow implements GitHub Releases API draft behavior by
-  setting `draft=true` before uploads and `draft=false` afterwards.
+  setting `draft=true` before uploads and `draft=false` afterwards, and an
+  existing Release that a retry returned to draft is restored to its entry
+  state on the failure path instead of staying hidden.
 
 ## Signing arrival
 
