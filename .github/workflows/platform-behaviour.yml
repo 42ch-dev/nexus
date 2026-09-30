@@ -16,6 +16,9 @@ permissions:
 
 jobs:
   changes:
+    permissions:
+      contents: read
+      pull-requests: read
     name: Classify changed files
     runs-on: ubuntu-latest
     outputs:
@@ -100,6 +103,10 @@ jobs:
       - name: Check native CLI provider tests
         if: always()
         run: cargo test -p nexus-agent-host --lib providers::native_cli
+
+      - name: Run macOS integration tests
+        if: runner.os == 'macOS'
+        run: cargo test -p nexus-agent-host --tests
 
   desktop-clean-home:
     name: Desktop clean-home tests
