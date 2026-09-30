@@ -43,10 +43,12 @@ jobs:
           workspaces: .
           cache-all-crates: false
           cache-on-failure: false
-      - name: Run release tooling tests
-        run: node --test 'tooling/release/*.test.mjs'
+      # Order matters: the bump tests exercise the real offline Cargo lockfile
+      # regeneration path, so the registry cache must be populated first.
       - name: Warm Cargo registry cache
         run: cargo fetch --locked
+      - name: Run release tooling tests
+        run: node --test 'tooling/release/*.test.mjs'
 
   validate:
     name: Validate requested version

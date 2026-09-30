@@ -168,12 +168,6 @@ test("CLI bumps and prints next steps", () => {
     assert.ok(run.stdout.includes(`Lockstep OK: ${FIXTURE_TARGET_VERSION}`), run.stdout);
     assert.ok(
       run.stdout.includes(
-        `git commit -m "chore(release): bump version to ${FIXTURE_TARGET_VERSION}"`,
-      ),
-      run.stdout,
-    );
-    assert.ok(
-      run.stdout.includes(
         `generate-changelog.mjs --version ${FIXTURE_TARGET_VERSION} --prepend CHANGELOG.md`,
       ),
       run.stdout,

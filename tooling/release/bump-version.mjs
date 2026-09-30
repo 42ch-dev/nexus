@@ -159,11 +159,13 @@ function main(argv, env = process.env) {
   }
   console.log(`Lockstep OK: ${report.to}`);
   console.log("");
-  console.log("Next steps:");
-  console.log("  git add -A");
-  console.log(`  git commit -m "chore(release): bump version to ${report.to}"`);
+  console.log("Scratch bump only — this script never commits or publishes.");
+  console.log("  Release bumps are published by the `New release` workflow, which turns the");
+  console.log("  prepared tree into one GitHub-signed commit via");
+  console.log("  tooling/release/push-github-signed-commit.mjs. Do not git-commit a release bump");
+  console.log("  by hand. Runbook: docs/release.md (Dispatch a release).");
   console.log("");
-  console.log("CHANGELOG entry (append before committing):");
+  console.log("CHANGELOG entry for local inspection (the workflow prepends this itself):");
   console.log(
     `  node tooling/release/generate-changelog.mjs --version ${report.to} --prepend CHANGELOG.md`,
   );
