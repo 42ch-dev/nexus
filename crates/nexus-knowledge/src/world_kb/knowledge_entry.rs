@@ -915,7 +915,7 @@ pub fn is_character_subject_id(id: &str) -> bool {
 
 /// Handbook closed label spaces for one `modules.belief` row, in handbook
 /// field order. This is the **single** source of the belief closed
-/// vocabulary: the Character ToM row validator ([`validate_closed_belief_labels`])
+/// vocabulary: the Character `ToM` row validator ([`validate_closed_belief_labels`])
 /// and the authoring-seam validator ([`validate_belief_module`]) both read
 /// this table, so the grammar cannot fork (V1.203 P2 write contract §3 STOP
 /// condition).
@@ -1052,7 +1052,8 @@ pub fn validate_character_tom_belief_row(
 fn module_error(dialect: &str, index: Option<usize>, field: Option<&str>, reason: &str) -> String {
     let mut path = format!("modules.{dialect}");
     if let Some(index) = index {
-        path.push_str(&format!(".{index}"));
+        use std::fmt::Write as _;
+        let _ = write!(path, ".{index}");
     }
     if let Some(field) = field {
         path.push('.');
@@ -1061,10 +1062,11 @@ fn module_error(dialect: &str, index: Option<usize>, field: Option<&str>, reason
     format!("{path}: {reason}")
 }
 
-/// Validate an authored `modules.mental` value: it must be an object in the
-/// nine-field [`MentalFieldsRaw`] handbook shape. Field values stay raw JSON
-/// and unknown inner keys round-trip verbatim (PD-13), so every JSON object
-/// is accepted; only a non-object value rejects.
+/// Validate an authored `modules.mental` value.
+///
+/// It must be an object in the nine-field [`MentalFieldsRaw`] handbook shape.
+/// Field values stay raw JSON and unknown inner keys round-trip verbatim
+/// (PD-13), so every JSON object is accepted; only a non-object value rejects.
 #[must_use]
 pub fn validate_mental_module(value: &serde_json::Value) -> Vec<String> {
     if value.is_object() {
@@ -1074,10 +1076,11 @@ pub fn validate_mental_module(value: &serde_json::Value) -> Vec<String> {
     }
 }
 
-/// Validate an authored `modules.belief` value: it must be an array whose
-/// every element is a [`BeliefPropositionRaw`] object carrying legal closed
-/// labels. Unknown element keys round-trip verbatim (PD-13).
+/// Validate an authored `modules.belief` value.
 ///
+/// It must be an array whose every element is a [`BeliefPropositionRaw`]
+/// object carrying legal closed labels. Unknown element keys round-trip
+/// verbatim (PD-13).
 /// A known member with the wrong raw type is addressed by member name
 /// (`modules.belief.<index>.<member>`); only a genuinely non-object row
 /// falls back to the row-level `must be a belief proposition object`.
@@ -1136,10 +1139,11 @@ pub fn validate_belief_module(value: &serde_json::Value) -> Vec<String> {
     errors
 }
 
-/// Validate an authored `modules.observation` value: an object whose
-/// `observers` (when present) is an array of non-empty entry-id strings —
-/// an explicit `[]` is the meaningful PD-9 "no observers" claim and is
-/// accepted — and whose `access` (when present) is a JSON object.
+/// Validate an authored `modules.observation` value.
+///
+/// It is an object whose `observers` (when present) is an array of non-empty
+/// entry-id strings — an explicit `[]` is the meaningful PD-9 "no observers"
+/// claim and is accepted — and whose `access` (when present) is a JSON object.
 #[must_use]
 pub fn validate_observation_module(value: &serde_json::Value) -> Vec<String> {
     let Some(obj) = value.as_object() else {
@@ -1683,20 +1687,18 @@ mod tests {
             vec!["modules.belief: must be an array".to_string()]
         );
         // Every closed label across the handbook table is accepted.
-        assert!(
-            validate_belief_module(&serde_json::json!([{
-                "holder": "world",
-                "proposition": "the harbor froze",
-                "order": 0,
-                "truth": "Unknown",
-                "access": "Public",
-                "representation": "Implicit",
-                "content_type": "Action/Event",
-                "source": "Narration",
-                "context": "Neutral",
-            }]))
-            .is_empty()
-        );
+        assert!(validate_belief_module(&serde_json::json!([{
+            "holder": "world",
+            "proposition": "the harbor froze",
+            "order": 0,
+            "truth": "Unknown",
+            "access": "Public",
+            "representation": "Implicit",
+            "content_type": "Action/Event",
+            "source": "Narration",
+            "context": "Neutral",
+        }]))
+        .is_empty());
     }
 
     #[test]
@@ -1733,7 +1735,9 @@ mod tests {
         // without this correction.
         assert_eq!(
             validate_belief_module(&serde_json::json!([{"order": "first"}])),
-            vec!["modules.belief.0.order: invalid type: string \"first\", expected i64".to_string()]
+            vec![
+                "modules.belief.0.order: invalid type: string \"first\", expected i64".to_string()
+            ]
         );
         // A genuinely non-object row keeps the row-level fallback.
         assert_eq!(
@@ -1748,14 +1752,12 @@ mod tests {
         // absent key and an unknown inner key.
         assert!(validate_observation_module(&serde_json::json!({"observers": []})).is_empty());
         assert!(validate_observation_module(&serde_json::json!({})).is_empty());
-        assert!(
-            validate_observation_module(&serde_json::json!({
-                "observers": ["kb_ana"],
-                "access": {"line_of_sight": true},
-                "unknown_inner": 1,
-            }))
-            .is_empty()
-        );
+        assert!(validate_observation_module(&serde_json::json!({
+            "observers": ["kb_ana"],
+            "access": {"line_of_sight": true},
+            "unknown_inner": 1,
+        }))
+        .is_empty());
         // Non-object access is rejected with the member-qualified prefix.
         assert_eq!(
             validate_observation_module(&serde_json::json!({"access": ["kb_ana"]})),

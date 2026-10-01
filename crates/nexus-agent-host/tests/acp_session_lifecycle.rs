@@ -17,7 +17,6 @@
 //! - EOF/crash is a typed failure, never success
 #![cfg(unix)]
 
-
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

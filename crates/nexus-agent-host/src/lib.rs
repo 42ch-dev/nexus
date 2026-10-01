@@ -300,7 +300,10 @@ pub(crate) mod test_support {
             let _guard = SHIM_LOCK.lock().expect("fixture shim lock");
             let shim_dir = &*SHIMS;
             let interpreter = python_path();
-            let name = fixture.file_stem().expect("fixture filename").to_string_lossy();
+            let name = fixture
+                .file_stem()
+                .expect("fixture filename")
+                .to_string_lossy();
             let shim = shim_dir.path().join(format!("{name}.cmd"));
             let body = format!(
                 "@echo off\r\n\"{}\" \"{}\" %*\r\n",

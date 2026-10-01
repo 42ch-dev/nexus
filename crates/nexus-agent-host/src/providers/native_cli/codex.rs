@@ -1022,7 +1022,9 @@ mod tests {
         CodexNativeProvider::new(
             ProviderId::new("test-codex-app-server"),
             "Test".to_string(),
-            crate::test_support::fixture_launch(MOCK_APP_SERVER).to_string_lossy().into_owned(),
+            crate::test_support::fixture_launch(MOCK_APP_SERVER)
+                .to_string_lossy()
+                .into_owned(),
             env,
             TimeoutConfig::default(),
         )
