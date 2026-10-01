@@ -18,10 +18,15 @@ overrides:
   # (GHSA-jqff-g426-hqxp / GHSA-fph4-wmhf-6fwf / GHSA-f65p-4m7j-42xc /
   # GHSA-5jgf-p345-68v8), browserslist >=4.28.7 (GHSA-73wf-gq98-2v4g /
   # GHSA-c83g-rgw3-j3cx), js-yaml >=4.3.2 (GHSA-2883-xcg3-v3hh).
-  fast-uri: '>=4.1.3'
+  # 2026-10-01 Dependabot remediation raised fast-uri to >=4.1.5
+  # (GHSA-jvvf-x445-j334 / GHSA-hrr3-gc8f-f4qj), raised brace-expansion to
+  # >=5.0.12 (GHSA-6j4f-fj2g-mc7p / GHSA-qhr7-859c-m2p7 / GHSA-q2hr-2g5m-vwhr),
+  # and added markdown-it >=14.3.1 (GHSA-253c-mchw-3w2r).
+  fast-uri: '>=4.1.5'
   browserslist: '>=4.28.7 <5'
   linkify-it: '>=5.0.2 <6'
-  brace-expansion: '>=5.0.9'
+  brace-expansion: '>=5.0.12'
+  markdown-it: '>=14.3.1 <15'
   js-yaml: '>=4.3.2 <5'
   # js-yaml 5.x is NOT in GHSA-2883-xcg3-v3hh's affected ranges (`>=4.0.0 <4.3.2`
   # / `>=3.0.0 <3.15.2`; v5 rewrote default merge handling), so the >=4.3.2
