@@ -1077,6 +1077,10 @@ pub fn validate_mental_module(value: &serde_json::Value) -> Vec<String> {
 /// Validate an authored `modules.belief` value: it must be an array whose
 /// every element is a [`BeliefPropositionRaw`] object carrying legal closed
 /// labels. Unknown element keys round-trip verbatim (PD-13).
+///
+/// A known member with the wrong raw type is addressed by member name
+/// (`modules.belief.<index>.<member>`); only a genuinely non-object row
+/// falls back to the row-level `must be a belief proposition object`.
 #[must_use]
 pub fn validate_belief_module(value: &serde_json::Value) -> Vec<String> {
     let Some(rows) = value.as_array() else {
@@ -1084,6 +1088,38 @@ pub fn validate_belief_module(value: &serde_json::Value) -> Vec<String> {
     };
     let mut errors = Vec::new();
     for (index, element) in rows.iter().enumerate() {
+        let Some(members) = element.as_object() else {
+            errors.push(module_error(
+                "belief",
+                Some(index),
+                None,
+                "must be a belief proposition object",
+            ));
+            continue;
+        };
+        // Typed failures are member-addressed: probe each present member
+        // alone through the handbook raw type, so member names and their
+        // serde reasons come from `BeliefPropositionRaw` itself. An unknown
+        // key is ignored by serde (PD-13) and never fails this probe; only a
+        // mistyped handbook member does.
+        let mut mistyped = false;
+        for (member, member_value) in members {
+            let probe = serde_json::Value::Object(
+                std::iter::once((member.clone(), member_value.clone())).collect(),
+            );
+            if let Err(error) = BeliefPropositionRaw::deserialize(probe) {
+                errors.push(module_error(
+                    "belief",
+                    Some(index),
+                    Some(member.as_str()),
+                    &error.to_string(),
+                ));
+                mistyped = true;
+            }
+        }
+        if mistyped {
+            continue;
+        }
         let Ok(row) = BeliefPropositionRaw::deserialize(element) else {
             errors.push(module_error(
                 "belief",
@@ -1677,6 +1713,32 @@ mod tests {
                 "modules.belief.0.access: must be one of the handbook closed labels (got \"Secret\")"
                     .to_string(),
             ]
+        );
+    }
+
+    #[test]
+    fn validate_belief_module_reports_mistyped_members_by_name() {
+        // A known string member with a non-string value is member-addressed
+        // (`modules.belief.<index>.<member>`), carrying the raw type's serde
+        // reason — not the row-level fallback.
+        assert_eq!(
+            validate_belief_module(&serde_json::json!([
+                {"holder": "kb_ana", "order": 1, "truth": 17},
+            ])),
+            vec![
+                "modules.belief.0.truth: invalid type: integer `17`, expected a string".to_string()
+            ]
+        );
+        // `order` is the raw type's integer member; a string loses its prefix
+        // without this correction.
+        assert_eq!(
+            validate_belief_module(&serde_json::json!([{"order": "first"}])),
+            vec!["modules.belief.0.order: invalid type: string \"first\", expected i64".to_string()]
+        );
+        // A genuinely non-object row keeps the row-level fallback.
+        assert_eq!(
+            validate_belief_module(&serde_json::json!([42])),
+            vec!["modules.belief.0: must be a belief proposition object".to_string()]
         );
     }
 
