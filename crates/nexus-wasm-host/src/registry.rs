@@ -115,7 +115,10 @@ mod tests {
         assert_eq!(summary.module_id, "broken-module");
         assert_eq!(summary.name, "broken-module");
         assert_eq!(summary.version, "unknown");
-        assert!(summary.required_key_block_types.is_empty());
+        assert_eq!(
+            summary.required_key_block_types,
+            [] as [std::string::String; 0]
+        );
         assert_eq!(summary.status.to_string(), "broken");
     }
 

@@ -615,7 +615,10 @@ mod tests {
             SpokeResult::Ok(_) => panic!("a non-provisional candidate must be rejected"),
         };
         assert_eq!(reject.code, SpokeRejectCode::CandidateNotProvisional);
-        assert!(store.list_by_world(WORLD_ID).await.unwrap().is_empty());
+        assert_eq!(
+            store.list_by_world(WORLD_ID).await.unwrap(),
+            [] as [nexus_knowledge::world_kb::KnowledgeEntryRecord; 0]
+        );
     }
 
     #[tokio::test]
@@ -638,7 +641,10 @@ mod tests {
         };
         assert_eq!(reject.code, SpokeRejectCode::InternalError);
         assert_eq!(reject.message, "extractor unavailable");
-        assert!(store.list_by_world(WORLD_ID).await.unwrap().is_empty());
+        assert_eq!(
+            store.list_by_world(WORLD_ID).await.unwrap(),
+            [] as [nexus_knowledge::world_kb::KnowledgeEntryRecord; 0]
+        );
     }
 
     #[tokio::test]

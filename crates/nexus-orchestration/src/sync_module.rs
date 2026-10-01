@@ -482,7 +482,7 @@ mod tests {
 
         let works = discover_works(workspace.path());
         assert_eq!(works.len(), 1);
-        assert!(works[0].chapters.is_empty());
+        assert_eq!(works[0].chapters, [] as [std::string::String; 0]);
 
         let result = build_story_bundle("w1", "wrk_003", &works[0], workspace.path());
         assert!(result.is_none(), "empty stories should yield None");

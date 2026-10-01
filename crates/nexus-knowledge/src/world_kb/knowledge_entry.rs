@@ -1513,7 +1513,7 @@ mod tests {
     fn test_mental_absent_or_non_object_parses_as_none() {
         let bare = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Bare");
         assert!(bare.parse_mental_fields().is_none());
-        assert!(bare.parse_belief_rows().is_empty());
+        assert_eq!(bare.parse_belief_rows(), Vec::<BeliefPropositionRaw>::new());
 
         let mut scalar = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Scalar");
         scalar.modules = Some(serde_json::json!({ "mental": "not-an-object" }));
@@ -1521,7 +1521,10 @@ mod tests {
 
         let mut not_array = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "NotArray");
         not_array.modules = Some(serde_json::json!({ "belief": { "holder": "world" } }));
-        assert!(not_array.parse_belief_rows().is_empty());
+        assert_eq!(
+            not_array.parse_belief_rows(),
+            Vec::<BeliefPropositionRaw>::new()
+        );
     }
 
     #[test]
@@ -1646,7 +1649,10 @@ mod tests {
 
     #[test]
     fn validate_mental_module_accepts_objects_and_rejects_non_object() {
-        assert!(validate_mental_module(&serde_json::json!({})).is_empty());
+        assert_eq!(
+            validate_mental_module(&serde_json::json!({})),
+            Vec::<String>::new()
+        );
         assert!(
             validate_mental_module(&serde_json::json!({
                 "identity": {"role": "harbor_master"},
@@ -1687,18 +1693,20 @@ mod tests {
             vec!["modules.belief: must be an array".to_string()]
         );
         // Every closed label across the handbook table is accepted.
-        assert!(validate_belief_module(&serde_json::json!([{
-            "holder": "world",
-            "proposition": "the harbor froze",
-            "order": 0,
-            "truth": "Unknown",
-            "access": "Public",
-            "representation": "Implicit",
-            "content_type": "Action/Event",
-            "source": "Narration",
-            "context": "Neutral",
-        }]))
-        .is_empty());
+        assert_eq!(
+            validate_belief_module(&serde_json::json!([{
+                "holder": "world",
+                "proposition": "the harbor froze",
+                "order": 0,
+                "truth": "Unknown",
+                "access": "Public",
+                "representation": "Implicit",
+                "content_type": "Action/Event",
+                "source": "Narration",
+                "context": "Neutral",
+            }])),
+            Vec::<String>::new()
+        );
     }
 
     #[test]
@@ -1750,14 +1758,22 @@ mod tests {
     fn validate_observation_module_shape_rules() {
         // Explicit empty observers is the PD-9 claim: accepted, as is an
         // absent key and an unknown inner key.
-        assert!(validate_observation_module(&serde_json::json!({"observers": []})).is_empty());
-        assert!(validate_observation_module(&serde_json::json!({})).is_empty());
-        assert!(validate_observation_module(&serde_json::json!({
-            "observers": ["kb_ana"],
-            "access": {"line_of_sight": true},
-            "unknown_inner": 1,
-        }))
-        .is_empty());
+        assert_eq!(
+            validate_observation_module(&serde_json::json!({"observers": []})),
+            [] as [std::string::String; 0]
+        );
+        assert_eq!(
+            validate_observation_module(&serde_json::json!({})),
+            [] as [std::string::String; 0]
+        );
+        assert_eq!(
+            validate_observation_module(&serde_json::json!({
+                "observers": ["kb_ana"],
+                "access": {"line_of_sight": true},
+                "unknown_inner": 1,
+            })),
+            [] as [std::string::String; 0]
+        );
         // Non-object access is rejected with the member-qualified prefix.
         assert_eq!(
             validate_observation_module(&serde_json::json!({"access": ["kb_ana"]})),

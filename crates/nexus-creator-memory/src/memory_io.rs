@@ -280,7 +280,7 @@ mod tests {
         let home = fake_home();
         cleanup(&home);
         let slugs = list_memories(&home, MemoryBearerRef::Creator("ctr_test")).unwrap();
-        assert!(slugs.is_empty());
+        assert_eq!(slugs, [] as [std::string::String; 0]);
         cleanup(&home);
     }
 
@@ -354,7 +354,7 @@ mod tests {
         cleanup(&home);
         // Never create the memory directory: genuine absence is honest-empty.
         let slugs = list_memories(&home, MemoryBearerRef::Creator("ctr_test")).unwrap();
-        assert!(slugs.is_empty());
+        assert_eq!(slugs, [] as [std::string::String; 0]);
         cleanup(&home);
     }
 

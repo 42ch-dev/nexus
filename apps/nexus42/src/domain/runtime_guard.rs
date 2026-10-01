@@ -156,6 +156,9 @@ mod tests {
     fn blocked_categories_cloud_enhanced() {
         let mode = DomainRuntimeMode::parse("cloud_enhanced").unwrap();
         let blocked = blocked_categories(&mode);
-        assert!(blocked.is_empty());
+        assert_eq!(
+            blocked,
+            [] as [crate::domain::runtime_guard::OperationCategory; 0]
+        );
     }
 }

@@ -217,10 +217,10 @@ Solid chapter with a few craft issues.
     for f in &rows {
         assert_eq!(f.work_id, "wrk_parsed");
         assert_eq!(f.status, "open");
-        assert!(!f.kind.is_empty());
-        assert!(!f.severity.is_empty());
-        assert!(!f.target_executor.is_empty());
-        assert!(!f.description.is_empty());
+        assert_ne!(f.kind, "");
+        assert_ne!(f.severity, "");
+        assert_ne!(f.target_executor, "");
+        assert_ne!(f.description, "");
     }
 
     // Spot-check the kind set + the critical→blocker severity mapping.

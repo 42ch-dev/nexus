@@ -752,7 +752,7 @@ mod tests {
     fn nexus_new_session_request() {
         let req = NexusNewSessionRequest::new("/tmp/workspace");
         assert_eq!(req.cwd, PathBuf::from("/tmp/workspace"));
-        assert!(req.mcp_servers.is_empty());
+        assert_eq!(req.mcp_servers, Vec::new());
     }
 
     #[test]

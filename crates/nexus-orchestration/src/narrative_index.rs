@@ -755,10 +755,14 @@ mod tests {
 
     #[test]
     fn parse_foreshadowing_index_handles_empty_file() {
-        assert!(parse_foreshadowing_index("").unwrap().is_empty());
-        assert!(parse_foreshadowing_index("# just a title\n\nno table here")
-            .unwrap()
-            .is_empty());
+        assert_eq!(
+            parse_foreshadowing_index("").unwrap(),
+            [] as [crate::narrative_index::ForeshadowingRow; 0]
+        );
+        assert_eq!(
+            parse_foreshadowing_index("# just a title\n\nno table here").unwrap(),
+            [] as [crate::narrative_index::ForeshadowingRow; 0]
+        );
     }
 
     #[test]
@@ -789,7 +793,10 @@ mod tests {
             | ID | Description | Planted | Paid off | Status |\n\
             | --- | --- | --- | --- | --- |\n\
             | | | | | |\n";
-        assert!(parse_foreshadowing_index(content).unwrap().is_empty());
+        assert_eq!(
+            parse_foreshadowing_index(content).unwrap(),
+            [] as [crate::narrative_index::ForeshadowingRow; 0]
+        );
     }
 
     #[test]
@@ -834,7 +841,10 @@ mod tests {
     fn serialize_empty_emits_valid_table() {
         let s = serialize_foreshadowing_index(&[]);
         assert!(s.contains(FORESHADOWING_HEADER));
-        assert!(parse_foreshadowing_index(&s).unwrap().is_empty());
+        assert_eq!(
+            parse_foreshadowing_index(&s).unwrap(),
+            [] as [crate::narrative_index::ForeshadowingRow; 0]
+        );
     }
 
     // ── next_f_id ──────────────────────────────────────────────────────────
@@ -876,7 +886,10 @@ mod tests {
 
     #[test]
     fn parse_event_index_handles_empty_file() {
-        assert!(parse_event_index("").is_empty());
+        assert_eq!(
+            parse_event_index(""),
+            [] as [crate::narrative_index::EventRow; 0]
+        );
     }
 
     // ── extract_inline_f_declarations ──────────────────────────────────────
@@ -920,7 +933,10 @@ mod tests {
     #[test]
     fn extract_inline_f_declarations_skips_nothing_touched_sentinel() {
         let section = "No foreshadowing items touched in this chapter.\n";
-        assert!(extract_inline_f_declarations(section).is_empty());
+        assert_eq!(
+            extract_inline_f_declarations(section),
+            [] as [crate::narrative_index::FDeclaration; 0]
+        );
     }
 
     #[test]
@@ -1008,7 +1024,7 @@ mod tests {
         promote_outline_to_index(&work, "- F001: the locket").unwrap();
         // Re-promote the SAME id + description → no-op, no duplicate.
         let allocated = promote_outline_to_index(&work, "- F001: the locket").unwrap();
-        assert!(allocated.is_empty());
+        assert_eq!(allocated, [] as [std::string::String; 0]);
 
         let rows = parse_foreshadowing_index(
             &fs::read_to_string(work.join("Outlines/foreshadowing.md")).unwrap(),
@@ -1071,7 +1087,7 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(20));
         // Empty section → nothing to promote → no write.
         let allocated = promote_outline_to_index(&work, "").unwrap();
-        assert!(allocated.is_empty());
+        assert_eq!(allocated, [] as [std::string::String; 0]);
         let mtime_after = fs::metadata(&path).unwrap().modified().unwrap();
         assert_eq!(mtime_before, mtime_after, "no-op must not rewrite the file");
     }

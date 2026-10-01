@@ -93,7 +93,7 @@ mod tests {
         let findings = check(&events, None);
         assert_eq!(findings.len(), 1, "expected one finding: {findings:?}");
         assert_eq!(findings[0].invariant, InvariantId::SingleTerminal);
-        assert!(findings[0].evidence.is_empty());
+        assert_eq!(findings[0].evidence, [] as [usize; 0]);
     }
 
     #[test]

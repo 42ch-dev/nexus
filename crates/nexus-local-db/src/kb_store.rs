@@ -3431,7 +3431,7 @@ mod tests {
         store.delete_knowledge_entry(&id).await.unwrap();
 
         let items = store.list_by_world("wld_1").await.unwrap();
-        assert!(items.is_empty());
+        assert_eq!(items, Vec::<KnowledgeEntryRecord>::new());
     }
 
     #[tokio::test]
@@ -3851,7 +3851,7 @@ mod tests {
             .unwrap();
 
         let result = store.query(&KbQuery::new("wld_2")).await.unwrap();
-        assert!(result.items.is_empty());
+        assert_eq!(result.items, Vec::<KnowledgeEntryRecord>::new());
     }
 
     // ── Validation tests (QC1 C-001 / QC2 C1 + QC2 W2 + QC2 W3) ──
@@ -4576,7 +4576,7 @@ mod tests {
             .insert_actor_owned_key_block("ctr_a", "chr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab", None, kb)
             .await
             .expect("active owned Character inserts");
-        assert!(!inserted.entry_id.is_empty());
+        assert_ne!(inserted.entry_id, "");
         assert!(inserted.entry_id.starts_with("kb_"));
 
         // Archive the Character: the guarded insert now refuses character_inactive

@@ -105,7 +105,10 @@ fn basic_combat_resolves_attack_into_four_part_output() {
     );
 
     // 4) new_key_blocks empty for basic combat.
-    assert!(output.new_key_blocks.is_empty());
+    assert_eq!(
+        output.new_key_blocks,
+        [] as [serde_json::Map<std::string::String, serde_json::Value>; 0]
+    );
 
     // The whole envelope must round-trip through serde (already did; sanity-check size).
     let json = serde_json::to_string(&output).unwrap();

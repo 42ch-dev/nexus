@@ -810,7 +810,7 @@ mod tests {
             "Explored narrative structure, character development, and pacing techniques.",
         );
         let fragment = create_fragment_from_review(&input);
-        assert!(!fragment.keywords.is_empty());
+        assert_ne!(fragment.keywords, [] as [std::string::String; 0]);
         // Stop words should be filtered
         assert!(!fragment.keywords.contains(&"and".to_string()));
         // Should have substantive keywords

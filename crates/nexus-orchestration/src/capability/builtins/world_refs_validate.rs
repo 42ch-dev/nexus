@@ -183,7 +183,10 @@ mod tests {
             force: false,
         };
         let result = validate_world_refs(&refs, &ids, &params);
-        assert!(result.findings.is_empty());
+        assert_eq!(
+            result.findings,
+            [] as [crate::capability::builtins::world_refs_validate::WorldRefFinding; 0]
+        );
         assert!(!result.blocks);
     }
 
@@ -262,7 +265,10 @@ mod tests {
             force: false,
         };
         let result = validate_world_refs(&refs, &ids, &params);
-        assert!(result.findings.is_empty());
+        assert_eq!(
+            result.findings,
+            [] as [crate::capability::builtins::world_refs_validate::WorldRefFinding; 0]
+        );
         assert!(!result.blocks);
     }
 
@@ -291,7 +297,10 @@ mod tests {
             force: false,
         };
         let result = validate_world_refs(&refs, &ids, &params);
-        assert!(result.findings.is_empty());
+        assert_eq!(
+            result.findings,
+            [] as [crate::capability::builtins::world_refs_validate::WorldRefFinding; 0]
+        );
         assert!(!result.blocks);
     }
 }

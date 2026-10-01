@@ -313,7 +313,7 @@ None yet.
 
     #[test]
     fn extract_frontmatter_none() {
-        assert!(extract_frontmatter("## Personality\nTest").is_empty());
+        assert_eq!(extract_frontmatter("## Personality\nTest"), "");
     }
 
     #[test]

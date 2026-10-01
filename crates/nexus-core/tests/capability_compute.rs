@@ -1688,7 +1688,16 @@ async fn compute_run_refusals_are_typed_and_leave_no_state() {
             .await
             .unwrap();
     assert_eq!(rows, 0, "a refused run must not persist a row");
-    assert!(timeline_rows(f.core.pool()).await.is_empty());
+    assert_eq!(
+        timeline_rows(f.core.pool()).await,
+        [] as [(
+            std::string::String,
+            std::string::String,
+            std::string::String,
+            std::option::Option<std::string::String>,
+            std::option::Option<std::string::String>
+        ); 0]
+    );
 }
 
 /// A sandbox trap is refused with its retained code, the failed run is
@@ -1713,7 +1722,16 @@ async fn compute_run_fuel_exhaustion_is_persisted_as_a_failed_run() {
     let error: serde_json::Value =
         serde_json::from_str(error_json.as_deref().expect("failed rows carry error_json")).unwrap();
     assert_eq!(error["code"], "compute_fuel_exhausted");
-    assert!(timeline_rows(f.core.pool()).await.is_empty());
+    assert_eq!(
+        timeline_rows(f.core.pool()).await,
+        [] as [(
+            std::string::String,
+            std::string::String,
+            std::string::String,
+            std::option::Option<std::string::String>,
+            std::option::Option<std::string::String>
+        ); 0]
+    );
 }
 
 /// The wall-time watchdog traps first when fuel cannot be exhausted, and the
@@ -1743,7 +1761,16 @@ async fn compute_run_wall_time_exceeded_is_persisted_as_a_failed_run() {
     let error: serde_json::Value =
         serde_json::from_str(error_json.as_deref().expect("failed rows carry error_json")).unwrap();
     assert_eq!(error["code"], "compute_wall_time_exceeded");
-    assert!(timeline_rows(f.core.pool()).await.is_empty());
+    assert_eq!(
+        timeline_rows(f.core.pool()).await,
+        [] as [(
+            std::string::String,
+            std::string::String,
+            std::string::String,
+            std::option::Option<std::string::String>,
+            std::option::Option<std::string::String>
+        ); 0]
+    );
 }
 
 /// Two concurrent runs against the shared engine execute SERIALLY through the
@@ -1852,7 +1879,16 @@ async fn compute_run_reports_per_entry_detail_for_an_invalid_entry() {
         error["details"]["invalid_entries"][0]["entry_id"],
         "kb_broken"
     );
-    assert!(timeline_rows(f.core.pool()).await.is_empty());
+    assert_eq!(
+        timeline_rows(f.core.pool()).await,
+        [] as [(
+            std::string::String,
+            std::string::String,
+            std::string::String,
+            std::option::Option<std::string::String>,
+            std::option::Option<std::string::String>
+        ); 0]
+    );
 
     // The detail read must serve this failed run (a top-level `invalid_entries`
     // key would break its deserialization).
@@ -1926,7 +1962,16 @@ async fn discard_marks_the_run_discarded_and_leaves_the_world_unchanged() {
         .expect("discard succeeds");
 
     assert_eq!(defender_hp(f.core.pool(), "kb_def").await, 30);
-    assert!(timeline_rows(f.core.pool()).await.is_empty());
+    assert_eq!(
+        timeline_rows(f.core.pool()).await,
+        [] as [(
+            std::string::String,
+            std::string::String,
+            std::string::String,
+            std::option::Option<std::string::String>,
+            std::option::Option<std::string::String>
+        ); 0]
+    );
 
     let detail = get_compute_run(&f.core, &principal, &run_id)
         .await
@@ -2274,7 +2319,16 @@ async fn accept_rolls_back_when_a_delta_targets_another_world() {
     // the run is still `succeeded` (nothing was partially applied).
     assert_eq!(defender_hp(f.core.pool(), "kb_def").await, 30);
     assert_eq!(defender_hp(f.core.pool(), "kb_foreign").await, 777);
-    assert!(timeline_rows(f.core.pool()).await.is_empty());
+    assert_eq!(
+        timeline_rows(f.core.pool()).await,
+        [] as [(
+            std::string::String,
+            std::string::String,
+            std::string::String,
+            std::option::Option<std::string::String>,
+            std::option::Option<std::string::String>
+        ); 0]
+    );
     let row = nexus_local_db::compute_runs::get_run(f.core.pool(), &run_id)
         .await
         .unwrap()

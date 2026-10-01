@@ -635,7 +635,7 @@ mod tests {
         let anchors = pack["source_anchors"]
             .as_array()
             .expect("should be an array when Some(&[])");
-        assert!(anchors.is_empty());
+        assert_eq!(anchors.as_slice(), &[] as &[serde_json::Value]);
     }
 
     // ── parse_pack_str convenience ────────────────────────────────────────

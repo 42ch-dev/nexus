@@ -692,7 +692,7 @@ async fn handshake_rejections_fail_fast_with_zero_session_state() {
         "handshake rejection must be immediate (no timeout park)"
     );
     assert_eq!(harness.sessions.session_count(), 0);
-    assert!(harness.sessions.peer_ids().is_empty());
+    assert_eq!(harness.sessions.peer_ids(), [] as [std::string::String; 0]);
     harness.stop(&[allowed]).await;
 
     // (b) Allowlisted peer with no preconfigured key: fail-closed.
@@ -709,7 +709,7 @@ async fn handshake_rejections_fail_fast_with_zero_session_state() {
         "handshake rejection must be immediate (no timeout park)"
     );
     assert_eq!(harness.sessions.session_count(), 0);
-    assert!(harness.sessions.peer_ids().is_empty());
+    assert_eq!(harness.sessions.peer_ids(), [] as [std::string::String; 0]);
     harness.stop(&[keyless]).await;
 }
 

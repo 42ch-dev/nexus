@@ -377,7 +377,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let outcome = scan_user_capabilities(tmp.path(), &builtins(), None, None);
         assert!(outcome.admitted.is_empty());
-        assert!(outcome.skipped.is_empty());
+        assert_eq!(
+            outcome.skipped,
+            [] as [crate::capability::scan::SkippedCapability; 0]
+        );
     }
 
     #[test]
@@ -386,7 +389,10 @@ mod tests {
         let missing = tmp.path().join("does-not-exist");
         let outcome = scan_user_capabilities(&missing, &builtins(), None, None);
         assert!(outcome.admitted.is_empty());
-        assert!(outcome.skipped.is_empty());
+        assert_eq!(
+            outcome.skipped,
+            [] as [crate::capability::scan::SkippedCapability; 0]
+        );
     }
     /// Bugbot High (V1.176 PR wave): a top-level non-`NotFound` `read_dir`
     /// failure (EACCES/EMFILE race — here: a regular file → ENOTDIR, the
@@ -405,7 +411,10 @@ mod tests {
             "top-level non-NotFound read failure must mark the outcome transient"
         );
         assert!(outcome.admitted.is_empty());
-        assert!(outcome.skipped.is_empty());
+        assert_eq!(
+            outcome.skipped,
+            [] as [crate::capability::scan::SkippedCapability; 0]
+        );
     }
 
     #[test]
@@ -507,7 +516,10 @@ mod tests {
         let outcome = scan_user_capabilities(tmp.path(), &builtins(), None, None);
         let names: Vec<&str> = outcome.admitted.iter().map(Capability::name).collect();
         assert_eq!(names, vec!["visible.cap"]);
-        assert!(outcome.skipped.is_empty());
+        assert_eq!(
+            outcome.skipped,
+            [] as [crate::capability::scan::SkippedCapability; 0]
+        );
     }
 
     /// M1 (QC wave): two dirs cannot both declare the same descriptor name
@@ -564,6 +576,9 @@ mod tests {
             vec!["alpha.cap", "mike.cap", "zeta.cap"],
             "admitted in deterministic sorted order"
         );
-        assert!(outcome.skipped.is_empty());
+        assert_eq!(
+            outcome.skipped,
+            [] as [crate::capability::scan::SkippedCapability; 0]
+        );
     }
 }

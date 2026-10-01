@@ -265,9 +265,12 @@ mod tests {
         assert_eq!(mem.frontmatter.nexus_memory_version, MEMORY_FILE_VERSION);
         assert!(mem.frontmatter.memory_id.starts_with("mem_"));
         assert_eq!(mem.frontmatter.memory_kind, "story_summary");
-        assert!(!mem.frontmatter.updated_at.is_empty());
-        assert!(mem.frontmatter.source_session_ids.is_empty());
-        assert!(mem.body.is_empty());
+        assert_ne!(mem.frontmatter.updated_at, "");
+        assert_eq!(
+            mem.frontmatter.source_session_ids,
+            [] as [std::string::String; 0]
+        );
+        assert_eq!(mem.body, "");
         assert!(mem.source_path.is_none());
     }
 
@@ -378,7 +381,7 @@ mod tests {
     #[test]
     fn slug_empty_when_no_source_path() {
         let mem = LongTermMemory::new("story_summary");
-        assert!(mem.slug().is_empty());
+        assert_eq!(mem.slug(), "");
     }
 
     #[test]
@@ -443,7 +446,7 @@ Character analysis: Alice is a determined protagonist.
     fn parse_body_empty() {
         let content = "---\nnexus_memory_version: 1\nmemory_id: mem_x\nmemory_kind: custom\nupdated_at: '2026-01-01T00:00:00Z'\n---\n";
         let mem = LongTermMemory::parse(content).unwrap();
-        assert!(mem.body.is_empty());
+        assert_eq!(mem.body, "");
     }
 
     #[test]
@@ -564,6 +567,6 @@ Character analysis: Alice is a determined protagonist.
         let content = "---\nkey: val\n---\n";
         let (fm, body) = extract_frontmatter_and_body(content).unwrap();
         assert_eq!(fm, "key: val");
-        assert!(body.is_empty());
+        assert_eq!(body, "");
     }
 }

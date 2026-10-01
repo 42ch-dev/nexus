@@ -1132,7 +1132,7 @@ mod tests {
         let boot_digest = peer_config_digest(home.path());
         let boot = PeerToolsConfig::load(home.path()).expect("boot config loads");
         let holder = PeerConfigHolder::new(boot_snapshot(boot));
-        assert!(holder.get().config.peer_ids.is_empty());
+        assert_eq!(holder.get().config.peer_ids, [] as [std::string::String; 0]);
 
         let shutdown = Arc::new(Notify::new());
         let watch = spawn_peer_config_watch(

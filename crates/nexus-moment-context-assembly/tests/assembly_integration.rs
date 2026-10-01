@@ -311,7 +311,7 @@ async fn full_assembly_produces_correct_moment_context() {
 #[tokio::test]
 async fn moment_context_default_is_all_none_except_stage0() {
     let ctx = MomentContext::default();
-    assert!(ctx.stage0_context.is_empty());
+    assert_eq!(ctx.stage0_context, "");
     assert!(ctx.world_state.is_none());
     assert!(ctx.timeline.is_none());
     assert!(ctx.world_kb.is_none());

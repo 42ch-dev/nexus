@@ -931,7 +931,10 @@ mod tests {
             "queued",
             "the job is untouched"
         );
-        assert!(world_rows(&pool).await.is_empty());
+        assert_eq!(
+            world_rows(&pool).await,
+            [] as [nexus_knowledge::world_kb::KnowledgeEntryRecord; 0]
+        );
     }
 
     #[tokio::test]

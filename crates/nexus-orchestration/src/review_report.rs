@@ -522,7 +522,10 @@ Adequate; no actionable issues.
 - Ship as-is.
 ";
         let parsed = parse_review_report(report).expect("must parse");
-        assert!(parsed.findings.is_empty());
+        assert_eq!(
+            parsed.findings,
+            [] as [crate::review_report::ParsedFinding; 0]
+        );
         assert_eq!(
             parsed.overall_assessment.as_deref(),
             Some("Adequate; no actionable issues.")

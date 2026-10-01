@@ -280,10 +280,10 @@ async fn ac2_on_demand_review_run_persists_finding_same_path() {
     assert_eq!(rows.len(), 1);
     let f = &rows[0];
     assert_eq!(f.work_id, "wrk_ac2");
-    assert!(!f.kind.is_empty());
-    assert!(!f.severity.is_empty());
-    assert!(!f.target_executor.is_empty());
-    assert!(!f.description.is_empty());
+    assert_ne!(f.kind, "");
+    assert_ne!(f.severity, "");
+    assert_ne!(f.target_executor, "");
+    assert_ne!(f.description, "");
 
     // AC4 invariant: on-demand path does NOT touch driver_schedule_id.
     // The Work's driver remains None (was None at seed; never set).

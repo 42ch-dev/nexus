@@ -235,7 +235,7 @@ mod tests {
         let denied = vec!["nonexistent".to_string()];
         let (result, actually_denied) = apply_policy_deny(&caps, &denied);
         assert!(result.streaming);
-        assert!(actually_denied.is_empty());
+        assert_eq!(actually_denied, [] as [std::string::String; 0]);
     }
 
     #[test]

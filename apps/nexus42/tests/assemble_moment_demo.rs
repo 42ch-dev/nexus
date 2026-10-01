@@ -190,7 +190,7 @@ async fn assemble_moment_demo_non_seeded_ids_yield_stage0_only() {
     let request = MomentRequest::new(make_stage0()).with_world("wld_ghost");
     let ctx = assemble_moment(&request, &narrative, &kb, &knowledge).await;
 
-    assert!(!ctx.stage0_context.is_empty());
+    assert_ne!(ctx.stage0_context, "");
     assert!(ctx.world_state.is_none());
     assert!(ctx.timeline.is_none());
     assert!(ctx.world_kb.is_none());

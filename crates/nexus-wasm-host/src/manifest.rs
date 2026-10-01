@@ -168,7 +168,10 @@ mod tests {
             "init_export": "init"
         }"#;
         let m: ModuleManifest = serde_json::from_str(json).unwrap();
-        assert!(m.host_functions.is_empty());
+        assert_eq!(
+            m.host_functions,
+            [] as [nexus_module_manifest::HostFunction; 0]
+        );
         assert!(m.max_fuel.is_none());
         assert!(m.description.is_none());
     }

@@ -1327,7 +1327,7 @@ mod tests {
             ]
         });
         let outcome = parse_st_lorebook(&lorebook).expect("must convert");
-        assert!(outcome.diagnostics.is_empty());
+        assert_eq!(outcome.diagnostics, Vec::<ConversionDiagnostic>::new());
     }
 
     // ── R2-3: mapped booleans in an unsupported shape must not silently
@@ -1978,7 +1978,7 @@ mod tests {
             ]
         });
         let outcome = parse_st_lorebook(&lorebook).expect("must convert");
-        assert!(outcome.diagnostics.is_empty());
+        assert_eq!(outcome.diagnostics, Vec::<ConversionDiagnostic>::new());
         assert_eq!(
             outcome.pack_input["entries"][0]["entry_id"],
             json!("kb_st_550e8400-e29b-41d4-a716-446655440000")

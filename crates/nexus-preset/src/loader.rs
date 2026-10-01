@@ -1228,7 +1228,7 @@ states:
         let loaded = load_preset_from_str(minimal_valid_yaml(), &caps).unwrap();
         assert_eq!(loaded.id, "tiny");
         assert_eq!(loaded.version, 1);
-        assert!(!loaded.source_hash.is_empty());
+        assert_ne!(loaded.source_hash.as_slice(), &[] as &[u8]);
     }
 
     #[test]

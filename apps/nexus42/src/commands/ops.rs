@@ -971,7 +971,7 @@ mod tests {
         }})
         .to_string();
         let dto = project(&row(ctx.as_bytes()));
-        assert!(dto.live_join_keys.is_empty());
+        assert_eq!(dto.live_join_keys, [] as [std::string::String; 0]);
         assert_eq!(dto.resumable.verdict, Verdict::No);
         assert_eq!(dto.resumable.rule, ResumeRule::NotConvergeMergeClass);
     }
@@ -992,7 +992,7 @@ mod tests {
         assert_eq!(dto.resumable.rule, ResumeRule::ContextUnreadable);
         assert!(dto.resumable.explanation.contains("corrupt"));
         assert!(dto.run_failure.is_none());
-        assert!(dto.live_join_keys.is_empty());
+        assert_eq!(dto.live_join_keys, [] as [std::string::String; 0]);
     }
 
     #[test]

@@ -233,7 +233,10 @@ async fn character_owner_round_trip_without_world_fabrication() {
     );
 
     // Invisible to legacy world-scoped reads.
-    assert!(store.list_by_world(WORLD_A).await.unwrap().is_empty());
+    assert_eq!(
+        store.list_by_world(WORLD_A).await.unwrap(),
+        [] as [nexus_knowledge::world_kb::KnowledgeEntryRecord; 0]
+    );
     assert_eq!(
         store
             .query(&KbQuery::new(WORLD_A))
@@ -286,7 +289,10 @@ async fn binding_owner_round_trip_without_world_fabrication() {
     assert_eq!(got.owner, KnowledgeOwnerRef::actor_world_binding(BINDING_1));
     assert_eq!(got.world_id(), None);
 
-    assert!(store.list_by_world(WORLD_A).await.unwrap().is_empty());
+    assert_eq!(
+        store.list_by_world(WORLD_A).await.unwrap(),
+        [] as [nexus_knowledge::world_kb::KnowledgeEntryRecord; 0]
+    );
     let owned = store
         .list_by_owner(&KnowledgeOwnerRef::actor_world_binding(BINDING_1))
         .await
@@ -813,11 +819,13 @@ async fn v1191_holder_visibility_keyset_pages_skip_hidden_before_limit() {
             .is_empty(),
         "a World outside the authorized containers contributes no rows"
     );
-    assert!(store
-        .list_by_owner_keyset(&KnowledgeOwnerRef::world(WORLD_B), None, 5, &selection)
-        .await
-        .unwrap()
-        .is_empty());
+    assert_eq!(
+        store
+            .list_by_owner_keyset(&KnowledgeOwnerRef::world(WORLD_B), None, 5, &selection)
+            .await
+            .unwrap(),
+        [] as [nexus_knowledge::world_kb::KnowledgeEntryRecord; 0]
+    );
     assert!(
         store
             .list_by_owner_complete(
@@ -900,11 +908,13 @@ async fn v1191_r5_by_id_read_is_container_and_governance_scoped() {
     }
 
     // A requested id that was never stored is simply absent (never an error).
-    assert!(store
-        .list_entries_by_ids_admitted(&["kb_never_stored".to_string()], &selection)
-        .await
-        .unwrap()
-        .is_empty());
+    assert_eq!(
+        store
+            .list_entries_by_ids_admitted(&["kb_never_stored".to_string()], &selection)
+            .await
+            .unwrap(),
+        [] as [nexus_knowledge::world_kb::KnowledgeEntryRecord; 0]
+    );
 }
 
 /// Search: the count, the returned rows and their snippets are computed over

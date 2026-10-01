@@ -2389,8 +2389,18 @@ mod tests {
         assert_eq!(summary.open_count, 0);
         assert!(!summary.is_truncated);
         assert!(summary.highest_severity.is_none());
-        assert!(summary.severity_counts.is_empty());
-        assert!(summary.top_findings.is_empty());
+        assert_eq!(
+            summary.severity_counts,
+            [] as [(std::string::String, usize); 0]
+        );
+        assert_eq!(
+            summary.top_findings,
+            [] as [(
+                std::string::String,
+                std::string::String,
+                std::string::String
+            ); 0]
+        );
     }
 
     #[test]
@@ -2718,7 +2728,7 @@ mod tests {
             .get("findings")
             .and_then(|v| v.as_array())
             .expect("findings[] present (empty) for novel work");
-        assert!(arr.is_empty());
+        assert_eq!(arr.as_slice(), &[] as &[serde_json::Value]);
     }
 
     #[test]
