@@ -108,14 +108,16 @@ jobs:
       - name: Check discovery tests
         run: cargo test -p nexus-agent-host --lib 'discovery::'
 
-      # The SDK-wire fixtures are `#!/usr/bin/env python3` scripts: Windows
-      # cannot exec them (no shebang, no exec bit), so the claude/codex/dsh
-      # launch cohorts are a unix-only proof surface. The Windows row runs the
-      # platform-independent mapping cohort; the excluded parity work is
-      # registered as R-V1202-P1T3-001. macOS runs the full cohort.
-      - name: Check native CLI provider tests (Windows mapping cohort)
+      # T1 added Windows executable fixture launch support for the native CLI
+      # provider cohort. Run the full library cohort on both platforms; the
+      # readiness acceptance integration test exercises the same fixture seam.
+      - name: Check native CLI provider tests
         if: always() && runner.os == 'Windows'
-        run: cargo test -p nexus-agent-host --lib 'providers::native_cli::map_'
+        run: cargo test -p nexus-agent-host --lib providers::native_cli
+
+      - name: Check provider readiness acceptance tests
+        if: always() && runner.os == 'Windows'
+        run: cargo test -p nexus-agent-host --test provider_readiness_acceptance
 
       - name: Check native CLI provider tests
         if: always() && runner.os != 'Windows'
