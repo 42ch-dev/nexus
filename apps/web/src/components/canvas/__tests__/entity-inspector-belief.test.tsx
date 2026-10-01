@@ -619,3 +619,96 @@ describe('EntityInspector — fix round 1 (L2-T2-001/002/003/004)', () => {
     expect(option).toHaveValue('Contents/Physical State');
   });
 });
+
+describe('EntityInspector — fix round 2 (L2-T2-002 remainder: stored {} rows)', () => {
+  /** Holder with a degenerate stored `{}` row before a populated row. */
+  const emptyRowEntity: WorldKbEntityProjection = {
+    key_block_id: 'kb-bo',
+    world_id: 'w-1',
+    block_type: 'character',
+    canonical_name: 'Bo',
+    status: 'confirmed',
+    version: 1,
+    modules: {
+      belief: [{}, { holder: 'chr_mara', proposition: 'the tide tables are wrong', order: 1 }],
+    },
+  };
+
+  it('L2-T2-002 remainder: a title-only save with stored [{}] omits modules entirely (no deletion semantics)', async () => {
+    const user = userEvent.setup();
+    const client = makeClient();
+    renderWith(
+      client,
+      <EntityInspector worldId="w-1" node={node} entity={emptyRowEntity} onConflict={vi.fn()} />,
+    );
+
+    const title = screen.getByLabelText('Title');
+    await user.clear(title);
+    await user.type(title, 'Bo the ferryman');
+
+    await user.click(screen.getByRole('button', { name: /^Save$/i }));
+
+    await waitFor(() => expect(client.worldKbPatchEntity).toHaveBeenCalled());
+    const call = callsOf(client.worldKbPatchEntity)[0];
+    expect(call[1]).toMatchObject({
+      entity_id: 'kb-bo',
+      expected_version: 1,
+      patch: { title: 'Bo the ferryman' },
+    });
+    // The untouched stored `[{}]` must not turn into `belief: []`.
+    expect(call[1].patch).not.toHaveProperty('modules');
+  });
+
+  it('L2-T2-002 remainder: editing the populated row preserves the untouched {} at its original index', async () => {
+    const user = userEvent.setup();
+    const client = makeClient();
+    renderWith(
+      client,
+      <EntityInspector worldId="w-1" node={node} entity={emptyRowEntity} onConflict={vi.fn()} />,
+    );
+
+    const section = screen.getByTestId('belief-section');
+    const rows = within(section).getAllByRole('group');
+    expect(rows).toHaveLength(2);
+
+    const proposition = within(rows[1]).getByLabelText('Proposition');
+    await user.clear(proposition);
+    await user.type(proposition, 'the tide tables are falsified');
+
+    await user.click(screen.getByRole('button', { name: /^Save$/i }));
+
+    await waitFor(() => expect(client.worldKbPatchEntity).toHaveBeenCalled());
+    const belief = callsOf(client.worldKbPatchEntity)[0][1].patch!.modules!.belief as Array<
+      Record<string, unknown>
+    >;
+    expect(belief).toHaveLength(2);
+    expect(belief[0]).toEqual({});
+    expect(belief[1]).toEqual({
+      holder: 'chr_mara',
+      proposition: 'the tide tables are falsified',
+      order: 1,
+    });
+  });
+
+  it('L2-T2-002 remainder: a mental-only save with stored [{}] omits belief (no spontaneous dialect dirty)', async () => {
+    const user = userEvent.setup();
+    const client = makeClient();
+    renderWith(
+      client,
+      <EntityInspector worldId="w-1" node={node} entity={emptyRowEntity} onConflict={vi.fn()} />,
+    );
+
+    // Type into a mental raw-JSON field: the change makes mental the only
+    // dirty dialect.
+    const mentalSection = screen.getByTestId('mental-state-section');
+    fireEvent.change(within(mentalSection).getByLabelText('Identity'), {
+      target: { value: '{"note": "changed"}' },
+    });
+
+    await user.click(screen.getByRole('button', { name: /^Save$/i }));
+
+    await waitFor(() => expect(client.worldKbPatchEntity).toHaveBeenCalled());
+    const modules = callsOf(client.worldKbPatchEntity)[0][1].patch!.modules!;
+    expect(modules).not.toHaveProperty('belief');
+  });
+});

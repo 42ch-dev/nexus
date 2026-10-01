@@ -310,9 +310,17 @@ function beliefsDirty(form: EntityEditForm, entity: WorldKbEntityProjection): bo
  * an edited member applies on top (blank clears the member), while untouched
  * members — unknown inner keys, nulls, intentional whitespace — round-trip
  * exactly (frozen write contract §3 / PD-13, L2-T2-002). Rows added in the
- * form have no `original` and contribute non-empty trimmed members only.
- * All-blank rows are dropped. Returns per-field errors keyed
- * `belief.<index>.<field>` (the 422 mapping key shape).
+ * form have no `original` and contribute
+ * non-empty trimmed members only; all-blank new rows are dropped. An
+ * untouched seeded row — every editable member equal to its stored text,
+ * even a degenerate stored `{}` — round-trips verbatim instead of being
+ * dropped, so an unrelated edit cannot mark belief dirty or shorten the
+ * stored array (L2-T2-002 re-review remainder). Explicit remove (row
+ * deletion) and blank-to-clear of a populated row keep their delete
+ * semantics: clearing every member of a stored row drops it, while clearing
+ * members of an already-empty row is a no-op that preserves the row.
+ * Returns per-field errors keyed `belief.<index>.<field>` (the 422 mapping
+ * key shape).
  */
 function buildBeliefValue(
   form: EntityEditForm,
@@ -321,6 +329,23 @@ function buildBeliefValue(
   const value: Array<Record<string, unknown>> = [];
   const errors: Record<string, string> = {};
   form.beliefs.forEach((row, index) => {
+    let untouched = row.original !== undefined;
+    if (untouched) {
+      for (const field of BELIEF_FIELDS) {
+        const originalValue = row.original![field];
+        const originalText = originalValue === undefined || originalValue === null ? '' : String(originalValue);
+        if (row[field] !== originalText) {
+          untouched = false;
+          break;
+        }
+      }
+    }
+    if (untouched) {
+      // Seeded row with no author edit: emit the stored content exactly —
+      // including a stored `{}`, which must survive at its original index.
+      value.push({ ...row.original! });
+      return;
+    }
     const out: Record<string, unknown> = row.original ? { ...row.original } : {};
     for (const field of BELIEF_FIELDS) {
       const text = row[field];
