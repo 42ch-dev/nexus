@@ -264,19 +264,69 @@ pub(crate) mod test_support {
     /// Serializes tests that mutate the process-global environment with
     /// tests that spawn fixture children.
     ///
-    /// The fixture mocks (`mock_claude_cli.py`, `mock_codex_app_server.py`,
-    /// `mock_dsh_agent.py`) are spawned via their
-    /// `#!/usr/bin/env python3` shebang, so the kernel resolves `python3`
-    /// **through the process PATH at execve time**. `discovery::path_scan`
-    /// env tests replace the process `PATH` / `DSH_RUNTIME_BIN`
-    /// (`PathGuard` / `DshEnvGuard`); a python fixture spawned in that window
-    /// fails its `env python3` lookup and dies before producing output —
-    /// surfaced as flaky `stream_closed` / missing-REQ_LOG failures. Every
-    /// env-mutating test AND every python-spawning provider test takes
-    /// this lock so the two groups never overlap.
+    /// On Unix, fixture shebangs resolve `python3` through process PATH at
+    /// spawn time. On Windows, `fixture_launch` generates a `.cmd` wrapper
+    /// using an absolute interpreter; it also isolates fixture spawns from
+    /// `discovery::path_scan` tests that replace process `PATH` /
+    /// `DSH_RUNTIME_BIN` (`PathGuard` / `DshEnvGuard`). Otherwise fixtures
+    /// fail before producing output, surfaced as flaky `stream_closed` /
+    /// missing-REQ_LOG failures. Every env-mutating test AND every
+    /// python-spawning provider test takes this lock so the groups never
+    /// overlap.
     ///
     /// Async-aware (`tokio::sync::Mutex`) so tests that must keep the lock
     /// across `.await` points do not hold a blocking guard: async tests take
     /// it with `.lock().await`, sync `#[test]` fns with `.blocking_lock()`.
     pub static PROCESS_ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    /// Resolve a Python fixture to a program the current platform can spawn.
+    pub fn fixture_launch(fixture: &str) -> std::path::PathBuf {
+        let fixture = std::path::Path::new(fixture);
+        #[cfg(unix)]
+        {
+            fixture.to_path_buf()
+        }
+        #[cfg(windows)]
+        {
+            use std::sync::{LazyLock, Mutex};
+            static SHIMS: LazyLock<tempfile::TempDir> =
+                LazyLock::new(|| tempfile::tempdir().expect("fixture shim dir"));
+            static SHIM_LOCK: Mutex<()> = Mutex::new(());
+            let _guard = SHIM_LOCK.lock().expect("fixture shim lock");
+            let shim_dir = &*SHIMS;
+            let interpreter = python_path();
+            let name = fixture.file_stem().expect("fixture filename").to_string_lossy();
+            let shim = shim_dir.path().join(format!("{name}.cmd"));
+            let body = format!(
+                "@echo off\r\n\"{}\" \"{}\" %*\r\n",
+                interpreter.display(),
+                fixture.display()
+            );
+            std::fs::write(&shim, body).expect("write fixture shim");
+            shim
+        }
+    }
+
+    #[cfg(windows)]
+    fn python_path() -> std::path::PathBuf {
+        use std::sync::LazyLock;
+        static PYTHON: LazyLock<std::path::PathBuf> = LazyLock::new(|| {
+            for (program, args) in [
+                ("py", vec!["-3", "-c", "import sys; print(sys.executable)"]),
+                ("python", vec!["-c", "import sys; print(sys.executable)"]),
+            ] {
+                if let Ok(output) = std::process::Command::new(program).args(args).output() {
+                    if output.status.success() {
+                        if let Ok(path) = String::from_utf8(output.stdout) {
+                            let path = std::path::PathBuf::from(path.trim());
+                            if path.is_absolute() {
+                                return path;
+                            }
+                        }
+                    }
+                }
+            }
+            panic!("Python is unavailable through `py -3` and `python`");
+        });
+        PYTHON.clone()
+    }
 }

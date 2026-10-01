@@ -119,35 +119,60 @@ fn set_executable(path: &Path) {
 #[cfg(not(unix))]
 fn set_executable(_path: &Path) {}
 
-/// Absolute interpreter path resolved BEFORE any PATH isolation.
-///
-/// The route tests replace `PATH` with a single directory, so a shim that said
-/// bare `python3` would lose its interpreter and the child would exit
-/// immediately (observed as "closed the transport before the turn completed").
+/// Resolve an absolute interpreter before tests isolate the process PATH.
 fn python3_path() -> String {
     static PYTHON3: LazyLock<String> = LazyLock::new(|| {
-        let from_env = std::process::Command::new("/usr/bin/env")
-            .args(["python3", "-c", "import sys; print(sys.executable)"])
-            .output()
-            .ok()
-            .filter(|out| out.status.success())
-            .and_then(|out| String::from_utf8(out.stdout).ok())
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty());
-        from_env.unwrap_or_else(|| "python3".to_string())
+        #[cfg(unix)]
+        {
+            let from_env = std::process::Command::new("/usr/bin/env")
+                .args(["python3", "-c", "import sys; print(sys.executable)"])
+                .output()
+                .ok()
+                .filter(|out| out.status.success())
+                .and_then(|out| String::from_utf8(out.stdout).ok())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            from_env.unwrap_or_else(|| "python3".to_string())
+        }
+        #[cfg(windows)]
+        {
+            for (program, args) in [
+                ("py", vec!["-3", "-c", "import sys; print(sys.executable)"]),
+                ("python", vec!["-c", "import sys; print(sys.executable)"]),
+            ] {
+                if let Ok(output) = std::process::Command::new(program).args(args).output() {
+                    if output.status.success() {
+                        if let Ok(path) = String::from_utf8(output.stdout) {
+                            let path = path.trim();
+                            if !path.is_empty() && Path::new(path).is_absolute() {
+                                return path.to_string();
+                            }
+                        }
+                    }
+                }
+            }
+            panic!("Python is unavailable through `py -3` and `python`");
+        }
     });
     PYTHON3.clone()
 }
 
-/// Make an executable shim named `name` that runs the python fixture with an
-/// ABSOLUTE interpreter, so it survives PATH isolation.
+/// Make a platform-appropriate shim using an absolute interpreter.
 fn write_fixture_shim(dir: &Path, name: &str, fixture: &str) -> PathBuf {
-    let path = dir.join(name);
+    let path = dir.join(if cfg!(windows) {
+        format!("{name}.cmd")
+    } else {
+        name.to_string()
+    });
+    #[cfg(unix)]
     let body = format!("#!/bin/sh\nexec {} {fixture} \"$@\"\n", python3_path());
+    #[cfg(windows)]
+    let body = format!("@echo off\r\n\"{}\" \"{fixture}\" %*\r\n", python3_path());
     std::fs::write(&path, body).expect("write shim");
     set_executable(&path);
     path
 }
+
 
 /// Crate-default budgets (see `TimeoutConfig`), not tightened values.
 ///

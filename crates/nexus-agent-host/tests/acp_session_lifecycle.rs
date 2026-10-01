@@ -1,5 +1,8 @@
 //! Hermetic ACP session lifecycle tests (v1.186 P1 T1).
 //!
+//! Windows is excluded: these lifecycle assertions require Unix process-tree
+//! shutdown/reap semantics and verify signal-driven cancellation.
+//!
 //! Proves the observable lifecycle contracts of the recipe-based ACP
 //! provider through the real `HostManager` plane and a real deterministic
 //! ACP stdio fixture (`tests/fixtures/mock_acp_workflow.py`):
@@ -12,6 +15,8 @@
 //! - bounded cancel reaches the owned operation; shutdown drains and reaps
 //!   the exact owned process tree (a reused/unowned PID is never signalled)
 //! - EOF/crash is a typed failure, never success
+#![cfg(unix)]
+
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

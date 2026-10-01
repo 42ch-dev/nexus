@@ -2555,7 +2555,7 @@ mod tests {
         DshNativeProvider::new(
             ProviderId::new(provider_id),
             "Test".to_string(),
-            Some(MOCK_DSH_AGENT.to_string()),
+            Some(crate::test_support::fixture_launch(MOCK_DSH_AGENT).to_string_lossy().into_owned()),
             &[],
             env,
             TimeoutConfig::default(),
@@ -2571,7 +2571,7 @@ mod tests {
         DshNativeProvider::new(
             ProviderId::new(provider_id),
             "Test".to_string(),
-            Some(MOCK_DSH_AGENT.to_string()),
+            Some(crate::test_support::fixture_launch(MOCK_DSH_AGENT).to_string_lossy().into_owned()),
             &[],
             env,
             timeouts,

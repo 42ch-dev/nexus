@@ -827,7 +827,7 @@ mod tests {
         ClaudeCliProvider::new(
             ProviderId::new("test-claude-stream-json"),
             "Test".to_string(),
-            MOCK_CLAUDE_CLI.to_string(),
+            crate::test_support::fixture_launch(MOCK_CLAUDE_CLI).to_string_lossy().into_owned(),
             env,
             TimeoutConfig::default(),
         )
