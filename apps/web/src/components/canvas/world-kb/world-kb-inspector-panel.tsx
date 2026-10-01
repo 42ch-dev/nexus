@@ -12,7 +12,12 @@ import type {
   WorldKbSourceAnchorProjection,
 } from '@42ch/nexus-contracts';
 
-import { EntityInspector, type EntityEditForm, type WorldKbEntityField } from './entity-inspector';
+import {
+  EntityInspector,
+  type EntityEditForm,
+  type ModuleDialect,
+  type WorldKbEntityField,
+} from './entity-inspector';
 import { PromotionInspector } from './promotion-inspector';
 import { RelationshipInspector, type RelationshipForm } from './relationship-inspector';
 import type { Selection } from './world-kb-canvas-types';
@@ -29,6 +34,7 @@ interface InspectorPanelProps {
     conflictingPath: string;
     draft: EntityEditForm;
     dirtyFields: WorldKbEntityField[];
+    dirtyDialects: ModuleDialect[];
   }) => void;
   onPromoteConflict: (payload: {
     currentVersion: number;

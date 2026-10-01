@@ -14,7 +14,7 @@ import type {
 } from '@42ch/nexus-contracts';
 
 import type { RelationshipForm } from './relationship-inspector';
-import type { EntityEditForm } from './entity-inspector';
+import type { EntityEditForm, ModuleDialect } from './entity-inspector';
 import type {
   EntityConflictState,
   EntityField,
@@ -128,6 +128,7 @@ export function buildEntityConflict(
     conflictingPath: string;
     draft: EntityEditForm;
     dirtyFields: EntityField[];
+    dirtyDialects: ModuleDialect[];
   },
 ): EntityConflictState {
   const entityName = selection?.kind === 'entity' ? selection.node.name : 'this entity';
@@ -149,6 +150,7 @@ export function buildEntityConflict(
     currentVersion: payload.currentVersion,
     reapplyForm: payload.draft,
     dirtyFields: payload.dirtyFields,
+    dirtyDialects: payload.dirtyDialects,
     modalDraft: {
       entityName,
       fields: payload.dirtyFields,

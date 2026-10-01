@@ -61,7 +61,17 @@ export interface BeliefRowForm {
   content_type: string;
   source: string;
   context: string;
+  /**
+   * Complete stored row this form row was seeded from (absent for rows added
+   * in the form). Preserved so untouched members — unknown inner keys, nulls,
+   * intentional whitespace — round-trip verbatim on whole-value write
+   * (frozen write contract §3 / PD-13, L2-T2-002).
+   */
+  original?: Record<string, unknown>;
 }
+
+/** Functional module dialects carried under `modules` (mental / belief). */
+export type ModuleDialect = 'mental' | 'belief';
 
 /** Build the form from a selected node's backing projection. */
 export function formFromEntity(entity: WorldKbEntityProjection): EntityEditForm {
@@ -218,40 +228,31 @@ function mentalRecord(entity: WorldKbEntityProjection): Record<string, unknown> 
     : {};
 }
 
-/** Stored `modules.belief` as flat editable rows ('[]' when absent / non-array). */
-function beliefRowsFromEntity(entity: WorldKbEntityProjection): BeliefRowForm[] {
+/** Stored `modules.belief` object rows verbatim ('[]' when absent / non-array). */
+function beliefRowsRaw(entity: WorldKbEntityProjection): Array<Record<string, unknown>> {
   const belief = entity.modules?.belief;
   if (!Array.isArray(belief)) return [];
-  return belief.flatMap((raw) => {
-    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return [];
-    const row = raw as Record<string, unknown>;
+  return belief.filter(
+    (raw): raw is Record<string, unknown> =>
+      raw !== null && typeof raw === 'object' && !Array.isArray(raw),
+  );
+}
+
+/**
+ * Stored `modules.belief` as flat editable rows. Known members seed with the
+ * exact stored text (absent / null → '', no trimming); every row retains its
+ * complete stored content in `original` so untouched members round-trip
+ * verbatim.
+ */
+function beliefRowsFromEntity(entity: WorldKbEntityProjection): BeliefRowForm[] {
+  return beliefRowsRaw(entity).map((row) => {
     const form = emptyBeliefRow();
     for (const field of BELIEF_FIELDS) {
       const value = row[field];
-      if (value === undefined || value === null) continue;
-      form[field] = field === 'order' ? String(value) : String(value);
+      form[field] = value === undefined || value === null ? '' : String(value);
     }
-    return [form];
+    return { ...form, original: { ...row } };
   });
-}
-
-/** Normalize belief rows to the submitted wire shape (non-empty fields only, all-blank rows dropped). */
-function normalizeBeliefs(rows: BeliefRowForm[]): Array<Record<string, unknown>> {
-  return rows
-    .map((row) => {
-      const out: Record<string, unknown> = {};
-      for (const field of BELIEF_FIELDS) {
-        const value = row[field].trim();
-        if (!value) continue;
-        out[field] = field === 'order' ? Number(value) : value;
-      }
-      return out;
-    })
-    .filter((row) => Object.keys(row).length > 0);
-}
-
-function beliefsDirty(form: EntityEditForm, entity: WorldKbEntityProjection): boolean {
-  return JSON.stringify(normalizeBeliefs(form.beliefs)) !== JSON.stringify(normalizeBeliefs(beliefRowsFromEntity(entity)));
 }
 
 function mentalDirty(form: EntityEditForm, entity: WorldKbEntityProjection): boolean {
@@ -293,8 +294,25 @@ function buildMentalValue(
 }
 
 /**
- * Parse the belief rows into the complete first-level array. Returns
- * per-field errors keyed `belief.<index>.<field>` (the 422 mapping key shape).
+ * Exact dirty check: the built whole value must match the stored array
+ * verbatim. No normalization on either side — a normalized comparison would
+ * hide loss of unknown inner keys or stored whitespace (L2-T2-002).
+ */
+function beliefsDirty(form: EntityEditForm, entity: WorldKbEntityProjection): boolean {
+  const belief = entity.modules?.belief;
+  const canonical = Array.isArray(belief) ? belief : [];
+  return JSON.stringify(buildBeliefValue(form, (field) => field).value) !== JSON.stringify(canonical);
+}
+
+/**
+ * Parse the belief rows into the complete first-level array. Rows seeded from
+ * the stored array start from their complete original content (`original`):
+ * an edited member applies on top (blank clears the member), while untouched
+ * members — unknown inner keys, nulls, intentional whitespace — round-trip
+ * exactly (frozen write contract §3 / PD-13, L2-T2-002). Rows added in the
+ * form have no `original` and contribute non-empty trimmed members only.
+ * All-blank rows are dropped. Returns per-field errors keyed
+ * `belief.<index>.<field>` (the 422 mapping key shape).
  */
 function buildBeliefValue(
   form: EntityEditForm,
@@ -303,48 +321,75 @@ function buildBeliefValue(
   const value: Array<Record<string, unknown>> = [];
   const errors: Record<string, string> = {};
   form.beliefs.forEach((row, index) => {
-    const out: Record<string, unknown> = {};
+    const out: Record<string, unknown> = row.original ? { ...row.original } : {};
     for (const field of BELIEF_FIELDS) {
-      const text = row[field].trim();
-      if (!text) continue;
+      const text = row[field];
+      if (row.original) {
+        const originalValue = row.original[field];
+        const originalText = originalValue === undefined || originalValue === null ? '' : String(originalValue);
+        if (text === originalText) continue; // untouched: keep the stored value exactly
+        if (!text.trim()) {
+          delete out[field]; // blanked by the author: clear the member
+          continue;
+        }
+      } else if (!text.trim()) {
+        continue;
+      }
       if (field === 'order') {
-        const n = Number(text);
+        const n = Number(text.trim());
         if (!Number.isInteger(n)) {
           errors[`belief.${index}.order`] = orderError(field);
+          // Keep the invalid raw text in the built value so the exact dirty
+          // check still sees the edit — otherwise the row would compare equal
+          // to the stored one and the submit (which surfaces this error)
+          // could never fire. The error blocks the write, so the raw string
+          // never reaches the wire.
+          out.order = text.trim();
           continue;
         }
         out.order = n;
       } else {
-        out[field] = text;
+        out[field] = text.trim();
       }
     }
-    value.push(out);
+    if (Object.keys(out).length > 0) value.push(out);
   });
   return { value, errors };
 }
 
 /**
- * Best-effort complete modules value for the 409 reapply path. The captured
- * form already passed client-side validation at submit time, so parsed values
- * round-trip; any unparseable dialect is omitted rather than blocking reapply.
+ * Best-effort complete modules value for the 409 reapply path, restricted to
+ * the exact dialect set that was dirty at submit time (L2-T2-001): reapplying
+ * must never rewrite the other dialect — a concurrent writer may have
+ * populated it (or the captured form may predate that population). The
+ * captured form already passed client-side validation at submit time, so
+ * parsed values round-trip; any unparseable requested dialect is omitted
+ * rather than blocking reapply.
  */
 export function modulesPatchFromForm(
   form: EntityEditForm,
+  dialects: readonly ModuleDialect[],
 ): NonNullable<WorldKbEntityPatch['modules']> | undefined {
-  const mental = buildMentalValue(form, (field) => field);
-  const belief = buildBeliefValue(form, (field) => field);
   const modules: NonNullable<WorldKbEntityPatch['modules']> = {};
-  if (Object.keys(mental.errors).length === 0) modules.mental = mental.value;
-  if (Object.keys(belief.errors).length === 0) modules.belief = belief.value;
+  if (dialects.includes('mental')) {
+    const mental = buildMentalValue(form, (field) => field);
+    if (Object.keys(mental.errors).length === 0) modules.mental = mental.value;
+  }
+  if (dialects.includes('belief')) {
+    const belief = buildBeliefValue(form, (field) => field);
+    if (Object.keys(belief.errors).length === 0) modules.belief = belief.value;
+  }
   return Object.keys(modules).length > 0 ? modules : undefined;
 }
 
 /**
  * Map one daemon 422 entry onto a form field when it carries the frozen
  * prefix grammar; unmatched / whole-dialect entries stay section-level with
- * the original entry text verbatim.
+ * the original entry text verbatim. The complete editable belief-member set
+ * maps 1:1 (holder / proposition / order included, L2-T2-003); a belief
+ * address only maps when the addressed row actually exists in the form.
  */
-function mapValidationEntry(entry: string): { key?: string; message: string } {
+function mapValidationEntry(entry: string, beliefRowCount: number): { key?: string; message: string } {
   if (!entry.startsWith('modules.')) return { message: entry };
   const sep = entry.indexOf(': ');
   if (sep === -1) return { message: entry };
@@ -361,7 +406,8 @@ function mapValidationEntry(entry: string): { key?: string; message: string } {
     parts[0] === 'belief' &&
     parts.length === 3 &&
     /^\d+$/.test(parts[1]) &&
-    BELIEF_CLOSED_FIELDS[parts[2]]
+    (BELIEF_FIELDS as readonly string[]).includes(parts[2]) &&
+    Number(parts[1]) < beliefRowCount
   ) {
     return { key: `belief.${parts[1]}.${parts[2]}`, message: reason };
   }
@@ -567,7 +613,16 @@ function BeliefSection({
                         {BELIEF_CLOSED_LABELS[field as Exclude<BeliefField, 'holder' | 'proposition' | 'order'>].map(
                           (option) => (
                             <option key={option} value={option}>
-                              {option}
+                              {/*
+                                The exact frozen handbook string stays the option *value*;
+                                the author-visible label comes from the en/zh-CN catalog
+                                (L2-T2-004). Key suffixes are generated with the same
+                                non-alphanumeric→'_' slug as the locale JSON entries.
+                              */}
+                              {t(
+                                `worldKb.entityInspector.belief.option.${field}.${option.replace(/[^A-Za-z0-9]+/g, '_')}`,
+                                { defaultValue: option },
+                              )}
                             </option>
                           ),
                         )}
@@ -666,6 +721,8 @@ export interface EntityInspectorProps {
     conflictingPath: string;
     draft: EntityEditForm;
     dirtyFields: WorldKbEntityField[];
+    /** Exact module dialect set this submit intended to write ([] when modules was clean). */
+    dirtyDialects: ModuleDialect[];
   }) => void;
   /** Optional external reseed (e.g. after "Use current" in the conflict modal). */
   reseedSignal?: number;
@@ -764,7 +821,7 @@ export function EntityInspector({
             // Frozen prefix grammar (write contract §3): split on the first
             // ": " for `modules.`-prefixed entries and map known prefixes 1:1
             // onto form fields; unmatched entries stay section-level verbatim.
-            const mapped = entries.map(mapValidationEntry);
+            const mapped = entries.map((entry) => mapValidationEntry(entry, form.beliefs.length));
             setFieldErrors(
               Object.fromEntries(mapped.filter((m) => m.key).map((m) => [m.key as string, m.message])),
             );
@@ -777,12 +834,23 @@ export function EntityInspector({
             details?: { current_version?: number; conflicting_path?: string; entity_id?: string };
           };
           if (details.status === 409) {
+            // Retain the exact per-dialect dirty set (L2-T2-001): the reapply
+            // must rewrite only the dialects this submit intended — the other
+            // dialect may have been populated concurrently while the modal
+            // was open, and inferring intent from the captured form is
+            // forbidden.
+            const dirtyDialects: ModuleDialect[] = [];
+            if (dirty.includes('modules')) {
+              if (mentalDirty(form, entity)) dirtyDialects.push('mental');
+              if (beliefsDirty(form, entity)) dirtyDialects.push('belief');
+            }
             onConflict({
               currentVersion: details.details?.current_version ?? node.version,
               entityId: details.details?.entity_id ?? entity.key_block_id,
               conflictingPath: details.details?.conflicting_path ?? dirty.join(','),
               draft: form,
               dirtyFields: dirty,
+              dirtyDialects,
             });
           }
           // Any other status (500/403/dropped network) is surfaced as a toast
@@ -894,7 +962,7 @@ export function EntityInspector({
           <MentalStateReadOnlySection key={`mental-ro-${entity.key_block_id}`} mental={mentalReadOnly} />
           <BeliefReadOnlySection
             key={`belief-ro-${entity.key_block_id}`}
-            beliefs={normalizeBeliefs(beliefRowsFromEntity(entity))}
+            beliefs={beliefRowsRaw(entity)}
           />
         </>
       )}

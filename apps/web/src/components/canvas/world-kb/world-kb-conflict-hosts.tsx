@@ -60,7 +60,7 @@ export function EntityConflictHost({
       {
         entity_id: selection.entity.key_block_id,
         expected_version: currentVersion,
-        patch: patchFromForm(state.reapplyForm, state.dirtyFields),
+        patch: patchFromForm(state.reapplyForm, state.dirtyFields, state.dirtyDialects),
       },
       {
         onSuccess: () => {

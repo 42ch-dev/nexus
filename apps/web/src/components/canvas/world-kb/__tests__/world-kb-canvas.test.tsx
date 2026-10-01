@@ -47,7 +47,7 @@ describe('patchFromForm (reapply payload shape)', () => {
   it('preserves a non-empty trimmed title', () => {
     const patch = patchFromForm(form({ title: '  Aria Stormwind  ' }), [
       'title',
-    ] as EntityField[]);
+    ] as EntityField[], []);
     expect(patch.title).toBe('Aria Stormwind');
   });
 
@@ -56,7 +56,7 @@ describe('patchFromForm (reapply payload shape)', () => {
   // user cleared the title sent an empty patch → 400 InvalidInput. The primary
   // submit path sends the empty string, surfacing a meaningful 422.
   it('keeps an explicitly-cleared title as the empty string (not undefined)', () => {
-    const patch = patchFromForm(form({ title: '   ' }), ['title'] as EntityField[]);
+    const patch = patchFromForm(form({ title: '   ' }), ['title'] as EntityField[], []);
 
     // `title` must be present as an empty string...
     expect(patch.title).toBe('');
@@ -68,9 +68,89 @@ describe('patchFromForm (reapply payload shape)', () => {
   it('omits title entirely when it is not in the dirty set', () => {
     const patch = patchFromForm(form({ title: 'unchanged' }), [
       'body',
-    ] as EntityField[]);
+    ] as EntityField[], []);
     expect(patch.title).toBeUndefined();
     expect('title' in patch).toBe(false);
+  });
+
+  // L2-T2-001 regressions: the 409 reapply must rewrite only the dialects the
+  // conflicting submit intended. The captured form predates any concurrent
+  // writes, so including the other dialect would overwrite them.
+  it('mental-only reapply omits belief entirely (a concurrent belief write survives)', () => {
+    const patch = patchFromForm(
+      form({
+        mental: {
+          identity: '',
+          beliefs: '',
+          attention: '',
+          goals: '{"focus":"the ferry"}',
+          intentions: '',
+          emotions: '',
+          dispositions: '',
+          norms: '',
+          constraints: '',
+        },
+        beliefs: [
+          {
+            holder: 'chr_ana',
+            proposition: 'concurrent belief — must not be rewritten',
+            order: '',
+            truth: '',
+            access: '',
+            representation: '',
+            content_type: '',
+            source: '',
+            context: '',
+          },
+        ],
+      }),
+      ['modules'] as EntityField[],
+      ['mental'],
+    );
+    expect(patch.modules).toEqual({ mental: { goals: { focus: 'the ferry' } } });
+    expect(patch.modules).not.toHaveProperty('belief');
+  });
+
+  it('belief-only reapply omits mental entirely (a concurrent mental write survives)', () => {
+    const patch = patchFromForm(
+      form({
+        mental: {
+          identity: '',
+          beliefs: '',
+          attention: '',
+          goals: '{"stale":"captured before the conflict"}',
+          intentions: '',
+          emotions: '',
+          dispositions: '',
+          norms: '',
+          constraints: '',
+        },
+        beliefs: [
+          {
+            holder: 'chr_ana',
+            proposition: 'the only intended edit',
+            order: '3',
+            truth: '',
+            access: '',
+            representation: '',
+            content_type: '',
+            source: '',
+            context: '',
+          },
+        ],
+      }),
+      ['modules'] as EntityField[],
+      ['belief'],
+    );
+    expect(patch.modules).toEqual({
+      belief: [{ holder: 'chr_ana', proposition: 'the only intended edit', order: 3 }],
+    });
+    expect(patch.modules).not.toHaveProperty('mental');
+  });
+
+  it('modules-dirty conflict without module dialects (modules since reverted) omits modules', () => {
+    const patch = patchFromForm(form(), ['modules'] as EntityField[], []);
+    expect(patch.modules).toBeUndefined();
   });
 });
 

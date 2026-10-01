@@ -509,6 +509,36 @@
         "readonlyRow": "信念 {{index}}",
         "jsonError": "{{field}} 必须是有效的 JSON。",
         "orderError": "{{field}} 必须是整数。",
+        "option": {
+          "truth": { "True": "真", "False": "假", "Unknown": "未知" },
+          "access": { "Private": "私有", "Shared": "共享", "Public": "公开" },
+          "representation": { "Explicit": "外显", "Implicit": "内隐" },
+          "content_type": {
+            "Location": "位置",
+            "Contents_Physical_State": "内容/物理状态",
+            "Identity_Relation": "身份/关系",
+            "Epistemic": "认知",
+            "Desire_Intention": "欲望/意图",
+            "Emotion": "情绪",
+            "Trait_Value": "特质/价值观",
+            "Action_Event": "行动/事件"
+          },
+          "source": {
+            "Narration": "叙述",
+            "Perception": "感知",
+            "Memory": "记忆",
+            "Testimony": "证言",
+            "Inference": "推断",
+            "Imagination": "想象",
+            "Unknown": "未知"
+          },
+          "context": {
+            "Deceptive": "欺骗性",
+            "Temporal": "时间性",
+            "Counterfactual": "反事实",
+            "Neutral": "中性"
+          }
+        },
         "field": {
           "holder": "持有者",
           "proposition": "命题",

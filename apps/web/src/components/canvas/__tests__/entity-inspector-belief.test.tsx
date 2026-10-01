@@ -12,7 +12,7 @@
  * `modules.belief.<index>.<field>: <reason>` map onto the offending row
  * field. Non-holder kinds render the stored rows read-only (PD-16 parity).
  */
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor, within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -441,5 +441,181 @@ describe('EntityInspector — modules.belief editing (v1.203 P2 O2)', () => {
     await user.click(screen.getByRole('button', { name: /^Save$/i }));
 
     expect(await screen.findByText('title: must not be empty')).toBeInTheDocument();
+  });
+});
+
+describe('EntityInspector — fix round 1 (L2-T2-001/002/003/004)', () => {
+  /** Stored rows with content the flat form cannot represent. */
+  const richEntity: WorldKbEntityProjection = {
+    key_block_id: 'kb-bo',
+    world_id: 'w-1',
+    block_type: 'character',
+    canonical_name: 'Bo',
+    status: 'confirmed',
+    version: 1,
+    modules: {
+      belief: [
+        {
+          holder: 'chr_bo',
+          proposition: '  the ferry is late  ',
+          order: 0,
+          truth: 'True',
+          custom_model_state: { nested: ['a', 'b'] },
+        },
+        { holder: 'chr_mara', proposition: 'untouched row', order: 1, context: null },
+      ],
+    },
+  };
+
+  it('L2-T2-002: editing one known field preserves unknown inner keys, nulls, and exact untouched text', async () => {
+    const user = userEvent.setup();
+    const client = makeClient();
+    renderWith(
+      client,
+      <EntityInspector worldId="w-1" node={node} entity={richEntity} onConflict={vi.fn()} />,
+    );
+
+    const section = screen.getByTestId('belief-section');
+    await user.selectOptions(within(section).getAllByLabelText('Truth Status')[0], 'False');
+
+    await user.click(screen.getByRole('button', { name: /^Save$/i }));
+
+    await waitFor(() => expect(client.worldKbPatchEntity).toHaveBeenCalled());
+    const belief = callsOf(client.worldKbPatchEntity)[0][1].patch!.modules!.belief as Array<
+      Record<string, unknown>
+    >;
+    // The edited member applies; every untouched member of the same row —
+    // including the unknown nested key — round-trips verbatim (no trimming).
+    expect(belief[0]).toEqual({
+      holder: 'chr_bo',
+      proposition: '  the ferry is late  ',
+      order: 0,
+      truth: 'False',
+      custom_model_state: { nested: ['a', 'b'] },
+    });
+    // The untouched second row is byte-identical, explicit null included.
+    expect(belief[1]).toEqual({
+      holder: 'chr_mara',
+      proposition: 'untouched row',
+      order: 1,
+      context: null,
+    });
+  });
+
+  it('L2-T2-001: a mental-only conflicting submit retains dirtyDialects ["mental"]', async () => {
+    const user = userEvent.setup();
+    const client = makeClient({
+      worldKbPatchEntity: vi.fn().mockRejectedValue(
+        new NexusClientError(409, 'world_kb_conflict', 'stale', {
+          current_version: 7,
+          entity_id: 'kb-ana',
+          conflicting_path: 'modules',
+          recovery_hint: 'r',
+        }),
+      ),
+    });
+    const onConflict = vi.fn();
+    renderWith(
+      client,
+      <EntityInspector
+        worldId="w-1"
+        node={{ ...node, keyBlockId: 'kb-ana' }}
+        entity={entityWithoutBeliefs}
+        onConflict={onConflict}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Goals'), {
+      target: { value: '{"focus":"the ferry"}' },
+    });
+    await user.click(screen.getByRole('button', { name: /^Save$/i }));
+
+    await waitFor(() => expect(onConflict).toHaveBeenCalled());
+    expect(onConflict.mock.calls[0][0]).toMatchObject({
+      currentVersion: 7,
+      dirtyFields: ['modules'],
+      dirtyDialects: ['mental'],
+    });
+  });
+
+  it('L2-T2-001: a belief-only conflicting submit retains dirtyDialects ["belief"] (a previously absent mental may be populated concurrently)', async () => {
+    const user = userEvent.setup();
+    const client = makeClient({
+      worldKbPatchEntity: vi.fn().mockRejectedValue(
+        new NexusClientError(409, 'world_kb_conflict', 'stale', {
+          current_version: 7,
+          entity_id: 'kb-ana',
+          conflicting_path: 'modules',
+          recovery_hint: 'r',
+        }),
+      ),
+    });
+    const onConflict = vi.fn();
+    renderWith(
+      client,
+      <EntityInspector
+        worldId="w-1"
+        node={{ ...node, keyBlockId: 'kb-ana' }}
+        entity={entityWithoutBeliefs}
+        onConflict={onConflict}
+      />,
+    );
+
+    const section = screen.getByTestId('belief-section');
+    await user.click(within(section).getByRole('button', { name: 'Add belief' }));
+    await user.type(within(section).getByLabelText('Proposition'), 'a brand-new belief');
+
+    await user.click(screen.getByRole('button', { name: /^Save$/i }));
+
+    await waitFor(() => expect(onConflict).toHaveBeenCalled());
+    expect(onConflict.mock.calls[0][0].dirtyDialects).toEqual(['belief']);
+  });
+
+  it('L2-T2-003: maps holder/order 422 prefixes onto row fields, keeps a reason containing ": ", and leaves out-of-range addresses at section level', async () => {
+    const user = userEvent.setup();
+    const client = makeClient({
+      worldKbPatchEntity: vi.fn().mockRejectedValue(
+        new NexusClientError(422, 'world_kb_validation_failed', 'validation failed', {
+          validation_summary: {
+            errors: [
+              'modules.belief.0.holder: must reference a known character: got "chr_x"',
+              'modules.belief.1.order: must be a whole number: got 1.5',
+              'modules.belief.5.truth: row does not exist',
+            ],
+          },
+        }),
+      ),
+    });
+    renderWith(
+      client,
+      <EntityInspector worldId="w-1" node={node} entity={entityWithBeliefs} onConflict={vi.fn()} />,
+    );
+
+    const proposition = screen.getByDisplayValue('the dawn ferry is late');
+    await user.type(proposition, '!');
+    await user.click(screen.getByRole('button', { name: /^Save$/i }));
+
+    const section = await screen.findByTestId('belief-section');
+    const rows = within(section).getAllByRole('group');
+    // Non-closed-label members map 1:1 onto their row fields...
+    expect(
+      within(rows[0]).getByText('must reference a known character: got "chr_x"'),
+    ).toBeInTheDocument();
+    expect(within(rows[1]).getByText('must be a whole number: got 1.5')).toBeInTheDocument();
+    // ...while a well-formed prefix addressing a row that does not exist stays
+    // at the form-level error list, verbatim (outside the collapsible section).
+    expect(screen.getByText('modules.belief.5.truth: row does not exist')).toBeInTheDocument();
+  });
+
+  it('L2-T2-004: closed-label options render the catalog label while the value stays the frozen handbook string', () => {
+    renderWith(
+      makeClient(),
+      <EntityInspector worldId="w-1" node={node} entity={entityWithBeliefs} onConflict={vi.fn()} />,
+    );
+
+    const section = screen.getByTestId('belief-section');
+    const contentType = within(section).getAllByLabelText('Content Type')[0];
+    const option = within(contentType).getByRole('option', { name: 'Contents/Physical State' });
+    expect(option).toHaveValue('Contents/Physical State');
   });
 });
