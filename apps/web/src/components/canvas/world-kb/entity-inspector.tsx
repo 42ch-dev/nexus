@@ -946,23 +946,39 @@ export function EntityInspector({
       // written complete — an untouched dialect is never included, so a
       // belief-only edit cannot wipe mental and vice versa. `audience` is
       // governance and is never emitted here.
+      //
+      // Build only the DIRTY dialects (QC3-003/QC1-F001 remainder): an
+      // untouched dialect may hold a nonrepresentable stored seed (raw
+      // fallback) whose builder always reports an error — building it would
+      // block an unrelated dialect's save. The builders below were already
+      // gated by the dirty checks for EMISSION; they are now also gated for
+      // CONSTRUCTION.
       const modules: NonNullable<WorldKbEntityPatch['modules']> = {};
-      const mental = buildMentalValue(form, (field) =>
-        t('worldKb.entityInspector.mentalState.jsonError', { field }),
-      );
-      const belief = buildBeliefValue(form, (field) =>
-        field === 'raw'
-          ? t('worldKb.entityInspector.belief.jsonError', { field: 'belief' })
-          : t('worldKb.entityInspector.belief.orderError', { field }),
-      );
-      beliefWireToForm = belief.wireToForm;
-      const errors = { ...mental.errors, ...belief.errors };
-      if (Object.keys(errors).length > 0) {
-        setFieldErrors(errors);
-        return;
+      const wantMental = mentalDirty(form, entity);
+      const wantBelief = beliefsDirty(form, entity);
+      if (wantMental) {
+        const mental = buildMentalValue(form, (field) =>
+          t('worldKb.entityInspector.mentalState.jsonError', { field }),
+        );
+        if (Object.keys(mental.errors).length > 0) {
+          setFieldErrors(mental.errors);
+          return;
+        }
+        modules.mental = mental.value;
       }
-      if (mentalDirty(form, entity)) modules.mental = mental.value;
-      if (beliefsDirty(form, entity)) modules.belief = belief.value;
+      if (wantBelief) {
+        const belief = buildBeliefValue(form, (field) =>
+          field === 'raw'
+            ? t('worldKb.entityInspector.belief.jsonError', { field: 'belief' })
+            : t('worldKb.entityInspector.belief.orderError', { field }),
+        );
+        beliefWireToForm = belief.wireToForm;
+        if (Object.keys(belief.errors).length > 0) {
+          setFieldErrors(belief.errors);
+          return;
+        }
+        modules.belief = belief.value;
+      }
       patchBody.modules = modules;
     }
 
