@@ -795,11 +795,23 @@
       "viewInWorkTimelineAria": "在 Work Timeline 中打开承接此世界的作品",
       "observers": "观察者：",
       "noObservers": "无观察者",
+      "observation": {
+        "title": "观察",
+        "observersLabel": "观察者",
+        "accessLabel": "访问",
+        "accessPlaceholder": "观察访问 JSON 对象…",
+        "accessJsonError": "{{field}}必须是有效的 JSON 对象。",
+        "noObserverOptions": "已加载图中没有可观察实体——请在下方输入条目 ID。",
+        "rawPlaceholder": "条目 ID（如 kb_char_1）",
+        "addRaw": "添加",
+        "clear": "清空观察者"
+      },
       "field": {
         "title": "标题",
         "body": "正文",
         "blockType": "块类型",
-        "aliases": "别名"
+        "aliases": "别名",
+        "modules": "模块"
       }
     },
     "eventNode": {

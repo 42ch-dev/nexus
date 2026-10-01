@@ -37,25 +37,112 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { BLOCK_TYPE_LABELS } from '../world-kb/types';
+import { HOLDER_BLOCK_TYPES } from '../world-kb/entity-inspector';
 import type { BlockType } from '@42ch/nexus-contracts';
 import type {
   TimelineCanvasAdapterContext,
   TimelineEntityPatch,
   TimelinePatchField,
 } from './timeline-canvas-adapter';
+import { extractTimelineConflict, mapTimelineValidationEntry } from './timeline-canvas-adapter';
 import type { TimelineNodeData } from './timeline-canvas-adapter';
 
 /** Editable form derived from a selected Timeline node's backing projection. */
 interface TimelineEditForm {
   title: string;
   bodyText: string; // JSON-serialised body (free-form Record<string, unknown>)
+  /**
+   * v1.203 P2 O3 — `modules.observation.observers` as entry-id strings in
+   * author order. Graph-resolved names render beside the id; ids absent from
+   * the loaded graph stay raw (PD-18 — no new fan-out fetch).
+   */
+  observers: string[];
+  /** `modules.observation.access` as JSON text ('' = omit / clear). */
+  accessText: string;
+}
+
+/** Stored `modules.observation` as a plain record ('{}' when absent / malformed). */
+function observationRecord(data: TimelineNodeData): Record<string, unknown> {
+  const modules = data.modules;
+  const observation =
+    modules !== null && typeof modules === 'object' && !Array.isArray(modules)
+      ? (modules as Record<string, unknown>).observation
+      : undefined;
+  return observation !== null &&
+    observation !== undefined &&
+    typeof observation === 'object' &&
+    !Array.isArray(observation)
+    ? (observation as Record<string, unknown>)
+    : {};
 }
 
 function formFromNode(data: TimelineNodeData): TimelineEditForm {
+  const observation = observationRecord(data);
+  const storedObservers = observation.observers;
   return {
     title: data.canonical_name ?? '',
     bodyText: data.body ? JSON.stringify(data.body, null, 2) : '',
+    observers: Array.isArray(storedObservers)
+      ? storedObservers.map((observer) => String(observer))
+      : [],
+    accessText:
+      observation.access !== undefined && observation.access !== null
+        ? JSON.stringify(observation.access, null, 2)
+        : '',
   };
+}
+
+/**
+ * Build the complete first-level `modules.observation` value for the
+ * whole-value upsert (AR-4/PD-12). Unknown inner keys round-trip verbatim
+ * (PD-13 — the value starts from the stored record). Observer semantics
+ * follow PD-9: clearing to `[]` writes the explicit empty container (the
+ * "no observers" claim), while a stored record that never carried
+ * `observers` and an author selection of nobody keeps the key absent
+ * (unrecorded ≠ explicitly nobody). Access: blank clears to the empty
+ * object (PD-16 empty-object omission reads as absent); invalid JSON keeps
+ * the raw text in the built value so the exact dirty check still sees the
+ * edit (mirrors T2's `order` handling) while the error blocks the write.
+ * Returns per-field errors keyed `observation.<field>` (the 422 mapping key
+ * shape).
+ */
+function buildObservationValue(
+  stored: Record<string, unknown>,
+  form: TimelineEditForm,
+  accessJsonError: (field: string) => string,
+): { value: Record<string, unknown>; errors: Record<string, string> } {
+  const value: Record<string, unknown> = { ...stored };
+  const errors: Record<string, string> = {};
+  const observers = form.observers.map((observer) => observer.trim()).filter(Boolean);
+  if ('observers' in stored || observers.length > 0) {
+    value.observers = observers;
+  } else {
+    delete value.observers;
+  }
+  const accessText = form.accessText.trim();
+  if (!accessText) {
+    if ('access' in stored) value.access = {};
+    else delete value.access;
+  } else {
+    try {
+      const parsed: unknown = JSON.parse(accessText);
+      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('access must be a JSON object');
+      }
+      value.access = parsed as Record<string, unknown>;
+    } catch {
+      value.access = accessText;
+      errors['observation.access'] = accessJsonError('access');
+    }
+  }
+  return { value, errors };
+}
+
+/** Exact dirty check on the built whole value (mirrors T2's `beliefsDirty`). */
+function observationDirty(form: TimelineEditForm, data: TimelineNodeData): boolean {
+  const stored = observationRecord(data);
+  const built = buildObservationValue(stored, form, () => '');
+  return JSON.stringify(built.value) !== JSON.stringify(stored);
 }
 
 /** Which form fields differ from the node's canonical projection. */
@@ -67,6 +154,7 @@ function computeDirty(
   if (form.title !== (data.canonical_name ?? '')) dirty.push('title');
   const canonBody = data.body ? JSON.stringify(data.body, null, 2) : '';
   if (form.bodyText !== canonBody) dirty.push('body');
+  if (observationDirty(form, data)) dirty.push('modules');
   return dirty;
 }
 
@@ -105,12 +193,15 @@ export function TimelineInspector({ node, ctxRef }: TimelineInspectorProps) {
   const data = node.data;
   const [form, setForm] = useState<TimelineEditForm>(() => formFromNode(data));
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [rawObserver, setRawObserver] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Reseed the form when the selected node changes.
   useEffect(() => {
     setForm(formFromNode(data));
     setValidationErrors([]);
+    setFieldErrors({});
     setIsSubmitting(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.key_block_id, data.version]);
@@ -134,12 +225,63 @@ export function TimelineInspector({ node, ctxRef }: TimelineInspectorProps) {
       ? (observation as Record<string, unknown>).observers
       : undefined;
 
+  // v1.203 P2 O3 — observer picker options come from entities ALREADY in the
+  // loaded graph (PD-18 — no new fan-out fetch), holder-capable kinds only
+  // (the observation carrier is a holder/character axis, V1.164 PD-8/PD-12);
+  // the observed event itself is excluded. Selected ids absent from the
+  // graph render as extra raw checked rows so they stay removable (PD-18
+  // raw-id read-back); new ids enter via the raw-id input below.
+  const observerOptions = (ctx.nodes ?? [])
+    .map((n) => n.data)
+    .filter(
+      (nodeData) =>
+        typeof nodeData.key_block_id === 'string' &&
+        nodeData.key_block_id.length > 0 &&
+        nodeData.key_block_id !== data.key_block_id &&
+        HOLDER_BLOCK_TYPES.includes(nodeData.block_type as BlockType),
+    );
+  const optionIds = new Set(observerOptions.map((nodeData) => nodeData.key_block_id));
+  const rawSelectedObservers = form.observers.filter((id) => !optionIds.has(id));
+
+  function toggleObserver(id: string) {
+    setForm((prev) => ({
+      ...prev,
+      observers: prev.observers.includes(id)
+        ? prev.observers.filter((observer) => observer !== id)
+        : [...prev.observers, id],
+    }));
+  }
+
+  function addRawObserver() {
+    const id = rawObserver.trim();
+    if (!id) return;
+    setForm((prev) =>
+      prev.observers.includes(id) ? prev : { ...prev, observers: [...prev.observers, id] },
+    );
+    setRawObserver('');
+  }
+
   async function handleSubmit() {
     if (dirty.length === 0) return;
     setValidationErrors([]);
+    setFieldErrors({});
 
     const patch: TimelineEntityPatch = {};
     if (dirty.includes('title')) patch.title = form.title.trim();
+    if (dirty.includes('modules')) {
+      // v1.203 P2 O3 — whole-first-level-value upsert of
+      // `modules.observation` (AR-4/PD-12). Only this dialect is authored
+      // from the Timeline surface; the daemon's first-level merge preserves
+      // sibling dialects. `audience` governance is never emitted here.
+      const built = buildObservationValue(observationRecord(data), form, (field) =>
+        t('timeline.inspector.observation.accessJsonError', { field }),
+      );
+      if (Object.keys(built.errors).length > 0) {
+        setFieldErrors(built.errors);
+        return;
+      }
+      patch.modules = { observation: built.value };
+    }
     if (dirty.includes('body')) {
       try {
         if (!form.bodyText.trim()) {
@@ -180,10 +322,23 @@ export function TimelineInspector({ node, ctxRef }: TimelineInspectorProps) {
     // Save permanently disabled until the selection changed).
     try {
       await onPatch(node, patch, dirty);
-    } catch {
-      // The orchestrator's mutation `onError` already surfaces conflict /
-      // validation / toast UX. The inspector only owns the local submit
-      // flag, which `finally` resets so the author can retry immediately.
+    } catch (err) {
+      // The orchestrator's mutation `onError` already surfaces the section
+      // banner (conflict modal / validation list / toast UX). The inspector
+      // additionally maps daemon 422 entries carrying the frozen prefix
+      // grammar onto the offending observation form fields (write contract
+      // §3 — same discipline as T2's `mapValidationEntry`); entries that
+      // address anything else stay section-level verbatim.
+      const info = extractTimelineConflict(err);
+      if (info?.kind === 'validation') {
+        const mapped = info.errors.map(mapTimelineValidationEntry);
+        setFieldErrors(
+          Object.fromEntries(
+            mapped.filter((m) => m.key).map((m) => [m.key as string, m.message]),
+          ),
+        );
+        setValidationErrors(mapped.filter((m) => !m.key).map((m) => m.message));
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -242,6 +397,131 @@ export function TimelineInspector({ node, ctxRef }: TimelineInspectorProps) {
             </span>
           )}
         </p>
+      ) : null}
+
+      {/* v1.203 P2 O3 — Observation edit affordance (write contract O3).
+          Event nodes only (`layoutHint === 'event'` — the existing read-path
+          gate mirrors the O1/O2 holder-gate discipline); context nodes never
+          surface it. Whole-first-level-value upsert of
+          `modules.observation` on save — see buildObservationValue. */}
+      {data.layoutHint === 'event' ? (
+        <section
+          className="mt-3 flex flex-col gap-2 border-t border-gray-alpha-300 pt-2"
+          data-testid="observation-section"
+          aria-label={t('timeline.inspector.observation.title')}
+        >
+          <h4 className="text-label-14 font-semibold text-gray-900">
+            {t('timeline.inspector.observation.title')}
+          </h4>
+
+          <div className="flex flex-col gap-1">
+            <Label>{t('timeline.inspector.observation.observersLabel')}</Label>
+            {observerOptions.length === 0 && rawSelectedObservers.length === 0 ? (
+              <p className="text-copy-13 text-gray-700">
+                {t('timeline.inspector.observation.noObserverOptions')}
+              </p>
+            ) : (
+              <div className="flex flex-col gap-1">
+                {observerOptions.map((nodeData) => {
+                  const id = nodeData.key_block_id as string;
+                  const name = nodeData.canonical_name;
+                  const label =
+                    name !== undefined && name !== id ? `${name} (${id})` : id;
+                  return (
+                    <label
+                      key={id}
+                      className="flex items-center gap-2 text-copy-13 text-gray-1000"
+                    >
+                      <input
+                        type="checkbox"
+                        data-testid={`observation-observer-${id}`}
+                        checked={form.observers.includes(id)}
+                        onChange={() => toggleObserver(id)}
+                      />
+                      {label}
+                    </label>
+                  );
+                })}
+                {rawSelectedObservers.map((id) => (
+                  <label
+                    key={id}
+                    className="flex items-center gap-2 text-copy-13 text-gray-1000"
+                  >
+                    <input
+                      type="checkbox"
+                      data-testid={`observation-observer-${id}`}
+                      checked
+                      onChange={() => toggleObserver(id)}
+                    />
+                    {id}
+                  </label>
+                ))}
+              </div>
+            )}
+            {fieldErrors['observation.observers'] ? (
+              <p className="text-copy-13 text-red-1000">
+                {fieldErrors['observation.observers']}
+              </p>
+            ) : null}
+            <div className="flex items-center gap-2">
+              <Input
+                id="tl-observation-raw"
+                value={rawObserver}
+                onChange={(e) => setRawObserver(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addRawObserver();
+                  }
+                }}
+                placeholder={t('timeline.inspector.observation.rawPlaceholder')}
+                aria-label={t('timeline.inspector.observation.rawPlaceholder')}
+                data-testid="observation-raw-input"
+              />
+              <Button
+                type="button"
+                variant="tertiary"
+                size="small"
+                onClick={addRawObserver}
+                disabled={rawObserver.trim().length === 0}
+                data-testid="observation-raw-add"
+              >
+                {t('timeline.inspector.observation.addRaw')}
+              </Button>
+              <Button
+                type="button"
+                variant="tertiary"
+                size="small"
+                onClick={() => setForm((prev) => ({ ...prev, observers: [] }))}
+                disabled={form.observers.length === 0}
+                data-testid="observation-clear"
+              >
+                {t('timeline.inspector.observation.clear')}
+              </Button>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="tl-observation-access">
+              {t('timeline.inspector.observation.accessLabel')}
+            </Label>
+            <Textarea
+              id="tl-observation-access"
+              rows={3}
+              className="font-mono text-copy-13-mono"
+              value={form.accessText}
+              onChange={(e) => setForm((prev) => ({ ...prev, accessText: e.target.value }))}
+              placeholder={t('timeline.inspector.observation.accessPlaceholder')}
+              spellCheck={false}
+              data-testid="observation-access-input"
+            />
+            {fieldErrors['observation.access'] ? (
+              <p className="text-copy-13 text-red-1000">
+                {fieldErrors['observation.access']}
+              </p>
+            ) : null}
+          </div>
+        </section>
       ) : null}
 
       <div className="flex flex-col gap-1">

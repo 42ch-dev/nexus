@@ -73,6 +73,7 @@ import type { Edge, Node } from '@xyflow/react';
 import type { CanvasSurfaceAdapter } from '../canvas-surface-adapter';
 import type {
   TimelineEventInfo,
+  WorldKbEntityPatch as WorldKbEntityPatchWire,
   WorldKbEntityProjection,
   WorldKbGraphResponse,
   WorldKbRelationshipProjection,
@@ -240,10 +241,13 @@ export type TimelineEdgeData = WorldKbEdgeData;
 
 /**
  * Patchable fields on a `WorldKbEntityProjection` (V1.73 `WorldKbEntityPatch`).
- * The Timeline surface's write boundary is limited to these four fields via
- * `kb.patch_entity` (architect-locked §4.1).
+ * The V1.122 architect lock scoped the Timeline surface to the four scalar
+ * fields; v1.203 P2 O3 widens it SPA-side with `modules` so the event
+ * inspector can author `modules.observation` on narrative-log events (the
+ * wire has carried `modules` since V1.165 P2 — `wire_contracts_changed:
+ * false`, whole-first-level-value upsert per AR-4/PD-12).
  */
-export type TimelinePatchField = 'title' | 'body' | 'aliases' | 'block_type';
+export type TimelinePatchField = 'title' | 'body' | 'aliases' | 'block_type' | 'modules';
 
 /**
  * The patch payload the Timeline adapter emits — a subset of the V1.73
@@ -257,6 +261,13 @@ export type TimelineEntityPatch = {
   body?: Record<string, unknown>;
   aliases?: string[];
   block_type?: WorldKbEntityProjection['block_type'];
+  /**
+   * v1.203 P2 O3 — whole-first-level-value module upsert (only the
+   * `observation` dialect is authored from this surface today; the value
+   * replaces the complete stored `modules.observation`, sibling dialect keys
+   * preserved by the daemon's first-level merge).
+   */
+  modules?: WorldKbEntityPatchWire['modules'];
 };
 
 /**
@@ -1927,6 +1938,36 @@ function asNexusClientError(error: unknown): NexusClientErrorLike | null {
     code: typeof e.code === 'string' ? (e.code as WorldKbErrorCode) : undefined,
     details: e.details,
   };
+}
+
+/**
+ * v1.203 P2 O3 — map one daemon 422 entry onto a Timeline inspector form
+ * field when it carries the frozen prefix grammar
+ * (`modules.<dialect>[.<index>].<field>: <reason>`, write contract §3). The
+ * Timeline event inspector authors exactly one dialect — `observation` — and
+ * its complete editable member set (`observers` / `access`) maps 1:1; entries
+ * addressing anything else (mental / belief / unknown observation members)
+ * stay section-level with the original entry text verbatim, mirroring T2's
+ * `mapValidationEntry` in the entity inspector. Pure: no React.
+ */
+export function mapTimelineValidationEntry(entry: string): {
+  key?: string;
+  message: string;
+} {
+  if (!entry.startsWith('modules.')) return { message: entry };
+  const sep = entry.indexOf(': ');
+  if (sep === -1) return { message: entry };
+  const addr = entry.slice('modules.'.length, sep);
+  const reason = entry.slice(sep + 2);
+  const parts = addr.split('.');
+  if (
+    parts[0] === 'observation' &&
+    parts.length === 2 &&
+    (parts[1] === 'observers' || parts[1] === 'access')
+  ) {
+    return { key: `observation.${parts[1]}`, message: reason };
+  }
+  return { message: entry };
 }
 
 /**

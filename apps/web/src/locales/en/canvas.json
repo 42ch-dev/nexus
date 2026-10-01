@@ -806,11 +806,23 @@
       "viewInWorkTimelineAria": "Open the Work that realizes this World on the Work Timeline",
       "observers": "Observers:",
       "noObservers": "No observers",
+      "observation": {
+        "title": "Observation",
+        "observersLabel": "Observers",
+        "accessLabel": "Access",
+        "accessPlaceholder": "Observation access JSON object…",
+        "accessJsonError": "{{field}} must be a valid JSON object.",
+        "noObserverOptions": "No observer entities in the loaded graph — enter an entry id below.",
+        "rawPlaceholder": "Entry id (e.g. kb_char_1)",
+        "addRaw": "Add",
+        "clear": "Clear observers"
+      },
       "field": {
         "title": "Title",
         "body": "Body",
         "blockType": "Block Type",
-        "aliases": "Aliases"
+        "aliases": "Aliases",
+        "modules": "Modules"
       }
     },
     "eventNode": {
