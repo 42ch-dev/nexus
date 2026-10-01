@@ -447,7 +447,7 @@ async fn allowlisted_peer_handshakes_and_reads_nexus_manifest() {
         host_peer,
         "session binds the host"
     );
-    assert!(!session.session_id().is_empty());
+    assert_ne!(session.session_id(), "");
 
     // The manifest is delivered inside the signed hello (§2.5 — no separate
     // get-manifest op). Assert the exact N-C0 baseline + N-C1 extension +
@@ -933,7 +933,7 @@ async fn cli_wiring_starts_a_node_with_persisted_identity_and_allowlist() {
         expected_peer,
         "stable persisted identity"
     );
-    assert!(!node.listen_addrs().is_empty());
+    assert_ne!(node.listen_addrs(), []);
 
     node.shutdown().await.expect("node shuts down");
 }

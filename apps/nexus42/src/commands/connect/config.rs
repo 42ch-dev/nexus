@@ -149,7 +149,7 @@ mod tests {
         let home = temp_home();
         let config = load(home.path()).expect("absent config.json is not an error");
         assert_eq!(config, ConnectTokenConfig::default());
-        assert!(config.trusted_issuers.is_empty());
+        assert_eq!(config.trusted_issuers, [] as [std::string::String; 0]);
         assert!(!config.require_capability_token);
         assert!(config.capability_token_provider.is_none());
     }
