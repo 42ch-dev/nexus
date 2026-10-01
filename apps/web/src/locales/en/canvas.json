@@ -505,7 +505,9 @@
           "norms": "Norms",
           "constraints": "Constraints"
         },
-        "jsonError": "{{field}} must be valid JSON."
+        "jsonError": "{{field}} must be valid JSON.",
+        "rawLabel": "Raw mental JSON",
+        "rawPlaceholderJson": "Mental module JSON object…"
       },
       "belief": {
         "title": "Belief Propositions",

@@ -15,11 +15,15 @@
  * STOP-condition contract: stored `modules.mental` keys outside the locked
  * nine-field vocabulary are never silently dropped — they render as raw-JSON
  * fallback rows (key + JSON text area) so unknown inner keys round-trip
- * verbatim (PD-13). Stored `modules.belief` arrays the structured row
- * editor cannot represent (non-array, or containing a non-object row)
- * likewise render as a raw-JSON fallback of the complete stored value
- * (QC1-F001/QC3-001), and module dirty detection / emission is gated by
- * the holder-kind authorization, not just the rendered editors.
+ * verbatim (PD-13). A stored `modules.mental` value the structured editor
+ * cannot represent at all (a non-object: array, string, number, …) likewise
+ * renders as a raw-JSON fallback of the complete stored value (Greptile P1),
+ * text-compared dirty so an unrelated save never rewrites the dialect.
+ * Stored `modules.belief` arrays the structured row editor cannot represent
+ * (non-array, or containing a non-object row) likewise render as a raw-JSON
+ * fallback of the complete stored value (QC1-F001/QC3-001), and module dirty
+ * detection / emission is gated by the holder-kind authorization, not just
+ * the rendered editors.
  */
 import { useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -44,6 +48,19 @@ export interface EntityEditForm {
    * Whole-first-level-value upsert: the parsed object is written back complete.
    */
   mental: Record<(typeof MENTAL_FIELD_ORDER)[number], string>;
+  /**
+   * Raw-JSON fallback mode: non-null when the stored `modules.mental` member
+   * is nonrepresentable for the structured nine-field editor (a stored
+   * non-object value — array, string, number, …). Holds the JSON text of the
+   * COMPLETE stored value so an untouched seed stays byte-identical (not
+   * dirty) and an unrelated save never rewrites the dialect (mirror of
+   * `beliefRawText`, QC1-F001/QC3-001; preservation discipline rule 1–2).
+   * The author repairs it deliberately as JSON; structured fields stay
+   * active only when the stored value is a representable object.
+   * Optional: `formFromEntity` always sets it; hand-rolled form literals in
+   * reapply-path tests may omit it (absent = structured mode).
+   */
+  mentalRawText?: string | null;
   /**
    * STOP-condition fallback rows: stored mental keys outside the locked
    * vocabulary, edited as raw JSON so unknown inner keys round-trip verbatim.
@@ -89,7 +106,17 @@ export type ModuleDialect = 'mental' | 'belief';
 
 /** Build the form from a selected node's backing projection. */
 export function formFromEntity(entity: WorldKbEntityProjection): EntityEditForm {
-  const mental = mentalRecord(entity);
+  const mentalRaw = entity.modules?.mental;
+  // Representability gate (preservation discipline rule 1): the structured
+  // nine-field editor (plus extras rows) covers plain objects only. A stored
+  // NON-object (array, string, number, …) seeds the raw-JSON fallback with
+  // the COMPLETE stored value — `mentalRecord` would have read it as '{}',
+  // and an edited save would then silently discard it (Greptile P1).
+  const mentalStructured =
+    mentalRaw === undefined ||
+    mentalRaw === null ||
+    (typeof mentalRaw === 'object' && !Array.isArray(mentalRaw));
+  const mental = mentalStructured ? mentalRecord(entity) : {};
   const mentalForm = Object.fromEntries(MENTAL_FIELD_ORDER.map((key) => [key, ''])) as EntityEditForm['mental'];
   const mentalExtras: EntityEditForm['mentalExtras'] = [];
   for (const [key, value] of Object.entries(mental)) {
@@ -112,6 +139,11 @@ export function formFromEntity(entity: WorldKbEntityProjection): EntityEditForm 
     aliasesText: (entity.aliases ?? []).join(', '),
     block_type: entity.block_type,
     mental: mentalForm,
+    // Nonrepresentable stored mental → raw-JSON fallback: the complete
+    // stored value seeds the text untouched so an unrelated save is neither
+    // dirty nor destructive; structured seeding would read the value as {}
+    // and silently discard it on the next edited save.
+    mentalRawText: mentalStructured ? null : stringifyJson(mentalRaw),
     mentalExtras,
     // Nonrepresentable stored belief → raw-JSON fallback (QC1-F001/QC3-001):
     // the complete stored value seeds the text untouched so an unrelated
@@ -256,6 +288,20 @@ function stringifyJson(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
+/**
+ * Stored member → editable/compare text. Primitives keep their plain `String`
+ * text (closed-label selects must match the frozen handbook strings exactly,
+ * e.g. 'True'); structured values render as stable pretty JSON instead of
+ * the `[object Object]` default stringification (no-base-to-string).
+ */
+function memberText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+    return String(value);
+  }
+  return stringifyJson(value);
+}
+
 /** Stored `modules.mental` as a plain record ('{}' when absent / null / non-object). */
 function mentalRecord(entity: WorldKbEntityProjection): Record<string, unknown> {
   const mental = entity.modules?.mental;
@@ -285,13 +331,20 @@ function beliefRowsFromEntity(entity: WorldKbEntityProjection): BeliefRowForm[] 
     const form = emptyBeliefRow();
     for (const field of BELIEF_FIELDS) {
       const value = row[field];
-      form[field] = value === undefined || value === null ? '' : String(value);
+      form[field] = value === undefined || value === null ? '' : memberText(value);
     }
     return { ...form, original: { ...row } };
   });
 }
 
 function mentalDirty(form: EntityEditForm, entity: WorldKbEntityProjection): boolean {
+  // Raw fallback mode (Greptile P1 fix): text-compared dirty check — an
+  // untouched nonrepresentable seed (array, string, …) is NOT dirty, so an
+  // unrelated save is never blocked and never rewrites the stored dialect
+  // (preservation discipline rule 2, mirror of beliefsDirty).
+  if (form.mentalRawText != null) {
+    return form.mentalRawText.trim() !== stringifyJson(entity.modules?.mental).trim();
+  }
   const canonical = mentalRecord(entity);
   for (const key of MENTAL_FIELD_ORDER) {
     const canonText = key in canonical ? stringifyJson(canonical[key]) : '';
@@ -315,11 +368,35 @@ function mentalDirty(form: EntityEditForm, entity: WorldKbEntityProjection): boo
  * (`value[key] = …`) would invoke the inherited `__proto__` setter and lose
  * the key from JSON serialization on both submit and conflict reapply (this
  * builder backs both paths, including `modulesPatchFromForm`).
+ *
+ * Raw fallback (Greptile P1 fix) — `form.mentalRawText !== null` when the
+ * stored member was a nonrepresentable non-object value. The parsed JSON
+ * object becomes the complete value verbatim (deliberate repair); invalid
+ * JSON or a non-object parse keeps the raw text in the built value so the
+ * exact dirty check still sees the edit (mirrors the belief `raw` handling)
+ * while the error blocks the whole write.
  */
 function buildMentalValue(
   form: EntityEditForm,
   jsonError: (field: string) => string,
 ): { value: Record<string, unknown>; errors: Record<string, string> } {
+  // `!= null` (not `!== null`): hand-rolled form literals may leave the
+  // field undefined — only a STRING enables raw mode.
+  if (form.mentalRawText != null) {
+    const rawText = form.mentalRawText.trim();
+    try {
+      const parsed: unknown = JSON.parse(rawText);
+      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('mental must be a JSON object');
+      }
+      return { value: parsed as Record<string, unknown>, errors: {} };
+    } catch {
+      return {
+        value: { raw: rawText },
+        errors: { 'mental.raw': jsonError('raw') },
+      };
+    }
+  }
   const entries: Array<[string, unknown]> = [];
   const errors: Record<string, string> = {};
   const put = (key: string, text: string) => {
@@ -415,7 +492,7 @@ function buildBeliefValue(
     if (untouched) {
       for (const field of BELIEF_FIELDS) {
         const originalValue = row.original![field];
-        const originalText = originalValue === undefined || originalValue === null ? '' : String(originalValue);
+        const originalText = originalValue === undefined || originalValue === null ? '' : memberText(originalValue);
         if (row[field] !== originalText) {
           untouched = false;
           break;
@@ -434,7 +511,7 @@ function buildBeliefValue(
       const text = row[field];
       if (row.original) {
         const originalValue = row.original[field];
-        const originalText = originalValue === undefined || originalValue === null ? '' : String(originalValue);
+        const originalText = originalValue === undefined || originalValue === null ? '' : memberText(originalValue);
         if (text === originalText) continue; // untouched: keep the stored value exactly
         if (!text.trim()) {
           delete out[field]; // blanked by the author: clear the member
@@ -590,11 +667,13 @@ function MentalStateSection({
   fieldErrors,
   onMentalChange,
   onExtraChange,
+  onRawChange,
 }: {
   form: EntityEditForm;
   fieldErrors: Record<string, string>;
   onMentalChange: (key: (typeof MENTAL_FIELD_ORDER)[number], value: string) => void;
   onExtraChange: (index: number, value: string) => void;
+  onRawChange: (value: string) => void;
 }) {
   const { t } = useTranslation('canvas');
   const [open, setOpen] = useState(true);
@@ -621,6 +700,32 @@ function MentalStateSection({
         {title}
       </button>
       {open ? (
+        form.mentalRawText !== null ? (
+          /* Raw-JSON fallback (Greptile P1 fix): the stored member is a
+             non-object value the structured nine-field editor cannot
+             represent (stored array, string, …). The complete stored value
+             seeds the textarea untouched (not dirty); the author repairs it
+             deliberately as JSON, and the write requires a valid JSON
+             object. */
+          <div className="mt-1.5 flex flex-col gap-1">
+            <Label htmlFor="wkbe-mental-raw-json">
+              {t('worldKb.entityInspector.mentalState.rawLabel')}
+            </Label>
+            <Textarea
+              id="wkbe-mental-raw-json"
+              rows={6}
+              className="font-mono text-copy-13-mono"
+              value={form.mentalRawText}
+              onChange={(e) => onRawChange(e.target.value)}
+              placeholder={t('worldKb.entityInspector.mentalState.rawPlaceholderJson')}
+              spellCheck={false}
+              data-testid="mental-raw-json"
+            />
+            {fieldErrors['mental.raw'] ? (
+              <p className="text-copy-13 text-red-1000">{fieldErrors['mental.raw']}</p>
+            ) : null}
+          </div>
+        ) : (
         <div id={regionId} className="mt-1.5 flex flex-col gap-2">
           {MENTAL_FIELD_ORDER.map((key) => (
             <div key={key} className="flex flex-col gap-0.5">
@@ -657,6 +762,7 @@ function MentalStateSection({
             </div>
           ))}
         </div>
+        )
       ) : null}
     </section>
   );
@@ -1118,6 +1224,7 @@ export function EntityInspector({
                 form.mentalExtras.map((extra, i) => (i === index ? { ...extra, text: value } : extra)),
               )
             }
+            onRawChange={(value) => update('mentalRawText', value)}
           />
           <BeliefSection
             key={`belief-${entity.key_block_id}`}

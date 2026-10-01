@@ -761,3 +761,58 @@ describe('TimelineInspector — O3 observation editing (v1.203 P2 T3)', () => {
     expect(patchArg).toEqual({ modules: { observation: { observers: [] } } });
   });
 });
+
+describe('TimelineInspector — Greptile P2: raw observer input clears on event switch', () => {
+  const CTX_NODES = graphNodesWith({ kb_char_1: 'Char One', kb_char_2: 'Char Two' });
+
+  function tree(
+    client: NexusClient,
+    node: Node<TimelineNodeData>,
+    ctxRef: { current: TimelineCanvasAdapterContext },
+  ) {
+    return (
+      <QueryClientProvider client={makeQueryClient()}>
+        <ToastProvider>
+          <ClientProvider client={client}>
+            <TimelineInspector node={node} ctxRef={ctxRef} />
+          </ClientProvider>
+          <Toaster />
+        </ToastProvider>
+      </QueryClientProvider>
+    );
+  }
+
+  it('clears an unfinished raw observer id when the selected event changes (no cross-event leak)', async () => {
+    const client = makeClient();
+    const ctxRef = {
+      current: {
+        worldId: 'world-7',
+        client,
+        nodes: CTX_NODES,
+        onPatchEntity: vi.fn().mockResolvedValue(undefined),
+      } as unknown as TimelineCanvasAdapterContext,
+    };
+    const { rerender } = render(tree(client, eventNode(), ctxRef));
+
+    // Type an id for event A without adding it.
+    fireEvent.change(screen.getByTestId('observation-raw-input'), {
+      target: { value: 'kb_char_9' },
+    });
+    expect(screen.getByTestId('observation-raw-input')).toHaveValue('kb_char_9');
+
+    // Switch to event B — the reseed effect must clear the per-event input.
+    rerender(
+      tree(
+        client,
+        eventNode({ key_block_id: 'kb-event-2', canonical_name: 'Second Event' }),
+        ctxRef,
+      ),
+    );
+    expect(screen.getByTestId('observation-raw-input')).toHaveValue('');
+    // Add with the empty input is inert: no invented observer state.
+    expect(screen.getByTestId('observation-raw-add')).toBeDisabled();
+    // The unfinished id typed for event A did not leak into event B's state.
+    expect(screen.queryByTestId('observation-observer-kb_char_9')).not.toBeInTheDocument();
+    expect(screen.queryByText('kb_char_9')).not.toBeInTheDocument();
+  });
+});

@@ -536,3 +536,95 @@ describe('EntityInspector — plan QC fix 1 (QC1-F002: legal unknown __proto__ k
     expect(JSON.stringify(modules)).toContain('__proto__');
   });
 });
+
+/**
+ * Greptile P1 (PR #355) — a stored array-valued `modules.mental` previously
+ * seeded as '{}' and any edited save silently discarded the stored value.
+ * The raw-JSON fallback exposes the complete stored value; dirty is
+ * text-compared so an unrelated save never touches the dialect.
+ */
+describe('EntityInspector — modules.mental raw-JSON fallback (Greptile P1)', () => {
+  /** Holder whose stored `modules.mental` is an ARRAY — nonrepresentable for the nine-field form. */
+  const entityWithArrayMental: WorldKbEntityProjection = {
+    key_block_id: 'kb-bo',
+    world_id: 'w-1',
+    block_type: 'character',
+    canonical_name: 'Bo',
+    status: 'confirmed',
+    version: 1,
+    modules: {
+      mental: [{ goal: 'legacy row the form cannot represent' }],
+    },
+  };
+
+  it('renders the raw-JSON fallback with the complete stored value, not dirty, structured fields hidden', () => {
+    renderWith(
+      makeClient(),
+      <EntityInspector worldId="w-1" node={node} entity={entityWithArrayMental} onConflict={vi.fn()} />,
+    );
+
+    const section = screen.getByTestId('mental-state-section');
+    const raw = within(section).getByTestId('mental-raw-json');
+    expect(raw).toHaveDisplayValue(
+      JSON.stringify([{ goal: 'legacy row the form cannot represent' }], null, 2),
+    );
+    // Structured nine-field inputs stay inactive for a nonrepresentable seed.
+    expect(within(section).queryByLabelText('Goals')).not.toBeInTheDocument();
+    // Untouched seed is not dirty — Save stays disabled.
+    expect(screen.getByRole('button', { name: /^Save$/i })).toBeDisabled();
+  });
+
+  it('array-valued stored mental + title-only save omits modules and preserves the stored value', async () => {
+    const user = userEvent.setup();
+    const client = makeClient();
+    renderWith(
+      client,
+      <EntityInspector worldId="w-1" node={node} entity={entityWithArrayMental} onConflict={vi.fn()} />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Bo (retired)' } });
+    await user.click(screen.getByRole('button', { name: /^Save$/i }));
+
+    await waitFor(() => expect(client.worldKbPatchEntity).toHaveBeenCalled());
+    const call = callsOf(client.worldKbPatchEntity)[0];
+    expect(call[1].patch).toEqual({ title: 'Bo (retired)' });
+    // The stored dialect is never rewritten by an unrelated save.
+    expect(call[1].patch).not.toHaveProperty('modules');
+  });
+
+  it('deliberate repair: editing the raw fallback to a valid JSON object writes the complete object', async () => {
+    const user = userEvent.setup();
+    const client = makeClient();
+    renderWith(
+      client,
+      <EntityInspector worldId="w-1" node={node} entity={entityWithArrayMental} onConflict={vi.fn()} />,
+    );
+
+    fireEvent.change(screen.getByTestId('mental-raw-json'), {
+      target: { value: '{"goals": ["repaired"], "notes": {"kept": true}}' },
+    });
+    await user.click(screen.getByRole('button', { name: /^Save$/i }));
+
+    await waitFor(() => expect(client.worldKbPatchEntity).toHaveBeenCalled());
+    const call = callsOf(client.worldKbPatchEntity)[0];
+    expect(call[1].patch.modules).toEqual({
+      mental: { goals: ['repaired'], notes: { kept: true } },
+    });
+  });
+
+  it('blocks the write and shows an inline error when the repair JSON is invalid', async () => {
+    const user = userEvent.setup();
+    const client = makeClient();
+    renderWith(
+      client,
+      <EntityInspector worldId="w-1" node={node} entity={entityWithArrayMental} onConflict={vi.fn()} />,
+    );
+
+    fireEvent.change(screen.getByTestId('mental-raw-json'), { target: { value: 'not json' } });
+    await user.click(screen.getByRole('button', { name: /^Save$/i }));
+
+    const section = screen.getByTestId('mental-state-section');
+    expect(within(section).getByText(/must be valid JSON/i)).toBeInTheDocument();
+    expect(client.worldKbPatchEntity).not.toHaveBeenCalled();
+  });
+});
