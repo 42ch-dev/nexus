@@ -34,6 +34,7 @@ import { ChronosTitlebarFixtures } from '@/fixtures/chronos-titlebar-fixtures';
 import { GlobalTimelineFixtures } from '@/fixtures/global-timeline-fixtures';
 import { LayerBreadcrumbFixtures } from '@/fixtures/layer-breadcrumb-fixtures';
 import { MentalSurfacingFixtures } from '@/fixtures/mental-surfacing-fixtures';
+import { ModuleEditingFixtures } from '@/fixtures/module-editing-fixtures';
 import { SelectionSubmenuStubFixtures } from '@/fixtures/selection-submenu-fixtures';
 import { NleTimelineCanvasFixtures } from '@/fixtures/nle-timeline-canvas-fixtures';
 import { TimelineCanvasFixtures } from '@/fixtures/timeline-canvas-fixtures';
@@ -1035,6 +1036,38 @@ export function SurfacesCanvasPage() {
           (studio boundary).
         </p>
         <MentalSurfacingFixtures />
+      </section>
+
+      {/* v1.203 P2 O1/O2/O3 + PR #355 Greptile P3 — Module editing inspector states (studio-first) */}
+      <section className="mt-10" data-testid="surfaces-module-editing" id="surfaces-module-editing">
+        <SurfaceHeading id="surfaces-module-editing">Module Editing</SurfaceHeading>
+        <SurfaceSourceBadges importPaths={['@/fixtures/module-editing-fixtures']} />
+        <p className="text-copy-14 text-gray-700 mb-6">
+          Editable inspector states for the functional-dialect module carriers
+          shipped in v1.203 P2 — World KB{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            modules.mental
+          </code>{' '}
+          and{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            modules.belief
+          </code>{' '}
+          editing on holder kinds, and Timeline event{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            modules.observation
+          </code>{' '}
+          editing — including the raw-JSON fallback states for stored values
+          the structured forms cannot represent (Greptile P1/QC1-F001/C1:
+          non-object mental, non-array belief, non-object observation seed the
+          complete stored value verbatim and are repaired deliberately, never
+          silently discarded). Seven frames, seeded read-only inputs; wire
+          shapes are hand-mirrored locally — no{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            @42ch/nexus-contracts
+          </code>{' '}
+          (studio boundary).
+        </p>
+        <ModuleEditingFixtures />
       </section>
 
       {/* V1.128 P1 T1 — NLE multi-track Timeline band */}

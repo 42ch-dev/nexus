@@ -499,7 +499,9 @@
           "norms": "规范",
           "constraints": "约束"
         },
-        "jsonError": "{{field}} 必须是有效的 JSON。"
+        "jsonError": "{{field}} 必须是有效的 JSON。",
+        "rawLabel": "原始心理 JSON",
+        "rawPlaceholderJson": "心理模块 JSON 对象…"
       },
       "belief": {
         "title": "信念命题",

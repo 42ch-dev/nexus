@@ -327,6 +327,11 @@ export function TimelineInspector({ node, ctxRef }: TimelineInspectorProps) {
     setValidationErrors([]);
     setFieldErrors({});
     setIsSubmitting(false);
+    // Greptile P2 fix: the raw-observer input is per-event transient state —
+    // reseeding the form for a different event must not leave an unfinished
+    // id typed for the previous event (pressing Add would otherwise apply
+    // event A's id to event B).
+    setRawObserver('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.key_block_id, data.version]);
 
