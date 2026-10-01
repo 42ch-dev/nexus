@@ -15,14 +15,15 @@ import {
   type ConflictReviewRow,
 } from '@/components/canvas/conflict-modal-base';
 
-/** Fields editable through `world_kb.patch_entity`. */
-export type WorldKbEntityField = 'title' | 'body' | 'aliases' | 'block_type';
+/** Fields editable through `world_kb.patch_entity` (`modules` covers the v1.203 P2 mental/belief module editors). */
+export type WorldKbEntityField = 'title' | 'body' | 'aliases' | 'block_type' | 'modules';
 
 const ENTITY_FIELD_LABEL_KEYS: Record<WorldKbEntityField, string> = {
   title: 'worldKb.conflict.field.title',
   body: 'worldKb.conflict.field.body',
   aliases: 'worldKb.conflict.field.aliases',
   block_type: 'worldKb.conflict.field.blockType',
+  modules: 'worldKb.conflict.field.modules',
 };
 
 /** Draft carried by the `patch_entity` conflict modal. */

@@ -2525,7 +2525,7 @@ mod tests {
         let trace = ctx
             .hygiene_trace
             .expect("hygiene pass ran on the activation-on path");
-        assert!(trace.is_empty());
+        assert_eq!(trace, Vec::<crate::hygiene::HygieneTraceEntry>::new());
     }
 
     #[tokio::test]

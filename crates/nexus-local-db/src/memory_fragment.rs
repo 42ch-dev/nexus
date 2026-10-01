@@ -508,7 +508,7 @@ mod tests {
     async fn test_get_all_keywords_empty_creator() {
         let (pool, _dir) = fresh_pool().await;
         let keywords = get_all_keywords(&pool, "ctr_ghost").await.unwrap();
-        assert!(keywords.is_empty());
+        assert_eq!(keywords, Vec::<String>::new());
     }
 
     #[tokio::test]

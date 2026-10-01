@@ -305,10 +305,10 @@ mod tests {
         forget_session(&pool, "sess-3").await.unwrap();
         assert!(get_operation(&pool, "op-3").await.unwrap().is_none());
         assert!(get_operation(&pool, "op-4").await.unwrap().is_none());
-        assert!(list_session_operations(&pool, "sess-3")
-            .await
-            .unwrap()
-            .is_empty());
+        assert_eq!(
+            list_session_operations(&pool, "sess-3").await.unwrap(),
+            [] as [crate::js_provider_journal::JournaledOperation; 0]
+        );
         // Another session's row is untouched.
         assert!(get_operation(&pool, "op-5").await.unwrap().is_some());
     }

@@ -156,9 +156,9 @@ mod tests {
     fn empty_optional_field_shows_unset() {
         let config = CliConfig::default();
         let value = config.get("workspace_path").unwrap();
-        assert!(value.is_empty());
+        assert_eq!(value, "");
         let value = config.get("active_creator_id").unwrap();
-        assert!(value.is_empty());
+        assert_eq!(value, "");
     }
 
     #[test]

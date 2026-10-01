@@ -433,10 +433,19 @@ mod tests {
     fn before_defs_routes_to_world_before() {
         let routing = route_slots(vec![entry("Rules", "kb_1", Some(with_hint("before_defs")))]);
         assert_eq!(names(&routing.before), vec!["Rules"]);
-        assert!(routing.fallback.is_empty());
-        assert!(routing.after.is_empty());
+        assert_eq!(
+            routing.fallback,
+            [] as [nexus_knowledge::world_kb::KnowledgeEntryRecord; 0]
+        );
+        assert_eq!(
+            routing.after,
+            [] as [nexus_knowledge::world_kb::KnowledgeEntryRecord; 0]
+        );
         assert!(routing.outlets.is_empty());
-        assert!(routing.post_history.is_empty());
+        assert_eq!(
+            routing.post_history,
+            [] as [nexus_knowledge::world_kb::KnowledgeEntryRecord; 0]
+        );
     }
 
     #[test]
@@ -447,10 +456,19 @@ mod tests {
             Some(with_hint("after_defs")),
         )]);
         assert_eq!(names(&routing.after), vec!["Reminders"]);
-        assert!(routing.before.is_empty());
-        assert!(routing.fallback.is_empty());
+        assert_eq!(
+            routing.before,
+            [] as [nexus_knowledge::world_kb::KnowledgeEntryRecord; 0]
+        );
+        assert_eq!(
+            routing.fallback,
+            [] as [nexus_knowledge::world_kb::KnowledgeEntryRecord; 0]
+        );
         assert!(routing.outlets.is_empty());
-        assert!(routing.post_history.is_empty());
+        assert_eq!(
+            routing.post_history,
+            [] as [nexus_knowledge::world_kb::KnowledgeEntryRecord; 0]
+        );
     }
 
     #[test]
@@ -462,7 +480,10 @@ mod tests {
         )]);
         assert_eq!(names(&routing.post_history), vec!["PostStyle"]);
         assert!(routing.outlets.is_empty(), "reserved outlet is not open");
-        assert!(routing.fallback.is_empty());
+        assert_eq!(
+            routing.fallback,
+            [] as [nexus_knowledge::world_kb::KnowledgeEntryRecord; 0]
+        );
     }
 
     #[test]
@@ -481,8 +502,14 @@ mod tests {
     fn no_hint_routes_to_default_fallback() {
         let routing = route_slots(vec![entry("Hero", "kb_n", None)]);
         assert_eq!(names(&routing.fallback), vec!["Hero"]);
-        assert!(routing.before.is_empty());
-        assert!(routing.after.is_empty());
+        assert_eq!(
+            routing.before,
+            [] as [nexus_knowledge::world_kb::KnowledgeEntryRecord; 0]
+        );
+        assert_eq!(
+            routing.after,
+            [] as [nexus_knowledge::world_kb::KnowledgeEntryRecord; 0]
+        );
     }
 
     #[test]
@@ -512,7 +539,10 @@ mod tests {
         )]);
         assert_eq!(names(&routing.fallback), vec!["Nameless"]);
         assert!(routing.outlets.is_empty());
-        assert!(routing.post_history.is_empty());
+        assert_eq!(
+            routing.post_history,
+            [] as [nexus_knowledge::world_kb::KnowledgeEntryRecord; 0]
+        );
     }
 
     #[test]
@@ -657,7 +687,10 @@ mod tests {
             "after_defs hint beats the paired outlet"
         );
         assert!(routing.outlets.is_empty());
-        assert!(routing.post_history.is_empty());
+        assert_eq!(
+            routing.post_history,
+            [] as [nexus_knowledge::world_kb::KnowledgeEntryRecord; 0]
+        );
     }
 
     #[test]

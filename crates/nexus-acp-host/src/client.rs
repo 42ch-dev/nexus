@@ -1855,7 +1855,10 @@ mod tests {
         assert_eq!(nexus_resp.protocol_version.0, "1");
         assert!(!nexus_resp.agent_capabilities.load_session);
         assert!(nexus_resp.agent_info.is_none());
-        assert!(nexus_resp.auth_methods.is_empty());
+        assert_eq!(
+            nexus_resp.auth_methods,
+            [] as [nexus_contracts::local::acp::NexusAuthMethod; 0]
+        );
     }
 
     #[test]
@@ -1909,7 +1912,10 @@ mod tests {
             McpServer::Http(h) => {
                 assert_eq!(h.name, "http-server");
                 assert_eq!(h.url, "https://example.com/mcp");
-                assert!(h.headers.is_empty());
+                assert_eq!(
+                    h.headers,
+                    [] as [agent_client_protocol::schema::v1::HttpHeader; 0]
+                );
             }
             _ => panic!("Expected Http variant"),
         }
@@ -1938,7 +1944,10 @@ mod tests {
     fn new_session_request_empty_mcp_servers() {
         let nexus_req = NexusNewSessionRequest::new("/tmp/workspace");
         let sdk_req = sdk_new_session_request_from_nexus(nexus_req);
-        assert!(sdk_req.mcp_servers.is_empty());
+        assert_eq!(
+            sdk_req.mcp_servers,
+            [] as [agent_client_protocol::schema::v1::McpServer; 0]
+        );
     }
 
     #[test]
@@ -2320,7 +2329,10 @@ mod tests {
     fn set_config_option_response_to_nexus_empty() {
         let sdk_resp = SetSessionConfigOptionResponse::new(vec![]);
         let nexus_resp = sdk_set_config_option_response_to_nexus(&sdk_resp);
-        assert!(nexus_resp.config_options.is_empty());
+        assert_eq!(
+            nexus_resp.config_options,
+            [] as [nexus_contracts::local::acp::NexusConfigOption; 0]
+        );
     }
 
     #[test]

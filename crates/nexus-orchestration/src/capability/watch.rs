@@ -495,7 +495,10 @@ mod tests {
         // NOT duplicate it (new entry wins, mirror copy dropped).
         let (reg, hot_outcome) =
             rebuild_registry_with_merge(&deps, None, None, tmp.path(), &mirror);
-        assert!(hot_outcome.skipped.is_empty());
+        assert_eq!(
+            hot_outcome.skipped,
+            [] as [crate::capability::scan::SkippedCapability; 0]
+        );
         assert_eq!(hot_outcome.admitted.len(), 1, "no duplication");
         assert_eq!(user_cap_names(&reg), vec!["demo.pull".to_string()]);
     }
@@ -563,8 +566,14 @@ mod tests {
         let (hot_reg, hot_outcome) =
             rebuild_registry_with_merge(&deps, None, None, tmp.path(), &[]);
 
-        assert!(boot_outcome.skipped.is_empty());
-        assert!(hot_outcome.skipped.is_empty());
+        assert_eq!(
+            boot_outcome.skipped,
+            [] as [crate::capability::scan::SkippedCapability; 0]
+        );
+        assert_eq!(
+            hot_outcome.skipped,
+            [] as [crate::capability::scan::SkippedCapability; 0]
+        );
         assert_eq!(
             admitted_pairs(&hot_outcome),
             admitted_pairs(&boot_outcome),

@@ -108,17 +108,18 @@ jobs:
       - name: Check discovery tests
         run: cargo test -p nexus-agent-host --lib 'discovery::'
 
-      # The SDK-wire fixtures are `#!/usr/bin/env python3` scripts: Windows
-      # cannot exec them (no shebang, no exec bit), so the claude/codex/dsh
-      # launch cohorts are a unix-only proof surface. The Windows row runs the
-      # platform-independent mapping cohort; the excluded parity work is
-      # registered as R-V1202-P1T3-001. macOS runs the full cohort.
+      # Windows provider fixture parity is only partially established: the map_
+      # cohort is portable, while 39 broader lib tests expose Windows-specific
+      # process/path/sealed-filesystem gaps. Windows readiness integration also
+      # currently fails to compile because process_alive is Unix-only. Both
+      # gaps are dispositioned for T3; do not change provider semantics here.
       - name: Check native CLI provider tests (Windows mapping cohort)
         if: always() && runner.os == 'Windows'
         run: cargo test -p nexus-agent-host --lib 'providers::native_cli::map_'
 
+
       - name: Check native CLI provider tests
-        if: always() && runner.os != 'Windows'
+        if: always() && runner.os == 'macOS'
         run: cargo test -p nexus-agent-host --lib providers::native_cli
 
       # The integration cohort spawns a Node peer that imports the built

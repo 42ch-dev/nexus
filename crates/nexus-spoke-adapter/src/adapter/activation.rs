@@ -1748,7 +1748,10 @@ mod tests {
             ["kb_nA", "kb_nB", "kb_nC"],
             "all-neutral matched set keeps original entry order"
         );
-        assert!(result.unmatched.is_empty());
+        assert_eq!(
+            result.unmatched,
+            [] as [nexus_knowledge::world_kb::KnowledgeEntryRecord; 0]
+        );
     }
 
     #[test]

@@ -489,7 +489,8 @@
         "title": "Title",
         "body": "Body",
         "aliases": "Aliases",
-        "blockType": "Block Type"
+        "blockType": "Block Type",
+        "modules": "Mental & Belief modules"
       },
       "mentalState": {
         "title": "Mental State",
@@ -503,6 +504,61 @@
           "dispositions": "Dispositions",
           "norms": "Norms",
           "constraints": "Constraints"
+        },
+        "jsonError": "{{field}} must be valid JSON.",
+        "rawLabel": "Raw mental JSON",
+        "rawPlaceholderJson": "Mental module JSON object…"
+      },
+      "belief": {
+        "title": "Belief Propositions",
+        "addRow": "Add belief",
+        "removeRow": "Remove belief {{index}}",
+        "emptyOption": "—",
+        "readonlyRow": "Belief {{index}}",
+        "rawLabel": "Raw belief JSON",
+        "rawPlaceholderJson": "Belief module JSON array…",
+        "jsonError": "{{field}} must be valid JSON.",
+        "orderError": "{{field}} must be a whole number.",
+        "option": {
+          "truth": { "True": "True", "False": "False", "Unknown": "Unknown" },
+          "access": { "Private": "Private", "Shared": "Shared", "Public": "Public" },
+          "representation": { "Explicit": "Explicit", "Implicit": "Implicit" },
+          "content_type": {
+            "Location": "Location",
+            "Contents_Physical_State": "Contents/Physical State",
+            "Identity_Relation": "Identity/Relation",
+            "Epistemic": "Epistemic",
+            "Desire_Intention": "Desire/Intention",
+            "Emotion": "Emotion",
+            "Trait_Value": "Trait/Value",
+            "Action_Event": "Action/Event"
+          },
+          "source": {
+            "Narration": "Narration",
+            "Perception": "Perception",
+            "Memory": "Memory",
+            "Testimony": "Testimony",
+            "Inference": "Inference",
+            "Imagination": "Imagination",
+            "Unknown": "Unknown"
+          },
+          "context": {
+            "Deceptive": "Deceptive",
+            "Temporal": "Temporal",
+            "Counterfactual": "Counterfactual",
+            "Neutral": "Neutral"
+          }
+        },
+        "field": {
+          "holder": "Holder",
+          "proposition": "Proposition",
+          "order": "Order",
+          "truth": "Truth Status",
+          "access": "Knowledge Access",
+          "representation": "Representation",
+          "contentType": "Content Type",
+          "source": "Mental Source",
+          "context": "Context"
         }
       }
     },
@@ -668,7 +724,8 @@
         "aliases": "Aliases",
         "blockType": "Block Type",
         "relationType": "Relation type",
-        "customLabel": "Custom label"
+        "customLabel": "Custom label",
+        "modules": "Mental & Belief modules"
       }
     }
   },
@@ -753,11 +810,26 @@
       "viewInWorkTimelineAria": "Open the Work that realizes this World on the Work Timeline",
       "observers": "Observers:",
       "noObservers": "No observers",
+      "observation": {
+        "title": "Observation",
+        "observersLabel": "Observers",
+        "accessLabel": "Access",
+        "accessPlaceholder": "Observation access JSON object…",
+        "accessJsonError": "{{field}} must be a valid JSON object.",
+        "noObserverOptions": "No observer entities in the loaded graph — enter an entry id below.",
+        "rawPlaceholder": "Entry id (e.g. kb_char_1)",
+        "addRaw": "Add",
+        "clear": "Clear observers",
+        "claimNone": "No observers (explicit claim)",
+        "rawLabel": "Raw observation JSON",
+        "rawPlaceholderJson": "Observation module JSON object…"
+      },
       "field": {
         "title": "Title",
         "body": "Body",
         "blockType": "Block Type",
-        "aliases": "Aliases"
+        "aliases": "Aliases",
+        "modules": "Modules"
       }
     },
     "eventNode": {

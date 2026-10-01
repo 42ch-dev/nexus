@@ -81,12 +81,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut files = Vec::new();
         walk_files(&dir.path().join("does-not-exist"), &mut files);
-        assert!(files.is_empty());
+        assert_eq!(files, [] as [std::path::PathBuf; 0]);
 
         let empty = dir.path().join("empty");
         fs::create_dir_all(&empty).unwrap();
         walk_files(&empty, &mut files);
-        assert!(files.is_empty());
+        assert_eq!(files, [] as [std::path::PathBuf; 0]);
     }
 
     #[test]

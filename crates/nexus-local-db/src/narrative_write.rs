@@ -681,7 +681,7 @@ mod tests {
 
         assert!(result.world_id.starts_with("wld_"));
         assert!(result.root_fork_branch_id.starts_with("fbk_root_"));
-        assert!(!result.created_at.is_empty());
+        assert_ne!(result.created_at, "");
     }
 
     #[tokio::test]

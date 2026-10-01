@@ -771,7 +771,7 @@ mod tests {
         assert_eq!(trace[0].entry_id, "kb_1");
         assert_eq!(trace[0].applied, 1);
         assert_eq!(trace[0].skipped, 0);
-        assert!(trace[0].notes.is_empty());
+        assert_eq!(trace[0].notes, [] as [std::string::String; 0]);
     }
 
     #[test]
@@ -1209,7 +1209,7 @@ mod tests {
             entry_without_carrier("kb_2", "The castle stands tall"),
         ];
         let (out, trace) = apply_hygiene(input.clone());
-        assert!(trace.is_empty());
+        assert_eq!(trace, Vec::<HygieneTraceEntry>::new());
         assert_eq!(
             out, input,
             "no-carrier entries must pass through byte-identical"
@@ -1482,7 +1482,7 @@ mod tests {
             .collect();
         let parsed = serde_json::json!(carrier);
         let (transforms, notes, malformed) = parse_carrier(&parsed);
-        assert!(transforms.is_empty());
+        assert_eq!(transforms, Vec::<HygieneTransform<'_>>::new());
         assert_eq!(malformed, 5);
         assert_eq!(notes.len(), 1);
         assert!(notes[0].contains("5 malformed hygiene transforms skipped"));
@@ -1501,7 +1501,7 @@ mod tests {
             .collect();
         let parsed = serde_json::json!(in_budget);
         let (transforms, notes, malformed) = parse_carrier(&parsed);
-        assert!(transforms.is_empty());
+        assert_eq!(transforms, Vec::<HygieneTransform<'_>>::new());
         assert_eq!(malformed, MAX_HYGIENE_TRANSFORMS * 8);
         assert_eq!(notes.len(), 1);
         assert!(notes[0].contains("malformed hygiene transforms skipped"));
@@ -1550,7 +1550,7 @@ mod tests {
         assert_eq!(out_summary, expected);
         assert_eq!(trace[0].applied, total);
         assert_eq!(trace[0].skipped, 0);
-        assert!(trace[0].notes.is_empty());
+        assert_eq!(trace[0].notes, [] as [std::string::String; 0]);
     }
 
     #[test]
@@ -1578,7 +1578,7 @@ mod tests {
             { "pattern": "c", "replacement": "d" },
         ]);
         let (transforms, notes, malformed) = parse_carrier(&carrier);
-        assert!(notes.is_empty());
+        assert_eq!(notes, [] as [std::string::String; 0]);
         assert_eq!(malformed, 0);
         assert_eq!(transforms.len(), 2);
         assert_eq!(transforms[0].description, Some("fix a"));
@@ -1678,7 +1678,7 @@ mod tests {
         assert_eq!(summary, "dragon the hero $");
         assert_eq!(trace[0].applied, 1);
         assert_eq!(trace[0].skipped, 0);
-        assert!(trace[0].notes.is_empty());
+        assert_eq!(trace[0].notes, [] as [std::string::String; 0]);
     }
 
     #[test]
@@ -1693,7 +1693,7 @@ mod tests {
         let summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
         assert_eq!(summary, "a-b tail$");
         assert_eq!(trace[0].applied, 1);
-        assert!(trace[0].notes.is_empty());
+        assert_eq!(trace[0].notes, [] as [std::string::String; 0]);
     }
 
     #[test]

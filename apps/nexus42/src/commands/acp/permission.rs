@@ -445,7 +445,10 @@ mod tests {
         run_reset(ws.path(), Some("test-agent")).expect("reset failed");
 
         let loaded = PermissionPolicy::load(ws.path()).expect("load failed");
-        assert!(loaded.list_agent_rules("test-agent").0.is_empty());
+        assert_eq!(
+            loaded.list_agent_rules("test-agent").0,
+            [] as [std::string::String; 0]
+        );
     }
 
     #[test]
@@ -523,7 +526,7 @@ mod tests {
         run_reset(ws.path(), None).expect("reset all failed");
 
         let loaded = PermissionPolicy::load(ws.path()).expect("load failed");
-        assert!(loaded.list_agents().is_empty());
+        assert_eq!(loaded.list_agents(), [] as [&str; 0]);
     }
 
     #[test]

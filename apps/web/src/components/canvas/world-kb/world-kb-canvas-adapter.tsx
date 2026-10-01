@@ -27,7 +27,7 @@ import {
   filterRelationshipEdgesByConfidence,
 } from './relationship-projection';
 import { WorldKbAltView } from './world-kb-alt-view';
-import { EntityInspector, type EntityEditForm } from './entity-inspector';
+import { EntityInspector, type EntityEditForm, type ModuleDialect } from './entity-inspector';
 import { PromotionInspector } from './promotion-inspector';
 import type { RelationshipForm } from './relationship-inspector';
 import type { EntityField, Selection } from './world-kb-canvas-types';
@@ -87,6 +87,7 @@ export interface WorldKbCanvasAdapterContext {
     conflictingPath: string;
     draft: EntityEditForm;
     dirtyFields: EntityField[];
+    dirtyDialects: ModuleDialect[];
   }) => void;
   onPromoteConflict: (payload: {
     currentVersion: number;

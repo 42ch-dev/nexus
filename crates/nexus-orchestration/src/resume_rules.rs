@@ -391,7 +391,7 @@ mod tests {
             "_merge_j1": null,
             "_join_wait_start_j1": null
         }));
-        assert!(live_join_keys(&cleared).is_empty());
+        assert_eq!(live_join_keys(&cleared), [] as [std::string::String; 0]);
         assert!(!is_converge_merge_chain(&cleared));
     }
 

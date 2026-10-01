@@ -23,7 +23,8 @@
  * `entityToTimelineNodeData` (spread) → `TimelineInspector` reads
  * `data.modules.observation.observers` gated `layoutHint === 'event'`.
  */
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 
@@ -340,5 +341,478 @@ describe('TimelineInspector — AC-V165-8: observation→canvas via the KB patch
     renderInspector({ node: charNode!, ctxOverrides: { nodes } });
     expect(screen.queryByTestId('event-observers-line')).not.toBeInTheDocument();
     expect(screen.queryByText('Observers:')).not.toBeInTheDocument();
+  });
+});
+
+// ─── v1.203 P2 T3 — O3: observation editing on the event inspector ──────────
+
+describe('TimelineInspector — O3 observation editing (v1.203 P2 T3)', () => {
+  const CTX_NODES = graphNodesWith({ kb_char_1: 'Char One', kb_char_2: 'Char Two' });
+
+  it('sets observers + access on an event without a stored observation module → save upserts the whole modules.observation value', async () => {
+    const user = userEvent.setup();
+    const onPatchEntity = vi.fn().mockResolvedValue(undefined);
+    renderInspector({
+      node: eventNode(),
+      ctxOverrides: { nodes: CTX_NODES, onPatchEntity },
+    });
+
+    // The edit affordance renders on event nodes even when nothing is stored.
+    expect(screen.getByTestId('observation-section')).toBeInTheDocument();
+    // Save starts disabled — absent stays absent until the author edits.
+    expect(screen.getByTestId('timeline-inspector-save')).toBeDisabled();
+
+    await user.click(screen.getByTestId('observation-observer-kb_char_1'));
+    fireEvent.change(screen.getByTestId('observation-access-input'), {
+      target: { value: '{"read":true}' },
+    });
+
+    expect(screen.getByTestId('timeline-inspector-save')).toBeEnabled();
+    await user.click(screen.getByTestId('timeline-inspector-save'));
+
+    expect(onPatchEntity).toHaveBeenCalledTimes(1);
+    const [nodeArg, patchArg, dirtyArg] = onPatchEntity.mock.calls[0];
+    expect(nodeArg.data.key_block_id).toBe('kb-event-1');
+    expect(patchArg).toEqual({
+      modules: { observation: { observers: ['kb_char_1'], access: { read: true } } },
+    });
+    expect(dirtyArg).toContain('modules');
+    // The editing status line resolves the new `modules` field label.
+    expect(screen.getByText(/Modules/)).toBeInTheDocument();
+  });
+
+  it('modifies observers (uncheck one) while access round-trips verbatim', async () => {
+    const user = userEvent.setup();
+    const onPatchEntity = vi.fn().mockResolvedValue(undefined);
+    renderInspector({
+      node: eventNode({ ...EVENT_WITH_OBSERVERS }),
+      ctxOverrides: { nodes: CTX_NODES, onPatchEntity },
+    });
+
+    await user.click(screen.getByTestId('observation-observer-kb_char_1'));
+    await user.click(screen.getByTestId('timeline-inspector-save'));
+
+    expect(onPatchEntity).toHaveBeenCalledTimes(1);
+    const [, patchArg] = onPatchEntity.mock.calls[0];
+    // Whole-first-level-value upsert: the untouched access object is carried
+    // along with the edited observers list.
+    expect(patchArg).toEqual({
+      modules: {
+        observation: { observers: ['kb_char_2'], access: { line_of_sight: true } },
+      },
+    });
+  });
+
+  it('clearing every observer writes the explicit empty list (PD-9 claim preserved)', async () => {
+    const user = userEvent.setup();
+    const onPatchEntity = vi.fn().mockResolvedValue(undefined);
+    renderInspector({
+      node: eventNode({ ...EVENT_WITH_OBSERVERS }),
+      ctxOverrides: { nodes: CTX_NODES, onPatchEntity },
+    });
+
+    await user.click(screen.getByTestId('observation-clear'));
+    await user.click(screen.getByTestId('timeline-inspector-save'));
+
+    expect(onPatchEntity).toHaveBeenCalledTimes(1);
+    const [, patchArg] = onPatchEntity.mock.calls[0];
+    // `observers: []` is the meaningful "no observers" claim — NOT an omitted
+    // key (absent would read back as unrecorded).
+    expect(patchArg.modules.observation.observers).toEqual([]);
+    expect(patchArg.modules.observation.access).toEqual({ line_of_sight: true });
+  });
+
+  it('clearing access (blank text) on a stored observation writes the empty object', async () => {
+    const user = userEvent.setup();
+    const onPatchEntity = vi.fn().mockResolvedValue(undefined);
+    renderInspector({
+      node: eventNode({ ...EVENT_WITH_OBSERVERS }),
+      ctxOverrides: { nodes: CTX_NODES, onPatchEntity },
+    });
+
+    await user.clear(screen.getByTestId('observation-access-input'));
+    await user.click(screen.getByTestId('timeline-inspector-save'));
+
+    const [, patchArg] = onPatchEntity.mock.calls[0];
+    expect(patchArg.modules.observation).toEqual({
+      observers: ['kb_char_1', 'kb_char_2'],
+      access: {},
+    });
+  });
+
+  it('blocks the write and surfaces a field error when access is not a JSON object', async () => {
+    const user = userEvent.setup();
+    const onPatchEntity = vi.fn().mockResolvedValue(undefined);
+    renderInspector({
+      node: eventNode(),
+      ctxOverrides: { nodes: CTX_NODES, onPatchEntity },
+    });
+
+    fireEvent.change(screen.getByTestId('observation-access-input'), {
+      target: { value: 'not-json' },
+    });
+    await user.click(screen.getByTestId('timeline-inspector-save'));
+
+    expect(onPatchEntity).not.toHaveBeenCalled();
+    expect(screen.getByTestId('observation-section')).toHaveTextContent(
+      'access must be a valid JSON object.',
+    );
+  });
+
+  it('blocks the write when access parses to a non-object JSON value', async () => {
+    const user = userEvent.setup();
+    const onPatchEntity = vi.fn().mockResolvedValue(undefined);
+    renderInspector({
+      node: eventNode(),
+      ctxOverrides: { nodes: CTX_NODES, onPatchEntity },
+    });
+
+    fireEvent.change(screen.getByTestId('observation-access-input'), {
+      target: { value: '[1,2]' },
+    });
+    await user.click(screen.getByTestId('timeline-inspector-save'));
+
+    expect(onPatchEntity).not.toHaveBeenCalled();
+    expect(screen.getByTestId('observation-section')).toHaveTextContent(
+      'access must be a valid JSON object.',
+    );
+  });
+
+  it('adds an observer by raw entry id (PD-18 — no fan-out fetch; raw id round-trips)', async () => {
+    const user = userEvent.setup();
+    const onPatchEntity = vi.fn().mockResolvedValue(undefined);
+    renderInspector({
+      node: eventNode(),
+      ctxOverrides: { nodes: CTX_NODES, onPatchEntity },
+    });
+
+    await user.type(screen.getByTestId('observation-raw-input'), 'kb_char_9');
+    await user.click(screen.getByTestId('observation-raw-add'));
+
+    // The raw id renders as an extra checked row it can later be removed from.
+    expect(screen.getByTestId('observation-observer-kb_char_9')).toBeChecked();
+
+    await user.click(screen.getByTestId('timeline-inspector-save'));
+
+    const [, patchArg] = onPatchEntity.mock.calls[0];
+    expect(patchArg.modules.observation.observers).toEqual(['kb_char_9']);
+  });
+
+  it('maps daemon 422 observation prefixes onto the offending form fields (frozen grammar)', async () => {
+    const user = userEvent.setup();
+    const onPatchEntity = vi.fn().mockRejectedValue({
+      status: 422,
+      code: 'world_kb_validation_failed',
+      details: {
+        validation_summary: {
+          errors: [
+            'modules.observation.observers: must be an array of non-empty entry ids',
+            'modules.mental.identity: must be an object',
+          ],
+        },
+      },
+    });
+    renderInspector({
+      node: eventNode({ ...EVENT_WITH_OBSERVERS }),
+      ctxOverrides: { nodes: CTX_NODES, onPatchEntity },
+    });
+
+    await user.click(screen.getByTestId('observation-observer-kb_char_1'));
+    await user.click(screen.getByTestId('timeline-inspector-save'));
+
+    expect(onPatchEntity).toHaveBeenCalledTimes(1);
+    // Known observation prefix → field-level message under the section.
+    expect(screen.getByTestId('observation-section')).toHaveTextContent(
+      'must be an array of non-empty entry ids',
+    );
+    // Unrelated dialect prefix stays section-level, verbatim.
+    expect(screen.getByTestId('timeline-inspector-validation-errors')).toHaveTextContent(
+      'modules.mental.identity: must be an object',
+    );
+  });
+
+  it('keeps the edit affordance hidden on non-event nodes (S-4 event gate)', () => {
+    renderInspector({
+      node: eventNode({ ...EVENT_WITH_OBSERVERS, layoutHint: 'context' }),
+      ctxOverrides: { nodes: CTX_NODES },
+    });
+
+    expect(screen.queryByTestId('observation-section')).not.toBeInTheDocument();
+  });
+
+  it('preserves unknown stored observation inner keys verbatim on whole-value write (PD-13)', async () => {
+    const user = userEvent.setup();
+    const onPatchEntity = vi.fn().mockResolvedValue(undefined);
+    renderInspector({
+      node: eventNode({
+        modules: {
+          observation: {
+            observers: ['kb_char_1'],
+            access: { read: true },
+            future_dialect_key: { nested: ['kept'] },
+          },
+        },
+      }),
+      ctxOverrides: { nodes: CTX_NODES, onPatchEntity },
+    });
+
+    await user.click(screen.getByTestId('observation-observer-kb_char_2'));
+    await user.click(screen.getByTestId('timeline-inspector-save'));
+
+    const [, patchArg] = onPatchEntity.mock.calls[0];
+    expect(patchArg.modules.observation).toEqual({
+      observers: ['kb_char_1', 'kb_char_2'],
+      access: { read: true },
+      future_dialect_key: { nested: ['kept'] },
+    });
+  });
+
+  it('an untouched seeded observation is not dirty — a title-only save never rewrites modules', async () => {
+    const user = userEvent.setup();
+    const onPatchEntity = vi.fn().mockResolvedValue(undefined);
+    renderInspector({
+      node: eventNode({ ...EVENT_WITH_OBSERVERS }),
+      ctxOverrides: { nodes: CTX_NODES, onPatchEntity },
+    });
+
+    await user.type(screen.getByLabelText('Title'), '!');
+    await user.click(screen.getByTestId('timeline-inspector-save'));
+
+    expect(onPatchEntity).toHaveBeenCalledTimes(1);
+    const [, patchArg, dirtyArg] = onPatchEntity.mock.calls[0];
+    expect(patchArg).toEqual({ title: 'Coronation!' });
+    expect(dirtyArg).not.toContain('modules');
+  });
+
+  // ── Fix Round 1 (L2 review C1/C2/C3) ──────────────────────────────────────
+
+  it('C1 — a whitespace-containing stored observer id seeds verbatim: untouched seed + title-only save sends only title', async () => {
+    const user = userEvent.setup();
+    const onPatchEntity = vi.fn().mockResolvedValue(undefined);
+    renderInspector({
+      node: eventNode({
+        modules: { observation: { observers: ['  kb_char_1  '] } },
+      }),
+      ctxOverrides: { nodes: CTX_NODES, onPatchEntity },
+    });
+
+    // The graph checkbox for the trimmed id is NOT selected — the stored
+    // whitespace-containing id seeded verbatim, not coerced.
+    expect(screen.getByTestId('observation-observer-kb_char_1')).not.toBeChecked();
+    // Seed normalization must NOT mark modules dirty.
+    expect(screen.getByTestId('timeline-inspector-save')).toBeDisabled();
+
+    await user.type(screen.getByLabelText('Title'), '!');
+    await user.click(screen.getByTestId('timeline-inspector-save'));
+
+    expect(onPatchEntity).toHaveBeenCalledTimes(1);
+    const [, patchArg, dirtyArg] = onPatchEntity.mock.calls[0];
+    expect(patchArg).toEqual({ title: 'Coronation!' });
+    expect(dirtyArg).not.toContain('modules');
+  });
+
+  it('C1 — a non-array stored observers member falls back to raw JSON: untouched seed + title-only save preserves the stored module', async () => {
+    const user = userEvent.setup();
+    const onPatchEntity = vi.fn().mockResolvedValue(undefined);
+    const storedModules = { observation: { observers: 'kb_char_1' } };
+    renderInspector({
+      node: eventNode({ modules: storedModules }),
+      ctxOverrides: { nodes: CTX_NODES, onPatchEntity },
+    });
+
+    // Raw fallback replaces the structured controls (C1 — no coercion).
+    const raw = screen.getByTestId('observation-raw-json');
+    expect(raw).toBeInTheDocument();
+    expect((raw as HTMLTextAreaElement).value).toBe(
+      JSON.stringify(storedModules.observation, null, 2),
+    );
+    expect(screen.queryByTestId('observation-observer-kb_char_1')).not.toBeInTheDocument();
+    expect(screen.getByTestId('timeline-inspector-save')).toBeDisabled();
+
+    await user.type(screen.getByLabelText('Title'), '!');
+    await user.click(screen.getByTestId('timeline-inspector-save'));
+
+    expect(onPatchEntity).toHaveBeenCalledTimes(1);
+    const [, patchArg] = onPatchEntity.mock.calls[0];
+    expect(patchArg).toEqual({ title: 'Coronation!' });
+  });
+
+  it('C1 — raw fallback editing preserves the original complete value until deliberately changed, then writes it verbatim', async () => {
+    const user = userEvent.setup();
+    const onPatchEntity = vi.fn().mockResolvedValue(undefined);
+    const stored = { observers: [42, 'kb_char_1'], access: null, future_key: 'kept' };
+    renderInspector({
+      node: eventNode({ modules: { observation: stored } }),
+      ctxOverrides: { nodes: CTX_NODES, onPatchEntity },
+    });
+
+    const raw = screen.getByTestId('observation-raw-json') as HTMLTextAreaElement;
+    // Editing the JSON (adding a member) writes the complete edited value —
+    // unknown inner keys (PD-13) and the previously nonrepresentable
+    // members round-trip through the author's text.
+    fireEvent.change(raw, {
+      target: {
+        value: JSON.stringify({ ...stored, note: 'edited' }, null, 2),
+      },
+    });
+    await user.click(screen.getByTestId('timeline-inspector-save'));
+
+    expect(onPatchEntity).toHaveBeenCalledTimes(1);
+    const [, patchArg] = onPatchEntity.mock.calls[0];
+    expect(patchArg).toEqual({
+      modules: { observation: { ...stored, note: 'edited' } },
+    });
+  });
+
+  it('C1 — invalid raw JSON blocks the write and surfaces a field error', async () => {
+    const user = userEvent.setup();
+    const onPatchEntity = vi.fn().mockResolvedValue(undefined);
+    renderInspector({
+      node: eventNode({ modules: { observation: { access: null } } }),
+      ctxOverrides: { nodes: CTX_NODES, onPatchEntity },
+    });
+
+    fireEvent.change(screen.getByTestId('observation-raw-json'), {
+      target: { value: 'not-json' },
+    });
+    await user.click(screen.getByTestId('timeline-inspector-save'));
+
+    expect(onPatchEntity).not.toHaveBeenCalled();
+    expect(screen.getByTestId('observation-section')).toHaveTextContent(
+      'observation must be a valid JSON object.',
+    );
+  });
+
+  it('C2 — a context node with an unusual stored observation shape never emits modules; a title-only edit sends only title', async () => {
+    const user = userEvent.setup();
+    const onPatchEntity = vi.fn().mockResolvedValue(undefined);
+    const storedModules = { observation: { observers: 'kb_char_1' } };
+    renderInspector({
+      node: eventNode({ modules: storedModules, layoutHint: 'context' }),
+      ctxOverrides: { nodes: CTX_NODES, onPatchEntity },
+    });
+
+    // The observation editor is hidden (existing JSX gate)…
+    expect(screen.queryByTestId('observation-section')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('observation-raw-json')).not.toBeInTheDocument();
+    // …and the stored module does not make the form dirty (C2 dirty gate).
+    expect(screen.getByTestId('timeline-inspector-save')).toBeDisabled();
+
+    await user.type(screen.getByLabelText('Title'), '!');
+    await user.click(screen.getByTestId('timeline-inspector-save'));
+
+    expect(onPatchEntity).toHaveBeenCalledTimes(1);
+    const [, patchArg, dirtyArg] = onPatchEntity.mock.calls[0];
+    expect(patchArg).toEqual({ title: 'Coronation!' });
+    expect(dirtyArg).not.toContain('modules');
+  });
+
+  it('C3 — an explicit "no observers" claim from an unrecorded event submits observers: [] on the first save and reads back explicitly', async () => {
+    const user = userEvent.setup();
+    const onPatchEntity = vi.fn().mockResolvedValue(undefined);
+    // No observers member at all — previously unrecorded.
+    renderInspector({
+      node: eventNode(),
+      ctxOverrides: { nodes: CTX_NODES, onPatchEntity },
+    });
+
+    // Untouched unrecorded seed keeps omission (Save disabled, no modules).
+    expect(screen.getByTestId('timeline-inspector-save')).toBeDisabled();
+
+    // The explicit claim checkbox is available even with an empty selection.
+    await user.click(screen.getByTestId('observation-claim-none'));
+    expect(screen.getByTestId('timeline-inspector-save')).toBeEnabled();
+    await user.click(screen.getByTestId('timeline-inspector-save'));
+
+    expect(onPatchEntity).toHaveBeenCalledTimes(1);
+    const [, patchArg] = onPatchEntity.mock.calls[0];
+    expect(patchArg).toEqual({ modules: { observation: { observers: [] } } });
+
+    // Read-back (L2 cannot-verify item): the post-save projection with
+    // `observers: []` renders the explicit "No observers" claim line.
+    const updated = eventNode({
+      modules: { observation: { observers: [] } },
+      version: 4,
+    });
+    const { unmount } = renderInspector({
+      node: updated,
+      ctxOverrides: { nodes: CTX_NODES, onPatchEntity },
+    });
+    const line = screen.getByTestId('event-observers-line');
+    expect(within(line).getByText('No observers')).toBeInTheDocument();
+    unmount();
+  });
+
+  it('C3 — Clear on an unrecorded event records the explicit empty claim (select-then-clear no longer collapses to omission)', async () => {
+    const user = userEvent.setup();
+    const onPatchEntity = vi.fn().mockResolvedValue(undefined);
+    renderInspector({
+      node: eventNode(),
+      ctxOverrides: { nodes: CTX_NODES, onPatchEntity },
+    });
+
+    await user.click(screen.getByTestId('observation-observer-kb_char_1'));
+    await user.click(screen.getByTestId('observation-clear'));
+    await user.click(screen.getByTestId('timeline-inspector-save'));
+
+    expect(onPatchEntity).toHaveBeenCalledTimes(1);
+    const [, patchArg] = onPatchEntity.mock.calls[0];
+    // The deliberate clear is the PD-9 "no observers" claim — NOT omission.
+    expect(patchArg).toEqual({ modules: { observation: { observers: [] } } });
+  });
+});
+
+describe('TimelineInspector — Greptile P2: raw observer input clears on event switch', () => {
+  const CTX_NODES = graphNodesWith({ kb_char_1: 'Char One', kb_char_2: 'Char Two' });
+
+  function tree(
+    client: NexusClient,
+    node: Node<TimelineNodeData>,
+    ctxRef: { current: TimelineCanvasAdapterContext },
+  ) {
+    return (
+      <QueryClientProvider client={makeQueryClient()}>
+        <ToastProvider>
+          <ClientProvider client={client}>
+            <TimelineInspector node={node} ctxRef={ctxRef} />
+          </ClientProvider>
+          <Toaster />
+        </ToastProvider>
+      </QueryClientProvider>
+    );
+  }
+
+  it('clears an unfinished raw observer id when the selected event changes (no cross-event leak)', async () => {
+    const client = makeClient();
+    const ctxRef = {
+      current: {
+        worldId: 'world-7',
+        client,
+        nodes: CTX_NODES,
+        onPatchEntity: vi.fn().mockResolvedValue(undefined),
+      } as unknown as TimelineCanvasAdapterContext,
+    };
+    const { rerender } = render(tree(client, eventNode(), ctxRef));
+
+    // Type an id for event A without adding it.
+    fireEvent.change(screen.getByTestId('observation-raw-input'), {
+      target: { value: 'kb_char_9' },
+    });
+    expect(screen.getByTestId('observation-raw-input')).toHaveValue('kb_char_9');
+
+    // Switch to event B — the reseed effect must clear the per-event input.
+    rerender(
+      tree(
+        client,
+        eventNode({ key_block_id: 'kb-event-2', canonical_name: 'Second Event' }),
+        ctxRef,
+      ),
+    );
+    expect(screen.getByTestId('observation-raw-input')).toHaveValue('');
+    // Add with the empty input is inert: no invented observer state.
+    expect(screen.getByTestId('observation-raw-add')).toBeDisabled();
+    // The unfinished id typed for event A did not leak into event B's state.
+    expect(screen.queryByTestId('observation-observer-kb_char_9')).not.toBeInTheDocument();
+    expect(screen.queryByText('kb_char_9')).not.toBeInTheDocument();
   });
 });

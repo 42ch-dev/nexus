@@ -712,7 +712,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         let gw = SqliteNarrativeGateway::new(pool);
         let worlds = gw.list_worlds().await.unwrap();
-        assert!(worlds.is_empty());
+        assert_eq!(worlds, Vec::<nexus_narrative::WorldState>::new());
     }
 
     #[tokio::test]

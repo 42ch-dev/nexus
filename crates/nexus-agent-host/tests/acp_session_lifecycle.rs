@@ -1,5 +1,8 @@
 //! Hermetic ACP session lifecycle tests (v1.186 P1 T1).
 //!
+//! Windows is excluded: these lifecycle assertions require Unix process-tree
+//! shutdown/reap semantics and verify signal-driven cancellation.
+//!
 //! Proves the observable lifecycle contracts of the recipe-based ACP
 //! provider through the real `HostManager` plane and a real deterministic
 //! ACP stdio fixture (`tests/fixtures/mock_acp_workflow.py`):
@@ -12,6 +15,7 @@
 //! - bounded cancel reaches the owned operation; shutdown drains and reaps
 //!   the exact owned process tree (a reused/unowned PID is never signalled)
 //! - EOF/crash is a typed failure, never success
+#![cfg(unix)]
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -258,7 +262,7 @@ async fn no_boot_spawn_and_truthful_catalog_recipe() {
     match &entry.launch {
         LaunchStrategy::Acp { command, args, env } => {
             assert_eq!(command, FIXTURE, "catalog reports the real command");
-            assert!(args.is_empty());
+            assert_eq!(args.as_slice(), &[] as &[String]);
             assert_eq!(
                 env.get("ACP_FIXTURE_LOG").map(String::as_str),
                 Some(ws.fixture_log.to_str().expect("utf8")),

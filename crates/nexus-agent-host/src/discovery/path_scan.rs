@@ -620,7 +620,7 @@ mod tests {
                 .into_owned(),
             "the row carries the validated canonical executable"
         );
-        assert!(args.is_empty());
+        assert_eq!(args.as_slice(), &[] as &[String]);
         assert!(env.is_empty());
         assert!(
             dsh.capabilities.streaming,

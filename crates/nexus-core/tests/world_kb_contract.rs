@@ -1719,3 +1719,103 @@ async fn retained_world_kb_modules_semantics_and_graph_projection() {
     .expect("a conforming map parses");
     assert_eq!(conforming.patch.modules.len(), 2);
 }
+
+/// V1.203 P2 T1 (DF-81): the `patch_entity` path validates the three authored
+/// module dialects into the frozen 422 field-prefix grammar
+/// (`modules.<dialect>[.<index>].<field>: <reason>`), leaves unknown dialect
+/// and inner keys verbatim (PD-13), and accepts the explicit-empty observers
+/// claim (PD-9). A rejected patch carries no write.
+#[tokio::test]
+async fn world_kb_contract_authored_module_dialect_validation() {
+    let fx = setup().await;
+    let (_guard, pool) = live_write_pool(&fx).await;
+
+    seed_kb_row(
+        &pool,
+        "kb_dialect",
+        OWNED_WORLD,
+        "character",
+        "Dialect",
+        "confirmed",
+        0,
+        "{}",
+        Some(r#"{"mental":{"goals":["old"]},"unrelated":{"keep":true}}"#),
+    )
+    .await;
+
+    for (patch, expected) in [
+        (
+            serde_json::json!({"modules": {"mental": ["not", "an", "object"]}}),
+            vec!["modules.mental: must be an object".to_string()],
+        ),
+        (
+            serde_json::json!({"modules": {"belief": [
+                {"holder": "kb_ana", "proposition": "cold", "order": 1, "truth": "Maybe"}
+            ]}}),
+            vec![
+                "modules.belief.0.truth: must be one of the handbook closed labels (got \"Maybe\")"
+                    .to_string(),
+            ],
+        ),
+        (
+            serde_json::json!({"modules": {"observation": {"access": ["kb_ana"]}}}),
+            vec!["modules.observation.access: must be a JSON object".to_string()],
+        ),
+    ] {
+        let req: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
+            "entity_id": "kb_dialect",
+            "expected_version": 0,
+            "patch": patch,
+        }))
+        .unwrap();
+        let err = fx
+            .core
+            .patch_world_kb_entity(&fx.principal, OWNED_WORLD.to_string(), req)
+            .await
+            .expect_err("a malformed authored dialect must be refused");
+        let CoreError::WorldKbValidation(detail) = err else {
+            panic!("expected a 422 validation rejection, got {err:?}");
+        };
+        assert_eq!(detail.validation_summary.errors, expected);
+    }
+
+    // A conforming write exercises the per-dialect validators together:
+    // explicit-empty observers accepted, unknown inner keys verbatim, and an
+    // unrelated dialect key never gated.
+    let accepted: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
+        "entity_id": "kb_dialect",
+        "expected_version": 0,
+        "patch": {"modules": {
+            "mental": {"goals": ["new"], "mystery": {"deep": [1, 2]}},
+            "belief": [{"holder": "kb_ana", "proposition": "raining", "order": 1, "truth": "True"}],
+            "observation": {"observers": [], "access": {"line_of_sight": true}},
+            "plugins": ["not", "a", "validated", "dialect"],
+        }},
+    }))
+    .unwrap();
+    let response = fx
+        .core
+        .patch_world_kb_entity(&fx.principal, OWNED_WORLD.to_string(), accepted)
+        .await
+        .expect("conforming authored dialects are accepted");
+    assert_eq!(
+        response.entity.modules.get("mental"),
+        Some(&serde_json::json!({"goals": ["new"], "mystery": {"deep": [1, 2]}})),
+        "unknown inner keys round-trip verbatim (PD-13)"
+    );
+    assert_eq!(
+        response.entity.modules.get("observation"),
+        Some(&serde_json::json!({"observers": [], "access": {"line_of_sight": true}})),
+        "the explicit-empty observers claim is preserved (PD-9)"
+    );
+    assert_eq!(
+        response.entity.modules.get("plugins"),
+        Some(&serde_json::json!(["not", "a", "validated", "dialect"])),
+        "an unknown dialect key is untouched, never gated"
+    );
+    assert_eq!(
+        response.entity.modules.get("unrelated"),
+        Some(&serde_json::json!({"keep": true})),
+        "an unspecified stored dialect survives the patch"
+    );
+}

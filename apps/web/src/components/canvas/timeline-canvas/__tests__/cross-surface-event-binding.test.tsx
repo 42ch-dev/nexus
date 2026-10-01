@@ -882,15 +882,21 @@ describe('V1.163 Task 4 — AC-V1163-7: no write path for world_event_id (World 
       </MemoryRouter>,
     );
 
-    // The ONLY editable fields are title + body (the pre-existing entity
-    // patch surface). Block type renders read-only. No field — editable or
-    // not — references the bind carrier.
+    // The editable fields are title + body (the pre-existing entity patch
+    // surface) plus the v1.203 P2 O3 observation drafts (raw observer-id
+    // input + access JSON textarea). Block type renders read-only. No field
+    // — editable or not — references the bind carrier.
     const editable = Array.from(
       container.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
-        'input:not([readonly]):not([type="hidden"]), textarea',
+        'input:not([readonly]):not([type="hidden"]):not([type="checkbox"]), textarea',
       ),
     );
-    expect(editable.map((el) => el.id)).toEqual(['tl-title', 'tl-body']);
+    expect(editable.map((el) => el.id)).toEqual([
+      'tl-observation-raw',
+      'tl-observation-access',
+      'tl-title',
+      'tl-body',
+    ]);
 
     for (const el of container.querySelectorAll('input, textarea, select')) {
       expect(el.getAttribute('id') ?? '').not.toMatch(/world[-_]?event/i);

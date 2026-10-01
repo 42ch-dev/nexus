@@ -378,7 +378,7 @@ async fn second_owner_and_restart_are_fenced() {
         )
         .await
         .expect("direct domain write commits without any engine");
-    assert!(!world.world_id.is_empty());
+    assert_ne!(world.world_id, "");
 
     // ── 6. Close settles the owner; no provider effect ever ran. ──
     direct.close().await.unwrap();

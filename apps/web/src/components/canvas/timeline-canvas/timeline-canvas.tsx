@@ -210,6 +210,11 @@ function buildConflictDraft(
         ? info.draftPatch.body
         : JSON.stringify(info.draftPatch.body);
   }
+  // v1.203 P2 O3 — a modules-bearing draft (modules.observation authored from
+  // the event inspector) serializes into the modal's `modules` field row.
+  if (info.draftPatch.modules !== undefined) {
+    draftValues.modules = JSON.stringify(info.draftPatch.modules);
+  }
   return {
     entityName,
     fields,

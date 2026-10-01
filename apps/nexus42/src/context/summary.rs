@@ -1132,7 +1132,7 @@ mod tests {
         assert_eq!(summary.title, Some("My Novel".to_string()));
         assert_eq!(summary.chapters.len(), 3);
         assert!(summary.word_count > 0);
-        assert!(!summary.summary_text.is_empty());
+        assert_ne!(summary.summary_text, "");
         assert!(summary.summary_text.contains("My Novel"));
         assert!(summary.summary_text.contains("Word count:"));
         assert!(summary.summary_text.len() <= 4096);
@@ -1144,7 +1144,7 @@ mod tests {
         let gen = SummaryGenerator::new(tmp.path().to_path_buf());
         let summary = gen.generate().expect("generate should succeed");
         assert_eq!(summary.title, None);
-        assert!(summary.chapters.is_empty());
+        assert_eq!(summary.chapters, [] as [std::string::String; 0]);
         assert_eq!(summary.word_count, 0);
     }
 

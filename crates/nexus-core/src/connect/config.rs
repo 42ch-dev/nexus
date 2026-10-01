@@ -475,8 +475,8 @@ mod tests {
         assert_eq!(config.max_sessions, DEFAULT_MAX_SESSIONS);
         assert_eq!(config.invoke_timeout_ms, DEFAULT_INVOKE_TIMEOUT_MS);
         assert_eq!(config.max_envelope_bytes, DEFAULT_MAX_ENVELOPE_BYTES);
-        assert!(config.tool_allowlist.is_empty());
-        assert!(config.peer_ids.is_empty());
+        assert_eq!(config.tool_allowlist, [] as [std::string::String; 0]);
+        assert_eq!(config.peer_ids, [] as [std::string::String; 0]);
     }
 
     #[test]

@@ -846,8 +846,8 @@ mod tests {
 
         let (granted, denied, asked) = policy.list_agent_rules("test-agent");
         assert_eq!(granted, vec!["terminal.create"]);
-        assert!(denied.is_empty());
-        assert!(asked.is_empty());
+        assert_eq!(denied, [] as [std::string::String; 0]);
+        assert_eq!(asked, [] as [std::string::String; 0]);
     }
 
     #[test]
@@ -856,9 +856,9 @@ mod tests {
         policy.deny_agent("test-agent", "terminal.kill");
 
         let (granted, denied, asked) = policy.list_agent_rules("test-agent");
-        assert!(granted.is_empty());
+        assert_eq!(granted, [] as [std::string::String; 0]);
         assert_eq!(denied, vec!["terminal.kill"]);
-        assert!(asked.is_empty());
+        assert_eq!(asked, [] as [std::string::String; 0]);
     }
 
     #[test]
@@ -867,8 +867,8 @@ mod tests {
         policy.ask_agent("test-agent", "file_system.write");
 
         let (granted, denied, asked) = policy.list_agent_rules("test-agent");
-        assert!(granted.is_empty());
-        assert!(denied.is_empty());
+        assert_eq!(granted, [] as [std::string::String; 0]);
+        assert_eq!(denied, [] as [std::string::String; 0]);
         assert_eq!(asked, vec!["file_system.write"]);
     }
 
@@ -880,8 +880,8 @@ mod tests {
 
         let (granted, denied, asked) = policy.list_agent_rules("test-agent");
         assert_eq!(granted, vec!["terminal.create"]);
-        assert!(denied.is_empty());
-        assert!(asked.is_empty());
+        assert_eq!(denied, [] as [std::string::String; 0]);
+        assert_eq!(asked, [] as [std::string::String; 0]);
     }
 
     #[test]
@@ -891,9 +891,9 @@ mod tests {
         policy.deny_agent("test-agent", "terminal.create");
 
         let (granted, denied, asked) = policy.list_agent_rules("test-agent");
-        assert!(granted.is_empty());
+        assert_eq!(granted, [] as [std::string::String; 0]);
         assert_eq!(denied, vec!["terminal.create"]);
-        assert!(asked.is_empty());
+        assert_eq!(asked, [] as [std::string::String; 0]);
     }
 
     #[test]
@@ -922,7 +922,7 @@ mod tests {
         policy.grant_agent("test-agent", "terminal.create");
 
         policy.revoke_agent("test-agent", "terminal.create");
-        assert!(policy.list_agents().is_empty());
+        assert_eq!(policy.list_agents(), [] as [&str; 0]);
     }
 
     #[test]
@@ -935,8 +935,14 @@ mod tests {
         let removed = policy.reset_agent("test-agent");
         assert!(removed);
 
-        assert!(policy.list_agent_rules("test-agent").0.is_empty());
-        assert!(!policy.list_agent_rules("other-agent").0.is_empty());
+        assert_eq!(
+            policy.list_agent_rules("test-agent").0,
+            [] as [std::string::String; 0]
+        );
+        assert_ne!(
+            policy.list_agent_rules("other-agent").0,
+            [] as [std::string::String; 0]
+        );
     }
 
     #[test]
@@ -947,7 +953,7 @@ mod tests {
 
         policy.reset_all_agents();
 
-        assert!(policy.list_agents().is_empty());
+        assert_eq!(policy.list_agents(), [] as [&str; 0]);
     }
 
     #[test]
@@ -1016,9 +1022,9 @@ mod tests {
     fn test_list_agent_rules_for_nonexistent_agent() {
         let policy = PermissionPolicy::new();
         let (granted, denied, asked) = policy.list_agent_rules("nonexistent");
-        assert!(granted.is_empty());
-        assert!(denied.is_empty());
-        assert!(asked.is_empty());
+        assert_eq!(granted, [] as [std::string::String; 0]);
+        assert_eq!(denied, [] as [std::string::String; 0]);
+        assert_eq!(asked, [] as [std::string::String; 0]);
     }
 
     #[test]

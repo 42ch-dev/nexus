@@ -52,7 +52,7 @@ async fn insert_and_get_roundtrip() {
     assert_eq!(row.status, RUN_STATUS_RUNNING);
     assert!(row.proposals_json.is_none());
     assert!(row.error_json.is_none());
-    assert!(!row.created_at.is_empty());
+    assert_ne!(row.created_at, "");
     assert!(row.updated_at.is_none());
     assert!(row.accepted_at.is_none());
     assert!(row.branch_id.is_none());

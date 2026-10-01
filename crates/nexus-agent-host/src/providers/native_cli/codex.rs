@@ -1015,12 +1015,16 @@ mod tests {
     }
 
     /// Provider wired to the fixture mock app-server (a small Python
-    /// JSON-RPC speaker; see `MOCK_APP_SERVER`).
+    /// JSON-RPC speaker; see `MOCK_APP_SERVER`). Caller must hold
+    /// `PROCESS_ENV_LOCK` while constructing it because fixture resolution
+    /// may inspect PATH on Windows.
     fn mock_provider(env: HashMap<String, String>) -> CodexNativeProvider {
         CodexNativeProvider::new(
             ProviderId::new("test-codex-app-server"),
             "Test".to_string(),
-            MOCK_APP_SERVER.to_string(),
+            crate::test_support::fixture_launch(MOCK_APP_SERVER)
+                .to_string_lossy()
+                .into_owned(),
             env,
             TimeoutConfig::default(),
         )
@@ -1232,7 +1236,10 @@ mod tests {
     /// (turn/completed), and the client/thread survive for later turns.
     #[tokio::test]
     async fn execute_maps_turn_events_and_keeps_client() {
-        let provider = mock_provider(HashMap::new());
+        let provider = {
+            let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
+            mock_provider(HashMap::new())
+        };
 
         let (handle, stream) = launch_and_execute(&provider, "hi").await;
         let events = collect_events(stream).await;
@@ -1344,7 +1351,10 @@ mod tests {
     /// `OpFinished(EndTurn)` (AR-1).
     #[tokio::test]
     async fn cancel_interrupts_active_turn() {
-        let provider = mock_provider(HashMap::from([("BLOCK_TURN".to_string(), "1".to_string())]));
+        let provider = {
+            let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
+            mock_provider(HashMap::from([("BLOCK_TURN".to_string(), "1".to_string())]))
+        };
 
         let (handle, stream) = launch_and_execute(&provider, "hi").await;
         let events_fut = Box::pin(collect_events(stream));
@@ -1374,7 +1384,10 @@ mod tests {
     /// terminal — `OpFailed(stream_closed)` (PD-3 backstop).
     #[tokio::test]
     async fn shutdown_tears_down_client_and_stream_terminates() {
-        let provider = mock_provider(HashMap::from([("BLOCK_TURN".to_string(), "1".to_string())]));
+        let provider = {
+            let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
+            mock_provider(HashMap::from([("BLOCK_TURN".to_string(), "1".to_string())]))
+        };
 
         let (handle, stream) = launch_and_execute(&provider, "hi").await;
         let mut stream = stream;
@@ -1404,7 +1417,10 @@ mod tests {
 
     #[tokio::test]
     async fn cancel_with_no_active_turn_is_noop() {
-        let provider = mock_provider(HashMap::new());
+        let provider = {
+            let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
+            mock_provider(HashMap::new())
+        };
         let handle = provider.launch(launch_spec()).await.expect("launch");
 
         provider
@@ -1620,7 +1636,10 @@ mod tests {
 
     #[tokio::test]
     async fn empty_prompt_is_rejected() {
-        let provider = mock_provider(HashMap::new());
+        let provider = {
+            let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
+            mock_provider(HashMap::new())
+        };
         let handle = provider.launch(launch_spec()).await.expect("launch");
 
         let result = provider

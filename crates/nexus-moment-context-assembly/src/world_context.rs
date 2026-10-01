@@ -566,9 +566,9 @@ mod tests {
         let block = build_chapter_kb_block(&CharacterViewInput::from_entries(Vec::new()), &params);
 
         assert_eq!(block.world_id, "wld_empty");
-        assert!(block.characters_in_chapter.is_empty());
-        assert!(block.locations_referenced.is_empty());
-        assert!(block.active_rules.is_empty());
+        assert_eq!(block.characters_in_chapter, Vec::<WorldContextItem>::new());
+        assert_eq!(block.locations_referenced, Vec::<WorldContextItem>::new());
+        assert_eq!(block.active_rules, Vec::<WorldContextItem>::new());
 
         let yaml = block.to_yaml();
         assert!(yaml.contains("characters_in_chapter:"));
@@ -723,9 +723,9 @@ mod tests {
         let block = build_chapter_kb_block(&CharacterViewInput::from_entries(Vec::new()), &params);
 
         // No data for wld_ghost
-        assert!(block.characters_in_chapter.is_empty());
-        assert!(block.locations_referenced.is_empty());
-        assert!(block.active_rules.is_empty());
+        assert_eq!(block.characters_in_chapter, Vec::<WorldContextItem>::new());
+        assert_eq!(block.locations_referenced, Vec::<WorldContextItem>::new());
+        assert_eq!(block.active_rules, Vec::<WorldContextItem>::new());
     }
 
     // AC7: Token budget exceeded → truncate gracefully with marker.
@@ -891,7 +891,7 @@ mod tests {
 
         let located = WorldKbQueryBuilder::by_canonical_name(&admitted, "Castle", BlockType::Scene)
             .expect("exact canonical_name + block_type match");
-        assert!(!located.entry_id.is_empty());
+        assert_ne!(located.entry_id, "");
 
         // A row that is not in the snapshot can never be resolved: absence is
         // "not admitted", never "query the World for it".
@@ -903,7 +903,10 @@ mod tests {
             WorldKbQueryBuilder::by_canonical_name(&admitted, "Ada", BlockType::Scene).is_none(),
             "block_type must match as well as canonical_name"
         );
-        assert!(WorldKbQueryBuilder::of_block_type(&[], BlockType::Character).is_empty());
+        assert_eq!(
+            WorldKbQueryBuilder::of_block_type(&[], BlockType::Character),
+            [] as [&nexus_knowledge::world_kb::KnowledgeEntryRecord; 0]
+        );
     }
 
     // v1.191 P1 T11 (durable §4.2): the chapter block reads the admitted
@@ -921,9 +924,9 @@ mod tests {
         };
 
         let empty = build_chapter_kb_block(&CharacterViewInput::from_entries(Vec::new()), &params);
-        assert!(empty.characters_in_chapter.is_empty());
-        assert!(empty.locations_referenced.is_empty());
-        assert!(empty.active_rules.is_empty());
+        assert_eq!(empty.characters_in_chapter, Vec::<WorldContextItem>::new());
+        assert_eq!(empty.locations_referenced, Vec::<WorldContextItem>::new());
+        assert_eq!(empty.active_rules, Vec::<WorldContextItem>::new());
 
         let shared = KnowledgeEntryRecord::new("wld_ctx", BlockType::Character, "SharedAda");
         let admitted = build_chapter_kb_block(

@@ -823,7 +823,7 @@ mod tests {
         let out = cap.run(serde_json::json!({"force": true})).await.unwrap();
 
         assert_eq!(out["source"], "synthetic_fallback");
-        assert!(!out["fallbackReason"].as_str().unwrap_or("").is_empty());
+        assert_ne!(out["fallbackReason"].as_str().unwrap_or(""), "");
     }
 
     // ── Constructor injection test (V1.57 P1) ────────────────────────────

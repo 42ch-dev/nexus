@@ -2,16 +2,32 @@
  * World KB entity inspector — edits a confirmed/rejected/merged KeyBlock entity
  * via `world_kb.patch_entity` (V1.73 P0 A6).
  *
- * Edits title / body / aliases / block_type with inline validation (422) and
- * surfaces per-row OCC conflicts (409) to the parent canvas, which renders the
- * KB-flavored conflict modal. Body is shown as a JSON summary field because the
- * V1.73 entity body is a free-form `Record<string, unknown>` projection; a rich
- * body editor is V1.74.
+ * Edits title / body / aliases / block_type plus — on holder-capable kinds
+ * (`character` / `faction` / `organization`, V1.164 PD-8/PD-12) — the
+ * functional-dialect `modules.mental` and `modules.belief` carriers (v1.203
+ * P2, whole-first-level-value upsert per AR-4/PD-12). Daemon 422s use the
+ * frozen field-prefix grammar `modules.<dialect>[.<index>].<field>: <reason>`
+ * and are mapped 1:1 back onto the offending form fields; 409s hand off to
+ * the parent canvas conflict modal. Body is shown as a JSON summary field
+ * because the V1.73 entity body is a free-form `Record<string, unknown>`
+ * projection; a rich body editor is V1.74.
+ *
+ * STOP-condition contract: stored `modules.mental` keys outside the locked
+ * nine-field vocabulary are never silently dropped — they render as raw-JSON
+ * fallback rows (key + JSON text area) so unknown inner keys round-trip
+ * verbatim (PD-13). A stored `modules.mental` value the structured editor
+ * cannot represent at all (a non-object: array, string, number, …) likewise
+ * renders as a raw-JSON fallback of the complete stored value (Greptile P1),
+ * text-compared dirty so an unrelated save never rewrites the dialect.
+ * Stored `modules.belief` arrays the structured row editor cannot represent
+ * (non-array, or containing a non-object row) likewise render as a raw-JSON
+ * fallback of the complete stored value (QC1-F001/QC3-001), and module dirty
+ * detection / emission is gated by the holder-kind authorization, not just
+ * the rendered editors.
  */
 import { useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronRight } from 'lucide-react';
-
 import { Textarea } from '@/components/ui/textarea';
 import { Select } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
@@ -27,37 +43,151 @@ export interface EntityEditForm {
   bodyText: string;
   aliasesText: string; // comma-separated in the UI; converted to string[] on submit
   block_type: BlockType;
+  /**
+   * `modules.mental` as JSON text per locked nine-field key ('' = absent).
+   * Whole-first-level-value upsert: the parsed object is written back complete.
+   */
+  mental: Record<(typeof MENTAL_FIELD_ORDER)[number], string>;
+  /**
+   * Raw-JSON fallback mode: non-null when the stored `modules.mental` member
+   * is nonrepresentable for the structured nine-field editor (a stored
+   * non-object value — array, string, number, …). Holds the JSON text of the
+   * COMPLETE stored value so an untouched seed stays byte-identical (not
+   * dirty) and an unrelated save never rewrites the dialect (mirror of
+   * `beliefRawText`, QC1-F001/QC3-001; preservation discipline rule 1–2).
+   * The author repairs it deliberately as JSON; structured fields stay
+   * active only when the stored value is a representable object.
+   * Optional: `formFromEntity` always sets it; hand-rolled form literals in
+   * reapply-path tests may omit it (absent = structured mode).
+   */
+  mentalRawText?: string | null;
+  /**
+   * STOP-condition fallback rows: stored mental keys outside the locked
+   * vocabulary, edited as raw JSON so unknown inner keys round-trip verbatim.
+   * A blanked row clears that inner key on save (container-level semantics).
+   */
+  mentalExtras: Array<{ key: string; text: string }>;
+  /** `modules.belief` rows; '' on a field means "absent" on that row. */
+  beliefs: BeliefRowForm[];
+  /**
+   * Raw-JSON fallback mode (QC1-F001/QC3-001): non-null when the stored
+   * `modules.belief` member is nonrepresentable for the structured row
+   * editor (non-array value, or an array containing a non-object row).
+   * Holds the JSON text of the COMPLETE stored value so an untouched seed
+   * stays byte-identical (not dirty) and an unrelated save never rewrites
+   * the dialect; the author repairs it deliberately as JSON (mirrors the
+   * O3 observation raw fallback, timeline-inspector C1).
+   */
+  beliefRawText: string | null;
 }
+
+/** One editable `modules.belief` row (BeliefPropositionRaw as flat strings). */
+export interface BeliefRowForm {
+  holder: string;
+  proposition: string;
+  order: string;
+  truth: string;
+  access: string;
+  representation: string;
+  content_type: string;
+  source: string;
+  context: string;
+  /**
+   * Complete stored row this form row was seeded from (absent for rows added
+   * in the form). Preserved so untouched members — unknown inner keys, nulls,
+   * intentional whitespace — round-trip verbatim on whole-value write
+   * (frozen write contract §3 / PD-13, L2-T2-002).
+   */
+  original?: Record<string, unknown>;
+}
+
+/** Functional module dialects carried under `modules` (mental / belief). */
+export type ModuleDialect = 'mental' | 'belief';
 
 /** Build the form from a selected node's backing projection. */
 export function formFromEntity(entity: WorldKbEntityProjection): EntityEditForm {
+  const mentalRaw = entity.modules?.mental;
+  // Representability gate (preservation discipline rule 1): the structured
+  // nine-field editor (plus extras rows) covers plain objects only. A stored
+  // NON-object (array, string, number, …) seeds the raw-JSON fallback with
+  // the COMPLETE stored value — `mentalRecord` would have read it as '{}',
+  // and an edited save would then silently discard it (Greptile P1).
+  const mentalStructured =
+    mentalRaw === undefined ||
+    mentalRaw === null ||
+    (typeof mentalRaw === 'object' && !Array.isArray(mentalRaw));
+  const mental = mentalStructured ? mentalRecord(entity) : {};
+  const mentalForm = Object.fromEntries(MENTAL_FIELD_ORDER.map((key) => [key, ''])) as EntityEditForm['mental'];
+  const mentalExtras: EntityEditForm['mentalExtras'] = [];
+  for (const [key, value] of Object.entries(mental)) {
+    if ((MENTAL_FIELD_ORDER as readonly string[]).includes(key)) {
+      mentalForm[key as (typeof MENTAL_FIELD_ORDER)[number]] = stringifyJson(value);
+    } else {
+      mentalExtras.push({ key, text: stringifyJson(value) });
+    }
+  }
+  const beliefRaw = entity.modules?.belief;
+  const beliefStructured =
+    beliefRaw === undefined ||
+    (Array.isArray(beliefRaw) &&
+      beliefRaw.every(
+        (row) => row !== null && typeof row === 'object' && !Array.isArray(row),
+      ));
   return {
     title: entity.canonical_name,
     bodyText: entity.body ? JSON.stringify(entity.body, null, 2) : '',
     aliasesText: (entity.aliases ?? []).join(', '),
     block_type: entity.block_type,
+    mental: mentalForm,
+    // Nonrepresentable stored mental → raw-JSON fallback: the complete
+    // stored value seeds the text untouched so an unrelated save is neither
+    // dirty nor destructive; structured seeding would read the value as {}
+    // and silently discard it on the next edited save.
+    mentalRawText: mentalStructured ? null : stringifyJson(mentalRaw),
+    mentalExtras,
+    // Nonrepresentable stored belief → raw-JSON fallback (QC1-F001/QC3-001):
+    // the complete stored value seeds the text untouched so an unrelated
+    // save is neither dirty nor destructive; structured seeding keeps only
+    // object rows and would silently shorten the stored array.
+    beliefs: beliefStructured ? beliefRowsFromEntity(entity) : [],
+    beliefRawText: beliefStructured ? null : stringifyJson(beliefRaw),
   };
 }
 
 /** Which form fields differ from the canonical entity (drives patch + overlap). */
-function dirtyFields(form: EntityEditForm, entity: WorldKbEntityProjection): WorldKbEntityField[] {
+function dirtyFields(
+  form: EntityEditForm,
+  entity: WorldKbEntityProjection,
+  isHolderKind: boolean,
+): WorldKbEntityField[] {
   const fields: WorldKbEntityField[] = [];
   if (form.title !== entity.canonical_name) fields.push('title');
   if (form.aliasesText !== (entity.aliases ?? []).join(', ')) fields.push('aliases');
   if (form.block_type !== entity.block_type) fields.push('block_type');
   const canonBody = entity.body ? JSON.stringify(entity.body, null, 2) : '';
   if (form.bodyText !== canonBody) fields.push('body');
+  // Holder-kind gate (QC1-F001/QC3-001): module dirty detection is gated by
+  // the same authorization as the rendered editors — a non-holder kind must
+  // never author modules (not even a title-only save), and its module
+  // content stays read-only.
+  if (isHolderKind && (mentalDirty(form, entity) || beliefsDirty(form, entity))) {
+    fields.push('modules');
+  }
   return fields;
 }
 
-type WorldKbEntityField = 'title' | 'body' | 'aliases' | 'block_type';
+export type WorldKbEntityField = 'title' | 'body' | 'aliases' | 'block_type' | 'modules';
 
 const FIELD_LABEL_KEYS: Record<WorldKbEntityField, string> = {
   title: 'worldKb.entityInspector.field.title',
   body: 'worldKb.entityInspector.field.body',
   aliases: 'worldKb.entityInspector.field.aliases',
   block_type: 'worldKb.entityInspector.field.blockType',
+  modules: 'worldKb.entityInspector.field.modules',
 };
+
+/** Kinds that can hold mental/belief modules (V1.164 PD-8/PD-12 — do not widen). */
+export const HOLDER_BLOCK_TYPES: readonly BlockType[] = ['character', 'faction', 'organization'];
 
 /** Handbook order for the nine-field mental table (product locks §Mental field vocabulary). */
 const MENTAL_FIELD_ORDER = [
@@ -84,15 +214,407 @@ const MENTAL_FIELD_LABEL_KEYS: Record<(typeof MENTAL_FIELD_ORDER)[number], strin
   constraints: 'worldKb.entityInspector.mentalState.field.constraints',
 };
 
+/** Belief row fields in handbook order (BeliefPropositionRaw member names). */
+const BELIEF_FIELDS = [
+  'holder',
+  'proposition',
+  'order',
+  'truth',
+  'access',
+  'representation',
+  'content_type',
+  'source',
+  'context',
+] as const;
+
+type BeliefField = (typeof BELIEF_FIELDS)[number];
+
+/** Closed handbook label spaces (mirrors the daemon's `validate_closed_belief_labels`). */
+const BELIEF_CLOSED_LABELS: Record<Exclude<BeliefField, 'holder' | 'proposition' | 'order'>, readonly string[]> = {
+  truth: ['True', 'False', 'Unknown'],
+  access: ['Private', 'Shared', 'Public'],
+  representation: ['Explicit', 'Implicit'],
+  content_type: [
+    'Location',
+    'Contents/Physical State',
+    'Identity/Relation',
+    'Epistemic',
+    'Desire/Intention',
+    'Emotion',
+    'Trait/Value',
+    'Action/Event',
+  ],
+  source: ['Narration', 'Perception', 'Memory', 'Testimony', 'Inference', 'Imagination', 'Unknown'],
+  context: ['Deceptive', 'Temporal', 'Counterfactual', 'Neutral'],
+};
+
+const BELIEF_FIELD_LABEL_KEYS: Record<BeliefField, string> = {
+  holder: 'worldKb.entityInspector.belief.field.holder',
+  proposition: 'worldKb.entityInspector.belief.field.proposition',
+  order: 'worldKb.entityInspector.belief.field.order',
+  truth: 'worldKb.entityInspector.belief.field.truth',
+  access: 'worldKb.entityInspector.belief.field.access',
+  representation: 'worldKb.entityInspector.belief.field.representation',
+  content_type: 'worldKb.entityInspector.belief.field.contentType',
+  source: 'worldKb.entityInspector.belief.field.source',
+  context: 'worldKb.entityInspector.belief.field.context',
+};
+
+/** Closed-label belief fields as a lookup (422 prefix-mapping target check). */
+const BELIEF_CLOSED_FIELDS: Record<string, true> = {
+  truth: true,
+  access: true,
+  representation: true,
+  content_type: true,
+  source: true,
+  context: true,
+};
+
+function emptyBeliefRow(): BeliefRowForm {
+  return {
+    holder: '',
+    proposition: '',
+    order: '',
+    truth: '',
+    access: '',
+    representation: '',
+    content_type: '',
+    source: '',
+    context: '',
+  };
+}
+
+function stringifyJson(value: unknown): string {
+  return JSON.stringify(value, null, 2);
+}
+
 /**
- * Read-only "Mental State" section (V1.164 P3 Task 3, AC-V1164-12/15 + PD-16).
- *
- * Collapsible via the header toggle. Renders every populated nine-field key
- * (bold label + JSON value row, no input controls). Returns null when
- * `modules.mental` is absent / null / has no populated keys — no empty panel,
- * no "N/A" placeholders.
+ * Stored member → editable/compare text. Primitives keep their plain `String`
+ * text (closed-label selects must match the frozen handbook strings exactly,
+ * e.g. 'True'); structured values render as stable pretty JSON instead of
+ * the `[object Object]` default stringification (no-base-to-string).
  */
-function MentalStateSection({ mental }: { mental: Record<string, unknown> }) {
+function memberText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+    return String(value);
+  }
+  return stringifyJson(value);
+}
+
+/** Stored `modules.mental` as a plain record ('{}' when absent / null / non-object). */
+function mentalRecord(entity: WorldKbEntityProjection): Record<string, unknown> {
+  const mental = entity.modules?.mental;
+  return mental !== undefined && mental !== null && typeof mental === 'object' && !Array.isArray(mental)
+    ? (mental as Record<string, unknown>)
+    : {};
+}
+
+/** Stored `modules.belief` object rows verbatim ('[]' when absent / non-array). */
+function beliefRowsRaw(entity: WorldKbEntityProjection): Array<Record<string, unknown>> {
+  const belief = entity.modules?.belief;
+  if (!Array.isArray(belief)) return [];
+  return belief.filter(
+    (raw): raw is Record<string, unknown> =>
+      raw !== null && typeof raw === 'object' && !Array.isArray(raw),
+  );
+}
+
+/**
+ * Stored `modules.belief` as flat editable rows. Known members seed with the
+ * exact stored text (absent / null → '', no trimming); every row retains its
+ * complete stored content in `original` so untouched members round-trip
+ * verbatim.
+ */
+function beliefRowsFromEntity(entity: WorldKbEntityProjection): BeliefRowForm[] {
+  return beliefRowsRaw(entity).map((row) => {
+    const form = emptyBeliefRow();
+    for (const field of BELIEF_FIELDS) {
+      const value = row[field];
+      form[field] = value === undefined || value === null ? '' : memberText(value);
+    }
+    return { ...form, original: { ...row } };
+  });
+}
+
+function mentalDirty(form: EntityEditForm, entity: WorldKbEntityProjection): boolean {
+  // Raw fallback mode (Greptile P1 fix): text-compared dirty check — an
+  // untouched nonrepresentable seed (array, string, …) is NOT dirty, so an
+  // unrelated save is never blocked and never rewrites the stored dialect
+  // (preservation discipline rule 2, mirror of beliefsDirty).
+  if (form.mentalRawText != null) {
+    return form.mentalRawText.trim() !== stringifyJson(entity.modules?.mental).trim();
+  }
+  const canonical = mentalRecord(entity);
+  for (const key of MENTAL_FIELD_ORDER) {
+    const canonText = key in canonical ? stringifyJson(canonical[key]) : '';
+    if (form.mental[key].trim() !== canonText.trim()) return true;
+  }
+  const canonExtras = Object.keys(canonical).filter((key) => !(MENTAL_FIELD_ORDER as readonly string[]).includes(key));
+  if (form.mentalExtras.length !== canonExtras.length) return true;
+  return form.mentalExtras.some((extra, i) => {
+    if (extra.key !== canonExtras[i]) return true;
+    return extra.text.trim() !== stringifyJson(canonical[extra.key]).trim();
+  });
+}
+
+/**
+ * Parse the mental module texts into the complete first-level value.
+ * Returns per-field errors keyed `mental.<key>` (the 422 mapping key shape).
+ *
+ * QC1-F002: arbitrary stored keys — including a legal unknown own key like
+ * `__proto__` accepted under PD-13 — are collected as entries and built with
+ * `Object.fromEntries`, which creates OWN DATA properties. Plain assignment
+ * (`value[key] = …`) would invoke the inherited `__proto__` setter and lose
+ * the key from JSON serialization on both submit and conflict reapply (this
+ * builder backs both paths, including `modulesPatchFromForm`).
+ *
+ * Raw fallback (Greptile P1 fix) — `form.mentalRawText !== null` when the
+ * stored member was a nonrepresentable non-object value. The parsed JSON
+ * object becomes the complete value verbatim (deliberate repair); invalid
+ * JSON or a non-object parse keeps the raw text in the built value so the
+ * exact dirty check still sees the edit (mirrors the belief `raw` handling)
+ * while the error blocks the whole write.
+ */
+function buildMentalValue(
+  form: EntityEditForm,
+  jsonError: (field: string) => string,
+): { value: Record<string, unknown>; errors: Record<string, string> } {
+  // `!= null` (not `!== null`): hand-rolled form literals may leave the
+  // field undefined — only a STRING enables raw mode.
+  if (form.mentalRawText != null) {
+    const rawText = form.mentalRawText.trim();
+    try {
+      const parsed: unknown = JSON.parse(rawText);
+      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('mental must be a JSON object');
+      }
+      return { value: parsed as Record<string, unknown>, errors: {} };
+    } catch {
+      return {
+        value: { raw: rawText },
+        errors: { 'mental.raw': jsonError('raw') },
+      };
+    }
+  }
+  const entries: Array<[string, unknown]> = [];
+  const errors: Record<string, string> = {};
+  const put = (key: string, text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return; // blank clears / omits the inner key
+    try {
+      entries.push([key, JSON.parse(trimmed)]);
+    } catch {
+      errors[`mental.${key}`] = jsonError(key);
+    }
+  };
+  for (const key of MENTAL_FIELD_ORDER) put(key, form.mental[key]);
+  for (const extra of form.mentalExtras) put(extra.key, extra.text);
+  return { value: Object.fromEntries(entries), errors };
+}
+
+/**
+ * Exact dirty check: the built whole value must match the stored array
+ * verbatim. No normalization on either side — a normalized comparison would
+ * hide loss of unknown inner keys or stored whitespace (L2-T2-002).
+ */
+function beliefsDirty(form: EntityEditForm, entity: WorldKbEntityProjection): boolean {
+  const belief = entity.modules?.belief;
+  // Raw fallback mode (QC1-F001/QC3-001): text-compared dirty check — an
+  // untouched nonrepresentable seed is NOT dirty, so an unrelated save is
+  // never blocked and never rewrites the stored dialect.
+  if (form.beliefRawText !== null) {
+    return form.beliefRawText.trim() !== stringifyJson(belief).trim();
+  }
+  const canonical = Array.isArray(belief) ? belief : [];
+  return JSON.stringify(buildBeliefValue(form, (field) => field).value) !== JSON.stringify(canonical);
+}
+
+/**
+ * Parse the belief rows into the complete first-level array. Rows seeded from
+ * the stored array start from their complete original content (`original`):
+ * an edited member applies on top (blank clears the member), while untouched
+ * members — unknown inner keys, nulls, intentional whitespace — round-trip
+ * exactly (frozen write contract §3 / PD-13, L2-T2-002). Rows added in the
+ * form have no `original` and contribute
+ * non-empty trimmed members only; all-blank new rows are dropped. An
+ * untouched seeded row — every editable member equal to its stored text,
+ * even a degenerate stored `{}` — round-trips verbatim instead of being
+ * dropped, so an unrelated edit cannot mark belief dirty or shorten the
+ * stored array (L2-T2-002 re-review remainder). Explicit remove (row
+ * deletion) and blank-to-clear of a populated row keep their delete
+ * semantics: clearing every member of a stored row drops it, while clearing
+ * members of an already-empty row is a no-op that preserves the row.
+ * Returns per-field errors keyed `belief.<index>.<field>` (the 422 mapping
+ * key shape) — `<index>` is the FORM row index for client-side errors.
+ *
+ * Raw fallback (QC1-F001/QC3-001) — `form.beliefRawText !== null` when the
+ * stored member was nonrepresentable (non-array, or containing a non-object
+ * row). The parsed JSON array becomes the value verbatim; invalid JSON or a
+ * non-array parse keeps the raw text in the built value so the exact dirty
+ * check still sees the edit (mirrors the `order` handling) while the error
+ * blocks the whole write. Deliberate repair is the only way the value
+ * changes.
+ *
+ * `wireToForm` (QC1-F003) — for each emitted wire element, the index of the
+ * FORM row that produced it. The builder compacts the submitted array
+ * (dropped blank rows / cleared stored rows), so daemon 422 row addresses
+ * (wire indices) must be translated through this map before they can be
+ * mapped onto form rows.
+ */
+function buildBeliefValue(
+  form: EntityEditForm,
+  orderError: (field: string) => string,
+): {
+  value: Array<Record<string, unknown>>;
+  errors: Record<string, string>;
+  wireToForm: number[];
+} {
+  if (form.beliefRawText !== null) {
+    const rawText = form.beliefRawText.trim();
+    try {
+      const parsed: unknown = JSON.parse(rawText);
+      if (!Array.isArray(parsed)) throw new Error('belief must be a JSON array');
+      return { value: parsed as Array<Record<string, unknown>>, errors: {}, wireToForm: [] };
+    } catch {
+      return {
+        value: [{ raw: rawText }],
+        errors: { 'belief.raw': orderError('raw') },
+        wireToForm: [],
+      };
+    }
+  }
+  const value: Array<Record<string, unknown>> = [];
+  const wireToForm: number[] = [];
+  const errors: Record<string, string> = {};
+  form.beliefs.forEach((row, index) => {
+    let untouched = row.original !== undefined;
+    if (untouched) {
+      for (const field of BELIEF_FIELDS) {
+        const originalValue = row.original![field];
+        const originalText = originalValue === undefined || originalValue === null ? '' : memberText(originalValue);
+        if (row[field] !== originalText) {
+          untouched = false;
+          break;
+        }
+      }
+    }
+    if (untouched) {
+      // Seeded row with no author edit: emit the stored content exactly —
+      // including a stored `{}`, which must survive at its original index.
+      value.push({ ...row.original! });
+      wireToForm.push(index);
+      return;
+    }
+    const out: Record<string, unknown> = row.original ? { ...row.original } : {};
+    for (const field of BELIEF_FIELDS) {
+      const text = row[field];
+      if (row.original) {
+        const originalValue = row.original[field];
+        const originalText = originalValue === undefined || originalValue === null ? '' : memberText(originalValue);
+        if (text === originalText) continue; // untouched: keep the stored value exactly
+        if (!text.trim()) {
+          delete out[field]; // blanked by the author: clear the member
+          continue;
+        }
+      } else if (!text.trim()) {
+        continue;
+      }
+      if (field === 'order') {
+        const n = Number(text.trim());
+        if (!Number.isInteger(n)) {
+          errors[`belief.${index}.order`] = orderError(field);
+          // Keep the invalid raw text in the built value so the exact dirty
+          // check still sees the edit — otherwise the row would compare equal
+          // to the stored one and the submit (which surfaces this error)
+          // could never fire. The error blocks the write, so the raw string
+          // never reaches the wire.
+          out.order = text.trim();
+          continue;
+        }
+        out.order = n;
+      } else {
+        out[field] = text.trim();
+      }
+    }
+    if (Object.keys(out).length > 0) {
+      value.push(out);
+      wireToForm.push(index);
+    }
+  });
+  return { value, errors, wireToForm };
+}
+
+/**
+ * Best-effort complete modules value for the 409 reapply path, restricted to
+ * the exact dialect set that was dirty at submit time (L2-T2-001): reapplying
+ * must never rewrite the other dialect — a concurrent writer may have
+ * populated it (or the captured form may predate that population). The
+ * captured form already passed client-side validation at submit time, so
+ * parsed values round-trip; any unparseable requested dialect is omitted
+ * rather than blocking reapply.
+ */
+export function modulesPatchFromForm(
+  form: EntityEditForm,
+  dialects: readonly ModuleDialect[],
+): NonNullable<WorldKbEntityPatch['modules']> | undefined {
+  const modules: NonNullable<WorldKbEntityPatch['modules']> = {};
+  if (dialects.includes('mental')) {
+    const mental = buildMentalValue(form, (field) => field);
+    if (Object.keys(mental.errors).length === 0) modules.mental = mental.value;
+  }
+  if (dialects.includes('belief')) {
+    const belief = buildBeliefValue(form, (field) => field);
+    if (Object.keys(belief.errors).length === 0) modules.belief = belief.value;
+  }
+  return Object.keys(modules).length > 0 ? modules : undefined;
+}
+
+/**
+ * Map one daemon 422 entry onto a form field when it carries the frozen
+ * prefix grammar; unmatched / whole-dialect entries stay section-level with
+ * the original entry text verbatim. The complete editable belief-member set
+ * maps 1:1 (holder / proposition / order included, L2-T2-003). A belief
+ * address carries a WIRE index: the builder compacts the submitted array
+ * (QC1-F003), so it is translated through `wireToForm` (emitted wire element
+ * → contributing form row) before mapping; a wire index with no contributing
+ * form row stays section-level verbatim.
+ */
+function mapValidationEntry(
+  entry: string,
+  wireToForm: readonly number[],
+): { key?: string; message: string } {
+  if (!entry.startsWith('modules.')) return { message: entry };
+  const sep = entry.indexOf(': ');
+  if (sep === -1) return { message: entry };
+  const addr = entry.slice('modules.'.length, sep);
+  const reason = entry.slice(sep + 2);
+  const parts = addr.split('.');
+  if (parts[0] === 'mental' && parts.length === 2) {
+    if ((MENTAL_FIELD_ORDER as readonly string[]).includes(parts[1])) {
+      return { key: `mental.${parts[1]}`, message: reason };
+    }
+    return { message: entry };
+  }
+  if (
+    parts[0] === 'belief' &&
+    parts.length === 3 &&
+    /^\d+$/.test(parts[1]) &&
+    (BELIEF_FIELDS as readonly string[]).includes(parts[2])
+  ) {
+    const formIndex = wireToForm[Number(parts[1])];
+    if (formIndex === undefined) return { message: entry };
+    return { key: `belief.${formIndex}.${parts[2]}`, message: reason };
+  }
+  return { message: entry };
+}
+
+/**
+ * Read-only "Mental State" section for non-holder kinds (V1.164 P3 Task 3,
+ * AC-V1164-12/15 + PD-16): populated values render label + JSON rows, no
+ * input controls, no create affordance. Returns null when nothing populated.
+ */
+function MentalStateReadOnlySection({ mental }: { mental: Record<string, unknown> }) {
   const { t } = useTranslation('canvas');
   const [open, setOpen] = useState(true);
   const regionId = useId();
@@ -129,7 +651,306 @@ function MentalStateSection({ mental }: { mental: Record<string, unknown> }) {
                 {t(MENTAL_FIELD_LABEL_KEYS[key])}
               </dt>
               <dd className="text-copy-13 font-mono text-gray-1000 whitespace-pre-wrap break-words">
-                {JSON.stringify(mental[key], null, 2)}
+                {stringifyJson(mental[key])}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+    </section>
+  );
+}
+
+/** Editable "Mental State" section (holder kinds, v1.203 P2 O1). */
+function MentalStateSection({
+  form,
+  fieldErrors,
+  onMentalChange,
+  onExtraChange,
+  onRawChange,
+}: {
+  form: EntityEditForm;
+  fieldErrors: Record<string, string>;
+  onMentalChange: (key: (typeof MENTAL_FIELD_ORDER)[number], value: string) => void;
+  onExtraChange: (index: number, value: string) => void;
+  onRawChange: (value: string) => void;
+}) {
+  const { t } = useTranslation('canvas');
+  const [open, setOpen] = useState(true);
+  const regionId = useId();
+  const title = t('worldKb.entityInspector.mentalState.title');
+  return (
+    <section
+      className="mt-3 border-t border-gray-alpha-300 pt-2"
+      data-testid="mental-state-section"
+      aria-label={title}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-controls={regionId}
+        className="flex w-full items-center gap-1.5 text-left text-label-14 font-semibold text-gray-900"
+      >
+        {open ? (
+          <ChevronDown className="h-4 w-4 text-gray-700" aria-hidden />
+        ) : (
+          <ChevronRight className="h-4 w-4 text-gray-700" aria-hidden />
+        )}
+        {title}
+      </button>
+      {open ? (
+        form.mentalRawText !== null ? (
+          /* Raw-JSON fallback (Greptile P1 fix): the stored member is a
+             non-object value the structured nine-field editor cannot
+             represent (stored array, string, …). The complete stored value
+             seeds the textarea untouched (not dirty); the author repairs it
+             deliberately as JSON, and the write requires a valid JSON
+             object. */
+          <div className="mt-1.5 flex flex-col gap-1">
+            <Label htmlFor="wkbe-mental-raw-json">
+              {t('worldKb.entityInspector.mentalState.rawLabel')}
+            </Label>
+            <Textarea
+              id="wkbe-mental-raw-json"
+              rows={6}
+              className="font-mono text-copy-13-mono"
+              value={form.mentalRawText}
+              onChange={(e) => onRawChange(e.target.value)}
+              placeholder={t('worldKb.entityInspector.mentalState.rawPlaceholderJson')}
+              spellCheck={false}
+              data-testid="mental-raw-json"
+            />
+            {fieldErrors['mental.raw'] ? (
+              <p className="text-copy-13 text-red-1000">{fieldErrors['mental.raw']}</p>
+            ) : null}
+          </div>
+        ) : (
+        <div id={regionId} className="mt-1.5 flex flex-col gap-2">
+          {MENTAL_FIELD_ORDER.map((key) => (
+            <div key={key} className="flex flex-col gap-0.5">
+              <Label htmlFor={`wkbe-mental-${key}`}>{t(MENTAL_FIELD_LABEL_KEYS[key])}</Label>
+              <Textarea
+                id={`wkbe-mental-${key}`}
+                rows={2}
+                className="font-mono text-copy-13-mono"
+                value={form.mental[key]}
+                onChange={(e) => onMentalChange(key, e.target.value)}
+                placeholder="{}"
+                spellCheck={false}
+              />
+              {fieldErrors[`mental.${key}`] ? (
+                <p className="text-copy-13 text-red-1000">{fieldErrors[`mental.${key}`]}</p>
+              ) : null}
+            </div>
+          ))}
+          {form.mentalExtras.map((extra, i) => (
+            <div key={extra.key} className="flex flex-col gap-0.5">
+              <Label htmlFor={`wkbe-mental-extra-${i}`}>{extra.key}</Label>
+              <Textarea
+                id={`wkbe-mental-extra-${i}`}
+                rows={2}
+                className="font-mono text-copy-13-mono"
+                value={extra.text}
+                onChange={(e) => onExtraChange(i, e.target.value)}
+                placeholder="{}"
+                spellCheck={false}
+              />
+              {fieldErrors[`mental.${extra.key}`] ? (
+                <p className="text-copy-13 text-red-1000">{fieldErrors[`mental.${extra.key}`]}</p>
+              ) : null}
+            </div>
+          ))}
+        </div>
+        )
+      ) : null}
+    </section>
+  );
+}
+
+/** Editable "Belief Propositions" section (holder kinds, v1.203 P2 O2). */
+function BeliefSection({
+  beliefs,
+  rawText,
+  fieldErrors,
+  onRowChange,
+  onAdd,
+  onRemove,
+  onRawChange,
+}: {
+  beliefs: BeliefRowForm[];
+  /** Raw-JSON fallback mode (QC1-F001/QC3-001): non-null when the stored array is nonrepresentable. */
+  rawText: string | null;
+  fieldErrors: Record<string, string>;
+  onRowChange: (index: number, field: BeliefField, value: string) => void;
+  onAdd: () => void;
+  onRemove: (index: number) => void;
+  onRawChange: (value: string) => void;
+}) {
+  const { t } = useTranslation('canvas');
+  const [open, setOpen] = useState(true);
+  const regionId = useId();
+  const title = t('worldKb.entityInspector.belief.title');
+  return (
+    <section
+      className="mt-3 border-t border-gray-alpha-300 pt-2"
+      data-testid="belief-section"
+      aria-label={title}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-controls={regionId}
+        className="flex w-full items-center gap-1.5 text-left text-label-14 font-semibold text-gray-900"
+      >
+        {open ? (
+          <ChevronDown className="h-4 w-4 text-gray-700" aria-hidden />
+        ) : (
+          <ChevronRight className="h-4 w-4 text-gray-700" aria-hidden />
+        )}
+        {title}
+      </button>
+      {open ? (
+        rawText !== null ? (
+          /* Raw-JSON fallback (QC1-F001/QC3-001): the stored array has a shape
+             the structured row editor cannot represent (non-array, or a
+             non-object row). The complete stored value seeds the textarea
+             untouched (not dirty); the author repairs it deliberately as
+             JSON, and the write requires a valid JSON array. */
+          <div className="mt-1.5 flex flex-col gap-1">
+            <Label htmlFor="wkbe-belief-raw-json">
+              {t('worldKb.entityInspector.belief.rawLabel')}
+            </Label>
+            <Textarea
+              id="wkbe-belief-raw-json"
+              rows={6}
+              className="font-mono text-copy-13-mono"
+              value={rawText}
+              onChange={(e) => onRawChange(e.target.value)}
+              placeholder={t('worldKb.entityInspector.belief.rawPlaceholderJson')}
+              spellCheck={false}
+              data-testid="belief-raw-json"
+            />
+            {fieldErrors['belief.raw'] ? (
+              <p className="text-copy-13 text-red-1000">{fieldErrors['belief.raw']}</p>
+            ) : null}
+          </div>
+        ) : (
+        <div id={regionId} className="mt-1.5 flex flex-col gap-3">
+          {beliefs.map((row, index) => (
+            <fieldset
+              key={index}
+              className="flex flex-col gap-1.5 rounded-card border border-gray-alpha-300 p-2"
+            >
+              {BELIEF_FIELDS.map((field) => {
+                const error = fieldErrors[`belief.${index}.${field}`];
+                const label = t(BELIEF_FIELD_LABEL_KEYS[field]);
+                const id = `wkbe-belief-${index}-${field}`;
+                return (
+                  <div key={field} className="flex flex-col gap-0.5">
+                    <Label htmlFor={id}>{label}</Label>
+                    {field === 'proposition' ? (
+                      <Textarea
+                        id={id}
+                        rows={2}
+                        value={row[field]}
+                        onChange={(e) => onRowChange(index, field, e.target.value)}
+                      />
+                    ) : BELIEF_CLOSED_FIELDS[field] ? (
+                      <Select
+                        id={id}
+                        value={row[field]}
+                        onChange={(e) => onRowChange(index, field, e.target.value)}
+                      >
+                        <option value="">{t('worldKb.entityInspector.belief.emptyOption')}</option>
+                        {BELIEF_CLOSED_LABELS[field as Exclude<BeliefField, 'holder' | 'proposition' | 'order'>].map(
+                          (option) => (
+                            <option key={option} value={option}>
+                              {/*
+                                The exact frozen handbook string stays the option *value*;
+                                the author-visible label comes from the en/zh-CN catalog
+                                (L2-T2-004). Key suffixes are generated with the same
+                                non-alphanumeric→'_' slug as the locale JSON entries.
+                              */}
+                              {t(
+                                `worldKb.entityInspector.belief.option.${field}.${option.replace(/[^A-Za-z0-9]+/g, '_')}`,
+                                { defaultValue: option },
+                              )}
+                            </option>
+                          ),
+                        )}
+                      </Select>
+                    ) : (
+                      <Input
+                        id={id}
+                        value={row[field]}
+                        onChange={(e) => onRowChange(index, field, e.target.value)}
+                      />
+                    )}
+                    {error ? <p className="text-copy-13 text-red-1000">{error}</p> : null}
+                  </div>
+                );
+              })}
+              <Button
+                type="button"
+                variant="tertiary"
+                size="small"
+                onClick={() => onRemove(index)}
+                aria-label={t('worldKb.entityInspector.belief.removeRow', { index: index + 1 })}
+              >
+                {t('worldKb.entityInspector.belief.removeRow', { index: index + 1 })}
+              </Button>
+            </fieldset>
+          ))}
+          <Button type="button" variant="tertiary" size="small" onClick={onAdd}>
+            {t('worldKb.entityInspector.belief.addRow')}
+          </Button>
+        </div>
+        )
+      ) : null}
+    </section>
+  );
+}
+
+/** Read-only "Belief Propositions" section for non-holder kinds (PD-16 parity with O1). */
+function BeliefReadOnlySection({ beliefs }: { beliefs: Array<Record<string, unknown>> }) {
+  const { t } = useTranslation('canvas');
+  const [open, setOpen] = useState(true);
+  const regionId = useId();
+  if (beliefs.length === 0) {
+    return null;
+  }
+  const title = t('worldKb.entityInspector.belief.title');
+  return (
+    <section
+      className="mt-3 border-t border-gray-alpha-300 pt-2"
+      data-testid="belief-section"
+      aria-label={title}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-controls={regionId}
+        className="flex w-full items-center gap-1.5 text-left text-label-14 font-semibold text-gray-900"
+      >
+        {open ? (
+          <ChevronDown className="h-4 w-4 text-gray-700" aria-hidden />
+        ) : (
+          <ChevronRight className="h-4 w-4 text-gray-700" aria-hidden />
+        )}
+        {title}
+      </button>
+      {open ? (
+        <dl id={regionId} className="mt-1.5 flex flex-col gap-2">
+          {beliefs.map((row, index) => (
+            <div key={index} className="flex flex-col gap-0.5">
+              <dt className="text-label-14 font-semibold text-gray-900">
+                {t('worldKb.entityInspector.belief.readonlyRow', { index: index + 1 })}
+              </dt>
+              <dd className="text-copy-13 font-mono text-gray-1000 whitespace-pre-wrap break-words">
+                {stringifyJson(row)}
               </dd>
             </div>
           ))}
@@ -155,6 +976,8 @@ export interface EntityInspectorProps {
     conflictingPath: string;
     draft: EntityEditForm;
     dirtyFields: WorldKbEntityField[];
+    /** Exact module dialect set this submit intended to write ([] when modules was clean). */
+    dirtyDialects: ModuleDialect[];
   }) => void;
   /** Optional external reseed (e.g. after "Use current" in the conflict modal). */
   reseedSignal?: number;
@@ -171,31 +994,38 @@ export function EntityInspector({
   const { t } = useTranslation('canvas');
   const [form, setForm] = useState<EntityEditForm>(() => formFromEntity(entity));
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
-  // PD-16: null / undefined / non-object modules.mental skips the whole
-  // section — no empty panel, no placeholder rows.
-  const mental =
-    entity.modules?.mental !== undefined &&
-    entity.modules.mental !== null &&
-    typeof entity.modules.mental === 'object'
-      ? (entity.modules.mental as Record<string, unknown>)
-      : undefined;
+  // Holder-kind gate (V1.164 PD-8/PD-12): the module editors only open on
+  // holder-capable kinds; other kinds keep the PD-16 read-only rendering.
+  const isHolderKind = HOLDER_BLOCK_TYPES.includes(entity.block_type);
+
+  // PD-16 read-only path: null / undefined / non-object modules.mental skips
+  // the read-only section — no empty panel, no placeholder rows.
+  const mentalReadOnly = mentalRecord(entity);
 
   // Reseed when the selection (or an external reseed signal) changes.
   useEffect(() => {
     setForm(formFromEntity(entity));
     setValidationErrors([]);
+    setFieldErrors({});
   }, [entity.key_block_id, reseedSignal]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function update<K extends keyof EntityEditForm>(field: K, value: EntityEditForm[K]) {
     setForm((prev) => ({ ...prev, [field]: value }));
   }
 
-  const dirty = dirtyFields(form, entity);
+  const dirty = dirtyFields(form, entity, isHolderKind);
 
   function handleSubmit() {
     if (dirty.length === 0) return;
     setValidationErrors([]);
+    setFieldErrors({});
+
+    // Wire index → form row map of THIS submit's built belief array (QC1-F003):
+    // the daemon enumerates the compacted wire array, so its 422 row
+    // addresses must be translated before they are mapped onto form rows.
+    let beliefWireToForm: readonly number[] = [];
 
     const patchBody: WorldKbEntityPatch = {};
     if (dirty.includes('title')) patchBody.title = form.title.trim();
@@ -214,6 +1044,49 @@ export function EntityInspector({
         return;
       }
     }
+    // Holder-kind gate (QC1-F001/QC3-001): `dirty` can only contain
+    // 'modules' on holder-capable kinds, and the emission below re-checks the
+    // gate — a non-holder save never authors modules.
+    if (isHolderKind && dirty.includes('modules')) {
+      // Whole-first-level-value upsert (AR-4/PD-12): each dirty dialect is
+      // written complete — an untouched dialect is never included, so a
+      // belief-only edit cannot wipe mental and vice versa. `audience` is
+      // governance and is never emitted here.
+      //
+      // Build only the DIRTY dialects (QC3-003/QC1-F001 remainder): an
+      // untouched dialect may hold a nonrepresentable stored seed (raw
+      // fallback) whose builder always reports an error — building it would
+      // block an unrelated dialect's save. The builders below were already
+      // gated by the dirty checks for EMISSION; they are now also gated for
+      // CONSTRUCTION.
+      const modules: NonNullable<WorldKbEntityPatch['modules']> = {};
+      const wantMental = mentalDirty(form, entity);
+      const wantBelief = beliefsDirty(form, entity);
+      if (wantMental) {
+        const mental = buildMentalValue(form, (field) =>
+          t('worldKb.entityInspector.mentalState.jsonError', { field }),
+        );
+        if (Object.keys(mental.errors).length > 0) {
+          setFieldErrors(mental.errors);
+          return;
+        }
+        modules.mental = mental.value;
+      }
+      if (wantBelief) {
+        const belief = buildBeliefValue(form, (field) =>
+          field === 'raw'
+            ? t('worldKb.entityInspector.belief.jsonError', { field: 'belief' })
+            : t('worldKb.entityInspector.belief.orderError', { field }),
+        );
+        beliefWireToForm = belief.wireToForm;
+        if (Object.keys(belief.errors).length > 0) {
+          setFieldErrors(belief.errors);
+          return;
+        }
+        modules.belief = belief.value;
+      }
+      patchBody.modules = modules;
+    }
 
     patch.mutate(
       {
@@ -225,7 +1098,16 @@ export function EntityInspector({
         onError: (error) => {
           if (isWorldKbValidationError(error)) {
             const details = error.details as { validation_summary?: { errors?: string[] } } | undefined;
-            setValidationErrors(details?.validation_summary?.errors ?? [t('worldKb.entityInspector.validationFailed')]);
+            const entries =
+              details?.validation_summary?.errors ?? [t('worldKb.entityInspector.validationFailed')];
+            // Frozen prefix grammar (write contract §3): split on the first
+            // ": " for `modules.`-prefixed entries and map known prefixes 1:1
+            // onto form fields; unmatched entries stay section-level verbatim.
+            const mapped = entries.map((entry) => mapValidationEntry(entry, beliefWireToForm));
+            setFieldErrors(
+              Object.fromEntries(mapped.filter((m) => m.key).map((m) => [m.key as string, m.message])),
+            );
+            setValidationErrors(mapped.filter((m) => !m.key).map((m) => m.message));
             return;
           }
           // Conflict (409) — hand off to the canvas to render the modal.
@@ -234,12 +1116,23 @@ export function EntityInspector({
             details?: { current_version?: number; conflicting_path?: string; entity_id?: string };
           };
           if (details.status === 409) {
+            // Retain the exact per-dialect dirty set (L2-T2-001): the reapply
+            // must rewrite only the dialects this submit intended — the other
+            // dialect may have been populated concurrently while the modal
+            // was open, and inferring intent from the captured form is
+            // forbidden.
+            const dirtyDialects: ModuleDialect[] = [];
+            if (dirty.includes('modules')) {
+              if (mentalDirty(form, entity)) dirtyDialects.push('mental');
+              if (beliefsDirty(form, entity)) dirtyDialects.push('belief');
+            }
             onConflict({
               currentVersion: details.details?.current_version ?? node.version,
               entityId: details.details?.entity_id ?? entity.key_block_id,
               conflictingPath: details.details?.conflicting_path ?? dirty.join(','),
               draft: form,
               dirtyFields: dirty,
+              dirtyDialects,
             });
           }
           // Any other status (500/403/dropped network) is surfaced as a toast
@@ -313,6 +1206,52 @@ export function EntityInspector({
         />
       </div>
 
+      {isHolderKind ? (
+        <>
+          {/* Keyed by entity id (S-3, QC fix wave): React otherwise keeps the
+              component instance (and its `open` collapse state) when switching
+              between entities — sections must reset to expanded. */}
+          <MentalStateSection
+            key={`mental-${entity.key_block_id}`}
+            form={form}
+            fieldErrors={fieldErrors}
+            onMentalChange={(key, value) =>
+              update('mental', { ...form.mental, [key]: value })
+            }
+            onExtraChange={(index, value) =>
+              update(
+                'mentalExtras',
+                form.mentalExtras.map((extra, i) => (i === index ? { ...extra, text: value } : extra)),
+              )
+            }
+            onRawChange={(value) => update('mentalRawText', value)}
+          />
+          <BeliefSection
+            key={`belief-${entity.key_block_id}`}
+            beliefs={form.beliefs}
+            rawText={form.beliefRawText}
+            fieldErrors={fieldErrors}
+            onRowChange={(index, field, value) =>
+              update(
+                'beliefs',
+                form.beliefs.map((row, i) => (i === index ? { ...row, [field]: value } : row)),
+              )
+            }
+            onAdd={() => update('beliefs', [...form.beliefs, emptyBeliefRow()])}
+            onRemove={(index) => update('beliefs', form.beliefs.filter((_, i) => i !== index))}
+            onRawChange={(value) => update('beliefRawText', value)}
+          />
+        </>
+      ) : (
+        <>
+          <MentalStateReadOnlySection key={`mental-ro-${entity.key_block_id}`} mental={mentalReadOnly} />
+          <BeliefReadOnlySection
+            key={`belief-ro-${entity.key_block_id}`}
+            beliefs={beliefRowsRaw(entity)}
+          />
+        </>
+      )}
+
       {validationErrors.length > 0 ? (
         <ul
           className="rounded-card border border-red-700/30 bg-red-700/10 p-3 text-copy-13 text-red-1000"
@@ -336,14 +1275,6 @@ export function EntityInspector({
           {patch.isPending ? t('worldKb.entityInspector.saving') : t('worldKb.entityInspector.save')}
         </Button>
       </div>
-
-      {mental ? (
-        // Keyed by entity id (S-3, QC fix wave): React otherwise keeps the
-        // component instance (and its `open` collapse state) when switching
-        // between two entities that both have `modules.mental` — the section
-        // must reset to expanded for the newly selected entity.
-        <MentalStateSection key={entity.key_block_id} mental={mental} />
-      ) : null}
     </form>
   );
 }
