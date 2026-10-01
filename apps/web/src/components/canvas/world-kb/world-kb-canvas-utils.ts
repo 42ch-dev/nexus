@@ -7,9 +7,11 @@
  */
 import type { Node } from '@xyflow/react';
 
-import type { EntityEditForm } from './entity-inspector';
+import type { EntityEditForm, ModuleDialect } from './entity-inspector';
+import { modulesPatchFromForm } from './entity-inspector';
 import type { EntityField } from './world-kb-canvas-types';
 import type { WorldKbNodeData } from './types';
+import type { WorldKbEntityPatch } from '@42ch/nexus-contracts';
 
 /** Extract node data for the alt view (filters to entity/candidate nodes only). */
 export function nodesToData(nodes: Node[]): WorldKbNodeData[] {
@@ -23,12 +25,13 @@ export function nodesToData(nodes: Node[]): WorldKbNodeData[] {
  * Build a patch payload from the captured conflict form + dirty fields.
  * Exported for unit testing the reapply payload shape.
  */
-export function patchFromForm(form: EntityEditForm, dirty: EntityField[]) {
+export function patchFromForm(form: EntityEditForm, dirty: EntityField[], dialects: readonly ModuleDialect[]) {
   const patch: {
     title?: string;
     body?: Record<string, unknown>;
     aliases?: string[];
     block_type?: EntityEditForm['block_type'];
+    modules?: NonNullable<WorldKbEntityPatch['modules']>;
   } = {};
   // Preserve the trimmed value verbatim — including the empty string. The
   // primary handleSubmit path sends `form.title.trim()` directly, so an
@@ -45,6 +48,15 @@ export function patchFromForm(form: EntityEditForm, dirty: EntityField[]) {
   }
   if (dirty.includes('body')) {
     patch.body = form.bodyText.trim() ? safeJson(form.bodyText) : undefined;
+  }
+  if (dirty.includes('modules')) {
+    // L2-T2-001: reapply only the dialects the conflicting submit intended.
+    // The captured form predates any concurrent writes that happened while
+    // the modal was open, so rebuilding the other dialect from it would
+    // overwrite them (e.g. a belief populated concurrently with the modal
+    // open must survive a mental-only reapply).
+    const modules = modulesPatchFromForm(form, dialects);
+    if (modules) patch.modules = modules;
   }
   return patch;
 }

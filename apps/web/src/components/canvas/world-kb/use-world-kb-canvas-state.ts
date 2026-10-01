@@ -14,9 +14,10 @@ import type {
 } from '@42ch/nexus-contracts';
 
 import type { RelationshipForm } from './relationship-inspector';
-import type { EntityEditForm } from './entity-inspector';
+import type { EntityEditForm, ModuleDialect } from './entity-inspector';
 import type {
   EntityConflictState,
+  EntityField,
   PromoteConflictState,
   RelationshipConflictState,
   Selection,
@@ -126,19 +127,30 @@ export function buildEntityConflict(
     entityId: string;
     conflictingPath: string;
     draft: EntityEditForm;
-    dirtyFields: ('title' | 'body' | 'aliases' | 'block_type')[];
+    dirtyFields: EntityField[];
+    dirtyDialects: ModuleDialect[];
   },
 ): EntityConflictState {
   const entityName = selection?.kind === 'entity' ? selection.node.name : 'this entity';
-  const draftValues: Partial<Record<'title' | 'body' | 'aliases' | 'block_type', string>> = {};
+  const draftValues: Partial<Record<EntityField, string>> = {};
   if (payload.dirtyFields.includes('title')) draftValues.title = payload.draft.title;
   if (payload.dirtyFields.includes('block_type')) draftValues.block_type = payload.draft.block_type;
   if (payload.dirtyFields.includes('aliases')) draftValues.aliases = payload.draft.aliasesText;
   if (payload.dirtyFields.includes('body')) draftValues.body = payload.draft.bodyText;
+  if (payload.dirtyFields.includes('modules')) {
+    // Summary line for the conflict modal's "what you were about to do" block:
+    // the module editors write whole first-level values, so the JSON preview
+    // is the faithful representation of the pending edit.
+    draftValues.modules = JSON.stringify({
+      mental: payload.draft.mental,
+      beliefs: payload.draft.beliefs,
+    });
+  }
   return {
     currentVersion: payload.currentVersion,
     reapplyForm: payload.draft,
     dirtyFields: payload.dirtyFields,
+    dirtyDialects: payload.dirtyDialects,
     modalDraft: {
       entityName,
       fields: payload.dirtyFields,

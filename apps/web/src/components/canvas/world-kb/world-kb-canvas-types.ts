@@ -10,7 +10,7 @@ import type {
   WorldKbRelationshipProjection,
 } from '@42ch/nexus-contracts';
 
-import type { EntityEditForm } from './entity-inspector';
+import type { EntityEditForm, ModuleDialect } from './entity-inspector';
 import type { RelationshipForm } from './relationship-inspector';
 import type {
   WorldKbEntityConflictDraft,
@@ -19,7 +19,7 @@ import type {
 import type { WorldKbNodeData } from './types';
 
 /** Editable entity fields tracked for conflict reapply. */
-export type EntityField = 'title' | 'body' | 'aliases' | 'block_type';
+export type EntityField = 'title' | 'body' | 'aliases' | 'block_type' | 'modules';
 
 /** Current canvas selection — entity, candidate, relationship, new relationship, or nothing. */
 export type Selection =
@@ -36,6 +36,12 @@ export interface EntityConflictState {
   /** Raw form captured at conflict time, used to reapply the user's edit. */
   reapplyForm: EntityEditForm;
   dirtyFields: EntityField[];
+  /**
+   * Exact module dialect set the conflicting submit intended to write. The
+   * reapply must rewrite only these dialects — the other dialect may have
+   * changed concurrently while the modal was open (L2-T2-001).
+   */
+  dirtyDialects: ModuleDialect[];
   currentVersion: number;
 }
 

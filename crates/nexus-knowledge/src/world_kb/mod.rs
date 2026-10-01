@@ -37,7 +37,8 @@ pub use extract_finalize::{
 pub use extract_sync::{compute_kb_diff, diff_and_apply, KbSyncDiff, KbSyncUpdate};
 pub use knowledge_entry::{
     is_character_subject_id, reject_reserved_authoring_keys, resolve_authored_governance,
-    validate_character_tom_belief_row, validate_native_governance, BeliefPropositionRaw,
+    validate_belief_module, validate_character_tom_belief_row, validate_mental_module,
+    validate_native_governance, validate_observation_module, BeliefPropositionRaw,
     KnowledgeAudience, KnowledgeAuthoringOp, KnowledgeEntryBody, KnowledgeEntryRecord,
     KnowledgeGovernance, KnowledgeOwnerRef, MentalFieldsRaw, ReservedAuthoringKey,
     DISCLOSURE_OWNER_PRIVATE, LEGACY_CREATOR_ONLY_KEY, LEGACY_CREATOR_ONLY_UNSUPPORTED,

@@ -483,7 +483,8 @@
         "title": "标题",
         "body": "正文",
         "aliases": "别名",
-        "blockType": "块类型"
+        "blockType": "块类型",
+        "modules": "心理与信念模块"
       },
       "mentalState": {
         "title": "心理状态",
@@ -497,6 +498,59 @@
           "dispositions": "倾向",
           "norms": "规范",
           "constraints": "约束"
+        },
+        "jsonError": "{{field}} 必须是有效的 JSON。"
+      },
+      "belief": {
+        "title": "信念命题",
+        "addRow": "添加信念",
+        "removeRow": "删除信念 {{index}}",
+        "emptyOption": "—",
+        "readonlyRow": "信念 {{index}}",
+        "rawLabel": "原始信念 JSON",
+        "rawPlaceholderJson": "信念模块 JSON 数组…",
+        "jsonError": "{{field}} 必须是有效的 JSON。",
+        "orderError": "{{field}} 必须是整数。",
+        "option": {
+          "truth": { "True": "真", "False": "假", "Unknown": "未知" },
+          "access": { "Private": "私有", "Shared": "共享", "Public": "公开" },
+          "representation": { "Explicit": "外显", "Implicit": "内隐" },
+          "content_type": {
+            "Location": "位置",
+            "Contents_Physical_State": "内容/物理状态",
+            "Identity_Relation": "身份/关系",
+            "Epistemic": "认知",
+            "Desire_Intention": "欲望/意图",
+            "Emotion": "情绪",
+            "Trait_Value": "特质/价值观",
+            "Action_Event": "行动/事件"
+          },
+          "source": {
+            "Narration": "叙述",
+            "Perception": "感知",
+            "Memory": "记忆",
+            "Testimony": "证言",
+            "Inference": "推断",
+            "Imagination": "想象",
+            "Unknown": "未知"
+          },
+          "context": {
+            "Deceptive": "欺骗性",
+            "Temporal": "时间性",
+            "Counterfactual": "反事实",
+            "Neutral": "中性"
+          }
+        },
+        "field": {
+          "holder": "持有者",
+          "proposition": "命题",
+          "order": "阶",
+          "truth": "真值",
+          "access": "知识访问",
+          "representation": "表征",
+          "contentType": "内容类型",
+          "source": "心智来源",
+          "context": "情境"
         }
       }
     },
@@ -657,7 +711,8 @@
         "aliases": "别名",
         "blockType": "块类型",
         "relationType": "关系类型",
-        "customLabel": "自定义标签"
+        "customLabel": "自定义标签",
+        "modules": "心理与信念模块"
       }
     }
   },
@@ -742,11 +797,26 @@
       "viewInWorkTimelineAria": "在 Work Timeline 中打开承接此世界的作品",
       "observers": "观察者：",
       "noObservers": "无观察者",
+      "observation": {
+        "title": "观察",
+        "observersLabel": "观察者",
+        "accessLabel": "访问",
+        "accessPlaceholder": "观察访问 JSON 对象…",
+        "accessJsonError": "{{field}} 必须是有效的 JSON 对象。",
+        "noObserverOptions": "已加载图中没有可观察实体——请在下方输入条目 ID。",
+        "rawPlaceholder": "条目 ID（如 kb_char_1）",
+        "addRaw": "添加",
+        "clear": "清空观察者",
+        "claimNone": "无观察者（显式声明）",
+        "rawLabel": "原始观察 JSON",
+        "rawPlaceholderJson": "观察模块 JSON 对象…"
+      },
       "field": {
         "title": "标题",
         "body": "正文",
         "blockType": "块类型",
-        "aliases": "别名"
+        "aliases": "别名",
+        "modules": "模块"
       }
     },
     "eventNode": {

@@ -6,7 +6,7 @@
  * version as `expected_version`, that invalid JSON surfaces an inline error, and
  * that a 409 conflict hands off to the parent canvas (onConflict).
  */
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -164,5 +164,142 @@ describe('EntityInspector', () => {
     // A 500 is neither a conflict nor validation — no modal handoff.
     await waitFor(() => expect(client.worldKbPatchEntity).toHaveBeenCalled());
     expect(onConflict).not.toHaveBeenCalled();
+  });
+
+  // QC3-003 / QC1-F001 remainder: a mental-only edit with an untouched
+  // non-array stored belief (raw-seeded fallback) must save — the submit
+  // builder constructs/validates only the dirty dialects, so the untouched
+  // dialect's builder (whose raw-seeded fallback can report an error even
+  // when untouched) never runs and never blocks the write.
+  describe('dirty-dialect-only submit construction (QC3-003)', () => {
+    /** One recorded `worldKbPatchEntity(worldId, request)` invocation. */
+    /** Module dialects carried by a patch request's `modules` key. */
+    type PatchModules = Record<string, unknown>;
+
+    type PatchEntityCall = [
+      worldId: string,
+      request: {
+        entity_id: string;
+        expected_version: number;
+        patch: { modules?: PatchModules } & Record<string, unknown>;
+      },
+    ];
+
+    /** All recorded invocations of the mocked patch client method. */
+    function patchCalls(client: NexusClient): PatchEntityCall[] {
+      // vi.mocked exposes the Mock API on the stubbed client method without
+      // fabricating a shape: `makeClient` installs this as a resolved vi.fn.
+      return vi.mocked(client.worldKbPatchEntity).mock.calls as PatchEntityCall[];
+    }
+
+    const scalarBeliefEntity: WorldKbEntityProjection = {
+      ...entity,
+      modules: { belief: 42 },
+    };
+
+    it('mental-only edit with untouched non-array belief saves and omits belief', async () => {
+      const client = makeClient();
+      const { findByRole } = renderWith(
+        client,
+        <EntityInspector worldId="w-1" node={node} entity={scalarBeliefEntity} onConflict={vi.fn()} />,
+      );
+
+      fireEvent.change(document.querySelector('#wkbe-mental-identity')!, {
+        target: { value: '{"trait":"brave"}' },
+      });
+
+      (await findByRole('button', { name: /^Save$/i })).click();
+
+      await waitFor(() => expect(client.worldKbPatchEntity).toHaveBeenCalled());
+      const call = patchCalls(client)[0];
+      expect(call[1]).toMatchObject({
+        entity_id: 'kb-1',
+        patch: {
+          modules: { mental: { identity: { trait: 'brave' } } },
+        },
+      });
+      // The untouched scalar belief dialect is neither built nor emitted.
+      expect(call[1].patch.modules?.belief).toBeUndefined();
+      expect(Object.keys(call[1].patch.modules ?? {})).toEqual(['mental']);
+    });
+
+    it('belief-only edit (raw repair) with untouched mental saves and omits mental', async () => {
+      const client = makeClient();
+      const { findByRole } = renderWith(
+        client,
+        <EntityInspector worldId="w-1" node={node} entity={scalarBeliefEntity} onConflict={vi.fn()} />,
+      );
+
+      fireEvent.change(screen.getByTestId('belief-raw-json'), {
+        target: { value: '[{"holder":"Aria","proposition":"It rains","order":0}]' },
+      });
+
+      (await findByRole('button', { name: /^Save$/i })).click();
+
+      await waitFor(() => expect(client.worldKbPatchEntity).toHaveBeenCalled());
+      const call = patchCalls(client)[0];
+      expect(call[1]).toMatchObject({
+        entity_id: 'kb-1',
+        patch: {
+          modules: {
+            belief: [{ holder: 'Aria', proposition: 'It rains', order: 0 }],
+          },
+        },
+      });
+      // The untouched mental dialect is neither built nor emitted.
+      expect(call[1].patch.modules?.mental).toBeUndefined();
+      expect(Object.keys(call[1].patch.modules ?? {})).toEqual(['belief']);
+    });
+
+    it('both-dirty submit still builds and emits both dialects', async () => {
+      const client = makeClient();
+      const { findByRole } = renderWith(
+        client,
+        <EntityInspector worldId="w-1" node={node} entity={scalarBeliefEntity} onConflict={vi.fn()} />,
+      );
+
+      fireEvent.change(document.querySelector('#wkbe-mental-goals')!, {
+        target: { value: '{"goal":"survive"}' },
+      });
+      fireEvent.change(screen.getByTestId('belief-raw-json'), {
+        target: { value: '[{"holder":"Aria","proposition":"It rains","order":0}]' },
+      });
+
+      (await findByRole('button', { name: /^Save$/i })).click();
+
+      await waitFor(() => expect(client.worldKbPatchEntity).toHaveBeenCalled());
+      const call = patchCalls(client)[0];
+      expect(call[1]).toMatchObject({
+        entity_id: 'kb-1',
+        patch: {
+          modules: {
+            mental: { goals: { goal: 'survive' } },
+            belief: [{ holder: 'Aria', proposition: 'It rains', order: 0 }],
+          },
+        },
+      });
+      expect(Object.keys(call[1].patch.modules ?? {}).sort()).toEqual(['belief', 'mental']);
+    });
+
+    it('an untouched invalid-raw belief still blocks a belief edit until repaired', async () => {
+      // Guard not weakened: once the belief dialect IS dirty, its builder
+      // must still reject a non-array parse.
+      const client = makeClient();
+      const { findByRole, findByText } = renderWith(
+        client,
+        <EntityInspector worldId="w-1" node={node} entity={scalarBeliefEntity} onConflict={vi.fn()} />,
+      );
+
+      fireEvent.change(screen.getByTestId('belief-raw-json'), {
+        target: { value: '{"not":"an array"}' },
+      });
+
+      (await findByRole('button', { name: /^Save$/i })).click();
+
+      expect(
+        await findByText(/belief must be valid JSON/i),
+      ).toBeInTheDocument();
+      expect(client.worldKbPatchEntity).not.toHaveBeenCalled();
+    });
   });
 });
