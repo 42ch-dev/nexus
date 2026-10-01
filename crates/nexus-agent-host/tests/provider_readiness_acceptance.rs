@@ -235,13 +235,48 @@ fn fixture_pids(log: &[serde_json::Value]) -> Vec<u32> {
         .collect()
 }
 
+// Liveness probe for the fixture children this binary spawns. The definition is
+// split by platform; the call sites stay shared. The Windows form is a REAL
+// probe, never a constant stub: a `false` stub would let every `!process_alive`
+// leak assertion below pass vacuously, and a `true` stub would false-fail the
+// un-gated post-ready test.
 #[cfg(unix)]
 fn process_alive(pid: u32) -> bool {
+    // `kill -0 <pid>` returns Ok while the process exists (or is a zombie
+    // awaiting reap); non-zero (ESRCH) means it is gone.
     std::process::Command::new("kill")
         .arg("-0")
         .arg(pid.to_string())
         .output()
         .is_ok_and(|out| out.status.success())
+}
+
+#[cfg(windows)]
+fn process_alive(pid: u32) -> bool {
+    // `tasklist /FI "PID eq <pid>" /FO CSV /NH` prints one quoted CSV row per
+    // match; a no-match run prints a localized INFO line instead, which is
+    // never CSV-shaped, so comparing the CSV PID column is
+    // localization-independent. `tasklist` exits 0 either way, so the OUTPUT
+    // is parsed, never the exit status.
+    let output = std::process::Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+        .output()
+        .unwrap_or_else(|error| {
+            panic!("`tasklist /FI \"PID eq {pid}\" /FO CSV /NH` failed to spawn: {error}")
+        });
+    assert!(
+        output.status.success(),
+        "`tasklist /FI \"PID eq {pid}\" /FO CSV /NH` exited with {}: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let expected = pid.to_string();
+    stdout.lines().any(|line| {
+        line.split(',')
+            .nth(1)
+            .is_some_and(|field| field.trim_matches('"') == expected)
+    })
 }
 
 // ── dsh: routes, cwd binding, timeout close ────────────────────────
