@@ -960,7 +960,10 @@ mod tests {
     /// dropped when the turn ends, killing the child.
     #[tokio::test]
     async fn execute_maps_turn_events_and_kills_client() {
-        let provider = mock_provider(HashMap::new());
+        let provider = {
+            let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
+            mock_provider(HashMap::new())
+        };
 
         let (handle, stream) = launch_and_execute(&provider, "hi").await;
         let events = collect_events(stream).await;
