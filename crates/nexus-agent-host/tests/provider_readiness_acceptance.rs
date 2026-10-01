@@ -282,14 +282,27 @@ fn process_alive(pid: u32) -> bool {
 // ── dsh: routes, cwd binding, timeout close ────────────────────────
 
 /// A resolved dsh route must reach a REAL fixture handshake. On unix the probe
-/// reports available (ordinary AND sealed recipes initialize); on Windows the
-/// sealed recipe is unsupported (register R-V1202-P1T3-001), so the observable
-/// is the fixture's own request-log receipt for the ordinary handshake reached
-/// through the resolved route.
+/// reports available (ordinary AND sealed recipes initialize and close); on
+/// Windows the sealed recipe is unsupported (register R-V1202-P1T3-001), so
+/// the observable is the fixture's own PROTOCOL receipts for the ordinary
+/// recipe reached through the resolved route.
+///
+/// The fixture logs `_spawn` BEFORE reading its first request, so a nonempty
+/// log proves nothing: the assertion requires BOTH the `initialize` handshake
+/// request AND the cooperative `shutdown` close reply-triggering request. A
+/// startup-only receipt therefore fails this check.
 fn assert_route_reached_a_handshake(available: bool, req_log: &Path, route: &str) {
+    let methods: Vec<String> = read_log(req_log)
+        .iter()
+        .filter_map(|entry| entry["method"].as_str().map(str::to_string))
+        .collect();
     assert!(
-        !read_log(req_log).is_empty(),
-        "the {route} route must reach a real fixture handshake (no REQ_LOG receipt)"
+        methods.iter().any(|method| method == "initialize"),
+        "the {route} route must complete a real ordinary `initialize` handshake: {methods:?}"
+    );
+    assert!(
+        methods.iter().any(|method| method == "shutdown"),
+        "the {route} route's ordinary recipe must be closed cooperatively: {methods:?}"
     );
     #[cfg(unix)]
     assert!(available, "the {route} route must probe available");
