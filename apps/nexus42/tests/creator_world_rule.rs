@@ -383,7 +383,7 @@ async fn json_summary_shape_projects_carrier_first_class() {
         summary.statement.as_deref(),
         Some("At most three observers per event.")
     );
-    assert!(summary.target_entry_types.is_empty());
+    assert_eq!(summary.target_entry_types, [] as [std::string::String; 0]);
     assert_eq!(
         summary.constraint,
         serde_json::json!({"family": "observer_cardinality", "min": 0, "max": 3})

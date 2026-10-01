@@ -3060,7 +3060,7 @@ async fn public_schedule_reads_and_context_are_owned() {
     assert_eq!(inspected.schedule.current_core_context_version, 0);
     assert!(inspected.schedule.current_session_id.is_none());
     assert_eq!(inspected.concurrency_kind, "serial");
-    assert!(inspected.depends_on.is_empty());
+    assert_eq!(inspected.depends_on, [] as [std::string::String; 0]);
 
     // ── 2. Foreign and unknown ids close IDENTICALLY, and an explicit foreign
     //       creator filter refuses before any query runs. ──

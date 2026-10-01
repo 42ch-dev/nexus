@@ -1182,7 +1182,7 @@ mod tests {
         let registry = registry_with_binary("definitely-not-installed-42ch");
         let results =
             scan_local_installations_with_path(&registry, &[tmp.path().to_path_buf()]).await;
-        assert!(results.is_empty());
+        assert_eq!(results, Vec::<LocalInstallation>::new());
     }
 
     #[tokio::test]

@@ -203,26 +203,32 @@ fn character_memory_roundtrip_and_scope_isolation() {
 
     // Isolation: the owning Creator, a sibling Character, and a foreign
     // owner all see nothing.
-    assert!(memory_io::list_memories(&home, creator())
-        .unwrap()
-        .is_empty());
+    assert_eq!(
+        memory_io::list_memories(&home, creator()).unwrap(),
+        [] as [std::string::String; 0]
+    );
     let sibling = MemoryBearerRef::Character {
         owner_creator_id: OWNER,
         character_id: CHR_B,
     };
-    assert!(memory_io::list_memories(&home, sibling).unwrap().is_empty());
+    assert_eq!(
+        memory_io::list_memories(&home, sibling).unwrap(),
+        [] as [std::string::String; 0]
+    );
     let foreign_owner = MemoryBearerRef::Character {
         owner_creator_id: OTHER,
         character_id: CHR_A,
     };
-    assert!(memory_io::list_memories(&home, foreign_owner)
-        .unwrap()
-        .is_empty());
+    assert_eq!(
+        memory_io::list_memories(&home, foreign_owner).unwrap(),
+        [] as [std::string::String; 0]
+    );
 
     memory_io::delete_memory(&home, character(), "bridge-crossing").unwrap();
-    assert!(memory_io::list_memories(&home, character())
-        .unwrap()
-        .is_empty());
+    assert_eq!(
+        memory_io::list_memories(&home, character()).unwrap(),
+        [] as [std::string::String; 0]
+    );
     let _ = std::fs::remove_dir_all(&home);
 }
 

@@ -1174,7 +1174,7 @@ roles:
 "#;
         let p: PresetManifest = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(p.roles.len(), 1);
-        assert!(p.roles[0].recommended_skills.is_empty());
+        assert_eq!(p.roles[0].recommended_skills, Vec::<String>::new());
     }
 
     // ── V1.52 T-B P0: N-way labeled routing ─────────────────────────────

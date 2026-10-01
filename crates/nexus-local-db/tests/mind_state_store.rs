@@ -106,8 +106,8 @@ async fn insert_valid_mind_state_roundtrips_verbatim() {
     );
     assert_eq!(row.extensions_json.as_deref(), Some(VALID_EXTENSIONS_JSON));
     // created_at / updated_at are store-stamped at insert (RFC 3339).
-    assert!(!row.created_at.is_empty());
-    assert!(!row.updated_at.is_empty());
+    assert_ne!(row.created_at, "");
+    assert_ne!(row.updated_at, "");
 
     // Exactly one row persisted (no duplicate envelope expansion).
     // SAFETY: test-only — row-count verification against the mind_states DDL.

@@ -221,8 +221,8 @@ mod tests {
         assert_eq!(entry.tags.len(), 2);
         assert_eq!(entry.content, "Rust ownership model basics");
         assert!(entry.reference_uri.is_none());
-        assert!(!entry.created_at.is_empty());
-        assert!(!entry.updated_at.is_empty());
+        assert_ne!(entry.created_at, "");
+        assert_ne!(entry.updated_at, "");
     }
 
     #[test]

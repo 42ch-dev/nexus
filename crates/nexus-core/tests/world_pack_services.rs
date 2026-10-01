@@ -310,7 +310,7 @@ async fn bridge_admits_non_bootstrap_owner_on_bootstrap_pool() {
             .fetch_all(&cli_pool)
             .await
             .unwrap();
-    assert!(!identities.is_empty());
+    assert_ne!(identities, [] as [std::string::String; 0]);
     assert!(
         identities.iter().all(|c| c == "bootstrap"),
         "retained CLI pool must be bootstrap-registered: {identities:?}"
@@ -652,7 +652,10 @@ async fn v1191_holder_pack_mapped_adoption_removes_quarantine_atomically() {
     .await
     .unwrap();
     assert_eq!(adopted.entries.created, 1);
-    assert!(adopted.quarantined.is_empty());
+    assert_eq!(
+        adopted.quarantined,
+        [] as [nexus_core::QuarantinedAtomReport; 0]
+    );
     assert!(
         quarantine_rows(&pool).await.is_empty(),
         "quarantine row released with the adoption"
@@ -682,8 +685,18 @@ async fn v1191_holder_pack_mapped_adoption_removes_quarantine_atomically() {
     .unwrap();
     assert_eq!(repeat.entries.created, 0);
     assert_eq!(repeat.entries.skipped, 1);
-    assert!(repeat.quarantined.is_empty());
-    assert!(quarantine_rows(&pool).await.is_empty());
+    assert_eq!(
+        repeat.quarantined,
+        [] as [nexus_core::QuarantinedAtomReport; 0]
+    );
+    assert_eq!(
+        quarantine_rows(&pool).await,
+        [] as [(
+            std::string::String,
+            std::string::String,
+            std::string::String
+        ); 0]
+    );
     assert_eq!(atom_counts(&pool, TARGET).await, (1, 0));
     core.close().await.unwrap();
     pool.close().await;

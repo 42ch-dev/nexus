@@ -501,7 +501,7 @@ async fn v1191_extract_review_hook_retains_candidate_and_relationship_ids() {
     assert_eq!(relationships[0].source_entity_id, "kb_t13_aria");
     assert_eq!(relationships[0].target_entity_id, "kb_t13_kael");
     assert_eq!(relationships[0].relation_type, "allied_with");
-    assert!(!relationships[0].relationship_id.is_empty());
+    assert_ne!(relationships[0].relationship_id, "");
 }
 
 /// A schedule with no stored run identity extracts nothing: no empty/default

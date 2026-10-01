@@ -820,7 +820,7 @@ async fn work_lifecycle_locks_refuse_conflicting_holder() {
     let unchanged = core.get_work(&principal, work_id.clone()).await.unwrap();
     assert_eq!(unchanged.title, "Locked Work");
     assert_eq!(unchanged.story_ref.as_deref(), Some("locked-work"));
-    assert!(unchanged.inspiration_log.is_empty());
+    assert_eq!(unchanged.inspiration_log, [] as [serde_json::Value; 0]);
     assert_eq!(
         unchanged.runtime_lock_holder.as_deref(),
         Some(holder.as_str())
@@ -1170,8 +1170,8 @@ async fn retained_work_stage_advance_gate_and_lock_release() {
     assert_eq!(details.current_stage, "intake");
     assert_eq!(details.stage_status, "pending");
     assert!(details.creative_brief.is_none());
-    assert!(details.inspiration_log.is_empty());
-    assert!(details.schedule_ids.is_empty());
+    assert_eq!(details.inspiration_log, [] as [serde_json::Value; 0]);
+    assert_eq!(details.schedule_ids, [] as [std::string::String; 0]);
 
     // A terminal stage_status without an explicit advance is refused.
     let error = core
@@ -1500,7 +1500,7 @@ async fn retained_work_delete_cascades_pool_entries_and_failure_keeps_no_lock() 
     assert_eq!(logged.inspiration_log.len(), 2);
     assert_eq!(logged.inspiration_log[0]["note"], "First idea");
     assert_eq!(logged.inspiration_log[1]["note"], "Second idea");
-    assert!(logged.schedule_ids.is_empty());
+    assert_eq!(logged.schedule_ids, [] as [std::string::String; 0]);
     let entry = core
         .promote_work_pool_entry(
             &principal,
@@ -2308,7 +2308,7 @@ async fn retained_findings_lifecycle_and_batch_update_contracts() {
     .await
     .unwrap();
     assert_eq!(batched.updated, 2);
-    assert!(batched.not_found.is_empty());
+    assert_eq!(batched.not_found, [] as [std::string::String; 0]);
     assert_eq!(batched.conflict, vec![walk.finding_id.clone()]);
     assert_eq!(
         core.get_finding(&principal, second.finding_id.clone())

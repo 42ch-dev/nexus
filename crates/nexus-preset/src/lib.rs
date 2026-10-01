@@ -374,7 +374,7 @@ mod tests {
         // Verify outer graph has 6 states (outline_chapter, outline_review, draft_chapter, finalize, finalize_commit, done).
 
         // Verify source hash is non-trivial.
-        assert!(!loaded.source_hash.is_empty());
+        assert_ne!(loaded.source_hash.as_slice(), &[] as &[u8]);
         assert_ne!(loaded.source_hash, [0u8; 32]);
     }
 
@@ -709,7 +709,7 @@ states:
         // Verify it has an outer graph.
 
         // Verify source hash is valid.
-        assert!(!loaded.source_hash.is_empty());
+        assert_ne!(loaded.source_hash.as_slice(), &[] as &[u8]);
         assert_ne!(loaded.source_hash, [0u8; 32]);
     }
 
@@ -760,7 +760,7 @@ states:
         // Linear state machine: load_chapter → review → done
 
         // Source hash is non-trivial
-        assert!(!loaded.source_hash.is_empty());
+        assert_ne!(loaded.source_hash.as_slice(), &[] as &[u8]);
         assert_ne!(loaded.source_hash, [0u8; 32]);
 
         // Single-agent preset — no roles
@@ -880,7 +880,7 @@ states:
         );
 
         // Source hash is non-trivial
-        assert!(!loaded.source_hash.is_empty());
+        assert_ne!(loaded.source_hash.as_slice(), &[] as &[u8]);
         assert_ne!(loaded.source_hash, [0u8; 32]);
 
         // Single-agent preset — no roles

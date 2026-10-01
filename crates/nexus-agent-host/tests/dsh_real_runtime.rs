@@ -1419,7 +1419,7 @@ fn real_dsh_runtime_identity_is_recorded() {
         .as_str()
         .expect("server identity version");
     assert_eq!(server_name, "deepseek-harness-sdk-runtime");
-    assert!(!protocol_version.is_empty());
+    assert_ne!(protocol_version, "");
 
     // Cooperative shutdown + EOF; the child exits on its own.
     writeln!(

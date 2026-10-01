@@ -262,7 +262,7 @@ mod tests {
     #[test]
     fn deterministic_concat_empty() {
         let result = deterministic_concat(&[]);
-        assert!(result.is_empty());
+        assert_eq!(result, "");
     }
 
     #[test]
@@ -407,7 +407,7 @@ mod tests {
             .unwrap();
         assert_eq!(result.memories_processed, 0);
         assert!(!result.used_acp);
-        assert!(result.experience_markdown.is_empty());
+        assert_eq!(result.experience_markdown, "");
 
         // Verify soul still has empty experience
         let soul = crate::soul_io::load(&home, MemoryBearerRef::Creator("ctr_test")).unwrap();
@@ -588,7 +588,7 @@ mod tests {
         // Create SOUL with empty experience
         let soul = crate::soul_io::create(&home, MemoryBearerRef::Creator(creator_id)).unwrap();
         let exp_before = soul.experience.as_deref().unwrap_or("");
-        assert!(exp_before.is_empty());
+        assert_eq!(exp_before, "");
 
         // Create experience memories
         let mut mem1 = LongTermMemory::new("theme_analysis");
@@ -611,7 +611,7 @@ mod tests {
         // Verify SOUL.md was updated on disk
         let reloaded = crate::soul_io::load(&home, MemoryBearerRef::Creator(creator_id)).unwrap();
         let exp_after = reloaded.experience.as_deref().unwrap_or("");
-        assert!(!exp_after.is_empty());
+        assert_ne!(exp_after, "");
         assert!(exp_after.contains("Theme Analysis"));
 
         let _ = std::fs::remove_dir_all(&home);

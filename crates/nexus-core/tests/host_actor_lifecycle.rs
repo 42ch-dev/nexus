@@ -4492,7 +4492,7 @@ async fn character_cwd_uses_admitted_pin() {
         .await
         .expect("a Character create with an omitted cwd is admitted");
     assert_eq!(created.provider_id, CONTROL_PROVIDER);
-    assert!(!created.session_id.is_empty());
+    assert_ne!(created.session_id, "");
     assert_eq!(
         provider.launched_cwds(),
         vec![pin.clone()],

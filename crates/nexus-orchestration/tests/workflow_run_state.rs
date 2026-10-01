@@ -2230,7 +2230,7 @@ impl SessionStorage for GraphSaveAfterRead {
         let snapshot = self.inner.get(id).await?;
         if self
             .reads_until_save
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
             == Ok(1)
         {
             // A second load is essential: Session::clone shares its Context,

@@ -1448,7 +1448,7 @@ impl DshNativeProvider {
             error: HostError::launch_failed(self.provider_id.clone(), message, None),
             undeleted_lease: None,
         };
-        let lease = provision_sealed_home(&self.env).map_err(&launch_error)?;
+        let lease = provision_sealed_home(&self.env).map_err(launch_error)?;
         // The anchor guard must live through the SDK start handoff:
         // revalidate that the lexical child/patch still resolve to the
         // owned inode/files before the runtime is pointed at them.

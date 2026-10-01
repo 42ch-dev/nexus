@@ -1948,7 +1948,7 @@ mod tests {
         assert_eq!(value, 7);
         let evidence = bridge.shutdown().await;
         assert!(evidence.is_settled(), "{evidence:?}");
-        assert!(evidence.unsettled_pending().is_empty());
+        assert_eq!(evidence.unsettled_pending(), [] as [std::string::String; 0]);
     }
 
     #[tokio::test]

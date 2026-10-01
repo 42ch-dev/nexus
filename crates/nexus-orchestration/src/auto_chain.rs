@@ -377,7 +377,6 @@ async fn try_persist_parsed_findings(
                 "review-findings: parsed {} rows but 0 persisted; falling back to placeholder",
                 parsed.findings.len()
             );
-            Ok(None)
         }
         Ok(_) => {
             tracing::warn!(
@@ -388,7 +387,6 @@ async fn try_persist_parsed_findings(
                 "review-findings: review-report.md parsed but contained no issues; \
                  falling back to V1.47 placeholder synthesis"
             );
-            Ok(None)
         }
         Err(ReportLoadError::Missing) => {
             tracing::warn!(
@@ -399,7 +397,6 @@ async fn try_persist_parsed_findings(
                 "review-findings: review-report.md not found; \
                  falling back to V1.47 placeholder synthesis"
             );
-            Ok(None)
         }
         Err(ReportLoadError::Read(ref path, ref e)) => {
             tracing::warn!(
@@ -411,7 +408,6 @@ async fn try_persist_parsed_findings(
                 "review-findings: failed to read review-report.md; \
                  falling back to V1.47 placeholder synthesis"
             );
-            Ok(None)
         }
         Err(ReportLoadError::Parse(ref reason)) => {
             tracing::warn!(
@@ -423,7 +419,6 @@ async fn try_persist_parsed_findings(
                 "review-findings: review-report.md failed to parse; \
                  falling back to V1.47 placeholder synthesis"
             );
-            Ok(None)
         }
         // V1.48 P0-fix1 (qc3 W-1): bounded-read cap exceeded. `chapter`
         // included per spec §1.3 (qc3 W-3 adds it to every fallback arm).
@@ -441,7 +436,6 @@ async fn try_persist_parsed_findings(
                 "review-findings: review-report.md exceeds bounded-read cap; \
                  falling back to V1.47 placeholder synthesis"
             );
-            Ok(None)
         }
         // V1.49 P3 (R-V148P0-W1): resolved path escaped Works/<work_ref>/.
         // qc3 W-3: `chapter` included on every fallback arm.
@@ -458,9 +452,9 @@ async fn try_persist_parsed_findings(
                  (traversal or symlink); rejecting before read; falling back to \
                  V1.47 placeholder synthesis"
             );
-            Ok(None)
         }
     }
+    Ok(None)
 }
 
 /// Failures that can occur while loading + parsing `review-report.md`.

@@ -334,7 +334,10 @@ async fn peer_tool_admission_is_scoped_by_manifest_negotiation_allowlist_and_res
         registry.get(TOOL_ALPHA).is_none(),
         "an un-negotiated id leaves zero dispatchable rows"
     );
-    assert!(registry.peer_tool_ids(PEER_NEGOTIATION).is_empty());
+    assert_eq!(
+        registry.peer_tool_ids(PEER_NEGOTIATION),
+        [] as [std::string::String; 0]
+    );
 
     // (3) Default deny: an empty operator allowlist admits zero ids even
     //     though the id is negotiated and the peer is authenticated.
@@ -356,7 +359,10 @@ async fn peer_tool_admission_is_scoped_by_manifest_negotiation_allowlist_and_res
         registry.get(TOOL_ALPHA).is_none(),
         "zero rows for an empty operator allowlist"
     );
-    assert!(registry.peer_tool_ids(PEER_ALLOWLIST).is_empty());
+    assert_eq!(
+        registry.peer_tool_ids(PEER_ALLOWLIST),
+        [] as [std::string::String; 0]
+    );
 
     // (4) Reserved namespace: the daemon-owned `tools.nexus.*` family is
     //     refused even when negotiated AND explicitly allowlisted.

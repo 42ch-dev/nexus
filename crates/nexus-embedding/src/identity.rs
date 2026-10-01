@@ -84,7 +84,7 @@ mod tests {
         let a = identity();
         let b = identity();
         assert!(a.matches(&b));
-        assert!(a.differing_components(&b).is_empty());
+        assert_eq!(a.differing_components(&b), Vec::<IdentityComponent>::new());
     }
 
     #[test]

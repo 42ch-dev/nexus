@@ -258,6 +258,6 @@ mod tests {
     fn platform_key_matches_current_platform() {
         // Basic sanity: should not be "unknown" on CI/developer machines
         let key = platform_key();
-        assert!(!key.is_empty());
+        assert_ne!(key, "");
     }
 }

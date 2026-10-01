@@ -816,7 +816,7 @@ mod tests {
             .build("https://api.example.com", VALID_TOKEN)
             .expect("build");
         // Timeout is internal to client, we trust it's set correctly
-        assert!(!client.base_url().is_empty());
+        assert_ne!(client.base_url(), "");
     }
 
     #[test]

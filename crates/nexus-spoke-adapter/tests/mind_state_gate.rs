@@ -115,8 +115,8 @@ async fn gate_stores_valid_mind_state_verbatim() {
         Some(envelope["extensions"].to_string().as_str())
     );
     // created_at / updated_at are store-stamped at insert (RFC 3339).
-    assert!(!row.created_at.is_empty());
-    assert!(!row.updated_at.is_empty());
+    assert_ne!(row.created_at, "");
+    assert_ne!(row.updated_at, "");
 }
 
 // ── gate rejection paths ────────────────────────────────────────

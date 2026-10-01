@@ -924,7 +924,7 @@ mod tests {
         assert!(domain.content_hash.is_some());
         assert_eq!(domain.content_hash.unwrap().len(), 64);
 
-        assert!(!domain.created_at.is_empty());
+        assert_ne!(domain.created_at, "");
     }
 
     /// Verify no duplicate persistence: the domain model's tags are

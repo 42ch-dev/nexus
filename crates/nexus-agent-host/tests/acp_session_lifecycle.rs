@@ -262,7 +262,7 @@ async fn no_boot_spawn_and_truthful_catalog_recipe() {
     match &entry.launch {
         LaunchStrategy::Acp { command, args, env } => {
             assert_eq!(command, FIXTURE, "catalog reports the real command");
-            assert!(args.is_empty());
+            assert_eq!(args.as_slice(), &[] as &[String]);
             assert_eq!(
                 env.get("ACP_FIXTURE_LOG").map(String::as_str),
                 Some(ws.fixture_log.to_str().expect("utf8")),

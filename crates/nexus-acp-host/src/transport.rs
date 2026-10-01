@@ -1245,7 +1245,7 @@ mod tests {
         {
             assert!(platform.is_some());
             let p = platform.unwrap();
-            assert!(!p.as_str().is_empty());
+            assert_ne!(p.as_str(), "");
         }
 
         #[cfg(not(any(

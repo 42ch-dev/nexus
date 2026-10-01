@@ -926,7 +926,7 @@ mod tests {
         store.insert_knowledge_entry(kb).await.unwrap();
 
         let anchors = store.get_anchors(&id).await.unwrap();
-        assert!(anchors.is_empty());
+        assert_eq!(anchors, Vec::<SourceAnchor>::new());
     }
 
     // T15: Update a KnowledgeEntryRecord
@@ -985,7 +985,7 @@ mod tests {
 
         // list_by_world excludes deleted
         let listed = store.list_by_world("wld_1").await.unwrap();
-        assert!(listed.is_empty());
+        assert_eq!(listed, Vec::<KnowledgeEntryRecord>::new());
     }
 
     // T19: Delete non-existent KnowledgeEntryRecord fails
@@ -1006,7 +1006,7 @@ mod tests {
             .unwrap();
 
         let result = store.query(&KbQuery::new("wld_other")).await.unwrap();
-        assert!(result.items.is_empty());
+        assert_eq!(result.items, Vec::<KnowledgeEntryRecord>::new());
     }
 
     // T21: Deprecated block does not block uniqueness
@@ -1189,7 +1189,7 @@ mod tests {
             .query(&KbQuery::new("wld_1").with_canonical_name("char_unknown"))
             .await
             .unwrap();
-        assert!(result.items.is_empty());
+        assert_eq!(result.items, Vec::<KnowledgeEntryRecord>::new());
     }
 
     // AC5: kb-extract prompt output schema is recognized by validation.

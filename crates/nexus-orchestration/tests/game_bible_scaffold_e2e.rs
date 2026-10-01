@@ -346,7 +346,7 @@ async fn game_bible_scaffold_with_world_id() {
         .expect("scaffold with world_id should succeed");
 
     // Verify file/dir creation still works
-    assert!(!output["scaffold_root"].as_str().unwrap().is_empty());
+    assert_ne!(output["scaffold_root"].as_str().unwrap(), "");
     let files = output["files_created"].as_array().unwrap();
     assert_eq!(files.len(), 13, "13 files with optional world_id");
 

@@ -223,11 +223,11 @@ mod tests {
         ];
         let diff = compute_kb_diff(&old, &new);
         // "Kept" unchanged → not in updated.
-        assert!(diff.updated.is_empty());
+        assert_eq!(diff.updated, Vec::<KbSyncUpdate>::new());
         // "Newcomer" has no KnowledgeEntryRecord → advisory insert.
         assert_eq!(diff.inserted, vec!["Newcomer".to_string()]);
         // No active old row vanished → no removes.
-        assert!(diff.removed.is_empty());
+        assert_eq!(diff.removed, Vec::<String>::new());
     }
 
     #[test]
@@ -238,8 +238,8 @@ mod tests {
         let diff = compute_kb_diff(&old, &new);
         assert_eq!(diff.updated.len(), 1);
         assert_eq!(diff.updated[0].canonical_name, "Lin Xia");
-        assert!(diff.inserted.is_empty());
-        assert!(diff.removed.is_empty());
+        assert_eq!(diff.inserted, Vec::<String>::new());
+        assert_eq!(diff.removed, Vec::<String>::new());
     }
 
     #[test]
@@ -265,7 +265,7 @@ mod tests {
         let diff = compute_kb_diff(&old, &new);
         // Deleted row is not active → "Ghost" looks newly extracted.
         assert_eq!(diff.inserted, vec!["Ghost".to_string()]);
-        assert!(diff.updated.is_empty());
+        assert_eq!(diff.updated, Vec::<KbSyncUpdate>::new());
     }
 
     #[test]

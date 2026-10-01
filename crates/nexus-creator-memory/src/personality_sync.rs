@@ -126,7 +126,10 @@ mod tests {
         let memory = result.unwrap();
         assert_eq!(memory.frontmatter.memory_kind, "personality_core");
         assert!(memory.body.contains("Bold and inventive voice."));
-        assert!(memory.frontmatter.source_session_ids.is_empty());
+        assert_eq!(
+            memory.frontmatter.source_session_ids,
+            [] as [std::string::String; 0]
+        );
         assert!(memory.source_path.is_some());
         assert!(memory
             .source_path

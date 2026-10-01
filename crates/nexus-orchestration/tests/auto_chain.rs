@@ -845,7 +845,14 @@ async fn fix2_boot_resume_no_resumable_works() {
 
     // No works at all → no action
     let results = simulate_boot_auto_resume(&pool).await;
-    assert!(results.is_empty());
+    assert_eq!(
+        results,
+        [] as [(
+            std::string::String,
+            std::string::String,
+            std::option::Option<std::string::String>
+        ); 0]
+    );
 }
 
 #[tokio::test]
