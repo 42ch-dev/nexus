@@ -27,7 +27,8 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use nexus_agent_host::capability::model::{
-    CreateSessionRequest, HostEvent, HostOperation, HostStartConfig, ProbeRequest, SessionOwner,
+    CreateSessionRequest, HostEvent, HostOperation, HostStartConfig, ProbeRequest, ProviderHealth,
+    SessionOwner,
 };
 use nexus_agent_host::config::{AgentHostConfig, ProviderConfig, TimeoutConfig};
 use nexus_agent_host::core::manager::HostManager;
@@ -281,33 +282,160 @@ fn process_alive(pid: u32) -> bool {
 
 // ── dsh: routes, cwd binding, timeout close ────────────────────────
 
-/// A resolved dsh route must reach a REAL fixture handshake. On unix the probe
-/// reports available (ordinary AND sealed recipes initialize and close); on
-/// Windows the sealed recipe is unsupported (register R-V1202-P1T3-001), so
-/// the observable is the fixture's own PROTOCOL receipts for the ordinary
-/// recipe reached through the resolved route.
+/// Platform-specific expectation for one resolved dsh route's probe result.
+#[derive(Clone, Copy, Debug)]
+enum RouteExpectation {
+    /// Unix: ordinary AND sealed recipes initialize and close, so the probe
+    /// reports available.
+    Available,
+    /// Windows: sealed provisioning is unsupported, so the probe reports
+    /// unavailable ONLY after the ordinary recipe's confirmed start + close
+    /// (register R-V1202-P1T3-001).
+    UnsupportedSealed,
+}
+
+/// The Windows sealed-provisioning fail-closed reason fragment. The provider
+/// emits it only AFTER the ordinary recipe's confirmed start and cooperative
+/// close (`dsh.rs` probe ordering: an ordinary failure returns an
+/// "ordinary dsh recipe …" message instead), so matching it proves the
+/// ordinary handshake completed.
+const SEALED_UNSUPPORTED: &str = "sealed deny_all home provisioning is unsupported on this platform";
+
+/// Pure predicate for one resolved dsh route's probe outcome; `Err` carries
+/// the violation reason.
 ///
 /// The fixture logs `_spawn` BEFORE reading its first request, so a nonempty
-/// log proves nothing: the assertion requires BOTH the `initialize` handshake
-/// request AND the cooperative `shutdown` close reply-triggering request. A
-/// startup-only receipt therefore fails this check.
-fn assert_route_reached_a_handshake(available: bool, req_log: &Path, route: &str) {
+/// log proves nothing: the route log must carry BOTH the `initialize` request
+/// AND the cooperative `shutdown` close. Then the platform expectation applies:
+/// unix must report `available`; Windows must report unavailable for the
+/// SPECIFIC unsupported-sealed-provisioning reason — an ordinary close
+/// error/timeout (which also yields an unavailable health) is rejected.
+fn check_route_handshake(
+    methods: &[String],
+    available: bool,
+    message: Option<&str>,
+    expectation: RouteExpectation,
+    route: &str,
+) -> Result<(), String> {
+    if !methods.iter().any(|method| method == "initialize") {
+        return Err(format!(
+            "the {route} route must complete a real ordinary `initialize` handshake: {methods:?}"
+        ));
+    }
+    if !methods.iter().any(|method| method == "shutdown") {
+        return Err(format!(
+            "the {route} route's ordinary recipe must be closed cooperatively: {methods:?}"
+        ));
+    }
+    match expectation {
+        RouteExpectation::Available => {
+            if !available {
+                return Err(format!(
+                    "the {route} route must probe available, got message {message:?}"
+                ));
+            }
+        }
+        RouteExpectation::UnsupportedSealed => {
+            if available {
+                return Err(format!(
+                    "the {route} route must be unavailable on Windows (sealed recipe unsupported)"
+                ));
+            }
+            if !message.is_some_and(|text| text.contains(SEALED_UNSUPPORTED)) {
+                return Err(format!(
+                    "the {route} route may only fail via the unsupported sealed provisioning \
+                     reached after a confirmed ordinary close, got message {message:?}"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Assert one resolved dsh route reached a REAL ordinary handshake.
+fn assert_route_reached_a_handshake(health: &ProviderHealth, req_log: &Path, route: &str) {
     let methods: Vec<String> = read_log(req_log)
         .iter()
         .filter_map(|entry| entry["method"].as_str().map(str::to_string))
         .collect();
-    assert!(
-        methods.iter().any(|method| method == "initialize"),
-        "the {route} route must complete a real ordinary `initialize` handshake: {methods:?}"
-    );
-    assert!(
-        methods.iter().any(|method| method == "shutdown"),
-        "the {route} route's ordinary recipe must be closed cooperatively: {methods:?}"
-    );
     #[cfg(unix)]
-    assert!(available, "the {route} route must probe available");
+    let expectation = RouteExpectation::Available;
     #[cfg(not(unix))]
-    let _ = available;
+    let expectation = RouteExpectation::UnsupportedSealed;
+    if let Err(reason) = check_route_handshake(
+        &methods,
+        health.available,
+        health.message.as_deref(),
+        expectation,
+        route,
+    ) {
+        panic!("{reason}");
+    }
+}
+
+/// QC3-F001 proof: with `initialize` + `shutdown` receipts present, an ordinary
+/// recipe failure (initialization or close) must be rejected under BOTH
+/// platform expectations, while the Windows unsupported-sealed outcome — only
+/// reachable after a confirmed ordinary close — is accepted. A startup-only
+/// receipt (`_spawn` only) is always rejected.
+#[test]
+fn route_handshake_rejects_ordinary_failure_despite_receipts() {
+    let receipts = vec![
+        "_spawn".to_string(),
+        "initialize".to_string(),
+        "shutdown".to_string(),
+    ];
+    let expectations = [RouteExpectation::Available, RouteExpectation::UnsupportedSealed];
+    // The provider's two ordinary-recipe failure messages (dsh.rs probe).
+    for message in [
+        "ordinary dsh recipe failed to initialize: dsh runtime could not be launched",
+        "ordinary dsh recipe close was not confirmed: cooperative shutdown failed",
+    ] {
+        for expectation in expectations {
+            assert!(
+                check_route_handshake(&receipts, false, Some(message), expectation, "configured")
+                    .is_err(),
+                "an ordinary failure must be rejected despite receipts \
+                 ({expectation:?}, {message:?})"
+            );
+        }
+    }
+    // A startup-only log (no handshake receipt) is rejected even with the
+    // accepted Windows reason.
+    assert!(
+        check_route_handshake(
+            &["_spawn".to_string()],
+            false,
+            Some(SEALED_UNSUPPORTED),
+            RouteExpectation::UnsupportedSealed,
+            "configured"
+        )
+        .is_err(),
+        "a startup-only receipt must be rejected"
+    );
+    // The Windows unsupported-sealed outcome (ordinary confirmed close, then
+    // sealed provisioning fails closed) is accepted.
+    assert!(
+        check_route_handshake(
+            &receipts,
+            false,
+            Some(
+                "sealed dsh recipe failed to initialize: sealed deny_all home provisioning is \
+                 unsupported on this platform: descriptor-relative no-follow filesystem \
+                 primitives are required"
+            ),
+            RouteExpectation::UnsupportedSealed,
+            "configured"
+        )
+        .is_ok(),
+        "the unsupported-sealed outcome after a confirmed ordinary close must be accepted"
+    );
+    // An available result satisfies the unix expectation.
+    assert!(
+        check_route_handshake(&receipts, true, None, RouteExpectation::Available, "configured")
+            .is_ok(),
+        "an available probe with receipts must be accepted on unix"
+    );
 }
 
 /// The three documented resolution routes each produce a bounded, real
@@ -350,7 +478,7 @@ async fn dsh_routes_configured_path_and_env_all_reach_a_real_handshake() {
         .probe(probe_request(&cwd, 10_000))
         .await
         .expect("probe runs");
-    assert_route_reached_a_handshake(health.available, &req_log, "configured");
+    assert_route_reached_a_handshake(&health, &req_log, "configured");
 
     std::fs::remove_file(&req_log).ok();
     write_fixture_shim(&path_dir, "dsh", MOCK_DSH);
@@ -369,7 +497,7 @@ async fn dsh_routes_configured_path_and_env_all_reach_a_real_handshake() {
             .probe(probe_request(&cwd, 10_000))
             .await
             .expect("probe runs");
-        assert_route_reached_a_handshake(health.available, &req_log, "PATH");
+        assert_route_reached_a_handshake(&health, &req_log, "PATH");
     }
 
     // (3) DSH_RUNTIME_BIN route (no PATH entry).
@@ -391,7 +519,7 @@ async fn dsh_routes_configured_path_and_env_all_reach_a_real_handshake() {
             .probe(probe_request(&cwd, 10_000))
             .await
             .expect("probe runs");
-        assert_route_reached_a_handshake(health.available, &req_log, "DSH_RUNTIME_BIN");
+        assert_route_reached_a_handshake(&health, &req_log, "DSH_RUNTIME_BIN");
     }
 
     // (4) Nothing resolvable ⇒ unavailable, never a false ready.

@@ -4372,20 +4372,26 @@ mod tests {
     /// deny-all prompt permanently closes the session — no retryable
     /// half-switched state, no ordinary fallback; later `None` and
     /// deny-all executes are both rejected immediately, and no prompt is
-    /// ever sent. (The `nexus` component is a FILE, so the exclusive
-    /// leaf create fails.)
-    // Drives the sealed provisioning failure path (Windows sealed provisioning
-    // is unconditionally unsupported, so the test's premise requires unix).
-    // Dispositioned under register R-V1202-P1T3-001 — trigger: Windows
-    // job-object/process and descriptor-relative filesystem capability evidence
-    // re-opening the sealed cohort.
-    #[cfg(unix)]
+    /// ever sent. (Unix: a FILE at the `nexus` component makes the exclusive
+    /// leaf create fail; Windows: sealed provisioning is unsupported and
+    /// fails closed.)
+    // Drives the sealed provisioning failure path and asserts the permanent
+    // session-close invariants on EVERY platform (QC3-F002 restored Windows
+    // coverage): on Unix the injected FILE at the `nexus` component forces the
+    // exclusive leaf create to fail; on Windows the sealed recipe is
+    // unsupported outright and provisioning fails closed — the same
+    // failure-handling path the test asserts (register R-V1202-P1T3-001).
     #[tokio::test]
     async fn sealed_provision_failure_closes_session_permanently() {
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let req_log = temp_dir.path().join("reqs.jsonl");
         let dsh_home = temp_dir.path().join("dsh-home");
         std::fs::create_dir_all(&dsh_home).expect("home dir");
+        // Unix forces the exclusive leaf create to fail via a FILE at the
+        // `nexus` component; Windows has no descriptor-relative sealed
+        // filesystem primitive, so provisioning fails closed without an
+        // injected blocker.
+        #[cfg(unix)]
         std::fs::write(dsh_home.join(SEALED_HOME_SUBDIR), b"not a dir").expect("blocker");
         let provider =
             stub_provider_locked("test-dsh-sealfail", stub_env(&req_log, &dsh_home)).await;
