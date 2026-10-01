@@ -13,6 +13,7 @@ use nexus_contracts::{
     WorldKbPromoteCandidateResponse, WorldKbRelationshipProjection, WorldKbSourceAnchorProjection,
 };
 use nexus_knowledge::world_kb::knowledge_entry::{
+    validate_belief_module, validate_mental_module, validate_observation_module,
     KnowledgeAudience, KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeGovernance,
 };
 use nexus_knowledge::world_kb::store::{KbStoreError, KnowledgeReadScope};
@@ -538,7 +539,8 @@ pub mod patch {
         actor_db_err, db_err, get_knowledge_entry_in_tx, guards, is_world_conflict_reject,
         knowledge_record_to_spoke, local_db_err, project_entity, put_knowledge_entry_in_tx,
         resolve_authored_audience_tx, set_nexus_body, spoke_to_knowledge_record, store_err,
-        validate_body, validate_canonical_name, validation_summary, wire_cast, AudienceContainer,
+        validate_belief_module, validate_body, validate_canonical_name, validate_mental_module,
+        validate_observation_module, validation_summary, wire_cast, AudienceContainer,
         AuthoredAudience, BlockType, CoreError, CoreResult, HashMap, KbStoreError,
         KnowledgeAudience, KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeGovernance,
         KnowledgeReadScope, NexusWorldKbEntityPatch, NexusWorldKbEntityPatchAudience,
@@ -634,6 +636,13 @@ pub mod patch {
         if let Some(ref body) = body_for_validation {
             validate_body(validation_block_type, Some(body), ValidationMode::Novel)
                 .map_err(|e| CoreError::world_kb_validation_failed(&[e.to_string()], &[]))?;
+        }
+        // V1.203 P2: the authored module dialects are validated in-place
+        // (post-extraction, pre-write, after the addressing/status/OCC checks
+        // above), joining the same 422 `validation_summary.errors` array.
+        let module_errors = validate_authored_modules(&req.patch);
+        if !module_errors.is_empty() {
+            return Err(CoreError::world_kb_validation_failed(&module_errors, &[]));
         }
 
         let post_patch = build_post_patch(&kb, &req.patch, body_for_validation.as_ref());
@@ -843,6 +852,12 @@ pub mod patch {
         if let Some(body) = &body_for_validation {
             validate_body(block_type, Some(body), ValidationMode::Novel)
                 .map_err(|e| CoreError::world_kb_validation_failed(&[e.to_string()], &[]))?;
+        }
+        // V1.203 P2: a create authors the same carriers as an update, so it
+        // passes the same dialect seam before any material write.
+        let module_errors = validate_authored_modules(&req.patch);
+        if !module_errors.is_empty() {
+            return Err(CoreError::world_kb_validation_failed(&module_errors, &[]));
         }
         fresh.body = body_for_validation;
         apply_patch_modules(&mut fresh, None, &req.patch);
@@ -1077,6 +1092,40 @@ pub mod patch {
             map.insert(key.to_string(), json_val);
         }
         Some(serde_json::Value::Object(map))
+    }
+
+    /// Materialise one provided first-level module value as JSON for the
+    /// knowledge-crate validators (the same Object/Array mapping
+    /// `merge_modules` performs).
+    fn module_value_to_json(value: &NexusWorldKbEntityPatchModulesValue) -> serde_json::Value {
+        match value {
+            NexusWorldKbEntityPatchModulesValue::Object(obj) => {
+                serde_json::Value::Object(obj.clone())
+            }
+            NexusWorldKbEntityPatchModulesValue::Array(arr) => {
+                serde_json::Value::Array(arr.clone())
+            }
+        }
+    }
+
+    /// Validate the three authored module dialects (`mental` / `belief` /
+    /// `observation`) provided on a patch into the frozen 422 field-prefix
+    /// grammar (V1.203 P2 write contract §3). A lens on the three authored
+    /// keys only — every other dialect key round-trips verbatim (PD-13) and is
+    /// never materialised here.
+    fn validate_authored_modules(patch: &NexusWorldKbEntityPatch) -> Vec<String> {
+        let mut errors = Vec::new();
+        for (key, value) in &patch.modules {
+            let dialect_errors = match key.as_str() {
+                "mental" => validate_mental_module(&module_value_to_json(value)),
+                "belief" => validate_belief_module(&module_value_to_json(value)),
+                "observation" => validate_observation_module(&module_value_to_json(value)),
+                // Not an authored dialect: untouched opaque round-trip (PD-13).
+                _ => continue,
+            };
+            errors.extend(dialect_errors);
+        }
+        errors
     }
 
     fn compute_body(
