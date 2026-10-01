@@ -136,6 +136,9 @@ const SURFACES_CANVAS_ENTRIES: readonly GalleryEntry[] = [
   entry('/surfaces/canvas', 'surfaces-mental-surfacing', 'Mental Surfacing', ['beliefs', 'observers'], [
     '@/fixtures/mental-surfacing-fixtures',
   ]),
+  entry('/surfaces/canvas', 'surfaces-module-editing', 'Module Editing', ['module', 'editing', 'inspector', 'mental', 'belief', 'observation'], [
+    '@/fixtures/module-editing-fixtures',
+  ]),
   entry('/surfaces/canvas', 'surfaces-nle-timeline', 'NLE Timeline', ['nle', 'track'], [
     '@/fixtures/nle-timeline-canvas-fixtures',
   ]),
