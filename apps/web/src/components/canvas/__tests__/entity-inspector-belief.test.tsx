@@ -712,3 +712,187 @@ describe('EntityInspector — fix round 2 (L2-T2-002 remainder: stored {} rows)'
     expect(modules).not.toHaveProperty('belief');
   });
 });
+
+describe('EntityInspector — plan QC fix 1 (QC1-F001/QC3-001: belief raw fallback + holder-gated modules)', () => {
+  /** Holder with a legacy stored row the structured editor cannot represent. */
+  const holderWithMixedBelief: WorldKbEntityProjection = {
+    key_block_id: 'kb-bo',
+    world_id: 'w-1',
+    block_type: 'character',
+    canonical_name: 'Bo',
+    status: 'confirmed',
+    version: 1,
+    modules: {
+      // Seeded through JSON.parse so the array is a real parsed value.
+      belief: JSON.parse('[42, {"proposition": "keep me"}]'),
+    },
+  };
+
+  /** Non-holder kind carrying the same nonrepresentable stored dialect. */
+  const sceneWithMixedBelief: WorldKbEntityProjection = {
+    key_block_id: 'kb-dock',
+    world_id: 'w-1',
+    block_type: 'scene',
+    canonical_name: 'Dawn Dock',
+    status: 'confirmed',
+    version: 2,
+    modules: {
+      belief: JSON.parse('[42, {"proposition": "keep me"}]'),
+    },
+  };
+
+  it('QC1-F001: a holder with a non-object stored row seeds the raw-JSON fallback, not dirty rows', () => {
+    renderWith(
+      makeClient(),
+      <EntityInspector worldId="w-1" node={node} entity={holderWithMixedBelief} onConflict={vi.fn()} />,
+    );
+
+    // The complete stored value seeds the raw textarea; no structured rows.
+    const raw = screen.getByTestId('belief-raw-json');
+    expect(JSON.parse((raw as HTMLTextAreaElement).value)).toEqual([42, { proposition: 'keep me' }]);
+    expect(screen.getByRole('button', { name: /^Save$/i })).toBeDisabled();
+  });
+
+  it('QC1-F001/QC3-001: a holder title-only save with a non-object stored row omits modules entirely', async () => {
+    const user = userEvent.setup();
+    const client = makeClient();
+    renderWith(
+      client,
+      <EntityInspector worldId="w-1" node={node} entity={holderWithMixedBelief} onConflict={vi.fn()} />,
+    );
+
+    const title = screen.getByLabelText('Title');
+    await user.clear(title);
+    await user.type(title, 'Bo the ferryman');
+    await user.click(screen.getByRole('button', { name: /^Save$/i }));
+
+    await waitFor(() => expect(client.worldKbPatchEntity).toHaveBeenCalled());
+    const call = callsOf(client.worldKbPatchEntity)[0];
+    expect(call[1]).toMatchObject({
+      entity_id: 'kb-bo',
+      patch: { title: 'Bo the ferryman' },
+    });
+    // The untouched nonrepresentable dialect must not be rewritten (lossy or not).
+    expect(call[1].patch).not.toHaveProperty('modules');
+  });
+
+  it('QC1-F001/QC3-001: a non-holder title-only save emits no modules (holder gate on dirty + emission)', async () => {
+    const user = userEvent.setup();
+    const client = makeClient();
+    renderWith(
+      client,
+      <EntityInspector
+        worldId="w-1"
+        node={{ ...node, keyBlockId: 'kb-dock', version: 2 }}
+        entity={sceneWithMixedBelief}
+        onConflict={vi.fn()}
+      />,
+    );
+
+    const title = screen.getByLabelText('Title');
+    await user.clear(title);
+    await user.type(title, 'Dawn Dock at low tide');
+    await user.click(screen.getByRole('button', { name: /^Save$/i }));
+
+    await waitFor(() => expect(client.worldKbPatchEntity).toHaveBeenCalled());
+    const call = callsOf(client.worldKbPatchEntity)[0];
+    expect(call[1].patch).toMatchObject({ title: 'Dawn Dock at low tide' });
+    expect(call[1].patch).not.toHaveProperty('modules');
+  });
+
+  it('QC1-F001: a non-array stored belief seeds the raw-JSON fallback (boundary, not normalization)', () => {
+    const scalarBelief: WorldKbEntityProjection = {
+      ...holderWithMixedBelief,
+      modules: { belief: 'not-an-array' },
+    };
+    renderWith(
+      makeClient(),
+      <EntityInspector worldId="w-1" node={node} entity={scalarBelief} onConflict={vi.fn()} />,
+    );
+
+    const raw = screen.getByTestId('belief-raw-json');
+    expect((raw as HTMLTextAreaElement).value).toBe('"not-an-array"');
+    expect(screen.getByRole('button', { name: /^Save$/i })).toBeDisabled();
+  });
+
+  it('QC1-F001: deliberate raw repair is an explicit author action and writes the repaired array verbatim', async () => {
+    const user = userEvent.setup();
+    const client = makeClient();
+    renderWith(
+      client,
+      <EntityInspector worldId="w-1" node={node} entity={holderWithMixedBelief} onConflict={vi.fn()} />,
+    );
+
+    const raw = screen.getByTestId('belief-raw-json');
+    fireEvent.change(raw, { target: { value: '[{"proposition":"repaired"}]' } });
+    await user.click(screen.getByRole('button', { name: /^Save$/i }));
+
+    await waitFor(() => expect(client.worldKbPatchEntity).toHaveBeenCalled());
+    const modules = callsOf(client.worldKbPatchEntity)[0][1].patch!.modules!;
+    expect(modules.belief).toEqual([{ proposition: 'repaired' }]);
+  });
+
+  it('QC1-F001: invalid raw JSON blocks the whole write (no partial mutation)', async () => {
+    const user = userEvent.setup();
+    const client = makeClient();
+    renderWith(
+      client,
+      <EntityInspector worldId="w-1" node={node} entity={holderWithMixedBelief} onConflict={vi.fn()} />,
+    );
+
+    const raw = screen.getByTestId('belief-raw-json');
+    await user.type(raw, '{{broken');
+    await user.click(screen.getByRole('button', { name: /^Save$/i }));
+
+    expect(await screen.findByText(/must be valid JSON/i)).toBeInTheDocument();
+    expect(client.worldKbPatchEntity).not.toHaveBeenCalled();
+  });
+});
+
+describe('EntityInspector — plan QC fix 1 (QC1-F003: 422 row addresses map through the submission index map)', () => {
+  it('QC1-F003: a blank first row before a rejected row lands the returned prefix on the contributing form row', async () => {
+    const user = userEvent.setup();
+    const client = makeClient({
+      worldKbPatchEntity: vi.fn().mockRejectedValue(
+        new NexusClientError(422, 'world_kb_validation_failed', 'validation failed', {
+          validation_summary: {
+            errors: [
+              'modules.belief.0.order: must fit a signed 64-bit integer: got 9223372036854775808',
+            ],
+          },
+        }),
+      ),
+    });
+    renderWith(
+      client,
+      <EntityInspector
+        worldId="w-1"
+        node={{ ...node, keyBlockId: 'kb-ana' }}
+        entity={entityWithoutBeliefs}
+        onConflict={vi.fn()}
+      />,
+    );
+
+    const section = screen.getByTestId('belief-section');
+    await user.click(within(section).getByRole('button', { name: 'Add belief' }));
+    await user.click(within(section).getByRole('button', { name: 'Add belief' }));
+    const rows = within(section).getAllByRole('group');
+    expect(rows).toHaveLength(2);
+    // First row stays blank (compacted away); the second carries the rejected
+    // integer-valued order and is submitted at wire index 0.
+    await user.type(within(rows[1]).getByLabelText('Proposition'), 'the tide tables are forged');
+    await user.type(within(rows[1]).getByLabelText('Order'), '9223372036854775808');
+
+    await user.click(screen.getByRole('button', { name: /^Save$/i }));
+
+    // The daemon addressed wire row 0; the error must land on the SECOND form
+    // row (the contributing one), not the blank first row. The reason keeps
+    // its additional ': ' text intact.
+    const updated = await screen.findByTestId('belief-section');
+    const updatedRows = within(updated).getAllByRole('group');
+    expect(
+      within(updatedRows[1]).getByText('must fit a signed 64-bit integer: got 9223372036854775808'),
+    ).toBeInTheDocument();
+    expect(within(updatedRows[0]).queryByText(/signed 64-bit/)).not.toBeInTheDocument();
+  });
+});

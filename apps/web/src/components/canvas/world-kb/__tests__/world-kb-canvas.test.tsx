@@ -39,6 +39,7 @@ function form(overrides: Partial<EntityEditForm> = {}): EntityEditForm {
     },
     mentalExtras: [],
     beliefs: [],
+    beliefRawText: null,
     ...overrides,
   };
 }

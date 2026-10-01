@@ -513,6 +513,8 @@
         "removeRow": "Remove belief {{index}}",
         "emptyOption": "—",
         "readonlyRow": "Belief {{index}}",
+        "rawLabel": "Raw belief JSON",
+        "rawPlaceholderJson": "Belief module JSON array…",
         "jsonError": "{{field}} must be valid JSON.",
         "orderError": "{{field}} must be a whole number.",
         "option": {

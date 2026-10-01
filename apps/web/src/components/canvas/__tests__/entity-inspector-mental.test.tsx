@@ -20,7 +20,7 @@ import { ToastProvider, Toaster } from '@/lib/use-toast';
 import { NexusClientError, type NexusClient } from '@/lib/nexus';
 import type { WorldKbEntityPatch, WorldKbEntityProjection } from '@42ch/nexus-contracts';
 
-import { EntityInspector } from '../world-kb/entity-inspector';
+import { EntityInspector, formFromEntity, modulesPatchFromForm } from '../world-kb/entity-inspector';
 import type { WorldKbNodeData } from '../world-kb/types';
 
 const node: WorldKbNodeData = {
@@ -481,5 +481,58 @@ describe('EntityInspector — modules.mental editing (v1.203 P2 O1)', () => {
     expect(within(section).getByLabelText('Goals')).toHaveDisplayValue(/keep the docks quiet/);
     // Keys absent from the updated stored value no longer appear.
     expect(within(section).getByLabelText('Beliefs')).toHaveDisplayValue('');
+  });
+});
+
+describe('EntityInspector — plan QC fix 1 (QC1-F002: legal unknown __proto__ key round-trips)', () => {
+  /**
+   * Holder whose stored mental bag carries a legal unknown own key
+   * `__proto__` (accepted under PD-13). Seeded through JSON.parse — an object
+   * literal would have different `__proto__` syntax semantics.
+   */
+  const entityWithProtoKey: WorldKbEntityProjection = {
+    key_block_id: 'kb-bo',
+    world_id: 'w-1',
+    block_type: 'character',
+    canonical_name: 'Bo',
+    status: 'confirmed',
+    version: 1,
+    modules: {
+      mental: JSON.parse('{"goals":["old"],"__proto__":{"future":"keep"}}'),
+    },
+  };
+
+  it('QC1-F002: editing a known mental field retains the exact own __proto__ member on submit', async () => {
+    const user = userEvent.setup();
+    const client = makeClient();
+    renderWith(
+      client,
+      <EntityInspector worldId="w-1" node={node} entity={entityWithProtoKey} onConflict={vi.fn()} />,
+    );
+
+    const goals = screen.getByLabelText('Goals');
+    fireEvent.change(goals, { target: { value: '["new"]' } });
+
+    await user.click(screen.getByRole('button', { name: /^Save$/i }));
+
+    await waitFor(() => expect(client.worldKbPatchEntity).toHaveBeenCalled());
+    const call = callsOf(client.worldKbPatchEntity)[0];
+    const mental = call[1].patch.modules!.mental as Record<string, unknown>;
+    // The own data property survives as an exact own member — not swallowed
+    // by the inherited prototype setter — and serializes back verbatim.
+    expect(Object.prototype.hasOwnProperty.call(mental, '__proto__')).toBe(true);
+    expect(mental.__proto__).toEqual({ future: 'keep' });
+    expect(mental.goals).toEqual(['new']);
+    expect(JSON.stringify(call[1].patch)).toContain('__proto__');
+  });
+
+  it('QC1-F002: the conflict reapply builder (modulesPatchFromForm) retains the own __proto__ member', () => {
+    const form = formFromEntity(entityWithProtoKey);
+    form.mental.goals = '["edited"]';
+    const modules = modulesPatchFromForm(form, ['mental']);
+    const mental = modules!.mental as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(mental, '__proto__')).toBe(true);
+    expect(mental.__proto__).toEqual({ future: 'keep' });
+    expect(JSON.stringify(modules)).toContain('__proto__');
   });
 });

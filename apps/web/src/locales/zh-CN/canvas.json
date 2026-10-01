@@ -507,6 +507,8 @@
         "removeRow": "删除信念 {{index}}",
         "emptyOption": "—",
         "readonlyRow": "信念 {{index}}",
+        "rawLabel": "原始信念 JSON",
+        "rawPlaceholderJson": "信念模块 JSON 数组…",
         "jsonError": "{{field}} 必须是有效的 JSON。",
         "orderError": "{{field}} 必须是整数。",
         "option": {
@@ -800,7 +802,7 @@
         "observersLabel": "观察者",
         "accessLabel": "访问",
         "accessPlaceholder": "观察访问 JSON 对象…",
-        "accessJsonError": "{{field}}必须是有效的 JSON 对象。",
+        "accessJsonError": "{{field}} 必须是有效的 JSON 对象。",
         "noObserverOptions": "已加载图中没有可观察实体——请在下方输入条目 ID。",
         "rawPlaceholder": "条目 ID（如 kb_char_1）",
         "addRaw": "添加",
