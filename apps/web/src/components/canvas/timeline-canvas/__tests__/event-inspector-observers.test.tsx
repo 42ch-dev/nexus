@@ -583,4 +583,181 @@ describe('TimelineInspector — O3 observation editing (v1.203 P2 T3)', () => {
     expect(patchArg).toEqual({ title: 'Coronation!' });
     expect(dirtyArg).not.toContain('modules');
   });
+
+  // ── Fix Round 1 (L2 review C1/C2/C3) ──────────────────────────────────────
+
+  it('C1 — a whitespace-containing stored observer id seeds verbatim: untouched seed + title-only save sends only title', async () => {
+    const user = userEvent.setup();
+    const onPatchEntity = vi.fn().mockResolvedValue(undefined);
+    renderInspector({
+      node: eventNode({
+        modules: { observation: { observers: ['  kb_char_1  '] } },
+      }),
+      ctxOverrides: { nodes: CTX_NODES, onPatchEntity },
+    });
+
+    // The graph checkbox for the trimmed id is NOT selected — the stored
+    // whitespace-containing id seeded verbatim, not coerced.
+    expect(screen.getByTestId('observation-observer-kb_char_1')).not.toBeChecked();
+    // Seed normalization must NOT mark modules dirty.
+    expect(screen.getByTestId('timeline-inspector-save')).toBeDisabled();
+
+    await user.type(screen.getByLabelText('Title'), '!');
+    await user.click(screen.getByTestId('timeline-inspector-save'));
+
+    expect(onPatchEntity).toHaveBeenCalledTimes(1);
+    const [, patchArg, dirtyArg] = onPatchEntity.mock.calls[0];
+    expect(patchArg).toEqual({ title: 'Coronation!' });
+    expect(dirtyArg).not.toContain('modules');
+  });
+
+  it('C1 — a non-array stored observers member falls back to raw JSON: untouched seed + title-only save preserves the stored module', async () => {
+    const user = userEvent.setup();
+    const onPatchEntity = vi.fn().mockResolvedValue(undefined);
+    const storedModules = { observation: { observers: 'kb_char_1' } };
+    renderInspector({
+      node: eventNode({ modules: storedModules }),
+      ctxOverrides: { nodes: CTX_NODES, onPatchEntity },
+    });
+
+    // Raw fallback replaces the structured controls (C1 — no coercion).
+    const raw = screen.getByTestId('observation-raw-json');
+    expect(raw).toBeInTheDocument();
+    expect((raw as HTMLTextAreaElement).value).toBe(
+      JSON.stringify(storedModules.observation, null, 2),
+    );
+    expect(screen.queryByTestId('observation-observer-kb_char_1')).not.toBeInTheDocument();
+    expect(screen.getByTestId('timeline-inspector-save')).toBeDisabled();
+
+    await user.type(screen.getByLabelText('Title'), '!');
+    await user.click(screen.getByTestId('timeline-inspector-save'));
+
+    expect(onPatchEntity).toHaveBeenCalledTimes(1);
+    const [, patchArg] = onPatchEntity.mock.calls[0];
+    expect(patchArg).toEqual({ title: 'Coronation!' });
+  });
+
+  it('C1 — raw fallback editing preserves the original complete value until deliberately changed, then writes it verbatim', async () => {
+    const user = userEvent.setup();
+    const onPatchEntity = vi.fn().mockResolvedValue(undefined);
+    const stored = { observers: [42, 'kb_char_1'], access: null, future_key: 'kept' };
+    renderInspector({
+      node: eventNode({ modules: { observation: stored } }),
+      ctxOverrides: { nodes: CTX_NODES, onPatchEntity },
+    });
+
+    const raw = screen.getByTestId('observation-raw-json') as HTMLTextAreaElement;
+    // Editing the JSON (adding a member) writes the complete edited value —
+    // unknown inner keys (PD-13) and the previously nonrepresentable
+    // members round-trip through the author's text.
+    fireEvent.change(raw, {
+      target: {
+        value: JSON.stringify({ ...stored, note: 'edited' }, null, 2),
+      },
+    });
+    await user.click(screen.getByTestId('timeline-inspector-save'));
+
+    expect(onPatchEntity).toHaveBeenCalledTimes(1);
+    const [, patchArg] = onPatchEntity.mock.calls[0];
+    expect(patchArg).toEqual({
+      modules: { observation: { ...stored, note: 'edited' } },
+    });
+  });
+
+  it('C1 — invalid raw JSON blocks the write and surfaces a field error', async () => {
+    const user = userEvent.setup();
+    const onPatchEntity = vi.fn().mockResolvedValue(undefined);
+    renderInspector({
+      node: eventNode({ modules: { observation: { access: null } } }),
+      ctxOverrides: { nodes: CTX_NODES, onPatchEntity },
+    });
+
+    fireEvent.change(screen.getByTestId('observation-raw-json'), {
+      target: { value: 'not-json' },
+    });
+    await user.click(screen.getByTestId('timeline-inspector-save'));
+
+    expect(onPatchEntity).not.toHaveBeenCalled();
+    expect(screen.getByTestId('observation-section')).toHaveTextContent(
+      'observation must be a valid JSON object.',
+    );
+  });
+
+  it('C2 — a context node with an unusual stored observation shape never emits modules; a title-only edit sends only title', async () => {
+    const user = userEvent.setup();
+    const onPatchEntity = vi.fn().mockResolvedValue(undefined);
+    const storedModules = { observation: { observers: 'kb_char_1' } };
+    renderInspector({
+      node: eventNode({ modules: storedModules, layoutHint: 'context' }),
+      ctxOverrides: { nodes: CTX_NODES, onPatchEntity },
+    });
+
+    // The observation editor is hidden (existing JSX gate)…
+    expect(screen.queryByTestId('observation-section')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('observation-raw-json')).not.toBeInTheDocument();
+    // …and the stored module does not make the form dirty (C2 dirty gate).
+    expect(screen.getByTestId('timeline-inspector-save')).toBeDisabled();
+
+    await user.type(screen.getByLabelText('Title'), '!');
+    await user.click(screen.getByTestId('timeline-inspector-save'));
+
+    expect(onPatchEntity).toHaveBeenCalledTimes(1);
+    const [, patchArg, dirtyArg] = onPatchEntity.mock.calls[0];
+    expect(patchArg).toEqual({ title: 'Coronation!' });
+    expect(dirtyArg).not.toContain('modules');
+  });
+
+  it('C3 — an explicit "no observers" claim from an unrecorded event submits observers: [] on the first save and reads back explicitly', async () => {
+    const user = userEvent.setup();
+    const onPatchEntity = vi.fn().mockResolvedValue(undefined);
+    // No observers member at all — previously unrecorded.
+    renderInspector({
+      node: eventNode(),
+      ctxOverrides: { nodes: CTX_NODES, onPatchEntity },
+    });
+
+    // Untouched unrecorded seed keeps omission (Save disabled, no modules).
+    expect(screen.getByTestId('timeline-inspector-save')).toBeDisabled();
+
+    // The explicit claim checkbox is available even with an empty selection.
+    await user.click(screen.getByTestId('observation-claim-none'));
+    expect(screen.getByTestId('timeline-inspector-save')).toBeEnabled();
+    await user.click(screen.getByTestId('timeline-inspector-save'));
+
+    expect(onPatchEntity).toHaveBeenCalledTimes(1);
+    const [, patchArg] = onPatchEntity.mock.calls[0];
+    expect(patchArg).toEqual({ modules: { observation: { observers: [] } } });
+
+    // Read-back (L2 cannot-verify item): the post-save projection with
+    // `observers: []` renders the explicit "No observers" claim line.
+    const updated = eventNode({
+      modules: { observation: { observers: [] } },
+      version: 4,
+    });
+    const { unmount } = renderInspector({
+      node: updated,
+      ctxOverrides: { nodes: CTX_NODES, onPatchEntity },
+    });
+    const line = screen.getByTestId('event-observers-line');
+    expect(within(line).getByText('No observers')).toBeInTheDocument();
+    unmount();
+  });
+
+  it('C3 — Clear on an unrecorded event records the explicit empty claim (select-then-clear no longer collapses to omission)', async () => {
+    const user = userEvent.setup();
+    const onPatchEntity = vi.fn().mockResolvedValue(undefined);
+    renderInspector({
+      node: eventNode(),
+      ctxOverrides: { nodes: CTX_NODES, onPatchEntity },
+    });
+
+    await user.click(screen.getByTestId('observation-observer-kb_char_1'));
+    await user.click(screen.getByTestId('observation-clear'));
+    await user.click(screen.getByTestId('timeline-inspector-save'));
+
+    expect(onPatchEntity).toHaveBeenCalledTimes(1);
+    const [, patchArg] = onPatchEntity.mock.calls[0];
+    // The deliberate clear is the PD-9 "no observers" claim — NOT omission.
+    expect(patchArg).toEqual({ modules: { observation: { observers: [] } } });
+  });
 });

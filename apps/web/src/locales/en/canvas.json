@@ -815,7 +815,10 @@
         "noObserverOptions": "No observer entities in the loaded graph — enter an entry id below.",
         "rawPlaceholder": "Entry id (e.g. kb_char_1)",
         "addRaw": "Add",
-        "clear": "Clear observers"
+        "clear": "Clear observers",
+        "claimNone": "No observers (explicit claim)",
+        "rawLabel": "Raw observation JSON",
+        "rawPlaceholderJson": "Observation module JSON object…"
       },
       "field": {
         "title": "Title",
