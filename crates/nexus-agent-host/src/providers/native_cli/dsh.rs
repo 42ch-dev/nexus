@@ -3015,6 +3015,7 @@ mod tests {
             // carry the platform executable suffix there (see the bare-command
             // test above / register row R-V1202-P1T3-001).
             let path_bin = temp_dir.path().join(if cfg!(windows) { "dsh.cmd" } else { "dsh" });
+            write_executable(&path_bin);
             let _path_guard = PathGuard::isolate(temp_dir.path());
             let _bin_guard = DshRuntimeBinGuard::remove();
             let resolved = resolve_dsh_executable(None).expect("PATH dsh");
