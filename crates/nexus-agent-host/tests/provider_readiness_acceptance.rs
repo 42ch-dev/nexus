@@ -248,6 +248,8 @@ fn process_alive(pid: u32) -> bool {
 
 /// The three documented resolution routes each produce a bounded, real
 /// handshake; a missing runtime stays unavailable.
+// Keep the three resolution-route handshakes in one acceptance scenario.
+#[allow(clippy::too_many_lines)]
 #[tokio::test]
 async fn dsh_routes_configured_path_and_env_all_reach_a_real_handshake() {
     let _lock = ENV_LOCK.lock().await;

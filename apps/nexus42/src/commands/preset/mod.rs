@@ -955,7 +955,14 @@ mod tests {
 
         // No match → empty.
         let rows = build_preset_rows(&grouped_fixture(), Some("nonexistent-intent"));
-        assert!(rows.is_empty());
+        assert_eq!(
+            rows,
+            [] as [(
+                std::string::String,
+                std::string::String,
+                std::vec::Vec<std::string::String>
+            ); 0]
+        );
     }
 
     /// Minimal profile fixture for the text renderers.
@@ -1119,7 +1126,7 @@ states:
         let resp = validate_preset_local(bundle.to_str().unwrap()).unwrap();
         assert_eq!(resp["valid"], false);
         let errors = resp["errors"].as_array().unwrap();
-        assert!(!errors.is_empty());
+        assert_ne!(errors.as_slice(), &[] as &[serde_json::Value]);
         assert!(
             errors
                 .iter()

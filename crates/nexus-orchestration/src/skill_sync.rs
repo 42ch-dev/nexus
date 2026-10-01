@@ -246,7 +246,7 @@ mod tests {
 
         // First run: installs everything.
         let first = sync_ok(&temp);
-        assert!(!first.installed.is_empty());
+        assert_ne!(first.installed, [] as [std::string::String; 0]);
 
         // Second run: should skip everything.
         let second = sync_ok(&temp);
@@ -276,7 +276,7 @@ mod tests {
 
         // First run: install all skills.
         let first = sync_ok(&temp);
-        assert!(!first.installed.is_empty());
+        assert_ne!(first.installed, [] as [std::string::String; 0]);
 
         // Pick the first installed skill and modify its file.
         let modified_skill_id = &first.installed[0];

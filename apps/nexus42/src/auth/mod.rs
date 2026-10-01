@@ -292,7 +292,7 @@ mod tests {
             Some("nexus_live_new_key".to_string())
         );
         assert_eq!(state.creator_id, "crt_new");
-        assert!(state.access_token.is_empty());
+        assert_eq!(state.access_token, "");
     }
 
     #[test]

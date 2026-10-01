@@ -585,7 +585,7 @@ mod tests {
         let fields = demo_work_fields("produce");
         let input = build_preset_input(&fields);
         assert!(input["creative_brief"].is_string());
-        assert!(!input["creative_brief"].as_str().unwrap().is_empty());
+        assert_ne!(input["creative_brief"].as_str().unwrap(), "");
     }
 
     #[test]

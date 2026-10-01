@@ -2922,7 +2922,10 @@ mod tests {
     fn aggregate_empty_input_returns_empty() {
         let per_chapter: Vec<(i32, Vec<KbCandidate>)> = vec![];
         let aggregates = aggregate_candidates_by_canonical_name(&per_chapter);
-        assert!(aggregates.is_empty());
+        assert_eq!(
+            aggregates,
+            [] as [crate::quality_loop::AggregatedCandidate; 0]
+        );
     }
 
     #[test]

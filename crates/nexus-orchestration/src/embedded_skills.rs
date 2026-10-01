@@ -176,7 +176,7 @@ mod tests {
 
         assert_eq!(skill.id, "novel-writing-assistant");
         assert_eq!(skill.version, 1);
-        assert!(!skill.description.is_empty());
+        assert_ne!(skill.description, "");
         assert_eq!(skill.source, "novel-writing-assistant/SKILL.md");
         assert!(
             !skill.content.is_empty(),

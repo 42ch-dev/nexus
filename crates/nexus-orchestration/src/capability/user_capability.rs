@@ -1121,7 +1121,10 @@ mod tests {
         assert!(compute_input.world_ref.world_id.is_none());
         assert!(compute_input.world_ref.branch_id.is_none());
         assert!(compute_input.world_ref.timeline_head_event_id.is_none());
-        assert!(compute_input.key_blocks.is_empty());
+        assert_eq!(
+            compute_input.key_blocks,
+            [] as [serde_json::Map<std::string::String, serde_json::Value>; 0]
+        );
         assert!(compute_input.invocation.is_empty());
     }
 
@@ -1134,7 +1137,10 @@ mod tests {
             .to_compute_input(serde_json::json!({"seed": 7}))
             .expect("input with only invocation fields maps");
         assert!(compute_input.world_ref.world_id.is_none());
-        assert!(compute_input.key_blocks.is_empty());
+        assert_eq!(
+            compute_input.key_blocks,
+            [] as [serde_json::Map<std::string::String, serde_json::Value>; 0]
+        );
         assert_eq!(
             compute_input.invocation.get("seed"),
             Some(&serde_json::json!(7)),
