@@ -13,8 +13,8 @@ use nexus_contracts::{
     WorldKbPromoteCandidateResponse, WorldKbRelationshipProjection, WorldKbSourceAnchorProjection,
 };
 use nexus_knowledge::world_kb::knowledge_entry::{
-    validate_belief_module, validate_mental_module, validate_observation_module,
-    KnowledgeAudience, KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeGovernance,
+    validate_belief_module, validate_mental_module, validate_observation_module, KnowledgeAudience,
+    KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeGovernance,
 };
 use nexus_knowledge::world_kb::store::{KbStoreError, KnowledgeReadScope};
 use nexus_knowledge::world_kb::validation::{

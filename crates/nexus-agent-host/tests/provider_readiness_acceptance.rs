@@ -173,7 +173,6 @@ fn write_fixture_shim(dir: &Path, name: &str, fixture: &str) -> PathBuf {
     path
 }
 
-
 /// Crate-default budgets (see `TimeoutConfig`), not tightened values.
 ///
 /// These tests drive REAL python subprocesses; under parallel test load a cold
