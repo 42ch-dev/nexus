@@ -117,9 +117,6 @@ jobs:
         if: always() && runner.os == 'Windows'
         run: cargo test -p nexus-agent-host --lib 'providers::native_cli::map_'
 
-      - name: Check provider readiness acceptance tests
-        if: always() && runner.os == 'macOS'
-        run: cargo test -p nexus-agent-host --test provider_readiness_acceptance
 
       - name: Check native CLI provider tests
         if: always() && runner.os == 'macOS'

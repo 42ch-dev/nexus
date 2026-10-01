@@ -279,6 +279,9 @@ pub(crate) mod test_support {
     /// it with `.lock().await`, sync `#[test]` fns with `.blocking_lock()`.
     pub static PROCESS_ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
     /// Resolve a Python fixture to a program the current platform can spawn.
+    /// Callers must hold `PROCESS_ENV_LOCK` throughout construction: on
+    /// Windows, PATH-dependent `python_path()` discovery happens before this
+    /// function returns, not only when the fixture is spawned.
     pub fn fixture_launch(fixture: &str) -> std::path::PathBuf {
         let fixture = std::path::Path::new(fixture);
         #[cfg(unix)]
@@ -290,6 +293,9 @@ pub(crate) mod test_support {
             use std::sync::{LazyLock, Mutex};
             static SHIMS: LazyLock<tempfile::TempDir> =
                 LazyLock::new(|| tempfile::tempdir().expect("fixture shim dir"));
+            // cleanup deferred: this process-static TempDir is not dropped at
+            // test-process exit, so its shim directory may remain in the temp
+            // directory until external cleanup.
             static SHIM_LOCK: Mutex<()> = Mutex::new(());
             let _guard = SHIM_LOCK.lock().expect("fixture shim lock");
             let shim_dir = &*SHIMS;

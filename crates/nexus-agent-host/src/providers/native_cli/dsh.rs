@@ -2550,7 +2550,9 @@ mod tests {
     }
 
     /// A provider backed by the python SDK-wire fixture as its explicit
-    /// executable (empty native args).
+    /// executable (empty native args). Caller must hold `PROCESS_ENV_LOCK`
+    /// while constructing it because fixture resolution may inspect PATH on
+    /// Windows.
     fn stub_provider(provider_id: &str, env: HashMap<String, String>) -> DshNativeProvider {
         DshNativeProvider::new(
             ProviderId::new(provider_id),
@@ -2577,6 +2579,28 @@ mod tests {
             timeouts,
         )
         .expect("empty native args are accepted")
+    }
+    async fn stub_provider_locked(
+        provider_id: &str,
+        env: HashMap<String, String>,
+    ) -> DshNativeProvider {
+        let provider = {
+            let _env_lock = lock_test_env().await;
+            stub_provider(provider_id, env)
+        };
+        provider
+    }
+
+    async fn stub_provider_with_timeouts_locked(
+        provider_id: &str,
+        env: HashMap<String, String>,
+        timeouts: TimeoutConfig,
+    ) -> DshNativeProvider {
+        let provider = {
+            let _env_lock = lock_test_env().await;
+            stub_provider_with_timeouts(provider_id, env, timeouts)
+        };
+        provider
     }
 
     async fn lock_test_env() -> tokio::sync::MutexGuard<'static, ()> {
@@ -3191,13 +3215,11 @@ mod tests {
     #[tokio::test]
     async fn non_prompt_operation_is_capability_unsupported() {
         let temp_dir = tempfile::tempdir().expect("temp dir");
-        let provider = stub_provider(
-            "test-dsh-nonprompt",
-            stub_env(
-                &temp_dir.path().join("reqs.jsonl"),
-                &temp_dir.path().join("dsh-home"),
-            ),
-        );
+        let provider = stub_provider_locked("test-dsh-nonprompt",
+        stub_env(
+            &temp_dir.path().join("reqs.jsonl"),
+            &temp_dir.path().join("dsh-home"),
+        ),).await;
         let handle = launch_hermetic(&provider).await;
 
         let result = provider
@@ -3218,13 +3240,11 @@ mod tests {
     #[tokio::test]
     async fn empty_prompt_is_protocol_error() {
         let temp_dir = tempfile::tempdir().expect("temp dir");
-        let provider = stub_provider(
-            "test-dsh-empty",
-            stub_env(
-                &temp_dir.path().join("reqs.jsonl"),
-                &temp_dir.path().join("dsh-home"),
-            ),
-        );
+        let provider = stub_provider_locked("test-dsh-empty",
+        stub_env(
+            &temp_dir.path().join("reqs.jsonl"),
+            &temp_dir.path().join("dsh-home"),
+        ),).await;
         let handle = launch_hermetic(&provider).await;
 
         let result = provider
@@ -3247,13 +3267,11 @@ mod tests {
     #[tokio::test]
     async fn mcp_injection_is_rejected_at_launch() {
         let temp_dir = tempfile::tempdir().expect("temp dir");
-        let provider = stub_provider(
-            "test-dsh-mcp",
-            stub_env(
-                &temp_dir.path().join("reqs.jsonl"),
-                &temp_dir.path().join("dsh-home"),
-            ),
-        );
+        let provider = stub_provider_locked("test-dsh-mcp",
+        stub_env(
+            &temp_dir.path().join("reqs.jsonl"),
+            &temp_dir.path().join("dsh-home"),
+        ),).await;
         let mut spec = launch_spec();
         spec.mcp_servers = vec![McpServerConfig::Http {
             name: "injected".to_string(),
@@ -3295,13 +3313,11 @@ mod tests {
     #[tokio::test]
     async fn cancel_is_honest_noop() {
         let temp_dir = tempfile::tempdir().expect("temp dir");
-        let provider = stub_provider(
-            "test-dsh-cancel",
-            stub_env(
-                &temp_dir.path().join("reqs.jsonl"),
-                &temp_dir.path().join("dsh-home"),
-            ),
-        );
+        let provider = stub_provider_locked("test-dsh-cancel",
+        stub_env(
+            &temp_dir.path().join("reqs.jsonl"),
+            &temp_dir.path().join("dsh-home"),
+        ),).await;
         let handle = launch_hermetic(&provider).await;
 
         provider
@@ -3318,10 +3334,8 @@ mod tests {
     async fn shutdown_confirmed_close_removes_session_and_blocks_new_execute() {
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let req_log = temp_dir.path().join("reqs.jsonl");
-        let provider = stub_provider(
-            "test-dsh-shutdown",
-            stub_env(&req_log, &temp_dir.path().join("dsh-home")),
-        );
+        let provider = stub_provider_locked("test-dsh-shutdown",
+        stub_env(&req_log, &temp_dir.path().join("dsh-home")),).await;
         let handle = launch_hermetic(&provider).await;
 
         {
@@ -3373,14 +3387,12 @@ mod tests {
         let req_log = temp_dir.path().join("reqs.jsonl");
         let mut env = stub_env(&req_log, &temp_dir.path().join("dsh-home"));
         env.insert("SHUTDOWN_DELAY_MS".to_string(), "400".to_string());
-        let provider = stub_provider_with_timeouts(
-            "test-dsh-slow-close",
-            env,
-            TimeoutConfig {
-                shutdown_ms: 50,
-                ..TimeoutConfig::default()
-            },
-        );
+        let provider = stub_provider_with_timeouts_locked("test-dsh-slow-close",
+        env,
+        TimeoutConfig {
+            shutdown_ms: 50,
+            ..TimeoutConfig::default()
+        },).await;
         let handle = launch_hermetic(&provider).await;
 
         let first = {
@@ -3427,7 +3439,7 @@ mod tests {
         let req_log_dir = tempfile::tempdir().expect("temp dir");
         let req_log = req_log_dir.path().join("reqs.jsonl");
         let dsh_home = req_log_dir.path().join("dsh-home");
-        let provider = stub_provider("test-dsh-stub", stub_env(&req_log, &dsh_home));
+        let provider = stub_provider_locked("test-dsh-stub", stub_env(&req_log, &dsh_home)).await;
         let handle = launch_hermetic(&provider).await;
         let stored_before = stored_dsh_session_id(&provider, &handle.session_id).await;
 
@@ -3513,7 +3525,7 @@ mod tests {
         };
         let mut env = stub_env(&req_log, &req_log_dir.path().join("dsh-home"));
         env.insert("HOLD_TURN".to_string(), "1".to_string());
-        let provider = stub_provider_with_timeouts("test-dsh-timeout", env, timeouts);
+        let provider = stub_provider_with_timeouts_locked("test-dsh-timeout", env, timeouts).await;
         let handle = launch_hermetic(&provider).await;
 
         let events = run_turn(&provider, &handle, "slow turn 1").await;
@@ -3567,13 +3579,11 @@ mod tests {
     #[tokio::test]
     async fn dsh_stream_abort_backstop_when_session_closed_before_run() {
         let temp_dir = tempfile::tempdir().expect("temp dir");
-        let provider = stub_provider(
-            "test-dsh-backstop",
-            stub_env(
-                &temp_dir.path().join("reqs.jsonl"),
-                &temp_dir.path().join("dsh-home"),
-            ),
-        );
+        let provider = stub_provider_locked("test-dsh-backstop",
+        stub_env(
+            &temp_dir.path().join("reqs.jsonl"),
+            &temp_dir.path().join("dsh-home"),
+        ),).await;
         let handle = launch_hermetic(&provider).await;
 
         // The env lock is taken BEFORE `execute`, not around `shutdown`:
@@ -3661,10 +3671,8 @@ mod tests {
         let req_log_dir = tempfile::tempdir().expect("temp dir");
         let req_log = req_log_dir.path().join("reqs.jsonl");
         let dsh_home = req_log_dir.path().join("dsh-home");
-        let provider = stub_provider(
-            "test-dsh-closed-transport",
-            stub_env_scenario(&req_log, &dsh_home, "hold_turn"),
-        );
+        let provider = stub_provider_locked("test-dsh-closed-transport",
+        stub_env_scenario(&req_log, &dsh_home, "hold_turn"),).await;
         let handle = launch_hermetic(&provider).await;
 
         // The env lock covers the eager spawn (the fixture's shebang
@@ -3864,7 +3872,7 @@ mod tests {
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let req_log = temp_dir.path().join("reqs.jsonl");
         let dsh_home = temp_dir.path().join("dsh-home");
-        let provider = stub_provider("test-dsh-denyall", stub_env(&req_log, &dsh_home));
+        let provider = stub_provider_locked("test-dsh-denyall", stub_env(&req_log, &dsh_home)).await;
         let handle = launch_hermetic(&provider).await;
 
         let events = run_turn_scoped(
@@ -3976,10 +3984,8 @@ mod tests {
     async fn ordinary_then_deny_all_scope_change_is_rejected() {
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let req_log = temp_dir.path().join("reqs.jsonl");
-        let provider = stub_provider(
-            "test-dsh-lock1",
-            stub_env(&req_log, &temp_dir.path().join("dsh-home")),
-        );
+        let provider = stub_provider_locked("test-dsh-lock1",
+        stub_env(&req_log, &temp_dir.path().join("dsh-home")),).await;
         let handle = launch_hermetic(&provider).await;
 
         let events = run_turn(&provider, &handle, "ordinary first").await;
@@ -4009,10 +4015,8 @@ mod tests {
     async fn deny_all_then_none_scope_change_is_rejected() {
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let req_log = temp_dir.path().join("reqs.jsonl");
-        let provider = stub_provider(
-            "test-dsh-lock2",
-            stub_env(&req_log, &temp_dir.path().join("dsh-home")),
-        );
+        let provider = stub_provider_locked("test-dsh-lock2",
+        stub_env(&req_log, &temp_dir.path().join("dsh-home")),).await;
         let handle = launch_hermetic(&provider).await;
 
         let events = run_turn_scoped(&provider, &handle, "sealed first", Some(deny_all_scope()))
@@ -4043,10 +4047,8 @@ mod tests {
     async fn partially_permissive_scope_is_unsupported_before_admission() {
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let req_log = temp_dir.path().join("reqs.jsonl");
-        let provider = stub_provider(
-            "test-dsh-scope",
-            stub_env(&req_log, &temp_dir.path().join("dsh-home")),
-        );
+        let provider = stub_provider_locked("test-dsh-scope",
+        stub_env(&req_log, &temp_dir.path().join("dsh-home")),).await;
         let handle = launch_hermetic(&provider).await;
 
         let result = run_turn_scoped(
@@ -4096,7 +4098,7 @@ mod tests {
         };
         let mut env = stub_env(&req_log, &temp_dir.path().join("dsh-home"));
         env.insert("HOLD_TURN".to_string(), "1".to_string());
-        let provider = stub_provider_with_timeouts("test-dsh-race", env, timeouts);
+        let provider = stub_provider_with_timeouts_locked("test-dsh-race", env, timeouts).await;
         let handle = launch_hermetic(&provider).await;
 
         // Start a turn and drive the stream on a task so the run holds
@@ -4184,10 +4186,8 @@ mod tests {
     async fn start_final_close_race_with_reunify_observes_harness() {
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let req_log = temp_dir.path().join("reqs.jsonl");
-        let provider = stub_provider(
-            "test-dsh-reunify-race",
-            stub_env(&req_log, &temp_dir.path().join("dsh-home")),
-        );
+        let provider = stub_provider_locked("test-dsh-reunify-race",
+        stub_env(&req_log, &temp_dir.path().join("dsh-home")),).await;
         let handle = launch_hermetic(&provider).await;
 
         let (state, run_harness, active_run, run_reunified, retained) = {
@@ -4288,7 +4288,7 @@ mod tests {
         let dsh_home = temp_dir.path().join("dsh-home");
         std::fs::create_dir_all(&dsh_home).expect("home dir");
         std::fs::write(dsh_home.join(SEALED_HOME_SUBDIR), b"not a dir").expect("blocker");
-        let provider = stub_provider("test-dsh-sealfail", stub_env(&req_log, &dsh_home));
+        let provider = stub_provider_locked("test-dsh-sealfail", stub_env(&req_log, &dsh_home)).await;
         let handle = launch_hermetic(&provider).await;
 
         let failed = run_turn_scoped(&provider, &handle, "seal me", Some(deny_all_scope())).await;
@@ -4696,10 +4696,8 @@ mod tests {
 
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let req_log = temp_dir.path().join("reqs.jsonl");
-        let provider = stub_provider(
-            "test-dsh-retrylease",
-            stub_env(&req_log, &temp_dir.path().join("dsh-home")),
-        );
+        let provider = stub_provider_locked("test-dsh-retrylease",
+        stub_env(&req_log, &temp_dir.path().join("dsh-home")),).await;
         let handle = launch_hermetic(&provider).await;
         run_turn_scoped(&provider, &handle, "seal me", Some(deny_all_scope()))
             .await
@@ -4869,7 +4867,7 @@ mod tests {
         std::fs::create_dir_all(&dsh_home).expect("home");
         let mut env = stub_env(&req_log, &dsh_home);
         env.insert("INIT_FAIL_SEALED".to_string(), "1".to_string());
-        let provider = stub_provider("test-dsh-switchfail", env);
+        let provider = stub_provider_locked("test-dsh-switchfail", env).await;
         let handle = launch_hermetic(&provider).await;
 
         let failed = run_turn_scoped(&provider, &handle, "seal me", Some(deny_all_scope())).await;
@@ -5138,10 +5136,8 @@ mod tests {
         let req_log_dir = tempfile::tempdir().expect("temp dir");
         let req_log = req_log_dir.path().join("reqs.jsonl");
         let dsh_home = req_log_dir.path().join("dsh-home");
-        let provider = stub_provider(
-            "test-dsh-two-msgs",
-            stub_env_scenario(&req_log, &dsh_home, "two_messages"),
-        );
+        let provider = stub_provider_locked("test-dsh-two-msgs",
+        stub_env_scenario(&req_log, &dsh_home, "two_messages"),).await;
         let handle = launch_hermetic(&provider).await;
         let events = run_turn(&provider, &handle, "two").await;
         assert_eq!(message_texts(&events), vec!["A", "B"], "{events:?}");
@@ -5157,10 +5153,8 @@ mod tests {
         let req_log_dir = tempfile::tempdir().expect("temp dir");
         let req_log = req_log_dir.path().join("reqs.jsonl");
         let dsh_home = req_log_dir.path().join("dsh-home");
-        let provider = stub_provider(
-            "test-dsh-nested",
-            stub_env_scenario(&req_log, &dsh_home, "nested"),
-        );
+        let provider = stub_provider_locked("test-dsh-nested",
+        stub_env_scenario(&req_log, &dsh_home, "nested"),).await;
         let handle = launch_hermetic(&provider).await;
         let events = run_turn(&provider, &handle, "nested").await;
         assert_eq!(message_texts(&events), vec!["mock dsh reply"], "{events:?}");
@@ -5172,10 +5166,8 @@ mod tests {
         let req_log_dir = tempfile::tempdir().expect("temp dir");
         let req_log = req_log_dir.path().join("reqs.jsonl");
         let dsh_home = req_log_dir.path().join("dsh-home");
-        let provider = stub_provider(
-            "test-dsh-absent-type",
-            stub_env_scenario(&req_log, &dsh_home, "malformed_root_event_type"),
-        );
+        let provider = stub_provider_locked("test-dsh-absent-type",
+        stub_env_scenario(&req_log, &dsh_home, "malformed_root_event_type"),).await;
         let handle = launch_hermetic(&provider).await;
         let events = run_turn(&provider, &handle, "bad-type").await;
         assert!(
@@ -5194,10 +5186,8 @@ mod tests {
         let req_log_dir = tempfile::tempdir().expect("temp dir");
         let req_log = req_log_dir.path().join("reqs.jsonl");
         let dsh_home = req_log_dir.path().join("dsh-home");
-        let provider = stub_provider(
-            "test-dsh-malformed-text",
-            stub_env_scenario(&req_log, &dsh_home, "malformed_text"),
-        );
+        let provider = stub_provider_locked("test-dsh-malformed-text",
+        stub_env_scenario(&req_log, &dsh_home, "malformed_text"),).await;
         let handle = launch_hermetic(&provider).await;
         let events = run_turn(&provider, &handle, "bad").await;
         assert!(
@@ -5215,10 +5205,8 @@ mod tests {
         let req_log_dir = tempfile::tempdir().expect("temp dir");
         let req_log = req_log_dir.path().join("reqs.jsonl");
         let dsh_home = req_log_dir.path().join("dsh-home");
-        let provider = stub_provider(
-            "test-dsh-partial-fail",
-            stub_env_scenario(&req_log, &dsh_home, "partial_then_fail"),
-        );
+        let provider = stub_provider_locked("test-dsh-partial-fail",
+        stub_env_scenario(&req_log, &dsh_home, "partial_then_fail"),).await;
         let handle = launch_hermetic(&provider).await;
         let events = run_turn(&provider, &handle, "partial").await;
         assert_eq!(message_texts(&events), vec!["partial"], "{events:?}");
@@ -5302,10 +5290,8 @@ mod tests {
         let req_log_dir = tempfile::tempdir().expect("temp dir");
         let req_log = req_log_dir.path().join("reqs.jsonl");
         let dsh_home = req_log_dir.path().join("dsh-home");
-        let provider = stub_provider(
-            "test-dsh-oversize",
-            stub_env_scenario(&req_log, &dsh_home, "oversize"),
-        );
+        let provider = stub_provider_locked("test-dsh-oversize",
+        stub_env_scenario(&req_log, &dsh_home, "oversize"),).await;
         let handle = launch_hermetic(&provider).await;
         let events = run_turn(&provider, &handle, "big").await;
         assert!(
@@ -5451,10 +5437,8 @@ mod tests {
         let req_log_dir = tempfile::tempdir().expect("temp dir");
         let req_log = req_log_dir.path().join("reqs.jsonl");
         let dsh_home = req_log_dir.path().join("dsh-home");
-        let provider = stub_provider(
-            "test-dsh-drop",
-            stub_env_scenario(&req_log, &dsh_home, "hold_turn"),
-        );
+        let provider = stub_provider_locked("test-dsh-drop",
+        stub_env_scenario(&req_log, &dsh_home, "hold_turn"),).await;
         let handle = launch_hermetic(&provider).await;
         let mut stream = Box::pin(
             provider
@@ -5501,7 +5485,7 @@ mod tests {
         let dsh_home = req_log_dir.path().join("dsh-home");
         let mut env = stub_env_scenario(&req_log, &dsh_home, "lag");
         env.insert("LAG_MS".to_string(), "100".to_string());
-        let provider = stub_provider("test-dsh-lag", env);
+        let provider = stub_provider_locked("test-dsh-lag", env).await;
         let handle = launch_hermetic(&provider).await;
         let stream = provider
             .execute(
