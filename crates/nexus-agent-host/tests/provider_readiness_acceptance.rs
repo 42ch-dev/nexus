@@ -119,35 +119,60 @@ fn set_executable(path: &Path) {
 #[cfg(not(unix))]
 fn set_executable(_path: &Path) {}
 
-/// Absolute interpreter path resolved BEFORE any PATH isolation.
-///
-/// The route tests replace `PATH` with a single directory, so a shim that said
-/// bare `python3` would lose its interpreter and the child would exit
-/// immediately (observed as "closed the transport before the turn completed").
+/// Resolve an absolute interpreter before tests isolate the process PATH.
 fn python3_path() -> String {
     static PYTHON3: LazyLock<String> = LazyLock::new(|| {
-        let from_env = std::process::Command::new("/usr/bin/env")
-            .args(["python3", "-c", "import sys; print(sys.executable)"])
-            .output()
-            .ok()
-            .filter(|out| out.status.success())
-            .and_then(|out| String::from_utf8(out.stdout).ok())
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty());
-        from_env.unwrap_or_else(|| "python3".to_string())
+        #[cfg(unix)]
+        {
+            let from_env = std::process::Command::new("/usr/bin/env")
+                .args(["python3", "-c", "import sys; print(sys.executable)"])
+                .output()
+                .ok()
+                .filter(|out| out.status.success())
+                .and_then(|out| String::from_utf8(out.stdout).ok())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            from_env.unwrap_or_else(|| "python3".to_string())
+        }
+        #[cfg(windows)]
+        {
+            for (program, args) in [
+                ("py", vec!["-3", "-c", "import sys; print(sys.executable)"]),
+                ("python", vec!["-c", "import sys; print(sys.executable)"]),
+            ] {
+                if let Ok(output) = std::process::Command::new(program).args(args).output() {
+                    if output.status.success() {
+                        if let Ok(path) = String::from_utf8(output.stdout) {
+                            let path = path.trim();
+                            if !path.is_empty() && Path::new(path).is_absolute() {
+                                return path.to_string();
+                            }
+                        }
+                    }
+                }
+            }
+            panic!("Python is unavailable through `py -3` and `python`");
+        }
     });
     PYTHON3.clone()
 }
 
-/// Make an executable shim named `name` that runs the python fixture with an
-/// ABSOLUTE interpreter, so it survives PATH isolation.
+/// Make a platform-appropriate shim using an absolute interpreter.
 fn write_fixture_shim(dir: &Path, name: &str, fixture: &str) -> PathBuf {
-    let path = dir.join(name);
+    let path = dir.join(if cfg!(windows) {
+        format!("{name}.cmd")
+    } else {
+        name.to_string()
+    });
+    #[cfg(unix)]
     let body = format!("#!/bin/sh\nexec {} {fixture} \"$@\"\n", python3_path());
+    #[cfg(windows)]
+    let body = format!("@echo off\r\n\"{}\" \"{fixture}\" %*\r\n", python3_path());
     std::fs::write(&path, body).expect("write shim");
     set_executable(&path);
     path
 }
+
 
 /// Crate-default budgets (see `TimeoutConfig`), not tightened values.
 ///
@@ -244,11 +269,13 @@ async fn dsh_routes_configured_path_and_env_all_reach_a_real_handshake() {
         ),
     ]);
 
-    // (1) configured explicit executable.
+    let path_dir = tmp.path().join("path-bin");
+    std::fs::create_dir_all(&path_dir).expect("path bin");
+    let configured_bin = write_fixture_shim(&path_dir, "dsh-configured", MOCK_DSH);
     let explicit = DshNativeProvider::new(
         ProviderId::new("dsh-native"),
         "Configured".to_string(),
-        Some(MOCK_DSH.to_string()),
+        Some(configured_bin.to_string_lossy().into_owned()),
         &[],
         env.clone(),
         timeouts(),
@@ -263,10 +290,7 @@ async fn dsh_routes_configured_path_and_env_all_reach_a_real_handshake() {
         "a configured runtime must probe available, got {health:?}"
     );
 
-    // (2) PATH route: a `dsh` shim on the isolated PATH.
     std::fs::remove_file(&req_log).ok();
-    let path_dir = tmp.path().join("path-bin");
-    std::fs::create_dir_all(&path_dir).expect("path bin");
     write_fixture_shim(&path_dir, "dsh", MOCK_DSH);
     {
         let _path = PathGuard::isolate(&path_dir);
@@ -356,10 +380,11 @@ async fn dsh_probe_binds_verified_cwd_for_ordinary_and_sealed_recipes() {
     // tests running in the same binary).
     let ambient = std::env::current_dir().expect("cwd");
 
+    let fixture = write_fixture_shim(tmp.path(), "dsh-cwd", MOCK_DSH);
     let provider = DshNativeProvider::new(
         ProviderId::new("dsh-native"),
         "Cwd".to_string(),
-        Some(MOCK_DSH.to_string()),
+        Some(fixture.to_string_lossy().into_owned()),
         &[],
         HashMap::from([
             (
@@ -506,10 +531,11 @@ async fn claude_version_probe_applies_configured_environment() {
     std::fs::create_dir_all(&cwd).expect("cwd");
     let req_log = tmp.path().join("claude.jsonl");
 
+    let fixture = write_fixture_shim(tmp.path(), "claude", MOCK_CLAUDE);
     let provider = ClaudeCliProvider::new(
         ProviderId::new("claude-native"),
         "Claude".to_string(),
-        MOCK_CLAUDE.to_string(),
+        fixture.to_string_lossy().into_owned(),
         HashMap::from([(
             "REQ_LOG".to_string(),
             req_log.to_string_lossy().into_owned(),
@@ -629,11 +655,12 @@ async fn acp_probe_runs_in_the_verified_owner_workspace() {
     std::fs::create_dir_all(&creator_ws).expect("creator ws");
     let fixture_log = tmp.path().join("acp.jsonl");
 
+    let fixture = write_fixture_shim(tmp.path(), "acp", MOCK_ACP);
     let provider = AcpProvider::from_config(
         ProviderConfig {
             id: "mock-acp".to_string(),
             protocol: "acp".to_string(),
-            command: Some(MOCK_ACP.to_string()),
+            command: Some(fixture.to_string_lossy().into_owned()),
             args: vec![],
             env: HashMap::from([(
                 "ACP_FIXTURE_LOG".to_string(),
@@ -767,6 +794,7 @@ async fn post_ready_launch_failure_invalidates_while_prompt_timeout_stays_ready(
     let workspace_root = tmp.path().join("workspace");
     let creator_ws = workspace_root.join("creator-a");
     std::fs::create_dir_all(&creator_ws).expect("creator ws");
+    let acp_fixture = write_fixture_shim(tmp.path(), "acp-lifecycle", MOCK_ACP);
 
     // ── Case A: the probe PASSES (run 1), the SESSION LAUNCH EOFs (run 2).
     let launch_log = tmp.path().join("acp-launch.jsonl");
@@ -776,7 +804,7 @@ async fn post_ready_launch_failure_invalidates_while_prompt_timeout_stays_ready(
         providers: vec![ProviderConfig {
             id: "mock-acp".to_string(),
             protocol: "acp".to_string(),
-            command: Some(MOCK_ACP.to_string()),
+            command: Some(acp_fixture.to_string_lossy().into_owned()),
             args: vec![],
             env: HashMap::from([
                 (
@@ -880,7 +908,7 @@ async fn post_ready_launch_failure_invalidates_while_prompt_timeout_stays_ready(
         providers: vec![ProviderConfig {
             id: "mock-acp".to_string(),
             protocol: "acp".to_string(),
-            command: Some(MOCK_ACP.to_string()),
+            command: Some(acp_fixture.to_string_lossy().into_owned()),
             args: vec![],
             env: HashMap::from([
                 (

@@ -827,7 +827,7 @@ mod tests {
         ClaudeCliProvider::new(
             ProviderId::new("test-claude-stream-json"),
             "Test".to_string(),
-            MOCK_CLAUDE_CLI.to_string(),
+            crate::test_support::fixture_launch(MOCK_CLAUDE_CLI).to_string_lossy().into_owned(),
             env,
             TimeoutConfig::default(),
         )
@@ -960,7 +960,10 @@ mod tests {
     /// dropped when the turn ends, killing the child.
     #[tokio::test]
     async fn execute_maps_turn_events_and_kills_client() {
-        let provider = mock_provider(HashMap::new());
+        let provider = {
+            let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
+            mock_provider(HashMap::new())
+        };
 
         let (handle, stream) = launch_and_execute(&provider, "hi").await;
         let events = collect_events(stream).await;
@@ -1097,7 +1100,10 @@ mod tests {
     /// `OpFailed(stream_closed)` (AR-1 stream-abort row).
     #[tokio::test]
     async fn cancel_interrupts_then_kills_client() {
-        let provider = mock_provider(HashMap::from([("BLOCK_TURN".to_string(), "1".to_string())]));
+        let provider = {
+            let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
+            mock_provider(HashMap::from([("BLOCK_TURN".to_string(), "1".to_string())]))
+        };
 
         let (handle, stream) = launch_and_execute(&provider, "hi").await;
         let mut stream = stream;
@@ -1137,7 +1143,10 @@ mod tests {
     /// terminal — `OpFailed(stream_closed)` (PD-3 backstop).
     #[tokio::test]
     async fn shutdown_tears_down_client_and_stream_terminates() {
-        let provider = mock_provider(HashMap::from([("BLOCK_TURN".to_string(), "1".to_string())]));
+        let provider = {
+            let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
+            mock_provider(HashMap::from([("BLOCK_TURN".to_string(), "1".to_string())]))
+        };
 
         let (handle, stream) = launch_and_execute(&provider, "hi").await;
         let mut stream = stream;
@@ -1170,7 +1179,10 @@ mod tests {
     /// fails once with `OpFailed(decode_error)`, no per-item skip.
     #[tokio::test]
     async fn decode_error_fails_turn_once() {
-        let provider = mock_provider(HashMap::from([("BAD_FRAME".to_string(), "1".to_string())]));
+        let provider = {
+            let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
+            mock_provider(HashMap::from([("BAD_FRAME".to_string(), "1".to_string())]))
+        };
 
         let (handle, stream) = launch_and_execute(&provider, "hi").await;
         let events = collect_events(stream).await;
@@ -1245,7 +1257,10 @@ mod tests {
     /// EOF and the stream backstop emits exactly one `OpFailed(stream_closed)`.
     #[tokio::test]
     async fn cancel_is_prompt_when_own_frame_read_is_in_flight() {
-        let provider = mock_provider(HashMap::from([("BLOCK_TURN".to_string(), "1".to_string())]));
+        let provider = {
+            let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
+            mock_provider(HashMap::from([("BLOCK_TURN".to_string(), "1".to_string())]))
+        };
 
         let (handle, stream) = launch_and_execute(&provider, "hi").await;
         let mut stream = stream;
@@ -1449,7 +1464,10 @@ mod tests {
 
     #[tokio::test]
     async fn cancel_with_no_active_turn_is_noop() {
-        let provider = mock_provider(HashMap::new());
+        let provider = {
+            let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
+            mock_provider(HashMap::new())
+        };
         let handle = provider.launch(launch_spec()).await.expect("launch");
 
         provider
@@ -1475,7 +1493,10 @@ mod tests {
 
     #[tokio::test]
     async fn empty_prompt_is_rejected() {
-        let provider = mock_provider(HashMap::new());
+        let provider = {
+            let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
+            mock_provider(HashMap::new())
+        };
         let handle = provider.launch(launch_spec()).await.expect("launch");
 
         let result = provider
