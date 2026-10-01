@@ -489,7 +489,8 @@
         "title": "Title",
         "body": "Body",
         "aliases": "Aliases",
-        "blockType": "Block Type"
+        "blockType": "Block Type",
+        "modules": "Mental & Belief modules"
       },
       "mentalState": {
         "title": "Mental State",
@@ -503,6 +504,27 @@
           "dispositions": "Dispositions",
           "norms": "Norms",
           "constraints": "Constraints"
+        },
+        "jsonError": "{{field}} must be valid JSON."
+      },
+      "belief": {
+        "title": "Belief Propositions",
+        "addRow": "Add belief",
+        "removeRow": "Remove belief {{index}}",
+        "emptyOption": "—",
+        "readonlyRow": "Belief {{index}}",
+        "jsonError": "{{field}} must be valid JSON.",
+        "orderError": "{{field}} must be a whole number.",
+        "field": {
+          "holder": "Holder",
+          "proposition": "Proposition",
+          "order": "Order",
+          "truth": "Truth Status",
+          "access": "Knowledge Access",
+          "representation": "Representation",
+          "contentType": "Content Type",
+          "source": "Mental Source",
+          "context": "Context"
         }
       }
     },
@@ -668,7 +690,8 @@
         "aliases": "Aliases",
         "blockType": "Block Type",
         "relationType": "Relation type",
-        "customLabel": "Custom label"
+        "customLabel": "Custom label",
+        "modules": "Mental & Belief modules"
       }
     }
   },

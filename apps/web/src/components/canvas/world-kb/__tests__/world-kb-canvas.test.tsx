@@ -26,6 +26,19 @@ function form(overrides: Partial<EntityEditForm> = {}): EntityEditForm {
     bodyText: '',
     aliasesText: '',
     block_type: 'character',
+    mental: {
+      identity: '',
+      beliefs: '',
+      attention: '',
+      goals: '',
+      intentions: '',
+      emotions: '',
+      dispositions: '',
+      norms: '',
+      constraints: '',
+    },
+    mentalExtras: [],
+    beliefs: [],
     ...overrides,
   };
 }

@@ -8,8 +8,10 @@
 import type { Node } from '@xyflow/react';
 
 import type { EntityEditForm } from './entity-inspector';
+import { modulesPatchFromForm } from './entity-inspector';
 import type { EntityField } from './world-kb-canvas-types';
 import type { WorldKbNodeData } from './types';
+import type { WorldKbEntityPatch } from '@42ch/nexus-contracts';
 
 /** Extract node data for the alt view (filters to entity/candidate nodes only). */
 export function nodesToData(nodes: Node[]): WorldKbNodeData[] {
@@ -29,6 +31,7 @@ export function patchFromForm(form: EntityEditForm, dirty: EntityField[]) {
     body?: Record<string, unknown>;
     aliases?: string[];
     block_type?: EntityEditForm['block_type'];
+    modules?: NonNullable<WorldKbEntityPatch['modules']>;
   } = {};
   // Preserve the trimmed value verbatim — including the empty string. The
   // primary handleSubmit path sends `form.title.trim()` directly, so an
@@ -45,6 +48,10 @@ export function patchFromForm(form: EntityEditForm, dirty: EntityField[]) {
   }
   if (dirty.includes('body')) {
     patch.body = form.bodyText.trim() ? safeJson(form.bodyText) : undefined;
+  }
+  if (dirty.includes('modules')) {
+    const modules = modulesPatchFromForm(form);
+    if (modules) patch.modules = modules;
   }
   return patch;
 }

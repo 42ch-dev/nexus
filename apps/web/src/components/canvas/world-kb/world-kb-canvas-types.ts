@@ -19,7 +19,7 @@ import type {
 import type { WorldKbNodeData } from './types';
 
 /** Editable entity fields tracked for conflict reapply. */
-export type EntityField = 'title' | 'body' | 'aliases' | 'block_type';
+export type EntityField = 'title' | 'body' | 'aliases' | 'block_type' | 'modules';
 
 /** Current canvas selection — entity, candidate, relationship, new relationship, or nothing. */
 export type Selection =
