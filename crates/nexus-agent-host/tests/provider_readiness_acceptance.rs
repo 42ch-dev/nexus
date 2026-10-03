@@ -27,7 +27,8 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use nexus_agent_host::capability::model::{
-    CreateSessionRequest, HostEvent, HostOperation, HostStartConfig, ProbeRequest, SessionOwner,
+    CreateSessionRequest, HostEvent, HostOperation, HostStartConfig, ProbeRequest, ProviderHealth,
+    SessionOwner,
 };
 use nexus_agent_host::config::{AgentHostConfig, ProviderConfig, TimeoutConfig};
 use nexus_agent_host::core::manager::HostManager;
@@ -235,8 +236,15 @@ fn fixture_pids(log: &[serde_json::Value]) -> Vec<u32> {
         .collect()
 }
 
+// Liveness probe for the fixture children this binary spawns. The definition is
+// split by platform; the call sites stay shared. The Windows form is a REAL
+// probe, never a constant stub: a `false` stub would let every `!process_alive`
+// leak assertion below pass vacuously, and a `true` stub would false-fail the
+// un-gated post-ready test.
 #[cfg(unix)]
 fn process_alive(pid: u32) -> bool {
+    // `kill -0 <pid>` returns Ok while the process exists (or is a zombie
+    // awaiting reap); non-zero (ESRCH) means it is gone.
     std::process::Command::new("kill")
         .arg("-0")
         .arg(pid.to_string())
@@ -244,7 +252,191 @@ fn process_alive(pid: u32) -> bool {
         .is_ok_and(|out| out.status.success())
 }
 
+#[cfg(windows)]
+fn process_alive(pid: u32) -> bool {
+    // `tasklist /FI "PID eq <pid>" /FO CSV /NH` prints one quoted CSV row per
+    // match; a no-match run prints a localized INFO line instead, which is
+    // never CSV-shaped, so comparing the CSV PID column is
+    // localization-independent. `tasklist` exits 0 either way, so the OUTPUT
+    // is parsed, never the exit status.
+    let output = std::process::Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+        .output()
+        .unwrap_or_else(|error| {
+            panic!("`tasklist /FI \"PID eq {pid}\" /FO CSV /NH` failed to spawn: {error}")
+        });
+    assert!(
+        output.status.success(),
+        "`tasklist /FI \"PID eq {pid}\" /FO CSV /NH` exited with {}: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let expected = pid.to_string();
+    stdout.lines().any(|line| {
+        line.split(',')
+            .nth(1)
+            .is_some_and(|field| field.trim_matches('"') == expected)
+    })
+}
+
 // ── dsh: routes, cwd binding, timeout close ────────────────────────
+
+/// Platform-specific expectation for one resolved dsh route's probe result.
+#[derive(Clone, Copy, Debug)]
+enum RouteExpectation {
+    /// Unix: ordinary AND sealed recipes initialize and close, so the probe
+    /// reports available.
+    Available,
+    /// Windows: sealed provisioning is unsupported, so the probe reports
+    /// unavailable ONLY after the ordinary recipe's confirmed start + close
+    /// (register R-V1202-P1T3-001).
+    UnsupportedSealed,
+}
+
+/// The Windows sealed-provisioning fail-closed reason fragment. The provider
+/// emits it only AFTER the ordinary recipe's confirmed start and cooperative
+/// close (`dsh.rs` probe ordering: an ordinary failure returns an
+/// "ordinary dsh recipe …" message instead), so matching it proves the
+/// ordinary handshake completed.
+const SEALED_UNSUPPORTED: &str = "sealed deny_all home provisioning is unsupported on this platform";
+
+/// Pure predicate for one resolved dsh route's probe outcome; `Err` carries
+/// the violation reason.
+///
+/// The fixture logs `_spawn` BEFORE reading its first request, so a nonempty
+/// log proves nothing: the route log must carry BOTH the `initialize` request
+/// AND the cooperative `shutdown` close. Then the platform expectation applies:
+/// unix must report `available`; Windows must report unavailable for the
+/// SPECIFIC unsupported-sealed-provisioning reason — an ordinary close
+/// error/timeout (which also yields an unavailable health) is rejected.
+fn check_route_handshake(
+    methods: &[String],
+    available: bool,
+    message: Option<&str>,
+    expectation: RouteExpectation,
+    route: &str,
+) -> Result<(), String> {
+    if !methods.iter().any(|method| method == "initialize") {
+        return Err(format!(
+            "the {route} route must complete a real ordinary `initialize` handshake: {methods:?}"
+        ));
+    }
+    if !methods.iter().any(|method| method == "shutdown") {
+        return Err(format!(
+            "the {route} route's ordinary recipe must be closed cooperatively: {methods:?}"
+        ));
+    }
+    match expectation {
+        RouteExpectation::Available => {
+            if !available {
+                return Err(format!(
+                    "the {route} route must probe available, got message {message:?}"
+                ));
+            }
+        }
+        RouteExpectation::UnsupportedSealed => {
+            if available {
+                return Err(format!(
+                    "the {route} route must be unavailable on Windows (sealed recipe unsupported)"
+                ));
+            }
+            if !message.is_some_and(|text| text.contains(SEALED_UNSUPPORTED)) {
+                return Err(format!(
+                    "the {route} route may only fail via the unsupported sealed provisioning \
+                     reached after a confirmed ordinary close, got message {message:?}"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Assert one resolved dsh route reached a REAL ordinary handshake.
+fn assert_route_reached_a_handshake(health: &ProviderHealth, req_log: &Path, route: &str) {
+    let methods: Vec<String> = read_log(req_log)
+        .iter()
+        .filter_map(|entry| entry["method"].as_str().map(str::to_string))
+        .collect();
+    #[cfg(unix)]
+    let expectation = RouteExpectation::Available;
+    #[cfg(not(unix))]
+    let expectation = RouteExpectation::UnsupportedSealed;
+    if let Err(reason) = check_route_handshake(
+        &methods,
+        health.available,
+        health.message.as_deref(),
+        expectation,
+        route,
+    ) {
+        panic!("{reason}");
+    }
+}
+
+/// QC3-F001 proof: with `initialize` + `shutdown` receipts present, an ordinary
+/// recipe failure (initialization or close) must be rejected under BOTH
+/// platform expectations, while the Windows unsupported-sealed outcome — only
+/// reachable after a confirmed ordinary close — is accepted. A startup-only
+/// receipt (`_spawn` only) is always rejected.
+#[test]
+fn route_handshake_rejects_ordinary_failure_despite_receipts() {
+    let receipts = vec![
+        "_spawn".to_string(),
+        "initialize".to_string(),
+        "shutdown".to_string(),
+    ];
+    let expectations = [RouteExpectation::Available, RouteExpectation::UnsupportedSealed];
+    // The provider's two ordinary-recipe failure messages (dsh.rs probe).
+    for message in [
+        "ordinary dsh recipe failed to initialize: dsh runtime could not be launched",
+        "ordinary dsh recipe close was not confirmed: cooperative shutdown failed",
+    ] {
+        for expectation in expectations {
+            assert!(
+                check_route_handshake(&receipts, false, Some(message), expectation, "configured")
+                    .is_err(),
+                "an ordinary failure must be rejected despite receipts \
+                 ({expectation:?}, {message:?})"
+            );
+        }
+    }
+    // A startup-only log (no handshake receipt) is rejected even with the
+    // accepted Windows reason.
+    assert!(
+        check_route_handshake(
+            &["_spawn".to_string()],
+            false,
+            Some(SEALED_UNSUPPORTED),
+            RouteExpectation::UnsupportedSealed,
+            "configured"
+        )
+        .is_err(),
+        "a startup-only receipt must be rejected"
+    );
+    // The Windows unsupported-sealed outcome (ordinary confirmed close, then
+    // sealed provisioning fails closed) is accepted.
+    assert!(
+        check_route_handshake(
+            &receipts,
+            false,
+            Some(
+                "sealed dsh recipe failed to initialize: sealed deny_all home provisioning is \
+                 unsupported on this platform: descriptor-relative no-follow filesystem \
+                 primitives are required"
+            ),
+            RouteExpectation::UnsupportedSealed,
+            "configured"
+        )
+        .is_ok(),
+        "the unsupported-sealed outcome after a confirmed ordinary close must be accepted"
+    );
+    // An available result satisfies the unix expectation.
+    assert!(
+        check_route_handshake(&receipts, true, None, RouteExpectation::Available, "configured")
+            .is_ok(),
+        "an available probe with receipts must be accepted on unix"
+    );
+}
 
 /// The three documented resolution routes each produce a bounded, real
 /// handshake; a missing runtime stays unavailable.
@@ -286,10 +478,7 @@ async fn dsh_routes_configured_path_and_env_all_reach_a_real_handshake() {
         .probe(probe_request(&cwd, 10_000))
         .await
         .expect("probe runs");
-    assert!(
-        health.available,
-        "a configured runtime must probe available, got {health:?}"
-    );
+    assert_route_reached_a_handshake(&health, &req_log, "configured");
 
     std::fs::remove_file(&req_log).ok();
     write_fixture_shim(&path_dir, "dsh", MOCK_DSH);
@@ -308,10 +497,7 @@ async fn dsh_routes_configured_path_and_env_all_reach_a_real_handshake() {
             .probe(probe_request(&cwd, 10_000))
             .await
             .expect("probe runs");
-        assert!(
-            health.available,
-            "a PATH-found runtime must probe available, got {health:?}"
-        );
+        assert_route_reached_a_handshake(&health, &req_log, "PATH");
     }
 
     // (3) DSH_RUNTIME_BIN route (no PATH entry).
@@ -333,10 +519,7 @@ async fn dsh_routes_configured_path_and_env_all_reach_a_real_handshake() {
             .probe(probe_request(&cwd, 10_000))
             .await
             .expect("probe runs");
-        assert!(
-            health.available,
-            "a DSH_RUNTIME_BIN runtime must probe available, got {health:?}"
-        );
+        assert_route_reached_a_handshake(&health, &req_log, "DSH_RUNTIME_BIN");
     }
 
     // (4) Nothing resolvable ⇒ unavailable, never a false ready.
@@ -363,26 +546,17 @@ async fn dsh_routes_configured_path_and_env_all_reach_a_real_handshake() {
     }
 }
 
-/// F4: the bounded probe runs in the VERIFIED request cwd for BOTH recipes,
-/// never the daemon's ambient working directory.
-#[tokio::test]
-#[allow(clippy::await_holding_lock)] // one process-heavy fixture at a time
-async fn dsh_probe_binds_verified_cwd_for_ordinary_and_sealed_recipes() {
-    let _lock = ENV_LOCK.lock().await;
-    let tmp = tempfile::tempdir().expect("temp dir");
-    let cwd = tmp.path().join("creator-ws");
-    std::fs::create_dir_all(&cwd).expect("cwd");
-    let req_log = tmp.path().join("dsh.jsonl");
-    let dsh_home = tmp.path().join("dsh-home");
-
-    // Read (never mutate) the process cwd: the request cwd is a fresh temp dir,
-    // so a probe that fell back to the ambient directory would be detectable
-    // without changing process-global state (mutating cwd corrupts sibling
-    // tests running in the same binary).
-    let ambient = std::env::current_dir().expect("cwd");
-
-    let fixture = write_fixture_shim(tmp.path(), "dsh-cwd", MOCK_DSH);
-    let provider = DshNativeProvider::new(
+/// Build the verified-cwd dsh probe fixture: a real interpreter shim plus an
+/// isolated REQ_LOG/DSH_HOME. The `cwd` dir is created.
+fn dsh_cwd_probe_provider(
+    tmp: &Path,
+    cwd: &Path,
+    req_log: &Path,
+    dsh_home: &Path,
+) -> DshNativeProvider {
+    std::fs::create_dir_all(cwd).expect("cwd");
+    let fixture = write_fixture_shim(tmp, "dsh-cwd", MOCK_DSH);
+    DshNativeProvider::new(
         ProviderId::new("dsh-native"),
         "Cwd".to_string(),
         Some(fixture.to_string_lossy().into_owned()),
@@ -399,7 +573,81 @@ async fn dsh_probe_binds_verified_cwd_for_ordinary_and_sealed_recipes() {
         ]),
         timeouts(),
     )
-    .expect("constructor ok");
+    .expect("constructor ok")
+}
+
+/// The `_spawn` cwd as the probe child recorded it (`os.getcwd()`),
+/// canonicalized so Windows 8.3/long-name and verbatim-prefix forms compare
+/// equal to the verified request cwd.
+fn recorded_spawn_cwd(spawn: &serde_json::Value, log: &[serde_json::Value]) -> PathBuf {
+    let recorded = spawn["cwd"].as_str().expect("cwd recorded");
+    std::fs::canonicalize(recorded)
+        .unwrap_or_else(|e| panic!("recorded cwd {recorded:?} must canonicalize: {e}; log: {log:?}"))
+}
+
+/// F4 (ordinary half): the bounded probe runs in the VERIFIED request cwd,
+/// never the daemon's ambient working directory.
+///
+/// The sealed recipe is asserted by its own `#[cfg(unix)]` test below.
+#[tokio::test]
+#[allow(clippy::await_holding_lock)] // one process-heavy fixture at a time
+async fn dsh_probe_binds_verified_cwd_for_ordinary_recipe() {
+    let _lock = ENV_LOCK.lock().await;
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let cwd = tmp.path().join("creator-ws");
+    let req_log = tmp.path().join("dsh.jsonl");
+    let dsh_home = tmp.path().join("dsh-home");
+
+    // Read (never mutate) the process cwd: the request cwd is a fresh temp dir,
+    // so a probe that fell back to the ambient directory would be detectable
+    // without changing process-global state (mutating cwd corrupts sibling
+    // tests running in the same binary).
+    let ambient = std::env::current_dir().expect("cwd");
+    let provider = dsh_cwd_probe_provider(tmp.path(), &cwd, &req_log, &dsh_home);
+
+    let _health = provider
+        .probe(probe_request(&cwd, 15_000))
+        .await
+        .expect("probe runs");
+
+    let log = read_log(&req_log);
+    let spawns = spawn_records(&log);
+    assert!(
+        !spawns.is_empty(),
+        "the ordinary recipe must spawn for the probe: {log:?}"
+    );
+    let expected = std::fs::canonicalize(&cwd).expect("canonical cwd");
+    let ambient = std::fs::canonicalize(&ambient).expect("canonical ambient");
+    let recorded = recorded_spawn_cwd(spawns[0], &log);
+    assert_eq!(
+        recorded, expected,
+        "the probe must run in the verified request cwd: {log:?}"
+    );
+    assert_ne!(
+        recorded, ambient,
+        "the probe must never fall back to the ambient cwd: {log:?}"
+    );
+}
+
+/// F4 (sealed half): the bounded probe initializes and closes BOTH recipes and
+/// EVERY recipe binds the VERIFIED request cwd, never the ambient directory.
+///
+/// Sealed deny_all home provisioning needs descriptor-relative no-follow
+/// filesystem primitives; Windows is unsupported and fails that recipe closed
+/// (register R-V1202-P1T3-001 — trigger: Windows job-object/process and
+/// descriptor-relative filesystem capability evidence re-opening the sealed
+/// cohort), so only this unix half asserts both recipes.
+#[cfg(unix)]
+#[tokio::test]
+#[allow(clippy::await_holding_lock)] // one process-heavy fixture at a time
+async fn dsh_probe_binds_verified_cwd_for_sealed_recipe() {
+    let _lock = ENV_LOCK.lock().await;
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let cwd = tmp.path().join("creator-ws");
+    let req_log = tmp.path().join("dsh.jsonl");
+    let dsh_home = tmp.path().join("dsh-home");
+    let ambient = std::env::current_dir().expect("cwd");
+    let provider = dsh_cwd_probe_provider(tmp.path(), &cwd, &req_log, &dsh_home);
 
     let health = provider
         .probe(probe_request(&cwd, 15_000))
@@ -419,16 +667,15 @@ async fn dsh_probe_binds_verified_cwd_for_ordinary_and_sealed_recipes() {
         "the ordinary AND sealed recipes each spawn once: {log:?}"
     );
     let expected = std::fs::canonicalize(&cwd).expect("canonical cwd");
+    let ambient = std::fs::canonicalize(&ambient).expect("canonical ambient");
     for spawn in &spawns {
-        let recorded = spawn["cwd"].as_str().expect("cwd recorded");
+        let recorded = recorded_spawn_cwd(spawn, &log);
         assert_eq!(
-            Path::new(recorded),
-            expected.as_path(),
+            recorded, expected,
             "every probe recipe must run in the verified request cwd: {log:?}"
         );
         assert_ne!(
-            Path::new(recorded),
-            ambient.as_path(),
+            recorded, ambient,
             "the probe must never fall back to the ambient cwd: {log:?}"
         );
     }
@@ -564,10 +811,14 @@ async fn claude_version_probe_applies_configured_environment() {
         Some("--version"),
         "the probe must run the version handshake: {log:?}"
     );
+    // Canonicalize the child's recorded cwd too: Windows may report the 8.3
+    // short form (RUNNER~1) or a `\\?\` verbatim form, which both canonicalize
+    // to the long absolute path (register row R-V1202-P1T3-001).
+    let recorded_cwd = std::fs::canonicalize(log[0]["cwd"].as_str().expect("cwd recorded"))
+        .expect("the recorded cwd must canonicalize");
     let expected_cwd = std::fs::canonicalize(&cwd).expect("canonical cwd");
     assert_eq!(
-        log[0]["cwd"].as_str().map(Path::new),
-        Some(expected_cwd.as_path()),
+        recorded_cwd, expected_cwd,
         "the probe must run in the verified workspace cwd"
     );
 }
@@ -690,9 +941,13 @@ async fn acp_probe_runs_in_the_verified_owner_workspace() {
     let starts: Vec<&serde_json::Value> = log.iter().filter(|e| e["event"] == "start").collect();
     assert_eq!(starts.len(), 1, "one probe child: {log:?}");
     let expected = std::fs::canonicalize(&creator_ws).expect("canonical");
+    // Canonicalize the recorded cwd too: Windows may report a `\\?\` verbatim
+    // form that only matches after canonicalization (register row
+    // R-V1202-P1T3-001).
+    let recorded = std::fs::canonicalize(starts[0]["cwd"].as_str().expect("cwd recorded"))
+        .expect("the recorded cwd must canonicalize");
     assert_eq!(
-        Path::new(starts[0]["cwd"].as_str().expect("cwd recorded")),
-        expected.as_path(),
+        recorded, expected,
         "the probe must run in the verified owner workspace: {log:?}"
     );
 }

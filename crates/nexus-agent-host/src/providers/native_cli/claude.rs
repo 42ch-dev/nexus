@@ -780,13 +780,17 @@ mod tests {
     );
 
     fn test_probe_request(timeout_ms: u64) -> crate::capability::model::ProbeRequest {
-        let cwd = std::path::PathBuf::from("/tmp");
+        // A portable, existing working directory. `/tmp` is not a valid
+        // `current_dir` on Windows: spawn fails with ERROR_DIRECTORY (os
+        // error 267) before the fixture is ever reached. See register row
+        // R-V1202-P1T3-001.
+        let cwd = std::env::temp_dir();
         crate::capability::model::ProbeRequest {
             timeout_ms,
             cwd,
             owner: crate::capability::model::SessionOwner {
                 creator_id: "ctr_test".to_string(),
-                workspace_root: std::path::PathBuf::from("/tmp"),
+                workspace_root: std::env::temp_dir(),
                 orchestration_run_id: None,
             },
         }
@@ -794,12 +798,13 @@ mod tests {
 
     fn launch_spec() -> LaunchSpec {
         LaunchSpec {
-            cwd: std::path::PathBuf::from("/tmp"),
+            // Portable, existing working directory (see `test_probe_request`).
+            cwd: std::env::temp_dir(),
             model: None,
             mode: None,
             owner: crate::capability::model::SessionOwner {
                 creator_id: "ctr_test".to_string(),
-                workspace_root: std::path::PathBuf::from("/tmp"),
+                workspace_root: std::env::temp_dir(),
                 orchestration_run_id: None,
             },
             mcp_servers: vec![],
@@ -1221,13 +1226,21 @@ mod tests {
             prompt_ms: 1000,
             ..TimeoutConfig::default()
         };
-        let provider = ClaudeCliProvider::new(
-            ProviderId::new("test-claude-silent"),
-            "Test".to_string(),
-            MOCK_CLAUDE_CLI.to_string(),
-            HashMap::from([("BLOCK_TURN".to_string(), "1".to_string())]),
-            timeouts,
-        );
+        let provider = {
+            // Resolve the fixture launcher under the env lock: `fixture_launch`
+            // inspects PATH on Windows. The raw `.py` fixture is never spawned
+            // directly — a bare Python file is not executable on Windows.
+            let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
+            ClaudeCliProvider::new(
+                ProviderId::new("test-claude-silent"),
+                "Test".to_string(),
+                crate::test_support::fixture_launch(MOCK_CLAUDE_CLI)
+                    .to_string_lossy()
+                    .into_owned(),
+                HashMap::from([("BLOCK_TURN".to_string(), "1".to_string())]),
+                timeouts,
+            )
+        };
 
         let (handle, stream) = launch_and_execute(&provider, "hi").await;
         let mut stream = stream;
@@ -1257,6 +1270,13 @@ mod tests {
     /// is in flight (silent child). The per-session lock is held by the
     /// read, so the fallback signals the child by PID; the read returns
     /// EOF and the stream backstop emits exactly one `OpFailed(stream_closed)`.
+    //
+    // The PID-signal fallback shells out to `kill -TERM` (unix-only), so this
+    // assertion depends on unix signal semantics; a Windows-native kill path
+    // is a production change out of scope for the test boundary. Dispositioned
+    // under register R-V1202-P1T3-001 — trigger: Windows job-object/taskkill
+    // process-control evidence justifying a production kill-path change.
+    #[cfg(unix)]
     #[tokio::test]
     async fn cancel_is_prompt_when_own_frame_read_is_in_flight() {
         let provider = {
