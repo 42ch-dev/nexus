@@ -271,13 +271,100 @@ fn process_alive(pid: u32) -> bool {
         output.status,
         String::from_utf8_lossy(&output.stderr).trim()
     );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let expected = pid.to_string();
-    stdout.lines().any(|line| {
-        line.split(',')
-            .nth(1)
-            .is_some_and(|field| field.trim_matches('"') == expected)
-    })
+    tasklist_reports_live_pid(&String::from_utf8_lossy(&output.stdout), pid)
+}
+
+// ── Windows tasklist CSV parsing (pure; unit-tested cross-platform) ─
+
+/// Extract the PID column (the SECOND CSV field) from one `tasklist /FO CSV`
+/// row, honoring the CSV quoting rules `tasklist` actually emits.
+///
+/// Every field is double-quoted and an embedded quote is escaped by doubling
+/// (`""`), so a comma inside a quoted image name (for example `"py,thon.exe"`)
+/// must NOT split the row and shift the PID out of field two. A line that is
+/// not CSV-shaped — the localized "no tasks match" INFO line printed on a
+/// no-match run, or empty output — yields `None`. Kept pure so the known-live
+/// semantics are unit-testable without Windows.
+fn tasklist_csv_pid(line: &str) -> Option<String> {
+    // tasklist CSV rows always open with the quoted image-name field; the
+    // localized INFO line does not, so reject anything else before splitting.
+    let line = line.trim_start();
+    if !line.starts_with('"') {
+        return None;
+    }
+    let mut fields: Vec<String> = Vec::new();
+    let mut field = String::new();
+    let mut in_quotes = false;
+    let mut chars = line.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' if in_quotes => {
+                if chars.peek() == Some(&'"') {
+                    // `""` is one literal `"`; consume both.
+                    field.push('"');
+                    chars.next();
+                } else {
+                    in_quotes = false;
+                }
+            }
+            '"' => in_quotes = true,
+            ',' if !in_quotes => fields.push(std::mem::take(&mut field)),
+            _ => field.push(ch),
+        }
+    }
+    fields.push(field);
+    fields.get(1).map(|pid| pid.trim().to_string())
+}
+
+/// Whether a `tasklist /FI "PID eq <pid>" /FO CSV /NH` run's stdout reports
+/// `expected_pid` alive.
+///
+/// The PID is the second CSV field of a real row, so a live child is
+/// recognized even when its image name contains a comma. A no-match run still
+/// exits 0 and prints a localized INFO line, which `tasklist_csv_pid` rejects.
+fn tasklist_reports_live_pid(stdout: &str, expected_pid: u32) -> bool {
+    let expected = expected_pid.to_string();
+    stdout
+        .lines()
+        .filter_map(tasklist_csv_pid)
+        .any(|pid| pid == expected)
+}
+
+#[test]
+fn tasklist_probe_recognizes_a_live_pid_in_an_ordinary_row() {
+    let stdout = "\"python.exe\",\"4242\",\"Console\",\"1\",\"12,000 K\"\r\n";
+    assert!(tasklist_reports_live_pid(stdout, 4242));
+    // A PID the row does not carry is NOT reported alive (guards a true stub).
+    assert!(!tasklist_reports_live_pid(stdout, 4243));
+}
+
+#[test]
+fn tasklist_probe_handles_a_comma_inside_a_quoted_image_name() {
+    // The comma lives INSIDE the quoted image name; the PID stays field two.
+    let row = r#""py,thon.exe","4242","Console","1","12,000 K""#;
+    assert_eq!(tasklist_csv_pid(row).as_deref(), Some("4242"));
+    assert!(tasklist_reports_live_pid(row, 4242));
+}
+
+#[test]
+fn tasklist_probe_handles_an_escaped_quote_in_a_field() {
+    // `""` is one literal quote and must not end the quoted field early.
+    let row = r#""we""ird,na""me.exe","4242","Console","1","12,000 K""#;
+    assert_eq!(tasklist_csv_pid(row).as_deref(), Some("4242"));
+    assert!(tasklist_reports_live_pid(row, 4242));
+}
+
+#[test]
+fn tasklist_probe_ignores_a_localized_no_match_info_line() {
+    let stdout = "INFO: No tasks are running which match the specified criteria.\r\n";
+    assert_eq!(tasklist_csv_pid(stdout.trim()), None);
+    assert!(!tasklist_reports_live_pid(stdout, 4242));
+}
+
+#[test]
+fn tasklist_probe_reports_no_pid_for_empty_output() {
+    assert_eq!(tasklist_csv_pid(""), None);
+    assert!(!tasklist_reports_live_pid("", 4242));
 }
 
 // ── dsh: routes, cwd binding, timeout close ────────────────────────
@@ -299,7 +386,8 @@ enum RouteExpectation {
 /// close (`dsh.rs` probe ordering: an ordinary failure returns an
 /// "ordinary dsh recipe …" message instead), so matching it proves the
 /// ordinary handshake completed.
-const SEALED_UNSUPPORTED: &str = "sealed deny_all home provisioning is unsupported on this platform";
+const SEALED_UNSUPPORTED: &str =
+    "sealed deny_all home provisioning is unsupported on this platform";
 
 /// Pure predicate for one resolved dsh route's probe outcome; `Err` carries
 /// the violation reason.
@@ -385,7 +473,10 @@ fn route_handshake_rejects_ordinary_failure_despite_receipts() {
         "initialize".to_string(),
         "shutdown".to_string(),
     ];
-    let expectations = [RouteExpectation::Available, RouteExpectation::UnsupportedSealed];
+    let expectations = [
+        RouteExpectation::Available,
+        RouteExpectation::UnsupportedSealed,
+    ];
     // The provider's two ordinary-recipe failure messages (dsh.rs probe).
     for message in [
         "ordinary dsh recipe failed to initialize: dsh runtime could not be launched",
@@ -432,8 +523,14 @@ fn route_handshake_rejects_ordinary_failure_despite_receipts() {
     );
     // An available result satisfies the unix expectation.
     assert!(
-        check_route_handshake(&receipts, true, None, RouteExpectation::Available, "configured")
-            .is_ok(),
+        check_route_handshake(
+            &receipts,
+            true,
+            None,
+            RouteExpectation::Available,
+            "configured"
+        )
+        .is_ok(),
         "an available probe with receipts must be accepted on unix"
     );
 }
@@ -547,7 +644,7 @@ async fn dsh_routes_configured_path_and_env_all_reach_a_real_handshake() {
 }
 
 /// Build the verified-cwd dsh probe fixture: a real interpreter shim plus an
-/// isolated REQ_LOG/DSH_HOME. The `cwd` dir is created.
+/// isolated `REQ_LOG`/`DSH_HOME`. The `cwd` dir is created.
 fn dsh_cwd_probe_provider(
     tmp: &Path,
     cwd: &Path,
@@ -581,8 +678,9 @@ fn dsh_cwd_probe_provider(
 /// equal to the verified request cwd.
 fn recorded_spawn_cwd(spawn: &serde_json::Value, log: &[serde_json::Value]) -> PathBuf {
     let recorded = spawn["cwd"].as_str().expect("cwd recorded");
-    std::fs::canonicalize(recorded)
-        .unwrap_or_else(|e| panic!("recorded cwd {recorded:?} must canonicalize: {e}; log: {log:?}"))
+    std::fs::canonicalize(recorded).unwrap_or_else(|e| {
+        panic!("recorded cwd {recorded:?} must canonicalize: {e}; log: {log:?}")
+    })
 }
 
 /// F4 (ordinary half): the bounded probe runs in the VERIFIED request cwd,
@@ -632,7 +730,7 @@ async fn dsh_probe_binds_verified_cwd_for_ordinary_recipe() {
 /// F4 (sealed half): the bounded probe initializes and closes BOTH recipes and
 /// EVERY recipe binds the VERIFIED request cwd, never the ambient directory.
 ///
-/// Sealed deny_all home provisioning needs descriptor-relative no-follow
+/// Sealed `deny_all` home provisioning needs descriptor-relative no-follow
 /// filesystem primitives; Windows is unsupported and fails that recipe closed
 /// (register R-V1202-P1T3-001 — trigger: Windows job-object/process and
 /// descriptor-relative filesystem capability evidence re-opening the sealed
