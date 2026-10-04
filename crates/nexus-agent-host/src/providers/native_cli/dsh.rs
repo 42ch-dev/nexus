@@ -2505,13 +2505,17 @@ mod tests {
     use serde_json::{json, Map};
 
     fn test_probe_request(timeout_ms: u64) -> crate::capability::model::ProbeRequest {
-        let cwd = std::path::PathBuf::from("/tmp");
+        // A portable, existing working directory. `/tmp` is not a valid
+        // `current_dir` on Windows: spawn fails with ERROR_DIRECTORY (os
+        // error 267) before the fixture is ever reached. See register row
+        // R-V1202-P1T3-001.
+        let cwd = std::env::temp_dir();
         crate::capability::model::ProbeRequest {
             timeout_ms,
             cwd,
             owner: crate::capability::model::SessionOwner {
                 creator_id: "ctr_test".to_string(),
-                workspace_root: std::path::PathBuf::from("/tmp"),
+                workspace_root: std::env::temp_dir(),
                 orchestration_run_id: None,
             },
         }
@@ -2524,12 +2528,13 @@ mod tests {
 
     fn launch_spec() -> LaunchSpec {
         LaunchSpec {
-            cwd: std::path::PathBuf::from("/tmp"),
+            // Portable, existing working directory (see `test_probe_request`).
+            cwd: std::env::temp_dir(),
             model: None,
             mode: None,
             owner: crate::capability::model::SessionOwner {
                 creator_id: "ctr_test".to_string(),
-                workspace_root: std::path::PathBuf::from("/tmp"),
+                workspace_root: std::env::temp_dir(),
                 orchestration_run_id: None,
             },
             mcp_servers: vec![],
@@ -2928,7 +2933,14 @@ mod tests {
     fn resolve_explicit_bare_command_uses_path() {
         let _env_lock = lock_test_env_sync();
         let temp_dir = tempfile::tempdir().expect("temp dir");
-        let bin = temp_dir.path().join("dsh-custom");
+        // Windows resolves a bare command through PATHEXT, so the stub carries
+        // the platform executable suffix (`which` never matches an
+        // extension-less file there). See register row R-V1202-P1T3-001.
+        let bin = temp_dir.path().join(if cfg!(windows) {
+            "dsh-custom.cmd"
+        } else {
+            "dsh-custom"
+        });
         write_executable(&bin);
         let _path_guard = PathGuard::isolate(temp_dir.path());
         let _bin_guard = DshRuntimeBinGuard::remove();
@@ -2999,7 +3011,13 @@ mod tests {
 
         // PATH `dsh` is the last resort.
         {
-            let path_bin = temp_dir.path().join("dsh");
+            // Windows resolves a bare command through PATHEXT; the stub must
+            // carry the platform executable suffix there (see the bare-command
+            // test above / register row R-V1202-P1T3-001).
+            let path_bin = temp_dir
+                .path()
+                .join(if cfg!(windows) { "dsh.cmd" } else { "dsh" });
+            write_executable(&path_bin);
             let _path_guard = PathGuard::isolate(temp_dir.path());
             let _bin_guard = DshRuntimeBinGuard::remove();
             let resolved = resolve_dsh_executable(None).expect("PATH dsh");
@@ -3114,11 +3132,17 @@ mod tests {
     /// this guard, while the allowlist/pin assertions above keep the
     /// intent readable. Update the constant only with a reviewed,
     /// source-grounded asset change.
+    ///
+    /// `include_str!` embeds the WORKING-TREE bytes, so a Windows checkout
+    /// with `core.autocrlf=true` would otherwise drift the pin (LF→CRLF)
+    /// without any source change. Line endings are normalized to the LF
+    /// contract before hashing; real content drift still fails.
     #[test]
     fn deny_all_asset_serialized_contract_is_pinned() {
         use sha2::Digest;
         use std::fmt::Write as _;
-        let digest = sha2::Sha256::digest(DENY_ALL_PATCH.as_bytes());
+        let normalized = DENY_ALL_PATCH.replace("\r\n", "\n");
+        let digest = sha2::Sha256::digest(normalized.as_bytes());
         let mut digest_hex = String::with_capacity(64);
         for byte in digest {
             let _ = write!(digest_hex, "{byte:02x}");
@@ -3129,6 +3153,12 @@ mod tests {
         );
     }
 
+    // Sealed deny_all home provisioning needs descriptor-relative no-follow
+    // filesystem primitives that Windows does not provide; unsupported targets
+    // fail closed. Dispositioned under register R-V1202-P1T3-001 — trigger:
+    // Windows job-object/process and descriptor-relative filesystem capability
+    // evidence re-opening the sealed cohort.
+    #[cfg(unix)]
     #[test]
     fn provision_sealed_home_layout_and_exclusivity() {
         let temp_dir = tempfile::tempdir().expect("temp dir");
@@ -3199,9 +3229,13 @@ mod tests {
         let previous = std::env::var("DSH_HOME").ok();
         std::env::set_var("DSH_HOME", "/parent/dsh-home");
         let caller = HashMap::from([("DSH_HOME".to_string(), "/caller/dsh-home".to_string())]);
+        // The SDK normalizes a selected home with `std::path::absolute`; on
+        // Windows that drive-qualifies a root-relative literal, so the
+        // expected value is derived the same way rather than compared against
+        // a Unix literal (register row R-V1202-P1T3-001).
         assert_eq!(
             selected_dsh_home(&caller),
-            PathBuf::from("/caller/dsh-home"),
+            std::path::absolute(Path::new("/caller/dsh-home")).expect("absolute"),
             "caller env DSH_HOME outranks the parent value"
         );
         // Parent DSH_HOME is used when the caller env is absent; a blank
@@ -3209,7 +3243,7 @@ mod tests {
         let blank = HashMap::from([("DSH_HOME".to_string(), "   ".to_string())]);
         assert_eq!(
             selected_dsh_home(&blank),
-            PathBuf::from("/parent/dsh-home"),
+            std::path::absolute(Path::new("/parent/dsh-home")).expect("absolute"),
             "a blank caller DSH_HOME falls through to the parent value"
         );
         match previous {
@@ -3812,6 +3846,12 @@ mod tests {
     /// discloses neither the explicit runtime path nor the caller
     /// `DSH_HOME` path — it is serialized verbatim into the daemon
     /// provider-catalog response (`GET /v1/daemon/agent-host/providers`).
+    // Exercises the sealed deny_all recipe, which needs descriptor-relative
+    // no-follow filesystem primitives Windows does not provide (provisioning
+    // fails closed there). Dispositioned under register R-V1202-P1T3-001 —
+    // trigger: Windows job-object/process and descriptor-relative filesystem
+    // capability evidence re-opening the sealed cohort.
+    #[cfg(unix)]
     #[tokio::test]
     async fn probe_initializes_and_closes_both_recipes() {
         let _env_lock = lock_test_env().await;
@@ -3899,6 +3939,11 @@ mod tests {
     /// reaches ONLY the sealed runtime. A second identical-scope prompt
     /// reuses the sealed recipe (no third spawn). The child-home lease is
     /// deleted by the confirmed shutdown close.
+    // Requires the sealed deny_all recipe (Windows sealed provisioning fails
+    // closed). Dispositioned under register R-V1202-P1T3-001 — trigger:
+    // Windows job-object/process and descriptor-relative filesystem capability
+    // evidence re-opening the sealed cohort.
+    #[cfg(unix)]
     #[tokio::test]
     async fn deny_all_first_prompt_switches_to_sealed_recipe() {
         let temp_dir = tempfile::tempdir().expect("temp dir");
@@ -4047,6 +4092,11 @@ mod tests {
 
     /// Once a `deny_all` prompt has been admitted, a `None` scope change is
     /// rejected — `None` never escalates out of the sealed recipe.
+    // Requires a sealed deny_all session (Windows sealed provisioning fails
+    // closed). Dispositioned under register R-V1202-P1T3-001 — trigger:
+    // Windows job-object/process and descriptor-relative filesystem capability
+    // evidence re-opening the sealed cohort.
+    #[cfg(unix)]
     #[tokio::test]
     async fn deny_all_then_none_scope_change_is_rejected() {
         let temp_dir = tempfile::tempdir().expect("temp dir");
@@ -4324,14 +4374,26 @@ mod tests {
     /// deny-all prompt permanently closes the session — no retryable
     /// half-switched state, no ordinary fallback; later `None` and
     /// deny-all executes are both rejected immediately, and no prompt is
-    /// ever sent. (The `nexus` component is a FILE, so the exclusive
-    /// leaf create fails.)
+    /// ever sent. (Unix: a FILE at the `nexus` component makes the exclusive
+    /// leaf create fail; Windows: sealed provisioning is unsupported and
+    /// fails closed.)
+    // Drives the sealed provisioning failure path and asserts the permanent
+    // session-close invariants on EVERY platform (QC3-F002 restored Windows
+    // coverage): on Unix the injected FILE at the `nexus` component forces the
+    // exclusive leaf create to fail; on Windows the sealed recipe is
+    // unsupported outright and provisioning fails closed — the same
+    // failure-handling path the test asserts (register R-V1202-P1T3-001).
     #[tokio::test]
     async fn sealed_provision_failure_closes_session_permanently() {
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let req_log = temp_dir.path().join("reqs.jsonl");
         let dsh_home = temp_dir.path().join("dsh-home");
         std::fs::create_dir_all(&dsh_home).expect("home dir");
+        // Unix forces the exclusive leaf create to fail via a FILE at the
+        // `nexus` component; Windows has no descriptor-relative sealed
+        // filesystem primitive, so provisioning fails closed without an
+        // injected blocker.
+        #[cfg(unix)]
         std::fs::write(dsh_home.join(SEALED_HOME_SUBDIR), b"not a dir").expect("blocker");
         let provider =
             stub_provider_locked("test-dsh-sealfail", stub_env(&req_log, &dsh_home)).await;
@@ -4530,6 +4592,12 @@ mod tests {
     /// the ORDINARY close instead, the dropped `probe_recipes` future
     /// never reached the sealed recipe, and only one `_spawn` was ever
     /// recorded.
+    // Exercises the sealed recipe's retained cleanup owner (Windows sealed
+    // provisioning fails closed). Dispositioned under register
+    // R-V1202-P1T3-001 — trigger: Windows job-object/process and
+    // descriptor-relative filesystem capability evidence re-opening the sealed
+    // cohort.
+    #[cfg(unix)]
     #[tokio::test]
     async fn probe_deadline_drop_keeps_sealed_cleanup_owner() {
         let _env_lock = lock_test_env().await;
@@ -4602,6 +4670,12 @@ mod tests {
     /// deadline expired during the ORDINARY start instead, the dropped
     /// `probe_recipes` future never reached the sealed recipe, and only
     /// one `_spawn` was ever recorded.
+    // Exercises the sealed recipe's retained start/lease owner (Windows sealed
+    // provisioning fails closed). Dispositioned under register
+    // R-V1202-P1T3-001 — trigger: Windows job-object/process and
+    // descriptor-relative filesystem capability evidence re-opening the sealed
+    // cohort.
+    #[cfg(unix)]
     #[tokio::test]
     async fn probe_init_timeout_retains_sealed_owner_and_completes_cleanup() {
         let _env_lock = lock_test_env().await;

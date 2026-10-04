@@ -108,14 +108,15 @@ jobs:
       - name: Check discovery tests
         run: cargo test -p nexus-agent-host --lib 'discovery::'
 
-      # Windows provider fixture parity is only partially established: the map_
-      # cohort is portable, while 39 broader lib tests expose Windows-specific
-      # process/path/sealed-filesystem gaps. Windows readiness integration also
-      # currently fails to compile because process_alive is Unix-only. Both
-      # gaps are dispositioned for T3; do not change provider semantics here.
-      - name: Check native CLI provider tests (Windows mapping cohort)
+      # Keep provider semantics unchanged. If any per-test dispositions remain
+      # after Task 3, gate them in test sources with a named register row.
+      - name: Check native CLI provider tests (Windows launch cohort)
         if: always() && runner.os == 'Windows'
-        run: cargo test -p nexus-agent-host --lib 'providers::native_cli::map_'
+        run: cargo test -p nexus-agent-host --lib providers::native_cli
+
+      - name: Check provider readiness acceptance (Windows)
+        if: always() && runner.os == 'Windows'
+        run: cargo test -p nexus-agent-host --test provider_readiness_acceptance
 
 
       - name: Check native CLI provider tests

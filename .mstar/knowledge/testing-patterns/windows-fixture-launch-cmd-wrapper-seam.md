@@ -69,5 +69,6 @@ let provider = stub_provider_locked("test-dsh", /* ... */); // env guard → fix
 
 ## See also
 
+- [windows-launch-cohort-remediation-discipline.md](windows-launch-cohort-remediation-discipline.md) — the v1.204 remediation pass that measured this seam's triage hypotheses and carries the assertion-strength discipline
 - [process-env-lock-fixture-spawn-serialization.md](../workflow-patterns/process-env-lock-fixture-spawn-serialization.md) — the env-lock contract this seam's construction-time discovery depends on
 - [native-cli-provider-adapter-pattern.md](../architecture-patterns/native-cli-provider-adapter-pattern.md) — provider SDK ownership and the spawn contract the seam satisfies
