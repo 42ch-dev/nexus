@@ -973,13 +973,17 @@ mod tests {
     );
 
     fn test_probe_request(timeout_ms: u64) -> crate::capability::model::ProbeRequest {
-        let cwd = std::path::PathBuf::from("/tmp");
+        // A portable, existing working directory. `/tmp` is not a valid
+        // `current_dir` on Windows: spawn fails with ERROR_DIRECTORY (os
+        // error 267) before the fixture is ever reached. See register row
+        // R-V1202-P1T3-001.
+        let cwd = std::env::temp_dir();
         crate::capability::model::ProbeRequest {
             timeout_ms,
             cwd,
             owner: crate::capability::model::SessionOwner {
                 creator_id: "ctr_test".to_string(),
-                workspace_root: std::path::PathBuf::from("/tmp"),
+                workspace_root: std::env::temp_dir(),
                 orchestration_run_id: None,
             },
         }
@@ -987,12 +991,13 @@ mod tests {
 
     fn launch_spec() -> LaunchSpec {
         LaunchSpec {
-            cwd: std::path::PathBuf::from("/tmp"),
+            // Portable, existing working directory (see `test_probe_request`).
+            cwd: std::env::temp_dir(),
             model: None,
             mode: None,
             owner: crate::capability::model::SessionOwner {
                 creator_id: "ctr_test".to_string(),
-                workspace_root: std::path::PathBuf::from("/tmp"),
+                workspace_root: std::env::temp_dir(),
                 orchestration_run_id: None,
             },
             mcp_servers: vec![],
