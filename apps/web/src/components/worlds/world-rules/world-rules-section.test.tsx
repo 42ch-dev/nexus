@@ -729,7 +729,11 @@ describe('WorldRulesSection — edit + Deactivate (V1.169 P2 T2)', () => {
     // (status: 'active') can never be saved to silently reactivate the rule.
     await waitFor(() => expect(screen.queryByTestId('world-rule-form')).not.toBeInTheDocument());
     expect(patches).toEqual([{ status: 'deprecated' }]);
-    expect(screen.getByTestId('world-rule-status')).toHaveTextContent('deprecated');
+    // msw v3 delivers the invalidated list refetch a turn later than v2, so the
+    // refreshed badge is awaited rather than read synchronously after the close.
+    await waitFor(() =>
+      expect(screen.getByTestId('world-rule-status')).toHaveTextContent('deprecated'),
+    );
   });
 
   it('list refresh after PATCH keeps the read-route ordering contract', async () => {

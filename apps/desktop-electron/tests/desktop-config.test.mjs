@@ -31,7 +31,17 @@ import { createDesktopConfig } from '../dist/desktop-config.js';
 const configPath = (home) => join(home, '.nexus42', 'config.toml');
 const agentPath = (home) => join(home, '.nexus42', 'agent-host', 'config.toml');
 const readText = (path) => readFileSync(path, 'utf8');
-const parseToml = (path) => parse(readText(path), { integersAsBigInt: 'asNeeded' });
+// smol-toml 1.9 returns null-prototype tables (prototype-pollution hardening);
+// re-establish the plain-object shape these assertions pin, mirroring the
+// normalization at the product's own parse seam in src/desktop-config.ts.
+const toPlainToml = (value) =>
+  Array.isArray(value)
+    ? value.map(toPlainToml)
+    : value && typeof value === 'object' && !(value instanceof Date)
+      ? Object.fromEntries(Object.entries(value).map(([key, child]) => [key, toPlainToml(child)]))
+      : value;
+const parseToml = (path) =>
+  toPlainToml(parse(readText(path), { integersAsBigInt: 'asNeeded' }));
 
 function writeTomlFile(path, text) {
   mkdirSync(dirname(path), { recursive: true });

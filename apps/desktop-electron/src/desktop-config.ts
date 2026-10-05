@@ -90,6 +90,30 @@ function isTomlTable(value: TomlValue | undefined): value is TomlTable {
 }
 
 /**
+ * smol-toml 1.9 returns every table as an `Object.create(null)` object
+ * (prototype-pollution hardening, README "Key safety"). This module's contract
+ * is an ordinary plain-object document — indexing, spreads and `{ ...doc }`
+ * behave like any other object — so the parsed tree is deep-copied back onto
+ * `Object.prototype` at the single parse seam. Keys are re-added as own data
+ * properties via `defineProperty`, so a literal `__proto__` key is stored as
+ * data instead of invoking the prototype setter.
+ */
+function toPlainToml(value: TomlValue): TomlValue {
+  if (Array.isArray(value)) return value.map(toPlainToml);
+  if (!isTomlTable(value)) return value;
+  const plain: TomlTable = {};
+  for (const [key, child] of Object.entries(value)) {
+    Object.defineProperty(plain, key, {
+      value: toPlainToml(child),
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  }
+  return plain;
+}
+
+/**
  * `ctr_local` + 12 hex characters — the generation pattern of
  * `nexus-creator/src/local_identity.rs` (first 12 hex chars of a UUID v4).
  */
@@ -170,7 +194,7 @@ export function createDesktopConfig(home: string, documentsPath: string): Deskto
       );
     }
     try {
-      return parse(text, { integersAsBigInt: 'asNeeded' });
+      return toPlainToml(parse(text, { integersAsBigInt: 'asNeeded' })) as TomlTable;
     } catch (err) {
       throw desktopError(
         'config_corrupt',

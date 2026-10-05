@@ -11,7 +11,7 @@
 import { http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { act, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import userEvent, { type UserEvent } from '@testing-library/user-event';
 import type { ReactElement } from 'react';
 import { useNavigate } from 'react-router';
 import type { RunSummary } from '@42ch/nexus-contracts';
@@ -498,9 +498,19 @@ async function openRunStudio(user: ReturnType<typeof userEvent.setup>) {
   await screen.findByText('Run Studio');
 }
 
+/**
+ * Pick the World. msw v3 resolves the Worlds list a turn later than v2, so the
+ * picker is awaited to become enabled before selecting (the same convention as
+ * run-studio.test.tsx) instead of racing the query.
+ */
+async function selectWorld(user: UserEvent) {
+  await waitFor(() => expect(screen.getByTestId('run-studio-world')).toBeEnabled());
+  await user.selectOptions(screen.getByTestId('run-studio-world'), 'w1');
+}
+
 /** Fill the guided form: pick a World, then both character pickers. */
 async function fillBasicCombatForm(user: ReturnType<typeof userEvent.setup>) {
-  await user.selectOptions(screen.getByTestId('run-studio-world'), 'w1');
+  await selectWorld(user);
   // The required-mark span (*) joins the label text, so match by regex.
   await screen.findByRole('combobox', { name: /^Attacker/ });
   await user.selectOptions(screen.getByRole('combobox', { name: /^Attacker/ }), 'kb-aria');
@@ -672,7 +682,7 @@ describe('ModulesPage Run Studio (V1.147 P1 T3)', () => {
     useHandlers(...handlers);
 
     await openRunStudio(user);
-    await user.selectOptions(screen.getByTestId('run-studio-world'), 'w1');
+    await selectWorld(user);
 
     expect(await screen.findByText('Could not load World characters')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
@@ -694,7 +704,7 @@ describe('ModulesPage Run Studio (V1.147 P1 T3)', () => {
     useHandlers(...handlers);
 
     await openRunStudio(user);
-    await user.selectOptions(screen.getByTestId('run-studio-world'), 'w1');
+    await selectWorld(user);
 
     // §6: no characters to run — the picker renders its caller-owned empty state.
     expect(await screen.findAllByText('No characters to run')).toHaveLength(2);

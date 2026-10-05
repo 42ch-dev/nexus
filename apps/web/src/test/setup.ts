@@ -93,7 +93,9 @@ function ensureLocalStorage() {
 
 ensureLocalStorage();
 
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+// msw v3 renamed this option: `onUnhandledRequest` → `onUnhandledFrame`
+// (SharedOptions in msw@3; the unhandled request is now surfaced as a frame).
+beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
 afterEach(() => {
   server.resetHandlers();
   i18n.changeLanguage('en');
