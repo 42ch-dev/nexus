@@ -10,7 +10,7 @@
  *
  * Usage:
  *   node apps/desktop-electron/scripts/proof-maintenance.mjs \
- *     --arch arm64 --to 44.3.0 --out <evidence dir>
+ *     --arch arm64 --to 44.4.5 --out <evidence dir>
  *
  * The pin in apps/desktop-electron/package.json must already be the target
  * version; the driver asserts that rather than rewriting it, so the measured

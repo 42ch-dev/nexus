@@ -35,7 +35,7 @@ test('missing minimum-macOS load command fails package verification', () => {
       minimum_macos: '13.0',
       node_version: 'v22.0.0',
       pnpm_version: '10.0.0',
-      electron_version: '44.3.0',
+      electron_version: '44.4.5',
       packager_version: '20.3.0',
       native_contract_hash: 'a'.repeat(64),
       native_target: 'aarch64-apple-darwin',
