@@ -4,7 +4,7 @@
 //! `KnowledgeEntryRecord` is the canonical owner-aware knowledge container in
 //! Nexus (v1.184 P1): the pre-v1.184 `KnowledgeEntryRecord` generalized in place into a
 //! single aggregate carrying a closed [`KnowledgeOwnerRef`] (`World`,
-//! `Character`, `ActorWorldBinding`) and a World-only `creator_only` flag. Each
+//! `Character`, `ActorWorldBinding`). Each
 //! KB has a lifecycle from provisional → confirmed (with possible
 //! deprecation/merge/deletion). See data-model-v1.md §5.5,
 //! consistency-rules-v1.md §3.2.
@@ -18,8 +18,8 @@
 //! closed narrative container, and the holder pair is the disclosure policy
 //! applied on top of it. [`KnowledgeAudience`] is the closed author-facing
 //! input; [`resolve_authored_governance`] owns its omission semantics. The
-//! legacy `creator_only` boolean stays carried here only until the complete
-//! cutover removes it (durable §5); it is never an authoring input.
+//! legacy `creator_only` boolean is retired (durable §5) and no longer part of
+//! this record; it was never an authoring input.
 
 use crate::world_kb::errors::KbError;
 use crate::world_kb::source_anchor::SourceAnchor;
@@ -209,15 +209,6 @@ pub struct KnowledgeEntryRecord {
     /// rewritten.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub disclosure: Option<String>,
-    /// Legacy World-only creator visibility flag (`creator_only` column).
-    /// May only be `true` for a [`KnowledgeOwnerRef::World`] owner (DB CHECK).
-    ///
-    /// Planned target (durable §5): the offline cutover migrates every `true`
-    /// row to the stored controlling Creator's holder + `owner-private` and
-    /// removes this field; client authoring of the key is already rejected —
-    /// including `false` — by [`reject_reserved_authoring_keys`].
-    #[serde(default)]
-    pub creator_only: bool,
     pub block_type: BlockType,
     pub canonical_name: String,
     pub status: String,
@@ -240,8 +231,8 @@ pub struct KnowledgeEntryRecord {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_provenance_kind: Option<String>,
     /// Unknown keys carried under `extensions.nexus` on the spoke boundary —
-    /// everything outside the 8 typed identity/owner fields (`world_id`,
-    /// `character_id`, `actor_world_binding_id`, `creator_only`,
+    /// everything outside the 7 typed identity/owner fields (`world_id`,
+    /// `character_id`, `actor_world_binding_id`,
     /// `created_from_command_id`, `source_work_id`, `source_chapter`,
     /// `source_provenance_kind`). Preserved verbatim across the `SQLite`
     /// read-modify-write cycle and the spoke conversion seam (spec §2.2
@@ -346,7 +337,6 @@ impl KnowledgeEntryRecord {
             owner,
             holder_entry_id: None,
             disclosure: None,
-            creator_only: false,
             block_type,
             canonical_name: canonical_name.to_string(),
             status: KeyBlockStatus::Provisional.as_str().to_string(),
@@ -475,28 +465,6 @@ impl KnowledgeEntryRecord {
             .filter_map(|row| serde_json::from_value(row.clone()).ok())
             .collect()
     }
-}
-
-/// Validate the owner/flag invariant shared by every write boundary
-/// (v1.184 P1 fix).
-///
-/// `creator_only` may be `true` only for a
-/// [`KnowledgeOwnerRef::World`] owner. Used by both `KbStore`
-/// implementations (in-memory + `SQLite`) and the spoke conversion seam so
-/// the invariant holds identically across domain, memory, `SQLite`, and
-/// conversion (the `SQLite` schema CHECK remains defense in depth).
-///
-/// # Errors
-/// Returns [`KbError::CreatorOnlyRequiresWorld`] when `creator_only` is set
-/// on a Character- or binding-owned record.
-pub fn validate_creator_only_owner(
-    owner: &KnowledgeOwnerRef,
-    creator_only: bool,
-) -> Result<(), KbError> {
-    if creator_only && owner.world_id().is_none() {
-        return Err(KbError::CreatorOnlyRequiresWorld(owner.kind()));
-    }
-    Ok(())
 }
 
 // ── Native holder governance (v1.191 P1 T2, durable §§1/3) ────────────────
@@ -1235,7 +1203,6 @@ mod tests {
         assert_eq!(kb.schema_version, 1);
         assert_eq!(kb.owner, KnowledgeOwnerRef::world("wld_test123"));
         assert_eq!(kb.world_id(), Some("wld_test123"));
-        assert!(!kb.creator_only);
         assert!(kb.entry_id.starts_with("kb_"));
     }
     // ── v1.184 P1 T2: closed owner ref + constructors ─────────────────
@@ -1249,7 +1216,6 @@ mod tests {
         assert_eq!(kb.owner.world_id(), Some("wld_x"));
         assert_eq!(kb.owner.character_id(), None);
         assert_eq!(kb.owner.actor_world_binding_id(), None);
-        assert!(!kb.creator_only);
     }
 
     #[test]
@@ -1260,7 +1226,6 @@ mod tests {
         assert_eq!(kb.owner.id(), "chr_x");
         assert_eq!(kb.owner.world_id(), None);
         assert_eq!(kb.owner.character_id(), Some("chr_x"));
-        assert!(!kb.creator_only);
     }
 
     #[test]
@@ -1271,7 +1236,6 @@ mod tests {
         assert_eq!(kb.owner.id(), "awb_x");
         assert_eq!(kb.owner.world_id(), None);
         assert_eq!(kb.owner.actor_world_binding_id(), Some("awb_x"));
-        assert!(!kb.creator_only);
     }
 
     #[test]

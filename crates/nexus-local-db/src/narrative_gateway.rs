@@ -122,8 +122,8 @@ impl SqliteNarrativeGateway {
 /// - `branch_id` — optional strict equality (`scope.extensions["nexus"]
 ///   ["branch_id"]`).
 /// - `event_ids` — optional `IN (SELECT value FROM json_each(?))`, the same
-///   `SQLite` idiom `kb_store::list_by_world_scoped` uses for `entry_ids`
-///   (`scope.timeline_event_ids`).
+///   `SQLite` idiom `kb_store::list_entries_by_ids_admitted` uses for
+///   `entry_ids` (`scope.timeline_event_ids`).
 ///
 /// # Ordering
 ///
@@ -153,8 +153,8 @@ pub async fn list_timeline_events_scoped(
     // SAFETY: static column list; the only dynamic fragments are the optional
     // `branch_id` equality and the optional `event_ids` IN clause — both use
     // bind params only (no user-controlled SQL). Same runtime-query pattern as
-    // `get_timeline` (line ~320) and `kb_store::list_by_world_scoped` (line
-    // ~328). The bind order below matches the `?` order in the SQL: world_id,
+    // `get_timeline` (line ~320) and `kb_store::list_entries_by_ids_admitted`.
+    // The bind order below matches the `?` order in the SQL: world_id,
     // then branch_id (if present), then the event_ids JSON array (if present).
     let mut sql = String::from(if has_branch {
         r"SELECT

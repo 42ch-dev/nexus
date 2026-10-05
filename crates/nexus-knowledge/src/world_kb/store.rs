@@ -46,8 +46,8 @@ pub enum KbStoreError {
     #[error("key block not found: {0}")]
     NotFound(String),
 
-    /// Owner or `creator_only` change attempted on update (both immutable,
-    /// v1.184 P1 — moving knowledge is explicit create/copy work).
+    /// Owner change attempted on update (immutable, v1.184 P1 — moving
+    /// knowledge is explicit create/copy work).
     #[error("owner is immutable for entry {0}")]
     ImmutableOwner(String),
 
@@ -335,10 +335,9 @@ impl InMemoryKbStore {
     /// Validate the native governance pair of a record before it is stored
     /// (durable §3).
     ///
-    /// Parity companion to `validate_creator_only_owner`: the in-memory
-    /// backend owns the invariant that the `SQLite` columns + registry
-    /// reference enforce, so an invalid pair is rejected before it can be
-    /// observed or projected onto the wire.
+    /// The in-memory backend owns the invariant that the `SQLite` columns +
+    /// registry reference enforce, so an invalid pair is rejected before it
+    /// can be observed or projected onto the wire.
     fn validate_governance(kb: &KnowledgeEntryRecord) -> Result<(), KbStoreError> {
         crate::world_kb::knowledge_entry::validate_native_governance(
             kb.holder_entry_id.as_deref(),
@@ -404,16 +403,8 @@ impl KbStore for InMemoryKbStore {
             },
         )?;
 
-        // v1.184 P1 fix: `creator_only` is World-only — the in-memory store
-        // enforces the same invariant as the SQLite schema CHECK (which the
-        // in-memory backend cannot rely on), so a non-World owner carrying the
-        // flag is rejected before it can be observed or emit an invalid spoke
-        // projection.
-        crate::world_kb::knowledge_entry::validate_creator_only_owner(&kb.owner, kb.creator_only)
-            .map_err(|e| KbStoreError::ValidationLegacy(e.to_string()))?;
-
         // v1.191 P1 T2: the native governance pair is validated on every write
-        // path, exactly like the owner/flag invariant above.
+        // path.
         Self::validate_governance(&kb)?;
 
         let entry_id = kb.entry_id.clone();
@@ -600,9 +591,9 @@ impl KbStore for InMemoryKbStore {
                 .get(&kb.entry_id)
                 .ok_or_else(|| KbStoreError::NotFound(kb.entry_id.clone()))?;
 
-            // v1.184 P1: owner and creator_only are immutable through patch
-            // APIs — moving knowledge is explicit create/copy work.
-            if existing.owner != kb.owner || existing.creator_only != kb.creator_only {
+            // v1.184 P1: the owner is immutable through patch APIs — moving
+            // knowledge is explicit create/copy work.
+            if existing.owner != kb.owner {
                 return Err(KbStoreError::ImmutableOwner(kb.entry_id.clone()));
             }
 
@@ -1364,44 +1355,6 @@ mod tests {
         let q = KbQuery::new("wld_1").with_computable(Some(false));
         let result = store.query(&q).await.unwrap();
         assert_eq!(result.total_count, 1);
-    }
-
-    // v1.184 P1 fix parity: the in-memory store must reject `creator_only`
-    // set on a Character- or binding-owned record (the SQLite CHECK is not
-    // available to the in-memory backend) — the invariant must match across
-    // domain / memory / SQLite / conversion.
-    #[tokio::test]
-    async fn insert_rejects_creator_only_on_character_owner() {
-        let store = InMemoryKbStore::new();
-        let mut kb = KnowledgeEntryRecord::for_character("chr_1", BlockType::Character, "Flagged");
-        kb.creator_only = true;
-        let err = store.insert_knowledge_entry(kb).await.unwrap_err();
-        assert!(
-            matches!(&err, KbStoreError::ValidationLegacy(m) if m.contains("creator_only")),
-            "character-owned creator_only must be rejected, got {err:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn insert_rejects_creator_only_on_binding_owner() {
-        let store = InMemoryKbStore::new();
-        let mut kb = KnowledgeEntryRecord::for_binding("awb_1", BlockType::Character, "Flagged");
-        kb.creator_only = true;
-        let err = store.insert_knowledge_entry(kb).await.unwrap_err();
-        assert!(
-            matches!(&err, KbStoreError::ValidationLegacy(m) if m.contains("creator_only")),
-            "binding-owned creator_only must be rejected, got {err:?}"
-        );
-    }
-
-    // World-owned creator_only remains accepted (parity with SQLite).
-    #[tokio::test]
-    async fn insert_accepts_creator_only_on_world_owner() {
-        let store = InMemoryKbStore::new();
-        let mut kb = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Flagged");
-        kb.creator_only = true;
-        let result = store.insert_knowledge_entry(kb).await.unwrap();
-        assert_eq!(result.owner, KnowledgeOwnerRef::world("wld_1"));
     }
 
     // ── v1.191 P1 T2: native holder governance (durable §§1, 3) ─────────

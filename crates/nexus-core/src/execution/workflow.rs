@@ -718,10 +718,6 @@ pub enum ResumeDecision {
     /// converge/merge chain (A7 rule 4 — human wait). The A4 wait token is
     /// preserved; never stepped or approved at boot.
     SkippedHumanWait { session_id: SessionId },
-    /// Skipped: the v1 durable record sits at a fully committed boundary
-    /// with no in-flight work (A7 rule 6 — safe boundary, reconstructable).
-    /// Boot does not auto-drive outside the converge/merge chain class.
-    SkippedSafeBoundary { session_id: SessionId },
 }
 
 /// Resume re-drive for recovered non-terminal sessions (BL-04 slice, T2).
