@@ -41,7 +41,8 @@ in `nexus-core`:
   (`selection_visibility_conjunct`) run **before** keyset/LIMIT/count/rank in
   `actor_knowledge_store.rs` / `kb_store.rs`. `reject_legacy_creator_only_extension`
   refuses the retired `extensions.nexus.creator_only` key (including `false`) on every
-  opaque write path, and the record carrier is written as a constant `false`.
+  opaque write path; the native `creator_only` carrier is removed, and the
+  `holder_entry_id`/`disclosure` column pair is the native governance authority.
 - **Scoped by-id reads.** `src/read_scope.rs` derives an admitted selection's owned
   containers (`owned_world_containers`, `creator_actor_view_scope`) and
   `kb_store.rs` exposes the scoped by-id/id-set reads (`list_by_owner_keyset`,

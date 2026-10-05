@@ -820,10 +820,10 @@ async fn provider_journal_contract_settle_rejects_stale_selection() {
 // The authoring half is driven through the local-db primitives the canvas
 // entity patch calls inside its own `BEGIN IMMEDIATE` transaction
 // (`author_world_knowledge_governance_tx` is the governance + invalidation
-// side-car of that transaction). The canvas *update* lane itself cannot be
-// exercised end to end yet: `nexus-spoke-adapter`'s `run_cas_update_in_tx`
-// still reads the retired `creator_only` column (finding F1, owner T8), which
-// reddens three pre-existing cases in this file. The end-to-end direction that
+// side-car of that transaction). The canvas *update* lane no longer reads the
+// retired `creator_only` column: `nexus-spoke-adapter`'s `run_cas_update_in_tx`
+// guards on the stored `holder_entry_id`/`disclosure` pair (`disclosure IS
+// NULL`), so the former F1 blocker is resolved. The end-to-end direction that
 // needs no update lane (canvas create with an audience) is asserted below.
 
 const SHEET_WORLD: &str = "wld_sheetworld";

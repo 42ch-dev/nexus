@@ -2218,10 +2218,15 @@ impl SqliteKbStore {
     /// parameterized status clause so the two call sites don't duplicate
     /// the full SELECT shape.
     ///
-    /// `selection` is the admitted read selection of a scoped caller; `None` is
-    /// the retained unscoped listing. A scoped caller gets the durable §4.2
-    /// visibility conjunct **inside** the `WHERE`, so the [`LIST_BY_WORLD_LIMIT`]
-    /// window counts only eligible rows.
+    /// Both live callers pass `Some(selection)` — the admitted read selection
+    /// of a scoped caller — so the `None` (unscoped listing) arm is currently
+    /// unreachable. The caller gets the durable §4.2 visibility conjunct
+    /// **inside** the `WHERE`, so the [`LIST_BY_WORLD_LIMIT`] window counts only
+    /// eligible rows.
+    ///
+    /// simplify: `selection` stays `Option<&KnowledgeReadScope>` only until
+    /// signature cleanup is authorized; then take `&KnowledgeReadScope` and drop
+    /// the unreachable empty-visibility branch from the shared body.
     async fn list_by_world_with_status_filter(
         &self,
         world_id: &str,
