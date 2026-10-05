@@ -138,7 +138,7 @@ Extend local `PeerScope`/allowlist rows with an operator-stored Actor grant (con
 | `tools.nexus.list_observed_peers`, `tools.nexus.list_modules` | Existing exact tool allowlist and peer/module policy; no holder directory | Do not infer KE capability from tools |
 | `extract` | Not served remotely; reject unsupported | Never advertise `ke-extraction` |
 
-The current CLI Connect host can retain six KE ops plus the two exact tools after enforcement is complete. A Connect responder composed with no KE ports remains tools-only and declares neither new family; do not advertise planned support. Existing baseline families and `libp2p =0.56.0` remain unchanged; external libp2p residuals are not resolved by this feature.
+The current CLI Connect host can retain six KE ops plus the two exact tools after enforcement is complete. A Connect responder composed with no KE ports remains tools-only and declares neither new family; do not advertise planned support. Existing baseline families remain unchanged; the companion `libp2p` pin sits at `=0.57.0` (moved in the v1.195 lockstep, re-verified against the integrated lock graph by v1.198 P3 at anchor `d73ab1855921a9a222d315b8de5d4ab44b57c000`), and external libp2p residuals are not resolved by this feature.
 
 ## 10. Required implementation evidence
 

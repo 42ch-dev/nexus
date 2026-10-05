@@ -266,7 +266,7 @@ pub(crate) fn selection_visibility_conjunct(
 /// filtered view of an unauthorized one.
 ///
 /// The `json_each` id-set binds follow the existing convention in this file
-/// ([`SqliteKbStore::list_by_world_scoped`]).
+/// ([`SqliteKbStore::list_entries_by_ids_admitted`]).
 pub(crate) fn selection_container_conjunct(
     selection: &KnowledgeReadScope,
 ) -> (String, Vec<String>) {
@@ -358,15 +358,6 @@ pub mod seed {
 /// its own pagination on top of this.
 pub const LIST_BY_WORLD_LIMIT: i64 = 500;
 
-/// Result of [`SqliteKbStore::list_by_world_scoped`].
-#[derive(Debug, Clone)]
-pub struct WorldKbScopedList {
-    /// Active entries matching the scope filters.
-    pub entries: Vec<KnowledgeEntryRecord>,
-    /// `true` when an unfiltered world listing exceeded [`LIST_BY_WORLD_LIMIT`].
-    pub truncated: bool,
-}
-
 /// SQLite-backed KB store.
 ///
 /// Holds an `Arc<SqlitePool>` shared per active workspace. Construct once
@@ -441,103 +432,6 @@ impl SqliteKbStore {
         .map_err(|e| db_err(&e))?;
 
         row.as_ref().map(KeyBlockRow::to_record).transpose()
-    }
-
-    /// List active knowledge entries for a world with optional scope filters
-    /// applied in SQL (V1.142 greploop R-V1142P2-002).
-    ///
-    /// When `entry_ids` and/or `entry_types` are non-empty, filters are
-    /// pushed into the query so matching rows are not dropped by the
-    /// `list_by_world` 500-row window. Unfiltered listings use
-    /// `LIST_BY_WORLD_LIMIT + 1` to detect truncation; callers must reject
-    /// when [`WorldKbScopedList::truncated`] is `true`.
-    ///
-    /// `entry_types` are spoke wire `entry_type` strings (`snake_case`), which
-    /// match the `kb_key_blocks.block_type` column format.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`KbStoreError::Storage`] on database failure.
-    // v1.191 P1 T6 — UNSCOPED retained read (no `KnowledgeReadScope`, no
-    // disclosure conjunct): transitional state equals the pre-T6 behaviour,
-    // so it adds no exposure. Its production caller is the adapter
-    // `ScopeQueryPort` (T8) and must be migrated to an admitted selection;
-    // T15 verifies no public unscoped reader remains. Do not add new callers.
-    pub async fn list_by_world_scoped(
-        &self,
-        world_id: &str,
-        entry_ids: &[String],
-        entry_types: &[String],
-    ) -> Result<WorldKbScopedList, KbStoreError> {
-        let has_id_filter = !entry_ids.is_empty();
-        let has_type_filter = !entry_types.is_empty();
-        let unfiltered = !has_id_filter && !has_type_filter;
-
-        let mut sql = String::from(
-            r"SELECT
-                key_block_id,
-                owner_kind,
-                world_id,
-                character_id,
-                actor_world_binding_id,
-                holder_entry_id,
-                disclosure,
-                block_type,
-                canonical_name,
-                status,
-                revision,
-                body_json,
-                source_anchor_json,
-                created_from_command_id,
-                created_at,
-                updated_at,
-                source_work_id,
-                source_chapter,
-                source_provenance_kind, extensions_nexus_json, modules_json
-            FROM kb_key_blocks
-            WHERE owner_kind = 'world'
-              AND world_id = ?
-              AND status NOT IN ('deleted', 'merged', 'deprecated')",
-        );
-
-        if has_id_filter {
-            sql.push_str(" AND key_block_id IN (SELECT value FROM json_each(?))");
-        }
-        if has_type_filter {
-            sql.push_str(" AND block_type IN (SELECT value FROM json_each(?))");
-        }
-        sql.push_str(" ORDER BY created_at ASC");
-        if unfiltered {
-            use std::fmt::Write;
-            let _ = write!(sql, " LIMIT {}", LIST_BY_WORLD_LIMIT + 1);
-        }
-
-        // SAFETY: static column list; dynamic fragments are filter/limit clauses
-        // with bind params only (no user-controlled SQL).
-        let mut q = sqlx::query_as::<_, KeyBlockRow>(sqlx::AssertSqlSafe(sql)).bind(world_id);
-        if has_id_filter {
-            q = q.bind(serde_json::to_string(entry_ids).unwrap_or_else(|_| "[]".to_string()));
-        }
-        if has_type_filter {
-            q = q.bind(serde_json::to_string(entry_types).unwrap_or_else(|_| "[]".to_string()));
-        }
-
-        let rows = q.fetch_all(&*self.pool).await.map_err(|e| db_err(&e))?;
-
-        let truncated =
-            unfiltered && rows.len() > usize::try_from(LIST_BY_WORLD_LIMIT).unwrap_or(500);
-        let kept = if truncated {
-            &rows[..usize::try_from(LIST_BY_WORLD_LIMIT).unwrap_or(500)]
-        } else {
-            rows.as_slice()
-        };
-
-        let entries = kept
-            .iter()
-            .map(KeyBlockRow::to_record)
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(WorldKbScopedList { entries, truncated })
     }
 
     /// Transaction-aware variant of [`KbStore::insert_knowledge_entry`] (R-V150KBED-03).
@@ -1378,13 +1272,6 @@ impl KeyBlockRow {
             // would read back as shared.
             holder_entry_id: self.holder_entry_id.clone(),
             disclosure: self.disclosure.clone(),
-            // The retired World-only carrier has no storage column after the
-            // cutover, and no runtime code may interpret the bool (durable §5).
-            // This storage layer therefore neither reconstructs it from the
-            // governance pair nor lets it drive any predicate: the pair above
-            // is the authority, and this constant only serves the vestigial
-            // field that the complete-cutover task deletes.
-            creator_only: false,
             block_type,
             canonical_name: self.canonical_name.clone(),
             status: self.status.clone(),
@@ -2068,28 +1955,6 @@ async fn assert_owner_scoped_name_unique_tx(
 // ── V1.146 P3: pack-IO widened list methods (inherent, not trait) ─────────
 
 impl SqliteKbStore {
-    /// List `KnowledgeEntryRecord`s for a world **including** `deprecated` rows
-    /// (still excluding `deleted` / `merged` terminal states).
-    ///
-    /// Used by the V1.146 P3 `creator world kb pack export --include-deprecated`
-    /// CLI path. Mirrors [`KbStore::list_by_world`] but widens the status
-    /// filter. Bound by the same [`LIST_BY_WORLD_LIMIT`] safety cap.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`KbStoreError::Storage`] on database failure.
-    // v1.191 P1 T6 — UNSCOPED retained read (no `KnowledgeReadScope`): its
-    // callers are the pack export paths owned by T10; transitional state
-    // equals the pre-T6 behaviour, so it adds no exposure, and T15 verifies
-    // no public unscoped reader remains. Do not add new callers.
-    pub async fn list_by_world_including_deprecated(
-        &self,
-        world_id: &str,
-    ) -> Result<Vec<KnowledgeEntryRecord>, KbStoreError> {
-        self.list_by_world_with_status_filter(world_id, true, None)
-            .await
-    }
-
     /// List the **admitted** rows of one World under an explicit read selection
     /// (v1.191 P1 T10, durable §4.2/§6).
     ///
@@ -2348,15 +2213,20 @@ pub async fn list_quarantine_atoms(
 }
 
 impl SqliteKbStore {
-    /// Shared body for [`Self::list_by_world_including_deprecated`] —
+    /// Shared body for the two admitted World listings —
+    /// [`Self::list_by_world_admitted`] and [`Self::query_with_scope`] —
     /// parameterized status clause so the two call sites don't duplicate
     /// the full SELECT shape.
     ///
-    /// `selection` is the admitted read selection of a scoped caller; `None` is
-    /// the retained unscoped listing (its callers are migrated to an admitted
-    /// selection by their owning tasks). A scoped caller gets the durable §4.2
-    /// visibility conjunct **inside** the `WHERE`, so the [`LIST_BY_WORLD_LIMIT`]
-    /// window counts only eligible rows.
+    /// Both live callers pass `Some(selection)` — the admitted read selection
+    /// of a scoped caller — so the `None` (unscoped listing) arm is currently
+    /// unreachable. The caller gets the durable §4.2 visibility conjunct
+    /// **inside** the `WHERE`, so the [`LIST_BY_WORLD_LIMIT`] window counts only
+    /// eligible rows.
+    ///
+    /// simplify: `selection` stays `Option<&KnowledgeReadScope>` only until
+    /// signature cleanup is authorized; then take `&KnowledgeReadScope` and drop
+    /// the unreachable empty-visibility branch from the shared body.
     async fn list_by_world_with_status_filter(
         &self,
         world_id: &str,
@@ -3476,68 +3346,6 @@ mod tests {
             .unwrap()
             .expect("targeted lookup must find the active row");
         assert_eq!(found.entry_id, "kb_target");
-    }
-
-    #[tokio::test]
-    async fn test_list_by_world_scoped_entry_id_beyond_list_window() {
-        let (pool, _dir) = fresh_pool().await;
-        seed_world(&pool).await;
-
-        for i in 0..LIST_BY_WORLD_LIMIT {
-            seed::knowledge_entry(
-                &pool,
-                &format!("kb_fill_{i:03}"),
-                "wld_1",
-                "item",
-                &format!("Fill_{i:03}"),
-                "confirmed",
-            )
-            .await;
-        }
-        seed::knowledge_entry(
-            &pool,
-            "kb_scoped_target",
-            "wld_1",
-            "character",
-            "ScopedTarget",
-            "confirmed",
-        )
-        .await;
-
-        let store = SqliteKbStore::new(pool);
-        let scoped = store
-            .list_by_world_scoped("wld_1", &["kb_scoped_target".to_string()], &[])
-            .await
-            .unwrap();
-        assert!(!scoped.truncated);
-        assert_eq!(scoped.entries.len(), 1);
-        assert_eq!(scoped.entries[0].entry_id, "kb_scoped_target");
-    }
-
-    #[tokio::test]
-    async fn test_list_by_world_scoped_unfiltered_detects_truncation() {
-        let (pool, _dir) = fresh_pool().await;
-        seed_world(&pool).await;
-
-        for i in 0..=LIST_BY_WORLD_LIMIT {
-            seed::knowledge_entry(
-                &pool,
-                &format!("kb_cap_{i:03}"),
-                "wld_1",
-                "item",
-                &format!("Cap_{i:03}"),
-                "confirmed",
-            )
-            .await;
-        }
-
-        let store = SqliteKbStore::new(pool);
-        let scoped = store.list_by_world_scoped("wld_1", &[], &[]).await.unwrap();
-        assert!(scoped.truncated);
-        assert_eq!(
-            scoped.entries.len(),
-            usize::try_from(LIST_BY_WORLD_LIMIT).unwrap()
-        );
     }
 
     #[tokio::test]

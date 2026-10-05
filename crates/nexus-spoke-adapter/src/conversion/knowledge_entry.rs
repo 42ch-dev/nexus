@@ -308,11 +308,6 @@ pub fn spoke_to_knowledge_record(
         // shared.
         holder_entry_id,
         disclosure,
-        // The legacy World-only visibility bool is retired: it is never read
-        // from the wire (its presence is refused above), so every converted
-        // record carries the retired field `false` until the complete-cutover
-        // task removes it. Governance travels only in the column pair.
-        creator_only: false,
         block_type: entry_type_to_block_type(&entry_type)?,
         canonical_name,
         status: s.status,

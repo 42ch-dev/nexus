@@ -81,7 +81,7 @@ pub async fn get_spoke_rules_by_ids(
     // SAFETY: static SQL; the variable-length IN list is delegated to SQLite's
     // `json_each` with a single JSON-array bind (same idiom as
     // `narrative_gateway::list_timeline_events_scoped` and
-    // `kb_store::list_by_world_scoped`). No user-controlled SQL fragments.
+    // `kb_store::list_entries_by_ids_admitted`). No user-controlled SQL fragments.
     let rows = sqlx::query_as::<_, SpokeRuleRow>(
         "SELECT rule_id, world_id, schema_version, canonical_name, kind, statement, \
          description, target_entry_types_json, severity_hint, status, source_anchor_json, \

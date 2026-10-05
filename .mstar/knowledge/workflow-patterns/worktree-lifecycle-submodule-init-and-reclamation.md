@@ -1,6 +1,7 @@
 ---
 module: developer worktree lifecycle (submodule metadata, concurrency budget, reclamation)
 date: 2026-09-25
+last_updated: 2026-10-05
 problem_type: workflow_issue
 category: workflow-patterns
 severity: high
@@ -10,14 +11,16 @@ applies_when:
   - deciding how many development tracks may run concurrently
   - reclaiming a finished track's worktree, cargo cache or temporary build footprint
   - diagnosing a cleanup probe that refuses a worktree, or a submodule that resolves in the main checkout but not in a linked one
+  - reclaiming squash-merge lineage leftovers (local iteration/feature branches whose PRs were squash-merged)
 tags:
   - git-worktree
   - submodule
   - resource-budget
   - reclamation
   - convergence
-  - envrc
   - cargo-target-dir
+  - mstar-worktree-cleanup
+  - squash-merge
 ---
 
 # Worktree lifecycle: native submodule initialization, resource-budget concurrency, guarded reclamation
@@ -76,6 +79,23 @@ A third, subtler one: a file attributed `filter=lfs` in `.gitattributes` while t
 ### Branch cleanup belongs to the workflow-level checkpoint
 
 After the non-force worktree route, the engine can no longer match the pruned path, so that track's branch legitimately stays behind with a `retained` verdict. Branch deletion is the workflow-level cleanup's job (the installed engine deletes merged branches once the owning plan row is `Done`), not the sweeper's — do not widen the tool into a workflow-wide scan to "finish the job".
+
+## v1.205 update — engine `mstar worktree cleanup` mechanics and squash-lineage leftovers (measured 2026-10-05)
+
+The v1.197 doc above records the invariants; the v1.205 maintenance round measured the **engine guard mechanics** and the **squash-merge lineage** class that sweeper-era notes left open. Refinements, each observed on this repository:
+
+1. **The guard's cleanliness probe counts ignored files.** `mstar worktree cleanup --workflow <id>` decides `cleanup.refuse.dirty-worktree` from `git status --porcelain --ignored=matching` — a merged feature worktree that ran checks/tests is refused as dirty purely because of ignored build output (`target/`, module caches). Unlock: first enumerate — `git -C "$WT" status --porcelain` must be empty (no untracked non-ignored files); when it is not, enumerate the exact paths and keep/relocate anything that could be work (never blanket-delete). Only confirmed disposable build output is removed: either targeted `rm -rf <exact ignored paths>` or, once the status check is empty, `git clean -fdx`. Then re-run the dry-run — the verdict flips to `cleanup.remove.merged`.
+2. **Lane-1 `--apply` order completes the branch story.** After the worktree is removed, `--apply` re-probes and re-plans in the same run: the branch that was `cleanup.refuse.checked-out` before becomes `cleanup.remove.merged` and is deleted (`git branch -d`, never `-D`), while the non-terminal integration branch stays `cleanup.refuse.non-terminal`. So "branch deletion belongs to the workflow-level checkpoint" now has its concrete command: `mstar worktree cleanup --workflow <id> [--apply]` at lane-1 (same round as `Done`) and lane-2 (Phase 6 §6.4).
+3. **Ownership metadata is the claim predicate.** The guard only claims a merged leftover when the plan row still records `metadata.working_branch` + `metadata.worktree_path` (persisted in the same locked update as `status: Done`). Rows that went `Done` without persisting them (v1.193-era) refuse as `cleanup.refuse.foreign-*` — recorded as the standing producer obligation (`R-V1193-CLEANUP-OWNERSHIP`), not a guard defect.
+4. **Squash-lineage evidence has two classes.** `git cherry <iteration-branch> <feature-branch>` (empty output = no patch unique to the feature branch) correctly proves containment for feature/fix branches that landed via an iteration PR **squash-merge** — patch-id equivalence survives the squash. Direct-to-main squashed branches (local `iteration/v1.20x` integration branches) cannot be cherry-proven (`-` lines only); use merge-SHA ancestry of the target (`git merge-base --is-ancestor <mergeSHA> main`) + empty `git diff <mergeSHA> <branch>` instead. Manual `-D` past the guard is only for an explicit cleanup mandate with per-branch evidence rows — a failing row means keep-and-report, never deletion.
+5. **Bounded force on submodule worktrees: measured success where this doc's v1.197 note prescribed the rm+prune route only.** With trees clean (probe above) and merged evidence passing, `git worktree remove --force <wt>` succeeded on **all four** submodule-carrying leftovers on first attempt (2026-10-05, current git); `--force --force`, `submodule deinit`, and manual rm+prune were not needed. The dual gate (ignored-matching clean + passing merged-evidence row) is the authorization basis; the non-force route in this doc remains the default when force is not explicitly authorized.
+
+```sh
+# lane-1 / lane-2 reclaim of a merged plan's worktree+branch (engine guard)
+git -C "$WT" clean -fdx                    # only after merged + porcelain empty (untracked gate)
+mstar worktree cleanup --workflow <id>     # dry-run: expect cleanup.remove.merged
+mstar worktree cleanup --workflow <id> --apply
+```
 
 ## Why This Matters
 

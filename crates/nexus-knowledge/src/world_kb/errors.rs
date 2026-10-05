@@ -147,12 +147,6 @@ pub enum KbError {
     #[error("invalid owner metadata: {0}")]
     InvalidOwnerMetadata(String),
 
-    /// `creator_only` set on a non-World owner (v1.184 P1 fix): the flag is
-    /// World-only; domain, both store implementations, and the conversion
-    /// boundary enforce the same invariant. Carries the owner `kind()`.
-    #[error("creator_only requires a World owner (got {0} owner)")]
-    CreatorOnlyRequiresWorld(&'static str),
-
     /// Wire `schema_version` exceeds the domain `u32` range (v1.184 P1 fix):
     /// reverse conversion fails closed instead of silently normalizing an
     /// unsupported future version to `1`.

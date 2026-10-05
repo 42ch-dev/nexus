@@ -22,7 +22,7 @@ nexus depends on spoke's published packages directly:
 - **TypeScript:** `@42ch/spoke-schemas` + `@42ch/spoke-operations` (npm, lockstep exact pin on the same release — the two root `package.json` pins)
 - **Rust (opt-in Connect Host only):** `spoke-connect` (crates.io, lockstep exact pin on the same release) — workspace dep consumed **only** behind cargo feature `connect-host` on `apps/nexus42`. The ordinary `nexus42` (`cli`) build MUST NOT link `spoke-connect`. See §10.
 
-**Lockstep cutover (shipped, v1.191 P1):** all three Rust and both root npm pins, `tooling/check-wire-drift.sh::SPOKE_PIN`, and the strategy sample pin references moved together, in one custodian checkpoint. `libp2p =0.56.0` is unchanged. Both `connect-host` and `connect-client` feature consumers were verified; no default-build linkage expansion was introduced.
+**Lockstep cutover (shipped, v1.191 P1):** all three Rust and both root npm pins, `tooling/check-wire-drift.sh::SPOKE_PIN`, and the strategy sample pin references moved together, in one custodian checkpoint. `libp2p` did not move in this cutover; it moved to `=0.57.0` with the v1.195 `spoke-connect` 0.14.1 lockstep and was re-verified against the integrated lock graph by v1.198 P3 (anchor commit `d73ab1855921a9a222d315b8de5d4ab44b57c000`). Both `connect-host` and `connect-client` feature consumers were verified; no default-build linkage expansion was introduced.
 
 > **Historical:** V1.139 shipped at `0.1.1`; V1.140 bumped to `0.2.0`. V1.141 jumped to `0.4.0` (covering both the `0.3.0` capability-sliced port architecture and `0.4.0` additive `HostCapabilityManifest` + body helpers + UTF-8 peer sort). V1.144 bumped to `0.5.0` (additive `Relation.revision` + OCC-aware `RelationPort` + `RelationAlreadyExists`/`RelationNotFound` reject codes + relate-gate explicit mode). V1.145 bumped to `0.6.0` (additive `Scope.extensions` + `KnowledgeEntry.modules`). V1.146 bumped to `0.6.1` (additive `InternalError` 500-class reject code, PR #35). **V1.148 bumped to `0.8.2`** (spoke-connect surface 0.7.0–0.8.2 additive; 0.7.0 demote pack catalog from ModuleMap — pack catalog is product transport envelope, not `modules.pack` on KE/AssemblePacket; connect family schemas additive). **V1.153 bumped to `0.9.1`** (lockstep re-baseline on the connect v2 wire; 0.9.0's dial-bound hello + envelope-auth v2 are internal to `spoke-connect`; `spoke-operations` 0.9.1 additionally converted the adapter port traits + `orchestrate_*` to native async — nexus adapted signature-level, see §7.3). **V1.154 bumped to `0.9.2`** (additive release: `InvokeHandlerV2` session-peer handler API + removal of the never-enabled `mdns` feature). **V1.164 bumped to `0.10.0`** (l5-mind release: `MindState` wire + `TimelineEvent.modules` additive field — struct-literal break adapted in nexus-narrative; rest additive). **V1.169 bumped to `0.11.1`** (lockstep across all three crates: schemas `ToolDescriptor` + optional `HostCapabilityManifest.tools[]`; operations `tools` module + `regress` dep; connect responder / serve_ports / reverse-invoke + `required_capability` lifetime loosening — nexus consumes none of the new surface, declares `tools: Vec::new()`, see §10.3 manifest honesty). **v1.191 P1 bumped to the pinned upstream lockstep release** (holder governance: `KnowledgeEntry.owner` / `.disclosure` + `Scope.viewpoint`, the extraction surface, and the Connect `ke-ownership` / `ke-extraction` capability families — see the holder amendment note above; the exact version lives in the manifests and compass D17, deliberately not restated here).
 
@@ -213,6 +213,8 @@ not generation-time validation.
 | `@42ch/nexus-contracts` | Nexus-specific daemon-api envelopes (route DTOs), compute ABI types, common nexus identifiers |
 
 ### 4.2 App import pattern
+
+**Current reality (v1.195 P4):** no application imports these packages — a repo-wide search finds no `import`/`require` of `@42ch/spoke-schemas` or `@42ch/spoke-operations`; the packages are referenced only by the root `package.json` pins and generated-comment text. The pattern below is the intended consumer shape, not a site that exists today.
 
 ```typescript
 // KB entry data type — from spoke
@@ -836,7 +838,7 @@ Normative architectural surface for the first FL-R Connect Host slice. Product b
 | CLI entrypoint | `nexus42 connect start` (feature-gated) or the independent `nexus-runtime` binary |
 | Dependency | `spoke-connect = "=0.9.2"` workspace dep; optional on `nexus42` |
 | Default CLI | Feature-off build does **not** link `spoke-connect`; the ordinary `cli` graph stays libp2p-free. The deleted `nexus42 daemon start` never opened a Connect listener, and no retained CLI entry does either except the `connect` group. |
-| mDNS | spoke-connect exposes no `mdns` feature as of 0.9.2 (removed upstream); hickory/libp2p-mdns stay lockfile-only via libp2p 0.56 optional deps, never compiled |
+| mDNS | spoke-connect exposes no `mdns` feature as of 0.9.2 (removed upstream); hickory/libp2p-mdns stay lockfile-only via libp2p 0.57 optional deps, never compiled |
 
 ### 10.2 Topology
 
