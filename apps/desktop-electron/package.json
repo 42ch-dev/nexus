@@ -19,12 +19,12 @@
     "@42ch/nexus-native": "workspace:*",
     "@42ch/nexus-provider-acp": "workspace:*",
     "@42ch/nexus-service": "workspace:*",
-    "smol-toml": "1.8.0"
+    "smol-toml": "1.9.0"
   },
   "devDependencies": {
     "@electron/packager": "20.3.0",
-    "@types/node": "^26.6.2",
-    "electron": "44.4.3",
-    "sharp": "0.35.4"
+    "@types/node": "^26.6.3",
+    "electron": "44.4.5",
+    "sharp": "0.35.5"
   }
 }

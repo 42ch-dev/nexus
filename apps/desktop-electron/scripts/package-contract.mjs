@@ -6,7 +6,7 @@ export const PACKAGE_CONTRACT = Object.freeze({
   schemaVersion: 1,
   productName: 'Nexus',
   bundleId: 'io.nexus42.desktop',
-  electronVersion: '44.3.0',
+  electronVersion: '44.4.5',
   packagerVersion: '20.3.0',
   minimumMacos: '13.0',
   supportedArchitectures: Object.freeze(['arm64', 'x64']),
