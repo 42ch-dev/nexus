@@ -3,12 +3,12 @@
 //!
 //! # Knowledge entries (production)
 //!
-//! [`ScopeQueryPort::list_knowledge_entries`] routes through
-//! [`SqliteKbStore::list_by_world_scoped`], applying optional `entry_ids` /
-//! `entry_types` filters in SQL before any safety cap. Filtered scopes are not
-//! subject to the unfiltered `LIST_BY_WORLD_LIMIT` window. Unfiltered full-world
-//! listings reject when the cap is exceeded so orchestrators never receive a
-//! silently incomplete scope.
+//! [`ScopeQueryPort::list_knowledge_entries`] routes through the admitted
+//! [`SqliteKbStore::list_by_owner_keyset`] / id-set readers, applying optional
+//! `entry_ids` / `entry_types` filters in SQL before any safety cap. Filtered
+//! scopes are not subject to the unfiltered `LIST_BY_WORLD_LIMIT` window.
+//! Unfiltered full-world listings reject when the cap is exceeded so
+//! orchestrators never receive a silently incomplete scope.
 //!
 //! Rows are projected through the V1.139 `KnowledgeEntryRecord → SpokeKnowledgeEntry`
 //! conversion seam (spec §7.1). The world id is taken from `scope.scope_id`.

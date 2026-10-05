@@ -44,7 +44,7 @@ in `nexus-core`:
   opaque write path, and the record carrier is written as a constant `false`.
 - **Scoped by-id reads.** `src/read_scope.rs` derives an admitted selection's owned
   containers (`owned_world_containers`, `creator_actor_view_scope`) and
-  `kb_store.rs` exposes the scoped by-id/id-set reads (`list_by_world_scoped`,
+  `kb_store.rs` exposes the scoped by-id/id-set reads (`list_by_owner_keyset`,
   `list_entries_by_ids_admitted`, the scoped `get_*`) used by the compute/snapshot
   consumers, so a foreign or missing holder fails closed instead of falling back to
   an unfiltered World query.
