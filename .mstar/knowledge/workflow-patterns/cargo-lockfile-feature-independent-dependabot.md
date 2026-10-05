@@ -34,7 +34,7 @@ alerts close. **Empirically false.**
   feature enables them. Removing a feature removes the *activation*, not the
   lockfile entry.
 - `cargo generate-lockfile` / `cargo update -p <pkg>` do **not** drop orphan
-  optional-dep entries while the parent crate (e.g. libp2p 0.56.0) remains in
+  optional-dep entries while the parent crate (e.g. `libp2p`) remains in
   the tree — verified 2026-08-07 with `cargo update -p libp2p-mdns` and
   `cargo generate-lockfile`.
 - **Dependabot reports lockfile entries, not the activated graph** — the
@@ -78,7 +78,7 @@ Cargo.lock → alerts #42/#43 close."
 ### After
 Reality: "spoke removes the `mdns` feature → activated graph clean, but
 Cargo.lock keeps hickory-proto/libp2p-mdns/libp2p-dns entries while
-libp2p 0.56.0 remains. Alerts close only with libp2p ≥0.57 (unreleased)."
+libp2p remains. Alerts close only with the ≥0.57 line, which was still unreleased at triage time (since adopted — see the v1.195/v1.198 updates below)."
 Deferral recorded with the upstream target; the feature removal shipped as
 cleanup, not as the alert fix.
 
@@ -88,7 +88,7 @@ Alert #41 (yamux 0.12.1, high) added a nuance the original doc did not
 separate: a lockfile entry can be **never compiled under default features**
 yet **activated under a feature combo CI actually builds**. In nexus,
 `yamux@0.12.1` is absent from the default resolve but is an activated dep
-(`libp2p 0.56.0 → libp2p-yamux 0.47.0 → {yamux 0.12.1, yamux 0.13.10}`) under
+(`libp2p → libp2p-yamux 0.47.0 → {yamux 0.12.1, yamux 0.13.10}`) under
 `--features nexus42/connect-host` — the combo `runtime-build.yml` /
 `runtime-probe-build.yml` build for the `nexus-runtime` artifact. So #41 is a
 **real reachable vulnerability in that artifact**, while #42/#43
