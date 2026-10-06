@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO characters (character_id, owner_creator_id, display_name, status, created_at, updated_at) VALUES (?, 'ctr_test', 'Ghost', 'active', datetime('now'), datetime('now'))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "c477e8832307e37a6f9f602a6e82151c2f2b6746a9ad0c9e2524d8aebfbf5107"
+}

@@ -1471,11 +1471,12 @@ async fn key_block_owned_by(
     key_block_id: &str,
     owner: &KnowledgeOwnerRef,
 ) -> bool {
-    let stored: Option<KeyBlockOwnerRow> = sqlx::query_as(
+    let stored = sqlx::query_as!(
+        KeyBlockOwnerRow,
         "SELECT owner_kind, world_id, character_id, actor_world_binding_id \
          FROM kb_key_blocks WHERE key_block_id = ?",
+        key_block_id
     )
-    .bind(key_block_id)
     .fetch_optional(&mut **tx)
     .await
     .ok()
@@ -3665,8 +3666,8 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
         // Second container for the FK (`kb_key_blocks.world_id`).
-        sqlx::query(
-            r"INSERT INTO narrative_worlds
+        sqlx::query!(
+            "INSERT INTO narrative_worlds
                 (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json)
                VALUES ('wld_2', 'wrk_test', 'ctr_test', 'Other World', 'other-world', 'active', 'private', 'manual', '{}')",
         )
@@ -3709,29 +3710,32 @@ mod tests {
 
         // FK target for the malformed row's extra owner column.
         let character_id = format!("chr_{}", "0".repeat(32));
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO characters \
                 (character_id, owner_creator_id, display_name, status, created_at, updated_at) \
                VALUES (?, 'ctr_test', 'Ghost', 'active', datetime('now'), datetime('now'))",
+            character_id.as_str()
         )
-        .bind(&character_id)
         .execute(&pool)
         .await
         .unwrap();
 
         let store = SqliteKbStore::new(pool.clone());
         let mut tx = pool.begin().await.unwrap();
+        // SAFETY: PRAGMA statement — no table schema to validate against, and
+        // the crate guide admits runtime `sqlx::query()` for PRAGMAs. The CHECK
+        // it suspends stays in force for the database and every other test.
         sqlx::query("PRAGMA ignore_check_constraints = 1")
             .execute(&mut *tx)
             .await
             .unwrap();
         // owner_kind='world' AND character_id set ⇒ two owner arms populated.
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO kb_key_blocks \
                 (key_block_id, owner_kind, world_id, character_id, block_type, canonical_name) \
                VALUES ('kb_malformed_owner', 'world', 'wld_1', ?, 'Character', 'Ghost')",
+            character_id.as_str()
         )
-        .bind(&character_id)
         .execute(&mut *tx)
         .await
         .unwrap();
