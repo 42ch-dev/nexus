@@ -1192,17 +1192,16 @@ async fn execute_world_snapshot_get(
     // The gateway is a thin projection over the same pool this context carries,
     // so the core composes its own rather than reaching into a transport.
     let gw = nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(context.pool().clone());
-    let world_state =
-        gw.get_world_state(world_id)
-            .await
-            .map_err(|e: nexus_narrative::NarrativeError| match e {
-                nexus_narrative::NarrativeError::NotFound { resource } => {
-                    NexusApiError::NotFound { resource }
-                }
-                other => NexusApiError::Internal {
-                    category: format!("NARRATIVE_ERROR: {other}"),
-                },
-            })?;
+    let world_state = gw.get_world_state(world_id).await.map_err(
+        |e: nexus_narrative::NarrativeError| match e {
+            nexus_narrative::NarrativeError::NotFound { resource } => {
+                NexusApiError::NotFound { resource }
+            }
+            other => NexusApiError::Internal {
+                category: format!("NARRATIVE_ERROR: {other}"),
+            },
+        },
+    )?;
 
     Ok(serde_json::to_value(world_state).unwrap_or_else(|_| serde_json::json!({})))
 }

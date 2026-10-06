@@ -210,9 +210,11 @@ impl<K: KbStore> NarrativeGateway for InMemoryNarrativeGateway<K> {
     async fn get_world_state(&self, world_id: &str) -> Result<WorldState, NarrativeError> {
         let state = {
             let worlds = self.read_worlds()?;
-            let world = worlds.get(world_id).ok_or_else(|| NarrativeError::NotFound {
-                resource: format!("world {world_id}"),
-            })?;
+            let world = worlds
+                .get(world_id)
+                .ok_or_else(|| NarrativeError::NotFound {
+                    resource: format!("world {world_id}"),
+                })?;
             self.project_world_state(world, true)
         };
         Ok(state)
@@ -267,9 +269,11 @@ impl<K: KbStore> NarrativeGateway for InMemoryNarrativeGateway<K> {
         // Phase 1: resolve world state (drop lock before continuing)
         let (world_state, timeline_head_id) = {
             let worlds = self.read_worlds()?;
-            let world = worlds.get(&query.world_id).ok_or_else(|| NarrativeError::NotFound {
-                resource: format!("world {}", query.world_id),
-            })?;
+            let world = worlds
+                .get(&query.world_id)
+                .ok_or_else(|| NarrativeError::NotFound {
+                    resource: format!("world {}", query.world_id),
+                })?;
             let head = world.current_timeline_head_id.clone();
             let state = self.project_world_state(world, query.include_fork_info);
             (state, head)
