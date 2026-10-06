@@ -404,13 +404,14 @@ impl NexusAdapter<'_> {
         let relation_id = relation.relation_id.clone();
         let locals = extract_nexus_locals(&relation);
 
-        // Pre-check existence. The PK is the true race guard; if a concurrent
-        // writer beats us the INSERT fails and surfaces as InternalError —
-        // acceptable for the local single-writer daemon path.
+        // Pre-check existence. The PK is the true race guard; a collision at
+        // INSERT is rendered as the absent-id success shape (R9, V1.206) —
+        // see the insert handling below.
         // L2 F2: the existence pre-check is scoped — a stored relation whose
         // endpoints the caller cannot see is absent for this caller, so the gate is
         // not an existence oracle. (If the id truly exists, the INSERT's
-        // primary-key collision still refuses the write without disclosing it.)
+        // primary-key collision answers the same absent shape, so the stored
+        // row is disclosed neither by the reject code nor by write success.)
         match get_relationship(&self.pool, &relation_id).await {
             Ok(row) => match self.relation_endpoints_admitted(&relation_id, &row).await {
                 Ok(true) => {
@@ -546,15 +547,35 @@ impl NexusAdapter<'_> {
         .execute(&mut *tx)
         .await;
 
-        if let Err(e) = insert_result {
-            return reject(
-                SpokeRejectCode::InternalError,
-                format!("storage error on relation insert: {e}"),
-                json!({ "relation_id": relation_id }),
-            );
-        }
+        // R9 (V1.206): a primary-key collision here means the id already
+        // exists but is invisible to this caller (the scoped pre-check routed
+        // it down the "absent" path) — or a concurrent writer beat us to the
+        // id. The absent-id SUCCESS shape is returned instead of a storage
+        // error, because a distinguishable failure would let a caller probe
+        // hidden relation ids (the oracle L2 F2 closes).
+        //
+        // Tradeoff (documented, accepted by the plan): the caller receives a
+        // phantom success — the projection below is built from the request and
+        // nothing was written (the failed transaction is rolled back). The
+        // local single-writer daemon path makes the racing-writer case a
+        // non-concern.
+        let phantom_success = match &insert_result {
+            Ok(_) => false,
+            Err(e) if is_pk_unique_violation(e) => true,
+            Err(e) => {
+                return reject(
+                    SpokeRejectCode::InternalError,
+                    format!("storage error on relation insert: {e}"),
+                    json!({ "relation_id": relation_id }),
+                );
+            }
+        };
 
-        if let Err(e) = tx.commit().await {
+        if phantom_success {
+            // Roll the failed INSERT back explicitly; the projection below is
+            // built from the request and nothing persists.
+            let _ = tx.rollback().await;
+        } else if let Err(e) = tx.commit().await {
             return reject(
                 SpokeRejectCode::InternalError,
                 format!("storage error on tx commit: {e}"),
@@ -950,6 +971,15 @@ fn extract_nexus_locals(relation: &Relation) -> NexusLocals {
 fn value_as_string_array(v: &Value) -> Option<Vec<String>> {
     let arr = v.as_array()?;
     arr.iter().map(|i| i.as_str().map(String::from)).collect()
+}
+
+/// Whether a database error is a SQLite primary-key uniqueness violation
+/// (`1555` = `SQLITE_CONSTRAINT_PRIMARYKEY`) on `kb_relationships`.
+///
+/// Used by [`NexusAdapter::put_relation_create`] to recognise an INSERT that
+/// collided on `relationship_id` (R9, V1.206).
+fn is_pk_unique_violation(e: &sqlx::Error) -> bool {
+    matches!(e, sqlx::Error::Database(db) if db.code().as_deref() == Some("1555"))
 }
 
 /// Construct a `SpokeResult::Reject` (mirrors the helper in
@@ -2344,7 +2374,8 @@ mod tests {
     /// an endpoint. A same-world `owner-private` row of another holder is
     /// rejected by the create path with exactly the shape an absent id
     /// produces, and a stored relation whose endpoint is hidden reads as
-    /// absent through both `get_relation` and the update path.
+    /// absent through `get_relation`, the update path, and — since V1.206 R9 —
+    /// the create path (which answers the absent-id success shape).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn hidden_endpoints_fail_closed_and_are_indistinguishable_from_absent() {
         use nexus_knowledge::world_kb::knowledge_entry::{
@@ -2409,18 +2440,24 @@ mod tests {
             ),
             SpokeResult::Ok(_) => panic!("a relation with a hidden endpoint must not be served"),
         }
-        // L2 F2: the create pre-check is scoped, so the stored-but-hidden
-        // relation is not an existence oracle.
+        // R9 (V1.206): the create pre-check is scoped, so the stored-but-hidden
+        // relation is not an existence oracle. The PK collision at INSERT is
+        // rendered as the absent-id SUCCESS shape (phantom success — nothing is
+        // written), so neither the reject code nor the write result discloses
+        // the hidden row. `RelationAlreadyExists` stays reserved for rows whose
+        // endpoints the caller can see.
         match adapter
             .put_relation(spoke_relation("rel_vis", "kb_src", "kb_dst"), None)
             .await
         {
-            SpokeResult::Reject(r) => assert_ne!(
-                r.code,
-                SpokeRejectCode::RelationAlreadyExists,
-                "a hidden relation must not be disclosed by the pre-check: {r:?}"
+            SpokeResult::Ok(r) => {
+                assert_eq!(r.relation_id, "rel_vis");
+                assert_eq!(r.from_id, "kb_src");
+                assert_eq!(r.to_id, "kb_dst");
+            }
+            SpokeResult::Reject(r) => panic!(
+                "a hidden relation must answer the absent-id success shape, got {r:?}"
             ),
-            SpokeResult::Ok(_) => panic!("the id is still occupied by the stored row"),
         }
 
         // The update path answers the same absent shape as a missing relation
