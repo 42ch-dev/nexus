@@ -2196,6 +2196,15 @@ async fn list_compute_runs_orders_newest_first() {
     assert_eq!(page2["has_more"], false);
 }
 
+/// Extract the `resource` of a `NotFound` refusal — the shared-shape assertion
+/// used by the run-ID opacity pins (V1.206 P2 site 4).
+fn not_found_resource(err: &CoreError) -> &str {
+    match err {
+        CoreError::NotFound { resource } => resource,
+        other => panic!("a foreign or unknown run must close as NotFound, got {other:?}"),
+    }
+}
+
 /// The detail read returns the proposals and invocation params of a succeeded
 /// run, refuses an unknown run as `not_found`, and closes EVERY operation on a
 /// foreign-world run with that SAME `not_found` shape (existence opacity,
@@ -2253,12 +2262,6 @@ async fn run_detail_and_foreign_run_refusals() {
     // of a foreign World close with the SAME 404 `not_found` shape, so a probe
     // cannot split run existence from World ownership. `WorldOwnerDenied` stays
     // reserved for the world-scoped routes (invoke / list / clear).
-    fn not_found_resource(err: &CoreError) -> &str {
-        match err {
-            CoreError::NotFound { resource } => resource,
-            other => panic!("a foreign or unknown run must close as NotFound, got {other:?}"),
-        }
-    }
     assert_eq!(
         not_found_resource(unknown.as_ref().unwrap_err()),
         "run run_does_not_exist not found"
