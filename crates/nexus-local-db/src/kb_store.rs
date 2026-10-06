@@ -613,6 +613,13 @@ impl SqliteKbStore {
             //     foreign promote must answer the already-exists family, not a
             //     raw storage error).
             // Any other database error keeps the `db_err` classification.
+            //
+            // Opacity tradeoff (accepted; mirrors R9's documented phantom-success
+            // tradeoff in `relation_port.rs`): answering the already-exists family
+            // for `1555` confirms that SOME row occupies this caller-supplied id.
+            // A raw storage error would confirm the same occupancy while
+            // misclassifying a domain conflict as a fault, so the tradeoff buys a
+            // correct, non-leaking family at no additional disclosure.
             if let sqlx::Error::Database(db_err_inner) = &e {
                 if matches!(db_err_inner.code().as_deref(), Some("2067" | "1555")) {
                     return KbStoreError::Duplicate {

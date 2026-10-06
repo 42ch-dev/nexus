@@ -617,13 +617,18 @@ pub struct ResolvedSandbox {
 /// # Runtime memory-growth semantics (V1.206 P2 site 2)
 ///
 /// There is deliberately no memory predicate here. At wasmtime 49.0.1 a
-/// `memory.grow` denied by the `StoreLimits` limiter is not a typed trap — it
-/// surfaces through the generic error channel as the formatted
-/// "memory growth exceeds memory type's limits" string — so a *runtime* growth
-/// failure falls into the `Trap` arm below instead of
-/// [`ComputeError::MemoryCapExceeded`]. The *instantiation* path is covered by
-/// the structured pre-check in [`WasmEngine::run_invocation`]. Trigger for
-/// reclassifying this arm: "wasmtime exposes a typed limiter-denial error".
+/// limiter denial is not a typed trap — the denial is a formatted string
+/// ("memory growth exceeds memory type's limits") handed to the limiter — so
+/// this mapper declines to guess from message text: IF such a denial reaches
+/// it as a wasmtime error, it is classified as the generic
+/// [`ComputeError::Trap`] rather than [`ComputeError::MemoryCapExceeded`].
+/// No claim is made about how any particular denial is surfaced on any
+/// particular path.
+///
+/// The instantiation path is covered *before* instantiation by the
+/// exported-memory-minimum pre-check in [`WasmEngine::run_invocation`] (see
+/// [`declared_memory_minimum_exceeds_cap`]). Trigger for reclassifying this
+/// arm: "wasmtime exposes a typed limiter-denial error".
 fn map_call_result<T>(res: wasmtime::Result<T>) -> Result<T> {
     res.map_err(|e| {
         if e.downcast_ref::<Trap>() == Some(&Trap::OutOfFuel) {
