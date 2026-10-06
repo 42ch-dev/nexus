@@ -109,8 +109,7 @@ enum RunVisibility { Visible(Box<ComputeRun>), Absent, ForeignDenied }
 - `architecture-patterns/verify-stored-row-scope-before-cas-write.md` — the
   write-path sibling (payload-claim vs stored-scope, OCC reject leaks).
 - Spec amendment pending: `.mstar/specs/runtime/daemon-api-surface-conventions.md`
-  §12.3 error-table entry; iteration draft
-  `.mstar/iterations/v1.206/specs/compute-run-id-opacity.md` (Promoted here).
+  §12.3 error-table entry.
 - Regression pins: `crates/nexus-core/tests/capability_compute.rs`
   `run_detail_and_foreign_run_refusals`; `nexus-spoke-adapter` relation
   absent-id-shape differential.
