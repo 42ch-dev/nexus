@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use wasmtime::{Instance, Linker, Store, StoreLimitsBuilder, Trap, TypedFunc};
+use wasmtime::{ExternType, Instance, Linker, Module, Store, StoreLimitsBuilder, Trap, TypedFunc};
 
 use crate::error::{ComputeError, EntryValidationFailure, Result};
 use crate::host::{register_host_imports, InvocationState};
@@ -93,6 +93,19 @@ impl WasmEngine {
         input_bytes: &[u8],
         sandbox: ResolvedSandbox,
     ) -> Result<ComputeOutput> {
+        // --- 0. Structured memory-cap pre-check (V1.206 P2 site 2) -----------
+        // wasmtime 49.0.1 exposes no typed limiter-denial error: the
+        // instantiation-time `StoreLimits` refusal is a formatted string
+        // ("memory minimum size of N pages exceeds memory limits"), so the
+        // class cannot be recovered by downcasting. Compare the module's
+        // declared linear-memory minimum against this invocation's cap
+        // instead — a module that starts above the cap can never be
+        // instantiated within it, so the refusal is decided before the store
+        // is built.
+        if declared_memory_minimum_exceeds_cap(&module.module, sandbox.max_memory_bytes) {
+            return Err(ComputeError::MemoryCapExceeded);
+        }
+
         // --- 1. Fresh per-invocation store (snapshot + memory cap) ----------
         let limits = StoreLimitsBuilder::new()
             .memory_size(sandbox.max_memory_bytes)
@@ -139,7 +152,7 @@ impl WasmEngine {
 
         let instance = linker
             .instantiate(&mut *store, &module.module)
-            .map_err(map_instantiate_error)?;
+            .map_err(ComputeError::Wasmtime)?;
 
         // Optional one-shot `init`.
         if let Some(init) = optional_export::<(), ()>(&mut *store, &instance, &manifest.init_export)
@@ -600,32 +613,44 @@ pub struct ResolvedSandbox {
 // ---------------------------------------------------------------------------
 
 /// Map a wasmtime call result, translating fuel/epoch traps into typed errors.
+///
+/// # Runtime memory-growth semantics (V1.206 P2 site 2)
+///
+/// There is deliberately no memory predicate here. At wasmtime 49.0.1 a
+/// `memory.grow` denied by the `StoreLimits` limiter is not a typed trap — it
+/// surfaces through the generic error channel as the formatted
+/// "memory growth exceeds memory type's limits" string — so a *runtime* growth
+/// failure falls into the `Trap` arm below instead of
+/// [`ComputeError::MemoryCapExceeded`]. The *instantiation* path is covered by
+/// the structured pre-check in [`WasmEngine::run_invocation`]. Trigger for
+/// reclassifying this arm: "wasmtime exposes a typed limiter-denial error".
 fn map_call_result<T>(res: wasmtime::Result<T>) -> Result<T> {
     res.map_err(|e| {
         if e.downcast_ref::<Trap>() == Some(&Trap::OutOfFuel) {
             ComputeError::OutOfFuel
         } else if e.downcast_ref::<Trap>() == Some(&Trap::Interrupt) {
             ComputeError::WallTimeExceeded
-        } else if is_memory_trap(&e) {
-            ComputeError::MemoryCapExceeded
         } else {
             ComputeError::Trap(e.to_string())
         }
     })
 }
 
-fn map_instantiate_error(e: wasmtime::Error) -> ComputeError {
-    if is_memory_trap(&e) {
-        ComputeError::MemoryCapExceeded
-    } else {
-        ComputeError::Wasmtime(e)
-    }
-}
-
-fn is_memory_trap(e: &wasmtime::Error) -> bool {
-    let msg = e.to_string().to_lowercase();
-    msg.contains("memory")
-        && (msg.contains("grow") || msg.contains("limit") || msg.contains("exceed"))
+/// Whether any linear memory the module exports starts above the invocation's
+/// cap (V1.206 P2 site 2).
+///
+/// The ABI requires the module to export its linear memory (`memory`); the
+/// check reads each exported memory's declared minimum (pages × page size)
+/// against `max_memory_bytes`, so a module that declares more than the cap is
+/// refused with [`ComputeError::MemoryCapExceeded`] before instantiation.
+fn declared_memory_minimum_exceeds_cap(module: &Module, max_memory_bytes: usize) -> bool {
+    let cap = u64::try_from(max_memory_bytes).unwrap_or(u64::MAX);
+    module.exports().any(|export| match export.ty() {
+        ExternType::Memory(memory) => {
+            memory.minimum().saturating_mul(memory.page_size()) > cap
+        }
+        _ => false,
+    })
 }
 
 fn optional_export<Params, Returns>(
