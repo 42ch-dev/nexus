@@ -1458,9 +1458,14 @@ struct KeyBlockOwnerRow {
 /// `insert_key_block_with_extensions_in_tx` counts it as a
 /// [`KbStoreError::Duplicate`] only when the occupying row shares this entry's
 /// container; a foreign-container clash must stay a generic storage conflict
-/// (v1.153 N-C1 no-oracle contract). Fails closed (`false`) on a read error or
-/// a malformed owner row — a collision that cannot be attributed to this
-/// container is never reported as this owner's duplicate.
+/// (v1.153 N-C1 no-oracle contract).
+///
+/// The occupying row must satisfy the **complete** owner union — `owner_kind`
+/// plus its matching id column with the other two NULL (the migration's
+/// `kb_key_blocks` owner CHECK). A malformed row that populates any other
+/// combination (for example two owner-id columns) belongs to no container and
+/// is never attributed to one, so this fails closed on it rather than matching
+/// whichever arm happens to agree. Read errors fail closed the same way.
 async fn key_block_owned_by(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     key_block_id: &str,
@@ -1478,6 +1483,21 @@ async fn key_block_owned_by(
     let Some(row) = stored else {
         return false;
     };
+    // Exactly one owner arm, and it must be the arm `owner_kind` names.
+    let exclusive_union = matches!(
+        (
+            row.owner_kind.as_str(),
+            row.world_id.is_some(),
+            row.character_id.is_some(),
+            row.actor_world_binding_id.is_some(),
+        ),
+        ("world", true, false, false)
+            | ("character", false, true, false)
+            | ("actor_world_binding", false, false, true)
+    );
+    if !exclusive_union {
+        return false;
+    }
     match owner {
         KnowledgeOwnerRef::World(id) => {
             row.owner_kind == "world" && row.world_id.as_deref() == Some(id)
@@ -3668,6 +3688,66 @@ mod tests {
             matches!(err, KbStoreError::Storage(_)),
             "a foreign-container id collision must stay a generic storage error \
              (no cross-container oracle), got: {err:?}"
+        );
+    }
+
+    /// V1.206 P2 R8 fix round (review I-1): `key_block_owned_by` promises a
+    /// fail-closed **complete-union** check, so a row that populates more than
+    /// one owner arm belongs to no container — the collision must fall back to
+    /// the generic storage error instead of being attributed to whichever arm
+    /// happens to match the requested owner.
+    ///
+    /// The migration's owner CHECK forbids such a row through every ordinary
+    /// write path (and the FKs require the extra id column to be real), so the
+    /// row is planted with the CHECK disabled **for this transaction only**. The
+    /// CHECK itself is NOT weakened: it stays in force for the whole database
+    /// and for every other test, and the malformed row never commits.
+    #[tokio::test]
+    async fn test_malformed_multi_owner_row_is_not_a_duplicate() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        // FK target for the malformed row's extra owner column.
+        let character_id = format!("chr_{}", "0".repeat(32));
+        sqlx::query(
+            "INSERT INTO characters \
+                (character_id, owner_creator_id, display_name, status, created_at, updated_at) \
+               VALUES (?, 'ctr_test', 'Ghost', 'active', datetime('now'), datetime('now'))",
+        )
+        .bind(&character_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let store = SqliteKbStore::new(pool.clone());
+        let mut tx = pool.begin().await.unwrap();
+        sqlx::query("PRAGMA ignore_check_constraints = 1")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        // owner_kind='world' AND character_id set ⇒ two owner arms populated.
+        sqlx::query(
+            "INSERT INTO kb_key_blocks \
+                (key_block_id, owner_kind, world_id, character_id, block_type, canonical_name) \
+               VALUES ('kb_malformed_owner', 'world', 'wld_1', ?, 'Character', 'Ghost')",
+        )
+        .bind(&character_id)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+
+        // Same id, same (World) container arm, different canonical name ⇒ the
+        // primary key is the only violated guard, and the occupying row is
+        // malformed — the arm matches, the union does not.
+        let mut kb = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Other");
+        kb.entry_id = "kb_malformed_owner".to_string();
+        let err = store
+            .insert_key_block_with_extensions_in_tx(&mut tx, kb, "{}".to_string())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, KbStoreError::Storage(_)),
+            "a multi-owner row must not be attributed to a container, got: {err:?}"
         );
     }
 
