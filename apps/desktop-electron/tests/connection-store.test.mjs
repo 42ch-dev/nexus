@@ -694,7 +694,7 @@ test('openFailure captures the typed classification without changing the inactiv
   const unreadable = await ConnectionStore.open(unreadableDeps);
   assert.equal(errorCode(unreadable.openFailure), 'secure_store_unreadable');
   assert.equal(await unreadable.get(), null, 'still not activated');
-  assert.equal(await unreadable.getAuth(), null);
+  assert.equal(unreadable.getAuth(), null);
   assert.equal(statSync(unreadableDeps.filePath).isDirectory(), true, 'the bytes stay on disk');
 
   // Corrupt store bytes → secure_store_corrupt, bytes preserved verbatim.
